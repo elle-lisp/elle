@@ -1,6 +1,6 @@
 # Signal Inference
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-10-06 -->
 
 How the compiler infers each function's signal, and the forms that bound,
 narrow or check it.
@@ -282,7 +282,9 @@ analyzer unwraps `begin`, `let`, `letrec` and `fn` bodies to find the struct,
 and takes the union of the two branches of an `if`. Any other return shape
 gives no projection.
 
-An importing file that binds `((import "literal"))` looks the projection up.
+An importing file that binds `((import-file "literal"))` looks the projection up.
+The analyzer reads no projection through `import`, which is a macro over a
+resolver the program may replace ([modules.md](../modules.md)).
 Today the projected signal never reaches a call through `module:field`, so a
 call into another file is treated as unknown (#1232). A `(silence)` function
 cannot call into another module until that is fixed.

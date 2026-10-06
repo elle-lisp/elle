@@ -1,6 +1,6 @@
 # pipeline
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-06 -->
 
 Compilation entry points: source text to bytecode, or to HIR for a reader that wants the analysis alone.
 
@@ -97,7 +97,7 @@ Properties:
 ## Dependents
 
 - `program.rs` — file, stdin and `-e` execution use `compile_file`
-- `primitives/modules.rs` — `import-file` uses `compile_file`
+- `primitives/modules.rs` — `import/load-file` uses `compile_file`
 - `primitives/module_init.rs` — the stdlib load uses `compile_file`
 - `repl/` — each prompt form compiles through `compile_file_repl`
 - `lsp/state.rs` and `lint/cli.rs` — file analysis uses `analyze_file`

@@ -1,13 +1,14 @@
 # Modules: a proposal
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-06 -->
 
 The module system Elle is building toward: compiled once per instance, linked across files, and shipped as images.
 
 [modules.md](modules.md) describes the module system as it is. This document
-states the design it becomes, and the argument for each part. Nothing here is
-implemented. [solver.md](impl/solver.md) owns the cross-file signal solver
-that linking uses. The decisions that belong to the language's owner are
+states the design it becomes, and the argument for each part. Of the parts,
+only [the raw primitives](#the-raw-primitives-are-raw) are implemented.
+[solver.md](impl/solver.md) owns the cross-file signal solver that linking
+uses. The decisions that belong to the language's owner are
 listed under [Open decisions](#open-decisions).
 
 ## Contents
@@ -33,17 +34,10 @@ listed under [Open decisions](#open-decisions).
 
 The defects below carry issue numbers. The measurements were taken on a
 release build at `8fe781a03`; [Measuring](#measuring) gives the method.
-
-**Every literal import compiles its target twice.** The analyzer compiles the
-target of each `((import "literal"))` to read its signal projection
-([call.rs](../src/hir/analyze/call.rs), [cache.rs](../src/pipeline/cache.rs)).
-The runtime `import` then compiles it again (#881). Importing `std/http2`
-compiles each of its nine files twice, and the second compile is about a third
-of the time the import adds.
-
-**The first compile buys nothing yet.** A call through `module:field` never
-uses the projection, so the analyzer treats it as a call to an unknown
-function (#1232).
+[modules.md](modules.md) states three more under its architectural
+constraints: a literal `import-file` compiles its target twice (#881), no call
+uses the projection that compile reads (#1232), and a cycle of literal imports
+overflows the stack at compile time (#1323).
 
 **A function body infers less than a file.** A file's top level converges by a
 fixpoint, and a function body runs none ([pipeline.md](pipeline.md)). A
@@ -81,15 +75,6 @@ from such a function aborts the process as a silence violation.
   `:alpha` is bit 32 or 33 depending on which declaration ran first. Compiled
   code carries the bit number.
 - The projection cache is keyed by path and never invalidated.
-
-**Resolution is loose where it should be strict.** `import-file` is an alias of
-`import`, so it resolves `std/`, `plugin/`, the search paths and suffixes
-(#1325). A relative spec resolves against the working directory, never against
-the importing file.
-
-**A cycle of literal imports overflows the stack** at compile time, before the
-runtime cycle check can run (#1323). A cycle between imports inside function
-bodies compiles.
 
 **The standard library already has the shape.** 69 of the 70 files in
 [lib/](../lib/) end in a `(fn …)` that builds the export struct; `lua.lisp` is
@@ -159,8 +144,8 @@ closure's body at a call site in another file.
 ## Principles
 
 **A raw primitive does one thing and assumes nothing.** `import-file` and
-`include-file` load the file their argument names. `import` and `include` are
-the only forms that resolve a spec.
+`include-file` load the file their argument names. `import` and `include`
+resolve a spec, and the rules they follow are Elle code a program may replace.
 
 **A check is enforced, not trusted.** Where a property can be checked at run
 time, it is checked there too. Capabilities already work this way.
@@ -186,16 +171,45 @@ Every later part reads an inferred signal, so each one depends on this.
 
 ## The raw primitives are raw
 
-`import-file` and `include-file` load exactly the file named (#1325). `import`
-and `include` resolve `std/`, `plugin/`, the search paths, `.lisp` probing,
-and the platform's shared-object name and suffix. A reader can then state two
-resolution rules, one for the raw primitives and one for the resolving forms.
+`import-file` and `include-file` load exactly the file named (#1325). Three
+loaders do the work, one for each kind of input: `import/load-file` for
+source, `import/load-plugin` for a shared library, and `import/load-syntax`
+for a form. No loader decides what its input is, so `:ffi` sits on the plugin
+loader's declaration instead of being read off a path.
+[modules.md](modules.md) states the rules.
 
-Which directory a relative spec resolves against stays an
-[open decision](#open-decisions). Resolving against the importing file, as
-`include-file` does, needs a mechanism `import` lacks, because it is a runtime
-primitive given a string. Either the call site's location reaches it at run
-time, or `import` becomes a form that bakes the directory in at compile time.
+**A path that names code resolves against the file that writes it.** A
+program then means the same thing wherever the process starts, and a library
+moves as one unit with its private modules. `include-file` already worked this
+way, and so do ES modules, Python's relative imports and Rust's `mod` paths. A
+path that names data, given to `slurp` or `port/open`, stays relative to the
+working directory. So there are two rules: code is relative to its file, and
+data to the process.
+
+Only the compiler knows which file wrote a form, so `import-file` is a special
+form, and `(meta/location)` hands the same fact to Elle code. A form a macro
+builds carries the location of the macro call, so a macro learns the file of
+the code that called it.
+
+**`import` is a library, not a primitive.** It is a prelude macro over
+`import-file`, and the rules it follows are `import/resolve`, a function in the
+standard library. It shows a user how to build a module system, and a user
+may replace it. Two costs follow:
+
+- A macro is not a value, so `import` cannot be handed to `map`.
+- The compiler does not assume what `import` resolves to. A literal
+  `import-file` is the one dependency it knows before anything runs, and
+  [linking](#linking) inherits that limit.
+
+`include` keeps one copy of the rules by calling `import/resolve` at compile
+time.
+
+**The search visits neither the working directory nor the writer's
+directory.** A spec that starts with `./` or `../` names a file relative to
+the writer. A bare spec searches `--path`, then home. A file beside a program
+therefore cannot shadow a library of the same name, the defect that Python 2's
+implicit relative imports had and PEP 328 removed. A user who wants the working
+directory searched sets `ELLE_PATH=.`.
 
 ## Expansion is contained
 
@@ -233,7 +247,7 @@ The compile inputs, as far as they are known:
 | The epoch and the Unicode generation | Migration rules and string semantics |
 | The binary's build identity and the primitive table | Codegen, primitive ids, the prelude and stdlib |
 | The macro environment | Prelude, plus the unit's own macros; plus the macros of every literal import once modules export them |
-| The resolved path of every import | The search paths decide which file a spec names |
+| The resolved path of every literal `import-file` and every `include` | The writer's directory and the search paths decide which file a path names |
 | The facts of every literal import | Linking reads them to solve the file's signals |
 | User signal declarations | Bit numbers, until signals relocate by name |
 
@@ -309,10 +323,10 @@ closure". That case needs an error of its own.
 
 ## A top level does not suspend
 
-`import` runs a module's top level on the current fiber and refuses a
+A loader runs a module's top level on the current fiber and refuses a
 suspension, because it cannot hold one ([park.md](impl/region/park.md)). A top
-level that runs `ev/sleep` or `port/read-all` fails with `import: unexpected
-signal`. The lambda a module returns is an ordinary closure, and it may suspend
+level that runs `ev/sleep` or `port/read-all` fails with `import/load-file:
+unexpected signal`. The lambda a module returns is an ordinary closure, and it may suspend
 when called directly and inside `ev/spawn`. So a module is already
 asynchronous where its work runs.
 
@@ -357,7 +371,7 @@ The check reads sound signals, and it needs a decided shape.
 
 ## Linking
 
-Treat `((import "literal"))` as a dependency the compiler knows before
+Treat `((import-file "literal"))` as a dependency the compiler knows before
 anything runs:
 
 - The export shape becomes part of the rule: the lambda's body ends in a
@@ -422,6 +436,15 @@ stopgap. A hit rebuilds every object through the send codec, which
 decodes no value. A module disk cache would repeat the rejected design for
 user code, so module images replace it.
 
+**Resolving a relative path against the working directory.** It is one rule
+for code and data, and every library pays for it: its imports break when a
+user runs from another directory. Passing the caller's directory at run time
+fails too, because a function that holds an import may run from any file.
+
+**One loader that sorts its input.** A loader that picks source or library by
+extension, or by whether the file is UTF-8, must read its argument to know
+what it needs. `import-file` picks by name, and each loader declares its need.
+
 ## Open decisions
 
 - **Macro purity: strict or deterministic.** A transformer builds its result
@@ -442,26 +465,27 @@ user code, so module images replace it.
   the import instead of the call.
 - **Ambient reads**: whether `sys/env`, `sys/args`, `sys/pid`, the clock and
   `backend?` gain a capability bit, so the run-time purity check covers them.
-- **The raw primitives** (#1325). Which directory a relative spec resolves
-  against. Whether `import-file` loads a shared object given its exact path.
-  Whether a file that is not valid UTF-8 is still tried as a plugin. Whether
-  `module/import` stays an alias.
+- **Linking through `import`**: how `((import "std/x"))` becomes a dependency
+  the compiler knows, now that `import` is a macro over a resolver a program
+  may replace.
 - **Plugins**: whether `(import "plugin/x")` keeps returning a struct while a
   source module returns a lambda.
 
 ## Measuring
 
-The double compile is visible per file and per phase:
+The double compile is visible per file and per phase. Run this from the
+repository root:
 
 ```sh
-echo '(def h ((import "std/http2")))' | elle --trace=compile -
+echo '(def h ((import-file "lib/http2.lisp")))' | elle --trace=compile -
 ```
 
-Each module file appears twice. The first appearance is nested inside the
-importing file's analysis, and the second is the runtime import. One compile
-per file is done when each file appears once.
+`lib/http2.lisp` appears twice. The first appearance is nested inside the
+importing file's analysis, and the second is the load. One compile per file is
+done when each file appears once.
 
-On a release build at `8fe781a03`:
+On a release build at `8fe781a03`, where `((import "std/http2"))` read
+projections and so did the imports inside `std/http2`:
 
 | Measure | Value |
 |---------|-------|

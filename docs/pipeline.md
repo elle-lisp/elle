@@ -1,6 +1,6 @@
 # Compilation Pipeline
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-06 -->
 
 Compilation entry points: source reaches bytecode through the reader, expander, analyzer, lowerer and emitter.
 
@@ -25,7 +25,7 @@ Module: [src/pipeline](../src/pipeline/AGENTS.md).
 | [directives.rs](../src/pipeline/directives.rs) | Validate and strip `(elle/version …)` and `(elle/migration …)` |
 | [compile.rs](../src/pipeline/compile.rs) | `compile()`, `compile_file()`, `compile_file_repl()`, and the whole-module entry points |
 | [frontend.rs](../src/pipeline/compile/frontend.rs) | Read, expand, and classify forms ahead of analysis |
-| [transforms.rs](../src/pipeline/compile/transforms.rs) | Post-analysis HIR transforms |
+| [transforms.rs](../src/pipeline/compile/transforms.rs) | The test-mode transforms of the expanded forms, and `include` and `include-file` resolution |
 | [analyze.rs](../src/pipeline/analyze.rs) | `analyze()`, `analyze_file()`, `analyze_file_detached()` |
 | [eval.rs](../src/pipeline/eval.rs) | `eval()`, `eval_all()`, `eval_syntax()`, `eval_file()` |
 
@@ -54,7 +54,7 @@ keeps only the signal that results from applying them.
 | Function | VM for macros | Fixpoint? | Callers |
 |----------|---------------|-----------|---------|
 | `compile` | Internal | No | Integration tests |
-| `compile_file` | Internal | Yes | `elle::program::run_source` (file, stdin, `-e`), `import-file`, the stdlib load, `eval_all`, `eval_file`, the analyzer's projection lookup |
+| `compile_file` | Internal | Yes | `elle::program::run_source` (file, stdin, `-e`), `import/load-file`, the stdlib load, `eval_all`, `eval_file`, the analyzer's projection lookup |
 | `eval` | Borrowed | No | Tests |
 | `eval_all` | Internal (delegates to `compile_file`) | Yes | Tests |
 | `eval_file` | Borrowed | Yes | Tests |
@@ -63,7 +63,7 @@ keeps only the signal that results from applying them.
 | `analyze_file` | Borrowed | Yes | The LSP, the linter, `compile/analyze` |
 | `analyze_file_detached` | Borrowed | Yes | A reader that needs the file without the projections of its imports |
 
-`analyze_file` compiles the target of each `((import "literal"))` to read its
+`analyze_file` compiles the target of each `((import-file "literal"))` to read its
 signal projection. `analyze_file_detached` skips that compile, so an import
 cycle does not recurse.
 
@@ -258,6 +258,9 @@ run expansion on their own VM.
 - A compile may run another inside it: the analyzer's projection lookup
   compiles an imported file while the importer is still being analyzed
   (`get_or_compile_projection`)
+- A compile may run Elle code from the standard library: an `include` calls
+  `import/resolve` to find its file, on the macro VM
+  ([modules.md](modules.md))
 
 ## Known issues
 

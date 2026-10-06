@@ -1,43 +1,28 @@
 # FFI: Foreign Function Interface
 
-The FFI subsystem enables Elle code to call C functions from shared libraries. It uses `libloading` for dynamic library loading and `bindgen`-generated bindings for type-safe C interop.
+<!-- audited: 2026-10-06 -->
 
-## How FFI Works
+Calls C functions in shared libraries from Elle code: libloading opens a library, and libffi makes the call.
 
-1. **Library loading**: `(import-file "path/to/lib.so")` loads a shared library
-2. **Symbol lookup**: FFI primitives find C functions by name
-3. **Type marshalling**: Elle `Value` is converted to C types and back
-4. **Execution**: The C function is called with marshalled arguments
-5. **Result conversion**: C return values become Elle `Value`
+## How a call works
 
-## FFI Primitives
+1. **Library loading**: `(ffi/native "libm.so.6")` opens a shared library, and
+   `(ffi/native nil)` opens the running process.
+2. **Symbol lookup**: `ffi/lookup` finds a C function in a library by name.
+3. **Signature**: `ffi/signature` states the return type and the argument
+   types.
+4. **Call**: `ffi/call` converts each Elle value to its C type, calls the
+   function, and converts the result back.
 
-FFI primitives are defined in [`src/ffi/primitives/`](primitives/) and provide:
+`ffi/native` opens a plain C library. An Elle plugin is a library that exports
+`elle_plugin_init`, and it loads through `import-file` or
+`import/load-plugin` instead ([modules](../../docs/modules.md)).
 
-- `ffi/call` — Call a C function by name with arguments
-- `ffi/library` — Get or load a library
-- `ffi/symbol` — Look up a symbol in a library
-- Type conversion functions for marshalling
+## See also
 
-## Type Support
-
-FFI supports marshalling between Elle and C for:
-
-- **Integers**: `i32`, `i64`, `u32`, `u64`
-- **Floats**: `f32`, `f64`
-- **Strings**: UTF-8 strings (null-terminated for C)
-- **Pointers**: Opaque pointers to C objects
-- **Structs**: Via `External` wrapper (plugin-provided types)
-
-## Example
-
-```janet
-(import-file "libm.so")
-(ffi/call "sin" 1.57)  ; Call C's sin() function
-```
-
-## See Also
-
-- [AGENTS.md](AGENTS.md) - technical reference for LLM agents
-- [`primitives/`](primitives/) - FFI primitive implementations
-- [`src/plugin.rs`](../plugin.rs) - plugin loading (similar mechanism)
+- [docs/ffi.md](../../docs/ffi.md): the architecture reference, with examples
+  that run
+- [AGENTS.md](AGENTS.md): the module's types and invariants
+- [loading.rs](../primitives/loading.rs) and
+  [memory.rs](../primitives/memory.rs): the `ffi/*` primitives
+- [plugin.rs](../plugin.rs): plugin loading

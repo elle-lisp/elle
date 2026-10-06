@@ -1,6 +1,6 @@
 # Runtime Configuration (`vm/config`)
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-06 -->
 
 What a build decides, what the `elle` command line sets, and what a running
 program reads and changes through `vm/config`.
@@ -107,7 +107,7 @@ Available trace keywords:
 | `:emit` | Bytecode emission |
 | `:jit` | JIT compilation: decisions, rejections, batch compilation |
 | `:io` | I/O operations |
-| `:import` | Module import resolution |
+| `:import` | Module loads: the path each `import/load-file` or `import/load-plugin` call loads |
 | `:macro` | Macro expansion |
 | `:wasm` | WASM backend: host calls, compilation |
 | `:capture` | Capture analysis decisions |
@@ -173,6 +173,18 @@ elle --wasm=lazy script.lisp        # the same, on the eleventh call
 | Full | `--wasm=full` | Full-module compilation |
 | Lazy | `--wasm=N`, `--wasm=lazy` | Each closure compiled from its Nth call; `lazy` is N = 11 |
 
+### Module paths
+
+```bash
+elle --path=/opt/elle-lib:vendor script.lisp   # look here for a bare import spec
+elle --home=/opt/elle script.lisp              # the project root
+```
+
+`--path` (or `ELLE_PATH`) lists the directories `import/resolve` searches for
+a spec that has no prefix and does not start with `./`. `--home` (or
+`ELLE_HOME`) names the root that `std/` and `plugin/` resolve under.
+[modules.md](modules.md) owns the rules.
+
 ### Boot image
 
 ```bash
@@ -201,6 +213,18 @@ milestones the default waits on.
 (vm/config :jit)               # returns the JIT threshold, or nil
 (vm/config :mlir)              # returns the MLIR threshold, or nil
 (vm/config :max-depth)         # returns the non-tail call depth cap
+(vm/config :home)              # returns --home, or nil
+(vm/config :path)              # returns the --path entries as an array
+(vm/config :plugin-suffix)     # returns "so", "dylib" or "dll"
+```
+
+`:home` and `:path` answer what the command line or the environment set, and
+`:plugin-suffix` answers the shared-library suffix of the platform the binary
+runs on. `import/resolve` reads all three ([modules.md](modules.md)).
+
+```lisp
+(assert (array? (vm/config :path)) "no --path is an empty array")
+(assert (contains? |"so" "dylib" "dll"| (vm/config :plugin-suffix)))
 ```
 
 `:jit` answers the number of calls after which the JIT compiles a function,

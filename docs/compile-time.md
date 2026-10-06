@@ -1,6 +1,6 @@
 # Compile-Time Operations
 
-<!-- audited: 2026-09-30 -->
+<!-- audited: 2026-10-06 -->
 
 The forms that act at compile time, and the `compile/*` API that reads the
 compiler's model from running code.
@@ -32,6 +32,8 @@ topic docs; this catalog is the map. Its examples run as one program under
 | `when!` / `unless!` *(proposed)* | analysis | no (the excluded body is not compiled) |
 | `emit` (signal keyword), `yield` | signal recorded at compile time | value emitted at runtime |
 | `quote`, quasiquote, `environment` | analysis/expansion | yes (data / list construction) |
+| `include`, `include-file` | before macro expansion | no (the file's forms are spliced in) |
+| `meta/location`, `import-file` | analysis | yes (a constant; a load of a file the compiler names) |
 | `%`-intrinsics | proven at compile time, lowered | yes (one VM instruction; storing ops a native funnel call) |
 | `compile/*` | runtime, over the compile model | n/a (reflective) |
 | `eval`, `read`, `read-all` | runtime (listed for contrast) | yes |
@@ -203,6 +205,24 @@ construction; `environment` desugars to a struct of the in-scope bindings.
       b 2]
   (assert (= (get (environment) 'b) 2))
   (assert (= (eval '(+ a b) (environment)) 3)))
+```
+
+## Source location and files
+
+| Form | Result |
+|---|---|
+| `(meta/location)` | `{:file :line :col}` of the form itself; `:file` is absolute, or nil for code with no file |
+| `(import-file path)` | the file `path` names, relative to the writer's directory, loaded when the form runs |
+| `(include-file path)`, `(include spec)` | the forms of a file, spliced in before expansion |
+
+The compiler fixes `meta/location` from the form's source location. A form a
+macro builds carries the location of the macro call, which is how the `import`
+macro learns the directory of the file that calls it. With a literal path,
+`import-file` names its file at compile time. [modules.md](modules.md) owns all
+three.
+
+```lisp
+(assert (= "compile-time.md" (path/filename (get (meta/location) :file))))
 ```
 
 ## Reflecting the compile-time model at runtime — `compile/*`

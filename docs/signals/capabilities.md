@@ -1,6 +1,6 @@
 # Capability enforcement
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-06 -->
 
 Capabilities flow down. A fiber's parent decides what the fiber is
 permitted to do. Operations the fiber can't perform become signals the
@@ -158,15 +158,17 @@ and the value — not the primitive's name — says what the spend costs. For th
 the gate reads the requirement from the argument and tests it against the calling
 fiber, so a fiber cannot spend what it withholds however it obtained the value.
 
-Three primitives work this way, each in its own domain:
+Two primitives work this way, each in its own domain:
 
 - `io/submit` spends the operation its request argument carries. A spawn request
   needs `|:io :exec|`, an open needs `|:io :fs|`, a plain read needs `|:io|`.
-- native `import` runs a shared library's `elle_plugin_init`, which is foreign
-  code, so a `.so`/`.dylib`/`.dll` spec needs `:ffi`. A `.lisp` module needs only
-  the `:fs` that `import` already declares.
 - dynamic `emit` raises the bits its first argument names, so it needs those
   bits.
+
+Loading a module needs no such rule, because each loader does one thing.
+`import/load-plugin` runs a shared library's `elle_plugin_init`, which is
+foreign code, so it declares `:ffi`. `import/load-file` loads Elle source and
+declares `:fs` and no `:ffi`.
 
 ```lisp
 # The first fiber may build the request; `f` may not spend it.
@@ -413,8 +415,8 @@ calls — the internal-helper seam #930 describes:
 
 Each sandbox below holds against the primitives the fiber names. A
 capability-bearing value handed in from outside is confined only where a crossing
-checks it: a submitted request is, and loading a native library is; a module
-already loaded and handed in is not — see the spend section above.
+checks it: a submitted request is; a module already loaded and handed in is
+not — see the spend section above.
 
 ```lisp
 (defn compute [] (* 6 7))
@@ -438,9 +440,17 @@ already loaded and handed in is not — see the spend section above.
   (fiber/cancel f))
 ```
 
-Denying `:ffi` stops the fiber loading a native module: a `.so` spec requires
-`:ffi` for the foreign code its load runs. A `.lisp` module needs only the `:fs`
-that `import` declares.
+Denying `:ffi` stops the fiber loading a native module, because
+`import/load-plugin` declares `:ffi` for the foreign code its load runs. The
+gate refuses the call before the loader reads the path, so no library need
+exist. A `.lisp` module loads through `import/load-file`, which needs only
+`:fs`.
+
+```lisp
+(let [f (fiber/new (fn [] (import/load-plugin "nonexistent.so")) |:ffi :error|
+                   :deny |:ffi|)]
+  (assert (= (get (fiber/resume f) :primitive) "import/load-plugin")))
+```
 
 ```lisp
 # Nested sandbox: outer denies IO, inner denies errors
