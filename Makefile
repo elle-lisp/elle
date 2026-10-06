@@ -4,7 +4,7 @@
        elle-nojit elle-pool elle-mlir elle-noffi elle-wasm check-wasm \
        doctest doctest-list myplugin plugins plugins-all \
        plugins-verify smoke-plugins mcp embedding semver-check \
-       fmt fmt-check audit agents agents-check
+       fmt fmt-check audit agents agents-check signal-solve
 
 .DEFAULT_GOAL := all
 
@@ -513,6 +513,21 @@ embedding: elle  ## Build + run embedding demos (Rust + C hosts)
 	$(MAKE) -C demos/embedding chost TARGET_DIR=$(EMBED_TARGET_DIR)
 	LD_LIBRARY_PATH=$(EMBED_TARGET_DIR) demos/embedding/chost
 
+# The signal solver spike (docs/impl/solver.md): every fixture's `# expect`
+# lines, and the worklist and datafrog solving one model over all of lib/. An
+# import spec resolves against the working directory, so the fixtures run from
+# their own. The spike exits non-zero on a failed expectation or a disagreement.
+SIGNAL_SOLVE = $(CURDIR)/$(CARGO_OUT)/examples/signal_solve
+
+signal-solve:  ## The signal solver spike: its fixtures, and both engines over lib/
+	cargo build $(CARGO_PROFILE) --example signal_solve
+	cd examples/signal_solve/fixtures && \
+		$(SIGNAL_SOLVE) --expect parity.lisp && \
+		$(SIGNAL_SOLVE) --expect app.lisp && \
+		$(SIGNAL_SOLVE) --expect cyc_a.lisp && \
+		$(SIGNAL_SOLVE) --expect --no-follow sep.lisp
+	$(SIGNAL_SOLVE) $$(find lib -name '*.lisp' | sort)
+
 
 # What a contributor runs before a push and what the merge queue runs: both
 # suites on this build, the documents, the embedding demo and the surface gate.
@@ -539,7 +554,7 @@ qa: audit crosscheck  ## The PR gate's QA job, locally (~2min, no smoke): rustfm
 
 # `qa` goes first: it takes about two minutes and the suites about thirty, so a
 # formatting or clippy failure stops the gate before the suites start.
-test: qa smoke  ## QA (fmt/clippy/crosscheck/rustdoc), then smoke, then the Rust unit, integration and rig tests
+test: qa smoke signal-solve  ## QA (fmt/clippy/crosscheck/rustdoc), then smoke, the solver spike, and the Rust unit, integration and rig tests
 	cargo test --workspace --lib --all-features
 	cargo test --test '*' -- --skip property
 	cargo test -p elle-rig

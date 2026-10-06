@@ -1,3 +1,4 @@
+// audited: 2026-10-05
 // Coordinator for the pipeline integration tests. This file owns the shared
 // `use` imports and the `setup`/`setup_with_stdlib` helpers, then pulls in each
 // themed test group via `include!`. The included subfiles open with
@@ -9,6 +10,9 @@
 //   analyze — `analyze` HIR shape + mutual-recursion / purity inference
 //   fiber   — fiber/new, resume, status, emit, mask
 //   special — const, arity checks, and the `eval` special form
+//   solver  — what an analysis hands a signal solver
+//
+// docs/pipeline.md
 
 use elle::hir::HirKind;
 use elle::pipeline::{analyze, compile, compile_file, eval, CompileCtx};
@@ -48,4 +52,8 @@ mod fiber {
 
 mod special {
     include!("pipeline/special.rs");
+}
+
+mod solver {
+    include!("pipeline/solver.rs");
 }
