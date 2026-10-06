@@ -178,8 +178,8 @@ The other entry points leave this path:
   context with `new_with_heap` or `from_boot_image`
 - [primitives/module_init.rs](../primitives/module_init.rs) — compiles
   stdlib.lisp through `compile_file`, then calls `register_stdlib_exports`
-- [primitives/modules.rs](../primitives/modules.rs) — compiles an imported
-  file through `compile_file`
+- [primitives/modules.rs](../primitives/modules.rs) — `import/load-file`
+  compiles a loaded file through `compile_file`
 - [hir/analyze/call.rs](../hir/analyze/call.rs) — reads an import's signal
   projection through `get_or_compile_projection`
 - [repl/eval.rs](../repl/eval.rs) and [repl/defer.rs](../repl/defer.rs) —
