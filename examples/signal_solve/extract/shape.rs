@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-06
 //! The shape of the value a module file returns, and the exports its struct literal names.
 //!
 //! docs/impl/solver.md
@@ -53,7 +53,8 @@ impl<'a> Extractor<'a> {
     }
 
     /// Collect the fields of the struct literal an expression ends in, through
-    /// the forms `compute_signal_projection` unwraps.
+    /// the bodies of `fn`, `begin`, `let` and `letrec`, and both branches of
+    /// an `if`, and the value of a `return`.
     fn export_struct(&mut self, hir: &'a Hir, out: &mut Vec<(String, VarId)>) {
         match &hir.kind {
             HirKind::Call { func, args, .. } if self.is_prim_named(func, "struct") => {

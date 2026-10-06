@@ -166,7 +166,6 @@ impl<'a> Analyzer<'a> {
         } else if sites[0].hoisted {
             let binding = sites[0].binding;
             let value = self.analyze_expr(&items[2])?;
-            self.last_import_projection = None;
             self.last_squelch_signal = None;
             let signal = value.signal;
             let value = Box::new(value);

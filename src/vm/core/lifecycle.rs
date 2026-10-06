@@ -131,7 +131,7 @@ impl VM {
             current_fiber_handle: None, // root fiber has no handle
             current_fiber_value: None,  // root fiber has no Value
             ffi: FFISubsystem::new(),
-            loading_modules: std::collections::HashSet::new(),
+            loading_modules: Vec::new(),
             loaded_plugins: HashMap::new(),
             closure_call_counts: CallCounts::default(),
             tail_call_env_cache: Vec::with_capacity(256),
@@ -181,8 +181,8 @@ impl VM {
     /// Preserves: docs, the host primitives, ffi, jit_cache, spirv_cache, eval_expander, env_cache,
     /// tail_call_env_cache, and the heap, which the VM points at but never owns.
     /// Resets: the fiber, the pending call state, the error location, the active
-    /// tier, the closure call counts, the JIT rejections, and the set of modules
-    /// loading.
+    /// tier, the closure call counts, the JIT rejections, and the loads in
+    /// progress.
     pub fn reset_fiber(&mut self) {
         // The VM heap is persistent — don't clear it. Values from previous
         // execute calls remain valid.
