@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 14)
+# audited: 2026-10-06
 # elle semver check — old-test arbitration over a fixture repository.
 # docs/semver.md fixes the mechanics this file pins.
 #
@@ -25,10 +25,10 @@
   (string "(elle/epoch 12)\n(elle/version \"" version "\")\n(fn []\n"
           "  (letrec [f " body "]\n    {:f f}))\n"))
 
-# The old test imports by the spec the worktree's search path resolves:
-# the child runs with the worktree as its working directory, and "lib/x"
-# reaches lib/x.lisp there. The "std/" prefix names the interpreter's
-# own stdlib and would not reach a fixture tree.
+# The old test imports by a bare spec: the child runs with the worktree
+# first on its search path, and "lib/x" reaches lib/x.lisp there. The
+# "std/" prefix names the interpreter's own stdlib and would not reach a
+# fixture tree.
 (def old-test
   (string "(elle/epoch 12)\n" "(def m ((import \"lib/x\")))\n"
           "(assert (= (m:f 1) 1) \"f answers its argument\")\n"
