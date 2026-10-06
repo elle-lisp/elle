@@ -98,6 +98,24 @@ headers, and copies constant and LIR values as they stand. A constant that
 names a value on the compile heap stays a foreign reference, which the alloc
 scan's ownership test already skips.
 
+## A rebuilt closure's code lands in the closure's region
+
+`send` and the stdlib disk cache rebuild closures from a serialized form. A
+closure rebuilt this way comes from no compile, and its code object is written
+into the region the closure itself is rebuilt in: its payload, the payloads of
+the lambdas its child table names, and their headers. Every edge among them is
+a self-edge.
+
+A code region of its own would close a cycle. The rebuilt constants are born in
+the closure's region, so a child header in a separate code region would hold a
+counted edge into the closure's region, and the closure's header would hold one
+back. Neither region could reach zero.
+
+A cache hit's unit is a compile's product all the same: its entry and the
+lambdas it nests land in a fresh code region, as a compile's do, and only the
+closure constants it restores take the rule above
+([stdlib-cache.md](../stdlib-cache.md)).
+
 ## One constructor builds a nested lambda's payload
 
 The emitter holds two inputs at a `MakeClosure`: the lambda's frozen LIR, and
@@ -129,6 +147,10 @@ module's payload whole; the **shape half** comes off the call, and so does the
 dispatch index. The release tables, the location table, the merge set and the
 child table are in the code half, so none of them is the site's to remember.
 
+The host writes that code object once per table index, into the module's code
+region. Every call at one index supplies the lambda's own shape, so a closure
+built in a loop costs a header, as a `MakeClosure` does.
+
 The dual-compiled bytecode is what a spawned OS-thread worker runs, so a frame
 of it abandoned on an error exit walks whichever table this constructor
 carried.
@@ -147,7 +169,7 @@ an ordinary, reclaimable allocation born in the executing frame's region
 (model.md § "Constants lower as ordinary allocations"), and a closure template
 is a heap literal. The payload is not per-creation, because copying a
 function's whole bytecode on every iteration of a loop that builds a closure is
-a cost the old blueprint did not have.
+a cost a shared payload does not pay.
 
 So the header copies the child's payload slice out of the parent's child table,
 and building one copies one word and takes one cross-region reference. The

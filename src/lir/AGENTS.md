@@ -69,7 +69,7 @@ The emitter, which reads the frozen form:
 
 | Type | Purpose |
 |------|---------|
-| `Emitter` | LIR → `ClosureCompiled`, that is `(Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>)`, writing each nested lambda's payload into the `CodeArena` it was built over ([emit/mod.rs](emit/mod.rs)) |
+| `Emitter` | LIR → `ClosureCompiled`, that is `(Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>)`, writing each nested lambda's payload into the `CodeArena` it was built over ([emit/mod.rs](emit/mod.rs)). `emit_module_with_lambdas` also answers the header over every closure's payload, for the WASM backend's dual compile |
 | `YieldPointInfo` | What emission records at a yield point: resume IP, live registers, local count |
 | `CallSiteInfo` | What emission records at a call site, for yield-through-call |
 | `testkit::LirFixture` | Builds a frozen function by hand, for tests (`#[cfg(test)]`) |
@@ -186,9 +186,9 @@ PayloadParts::lambda, at the MakeClosure that builds the lambda
         sites, for the JIT's side exits
     │
     ▼
-CodeArena::payload ──► a CodePayload in the unit's code region, whose
-                       LirBody every reader reaches through
-                       ClosureTemplate::lir()
+CodeArena::write ──► a CodePayload in the unit's code region, whose
+                     LirBody every reader reaches through
+                     ClosureTemplate::lir()
 ```
 
 The emitter emits blocks in the order the lowerer appended them, and freezing

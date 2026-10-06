@@ -18,7 +18,7 @@ Module: [src/pipeline](../src/pipeline/AGENTS.md).
 
 | File | Purpose |
 |------|---------|
-| [mod.rs](../src/pipeline/mod.rs) | `CompileResult`, `AnalyzeResult`, re-exports |
+| [mod.rs](../src/pipeline/mod.rs) | `AnalyzeResult`, re-exports |
 | [cache.rs](../src/pipeline/cache.rs) | `CompileCtx`: per-instance compile state (macro VM, Expander, PrimitiveMeta, projection cache) |
 | [bootstrap.rs](../src/pipeline/bootstrap.rs) | Compile and run core.lisp before any compile context exists |
 | [sources.rs](../src/pipeline/sources.rs) | The core, prelude and stdlib sources a boot compiles, embedded at build time |
@@ -33,13 +33,16 @@ Module: [src/pipeline](../src/pipeline/AGENTS.md).
 
 ### Types
 
-```rust
-pub struct CompileResult {
-    pub bytecode: Bytecode,
-}
+A compile hands out a `CodeUnit`: the entry function's code object, and one
+counted reference to the code region every payload of the unit lives in
+([region/template.md](impl/region/template.md)). An analysis hands out an
+`AnalyzeResult`:
 
+```rust
 pub struct AnalyzeResult {
     pub hir: Hir,
+    pub arena: BindingArena,
+    pub errors: Vec<LError>,
 }
 ```
 
@@ -64,8 +67,8 @@ expand macros on the context's own macro VM, so they need no caller VM; the
 `eval`/`analyze` family run expansion on the caller's borrowed VM.
 
 ```rust
-pub fn compile(source: &str, symbols: &mut SymbolTable, cctx: &mut CompileCtx, source_name: &str) -> Result<CompileResult, String>
-pub fn compile_file(source: &str, symbols: &mut SymbolTable, cctx: &mut CompileCtx, source_name: &str) -> Result<CompileResult, String>
+pub fn compile(source: &str, symbols: &mut SymbolTable, cctx: &mut CompileCtx, source_name: &str) -> Result<CodeUnit, String>
+pub fn compile_file(source: &str, symbols: &mut SymbolTable, cctx: &mut CompileCtx, source_name: &str) -> Result<CodeUnit, String>
 pub fn eval(source: &str, symbols: &mut SymbolTable, vm: &mut VM, cctx: &mut CompileCtx, source_name: &str) -> Result<Value, String>
 pub fn eval_all(source: &str, symbols: &mut SymbolTable, vm: &mut VM, cctx: &mut CompileCtx, source_name: &str) -> Result<Value, String>
 pub fn eval_file(source: &str, symbols: &mut SymbolTable, vm: &mut VM, cctx: &mut CompileCtx, source_name: &str) -> Result<Value, String>
@@ -206,7 +209,9 @@ Every compilation path follows the same phases:
 6. **Lower**: `Lowerer::new(&arena)...lower(&hir)` → `LirModule`
 7. **Freeze**: `LirModule::freeze()` → `FrozenModule`
    ([lir.md](impl/lir.md) § "Two forms of one function")
-8. **Emit**: `Emitter::new().emit_module(&frozen)` → `Bytecode`
+8. **Emit**: `Emitter::new(code).emit_module(&frozen)` → the entry's
+   `Bytecode`, each nested lambda's payload written into the code region
+   `code` names, and `CodeUnit::new(code, bytecode)` → the `CodeUnit`
 
 `analyze` and `analyze_file` stop after phase 3, then mark tail calls alone
 (no regularization, lowering or emission).

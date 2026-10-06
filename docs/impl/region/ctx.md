@@ -1,6 +1,6 @@
 # NativeCtx — explicit allocation: every value names its region and heap
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-06 -->
 
 A native allocates only through a capability it is handed, which names its region.
 
@@ -94,6 +94,7 @@ pub struct NativeCtx<'h> {
     alloc: Alloc<'h>,
     vm: *mut VM,                    // non-null; guarded by the phantom borrow
     _vm: PhantomData<&'h mut VM>,
+    withheld: Option<SignalBits>,   // the calling fiber's, where it is not vm.fiber
 }
 impl<'h> Deref for NativeCtx<'h> { type Target = Alloc<'h>; /* &self.alloc */ }
 impl<'h> DerefMut for NativeCtx<'h> { /* &mut self.alloc */ }
@@ -132,7 +133,12 @@ Invariants:
 - `dispatch_query` (the in-dispatch `SIG_QUERY` answer) builds its answer through
   the same ctx, preserving "the answer is born in the call's own region"
   (built at the dispatch site,
-  [natives.rs](../../../src/vm/core/region/natives.rs)).
+  [natives.rs](../../../src/vm/core/region/natives.rs)). The question the
+  native asked is born there too. A fresh answer takes the question with it
+  when the caller releases the result. An immediate answer, or one that lives
+  elsewhere — `jit?`'s boolean, `git`'s closure — leaves the region's birth
+  reference with no consumer, so the dispatch releases it. Pinned by
+  [region-query-payload-leak.lisp](../../../tests/impl/region-query-payload-leak.lisp).
 - The JIT's `elle_jit_call` / `elle_jit_tail_call` route through
   `VM::dispatch_native_call`, so both tiers share its single bytecode-dispatch
   ctx construction and get identical region accounting for free.
@@ -209,20 +215,18 @@ reached as `ctx.vm().field`:
   `(backend? :tier)`. Set/restored around the dispatch in
   `dispatch_compile_run_on`.
 
-## Symbols are not a per-instance capability
+## Symbol identity needs no instance; its spelling does
 
-A symbol id is the name's hash and the hash→name registry is process-global
-([impl/symbol.md](../symbol.md)), so name resolution needs no instance, no ctx,
-and no threading. `crate::symbol::name(id)` answers anywhere — inside
-`Display`/`Debug for Value`, inside a panic message, inside a unit test with no
-`Runtime` at all. There is no lost-names case to work around.
+A symbol id is the name's hash ([impl/symbol.md](../symbol.md)), so identity
+needs no instance, no ctx, and no threading: `SymbolId::of(name)` answers it
+anywhere. Two instances cannot disagree about what an id means.
 
-The `SymbolTable` a `RuntimeCore` owns is a handle onto that registry, not a
-table of its own. It is still threaded through the pipeline (`&mut SymbolTable`
-where interning happens, `vm.symbols()` / `ctx.vm().symbols()` where a VM is in
-scope), because interning is a compile-time capability — but two instances
-cannot disagree about a name, and none of the reach paths above affects what a
-symbol means.
+Display is per instance. The `SymbolTable` a `RuntimeCore` owns is that
+instance's display memo, and a name prints only where the memo learned it. The
+table is threaded through the pipeline (`&mut SymbolTable` where interning
+happens, `vm.symbols()` / `ctx.vm().symbols()` where a VM is in scope). An
+`Alloc` holds none, so `Alloc::error` records no spelling and
+`NativeCtx::error` records it first.
 
 Pinned by `two_instances_agree_on_every_symbol_name`
 ([lifecycle.rs](../../../src/runtime/tests/lifecycle.rs)): a symbol one `Runtime` compiled is the same

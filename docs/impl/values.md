@@ -1,6 +1,6 @@
 # Values
 
-<!-- audited: 2026-09-19 -->
+<!-- audited: 2026-10-06 -->
 
 Every Elle value is a 16-byte tagged union: an 8-byte tag and an 8-byte
 payload.
@@ -48,7 +48,7 @@ table that agrees with these payloads, for the WASM host's dispatch.
 ## Heap types
 
 Heap types store a raw pointer to a `HeapObject` in the payload. The
-`HeapObject` lives in a region page owned by the fiber's `FiberHeap`, whose
+`HeapObject` lives in a region page of the instance's `FiberHeap`, whose
 backing is a `RegionStore`. `Value` is `Copy` — it is just a tag + pointer, not
 a reference-counted handle.
 
@@ -86,29 +86,29 @@ The tag numbers are not contiguous and are not in HeapObject declaration order
 `TAG_HEAP_START` = 11; nothing hardcodes the numeric values — all uses are by
 name). `Float` (the heap-NaN variant) has no live tag: all floats are immediate
 (`TAG_FLOAT`), and `HeapObject::Float` is never allocated. See
-`src/value/heap.rs` for the authoritative list.
+[heap.rs](../../src/value/heap.rs) for the authoritative list.
 
 ### Heap allocation
 
 `HeapObject` is a Rust enum — a fixed-size tagged union. All variants
 occupy the same number of bytes (the size of the largest variant). Each
-`HeapObject` lives in a region page owned by the fiber's `FiberHeap`
-(backed by a `RegionStore`).
+`HeapObject` lives in a region page of the instance's `FiberHeap`
+(backed by a `RegionStore`), which every fiber of the instance shares.
 
 The pages store `HeapObject` shells. Many variants contain inner Rust
 heap data — a `Vec<Value>` inside a mutable array, an `Rc<RefCell<...>>`
-inside a closure, a `BTreeMap` inside a struct. The `needs_drop()` function
-(`src/value/fiberheap/mod.rs`) tracks which `HeapTag` variants have inner heap
-allocations that require `Drop`. When a region is reclaimed or the fiber dies,
-destructors run on those `HeapObject`s (freeing inner data) before the pages are
-released.
+inside a box, a `BTreeMap` inside a mutable struct. The `needs_drop()` function
+([dropsafety.rs](../../src/value/fiberheap/dropsafety.rs)) tracks which
+`HeapTag` variants have inner heap allocations that require `Drop`. When a
+region is reclaimed, destructors run on those `HeapObject`s (freeing inner data)
+before the pages are released.
 
 This structure means:
 - **Allocation is O(1)** — bump a byte offset within the current region page
 - **Pointer stability** — a `Value`'s payload pointer never moves while its
   region is live; pages sit at fixed addresses
-- **Batch deallocation** — fiber death runs all destructors then releases the
-  pages
+- **Batch deallocation** — a region's free runs all its destructors, then
+  releases its pages
 - **Region reclamation** — a region is a set of pages with a reference count
   minted per allocation; `DecrefRegion` decrements that RC, and when it hits 0
   the region's pages are freed and the contained destructors run (see
@@ -133,7 +133,7 @@ invisible to equality, ordering, and hashing.
 
 ## Struct keys
 
-A struct key is a `TableKey` (`src/value/types.rs`). Every variant is `Copy`,
+A struct key is a `TableKey` ([types.rs](../../src/value/types.rs)). Every variant is `Copy`,
 and no variant owns a Rust-heap allocation: a key's payload is either an
 immediate or a `Value` that points into a region. The entries of an immutable
 struct are therefore page bytes, which is what lets an image dump a struct as
@@ -157,8 +157,9 @@ set, a struct, a fiber, a closure — used to alias its value, and it still
 aliases: interning one would break the identity that a fiber or closure key
 depends on.
 
-Every store site interns: the constructors in `value/build.rs`, the `@struct`
-store funnel in `value/arena/mutate.rs`, `with-traits`, the trait-table root
+Every store site interns: the constructors in
+[build.rs](../../src/value/build.rs), the `@struct` store funnel in
+[mutate.rs](../../src/value/arena/mutate.rs), `with-traits`, the trait-table root
 builder, and the receiving side of `send`. A key already resident in the
 destination region is left alone, and a rebind interns nothing — the map keeps
 the key it already holds.
@@ -177,8 +178,8 @@ instead of folding into `Heap`, whose comparison delegates to `Value::Ord`.
 
 `TableKey::for_each_heap_value` enumerates the `Value`s a key holds. Two
 ledgers walk it: the alloc-time scan (`find_object_cross_refs`) for a struct
-born with its keys, and the `@struct` store funnels (`value/arena/mutate.rs`)
-for a key put or deleted later. Both count a key's heap value on one rule —
+born with its keys, and the `@struct` store funnels
+([mutate.rs](../../src/value/arena/mutate.rs)) for a key put or deleted later. Both count a key's heap value on one rule —
 **only when it resolves to a region other than the container's**. On that
 rule a key's region is increfed and its edge recorded exactly as a struct
 value's is, and the free-time cascade releases both.
@@ -198,7 +199,7 @@ own reader.
 
 ### The wire key owns its bytes
 
-`SendKey` (`value/send/mod.rs`) is the key form that crosses a thread or a
+`SendKey` ([mod.rs](../../src/value/send/mod.rs)) is the key form that crosses a thread or a
 process: an owning enum with no `Value` in it. `SendValue::Struct` and
 `SendValue::StructMut` are keyed on it. A `TableKey` holds raw region
 pointers, so it is never `Send` and never serialized. The conversion reads a
@@ -215,7 +216,7 @@ A `Closure` stores three `Copy` fields:
 
 Everything a definition shares between its instances — bytecode, constants,
 arity, docstring, signal profile, source locations — lives in the code
-object's payload, allocated once per blueprint
+object's payload, written once per lambda into its compile unit's code region
 ([region/template.md](region/template.md) owns that split).
 
 ## Arity
@@ -239,16 +240,16 @@ across mutability boundaries (`hash [1 2]` = `hash @[1 2]`).
 
 ## Files
 
-```text
-src/value/repr/            Value struct, tag constants, constructors, accessors
-src/value/types.rs         Arity, SymbolId, NativeFn, TableKey
-src/value/heap.rs          HeapObject, HeapTag, Pair, ExternalObject
-src/value/closure.rs       Closure and ClosureTemplate structs
-src/value/fiberheap/       FiberHeap, RegionStore, PagePool, routing
-src/value/arena.rs         alloc/deref, region_of, region RC operations
-src/value/region_slice.rs  RegionSlice<T> for inline region data
-src/value/allocator.rs     ElleAllocator trait, AllocatorBox
-```
+| File | Holds |
+|------|-------|
+| [repr/](../../src/value/repr/mod.rs) | The `Value` struct, tag constants, constructors, accessors |
+| [types.rs](../../src/value/types.rs) | `Arity`, `SymbolId`, `NativeFn`, `TableKey` |
+| [heap.rs](../../src/value/heap.rs) | `HeapObject`, `HeapTag`, `Pair`, `ExternalObject` |
+| [closure.rs](../../src/value/closure.rs) | `Closure`, and the code object's payload, header and unit |
+| [fiberheap/](../../src/value/fiberheap/mod.rs) | `FiberHeap`, `RegionStore`, `PagePool`, routing |
+| [arena.rs](../../src/value/arena.rs) | alloc/deref, `region_of`, region RC operations |
+| [region_slice.rs](../../src/value/region_slice.rs) | `RegionSlice<T>` for inline region data |
+| [allocator.rs](../../src/value/allocator.rs) | The `ElleAllocator` trait, `AllocatorBox` |
 
 ---
 

@@ -250,7 +250,7 @@ Yielding closures use a CPS-like scheme:
 `sys/spawn`/`sys/spawn-vm` deep-copy a closure to a fresh OS-thread **bytecode**
 VM and run it there — WASM functions are not callable off the main store. So the
 full-module emitter *dual-compiles*: alongside the WASM body it emits ordinary
-bytecode for every closure (`emit_module_closures`), writing each closure's
+bytecode for every closure (`emit_module_with_lambdas`), writing each closure's
 payload into a code unit of the module's own. The host holds that unit and the
 closures' headers as `closure_bytecodes`. When `rt_make_closure` builds a WASM
 closure value it builds the code object from that payload, so a spawned worker

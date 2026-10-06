@@ -34,8 +34,8 @@ answers an exact offset; inspection adds the lookup that resolves an ip to
 the nearest preceding entry. Second, `name` is `None` for a lambda that no
 `def` or `let` binds, and for code lowered without a symbol table. Lowering
 takes the name from the binding (`binder_name`, [src/lir/lower/setup.rs](../../src/lir/lower/setup.rs)) into
-`LirFunction.name`, and the template copies it from there
-(`TemplateProto::nested_lambda`, [src/value/closure/proto.rs](../../src/value/closure/proto.rs)).
+`LirFunction.name`, and the payload copies it from there
+(`PayloadParts::lambda`, [src/value/closure/arena.rs](../../src/value/closure/arena.rs)).
 
 Two additions, both on the template, flowing the same path as the location
 table:
@@ -63,11 +63,11 @@ table:
   needed. Bindings the lowerer constant-folds away have no slot and
   do not appear.
 - **the `Bytecode` local count** — the top-level, `eval`, and module-import
-  paths build their template from bare `Bytecode` through
-  `Bytecode::into_proto` ([src/compiler/bytecode.rs](../../src/compiler/bytecode.rs)). That copies the
-  location map but no local count, and `TemplateProto::new` sets
-  `num_locals` to 0, so those code objects claim zero locals while their
-  prologue reserves slots. `Bytecode` gains `num_locals`; without it,
+  paths run a unit's entry, whose payload is written from bare `Bytecode`
+  through `PayloadParts::entry` ([src/value/closure/arena.rs](../../src/value/closure/arena.rs)). That
+  copies the location map but no local count, and leaves `num_locals` at 0,
+  so those code objects claim zero locals while their prologue reserves
+  slots. `Bytecode` gains `num_locals`; without it,
   top-level locals render as operand-stack junk. Copying it also arms the
   debug-build locals-integrity assertion for these frames — it is vacuous
   while `reserved_locals` is 0 — which may surface latent violations; the
