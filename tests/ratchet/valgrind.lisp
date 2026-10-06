@@ -1,7 +1,7 @@
 (elle/epoch 14)
-# audited: 2026-10-05
-# Four programs on this rig under memcheck: each one's definitely-lost bytes
-# and error contexts, read against the rows of tests/ledger/valgrind.lisp.
+# audited: 2026-10-06
+# Four programs under memcheck on both stdlib paths: lost bytes and error
+# contexts, read against the rows of tests/ledger/valgrind.lisp.
 # tests/ratchet/overview.md
 
 (def r ((import "std/ratchet")))
@@ -60,20 +60,38 @@
       (error {:error :unparsed :message "no error summary in the report"}))
     (count-of (get (words-after line "ERROR SUMMARY: ") 3))))
 
-# Every run starts before any is read, so the producer costs about one run.
-(def children
-  (map (fn [[subject flags source]]
-         [subject
-          (subprocess/exec "valgrind"
-                           (concat memcheck [(elle/executable)] flags
-                                   ["-e" source]) {:stdin :null :stdout :null})])
-       programs))
+(defn start [cache flags source]
+  "One memcheck run of SOURCE on this rig, under CACHE and the rig FLAGS."
+  (subprocess/exec "valgrind"
+                   (concat memcheck [(elle/executable) cache] flags
+                           ["-e" source]) {:stdin :null :stdout :null}))
 
-(each [subject child] in children
-  (let [report (string (port/read-all (get child :stderr)))
-        code (subprocess/wait child)
-        lines (string/split report "\n")]
-    (assert (= code 0)
-            (string subject ": the program exits 0 under memcheck\n" report))
-    (r:read subject :definitely-lost (lost-bytes lines) :unit "bytes")
-    (r:read subject :error-contexts (error-contexts lines) :unit "contexts")))
+(defn measure [dir]
+  "Fill DIR's cache with one unmeasured run, then read every program on both
+   paths."
+  (def cached (string "--cache=" dir))
+  # The cached path loads the file this run writes. Without the file, every
+  # cached run would compile the standard library and read the compiled
+  # path's sites under the cached path's subjects.
+  (let [warm (subprocess/system (elle/executable) [cached "-e" "nil"])]
+    (assert (= (get warm :exit) 0)
+            (string "the unmeasured run exits 0\n" (get warm :stderr))))
+  (assert (not (empty? (file/ls (path/join dir "stdlib-cache"))))
+          "the unmeasured run wrote the standard library to the cache")
+  # [path cache-flag]. `--cache=` with no directory turns caching off.
+  (def paths [["stdlib compiled" "--cache="] ["stdlib cached" cached]])
+  # Every run starts before any is read, so the producer costs about one run.
+  (def @children @[])
+  (each [path cache] in paths
+    (each [subject flags source] in programs
+      (push children [(string subject ", " path) (start cache flags source)])))
+  (each [subject child] in children
+    (let [report (string (port/read-all (get child :stderr)))
+          code (subprocess/wait child)
+          lines (string/split report "\n")]
+      (assert (= code 0)
+              (string subject ": the program exits 0 under memcheck\n" report))
+      (r:read subject :definitely-lost (lost-bytes lines) :unit "bytes")
+      (r:read subject :error-contexts (error-contexts lines) :unit "contexts"))))
+
+(with-temp-dir dir (measure dir))
