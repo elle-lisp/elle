@@ -163,12 +163,12 @@ fn inc_promotes(rt: &mut Runtime) -> bool {
         let t = &inc.as_closure().expect("inc is a closure").template;
         (t.bytecode().as_ptr(), t.signal(), t.arity())
     };
-    // A REPL binding, so the call below reaches inc's closure through the
+    // A host binding, so the call below reaches inc's closure through the
     // ordinary dispatch path.
     let sym = rt.symbols().intern("tier-f");
     {
         let (cctx, heap) = rt.compile_and_heap();
-        cctx.register_repl_binding(
+        cctx.register_host_binding(
             heap,
             sym,
             inc,
