@@ -1,6 +1,7 @@
 // audited: 2026-10-06
-//! The special-form handlers: uniform thunks adapting `Analyzer` methods to
-//! [`FormHandler`](super::FormHandler), the shape the registry dispatches through.
+//! The special-form handlers: thunks that adapt `Analyzer` methods to the shape the registry dispatches through.
+//!
+//! That shape is [`FormHandler`](super::FormHandler).
 //!
 //! docs/impl/hir.md
 

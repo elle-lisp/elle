@@ -1,6 +1,6 @@
 (elle/epoch 14)
 ## audited: 2026-10-06
-## The documentation site: docs/*.md as HTML pages, and an API reference with each function's signals.
+## The documentation site: the markdown documents as HTML pages, and an API reference with each function's signals.
 ## demos/docgen/README.md
 
 # ── Configuration ──────────────────────────────────────────────────
