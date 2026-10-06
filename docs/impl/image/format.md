@@ -176,15 +176,19 @@ neither records zero for both.
 
 ## Fingerprint: regenerate, never migrate
 
-`HeapObject` is `repr(Rust)`; opcode discriminants and `prim_id`s are
+`HeapObject` is `repr(Rust)`, and opcode discriminants are
 source-order-dependent. An image is therefore valid only for a binary whose
-layout agrees with the dumper's. The fingerprint records: format version,
-rustc version and target triple, `size_of`/`align_of` for `Value`,
-`HeapObject`, `RegionSlice`, `Closure`, `ClosureTemplate`, and `TableKey`, the
-instruction-set high-water mark, the LIR opcode list, `CURRENT_EPOCH`, the
-feature set, a hash of the primitive name list in registration order, and the
-OS base page size. A frozen node stores its opcode as a byte, so a build that
-reorders the LIR opcodes reads every body node as a different instruction.
+layout agrees with the dumper's. The fingerprint records the format version,
+the rustc version and target, the OS base page size, `size_of`/`align_of` for
+`Value`, `HeapObject` and `RegionSlice`, `CURRENT_EPOCH`, both instruction
+sets, and the probed layouts below.
+
+An instruction set is recorded as its length and a hash of its names in byte
+order. A payload's bytecode and its LIR body's nodes store opcodes as bytes,
+so a build that renumbers either set reads every body instruction as a
+different one, and no layout probe can see that. A `prim_id` needs no entry,
+because a primitive travels by name (§ "A primitive travels by name, for the
+same reason").
 
 The three boot sources are not fingerprint inputs. An image built before
 somebody edited stdlib.lisp has a layout this binary can map and a library it
