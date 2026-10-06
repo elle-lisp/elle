@@ -329,6 +329,29 @@ A parent that catches a denial decides what the denied call does: it can
 perform the call and resume the child with the result, or refuse it with
 `fiber/refuse`. A fiber a scheduler runs is refused by that scheduler.
 [mediation.md](mediation.md) holds all three.
+
+## A macro expands with the fiber's capabilities
+
+Code on a fiber can start a compile: `eval`, a module loader, `compile/analyze`
+and the other `compile/*` primitives that compile source. Every macro that
+compile expands runs with the capabilities the fiber withholds, so a fiber
+cannot spend at expansion time what its own code cannot spend. An expansion
+cannot pause, so a parent cannot mediate a denial there. The compile fails,
+and the error names the macro and the denied primitive:
+
+```lisp
+(let [f (fiber/new (fn [] (eval '(begin (defmacro m [] (file/read "/etc/hostname")) (m))))
+                   |:fs :error| :deny |:fs|)
+      err (fiber/resume f)]
+  (assert (= (get err :error) :eval-error) "the compile fails")
+  (assert (string/contains? (get err :message) "macro 'm'") "naming the macro")
+  (assert (string/contains? (get err :message) "file/read") "and the primitive"))
+```
+
+An `include` or `include-file` reads its file for that compile, so a fiber
+that withholds `:fs` cannot include a file either. The file `elle` runs
+compiles before any fiber exists, so its macros run with every capability.
+
 ## Intrinsics are not checked
 
 The `%` [intrinsics](../intrinsics.md) compile to bytecode instructions that

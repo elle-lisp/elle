@@ -459,20 +459,21 @@ Elle code cannot build a broken proof, because inference is sound.
 [proof_tests.rs](../../src/vm/call/proof_tests.rs) forges a silent code
 object that yields, and pins the report.
 
-## Across files: signal projection
+## Across files
 
-When a file returns a struct literal of closures, or a function whose body is
-one, the compiler records a projection: a signal for each field. The
-analyzer unwraps `begin`, `let`, `letrec` and `fn` bodies to find the struct,
-and takes the union of the two branches of an `if`. Any other return shape
-gives no projection.
+The analysis of a file never compiles another file, so it knows nothing about
+what an import returns. A call into another file, such as `(m:f)`, takes the
+signal of an unknown callee (#1232). A `(silent!)` function therefore cannot
+call into another module. The file below imports one that does not exist, and
+its analysis still succeeds:
 
-An importing file that binds `((import-file "literal"))` looks the projection up.
-The analyzer reads no projection through `import`, which is a macro over a
-resolver the program may replace ([modules.md](../modules.md)).
-Today the projected signal never reaches a call through `module:field`, so a
-call into another file is treated as unknown (#1232). A `(silent!)` function
-cannot call into another module until that is fixed.
+```lisp
+(def sig (signal-of "(def m ((import-file \"/nonexistent/m.lisp\"))) (defn g [] (m:f))" :g))
+(assert (contains? (get sig :bits) :io) "a call into another file may do anything")
+```
+
+[solver.md](../impl/solver.md) solves signals across the files of a program,
+and the [module design](../modules-proposal.md) links them with it.
 
 ## See also
 
