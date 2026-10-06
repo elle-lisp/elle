@@ -48,6 +48,7 @@ pub struct LirCode {
     pub(crate) capture_locals: Vec<u64>,
     pub(crate) signal: Signal,
     pub(crate) vararg_kind: crate::hir::VarargKind,
+    pub(crate) rest_list_layout: crate::value::RestListLayout,
     pub(crate) region_table: Vec<StaticRegion>,
     pub(crate) merged_slots: Vec<StaticRegion>,
     pub(crate) frame_release_slots: Vec<u16>,
@@ -98,11 +99,49 @@ impl LirOwned {
 
     /// Record the yield points and call sites emission found. Only emission
     /// can supply them, so they arrive after the function froze.
-    pub fn set_sites(&mut self, _yield_points: &[YieldPointInfo], _call_sites: &[CallSiteInfo]) {}
+    pub fn set_sites(&mut self, yield_points: &[YieldPointInfo], call_sites: &[CallSiteInfo]) {
+        let code = &mut self.code;
+        code.site_regs.clear();
+        code.yield_points = yield_points
+            .iter()
+            .map(|y| {
+                site(
+                    &mut code.site_regs,
+                    y.resume_ip,
+                    y.num_locals,
+                    &y.stack_regs,
+                )
+            })
+            .collect();
+        code.call_sites = call_sites
+            .iter()
+            .map(|c| {
+                site(
+                    &mut code.site_regs,
+                    c.resume_ip,
+                    c.num_locals,
+                    &c.stack_regs,
+                )
+            })
+            .collect();
+    }
 
     /// Name a nameless function, for the JIT's code-address registry.
     pub fn set_name(&mut self, name: Option<String>) {
         self.code.name = name;
+    }
+}
+
+/// One site's record, its registers appended to `regs`.
+fn site(regs: &mut Vec<Reg>, resume_ip: usize, num_locals: u16, stack: &[Reg]) -> SiteRec {
+    let at = regs.len() as u32;
+    regs.extend_from_slice(stack);
+    SiteRec {
+        resume_ip: u32::try_from(resume_ip).expect("a resume address fits 32 bits"),
+        num_locals,
+        pad: 0,
+        regs: at,
+        n_regs: stack.len() as u32,
     }
 }
 

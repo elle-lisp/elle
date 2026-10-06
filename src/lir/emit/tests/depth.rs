@@ -1,4 +1,4 @@
-// audited: 2026-09-16
+// audited: 2026-10-06
 // src/lir/AGENTS.md
 //! The operand depth an edge leaves: what a jump into a merge owes, and what a
 //! jump back into a loop header owes.
@@ -27,7 +27,7 @@ use super::*;
 /// value, store the new value — `ensure_on_top` must `DupN` it back to the top
 /// past the old one — then consume the old value. What remains is the new
 /// value's original cell, which no register names any more.
-fn orphan_across_merge_func() -> LirFunction {
+fn orphan_across_merge_func() -> LirOwned {
     let konst = |dst: Reg, n: i64| LirInstr::Const {
         dst,
         value: LirConst::Int(n),
@@ -85,7 +85,7 @@ fn merge_predecessors_leave_equal_operand_depth() {
     // reserved local region and the sentinel in slot 2 stops existing.
     let func = orphan_across_merge_func();
     let mut emitter = Emitter::new();
-    let (bytecode, _, _) = emitter.emit(&func);
+    let (bytecode, _, _) = emitter.emit(&func.view());
     let mut vm = crate::vm::VM::new();
     let result = vm.execute(&bytecode);
     assert_eq!(
@@ -106,7 +106,7 @@ fn merge_predecessors_leave_equal_operand_depth() {
 /// back edge exactly two cells deeper than the header was fixed at.
 ///
 /// Slot 0 is the counter, slot 3 the sentinel the function returns.
-fn orphan_in_loop_func(iterations: i64) -> LirFunction {
+fn orphan_in_loop_func(iterations: i64) -> LirOwned {
     let konst = |dst: Reg, n: i64| LirInstr::Const {
         dst,
         value: LirConst::Int(n),
@@ -162,7 +162,7 @@ fn orphan_in_loop_func(iterations: i64) -> LirFunction {
 /// for `iterations` passes, and the sentinel it returned.
 fn run_orphan_loop(iterations: i64) -> (usize, Option<i64>) {
     let func = orphan_in_loop_func(iterations);
-    let (bytecode, _, _) = Emitter::new().emit(&func);
+    let (bytecode, _, _) = Emitter::new().emit(&func.view());
     let mut vm = crate::vm::VM::new();
     let result = vm.execute(&bytecode);
     (vm.fiber.stack.len(), result.ok().and_then(|v| v.as_int()))

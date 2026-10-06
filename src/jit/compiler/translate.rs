@@ -14,15 +14,15 @@ impl JitCompiler {
     /// and loads arg Values (16 bytes each) into the doubled arg variables.
     pub(super) fn translate_function(
         &mut self,
-        lir: &LirFunction,
+        lir: &LirView<'_>,
         func: &mut Function,
-        module_closures: Vec<LirFunction>,
+        module_closures: Vec<LirOwned>,
     ) -> Result<TranslatedConsts, JitError> {
         let mut builder_ctx = FunctionBuilderContext::new();
         let mut builder = FunctionBuilder::new(func, &mut builder_ctx);
 
         // Create translator context
-        let mut translator = FunctionTranslator::new(&mut self.module, &self.helpers, lir);
+        let mut translator = FunctionTranslator::new(&mut self.module, &self.helpers, *lir);
         translator.module_closures = module_closures;
 
         // Variable layout: each LIR register index `r` maps to TWO Cranelift variables:
@@ -34,20 +34,23 @@ impl JitCompiler {
         //   [num_regs, num_regs+num_locals)  - locals (args + locally-defined)
         // The max logical index is max(num_regs, local_var_base + num_locally_defined).
         // Each logical slot needs 2 Cranelift variables.
-        let arg_var_base = lir.num_regs;
-        let is_list_variadic = matches!(lir.arity, Arity::AtLeast(_))
-            && matches!(lir.vararg_kind, crate::hir::VarargKind::List);
-        let is_range_arity = matches!(lir.arity, Arity::Range(_, _));
+        let arg_var_base = lir.num_regs();
+        let is_list_variadic = matches!(lir.arity(), Arity::AtLeast(_))
+            && matches!(lir.vararg_kind(), crate::hir::VarargKind::List);
+        let is_range_arity = matches!(lir.arity(), Arity::Range(_, _));
         let arity_params = if is_list_variadic || is_range_arity {
-            lir.num_params as u16
+            lir.num_params() as u16
         } else {
-            lir.arity.fixed_params() as u16
+            lir.arity().fixed_params() as u16
         };
         // All num_locals are stack-relative in the dual-address-space lowerer.
-        let num_locally_defined = lir.num_locals as u32;
+        let num_locally_defined = lir.num_locals() as u32;
         let local_var_base = arg_var_base + arity_params as u32;
         let max_logical = std::cmp::max(
-            std::cmp::max(lir.num_regs + lir.num_locals as u32, lir.num_locals as u32),
+            std::cmp::max(
+                lir.num_regs() + lir.num_locals() as u32,
+                lir.num_locals() as u32,
+            ),
             local_var_base + num_locally_defined,
         );
         // Declare 2 * max_logical Cranelift variables (tag + payload per slot).
@@ -64,9 +67,9 @@ impl JitCompiler {
         let loop_header = builder.create_block();
 
         let mut block_map: HashMap<Label, cranelift_codegen::ir::Block> = HashMap::new();
-        for bb in &lir.blocks {
+        for bb in lir.blocks() {
             let cl_block = builder.create_block();
-            block_map.insert(bb.label, cl_block);
+            block_map.insert(bb.label(), cl_block);
         }
 
         // Entry block: extract 6 function parameters
@@ -111,16 +114,16 @@ impl JitCompiler {
 
         if is_list_variadic {
             // --- Variadic entry: load required+optional params, then cons list for rest ---
-            let required = lir.arity.fixed_params();
+            let required = lir.arity().fixed_params();
             // num_params includes the rest param slot — subtract 1 for non-rest count
-            let non_rest_params = lir.num_params.saturating_sub(1);
+            let non_rest_params = lir.num_params().saturating_sub(1);
             let has_opt_params = non_rest_params > required;
 
             // Load required params unconditionally
             for i in 0..required as u32 {
                 let (arg_tag, arg_payload) = load_value_slot(&mut builder, args_ptr, i);
                 let base = arg_var_base + i;
-                if (i as u64) < 64 && (lir.capture_params_mask & (1 << i)) != 0 {
+                if (i as u64) < 64 && (lir.capture_params_mask() & (1 << i)) != 0 {
                     let (cell_t, cell_p) = translator.call_helper_value_vm(
                         &mut builder,
                         translator.helpers.make_capture_owned,
@@ -177,7 +180,7 @@ impl JitCompiler {
                     let merged_tag = builder.block_params(merge_block)[0];
                     let merged_pay = builder.block_params(merge_block)[1];
 
-                    if (i as u64) < 64 && (lir.capture_params_mask & (1 << i)) != 0 {
+                    if (i as u64) < 64 && (lir.capture_params_mask() & (1 << i)) != 0 {
                         let (cell_t, cell_p) = translator.call_helper_value_vm(
                             &mut builder,
                             translator.helpers.make_capture_owned,
@@ -201,7 +204,7 @@ impl JitCompiler {
             let rest_var_idx = arg_var_base + non_rest_params as u32;
             let start_const = builder.ins().iconst(I32, non_rest_params as i64);
             let nargs_i32 = builder.ins().ireduce(I32, nargs);
-            let layout_const = builder.ins().iconst(I32, lir.rest_list_layout as i64);
+            let layout_const = builder.ins().iconst(I32, lir.rest_list_layout() as i64);
             let rest_ref = translator
                 .module
                 .declare_func_in_func(translator.helpers.collect_rest_list, builder.func);
@@ -214,7 +217,7 @@ impl JitCompiler {
 
             // Handle capture_params_mask for the rest param
             let rest_param_index = non_rest_params;
-            if rest_param_index < 64 && (lir.capture_params_mask & (1 << rest_param_index)) != 0 {
+            if rest_param_index < 64 && (lir.capture_params_mask() & (1 << rest_param_index)) != 0 {
                 let (cell_t, cell_p) = translator.call_helper_value_vm(
                     &mut builder,
                     translator.helpers.make_capture_owned,
@@ -230,7 +233,7 @@ impl JitCompiler {
             // NOTE: cons_loop_head is NOT sealed here — sealed by seal_all_blocks() below.
         } else {
             // --- Non-variadic entry: load args directly (16 bytes each) ---
-            let required = lir.arity.fixed_params() as u32;
+            let required = lir.arity().fixed_params() as u32;
             for i in 0..arity_params as u32 {
                 let base = arg_var_base + i;
                 let is_optional = is_range_arity && i >= required;
@@ -279,7 +282,7 @@ impl JitCompiler {
                     let merged_tag = builder.block_params(merge_block)[0];
                     let merged_pay = builder.block_params(merge_block)[1];
 
-                    if (i as u64) < 64 && (lir.capture_params_mask & (1 << i)) != 0 {
+                    if (i as u64) < 64 && (lir.capture_params_mask() & (1 << i)) != 0 {
                         let (cell_t, cell_p) = translator.call_helper_value_vm(
                             &mut builder,
                             translator.helpers.make_capture_owned,
@@ -294,7 +297,7 @@ impl JitCompiler {
                 } else {
                     // Required param: load unconditionally
                     let (arg_tag, arg_payload) = load_value_slot(&mut builder, args_ptr, i);
-                    if (i as u64) < 64 && (lir.capture_params_mask & (1 << i)) != 0 {
+                    if (i as u64) < 64 && (lir.capture_params_mask() & (1 << i)) != 0 {
                         let (cell_t, cell_p) = translator.call_helper_value_vm(
                             &mut builder,
                             translator.helpers.make_capture_owned,
@@ -325,7 +328,7 @@ impl JitCompiler {
         // Allocate shared spill slot for emit/call sites (if any).
         // Check yield_points (emit terminators) and call_sites directly,
         // not may_suspend() — emit can emit any signal, not just :yield.
-        if !lir.yield_points.is_empty() || !lir.call_sites.is_empty() {
+        if lir.yield_points().len() != 0 || lir.call_sites().len() != 0 {
             translator.allocate_shared_spill_slot(&mut builder);
         }
 
@@ -333,30 +336,26 @@ impl JitCompiler {
 
         // Loop header: merge point for self-tail-calls
         builder.switch_to_block(loop_header);
-        let first_lir_block = block_map[&lir.entry];
+        let first_lir_block = block_map[&lir.entry()];
         builder.ins().jump(first_lir_block, &[]);
 
         translator.loop_header = Some(loop_header);
 
         // Translate LIR blocks
-        for bb in &lir.blocks {
-            let cl_block = block_map[&bb.label];
+        for bb in lir.blocks() {
+            let cl_block = block_map[&bb.label()];
             builder.switch_to_block(cl_block);
 
             let mut block_terminated = false;
-            for spanned in &bb.instructions {
-                if translator.translate_instr(&mut builder, &spanned.instr, &block_map)? {
+            for node in bb.nodes() {
+                if translator.translate_instr(&mut builder, &node.instr(), &block_map)? {
                     block_terminated = true;
                     break;
                 }
             }
 
             if !block_terminated {
-                translator.translate_terminator(
-                    &mut builder,
-                    &bb.terminator.terminator,
-                    &block_map,
-                )?;
+                translator.translate_terminator(&mut builder, &bb.terminator(), &block_map)?;
             }
         }
 
@@ -367,18 +366,20 @@ impl JitCompiler {
         // would read ANOTHER site's resume_ip and stack shape — a silently
         // corrupted resume. Reject the compile; the interpreter tier is
         // always correct.
-        if translator.yield_point_index as usize != lir.yield_points.len() {
+        if translator.yield_point_index as usize != lir.yield_points().len() {
             return Err(JitError::InvalidLir(format!(
                 "yield-point count mismatch: translated {}, emitter recorded {}",
                 translator.yield_point_index,
-                lir.yield_points.len()
+                lir.yield_points().len()
             )));
         }
-        if lir.signal.may_suspend() && translator.call_site_index as usize != lir.call_sites.len() {
+        if lir.signal().may_suspend()
+            && translator.call_site_index as usize != lir.call_sites().len()
+        {
             return Err(JitError::InvalidLir(format!(
                 "call-site count mismatch: translated {}, emitter recorded {}",
                 translator.call_site_index,
-                lir.call_sites.len()
+                lir.call_sites().len()
             )));
         }
 

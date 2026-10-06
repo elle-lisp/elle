@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! What crosses the send boundary intact: closures and their LIR, ports and parameters, symbols, and the mirrors.
 //!
 //! docs/threads.md
@@ -12,7 +12,7 @@
 
 use super::*;
 use crate::lir::testkit::LirFixture;
-use crate::lir::{LirConst, LirFunction, LirInstr, Reg, Terminator};
+use crate::lir::{InstrRef, LirConst, LirInstr, LirOwned, Reg, Terminator};
 use crate::value::closure::{Closure, TemplateProto};
 use crate::value::fiber::SignalBits;
 use crate::value::heap::HeapObject;

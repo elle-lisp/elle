@@ -1,3 +1,5 @@
+// audited: 2026-10-06
+// docs/impl/wasm.md
 //! `compile/run-on :wasm` — force Wasmtime tiered execution (`--features wasm`).
 
 use super::rejected;
@@ -52,7 +54,7 @@ impl VM {
         // Force-compile if not already cached.
         let heap_ptr = self.heap_ptr;
         let tier = self.wasm_tier.as_mut().unwrap();
-        if !tier.is_compiled(bytecode_ptr) && !tier.compile(bytecode_ptr, &lir, heap_ptr) {
+        if !tier.is_compiled(bytecode_ptr) && !tier.compile(bytecode_ptr, &lir.view(), heap_ptr) {
             // Remove the temporary tier before returning.
             if !had_tier {
                 self.wasm_tier = None;

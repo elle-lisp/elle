@@ -1,10 +1,12 @@
+// audited: 2026-10-06
+// docs/threads.md
 //! Serialization of a live `Value` into a Send-safe `SendValue`.
 //!
 //! The module root holds the value-tag dispatch (`from_value_inner`) and the
 //! traits-field helper it leans on. Cohesive sub-concerns live in siblings:
-//! `ctx` (the threaded bookkeeping context), `lir` (LIR-for-send rewriting),
-//! `template` (closure blueprint copies), and `closure` (the interning closure
-//! arm). Re-exports keep `ser::from_value_inner` / `ser::SerContext` resolving
+//! `ctx` (the threaded bookkeeping context), `template` (code-object copies,
+//! with the LIR they carry), and `closure` (the interning closure arm).
+//! Re-exports keep `ser::from_value_inner` / `ser::SerContext` resolving
 //! for the parent module unchanged.
 
 use super::syntax::syntax_to_send;
@@ -12,7 +14,6 @@ use super::*;
 
 mod closure;
 mod ctx;
-mod lir;
 mod template;
 
 pub(super) use ctx::SerContext;

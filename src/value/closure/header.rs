@@ -318,7 +318,7 @@ impl ClosureTemplate {
     }
 
     #[inline]
-    pub fn lir_function(&self) -> Option<&Rc<crate::lir::LirFunction>> {
+    pub fn lir_function(&self) -> Option<&Rc<crate::lir::LirOwned>> {
         self.proto.as_ref()?.lir_function.as_ref()
     }
 
@@ -395,7 +395,7 @@ impl ClosureTemplate {
 
     /// True if signal and structural checks pass for GPU eligibility.
     ///
-    /// Necessary but not sufficient — the full `LirFunction::is_gpu_eligible`
+    /// Necessary but not sufficient — the full `LirView::is_gpu_eligible`
     /// also walks instructions. Allows error-only signals (arithmetic ops on
     /// unboxed GPU scalars cannot type-error) but rejects yield, I/O, FFI, and
     /// polymorphism.

@@ -1,3 +1,5 @@
+// audited: 2026-10-06
+// docs/impl/mlir.md
 //! `compile/run-on :mlir-cpu` — force MLIR/LLVM CPU tier-2 execution
 //! (`--features mlir`).
 
@@ -9,8 +11,8 @@ impl VM {
     /// Run a closure via the MLIR/LLVM CPU tier-2 backend.
     ///
     /// Requires `--features mlir`. The closure must satisfy the
-    /// `is_mlir_cpu_eligible` predicate (no captures, exact arity, only
-    /// arithmetic/comparison/local instructions). Arguments may be
+    /// `is_mlir_cpu_eligible` predicate (exact arity, no capture cells, only
+    /// arithmetic, comparison and local instructions). Arguments may be
     /// integers or floats — floats are bitcast f64→i64 by the caller
     /// and i64→f64 at MLIR function entry.
     pub fn invoke_closure_mlir_cpu(
@@ -24,7 +26,7 @@ impl VM {
             None => return (SIG_ERROR, rejected(self, "mlir-cpu", "closure has no LIR")),
         };
 
-        if !lir.is_mlir_cpu_eligible() {
+        if !lir.view().is_mlir_cpu_eligible() {
             return (
                 SIG_ERROR,
                 rejected(self, "mlir-cpu", "closure is not MLIR-CPU eligible"),
@@ -94,9 +96,13 @@ impl VM {
 
         // Ensure compiled for this (capture_types, param_types) signature.
         if !cache.contains(bytecode_ptr, capture_types, param_types) {
-            if let Err(e) =
-                cache.compile(bytecode_ptr, &lir, num_captures, capture_types, param_types)
-            {
+            if let Err(e) = cache.compile(
+                bytecode_ptr,
+                &lir.view(),
+                num_captures,
+                capture_types,
+                param_types,
+            ) {
                 return (
                     SIG_ERROR,
                     rejected(self, "mlir-cpu", format!("MLIR compilation failed: {}", e)),

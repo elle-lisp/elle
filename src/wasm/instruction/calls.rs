@@ -1,3 +1,5 @@
+// audited: 2026-10-06
+// src/wasm/AGENTS.md
 //! Closure construction, calls, tail calls, and result handling.
 //!
 //! These emitters marshal register values into linear memory at `ARGS_BASE`,
@@ -22,10 +24,11 @@ impl WasmEmitter {
             .get(&closure_id)
             .copied()
             .expect("MakeClosure: ClosureId not found in table map");
-        let nested = &self
+        let nested = self
             .module_closures
             .as_ref()
-            .expect("MakeClosure: no module_closures context")[closure_id.0 as usize];
+            .expect("MakeClosure: no module_closures context")[closure_id.0 as usize]
+            .view();
 
         for (i, cap) in captures.iter().enumerate() {
             self.write_val_to_mem(f, *cap, i);
@@ -36,24 +39,24 @@ impl WasmEmitter {
         // the WORD COUNT and the words are appended after the 8 fixed slots
         // (read symmetrically in `rt_make_closure`, src/wasm/linker/create.rs).
         // The common case (no captured locals) is 0 words.
-        let locals_mask_words = nested.capture_locals_mask.words();
+        let locals_mask_words = nested.capture_locals_mask().words();
         let meta_vals: [i64; 8] = [
-            nested.num_captures as i64,
-            nested.num_params as i64,
-            nested.num_locals as i64,
-            match nested.arity {
+            nested.num_captures() as i64,
+            nested.num_params() as i64,
+            nested.num_locals() as i64,
+            match nested.arity() {
                 crate::value::types::Arity::Exact(_) => 0,
                 crate::value::types::Arity::AtLeast(_) => 1,
                 crate::value::types::Arity::Range(_, _) => 2,
             },
-            match nested.arity {
+            match nested.arity() {
                 crate::value::types::Arity::Exact(n) => n as i64,
                 crate::value::types::Arity::AtLeast(n) => n as i64,
                 crate::value::types::Arity::Range(min, _) => min as i64,
             },
-            nested.capture_params_mask as i64,
+            nested.capture_params_mask() as i64,
             locals_mask_words.len() as i64,
-            nested.signal.bits.raw() as i64,
+            nested.signal().bits.raw() as i64,
         ];
         for (i, val) in meta_vals.iter().enumerate() {
             f.instruction(&Instruction::I32Const(meta_base));

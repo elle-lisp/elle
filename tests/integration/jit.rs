@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-10-06
 // docs/impl/jit.md
 // The JIT integration corpus: hand-built LIR compiled to native code, run, and
 // held to the answer the interpreter gives.
@@ -56,7 +56,12 @@ fn stdlib_cctx(
 ) -> elle::pipeline::CompileCtx {
     let mut cctx = elle::pipeline::CompileCtx::new();
     vm.set_symbols(symbols as *mut elle::symbol::SymbolTable);
-    elle::init_stdlib(vm, symbols, &mut cctx, &elle::compiler::stdlib_cache::StdlibCache::Off);
+    elle::init_stdlib(
+        vm,
+        symbols,
+        &mut cctx,
+        &elle::compiler::stdlib_cache::StdlibCache::Off,
+    );
     cctx
 }
 
@@ -105,6 +110,11 @@ fn load_arg(dst: Reg, arg_index: u16) -> SpannedInstr {
     )
 }
 
+/// `lir` frozen, the form the JIT reads.
+fn frozen(lir: &LirFunction) -> elle::lir::LirOwned {
+    elle::lir::code::freeze(lir).expect("a hand-built function freezes")
+}
+
 fn compile_and_call(lir: &LirFunction, args: &[Value]) -> Result<Value, JitError> {
     use elle::primitives::register_primitives;
     use elle::symbol::SymbolTable;
@@ -120,7 +130,7 @@ fn compile_and_call(lir: &LirFunction, args: &[Value]) -> Result<Value, JitError
     let _signals = register_primitives(&mut vm, &mut symbols);
 
     let compiler = JitCompiler::new()?;
-    let code = compiler.compile(lir, Vec::new())?;
+    let code = compiler.compile(&frozen(lir).view(), Vec::new())?;
     // self_tag/self_payload = 0 since we're not testing self-tail-calls in these basic tests
     let result = unsafe {
         code.call(

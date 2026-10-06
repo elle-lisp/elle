@@ -8,8 +8,9 @@
 //! reads no `aux` or flag word, because reading one costs a per-variant match
 //! the region form does not need.
 
-use elle::lir::{for_each_def, for_each_use, value_to_lir_const, LirConst, LirFunction, LirInstr};
+use elle::lir::{for_each_def, for_each_use, LirConst, LirFunction, LirInstr};
 use elle::value::region_slice::RegionSlice;
+use elle::value::Value;
 
 use crate::node::{PConst, PFunc};
 use crate::opcode::opcode;
@@ -83,18 +84,15 @@ pub fn walk_region(f: &PFunc) -> u64 {
     sum
 }
 
-/// The rewrite `send` runs before a closure crosses a thread: every
-/// `ValueConst` becomes a `Const`, in place — an immediate by value, a closure
-/// by its index in the bundle. The index here is a fixed stand-in, because what
-/// is being measured is the write, not the intern table behind it.
+/// An in-place pass over every `ValueConst`: each one whose value [`immediate`]
+/// spells becomes a `Const`. What is measured is the write where the
+/// instruction lies, not the conversion behind it.
 pub fn rewrite_rust(f: &mut LirFunction) -> u64 {
     let mut hits = 0u64;
     for b in &mut f.blocks {
         for si in &mut b.instructions {
             if let LirInstr::ValueConst { dst, value } = &si.instr {
-                let converted = value_to_lir_const(*value)
-                    .or_else(|| value.is_closure().then_some(LirConst::ClosureRef(0)));
-                if let Some(c) = converted {
+                if let Some(c) = immediate(*value) {
                     si.instr = LirInstr::Const {
                         dst: *dst,
                         value: c,
@@ -138,8 +136,6 @@ pub fn build_rust(corpus: &[LirFunction]) -> Vec<LirFunction> {
         nf.rest_list_layout = f.rest_list_layout;
         nf.num_params = f.num_params;
         nf.num_local_params = f.num_local_params;
-        nf.yield_points = f.yield_points.clone();
-        nf.call_sites = f.call_sites.clone();
         nf.region_table = f.region_table.clone();
         nf.merged_slots = f.merged_slots.clone();
         nf.frame_release_slots = f.frame_release_slots.clone();
@@ -158,9 +154,7 @@ pub fn rewrite_region(f: &PFunc) -> u64 {
         for i in unsafe { as_mut(b.instrs) } {
             if i.op == 1 {
                 if let PConst::Val(v) = consts[i.aux as usize] {
-                    let converted = value_to_lir_const(v)
-                        .or_else(|| v.is_closure().then_some(LirConst::ClosureRef(0)));
-                    if let Some(c) = converted {
+                    if let Some(c) = immediate(v) {
                         consts[i.aux as usize] = lir_to_pconst(&c);
                         i.op = 0;
                         hits += 1;
@@ -172,9 +166,31 @@ pub fn rewrite_region(f: &PFunc) -> u64 {
     hits
 }
 
-/// A converted constant, for the one rewrite above. A `String` constant cannot
-/// arise here: `value_to_lir_const` returns one only for a string `Value`, and
-/// a string literal lowers to `MaterializeConst` rather than to `ValueConst`.
+/// The constant the rewrite writes for a value: the immediate a scalar spells,
+/// and a nil stand-in for a closure, so that the pass has as many sites as
+/// there are closure-valued `ValueConst`s too.
+fn immediate(v: Value) -> Option<LirConst> {
+    if v.is_nil() {
+        Some(LirConst::Nil)
+    } else if v.is_empty_list() {
+        Some(LirConst::EmptyList)
+    } else if let Some(b) = v.as_bool() {
+        Some(LirConst::Bool(b))
+    } else if let Some(n) = v.as_int() {
+        Some(LirConst::Int(n))
+    } else if let Some(f) = v.as_float() {
+        Some(LirConst::Float(f))
+    } else if let Some(id) = v.as_symbol() {
+        Some(LirConst::Symbol(id))
+    } else if let Some(hash) = v.keyword_hash() {
+        Some(LirConst::Keyword(hash))
+    } else {
+        v.is_closure().then_some(LirConst::Nil)
+    }
+}
+
+/// A converted constant, for the one rewrite above. [`immediate`] writes no
+/// `String`.
 fn lir_to_pconst(c: &LirConst) -> PConst {
     match c {
         LirConst::Nil => PConst::Nil,
@@ -185,8 +201,6 @@ fn lir_to_pconst(c: &LirConst) -> PConst {
         LirConst::Symbol(s) => PConst::Symbol(s.0),
         LirConst::Keyword(k) => PConst::Keyword(*k),
         LirConst::String(_) => PConst::Nil,
-        LirConst::ClosureRef(i) => PConst::ClosureRef(*i as u32),
-        LirConst::ValueRef(i) => PConst::ValueRef(*i as u32),
     }
 }
 

@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-10-06
 //! The region-native LIR prototype: a fixed-size POD instruction in region
 //! pages.
 //!
@@ -70,8 +70,6 @@ pub enum PConst {
     Keyword(u64),
     Str(RegionStr),
     Val(Value),
-    ClosureRef(u32),
-    ValueRef(u32),
     /// The root of a flattened `ConstTemplate`, indexing `PFunc::templates`.
     Template(u32),
     /// A raw scalar a variant carries: a signal mask, a symbol id.

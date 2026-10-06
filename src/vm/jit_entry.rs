@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! Where a closure call meets the JIT: the hotness counter, the code cache, and the trampolines back into the interpreter.
 //!
 //! docs/impl/jit.md
@@ -183,7 +183,7 @@ impl VM {
     /// Submit a background JIT compilation task for a hot function.
     fn submit_jit_task(
         &mut self,
-        lir_func: &crate::lir::LirFunction,
+        lir_func: &crate::lir::LirOwned,
         closure: &crate::value::Closure,
         bytecode_ptr: *const u8,
     ) {
@@ -195,12 +195,13 @@ impl VM {
         // immediately; the `elle-jit` worker never spawns. Codegen inputs are
         // identical to the background path (same prepare_task output), so a
         // failure that persists under syncjit indicts codegen or its inputs,
-        // while one that vanishes lives at the worker boundary — the Send
-        // claim on JitTask, or a poll/install racing execution. Diagnosing a
+        // while one that vanishes lives at the worker boundary — the task
+        // crossing to the worker, or a poll/install racing execution. Diagnosing a
         // suspected JIT race starts here; `--trace=jit,syncjit` logs each
         // synchronous install like the background path logs its own.
         if crate::config::get().has_trace("syncjit") {
-            let res = crate::jit::JitCompiler::new().and_then(|c| c.compile(&task.lir, Vec::new()));
+            let res = crate::jit::JitCompiler::new()
+                .and_then(|c| c.compile(&task.lir.view(), Vec::new()));
             match res {
                 Ok(jit_code) => {
                     if self

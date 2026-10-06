@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-10-06
 // docs/impl/region/template.md
 //! The blueprint the JIT builds for a nested lambda at a `MakeClosure`.
 
@@ -7,8 +7,8 @@ use crate::hir::region::StaticRegion;
 use crate::lir::{ClosureId, LirConst};
 
 /// A nullary lambda carrying one of everything the blueprint has to copy off
-/// its `LirFunction`: both release tables, the region table, and a merge set.
-fn nested_lambda_lir() -> LirFunction {
+/// its frozen LIR: both release tables, the region table, and a merge set.
+fn nested_lambda_lir() -> LirOwned {
     let mut func = LirFixture::new(Arity::Exact(0))
         .name("nested")
         .signal(Signal::silent())
@@ -20,7 +20,7 @@ fn nested_lambda_lir() -> LirFunction {
             }],
             Terminator::Return(Reg(0)),
         )
-        .build();
+        .build_working();
     func.region_table = vec![StaticRegion::new(2).unwrap(), StaticRegion::new(5).unwrap()];
     func.merged_slots = vec![StaticRegion::new(5).unwrap()];
     func.frame_release_slots = vec![3, 7];
@@ -28,11 +28,11 @@ fn nested_lambda_lir() -> LirFunction {
         StaticRegion::new(11).unwrap(),
         StaticRegion::new(13).unwrap(),
     ];
-    func
+    crate::lir::code::freeze(&func).expect("the lambda freezes")
 }
 
 /// A nullary function whose whole body is one `MakeClosure` of closure 0.
-fn outer_lir() -> LirFunction {
+fn outer_lir() -> LirOwned {
     LirFixture::new(Arity::Exact(0))
         .signal(Signal::silent())
         .block(
@@ -56,8 +56,8 @@ fn outer_lir() -> LirFunction {
 /// it. The blueprint is built all the same, and it is what a closure the
 /// compiled code materializes reads its code object from.
 fn closure_protos(
-    outer: &LirFunction,
-    nested: LirFunction,
+    outer: &LirOwned,
+    nested: LirOwned,
 ) -> Vec<std::rc::Rc<crate::value::TemplateProto>> {
     let mut compiler = JitCompiler::new().expect("Failed to create compiler");
     let sig = compiler.make_jit_signature();
@@ -69,7 +69,7 @@ fn closure_protos(
     ctx.func.signature = sig;
     ctx.func.name = UserFuncName::user(0, func_id.as_u32());
     let (protos, _) = compiler
-        .translate_function(outer, &mut ctx.func, vec![nested])
+        .translate_function(&outer.view(), &mut ctx.func, vec![nested])
         .expect("Failed to translate");
     protos
 }
@@ -98,7 +98,7 @@ fn a_nested_lambdas_jit_blueprint_carries_the_frame_release_tables() {
 #[test]
 fn a_nested_lambdas_jit_blueprint_carries_the_regions_its_body_names() {
     // The two region tables travel beside the release tables and off the same
-    // `LirFunction`, so one omission is as silent as the other.
+    // frozen function, so one omission is as silent as the other.
     let protos = closure_protos(&outer_lir(), nested_lambda_lir());
     assert_eq!(
         protos[0].region_table,

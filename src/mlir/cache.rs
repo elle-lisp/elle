@@ -1,10 +1,12 @@
+// audited: 2026-10-06
+// docs/impl/mlir.md
 //! MLIR compilation cache for the VM.
 //!
 //! Stores a shared MLIR Context and cached ExecutionEngines keyed by
 //! bytecode pointer. The context is created once; subsequent compilations
 //! amortize the 4ms initialization cost.
 
-use crate::lir::LirFunction;
+use crate::lir::LirView;
 use melior::ExecutionEngine;
 use std::collections::HashMap;
 
@@ -56,12 +58,12 @@ impl MlirCache {
         self.rejections.contains(&(key, capture_types, param_types))
     }
 
-    /// Compile a GPU-eligible LirFunction and cache the result.
+    /// Compile a GPU-eligible frozen function and cache the result.
     /// Returns the function name for subsequent invocation.
     pub fn compile(
         &mut self,
         key: *const u8,
-        lir: &LirFunction,
+        lir: &LirView<'_>,
         num_captures: u16,
         capture_types: u64,
         param_types: u64,
@@ -75,7 +77,7 @@ impl MlirCache {
             .map_err(|_| "MLIR-to-LLVM conversion failed".to_string())?;
 
         let engine = ExecutionEngine::new(&module, 2, &[], false, false);
-        let name = lir.name.as_deref().unwrap_or("gpu_kernel").to_string();
+        let name = lir.name().unwrap_or("gpu_kernel").to_string();
 
         let cache_key = (key, capture_types, param_types);
         self.engines.insert(cache_key, (engine, name, scalar_type));
@@ -128,12 +130,12 @@ impl MlirCache {
             .contains_key(&(key, capture_types, param_types))
     }
 
-    /// Compile a GPU-eligible LirFunction to SPIR-V bytes, using the
+    /// Compile a GPU-eligible frozen function to SPIR-V bytes, using the
     /// shared context and caching the result by bytecode pointer.
     pub fn compile_spirv(
         &mut self,
         key: *const u8,
-        lir: &LirFunction,
+        lir: &LirView<'_>,
         workgroup_size: u32,
     ) -> Result<&[u8], String> {
         if !self.spirv_cache.contains_key(&key) {

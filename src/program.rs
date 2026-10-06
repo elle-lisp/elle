@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-06
 //! What `elle` and the rig share: the run path of one `Runtime`, from a file, `-e`, stdin or the REPL, and the subcommands.
 //!
 //! docs/config.md
@@ -203,10 +203,6 @@ impl Program {
         if stats {
             #[cfg(feature = "jit")]
             print_jit_stats(rt.vm());
-            let cvc = crate::lir::closure_value_const_count();
-            if cvc > 0 {
-                eprintln!("[stats] closure-valued ValueConsts serialized: {}", cvc);
-            }
         }
 
         // Graceful exit on every path: run the principled teardown sweep

@@ -1,4 +1,4 @@
-// audited: 2026-09-22
+// audited: 2026-10-06
 //! Where each form's bytes go, counted line by line.
 //!
 //! docs/impl/image/measurements.md
@@ -47,14 +47,6 @@ pub fn rust_rows(corpus: &[LirFunction]) -> Vec<Row> {
         tables += f.merged_slots.capacity() * size_of::<u32>();
         tables += f.frame_release_slots.capacity() * size_of::<u16>();
         tables += f.frame_release_regions.capacity() * size_of::<u32>();
-        for y in &f.yield_points {
-            tables += size_of::<elle::lir::YieldPointInfo>()
-                + y.stack_regs.capacity() * size_of::<elle::lir::Reg>();
-        }
-        for c in &f.call_sites {
-            tables += size_of::<elle::lir::CallSiteInfo>()
-                + c.stack_regs.capacity() * size_of::<elle::lir::Reg>();
-        }
         text += f.name.as_ref().map_or(0, |n| n.capacity());
         text += f.doc.as_ref().map_or(0, |d| d.len());
     }

@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-10-06
 // src/wasm/AGENTS.md
 //! Emitting the intrinsic opcodes as WASM: type predicates, data access, and
 //! the collection operations that cross to the host.
@@ -9,11 +9,15 @@
 use super::*;
 
 impl WasmEmitter {
-    pub(in crate::wasm) fn emit_instr_intrinsics(&mut self, f: &mut Function, instr: &LirInstr) {
+    pub(in crate::wasm) fn emit_instr_intrinsics(
+        &mut self,
+        f: &mut Function,
+        instr: &InstrRef<'_>,
+    ) {
         match instr {
             // New type predicates — use tag checks or data ops
-            LirInstr::IsEmpty { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_EMPTY_LIST),
-            LirInstr::IsBool { dst, src } => {
+            InstrRef::IsEmpty { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_EMPTY_LIST),
+            InstrRef::IsBool { dst, src } => {
                 // bool = tag is TRUE or FALSE
                 f.instruction(&Instruction::LocalGet(self.tag_local(*src)));
                 f.instruction(&Instruction::I64Const(TAG_TRUE as i64));
@@ -24,9 +28,9 @@ impl WasmEmitter {
                 f.instruction(&Instruction::I32Or);
                 self.emit_bool_from_i32(f, *dst);
             }
-            LirInstr::IsInt { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_INT),
-            LirInstr::IsFloat { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_FLOAT),
-            LirInstr::IsString { dst, src } => {
+            InstrRef::IsInt { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_INT),
+            InstrRef::IsFloat { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_FLOAT),
+            InstrRef::IsString { dst, src } => {
                 // string = TAG_STRING or TAG_STRING_MUT
                 f.instruction(&Instruction::LocalGet(self.tag_local(*src)));
                 f.instruction(&Instruction::I64Const(TAG_STRING as i64));
@@ -37,9 +41,9 @@ impl WasmEmitter {
                 f.instruction(&Instruction::I32Or);
                 self.emit_bool_from_i32(f, *dst);
             }
-            LirInstr::IsKeyword { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_KEYWORD),
-            LirInstr::IsSymbolCheck { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_SYMBOL),
-            LirInstr::IsBytes { dst, src } => {
+            InstrRef::IsKeyword { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_KEYWORD),
+            InstrRef::IsSymbolCheck { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_SYMBOL),
+            InstrRef::IsBytes { dst, src } => {
                 f.instruction(&Instruction::LocalGet(self.tag_local(*src)));
                 f.instruction(&Instruction::I64Const(TAG_BYTES as i64));
                 f.instruction(&Instruction::I64Eq);
@@ -49,21 +53,21 @@ impl WasmEmitter {
                 f.instruction(&Instruction::I32Or);
                 self.emit_bool_from_i32(f, *dst);
             }
-            LirInstr::IsBox { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_LBOX),
-            LirInstr::IsClosure { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_CLOSURE),
-            LirInstr::IsFiber { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_FIBER),
+            InstrRef::IsBox { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_LBOX),
+            InstrRef::IsClosure { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_CLOSURE),
+            InstrRef::IsFiber { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_FIBER),
 
             // Data ops via runtime
-            LirInstr::TypeOf { dst, src } => {
+            InstrRef::TypeOf { dst, src } => {
                 self.emit_data_op1(f, *dst, OP_TYPE_OF, *src);
             }
-            LirInstr::Length { dst, src } => {
+            InstrRef::Length { dst, src } => {
                 self.emit_data_op1(f, *dst, OP_LENGTH, *src);
             }
-            LirInstr::Get { dst, obj, key } => {
+            InstrRef::Get { dst, obj, key } => {
                 self.emit_data_op2(f, *dst, OP_INTR_GET, *obj, *key);
             }
-            LirInstr::Put { dst, obj, key, val } => {
+            InstrRef::Put { dst, obj, key, val } => {
                 self.write_val_to_mem(f, *obj, 0);
                 self.write_val_to_mem(f, *key, 1);
                 self.write_val_to_mem(f, *val, 2);
@@ -73,34 +77,34 @@ impl WasmEmitter {
                 f.instruction(&wasm_encoder::Instruction::Call(FN_RT_DATA_OP));
                 self.store_result_with_signal(f, *dst);
             }
-            LirInstr::Del { dst, obj, key } => {
+            InstrRef::Del { dst, obj, key } => {
                 self.emit_data_op2(f, *dst, OP_INTR_DEL, *obj, *key);
             }
-            LirInstr::Has { dst, obj, key } => {
+            InstrRef::Has { dst, obj, key } => {
                 self.emit_data_op2(f, *dst, OP_INTR_HAS, *obj, *key);
             }
-            LirInstr::IntrPush { dst, array, value } => {
+            InstrRef::IntrPush { dst, array, value } => {
                 self.emit_data_op2(f, *dst, OP_INTR_PUSH, *array, *value);
             }
-            LirInstr::IntrStringPush { dst, string, value } => {
+            InstrRef::IntrStringPush { dst, string, value } => {
                 self.emit_data_op2(f, *dst, OP_INTR_STRING_PUSH, *string, *value);
             }
-            LirInstr::IntrBytesPush { dst, bytes, value } => {
+            InstrRef::IntrBytesPush { dst, bytes, value } => {
                 self.emit_data_op2(f, *dst, OP_INTR_BYTES_PUSH, *bytes, *value);
             }
-            LirInstr::Pop { dst, src } => {
+            InstrRef::Pop { dst, src } => {
                 self.emit_data_op1(f, *dst, OP_INTR_POP, *src);
             }
-            LirInstr::Freeze { dst, src, .. } => {
+            InstrRef::Freeze { dst, src, .. } => {
                 self.emit_data_op1(f, *dst, OP_INTR_FREEZE, *src);
             }
-            LirInstr::Thaw { dst, src, .. } => {
+            InstrRef::Thaw { dst, src, .. } => {
                 self.emit_data_op1(f, *dst, OP_INTR_THAW, *src);
             }
-            LirInstr::Identical { dst, lhs, rhs } => {
+            InstrRef::Identical { dst, lhs, rhs } => {
                 self.emit_data_op2(f, *dst, OP_INTR_IDENTICAL, *lhs, *rhs);
             }
-            LirInstr::StructRest {
+            InstrRef::StructRest {
                 dst,
                 src,
                 exclude_keys,
@@ -108,11 +112,11 @@ impl WasmEmitter {
                 self.write_val_to_mem(f, *src, 0);
                 for (i, key) in exclude_keys.iter().enumerate() {
                     match key {
-                        LirConst::Keyword(hash) => {
-                            self.emit_const_pool_load(f, *dst, Value::keyword_from_hash(*hash));
+                        ConstRef::Keyword(hash) => {
+                            self.emit_const_pool_load(f, *dst, Value::keyword_from_hash(hash));
                         }
-                        LirConst::Symbol(id) => {
-                            self.emit_const_pool_load(f, *dst, Value::symbol(*id));
+                        ConstRef::Symbol(id) => {
+                            self.emit_const_pool_load(f, *dst, Value::symbol(id));
                         }
                         _ => {
                             f.instruction(&Instruction::I64Const(TAG_NIL as i64));

@@ -4,13 +4,13 @@
 
 use super::*;
 use crate::lir::testkit::LirFixture;
-use crate::lir::{LirInstr, Reg, Terminator};
+use crate::lir::{LirInstr, LirOwned, Reg, Terminator};
 use crate::signals::Signal;
 use crate::value::Arity;
 
 /// fn(x) -> x: the cheapest function the compiler accepts, so the queue, not
 /// any one compile, is what the test measures.
-fn identity_lir() -> LirFunction {
+fn identity_lir() -> LirOwned {
     LirFixture::new(Arity::Exact(1))
         .signal(Signal::silent())
         .block(

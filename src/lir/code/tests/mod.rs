@@ -17,6 +17,7 @@ use crate::lir::{
 use crate::value::fiber::SignalBits;
 use crate::value::{Arity, ConstTemplate, SymbolId, Value};
 
+mod gpu;
 mod header;
 mod records;
 mod roundtrip;

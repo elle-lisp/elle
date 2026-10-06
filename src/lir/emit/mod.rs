@@ -1,4 +1,4 @@
-// audited: 2026-09-16
+// audited: 2026-10-06
 // docs/impl/bytecode.md
 //! Converts register-based LIR to stack-based bytecode, simulating the operand
 //! stack to find where each register's value sits. `edge` emits the block
@@ -7,6 +7,7 @@
 mod edge;
 mod stack;
 
+use super::code::{BlockRef, ConstRef, FrozenModule, InstrRef, LirOwned, LirView};
 use super::types::*;
 use crate::compiler::bytecode::{Bytecode, Instruction};
 use crate::value::Value;
@@ -50,9 +51,9 @@ pub struct Emitter {
     /// Pre-compiled closure bytecodes for `emit_module`. Indexed by `ClosureId`.
     /// `None` when emitting a standalone function (tests, nested emit).
     compiled_closures: Option<Vec<ClosureCompiled>>,
-    /// LirFunction metadata for each closure. Parallel to `compiled_closures`.
+    /// The frozen LIR of each closure. Parallel to `compiled_closures`.
     /// Needed by MakeClosure to build ClosureTemplates.
-    closure_lir_funcs: Option<Rc<[LirFunction]>>,
+    closure_lir_funcs: Option<Rc<[LirOwned]>>,
 }
 
 mod instr;
@@ -81,7 +82,7 @@ impl Emitter {
     /// Each closure is compiled independently via `emit`. The entry
     /// function's `MakeClosure` instructions reference pre-compiled
     /// closures by `ClosureId`.
-    pub fn emit_module(&mut self, module: &LirModule) -> ClosureCompiled {
+    pub fn emit_module(&mut self, module: &FrozenModule) -> ClosureCompiled {
         // Compile closures in REVERSE order (post-order). Parents have
         // lower IDs than children (pre-order assignment), so compiling
         // in reverse ensures children are compiled before their parents.
@@ -97,13 +98,13 @@ impl Emitter {
             .collect();
         for i in (0..n).rev() {
             self.compiled_closures = Some(compiled);
-            let result = self.emit(&module.closures[i]);
+            let result = self.emit(&module.closures[i].view());
             compiled = self.compiled_closures.take().unwrap();
             compiled[i] = result;
         }
         // All closures compiled.
         self.compiled_closures = Some(compiled);
-        let result = self.emit(&module.entry);
+        let result = self.emit(&module.entry.view());
         self.compiled_closures = None;
         self.closure_lir_funcs = None;
         result
@@ -114,7 +115,7 @@ impl Emitter {
     /// Like `emit_module` but returns the individual closure results
     /// instead of the entry function result. Used by the WASM backend
     /// for dual-compile (bytecode for spawn).
-    pub fn emit_module_closures(&mut self, module: &LirModule) -> Vec<ClosureCompiled> {
+    pub fn emit_module_closures(&mut self, module: &FrozenModule) -> Vec<ClosureCompiled> {
         let n = module.closures.len();
         self.closure_lir_funcs = Some(Rc::from(module.closures.as_slice()));
         let mut compiled: Vec<ClosureCompiled> = (0..n)
@@ -122,7 +123,7 @@ impl Emitter {
             .collect();
         for i in (0..n).rev() {
             self.compiled_closures = Some(compiled);
-            let result = self.emit(&module.closures[i]);
+            let result = self.emit(&module.closures[i].view());
             compiled = self.compiled_closures.take().unwrap();
             compiled[i] = result;
         }
@@ -134,7 +135,7 @@ impl Emitter {
     /// Set module context for MakeClosure resolution without
     /// pre-compiling all closures. Used by the JIT to compile a
     /// single closure that may contain MakeClosure instructions.
-    pub fn set_module_context(&mut self, closures: &[LirFunction]) {
+    pub fn set_module_context(&mut self, closures: &[LirOwned]) {
         self.closure_lir_funcs = Some(Rc::from(closures));
         // Pre-compile all closures so MakeClosure can look them up.
         // Uses reverse order (children before parents).
@@ -144,7 +145,7 @@ impl Emitter {
             .collect();
         for i in (0..n).rev() {
             self.compiled_closures = Some(compiled);
-            let result = self.emit(&closures[i]);
+            let result = self.emit(&closures[i].view());
             compiled = self.compiled_closures.take().unwrap();
             compiled[i] = result;
         }
@@ -152,7 +153,7 @@ impl Emitter {
     }
 
     /// Emit bytecode from a single LIR function.
-    pub fn emit(&mut self, func: &LirFunction) -> ClosureCompiled {
+    pub fn emit(&mut self, func: &LirView<'_>) -> ClosureCompiled {
         self.bytecode = Bytecode::new();
         self.label_offsets.clear();
         self.pending_jumps.clear();
@@ -162,8 +163,8 @@ impl Emitter {
         self.block_entry_depth.clear();
         self.yield_points.clear();
         self.call_sites.clear();
-        self.current_func_may_suspend = func.signal.may_suspend();
-        self.current_func_num_locals = func.num_locals;
+        self.current_func_may_suspend = func.signal().may_suspend();
+        self.current_func_num_locals = func.num_locals();
 
         // Emit blocks in the order they were appended by the lowerer.
         //
@@ -174,6 +175,7 @@ impl Emitter {
         // guarantees that by the time the emitter processes a done/merge
         // block, all predecessors have already emitted their Jump/Branch
         // terminators and saved their stack state into yield_stack_state.
+        // Freezing keeps the order.
         //
         // Do NOT sort by label number. Labels are allocated in creation
         // order, not emission order. Constructs like `cond` and `match`
@@ -182,12 +184,12 @@ impl Emitter {
         // the done block to be emitted before its predecessors, losing the
         // stack state they carry.
         //
-        // Invariant: func.blocks[0] is always the entry block (Label 0),
+        // Invariant: the first block is always the entry block (Label 0),
         // because the lowerer always starts with BasicBlock::new(Label(0))
         // and finish_block() appends it when the first branch is encountered.
-        for block in &func.blocks {
+        for block in func.blocks() {
             self.label_offsets
-                .insert(block.label, self.bytecode.current_pos());
+                .insert(block.label(), self.bytecode.current_pos());
             self.emit_block(block, func);
         }
 
@@ -205,12 +207,24 @@ impl Emitter {
         // build makes. Empty unless a merge fired. The payload stores both these
         // and the release tables ascending, so nothing here depends on a hash
         // order.
-        self.bytecode.merged_slots = func.merged_slots.iter().map(|s| s.get()).collect();
+        self.bytecode.merged_slots = func.merged_slots().iter().map(|s| s.get()).collect();
         // Likewise the value-route release table, so the entry function's error
         // exit walks the releases its abandoned frame still owed.
-        self.bytecode.frame_release_slots = func.frame_release_slots.clone();
-        self.bytecode.frame_release_regions =
-            func.frame_release_regions.iter().map(|r| r.get()).collect();
+        self.bytecode.frame_release_slots = func.frame_release_slots().to_vec();
+        self.bytecode.frame_release_regions = func
+            .frame_release_regions()
+            .iter()
+            .map(|r| r.get())
+            .collect();
+
+        // A frozen function's values have no owner of their own: the constant
+        // pool keeps them alive (src/lir/AGENTS.md invariant 7).
+        debug_assert!(
+            func.values()
+                .iter()
+                .all(|v| self.bytecode.constants.contains(v)),
+            "every ValueConst value is in the constant pool"
+        );
 
         (
             std::mem::take(&mut self.bytecode),
@@ -220,9 +234,10 @@ impl Emitter {
     }
 
     /// Emit one basic block: its instructions in order, then its terminator.
-    fn emit_block(&mut self, block: &BasicBlock, func: &LirFunction) {
+    fn emit_block(&mut self, block: BlockRef<'_>, func: &LirView<'_>) {
+        let label = block.label();
         // Check if this block has saved stack state from a yield
-        if let Some((saved_stack, saved_reg_map)) = self.yield_stack_state.remove(&block.label) {
+        if let Some((saved_stack, saved_reg_map)) = self.yield_stack_state.remove(&label) {
             self.stack = saved_stack;
             self.reg_to_stack = saved_reg_map;
         } else {
@@ -234,7 +249,7 @@ impl Emitter {
         // This block's operand depth is now fixed. Record it before the
         // instructions run: once the cursor is past a block, a back edge into it
         // has nothing else to trim against (`edge_depth`).
-        self.block_entry_depth.insert(block.label, self.stack.len());
+        self.block_entry_depth.insert(label, self.stack.len());
 
         // Pre-allocate local slots at the start of the entry block.
         //
@@ -252,22 +267,22 @@ impl Emitter {
         // all emitter operations (DupN, Pop, ensure_on_top) use
         // offsets relative to the stack top, so the constant base
         // offset is invisible to the simulation.
-        if block.label == func.entry && func.num_locals > 0 {
-            for _ in 0..func.num_locals {
+        if label == func.entry() && func.num_locals() > 0 {
+            for _ in 0..func.num_locals() {
                 self.bytecode.emit(Instruction::Nil);
             }
         }
 
         // Emit instructions
-        for spanned in &block.instructions {
+        for node in block.nodes() {
             // Record source location before emitting the instruction
-            self.bytecode.record_location(&spanned.span);
-            self.emit_instr(&spanned.instr, func);
+            self.bytecode.record_location(&node.span());
+            self.emit_instr(&node.instr(), func);
         }
 
         // Record source location for the terminator
-        self.bytecode.record_location(&block.terminator.span);
-        self.emit_terminator(&block.terminator.terminator);
+        self.bytecode.record_location(&block.terminator_span());
+        self.emit_terminator(&block.terminator());
     }
 
     /// Check if an upvalue index refers to a non-cell locally-defined variable.
@@ -276,22 +291,22 @@ impl Emitter {
     /// Environment layout: [captures... | params... | locals...]
     /// Stack layout: [params... | locals...] (num_locals slots pre-allocated)
     /// Conversion: stack_slot = env_index - num_captures
-    fn non_cell_local_slot(index: u16, func: &LirFunction) -> Option<u16> {
+    fn non_cell_local_slot(index: u16, func: &LirView<'_>) -> Option<u16> {
         debug_assert!(
-            func.num_params <= u16::MAX as usize,
+            func.num_params() <= u16::MAX as usize,
             "num_params {} exceeds u16 range",
-            func.num_params
+            func.num_params()
         );
-        let locals_start = func.num_captures + func.num_params as u16;
+        let locals_start = func.num_captures() + func.num_params() as u16;
         if index >= locals_start {
             let local_offset = index - locals_start;
             // The mask names every local precisely, at any index: an unset slot
             // is a non-cell stack local; a set slot is a cell local reached via
             // the env. No >=64 conservatism (which forced — and leaked — cells
             // for uncaptured high locals).
-            if !func.capture_locals_mask.is_set(local_offset as usize) {
+            if !func.capture_locals_mask().is_set(local_offset as usize) {
                 // Non-cell local: use stack slot
-                Some(index - func.num_captures)
+                Some(index - func.num_captures())
             } else {
                 None // cell local: use env
             }
@@ -300,56 +315,39 @@ impl Emitter {
         }
     }
 
-    fn emit_const(&mut self, value: &LirConst, _func: &LirFunction) {
+    fn emit_const(&mut self, value: ConstRef) {
         match value {
-            LirConst::Nil => {
+            ConstRef::Nil => {
                 self.bytecode.emit(Instruction::Nil);
             }
-            LirConst::EmptyList => {
+            ConstRef::EmptyList => {
                 self.bytecode.emit(Instruction::EmptyList);
             }
-            LirConst::Bool(true) => {
+            ConstRef::Bool(true) => {
                 self.bytecode.emit(Instruction::True);
             }
-            LirConst::Bool(false) => {
+            ConstRef::Bool(false) => {
                 self.bytecode.emit(Instruction::False);
             }
-            LirConst::Int(n) => {
-                let idx = self.bytecode.add_constant(Value::int(*n));
+            ConstRef::Int(n) => {
+                let idx = self.bytecode.add_constant(Value::int(n));
                 self.bytecode.emit(Instruction::LoadConst);
                 self.bytecode.emit_u16(idx);
             }
-            LirConst::Float(f) => {
-                let idx = self.bytecode.add_constant(Value::float(*f));
+            ConstRef::Float(f) => {
+                let idx = self.bytecode.add_constant(Value::float(f));
                 self.bytecode.emit(Instruction::LoadConst);
                 self.bytecode.emit_u16(idx);
             }
-            LirConst::String(_) => {
-                // No producer emits `Const{LirConst::String}`. A string is a heap
-                // value: in value position it lowers to a reclaimable
-                // `MaterializeConst` (HirKind::String), and in a pattern it is
-                // materialized-compared-freed (lir/lower/pattern.rs). The bytecode
-                // constant pool has no region, so a string here would have nowhere
-                // reclaimable to live. Hence: unreachable, loudly.
-                unreachable!("string literals lower to MaterializeConst, not Const")
-            }
-            LirConst::Symbol(sym) => {
-                let idx = self.bytecode.add_constant(Value::symbol(*sym));
+            ConstRef::Symbol(sym) => {
+                let idx = self.bytecode.add_constant(Value::symbol(sym));
                 self.bytecode.emit(Instruction::LoadConst);
                 self.bytecode.emit_u16(idx);
             }
-            LirConst::Keyword(hash) => {
-                let idx = self.bytecode.add_constant(Value::keyword_from_hash(*hash));
+            ConstRef::Keyword(hash) => {
+                let idx = self.bytecode.add_constant(Value::keyword_from_hash(hash));
                 self.bytecode.emit(Instruction::LoadConst);
                 self.bytecode.emit_u16(idx);
-            }
-            LirConst::ClosureRef(_) => {
-                panic!(
-                    "bug: ClosureRef in emitter — should have been patched during reconstruction"
-                )
-            }
-            LirConst::ValueRef(_) => {
-                panic!("bug: ValueRef in emitter — should have been patched during reconstruction")
             }
         }
     }

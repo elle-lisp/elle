@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-10-06
 // docs/impl/region/owner.md
 //! What a compiled activation reclaims when it completes normally.
 
@@ -6,7 +6,7 @@ use super::*;
 
 /// fn(x) -> nil, adopting x's region into the current activation's owner node.
 /// The compiled body: load arg 0, `AdoptIntoActivation`, return nil.
-fn make_adopt_into_activation_lir() -> LirFunction {
+fn make_adopt_into_activation_lir() -> LirOwned {
     LirFixture::new(Arity::Exact(1))
         .signal(Signal::silent())
         .block(
@@ -45,7 +45,7 @@ fn adopt_into_activation_frees_member_at_compiled_return() {
     let lir = make_adopt_into_activation_lir();
     let compiler = JitCompiler::new().expect("Failed to create compiler");
     let code = compiler
-        .compile(&lir, Vec::new())
+        .compile(&lir.view(), Vec::new())
         .expect("Failed to compile");
 
     let mut vm = crate::vm::VM::new();

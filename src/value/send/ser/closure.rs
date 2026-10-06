@@ -10,8 +10,7 @@
 use super::super::*;
 use super::ctx::SerContext;
 use super::from_value_inner;
-use super::lir::convert_lir_for_send;
-use super::template::{sendable_from_child, sendable_header};
+use super::template::{send_lir, sendable_from_child, sendable_header};
 
 /// Serialize a closure instance reached at heap value `value`, interning it
 /// into `ctx.closures` with cycle detection and returning a `Ref` to its slot.
@@ -52,8 +51,8 @@ pub(super) fn send_closure(
         name: None,
         squelch_mask: SignalBits::EMPTY,
         env: Vec::new(),
-        lir_function: None,
-        lir_value_pool: Vec::new(),
+        lir: None,
+        lir_values: Vec::new(),
         child_protos: Vec::new(),
         merged_slots: Vec::new(),          // placeholder; replaced below
         frame_release_slots: Vec::new(),   // placeholder; replaced below
@@ -78,25 +77,8 @@ pub(super) fn send_closure(
         .collect();
     let constants = constants?;
 
-    // Clone LIR for JIT in spawned threads. Strip doc (an `Rc<str>`), then
-    // convert every cross-thread-unsafe ValueConst: scalars inline, closures →
-    // ClosureRef, compounds → ValueRef into `lir_value_pool` (serialized
-    // through `ctx` so nested closures intern correctly). The LIR is preserved
-    // unconditionally — a spawned closure keeps its JIT-able body across the
-    // boundary, and its `origin` span rides along as plain bytes.
-    let (lir_function, lir_value_pool) = match closure_rc.template.lir_function() {
-        Some(lir) => {
-            let mut lir = (**lir).clone();
-            lir.doc = None;
-            match convert_lir_for_send(&mut lir, ctx)? {
-                Some(pool) => (Some(lir), pool),
-                // A closure-valued ValueConst couldn't be interned — drop
-                // the LIR (the closure still runs via bytecode in the worker).
-                None => (None, Vec::new()),
-            }
-        }
-        None => (None, Vec::new()),
-    };
+    // The LIR crosses with the closure, so the worker's JIT can compile it.
+    let (lir, lir_values) = send_lir(closure_rc.template.lir_function(), ctx)?;
 
     // Serialize the nested lambdas' code objects so the worker's reconstructed
     // template carries them and `MakeClosure` resolves by index. A hydrated
@@ -110,8 +92,8 @@ pub(super) fn send_closure(
     ctx.closures[idx] = SendableClosure {
         squelch_mask: closure_rc.squelch_mask,
         env,
-        lir_function,
-        lir_value_pool,
+        lir,
+        lir_values,
         ..sendable_header(&closure_rc.template, constants, child_protos)
     };
 

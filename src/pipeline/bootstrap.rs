@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-10-06
 //! The core.lisp bootstrap: compile and run the core module before any
 //! compile context exists, and hand its exports to the one being built.
 //!
@@ -62,7 +62,7 @@ pub fn install_core_exports(
 
 /// Compile and execute core.lisp, storing exports in the Expander's core_env.
 ///
-/// Runs the full pipeline (read → expand → analyze → lower → emit → execute)
+/// Runs the full pipeline (read → expand → analyze → lower → freeze → emit → execute)
 /// without using a `CompileCtx` (we're inside its construction). The bare
 /// expander has no prelude macros — core.lisp uses only special forms and
 /// %-prefixed intrinsics.
@@ -163,6 +163,7 @@ pub(super) fn compile_core(
         .with_type_info(types);
     let lir_module = lowerer
         .lower(&hir)
+        .and_then(|m| m.freeze())
         .expect("core.lisp lowering must succeed");
 
     let mut emitter = Emitter::new();

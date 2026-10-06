@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 // docs/impl/jit.md
 //! The shared spill slot: one stack slot that every yield and call site reuses.
 //!
@@ -12,26 +12,24 @@ use super::*;
 impl<'a> FunctionTranslator<'a> {
     /// Allocate the shared spill slot sized to the maximum spill requirement.
     pub(crate) fn allocate_shared_spill_slot(&mut self, builder: &mut FunctionBuilder) {
-        let num_locals = self.lir.num_locals as usize;
+        let num_locals = self.lir.num_locals() as usize;
 
         let max_yield_operands = self
             .lir
-            .yield_points
-            .iter()
+            .yield_points()
             .map(|yp| yp.stack_regs.len())
             .max()
             .unwrap_or(0);
         let max_call_operands = self
             .lir
-            .call_sites
-            .iter()
+            .call_sites()
             .map(|cs| cs.stack_regs.len())
             .max()
             .unwrap_or(0);
         let max_operands = std::cmp::max(max_yield_operands, max_call_operands);
         // Spill saves: arity params (arg_vars) + num_locals locals (local_var_base)
         // + operand stack entries.
-        let arity = self.lir.num_params;
+        let arity = self.lir.num_params();
         let max_total = arity + num_locals + max_operands;
 
         if max_total > 0 {
@@ -54,8 +52,8 @@ impl<'a> FunctionTranslator<'a> {
         builder: &mut FunctionBuilder,
         stack_regs: &[Reg],
     ) -> Result<cranelift_codegen::ir::Value, JitError> {
-        let arity = self.lir.num_params as u16;
-        let num_locals = self.lir.num_locals;
+        let arity = self.lir.num_params() as u16;
+        let num_locals = self.lir.num_locals();
         // Spill params (from arg vars) + all local vars (from local_var_base).
         // num_locals includes non-LBox param copies + let-bound locals.
         let num_locally_defined = num_locals;

@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! `SIG_QUERY` dispatch: the questions a primitive asks the running VM.
 //!
 //! docs/runtime.md
@@ -368,7 +368,7 @@ impl VM {
                         )
                     }
                 };
-                if !lir.is_gpu_eligible() {
+                if !lir.view().is_gpu_eligible() {
                     return (
                         SIG_ERROR,
                         ctx.error(
@@ -381,7 +381,7 @@ impl VM {
                 let cache = self
                     .mlir_cache
                     .get_or_insert_with(crate::mlir::MlirCache::new);
-                match cache.compile_spirv(key, lir, wg_size) {
+                match cache.compile_spirv(key, &lir.view(), wg_size) {
                     Ok(bytes) => (SIG_OK, ctx.bytes(bytes.to_vec())),
                     Err(e) => (
                         SIG_ERROR,
@@ -414,7 +414,7 @@ impl VM {
                         )
                     }
                 };
-                if !lir.is_gpu_eligible() {
+                if !lir.view().is_gpu_eligible() {
                     return (
                         SIG_ERROR,
                         ctx.error("mlir-error", "git: closure is not GPU-eligible".to_string()),
@@ -424,7 +424,7 @@ impl VM {
                 let cache = self
                     .mlir_cache
                     .get_or_insert_with(crate::mlir::MlirCache::new);
-                match cache.compile_spirv(key, lir, wg_size) {
+                match cache.compile_spirv(key, &lir.view(), wg_size) {
                     Ok(bytes) => {
                         // Cache on the template (idempotent).
                         closure.template.cache_spirv(bytes.to_vec());

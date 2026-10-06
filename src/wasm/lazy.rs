@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-10-06
 //! Lazy (tiered) WASM compilation.
 //!
 //! Compiles individual hot closures to WASM on demand. The bytecode VM
@@ -10,7 +10,7 @@
 //!   VM call path → try_wasm_call → WasmTier::call
 //!   WASM closure → rt_call → host → VM (for bytecode closures)
 
-use crate::lir::LirFunction;
+use crate::lir::LirView;
 use crate::value::repr::TAG_HEAP_START;
 use crate::value::{SignalBits, Value};
 use rustc_hash::FxHashMap;
@@ -110,7 +110,7 @@ impl WasmTier {
     pub fn compile(
         &mut self,
         bytecode_ptr: *const u8,
-        lir_func: &LirFunction,
+        lir_func: &LirView<'_>,
         heap_ptr: *mut crate::value::fiberheap::FiberHeap,
     ) -> bool {
         if self.modules.contains_key(&bytecode_ptr) {
@@ -131,7 +131,7 @@ impl WasmTier {
                 if crate::config::get().has_trace("wasm") {
                     eprintln!(
                         "[wasm-tier] compiled {:?} ({} bytes, {} consts)",
-                        lir_func.name,
+                        lir_func.name(),
                         result.wasm_bytes.len(),
                         result.const_pool.len()
                     );
@@ -148,7 +148,11 @@ impl WasmTier {
             }
             Err(e) => {
                 if crate::config::get().has_trace("wasm") {
-                    eprintln!("[wasm-tier] compile failed for {:?}: {}", lir_func.name, e);
+                    eprintln!(
+                        "[wasm-tier] compile failed for {:?}: {}",
+                        lir_func.name(),
+                        e
+                    );
                 }
                 false
             }

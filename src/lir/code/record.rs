@@ -93,7 +93,6 @@ pub struct SiteRec {
 }
 
 /// `BlockRec::term_op`: how a block exits.
-#[allow(dead_code)]
 pub(crate) mod term {
     pub(crate) const RETURN: u8 = 0;
     pub(crate) const JUMP: u8 = 1;
@@ -103,7 +102,6 @@ pub(crate) mod term {
 }
 
 /// `ConstRec::kind`: what the 64 bits hold.
-#[allow(dead_code)]
 pub(crate) mod kind {
     pub(crate) const NIL: u8 = 0;
     pub(crate) const EMPTY_LIST: u8 = 1;

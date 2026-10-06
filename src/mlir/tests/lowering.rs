@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-10-06
 // docs/impl/mlir.md
 //! The straight-line base case: an add and a constant, through MLIR text, the
 //! CPU tier, and a SPIR-V module.
@@ -6,7 +6,7 @@
 use super::*;
 
 /// Build LIR: fn(a, b) { return a + b }
-fn make_add() -> LirFunction {
+fn make_add() -> LirOwned {
     LirFixture::new(Arity::Exact(2))
         .name("add")
         .signal(Signal::errors())
@@ -29,7 +29,7 @@ fn make_add() -> LirFunction {
 }
 
 /// Build LIR: fn() { return 42 }
-fn make_const() -> LirFunction {
+fn make_const() -> LirOwned {
     LirFixture::new(Arity::Exact(0))
         .name("the_answer")
         .block(
@@ -47,7 +47,7 @@ fn make_const() -> LirFunction {
 
 #[test]
 fn test_lower_add() {
-    let mlir_text = lower_to_mlir(&make_add()).expect("lowering should succeed");
+    let mlir_text = lower_to_mlir(&make_add().view()).expect("lowering should succeed");
     assert!(
         mlir_text.contains("arith.addi"),
         "should contain arith.addi: {}",
@@ -62,7 +62,7 @@ fn test_lower_add() {
 
 #[test]
 fn test_lower_constant() {
-    let mlir_text = lower_to_mlir(&make_const()).expect("lowering should succeed");
+    let mlir_text = lower_to_mlir(&make_const().view()).expect("lowering should succeed");
     assert!(
         mlir_text.contains("42"),
         "should contain constant 42: {}",
@@ -74,19 +74,19 @@ fn test_lower_constant() {
 
 #[test]
 fn test_execute_constant() {
-    let result = mlir_call(&make_const(), &[]).expect("execution should succeed");
+    let result = mlir_call(&make_const().view(), &[]).expect("execution should succeed");
     assert_eq!(result, 42);
 }
 
 #[test]
 fn test_execute_add() {
-    let result = mlir_call(&make_add(), &[10, 32]).expect("execution should succeed");
+    let result = mlir_call(&make_add().view(), &[10, 32]).expect("execution should succeed");
     assert_eq!(result, 42);
 }
 
 #[test]
 fn test_execute_add_negative() {
-    let result = mlir_call(&make_add(), &[-5, 15]).expect("execution should succeed");
+    let result = mlir_call(&make_add().view(), &[-5, 15]).expect("execution should succeed");
     assert_eq!(result, 10);
 }
 
@@ -95,7 +95,7 @@ fn test_execute_add_negative() {
 #[test]
 fn test_spirv_add() {
     let func = make_add();
-    let spirv_bytes = lower_to_spirv(&func, 256).expect("SPIR-V lowering should succeed");
+    let spirv_bytes = lower_to_spirv(&func.view(), 256).expect("SPIR-V lowering should succeed");
     assert!(
         spirv_bytes.len() >= 20,
         "SPIR-V should be non-trivial: {} bytes",

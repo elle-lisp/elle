@@ -6,11 +6,10 @@
 use super::*;
 
 /// Build a minimal closure Value with an attached LIR function, on `heap`.
-/// Used by the ClosureRef round-trip test.
 fn make_test_closure(
     heap: *mut crate::value::fiberheap::FiberHeap,
     name: &str,
-    lir: Option<LirFunction>,
+    lir: Option<LirOwned>,
 ) -> Value {
     let proto = TemplateProto {
         num_locals: 1,
@@ -31,113 +30,6 @@ fn make_test_closure(
             traits: Value::NIL,
         },
     )
-}
-
-/// Build a minimal LIR function consisting of a single block that
-/// loads a closure-valued ValueConst and returns it.
-fn make_lir_with_closure_value_const(closure_val: Value) -> LirFunction {
-    LirFixture::new(Arity::Exact(1))
-        .num_params(1)
-        .num_locals(1)
-        .block(
-            0,
-            vec![LirInstr::ValueConst {
-                dst: Reg(0),
-                value: closure_val,
-            }],
-            Terminator::Return(Reg(0)),
-        )
-        .build()
-}
-
-/// Directly verifies the ClosureRef serialization path: a closure
-/// whose LIR contains a ValueConst referencing another closure must
-/// round-trip through SendBundle with its LIR preserved, and the
-/// ClosureRef placeholder must be patched back to a valid ValueConst.
-#[test]
-fn test_send_bundle_patches_closure_value_const_in_lir() {
-    crate::value::arena::with_test_region(|| {
-        // One heap for the whole round-trip: the inner/outer closures and the
-        // serialization all name it explicitly.
-        let heap_ptr = crate::value::arena::leaked_test_heap();
-        // 1. Build an inner closure (the "target" of the ValueConst).
-        let inner = make_test_closure(heap_ptr, "inner", None);
-
-        // 2. Build an outer closure whose LIR contains a ValueConst
-        //    referencing `inner`. Store `inner` in the outer closure's
-        //    env so it's reachable via the SendBundle intern table.
-        let lir = make_lir_with_closure_value_const(inner);
-        let outer_template = TemplateProto {
-            num_captures: 1,
-            lir_function: Some(Rc::new(lir)),
-            name: Some("outer".to_string()),
-            ..TemplateProto::new(Vec::new(), Arity::Exact(0), Vec::new())
-        };
-        // Build the env slice and the closure header in ONE explicit region
-        // (slice + header must share a region), on the same heap as `inner`.
-        let region = unsafe { (*heap_ptr).new_runtime_region() };
-        let env = crate::value::arena::alloc_region_slice_in_region::<Value>(
-            unsafe { &mut *heap_ptr },
-            &[inner],
-            region,
-        );
-        let outer_closure = Closure::new(
-            crate::value::closure::test_template(unsafe { &mut *heap_ptr }, outer_template),
-            // make `inner` reachable from the bundle
-            env,
-            SignalBits::EMPTY,
-        );
-        let outer_val = crate::value::arena::alloc_in_region(
-            unsafe { &mut *heap_ptr },
-            HeapObject::Closure {
-                closure: outer_closure,
-                traits: Value::NIL,
-            },
-            region,
-        );
-
-        // 3. Round-trip through SendBundle.
-        let bundle = SendBundle::from_value(outer_val, unsafe { &*heap_ptr }, None)
-            .expect("should serialize");
-        let restored = into_value_in_region(|ctx| bundle.into_value(ctx, None));
-
-        // 4. The reconstructed outer closure should still have an LIR.
-        let restored_rc = restored
-            .as_closure()
-            .expect("restored value should be a closure");
-        let restored_lir = restored_rc
-            .template
-            .lir_function()
-            .expect("LIR must be preserved across SendBundle round-trip");
-
-        // 5. The LIR should contain a ValueConst (not a ClosureRef) whose
-        //    value is a closure — specifically the reconstructed `inner`.
-        let mut found_closure_vc = false;
-        for block in &restored_lir.blocks {
-            for si in &block.instructions {
-                match &si.instr {
-                    LirInstr::Const {
-                        value: LirConst::ClosureRef(_),
-                        ..
-                    } => {
-                        panic!("ClosureRef should have been patched during reconstruction");
-                    }
-                    LirInstr::ValueConst { value, .. } => {
-                        assert!(
-                            value.as_closure().is_some(),
-                            "patched ValueConst should hold a closure"
-                        );
-                        found_closure_vc = true;
-                    }
-                    _ => {}
-                }
-            }
-        }
-        assert!(
-            found_closure_vc,
-            "restored LIR must contain the patched closure ValueConst"
-        );
-    });
 }
 
 /// A closure's LIR crosses with the values its `ValueConst`s load — a closure
@@ -202,11 +94,9 @@ fn a_closure_crosses_with_its_lir_and_the_values_it_loads() {
             .expect("the LIR crosses with the closure");
 
         let mut loaded = Vec::new();
-        for block in &lir.blocks {
-            for si in &block.instructions {
-                if let LirInstr::ValueConst { value, .. } = &si.instr {
-                    loaded.push(*value);
-                }
+        for node in lir.view().nodes() {
+            if let InstrRef::ValueConst { value, .. } = node.instr() {
+                loaded.push(value);
             }
         }
         assert_eq!(loaded.len(), 2, "both ValueConsts arrive as ValueConsts");
@@ -218,7 +108,7 @@ fn a_closure_crosses_with_its_lir_and_the_values_it_loads() {
         #[cfg(feature = "jit")]
         crate::jit::JitCompiler::new()
             .expect("a compiler")
-            .compile(lir, Vec::new())
+            .compile(&lir.view(), Vec::new())
             .expect("the worker's JIT compiles the LIR that arrived");
     });
 }

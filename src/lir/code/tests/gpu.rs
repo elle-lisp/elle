@@ -1,10 +1,15 @@
+// audited: 2026-10-06
+//! The GPU whitelist admits numeric work only, and refuses every instruction that reaches region runtime state.
+//!
+//! docs/impl/region/diagnostics.md
+
 use super::*;
 use crate::lir::testkit::LirFixture;
 
 /// A single-block function whose body is `instr` followed by `Return(Reg(0))`,
 /// with the GPU-friendly defaults (`Arity::Exact`, silent signal, no capture
 /// cells) so the only variable under test is the instruction itself.
-fn one_instr_func(instr: LirInstr) -> LirFunction {
+fn one_instr_func(instr: LirInstr) -> LirOwned {
     LirFixture::new(Arity::Exact(1))
         .block(0, vec![instr], Terminator::Return(Reg(0)))
         .build()
@@ -19,7 +24,7 @@ fn numeric_body_is_gpu_eligible_control() {
         value: LirConst::Int(1),
     });
     assert!(
-        func.is_gpu_eligible(),
+        func.view().is_gpu_eligible(),
         "a numeric-only function must be GPU-eligible",
     );
 }
@@ -31,7 +36,7 @@ fn load_self_is_not_gpu_eligible() {
     // carrying it must be excluded from GPU compilation.
     let func = one_instr_func(LirInstr::LoadSelf { dst: Reg(0) });
     assert!(
-        !func.is_gpu_eligible(),
+        !func.view().is_gpu_eligible(),
         "a function loading the executing closure is not GPU-eligible",
     );
 }
@@ -43,7 +48,7 @@ fn adopt_into_activation_is_not_gpu_eligible() {
     // function carrying it must be excluded from GPU compilation.
     let func = one_instr_func(LirInstr::AdoptIntoActivation { child: Reg(0) });
     assert!(
-        !func.is_gpu_eligible(),
+        !func.view().is_gpu_eligible(),
         "a function adopting into the activation owner node is not GPU-eligible",
     );
 }
@@ -93,7 +98,7 @@ fn gpu_eligibility_refuses_slot_and_forest_region_instructions() {
     for instr in refused {
         let label = format!("{:?}", instr);
         assert!(
-            !one_instr_func(instr).is_gpu_eligible(),
+            !one_instr_func(instr).view().is_gpu_eligible(),
             "{label} reaches region-runtime state and must not be GPU-eligible",
         );
     }
@@ -110,7 +115,7 @@ fn gpu_eligibility_admits_value_targeted_region_rc() {
     ] {
         let label = format!("{:?}", instr);
         assert!(
-            one_instr_func(instr).is_gpu_eligible(),
+            one_instr_func(instr).view().is_gpu_eligible(),
             "{label} is a scalar no-op and must stay GPU-eligible",
         );
     }
@@ -128,7 +133,7 @@ fn gpu_eligibility_refuses_heap_allocation() {
         region: static_region(2),
     });
     assert!(
-        !func.is_gpu_eligible(),
+        !func.view().is_gpu_eligible(),
         "an allocating instruction must not be GPU-eligible",
     );
 }

@@ -45,7 +45,7 @@ impl ConstRef {
 }
 
 /// A `MaterializeConst`'s template, as `ConstTemplate::encode` wrote it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct TemplateBytes<'a>(pub(crate) &'a [u8]);
 
 impl<'a> TemplateBytes<'a> {
@@ -62,7 +62,7 @@ impl<'a> TemplateBytes<'a> {
 }
 
 /// A tail call's borrowed-argument stash slots, each a local slot number.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Slots<'a>(pub(crate) &'a [u32]);
 
 impl<'a> Slots<'a> {
@@ -80,7 +80,7 @@ impl<'a> Slots<'a> {
 }
 
 /// A run of immediate constants: a `StructRest`'s excluded keys.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct ConstList<'a>(pub(crate) &'a [ConstRec]);
 
 impl<'a> ConstList<'a> {
@@ -495,4 +495,47 @@ pub enum InstrRef<'a> {
         lhs: Reg,
         rhs: Reg,
     },
+}
+
+impl InstrRef<'_> {
+    /// The static region slot this allocating or calling instruction is stamped
+    /// with, as `LirInstr::region` answers it.
+    pub fn region(&self) -> Option<StaticRegion> {
+        match self {
+            InstrRef::MakeClosure { region, .. }
+            | InstrRef::Call { region, .. }
+            | InstrRef::SuspendingCall { region, .. }
+            | InstrRef::TailCall { region, .. }
+            | InstrRef::List { region, .. }
+            | InstrRef::MaterializeConst { region, .. }
+            | InstrRef::MakeArrayMut { region, .. }
+            | InstrRef::MakeCaptureCell { region, .. }
+            | InstrRef::CallArrayMut { region, .. }
+            | InstrRef::TailCallArrayMut { region, .. }
+            | InstrRef::Freeze { region, .. }
+            | InstrRef::Thaw { region, .. } => Some(*region),
+            _ => None,
+        }
+    }
+}
+
+// Each borrowed operand prints as the value `LirInstr` holds in its place, so
+// an instruction's `Debug` text reads the same in either form.
+
+impl std::fmt::Debug for TemplateBytes<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.decode().fmt(f)
+    }
+}
+
+impl std::fmt::Debug for Slots<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list().entries(self.iter()).finish()
+    }
+}
+
+impl std::fmt::Debug for ConstList<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list().entries(self.iter()).finish()
+    }
 }

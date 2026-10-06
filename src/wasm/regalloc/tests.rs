@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-10-06
 // src/wasm/AGENTS.md
 //! What the WASM register allocator gives a register: a shared slot inside one
 //! block, a dedicated slot across two.
@@ -30,7 +30,7 @@ fn within_block_reuse() {
             Terminator::Return(Reg(2)),
         )
         .build();
-    let alloc = allocate(&func, 0);
+    let alloc = allocate(&func.view(), 0);
 
     // r0 and r1 are last used at idx 2 (BinOp), r2 is defined at idx 2.
     // Defs are allocated before frees at the same instruction, so r2
@@ -53,7 +53,7 @@ fn cross_block_dedicated() {
         )
         .block(1, vec![], Terminator::Return(Reg(0)))
         .build();
-    let alloc = allocate(&func, 0);
+    let alloc = allocate(&func.view(), 0);
 
     assert_eq!(alloc.max_slots, 1);
     assert!(alloc.reg_to_slot.contains_key(&Reg(0)));

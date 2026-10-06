@@ -1,4 +1,4 @@
-// audited: 2026-09-22
+// audited: 2026-10-06
 //! The encoder: one `LirFunction` into one region, through a reused buffer.
 //!
 //! docs/impl/image/measurements.md
@@ -17,7 +17,7 @@ use elle::value::fiberheap::FiberHeap;
 use elle::value::region_slice::{RegionSlice, RegionStr};
 use elle::value::ConstTemplate;
 
-use crate::node::{PBlock, PConst, PFunc, PInstr, PSite, PTemplate, NO_REG};
+use crate::node::{PBlock, PConst, PFunc, PInstr, PTemplate, NO_REG};
 use crate::opcode::opcode;
 
 /// The scratch a build reuses across functions, beside the region it fills.
@@ -31,7 +31,6 @@ pub struct Builder {
     templates: Vec<PTemplate>,
     uses: Vec<u32>,
     scratch: Vec<u32>,
-    sites: Vec<PSite>,
 }
 
 impl Builder {
@@ -46,7 +45,6 @@ impl Builder {
             templates: Vec::new(),
             uses: Vec::new(),
             scratch: Vec::new(),
-            sites: Vec::new(),
         }
     }
 
@@ -145,8 +143,6 @@ impl Builder {
         let merged_slots = self.slots(&f.merged_slots);
         let frame_release_slots = self.slice(&f.frame_release_slots);
         let frame_release_regions = self.slots(&f.frame_release_regions);
-        let yield_points = self.yields(f);
-        let call_sites = self.calls(f);
         let name = match &f.name {
             Some(n) => self.text(n),
             None => RegionStr::empty(),
@@ -163,8 +159,10 @@ impl Builder {
             merged_slots,
             frame_release_slots,
             frame_release_regions,
-            yield_points,
-            call_sites,
+            // The working form carries no sites: emission records them, and
+            // the frozen form holds them.
+            yield_points: RegionSlice::empty(),
+            call_sites: RegionSlice::empty(),
             name,
             span: f.origin.unwrap_or_else(Span::synthetic),
             closure_id: f.closure_id.map(|c| c.0).unwrap_or(NO_REG),
@@ -190,42 +188,6 @@ impl Builder {
         let built = std::mem::take(&mut self.scratch);
         let s = self.slice(&built);
         self.scratch = built;
-        s
-    }
-
-    fn yields(&mut self, f: &LirFunction) -> RegionSlice<PSite> {
-        self.sites.clear();
-        for y in &f.yield_points {
-            let at = self.pool.len() as u32;
-            self.pool.extend(y.stack_regs.iter().map(|r| r.0));
-            self.sites.push(PSite {
-                resume_ip: y.resume_ip as u32,
-                num_locals: y.num_locals,
-                regs: at,
-                n_regs: y.stack_regs.len() as u32,
-            });
-        }
-        let built = std::mem::take(&mut self.sites);
-        let s = self.slice(&built);
-        self.sites = built;
-        s
-    }
-
-    fn calls(&mut self, f: &LirFunction) -> RegionSlice<PSite> {
-        self.sites.clear();
-        for c in &f.call_sites {
-            let at = self.pool.len() as u32;
-            self.pool.extend(c.stack_regs.iter().map(|r| r.0));
-            self.sites.push(PSite {
-                resume_ip: c.resume_ip as u32,
-                num_locals: c.num_locals,
-                regs: at,
-                n_regs: c.stack_regs.len() as u32,
-            });
-        }
-        let built = std::mem::take(&mut self.sites);
-        let s = self.slice(&built);
-        self.sites = built;
         s
     }
 
@@ -398,8 +360,6 @@ impl Builder {
             }
             LirConst::Symbol(s) => PConst::Symbol(s.0),
             LirConst::Keyword(k) => PConst::Keyword(*k),
-            LirConst::ClosureRef(i) => PConst::ClosureRef(*i as u32),
-            LirConst::ValueRef(i) => PConst::ValueRef(*i as u32),
         }
     }
 

@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! `compile/run-on :jit` — force Cranelift JIT execution, in a build with the
 //! `jit` feature.
 //!
@@ -29,8 +29,8 @@ impl VM {
         // Backfill a nameless LIR from the template so the compile records a
         // readable code-address registry entry (docs/impl/jit.md § "The
         // code-address registry").
-        if lir.name.is_none() {
-            lir.name = Some(closure.template.display_label());
+        if lir.view().name().is_none() {
+            lir.set_name(Some(closure.template.display_label()));
         }
 
         // Arity check writes to fiber.signal on mismatch.
@@ -52,7 +52,7 @@ impl VM {
                         )
                     }
                 };
-                match compiler.compile(&lir, Vec::new()) {
+                match compiler.compile(&lir.view(), Vec::new()) {
                     Ok(jc) => {
                         let jc = Arc::new(jc);
                         self.install_jit_code((*closure.template).clone(), jc.clone());

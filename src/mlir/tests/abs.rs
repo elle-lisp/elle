@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-10-06
 // docs/impl/mlir.md
 //! One branching function, `abs`, run through both MLIR tiers: the CPU JIT
 //! computes it, and the SPIR-V path lowers its two blocks to a module.
@@ -6,7 +6,7 @@
 use super::*;
 
 /// Build LIR: fn(x) { if x > 0 then x else -x }  (absolute value)
-fn make_abs() -> LirFunction {
+fn make_abs() -> LirOwned {
     LirFixture::new(Arity::Exact(1))
         .name("abs")
         .signal(Signal::errors())
@@ -43,24 +43,24 @@ fn make_abs() -> LirFunction {
 
 #[test]
 fn test_execute_abs_positive() {
-    assert_eq!(mlir_call(&make_abs(), &[42]).unwrap(), 42);
+    assert_eq!(mlir_call(&make_abs().view(), &[42]).unwrap(), 42);
 }
 
 #[test]
 fn test_execute_abs_negative() {
-    assert_eq!(mlir_call(&make_abs(), &[-7]).unwrap(), 7);
+    assert_eq!(mlir_call(&make_abs().view(), &[-7]).unwrap(), 7);
 }
 
 #[test]
 fn test_execute_abs_zero() {
-    assert_eq!(mlir_call(&make_abs(), &[0]).unwrap(), 0);
+    assert_eq!(mlir_call(&make_abs().view(), &[0]).unwrap(), 0);
 }
 
 #[test]
 fn test_spirv_abs() {
     let func = make_abs();
     let spirv_bytes =
-        lower_to_spirv(&func, 256).expect("multi-block SPIR-V lowering should succeed");
+        lower_to_spirv(&func.view(), 256).expect("multi-block SPIR-V lowering should succeed");
     assert!(spirv_bytes.len() >= 20);
     assert_eq!(&spirv_bytes[0..4], &[0x03, 0x02, 0x23, 0x07]);
 }

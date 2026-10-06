@@ -27,7 +27,7 @@ fn test_emit_simple() {
         )
         .build();
 
-    let (bytecode, _, _) = emitter.emit(&func);
+    let (bytecode, _, _) = emitter.emit(&func.view());
     assert!(!bytecode.instructions.is_empty());
 }
 
@@ -66,7 +66,7 @@ fn test_emit_branch() {
         )
         .build();
 
-    let (bytecode, _, _) = emitter.emit(&func);
+    let (bytecode, _, _) = emitter.emit(&func.view());
     assert!(!bytecode.instructions.is_empty());
     // Should have Jump instructions for control flow
     assert!(bytecode
@@ -101,7 +101,7 @@ fn test_yield_point_info_collected() {
         )
         .build();
 
-    let (bytecode, yield_points, _call_sites) = emitter.emit(&func);
+    let (bytecode, yield_points, _call_sites) = emitter.emit(&func.view());
     assert!(!bytecode.instructions.is_empty());
     assert_eq!(yield_points.len(), 1);
     assert!(yield_points[0].resume_ip > 0);
@@ -125,7 +125,7 @@ fn test_yield_point_info_collected() {
 /// slots match, the oracle's resolve equals `region_of(pair)`; when they differ,
 /// `assert_slot` is unmapped (never allocated this activation) and resolves to
 /// `None`, which the pair's real region contradicts.
-fn oracle_probe_func(alloc_slot: u32, assert_slot: u32) -> LirFunction {
+fn oracle_probe_func(alloc_slot: u32, assert_slot: u32) -> LirOwned {
     use crate::hir::region::StaticRegion;
     let s_alloc = StaticRegion::new(alloc_slot).expect("alloc slot nonzero");
     let s_assert = StaticRegion::new(assert_slot).expect("assert slot nonzero");
@@ -171,7 +171,7 @@ fn assert_region_matches_passes_on_correct_slot() {
     // site.)
     let func = oracle_probe_func(1, 1);
     let mut emitter = Emitter::new();
-    let (bytecode, _, _) = emitter.emit(&func);
+    let (bytecode, _, _) = emitter.emit(&func.view());
     let mut vm = crate::vm::VM::new();
     let result = vm.execute(&bytecode);
     assert!(
@@ -196,7 +196,7 @@ fn assert_region_matches_panics_on_wrong_slot() {
     // assertion is what catches the mis-coalesce.
     let func = oracle_probe_func(1, 2);
     let mut emitter = Emitter::new();
-    let (bytecode, _, _) = emitter.emit(&func);
+    let (bytecode, _, _) = emitter.emit(&func.view());
     let mut vm = crate::vm::VM::new();
     let _ = vm.execute(&bytecode);
 }
@@ -247,7 +247,7 @@ fn emit_terminator_carries_a_user_signal_bit_whole() {
         )
         .build();
 
-    let (bytecode, _, _) = Emitter::new().emit(&func);
+    let (bytecode, _, _) = Emitter::new().emit(&func.view());
     let lines = disassemble_lines(&bytecode.instructions);
     let emit_line = lines
         .iter()
@@ -283,7 +283,7 @@ fn a_nested_lambdas_blueprint_carries_the_frame_release_tables() {
             }],
             Terminator::Return(Reg(0)),
         )
-        .build();
+        .build_working();
     nested.frame_release_slots = vec![3, 7];
     nested.frame_release_regions = vec![
         StaticRegion::new(11).unwrap(),
@@ -301,12 +301,13 @@ fn a_nested_lambdas_blueprint_carries_the_frame_release_tables() {
             }],
             Terminator::Return(Reg(0)),
         )
-        .build();
+        .build_working();
 
     let module = LirModule {
         entry: outer,
         closures: vec![nested],
     };
+    let module = module.freeze().expect("the module freezes");
     let (bytecode, _, _) = Emitter::new().emit_module(&module);
     assert_eq!(
         bytecode.child_protos.len(),
@@ -350,7 +351,7 @@ fn a_nested_lambdas_blueprint_carries_its_rest_list_layout() {
             }],
             Terminator::Return(Reg(0)),
         )
-        .build();
+        .build_working();
     nested.rest_list_layout = RestListLayout::OneRegion;
 
     let outer = LirFixture::new(Arity::Exact(0))
@@ -364,12 +365,13 @@ fn a_nested_lambdas_blueprint_carries_its_rest_list_layout() {
             }],
             Terminator::Return(Reg(0)),
         )
-        .build();
+        .build_working();
 
     let module = LirModule {
         entry: outer,
         closures: vec![nested],
     };
+    let module = module.freeze().expect("the module freezes");
     let (bytecode, _, _) = Emitter::new().emit_module(&module);
     assert_eq!(
         bytecode.child_protos[0].rest_list_layout,

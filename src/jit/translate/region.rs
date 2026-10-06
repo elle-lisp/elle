@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 // docs/impl/jit.md
 // docs/impl/region/mechanism.md
 //! Prologue plumbing: region-map push/pop, local-variable init, per-slot
@@ -27,12 +27,12 @@ impl<'a> FunctionTranslator<'a> {
     ) -> Result<(), JitError> {
         let nil_tag = builder.ins().iconst(I64, TAG_NIL as i64);
         let zero = builder.ins().iconst(I64, 0);
-        let capture_locals_mask = &self.lir.capture_locals_mask;
+        let capture_locals_mask = self.lir.capture_locals_mask();
 
         // The first num_local_params slots are non-LBox param copies
         // (initialized at function entry). capture_locals_mask indexes from
         // the first let-bound local (after param copies).
-        let nlp = self.lir.num_local_params as u32;
+        let nlp = self.lir.num_local_params() as u32;
 
         for i in 0..num_locally_defined {
             let base = self.local_var_base + i;
@@ -107,7 +107,7 @@ impl<'a> FunctionTranslator<'a> {
         // Read the function out of `self` first: the loops below borrow it while
         // the writes at the end need `&mut self`.
         let lir = self.lir;
-        let slots = &lir.frame_release_slots;
+        let slots = lir.frame_release_slots();
         if !slots.is_empty() {
             let table = builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
                 cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
@@ -127,12 +127,12 @@ impl<'a> FunctionTranslator<'a> {
             self.abandoned_locals_spill = Some(builder.create_sized_stack_slot(
                 cranelift_codegen::ir::StackSlotData::new(
                     cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
-                    (lir.num_locals as u32) * 16,
+                    (lir.num_locals() as u32) * 16,
                     0,
                 ),
             ));
         }
-        let regions = &lir.frame_release_regions;
+        let regions = lir.frame_release_regions();
         if !regions.is_empty() {
             let table = builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
                 cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
@@ -171,19 +171,19 @@ impl<'a> FunctionTranslator<'a> {
                 builder.ins().stack_addr(I64, table, 0),
                 builder
                     .ins()
-                    .iconst(I64, self.lir.frame_release_slots.len() as i64),
+                    .iconst(I64, self.lir.frame_release_slots().len() as i64),
             ),
             None => (null, null),
         };
         let (locals_ptr, num_locals) = match self.abandoned_locals_spill {
             Some(spill) => {
-                for i in 0..self.lir.num_locals as u32 {
+                for i in 0..self.lir.num_locals() as u32 {
                     let (tag, payload) = self.use_var_pair(builder, self.local_var_base + i);
                     store_value_slot(builder, spill, i, tag, payload);
                 }
                 (
                     builder.ins().stack_addr(I64, spill, 0),
-                    builder.ins().iconst(I64, self.lir.num_locals as i64),
+                    builder.ins().iconst(I64, self.lir.num_locals() as i64),
                 )
             }
             None => (null, null),
@@ -193,7 +193,7 @@ impl<'a> FunctionTranslator<'a> {
                 builder.ins().stack_addr(I64, table, 0),
                 builder
                     .ins()
-                    .iconst(I64, self.lir.frame_release_regions.len() as i64),
+                    .iconst(I64, self.lir.frame_release_regions().len() as i64),
             ),
             None => (null, null),
         };
@@ -265,7 +265,7 @@ impl<'a> FunctionTranslator<'a> {
         // the interpreter's `runtime_region_for_alloc_slot_maybe_merged`. The
         // membership is decided here, at compile time, so the hot path carries no
         // set lookup (docs/impl/region/merging.md § Merging).
-        let helper = if self.lir.merged_slots.contains(&slot) {
+        let helper = if self.lir.merged_slots().contains(&slot) {
             self.helpers.resolve_alloc_region_merged
         } else {
             self.helpers.resolve_alloc_region

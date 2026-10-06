@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-10-06
 // src/wasm/AGENTS.md
 //! What the WASM emitter does with an operand proof.
 //!
@@ -7,13 +7,13 @@
 //! these compare the emitted module's size (docs/impl/lir.md).
 
 use crate::lir::testkit::LirFixture;
-use crate::lir::{BinOp, ClosureId, LirFunction, LirInstr, Reg, Terminator};
+use crate::lir::{BinOp, ClosureId, LirInstr, LirOwned, Reg, Terminator};
 use crate::signals::Signal;
 use crate::value::Arity;
 
 /// fn(a, b) -> a `op` b, standalone-emittable, with the operation built by
 /// `make_op`.
-fn arith_closure(op: BinOp, make_op: fn(Reg, BinOp, Reg, Reg) -> LirInstr) -> LirFunction {
+fn arith_closure(op: BinOp, make_op: fn(Reg, BinOp, Reg, Reg) -> LirInstr) -> LirOwned {
     LirFixture::new(Arity::Exact(2))
         .signal(Signal::silent())
         .closure_id(ClosureId(0))
@@ -39,7 +39,7 @@ fn arith_closure(op: BinOp, make_op: fn(Reg, BinOp, Reg, Reg) -> LirInstr) -> Li
 fn emitted_len(op: BinOp, make_op: fn(Reg, BinOp, Reg, Reg) -> LirInstr) -> usize {
     let vm = crate::vm::VM::new();
     super::super::emit::emit_single_closure(
-        &arith_closure(op, make_op),
+        &arith_closure(op, make_op).view(),
         None,
         vm.heap_ptr,
         std::ptr::null_mut(),

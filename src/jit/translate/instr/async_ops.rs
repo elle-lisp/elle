@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 // docs/impl/jit.md
 //! Lowering the destructure, type-test, struct, suspending-call and array-mut instructions.
 
@@ -9,18 +9,18 @@ impl<'a> FunctionTranslator<'a> {
     pub(super) fn translate_instr_async(
         &mut self,
         builder: &mut FunctionBuilder,
-        instr: &LirInstr,
+        instr: &InstrRef<'_>,
         region_id_const: cranelift_codegen::ir::Value,
     ) -> Result<bool, JitError> {
         match instr {
-            LirInstr::LoadResumeValue { dst } => {
+            InstrRef::LoadResumeValue { dst } => {
                 // Resume goes through the interpreter. Emit NIL as dead code.
                 let nil_t = builder.ins().iconst(I64, TAG_NIL as i64);
                 let zero = builder.ins().iconst(I64, 0);
                 self.def_var_pair(builder, dst.0, nil_t, zero);
             }
 
-            LirInstr::MatchFail { dst, src } => {
+            InstrRef::MatchFail { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("MatchFail without vm pointer".to_string())
@@ -31,7 +31,7 @@ impl<'a> FunctionTranslator<'a> {
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::FirstDestructure { dst, src } => {
+            InstrRef::FirstDestructure { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("FirstDestructure without vm pointer".to_string())
@@ -42,7 +42,7 @@ impl<'a> FunctionTranslator<'a> {
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::RestDestructure { dst, src } => {
+            InstrRef::RestDestructure { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("RestDestructure without vm pointer".to_string())
@@ -53,7 +53,7 @@ impl<'a> FunctionTranslator<'a> {
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::ArrayMutRefDestructure { dst, src, index } => {
+            InstrRef::ArrayMutRefDestructure { dst, src, index } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let idx_val = builder.ins().iconst(I64, *index as i64);
                 let vm = self.vm_ptr.ok_or_else(|| {
@@ -69,7 +69,7 @@ impl<'a> FunctionTranslator<'a> {
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::ArrayMutSliceFrom { dst, src, index } => {
+            InstrRef::ArrayMutSliceFrom { dst, src, index } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let idx_val = builder.ins().iconst(I64, *index as i64);
                 let vm = self.vm_ptr.ok_or_else(|| {
@@ -85,44 +85,44 @@ impl<'a> FunctionTranslator<'a> {
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::IsArray { dst, src } => {
+            InstrRef::IsArray { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let (rt, rp) =
                     self.call_helper_value_unary(builder, self.helpers.is_array, st, sp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::IsArrayMut { dst, src } => {
+            InstrRef::IsArrayMut { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let (rt, rp) =
                     self.call_helper_value_unary(builder, self.helpers.is_array_mut, st, sp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::IsStruct { dst, src } => {
+            InstrRef::IsStruct { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let (rt, rp) =
                     self.call_helper_value_unary(builder, self.helpers.is_struct, st, sp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::IsStructMut { dst, src } => {
+            InstrRef::IsStructMut { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let (rt, rp) =
                     self.call_helper_value_unary(builder, self.helpers.is_struct_mut, st, sp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::ArrayMutLen { dst, src } => {
+            InstrRef::ArrayMutLen { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let (rt, rp) =
                     self.call_helper_value_unary(builder, self.helpers.array_len, st, sp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::StructGetOrNil { dst, src, key } => {
+            InstrRef::StructGetOrNil { dst, src, key } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
-                let (kt, kp) = self.translate_const(builder, key);
+                let (kt, kp) = self.translate_const(builder, *key);
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("StructGetOrNil without vm pointer".to_string())
                 })?;
@@ -135,9 +135,9 @@ impl<'a> FunctionTranslator<'a> {
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::StructGetDestructure { dst, src, key } => {
+            InstrRef::StructGetDestructure { dst, src, key } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
-                let (kt, kp) = self.translate_const(builder, key);
+                let (kt, kp) = self.translate_const(builder, *key);
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("StructGetDestructure without vm pointer".to_string())
                 })?;
@@ -151,7 +151,7 @@ impl<'a> FunctionTranslator<'a> {
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::StructRest {
+            InstrRef::StructRest {
                 dst,
                 src,
                 exclude_keys,
@@ -189,21 +189,21 @@ impl<'a> FunctionTranslator<'a> {
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::FirstOrNil { dst, src } => {
+            InstrRef::FirstOrNil { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let (rt, rp) =
                     self.call_helper_value_unary(builder, self.helpers.first_or_nil, st, sp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::RestOrNil { dst, src } => {
+            InstrRef::RestOrNil { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let (rt, rp) =
                     self.call_helper_value_unary(builder, self.helpers.rest_or_nil, st, sp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::ArrayMutRefOrNil { dst, src, index } => {
+            InstrRef::ArrayMutRefOrNil { dst, src, index } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let idx_val = builder.ins().iconst(I64, *index as i64);
                 let func_ref = self
@@ -215,11 +215,11 @@ impl<'a> FunctionTranslator<'a> {
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::Eval { .. } => {
+            InstrRef::Eval { .. } => {
                 return Err(JitError::UnsupportedInstruction("Eval".to_string()));
             }
 
-            LirInstr::SuspendingCall {
+            InstrRef::SuspendingCall {
                 dst, func, args, ..
             } => {
                 // SuspendingCall: the callee may yield. Handled identically
@@ -269,14 +269,14 @@ impl<'a> FunctionTranslator<'a> {
                     self.def_var_pair(builder, dst.0, rt, rp);
                 }
                 self.emit_exception_check_after_call(builder)?;
-                if self.lir.signal.may_suspend() {
+                if self.lir.signal().may_suspend() {
                     let idx = self.call_site_index;
                     self.call_site_index += 1;
                     self.emit_yield_check_after_call(builder, idx)?;
                 }
             }
 
-            LirInstr::ArrayMutExtend { dst, array, source } => {
+            InstrRef::ArrayMutExtend { dst, array, source } => {
                 let (at, ap) = self.use_var_pair(builder, array.0);
                 let (srt, srp) = self.use_var_pair(builder, source.0);
                 let vm = self.vm_ptr.ok_or_else(|| {
@@ -295,7 +295,7 @@ impl<'a> FunctionTranslator<'a> {
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::ArrayMutPush { dst, array, value } => {
+            InstrRef::ArrayMutPush { dst, array, value } => {
                 let (at, ap) = self.use_var_pair(builder, array.0);
                 let (vt, vp) = self.use_var_pair(builder, value.0);
                 let vm = self.vm_ptr.ok_or_else(|| {
@@ -314,7 +314,7 @@ impl<'a> FunctionTranslator<'a> {
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::CallArrayMut {
+            InstrRef::CallArrayMut {
                 dst,
                 func,
                 args,
@@ -342,14 +342,14 @@ impl<'a> FunctionTranslator<'a> {
                 )?;
                 self.def_var_pair(builder, dst.0, rt, rp);
                 self.emit_exception_check_after_call(builder)?;
-                if self.lir.signal.may_suspend() {
+                if self.lir.signal().may_suspend() {
                     let idx = self.call_site_index;
                     self.call_site_index += 1;
                     self.emit_yield_check_after_call(builder, idx)?;
                 }
             }
 
-            LirInstr::TailCallArrayMut {
+            InstrRef::TailCallArrayMut {
                 func,
                 args,
                 args_region,

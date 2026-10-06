@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-10-06
 // src/wasm/AGENTS.md
 //! LIR instruction → WASM instruction emission.
 //!
@@ -11,7 +11,8 @@
 //! [`data`] (`rt_data_op` helpers), [`arith`] (inline numeric/comparison), and
 //! [`mem`] (memory marshalling + constant materialization).
 
-use crate::lir::{BinOp, CmpOp, LirConst, LirInstr, Reg, UnaryOp};
+use crate::lir::code::ConstRef;
+use crate::lir::{BinOp, CmpOp, InstrRef, Reg, UnaryOp};
 use crate::value::repr::*;
 use crate::value::Value;
 use wasm_encoder::*;

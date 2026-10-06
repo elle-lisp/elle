@@ -54,7 +54,7 @@ pub(crate) fn prim_gpu_eligible(
 ) -> (SignalBits, Value) {
     if let Some(closure) = args[0].as_closure() {
         let eligible = match &closure.template.lir_function() {
-            Some(lir) => lir.is_gpu_eligible(),
+            Some(lir) => lir.view().is_gpu_eligible(),
             None => closure.template.is_gpu_candidate(),
         };
         (SIG_OK, Value::bool(eligible))
@@ -229,21 +229,6 @@ pub(crate) fn prim_keyword(
     }
 }
 
-/// (lir/closure-value-const-count) — number of closure-valued `ValueConst`
-/// instructions converted to `ClosureRef` by the LIR cross-thread
-/// serializer during this process's lifetime.
-///
-/// See `LirFunction::convert_value_consts_for_send` (src/lir/types/func.rs).
-pub(crate) fn prim_closure_value_const_count(
-    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    _args: &[Value],
-) -> (SignalBits, Value) {
-    (
-        SIG_OK,
-        Value::int(crate::lir::closure_value_const_count() as i64),
-    )
-}
-
 /// (jit/rejections) — list closures rejected from JIT compilation with reasons
 ///
 /// Returns a list of structs, each with :name, :reason, :calls and :attempts keys.
@@ -289,7 +274,7 @@ pub(crate) fn prim_compile_spirv(
             )
         }
     };
-    if !lir.is_gpu_eligible() {
+    if !lir.view().is_gpu_eligible() {
         return (
             SIG_ERROR,
             ctx.error(
@@ -442,12 +427,6 @@ primitive! {
         category: "meta",
         example: "(jit/rejections)",
         effect: RegionEffect::Fresh,
-    }
-    "lir/closure-value-const-count" => prim_closure_value_const_count {
-        doc: "Number of closure-valued ValueConst instructions converted to ClosureRef by the LIR cross-thread serializer. A test reads it to assert the conversion runs on a real spawn.",
-        category: "meta",
-        example: "(lir/closure-value-const-count)",
-        effect: RegionEffect::Immediate,
     }
     "keyword" => prim_keyword {
         signal: Signal::errors(),

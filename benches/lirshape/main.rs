@@ -1,4 +1,4 @@
-// audited: 2026-09-22
+// audited: 2026-10-06
 //! Region-native LIR parity — the head-to-head the expander migration ran for
 //! syntax, over the LIR the stdlib compile produces.
 //!
@@ -23,7 +23,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use elle::lir::LirFunction;
-use elle::pipeline::{compile_file_to_lir, sources};
+use elle::pipeline::{lower_file_to_lir, sources};
 use elle::runtime::Runtime;
 
 use build::Builder;
@@ -89,7 +89,7 @@ fn corpus(rt: &mut Runtime) -> Vec<LirFunction> {
         ("stdlib.lisp", sources::STDLIB),
     ] {
         let (_, symbols, cctx) = rt.parts();
-        match compile_file_to_lir(src, symbols, cctx, name, 0) {
+        match lower_file_to_lir(src, symbols, cctx, name, 0) {
             Ok(module) => {
                 out.push(module.entry);
                 out.extend(module.closures);
@@ -399,7 +399,7 @@ fn main() {
     report("copy (a JIT promotion)", rust_clone_ns, instrs);
     report("walk (a backend's read)", rust_walk, instrs);
     report("walk, from memory", rust_walk_cold, instrs);
-    report("rewrite (the send pass)", rust_rewrite_ns, instrs);
+    report("rewrite (a ValueConst pass)", rust_rewrite_ns, instrs);
     report("teardown", rust_teardown, instrs);
     println!(
         "    {} malloc calls, {} KiB requested per build",
@@ -420,7 +420,7 @@ fn main() {
     report("copy (a JIT promotion)", region_clone_ns, instrs);
     report("walk (a backend's read)", region_walk, instrs);
     report("walk, from memory", region_walk_cold, instrs);
-    report("rewrite (the send pass)", region_rewrite_ns, instrs);
+    report("rewrite (a ValueConst pass)", region_rewrite_ns, instrs);
     report("teardown (free the region)", region_teardown, instrs);
     println!(
         "    {} malloc calls, {} KiB requested per build",

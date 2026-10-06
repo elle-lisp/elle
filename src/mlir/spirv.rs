@@ -1,11 +1,14 @@
-//! Lower GPU-eligible LirFunction to SPIR-V bytes.
+// audited: 2026-10-06
+// docs/impl/spirv.md
+//! Lower a GPU-eligible frozen function to SPIR-V bytes.
 //!
 //! Generates a compute kernel from a scalar LIR function by wrapping
 //! it in a gpu.module with buffer I/O. Uses scf.if for control flow.
 //!
 //! Pipeline: LIR → MLIR text → parse → pass pipeline → extract binary
 
-use crate::lir::{BinOp, CmpOp, ConvOp, LirConst, LirFunction, LirInstr, Reg, Terminator, UnaryOp};
+use crate::lir::code::{BlockRef, ConstRef};
+use crate::lir::{BinOp, CmpOp, ConvOp, InstrRef, LirView, Reg, Terminator, UnaryOp};
 
 use super::lower::{ScalarType, SlotId};
 use melior::ir::Module;
@@ -19,16 +22,16 @@ use super::lower::create_context;
 mod emit;
 use emit::*;
 
-/// Lower a GPU-eligible LirFunction to SPIR-V bytes (creates fresh context).
-pub fn lower_to_spirv(lir: &LirFunction, workgroup_size: u32) -> Result<Vec<u8>, String> {
+/// Lower a GPU-eligible frozen function to SPIR-V bytes (creates fresh context).
+pub fn lower_to_spirv(lir: &LirView<'_>, workgroup_size: u32) -> Result<Vec<u8>, String> {
     let context = create_context();
     lower_to_spirv_with_context(&context, lir, workgroup_size)
 }
 
-/// Lower a GPU-eligible LirFunction to SPIR-V bytes using a shared context.
+/// Lower a GPU-eligible frozen function to SPIR-V bytes using a shared context.
 pub fn lower_to_spirv_with_context(
     context: &melior::Context,
-    lir: &LirFunction,
+    lir: &LirView<'_>,
     workgroup_size: u32,
 ) -> Result<Vec<u8>, String> {
     let mlir_text = generate_gpu_module(lir, workgroup_size)?;
@@ -86,13 +89,13 @@ struct SsaEnv {
 
 /// Generate MLIR text for a gpu.module wrapping the LIR function.
 pub(super) fn generate_gpu_module(
-    lir: &LirFunction,
+    lir: &LirView<'_>,
     workgroup_size: u32,
 ) -> Result<String, String> {
-    if lir.num_captures > 0 {
+    if lir.num_captures() > 0 {
         return Err("captures not supported in SPIR-V".to_string());
     }
-    let num_params = lir.arity.fixed_params();
+    let num_params = lir.arity().fixed_params();
     let buf_size = "?";
     let indent = "      ";
 
@@ -130,17 +133,10 @@ pub(super) fn generate_gpu_module(
 
     let mut env = SsaEnv::default();
 
-    if lir.blocks.len() == 1 {
-        emit_block_instructions(
-            &lir.blocks[0].instructions,
-            &mut env,
-            num_params,
-            0,
-            indent,
-            &mut out,
-        )?;
-        let result_reg = match &lir.blocks[0].terminator.terminator {
-            Terminator::Return(reg) => *reg,
+    if lir.block_count() == 1 {
+        emit_block_instructions(lir.block(0), &mut env, num_params, 0, indent, &mut out)?;
+        let result_reg = match lir.block(0).terminator() {
+            Terminator::Return(reg) => reg,
             _ => return Err("SPIR-V kernel must end with Return".to_string()),
         };
         let result = env.reg_names.get(&result_reg).ok_or("undef result")?;
@@ -174,7 +170,7 @@ pub(super) fn generate_gpu_module(
     Ok(out)
 }
 
-/// Indices into `lir.blocks` describing an `if` that returns directly.
+/// Block indices describing an `if` that returns directly.
 struct IfReturn<'a> {
     entry_idx: usize,
     then_idx: usize,

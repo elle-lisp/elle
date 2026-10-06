@@ -92,7 +92,7 @@ fn blocks_keep_their_order_labels_and_terminators() {
     let labels = [5u32, 3, 2, 0, 9];
     let mut fixture = LirFixture::new(Arity::Exact(0));
     for (label, term) in labels.iter().zip(terms.iter()) {
-        fixture = fixture.block(*label, vec![], term.clone());
+        fixture = fixture.block(*label, vec![], *term);
     }
     let owned = freeze(&fixture.build_working()).expect("freezes");
     let view = owned.view();

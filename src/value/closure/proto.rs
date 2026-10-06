@@ -53,8 +53,8 @@ pub struct TemplateProto {
     /// Bytecode offset → source location, as the emitter records it. Sorted
     /// into a flat table at materialization.
     pub location_map: LocationMap,
-    /// LIR for deferred JIT compilation.
-    pub lir_function: Option<Rc<crate::lir::LirFunction>>,
+    /// The frozen LIR the JIT compiles from, with the sites emission recorded.
+    pub lir_function: Option<Rc<crate::lir::LirOwned>>,
     /// Docstring from the source lambda.
     pub doc: Option<String>,
     /// Where the source lambda was written, for `(meta/origin f)`.
@@ -91,7 +91,7 @@ pub struct TemplateProto {
 }
 
 /// The shape of the frame a WASM closure runs in, as the `MakeClosure` site
-/// supplies it: what a lambda's own `LirFunction` would answer, read out of
+/// supplies it: what a lambda's own frozen LIR would answer, read out of
 /// linear memory instead because the host has no LIR to ask.
 ///
 /// A struct rather than eight arguments: the three counts and the two masks are
@@ -140,7 +140,7 @@ impl TemplateProto {
         }
     }
 
-    /// The blueprint of a nested lambda: everything `func` knows about itself,
+    /// The blueprint of a nested lambda: everything `lir` knows about itself,
     /// plus the bytecode its own emission produced.
     ///
     /// Every backend that meets a `MakeClosure` builds its blueprint here, so
@@ -148,42 +148,49 @@ impl TemplateProto {
     /// all (docs/impl/region/template.md § "One constructor builds a nested
     /// lambda's blueprint").
     ///
-    /// `num_captures` comes from the instruction rather than from `func`: what
+    /// `num_captures` comes from the instruction rather than from `lir`: what
     /// a lambda closes over is decided at the site that builds it.
     pub fn nested_lambda(
-        func: &crate::lir::LirFunction,
+        lir: &crate::lir::LirOwned,
         num_captures: usize,
         compiled: crate::lir::ClosureCompiled,
     ) -> Self {
         let (bytecode, yield_points, call_sites) = compiled;
-        // The LIR the JIT promotes this lambda from is `func` plus the metadata
-        // only emission can supply.
-        let mut lir = func.clone();
-        lir.yield_points = yield_points;
-        lir.call_sites = call_sites;
+        // The LIR the JIT promotes this lambda from is the frozen function plus
+        // the sites only emission can supply.
+        let mut lir = lir.clone();
+        lir.set_sites(&yield_points, &call_sites);
+        let func = lir.view();
+        let arity = func.arity();
 
         TemplateProto {
-            num_locals: func.num_locals as usize,
+            num_locals: func.num_locals() as usize,
             num_captures,
-            num_params: func.num_params,
-            signal: func.signal,
-            capture_params_mask: func.capture_params_mask,
-            capture_locals_mask: func.capture_locals_mask.clone(),
+            num_params: func.num_params(),
+            signal: func.signal(),
+            capture_params_mask: func.capture_params_mask(),
+            capture_locals_mask: crate::value::CaptureMask::from_words(
+                func.capture_locals_mask().words().to_vec(),
+            ),
             location_map: bytecode.location_map,
-            lir_function: Some(Rc::new(lir)),
-            doc: func.doc.as_deref().map(str::to_string),
-            origin: func.origin,
-            vararg_kind: func.vararg_kind.clone(),
-            rest_list_layout: func.rest_list_layout,
-            name: func.name.clone(),
-            region_table: func.region_table.clone(),
-            merged_slots: func.merged_slots.iter().map(|s| s.get()).collect(),
-            frame_release_slots: func.frame_release_slots.clone(),
-            frame_release_regions: func.frame_release_regions.iter().map(|r| r.get()).collect(),
+            doc: func.doc().map(str::to_string),
+            origin: func.origin(),
+            vararg_kind: func.vararg_kind().clone(),
+            rest_list_layout: func.rest_list_layout(),
+            name: func.name().map(str::to_string),
+            region_table: func.region_table().to_vec(),
+            merged_slots: func.merged_slots().iter().map(|s| s.get()).collect(),
+            frame_release_slots: func.frame_release_slots().to_vec(),
+            frame_release_regions: func
+                .frame_release_regions()
+                .iter()
+                .map(|r| r.get())
+                .collect(),
             // The nested bytecode's own children, so a deeper `MakeClosure`
             // resolves recursively.
             child_protos: bytecode.child_protos,
-            ..TemplateProto::new(bytecode.instructions, func.arity, bytecode.constants)
+            lir_function: Some(Rc::new(lir)),
+            ..TemplateProto::new(bytecode.instructions, arity, bytecode.constants)
         }
     }
 
@@ -191,7 +198,7 @@ impl TemplateProto {
     /// `code` knows about the lambda's code, plus the shape `meta` carries.
     ///
     /// The third site that meets a `MakeClosure`, and the one holding no
-    /// `LirFunction` to read (docs/impl/region/template.md § "The WASM backend
+    /// LIR to read (docs/impl/region/template.md § "The WASM backend
     /// is handed a blueprint instead"). `code` is the dual-compiled blueprint
     /// the module carries for this closure, and it travels whole, because a
     /// spawned OS-thread worker running its bytecode reads every field of it.

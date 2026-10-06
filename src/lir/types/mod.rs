@@ -7,8 +7,7 @@
 use crate::hir::region::StaticRegion;
 use crate::signals::Signal;
 use crate::syntax::Span;
-use crate::value::{Arity, SymbolId, Value};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use crate::value::{Arity, SymbolId};
 
 mod func;
 mod instr;
@@ -17,28 +16,12 @@ pub use func::*;
 pub use instr::*;
 pub use regs::*;
 
-/// Number of closure-valued `ValueConst` instructions converted to
-/// `ClosureRef` by `convert_value_consts_for_send` during the lifetime
-/// of this process.
-///
-/// This path is exercised whenever user code references a stdlib
-/// function (registered as a primitive via `CompileCtx::register_stdlib_exports`)
-/// from inside a closure that is sent across a `sys/spawn` boundary.
-/// Exposed to Elle via the `lir/closure-value-const-count` primitive
-/// and printed by `--dump=stats`.
-static CLOSURE_VALUE_CONST_COUNT: AtomicUsize = AtomicUsize::new(0);
-
-/// Returns the lifetime count of closure-valued `ValueConst` instructions
-/// serialized across `sys/spawn` boundaries. Reported by `--dump=stats` and
-/// exposed as an Elle primitive for tests.
-pub fn closure_value_const_count() -> usize {
-    CLOSURE_VALUE_CONST_COUNT.load(Ordering::Relaxed)
-}
-
-/// Virtual register
+/// Virtual register. `repr(transparent)`, so a frozen function's pool of `u32`
+/// words reads as a slice of registers without a copy.
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
 )]
+#[repr(transparent)]
 pub struct Reg(pub u32);
 
 /// Index into an `LirModule`'s closure list.
@@ -190,7 +173,7 @@ pub enum CmpOp {
 }
 
 /// Block terminator - how control leaves a block
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub enum Terminator {
     /// Return from function
     Return(Reg),
@@ -222,96 +205,9 @@ pub enum LirConst {
     Bool(bool),
     Int(i64),
     Float(f64),
+    /// No producer emits it: a string literal lowers to `MaterializeConst`,
+    /// and freezing refuses this variant by name.
     String(String),
     Symbol(SymbolId),
     Keyword(u64),
-    /// Placeholder for a closure during cross-thread LIR transfer.
-    /// The usize is the index into `SendBundle::closures`.
-    /// Patched back to `ValueConst` during reconstruction.
-    ClosureRef(usize),
-    /// Placeholder for a compound heap value (quoted list, struct, array, …)
-    /// during cross-thread LIR transfer. The usize indexes the owning
-    /// `SendableClosure::lir_value_pool`. Patched back to `ValueConst` during
-    /// reconstruction — so, like `ClosureRef`, it never reaches the JIT/emitter.
-    ValueRef(usize),
-}
-
-/// Convert a runtime Value to a LirConst for safe cross-thread transfer.
-/// Returns None for compound heap values (cons, arrays, closures, etc.)
-/// that can't be represented as LirConst.
-pub fn value_to_lir_const(v: Value) -> Option<LirConst> {
-    if v.is_nil() {
-        Some(LirConst::Nil)
-    } else if v.is_empty_list() {
-        Some(LirConst::EmptyList)
-    } else if let Some(b) = v.as_bool() {
-        Some(LirConst::Bool(b))
-    } else if let Some(n) = v.as_int() {
-        Some(LirConst::Int(n))
-    } else if let Some(f) = v.as_float() {
-        Some(LirConst::Float(f))
-    } else if let Some(id) = v.as_symbol() {
-        Some(LirConst::Symbol(id))
-    } else if let Some(hash) = v.keyword_hash() {
-        Some(LirConst::Keyword(hash))
-    } else {
-        v.with_string(|s| s.to_string()).map(LirConst::String)
-    }
-}
-
-/// True if this LIR instruction is safe for GPU compilation.
-///
-/// GPU-safe: numeric constants, arithmetic, comparison, local/parameter
-/// access. Everything else requires heap, closures, calls, or signals.
-///
-/// LoadCapture/LoadCaptureRaw are parameter or capture loads. Captures
-/// are passed as extra parameters at the MLIR level.
-fn is_gpu_instruction(i: &LirInstr) -> bool {
-    match i {
-        LirInstr::Const {
-            value: LirConst::Int(_) | LirConst::Float(_) | LirConst::Bool(_) | LirConst::Nil,
-            ..
-        }
-        | LirInstr::BinOp { .. }
-        | LirInstr::UnaryOp { .. }
-        | LirInstr::Compare { .. }
-        | LirInstr::Convert { .. }
-        | LirInstr::LoadLocal { .. }
-        | LirInstr::StoreLocal { .. }
-        | LirInstr::StoreLocalRefcounted { .. }
-        | LirInstr::LoadCapture { .. }
-        | LirInstr::LoadCaptureRaw { .. } => true,
-        // Value-targeted region refcounts are no-ops on unboxed GPU
-        // scalars (ints/floats carry no region) — the MLIR/SPIR-V
-        // lowerers skip them. Every instruction that could put a heap
-        // value in a register is rejected by this whitelist, so the
-        // skipped refcounts can never unbalance a real region.
-        LirInstr::IncrefValueRegion { .. } | LirInstr::DecrefValueRegion { .. } => true,
-        // ValueConst of numeric/bool/nil types is GPU-safe — these are
-        // immutable binding constants inlined by the lowerer.
-        LirInstr::ValueConst { value, .. } => {
-            value.is_int() || value.is_float() || value.as_bool().is_some() || value.is_nil()
-        }
-        // LoadSelf reads the executing-closure register — VM/JIT execution-context
-        // state that has no meaning on an unboxed GPU scalar tier. Excluded
-        // explicitly so a value-position self-reference is never GPU-dispatched.
-        LirInstr::LoadSelf { .. } => false,
-        // The activation adopt reaches the fiber's owner-node stack — VM/JIT
-        // execution-context state with no meaning on the GPU tier. Excluded
-        // explicitly so a function carrying it is never GPU-dispatched.
-        LirInstr::AdoptIntoActivation { .. } => false,
-        _ => false,
-    }
-}
-
-/// True if this block terminator is safe for GPU compilation.
-///
-/// GPU-safe: return, jump, branch. Emit (any signal) and Unreachable are not.
-/// An Emit terminator means the function deliberately signals — even :error
-/// via `(error ...)` is not GPU-safe.
-fn is_gpu_terminator(t: &Terminator) -> bool {
-    matches!(
-        t,
-        Terminator::Return(_) | Terminator::Jump(_) | Terminator::Branch { .. }
-    )
 }

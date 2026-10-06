@@ -1,10 +1,11 @@
-//! CPS suspension/resume machinery for yielding WASM closures.
+// audited: 2026-10-06
+// docs/impl/wasm.md
+//! CPS suspension and resume for yielding WASM closures: spills, the resume prologue, and yield-aware calls.
 //!
-//! Handles spill/restore of registers across yield points, resume
-//! prologue generation, block splitting at suspending call boundaries,
-//! and yield-aware call emission.
+//! The blocks arrive already split after each suspending call
+//! (`LirView::split_after`), so a resume enters at a block boundary.
 
-use crate::lir::{BasicBlock, Label, LirFunction, LirInstr, Reg, SpannedTerminator, Terminator};
+use crate::lir::{InstrRef, LirView, Reg, Terminator};
 use wasm_encoder::*;
 
 use super::emit::*;
@@ -321,72 +322,22 @@ impl WasmEmitter {
         f.instruction(&Instruction::End);
     }
 
-    /// Split blocks at SuspendingCall/CallArrayMut boundaries to avoid O(N²)
-    /// code duplication in CPS virtual resume blocks.
-    pub(super) fn split_blocks_at_suspending_calls(blocks: &[BasicBlock]) -> Vec<BasicBlock> {
-        let max_label = blocks.iter().map(|b| b.label.0).max().unwrap_or(0);
-        let mut next_label = max_label + 1;
-        let mut result = Vec::new();
-
-        for block in blocks {
-            let call_positions: Vec<usize> = block
-                .instructions
-                .iter()
-                .enumerate()
-                .filter(|(i, si)| {
-                    matches!(
-                        si.instr,
-                        LirInstr::SuspendingCall { .. } | LirInstr::CallArrayMut { .. }
-                    ) && *i < block.instructions.len() - 1
-                })
-                .map(|(i, _)| i)
-                .collect();
-
-            if call_positions.is_empty() {
-                result.push(block.clone());
-                continue;
-            }
-
-            let mut start = 0;
-            let mut current_label = block.label;
-
-            for &call_pos in &call_positions {
-                let cont_label = Label(next_label);
-                next_label += 1;
-                let mut split_block = BasicBlock::new(current_label);
-                split_block.instructions = block.instructions[start..=call_pos].to_vec();
-                split_block.terminator =
-                    SpannedTerminator::new(Terminator::Jump(cont_label), block.terminator.span);
-                result.push(split_block);
-                start = call_pos + 1;
-                current_label = cont_label;
-            }
-
-            let mut final_block = BasicBlock::new(current_label);
-            final_block.instructions = block.instructions[start..].to_vec();
-            final_block.terminator = block.terminator.clone();
-            result.push(final_block);
-        }
-
-        result
-    }
-
     /// Pre-scan to build the resume_states table. Must be called before emit_cfg.
-    pub(super) fn pre_scan_resume_states(&mut self, func: &LirFunction) {
+    pub(super) fn pre_scan_resume_states(&mut self, func: &LirView<'_>) {
         self.resume_states.clear();
         self.call_continuations.clear();
         self.yield_state_map.clear();
         self.call_state_map.clear();
         self.next_resume_state = 1;
-        let num_real_blocks = func.blocks.len();
+        let num_real_blocks = func.block_count();
 
-        for block in &func.blocks {
-            let block_idx = self.label_to_idx[&block.label];
+        for block in func.blocks() {
+            let block_idx = self.label_to_idx[&block.label()];
 
-            if let Terminator::Emit { resume_label, .. } = &block.terminator.terminator {
+            if let Terminator::Emit { resume_label, .. } = block.terminator() {
                 let state_id = self.next_resume_state;
                 self.next_resume_state += 1;
-                let target_block_idx = self.label_to_idx[resume_label] as i32;
+                let target_block_idx = self.label_to_idx[&resume_label] as i32;
                 self.resume_states.push(ResumeStateInfo {
                     state_id,
                     target_block_idx,
@@ -394,10 +345,10 @@ impl WasmEmitter {
                 self.yield_state_map.insert(block_idx, state_id);
             }
 
-            for (instr_idx, spanned) in block.instructions.iter().enumerate() {
-                let dst = match &spanned.instr {
-                    LirInstr::SuspendingCall { dst, .. } => Some(*dst),
-                    LirInstr::CallArrayMut { dst, .. } => Some(*dst),
+            for (instr_idx, instr) in block.instrs().enumerate() {
+                let dst = match instr {
+                    InstrRef::SuspendingCall { dst, .. } => Some(dst),
+                    InstrRef::CallArrayMut { dst, .. } => Some(dst),
                     _ => None,
                 };
                 if let Some(dst) = dst {

@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! Where a closure call meets the tiered WASM backend: the call count, the compile, and the dispatch.
 //!
 //! docs/impl/wasm.md
@@ -54,7 +54,7 @@ impl VM {
         // Try to compile
         let heap_ptr = self.heap_ptr;
         let wasm_tier = self.wasm_tier.as_mut().unwrap();
-        if wasm_tier.compile(bytecode_ptr, &lir_func, heap_ptr) {
+        if wasm_tier.compile(bytecode_ptr, &lir_func.view(), heap_ptr) {
             return Some(self.run_wasm(bytecode_ptr, closure, args, self_val));
         }
 

@@ -6,10 +6,12 @@
 
 mod decode;
 mod freeze;
+mod gpu;
 mod instr;
 mod op;
 mod owned;
 mod record;
+mod split;
 mod view;
 
 pub use freeze::freeze;

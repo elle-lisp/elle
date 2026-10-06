@@ -186,16 +186,16 @@ fn lowered_stages(
 
 /// Dump SPIR-V disassembly for each GPU-eligible closure. The "git" keyword
 /// names this stage (a shorthand; it's the GPU codegen output).
-fn print_spirv_module(module: &crate::lir::LirModule) {
-    print_spirv_function("entry", &module.entry);
+fn print_spirv_module(module: &crate::lir::FrozenModule) {
+    print_spirv_function("entry", &module.entry.view());
     for (i, f) in module.closures.iter().enumerate() {
-        print_spirv_function(&format!("closure[{}]", i), f);
+        print_spirv_function(&format!("closure[{}]", i), &f.view());
     }
 }
 
 #[cfg(feature = "mlir")]
-fn print_spirv_function(tag: &str, f: &crate::lir::LirFunction) {
-    let name = f.name.as_deref().unwrap_or("<anon>");
+fn print_spirv_function(tag: &str, f: &crate::lir::LirView<'_>) {
+    let name = f.name().unwrap_or("<anon>");
     println!("; {} {}", tag, name);
     if !f.is_gpu_eligible() {
         println!(";   (not GPU-eligible; skipped)");
@@ -231,8 +231,8 @@ fn print_spirv_function(tag: &str, f: &crate::lir::LirFunction) {
 }
 
 #[cfg(not(feature = "mlir"))]
-fn print_spirv_function(tag: &str, f: &crate::lir::LirFunction) {
-    let name = f.name.as_deref().unwrap_or("<anon>");
+fn print_spirv_function(tag: &str, f: &crate::lir::LirView<'_>) {
+    let name = f.name().unwrap_or("<anon>");
     println!("; {} {}", tag, name);
     println!(";   (SPIR-V dump requires the `mlir` feature)");
     println!();

@@ -1,3 +1,5 @@
+// audited: 2026-10-06
+// docs/impl/wasm.md
 //! Register allocation for the WASM emitter.
 //!
 //! LIR uses SSA-style virtual registers (one def per register, unlimited count).
@@ -8,7 +10,7 @@
 //! reusable WASM local pairs. Registers whose entire lifetime is within a single
 //! basic block share locals from a pool. Cross-block registers get dedicated slots.
 
-use crate::lir::{for_each_def, for_each_terminator_use, for_each_use, Label, LirFunction, Reg};
+use crate::lir::{for_each_terminator_use, Label, LirView, Reg};
 use std::collections::{HashMap, HashSet};
 
 /// Result of register allocation: maps each LIR Reg to a WASM local "slot"
@@ -32,8 +34,8 @@ pub struct RegAlloc {
 ///    `pinned_regs`: registers that must have dedicated (non-reused) slots.
 ///    For the entry function, this is 0..num_locals because LoadLocal/StoreLocal
 ///    maps slot N to Reg(N) via copy_reg, requiring a stable physical mapping.
-pub fn allocate(func: &LirFunction, pinned_regs: u32) -> RegAlloc {
-    if func.blocks.is_empty() || func.num_regs == 0 {
+pub fn allocate(func: &LirView<'_>, pinned_regs: u32) -> RegAlloc {
+    if func.block_count() == 0 || func.num_regs() == 0 {
         return RegAlloc {
             reg_to_slot: HashMap::new(),
             max_slots: 0,
@@ -44,17 +46,17 @@ pub fn allocate(func: &LirFunction, pinned_regs: u32) -> RegAlloc {
     let mut def_block: HashMap<Reg, Label> = HashMap::new();
     let mut use_blocks: HashMap<Reg, HashSet<Label>> = HashMap::new();
 
-    for block in &func.blocks {
-        for si in &block.instructions {
-            for_each_def(&si.instr, |reg| {
-                def_block.insert(reg, block.label);
+    for block in func.blocks() {
+        for node in block.nodes() {
+            node.def().into_iter().for_each(|reg| {
+                def_block.insert(reg, block.label());
             });
-            for_each_use(&si.instr, |reg| {
-                use_blocks.entry(reg).or_default().insert(block.label);
+            node.uses().iter().copied().for_each(|reg| {
+                use_blocks.entry(reg).or_default().insert(block.label());
             });
         }
-        for_each_terminator_use(&block.terminator.terminator, |reg| {
-            use_blocks.entry(reg).or_default().insert(block.label);
+        for_each_terminator_use(&block.terminator(), |reg| {
+            use_blocks.entry(reg).or_default().insert(block.label());
         });
     }
 
@@ -63,7 +65,7 @@ pub fn allocate(func: &LirFunction, pinned_regs: u32) -> RegAlloc {
     // Per-block list of within-block registers, in instruction order.
     let mut block_local_regs: HashMap<Label, Vec<Reg>> = HashMap::new();
 
-    for reg_id in 0..func.num_regs {
+    for reg_id in 0..func.num_regs() {
         let reg = Reg(reg_id);
         let def_lbl = match def_block.get(&reg) {
             Some(l) => *l,
@@ -107,8 +109,8 @@ pub fn allocate(func: &LirFunction, pinned_regs: u32) -> RegAlloc {
     // The pool slots start at `cross_block_count` and are reused across blocks.
     let mut pool_high_water: u32 = 0;
 
-    for block in &func.blocks {
-        let locals = match block_local_regs.get(&block.label) {
+    for block in func.blocks() {
+        let locals = match block_local_regs.get(&block.label()) {
             Some(v) => v,
             None => continue,
         };
@@ -120,16 +122,16 @@ pub fn allocate(func: &LirFunction, pinned_regs: u32) -> RegAlloc {
         let mut last_use: HashMap<Reg, usize> = HashMap::new();
         let local_set: HashSet<Reg> = locals.iter().copied().collect();
 
-        for (idx, si) in block.instructions.iter().enumerate() {
-            for_each_use(&si.instr, |reg| {
+        for (idx, node) in block.nodes().enumerate() {
+            node.uses().iter().copied().for_each(|reg| {
                 if local_set.contains(&reg) {
                     last_use.insert(reg, idx);
                 }
             });
         }
         // Check terminator uses too — encode as idx = instructions.len()
-        let term_idx = block.instructions.len();
-        for_each_terminator_use(&block.terminator.terminator, |reg| {
+        let term_idx = block.len();
+        for_each_terminator_use(&block.terminator(), |reg| {
             if local_set.contains(&reg) {
                 last_use.insert(reg, term_idx);
             }
@@ -139,9 +141,9 @@ pub fn allocate(func: &LirFunction, pinned_regs: u32) -> RegAlloc {
         let mut free_pool: Vec<u32> = Vec::new();
         let mut active: HashMap<Reg, u32> = HashMap::new(); // reg → pool slot
 
-        for (idx, si) in block.instructions.iter().enumerate() {
+        for (idx, node) in block.nodes().enumerate() {
             // Allocate for defs in this instruction.
-            for_each_def(&si.instr, |reg| {
+            node.def().into_iter().for_each(|reg| {
                 if local_set.contains(&reg) {
                     let slot = free_pool.pop().unwrap_or_else(|| {
                         let s = pool_high_water;
@@ -186,7 +188,7 @@ pub fn allocate(func: &LirFunction, pinned_regs: u32) -> RegAlloc {
 
     // Debug: check for any registers in 0..num_regs not in the map
     if crate::config::get().has_trace("wasm") {
-        for reg_id in 0..func.num_regs {
+        for reg_id in 0..func.num_regs() {
             if !reg_to_slot.contains_key(&Reg(reg_id)) {
                 eprintln!(
                     "[regalloc] DEBUG: Reg({}) has no slot (defined={}, used={})",

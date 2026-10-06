@@ -12,9 +12,9 @@ mod intrinsics;
 impl Emitter {
     /// Operator, predicate, region-refcount, and collection-op instruction
     /// emission (chain tail from `emit_instr`).
-    pub(super) fn emit_instr_ops(&mut self, instr: &LirInstr) {
+    pub(super) fn emit_instr_ops(&mut self, instr: &InstrRef<'_>) {
         match instr {
-            LirInstr::BinOp {
+            InstrRef::BinOp {
                 dst,
                 op,
                 lhs,
@@ -52,7 +52,7 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::Compare {
+            InstrRef::Compare {
                 dst,
                 op,
                 lhs,
@@ -78,7 +78,7 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::UnaryOp {
+            InstrRef::UnaryOp {
                 dst,
                 op,
                 src,
@@ -103,7 +103,7 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::Convert { dst, op, src } => {
+            InstrRef::Convert { dst, op, src } => {
                 self.ensure_on_top(*src);
                 match op {
                     ConvOp::IntToFloat => self.bytecode.emit(Instruction::IntToFloat),
@@ -113,70 +113,70 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::IsNil { dst, src } => {
+            InstrRef::IsNil { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IsNil);
                 self.pop();
                 self.push_reg(*dst);
             }
 
-            LirInstr::IsPair { dst, src } => {
+            InstrRef::IsPair { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IsPair);
                 self.pop();
                 self.push_reg(*dst);
             }
 
-            LirInstr::IsArray { dst, src } => {
+            InstrRef::IsArray { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IsArray);
                 self.pop();
                 self.push_reg(*dst);
             }
 
-            LirInstr::IsArrayMut { dst, src } => {
+            InstrRef::IsArrayMut { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IsArrayMut);
                 self.pop();
                 self.push_reg(*dst);
             }
 
-            LirInstr::IsStruct { dst, src } => {
+            InstrRef::IsStruct { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IsStruct);
                 self.pop();
                 self.push_reg(*dst);
             }
 
-            LirInstr::IsStructMut { dst, src } => {
+            InstrRef::IsStructMut { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IsStructMut);
                 self.pop();
                 self.push_reg(*dst);
             }
 
-            LirInstr::IsSet { dst, src } => {
+            InstrRef::IsSet { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IsSet);
                 self.pop();
                 self.push_reg(*dst);
             }
 
-            LirInstr::IsSetMut { dst, src } => {
+            InstrRef::IsSetMut { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IsSetMut);
                 self.pop();
                 self.push_reg(*dst);
             }
 
-            LirInstr::ArrayMutLen { dst, src } => {
+            InstrRef::ArrayMutLen { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::ArrayMutLen);
                 self.pop();
                 self.push_reg(*dst);
             }
 
-            LirInstr::MakeCaptureCell {
+            InstrRef::MakeCaptureCell {
                 dst,
                 value,
                 region,
@@ -192,14 +192,14 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::LoadCaptureCell { dst, cell } => {
+            InstrRef::LoadCaptureCell { dst, cell } => {
                 self.ensure_on_top(*cell);
                 self.bytecode.emit(Instruction::UnwrapCapture);
                 self.pop();
                 self.push_reg(*dst);
             }
 
-            LirInstr::StoreCaptureCell { cell, value } => {
+            InstrRef::StoreCaptureCell { cell, value } => {
                 self.ensure_on_top(*cell);
                 self.ensure_on_top(*value);
                 self.bytecode.emit(Instruction::UpdateCapture);
@@ -211,7 +211,7 @@ impl Emitter {
                 self.push_reg(*value);
             }
 
-            LirInstr::LoadResumeValue { dst } => {
+            InstrRef::LoadResumeValue { dst } => {
                 // The resume value is already on the operand stack
                 // (pushed by the VM's resume_continuation).
                 // The stack simulation already has the pre-yield state.
@@ -219,7 +219,7 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::Eval { dst, expr, env } => {
+            InstrRef::Eval { dst, expr, env } => {
                 // Stack order: env on bottom, expr on top
                 // (VM pops expr first, then env)
                 self.ensure_on_top(*env);
@@ -231,7 +231,7 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::ArrayMutExtend { dst, array, source } => {
+            InstrRef::ArrayMutExtend { dst, array, source } => {
                 // Stack: [array, source] → [extended_array]
                 self.ensure_binary_on_top(*array, *source);
                 self.bytecode.emit(Instruction::ArrayMutExtend);
@@ -240,7 +240,7 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::ArrayMutPush { dst, array, value } => {
+            InstrRef::ArrayMutPush { dst, array, value } => {
                 // Stack: [array, value] → [extended_array]
                 self.ensure_binary_on_top(*array, *value);
                 self.bytecode.emit(Instruction::ArrayMutPush);
@@ -249,7 +249,7 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::CallArrayMut {
+            InstrRef::CallArrayMut {
                 dst,
                 func,
                 args,
@@ -276,7 +276,7 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::TailCallArrayMut {
+            InstrRef::TailCallArrayMut {
                 func,
                 args,
                 region,
@@ -291,19 +291,19 @@ impl Emitter {
                 self.pop(); // func
             }
 
-            LirInstr::IncrefRegion { region_id } => {
+            InstrRef::IncrefRegion { region_id } => {
                 self.bytecode.emit(Instruction::IncrefRegion);
                 self.bytecode.emit_u32(region_id.get());
             }
 
-            LirInstr::DecrefValueRegion { src } => {
+            InstrRef::DecrefValueRegion { src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::DecrefValueRegion);
                 // Value popped by the release handler.
                 self.pop();
             }
 
-            LirInstr::DecrefCellRegion { src } => {
+            InstrRef::DecrefCellRegion { src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::DecrefCellRegion);
                 // Value popped by the release handler (frees the cell's own
@@ -311,7 +311,7 @@ impl Emitter {
                 self.pop();
             }
 
-            LirInstr::IncrefValueRegion { src } => {
+            InstrRef::IncrefValueRegion { src } => {
                 // Unlike DecrefValueRegion, retain does NOT consume the
                 // value: it is the function's result and must remain on
                 // top for the caller. The handler peeks rather than pops,
@@ -320,7 +320,7 @@ impl Emitter {
                 self.bytecode.emit(Instruction::IncrefValueRegion);
             }
 
-            LirInstr::AdoptRegion { parent, child } => {
+            InstrRef::AdoptRegion { parent, child } => {
                 // Value-resolved adopt (the ownership forest): bring both values
                 // to the top — parent at top-1, child at top — emit the op, and
                 // consume both. The handler reads each value's runtime region and
@@ -331,7 +331,7 @@ impl Emitter {
                 self.pop(); // parent
             }
 
-            LirInstr::AdoptCellRegion { parent, child } => {
+            InstrRef::AdoptCellRegion { parent, child } => {
                 // Value-resolved cell adopt (the ownership forest): identical stack
                 // shape to `AdoptRegion`, but the handler resolves both operands with
                 // `region_of` (NOT `result_region_of`), so a `CaptureCell` child's OWN
@@ -343,7 +343,7 @@ impl Emitter {
                 self.pop(); // parent
             }
 
-            LirInstr::AdoptIntoActivation { child } => {
+            InstrRef::AdoptIntoActivation { child } => {
                 // Value-resolved activation adopt (the ownership forest's owner
                 // node): bring the child value to the top, emit the op, and
                 // consume it. The handler resolves the child's runtime region
@@ -354,23 +354,23 @@ impl Emitter {
                 self.pop(); // child
             }
 
-            LirInstr::FreeRegionGroup { members } => {
+            InstrRef::FreeRegionGroup { members } => {
                 // Value-resolved co-owned group free (the ownership forest): bring every
                 // member value to the top, emit the op with the member count, and consume
                 // them all. The handler resolves each value's runtime region and frees the
                 // whole set as one wholesale subtree drop. Produces no value (it replaces
                 // the members' individual decrefs).
-                for m in members {
+                for m in members.iter() {
                     self.ensure_on_top(*m);
                 }
                 self.bytecode.emit(Instruction::FreeRegionGroup);
                 self.bytecode.emit_byte(members.len() as u8);
-                for _ in members {
+                for _ in members.iter() {
                     self.pop();
                 }
             }
 
-            LirInstr::AssertRegionMatches { region_id, src } => {
+            InstrRef::AssertRegionMatches { region_id, src } => {
                 // The coalescing oracle peeks the value the coalesced slot is
                 // claimed to name (it must stay on top — the subsequent
                 // `IncrefRegion`/`Return` reads it), then carries the slot as a
@@ -380,25 +380,25 @@ impl Emitter {
                 self.bytecode.emit_u32(region_id.get());
             }
 
-            LirInstr::DecrefRegion { region_id } => {
+            InstrRef::DecrefRegion { region_id } => {
                 self.bytecode.emit(Instruction::DecrefRegion);
                 self.bytecode.emit_u32(region_id.get());
             }
 
-            LirInstr::PushParamFrame { pairs } => {
+            InstrRef::PushParamFrame { pairs } => {
                 // Push all param/value pairs onto the stack, parameter first
-                for r in pairs {
+                for r in pairs.iter() {
                     self.ensure_on_top(*r);
                 }
                 self.bytecode.emit(Instruction::PushParamFrame);
                 self.bytecode.emit_byte((pairs.len() / 2) as u8);
                 // Every register is consumed from the stack
-                for _ in pairs {
+                for _ in pairs.iter() {
                     self.pop();
                 }
             }
 
-            LirInstr::PopParamFrame => {
+            InstrRef::PopParamFrame => {
                 self.bytecode.emit(Instruction::PopParamFrame);
                 // No stack effect
             }

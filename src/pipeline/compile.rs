@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-10-06
 // src/pipeline/AGENTS.md
 //! Compilation pipeline: source -> bytecode.
 
@@ -125,7 +125,7 @@ fn compile_inner(
         .with_primitive_values(prim_values)
         .with_region_info(region_info)
         .with_type_info(types);
-    let lir_module = lowerer.lower(&analysis.hir)?;
+    let lir_module = lowerer.lower(&analysis.hir)?.freeze()?;
 
     // Phase 5: Emit bytecode with symbol names for cross-thread portability
     let mut emitter = Emitter::new();
@@ -134,12 +134,25 @@ fn compile_inner(
     Ok(CompileResult { bytecode })
 }
 
-/// Compile a file to LIR as a single synthetic letrec (for WASM backend).
+/// Compile a file to frozen LIR as a single synthetic letrec (for the WASM
+/// backend and the dumps).
 ///
 /// `epoch_skip` — number of leading forms to exclude from epoch migration
 /// (e.g. stdlib forms that are already in the current epoch). When 0,
 /// epoch migration applies to all forms.
 pub fn compile_file_to_lir(
+    source: &str,
+    symbols: &mut SymbolTable,
+    cctx: &mut CompileCtx,
+    source_name: &str,
+    epoch_skip: usize,
+) -> Result<crate::lir::FrozenModule, String> {
+    lower_file_to_lir(source, symbols, cctx, source_name, epoch_skip)?.freeze()
+}
+
+/// [`compile_file_to_lir`] before freezing: the lowerer's working form, for a
+/// measurement of the lowerer itself.
+pub fn lower_file_to_lir(
     source: &str,
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
@@ -340,10 +353,13 @@ fn compile_file_inner(
 
     let lir_module = lowerer.lower(&hir)?;
     crate::phase!(ct, "compile", t, "{} lower", source_name);
+    let t = std::time::Instant::now();
+    let lir_module = lir_module.freeze()?;
+    crate::phase!(ct, "compile", t, "{} freeze", source_name);
 
     // Emit bytecode
     let t = std::time::Instant::now();
-    let signal = lir_module.entry.signal;
+    let signal = lir_module.entry.view().signal();
     let mut emitter = Emitter::new();
     let (mut bytecode, _, _) = emitter.emit_module(&lir_module);
     crate::phase!(ct, "compile", t, "{} emit", source_name);
@@ -430,9 +446,9 @@ fn lower_test_frontend(
         .with_primitive_values(prim_values)
         .with_region_info(region_info)
         .with_type_info(types);
-    let lir_module = lowerer.lower(&hir)?;
+    let lir_module = lowerer.lower(&hir)?.freeze()?;
 
-    let signal = lir_module.entry.signal;
+    let signal = lir_module.entry.view().signal();
     let mut emitter = Emitter::new();
     let (mut bytecode, _, _) = emitter.emit_module(&lir_module);
     bytecode.signal = signal;

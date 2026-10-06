@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-10-06
 // docs/impl/wasm.md
 // docs/impl/region/template.md
 //! The code object `rt_make_closure` builds for a WASM closure.
@@ -24,7 +24,7 @@ const COL: u32 = 5;
 /// A nullary lambda carrying one of everything the dual-compiled blueprint
 /// copies off its own emission: a source location, a merge set, and both
 /// release tables.
-fn nested_lambda_lir() -> LirFunction {
+fn nested_lambda_lir() -> LirOwned {
     let mut func = LirFixture::new(Arity::Exact(0))
         .closure_id(ClosureId(0))
         .name("nested")
@@ -37,17 +37,17 @@ fn nested_lambda_lir() -> LirFunction {
             }],
             Terminator::Return(Reg(0)),
         )
-        .build();
+        .build_working();
     func.blocks[0].instructions[0].span = Span::new(0, 3, LINE, COL).with_file(FILE);
     func.merged_slots = vec![static_region(5)];
     func.frame_release_slots = vec![3, 7];
     func.frame_release_regions = vec![static_region(11), static_region(13)];
-    func
+    crate::lir::code::freeze(&func).expect("the lambda freezes")
 }
 
 /// A nullary entry whose whole body is one `MakeClosure` of closure 0, so the
 /// value the module returns is the closure that `MakeClosure` built.
-fn entry_making_closure() -> LirFunction {
+fn entry_making_closure() -> LirOwned {
     LirFixture::new(Arity::Exact(0))
         .signal(Signal::silent())
         .block(
@@ -71,7 +71,7 @@ fn entry_making_closure() -> LirFunction {
 /// value would dangle after either goes.
 fn with_entry_closure<T>(read: impl FnOnce(&Closure) -> T) -> T {
     let mut vm = crate::vm::VM::new();
-    let module = LirModule {
+    let module = FrozenModule {
         entry: entry_making_closure(),
         closures: vec![nested_lambda_lir()],
     };

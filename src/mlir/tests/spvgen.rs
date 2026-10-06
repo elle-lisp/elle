@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-10-06
 // docs/impl/spirv.md
 //! What the SPIR-V emitter makes of float arithmetic, and of a local slot whose
 //! id equals a register's.
@@ -6,7 +6,7 @@
 use super::*;
 
 /// Build LIR: fn(x) { return x + 1.5 }  (float constant + mixed promotion)
-fn make_float_add() -> LirFunction {
+fn make_float_add() -> LirOwned {
     LirFixture::new(Arity::Exact(1))
         .name("float_add")
         .signal(Signal::errors())
@@ -31,13 +31,14 @@ fn make_float_add() -> LirFunction {
 #[test]
 fn test_spirv_float_add() {
     let func = make_float_add();
-    let spirv_bytes = lower_to_spirv(&func, 256).expect("float SPIR-V lowering should succeed");
+    let spirv_bytes =
+        lower_to_spirv(&func.view(), 256).expect("float SPIR-V lowering should succeed");
     assert!(spirv_bytes.len() >= 20);
     assert_eq!(&spirv_bytes[0..4], &[0x03, 0x02, 0x23, 0x07]);
 }
 
 /// Build LIR: fn(x) { return 2.0 * 3.0 }  (pure float arithmetic)
-fn make_float_mul() -> LirFunction {
+fn make_float_mul() -> LirOwned {
     LirFixture::new(Arity::Exact(1))
         .name("float_mul")
         .signal(Signal::errors())
@@ -67,7 +68,7 @@ fn make_float_mul() -> LirFunction {
 fn test_spirv_float_mul() {
     let func = make_float_mul();
     let spirv_bytes =
-        lower_to_spirv(&func, 256).expect("pure-float SPIR-V lowering should succeed");
+        lower_to_spirv(&func.view(), 256).expect("pure-float SPIR-V lowering should succeed");
     assert!(spirv_bytes.len() >= 20);
     assert_eq!(&spirv_bytes[0..4], &[0x03, 0x02, 0x23, 0x07]);
 }
@@ -86,7 +87,7 @@ fn test_spirv_float_mul() {
 ///
 /// Slot 0 shares its number with r0. Correct lowering adds the const-10 value
 /// to itself; a conflated map adds the const-20 value instead.
-fn make_storelocal_clobbers_reg() -> LirFunction {
+fn make_storelocal_clobbers_reg() -> LirOwned {
     LirFixture::new(Arity::Exact(0))
         .name("store_clobber")
         .signal(Signal::errors())
@@ -120,7 +121,7 @@ fn make_storelocal_clobbers_reg() -> LirFunction {
 #[test]
 fn test_spirv_storelocal_does_not_clobber_reg() {
     let func = make_storelocal_clobbers_reg();
-    let text = super::spirv::generate_gpu_module(&func, 256)
+    let text = super::spirv::generate_gpu_module(&func.view(), 256)
         .expect("single-block lowering should succeed");
     // r0 = const 10 is named %c0_0; r1 = const 20 is named %c0_1.
     // The add reads r0 twice, so it must reference %c0_0 — not the
@@ -141,7 +142,7 @@ fn test_spirv_storelocal_does_not_clobber_reg() {
 /// The same collision across an if-conversion: param `x` is r0, local `s` is
 /// slot 0, and the merge writes its result under the slot key. The trailing
 /// `s + x` must still read `%arg0`.
-fn make_if_merge_clobbers_param() -> LirFunction {
+fn make_if_merge_clobbers_param() -> LirOwned {
     LirFixture::new(Arity::Exact(1))
         .name("merge_clobber")
         .signal(Signal::errors())
@@ -218,8 +219,8 @@ fn make_if_merge_clobbers_param() -> LirFunction {
 #[test]
 fn test_spirv_if_merge_does_not_clobber_param() {
     let func = make_if_merge_clobbers_param();
-    let text =
-        super::spirv::generate_gpu_module(&func, 256).expect("multi-block lowering should succeed");
+    let text = super::spirv::generate_gpu_module(&func.view(), 256)
+        .expect("multi-block lowering should succeed");
     assert!(
         text.contains(", %arg0 : i64"),
         "return s + x must read the param %arg0; the if-merge slot store \

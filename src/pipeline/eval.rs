@@ -1,3 +1,5 @@
+// audited: 2026-10-06
+// src/pipeline/AGENTS.md
 //! Evaluation pipeline: source -> value.
 
 use super::compile::compile_file;
@@ -65,7 +67,7 @@ pub fn eval_syntax(
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
         .with_region_info(region_info);
-    let lir_module = lowerer.lower(&analysis.hir)?;
+    let lir_module = lowerer.lower(&analysis.hir)?.freeze()?;
 
     let mut emitter = Emitter::new();
     let (bytecode, _yield_points, _call_sites) = emitter.emit_module(&lir_module);
@@ -143,7 +145,7 @@ fn eval_in_arena(
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
         .with_region_info(region_info);
-    let lir_module = lowerer.lower(&analysis.hir)?;
+    let lir_module = lowerer.lower(&analysis.hir)?.freeze()?;
 
     let mut emitter = Emitter::new();
     let (bytecode, _yield_points, _call_sites) = emitter.emit_module(&lir_module);

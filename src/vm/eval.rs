@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! Runtime eval instruction handler.
 //!
 //! Compiles and executes a datum (quoted value) at runtime.
@@ -212,6 +212,7 @@ fn eval_in_arena(
         .with_region_info(region_info);
     let lir_module = lowerer
         .lower(&analysis.hir)
+        .and_then(|m| m.freeze())
         .map_err(|e| LError::generic(format!("eval: lowering failed: {}", e)))?;
 
     // Emit

@@ -1,3 +1,5 @@
+// audited: 2026-10-06
+// src/wasm/AGENTS.md
 //! Data operations dispatched through the `rt_data_op` runtime helper.
 //!
 //! These emitters cover the 1-, 2-, and N-argument variants plus the
@@ -78,14 +80,14 @@ impl WasmEmitter {
         dst: Reg,
         op: i32,
         src: Reg,
-        key: &LirConst,
+        key: ConstRef,
     ) {
         self.write_val_to_mem(f, src, 0);
         match key {
-            LirConst::Keyword(hash) => {
-                self.emit_const_pool_load(f, dst, Value::keyword_from_hash(*hash))
+            ConstRef::Keyword(hash) => {
+                self.emit_const_pool_load(f, dst, Value::keyword_from_hash(hash))
             }
-            LirConst::Symbol(id) => self.emit_const_pool_load(f, dst, Value::symbol(*id)),
+            ConstRef::Symbol(id) => self.emit_const_pool_load(f, dst, Value::symbol(id)),
             _ => {
                 f.instruction(&Instruction::I64Const(TAG_NIL as i64));
                 f.instruction(&Instruction::LocalSet(self.tag_local(dst)));

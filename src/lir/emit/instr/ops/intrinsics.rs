@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-10-06
 // src/lir/AGENTS.md
 //! Emitting the intrinsic opcodes: type predicates, data access, mutability
 //! and identity.
@@ -9,76 +9,76 @@
 use super::*;
 
 impl Emitter {
-    pub(super) fn emit_instr_intrinsics(&mut self, instr: &LirInstr) {
+    pub(super) fn emit_instr_intrinsics(&mut self, instr: &InstrRef<'_>) {
         match instr {
             // === New type predicates ===
-            LirInstr::IsEmpty { dst, src } => {
+            InstrRef::IsEmpty { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IsEmptyList);
                 self.pop();
                 self.push_reg(*dst);
             }
-            LirInstr::IsBool { dst, src } => {
+            InstrRef::IsBool { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IsBool);
                 self.pop();
                 self.push_reg(*dst);
             }
-            LirInstr::IsInt { dst, src } => {
+            InstrRef::IsInt { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IsInt);
                 self.pop();
                 self.push_reg(*dst);
             }
-            LirInstr::IsFloat { dst, src } => {
+            InstrRef::IsFloat { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IsFloat);
                 self.pop();
                 self.push_reg(*dst);
             }
-            LirInstr::IsString { dst, src } => {
+            InstrRef::IsString { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IsString);
                 self.pop();
                 self.push_reg(*dst);
             }
-            LirInstr::IsKeyword { dst, src } => {
+            InstrRef::IsKeyword { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IsKeyword);
                 self.pop();
                 self.push_reg(*dst);
             }
-            LirInstr::IsSymbolCheck { dst, src } => {
+            InstrRef::IsSymbolCheck { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IsSymbol);
                 self.pop();
                 self.push_reg(*dst);
             }
-            LirInstr::IsBytes { dst, src } => {
+            InstrRef::IsBytes { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IsBytes);
                 self.pop();
                 self.push_reg(*dst);
             }
-            LirInstr::IsBox { dst, src } => {
+            InstrRef::IsBox { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IsBox);
                 self.pop();
                 self.push_reg(*dst);
             }
-            LirInstr::IsClosure { dst, src } => {
+            InstrRef::IsClosure { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IsClosure);
                 self.pop();
                 self.push_reg(*dst);
             }
-            LirInstr::IsFiber { dst, src } => {
+            InstrRef::IsFiber { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IsFiber);
                 self.pop();
                 self.push_reg(*dst);
             }
-            LirInstr::TypeOf { dst, src } => {
+            InstrRef::TypeOf { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::TypeOf);
                 self.pop();
@@ -86,20 +86,20 @@ impl Emitter {
             }
 
             // === Data access ===
-            LirInstr::Length { dst, src } => {
+            InstrRef::Length { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::Length);
                 self.pop();
                 self.push_reg(*dst);
             }
-            LirInstr::Get { dst, obj, key } => {
+            InstrRef::Get { dst, obj, key } => {
                 self.ensure_binary_on_top(*obj, *key);
                 self.bytecode.emit(Instruction::IntrGet);
                 self.pop(); // key
                 self.pop(); // obj
                 self.push_reg(*dst);
             }
-            LirInstr::Put { dst, obj, key, val } => {
+            InstrRef::Put { dst, obj, key, val } => {
                 self.ensure_on_top(*obj);
                 self.ensure_on_top(*key);
                 self.ensure_on_top(*val);
@@ -109,42 +109,42 @@ impl Emitter {
                 self.pop(); // obj
                 self.push_reg(*dst);
             }
-            LirInstr::Del { dst, obj, key } => {
+            InstrRef::Del { dst, obj, key } => {
                 self.ensure_binary_on_top(*obj, *key);
                 self.bytecode.emit(Instruction::IntrDel);
                 self.pop(); // key
                 self.pop(); // obj
                 self.push_reg(*dst);
             }
-            LirInstr::Has { dst, obj, key } => {
+            InstrRef::Has { dst, obj, key } => {
                 self.ensure_binary_on_top(*obj, *key);
                 self.bytecode.emit(Instruction::IntrHas);
                 self.pop(); // key
                 self.pop(); // obj
                 self.push_reg(*dst);
             }
-            LirInstr::IntrPush { dst, array, value } => {
+            InstrRef::IntrPush { dst, array, value } => {
                 self.ensure_binary_on_top(*array, *value);
                 self.bytecode.emit(Instruction::IntrPush);
                 self.pop(); // value
                 self.pop(); // array
                 self.push_reg(*dst);
             }
-            LirInstr::IntrStringPush { dst, string, value } => {
+            InstrRef::IntrStringPush { dst, string, value } => {
                 self.ensure_binary_on_top(*string, *value);
                 self.bytecode.emit(Instruction::IntrStringPush);
                 self.pop(); // value
                 self.pop(); // string
                 self.push_reg(*dst);
             }
-            LirInstr::IntrBytesPush { dst, bytes, value } => {
+            InstrRef::IntrBytesPush { dst, bytes, value } => {
                 self.ensure_binary_on_top(*bytes, *value);
                 self.bytecode.emit(Instruction::IntrBytesPush);
                 self.pop(); // value
                 self.pop(); // bytes
                 self.push_reg(*dst);
             }
-            LirInstr::Pop { dst, src } => {
+            InstrRef::Pop { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IntrPop);
                 self.pop();
@@ -152,14 +152,14 @@ impl Emitter {
             }
 
             // === Mutability ===
-            LirInstr::Freeze { dst, src, region } => {
+            InstrRef::Freeze { dst, src, region } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IntrFreeze);
                 self.bytecode.emit_u32(region.get());
                 self.pop();
                 self.push_reg(*dst);
             }
-            LirInstr::Thaw { dst, src, region } => {
+            InstrRef::Thaw { dst, src, region } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IntrThaw);
                 self.bytecode.emit_u32(region.get());
@@ -168,7 +168,7 @@ impl Emitter {
             }
 
             // === Identity ===
-            LirInstr::Identical { dst, lhs, rhs } => {
+            InstrRef::Identical { dst, lhs, rhs } => {
                 self.ensure_binary_on_top(*lhs, *rhs);
                 self.bytecode.emit(Instruction::Identical);
                 self.pop(); // rhs
@@ -176,7 +176,7 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::CheckSignalBound { src, allowed_bits } => {
+            InstrRef::CheckSignalBound { src, allowed_bits } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::CheckSignalBound);
                 self.bytecode.emit_signal_bits(*allowed_bits);

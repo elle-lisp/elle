@@ -17,12 +17,12 @@ pub mod lower;
 pub(crate) mod testkit;
 mod types;
 
+pub use code::{FrozenModule, InstrRef, LirCode, LirOwned, LirView};
 pub use display::terminator_kind;
 pub use emit::{ClosureCompiled, Emitter};
 pub use lower::Lowerer;
 pub use types::{
-    closure_value_const_count, for_each_def, for_each_terminator_use, for_each_use,
-    value_to_lir_const, BasicBlock, BinOp, CallSiteInfo, ClosureId, CmpOp, ConvOp, Label, LirConst,
-    LirFunction, LirInstr, LirModule, OperandProof, Reg, SpannedInstr, SpannedTerminator,
-    Terminator, UnaryOp, YieldPointInfo,
+    for_each_def, for_each_terminator_use, for_each_use, BasicBlock, BinOp, CallSiteInfo,
+    ClosureId, CmpOp, ConvOp, Label, LirConst, LirFunction, LirInstr, LirModule, OperandProof, Reg,
+    SpannedInstr, SpannedTerminator, Terminator, UnaryOp, YieldPointInfo,
 };

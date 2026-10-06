@@ -1,9 +1,9 @@
 // audited: 2026-10-06
 // src/lir/AGENTS.md
-//! Assembling a `LirFunction` by hand, for the unit tests of the backends that
-//! consume it.
+//! Assembling a frozen function by hand, for the unit tests of the backends that
+//! read it.
 //!
-//! Every consumer of LIR tests against a function written out instruction by
+//! Every reader of LIR tests against a function written out instruction by
 //! instruction, because the shape under test is usually one the front end cannot
 //! be coaxed into producing on demand. [`LirFixture`] is that assembly, once. It
 //! mirrors [`crate::hir::testkit`], which does the same job for the front end.
@@ -13,6 +13,7 @@
 //! instructions the way a hand-written constant does. A test that wants a count
 //! the instructions do not justify says so with [`LirFixture::num_regs`].
 
+use crate::lir::code::{freeze, LirOwned};
 use crate::lir::{
     for_each_def, for_each_terminator_use, for_each_use, BasicBlock, CallSiteInfo, ClosureId,
     Label, LirFunction, LirInstr, Reg, SpannedInstr, SpannedTerminator, Terminator, YieldPointInfo,
@@ -21,7 +22,7 @@ use crate::signals::Signal;
 use crate::syntax::Span;
 use crate::value::Arity;
 
-/// Builds a [`LirFunction`].
+/// Builds a frozen function, or the [`LirFunction`] it freezes from.
 ///
 /// The rules are in `src/lir/AGENTS.md`; the test for each is at the bottom of
 /// this file.
@@ -30,6 +31,9 @@ pub(crate) struct LirFixture {
     /// The count [`LirFixture::num_regs`] asked for, if it was called. `None`
     /// leaves the count to `build`'s inference.
     declared_regs: Option<u32>,
+    /// The sites emission would record, written into the frozen function.
+    yield_points: Vec<YieldPointInfo>,
+    call_sites: Vec<CallSiteInfo>,
 }
 
 impl LirFixture {
@@ -39,6 +43,8 @@ impl LirFixture {
         LirFixture {
             func: LirFunction::new(arity),
             declared_regs: None,
+            yield_points: Vec::new(),
+            call_sites: Vec::new(),
         }
     }
 
@@ -88,7 +94,7 @@ impl LirFixture {
     }
 
     pub(crate) fn yield_points(mut self, yield_points: Vec<YieldPointInfo>) -> Self {
-        self.func.yield_points = yield_points;
+        self.yield_points = yield_points;
         self
     }
 
@@ -96,7 +102,7 @@ impl LirFixture {
     /// by call-site number. A `Call` inside a `may_suspend` function needs one
     /// entry per site, or the JIT's yield check fails translation.
     pub(crate) fn call_sites(mut self, call_sites: Vec<CallSiteInfo>) -> Self {
-        self.func.call_sites = call_sites;
+        self.call_sites = call_sites;
         self
     }
 
@@ -128,8 +134,12 @@ impl LirFixture {
         self
     }
 
-    pub(crate) fn build(self) -> LirFunction {
-        self.build_working()
+    /// The frozen function, with the sites the fixture was given.
+    pub(crate) fn build(self) -> LirOwned {
+        let (yield_points, call_sites) = (self.yield_points.clone(), self.call_sites.clone());
+        let mut owned = freeze(&self.build_working()).expect("a fixture freezes");
+        owned.set_sites(&yield_points, &call_sites);
+        owned
     }
 
     /// The function in its working form, before freezing — for a test whose
@@ -181,11 +191,11 @@ mod tests {
             .block(7, vec![], Terminator::Unreachable)
             .build();
         assert_eq!(
-            func.blocks.iter().map(|b| b.label).collect::<Vec<_>>(),
+            func.view().blocks().map(|b| b.label()).collect::<Vec<_>>(),
             vec![Label(5), Label(7)],
         );
         assert_eq!(
-            func.entry,
+            func.view().entry(),
             Label(5),
             "the first block appended is the entry"
         );
@@ -211,7 +221,8 @@ mod tests {
             )
             .build();
         assert_eq!(
-            func.num_regs, 4,
+            func.view().num_regs(),
+            4,
             "Reg(3) is the highest register the block names",
         );
     }
@@ -232,7 +243,7 @@ mod tests {
             )
             .block(1, vec![], Terminator::Return(Reg(2)))
             .build();
-        assert_eq!(func.num_regs, 5, "the branch condition is Reg(4)");
+        assert_eq!(func.view().num_regs(), 5, "the branch condition is Reg(4)");
     }
 
     #[test]
@@ -257,14 +268,14 @@ mod tests {
                 Terminator::Unreachable,
             )
             .build();
-        assert_eq!(func.num_regs, 3, "the result register is Reg(2)");
+        assert_eq!(func.view().num_regs(), 3, "the result register is Reg(2)");
     }
 
     #[test]
     fn a_blockless_function_names_no_registers() {
         let func = LirFixture::new(Arity::Exact(1)).build();
-        assert_eq!(func.num_regs, 0);
-        assert!(func.blocks.is_empty());
+        assert_eq!(func.view().num_regs(), 0);
+        assert_eq!(func.view().block_count(), 0);
     }
 
     #[test]
@@ -283,7 +294,8 @@ mod tests {
             )
             .build();
         assert_eq!(
-            func.num_regs, 9,
+            func.view().num_regs(),
+            9,
             "the declared count wins over the inferred 1",
         );
     }
@@ -300,9 +312,10 @@ mod tests {
                 Terminator::Return(Reg(0)),
             )
             .build();
-        let block = &func.blocks[0];
-        assert_eq!(block.instructions[0].span, Span::synthetic());
-        assert_eq!(block.terminator.span, Span::synthetic());
+        let view = func.view();
+        let block = view.block(0);
+        assert_eq!(block.node(0).span(), Span::synthetic());
+        assert_eq!(block.terminator_span(), Span::synthetic());
     }
 
     #[test]
@@ -320,13 +333,14 @@ mod tests {
                 num_locals: 3,
             }])
             .build();
-        assert_eq!(func.name.as_deref(), Some("f"));
-        assert_eq!(func.signal, Signal::yields());
-        assert_eq!(func.num_captures, 2);
-        assert_eq!(func.num_locals, 3);
-        assert_eq!(func.num_params, 4);
-        assert_eq!(func.closure_id, Some(ClosureId(5)));
-        assert_eq!(func.yield_points.len(), 1);
-        assert_eq!(func.arity, Arity::AtLeast(1));
+        let func = func.view();
+        assert_eq!(func.name(), Some("f"));
+        assert_eq!(func.signal(), Signal::yields());
+        assert_eq!(func.num_captures(), 2);
+        assert_eq!(func.num_locals(), 3);
+        assert_eq!(func.num_params(), 4);
+        assert_eq!(func.closure_id(), Some(ClosureId(5)));
+        assert_eq!(func.yield_points().len(), 1);
+        assert_eq!(func.arity(), Arity::AtLeast(1));
     }
 }

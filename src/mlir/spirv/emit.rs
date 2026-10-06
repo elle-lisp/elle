@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-10-06
 // docs/impl/spirv.md
 //! Emitting the GPU-eligible LIR subset as MLIR text for the SPIR-V pipeline.
 //!
@@ -14,25 +14,25 @@ pub(super) fn emit_promote(name: &str, src: &str, indent: &str, out: &mut String
     ));
 }
 pub(super) fn emit_block_instructions(
-    instructions: &[crate::lir::SpannedInstr],
+    block: BlockRef<'_>,
     env: &mut SsaEnv,
     num_params: usize,
     block_idx: usize,
     indent: &str,
     out: &mut String,
 ) -> Result<(), String> {
-    for si in instructions {
-        match &si.instr {
-            LirInstr::LoadCaptureRaw { dst, index } | LirInstr::LoadCapture { dst, index } => {
+    for instr in block.instrs() {
+        match &instr {
+            InstrRef::LoadCaptureRaw { dst, index } | InstrRef::LoadCapture { dst, index } => {
                 if (*index as usize) < num_params {
                     env.reg_names.insert(*dst, format!("%arg{}", index));
                     env.reg_types.insert(*dst, ScalarType::Int);
                 }
             }
-            LirInstr::Const { dst, value } => {
+            InstrRef::Const { dst, value } => {
                 let name = format!("%c{}_{}", block_idx, dst.0);
                 match value {
-                    LirConst::Float(f) => {
+                    ConstRef::Float(f) => {
                         // Format with enough precision to round-trip.
                         let s = format!("{:.17e}", f);
                         out.push_str(&format!("{indent}{name} = arith.constant {s} : f64\n"));
@@ -41,9 +41,9 @@ pub(super) fn emit_block_instructions(
                     }
                     _ => {
                         let n = match value {
-                            LirConst::Int(n) => *n,
-                            LirConst::Bool(b) => i64::from(*b),
-                            LirConst::Nil => 0,
+                            ConstRef::Int(n) => *n,
+                            ConstRef::Bool(b) => i64::from(*b),
+                            ConstRef::Nil => 0,
                             _ => {
                                 return Err(format!("unsupported constant for SPIR-V: {:?}", value))
                             }
@@ -54,7 +54,7 @@ pub(super) fn emit_block_instructions(
                     }
                 }
             }
-            LirInstr::BinOp {
+            InstrRef::BinOp {
                 dst,
                 op,
                 lhs,
@@ -142,7 +142,7 @@ pub(super) fn emit_block_instructions(
                 env.reg_names.insert(*dst, name);
                 env.reg_types.insert(*dst, result_type);
             }
-            LirInstr::Compare {
+            InstrRef::Compare {
                 dst,
                 op,
                 lhs,
@@ -218,7 +218,7 @@ pub(super) fn emit_block_instructions(
                 env.reg_names.insert(*dst, ext_i64);
                 env.reg_types.insert(*dst, ScalarType::Int);
             }
-            LirInstr::UnaryOp {
+            InstrRef::UnaryOp {
                 dst,
                 op,
                 src,
@@ -289,7 +289,7 @@ pub(super) fn emit_block_instructions(
                 }
                 env.reg_names.insert(*dst, name);
             }
-            LirInstr::Convert { dst, op, src } => {
+            InstrRef::Convert { dst, op, src } => {
                 let sv = env
                     .reg_names
                     .get(src)
@@ -326,7 +326,7 @@ pub(super) fn emit_block_instructions(
                     }
                 }
             }
-            LirInstr::StoreLocal { slot, src } => {
+            InstrRef::StoreLocal { slot, src } => {
                 // Slot key, not register key: the store names a *local*, and
                 // must not disturb the register whose id collides numerically.
                 if let Some(name) = env.reg_names.get(src).cloned() {
@@ -336,7 +336,7 @@ pub(super) fn emit_block_instructions(
                     }
                 }
             }
-            LirInstr::LoadLocal { dst, slot } => {
+            InstrRef::LoadLocal { dst, slot } => {
                 if let Some(name) = env.slot_names.get(&SlotId::new(*slot as u32)).cloned() {
                     env.reg_names.insert(*dst, name);
                     if let Some(t) = env.slot_types.get(&SlotId::new(*slot as u32)).copied() {
@@ -346,8 +346,8 @@ pub(super) fn emit_block_instructions(
             }
             // Value-targeted region refcounts: no-ops on unboxed scalars
             // (the eligibility whitelist admits nothing heap-valued).
-            LirInstr::IncrefValueRegion { .. } | LirInstr::DecrefValueRegion { .. } => {}
-            _ => return Err(format!("unsupported SPIR-V instruction: {:?}", si.instr)),
+            InstrRef::IncrefValueRegion { .. } | InstrRef::DecrefValueRegion { .. } => {}
+            _ => return Err(format!("unsupported SPIR-V instruction: {:?}", instr)),
         }
     }
     Ok(())

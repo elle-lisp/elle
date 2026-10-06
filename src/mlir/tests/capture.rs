@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-10-06
 // docs/impl/mlir.md
 //! A closure body that reads its captured environment: lowered, executed, and
 //! refused by the SPIR-V tier.
@@ -8,7 +8,7 @@ use super::*;
 // ── Capture tests ──────────────────────────────────────────────
 
 /// Build LIR: fn(x) { return cap[0] + x } with num_captures=1
-fn make_capture_add() -> LirFunction {
+fn make_capture_add() -> LirOwned {
     // Env layout: [cap0, param0]
     LirFixture::new(Arity::Exact(1))
         .name("capture_add")
@@ -40,7 +40,7 @@ fn test_lower_capture_add() {
     let context = lower::create_context();
     let func = make_capture_add();
     // num_captures=1, capture_types=0 (int), param_types=0 (int)
-    let result = lower::lower_to_module(&context, &func, 1, 0, 0);
+    let result = lower::lower_to_module(&context, &func.view(), 1, 0, 0);
     assert!(result.is_ok(), "capture_add lowering should succeed");
     let (module, _) = result.unwrap();
     let text = module.as_operation().to_string();
@@ -58,7 +58,7 @@ fn test_execute_capture_add() {
     let func = make_capture_add();
     // num_captures=1, capture_types=0, param_types=0
     let (mut module, _) =
-        lower::lower_to_module(&context, &func, 1, 0, 0).expect("lowering should succeed");
+        lower::lower_to_module(&context, &func.view(), 1, 0, 0).expect("lowering should succeed");
     let pm = melior::pass::PassManager::new(&context);
     pm.add_pass(melior::pass::conversion::create_to_llvm());
     pm.run(&mut module).expect("LLVM conversion should succeed");
@@ -85,7 +85,7 @@ fn test_execute_capture_add() {
 #[test]
 fn test_spirv_rejects_captures() {
     let func = make_capture_add();
-    let result = lower_to_spirv(&func, 256);
+    let result = lower_to_spirv(&func.view(), 256);
     assert!(result.is_err(), "SPIR-V should reject captures");
     assert!(
         result.unwrap_err().contains("captures not supported"),
@@ -101,7 +101,7 @@ fn test_spirv_rejects_captures() {
 /// here they cross — `LoadCaptureRaw` reads env index 1 into r0, then env index
 /// 0 into r1. One map for both spaces makes the first load overwrite what the
 /// second reads, and the function returns `y + y`.
-fn make_capture_param_collision() -> LirFunction {
+fn make_capture_param_collision() -> LirOwned {
     LirFixture::new(Arity::Exact(1))
         .name("cap_param_collision")
         .signal(Signal::errors())
@@ -143,7 +143,7 @@ fn test_capture_param_collision() {
     let context = lower::create_context();
     // num_captures=1, capture_types=0 (int), param_types=0 (int)
     let (mut module, _) =
-        lower::lower_to_module(&context, &func, 1, 0, 0).expect("lowering should succeed");
+        lower::lower_to_module(&context, &func.view(), 1, 0, 0).expect("lowering should succeed");
     let pm = melior::pass::PassManager::new(&context);
     pm.add_pass(melior::pass::conversion::create_to_llvm());
     pm.run(&mut module).expect("LLVM conversion should succeed");

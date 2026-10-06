@@ -64,7 +64,8 @@ fn proto(s: &mut String, path: &str, p: &TemplateProto, symbols: Option<&SymbolT
     tables(s, &merged, &p.frame_release_slots, &p.frame_release_regions);
     body(s, &p.bytecode, &p.constants, &p.location_map, symbols);
     if let Some(lir) = p.lir_function.as_ref() {
-        for yp in &lir.yield_points {
+        let lir = lir.view();
+        for yp in lir.yield_points() {
             let regs: Vec<u32> = yp.stack_regs.iter().map(|r| r.0).collect();
             let _ = writeln!(
                 s,
@@ -72,7 +73,7 @@ fn proto(s: &mut String, path: &str, p: &TemplateProto, symbols: Option<&SymbolT
                 yp.resume_ip, yp.num_locals
             );
         }
-        for cs in &lir.call_sites {
+        for cs in lir.call_sites() {
             let regs: Vec<u32> = cs.stack_regs.iter().map(|r| r.0).collect();
             let _ = writeln!(
                 s,

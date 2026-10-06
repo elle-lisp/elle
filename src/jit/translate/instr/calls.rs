@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 // docs/impl/jit.md
 //! How a call leaves compiled code: the self-tail-call loop, the dispatch
 //! helper that carries every other call, and a `MakeClosure`.
@@ -10,11 +10,11 @@ impl<'a> FunctionTranslator<'a> {
     pub(super) fn translate_instr_call(
         &mut self,
         builder: &mut FunctionBuilder,
-        instr: &LirInstr,
+        instr: &InstrRef<'_>,
         region_id_const: cranelift_codegen::ir::Value,
     ) -> Result<bool, JitError> {
         match instr {
-            LirInstr::Call {
+            InstrRef::Call {
                 dst, func, args, ..
             } => {
                 let (ft, fp) = self.use_var_pair(builder, func.0);
@@ -36,7 +36,7 @@ impl<'a> FunctionTranslator<'a> {
                     )?;
                     self.def_var_pair(builder, dst.0, rt, rp);
                     self.emit_exception_check_after_call(builder)?;
-                    if self.lir.signal.may_suspend() {
+                    if self.lir.signal().may_suspend() {
                         let idx = self.call_site_index;
                         self.call_site_index += 1;
                         self.emit_yield_check_after_call(builder, idx)?;
@@ -66,7 +66,7 @@ impl<'a> FunctionTranslator<'a> {
                     )?;
                     self.def_var_pair(builder, dst.0, rt, rp);
                     self.emit_exception_check_after_call(builder)?;
-                    if self.lir.signal.may_suspend() {
+                    if self.lir.signal().may_suspend() {
                         let idx = self.call_site_index;
                         self.call_site_index += 1;
                         self.emit_yield_check_after_call(builder, idx)?;
@@ -74,7 +74,7 @@ impl<'a> FunctionTranslator<'a> {
                 }
             }
 
-            LirInstr::TailCall {
+            InstrRef::TailCall {
                 dst,
                 func,
                 args,
@@ -96,7 +96,7 @@ impl<'a> FunctionTranslator<'a> {
                 // The emitter records one call site per tail call of a function
                 // that may suspend; take it before the self-call branch so the
                 // counts agree whichever path runs.
-                let park_site = if self.lir.signal.may_suspend() {
+                let park_site = if self.lir.signal().may_suspend() {
                     let idx = self.call_site_index;
                     self.call_site_index += 1;
                     Some(idx)
@@ -108,7 +108,7 @@ impl<'a> FunctionTranslator<'a> {
                 if let (Some((self_tag, self_payload)), Some(loop_header)) =
                     (self.self_tag_payload, self.loop_header)
                 {
-                    if args.len() == self.lir.num_params {
+                    if args.len() == self.lir.num_params() {
                         // Check if func == self (tag AND payload match)
                         let tag_eq = builder.ins().icmp(IntCC::Equal, ft, self_tag);
                         let pay_eq = builder.ins().icmp(IntCC::Equal, fp, self_payload);
@@ -183,13 +183,13 @@ impl<'a> FunctionTranslator<'a> {
                 return Ok(false);
             }
 
-            LirInstr::MakeClosure {
+            InstrRef::MakeClosure {
                 dst,
                 closure_id,
                 captures,
                 region,
             } => {
-                // Look up the nested LirFunction by ClosureId from module context.
+                // Look up the nested frozen function by ClosureId from module context.
                 let func = self
                     .module_closures
                     .get(closure_id.0 as usize)
@@ -204,7 +204,7 @@ impl<'a> FunctionTranslator<'a> {
                 // Emit every closure of the module, then take this one's:
                 // a nested `MakeClosure` resolves its own child through the
                 // same pass, so the whole tree is compiled together.
-                let lir_module = crate::lir::LirModule {
+                let lir_module = crate::lir::FrozenModule {
                     entry: func.clone(),
                     closures: self.module_closures.clone(),
                 };

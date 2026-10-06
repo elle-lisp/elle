@@ -32,12 +32,16 @@ use syntax::{send_to_syntax, SendSyntax};
 /// Sendable snapshot of a closure: its code object, owned, plus the instance
 /// fields `env` and `squelch_mask`.
 ///
-/// The LIR crosses, with its value constants lifted into `lir_value_pool`. The
-/// code object's own defining span, its WASM index and its SPIR-V cache do not
+/// The LIR crosses as data, and the values it loads cross through the ordinary
+/// value walk; the receiving side compiles its own JIT code from it. The code
+/// object's own defining span, its WASM index and its SPIR-V cache do not
 /// cross, and a reconstructed code object answers each with absence.
 ///
 /// `env` holds the captured environment (upvalues), converted recursively
 /// to `SendValue`. Constants are stored separately in `constants`.
+///
+/// Public because a `SendBundle` and the stdlib cache's stored form carry it;
+/// only this module builds one.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct SendableClosure {
     pub bytecode: Vec<u8>,
@@ -57,16 +61,13 @@ pub struct SendableClosure {
     pub name: Option<String>,
     pub squelch_mask: SignalBits,
     pub env: Vec<SendValue>,
-    /// LIR function for JIT compilation in spawned threads.
-    /// Stripped of doc/syntax (not sendable), but retains all JIT-relevant fields.
-    pub lir_function: Option<crate::lir::LirFunction>,
-    /// Sendable snapshots of compound `ValueConst` operands lifted out of the
-    /// LIR (quoted lists, structs, …). `convert_lir_for_send` replaces each such
-    /// instruction with `LirConst::ValueRef(idx)` indexing this pool; on
-    /// reconstruction `patch_lir_value_refs` rebuilds them into worker-heap
-    /// `ValueConst`s. Keeping the LIR shippable lets JIT/MLIR/WASM tiers run a
-    /// closure across a thread boundary instead of dropping its LIR.
-    pub lir_value_pool: Vec<SendValue>,
+    /// The frozen LIR the receiving side's JIT, WASM and MLIR tiers compile
+    /// from. Plain data, so it crosses verbatim.
+    pub lir: Option<crate::lir::LirCode>,
+    /// The values the LIR's `ValueConst` instructions load, in the order its
+    /// values table holds them. They cross through the ordinary value walk, so
+    /// a closure among them interns into the bundle like any other.
+    pub lir_values: Vec<SendValue>,
     /// Nested-lambda blueprints (`TemplateProto::child_protos`) this code
     /// object's `MakeClosure` instructions index. Serialized inline (a blueprint
     /// has no heap identity to intern) so the worker can rebuild them into the
@@ -304,8 +305,8 @@ unsafe impl Sync for SendBundle {}
 impl SendValue {
     /// Convert a Value to SendValue by deep-copying heap data.
     ///
-    /// Returns Err if the value contains non-sendable data (a fiber, an FFI
-    /// handle, a file or socket port, and the like).
+    /// Returns Err if the value contains non-sendable data (a fiber, a file or
+    /// socket port, an FFI handle, a struct with an identity key).
     ///
     /// Note: this wrapper asserts that no closures are encountered. For values
     /// that may contain closures, use `SendBundle::from_value` instead.
@@ -345,7 +346,7 @@ impl SendBundle {
     /// may itself be a `Ref(0)` if `value` is a closure.
     ///
     /// Returns `Err` if any value in the reachable graph is not sendable
-    /// (a fiber, an FFI handle, a file or socket port, and the like).
+    /// (a fiber, a file or socket port, an FFI handle, a struct with an identity key).
     ///
     /// `symbols` is the sender's display memo; every symbol met during
     /// serialization takes its name from it into the bundle's name table.
@@ -462,8 +463,8 @@ pub(crate) fn serialize_templates(
 ///
 /// The name table replays into `symbols`, the receiving instance's display
 /// memo, exactly as `SendBundle::into_value` does. Nothing else about a symbol
-/// needs carrying: an id is its name's hash, so a `LirConst::Symbol` or a pool
-/// constant means the same symbol here as where it was stored.
+/// needs carrying: an id is its name's hash, so a symbol constant in the LIR or
+/// in the pool means the same symbol here as where it was stored.
 pub(crate) fn deserialize_templates(
     stored: SendTemplates,
     alloc: &mut crate::primitives::ctx::Alloc<'_>,

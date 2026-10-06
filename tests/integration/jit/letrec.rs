@@ -1,3 +1,7 @@
+// audited: 2026-10-06
+// docs/impl/jit.md
+// Letrec closures on the JIT: their inferred signals, their captures, and nqueens with and without the JIT.
+
 use super::*;
 
 #[test]
@@ -29,14 +33,10 @@ fn test_nqueens_eval_signals_are_silent() {
     );
     for proto in compiled.bytecode.child_protos.iter() {
         if let Some(lir) = proto.lir_function.as_ref() {
-            println!("DBG proto name={} arity={:?} signal={:?} has_sc={}", lir.name.as_deref().unwrap_or("<anon>"), lir.arity, lir.signal, lir.has_suspending_call());
-        }
-    }
-    for proto in compiled.bytecode.child_protos.iter() {
-        if let Some(lir) = proto.lir_function.as_ref() {
-            let has_sc = lir.has_suspending_call();
-            let signal = lir.signal;
-            let name = lir.name.as_deref().unwrap_or("<anon>");
+            let lir = lir.view();
+            let has_sc = lir.has_op(elle::lir::code::Op::SuspendingCall);
+            let signal = lir.signal();
+            let name = lir.name().unwrap_or("<anon>");
             assert!(
                 !signal.may_yield(),
                 "nqueens closure '{}' should not yield, got signal {:?}",

@@ -13,8 +13,25 @@
 use super::super::*;
 use super::ctx::SerContext;
 use super::from_value_inner;
-use super::lir::convert_lir_for_send;
 use crate::value::closure::{ChildCode, ClosureTemplate};
+
+/// A code object's frozen LIR as it crosses: the records verbatim, and the
+/// values its `ValueConst`s load through the ordinary value walk, so a closure
+/// among them interns into the bundle once.
+pub(in crate::value::send) fn send_lir(
+    lir: Option<&std::rc::Rc<crate::lir::LirOwned>>,
+    ctx: &mut SerContext<'_>,
+) -> Result<(Option<crate::lir::LirCode>, Vec<SendValue>), String> {
+    let Some(lir) = lir else {
+        return Ok((None, Vec::new()));
+    };
+    let values = lir
+        .values()
+        .iter()
+        .map(|v| from_value_inner(*v, ctx))
+        .collect::<Result<_, _>>()?;
+    Ok((Some(lir.code().clone()), values))
+}
 
 /// Serialize one child code object, from whichever side its parent answered.
 pub(in crate::value::send) fn sendable_from_child(
@@ -72,8 +89,8 @@ pub(in crate::value::send) fn sendable_header(
         name: t.name().map(str::to_string),
         squelch_mask: SignalBits::EMPTY,
         env: Vec::new(),
-        lir_function: None,
-        lir_value_pool: Vec::new(),
+        lir: None,
+        lir_values: Vec::new(),
         child_protos,
         merged_slots: t.merged_slots().as_slice().to_vec(),
         frame_release_slots: t.frame_release_slots().to_vec(),
@@ -98,17 +115,7 @@ pub(in crate::value::send) fn sendable_from_template(
 
     let doc = t.doc.clone();
 
-    let (lir_function, lir_value_pool) = match t.lir_function.as_ref() {
-        Some(lir) => {
-            let mut lir = (**lir).clone();
-            lir.doc = None;
-            match convert_lir_for_send(&mut lir, ctx)? {
-                Some(pool) => (Some(lir), pool),
-                None => (None, Vec::new()),
-            }
-        }
-        None => (None, Vec::new()),
-    };
+    let (lir, lir_values) = send_lir(t.lir_function.as_ref(), ctx)?;
 
     let child_protos: Vec<SendableClosure> = t
         .child_protos
@@ -133,8 +140,8 @@ pub(in crate::value::send) fn sendable_from_template(
         name: t.name.clone(),
         squelch_mask: SignalBits::EMPTY,
         env: Vec::new(),
-        lir_function,
-        lir_value_pool,
+        lir,
+        lir_values,
         child_protos,
         merged_slots: t.merged_slots.iter().copied().collect(),
         frame_release_slots: t.frame_release_slots.clone(),

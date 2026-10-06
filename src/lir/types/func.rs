@@ -1,6 +1,6 @@
 // audited: 2026-10-06
-//! A lowered function — its blocks, registers and constants — with the
-//! metadata the emitter records for the JIT and the region system.
+//! A lowered function in the working form — its blocks, registers and constants —
+//! and the site records emission produces for it.
 //!
 //! docs/impl/lir.md
 
@@ -58,8 +58,8 @@ pub struct LirFunction {
     /// Only meaningful when arity is AtLeast.
     pub vararg_kind: crate::hir::VarargKind,
     /// How a `&` rest list is built: the region analysis' verdict on this
-    /// lambda (docs/impl/region/restlist.md), written by the lowerer and read
-    /// by the JIT prologue and the blueprint.
+    /// lambda (docs/impl/region/restlist.md), written by the lowerer and
+    /// frozen with the function for the JIT prologue and the blueprint.
     pub rest_list_layout: crate::value::RestListLayout,
     /// Total number of parameter slots (required + optional + rest if present).
     /// Used by VM populate_env to know how many fixed slots to fill.
@@ -68,14 +68,6 @@ pub struct LirFunction {
     /// These occupy the first `num_local_params` positions in `num_locals`.
     /// The `capture_locals_mask` indexes from position `num_local_params`.
     pub num_local_params: usize,
-    /// Yield point metadata, populated during bytecode emission.
-    /// Indexed by yield point order (0, 1, 2, ...).
-    /// Empty for non-yielding functions.
-    pub yield_points: Vec<YieldPointInfo>,
-    /// Call site metadata, populated during bytecode emission.
-    /// Only populated for functions where `signal.may_suspend()`.
-    /// Indexed by call instruction order (0, 1, 2, ...).
-    pub call_sites: Vec<CallSiteInfo>,
     /// Per-function region table: the set of compile-time region slots
     /// (`StaticRegion`, each ≥ 2) the lowerer minted for this function.
     /// Built by the lowerer from region inference; propagated to
@@ -168,192 +160,10 @@ impl LirFunction {
             rest_list_layout: crate::value::RestListLayout::PerCell,
             num_params,
             num_local_params: 0,
-            yield_points: Vec::new(),
-            call_sites: Vec::new(),
             region_table: Vec::new(),
             merged_slots: Vec::new(),
             frame_release_slots: Vec::new(),
             frame_release_regions: Vec::new(),
         }
     }
-
-    /// True if any block contains a SuspendingCall instruction.
-    pub fn has_suspending_call(&self) -> bool {
-        self.blocks.iter().any(|b| {
-            b.instructions
-                .iter()
-                .any(|si| matches!(si.instr, LirInstr::SuspendingCall { .. }))
-        })
-    }
-
-    /// True if this function is eligible for GPU compilation.
-    ///
-    /// GPU-eligible functions use only numeric operations (arithmetic,
-    /// comparison, local variable access, control flow) with no heap
-    /// allocation, closures, function calls, or signal emission.
-    ///
-    /// Checked in order of increasing cost:
-    /// 1. Signal check (cheapest — just field reads)
-    /// 2. Structural check (arity, captures, cells)
-    /// 3. Instruction whitelist (walks all basic blocks)
-    pub fn is_gpu_eligible(&self) -> bool {
-        // Signal: allow error-only (arithmetic type errors can't happen on
-        // unboxed GPU scalars), reject yield/IO/FFI/polymorphic
-        let non_error = self.signal.bits.subtract(crate::signals::SIG_ERROR);
-        if !non_error.is_empty() || self.signal.propagates != 0 {
-            return false;
-        }
-        // Structural: no variadics, no mutable cells
-        if !matches!(self.arity, Arity::Exact(_)) {
-            return false;
-        }
-        if self.capture_params_mask != 0 || !self.capture_locals_mask.is_empty() {
-            return false;
-        }
-        // Instruction whitelist: every instruction and terminator must be GPU-safe
-        self.blocks.iter().all(|b| {
-            b.instructions
-                .iter()
-                .all(|si| is_gpu_instruction(&si.instr))
-                && is_gpu_terminator(&b.terminator.terminator)
-        })
-    }
-
-    /// True if this function is safe for the CPU MLIR tier-2 path.
-    ///
-    /// Stricter than `is_gpu_eligible`: the return register must be
-    /// producible from numeric operations only. MLIR represents all
-    /// values as i64, so nil (→ 0) can't round-trip back when the
-    /// function is called from regular Elle code. Bool/Compare results
-    /// are safe — the caller reboxes them as `Value::bool(result != 0)`.
-    ///
-    /// GPU dispatch (via `gpu:map`) doesn't have this problem — the
-    /// caller reads integers out of a buffer and treats them as integers.
-    pub fn is_mlir_cpu_eligible(&self) -> bool {
-        if !self.is_gpu_eligible() {
-            return false;
-        }
-        for block in &self.blocks {
-            if let Terminator::Return(reg) = &block.terminator.terminator {
-                if self.register_reaches_non_int(*reg) {
-                    return false;
-                }
-            }
-        }
-        true
-    }
-
-    /// True if `target` is transitively produced by a non-numeric value
-    /// source (Nil constant or IntToFloat conversion). Walks backward
-    /// through definitions — Const sources, LoadLocal/StoreLocal chains.
-    /// LoadCapture is treated as int (args are validated at call site).
-    /// Bool constants and Compare results are i64 0/1 at the MLIR level;
-    /// the caller reboxes as `Value::bool(result != 0)`.
-    fn register_reaches_non_int(&self, target: Reg) -> bool {
-        use std::collections::HashSet;
-        let mut regs_to_check: Vec<Reg> = vec![target];
-        let mut seen_regs: HashSet<u32> = HashSet::new();
-        let mut seen_slots: HashSet<u16> = HashSet::new();
-        while let Some(r) = regs_to_check.pop() {
-            if !seen_regs.insert(r.0) {
-                continue;
-            }
-            for block in &self.blocks {
-                for si in &block.instructions {
-                    match &si.instr {
-                        LirInstr::Const {
-                            dst,
-                            value: LirConst::Nil,
-                        } if *dst == r => return true,
-                        // ValueConst nil is non-int (same as Const nil)
-                        LirInstr::ValueConst { dst, value } if *dst == r && value.is_nil() => {
-                            return true;
-                        }
-                        LirInstr::Convert {
-                            dst,
-                            op: ConvOp::IntToFloat,
-                            ..
-                        } if *dst == r => return true,
-                        // FloatToInt produces an int — safe, no action needed
-                        LirInstr::LoadLocal { dst, slot }
-                            if *dst == r && seen_slots.insert(*slot) =>
-                        {
-                            for b2 in &self.blocks {
-                                for si2 in &b2.instructions {
-                                    if let LirInstr::StoreLocal { slot: s, src } = &si2.instr {
-                                        if *s == *slot {
-                                            regs_to_check.push(*src);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-        false
-    }
-
-    /// Convert ValueConst instructions to Const (LirConst) for safe cross-thread transfer.
-    /// NativeFn ValueConsts are safe to keep as-is (function pointers are Send+Sync).
-    /// Closure ValueConsts are converted to `ClosureRef(idx)` using the intern table.
-    /// Returns false if any ValueConst contains a non-sendable, non-closure heap value.
-    pub fn convert_value_consts_for_send(
-        &mut self,
-        visited: &std::collections::HashMap<u64, usize>,
-    ) -> bool {
-        for block in &mut self.blocks {
-            for si in &mut block.instructions {
-                if let LirInstr::ValueConst { dst, value } = &si.instr {
-                    if value.is_native_fn() {
-                        continue; // function pointers are thread-safe
-                    }
-                    let dst = *dst;
-                    if let Some(lir_const) = value_to_lir_const(*value) {
-                        si.instr = LirInstr::Const {
-                            dst,
-                            value: lir_const,
-                        };
-                    } else if value.is_closure() {
-                        // Closure ValueConst: look up in intern table.
-                        //
-                        // This branch fires whenever a closure being sent
-                        // across a `sys/spawn` boundary contains, in its
-                        // LIR, a `ValueConst` holding a closure Value. That
-                        // happens because stdlib functions are registered
-                        // as primitives (see
-                        // `src/primitives/module_init.rs::register_stdlib_exports`
-                        // which calls `CompileCtx::register_stdlib_exports`), so user
-                        // code referencing a stdlib function inside a
-                        // lambda lowers the reference to `ValueConst` via
-                        // `immutable_values` in the lowerer. A spawned
-                        // closure that transitively calls e.g. `inc` or
-                        // `map` from stdlib will trip this branch.
-                        //
-                        // `CLOSURE_VALUE_CONST_COUNT` tracks the live count;
-                        // see the `lir/closure-value-const-count` primitive
-                        // and the `--dump=stats` output.
-                        CLOSURE_VALUE_CONST_COUNT.fetch_add(1, Ordering::Relaxed);
-                        if let Some(&idx) = visited.get(&value.payload) {
-                            si.instr = LirInstr::Const {
-                                dst,
-                                value: LirConst::ClosureRef(idx),
-                            };
-                        } else {
-                            return false;
-                        }
-                    } else {
-                        // unsendable ValueConst (compound heap value)
-                        return false;
-                    }
-                }
-            }
-        }
-        true
-    }
 }
-
-#[cfg(test)]
-mod tests;

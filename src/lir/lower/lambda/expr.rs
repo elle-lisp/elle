@@ -1,6 +1,7 @@
 // audited: 2026-10-06
 //! Closure construction: capture collection, `MakeClosure`, the capture adopts, and the lambda's rest-list layout.
 //!
+//! src/lir/lower/AGENTS.md
 //! docs/impl/region/adopt.md
 //! docs/impl/region/restlist.md
 //!
@@ -15,8 +16,7 @@ use crate::value::Arity;
 impl<'a> Lowerer<'a> {
     /// Lower a lambda expression (creates closure with captures).
     ///
-    /// `pub(in crate::lir::lower)` so that `lower_expr`, in that module, can
-    /// call it.
+    /// Visible to `crate::lir::lower`, where its caller `lower_expr` lives.
     #[allow(clippy::too_many_arguments)]
     pub(in crate::lir::lower) fn lower_lambda_expr(
         &mut self,
@@ -159,8 +159,13 @@ impl<'a> Lowerer<'a> {
             nested_lir.rest_list_layout = self.region_info.rest_list_layout(lambda_id);
         }
 
-        // Check numeric! assertion after lowering
-        if assert_numeric && !nested_lir.is_gpu_eligible() {
+        // Check numeric! assertion after lowering. Eligibility is a question
+        // the frozen form answers, so the lambda freezes to ask it.
+        if assert_numeric
+            && !crate::lir::code::freeze(&nested_lir)?
+                .view()
+                .is_gpu_eligible()
+        {
             return Err("numeric! assertion failed: function is not GPU-eligible".to_string());
         }
 
@@ -192,11 +197,9 @@ impl<'a> Lowerer<'a> {
         //   baseline incref of the binding's scope region. For a genuinely-Shared member it is
         //   balanced by the cascade decref when the closure region frees. For a NON-owner
         //   capture of a member that some OTHER closure adopted (an interior member captured
-        //   by two closures of one Owned subtree — only reachable once a future cut claims
-        //   such webs), the incref is instead inert: the member is RC-frozen, so this
-        //   closure's free-time cascade decref no-ops and the OWNER's subtree drop reclaims
-        //   the member regardless of its RC. `capture_adopt_edges` is empty without the flag,
-        //   so this is the unchanged baseline path.
+        //   by two closures of one Owned subtree), the incref is instead inert: the member is
+        //   RC-frozen, so this closure's free-time cascade decref no-ops and the OWNER's
+        //   subtree drop reclaims the member regardless of its RC.
         if let Some(hir_id) = self.current_hir_id {
             if let Some(&closure_region) = self.region_info.alloc_region.get(&hir_id) {
                 let adopt_edges = self

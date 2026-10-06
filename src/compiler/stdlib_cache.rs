@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Version tag: bump when the serialized layout changes in an incompatible way.
-const FORMAT_VERSION: u32 = 7;
+const FORMAT_VERSION: u32 = 8;
 
 /// Bytes of payload hash a cache file carries ahead of its `StoredBytecode`.
 const PAYLOAD_HASH_BYTES: usize = 8;
@@ -41,7 +41,7 @@ fn payload_hash(bytes: &[u8]) -> u64 {
 pub struct StoredBytecode {
     pub format_version: u32,
     /// The entry template: `instructions` → bytecode, `constants` → entry
-    /// pool, `child_protos` → nested lambdas. LIR preserved.
+    /// pool, `child_protos` → nested lambdas, each with its frozen LIR.
     pub entry: crate::value::send::SendableClosure,
     /// Intern table of closure constants reachable from the entry's pool and
     /// its child templates, referenced by `Ref(idx)`.

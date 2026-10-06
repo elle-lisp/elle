@@ -1,3 +1,5 @@
+// audited: 2026-10-06
+// src/wasm/AGENTS.md
 //! Linear-memory marshalling and constant materialization helpers.
 //!
 //! Register-to-memory stores at `ARGS_BASE`, truthiness checks, and the const
@@ -73,47 +75,38 @@ impl WasmEmitter {
         f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
     }
 
-    pub(in crate::wasm) fn emit_const(&mut self, f: &mut Function, dst: Reg, value: &LirConst) {
-        match value {
-            LirConst::String(s) => {
-                // A compile-time const-pool template string, built on the driving
-                // instance's heap (threaded into the emitter); the wasm runtime
-                // re-materializes it from the pool on `rt_load_const`. It lives for
-                // the module's lifetime, held by the module's const pool.
-                let heap_ptr = self.heap_ptr;
-                let region = unsafe { (*heap_ptr).new_runtime_region() };
-                let sval =
-                    crate::value::build::string(unsafe { &mut *heap_ptr }, s.clone(), region);
-                self.emit_const_pool_load(f, dst, sval);
+    /// A string literal: a compile-time const-pool string built on the driving
+    /// instance's heap (threaded into the emitter). The wasm runtime
+    /// re-materializes it from the pool on `rt_load_const`. It lives for the
+    /// module's lifetime, held by the module's const pool.
+    pub(in crate::wasm) fn emit_string_const(&mut self, f: &mut Function, dst: Reg, s: String) {
+        let heap_ptr = self.heap_ptr;
+        let region = unsafe { (*heap_ptr).new_runtime_region() };
+        let sval = crate::value::build::string(unsafe { &mut *heap_ptr }, s, region);
+        self.emit_const_pool_load(f, dst, sval);
+    }
+
+    pub(in crate::wasm) fn emit_const(&mut self, f: &mut Function, dst: Reg, value: ConstRef) {
+        let (tag, payload) = match value {
+            ConstRef::Symbol(id) => {
+                self.emit_const_pool_load(f, dst, Value::symbol(id));
+                return;
             }
-            LirConst::Symbol(id) => {
-                self.emit_const_pool_load(f, dst, Value::symbol(*id));
+            ConstRef::Keyword(hash) => {
+                self.emit_const_pool_load(f, dst, Value::keyword_from_hash(hash));
+                return;
             }
-            LirConst::Keyword(hash) => {
-                self.emit_const_pool_load(f, dst, Value::keyword_from_hash(*hash));
-            }
-            _ => {
-                let (tag, payload) = match value {
-                    LirConst::Nil => (TAG_NIL as i64, 0i64),
-                    LirConst::EmptyList => (TAG_EMPTY_LIST as i64, 0),
-                    LirConst::Bool(true) => (TAG_TRUE as i64, 0),
-                    LirConst::Bool(false) => (TAG_FALSE as i64, 0),
-                    LirConst::Int(n) => (TAG_INT as i64, *n),
-                    LirConst::Float(x) => (TAG_FLOAT as i64, x.to_bits() as i64),
-                    LirConst::Symbol(_)
-                    | LirConst::Keyword(_)
-                    | LirConst::String(_)
-                    | LirConst::ClosureRef(_)
-                    | LirConst::ValueRef(_) => {
-                        unreachable!()
-                    }
-                };
-                f.instruction(&Instruction::I64Const(tag));
-                f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
-                f.instruction(&Instruction::I64Const(payload));
-                f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
-            }
-        }
+            ConstRef::Nil => (TAG_NIL as i64, 0i64),
+            ConstRef::EmptyList => (TAG_EMPTY_LIST as i64, 0),
+            ConstRef::Bool(true) => (TAG_TRUE as i64, 0),
+            ConstRef::Bool(false) => (TAG_FALSE as i64, 0),
+            ConstRef::Int(n) => (TAG_INT as i64, n),
+            ConstRef::Float(x) => (TAG_FLOAT as i64, x.to_bits() as i64),
+        };
+        f.instruction(&Instruction::I64Const(tag));
+        f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
+        f.instruction(&Instruction::I64Const(payload));
+        f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
     }
 
     pub(in crate::wasm) fn copy_reg(&self, f: &mut Function, src: Reg, dst: Reg) {

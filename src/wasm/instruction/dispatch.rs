@@ -9,12 +9,12 @@ use super::*;
 
 impl WasmEmitter {
     /// Emit a single LIR instruction as WASM code.
-    pub(in crate::wasm) fn emit_instr(&mut self, f: &mut Function, instr: &LirInstr) {
+    pub(in crate::wasm) fn emit_instr(&mut self, f: &mut Function, instr: &InstrRef<'_>) {
         match instr {
-            LirInstr::Const { dst, value } => {
-                self.emit_const(f, *dst, value);
+            InstrRef::Const { dst, value } => {
+                self.emit_const(f, *dst, *value);
                 match value {
-                    LirConst::Int(_) => {
+                    ConstRef::Int(_) => {
                         self.known_int.insert(*dst);
                     }
                     _ => {
@@ -22,21 +22,21 @@ impl WasmEmitter {
                     }
                 }
             }
-            LirInstr::ValueConst { dst, value } => {
+            InstrRef::ValueConst { dst, value } => {
                 self.emit_value_const(f, *dst, *value);
                 self.known_int.remove(dst);
             }
-            LirInstr::MaterializeConst { dst, template, .. } => {
+            InstrRef::MaterializeConst { dst, template, .. } => {
                 // The wasm backend has its own linear-memory model and no region
                 // RC, so the region slot is irrelevant here. A flat string takes
-                // the fast path (`emit_const` handles `LirConst::String`);
+                // the fast path (`emit_string_const`);
                 // a compound literal is reconstructed as a host Value and baked as
                 // a constant, materialized into a freshly minted region held for
                 // the module's lifetime (never freed — region reclamation is a
                 // VM/JIT property; wasm literals live for the module's lifetime).
-                match template {
+                match template.decode() {
                     crate::value::ConstTemplate::String(s) => {
-                        self.emit_const(f, *dst, &LirConst::String(s.clone()));
+                        self.emit_string_const(f, *dst, s);
                     }
                     other => {
                         let heap_ptr = self.heap_ptr;
@@ -59,7 +59,7 @@ impl WasmEmitter {
                 }
                 self.known_int.remove(dst);
             }
-            LirInstr::BinOp {
+            InstrRef::BinOp {
                 dst,
                 op,
                 lhs,
@@ -83,7 +83,7 @@ impl WasmEmitter {
                     self.known_int.remove(dst);
                 }
             }
-            LirInstr::Compare {
+            InstrRef::Compare {
                 dst,
                 op,
                 lhs,
@@ -92,7 +92,7 @@ impl WasmEmitter {
             } => {
                 self.emit_compare(f, *dst, *op, *lhs, *rhs);
             }
-            LirInstr::UnaryOp {
+            InstrRef::UnaryOp {
                 dst,
                 op,
                 src,
@@ -100,17 +100,17 @@ impl WasmEmitter {
             } => {
                 self.emit_unary(f, *dst, *op, *src);
             }
-            LirInstr::IsNil { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_NIL),
-            LirInstr::IsPair { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_CONS),
-            LirInstr::IsArray { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_ARRAY),
-            LirInstr::IsArrayMut { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_ARRAY_MUT),
-            LirInstr::IsStruct { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_STRUCT),
-            LirInstr::IsStructMut { dst, src } => {
+            InstrRef::IsNil { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_NIL),
+            InstrRef::IsPair { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_CONS),
+            InstrRef::IsArray { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_ARRAY),
+            InstrRef::IsArrayMut { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_ARRAY_MUT),
+            InstrRef::IsStruct { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_STRUCT),
+            InstrRef::IsStructMut { dst, src } => {
                 self.emit_tag_check(f, *dst, *src, TAG_STRUCT_MUT)
             }
-            LirInstr::IsSet { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_SET),
-            LirInstr::IsSetMut { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_SET_MUT),
-            LirInstr::LoadLocal { dst, slot } => {
+            InstrRef::IsSet { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_SET),
+            InstrRef::IsSetMut { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_SET_MUT),
+            InstrRef::LoadLocal { dst, slot } => {
                 if self.is_closure {
                     f.instruction(&Instruction::LocalGet(self.local_slot_tag(*slot)));
                     f.instruction(&Instruction::LocalSet(self.tag_local(*dst)));
@@ -121,7 +121,7 @@ impl WasmEmitter {
                     self.copy_reg(f, src, *dst);
                 }
             }
-            LirInstr::StoreLocal { slot, src } => {
+            InstrRef::StoreLocal { slot, src } => {
                 if self.is_closure {
                     f.instruction(&Instruction::LocalGet(self.tag_local(*src)));
                     f.instruction(&Instruction::LocalSet(self.local_slot_tag(*slot)));
@@ -132,7 +132,7 @@ impl WasmEmitter {
                     self.copy_reg(f, *src, dst);
                 }
             }
-            LirInstr::LoadCapture { dst, index } => {
+            InstrRef::LoadCapture { dst, index } => {
                 let offset = (*index as u64) * 16;
                 f.instruction(&Instruction::LocalGet(self.env_local()));
                 f.instruction(&Instruction::I64Load(MemArg {
@@ -156,7 +156,7 @@ impl WasmEmitter {
                 self.emit_data_op1(f, *dst, OP_LOAD_CAPTURE, *dst);
                 f.instruction(&Instruction::End);
             }
-            LirInstr::LoadCaptureRaw { dst, index } => {
+            InstrRef::LoadCaptureRaw { dst, index } => {
                 let offset = (*index as u64) * 16;
                 f.instruction(&Instruction::LocalGet(self.env_local()));
                 f.instruction(&Instruction::I64Load(MemArg {
@@ -173,7 +173,7 @@ impl WasmEmitter {
                 }));
                 f.instruction(&Instruction::LocalSet(self.pay_local(*dst)));
             }
-            LirInstr::StoreCapture { index, src } => {
+            InstrRef::StoreCapture { index, src } => {
                 let offset = (*index as u64) * 16;
                 // Write cell to args[0]
                 f.instruction(&Instruction::I32Const(ARGS_BASE));
@@ -211,17 +211,17 @@ impl WasmEmitter {
                 f.instruction(&Instruction::Drop);
                 f.instruction(&Instruction::Drop);
             }
-            LirInstr::Call {
+            InstrRef::Call {
                 dst, func, args, ..
             } => {
                 self.emit_call(f, *dst, *func, args);
             }
-            LirInstr::SuspendingCall {
+            InstrRef::SuspendingCall {
                 dst, func, args, ..
             } => {
                 self.emit_call(f, *dst, *func, args);
             }
-            LirInstr::TailCall { func, args, .. } => {
+            InstrRef::TailCall { func, args, .. } => {
                 if !self.is_closure {
                     let dst = Reg(0);
                     self.emit_call(f, dst, *func, args);
@@ -242,17 +242,17 @@ impl WasmEmitter {
                     self.emit_tail_call_dispatch(f);
                 }
             }
-            LirInstr::IncrefRegion { .. } | LirInstr::DecrefRegion { .. } => {}
+            InstrRef::IncrefRegion { .. } | InstrRef::DecrefRegion { .. } => {}
             // The ownership-forest ops (adopt, activation adopt, co-owned-group
             // free) are region-RC ops realized on the VM/JIT tiers; handled
             // structurally here — a no-op arm, like every other region op in
             // this backend (the arena boundary reclaims).
-            LirInstr::AdoptRegion { .. }
-            | LirInstr::AdoptCellRegion { .. }
-            | LirInstr::AdoptIntoActivation { .. }
-            | LirInstr::FreeRegionGroup { .. } => {}
+            InstrRef::AdoptRegion { .. }
+            | InstrRef::AdoptCellRegion { .. }
+            | InstrRef::AdoptIntoActivation { .. }
+            | InstrRef::FreeRegionGroup { .. } => {}
             // Region/refcount support is VM-only in this backend.
-            LirInstr::StoreLocalRefcounted { slot, src } => {
+            InstrRef::StoreLocalRefcounted { slot, src } => {
                 // Treat as a plain StoreLocal — wasm doesn't track refcounts.
                 if self.is_closure {
                     f.instruction(&Instruction::LocalGet(self.tag_local(*src)));
@@ -264,79 +264,79 @@ impl WasmEmitter {
                     self.copy_reg(f, *src, dst);
                 }
             }
-            LirInstr::DecrefValueRegion { .. } => {}
-            LirInstr::DecrefCellRegion { .. } => {}
-            LirInstr::IncrefValueRegion { .. } => {}
+            InstrRef::DecrefValueRegion { .. } => {}
+            InstrRef::DecrefCellRegion { .. } => {}
+            InstrRef::IncrefValueRegion { .. } => {}
             // The coalescing oracle is a VM-interp-only debug instrument.
-            LirInstr::AssertRegionMatches { .. } => {}
-            LirInstr::List {
+            InstrRef::AssertRegionMatches { .. } => {}
+            InstrRef::List {
                 dst, head, tail, ..
             } => {
                 self.emit_data_op2(f, *dst, OP_CONS, *head, *tail);
             }
-            LirInstr::First { dst, pair } => {
+            InstrRef::First { dst, pair } => {
                 self.emit_data_op1(f, *dst, OP_CAR, *pair);
             }
-            LirInstr::Rest { dst, pair } => {
+            InstrRef::Rest { dst, pair } => {
                 self.emit_data_op1(f, *dst, OP_CDR, *pair);
             }
-            LirInstr::MatchFail { dst, src } => {
+            InstrRef::MatchFail { dst, src } => {
                 self.emit_data_op1(f, *dst, OP_MATCH_FAIL, *src);
             }
-            LirInstr::FirstDestructure { dst, src } => {
+            InstrRef::FirstDestructure { dst, src } => {
                 self.emit_data_op1(f, *dst, OP_CAR_DESTRUCTURE, *src);
             }
-            LirInstr::RestDestructure { dst, src } => {
+            InstrRef::RestDestructure { dst, src } => {
                 self.emit_data_op1(f, *dst, OP_CDR_DESTRUCTURE, *src);
             }
-            LirInstr::FirstOrNil { dst, src } => {
+            InstrRef::FirstOrNil { dst, src } => {
                 self.emit_data_op1(f, *dst, OP_CAR_OR_NIL, *src);
             }
-            LirInstr::RestOrNil { dst, src } => {
+            InstrRef::RestOrNil { dst, src } => {
                 self.emit_data_op1(f, *dst, OP_CDR_OR_NIL, *src);
             }
-            LirInstr::MakeArrayMut { dst, elements, .. } => {
+            InstrRef::MakeArrayMut { dst, elements, .. } => {
                 self.emit_data_op_n(f, *dst, OP_MAKE_ARRAY, elements);
             }
-            LirInstr::ArrayMutLen { dst, src } => {
+            InstrRef::ArrayMutLen { dst, src } => {
                 self.emit_data_op1(f, *dst, OP_ARRAY_LEN, *src);
             }
-            LirInstr::ArrayMutRefDestructure { dst, src, index } => {
+            InstrRef::ArrayMutRefDestructure { dst, src, index } => {
                 self.emit_data_op1_imm(f, *dst, OP_ARRAY_REF_DESTRUCTURE, *src, *index as i64);
             }
-            LirInstr::ArrayMutSliceFrom { dst, src, index } => {
+            InstrRef::ArrayMutSliceFrom { dst, src, index } => {
                 self.emit_data_op1_imm(f, *dst, OP_ARRAY_SLICE_FROM, *src, *index as i64);
             }
-            LirInstr::ArrayMutRefOrNil { dst, src, index } => {
+            InstrRef::ArrayMutRefOrNil { dst, src, index } => {
                 self.emit_data_op1_imm(f, *dst, OP_ARRAY_REF_OR_NIL, *src, *index as i64);
             }
-            LirInstr::StructGetOrNil { dst, src, key } => {
-                self.emit_struct_get(f, *dst, OP_STRUCT_GET_OR_NIL, *src, key);
+            InstrRef::StructGetOrNil { dst, src, key } => {
+                self.emit_struct_get(f, *dst, OP_STRUCT_GET_OR_NIL, *src, *key);
             }
-            LirInstr::StructGetDestructure { dst, src, key } => {
-                self.emit_struct_get(f, *dst, OP_STRUCT_GET_DESTRUCTURE, *src, key);
+            InstrRef::StructGetDestructure { dst, src, key } => {
+                self.emit_struct_get(f, *dst, OP_STRUCT_GET_DESTRUCTURE, *src, *key);
             }
-            LirInstr::ArrayMutExtend { dst, array, source } => {
+            InstrRef::ArrayMutExtend { dst, array, source } => {
                 self.emit_data_op2(f, *dst, OP_ARRAY_EXTEND, *array, *source);
             }
-            LirInstr::ArrayMutPush { dst, array, value } => {
+            InstrRef::ArrayMutPush { dst, array, value } => {
                 self.emit_data_op2(f, *dst, OP_ARRAY_PUSH, *array, *value);
             }
-            LirInstr::MakeCaptureCell { dst, value, .. } => {
+            InstrRef::MakeCaptureCell { dst, value, .. } => {
                 self.emit_data_op1(f, *dst, OP_MAKE_CAPTURE, *value);
             }
-            LirInstr::LoadCaptureCell { dst, cell } => {
+            InstrRef::LoadCaptureCell { dst, cell } => {
                 self.emit_data_op1(f, *dst, OP_LOAD_CAPTURE, *cell);
             }
-            LirInstr::StoreCaptureCell { cell, value } => {
+            InstrRef::StoreCaptureCell { cell, value } => {
                 self.emit_data_op2(f, *cell, OP_STORE_CAPTURE, *cell, *value);
             }
-            LirInstr::CallArrayMut {
+            InstrRef::CallArrayMut {
                 dst, func, args, ..
             } => {
                 self.emit_call_array(f, *dst, *func, *args);
             }
-            LirInstr::TailCallArrayMut { func, args, .. } => {
+            InstrRef::TailCallArrayMut { func, args, .. } => {
                 if !self.is_closure {
                     let dst = Reg(0);
                     self.emit_call_array(f, dst, *func, *args);
@@ -355,11 +355,11 @@ impl WasmEmitter {
                     self.emit_tail_call_dispatch(f);
                 }
             }
-            LirInstr::Eval { dst, expr, env } => {
+            InstrRef::Eval { dst, expr, env } => {
                 let _ = (dst, expr, env);
                 f.instruction(&Instruction::Unreachable);
             }
-            LirInstr::LoadResumeValue { dst } => {
+            InstrRef::LoadResumeValue { dst } => {
                 if self.may_suspend {
                     f.instruction(&Instruction::LocalGet(self.resume_tag_local));
                     f.instruction(&Instruction::LocalSet(self.tag_local(*dst)));
@@ -369,7 +369,7 @@ impl WasmEmitter {
                     f.instruction(&Instruction::Unreachable);
                 }
             }
-            LirInstr::LoadSelf { dst } => {
+            InstrRef::LoadSelf { dst } => {
                 // The executing closure lives in the reserved `SELF_SLOT` in linear
                 // memory (tag at `SELF_SLOT`, payload at `SELF_SLOT + 8`), written by
                 // the host at every closure entry and carried across suspend/resume
@@ -391,7 +391,7 @@ impl WasmEmitter {
                 }));
                 f.instruction(&Instruction::LocalSet(self.pay_local(*dst)));
             }
-            LirInstr::MakeClosure {
+            InstrRef::MakeClosure {
                 dst,
                 closure_id,
                 captures,
@@ -399,7 +399,7 @@ impl WasmEmitter {
             } => {
                 self.emit_make_closure(f, *dst, *closure_id, captures);
             }
-            LirInstr::PushParamFrame { pairs } => {
+            InstrRef::PushParamFrame { pairs } => {
                 for (i, pair) in pairs.chunks(2).enumerate() {
                     self.write_val_to_mem_offset(f, pair[0], ARGS_BASE + (i as i32) * 32);
                     self.write_val_to_mem_offset(f, pair[1], ARGS_BASE + (i as i32) * 32 + 16);
@@ -408,17 +408,17 @@ impl WasmEmitter {
                 f.instruction(&Instruction::I32Const((pairs.len() / 2) as i32));
                 f.instruction(&Instruction::Call(FN_RT_PUSH_PARAM));
             }
-            LirInstr::PopParamFrame => {
+            InstrRef::PopParamFrame => {
                 f.instruction(&Instruction::Call(FN_RT_POP_PARAM));
             }
-            LirInstr::Convert { dst, op, src } => {
+            InstrRef::Convert { dst, op, src } => {
                 let op_code = match op {
                     crate::lir::ConvOp::IntToFloat => OP_INT_TO_FLOAT,
                     crate::lir::ConvOp::FloatToInt => OP_FLOAT_TO_INT,
                 };
                 self.emit_data_op1(f, *dst, op_code, *src);
             }
-            LirInstr::CheckSignalBound { .. } => {}
+            InstrRef::CheckSignalBound { .. } => {}
             _ => self.emit_instr_intrinsics(f, instr),
         }
     }

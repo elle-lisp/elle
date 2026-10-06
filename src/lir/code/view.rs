@@ -22,7 +22,6 @@ use crate::value::{Arity, Value};
 
 /// The slices a node decodes against.
 #[derive(Clone, Copy, Debug)]
-#[allow(dead_code)]
 pub(crate) struct Parts<'a> {
     pub(crate) nodes: &'a [Node],
     pub(crate) pool: &'a [u32],
@@ -64,6 +63,11 @@ impl<'a> LirView<'a> {
             },
             code,
         }
+    }
+
+    /// The records themselves, for the code module's own rewrites.
+    pub(crate) fn code(&self) -> &'a LirCode {
+        self.code
     }
 
     // ── header ─────────────────────────────────────────────────────────
@@ -128,6 +132,10 @@ impl<'a> LirView<'a> {
         &self.code.vararg_kind
     }
 
+    pub fn rest_list_layout(&self) -> crate::value::RestListLayout {
+        self.code.rest_list_layout
+    }
+
     pub fn region_table(&self) -> &'a [StaticRegion] {
         &self.code.region_table
     }
@@ -170,6 +178,14 @@ impl<'a> LirView<'a> {
     /// How many blocks the function has.
     pub fn block_count(&self) -> usize {
         self.code.blocks.len()
+    }
+
+    /// The `i`th block in append order. Panics past the last.
+    pub fn block(&self, i: usize) -> BlockRef<'a> {
+        BlockRef {
+            parts: self.parts,
+            rec: &self.code.blocks[i],
+        }
     }
 
     /// Every node of every block, in block order.
@@ -224,11 +240,20 @@ impl<'a> BlockRef<'a> {
     }
 
     /// The block's instructions, in order.
-    pub fn nodes(&self) -> impl ExactSizeIterator<Item = NodeRef<'a>> + 'a {
+    pub fn nodes(&self) -> impl ExactSizeIterator<Item = NodeRef<'a>> + DoubleEndedIterator + 'a {
         let parts = self.parts;
         let first = self.rec.first as usize;
         let run = &parts.nodes[first..first + self.rec.len as usize];
         run.iter().map(move |node| NodeRef { parts, node })
+    }
+
+    /// The block's `j`th instruction. Panics past the last.
+    pub fn node(&self, j: usize) -> NodeRef<'a> {
+        assert!(j < self.len(), "node {j} of a {}-node block", self.len());
+        NodeRef {
+            parts: self.parts,
+            node: &self.parts.nodes[self.rec.first as usize + j],
+        }
     }
 
     /// The block's instructions, decoded.

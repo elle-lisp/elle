@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 // src/jit/AGENTS.md
 // docs/impl/region/mechanism.md
 //! The two checks a compiled call site runs on the way back.
@@ -117,13 +117,13 @@ impl FunctionTranslator<'_> {
         // runtime helper indexes JitCode.call_sites with this same index, so
         // a missing entry means the counters diverged and the side-exit
         // would rebuild the frame from another site's stack shape.
-        let stack_regs = match self.lir.call_sites.get(call_site_idx as usize) {
-            Some(cs) => cs.stack_regs.as_slice(),
+        let stack_regs = match self.lir.call_site(call_site_idx as usize) {
+            Some(cs) => cs.stack_regs,
             None => {
                 return Err(JitError::InvalidLir(format!(
                     "call site {} has no emitter-recorded metadata ({} recorded)",
                     call_site_idx,
-                    self.lir.call_sites.len()
+                    self.lir.call_sites().len()
                 )))
             }
         };

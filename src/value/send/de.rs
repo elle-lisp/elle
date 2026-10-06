@@ -106,15 +106,7 @@ pub(in crate::value::send) fn template_from_sendable(
         .into_iter()
         .map(|cv| into_value_inner(cv, ctx))
         .collect();
-    let lir_value_pool: Vec<Value> = std::mem::take(&mut sc.lir_value_pool)
-        .into_iter()
-        .map(|cv| into_value_inner(cv, ctx))
-        .collect();
-    let lir_function = sc.lir_function.take().map(|mut lir| {
-        patch_lir_closure_refs(&mut lir, ctx);
-        patch_lir_value_refs(&mut lir, &lir_value_pool);
-        Rc::new(lir)
-    });
+    let lir_function = receive_lir(sc.lir.take(), std::mem::take(&mut sc.lir_values), ctx);
     let child_protos: Vec<Rc<crate::value::TemplateProto>> = std::mem::take(&mut sc.child_protos)
         .into_iter()
         .map(|p| template_from_sendable(p, ctx))
@@ -129,7 +121,7 @@ pub(in crate::value::send) fn template_from_sendable(
 fn blueprint(
     sc: SendableClosure,
     constants: Vec<Value>,
-    lir_function: Option<std::rc::Rc<crate::lir::LirFunction>>,
+    lir_function: Option<std::rc::Rc<crate::lir::LirOwned>>,
     child_protos: Vec<std::rc::Rc<crate::value::TemplateProto>>,
 ) -> crate::value::TemplateProto {
     crate::value::TemplateProto {
@@ -386,20 +378,8 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) ->
                 .map(|sv| into_value_inner(sv, ctx))
                 .collect();
 
-            // Rebuild the compound-value pool lifted out of the LIR on send.
-            let lir_value_pool: Vec<Value> = std::mem::take(&mut sc.lir_value_pool)
-                .into_iter()
-                .map(|sv| into_value_inner(sv, ctx))
-                .collect();
-
-            // Patch the LIR placeholders back to ValueConst: ClosureRef entries
-            // (forcing referenced closures to reconstruct) and ValueRef entries
-            // (from the pool above). Both invert convert_lir_for_send.
-            let lir_function = sc.lir_function.take().map(|mut lir| {
-                patch_lir_closure_refs(&mut lir, ctx);
-                patch_lir_value_refs(&mut lir, &lir_value_pool);
-                Rc::new(lir)
-            });
+            // The LIR crosses as data; only its values are rebuilt here.
+            let lir_function = receive_lir(sc.lir.take(), std::mem::take(&mut sc.lir_values), ctx);
 
             // Reconstruct the nested-lambda blueprints so this template's
             // `MakeClosure`s resolve by index in the worker.
@@ -427,56 +407,20 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) ->
     }
 }
 
-/// Patch `ClosureRef(idx)` entries in a LIR function back to `ValueConst`.
-/// Forces reconstruction of any referenced closures that haven't been built yet.
-fn patch_lir_closure_refs(lir: &mut crate::lir::LirFunction, ctx: &mut DeserContext<'_, '_>) {
-    use crate::lir::LirConst;
-    use crate::lir::LirInstr;
-
-    for block in &mut lir.blocks {
-        for si in &mut block.instructions {
-            if let LirInstr::Const {
-                dst,
-                value: LirConst::ClosureRef(ref_idx),
-            } = &si.instr
-            {
-                let ref_idx = *ref_idx;
-                let dst = *dst;
-                // Ensure the referenced closure is reconstructed.
-                let closure_val = match ctx.states[ref_idx] {
-                    ReconState::Done(v) => v,
-                    _ => {
-                        // Force reconstruction via a Ref lookup.
-                        into_value_inner(SendValue::Ref(ref_idx), ctx)
-                    }
-                };
-                si.instr = LirInstr::ValueConst {
-                    dst,
-                    value: closure_val,
-                };
-            }
-        }
-    }
-}
-
-/// Patch `ValueRef(idx)` entries in a LIR function back to `ValueConst`, using
-/// the reconstructed compound-value `pool`. Inverts `convert_lir_for_send`'s
-/// pass 1; mirrors `patch_lir_closure_refs`.
-fn patch_lir_value_refs(lir: &mut crate::lir::LirFunction, pool: &[Value]) {
-    use crate::lir::LirConst;
-    use crate::lir::LirInstr;
-
-    for block in &mut lir.blocks {
-        for si in &mut block.instructions {
-            if let LirInstr::Const {
-                dst,
-                value: LirConst::ValueRef(ref_idx),
-            } = &si.instr
-            {
-                let value = pool[*ref_idx];
-                let dst = *dst;
-                si.instr = LirInstr::ValueConst { dst, value };
-            }
-        }
-    }
+/// A code object's frozen LIR on the receiving side: the records as they
+/// crossed, and the values its `ValueConst`s load, rebuilt here through the
+/// ordinary value walk.
+fn receive_lir(
+    lir: Option<crate::lir::LirCode>,
+    values: Vec<SendValue>,
+    ctx: &mut DeserContext<'_, '_>,
+) -> Option<std::rc::Rc<crate::lir::LirOwned>> {
+    let lir = lir?;
+    let values = values
+        .into_iter()
+        .map(|sv| into_value_inner(sv, ctx))
+        .collect();
+    let owned = crate::lir::LirOwned::from_parts(lir, values)
+        .expect("a bundle carries the values its LIR indexes");
+    Some(std::rc::Rc::new(owned))
 }
