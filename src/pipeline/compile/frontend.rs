@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-10-06
 // src/pipeline/AGENTS.md
 //! Shared file/syntax compilation front end: parse → epoch-migrate → macro
 //! expand (with include splicing) → classify → analyze → regularize. Every
@@ -133,12 +133,13 @@ fn compile_syntaxes_frontend_xform_inner(
                     .collect()
             };
             let mut expanded_forms = Vec::new();
-            let mut included: HashSet<String> = HashSet::from([source_name.to_string()]);
+            let mut included = included_root(source_name);
             while let Some(syntax) = pending.pop_front() {
                 if resolve_and_splice_include(
                     &arena,
                     &syntax,
-                    source_name,
+                    macro_vm,
+                    &meta,
                     &mut pending,
                     &mut included,
                 )? {
