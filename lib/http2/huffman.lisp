@@ -1,13 +1,16 @@
-(elle/epoch 13)
-# audited: 2026-09-28
+(elle/epoch 14)
+# audited: 2026-10-06
 ## lib/http2/huffman.lisp — HPACK Huffman codec (RFC 7541 Appendix B)
+## lib/http2/overview.md
 ##
 ## Loaded via: (def huffman ((import "std/http2/huffman")))
 ##
-## Exports: {:encode :decode :test}
-##   encode [bytes] -> bytes   — Huffman-encode a byte sequence
-##   decode [bytes] -> bytes   — Huffman-decode a byte sequence
-##   test   []      -> true    — internal self-tests
+## Exports: {:encode :encoded-length :decode :table :test}
+##   encode         [bytes] -> bytes — Huffman-encode a byte sequence
+##   encoded-length [bytes] -> int   — the byte length encode would return
+##   decode         [bytes] -> bytes — Huffman-decode a byte sequence
+##   table                           — [code bit-length] per byte value, and EOS
+##   test           []      -> true  — internal self-tests
 
 (fn []
 
@@ -114,6 +117,20 @@
                 (bit/and (bit/or (bit/shl buf pad) (- (bit/shl 1 pad) 1)) 0xff))))
       (apply bytes out)))
 
+  ## ── Encoded length ─────────────────────────────────────────────────────
+
+  (defn encoded-length [input]
+    "The length in bytes of input's Huffman code, padding included.
+     Costs one table read per byte, and no output."
+    (let* [src (if (string? input) (bytes input) input)
+           len (length src)
+           @bits 0
+           @i 0]
+      (while (< i len)
+        (assign bits (+ bits (get (get table (get src i)) 1)))
+        (assign i (+ i 1)))
+      (/ (+ bits 7) 8)))
+
   ## ── Decode ─────────────────────────────────────────────────────────────
 
   (defn huffman-decode [input]
@@ -216,4 +233,8 @@
 
   ## ── Exports ────────────────────────────────────────────────────────────
 
-  {:encode huffman-encode :decode huffman-decode :table table :test run-tests})
+  {:encode huffman-encode
+   :encoded-length encoded-length
+   :decode huffman-decode
+   :table table
+   :test run-tests})

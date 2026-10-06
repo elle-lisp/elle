@@ -1,11 +1,14 @@
-(elle/epoch 12)
+(elle/epoch 14)
+# audited: 2026-10-06
 ## lib/http2/hpack.lisp — HPACK header compression (RFC 7541)
+## lib/http2/overview.md
 ##
 ## Loaded via:
 ##   (def huffman ((import "std/http2/huffman")))
 ##   (def hpack   ((import "std/http2/hpack") :huffman huffman))
 ##
-## Exports: {:make-encoder :make-decoder :encode :decode :test}
+## Exports: {:make-encoder :make-decoder :encode :decode :encode-int
+##           :decode-int :set-encoder-table-size :static-table :test}
 
 (fn [&named huffman]
 
@@ -46,7 +49,7 @@
         (let* [entry (get static-table i)
                name (get entry 0)
                value (get entry 1)
-               pair-key (concat name "\x00" value)]
+               pair-key (concat name "x00" value)]
           (when (nil? (get by-name name)) (put by-name name i))  # Store first occurrence for name+value pair
           (when (nil? (get by-pair pair-key)) (put by-pair pair-key i)))
         (assign i (+ i 1)))
@@ -94,7 +97,7 @@
   (defn dt-lookup [dt name value]
     "Look up a header in static + dynamic tables.
      Returns {:index i :exact? bool} or nil."
-    (block (let [pair-key (concat name "\x00" value)]
+    (block (let [pair-key (concat name "x00" value)]
              (let [exact-static (get static-index:by-pair pair-key)]
                (when (not (nil? exact-static))
                  (break {:index exact-static :exact? true})))  # Check dynamic table
@@ -178,9 +181,12 @@
   ## ── String codec (RFC 7541 Section 5.2) ────────────────────────────────
 
   (defn encode-string [s use-huffman?]
-    "Encode an HPACK string literal. Returns bytes."
+    "Encode an HPACK string literal. Returns bytes.
+     Huffman-codes the string only when the code is shorter than the
+     string; a tie goes raw, and a raw literal costs the decoder nothing."
     (let [str-bytes (if (string? s) (bytes s) s)]
-      (if (and use-huffman? huffman)
+      (if (and use-huffman? huffman
+               (< (huffman:encoded-length str-bytes) (length str-bytes)))
         (let* [encoded (huffman:encode str-bytes)
                len-ints (encode-int (length encoded) 7)
                first-byte (bit/or 0x80 (get len-ints 0))]

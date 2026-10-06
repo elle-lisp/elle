@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-28
+(elle/epoch 14)
+# audited: 2026-10-06
 ## lib/http2/session.lisp — session state and everything an h2 session sends
 ## lib/http2/overview.md
 ##
@@ -7,7 +7,8 @@
 ##   (def session ((import "std/http2/session")
 ##                 :frame frame :stream stream :hpack hpack))
 ##
-## Exports: {:make-session :writer-loop :close-writer :send-frame
+## Exports: {:make-session :checked-max-frame-size :advertised-settings
+##           :writer-loop :close-writer :send-frame
 ##           :send-settings :send-settings-ack :send-window-update :send-goaway
 ##           :send-rst-stream :apply-remote-settings :get-stream
 ##           :notify-all-streams :encode-and-send-headers
@@ -35,9 +36,28 @@
     [[C:settings-initial-window-size INITIAL-WINDOW]
      [C:settings-max-frame-size MAX-FRAME] [C:settings-enable-push 0]])
 
+  (defn checked-max-frame-size [size]
+    "`size`, or the default 256 KiB when `size` is nil. Raises an h2-error
+     whose :reason is :invalid-max-frame-size for anything else outside
+     RFC 9113's 16384..16777215, so a caller checks before it connects."
+    (cond
+      (nil? size) MAX-FRAME
+      (and (integer? size) (<= 16384 size 16777215)) size
+      true (error {:error :h2-error
+                   :reason :invalid-max-frame-size
+                   :value size
+                   :message "max-frame-size must be an integer in 16384..16777215"})))
+
+  (defn advertised-settings [session]
+    "The [id value] pairs of the SETTINGS frame `session` opens with: the
+     defaults, with the session's own max frame size."
+    [[C:settings-initial-window-size INITIAL-WINDOW]
+     [C:settings-max-frame-size (get session:local-settings :max-frame-size)]
+     [C:settings-enable-push 0]])
+
   ## ── Session constructor ────────────────────────────────────────────────
 
-  (defn make-session [transport host is-server? &named scheme]
+  (defn make-session [transport host is-server? &named scheme max-frame-size]
     @{:transport transport
       :is-server? is-server?
       :host host
@@ -48,7 +68,7 @@
       :hpack-decoder (hpack:make-decoder)
       :local-settings @{:header-table-size 4096
                         :initial-window-size INITIAL-WINDOW
-                        :max-frame-size MAX-FRAME
+                        :max-frame-size (checked-max-frame-size max-frame-size)
                         :max-concurrent-streams 100
                         :enable-push 0}
       :remote-settings @{:header-table-size 4096
@@ -381,6 +401,8 @@
   ## ── Exports ────────────────────────────────────────────────────────────
 
   {:make-session make-session
+   :checked-max-frame-size checked-max-frame-size
+   :advertised-settings advertised-settings
    :writer-loop writer-loop
    :close-writer close-writer
    :send-frame send-frame
