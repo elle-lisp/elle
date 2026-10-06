@@ -1,17 +1,16 @@
 // audited: 2026-10-05
-//! Solve the rules in datalog.rs with the datafrog crate, each join written by hand over sorted relations.
+//! Solve the solver's rules again with the datafrog crate, as an independent check on the worklist's model.
 //!
-//! docs/signals/inference.md
+//! docs/impl/solver.md
 
-use crate::datalog::Solution;
 use crate::link::Lowered;
-use crate::model::{Model, TOP};
+use crate::model::{Model, Solution, TOP};
 use datafrog::{Iteration, Relation, RelationLeaper, ValueFilter};
 use std::collections::HashSet;
 
 type Pair = (u32, u32);
 
-/// Compute the least model of the rules in datalog.rs.
+/// Compute the least model of the rules, each one a join over sorted relations.
 pub fn solve(model: &Model, lowered: &Lowered) -> Solution {
     let f = &model.facts;
     let call_by_g: Relation<(u32, Pair)> =

@@ -1,28 +1,28 @@
 // audited: 2026-10-05
-//! A spike: solve signal inference across files with z3, and compare the answer with the analyzer's.
+//! A spike: solve signal inference across files, and compare the answer with the analyzer's.
 //!
-//! docs/signals/inference.md
-//! docs/modules.md
+//! docs/impl/solver.md
+//! docs/modules-proposal.md
 //!
-//! Usage: `signal_solve [--all] [--no-follow] [--determinism] [--expect] [--dump FILE] FILE...`
+//! Usage: `signal_solve [--all] [--no-follow] [--expect] FILE...`
 //!
 //! The binary analyzes each FILE and, unless `--no-follow`, every `.lisp`
 //! file that its literal imports name. Each file's HIR becomes Datalog facts.
-//! z3 computes the least model over all of them at once, and a worklist in
-//! Rust computes it again as a check. `--expect` checks the `# expect` lines
-//! in the analyzed files against the model.
+//! The worklist in fixpoint.rs computes the least model over all of them at
+//! once, and datafrog computes it again in crosscheck.rs. The run fails when
+//! the two models differ, or when `--expect` finds an `# expect` or
+//! `# violates` line in the analyzed files that the model does not meet.
 
-mod by_ascent;
-mod by_crepe;
-mod by_datafrog;
-mod datalog;
+mod crosscheck;
+mod expect;
 mod extract;
 mod fixpoint;
 mod link;
 mod model;
 mod report;
+mod visit;
 
-use extract::{literal_imports, Extractor, Unit};
+use extract::{Extractor, Unit};
 use model::{Model, VarKey};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Instant;
@@ -30,23 +30,18 @@ use std::time::Instant;
 fn main() {
     let mut all = false;
     let mut follow = true;
-    let mut determinism = false;
     let mut expect = false;
-    let mut dump: Option<String> = None;
     let mut files = Vec::new();
-    let mut args = std::env::args().skip(1);
-    while let Some(a) = args.next() {
+    for a in std::env::args().skip(1) {
         match a.as_str() {
             "--all" => all = true,
             "--no-follow" => follow = false,
-            "--determinism" => determinism = true,
             "--expect" => expect = true,
-            "--dump" => dump = args.next(),
             _ => files.push(a),
         }
     }
     if files.is_empty() {
-        eprintln!("usage: signal_solve [--all] [--no-follow] [--determinism] [--expect] [--dump FILE] FILE...");
+        eprintln!("usage: signal_solve [--all] [--no-follow] [--expect] FILE...");
         std::process::exit(2);
     }
 
@@ -54,7 +49,7 @@ fn main() {
     let t = Instant::now();
     let mut units: Vec<Unit> = Vec::new();
     let mut failed: Vec<(String, String)> = Vec::new();
-    let mut queue: VecDeque<String> = files.iter().map(|f| extract::canonical(f)).collect();
+    let mut queue: VecDeque<String> = files.iter().map(|f| visit::canonical(f)).collect();
     let mut seen: HashSet<String> = queue.iter().cloned().collect();
     while let Some(path) = queue.pop_front() {
         let source = match std::fs::read_to_string(&path) {
@@ -78,7 +73,7 @@ fn main() {
                 }
             };
         let mut imports = Vec::new();
-        literal_imports(&analysis.hir, &analysis.arena, &mut imports);
+        visit::literal_imports(&analysis.hir, &analysis.arena, &mut imports);
         if follow {
             for i in imports {
                 if seen.insert(i.clone()) {
@@ -114,6 +109,7 @@ fn main() {
         }
     }
     link::link(&mut model, &shapes, pendings);
+    let lowered = link::lower(&model);
     let extract_time = t.elapsed();
     if std::env::var_os("SIGNAL_SOLVE_PRIMS").is_some() {
         for key in &model.keys_by_id {
@@ -128,60 +124,12 @@ fn main() {
         }
     }
 
-    let lowered = link::lower(&model);
-    let program = datalog::program(&model, &lowered, false);
-    if let Some(path) = &dump {
-        std::fs::write(path, &program).expect("write the program");
-    }
     let t = Instant::now();
-    let solution = match datalog::solve(&program) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("{e}");
-            std::process::exit(1);
-        }
-    };
+    let solution = fixpoint::solve(&model, &lowered);
     let solve_time = t.elapsed();
     let t = Instant::now();
-    let native = fixpoint::solve(&model, &lowered);
-    let native_time = t.elapsed();
-    let native_agrees = native.bits == solution.bits && native.dep == solution.dep;
-
-    // Each in-process engine runs five times and reports its fastest run.
-    type Engine = fn(&Model, &link::Lowered) -> datalog::Solution;
-    let engines: [(&str, Engine); 4] = [
-        ("worklist", fixpoint::solve),
-        ("ascent", by_ascent::solve),
-        ("crepe", by_crepe::solve),
-        ("datafrog", by_datafrog::solve),
-    ];
-    let engine_runs: Vec<report::EngineRun> = engines
-        .iter()
-        .map(|&(name, solve)| {
-            let mut best = std::time::Duration::MAX;
-            let mut model_out = datalog::Solution::default();
-            for _ in 0..5 {
-                let t = Instant::now();
-                model_out = solve(&model, &lowered);
-                best = best.min(t.elapsed());
-            }
-            report::EngineRun {
-                name,
-                time: best,
-                same_as_worklist: model_out.bits == native.bits && model_out.dep == native.dep,
-                same_as_z3: model_out.bits == solution.bits && model_out.dep == solution.dep,
-                same_viol_as_z3: name == "worklist" || model_out.viol == solution.viol,
-            }
-        })
-        .collect();
-
-    let deterministic = if determinism {
-        let again =
-            datalog::solve(&datalog::program(&model, &lowered, true)).expect("second solve");
-        Some(again == solution)
-    } else {
-        None
-    };
+    let check = crosscheck::solve(&model, &lowered);
+    let check_time = t.elapsed();
 
     let symbols = rt.symbols();
     let ctx = report::Context {
@@ -200,16 +148,20 @@ fn main() {
             analyze_time,
             extract_time,
             solve_time,
-            program_bytes: program.len(),
-            deterministic,
-            native_time,
-            native_agrees,
-            engines: &engine_runs,
+            check_time,
             expect,
         },
     );
+    let mut exit = 0;
+    if check != solution {
+        println!("the worklist and datafrog solved different models:");
+        let n = report::disagreement(&ctx, &check);
+        eprintln!("the two engines disagree on {n} tuple(s)");
+        exit = 1;
+    }
     if failures > 0 {
         eprintln!("{failures} expectation(s) failed");
-        std::process::exit(1);
+        exit = 1;
     }
+    std::process::exit(exit);
 }
