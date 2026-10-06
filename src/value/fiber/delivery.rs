@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! The delivery ledger: how the current park's delivery references are funded.
 //!
 //! docs/impl/region/park.md
@@ -8,8 +8,7 @@
 //! other side. Which side mints, and what else the park owes, depends on the
 //! park's shape — and only the site that builds the park knows the shape. The
 //! ledger is the one record that carries the answer from the park to the seam
-//! that ends it (docs/impl/region/park.md § "A park names its funding in the
-//! delivery ledger").
+//! that ends it (docs/impl/region/park.md).
 //!
 //! The fields are private: a park names its funding through a method or not at
 //! all, and each method carries the invariant its transition upholds. The
@@ -22,7 +21,7 @@ use crate::value::{SignalBits, Value};
 
 /// Where an error was raised, carried out of the dispatch loop with the exit.
 /// It says what a restart delivers into, and so what the delivery owes
-/// (docs/impl/vm.md § "The error exit").
+/// (docs/impl/vm.md).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum RaiseSite {
     /// An `Emit` raise: the restart value takes the emit's result, and the
@@ -37,8 +36,7 @@ pub enum RaiseSite {
     /// first instruction. A restart continues after it and delivers nothing.
     NoResult,
     /// A squelch boundary refused a tail call, ending the activation the call
-    /// replaced (docs/impl/region/park.md § "A restart delivers into an error
-    /// park").
+    /// replaced (docs/impl/region/park.md).
     TailRefused,
 }
 
@@ -75,10 +73,9 @@ pub struct Delivery {
     /// signal's payload, the payload exemption on the abandoned-frame walk and
     /// the parked frame's discharge is withdrawn: a frame's own reference funds
     /// no delivery, so every release the tables name is genuinely owed
-    /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases
-    /// it still owes"). A native install records nothing here — its delivery is
-    /// the payload's birth reference or the frame's left-standing one, which
-    /// the exemption preserves.
+    /// (docs/impl/region/mechanism.md). A native install records nothing here —
+    /// its delivery is the payload's birth reference or the frame's
+    /// left-standing one, which the exemption preserves.
     minted: Option<Value>,
     /// The runtime-built payload parked in `Fiber::signal`, whose region the
     /// install that displaces it owes one decref: a capability denial's
@@ -86,8 +83,7 @@ pub struct Delivery {
     /// built. The body never names either, so no `decref_point` names its
     /// region; the reference the allocation left is owed by whatever replaces
     /// the payload in the slot — a resume's delivery, or an abort's /
-    /// refusal's injected error (docs/impl/region/park.md § "A payload the
-    /// RUNTIME built is released by the install that displaces it"). Carried
+    /// refusal's injected error (docs/impl/region/park.md). Carried
     /// as the payload rather than a flag so the release is gated on
     /// representation identity with the live parked signal, and TAKEN by the
     /// displacing install ([`Self::take_bodyless`]) so no second install can
@@ -99,8 +95,7 @@ pub struct Delivery {
     /// release of the resume result is that reader, so [`Self::take_resume_funding`]
     /// clears the record at the crossing. A `squelch`/`attune` boundary is the
     /// one end of a park that has no reader at all, and it releases what this
-    /// names (docs/impl/region/park.md § "A boundary ends a park with no reader
-    /// and no install").
+    /// names (docs/impl/region/park.md).
     ///
     /// Written by the site that TAKES the retain — the two suspend arms, the two
     /// denial arms, the `Emit` handler, and their JIT twins — so a record exists
@@ -129,10 +124,9 @@ pub struct Delivery {
     /// call's compiler-emitted result release; a bytecode callee funds that
     /// reference with its `Return` mint, but a primitive that suspends never
     /// returns and a raising call never produced its result, so the delivery
-    /// mints it instead (docs/impl/region/park.md § "A delivery into a replayed
-    /// frame carries one owning reference"). Rides the fiber rather than the
-    /// frame because a tail suspend's park is built later and elsewhere, by a
-    /// driver that never saw the primitive.
+    /// mints it instead (docs/impl/region/park.md). Rides the fiber rather than
+    /// the frame because a tail suspend's park is built later and elsewhere, by
+    /// a driver that never saw the primitive.
     resume_unfunded: bool,
 }
 
@@ -170,6 +164,12 @@ impl Delivery {
     /// `handle_capability_denial[_tail]` and `jit_capability_denial`.
     pub(crate) fn park_denial(&mut self, bits: SignalBits, payload: Value) {
         self.park_bodyless(bits, payload);
+    }
+
+    /// An `Emit` of a withheld bit parked a denial.
+    #[cfg(test)]
+    pub(crate) fn park_emit_denial(&mut self, bits: SignalBits, payload: Value) {
+        self.park_denial(bits, payload);
     }
 
     /// A yielding io op parked the `IoRequest` it built: a primitive park
@@ -216,8 +216,7 @@ impl Delivery {
             !self.resume_unfunded,
             "delivery ledger: parking over an unconsumed park — a route ended \
              the previous park without consuming its resume funding \
-             (docs/impl/region/park.md § \"A park names its funding in the \
-             delivery ledger\")",
+             (docs/impl/region/park.md)",
         );
     }
 
@@ -233,9 +232,8 @@ impl Delivery {
     /// the raising call's result position. A `Call` site produced no result, so
     /// the resume value owes the `ResumeDelivery` mint; an `Emit` site's
     /// continuation funds its own release, and a `NoResult` site takes no
-    /// resume value at all (docs/impl/region/park.md § "A restart delivers into
-    /// an error park"). The raise's own mint record stands: it names the parked
-    /// payload.
+    /// resume value at all (docs/impl/region/park.md). The raise's own mint
+    /// record stands: it names the parked payload.
     ///
     /// A capability denial of `:error` also exits under `SIG_ERROR`, and in tail
     /// position the driver builds its frame. That park is the denial's own, so a

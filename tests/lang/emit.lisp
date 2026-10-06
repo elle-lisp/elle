@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 15)
+# audited: 2026-10-06
 # ── emit special form tests ───────────────────────────────────────────
 #
 # (emit <signal> <value>) is a special form when the first argument is
@@ -15,8 +16,12 @@
   (assert (= (fiber/status f) :paused) "emit :yield pauses fiber")
   (assert (= (fiber/resume f 5) 15) "emit :yield resumes: 5 + 10 = 15"))
 
-# (emit :yield) — no implicit nil form (emit requires 2 args)
-# Use (yield) for the 0-arg form.
+# (emit :yield) raises with a nil payload.
+(let [f (fiber/new (fn []
+                     (emit :yield)
+                     :done) |:yield|)]
+  (assert (nil? (fiber/resume f)) "emit with no payload raises nil")
+  (assert (= (fiber/resume f) :done) "and resumes past it"))
 
 # (emit :error val) emits an error signal
 (let [f (fiber/new (fn [] (emit :error :boom)) |:error|)]
@@ -35,7 +40,7 @@
       (assert (= (bit/and bits 2) 2) "emit set: :yield bit present")
       (assert (= (bit/and bits 512) 512) "emit set: :io bit present"))))
 
-# ── yield still works (it's still a special form for now) ────────────
+# ── yield is a macro over emit ───────────────────────────────────────
 
 (let [f (fiber/new (fn []
                      (yield 10)
@@ -97,7 +102,7 @@
 
 # ── emit interacts correctly with capability denial ──────────────────
 
-# A fiber with :deny |:error| can still (emit :yield val) because
-# the emit instruction itself doesn't go through call_inner
+# A fiber denied :error can still yield: the emit raises :yield alone, which
+# the fiber holds. caps-emit.lisp holds the emits a fiber is denied.
 (let [f (fiber/new (fn [] (emit :yield 42)) |:yield| :deny |:error|)]
   (assert (= (fiber/resume f) 42) "emit :yield works despite :deny |:error|"))

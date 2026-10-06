@@ -1,13 +1,12 @@
-(elle/epoch 12)
-# audited: 2026-09-21
-# ── dynamic emit requires the bits it raises (#1073, dynamic half) ─────
+(elle/epoch 15)
+# audited: 2026-10-06
+# A dynamic emit requires the bits its first argument names, so a fiber cannot raise a bit it withholds.
+# docs/signals/emit.md
 #
-# A fiber raised any signal bit it named. The literal `emit` is a bytecode
-# instruction and still does — that is a separate gate. The DYNAMIC form, whose
-# first argument is not a literal keyword, routes through the `fiber/emit`
-# primitive, and its requirement now rides that argument through the same
-# bits_from_args gate `io/submit` uses. So a fiber cannot dynamically emit a
-# capability it withholds.
+# The dynamic form, whose first argument is not a literal keyword, is a call to
+# the `fiber/emit` primitive, and its requirement rides that argument through
+# the same bits_from_args gate `io/submit` uses. caps-emit.lisp holds the
+# literal form.
 
 # `k` is a variable, so `(emit k …)` is the dynamic form, not the special form.
 # Counterfactual: `fiber/emit` declares `:yield`/`:error`, so without the

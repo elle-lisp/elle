@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! The ledger's transitions: each park write, each consume seam, and the
 //! debug net for a park shape wired without a consume.
 //!
@@ -412,4 +412,46 @@ fn an_error_park_over_another_payloads_denial_panics() {
     let mut d = Delivery::new();
     d.park_denial(SIG_ERROR, payload());
     d.park_error(RaiseSite::Call, other());
+}
+
+// -- the denied emit: a denial's payload at an `Emit` park --
+
+/// An `Emit` of a withheld bit parks a denial struct the runtime built, so the
+/// install that displaces it owes a release, as for a denied call. The park is
+/// still an `Emit` park, whose continuation funds its own release of the resume
+/// value. Counter-factual: recording it as a denied call mints a reference for
+/// every resume value that nothing releases, one region per mediated emit.
+#[test]
+fn a_denied_emit_park_records_the_payload_and_owes_no_resume_mint() {
+    let mut d = Delivery::new();
+    d.park_emit_denial(SIG_YIELD, payload());
+    assert_eq!(
+        d.bodyless().map(|p| p.bit_identical(payload())),
+        Some(true),
+        "the denial payload is recorded for the install's decref",
+    );
+    assert!(
+        !d.take_resume_funding(),
+        "an `Emit` park's continuation funds the resume value itself",
+    );
+}
+
+/// The record a boundary reads names the denial, so a boundary that ends the
+/// park releases the delivery retain the park took on the struct.
+#[test]
+fn a_denied_emit_park_records_its_delivery_for_a_boundary() {
+    let mut d = Delivery::new();
+    d.park_emit_denial(SIG_YIELD, payload());
+    let taken = d.take_undelivered().expect("the park is recorded");
+    assert_eq!(taken.0, SIG_YIELD);
+    assert!(taken.1.bit_identical(payload()));
+}
+
+#[test]
+#[should_panic(expected = "unconsumed")]
+#[cfg(debug_assertions)]
+fn a_denied_emit_park_over_an_unconsumed_one_panics() {
+    let mut d = Delivery::new();
+    d.park_primitive(SIG_IO, payload());
+    d.park_emit_denial(SIG_YIELD, payload());
 }

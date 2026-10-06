@@ -1,12 +1,12 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 // docs/impl/wasm.md
-//! The capability gate on this tier: a native the calling fiber withholds is
-//! denied, and the fiber reads the shared denial payload.
+//! The capability gate on this tier: a native or an emit of a bit the calling
+//! fiber withholds is denied, and the fiber reads the shared denial payload.
 //!
 //! The trap every case here is built around: a body that reaches a primitive
 //! THROUGH a prelude function runs that function on the host VM, whose own gate
 //! then fires. Such a shape passes with this tier's gate missing entirely, so
-//! each case names a native the fiber body calls directly. Written with
+//! each case names a native or an emit in the fiber body itself. Written with
 //! `println`, these tests are green against an ungated host.
 //!
 //! Each expression evaluates to a boolean so the assertion reads the language's
@@ -229,5 +229,40 @@ fn wasm_full_denies_a_submit_for_the_operation_its_request_carries() {
         "true",
         "io/submit must be denied for the :exec its request carries, not for \
          the :error it declares"
+    );
+}
+
+/// A literal `emit` is an instruction, not a native call, so no host path's
+/// gate sees it. The emit itself asks, on this tier as on the others: a fiber
+/// denied `:yield` parks on a denial, and the resume answers the `yield`.
+#[test]
+fn wasm_full_denies_a_literal_emit_of_a_withheld_bit() {
+    assert_eq!(
+        eval_with_stdlib(
+            "(let [f (fiber/new (fn [] (+ 1 (yield 1))) |:yield :error| :deny |:yield|)] \
+               (fiber/resume f) \
+               (and (= :paused (fiber/status f)) \
+                    (= :capability-denied (get (fiber/value f) :error)) \
+                    (= 11 (fiber/resume f 10))))"
+        ),
+        "true",
+        "a yield the fiber withholds must park on a denial the resume answers"
+    );
+}
+
+/// An `:error` emit returns rather than parks when it is raised, so a denied
+/// one must still park: classifying the denial by its bits would unwind it.
+#[test]
+fn wasm_full_denial_of_an_error_emit_parks() {
+    assert_eq!(
+        eval_with_stdlib(
+            "(let [f (fiber/new (fn [] (+ 1 (error {:error :mine}))) |:error| :deny |:error|)] \
+               (fiber/resume f) \
+               (and (= :paused (fiber/status f)) \
+                    (= :capability-denied (get (fiber/value f) :error)) \
+                    (= 3 (fiber/resume f 2))))"
+        ),
+        "true",
+        "an error emit the fiber withholds must park on a denial the resume answers"
     );
 }
