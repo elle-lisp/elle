@@ -1,7 +1,8 @@
 // audited: 2026-10-06
-//! The three module loaders: `import/load-file` runs Elle source,
-//! `import/load-plugin` loads a shared library, and `import/load-syntax` runs
-//! one form.
+//! The three module loaders, for Elle source, a shared library and one form.
+//!
+//! `import/load-file` runs Elle source, `import/load-plugin` loads a shared
+//! library, and `import/load-syntax` runs one form.
 //!
 //! docs/modules.md
 //! docs/impl/region/park.md
