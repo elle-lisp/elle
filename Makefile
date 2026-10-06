@@ -195,9 +195,19 @@ IMPL_FILES := $(sort $(wildcard tests/impl/*.lisp))
 # The producers, the files a ledger's `(producer "…")` header names, run
 # in-process on the rig in a pass of their own, and the isolated passes run the
 # rest (docs/test-runner.md). Read off the ledgers, so the ledger directory
-# stays the one list.
-PRODUCER_FILES      := $(sort $(shell sed -n 's/^(producer "\(.*\)")$$/\1/p' tests/ledger/*.lisp))
+# stays the one list. The runner's own producer, `elle test`, is no file.
+PRODUCER_FILES      := $(sort $(shell sed -n 's/^(producer "\(.*\.lisp\)")$$/\1/p' tests/ledger/*.lisp))
 ISOLATED_IMPL_FILES := $(filter-out $(PRODUCER_FILES),$(IMPL_FILES))
+
+# The charge pass reads what each file's second run in-process costs the
+# runner's heap (docs/test-gauges.md). It runs the language suite and the
+# implementation files with no sidecar, since a sidecar names a mode an
+# in-process run cannot give. It leaves out the producers, which have their
+# own pass, and config.lisp, which asserts that a program cannot change the JIT
+# policy the in-process runner sets.
+CHARGE_SKIP       := tests/impl/config.lisp
+SIDECAR_FREE_IMPL := $(foreach f,$(IMPL_FILES),$(if $(wildcard $(f:.lisp=.toml)),,$(f)))
+CHARGE_FILES      := $(filter-out $(PRODUCER_FILES) $(CHARGE_SKIP),$(LANG_FILES) $(SIDECAR_FREE_IMPL))
 
 # The runner's own acceptance tests drive `elle test` themselves and read the
 # store the pass records into, so they ride the implementation suite's first
@@ -333,13 +343,15 @@ smoke-lang: elle  ## The language suite on this build
 	@echo "=== the language suite ==="
 	$(call RUN_SUITE,$(LANG_FILES),)
 
-smoke-impl: elle elle-rig  ## The implementation suite on the rig, then both suites under each rig profile
+smoke-impl: elle elle-rig  ## The implementation suite on the rig, the producers, each file's charge, then both suites under each rig profile
 	@echo "=== the implementation suite, on the rig ==="
 	$(call RUN_SUITE,$(ISOLATED_IMPL_FILES) $(RUNNER_ACCEPTANCE),--isolate '',$(ELLE_RIG))
 	@echo "=== both suites, every function compiled on its first call ==="
 	$(call RUN_SUITE,$(LANG_FILES) $(ISOLATED_IMPL_FILES),--isolate '--profile $(EAGER_PROFILE)',$(ELLE_RIG))
 	@echo "=== the producers, in-process on the rig ==="
 	$(call RUN_SUITE,$(PRODUCER_FILES),,$(ELLE_RIG))
+	@echo "=== each file's charge on the runner's heap, in-process on the rig ==="
+	$(call RUN_SUITE,$(CHARGE_FILES),--charge,$(ELLE_RIG))
 	$(foreach profile,$(IMPL_PROFILES),$(call RUN_LANG_PROFILE,$(profile)))
 
 # The language suite booted from an image instead of from core.lisp,

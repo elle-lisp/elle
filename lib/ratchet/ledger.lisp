@@ -66,19 +66,35 @@
       (get form 1)
       nil))
 
+  (defn add-row! [rows row]
+    "Put ROW into ROWS under its key, and raise when the key is there already:
+     one build's row of a subject and an axis is written once."
+    (let [k (row-key (get row :subject) (get row :axis))
+          held (get rows k)]
+      (when held
+        (error {:error :ledger-error
+                :reason :duplicate-row
+                :subject (get row :subject)
+                :axis (get row :axis)
+                :ledgers [(get held :ledger) (get row :ledger)]
+                :message (string "the row " (get row :subject) " "
+                                 (string (get row :axis)) " is in "
+                                 (get held :ledger) " and in " (get row :ledger))}))
+      (put rows k row))
+    nil)
+
   (defn keep-row! [rows row build]
     "Put ROW into ROWS when it belongs to BUILD: the build its :build names,
      or the reference build when it names none. A row of another build is no
      row here."
-    (when (= (or (get row :build) reference-build) build)
-      (put rows (row-key (get row :subject) (get row :axis)) row))
+    (when (= (or (get row :build) reference-build) build) (add-row! rows row))
     nil)
 
   (defn load-file [path build]
     "One ledger file as BUILD sees it: {:file :producer :rows}, or nil when no
      form in it is the `(producer \"path\")` header. Rows are BUILD's alone,
-     keyed by `row-key`; a file that holds none of BUILD's has an empty
-     table."
+     keyed by `row-key`, and each names PATH as its :ledger; a file that holds
+     none of BUILD's has an empty table."
     (let [forms (read-all (slurp path))
           @producer nil
           @rows @{}]
@@ -87,17 +103,31 @@
           (if p
             (assign producer p)
             (let [row (parse-row f)]
-              (when row (keep-row! rows row build))))))
+              (when row (keep-row! rows (put row :ledger path) build))))))
       (if producer {:file path :producer producer :rows rows} nil)))
 
   (defn load-dir [dir build]
-    "Every ledger under DIR as BUILD sees it, keyed by producer."
-    (let [@out @{}]
-      (each name in (file/ls dir)
+    "Every ledger under DIR as BUILD sees it, keyed by producer, as
+     {:producer :files :rows}. FILES are every file naming the producer, in
+     name order, and ROWS are the rows of all of them."
+    (let [@files @{}
+          @rows @{}]
+      (each name in (sort (file/ls dir))
         (when (string/ends-with? name ".lisp")
           (let [l (load-file (path/join dir name) build)]
-            (when l (put out (get l :producer) l)))))
-      out))
+            (when l
+              (let [p (get l :producer)]
+                (when (nil? (get files p))
+                  (put files p @[])
+                  (put rows p @{}))
+                (push (get files p) (get l :file))
+                (each k in (keys (get l :rows))
+                  (add-row! (get rows p) (get (get l :rows) k))))))))
+      (let [@out @{}]
+        (each p in (keys files)
+          (put out p
+               {:producer p :files (freeze (get files p)) :rows (get rows p)}))
+        out)))
 
   (defn producer-of [file]
     "The producer FILE is, as a ledger's header names it: relative to the

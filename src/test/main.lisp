@@ -34,6 +34,7 @@
     "--query" [:query :value]
     "--summary" [:summary :flag]
     "--repin" [:repin :flag]
+    "--charge" [:charge :flag]
     "-e" [:eval :append]
     "--promote" [:promote :pair]})
 
@@ -92,6 +93,7 @@
                 :query nil
                 :summary false
                 :repin false
+                :charge false
                 :paths []}))
 
 # `--isolate FLAGS` runs each path as its own child, `elle FLAGS PATH`, for a
@@ -117,6 +119,23 @@
 (if (and isolate-flags (not (empty? (get opts :eval))))
   (begin
     (eprintln "elle test: --isolate runs a path in its own process, and -e has no file to give one")
+    (os/exit 2))
+  nil)
+
+# The charge is what a file's second run cost this process's heap
+# (docs/test-gauges.md). An isolated child leaves the runner nothing but the
+# spawn to charge, and an ad-hoc form has no file to name the reading.
+(def charging (get opts :charge))
+
+(if (and charging isolate-flags)
+  (begin
+    (eprintln "elle test: --charge reads the runner's own heap, and --isolate runs each path in a child")
+    (os/exit 2))
+  nil)
+
+(if (and charging (not (empty? (get opts :eval))))
+  (begin
+    (eprintln "elle test: --charge names each reading by its file, and -e has no file")
     (os/exit 2))
   nil)
 
@@ -258,6 +277,18 @@
 # (docs/test-gauges.md).
 (def gauge-prev (gauge-baseline))
 
+# Run FILE in-process a second time, and record what that run left live on the
+# runner's heap. The window opens after the first run's rows are written and
+# closes once the second run's are, so it holds the second run alone
+# (docs/test-gauges.md).
+(defn charge-file [conn run-id file]
+  (let [before (gauge-baseline)]
+    (parameterize ((*form-budget-ms* (budget-for file)))
+      (process-file conn run-id file))
+    (let [after (gauge-baseline)]
+      (record-charge conn run-id file
+                     (- (get after "objects") (get before "objects"))))))
+
 # Run every file/eval for its side effect: each writes its result rows to the DB.
 # We do NOT aggregate the returned status lists in memory — for a large corpus
 # that built a list one recursive `flat` per file deep and blew the VM's call
@@ -268,6 +299,7 @@
     (if isolate-flags
       (process-file-isolated conn run-id f isolate-flags)
       (process-file conn run-id f)))
+  (when charging (charge-file conn run-id f))
   (gauge-mark conn run-id gauge-prev f)
   (test-gauge-mark conn run-id f))
 (each e in (get opts :eval)

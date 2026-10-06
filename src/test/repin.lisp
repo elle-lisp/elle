@@ -81,19 +81,29 @@
               text)))
       true text)))
 
+# A producer's rows may span several files (docs/ratchet.md § The ledger). A
+# row moves in the file that holds it, and an adopted row lands in the file
+# that sorts last.
 (defn repin-file [file queued]
-  "Move FILE's ledger to what QUEUED read, and write it back when it moved."
+  "Move the ledger of FILE's producer to what QUEUED read, and write back each
+   of its files that moved."
   (let [l (get ledgers (ledger:producer-of file))
         rows (get l :rows)
-        before (slurp (get l :file))
-        @text before]
+        adopt-into (last (get l :files))
+        @before @{}
+        @texts @{}]
     (each entry in (grouped queued
                             (fn [r]
                               (ledger:row-key (get r :subject) (get r :axis))))
-      (assign
-        text
-        (repin-group file text (get rows (get entry 0)) (get entry 1))))
-    (when (not (= text before)) (spit (get l :file) text))
+      (let [row (get rows (get entry 0))
+            path (if row (get row :ledger) adopt-into)]
+        (when (nil? (get texts path))
+          (put before path (slurp path))
+          (put texts path (get before path)))
+        (put texts path (repin-group file (get texts path) row (get entry 1)))))
+    (each path in (keys texts)
+      (when (not (= (get texts path) (get before path)))
+        (spit path (get texts path))))
     nil))
 
 (defn repin-ledgers []

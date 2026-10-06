@@ -162,7 +162,7 @@
 ["tests/lang/process.lisp" :objects 1133]
 ["tests/lang/property-eval.lisp" :objects 272]
 ["tests/lang/quasiquote-bracket.lisp" :objects 287]
-["tests/lang/ratchet.lisp" :objects 1818]
+["tests/lang/ratchet.lisp" :objects 1821]
 ["tests/lang/raylib.lisp" :objects 1129]
 ["tests/lang/rc-http2-serve.lisp" :objects 141]
 ["tests/lang/rdf.lisp" :objects 310]

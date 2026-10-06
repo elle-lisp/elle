@@ -162,11 +162,11 @@
                                        ", f.file, r.tier, m.subject") [run-id])
         (eprintln "  " (render-measurement m))))
     # A run with no build left its readings unrecorded, so a green run that
-    # printed some must not read as a passed gate (docs/ratchet.md).
+    # took some must not read as a passed gate (docs/ratchet.md).
     (when (and (= total 0) (> unrecorded-readings 0))
       (eprintln unrecorded-readings " reading"
                 (if (= unrecorded-readings 1) "" "s")
-                " printed · no build, so none recorded or judged: run under elle-rig test")))
+                " · no build, so none recorded or judged: run under elle-rig test")))
   nil)
 
 # ── what the run cost each heap (docs/test-gauges.md) ─────────────────

@@ -47,36 +47,72 @@
 (def @unrecorded-readings 0)
 
 # A judged reading carries its row's bound and kind and the verdict it earned;
-# an unjudged one carries the reading alone. A missing row is written only
-# against a pass: a failed result already says so, and a gated one skipped
-# rather than fell silent (docs/test-store.md § Measurements).
-(defn record-readings [conn run-id result-id file text status]
-  "Every reading TEXT carries, as the run's build decides. With no build,
-   none is recorded. With a build and no ledger naming FILE, each is recorded
-   unjudged. With a ledger holding none of the build's rows, each is recorded
-   unjudged and queued for adoption. With rows of the build, each is judged,
-   recorded and queued, and when STATUS is :pass a row no reading answered is
-   recorded missing."
-  (let [readings (ledger:readings-in (if text text ""))]
-    (if (nil? run-build)
-      (assign unrecorded-readings (+ unrecorded-readings (length readings)))
-      (let [rows (rows-for file)]
-        (cond
-          (nil? rows) (each r in readings
-                        (insert-reading conn run-id result-id r))
-          (empty? (keys rows))
-            (each r in readings
-              (insert-reading conn run-id result-id r)
-              (push repin-queue (put r :file file)))
-          true
-            (begin
-              (each r in (ledger:judge-all readings rows)
-                (insert-reading conn run-id result-id r)
-                (push repin-queue (put r :file file)))
-              (when (= status :pass)
-                (each row in (ledger:unread rows readings)
-                  (insert-missing conn run-id result-id row))))))))
+# an unjudged one carries the reading alone.
+(defn record [conn run-id result-id producer readings rows owed]
+  "READINGS of PRODUCER, as the run's build decides. ROWS are the producer's
+   rows of the build, and nil when no ledger names it. With no build, none is
+   recorded. With no ledger, each is recorded unjudged. With a ledger holding
+   none of the build's rows, each is recorded unjudged and queued for
+   adoption. With rows of the build, each is judged, recorded and queued, and
+   a row of OWED that no reading answered is recorded missing. OWED is nil
+   when nothing is owed, which allocates nothing inside a charge's window."
+  (if (nil? run-build)
+    (assign unrecorded-readings (+ unrecorded-readings (length readings)))
+    (cond
+      (nil? rows) (each r in readings
+                    (insert-reading conn run-id result-id r))
+      (empty? (keys rows))
+        (each r in readings
+          (insert-reading conn run-id result-id r)
+          (push repin-queue (put r :file producer)))
+      true
+        (begin
+          (each r in (ledger:judge-all readings rows)
+            (insert-reading conn run-id result-id r)
+            (push repin-queue (put r :file producer)))
+          (when owed
+            (each row in (ledger:unread owed readings)
+              (insert-missing conn run-id result-id row))))))
   nil)
+
+# A result owes its file's rows only when it passed: a failed result already
+# says so, and a gated one skipped rather than fell silent (docs/test-store.md
+# § Measurements).
+(defn record-readings [conn run-id result-id file text status]
+  "Every reading TEXT carries, for the producer FILE, recorded by `record`."
+  (let [rows (rows-for file)]
+    (record conn run-id result-id file (ledger:readings-in (if text text ""))
+            rows (if (= status :pass) rows nil))))
+
+# ── a file's charge (docs/test-gauges.md) ────────────────────────────
+# The runner is the producer of every file's charge, and the file is the
+# subject.
+(def runner-producer "elle test")
+
+(defn rows-about [rows subject]
+  "The rows of ROWS whose subject is SUBJECT, keyed as ROWS keys them."
+  (let [@out @{}]
+    (when rows
+      (each k in (keys rows)
+        (when (= (get (get rows k) :subject) subject) (put out k (get rows k)))))
+    out))
+
+(defn latest-result-id [conn run-id]
+  (get (get (sqlite:query conn
+                          "SELECT max(id) AS id FROM result WHERE run_id = ?1"
+                          [run-id]) 0) :id))
+
+(defn record-charge [conn run-id file objects]
+  "FILE's charge, the OBJECTS its second run left live on the runner's heap,
+   as one reading of the producer `elle test` against the run's latest result.
+   FILE owes its own rows alone: every other row is another file's."
+  (let [rows (rows-for runner-producer)]
+    (record conn run-id (latest-result-id conn run-id) runner-producer
+            [@{:subject file
+               :axis :objects
+               :value objects
+               :half 0
+               :unit "objects"}] rows (rows-about rows file))))
 
 (defn count-gating-readings [conn run-id]
   "How many of the run's readings gate: every verdict but ok, and never an
