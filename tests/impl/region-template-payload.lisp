@@ -1,24 +1,25 @@
-(elle/epoch 12)
-## region/template-payload — a code object's payload outlives the frame that
-## built the closure.
-##
-## A closure template is now three things (docs/impl/region/template.md): a
-## compile-time blueprint, a `CodePayload` of region pages holding the bytecode,
-## constants, docstring and source-location table, and a per-creation header
-## naming that payload. The payload is shared, so it lives in a region of the
-## heap's own — NOT in the region the header was born in.
-##
-## The trap: the header carries the payload as a `RegionSlice`, a bare
-## `(ptr, len)` pair. Nothing in the header's own bytes says another region owns
-## the pages behind it, so the payload backing must be recorded as a counted
-## cross-region reference at the header's allocation. Counter-factual (RED
-## without that edge): the returned closure's frame is freed at its
-## `decref_point`, the payload region's count never rose to cover the escaped
-## header, and calling the closure reads freed pages — bytecode, docstring, and
-## location table all torn.
-##
-## Every probe below returns a closure from a call that has ended, then reads
-## something that lives only in the payload.
+(elle/epoch 14)
+# audited: 2026-10-06
+# A code object's payload outlives the frame that built the closure.
+# docs/impl/region/template.md
+#
+# A closure template is two things: a `CodePayload` of region pages holding the
+# bytecode, constants, docstring and source-location table, written into its
+# compile unit's code region, and a per-creation header naming that payload. The
+# payload is shared, so it lives in the code region — NOT in the region the
+# header was born in.
+#
+# The trap: the header carries the payload as a `RegionSlice`, a bare
+# `(ptr, len)` pair. Nothing in the header's own bytes says another region owns
+# the pages behind it, so the payload backing must be recorded as a counted
+# cross-region reference at the header's allocation. Counter-factual (RED
+# without that edge): the returned closure's frame is freed at its
+# `decref_point`, the code region's count never rose to cover the escaped
+# header, and calling the closure reads freed pages — bytecode, docstring, and
+# location table all torn.
+#
+# Every probe below returns a closure from a call that has ended, then reads
+# something that lives only in the payload.
 
 # ── the bytecode is payload: calling the escaped closure must still run ──
 (defn make-adder (n)
@@ -28,12 +29,12 @@
   (assert (= (add5 3) 8)
           "an escaped closure reads its bytecode from the payload"))
 
-# Many closures from ONE blueprint, all outliving their frames. They share one
-# payload, so every header must hold its own reference to it: releasing the
-# first frame's region must not take the payload the others still read.
+# Many closures over ONE payload, all outliving their frames. Every header must
+# hold its own reference to the code region: releasing the first frame's region
+# must not take the payload the others still read.
 (let [adders (map make-adder [1 2 3 4 5 6 7 8])]
   (assert (= (map (fn [f] (f 10)) adders) [11 12 13 14 15 16 17 18])
-          "each header from one blueprint holds its own payload reference"))
+          "each header over one payload holds its own code-region reference"))
 
 # ── the docstring is payload ──
 (defn documented (x)
@@ -147,14 +148,13 @@
 (assert (= (named-args :alpha 3) 3)
         "a declared &named key is accepted from the payload's key set")
 
-# ── the payload cache is bounded ──
-# Every `eval` compiles a fresh blueprint tree, and each blueprint's payload is
-# materialized into a payload region the heap owns. Those regions are released
-# when the last blueprint packed into one dies, so a program that evals in a
-# loop must not accumulate them.
+# ── a dropped unit's code region frees ──
+# Every `eval` compiles a fresh unit, and its payloads land in a code region of
+# their own. The region frees once the unit and the last header over its
+# payloads are gone, so a program that evals in a loop must not accumulate them.
 #
-# Counter-factual (RED without the cache's sweep): the payload regions are held
-# to teardown and the live region count climbs one per few evals — a REPL
+# Counter-factual (RED when a unit's region outlives it): the code regions are
+# held to teardown and the live region count climbs one per eval — a REPL
 # session would grow without bound.
 (defn eval-churn (n)
   (var i 0)
