@@ -7,7 +7,7 @@ Pipeline-agnostic lint types and rules.
 ## Responsibility
 
 Define diagnostic types and lint rules that can be used by any pipeline.
-The actual linting logic (tree walking) lives in `hir/lint.rs`; this module
+The actual linting logic (tree walking) lives in [hir/lint.rs](../hir/lint.rs); this module
 provides the shared types and rule implementations.
 
 ## Interface
@@ -38,10 +38,10 @@ Each code above names a `LintCode` in `diagnostics::WARNINGS` or
 Every binding rule shares one exemption set — synthetic, primitive, and
 `_`-prefixed names — through `reportable_name`.
 
-Adding a rule: see [`docs/cookbook/lint-rules.md`](../../docs/cookbook/lint-rules.md).
+Adding a rule: see [lint-rules.md](../../docs/cookbook/lint-rules.md).
 
 ## Dependents
 
-- `hir/lint.rs` — HIR linter calls rules and produces Diagnostics
-- `lint/cli.rs` — Linter wrapper for CLI output
-- `lsp/state.rs` — uses Diagnostic/Severity for LSP diagnostics
+- [hir/lint.rs](../hir/lint.rs) — HIR linter calls rules and produces Diagnostics
+- [cli.rs](cli.rs) — Linter wrapper for CLI output
+- [lsp/state.rs](../lsp/state.rs) — uses Diagnostic/Severity for LSP diagnostics
