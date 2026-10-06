@@ -1,14 +1,15 @@
 # lir
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-06 -->
 
-The LIR types, the registers each instruction reads and writes, and the emitter that turns LIR into stack bytecode.
+The LIR's two forms, the registers each instruction reads and writes, and the emitter that turns LIR into stack bytecode.
 
-LIR is SSA form over virtual registers and basic blocks.
+LIR is SSA form over virtual registers and basic blocks. The lowerer builds
+it in a working form and freezes it; everything else reads the frozen form.
 [lower/AGENTS.md](lower/AGENTS.md) owns how HIR becomes LIR: slots, capture
 cells, constants and the region instructions.
-[docs/impl/lir.md](../../docs/impl/lir.md) owns the design: the operand proof,
-heap literals and `LoadSelf`.
+[docs/impl/lir.md](../../docs/impl/lir.md) owns the design: the two forms, the
+operand proof, heap literals and `LoadSelf`.
 
 ## Size
 
@@ -24,11 +25,19 @@ A match over the instruction set splits where an enum cannot:
 [ops/intrinsics.rs](emit/instr/ops/intrinsics.rs), and every other file here
 takes the ordinary budget.
 
+The frozen form's mirror of the enum, `InstrRef` in
+[code/instr.rs](code/instr.rs), carries no per-variant docs and stays inside
+the budget: each variant means what the `LirInstr` variant of the same name
+means. Its decoder lives in [code/decode.rs](code/decode.rs), apart from it.
+
 ## Interface
+
+The working form, which the lowerer builds:
 
 | Type | Purpose |
 |------|---------|
-| `LirFunction` | Compilation unit: blocks, constants, slot counts, capture masks, signal, docstring, origin, region tables, yield-point and call-site metadata ([types/func.rs](types/func.rs)) |
+| `LirModule` | The lowerer's product: an entry function and its closures, which `MakeClosure` names by `ClosureId` |
+| `LirFunction` | Compilation unit: blocks, slot counts, capture masks, signal, docstring, origin and region tables ([types/func.rs](types/func.rs)) |
 | `BasicBlock` | Instructions + terminator |
 | `LirInstr` | Individual operation ([types/instr.rs](types/instr.rs)) |
 | `OperandProof` | What the front end proved about an operation's operands: nothing, or that every one is an integer |
@@ -36,34 +45,79 @@ takes the ordinary budget.
 | `SpannedTerminator` | `Terminator` + `Span` for source tracking |
 | `Terminator` | How a block exits: `Return`, `Jump`, `Branch`, `Emit`, `Unreachable` |
 | `LirConst` | An immediate constant: nil, the empty list, a bool, number, string, symbol or keyword |
-| `Reg` | Virtual register |
+| `Reg` | Virtual register, `repr(transparent)` over its `u32` |
 | `Label` | Basic block identifier |
-| `YieldPointInfo` | Metadata for a yield point: resume IP, live registers, local count |
-| `CallSiteInfo` | Metadata for a call site: resume IP, live registers, local count (for yield-through-call) |
 | `Lowerer` | HIR → LIR ([lower/AGENTS.md](lower/AGENTS.md)) |
+
+The frozen form, which every other reader reads ([code/](code/mod.rs)):
+
+| Type | Purpose |
+|------|---------|
+| `freeze` | `LirFunction` → `LirOwned`; refuses a `LirConst::String` by name |
+| `FrozenModule` | A `LirModule` frozen: one `LirOwned` per function |
+| `Op` | One opcode byte per `LirInstr` variant |
+| `Node`, `BlockRec`, `ConstRec`, `SiteRec` | The plain records a frozen function is made of |
+| `LirCode` | The records, tables and header in `Vec`s: `Send`, and serializable |
+| `LirOwned` | A `LirCode` plus the `Value`s its `ValueConst` instructions load |
+| `LirView` | The read API: blocks, instructions, terminators, header, tables, sites |
+| `InstrRef` | One instruction, decoded: `LirInstr`'s variants over borrowed slices |
+| `ConstRef`, `TemplateBytes` | An immediate constant, and a `MaterializeConst`'s encoded template |
+| `SiteRef` | A yield point or a call site: resume IP, live registers, local count |
+
+The emitter, which reads the frozen form:
+
+| Type | Purpose |
+|------|---------|
 | `Emitter` | LIR → `ClosureCompiled`, that is `(Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>)` ([emit/mod.rs](emit/mod.rs)) |
-| `for_each_def` / `for_each_use` / `for_each_terminator_use` | The registers an instruction or terminator writes and reads |
-| `testkit::LirFixture` | Builds a `LirFunction` by hand, for tests (`#[cfg(test)]`) |
+| `YieldPointInfo` | What emission records at a yield point: resume IP, live registers, local count |
+| `CallSiteInfo` | What emission records at a call site, for yield-through-call |
+| `testkit::LirFixture` | Builds a frozen function by hand, for tests (`#[cfg(test)]`) |
 
 `LirConst::Nil` and `LirConst::EmptyList` are distinct constants. Nil is falsy
 and the empty list is truthy, and a list ends in the empty list, never in nil.
 
+## Reading LIR
+
+Read a frozen function through its `LirView`, and match its instructions as
+`InstrRef`:
+
+```rust
+for block in view.blocks() {
+    for node in block.nodes() {
+        match node.instr() {
+            InstrRef::Call { dst, func, args, .. } => { /* args: &[Reg] */ }
+            _ => {}
+        }
+    }
+    let term: Terminator = block.terminator();
+}
+```
+
+A node answers its span, its opcode, the registers it defines and the registers
+it uses, without decoding the rest of the instruction. A view is built over
+borrowed slices, so a reader neither knows nor cares which `Vec`s back it.
+
 ## Register defs and uses
 
-`for_each_def`, `for_each_use` and `for_each_terminator_use`
-([types/regs.rs](types/regs.rs)) report the registers an instruction writes and
-reads. They are the single answer to that question for the whole crate: the
-WASM register allocator and its liveness analysis both walk them, and so does
-the test fixture below when it infers a register count. A new `LirInstr`
-variant must be added to all three — the matches are exhaustive, so the
-compiler names the omission.
+A frozen node answers the registers it reads with one slice, `NodeRef::uses`,
+in a fixed order per variant, once per operand position. It answers the
+register it writes with `NodeRef::def`. A `TailCall`'s `dst` is not a def:
+the call replaces the frame, so only the JIT's native-callee completion path
+writes it. `for_each_terminator_use` reports what a `Terminator` reads. The
+WASM register allocator and its liveness analysis walk these, and nothing else
+answers the question.
+
+`for_each_def` and `for_each_use` ([types/regs.rs](types/regs.rs)) answer
+the same question for the working form, and freezing takes a node's uses from
+`for_each_use`. A new `LirInstr` variant must be added to both — the matches
+are exhaustive, so the compiler names the omission.
 
 ## Building LIR in tests
 
 `testkit::LirFixture` ([testkit.rs](testkit.rs), `#[cfg(test)]`) assembles a
-`LirFunction` directly, for the unit tests of every consumer of LIR: the
-emitter, the JIT, the WASM backend, the MLIR and SPIR-V tiers, and the
-cross-thread send path. It mirrors `hir::testkit`
+`LirFunction` instruction by instruction and freezes it, for the unit tests of
+every reader of LIR: the emitter, the JIT, the WASM backend, the MLIR and
+SPIR-V tiers, and the cross-thread send path. It mirrors `hir::testkit`
 ([src/hir/testkit.rs](../hir/testkit.rs)), which does the same job for the
 front-end passes.
 
@@ -89,11 +143,14 @@ The rules the fixture holds:
    to maintain by hand.
 4. **`num_regs` overrides the inference**, for a test that wants a count the
    instructions do not justify.
+5. **`build` freezes.** It returns a `LirOwned`, which is what every reader
+   takes; `build_working` returns the `LirFunction` before freezing.
 
 The remaining setters — `name`, `signal`, `num_captures`, `num_locals`,
-`num_params`, `closure_id`, `yield_points`, `call_sites` — write the like-named
-field. Fields with no setter are public on the built `LirFunction`: set them on
-the result, as the JIT's arity and `vararg_kind` tests do.
+`num_params`, `num_local_params`, `capture_params_mask`, `vararg_kind`,
+`closure_id`, `yield_points`, `call_sites` — write the like-named field. A
+frozen function's fields are read-only, so a test sets them through the
+fixture.
 
 ## Data flow
 
@@ -104,13 +161,16 @@ HIR + spans
 Lowerer (lower/AGENTS.md)
     │
     ▼
-LirFunction (basic blocks of SpannedInstr)
+LirModule: LirFunctions of SpannedInstr blocks (the working form)
     │
     ▼
-Emitter
+freeze ──► FrozenModule: one LirOwned per function
+    │
+    ▼
+Emitter, reading each function through a LirView
     ├─► simulate the operand stack to place each register
     ├─► emit instruction bytes, then patch jump offsets
-    ├─► build the LocationMap from SpannedInstr spans
+    ├─► build the LocationMap from the node spans
     ├─► collect YieldPointInfo at each Emit terminator
     └─► collect CallSiteInfo at each call, in a function that may suspend
     │
@@ -120,14 +180,14 @@ ClosureCompiled = (Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>)
     ▼
 TemplateProto::nested_lambda
     ├─► location_map ← Bytecode.location_map
-    └─► lir_function ← a copy of the LirFunction, with yield_points and
-        call_sites filled in, for the JIT's side exits
+    └─► lir_function ← a copy of the lambda's LirOwned, with its yield
+        points and call sites filled in, for the JIT's side exits
 ```
 
-The emitter emits blocks in the order the lowerer appended them. A merge block
-is appended after every block that jumps to it, so the emitter meets each
-predecessor first; sorting by label number would break that, because labels
-are allocated in creation order.
+The emitter emits blocks in the order the lowerer appended them, and freezing
+keeps that order. A merge block is appended after every block that jumps to it,
+so the emitter meets each predecessor first; sorting by label number would
+break that, because labels are allocated in creation order.
 
 ## Invariants
 
@@ -149,7 +209,7 @@ are allocated in creation order.
    `YieldPointInfo` at each `Terminator::Emit` and a `CallSiteInfo` at each
    call and each `TailCall`. `TemplateProto::nested_lambda`
    ([src/value/closure/proto.rs](../value/closure/proto.rs)) writes both into
-   the template's copy of the `LirFunction`, which is what the JIT reads.
+   the template's copy of the frozen function, which is what the JIT reads.
 
 5. **Call sites are recorded only where the function may suspend.**
    `Emitter.current_func_may_suspend`, set from `signal.may_suspend()`, gates
@@ -158,6 +218,11 @@ are allocated in creation order.
 6. **A block's first emitted predecessor fixes its operand depth.** Every
    other edge into that block must arrive at the same depth. See "Merge
    operand depth" below.
+
+7. **Every `ValueConst` value is in the constant pool.** Emission adds each
+   one to the bytecode constant pool, which keeps it alive for as long as the
+   code object. A frozen function's `values` table holds the same values, so it
+   needs no owner of its own. A debug build checks this after emission.
 
 ## Yield and call-site metadata
 
@@ -272,4 +337,6 @@ count.
 - [src/pipeline/](../pipeline/) — runs the `Lowerer` and the `Emitter`
 - [src/vm/](../vm/) — executes the emitted bytecode
 - [src/jit/](../jit/), [src/wasm/](../wasm/) and the MLIR tier — compile a
-  closure from the `LirFunction` its template keeps
+  closure from the frozen function its template keeps
+- [src/value/send/](../value/send/mod.rs) — carries a closure's `LirCode`, and
+  its values through the ordinary value walk

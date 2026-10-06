@@ -1,30 +1,32 @@
 # jit
 
-<!-- audited: 2026-10-01 -->
+<!-- audited: 2026-10-06 -->
 
 JIT compilation for Elle using Cranelift.
 
 ## Responsibility
 
-Compile `LirFunction` to native code for the host, x86_64 or AArch64. A
-function's signal decides nothing about admission (see
+Compile a function's frozen LIR, read through a `LirView`
+([lir.md](../../docs/impl/lir.md)), to native code for the host, x86_64 or
+AArch64. A function's signal decides nothing about admission (see
 [signals/AGENTS.md](../signals/AGENTS.md) for signal definitions); what it
-decides is the code around a call. Yielding functions use side-exit:
-JIT code calls a runtime helper that builds a `SuspendedFrame` and returns
+decides is the code around a call. Yielding functions use side-exit: JIT code
+calls a runtime helper that builds a `SuspendedFrame` and returns
 `YIELD_SENTINEL` to the interpreter.
 
 ## Architecture
 
 ```
-LirFunction -> JitCompiler -> Cranelift IR -> Native code -> JitCode
+LirView -> JitCompiler -> Cranelift IR -> Native code -> JitCode
 ```
 
 ### Background compilation
 
 JIT compilation runs on a dedicated background thread (`elle-jit`).
 When a function becomes hot (called as many times as the JIT threshold, 10
-by default), its LIR is cloned, stripped of non-Send fields
-(`syntax`, `doc`), and sent to the worker via `crossbeam_channel`. The
+by default), `prepare_task` copies its frozen LIR (a `LirOwned`) into a
+`JitTask` and sends it to the worker via `crossbeam_channel`. The task is plain
+data, so it is `Send` by its type rather than by a hand-written claim. The
 interpreter continues running the function while Cranelift compiles it. Each VM
 owns its worker, and dropping the worker discards the tasks still in its queue
 ([jit.md](../../docs/impl/jit.md)).
@@ -54,7 +56,7 @@ compiles on the VM thread and installs into `jit_cache` before returning.
 Codegen inputs are identical (same `prepare_task` output), so this is the
 first lever when chasing a suspected JIT race — a failure that persists
 under `syncjit` is a codegen or input bug; one that vanishes lives at the
-worker boundary (the `Send` claim on `JitTask`, or poll/install racing
+worker boundary (the task crossing to the worker, or poll/install racing
 execution). Combine with `--trace=jit` to log each synchronous install.
 
 ## Interface
@@ -68,7 +70,7 @@ execution). Combine with `--trace=jit` to log each synchronous install.
 | `CallSiteMeta` | Metadata for a call site, the same shape, for a caller parked behind a suspended callee |
 | `YIELD_SENTINEL` | Sentinel value indicating JIT function yielded (side-exited) |
 | `JitWorker` | Background compilation thread; allocates no Elle values, so it carries no heap |
-| `JitTask` | Compilation request (cloned LIR + cache key) |
+| `JitTask` | Compilation request (a copy of the frozen LIR + cache key) |
 | `JitResult` | Compilation result (JitCode or JitError) |
 
 ## Calling Convention
@@ -310,13 +312,15 @@ No errors are silently swallowed.
    `Struct`/`StrictStruct` variadic and a function containing `MakeClosure`.
 
 2. **Yield metadata is populated during emission.** `Emitter::emit()` returns
-   `(Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>)`. The caller attaches
-   these to `LirFunction.yield_points` and `LirFunction.call_sites` before
-   storing on a `Closure`. The JIT reads this metadata to generate side-exit code.
+   `(Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>)`.
+   `TemplateProto::nested_lambda` writes both into the site tables of the
+   frozen LIR the blueprint keeps. The JIT reads them as `SiteRef`s to generate
+   side-exit code.
 
-3. **YieldPointMeta is derived from YieldPointInfo.** During JIT compilation,
-   `YieldPointInfo.stack_regs.len()` becomes `YieldPointMeta.num_spilled`, and
-   `num_locals` travels beside it; `num_params` comes from the function. The
+3. **YieldPointMeta is derived from a yield point.** During JIT compilation,
+   the length of a yield point's `stack_regs` becomes
+   `YieldPointMeta.num_spilled`, and `num_locals` travels beside it;
+   `num_params` comes from the function. The
    JIT stores all four in `JitCode.yield_points` for runtime lookup.
 
 4. **YIELD_SENTINEL is distinct from TAIL_CALL_SENTINEL.** Both are sentinel
@@ -381,7 +385,7 @@ LoadCapture/StoreCapture never use stack-relative slots.
 
 ## LBox Optimization for Locally-Defined Variables
 
-The JIT uses `LirFunction.capture_locals_mask` to avoid unnecessary `CaptureCell`
+The JIT uses the LIR's `capture_locals_mask` to avoid unnecessary `CaptureCell`
 heap allocations. In the VM interpreter, every locally-defined variable inside
 a lambda gets a `CaptureCell(NIL)` at function entry (because `StoreUpvalue`
 requires lbox indirection to write through `Rc<Vec<Value>>`). In JIT code,
@@ -413,22 +417,9 @@ run of them belongs in the rebuilt frame.
 
 ### Yield Point Recording
 
-During bytecode emission, when a `Terminator::Emit` is encountered:
-1. The emitter records the bytecode position after the `Emit` opcode as `resume_ip`
-2. The emitter captures the current operand stack state as `stack_regs`
-3. A `YieldPointInfo` is pushed to `Emitter.yield_points`
-
-After emission, the caller attaches `yield_points` to `LirFunction.yield_points`.
-
-During JIT compilation, `YieldPointInfo` is converted to `YieldPointMeta`:
-```rust
-YieldPointMeta {
-    resume_ip: yp.resume_ip,
-    num_spilled: yp.stack_regs.len() as u16,
-    num_locals: yp.num_locals,
-    num_params: lir.num_params as u16,
-}
-```
+The emitter records each yield point's resume IP and live operand stack
+([lir/AGENTS.md](../lir/AGENTS.md) § "Yield and call-site metadata"), and the
+JIT derives a `YieldPointMeta` from each as invariant 3 says.
 
 ### Call Site Recording
 

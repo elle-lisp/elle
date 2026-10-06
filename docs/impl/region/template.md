@@ -33,7 +33,7 @@ header, not a payload — that is the whole point of the split.
 ## One constructor builds a nested lambda's blueprint
 
 Three backends build a blueprint at a `MakeClosure`. Two of them — the bytecode
-emitter and the JIT — hold the same two inputs: the lambda's `LirFunction`, and
+emitter and the JIT — hold the same two inputs: the lambda's frozen LIR, and
 the bytecode its own emission produced. So `TemplateProto::nested_lambda` takes
 those two and fills every field.
 
@@ -57,7 +57,7 @@ and
 ## The WASM backend is handed a blueprint instead
 
 The third site is `rt_make_closure`, the host function an emitted module calls
-at every closure creation. It has no `LirFunction` to read. What it holds is a
+at every closure creation. It has no LIR to read. What it holds is a
 blueprint the module carries for that closure, dual-compiled for the spawn path
 ([wasm.md](../wasm.md) § "Cross-thread spawn"), and the shape of the frame the
 lambda runs in — arity, the three counts, the two capture masks, the signal —

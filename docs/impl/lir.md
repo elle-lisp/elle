@@ -1,16 +1,32 @@
 # LIR — Low-level IR
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-06 -->
 
 LIR is an SSA-form intermediate representation with virtual registers,
 basic blocks, and explicit control flow.
 
-## Key types
+## Two forms of one function
+
+The lowerer builds a function in a **working form** it can grow and splice.
+Freezing copies the finished function into a **frozen form**: fixed-size plain
+records, every operand list in one pool, read through a borrowed view. Every
+reader of LIR reads the frozen form — the emitter, the JIT, the WASM, MLIR and
+SPIR-V backends, `send`, the dumps and the introspection primitives. Only the
+lowerer and its own analyses read the working form.
+
+The split exists because the two jobs want different shapes. The lowerer
+pushes an instruction at a time and splices into finished blocks, which a
+`Vec` per block does well. A reader walks every instruction once, and a code
+object keeps its LIR for as long as the JIT may promote it, which a
+104-byte enum in a growable vector does badly
+([image/measurements.md](image/measurements.md) item 7).
+
+### The working form
 
 - **`LirFunction`** — a function body: entry label, blocks, metadata
   (arity, locals, captures, capture-cell masks, signal, region table)
-- **`BasicBlock`** — a sequence of `LirInstr` followed by a
-  `Terminator`
+- **`BasicBlock`** — a sequence of `SpannedInstr` followed by a
+  `SpannedTerminator`
 - **`Reg`** — virtual register (SSA — each assigned exactly once)
 - **`Label`** — block label for control flow
 - **`LirInstr`** — individual operations (load const, add, call, etc.)
@@ -19,9 +35,9 @@ basic blocks, and explicit control flow.
   variants (`TailCall`/`TailCallArrayMut`), not terminators.
 - **`LirConst`** — compile-time **immediate** constants: nil, the empty
   list, a bool, an int, a float, an interned symbol or keyword — all
-  tag+payload, no heap. Its `String` variant reaches no bytecode `Const`: a
-  string literal is a `MaterializeConst`. `Const`/`ValueConst` are pure pool
-  loads with no `region` field.
+  tag+payload, no heap. Its `String` variant has no frozen form: a string
+  literal is a `MaterializeConst`, and freezing refuses a `LirConst::String`
+  by name. `Const`/`ValueConst` are pure pool loads with no `region` field.
 - **`MaterializeConst`** — the allocation that builds a *heap* literal
   (a string, or quoted compound data: list / array / nested structure) from
   a recursive immutable `ConstTemplate` ([template.rs](../../src/value/template.rs)) into **its
@@ -29,6 +45,61 @@ basic blocks, and explicit control flow.
   and is an ordinary allocation site (see *Heap literals are allocations*
   below). The whole aggregate shares the one region (built bottom-up, so every
   internal reference is a self-edge taking no cross-region RC).
+
+`PushParamFrame` carries its (parameter, value) pairs as one flat register
+list, parameter first, so both forms hold the same operands in the same order.
+
+### The frozen form
+
+Freezing turns one `LirFunction` into these records
+([src/lir/code/](../../src/lir/code/mod.rs)):
+
+- **`Op`** — one opcode byte per `LirInstr` variant, matched exhaustively, so
+  a new variant cannot be frozen until it has an opcode.
+- **`Node`** — one instruction in 48 bytes of plain data with no implicit
+  padding: the span (`start`, `end`, `line`, `col`, and a `file` index into the
+  function's own file table), `dst`, `region`, `aux`, the first two register
+  uses, an `extra` offset into the pool, the use count, the opcode and a flag
+  byte. Every byte is written, so a copy of a node is a copy of its meaning.
+- **`BlockRec`** — a label, the block's range of nodes, the terminator's
+  fields and span, and an explicit zero pad.
+- **`ConstRec`** — a kind byte, an explicit seven-byte pad, and 64 bits.
+- **`SiteRec`** — a yield point or a call site: its resume address, its local
+  count, and a range of the site-register table.
+
+A function names its own parts by index everywhere. A register list longer
+than two lives in the pool, so a node is the same size whatever it carries. A
+node names its span's file by an index into the function's file table, never by
+a process-wide `FileId`.
+
+Each constant has one home:
+
+| Operand | Where it lives |
+|---------|----------------|
+| a `LirConst` immediate | a `ConstRec` |
+| a `ValueConst` value | the function's `values` table |
+| a `MaterializeConst` template | the `data` bytes, as `ConstTemplate::encode` wrote them |
+| a capture cell's name, a signal bound's mask, an `Emit`'s signal | a `ConstRec` of raw bits |
+
+Every `ValueConst` value is also in the bytecode constant pool, which is what
+keeps it alive. A debug build checks this after emission. The template encoding
+names symbols and files by their spelling, so it means the same thing in every
+process.
+
+**`LirCode`** holds the records, the tables and the function's header in
+`Vec`s. It is plain data: `Send`, and serializable with serde. **`LirOwned`**
+is a `LirCode` plus its `values: Vec<Value>`. A `JitTask` holds one, and so does
+the blueprint a `MakeClosure` registers.
+
+**`LirView<'a>`** is the one read API. It borrows the slices of a frozen
+function and answers its blocks, its instructions, its terminators, its header
+and its tables. **`InstrRef<'a>`** is one instruction as the view decodes it.
+It mirrors `LirInstr` variant for variant, with `&'a [Reg]` where `LirInstr`
+holds a `Vec<Reg>`, a `ConstRef` where it holds a `LirConst`, and a
+`TemplateBytes<'a>` where it holds a `ConstTemplate`.
+
+Decoding is safe Rust over slices. A corrupt index panics where it is read,
+and never reads outside the function's own records.
 
 ## From HIR to LIR
 
@@ -44,6 +115,30 @@ trees into LIR:
    (see [regions](../regions.md)); the lowerer emits each region's release
    after the HirId the solver names as its `decref_point`, and `IncrefRegion`
    at cross-region edges
+
+## From LIR to its readers
+
+```text
+Lowerer ──► LirModule (working form)
+              │
+              ▼  freeze
+          FrozenModule: one LirOwned per function
+              │
+              ▼  Emitter reads each through a LirView
+          ClosureCompiled = (Bytecode, yield points, call sites)
+              │
+              ▼  TemplateProto::nested_lambda
+          blueprint: Rc<LirOwned> with its sites filled in
+              │
+              ├─► JIT worker: a JitTask owns a copy of the LirOwned
+              ├─► WASM, MLIR, SPIR-V: a LirView over it
+              └─► send: the LirCode, plus the values through the value walk
+```
+
+Freezing runs once per compiled function, before emission. The yield points
+and call sites are the one part only emission can supply, so
+`TemplateProto::nested_lambda` writes them into the frozen function the
+blueprint keeps.
 
 ## The operand proof
 
@@ -129,7 +224,8 @@ arguments.
 
 | Path | Contents |
 |------|----------|
-| [src/lir/types/](../../src/lir/types/mod.rs) | `LirFunction` (func.rs), `LirInstr` (instr.rs), `BasicBlock`, `Reg`, `Terminator`, `LirConst` (mod.rs) |
+| [src/lir/types/](../../src/lir/types/mod.rs) | The working form: `LirFunction` (func.rs), `LirInstr` (instr.rs), `BasicBlock`, `Reg`, `Terminator`, `LirConst` (mod.rs) |
+| [src/lir/code/](../../src/lir/code/mod.rs) | The frozen form: the records, `freeze`, `LirCode`, `LirOwned`, `LirView` and `InstrRef` |
 | [src/lir/display.rs](../../src/lir/display.rs) | Debug printing of LIR |
 | [src/lir/lower/](../../src/lir/lower/AGENTS.md) | Lowering from HIR |
 | [src/lir/emit/](../../src/lir/emit/mod.rs) | Bytecode emission from LIR |

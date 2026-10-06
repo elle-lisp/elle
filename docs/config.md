@@ -1,6 +1,6 @@
 # Runtime Configuration (`vm/config`)
 
-<!-- audited: 2026-10-04 -->
+<!-- audited: 2026-10-06 -->
 
 What a build decides, what the `elle` command line sets, and what a running
 program reads and changes through `vm/config`.
@@ -158,6 +158,13 @@ the JIT's compiled and rejected functions, the page-claim histogram, and the
 regions the teardown left alive. The other `--dump=` keywords print a compiler
 artifact and exit without running the program; `stats` is the one that runs
 it.
+
+`--dump=bytecode` prints what the emitter wrote for the file: every code object
+the file builds, nested lambdas included, with its instructions, constants,
+source locations, region tables and yield and call sites. Two runs over one
+file print one text, so a recorded dump is a golden. `make bytecode-golden`
+records it for the corpus and the standard library, and
+`make bytecode-golden-check` compares the current binary against the record.
 
 ### WASM policy
 

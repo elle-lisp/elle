@@ -1,15 +1,16 @@
 # SPIR-V Backend
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-10-06 -->
 
 Two paths turn Elle into SPIR-V compute kernels for Vulkan: the MLIR compiler path, and a hand-written emitter in pure Elle.
 
 The bytes either path produces are fed to the vulkan plugin's `shader`
 primitive (see [impl/gpu.md](gpu.md)):
 
-- **`src/mlir/spirv.rs`** — automatic, compiler-generated. Wraps a
-  GPU-eligible `LirFunction` in a `gpu.module`, runs MLIR's standard SPIR-V
-  conversion passes, and serializes the result with `mlir-translate`. It needs
+- **[src/mlir/spirv.rs](../../src/mlir/spirv.rs)** — automatic,
+  compiler-generated. Wraps a GPU-eligible function's frozen LIR, read through
+  its `LirView`, in a `gpu.module`. It runs MLIR's standard SPIR-V conversion
+  passes and serializes the result with `mlir-translate`. It needs
   `--features mlir`. Used by `mlir/compile-spirv`, `git` and `gpu:map`.
 - **[lib/spirv.lisp](../../lib/spirv.lisp)** — hand-written DSL. A pure-Elle
   SPIR-V bytecode emitter for crafting compute shaders directly, with no MLIR.
@@ -21,7 +22,7 @@ plugin.
 ## Compiler-generated path
 
 ```text
-LirFunction → generate_gpu_module      (textual MLIR)
+LirView → generate_gpu_module          (textual MLIR)
             → Module::parse            (typed MLIR)
             → PassManager
                 gpu.module:

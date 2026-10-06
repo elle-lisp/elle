@@ -1,5 +1,9 @@
 # MLIR Backend
 
+<!-- audited: 2026-10-06 -->
+
+A tier-2 path that compiles a hot numeric function through MLIR and LLVM, ahead of the Cranelift JIT.
+
 > **Feature-gated:** The MLIR backend requires `--features mlir` at build
 > time and a working LLVM 22 + MLIR install (the `melior` crate links to
 > them). It is disabled by default. If your MLIR install lives outside the
@@ -7,10 +11,10 @@
 > of `~/.cargo/config.toml`. That file is per-user, so the repository
 > carries no machine-specific paths.
 
-The MLIR backend is a tier-2 path that takes a hot, **GPU-eligible**
-`LirFunction`, lowers it through the MLIR `arith` / `func` / `cf` /
-`memref` dialects, converts to the LLVM dialect, and JIT-compiles via
-the MLIR `ExecutionEngine`. The result is a native function pointer
+The backend takes the frozen LIR of a hot, **GPU-eligible** function, read
+through a `LirView` ([lir.md](lir.md)). It lowers it through the MLIR `arith`
+/ `func` / `cf` / `memref` dialects, converts to the LLVM dialect, and compiles
+it with the MLIR `ExecutionEngine`. The result is a native function pointer
 called from the VM with C calling convention.
 
 It runs alongside the bytecode VM and the Cranelift JIT — not as a
@@ -21,13 +25,13 @@ for GPU dispatch (see [impl/spirv.md](spirv.md) and
 ## Pipeline
 
 ```text
-LirFunction → lower_to_module → MLIR (arith/func/cf/memref)
-            → PassManager(create_to_llvm) → LLVM dialect
-            → ExecutionEngine::new           → native code
-            → invoke_packed                  → i64 result
+LirView → lower_to_module → MLIR (arith/func/cf/memref)
+        → PassManager(create_to_llvm) → LLVM dialect
+        → ExecutionEngine::new           → native code
+        → invoke_packed                  → i64 result
 ```
 
-The eligibility check (`LirFunction::is_gpu_eligible`) is layered:
+The eligibility check (`LirView::is_gpu_eligible`) is layered:
 
 1. **Signal** — only `errors`-or-silent functions; no yield, I/O, FFI,
    or polymorphic.
@@ -35,7 +39,7 @@ The eligibility check (`LirFunction::is_gpu_eligible`) is layered:
    (`capture_params_mask == 0`, `capture_locals_mask == 0`).
    Immutable captures are allowed — they become extra parameters in
    the MLIR signature.
-3. **Instruction whitelist** — every `LirInstr` and `Terminator` must
+3. **Instruction whitelist** — every instruction and terminator must
    be GPU-safe (constants, `ValueConst` with numeric/bool/nil values,
    arithmetic, comparison, local slots, parameter/capture loads,
    `Jump` / `Branch` / `Return`).
@@ -84,15 +88,16 @@ low bit and read e.g. `2` as false.
 
 ## VM integration
 
-`VM::try_mlir_call` (in `src/vm/mlir_entry.rs`) is consulted on every
-closure call before the Cranelift JIT path. It:
+`VM::try_mlir_call` ([mlir_entry.rs](../../src/vm/mlir_entry.rs)) is
+consulted on every closure call that reaches the compiled tiers, after the WASM
+tier and before the Cranelift JIT. It:
 
 1. Skips non-`is_gpu_candidate` closures (cheap field check).
 2. Returns the cached engine result if available.
 3. Returns early if the closure is in the rejection set.
-4. Reads the closure call counter — only proceeds past
-   `jit_hotness_threshold`. The counter is owned by the JIT path,
-   which runs after MLIR; MLIR only reads.
+4. Reads the closure call counter, and proceeds only once it reaches the
+   MLIR threshold in the VM's runtime configuration. The counter is owned by
+   the JIT path, which runs after MLIR; MLIR only reads.
 5. Runs `is_mlir_cpu_eligible` (full instruction walk).
 6. Compiles via `MlirCache::compile`, caches by bytecode pointer,
    and invokes.
@@ -119,9 +124,9 @@ The result is reboxed based on the compiled function's return type:
 - `ScalarType::Float` → `Value::float(f64::from_bits(result))`
 - `ScalarType::Bool` → `Value::bool(result != 0)`
 
-Failures are reported as a structured error
-(`error_val("mlir-error", ...)`) carried via `SIG_ERROR` — the
-rejection is also recorded so future calls don't retry.
+A compile failure joins the rejection set, so later calls do not retry it,
+and the call falls through to the next tier. A failure while the compiled code
+runs raises a structured `mlir-error`.
 
 ## MlirCache
 
@@ -142,15 +147,15 @@ concurrently.
 
 ## Files
 
-```text
-src/mlir/mod.rs       Module entry, tests
-src/mlir/lower.rs     LIR → MLIR (arith/func/cf/memref)
-src/mlir/execute.rs   One-shot compile + invoke (mlir_call)
-src/mlir/cache.rs     MlirCache: shared context + engine cache
-src/mlir/spirv.rs     LIR → SPIR-V (see impl/spirv.md)
-src/vm/mlir_entry.rs  VM::try_mlir_call dispatch
-src/lir/types.rs      is_gpu_eligible / is_mlir_cpu_eligible / is_gpu_instruction
-```
+| File | Content |
+|------|---------|
+| [src/mlir/mod.rs](../../src/mlir/mod.rs) | Module entry |
+| [src/mlir/lower.rs](../../src/mlir/lower.rs) | LIR → MLIR (arith/func/cf/memref) |
+| [src/mlir/execute.rs](../../src/mlir/execute.rs) | One-shot compile + invoke (`mlir_call`) |
+| [src/mlir/cache.rs](../../src/mlir/cache.rs) | `MlirCache`: shared context + engine cache |
+| [src/mlir/spirv.rs](../../src/mlir/spirv.rs) | LIR → SPIR-V (see [impl/spirv.md](spirv.md)) |
+| [src/vm/mlir_entry.rs](../../src/vm/mlir_entry.rs) | `VM::try_mlir_call` dispatch |
+| [src/lir/code/gpu.rs](../../src/lir/code/gpu.rs) | `is_gpu_eligible` / `is_mlir_cpu_eligible` over a `LirView` |
 
 ## Primitives
 

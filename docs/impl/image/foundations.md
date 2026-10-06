@@ -1,6 +1,6 @@
 # Foundations
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-10-06 -->
 
 Five representation fixes the image needs: each pays at runtime today, and each
 deletes image machinery.
@@ -12,7 +12,7 @@ the image first would mean shipping remap passes, re-sort passes, and the
 syntax and LIR codecs whose only purpose is to compensate for representations
 we intend to fix anyway.
 
-[image.md](../image.md) owns the design these four serve, and
+[image.md](../image.md) owns the design these five serve, and
 [plan.md](plan.md) records the order they landed in.
 
 ## Stable symbol identity — landed
@@ -108,8 +108,8 @@ baked into persisted syntax.
 
 ## Region-native LIR — to land
 
-The JIT compiles from `lir_function`: a Rust-heap `LirFunction` hanging off the
-blueprint every code object still carries. It is the last of the four questions
+The JIT compiles from `lir_function`: a Rust-heap copy of the function's LIR
+hanging off the blueprint every code object still carries. It is the last of the four questions
 that blueprint answers (§ "Region-native closure templates"), so it is what
 keeps `TemplateProto` alive — and `TemplateProto` is a second copy of the
 bytecode, the constants, the masks and the region tables the payload already
@@ -143,3 +143,37 @@ which a fixed-extent slice turns into build-then-materialize. Syntax met that
 wall and answered it by copying as it stamps ([syntax.md](../syntax.md)); the
 better answer is a slice that grows in its own region, which no foundation has
 needed yet.
+
+### The shape
+
+The `benches/lirshape` prototype's node is the shape, and
+[lir.md](../lir.md) § "The frozen form" owns its details. An instruction is a
+48-byte `repr(C)` record with no implicit padding, and its variable-length
+operands sit in one pool per function, named by index. A function refers to its
+own parts by index everywhere, so only its top-level slices are pointers. An
+instruction page therefore carries no relocation slot and stays clean in an
+image. A reader decodes a record into a borrowed `InstrRef` with safe Rust over
+slices, so a corrupt index panics where it is read and the verifier need not
+fault in LIR pages to bound one.
+
+### Landing
+
+The port lands as a seam and then three stages, each green on its own:
+
+1. **One read form.** Freezing turns a lowered function into the records, and
+   every reader except the lowerer reads them through `LirView`. The records
+   still live in `Vec`s, so nothing about storage changes. `send`'s LIR codec
+   is deleted here, because a frozen function carries its values in a table
+   that crosses through the ordinary value walk.
+2. **LIR in the payload.** The code payload carries the records as body data,
+   so a closure hydrated from an image reaches the JIT. This is the image's
+   goal.
+3. **Retire `TemplateProto`.** A code object becomes one payload slice, and the
+   payload cache, the blueprint arm of every header and the second copy of the
+   bytecode go with it.
+4. **A region-native lowerer.** The lowerer builds the records directly in a
+   working region, through slices that grow in place, and the Rust-heap working
+   form is deleted. This stage meets the wall above, so it starts with a
+   prototype of the growable slice.
+
+[plan.md](plan.md) records the pins each stage lands with.

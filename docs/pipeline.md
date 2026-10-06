@@ -1,6 +1,6 @@
 # Compilation Pipeline
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-06 -->
 
 Compilation entry points: source reaches bytecode through the reader, expander, analyzer, lowerer and emitter.
 
@@ -13,21 +13,21 @@ Module: [src/pipeline](../src/pipeline/AGENTS.md).
 - [Expander lifecycle](#expander-lifecycle)
 - [The fixpoint loop](#the-fixpoint-loop)
 - [Compilation phases (single-form)](#compilation-phases-single-form)
-- [Compile context](#compile-context-in-srcpipelinecachersrs)
+- [Compile context](#compile-context)
 - [Known issues](#known-issues)
 
 | File | Purpose |
 |------|---------|
-| `mod.rs` | `CompileResult`, `AnalyzeResult`, re-exports |
-| `cache.rs` | `CompileCtx`: per-instance compile state (macro VM, Expander, PrimitiveMeta, projection cache) |
-| `bootstrap.rs` | Compile and run core.lisp before any compile context exists |
-| `sources.rs` | The core, prelude and stdlib sources a boot compiles, embedded at build time |
-| `directives.rs` | Validate and strip `(elle/version …)` and `(elle/migration …)` |
-| `compile.rs` | `compile()`, `compile_file()`, `compile_file_repl()`, and the whole-module entry points |
-| `compile/frontend.rs` | Read, expand, and classify forms ahead of analysis |
-| `compile/transforms.rs` | Post-analysis HIR transforms |
-| `analyze.rs` | `analyze()`, `analyze_file()` |
-| `eval.rs` | `eval()`, `eval_all()`, `eval_syntax()`, `eval_file()` |
+| [mod.rs](../src/pipeline/mod.rs) | `CompileResult`, `AnalyzeResult`, re-exports |
+| [cache.rs](../src/pipeline/cache.rs) | `CompileCtx`: per-instance compile state (macro VM, Expander, PrimitiveMeta, projection cache) |
+| [bootstrap.rs](../src/pipeline/bootstrap.rs) | Compile and run core.lisp before any compile context exists |
+| [sources.rs](../src/pipeline/sources.rs) | The core, prelude and stdlib sources a boot compiles, embedded at build time |
+| [directives.rs](../src/pipeline/directives.rs) | Validate and strip `(elle/version …)` and `(elle/migration …)` |
+| [compile.rs](../src/pipeline/compile.rs) | `compile()`, `compile_file()`, `compile_file_repl()`, and the whole-module entry points |
+| [compile/frontend.rs](../src/pipeline/compile/frontend.rs) | Read, expand, and classify forms ahead of analysis |
+| [compile/transforms.rs](../src/pipeline/compile/transforms.rs) | Post-analysis HIR transforms |
+| [analyze.rs](../src/pipeline/analyze.rs) | `analyze()`, `analyze_file()` |
+| [eval.rs](../src/pipeline/eval.rs) | `eval()`, `eval_all()`, `eval_syntax()`, `eval_file()` |
 
 ## Public API
 
@@ -52,7 +52,7 @@ pub struct AnalyzeResult {
 | `eval` | Borrowed | No | Tests |
 | `eval_all` | Internal (delegates to `compile_file`) | Yes | Tests |
 | `eval_file` | Borrowed | Yes | Tests |
-| `eval_syntax` | Borrowed | No | Macro body evaluation (src/syntax/expand/macro_expand.rs) |
+| `eval_syntax` | Borrowed | No | Macro body evaluation ([macro_expand.rs](../src/syntax/expand/macro_expand.rs)) |
 | `analyze` | Borrowed | No | Tests |
 | `analyze_file` | Borrowed | Yes | The LSP, the linter, `compile/analyze` |
 
@@ -107,9 +107,9 @@ borrow is needed mid-expansion.
 
 ## Expander lifecycle
 
-The prelude (`prelude.lisp`, embedded at build time) defines macros like
+The prelude ([prelude.lisp](../src/prelude.lisp), embedded at build time) defines macros like
 `defn`, `let*`, `when`, `unless` and `try`/`catch`. It is loaded once, into the
-`CompileCtx`'s `Expander`, when the context is built (`cache.rs`). Every entry
+`CompileCtx`'s `Expander`, when the context is built ([cache.rs](../src/pipeline/cache.rs)). Every entry
 point expands with a clone of that `Expander`: `compile` and `compile_file`
 through `with_macro_expansion`, the `eval` and `analyze` families through
 `expander_and_meta`. A clone carries the loaded prelude, so no call parses it
@@ -120,11 +120,13 @@ again.
 ## The fixpoint loop
 
 Signal inference for mutually recursive definitions converges by fixpoint. The
-loop lives in `analyze_file_letrec` (`src/hir/analyze/fileletrec/letrec.rs`),
+loop lives in `analyze_file_letrec`
+([fileletrec/letrec.rs](../src/hir/analyze/fileletrec/letrec.rs)),
 not in the pipeline module: `compile_file` and `analyze_file` both classify a
 file's forms and hand them to that one function, so the file *is* a letrec and
 the file-level fixpoint and the letrec fixpoint are the same mechanism. Local
-`(letrec ...)` forms run the same loop in `src/hir/analyze/letrec.rs`.
+`(letrec ...)` forms run the same loop in
+[letrec.rs](../src/hir/analyze/letrec.rs).
 
 The signal inference computed here is exposed to tools and agents via:
 - **`compile/signal`** — Get the inferred signal of a function
@@ -192,21 +194,26 @@ converge, because each import is a separate compilation — see
 
 ## Compilation phases (single-form)
 
-Every compilation path follows the same five phases:
+Every compilation path follows the same phases:
 
-1. **Read**: `read_syntax(source, source_name)` → `Syntax`
-2. **Expand**: `expander.expand(syntax, symbols, vm)` → expanded `Syntax`
-3. **Analyze**: `Analyzer::new_with_primitives(symbols, signals, arities)` →
+1. **Read**: `read_syntax(arena, source, source_name)` → `Syntax`
+2. **Expand**: `expander.expand(syntax, symbols, macro_vm)` → expanded `Syntax`
+3. **Analyze**: `Analyzer::new_with_primitives(...)` →
    `analyzer.analyze(&expanded)` → `AnalysisResult { hir, .. }`
-4. **Tail call marking**: `mark_tail_calls(&mut analysis.hir)` (mutates HIR in place)
-5. **Lower + Emit**: `Lowerer::new().with_intrinsics(intrinsics).lower(&hir)` →
-   `LirFunction` → `Emitter::new().emit(&lir_func)` → `Bytecode`
+4. **Regularize**: `crate::hir::regularize(&mut hir, ...)` marks tail calls,
+   functionalizes, lifts to ANF and infers types, in place
+5. **Regions**: `analyze_regions_with(&hir, ...)` → `RegionInfo`
+6. **Lower**: `Lowerer::new(&arena)...lower(&hir)` → `LirModule`
+7. **Freeze**: `LirModule::freeze()` → `FrozenModule`
+   ([lir.md](impl/lir.md) § "Two forms of one function")
+8. **Emit**: `Emitter::new().emit_module(&frozen)` → `Bytecode`
 
-`analyze` and `analyze_file` stop after phase 3 (no lowering or emission).
+`analyze` and `analyze_file` stop after phase 3, then mark tail calls alone
+(no regularization, lowering or emission).
 
-## Compile context (in `src/pipeline/cache.rs`)
+## Compile context
 
-`CompileCtx` is the per-instance compile-time state: a macro-expansion VM
+[cache.rs](../src/pipeline/cache.rs) holds it. `CompileCtx` is the per-instance compile-time state: a macro-expansion VM
 (primitives registered), the core.lisp/prelude `Expander`, the
 `PrimitiveMeta`, and the file→signal projection cache. It is built once when
 the instance's `RuntimeCore` is constructed and threaded explicitly through

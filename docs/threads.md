@@ -87,6 +87,16 @@ There is no bare `spawn` — it would collide with the
 `(ev/scope (fn [spawn] …))` nursery param, so it is not a primitive alias;
 top-level code uses `sys/spawn`/`sys/spawn-vm`.
 
+#### A closure crosses with its compiled LIR
+
+A closure carries its LIR across the boundary, so the worker's JIT can compile
+it as the sending thread's could. The LIR crosses as data: its frozen records
+copy verbatim, and the values its `ValueConst` instructions load cross through
+the same value walk as the closure's constants. A stdlib closure that such a
+value names interns into the bundle once, like any closure the graph reaches
+twice. Nothing in the LIR is rewritten on the way out or patched on the way in
+([impl/lir.md](impl/lir.md)).
+
 #### Worker stack size matches the main thread
 
 A worker must be able to compile and run anything the main thread can. The test

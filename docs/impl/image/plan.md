@@ -1,6 +1,6 @@
 # Landing order and test plan
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-10-06 -->
 
 What lands in which order, and the pins each milestone must land with.
 
@@ -31,13 +31,22 @@ code, and each deletes image machinery
    design would otherwise have needed, the `Box<Syntax>` inside
    `HeapObject::Syntax`, and the retained lambda tree on every closure
    template.
-5. **lir** — to land. The region-native `LirFunction`
+5. **lir** — to land. Region-native LIR
    ([foundations.md](foundations.md) argues it); deletes the encoded-LIR
    side-stream this design would otherwise have needed, `send`'s LIR codec,
    and `TemplateProto` — the last Rust-heap owner on a code object. It lands
    after boot rather than before it, because the measurement that sized it
    ([measurements.md](measurements.md) item 7) needed a boot configuration to
-   point at.
+   point at. It lands in four steps, each green on its own:
+   - **lir-view** — freezing, and one read form: every reader except the
+     lowerer reads a frozen function through `LirView`. Deletes `send`'s LIR
+     codec.
+   - **lir-payload** — the code payload carries the frozen function, so a
+     hydrated closure reaches the JIT.
+   - **lir-retire** — `TemplateProto` and the payload cache retire, and a code
+     object is one payload slice.
+   - **lir-lower** — the lowerer builds the frozen form in a working region,
+     and the Rust-heap working form is deleted.
 
 Then the image milestones:
 
@@ -95,19 +104,43 @@ Then the image milestones:
 - Foundations: existing corpus plus targeted unit tests pinning the new
   layouts, the no-clone `MakeClosure`, stable symbol ordering across two
   tables, and syntax round-trips through `send`.
-- LIR: every corpus file emits byte-identical bytecode through the ported
-  lowerer and emitter, which is the foundation's acceptance gate — a
+- LIR: every corpus file and the standard library emit byte-identical
+  bytecode through each step, which is the foundation's acceptance gate — a
   representation change that moves one instruction is a defect, and the golden
-  is what the binary emits today. A promotion copies its function out of the
-  region, and the copy answers after that region is freed; the counter-factual
-  is handing the worker a slice into live pages, which is correct until the
-  free lands. Freeing a code object's region frees its LIR, and the leak suite
-  stays green with no carve-out. A pass that grows an instruction list answers
-  as the `Vec` pass did. A closure sent to a worker carries its LIR as region
-  data, and the worker's JIT re-emits from it. `TemplateProto` is gone, and a
-  code object answers every question from its payload — the counter-factual is
-  a blueprint kept "just for the JIT", which passes every other test here and
-  keeps the second copy of the bytecode alive.
+  is what the binary emitted before the step. `make bytecode-golden` records
+  it under `target/` and `make bytecode-golden-check` compares, and
+  `--dump=bytecode` writing one text across two runs is what lets a golden
+  exist at all. Each step adds its own pins:
+  - **lir-view**: every opcode round-trips through freeze and the view, field
+    by field, from a list the compiler checks against `Op`. Each record's size
+    is the sum of its fields — the counter-factual is implicit padding, which
+    would carry stray bytes into a dump. A third use lands in the pool, a tail
+    call keeps its deferred-release slot and its borrowed-argument slots, and a
+    `LirConst::String` is refused by name. `JitTask` is `Send` by type, with no
+    hand-written claim. A closure whose LIR loads a stdlib closure and a list
+    as `ValueConst`s crosses to a worker with its LIR and both values, and the
+    worker's JIT compiles it.
+  - **lir-payload**: a header hydrated from an image answers its LIR, and under
+    `--boot-image` a hot stdlib function compiles on the JIT as it does under
+    source boot. A promotion copies its function out of the region, and the
+    copy answers after that region is freed; the counter-factual is handing the
+    worker a slice into live pages, which is correct until the free lands.
+    Freeing a code object's region frees its LIR, and the leak suite stays
+    green with no carve-out. Two dumps of a graph whose closures carry LIR
+    write one file, whatever a node's bytes beyond its fields held. The
+    verifier refuses an LIR slice whose extent leaves the image. A hydrated
+    closure sent to a worker carries its LIR, and the stdlib-cache reload keeps
+    it.
+  - **lir-retire**: `TemplateProto` is gone, and a code object answers every
+    question from its payload — the counter-factual is a blueprint kept "just
+    for the JIT", which passes every other test here and keeps the second copy
+    of the bytecode alive. A header is the size of one payload slice, a live
+    closure's payload child table is filled, and a dropped unit's code region
+    is released once its last header is freed.
+  - **lir-lower**: a pass that grows an instruction list answers as the `Vec`
+    pass did, checked against a `Vec::splice` model over random operation
+    sequences. The working region is freed after the compile, and the standard
+    library's LIR build shows in `arena/page-claims`.
 - Round-trip: dump a data graph, hydrate in a fresh runtime, assert
   structural equality — and a counter-factual load with a corrupted
   fingerprint falls back cleanly.
