@@ -1,4 +1,7 @@
-//! Diagnostic types for linter violations
+// audited: 2026-10-05
+//! A diagnostic's type, its severity, and the one table of codes each surface reports under.
+//!
+//! docs/cookbook/lint-rules.md
 
 use crate::reader::SourceLoc;
 use std::fmt;
@@ -41,15 +44,11 @@ impl LintCode {
 impl LintCode {
     /// The code an analysis failure reports under, on **every** surface.
     ///
-    /// The lint CLI, `compile/diagnostics`, and the LSP each used to spell this
-    /// mapping out for themselves, and they disagreed: a syntax error was
-    /// `E005` from `elle lint`, `E000` from `compile/diagnostics` (whose match
-    /// had no `SyntaxError` arm at all), and `E0001` from the LSP — a shape the
-    /// documented `E00x` scheme does not even have. A consumer that filters or
-    /// counts by code could not do it across surfaces.
+    /// The lint CLI, `compile/diagnostics`, and the LSP all ask here, so one
+    /// failure carries one code whichever surface a consumer reads, and a
+    /// consumer can filter or count by code across them.
     ///
-    /// Kinds with no code of their own report as [`ANALYSIS_ERROR`], which is
-    /// what each site's fallback arm already did.
+    /// Kinds with no code of their own report as [`ANALYSIS_ERROR`].
     pub fn for_error_kind(kind: &crate::error::ErrorKind) -> LintCode {
         use crate::error::ErrorKind;
         match kind {
@@ -80,6 +79,10 @@ pub const WARNINGS: &[LintCode] = &[
     UNUSED_BINDING,
     NON_TAIL_SELF_RECURSION,
 ];
+
+/// Every hint the linter gives, in code order, published in the cookbook
+/// beside [`WARNINGS`].
+pub const HINTS: &[LintCode] = &[];
 
 pub const ANALYSIS_ERROR: LintCode = LintCode::new("E000", "analysis-error");
 pub const UNDEFINED_VARIABLE: LintCode = LintCode::new("E001", "undefined-variable");
