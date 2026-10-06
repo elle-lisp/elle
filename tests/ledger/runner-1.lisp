@@ -1,5 +1,5 @@
 (elle/epoch 14)
-# audited: 2026-10-05
+# audited: 2026-10-06
 # The runner's ledger, part 1 of 2: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/impl/abort-wait-lists.lisp" :objects 809]
@@ -205,6 +205,7 @@
 ["tests/impl/wasm-tier-error-signal.lisp" :objects 177]
 ["tests/impl/wasm-tier.lisp" :objects 191]
 ["tests/impl/whole-module.lisp" :objects 118]
+["tests/lang/abort-unwind-waits.lisp" :objects 375]
 ["tests/lang/arithmetic.lisp" :objects 1064]
 ["tests/lang/array-keys.lisp" :objects 362]
 ["tests/lang/async-error-propagation.lisp" :objects 420]

@@ -1,5 +1,5 @@
 (elle/epoch 14)
-# audited: 2026-10-05
+# audited: 2026-10-06
 # The runner's ledger, part 2 of 2: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/lang/each.lisp" :objects 1016]
@@ -53,16 +53,20 @@
 ["tests/lang/h2-close-on-dead-peer.lisp" :objects 550]
 ["tests/lang/h2-flow.lisp" :objects 1359]
 ["tests/lang/h2-headers-in-process.lisp" :objects 509]
+["tests/lang/h2-hpack-strings.lisp" :objects 278]
+["tests/lang/h2-huffman.lisp" :objects 233]
 ["tests/lang/h2-load-bodies.lisp" :objects 421]
 ["tests/lang/h2-load-churn.lisp" :objects 316]
 ["tests/lang/h2-load-interleave.lisp" :objects 517]
 ["tests/lang/h2-load-polling.lisp" :objects 541]
 ["tests/lang/h2-load-volume.lisp" :objects 354]
 ["tests/lang/h2-load-width.lisp" :objects 397]
+["tests/lang/h2-max-frame-size.lisp" :objects 429]
 ["tests/lang/h2-modules.lisp" :objects 160]
 ["tests/lang/h2-recycle-cleanup.lisp" :objects 765]
 ["tests/lang/h2-rfc9113.lisp" :objects 511]
-["tests/lang/h2-server.lisp" :objects 1625]
+["tests/lang/h2-send-closed.lisp" :objects 230]
+["tests/lang/h2-server.lisp" :objects 1647]
 ["tests/lang/h2-stream-fanout.lisp" :objects 943]
 ["tests/lang/h2-stream-layers.lisp" :objects 918]
 ["tests/lang/h2-stream-share.lisp" :objects 1294]
@@ -105,6 +109,7 @@
 ["tests/lang/monoroute.lisp" :objects 292]
 ["tests/lang/muffle.lisp" :objects 261]
 ["tests/lang/mutability.lisp" :objects 333]
+["tests/lang/named-arg-tail-refusal.lisp" :objects 140]
 ["tests/lang/negindex.lisp" :objects 1817]
 ["tests/lang/nested-while-mutation.lisp" :objects 307]
 ["tests/lang/net-wait-timeout.lisp" :objects 380]
@@ -218,7 +223,7 @@
 ["tests/lang/string-escapes.lisp" :objects 292]
 ["tests/lang/string.lisp" :objects 1137]
 ["tests/lang/strings.lisp" :objects 1760]
-["tests/lang/struct-apply-orphan.lisp" :objects 503]
+["tests/lang/struct-apply-orphan.lisp" :objects 506]
 ["tests/lang/struct-closure-reuse.lisp" :objects 102]
 ["tests/lang/struct-string-keys.lisp" :objects 411]
 ["tests/lang/structured-concurrency.lisp" :objects 708]
