@@ -20,10 +20,10 @@ the closure a clone of the expander and of the compile metadata. These entry
 points need no VM from the caller, and a macro's side effects stay on the
 macro VM.
 
-**The caller's VM.** `eval`, `analyze` and `analyze_file` expand on the VM the
-caller passes, with the clones `CompileCtx::expander_and_meta` answers. `eval`
-then runs the bytecode on that VM as well, so a macro's side effects and the
-program's share one VM.
+**The caller's VM.** `eval`, `analyze`, `analyze_file` and
+`analyze_file_detached` expand on the VM the caller passes, with the clones
+`CompileCtx::expander_and_meta` answers. `eval` then runs the bytecode on that
+VM as well, so a macro's side effects and the program's share one VM.
 
 **Compile on one, run on the other.** `eval_file` and `eval_all` compile
 through `compile_file` on the macro VM, then run the bytecode on the caller's
