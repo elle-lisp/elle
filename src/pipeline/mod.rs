@@ -18,7 +18,7 @@ mod eval;
 pub mod sources;
 
 // Re-export public API
-pub use analyze::{analyze, analyze_file};
+pub use analyze::{analyze, analyze_file, analyze_file_detached};
 pub use bootstrap::install_core_exports;
 pub use cache::{BootExports, CompileCtx};
 #[cfg(test)]
@@ -42,4 +42,6 @@ pub struct AnalyzeResult {
     pub arena: crate::hir::BindingArena,
     /// Accumulated non-fatal analysis errors
     pub errors: Vec<crate::error::LError>,
+    /// Each lambda's declared ceiling, keyed by its node.
+    pub lambda_decls: std::collections::HashMap<crate::hir::HirId, crate::hir::LambdaDecl>,
 }
