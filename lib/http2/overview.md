@@ -54,6 +54,15 @@ handshake.
   the TCP and TLS transports. [http2.lisp](../http2.lisp) loads it once,
   uses it for the client, and hands it to the server.
 
+- **Huffman decode reads a byte-wide table.** A code of 8 bits or fewer
+  covers every letter and digit and the common punctuation, and the
+  decoder reads it in one step from a 256-entry table indexed by the next
+  8 bits of input. A longer code walks the trie a bit at a time. Walking
+  every code bit by bit costs eight loop steps per input byte, and in a
+  header-heavy exchange that walk outweighs the rest of the session.
+  [huffman-decode.lisp](../../tests/impl/huffman-decode.lisp) reads the
+  pages a decode claims, which track those loop steps.
+
 - **HPACK encode and send are atomic.** `encode-and-send-headers`
   encodes and enqueues HEADERS plus every CONTINUATION without yielding.
   A yield between them lets another fiber encode against the same
