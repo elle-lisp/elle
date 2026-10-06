@@ -181,7 +181,7 @@ impl CodeBuilder {
     pub fn unit(self, heap: &mut FiberHeap) -> CodeUnit {
         let arena = CodeArena::mint(heap);
         let parts = self.children_into(arena);
-        CodeUnit::of_parts(arena, parts, None)
+        CodeUnit::of_parts(arena, parts)
     }
 
     /// This code object's fields, its children written into `arena` and

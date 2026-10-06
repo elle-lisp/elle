@@ -6,8 +6,9 @@
 //! docs/impl/region/rules.md
 //!
 //! The state is a macro-expansion VM, the prelude and core `Expander`, the
-//! `PrimitiveMeta` (primitives, host primitives, core.lisp and stdlib exports,
-//! REPL value bindings), and the map from an imported file to its signal projection.
+//! `PrimitiveMeta` (primitives, host primitives, host bindings, core.lisp and
+//! stdlib exports), the REPL layer, and the capabilities the fiber a compile
+//! runs for withholds.
 //!
 //! The instance's `RuntimeCore` owns it beside the `VM` and the `SymbolTable`,
 //! and the pipeline takes it as a parameter. Two embedded Elle instances on one
@@ -20,10 +21,15 @@ use crate::signals::Signal;
 use crate::symbol::SymbolTable;
 use crate::syntax::Expander;
 use crate::value::arena::RootRef;
+use crate::value::fiber::SignalBits;
 use crate::vm::VM;
 use std::collections::HashMap;
 
 use super::bootstrap::{compile_core, install_core_exports};
+
+mod repl;
+pub use repl::Layer;
+use repl::ReplLayer;
 
 /// The two export structs a boot leaves behind: core.lisp's and stdlib.lisp's.
 ///
@@ -64,16 +70,18 @@ pub struct CompileCtx {
     /// macro bodies without a separate `CompileCtx` borrow.
     expander: Expander,
     /// Primitive metadata: primitives + core.lisp exports + stdlib exports +
-    /// REPL value bindings. The analyzer's `bind_primitives` reads this so user
+    /// host bindings. The analyzer's `bind_primitives` reads this so user
     /// code sees them as immutable globals; `lookup_stdlib_value` reads it for
     /// the runtime `ev/run` entry.
     meta: PrimitiveMeta,
-    /// Signal projection cache: resolved file path → keyword→signal projection.
-    /// Populated lazily when the analyzer encounters `((import-file "..."))`
-    /// with a literal string argument. Per-instance, keyed by resolved path, and never
-    /// invalidated: an edit to the file during the instance's life does not
-    /// reach the cached projection.
-    projections: HashMap<String, Option<HashMap<String, Signal>>>,
+    /// The macros and definitions earlier REPL lines made. Only a compile of
+    /// [`Layer::Repl`] sees them.
+    repl: ReplLayer,
+    /// The capabilities the fiber this compile runs for withholds, set by
+    /// [`on_behalf_of`](Self::on_behalf_of). The macro VM's fresh fiber
+    /// withholds them too, so a transformer spends no more than the code that
+    /// started the compile could.
+    withheld: SignalBits,
     /// The core and stdlib export aggregates this instance booted with.
     exports: BootExports,
     /// Whether a unit compiled here grafts its calls (docs/impl/graft.md).
@@ -162,18 +170,7 @@ impl CompileCtx {
         // the dropped table. The next `expand`, a real compile, points the VM at
         // the instance's table.
         vm.set_symbols(std::ptr::null_mut());
-        CompileCtx {
-            vm,
-            expander,
-            meta,
-            projections: HashMap::new(),
-            exports: BootExports {
-                core,
-                ..BootExports::default()
-            },
-            graft: crate::config::GraftPolicy::On,
-            static_region_mark: 0,
-        }
+        Self::assemble(vm, expander, meta, core)
     }
 
     /// Build a compile context out of a hydrated boot image instead of
@@ -202,13 +199,25 @@ impl CompileCtx {
         boot.install_macros(unsafe { &mut *heap_ptr }, &mut expander, symbols);
         crate::phase!(trace, "boot", t, "image-core-and-macros");
         vm.set_symbols(std::ptr::null_mut());
+        Self::assemble(vm, expander, meta, boot.core_exports())
+    }
+
+    /// The context a boot leaves: its macro VM, expander and meta, and the
+    /// core.lisp exports. Every other part starts empty.
+    fn assemble(
+        vm: VM,
+        expander: Expander,
+        meta: PrimitiveMeta,
+        core: crate::value::Value,
+    ) -> Self {
         CompileCtx {
             vm,
             expander,
             meta,
-            projections: HashMap::new(),
+            repl: ReplLayer::default(),
+            withheld: SignalBits::EMPTY,
             exports: BootExports {
-                core: boot.core_exports(),
+                core,
                 ..BootExports::default()
             },
             graft: crate::config::GraftPolicy::On,
@@ -218,36 +227,73 @@ impl CompileCtx {
 
     /// Run `f` with the macro-expansion VM (fiber reset), a clone of the
     /// `Expander` (independent expansion state), and a clone of the compile
-    /// `meta`. The clones decouple `f` from `self`'s borrow so a nested compile
-    /// during `f` (a `begin-for-syntax` that imports, say) does not alias.
+    /// `meta`, each of `layer`. The clones decouple `f` from `self`'s borrow so
+    /// a nested compile during `f` (a `begin-for-syntax` that imports, say)
+    /// does not alias. The fresh fiber withholds what
+    /// [`on_behalf_of`](Self::on_behalf_of) named.
     ///
     /// `arena` is the unit's working syntax arena, and the handed-out clone is
     /// already pointed at it. Taking it here rather than leaving it to the
     /// caller is what keeps an expansion from allocating into the instance's
     /// process-root template arena, which nothing would ever reclaim
     /// (docs/impl/syntax.md).
-    pub fn with_macro_expansion<F, R>(&mut self, arena: crate::syntax::SyntaxArena, f: F) -> R
+    pub fn with_macro_expansion<F, R>(
+        &mut self,
+        arena: crate::syntax::SyntaxArena,
+        layer: Layer,
+        f: F,
+    ) -> R
     where
         F: FnOnce(&mut VM, Expander, PrimitiveMeta) -> R,
     {
         self.vm.reset_fiber();
-        let mut expander = self.expander.clone();
-        expander.set_arena(arena);
-        let meta = self.meta.clone();
+        self.vm.fiber.withheld = self.withheld;
+        let (expander, meta) = self.layered(layer, arena);
         f(&mut self.vm, expander, meta)
     }
 
     /// A cloned `Expander` — pointed at `arena`, as in
     /// [`with_macro_expansion`](Self::with_macro_expansion) — and compile
-    /// `meta`, without borrowing the macro VM. Used by `eval`/`analyze`, which
-    /// run expansion on their own VM.
+    /// `meta`, of the instance's layer, without borrowing the macro VM. Used by
+    /// `eval`/`analyze`, which run expansion on their own VM.
     pub fn expander_and_meta(
         &self,
         arena: crate::syntax::SyntaxArena,
     ) -> (Expander, PrimitiveMeta) {
+        self.layered(Layer::Instance, arena)
+    }
+
+    /// Clones of the expander and the meta a compile of `layer` sees, the
+    /// expander pointed at `arena`.
+    fn layered(
+        &self,
+        layer: Layer,
+        arena: crate::syntax::SyntaxArena,
+    ) -> (Expander, PrimitiveMeta) {
         let mut expander = self.expander.clone();
         expander.set_arena(arena);
-        (expander, self.meta.clone())
+        let mut meta = self.meta.clone();
+        if layer == Layer::Repl {
+            self.repl.overlay(&mut expander, &mut meta);
+        }
+        (expander, meta)
+    }
+
+    /// The capabilities the fiber this compile runs for withholds.
+    pub fn withheld(&self) -> SignalBits {
+        self.withheld
+    }
+
+    /// Run `f`, a compile that code on a fiber started, with the capabilities
+    /// that fiber withholds. Every macro the compile expands on the macro VM
+    /// runs without them, and an include reads no file without `:fs`. A
+    /// compile inside another keeps what the outer one withheld.
+    pub fn on_behalf_of<R>(&mut self, withheld: SignalBits, f: impl FnOnce(&mut Self) -> R) -> R {
+        let saved = self.withheld;
+        self.withheld = saved.union(withheld);
+        let out = f(self);
+        self.withheld = saved;
+        out
     }
 
     /// Every globally-bound callable's `SymbolId`: Rust primitives, core.lisp
@@ -258,7 +304,7 @@ impl CompileCtx {
         self.meta.functions.keys().copied()
     }
 
-    /// Look up a stdlib-exported (or REPL-bound) value by `SymbolId`. The
+    /// Look up a stdlib-exported (or host-bound) value by `SymbolId`. The
     /// runtime `ev/run` entry resolves the scheduler closure this way.
     pub fn lookup_stdlib_value(
         &self,
@@ -307,19 +353,42 @@ impl CompileCtx {
     }
 
     /// The full compile metadata user code is analyzed against: primitives,
-    /// core.lisp exports, stdlib exports and REPL value bindings.
+    /// core.lisp exports, stdlib exports and host bindings.
     pub fn meta(&self) -> &PrimitiveMeta {
         &self.meta
     }
 
     /// The primitive(+stdlib) metadata for lowering's `PrimitiveClassification`
-    /// and for macro-body compilation. Excludes core.lisp exports and REPL
-    /// value bindings.
+    /// and for macro-body compilation. Excludes core.lisp exports and every
+    /// binding a host or a REPL line registers.
     pub fn primitive_meta(&self) -> &PrimitiveMeta {
         self.expander.eval_meta()
     }
 
-    /// Register a REPL `def` binding so subsequent compilations resolve it.
+    /// Register a binding an embedder makes, so that every compile in this
+    /// instance resolves it, the files a program imports included. The value
+    /// is rooted as [`register_repl_binding`](Self::register_repl_binding)
+    /// roots one.
+    pub fn register_host_binding(
+        &mut self,
+        heap: &mut crate::value::fiberheap::FiberHeap,
+        sym_id: crate::value::SymbolId,
+        value: crate::value::Value,
+        funding: RootRef,
+        signal: Signal,
+        arity: Option<crate::value::types::Arity>,
+    ) {
+        self.meta.signals.insert(sym_id, signal);
+        self.meta.functions.insert(sym_id, value);
+        if let Some(a) = arity {
+            self.meta.arities.insert(sym_id, a);
+        }
+        crate::value::arena::register_process_root(heap, value, funding);
+    }
+
+    /// Register a REPL `def` binding so later REPL lines resolve it. No other
+    /// compile does: a file a line imports compiles as it would from any
+    /// program.
     ///
     /// A REPL `def` value outlives the line that produced it, because later
     /// lines resolve it from `meta`. So the value's region becomes a process
@@ -342,18 +411,14 @@ impl CompileCtx {
         signal: Signal,
         arity: Option<crate::value::types::Arity>,
     ) {
-        self.meta.signals.insert(sym_id, signal);
-        self.meta.functions.insert(sym_id, value);
-        if let Some(a) = arity {
-            self.meta.arities.insert(sym_id, a);
-        }
+        self.repl.bind(sym_id, value, signal, arity);
         crate::value::arena::register_process_root(heap, value, funding);
     }
 
     /// Register a host primitive under its name and aliases, so compiled code
     /// and `eval` both resolve it as they resolve a built-in.
     ///
-    /// A REPL binding reaches the compile `meta` alone, and `eval` compiles
+    /// A host binding reaches the compile `meta` alone, and `eval` compiles
     /// against the macro-body `eval_meta`; a primitive belongs in both. A
     /// primitive value is an immediate, so nothing here needs a root.
     pub fn register_primitive(
@@ -370,24 +435,11 @@ impl CompileCtx {
         self.expander.set_eval_meta(eval_meta);
     }
 
-    /// Register a binding an embedder makes, so that every compile in this
-    /// instance resolves it, the files a program imports included.
-    pub fn register_host_binding(
-        &mut self,
-        _heap: &mut crate::value::fiberheap::FiberHeap,
-        _sym_id: crate::value::SymbolId,
-        _value: crate::value::Value,
-        _funding: RootRef,
-        _signal: Signal,
-        _arity: Option<crate::value::types::Arity>,
-    ) {
-    }
-
-    /// Merge REPL-defined macros into the expander so subsequent compilations
-    /// see them. (The macro-body `eval_meta` is unaffected: REPL value bindings
-    /// never reach macro-body compiles.)
+    /// Keep the macros a REPL line defined, from the expander that compiled
+    /// it, so later REPL lines expand them. The instance's own macros in that
+    /// expander are not the line's, and stay where they are.
     pub fn register_repl_macros(&mut self, macros: &HashMap<String, crate::syntax::MacroDef>) {
-        self.expander.merge_macros(macros);
+        self.repl.keep_macros(self.expander.macros(), macros);
     }
 
     /// Add stdlib exports to the compile `meta` (so user code sees them as
@@ -413,48 +465,17 @@ impl CompileCtx {
     /// Release what this context holds on the heap from Rust, ahead of the
     /// process-teardown sweep. Each macro transformer's cell would release on
     /// its own when the context drops, which is after the sweep has counted the
-    /// residue. So the master expander empties its cells here, and the macro
-    /// VM drops the `eval` expander a macro body may have built.
+    /// residue. So the master expander and the REPL layer empty their cells
+    /// here, and the macro VM drops the `eval` expander a macro body may have
+    /// built.
     ///
     /// The macro VM's JIT and SPIR-V caches pin code regions from Rust, so they
     /// go here too (docs/impl/jit.md).
     pub fn release(&mut self) {
         self.expander.release_cached_transformers();
+        self.repl.release();
         self.vm.eval_expander = None;
         self.vm.clear_code_pins();
-    }
-
-    /// Look up or compute the signal projection for an imported file.
-    ///
-    /// On a miss, compiles the file in this instance's context and caches the
-    /// projection from the resulting bytecode. Returns `None` when the file
-    /// cannot be read or compiled, or its return value is not a projectable
-    /// struct; the `None` is cached too, so the file is not compiled again.
-    pub fn get_or_compile_projection(
-        &mut self,
-        resolved_path: &str,
-        symbols: &mut SymbolTable,
-    ) -> Option<HashMap<String, Signal>> {
-        if let Some(proj) = self.projections.get(resolved_path) {
-            return proj.clone();
-        }
-
-        let source = std::fs::read_to_string(resolved_path).ok()?;
-        // The probe compiles in the CALLER's memo, which is per-instance
-        // (docs/impl/symbol.md). A throwaway table here would drop every name
-        // the module's quoted data carries. A transformer cached on the shared
-        // expander during this compile would also outlive the table it learned
-        // into. The `each` and probe tests in
-        // tests/integration/projection.rs pin both halves. A cache hit skips
-        // the stdlib compile that would otherwise warm every transformer, so
-        // the probe is often the first expansion on that path too.
-        let projection = super::compile::compile_file(&source, symbols, self, resolved_path)
-            .ok()
-            .and_then(|unit| unit.signal_projection().cloned());
-
-        self.projections
-            .insert(resolved_path.to_string(), projection.clone());
-        projection
     }
 }
 
