@@ -1,6 +1,6 @@
 # Region performance — merging and the cost model
 
-<!-- audited: 2026-09-30 -->
+<!-- audited: 2026-10-06 -->
 
 This is the consumer's view of where region performance comes from and what you
 can and cannot affect. The implementor's account of the page pool is in
@@ -47,7 +47,7 @@ value baseline affordable.
 The cache is bounded. Past that bound a released page is unmapped instead of
 kept, which is where memory returns to the OS; a page inside the bound stays
 resident because it is about to be handed out again. The implementor's account
-is in [impl/region/model.md](../impl/region/model.md) § "Page recycling".
+is in [impl/region/model.md](../impl/region/model.md).
 
 ## A call into a variadic stdlib operator allocates
 
@@ -57,6 +57,13 @@ arguments builds the two-cons rest list and the `letrec` closure that the
 definition asks for, and each of those objects is born in its own region, which
 owns a page. `(+ a b)` therefore claims three pages, where `(%add a b)` is one
 VM instruction and claims none.
+
+A rest list costs one page per argument when the callee might keep a tail of
+it. When the callee only reads it — counts it, tests it for empty, takes its
+first element, or splices it into another call — the whole list shares one
+region and costs one page ([restlist](../impl/region/restlist.md) gives the
+rule). `+` hands its list to the `letrec` helper that walks it, so it pays per
+argument.
 
 That is the price of the wrapper's polymorphism, its runtime type checks, and
 its `:error` signal — and it is the reason

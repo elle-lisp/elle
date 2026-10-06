@@ -27,6 +27,7 @@ Up: [..](../AGENTS.md)
 - [reads.md](reads.md) — **Reads of a 1-slot container** What a whole-value read of a reassigned binding's container takes, and which binder forms must emit the retain.
 - [relocate.md](relocate.md) — **A release past a frame-replacing tail call** Every release the lowerer emits after a `TailCall` is dead on the closure path, and what it costs to move one ahead of that call.
 - [replicate.md](replicate.md) — **The relocation point and its replicas** How a relocation point outlives its own block, so one release covers a merge and every path that leaves the frame before it.
+- [restlist.md](restlist.md) — **A rest list in one region** When no cell of a variadic call's rest list can outlive the head, the list is built in one region instead of one region per cell.
 - [rules.md](rules.md) — **Region rules — the implementor's correctness obligations** The exhaustive correctness contract the compiler and runtime must uphold for regions.
 - [settled.md](settled.md) — **Settled invariants** The invariants the region system upholds, one line each, with the spec that owns the argument.
 - [signalexit.md](signalexit.md) — **What a signal exit owes** A native tail call runs its fall-through block on normal completion alone, so a signal exit answers for the releases left in it.
