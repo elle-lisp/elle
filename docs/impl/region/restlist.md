@@ -95,7 +95,9 @@ soundness.
 
 The verdict rides the code object as the rest list's layout: one region per
 cell, or one region for the list ([template.md](template.md)). The interpreter's
-environment builder and the JIT's entry block both read it.
+environment builder and the JIT's entry block both read it. The layout travels
+with the rest of the code object: to a worker thread, through the stdlib cache,
+and into an image. A carrier that drops it falls back to one region per cell.
 
 For a list in one region, the runtime mints one region and builds the cells
 into it, last argument first. Each cell's `rest` points at the cell built
