@@ -33,6 +33,16 @@ pub struct Run<'a> {
     pub expect: bool,
     pub native_time: Duration,
     pub native_agrees: bool,
+    pub engines: &'a [EngineRun],
+}
+
+/// One in-process engine's fastest solve, and whether its model matches the others.
+pub struct EngineRun {
+    pub name: &'static str,
+    pub time: Duration,
+    pub same_as_worklist: bool,
+    pub same_as_z3: bool,
+    pub same_viol_as_z3: bool,
 }
 
 /// How the solver's answer for one lambda relates to the analyzer's.
@@ -160,6 +170,12 @@ pub fn print(ctx: &Context, run: &Run) -> usize {
         "worklist fixpoint in Rust {:.0?}; same model as z3: {}",
         run.native_time, run.native_agrees
     );
+    for e in run.engines {
+        println!(
+            "engine {:<9} {:>9.2?}  same as worklist: {}  same as z3: {}  same violations as z3: {}",
+            e.name, e.time, e.same_as_worklist, e.same_as_z3, e.same_viol_as_z3
+        );
+    }
     if let Some(d) = run.deterministic {
         println!("reversed fact order gives the same model: {}", d);
     }
