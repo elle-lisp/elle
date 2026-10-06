@@ -1,6 +1,6 @@
 (elle/epoch 15)
 # audited: 2026-10-20
-# Declaring `fiber/child` and `import` `Opaque` frees nothing early: the soundness face of region-fiber-child-effect.lisp.
+# Declaring `fiber/child` and `import/load-file` `Opaque` frees nothing early: the soundness face of region-fiber-child-effect.lisp.
 # docs/impl/region/effects.md
 # docs/impl/escape.md
 #
@@ -16,10 +16,10 @@
 # drive a fiber read after the branch, resumed after it, stored into a container
 # a sibling arm reads, returned to a caller that resumes it, captured by a
 # closure called later, and held across the fiber frontier — plus the same shapes
-# for `import`'s specifier. Each read reaches the subject's own pages (`fiber/bits`
-# reads the fiber object; a resume runs its body out of them), so an over-early
-# free faults rather than reading stale but mapped bytes. A fresh subject per
-# iteration keeps region ids churning.
+# for the path `import/load-file` reads. Each read reaches the subject's own
+# pages (`fiber/bits` reads the fiber object; a resume runs its body out of
+# them), so an over-early free faults rather than reading stale but mapped bytes.
+# A fresh subject per iteration keeps region ids churning.
 
 # ── the fiber subject ────────────────────────────────────────────────────────
 
@@ -91,34 +91,34 @@
     (fiber/resume inner)
     (length (fiber/resume f))))
 
-# ── the import specifier ────────────────────────────────────────────────────
+# ── the loader's path ───────────────────────────────────────────────────────
 
-# (g) the specifier is read after the branch that imported with it. The import
-# fails by design — resolution copies the specifier out to a Rust String either
-# way, which is the claim under test — and the caught error is data.
-(defn w-spec-after (s t)
+# (g) the path is read after the branch that loaded with it. The load fails by
+# design — the loader copies the path out to a Rust String either way, which is
+# the claim under test — and the caught error is data.
+(defn w-path-after (s t)
   (match t
     :a (try
-         (import s)
+         (import/load-file s)
          (catch e 0))
     :b (length s)
     _ (length s))
   (length (concat s "!")))
 
-# (h) the specifier is stored into a container a later read reaches, so its
-# release must land behind that read.
-(def @specs @[])
-(defn w-spec-stored (s t)
+# (h) the path is stored into a container a later read reaches, so its release
+# must land behind that read.
+(def @paths @[])
+(defn w-path-stored (s t)
   (match t
     :a
       (begin
         (try
-          (import s)
+          (import/load-file s)
           (catch e 0))
-        (push specs s))
-    :b (push specs s)
+        (push paths s))
+    :b (push paths s)
     _ 0)
-  (length (concat (get specs (%sub (length specs) 1)) "!")))
+  (length (concat (get paths (%sub (length paths) 1)) "!")))
 
 # ── controls: the same reads with no branch ──────────────────────────────────
 (defn c-plain (f)
@@ -160,19 +160,19 @@
 (assert (> e 0) "fiber freed under a capture called after the branch")
 (assert (%gt g 0) "fiber freed under a read across the fiber frontier")
 
-# The specifier witnesses run a shorter loop: every call re-resolves the module
-# through the filesystem, which is orders of magnitude slower than the fiber
-# reads above. A fresh specifier per iteration still churns the region ids.
+# The path witnesses run a shorter loop: every call asks the filesystem for the
+# file, which is orders of magnitude slower than the fiber reads above. A fresh
+# path per iteration still churns the region ids.
 (var j 0)
 (var p 0)
 (var q 0)
 (while (%lt j 300)
-  (assign p (w-spec-after (string "nope/missing" j) :a))
-  (assign q (w-spec-stored (string "nope/missing" j) :a))
-  (assign specs @[])
+  (assign p (w-path-after (string "nope/missing" j) :a))
+  (assign q (w-path-stored (string "nope/missing" j) :a))
+  (assign paths @[])
   (assign j (%add j 1)))
 
-(assert (%gt p 0) "specifier freed under a read after the branch")
-(assert (%gt q 0) "stored specifier freed under the read back out")
+(assert (%gt p 0) "path freed under a read after the branch")
+(assert (%gt q 0) "stored path freed under the read back out")
 
 (println "region-fiber-child-effect-uaf: ok")

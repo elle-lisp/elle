@@ -1,7 +1,8 @@
-(elle/epoch 12)
-# `fiber/child` is a fiber-graph read: it stores nothing
-# (docs/impl/region/effects.md "Native region effects: declared, not guessed",
-# the `Opaque` variant, § "A fiber-graph read is `Opaque`").
+(elle/epoch 14)
+# audited: 2026-10-06
+# A branch arm that reads a live-in fiber with `fiber/child` strands nothing, because the read stores nothing.
+# docs/impl/region/effects.md
+# docs/impl/escape.md
 #
 # The call hands back the cached child-fiber `Value` its argument carries. That
 # cache is written by the resume machinery (`with_child_fiber`), not by this
@@ -12,10 +13,10 @@
 # What the wrong declaration costs is NOT the arg clique. `fiber/child` takes a
 # single heap argument and the clique is over PAIRS of arguments, so there is no
 # edge to emit either way. The cost is on the ESCAPE side, which reads the same
-# declaration: `Mixed`/`Unknown` seeds every argument on escape's store facet
-# (docs/impl/escape.md), and a region escaping by a facet other than return keeps
-# the conservative baseline at every mechanism gated on `frame_held_regions` —
-# the branch-arm release window among them.
+# declaration: `Mixed`/`Unknown` seeds every argument on escape's store facet,
+# and a region escaping by a facet other than return keeps the conservative
+# baseline at every mechanism gated on `frame_held_regions` — the branch-arm
+# release window among them.
 #
 # So the gauge below is a BRANCH: the fiber subject is live-in, one arm reads it
 # with `fiber/child`, and a sibling arm names it too. Where the read seeds a
@@ -25,12 +26,12 @@
 # `fiber/bits` rows are the contrast (`Immediate` seeds nothing) and the
 # single-arm row is the control that the read itself reclaims.
 #
-# `import` is the same declaration on the other face — a native that re-enters
-# the VM, copies its specifier out to a Rust `String`, and hands back a value
-# minted by the module's own compiled top level. It has no probe here because
-# every call re-runs the module it names: its pins are the unit-level
-# counterfactuals `import_declares_opaque_no_hard_edge` and
-# `import_does_not_seed_the_store_facet`.
+# The module loaders take the same declaration on the other face: natives that
+# re-enter the VM, copy their argument out, and hand back a value the module's
+# own compiled top level minted. They have no probe here, because every call
+# runs a module again. Their pins are the unit-level counterfactuals
+# `the_loaders_declare_opaque_no_hard_edge` and
+# `import_load_file_does_not_seed_the_store_facet`.
 
 (def window 2000)
 
