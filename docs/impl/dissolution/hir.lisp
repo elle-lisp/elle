@@ -1,12 +1,12 @@
-(elle/epoch 13)
-# audited: 2026-09-28
+(elle/epoch 14)
+# audited: 2026-10-06
 # The two helpers the dissolution documents' examples read a fused call's HIR
 # through.
 #
 # docs/impl/dissolution.md
 #
-# Each document is a program of its own under `make doctest`, which runs from the
-# repository root, so each imports this file by that path.
+# Each document is a program of its own under `make doctest`, and imports this
+# file by a path relative to the document.
 
 (defn fused [expr]
   "The functionalized HIR of a function whose body is expr, as text."

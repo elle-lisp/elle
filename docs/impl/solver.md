@@ -1,6 +1,6 @@
 # The signal solver
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-06 -->
 
 Signal inference across files: facts per file, a link through literal imports, and the least model of a few Datalog rules.
 
@@ -72,7 +72,10 @@ never enters another file.
 ## Linking
 
 [link.rs](../../examples/signal_solve/link.rs) joins the files of one run
-through their literal imports.
+through their literal imports. A literal import is `((import-file "path"))`
+with a string path: the compiler knows its file before anything runs. An
+`import` is a macro over a resolver the program may replace, so the solver
+treats `((import "std/x"))` as an ordinary call ([modules.md](../modules.md)).
 
 - A module instance's fields are the exports of the lambda the file returns.
 - A call of an import's lambda binds that lambda's parameters to the call's
@@ -216,11 +219,10 @@ runs it over all of `lib/`. It fails when an expectation fails or when the two
 engines disagree. `make test` runs it, and so does the `Default Build Tests`
 job ([ci.md](../analysis/ci.md)).
 
-An import spec resolves against the working directory, so run a fixture from
-its own directory:
+A fixture names each import by a literal `import-file` path, which resolves
+against the fixture's own directory, so a fixture runs from any directory:
 
 ```sh
-cd examples/signal_solve/fixtures
-../../../target/release/examples/signal_solve --expect app.lisp
-../../../target/release/examples/signal_solve --expect --no-follow sep.lisp
+target/release/examples/signal_solve --expect examples/signal_solve/fixtures/app.lisp
+target/release/examples/signal_solve --expect --no-follow examples/signal_solve/fixtures/sep.lisp
 ```
