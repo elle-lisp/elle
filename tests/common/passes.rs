@@ -29,6 +29,11 @@ impl Pass {
         Some(rest.split_once('\'').map(|(flags, _)| flags).unwrap_or(""))
     }
 
+    /// Whether the pass reads each file's charge on the runner's heap.
+    pub fn charge(&self) -> bool {
+        self.command.split_whitespace().any(|w| w == "--charge")
+    }
+
     /// The program each child runs under, when the pass names one.
     pub fn host(&self) -> Option<&str> {
         let (_, rest) = self.command.split_once("--host ")?;
@@ -84,7 +89,8 @@ pub fn impl_files() -> BTreeSet<String> {
 }
 
 /// Every file a ledger under `tests/ledger` names in its `(producer "…")`
-/// header: the producers, which run in a pass of their own.
+/// header: the producers, which run in a pass of their own. The runner's own
+/// producer, `elle test`, is no file.
 #[allow(dead_code)]
 pub fn producer_files() -> BTreeSet<String> {
     let dir = super::repo_root().join("tests/ledger");
@@ -94,12 +100,38 @@ pub fn producer_files() -> BTreeSet<String> {
             .expect("read a ledger");
         for line in text.lines() {
             if let Some(rest) = line.strip_prefix("(producer \"") {
-                out.insert(rest.trim_end_matches("\")").to_string());
+                let producer = rest.trim_end_matches("\")");
+                if producer.ends_with(".lisp") {
+                    out.insert(producer.to_string());
+                }
             }
         }
     }
     assert!(!out.is_empty(), "tests/ledger names no producer");
     out
+}
+
+/// The file whose claim needs a process of its own: it asserts that a program
+/// cannot change the JIT policy, which the in-process runner sets.
+#[allow(dead_code)]
+pub const CHARGE_SKIP: &str = "tests/impl/config.lisp";
+
+/// Every file whose charge on the runner's heap the charge pass reads: the
+/// language suite and the implementation files with no sidecar, less the
+/// producers and `CHARGE_SKIP` (docs/test-gauges.md).
+#[allow(dead_code)]
+pub fn charge_files() -> BTreeSet<String> {
+    let root = super::repo_root();
+    let producers = producer_files();
+    lang_files()
+        .into_iter()
+        .chain(
+            impl_files()
+                .into_iter()
+                .filter(|f| !root.join(f.replace(".lisp", ".toml")).exists()),
+        )
+        .filter(|f| !producers.contains(f) && f != CHARGE_SKIP)
+        .collect()
 }
 
 /// The implementation suite less the producers: what an isolated pass runs.

@@ -11,8 +11,8 @@
 // verdict per file, and still gates green, so the recipe is checked here.
 
 use crate::common::{
-    assert_plain_language_pass, assert_producer_pass, assert_rig_runs, isolated_impl_files,
-    lang_files, make_expand, makefile, passes, Pass,
+    assert_plain_language_pass, assert_producer_pass, assert_rig_runs, charge_files,
+    isolated_impl_files, lang_files, make_expand, makefile, passes, Pass, CHARGE_SKIP,
 };
 use std::collections::BTreeSet;
 
@@ -91,6 +91,32 @@ fn smoke_impl_runs_both_suites_under_the_eager_profile() {
 #[test]
 fn smoke_impl_runs_the_producers_in_process_in_a_pass_of_their_own() {
     assert_producer_pass("smoke-impl", &passes("smoke-impl", &[]), "ELLE_RIG");
+}
+
+// Each file's charge on the runner's heap is read in a pass of its own, in
+// process on the rig, over the language suite and the implementation files
+// with no sidecar (docs/test-gauges.md).
+//
+// The counter-factual: an isolated pass charges the runner a spawn, so its
+// charge says nothing about the file; and a file the pass drops keeps its
+// rows in the ledger with nobody reading them and no `missing` to say so.
+#[test]
+fn smoke_impl_reads_each_files_charge_in_a_pass_of_its_own() {
+    let passes = passes("smoke-impl", &[]);
+    let charge: Vec<&Pass> = passes.iter().filter(|p| p.charge()).collect();
+    assert_eq!(
+        charge.len(),
+        1,
+        "one pass of `make smoke-impl` reads the charge"
+    );
+    assert_eq!(
+        charge[0].files,
+        charge_files(),
+        "the charge pass runs the language suite and the sidecar-free \
+         implementation files, less the producers and {CHARGE_SKIP}"
+    );
+    assert_eq!(charge[0].isolate(), None, "and runs them in-process");
+    assert_rig_runs(charge[0], "ELLE_RIG", "the charge pass");
 }
 
 // `IMPL_PROFILES` names further profiles for the language suite. The macOS job

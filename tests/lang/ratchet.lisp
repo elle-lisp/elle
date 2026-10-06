@@ -1,5 +1,5 @@
 (elle/epoch 14)
-# audited: 2026-10-04
+# audited: 2026-10-05
 # The ratchet's judge, row reader and line reader, as the pure functions of the
 # ledger module the runner judges with (docs/ratchet.md).
 #
@@ -71,6 +71,27 @@
                (def none (get (l:load-file path "mlir-pool-plan9-mips") :rows))
                (assert (empty? (keys none))
                        "a build with no rows of its own loads none, not the reference build's"))
+
+# ── a producer's rows may span several files ─────────────────────────
+# The counter-factual: the directory was keyed by producer, so a second file
+# naming the same producer replaced the first, and its rows were no rows.
+(with-temp-dir dir (def a (path/join dir "q-1.lisp"))
+               (def b (path/join dir "q-2.lisp"))
+               (spit a "(elle/epoch 14)\n(producer \"q\")\n[\"x\" :count 1]\n")
+               (spit b "(elle/epoch 14)\n(producer \"q\")\n[\"y\" :count 2]\n")
+               (def q (get (l:load-dir dir l:reference-build) "q"))
+               (assert (= (length (keys (get q :rows))) 2)
+                       "the rows of every file naming a producer are its ledger")
+               (assert (= (get (get (get q :rows) (l:row-key "x" :count))
+                               :ledger) a)
+                       "and each row knows the file that holds it")
+               (assert (= (get (get (get q :rows) (l:row-key "y" :count))
+                               :ledger) b) "whichever file that is")
+               (assert (= (get q :files) [a b])
+                       "the producer's files are in name order, last the one an adoption lands in")
+               (spit b "(elle/epoch 14)\n(producer \"q\")\n[\"x\" :count 3]\n")
+               (assert (not (first (protect (l:load-dir dir l:reference-build))))
+                       "one build's row of a subject and an axis is in one file only"))
 
 # ── the judge ─────────────────────────────────────────────────────────
 (def pin {:kind :pin :bound 1.0 :better :lower :slack 0.0})

@@ -1,6 +1,6 @@
 // audited: 2026-10-05
-// The committed ledgers: every producer on the ratchet has one, and every row
-// of one names a subject its producer reads.
+// The committed ledgers: every producer on the ratchet has one, every row of
+// one names a subject its producer reads, and no row is in two files.
 //
 // docs/ratchet.md
 //
@@ -15,13 +15,18 @@ fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-/// One committed ledger: the producer it answers for, and the subject of every
-/// row in it.
+/// One committed ledger file: the producer it answers for, and the subject,
+/// the axis and the build of every row in it.
 struct Ledger {
     file: PathBuf,
     producer: String,
     subjects: Vec<String>,
+    keys: Vec<String>,
 }
+
+/// The producer the runner reads each file's charge for; its subjects are
+/// files, not string literals in a source (docs/test-gauges.md).
+const RUNNER: &str = "elle test";
 
 /// The string literal opening at `text`'s first byte, unescaped.
 fn string_literal(text: &str) -> Option<String> {
@@ -49,11 +54,13 @@ fn ledgers() -> Vec<Ledger> {
         let text = std::fs::read_to_string(&file).expect("read the ledger");
         let mut producer = None;
         let mut subjects = Vec::new();
+        let mut keys = Vec::new();
         for line in text.lines() {
             if let Some(rest) = line.strip_prefix("(producer ") {
                 producer = string_literal(rest);
             } else if let Some(rest) = line.strip_prefix('[') {
                 if let Some(subject) = string_literal(rest) {
+                    keys.push(row_key(&subject, rest));
                     subjects.push(subject);
                 }
             }
@@ -63,9 +70,37 @@ fn ledgers() -> Vec<Ledger> {
             file,
             producer,
             subjects,
+            keys,
         });
     }
     out
+}
+
+/// What makes a row one row: its subject, the axis after it, and the build a
+/// `:build` names, or none. `rest` is the row's line after its bracket, which
+/// opens with the subject's literal.
+fn row_key(subject: &str, rest: &str) -> String {
+    let mut chars = rest.char_indices().skip(1);
+    let mut end = rest.len();
+    while let Some((i, c)) = chars.next() {
+        match c {
+            '\\' => {
+                chars.next();
+            }
+            '"' => {
+                end = i + 1;
+                break;
+            }
+            _ => {}
+        }
+    }
+    let after = &rest[end..];
+    let axis = after.split_whitespace().next().unwrap_or("");
+    let build = after
+        .split_once(":build ")
+        .and_then(|(_, b)| string_literal(b.trim_start()))
+        .unwrap_or_default();
+    format!("{subject}\t{axis}\t{build}")
 }
 
 /// The source a producer reads its subjects from: the file itself, and every
@@ -99,6 +134,7 @@ const PRODUCERS: &[&str] = &[
     "tests/impl/resource.lisp",
     "tests/ratchet/audit.lisp",
     "tests/ratchet/valgrind.lisp",
+    RUNNER,
 ];
 
 #[test]
@@ -119,7 +155,19 @@ fn every_ledger_row_names_a_subject_its_producer_reads() {
     // there. The instrument's own live-growth rows are named by the
     // instrument, not the producer.
     let mut stale = Vec::new();
+    let charged = crate::common::charge_files();
     for ledger in ledgers() {
+        if ledger.producer == RUNNER {
+            for subject in &ledger.subjects {
+                if !charged.contains(subject) {
+                    stale.push(format!(
+                        "{} -> {subject:?}, which the charge pass never runs",
+                        ledger.file.display()
+                    ));
+                }
+            }
+            continue;
+        }
         let source = producer_source(&repo_root().join(&ledger.producer));
         for subject in &ledger.subjects {
             if subject.ends_with(" gauge (live-growth)") {
@@ -140,5 +188,28 @@ fn every_ledger_row_names_a_subject_its_producer_reads() {
         stale.is_empty(),
         "ledger rows whose subject their producer never reads:\n  {}",
         stale.join("\n  ")
+    );
+}
+
+#[test]
+fn no_row_of_one_build_is_in_two_files_of_one_producer() {
+    // A producer's rows may span several files, as the runner's do. The row
+    // reader keeps one row per subject, axis and build, so a second copy in
+    // another file would leave the verdict to whichever file it read last.
+    let mut seen = std::collections::BTreeMap::new();
+    let mut twice = Vec::new();
+    for ledger in ledgers() {
+        let at = ledger.file.display().to_string();
+        for key in &ledger.keys {
+            let whose = format!("{}\t{key}", ledger.producer);
+            if let Some(first) = seen.insert(whose, at.clone()) {
+                twice.push(format!("{key:?} in {first} and {at}"));
+            }
+        }
+    }
+    assert!(
+        twice.is_empty(),
+        "rows written twice:\n  {}",
+        twice.join("\n  ")
     );
 }

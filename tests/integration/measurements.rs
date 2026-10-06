@@ -1,4 +1,4 @@
-// audited: 2026-10-04
+// audited: 2026-10-05
 // A run under `elle test` has no build: it records no reading, judges none,
 // gates on none, and refuses to re-pin.
 //
@@ -53,9 +53,8 @@ impl Bench {
             .expect("read the ledger")
     }
 
-    /// `elle test ARGS producer.lisp` from the scratch directory, with
-    /// `ELLE_LEDGER` naming the same ledger, so neither way of finding one is
-    /// left untried.
+    /// `elle test ARGS producer.lisp` from the scratch directory, whose
+    /// `tests/ledger` a run with a build would judge against.
     fn run(&self, args: &[&str]) -> Output {
         Command::new(elle_binary())
             .arg("test")
@@ -65,7 +64,6 @@ impl Bench {
             .arg(self.dir.join("s.db"))
             .arg("producer.lisp")
             .current_dir(self.dir.path())
-            .env("ELLE_LEDGER", self.dir.join("tests/ledger"))
             .env_remove("RUST_MIN_STACK")
             .output()
             .expect("run elle test")
@@ -114,6 +112,29 @@ fn an_isolated_child_of_elle_test_records_none_either() {
     assert!(
         count.contains(":c 0"),
         "a child of a run with no build records nothing, got:\n{count}"
+    );
+}
+
+#[test]
+fn a_charge_with_no_build_records_none_and_says_so() {
+    // The charge is the runner's own reading, never a line a file printed,
+    // and a run with no build records it no more than it records a line.
+    let b = Bench::new("nobuild-charge");
+    let out = b.run(&["--charge"]);
+    assert!(
+        out.status.success(),
+        "the charge gates nothing with no build to judge it:\n{}",
+        stderr(&out)
+    );
+    let count = b.measurements();
+    assert!(
+        count.contains(":c 0"),
+        "no measurement row is written, got:\n{count}"
+    );
+    assert!(
+        stderr(&out).contains("no build"),
+        "and the summary says the readings were neither recorded nor judged:\n{}",
+        stderr(&out)
     );
 }
 
