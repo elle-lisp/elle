@@ -144,10 +144,11 @@ pub struct VM {
     /// so `fiber/parent` can return the original Value without re-allocating.
     pub current_fiber_value: Option<Value>,
     pub(crate) ffi: FFISubsystem,
-    /// Modules currently being loaded (circular-import guard).
-    /// Added before execution, removed after. If a module is in this set
-    /// when a loader is called on it, the load is a cycle.
-    pub loading_modules: std::collections::HashSet<String>,
+    /// The loads in progress, oldest first (the circular-import guard). A
+    /// loader pushes its file before the load runs and pops it after. A
+    /// loader called on a file already here closes a cycle, and the files
+    /// from that one on name it.
+    pub loading_modules: Vec<String>,
     /// Plugins already loaded (path → return value). Prevents double-loading
     /// which would re-register primitives and leak library handles.
     pub loaded_plugins: HashMap<String, Value>,
@@ -409,19 +410,29 @@ impl VM {
             .unwrap_or(0)
     }
 
-    /// Check if a module is currently being loaded (circular dependency).
-    pub fn is_module_loading(&self, module_path: &str) -> bool {
-        self.loading_modules.contains(module_path)
+    /// The cycle a load of `module_path` would close: every load in progress
+    /// from the one of `module_path` on, then `module_path` again, joined by
+    /// ` -> `. `None` when no load of it is in progress.
+    pub fn loading_cycle(&self, module_path: &str) -> Option<String> {
+        let start = self.loading_modules.iter().position(|p| p == module_path)?;
+        let mut chain: Vec<&str> = self.loading_modules[start..]
+            .iter()
+            .map(String::as_str)
+            .collect();
+        chain.push(module_path);
+        Some(chain.join(" -> "))
     }
 
-    /// Mark a module as currently loading (for circular-import detection).
+    /// Push a load of `module_path` onto the loads in progress.
     pub fn mark_module_loading(&mut self, module_path: String) {
-        self.loading_modules.insert(module_path);
+        self.loading_modules.push(module_path);
     }
 
-    /// Unmark a module as loading (after execution completes).
+    /// Pop the newest load of `module_path` off the loads in progress.
     pub fn unmark_module_loading(&mut self, module_path: &str) {
-        self.loading_modules.remove(module_path);
+        if let Some(i) = self.loading_modules.iter().rposition(|p| p == module_path) {
+            self.loading_modules.remove(i);
+        }
     }
 
     /// Get the frame base for the current call frame

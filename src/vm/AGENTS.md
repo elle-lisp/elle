@@ -246,16 +246,17 @@ parameter frames). Each re-entry nests on the Rust stack, so it halts with
 | `arena/allocs` SIG_QUERY handler | [config.rs](signal/config.rs) | Runs a thunk to measure its allocations |
 | `compile/run-on :bytecode` | [bytecode.rs](run_on/bytecode.rs) | Runs a closure on the bytecode tier |
 | The tail-call sentinel | [jit.rs](run_on/jit.rs), [jit_entry.rs](jit_entry.rs) | Finishes a tail call a compiled callee handed back |
-| `call_closure` | [call.rs](call.rs) | Macro transformers and trait methods |
+| `call_transformer`, `run_at_expansion` | [expansion.rs](expansion.rs) | Macro transformers and `begin-for-syntax` definitions, under the expansion fuel budget |
+| `call_closure` | [call.rs](call.rs) | Trait methods, and the `import/resolve` an `include` calls |
 | JIT helpers | [callops.rs](../jit/calls/callops.rs) | Run an uncompiled callee, or any callee once the native stack is low |
 | The WASM host | [linker.rs](../wasm/linker.rs), [linker.rs](../wasm/lazy/linker.rs) | Falls back to bytecode for a callee the module does not hold |
 | FFI callback | [callback.rs](../ffi/callback.rs) | Runs a closure a C function calls back |
 
 A host that runs code on the current fiber cannot hold a suspension of that
 code. `eval`, `import/load-file`, `import/load-syntax`, the `compile/*-module`
-setup runs, `compile/run-on :jit` and the root driver refuse one:
-`refuse_hosted_park` ends the park through the discard chokepoint, and the host
-raises at its own call. `arena/allocs` and
+setup runs, `compile/run-on :jit`, a macro expansion and the root driver refuse
+one: `refuse_hosted_park` ends the park through the discard chokepoint, and the
+host raises at its own call. `arena/allocs` and
 `compile/run-on :bytecode` hand the suspension on as their own call's park
 (`abandon_hosted_park`). The module doc of [execute.rs](execute.rs) holds the
 rules on what is preserved, what is overwritten, and how to add a caller.

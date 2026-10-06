@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-10-06
 //! Hygienic macro expansion: the macro table, the scope counter hygiene turns
 //! on, and the walk that rewrites a form until no macro heads it.
 //!
@@ -56,6 +56,24 @@ pub struct MacroDef {
     pub(crate) cached_transformer: std::rc::Rc<RefCell<Option<crate::value::Value>>>,
 }
 
+impl MacroDef {
+    /// Whether `other` shares this definition's transformer cell: a clone of
+    /// the same `defmacro`, not a definition made again under the same name.
+    pub(crate) fn same_definition(&self, other: &MacroDef) -> bool {
+        Rc::ptr_eq(&self.cached_transformer, &other.cached_transformer)
+    }
+
+    /// Release the region reference the cached transformer holds, and empty
+    /// the cell. The transformer is a `Copy` closure `Value`, so no drop ever
+    /// decrefs it. Run once per cell, by its last holder, while the heap lives.
+    pub(crate) fn release_transformer(&self, heap: &mut crate::value::fiberheap::FiberHeap) {
+        if let Some(v) = self.cached_transformer.borrow_mut().take() {
+            let r = crate::value::arena::region_of(heap, v);
+            crate::value::arena::decref_region(heap, r);
+        }
+    }
+}
+
 /// Hygienic macro expander
 pub struct Expander {
     /// Where the tree being expanded is born — the working arena of the
@@ -81,7 +99,7 @@ pub struct Expander {
     /// bodies via `eval_syntax`. `Rc` so that the per-pipeline-call clone is a
     /// pointer bump rather than a deep copy of the maps. The owning instance's
     /// `CompileCtx` sets this to `primitives` at construction and to
-    /// `primitives + stdlib exports` once `init_stdlib` runs; REPL value
+    /// `primitives + stdlib exports` once `init_stdlib` runs. REPL and host
     /// bindings are deliberately NOT included (macro bodies never resolve them).
     /// Because it rides on the `Expander`, `eval_syntax` reaches it without a
     /// separate `CompileCtx` borrow — which would alias the macro VM mid-expand.
@@ -186,8 +204,8 @@ impl Expander {
         !self.macros.is_empty()
     }
 
-    /// Return the macro definitions. Used by the REPL to persist
-    /// macros defined during expansion back to the compilation cache.
+    /// Return the macro definitions. The REPL reads them to keep the macros a
+    /// line defined for later lines (`CompileCtx::register_repl_macros`).
     pub fn macros(&self) -> &HashMap<String, MacroDef> {
         &self.macros
     }
@@ -210,8 +228,8 @@ impl Expander {
     }
 
     /// Merge macro definitions from another Expander. Existing macros
-    /// with the same name are overwritten. Used to persist REPL-defined
-    /// macros back to the compilation cache.
+    /// with the same name are overwritten. A REPL line's expander takes the
+    /// macros earlier lines defined this way.
     pub fn merge_macros(&mut self, other: &HashMap<String, MacroDef>) {
         for (name, def) in other {
             self.macros.insert(name.clone(), def.clone());
@@ -267,10 +285,7 @@ impl Expander {
     /// SAME `Rc` cell, are long gone).
     pub fn release_cached_transformers(&mut self, heap: &mut crate::value::fiberheap::FiberHeap) {
         for def in self.macros.values() {
-            if let Some(v) = def.cached_transformer.borrow_mut().take() {
-                let r = crate::value::arena::region_of(heap, v);
-                crate::value::arena::decref_region(heap, r);
-            }
+            def.release_transformer(heap);
         }
     }
 

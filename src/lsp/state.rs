@@ -1,7 +1,8 @@
-//! Resident compiler state for LSP server
+// audited: 2026-10-06
+//! Resident compiler state for the LSP server: the open documents, and the
+//! instance that analyzes them.
 //!
-//! Manages compilation state for open documents and provides
-//! symbol index for IDE features.
+//! src/lsp/AGENTS.md
 
 use crate::hir::{extract_symbols_from_hir, HirLinter};
 use crate::lint::diagnostics::{Diagnostic, Severity};
@@ -27,8 +28,8 @@ pub(crate) fn uri_to_source_name(uri: &str) -> &str {
 /// Extract a `SourceLoc` from a reader/analyzer error string.
 ///
 /// Reader and analyzer errors are formatted as `file:line:col: message`, where
-/// `file` is the source name — now a real path (e.g. `/home/u/foo.lisp`), not
-/// just the old `<lsp>` sentinel. Parses from the right so a message containing
+/// `file` is the source name, the document's real path (e.g.
+/// `/home/u/foo.lisp`). Parses from the right so a message containing
 /// colons does not confuse the line/col fields.
 fn extract_location_from_error(msg: &str) -> Option<SourceLoc> {
     let (prefix, _message) = msg.split_once(": ")?; // "file:line:col"
@@ -70,8 +71,8 @@ pub struct CompilerState {
     /// THIS instance's own table.
     symbol_table: Box<SymbolTable>,
     vm: VM,
-    /// This instance's per-instance compile context (macro expander, meta,
-    /// projections). Boxed for a stable address (the VM holds a pointer to it).
+    /// This instance's per-instance compile context (macro expander, meta).
+    /// Boxed for a stable address (the VM holds a pointer to it).
     compile: Box<CompileCtx>,
 }
 

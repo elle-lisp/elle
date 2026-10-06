@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-06
 //! A spike: solve signal inference across files, and compare the answer with the analyzer's.
 //!
 //! docs/impl/solver.md
@@ -60,18 +60,17 @@ fn main() {
             }
         };
         let (vm, symbols, cctx) = rt.parts();
-        let analysis =
-            match elle::pipeline::analyze_file_detached(&source, symbols, vm, cctx, &path) {
-                Ok(a) if a.errors.is_empty() => a,
-                Ok(a) => {
-                    failed.push((path, a.errors[0].description()));
-                    continue;
-                }
-                Err(e) => {
-                    failed.push((path, e));
-                    continue;
-                }
-            };
+        let analysis = match elle::pipeline::analyze_file(&source, symbols, vm, cctx, &path) {
+            Ok(a) if a.errors.is_empty() => a,
+            Ok(a) => {
+                failed.push((path, a.errors[0].description()));
+                continue;
+            }
+            Err(e) => {
+                failed.push((path, e));
+                continue;
+            }
+        };
         let mut imports = Vec::new();
         visit::literal_imports(&analysis.hir, &analysis.arena, &mut imports);
         if follow {

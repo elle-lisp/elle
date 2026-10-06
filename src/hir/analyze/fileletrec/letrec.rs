@@ -1,6 +1,24 @@
+// audited: 2026-10-06
+//! The three passes that analyze a file's top-level forms as one letrec.
+//!
+//! docs/pipeline.md
+
 use super::*;
 
 impl<'a> Analyzer<'a> {
+    /// Analyze a list of top-level forms as a synthetic letrec.
+    ///
+    /// Each form is classified as `Def` (immutable), `Var` (mutable), or
+    /// `Expr` (gensym-named dummy binding). Three-pass analysis:
+    /// - Pass 1: pre-bind all names (enables mutual recursion)
+    /// - Pass 2: analyze initializers sequentially
+    /// - Pass 3: fixpoint loop for signal propagation through mutual recursion
+    ///
+    /// Duplicate names use sequential shadowing: the RHS of a redefinition
+    /// sees the previous binding, and subsequent forms see the new one.
+    ///
+    /// Returns a single `HirKind::Letrec` node. The body is a reference
+    /// to the last binding (the file's return value).
     pub(crate) fn analyze_file_letrec(
         &mut self,
         forms: Vec<FileForm>,
@@ -279,12 +297,6 @@ impl<'a> Analyzer<'a> {
             self.errors = merged;
         }
 
-        // Compute signal projection from the last binding's init value.
-        // This must happen before pop_scope so signal_env is still populated.
-        let projection = bindings
-            .last()
-            .and_then(|(_, value)| self.compute_signal_projection(value));
-
         // Body: reference to the last binding (the file's return value).
         let body = match last_binding {
             Some(binding) => Hir::silent(HirKind::Var(binding), span),
@@ -292,9 +304,6 @@ impl<'a> Analyzer<'a> {
         };
 
         self.pop_scope();
-
-        // Stash the projection on the Analyzer for the pipeline to retrieve.
-        self.last_signal_projection = projection;
 
         // Mark every direct file-letrec binding as MODULE-SCOPE. These are the
         // program/module-extent names (top-level `def`/`var`/expr statements and

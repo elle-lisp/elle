@@ -89,7 +89,7 @@ fn retain_plugin_result(vm: &mut crate::vm::VM, value: Value) {
 /// The mark brackets the load: everything a load does is the one call below, so
 /// every way out of it — a compile error, a read failure, an error the module
 /// raised — reaches the single unmark after that call. A load that finds `key`
-/// already marked is a cycle.
+/// already marked is a cycle, and the error names every file in it.
 fn with_load_mark(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     name: &str,
@@ -97,11 +97,11 @@ fn with_load_mark(
     load: impl FnOnce(&mut crate::primitives::ctx::NativeCtx<'_>) -> Outcome,
 ) -> Outcome {
     let vm = driving_vm(ctx);
-    if vm.is_module_loading(key) {
+    if let Some(cycle) = vm.loading_cycle(key) {
         return crate::rich_error!(
             ctx,
             "io-error",
-            format!("{name}: circular dependency detected for '{key}'"),
+            format!("{name}: circular dependency: {cycle}"),
             path = ctx.string(key),
         );
     }
@@ -162,7 +162,8 @@ fn run_module(
 }
 
 /// Compile with this instance's symbol table and compile context, reached
-/// through the driving VM.
+/// through the driving VM, on behalf of the calling fiber: the compile's
+/// macros run without the capabilities that fiber withholds.
 fn compile_with(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     name: &str,
@@ -171,13 +172,16 @@ fn compile_with(
         &mut crate::pipeline::CompileCtx,
     ) -> Result<crate::pipeline::CompileResult, String>,
 ) -> Result<crate::pipeline::CompileResult, String> {
+    let withheld = ctx.withheld();
     let vm = driving_vm(ctx);
     let symbols_ptr = vm.symbols_ptr;
     if symbols_ptr.is_null() {
         return Err(format!("{name}: symbol table context not initialized"));
     }
     match vm.compile_ctx() {
-        Some(cctx) => compile(unsafe { &mut *symbols_ptr }, cctx),
+        Some(cctx) => {
+            cctx.on_behalf_of(withheld, |cctx| compile(unsafe { &mut *symbols_ptr }, cctx))
+        }
         None => Err(format!("{name}: compile context unavailable")),
     }
 }

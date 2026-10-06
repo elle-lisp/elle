@@ -184,7 +184,7 @@ pub fn splice_includes(
     let mut home = crate::syntax::SyntaxHeap::new();
     let arena = home.arena();
     let syntaxes = read_syntax_all_for(arena, source, source_name)?;
-    cctx.with_macro_expansion(arena, |vm, _expander, meta| {
+    cctx.with_macro_expansion(arena, Layer::Instance, |vm, _expander, meta| {
         let mut pending: std::collections::VecDeque<Syntax> = syntaxes.into();
         let mut included = included_root(source_name);
         let mut parts: Vec<String> = Vec::new();
@@ -227,6 +227,14 @@ pub(super) fn resolve_and_splice_include(
         Some(pair) => pair,
         None => return Ok(false),
     };
+    // An include reads a file for the compile, so it reads under the
+    // capabilities of the fiber the compile runs for, as a macro does.
+    if vm.fiber.withheld.intersects(crate::signals::SIG_FS) {
+        return Err(format!(
+            "{}: include: '{}' needs :fs, which the compiling fiber withholds",
+            syntax.span, spec
+        ));
+    }
     let dir = syntax
         .span
         .source_path()

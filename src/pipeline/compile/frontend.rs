@@ -16,7 +16,6 @@ pub(super) struct Frontend {
     pub arena: BindingArena,
     pub expander: crate::syntax::Expander,
     pub prim_values: std::collections::HashMap<crate::hir::Binding, crate::value::Value>,
-    pub signal_projection: Option<std::collections::HashMap<String, crate::signals::Signal>>,
     /// The inferred types, which the lowerer reads to mark an operation whose
     /// operands the intrinsic operand contract proved are integers
     /// (docs/impl/lir.md).
@@ -33,12 +32,14 @@ pub(super) fn compile_file_frontend(
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
     source_name: &str,
+    layer: Layer,
 ) -> FrontendResult {
     compile_file_frontend_xform(
         source,
         symbols,
         cctx,
         source_name,
+        layer,
         |_arena, forms, _scope| forms,
     )
 }
@@ -57,6 +58,7 @@ pub(super) fn compile_file_frontend_xform(
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
     source_name: &str,
+    layer: Layer,
     xform: impl FnOnce(&SyntaxArena, Vec<Syntax>, crate::syntax::ScopeId) -> Vec<Syntax>,
 ) -> FrontendResult {
     with_syntax_arena(cctx.heap_ptr(), |arena| {
@@ -70,7 +72,15 @@ pub(super) fn compile_file_frontend_xform(
             source_name
         );
         crate::epoch::check_lexicon_agreement(&syntaxes, source, source_name)?;
-        compile_syntaxes_frontend_xform_inner(arena, syntaxes, symbols, cctx, source_name, xform)
+        compile_syntaxes_frontend_xform_inner(
+            arena,
+            syntaxes,
+            symbols,
+            cctx,
+            source_name,
+            layer,
+            xform,
+        )
     })
 }
 
@@ -94,7 +104,15 @@ pub(super) fn compile_syntaxes_frontend_xform(
         // owns its own tree and nothing it builds points at a value that may
         // be released while it compiles.
         let syntaxes: Vec<Syntax> = syntaxes.iter().map(|s| s.copy_into(&arena)).collect();
-        compile_syntaxes_frontend_xform_inner(arena, syntaxes, symbols, cctx, source_name, xform)
+        compile_syntaxes_frontend_xform_inner(
+            arena,
+            syntaxes,
+            symbols,
+            cctx,
+            source_name,
+            Layer::Instance,
+            xform,
+        )
     })
 }
 
@@ -108,6 +126,7 @@ fn compile_syntaxes_frontend_xform_inner(
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
     source_name: &str,
+    layer: Layer,
     xform: impl FnOnce(&SyntaxArena, Vec<Syntax>, crate::syntax::ScopeId) -> Vec<Syntax>,
 ) -> FrontendResult {
     let ct = crate::trace::compile();
@@ -122,7 +141,7 @@ fn compile_syntaxes_frontend_xform_inner(
     }
 
     let (expanded_forms, mut expander, meta) =
-        cctx.with_macro_expansion(arena, |macro_vm, mut expander, meta| {
+        cctx.with_macro_expansion(arena, layer, |macro_vm, mut expander, meta| {
             let mut pending: std::collections::VecDeque<Syntax> = if source_name.starts_with('<') {
                 syntaxes.into()
             } else {
@@ -175,7 +194,6 @@ fn compile_syntaxes_frontend_xform_inner(
         meta.signals.clone(),
         meta.arities.clone(),
     );
-    analyzer.set_compile_ctx(cctx);
     let effective_epoch = source_epoch.unwrap_or(crate::epoch::CURRENT_EPOCH);
     analyzer.set_immutable_by_default(effective_epoch >= 8);
     analyzer.set_unicode_generation(cctx.unicode_generation());
@@ -185,7 +203,6 @@ fn compile_syntaxes_frontend_xform_inner(
     }
     let mut hir = analyzer.analyze_file_letrec(forms, span)?;
     let prim_values = analyzer.primitive_values().clone();
-    let signal_projection = analyzer.take_signal_projection();
     let errors = analyzer.take_errors();
     drop(analyzer);
 
@@ -214,7 +231,6 @@ fn compile_syntaxes_frontend_xform_inner(
         arena,
         expander,
         prim_values,
-        signal_projection,
         types,
     })
 }

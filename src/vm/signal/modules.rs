@@ -133,7 +133,8 @@ impl VM {
                     ),
                 );
             };
-            match compile_fn(&source, symbols, cctx, &name) {
+            let withheld = self.fiber.withheld;
+            match cctx.on_behalf_of(withheld, |cctx| compile_fn(&source, symbols, cctx, &name)) {
                 Ok(r) => r,
                 Err(msg) => return (SIG_ERROR, ctx.error("compile-error", msg)),
             }
@@ -239,7 +240,10 @@ impl VM {
                     ),
                 );
             };
-            match crate::pipeline::compile_whole_module_forms(syntaxes, symbols, cctx, &name) {
+            let withheld = self.fiber.withheld;
+            match cctx.on_behalf_of(withheld, |cctx| {
+                crate::pipeline::compile_whole_module_forms(syntaxes, symbols, cctx, &name)
+            }) {
                 Ok(r) => r,
                 Err(msg) => return (SIG_ERROR, ctx.error("compile-error", msg)),
             }
@@ -373,7 +377,10 @@ impl VM {
                 ),
             );
         };
-        let dumps = crate::dump::render_all(&source, &name, symbols, cctx);
+        let withheld = self.fiber.withheld;
+        let dumps = cctx.on_behalf_of(withheld, |cctx| {
+            crate::dump::render_all(&source, &name, symbols, cctx)
+        });
         let symbols = unsafe { &mut *symbols_ptr };
         let mut map = BTreeMap::new();
         for (kind, text) in dumps {

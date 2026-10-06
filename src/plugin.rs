@@ -1,3 +1,4 @@
+// audited: 2026-10-06
 //! Plugin loading for dynamically-linked Rust libraries.
 //!
 //! Plugins are `.so` files (cdylib crates) that depend on `elle-plugin`
@@ -8,7 +9,9 @@
 //! The ABI is stable: a plugin compiles separately from elle and loads at
 //! runtime. Stable does not mean unversioned — a lookup carries the name and
 //! not the argument list, so the loader advertises `ABI_VERSION` and the
-//! plugin refuses a host it cannot call (docs/plugins.md § "The ABI version").
+//! plugin refuses a host it cannot call.
+//!
+//! docs/plugins.md
 
 use crate::error::{LError, LResult};
 use crate::plugin_api::{self, ApiLoader, PrimDefRaw};
@@ -52,7 +55,8 @@ extern "C" fn register_prim(ctx_ptr: *mut PluginCtx, def_ptr: *const PrimDefRaw)
 /// The library handle is intentionally leaked — plugins are never unloaded.
 /// This avoids use-after-free if Elle code holds values created by the plugin.
 ///
-/// The caller is responsible for deduplication (e.g., via `is_module_loading`).
+/// The caller deduplicates: `import/load-plugin` keeps the struct of each path
+/// it loaded in `VM::loaded_plugins` and hands that back on a later call.
 pub fn load_plugin(path: &str, vm: &mut VM, symbols: &mut SymbolTable) -> LResult<Value> {
     use crate::value::types::TableKey;
     use std::collections::BTreeMap;

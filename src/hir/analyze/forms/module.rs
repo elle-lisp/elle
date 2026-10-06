@@ -20,9 +20,8 @@ impl<'a> Analyzer<'a> {
     ///
     /// The handler builds the load as a form and analyzes it. A literal path
     /// joins the writer's directory now and names its loader, so the form is
-    /// `(import/load-file "/abs/path")`, the call the projection probe in
-    /// call.rs reads. A computed path is joined and its loader picked when the
-    /// form runs:
+    /// `(import/load-file "/abs/path")`. A computed path is joined and its
+    /// loader picked when the form runs:
     ///
     /// ```text
     /// (let [p (path/join DIR ARG)  e (path/extension p)]

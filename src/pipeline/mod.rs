@@ -18,9 +18,9 @@ mod eval;
 pub mod sources;
 
 // Re-export public API
-pub use analyze::{analyze, analyze_file, analyze_file_detached};
+pub use analyze::{analyze, analyze_file};
 pub use bootstrap::install_core_exports;
-pub use cache::{BootExports, CompileCtx};
+pub use cache::{BootExports, CompileCtx, Layer};
 pub use compile::{
     compile, compile_barrier_module, compile_file, compile_file_repl, compile_file_to_fhir,
     compile_file_to_lir, compile_value, compile_whole_module, compile_whole_module_forms,
