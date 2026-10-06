@@ -304,7 +304,8 @@ fn a_module_that_failed_to_compile_reports_the_same_failure_on_the_next_import()
 
 #[test]
 fn a_module_that_imports_itself_is_a_circular_dependency() {
-    // The mark a load holds while it runs is what catches a real cycle.
+    // The mark a load holds while it runs is what catches a real cycle, and
+    // the error names the file where the cycle starts and where it closes.
     let message = evaluated_string(
         r#"
         (let [r (protect (import-file "tests/modules/self-import.lisp"))]
@@ -312,9 +313,20 @@ fn a_module_that_imports_itself_is_a_circular_dependency() {
           (get (get r 1) :message))
     "#,
     );
+    // The outer load reports the inner one's error inside its own, so the
+    // chain is found by its exact text. The test runs from the package root,
+    // which is where the relative path resolves.
+    let module = std::env::current_dir()
+        .expect("working directory")
+        .join("tests/modules/self-import.lisp");
+    let cycle = format!(
+        "circular dependency: {} -> {}",
+        module.display(),
+        module.display()
+    );
     assert!(
-        message.contains("circular dependency detected"),
-        "{message}"
+        message.contains(&cycle),
+        "the error names the cycle `{cycle}`: {message}"
     );
 }
 
