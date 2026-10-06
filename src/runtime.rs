@@ -246,7 +246,7 @@ impl Runtime {
     }
 
     /// The compile context and this instance's heap as disjoint borrows — the
-    /// pair an embedder hands to [`CompileCtx::register_repl_binding`] (see
+    /// pair an embedder hands to [`CompileCtx::register_host_binding`] (see
     /// [`RuntimeCore::compile_and_heap`]).
     pub fn compile_and_heap(
         &mut self,

@@ -56,7 +56,7 @@ pub struct Expander {
     /// bodies via `eval_syntax`. `Rc` so that the per-pipeline-call clone is a
     /// pointer bump rather than a deep copy of the maps. The owning instance's
     /// `CompileCtx` sets this to `primitives` at construction and to
-    /// `primitives + stdlib exports` once `init_stdlib` runs; REPL value
+    /// `primitives + stdlib exports` once `init_stdlib` runs. REPL and host
     /// bindings are deliberately NOT included (macro bodies never resolve them).
     /// Because it rides on the `Expander`, `eval_syntax` reaches it without a
     /// separate `CompileCtx` borrow — which would alias the macro VM mid-expand.
@@ -161,8 +161,8 @@ impl Expander {
         !self.macros.is_empty()
     }
 
-    /// Return the macro definitions. Used by the REPL to persist
-    /// macros defined during expansion back to the compilation cache.
+    /// Return the macro definitions. The REPL reads them to keep the macros a
+    /// line defined for later lines (`CompileCtx::register_repl_macros`).
     pub fn macros(&self) -> &HashMap<String, MacroDef> {
         &self.macros
     }
@@ -185,8 +185,8 @@ impl Expander {
     }
 
     /// Merge macro definitions from another Expander. Existing macros
-    /// with the same name are overwritten. Used to persist REPL-defined
-    /// macros back to the compilation cache.
+    /// with the same name are overwritten. A REPL line's expander takes the
+    /// macros earlier lines defined this way.
     pub fn merge_macros(&mut self, other: &HashMap<String, MacroDef>) {
         for (name, def) in other {
             self.macros.insert(name.clone(), def.clone());

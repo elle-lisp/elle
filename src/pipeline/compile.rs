@@ -2,7 +2,7 @@
 // src/pipeline/AGENTS.md
 //! Compilation pipeline: source -> bytecode.
 
-use super::CompileCtx;
+use super::{CompileCtx, Layer};
 use crate::hir::{classify_form, Analyzer, BindingArena, FileForm};
 use crate::lir::{Emitter, Lowerer};
 use crate::reader::{read_syntax, read_syntax_all_for};
@@ -77,7 +77,7 @@ fn compile_inner(
 
     // Phase 2: Macro expansion (the compile context's macro VM)
     let (expanded, meta, core_env) =
-        cctx.with_macro_expansion(arena, |macro_vm, mut expander, meta| {
+        cctx.with_macro_expansion(arena, Layer::Instance, |macro_vm, mut expander, meta| {
             let expanded = expander.expand(syntax, symbols, macro_vm)?;
             Ok::<_, String>((expanded, meta, expander.core_env.clone()))
         })?;
@@ -178,7 +178,7 @@ fn compile_file_to_lir_inner(
 
     // Expand all forms, splicing include/include-file inline
     let (expanded_forms, meta, core_env) =
-        cctx.with_macro_expansion(arena, |macro_vm, mut expander, meta| {
+        cctx.with_macro_expansion(arena, Layer::Instance, |macro_vm, mut expander, meta| {
             let mut pending: std::collections::VecDeque<Syntax> = syntaxes.into();
             let mut expanded_forms = Vec::new();
             let mut included = included_root(source_name);
@@ -215,7 +215,6 @@ fn compile_file_to_lir_inner(
         meta.signals.clone(),
         meta.arities.clone(),
     );
-    analyzer.set_compile_ctx(cctx);
     let effective_epoch = source_epoch.unwrap_or(crate::epoch::CURRENT_EPOCH);
     analyzer.set_immutable_by_default(effective_epoch >= 8);
     analyzer.set_unicode_generation(cctx.unicode_generation());
@@ -281,7 +280,7 @@ pub fn compile_file_to_fhir(
     cctx: &mut CompileCtx,
     source_name: &str,
 ) -> Result<(crate::hir::Hir, BindingArena), String> {
-    let f = compile_file_frontend(source, symbols, cctx, source_name)?;
+    let f = compile_file_frontend(source, symbols, cctx, source_name, Layer::Instance)?;
     Ok((f.hir, f.arena))
 }
 
@@ -294,18 +293,21 @@ pub fn compile_file(
     cctx: &mut CompileCtx,
     source_name: &str,
 ) -> Result<CodeUnit, String> {
-    compile_file_inner(source, symbols, cctx, source_name).map(|(result, _)| result)
+    compile_file_inner(source, symbols, cctx, source_name, Layer::Instance)
+        .map(|(result, _)| result)
 }
 
-/// Like `compile_file`, but also returns the Expander after expansion.
-/// The REPL uses this to persist macro definitions across inputs.
+/// Like `compile_file`, but for a REPL line: the line also sees the macros and
+/// definitions earlier lines made (`CompileCtx::register_repl_macros`,
+/// `CompileCtx::register_repl_binding`), and the Expander comes back so the
+/// REPL can keep the macros this line defines.
 pub fn compile_file_repl(
     source: &str,
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
     source_name: &str,
 ) -> Result<(CodeUnit, crate::syntax::Expander), String> {
-    compile_file_inner(source, symbols, cctx, source_name)
+    compile_file_inner(source, symbols, cctx, source_name, Layer::Repl)
 }
 
 /// Compile one form, handed over as a value, as a whole file: `compile_file`
@@ -330,6 +332,7 @@ fn compile_file_inner(
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
     source_name: &str,
+    layer: Layer,
 ) -> Result<(CodeUnit, crate::syntax::Expander), String> {
     let ct = crate::trace::compile();
     let Frontend {
@@ -337,9 +340,8 @@ fn compile_file_inner(
         arena,
         expander,
         prim_values,
-        signal_projection,
         types,
-    } = compile_file_frontend(source, symbols, cctx, source_name)?;
+    } = compile_file_frontend(source, symbols, cctx, source_name, layer)?;
 
     // Lower to LIR
     let t = std::time::Instant::now();
@@ -373,7 +375,6 @@ fn compile_file_inner(
     let mut bytecode = emitter.emit_module(&lir_module).bytecode;
     crate::phase!(ct, "compile", t, "{} emit", source_name);
     bytecode.signal = signal;
-    bytecode.signal_projection = signal_projection;
 
     Ok((CodeUnit::new(code, bytecode), expander))
 }
@@ -411,7 +412,8 @@ fn compile_module_with_transform(
     source_name: &str,
     xform: impl FnOnce(&SyntaxArena, Vec<Syntax>, crate::syntax::ScopeId) -> Vec<Syntax>,
 ) -> Result<CodeUnit, String> {
-    let frontend = compile_file_frontend_xform(source, symbols, cctx, source_name, xform)?;
+    let frontend =
+        compile_file_frontend_xform(source, symbols, cctx, source_name, Layer::Instance, xform)?;
     lower_frontend(frontend, symbols, cctx)
 }
 
@@ -442,7 +444,6 @@ fn lower_frontend(
         hir,
         arena,
         prim_values,
-        signal_projection,
         types,
         ..
     } = frontend;
@@ -464,7 +465,6 @@ fn lower_frontend(
     let mut emitter = Emitter::new(code);
     let mut bytecode = emitter.emit_module(&lir_module).bytecode;
     bytecode.signal = signal;
-    bytecode.signal_projection = signal_projection;
 
     Ok(CodeUnit::new(code, bytecode))
 }

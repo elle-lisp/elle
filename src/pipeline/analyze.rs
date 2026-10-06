@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-06
 //! Analysis pipeline: source -> HIR (no bytecode generation).
 //!
 //! docs/pipeline.md
@@ -48,7 +48,6 @@ fn analyze_in_arena(
         meta.signals.clone(),
         meta.arities.clone(),
     );
-    analyzer.set_compile_ctx(cctx);
     analyzer.bind_primitives(&meta);
     let analysis = analyzer.analyze(&expanded)?;
     let errors = analysis.errors;
@@ -66,8 +65,9 @@ fn analyze_in_arena(
 
 /// Analyze a file as a single synthetic letrec (no bytecode).
 ///
-/// Used by linter and LSP for file-level analysis. Primitives are
-/// pre-bound as immutable Global bindings.
+/// The LSP, the linter, `compile/analyze` and the signal solver read a file
+/// this way. Primitives are pre-bound as immutable Global bindings. The
+/// analysis compiles no other file, so a cycle of imports does not recurse.
 pub fn analyze_file(
     source: &str,
     symbols: &mut SymbolTable,
@@ -76,22 +76,7 @@ pub fn analyze_file(
     source_name: &str,
 ) -> Result<AnalyzeResult, String> {
     let arena = unsafe { crate::syntax::SyntaxArena::mint(&mut *cctx.heap_ptr()) };
-    let out = analyze_file_in_arena(arena, source, symbols, vm, cctx, source_name, true);
-    unsafe { (*cctx.heap_ptr()).decref_region_if_present(arena.region()) };
-    out
-}
-
-/// Analyze a file as `analyze_file` does, without compiling the targets of its
-/// literal imports for their signal projections.
-pub fn analyze_file_detached(
-    source: &str,
-    symbols: &mut SymbolTable,
-    vm: &mut VM,
-    cctx: &mut CompileCtx,
-    source_name: &str,
-) -> Result<AnalyzeResult, String> {
-    let arena = unsafe { crate::syntax::SyntaxArena::mint(&mut *cctx.heap_ptr()) };
-    let out = analyze_file_in_arena(arena, source, symbols, vm, cctx, source_name, false);
+    let out = analyze_file_in_arena(arena, source, symbols, vm, cctx, source_name);
     unsafe { (*cctx.heap_ptr()).decref_region_if_present(arena.region()) };
     out
 }
@@ -103,7 +88,6 @@ fn analyze_file_in_arena(
     vm: &mut VM,
     cctx: &mut CompileCtx,
     source_name: &str,
-    project_imports: bool,
 ) -> Result<AnalyzeResult, String> {
     let mut syntaxes = read_syntax_all(arena, source, source_name)?;
 
@@ -145,9 +129,6 @@ fn analyze_file_in_arena(
         meta.signals.clone(),
         meta.arities.clone(),
     );
-    if project_imports {
-        analyzer.set_compile_ctx(cctx);
-    }
     analyzer.bind_primitives(&meta);
     let mut hir = analyzer.analyze_file_letrec(forms, span)?;
     let errors = analyzer.take_errors();

@@ -121,31 +121,6 @@ impl<'a> Analyzer<'a> {
 
         signal = signal.combine(callee_signal);
 
-        // ── Import projection detection ────────────────────────────────
-        // Pattern: ((import/load-file "literal")), which a literal
-        // `((import-file "path"))` becomes (forms/module.rs). The outer call's
-        // func is itself a call to `import/load-file` with a string argument.
-        // If so, look up the target file's signal projection and stash it for
-        // the binding analysis to pick up via `last_import_projection`.
-        self.last_import_projection = None;
-        if let HirKind::Call {
-            func: inner_func,
-            args: inner_args,
-            ..
-        } = &func.kind
-        {
-            if self.is_load_file(inner_func) {
-                if let Some(HirKind::String(path)) = inner_args.first().map(|a| &a.expr.kind) {
-                    // Resolve via the owning instance's compile context (set by
-                    // the file frontend). Absent it — pure analysis — the load
-                    // keeps the conservative `Polymorphic` projection.
-                    self.last_import_projection = self.import_ctx.and_then(|ptr| unsafe {
-                        (*ptr).get_or_compile_projection(path, self.symbols)
-                    });
-                }
-            }
-        }
-
         self.record_squelch_signal(&func, &args);
 
         Ok(Hir::new(
@@ -216,11 +191,6 @@ impl<'a> Analyzer<'a> {
     /// Check if the callee is the `emit` primitive.
     fn is_emit(&self, func: &Hir) -> bool {
         self.is_primitive_named(func, "emit")
-    }
-
-    /// Check if the callee is the `import/load-file` primitive.
-    fn is_load_file(&self, func: &Hir) -> bool {
-        self.is_primitive_named(func, "import/load-file")
     }
 
     /// Check if a callee HIR node is a binding spelled `name` — one hash
