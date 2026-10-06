@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-30
+(elle/epoch 14)
+# audited: 2026-10-06
 ## elle test — running one test: worker isolation, output capture, the
 ## per-form deadline, the build's tiers, and a file's own process.
 ## docs/test-runner.md
@@ -248,7 +248,8 @@
   (let [outcome (protect (os/join (worker-spawn (fn []
                                     (ev/run (fn []
                                       (capture-run tier thunk out-path err-path)))))
-                                  (form-budget)))]
+                                  :timeout (if-let [ms (form-budget)]
+                                  (/ ms 1000.0) nil)))]
     (if (get outcome 0)
       (get outcome 1)
       # The worker spawn/join failed. If a value could not cross — the thunk
@@ -285,9 +286,9 @@
              (sys/trap-exit! true)
              (let [t0 (clock/cpu)
                    [v readings] (parameterize ((out-param op)
-                                               (err-param ep))
+                                  (err-param ep))
                                   (gauges-around (fn []
-                                                   (protect (join (spawn thunk))))))
+                                    (protect (join (spawn thunk))))))
                    cpu (cpu-us-since t0)]
                (sys/trap-exit! false)
                (port/close op)
@@ -334,7 +335,8 @@
                                       name) 0) 1)]
                                       (capture-pumped w-evrun w-spawn w-join
                                       w-out w-err thunk out-path err-path))))
-                                  (form-budget)))]
+                                  :timeout (if-let [ms (form-budget)]
+                                  (/ ms 1000.0) nil)))]
     (if (get outcome 0)
       (get outcome 1)
       # Unsendable RESULT (an orphan fiber, an io-request, …) can't cross back
@@ -467,9 +469,9 @@
   (and (not (get r 0)) (= (get (get r 1) :error) :tier-rejected)
        (= (get (get r 1) :reason) :feature-disabled)))
 
+# A tier is available when a trivial closure runs on it.
 (defn tier-available? [tk]
   (not (feature-disabled? (exec-thunk tk (fn [] 0)))))
-# probe with a trivial closure
 
 # Candidate tiers as [tier-keyword tier-label]; :bytecode is recorded as :vm.
 # The label is a keyword (result.tier is keyword-typed; sqlite stores its name).
