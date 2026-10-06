@@ -1,6 +1,6 @@
 # NativeCtx — explicit allocation: every value names its region and heap
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-06 -->
 
 A native allocates only through a capability it is handed, which names its region.
 
@@ -132,7 +132,12 @@ Invariants:
 - `dispatch_query` (the in-dispatch `SIG_QUERY` answer) builds its answer through
   the same ctx, preserving "the answer is born in the call's own region"
   (built at the dispatch site,
-  [natives.rs](../../../src/vm/core/region/natives.rs)).
+  [natives.rs](../../../src/vm/core/region/natives.rs)). The `(op . arg)` pair
+  the native returns to ask the question is born there too. A fresh answer
+  shares that region, so the caller's release of the answer frees the pair. An
+  immediate or borrowed answer leaves the region holding the pair alone at its
+  birth count, and no caller release names it. So the dispatch releases that
+  region itself ([region-query-carrier-leak.lisp](../../../tests/impl/region-query-carrier-leak.lisp)).
 - The JIT's `elle_jit_call` / `elle_jit_tail_call` route through
   `VM::dispatch_native_call`, so both tiers share its single bytecode-dispatch
   ctx construction and get identical region accounting for free.
