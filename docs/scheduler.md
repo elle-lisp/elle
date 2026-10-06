@@ -90,11 +90,10 @@ Three invariants govern both lists:
 
 - **Only live fibers wait.** A fiber that reaches `:dead` or `:error`
   leaves the waiter list and the select set it sits in, on the rule that
-  takes it out of a park queue. A joiner reaches `:dead` with its wait
-  still recorded whenever `fiber/abort` injects an error its own
-  `protect` catches. Left on the list, it is resumed once the fiber it
-  joined finishes, and that resume raises `fiber/resume: cannot resume
-  completed fiber` out of the event loop.
+  takes it out of a park queue. Left on the list, it is resumed once the
+  fiber it joined finishes, and that resume raises `fiber/resume: cannot
+  resume completed fiber` out of the event loop. `ev/abort` takes a
+  waiter out sooner, at the abort itself, as the next section states.
 - **A list with no waiter left is gone.** An empty waiter list still
   counts as a join the loop is holding, so the loop never reports
   `:done`, exactly as an empty park key would keep it running.
