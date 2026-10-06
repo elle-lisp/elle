@@ -58,7 +58,7 @@ ELLE_RIG_MLIR ?= $(CARGO_OUT)/elle-rig-mlir
 # silently out of the format gate rather than failing it. The pin that every
 # Elle source in the tree stays reachable from this list is
 # tests/integration/paths.rs.
-LISP_FILES := $(shell find src/ lib/ tests/ demos/ tools/ docs/ -name '*.lisp' 2>/dev/null)
+LISP_FILES := $(shell find src/ lib/ tests/ demos/ tools/ docs/ examples/ -name '*.lisp' 2>/dev/null)
 
 all: elle docs  ## Build everything
 
