@@ -65,9 +65,14 @@
 # ── A cycle reports at run time ─────────────────────────────────────────
 
 # cycle-a and cycle-b import each other at top level through the import macro.
-# The compiler reads no projection through import, so nothing recurses at
-# compile time, and the loader names the cycle.
-(let [[ok? err] (protect (import "../modules/cycle-a"))]
+# Compiling a file compiles none of its imports, so nothing recurses at compile
+# time, and the loader names every file in the cycle, from the one it reached
+# twice.
+(let [[ok? err] (protect (import "../modules/cycle-a"))
+      msg (get err :message)]
   (assert (not ok?) "a top-level import cycle fails")
-  (assert (string/contains? (get err :message) "circular dependency")
-          "the loader names the cycle"))
+  (assert (string/contains? msg "circular dependency")
+          "the loader names a cycle")
+  (assert (string/contains? msg "cycle-a.lisp -> ")
+          "the cycle starts at cycle-a")
+  (assert (string/contains? msg "cycle-b.lisp -> ") "and passes through cycle-b"))
