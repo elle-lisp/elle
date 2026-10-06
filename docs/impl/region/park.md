@@ -90,6 +90,9 @@ symmetric with its unpark; the node and the deferred set a park moves are
   therefore the discharge's on a fiber that never runs again, and the DISPLACING install's
   on one that does: `fiber/resume`'s delivery and `fiber/abort` / `fiber/refuse`'s injected
   error each replace the payload in the slot, and each owes it a release as it does.
+  A denial of `:error` parks under `SIG_ERROR`, a terminal bit, so its payload also takes
+  the park retain of a terminal result, which the fiber's free releases. The discharge
+  still owes the reference the allocation left, as for any denial.
 
   **Only the site that builds a park knows who built its payload.** The signal slot
   cannot say. A denial parks under the WITHHELD capability's bits, and an
