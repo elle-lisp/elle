@@ -135,7 +135,12 @@ image rewrites it from the file table ([format.md](../image/format.md)).
 | strict-struct keys | `RegionSlice<RegionSlice<u8>>` — the `&named` key set |
 | children | `RegionSlice<Value>` — the code objects a `MakeClosure` indexes, empty until a dump fills it ([sealing.md](../image/sealing.md)) |
 | origin | a `Span` and a present flag — where the lambda was written, for `meta/origin` |
+| lir | a `LirBody` and a present flag — the frozen function the JIT promotes from, its sites and its values ([lir.md](../lir.md)) |
 | arity, param and local counts, signal, capture-params mask, vararg kind, rest-list layout ([restlist.md](restlist.md)), WASM index | scalars, inline |
+
+The LIR body is present on the payload of every nested lambda, and absent on
+an entry thunk's and on a WASM-built closure's, which have no LIR. It names its
+files by spelling, so it adds no process-local number to the payload.
 
 Two of those changed shape rather than merely moving.
 
@@ -234,22 +239,39 @@ The header's `Rc<TemplateProto>` is the one Rust-heap owner left on a code
 object, and it is optional: `MakeClosure` materializes every header with one,
 and a header hydrated from an image has none
 ([sealing.md](../image/sealing.md) § "A closure crosses without its
-blueprint"). It answers three questions the payload does not hold, and a
-blueprint-less header answers each with absence:
+blueprint"). It answers two questions the payload does not hold, and a
+blueprint-less header answers each without it:
 
 | Question | Answered by | Without a blueprint |
 |----------|-------------|---------------------|
 | Which code objects do my `MakeClosure` instructions index? | `child_protos` | the payload's child table, which the dumper fills because the blueprint cannot cross ([sealing.md](../image/sealing.md)) |
-| What LIR does the JIT promote me from? | `lir_function` | none — interpreter tier, until the encoded-LIR side-stream ([image.md](../image.md) § JIT) |
 | What SPIR-V did `(git f)` compile for me? | `spirv` | none, and nothing caches — the GPU path recompiles ([sealing.md](../image/sealing.md)) |
 
-"Where was I written?" is not among them. A defining span is twenty bytes of
-plain data, so the payload carries it and `meta/origin` answers the same on
-either side of a dump. Materializing it costs a copy of those bytes, where the
-child table would cost the payload of every lambda the function nests.
+Two questions are not among them, because the payload answers both on either
+side of a dump. "Where was I written?" is twenty bytes of plain data, so
+`meta/origin` reads the payload's span. "What LIR does the JIT promote me
+from?" is the payload's `lir` body, so a hydrated closure reaches the JIT as a
+materialized one does. Materializing either costs a copy of the function's own
+data, where the child table would cost the payload of every lambda the function
+nests.
 
 The census classifies `ClosureTemplate` as sealed on the strength of its
 payload, which is the part an image carries.
+
+## The LIR is stored twice until the blueprint retires
+
+A nested lambda's frozen function lives in two places. The blueprint holds a
+`LirOwned`, because the blueprint is what the emitter builds and what a
+materialization copies from. The payload holds a `LirBody`, because the payload
+is what every reader reaches and what an image carries. The first copy is
+compile-time data and the second is one copy per heap that runs the lambda.
+
+The cost is a second copy of the frozen records for every lambda a heap
+materializes. For the boot sources that is at most the 4,991 KiB the region
+form measured over all of their functions
+([image/measurements.md](../image/measurements.md) item 7), per heap. Retiring
+the blueprint deletes the first copy ([image/plan.md](../image/plan.md) orders
+that step).
 
 ## The executing context is the header
 

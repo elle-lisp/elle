@@ -69,13 +69,13 @@ masks and release tables as inline slices, and source locations as a sorted
 `HashMap<usize, SourceLoc>` whose `String` file names could not be sealed at
 any price.
 
-The header keeps one `Rc` to its blueprint, for the four questions the payload
-cannot yet answer: the nested-lambda blueprints a `MakeClosure` indexes, the
-LIR the JIT promotes from, the defining syntax, and the SPIR-V cache. The
-syntax foundation removed one; the image milestone's own dump removed the
-second by making child templates body data; the third is the GPU cache the
-design drops. The LIR foundation below is the last of them, and it takes the
-`Rc` with it.
+The header kept one `Rc` to its blueprint, for four questions the payload
+could not answer: the nested-lambda blueprints a `MakeClosure` indexes, the LIR
+the JIT promotes from, the defining syntax, and the SPIR-V cache. The syntax
+foundation removed one; the image milestone's own dump removed the second by
+making child templates body data; the third is the GPU cache the design drops.
+The LIR foundation below answered the fourth from the payload, and its next
+stage takes the `Rc` with it.
 
 ## Region-native syntax — landed
 
@@ -106,14 +106,16 @@ Hygiene scope ids minted by the expander remain process-local counters; the
 image records a scope watermark so a fresh expander mints above every scope
 baked into persisted syntax.
 
-## Region-native LIR — to land
+## Region-native LIR — in progress
 
-The JIT compiles from `lir_function`: a Rust-heap copy of the function's LIR
-hanging off the blueprint every code object still carries. It is the last of the four questions
-that blueprint answers (§ "Region-native closure templates"), so it is what
-keeps `TemplateProto` alive — and `TemplateProto` is a second copy of the
-bytecode, the constants, the masks and the region tables the payload already
-holds region-natively.
+A code payload carries its function's LIR as region-native records, and the
+JIT, the other backends, `send`, introspection and the image all read it there
+([lir.md](../lir.md) § "The frozen form"). The blueprint still holds the copy
+that materialization reads from, so `TemplateProto` stays alive. It is a second
+copy of the bytecode, the constants, the masks and the region tables the
+payload already holds region-natively, and now of the LIR as well. The stages
+still to land delete that copy, and then build the records in a region from
+the start.
 
 Four things the port buys. None is a compile-time number;
 [measurements.md](measurements.md) item 7 measured those, and they are real but
@@ -160,14 +162,13 @@ fault in LIR pages to bound one.
 
 The port lands as a seam and then three stages, each green on its own:
 
-1. **One read form.** Freezing turns a lowered function into the records, and
-   every reader except the lowerer reads them through `LirView`. The records
-   still live in `Vec`s, so nothing about storage changes. `send`'s LIR codec
-   is deleted here, because a frozen function carries its values in a table
-   that crosses through the ordinary value walk.
-2. **LIR in the payload.** The code payload carries the records as body data,
-   so a closure hydrated from an image reaches the JIT. This is the image's
-   goal.
+1. **One read form** — landed. Freezing turns a lowered function into the
+   records, and every reader except the lowerer reads them through `LirView`.
+   `send`'s LIR codec is deleted, because a frozen function carries its values
+   in a table that crosses through the ordinary value walk.
+2. **LIR in the payload** — landed. The code payload carries the records as
+   body data, so a closure hydrated from an image reaches the JIT. This is the
+   image's goal.
 3. **Retire `TemplateProto`.** A code object becomes one payload slice, and the
    payload cache, the blueprint arm of every header and the second copy of the
    bytecode go with it.

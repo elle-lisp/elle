@@ -1,6 +1,6 @@
 # Sealing
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-10-06 -->
 
 What an image's body may hold, what the hydrating instance rebuilds for itself,
 and what fails the dump.
@@ -54,15 +54,10 @@ blueprint is Rust-heap data and does not cross — a hydrated header carries
 none, and its slot hydrates as absent.
 
 Everything the payload answers is therefore identical after hydration:
-bytecode, constants, arity, signal, masks, locations, the region tables, and
-the defining span `meta/origin` reports. Two blueprint-only answers degrade,
-each within the design:
-
-- The LIR the JIT promotes from is absent, so a hydrated closure runs on the
-  interpreter tier until the LIR foundation lands and the payload answers for
-  it too ([plan.md](plan.md) owns that order).
-- The SPIR-V cache is absent; the GPU path already recompiles (§ "What the
-  body refuses").
+bytecode, constants, arity, signal, masks, locations, the region tables, the
+defining span `meta/origin` reports, and the LIR the JIT promotes from. One
+blueprint-only answer degrades, within the design: the SPIR-V cache is absent,
+and the GPU path already recompiles (§ "What the body refuses").
 
 The defining span is on the payload's side of the split rather than the
 blueprint's, so it needs no degrading answer. It is twenty bytes of plain
@@ -71,10 +66,18 @@ data, and every header carries it whichever boot built it
 process-local number a payload holds, and it travels by name like a syntax
 node's ([format.md](format.md)).
 
-The fourth cannot degrade. The nested-lambda blueprints a `MakeClosure`
-indexes decide what that instruction builds, so an absent one leaves it with
-nothing — which is why they cross as body data instead (§ "A child code object
-crosses as a header").
+The LIR is on the payload's side too, as the payload's `lir` body
+([lir.md](../lir.md) § "The frozen form"). Its records hold indices and plain
+bits, so they copy as bytes, with every pad written as zero. The values its
+`ValueConst` instructions load go through the value walk, where the copy of the
+constant pool has already met each of them. Its file table holds spellings,
+which copy like a string's bytes and need no file stream. A hydrated closure
+therefore reaches the JIT exactly as a source-booted one does.
+
+The other blueprint-only answer cannot degrade. The nested-lambda blueprints a
+`MakeClosure` indexes decide what that instruction builds, so an absent one
+leaves it with nothing — which is why they cross as body data instead (§ "A
+child code object crosses as a header").
 
 A closure a compiled WASM module built fails the dump by name: its dispatch
 index names a function table of the module this process holds, which no other

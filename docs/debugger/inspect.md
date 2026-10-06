@@ -1,6 +1,6 @@
 # Debugger: what a paused fiber shows
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-06 -->
 
 The debug information a code object carries, and the primitives that read a
 paused fiber through it.
@@ -21,7 +21,7 @@ invariants in [impl/vm.md](../impl/vm.md)).
 |----------------|------|
 | location table | bytecode offset → file, line, column |
 | `origin` | the lambda's source span |
-| `lir_function` | SSA, CFG, yield points, call sites; present on a nested lambda's template, absent on one built from bare `Bytecode` |
+| `lir` | SSA, CFG, yield points, call sites; present on a nested lambda's payload, absent on one built from bare `Bytecode` |
 | `name` | the binding the lambda was defined under |
 
 Two facts qualify the table. First, the location table is sparse: the

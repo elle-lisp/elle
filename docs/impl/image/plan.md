@@ -31,18 +31,18 @@ code, and each deletes image machinery
    design would otherwise have needed, the `Box<Syntax>` inside
    `HeapObject::Syntax`, and the retained lambda tree on every closure
    template.
-5. **lir** — to land. Region-native LIR
+5. **lir** — in progress. Region-native LIR
    ([foundations.md](foundations.md) argues it); deletes the encoded-LIR
    side-stream this design would otherwise have needed, `send`'s LIR codec,
    and `TemplateProto` — the last Rust-heap owner on a code object. It lands
    after boot rather than before it, because the measurement that sized it
    ([measurements.md](measurements.md) item 7) needed a boot configuration to
    point at. It lands in four steps, each green on its own:
-   - **lir-view** — freezing, and one read form: every reader except the
-     lowerer reads a frozen function through `LirView`. Deletes `send`'s LIR
-     codec.
-   - **lir-payload** — the code payload carries the frozen function, so a
-     hydrated closure reaches the JIT.
+   - **lir-view** — landed. Freezing, and one read form: every reader except
+     the lowerer reads a frozen function through `LirView`. Deleted `send`'s
+     LIR codec.
+   - **lir-payload** — landed. The code payload carries the frozen function, so
+     a hydrated closure reaches the JIT.
    - **lir-retire** — `TemplateProto` and the payload cache retire, and a code
      object is one payload slice.
    - **lir-lower** — the lowerer builds the frozen form in a working region,
@@ -86,16 +86,18 @@ Then the image milestones:
      and the corpus under image boot is the gate;
    - the warm cache — `--boot-image=`, the digest-keyed file, the atomic store
      and the prune. Opt-in rather than default: a hydrating instance still
-     loses the JIT tier and cross-unit inlining, and [boot.md](boot.md) argues
-     the default waits on both.
+     loses cross-unit inlining, and [boot.md](boot.md) argues the default
+     waits on it;
+   - the tier half of the parity gate — the **lir** foundation carries a
+     function's LIR in the payload, so a hot stdlib function reaches the JIT
+     under an image boot as under a source boot.
 
    Still to land: the embedded blob, per-worker hydration for `sys/spawn`,
    compiler-state persistence, the hydrated-region interval table, and the
-   parity gate (bytecode *and* tier). The tier half waits on the **lir**
-   foundation, which carries a function's LIR in the body rather than beside
-   it. The interval table keeps `region_of_ptr` off the probe ladder
-   ([image.md](../image.md) § "Pointer resolution must not regress"); the
-   regression it prevents needs a region the size of stdlib to show.
+   bytecode half of the parity gate. The interval table keeps `region_of_ptr`
+   off the probe ladder ([image.md](../image.md) § "Pointer resolution must not
+   regress"); the regression it prevents needs a region the size of stdlib to
+   show.
 8. **environment** — `image/save` and `image/load`, manifest deltas over
    boot, mutable side-stream.
 
@@ -120,17 +122,20 @@ Then the image milestones:
     hand-written claim. A closure whose LIR loads a stdlib closure and a list
     as `ValueConst`s crosses to a worker with its LIR and both values, and the
     worker's JIT compiles it.
-  - **lir-payload**: a header hydrated from an image answers its LIR, and under
-    `--boot-image` a hot stdlib function compiles on the JIT as it does under
-    source boot. A promotion copies its function out of the region, and the
-    copy answers after that region is freed; the counter-factual is handing the
-    worker a slice into live pages, which is correct until the free lands.
-    Freeing a code object's region frees its LIR, and the leak suite stays
-    green with no carve-out. Two dumps of a graph whose closures carry LIR
-    write one file, whatever a node's bytes beyond its fields held. The
-    verifier refuses an LIR slice whose extent leaves the image. A hydrated
-    closure sent to a worker carries its LIR, and the stdlib-cache reload keeps
-    it.
+  - **lir-payload**: a materialized header's payload answers the blueprint's
+    function, instruction for instruction and field for field, for every
+    lambda the standard library compiles. A header hydrated from an image
+    answers its LIR too, and under `--boot-image` a hot stdlib function
+    compiles on the JIT as it does under source boot. A promotion copies its
+    function out of the region, and the copy answers after that region is
+    freed and its pages reused; the counter-factual is handing the worker a
+    slice into live pages, which is correct until the free lands. Freeing a
+    code object's region frees its LIR, the payload's pages grow by the LIR
+    it carries, and the leak suite stays green with no carve-out. Two dumps of
+    a graph whose closures carry LIR write one file, whatever the pad bytes of
+    its records held. The verifier refuses an LIR slice whose extent leaves the
+    image, naming the field. A hydrated closure sent to a worker carries its
+    LIR, and the stdlib-cache reload keeps it.
   - **lir-retire**: `TemplateProto` is gone, and a code object answers every
     question from its payload — the counter-factual is a blueprint kept "just
     for the JIT", which passes every other test here and keeps the second copy
@@ -192,8 +197,8 @@ Then the image milestones:
   name, doc, and the capture masks. Two headers materialized from one
   blueprint hydrate naming one payload copy — the counter-factual is a
   per-header deep copy, which round-trips equal and silently doubles every
-  payload. A hydrated header has no blueprint, so the JIT is never entered.
-  `meta/origin` still answers, because the defining span is the payload's:
+  payload. A hydrated header has no blueprint, and still answers its LIR,
+  because the LIR is the payload's. `meta/origin` still answers, because the defining span is the payload's:
   a hydrated closure reports the line, the column and the file it was
   written at. The file table decides the file — rename the spelling there
   and the origin follows it. A lambda with no origin still answers nil,

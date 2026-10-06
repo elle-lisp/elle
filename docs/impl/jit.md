@@ -1,6 +1,6 @@
 # JIT
 
-<!-- audited: 2026-10-01 -->
+<!-- audited: 2026-10-06 -->
 
 The JIT compiles hot functions from LIR to native code using Cranelift.
 
@@ -116,6 +116,13 @@ first submission ([worker.rs](../../src/jit/worker.rs)). The interpreter keeps
 running a hot function while Cranelift compiles it, and the next call takes the
 code from the cache.
 
+**A task owns a copy of its function.** The function's LIR lives in its code
+payload, in region pages that belong to the VM's heap
+([lir.md](lir.md) § "The frozen form"), and a region belongs to one store. So
+`prepare_task` copies the payload's view into a `LirOwned`, and the task the
+worker receives is plain data — `Send` by its type, and valid whatever happens
+to the payload's region afterwards.
+
 **The queue ends with its VM.** When a VM drops its worker, the thread discards
 every task still queued and exits when the compile in progress returns. Only
 the VM that submitted a task can install its result, so a task that outlives
@@ -212,7 +219,10 @@ The invariant that makes the address key sound: **every entry pins the code
 object it was keyed by**, from submission until the entry is removed. The
 pinned header holds its blueprint, the blueprint holds its cache entry, and
 the cache entry holds the payload region — so the address cannot be reused and
-a key collision cannot occur. The pin travels: recorded in `jit_pending` at
+a key collision cannot occur. A header hydrated from an image has no blueprint.
+Its payload lives in the hydrated region, which an image boot registers as a
+process root for the instance's life ([image/boot.md](image/boot.md)), so its
+address is not reused either. The pin travels: recorded in `jit_pending` at
 submit, moved into `jit_cache` (or `jit_rejections`) when the result installs.
 The cost is that cached/rejected functions' payloads stay resident for the VM's
 lifetime — bounded by the amount of code the program compiles, the same order

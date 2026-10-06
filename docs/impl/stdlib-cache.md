@@ -181,8 +181,8 @@ So the `Bytecode` is wrapped as a synthetic `ClosureTemplate` with arity
 
 ### LIR must be preserved
 
-The JIT compiles from `ClosureTemplate.lir_function` in the background. If the
-cache dropped LIR, every stdlib function would run **interpreted forever** (no
+The JIT compiles from the LIR a closure's code payload carries, which
+materialization copies from the template's blueprint. If the cache dropped LIR, every stdlib function would run **interpreted forever** (no
 LIR → never submitted to the JIT worker) — a silent runtime regression, worse
 than not caching. Each template therefore stores its frozen LIR
 ([lir.md](lir.md) § "The frozen form"): the `LirCode` records verbatim, and the

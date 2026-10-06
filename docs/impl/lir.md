@@ -86,14 +86,32 @@ keeps it alive. A debug build checks this after emission. The template encoding
 names symbols and files by their spelling, so it means the same thing in every
 process.
 
-**`LirCode`** holds the records, the tables and the function's header in
-`Vec`s. It is plain data: `Send`, and serializable with serde. **`LirOwned`**
-is a `LirCode` plus its `values: Vec<Value>`. A `JitTask` holds one, and so does
-the blueprint a `MakeClosure` registers.
+A frozen function has two homes, and both hold the same records:
 
-**`LirView<'a>`** is the one read API. It borrows the slices of a frozen
-function and answers its blocks, its instructions, its terminators, its header
-and its tables. **`InstrRef<'a>`** is one instruction as the view decodes it.
+- **`LirCode`** holds the records, the tables and the function's header in
+  `Vec`s. It is plain data: `Send`, and serializable with serde.
+  **`LirOwned`** is a `LirCode` plus its `values: Vec<Value>`. A `JitTask`
+  holds one, and so does the blueprint a `MakeClosure` registers.
+- **`LirBody`** holds them in region pages, as the `lir` field of a code
+  payload ([region/template.md](region/template.md)). Every field is a
+  `RegionSlice` or a scalar, so the body is sealed data and an image carries
+  it with the rest of the payload. Its file table holds spellings rather than
+  `FileId`s, so a body holds no process-local number and needs no file stream.
+
+A body carries only what LIR alone knows: the closure id, the entry label, the
+register count, the capture and local-parameter counts, the sites, and the
+merge set and release tables in the order freezing recorded them. The payload
+keeps its own copy of those three tables, sorted for its binary searches. The
+header fields the two share are the payload's, and a view over a payload reads
+them there: the name, the docstring, the origin, the arity, the signal, the
+local and parameter counts, the capture masks, the vararg kind, the rest-list
+layout and the region table.
+
+**`LirView<'a>`** is the one read API, over either home. It borrows the slices
+of a frozen function and answers its blocks, its instructions, its terminators,
+its header and its tables. `LirView::to_owned` copies everything the view reads
+into a `LirOwned`, which is how a function leaves a payload for another thread.
+**`InstrRef<'a>`** is one instruction as the view decodes it.
 It mirrors `LirInstr` variant for variant, with `&'a [Reg]` where `LirInstr`
 holds a `Vec<Reg>`, a `ConstRef` where it holds a `LirConst`, and a
 `TemplateBytes<'a>` where it holds a `ConstTemplate`.
@@ -130,15 +148,20 @@ Lowerer ──► LirModule (working form)
               ▼  TemplateProto::nested_lambda
           blueprint: Rc<LirOwned> with its sites filled in
               │
-              ├─► JIT worker: a JitTask owns a copy of the LirOwned
-              ├─► WASM, MLIR, SPIR-V: a LirView over it
-              └─► send: the LirCode, plus the values through the value walk
+              ▼  materialized once per heap
+          code payload: a LirBody, read through ClosureTemplate::lir()
+              │
+              ├─► JIT worker: a JitTask owns the view's to_owned copy
+              ├─► WASM, MLIR, SPIR-V, introspection: the view itself
+              ├─► send: the records, plus the values through the value walk
+              └─► image: the body, copied with the rest of the payload
 ```
 
 Freezing runs once per compiled function, before emission. The yield points
 and call sites are the one part only emission can supply, so
 `TemplateProto::nested_lambda` writes them into the frozen function the
-blueprint keeps.
+blueprint keeps. Materializing the blueprint's payload copies that function
+into the payload's body, and every reader of a code object reads the body.
 
 ## The operand proof
 
@@ -225,7 +248,7 @@ arguments.
 | Path | Contents |
 |------|----------|
 | [src/lir/types/](../../src/lir/types/mod.rs) | The working form: `LirFunction` (func.rs), `LirInstr` (instr.rs), `BasicBlock`, `Reg`, `Terminator`, `LirConst` (mod.rs) |
-| [src/lir/code/](../../src/lir/code/mod.rs) | The frozen form: the records, `freeze`, `LirCode`, `LirOwned`, `LirView` and `InstrRef` |
+| [src/lir/code/](../../src/lir/code/mod.rs) | The frozen form: the records, `freeze`, `LirCode`, `LirOwned`, `LirBody`, `LirView` and `InstrRef` |
 | [src/lir/display.rs](../../src/lir/display.rs) | Debug printing of LIR |
 | [src/lir/lower/](../../src/lir/lower/AGENTS.md) | Lowering from HIR |
 | [src/lir/emit/](../../src/lir/emit/mod.rs) | Bytecode emission from LIR |

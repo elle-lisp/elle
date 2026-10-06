@@ -59,7 +59,8 @@ The frozen form, which every other reader reads ([code/](code/mod.rs)):
 | `Node`, `BlockRec`, `ConstRec`, `SiteRec` | The plain records a frozen function is made of |
 | `LirCode` | The records, tables and header in `Vec`s: `Send`, and serializable |
 | `LirOwned` | A `LirCode` plus the `Value`s its `ValueConst` instructions load |
-| `LirView` | The read API: blocks, instructions, terminators, header, tables, sites |
+| `LirBody` | The same records in region pages, as a code payload's `lir` field ([code/body.rs](code/body.rs)) |
+| `LirView` | The read API over either home: blocks, instructions, terminators, header, tables, sites |
 | `InstrRef` | One instruction, decoded: `LirInstr`'s variants over borrowed slices |
 | `ConstRef`, `TemplateBytes` | An immediate constant, and a `MaterializeConst`'s encoded template |
 | `SiteRef` | A yield point or a call site: resume IP, live registers, local count |
@@ -182,6 +183,10 @@ TemplateProto::nested_lambda
     ├─► location_map ← Bytecode.location_map
     └─► lir_function ← a copy of the lambda's LirOwned, with its yield
         points and call sites filled in, for the JIT's side exits
+    │
+    ▼
+materialize_payload ──► CodePayload.lir: a LirBody, which every reader
+                        reaches through ClosureTemplate::lir()
 ```
 
 The emitter emits blocks in the order the lowerer appended them, and freezing
@@ -209,7 +214,8 @@ break that, because labels are allocated in creation order.
    `YieldPointInfo` at each `Terminator::Emit` and a `CallSiteInfo` at each
    call and each `TailCall`. `TemplateProto::nested_lambda`
    ([src/value/closure/proto.rs](../value/closure/proto.rs)) writes both into
-   the template's copy of the frozen function, which is what the JIT reads.
+   the blueprint's copy of the frozen function. The code payload copies them
+   with the rest of the function, and the JIT reads the payload's.
 
 5. **Call sites are recorded only where the function may suspend.**
    `Emitter.current_func_may_suspend`, set from `signal.may_suspend()`, gates
@@ -337,6 +343,8 @@ count.
 - [src/pipeline/](../pipeline/) — runs the `Lowerer` and the `Emitter`
 - [src/vm/](../vm/) — executes the emitted bytecode
 - [src/jit/](../jit/), [src/wasm/](../wasm/) and the MLIR tier — compile a
-  closure from the frozen function its template keeps
+  closure from the frozen function its code payload carries
+- [src/image/](../image/mod.rs) — dumps a payload's `LirBody` with the rest of
+  the payload, and verifies its extents at hydration
 - [src/value/send/](../value/send/mod.rs) — carries a closure's `LirCode`, and
   its values through the ordinary value walk

@@ -24,8 +24,9 @@ LirView -> JitCompiler -> Cranelift IR -> Native code -> JitCode
 
 JIT compilation runs on a dedicated background thread (`elle-jit`).
 When a function becomes hot (called as many times as the JIT threshold, 10
-by default), `prepare_task` copies its frozen LIR (a `LirOwned`) into a
-`JitTask` and sends it to the worker via `crossbeam_channel`. The task is plain
+by default), `prepare_task` copies the frozen LIR its code payload carries
+into a `LirOwned`, puts that in a `JitTask`, and sends it to the worker via
+`crossbeam_channel`. The task is plain
 data, so it is `Send` by its type rather than by a hand-written claim. The
 interpreter continues running the function while Cranelift compiles it. Each VM
 owns its worker, and dropping the worker discards the tasks still in its queue
@@ -314,7 +315,8 @@ No errors are silently swallowed.
 2. **Yield metadata is populated during emission.** `Emitter::emit()` returns
    `(Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>)`.
    `TemplateProto::nested_lambda` writes both into the site tables of the
-   frozen LIR the blueprint keeps. The JIT reads them as `SiteRef`s to generate
+   frozen LIR the blueprint keeps, and the code payload copies them with the
+   rest of that function. The JIT reads them as `SiteRef`s to generate
    side-exit code.
 
 3. **YieldPointMeta is derived from a yield point.** During JIT compilation,
