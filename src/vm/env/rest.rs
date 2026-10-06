@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! Rest-parameter collection: the `&` list, the `&keys`/`&named` structs, and the release a collector takes over.
 //!
 //! docs/impl/region/mechanism.md
@@ -235,3 +235,6 @@ impl VM {
         Ok(crate::value::build::struct_from(heap, map, region))
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-10-06
 //! Unit tests for the JIT data helpers: cons, arrays, capture cells, and the
 //! prologue's own-region env values.
 
@@ -111,7 +111,7 @@ fn test_cell_operations() {
 //
 // A JIT-compiled function's prologue builds env values — capture cells (a
 // mutable-captured param/local) and the variadic rest cons-list — that the
-// interpreter's `populate_env` mints a FRESH per-value region for
+// interpreter's `populate_env` mints FRESH regions for
 // (`env_value_region`, src/vm/env.rs; `args_to_list`, src/vm/env/rest.rs).
 // The prologue must do the
 // same. On a JIT->JIT call the callee inherits the caller's region; an env value
@@ -119,8 +119,9 @@ fn test_cell_operations() {
 // (docs/impl/region/rules.md Rule 6) and its value-based `DecrefCellRegion` /
 // `DecrefValueRegion` decrefs the caller's region — a leak (Rule 8) and a latent
 // use-after-free. The owned helpers (`elle_jit_make_capture_owned` /
-// `elle_jit_collect_rest_list`) mint a fresh region per value, exactly like the
-// interpreter; these counterfactuals pin that.
+// `elle_jit_collect_rest_list`) mint regions of their own, exactly like the
+// interpreter: one per value, or one for a rest list whose layout says so
+// (docs/impl/region/restlist.md). These counterfactuals pin that.
 
 /// Build a VM and mint a live "caller" region on its heap, then run `f` with both.
 /// The region stands in for a JIT caller's region that the owned env helpers must
@@ -172,29 +173,85 @@ fn prologue_rest_list_conses_get_own_regions_not_callers() {
         let vm_ptr = vm as *mut crate::vm::VM as *mut ();
         // args = [1, 2, 3]; build the rest list from index 0.
         let args = [Value::int(1), Value::int(2), Value::int(3)];
-        let head = elle_jit_collect_rest_list(args.as_ptr(), 0, 3, vm_ptr).to_value();
+        let head = elle_jit_collect_rest_list(
+            args.as_ptr(),
+            0,
+            3,
+            crate::value::RestListLayout::PerCell as u32,
+            vm_ptr,
+        )
+        .to_value();
 
-        // Walk the list: every cons must be off the caller's region, and the
-        // elements must read back in order.
-        let mut cur = head;
-        let mut seen = 0;
-        while cur.as_pair().is_some() {
-            let region = crate::value::arena::region_of(unsafe { &*heap }, cur)
-                .expect("a heap cons must have a region");
-            assert_ne!(
-                region, caller_region,
-                "JIT-prologue rest cons commingled into the caller's region (Rule 6) \
-                 — each cons must mint its own region like args_to_list"
-            );
-            let car = elle_jit_first(cur.tag, cur.payload).to_value();
-            assert_eq!(car.as_int(), Some(seen + 1));
-            cur = elle_jit_rest(cur.tag, cur.payload).to_value();
-            seen += 1;
-        }
-        assert_eq!(seen, 3, "rest list must have all 3 elements");
+        // Walk the list: every cons must be off the caller's region, in a region
+        // no other cons shares, and the elements must read back in order.
+        let regions = walk_rest_list(heap, head, caller_region);
+        let mut distinct = regions.clone();
+        distinct.sort_by_key(|r| r.get());
+        distinct.dedup();
+        assert_eq!(
+            distinct.len(),
+            3,
+            "the per-cell layout builds each cons into a region of its own: {regions:?}"
+        );
+    });
+}
+
+/// Walk a rest list built from `[1, 2, …]`: check each element and that no cons
+/// sits in `caller_region`, and answer each cons's region, head first.
+fn walk_rest_list(
+    heap: *mut crate::value::fiberheap::FiberHeap,
+    head: Value,
+    caller_region: crate::hir::region::RuntimeRegion,
+) -> Vec<crate::hir::region::RuntimeRegion> {
+    let mut regions = Vec::new();
+    let mut cur = head;
+    while cur.as_pair().is_some() {
+        let region = crate::value::arena::region_of(unsafe { &*heap }, cur)
+            .expect("a heap cons must have a region");
+        assert_ne!(
+            region, caller_region,
+            "JIT-prologue rest cons commingled into the caller's region (Rule 6) \
+             — the list must mint its own region like args_to_list"
+        );
+        let car = elle_jit_first(cur.tag, cur.payload).to_value();
+        assert_eq!(car.as_int(), Some(regions.len() as i64 + 1));
+        cur = elle_jit_rest(cur.tag, cur.payload).to_value();
+        regions.push(region);
+    }
+    assert_eq!(regions.len(), 3, "rest list must have all 3 elements");
+    assert!(
+        cur.is_empty_list(),
+        "rest list must terminate in empty-list"
+    );
+    regions
+}
+
+/// SPEC (docs/impl/region/restlist.md): under the one-region layout every cons
+/// shares one region of the list's own, off the caller's region, and that
+/// region holds one reference, the head's.
+#[test]
+fn prologue_rest_list_one_region_layout_shares_one_region() {
+    with_caller_region(|vm, caller_region| {
+        let heap = vm.heap_ptr;
+        let vm_ptr = vm as *mut crate::vm::VM as *mut ();
+        let args = [Value::int(1), Value::int(2), Value::int(3)];
+        let head = elle_jit_collect_rest_list(
+            args.as_ptr(),
+            0,
+            3,
+            crate::value::RestListLayout::OneRegion as u32,
+            vm_ptr,
+        )
+        .to_value();
+        let regions = walk_rest_list(heap, head, caller_region);
         assert!(
-            cur.is_empty_list(),
-            "rest list must terminate in empty-list"
+            regions.iter().all(|r| *r == regions[0]),
+            "every cons shares the head's region: {regions:?}"
+        );
+        assert_eq!(
+            unsafe { (*heap).region_rc(regions[0]) },
+            1,
+            "the list's region holds one reference, the head's"
         );
     });
 }
@@ -206,7 +263,14 @@ fn prologue_rest_list_empty_is_empty_list() {
         let vm_ptr = vm as *mut crate::vm::VM as *mut ();
         let args = [Value::int(1)];
         // start == nargs → nothing to collect.
-        let head = elle_jit_collect_rest_list(args.as_ptr(), 1, 1, vm_ptr).to_value();
+        let head = elle_jit_collect_rest_list(
+            args.as_ptr(),
+            1,
+            1,
+            crate::value::RestListLayout::OneRegion as u32,
+            vm_ptr,
+        )
+        .to_value();
         assert!(head.is_empty_list());
     });
 }

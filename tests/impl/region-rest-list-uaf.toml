@@ -1,0 +1,2 @@
+# A freed page is unmapped, so a read of a freed cell or element faults at the read.
+trace = ["guardfree"]
