@@ -1,6 +1,6 @@
 # Contributing to Elle
 
-<!-- audited: 2026-09-30 -->
+<!-- audited: 2026-10-06 -->
 
 How to work on Elle: the test policy that keeps main green, the order of work,
 and what a change has to carry before we can take it.
@@ -10,7 +10,8 @@ and what a change has to carry before we can take it.
 `origin/main` is green. Always. Every commit on main has passed every
 Elle test, every Rust test, and every documentation file in CI. The pull
 request's jobs run the suites on every build and platform, and the merge
-queue runs `make smoke` again before a commit lands.
+queue runs `make smoke`, QA included, on the merged result before a commit
+lands.
 
 This is the "not rocket science rule of software engineering": maintain
 a repository of code that always passes all tests. It is successfully
@@ -95,9 +96,9 @@ tests and zero assertions, the session was wasted.
 | Command | Runtime | What it does |
 |---------|---------|-------------|
 | `cargo test -p elle --lib` | ~1.5min | Rust unit tests — the fast inner loop |
-| `make qa` | ~2min | The PR gate's QA job, locally: rustfmt, workspace clippy, the cross-checks, rustdoc. Run before every push |
-| `make smoke` | ~30min release | The language suite, the implementation suite on the rig, doctests, embedding, the semver surface gate |
-| `make test` | smoke + ~5min | qa, then smoke, then the unit and integration tests |
+| `make qa` | ~2min | The PR gate's QA job, locally: rustfmt, the generated indexes, workspace clippy, the cross-checks, rustdoc |
+| `make smoke` | ~30min release | qa, then the language suite, the implementation suite on the rig, doctests, embedding, the semver surface gate |
+| `make test` | smoke + ~5min | smoke, then the unit and integration tests |
 | `make crosscheck` | ~2min | Clippy over the macOS arms and `cargo check` over the Android arms of `cfg(target_os)`, which a Linux build never compiles |
 
 Pass the release binaries to anything that runs a suite — the debug default

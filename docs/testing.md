@@ -1,6 +1,6 @@
 # Testing
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-06 -->
 
 The two test suites, what each one claims, the builds that run them, and how a
 run is read.
@@ -30,8 +30,8 @@ specification is [docs/test-runner.md](test-runner.md), with
 |---------|--------------|
 | `make smoke-lang` | The language suite |
 | `make smoke-impl` | The implementation suite on the rig, then both suites under each rig profile |
-| `make smoke` | Both suites, the doctests, the embedding demo, and the surface gate |
-| `make test` | `make qa`, then `make smoke`, then the Rust unit and integration tests |
+| `make smoke` | `make qa`, then both suites, the doctests, the embedding demo, and the surface gate |
+| `make test` | `make smoke`, then the Rust unit and integration tests |
 | `elle test tests/lang/*.lisp` | Run those files in-process; print a summary; gate on exit code |
 | `elle-rig tests/impl/NAME.lisp` | Run one implementation test with its sidecar |
 | `elle test --summary` | Re-print the last run's summary (no re-run) |
@@ -383,9 +383,10 @@ see the other, which is why the claim is stated once more over the finished emis
 
 ## The Rust suite
 
-`make test` runs `make qa` first — `cargo fmt --check`, clippy,
-`make crosscheck`, rustdoc — then the corpus, then `cargo test --lib` and the
-integration tests. For what kind of Rust test to write and where, see [tests/AGENTS.md](../tests/AGENTS.md) and
+`make test` runs `make smoke`, which starts with `make qa` — `cargo fmt
+--check`, the generated indexes, clippy, `make crosscheck`, rustdoc — then
+runs the corpus. `make test` then runs `cargo test --lib` and the integration
+tests. For what kind of Rust test to write and where, see [tests/AGENTS.md](../tests/AGENTS.md) and
 [docs/analysis/testing.md](analysis/testing.md). (`elle test --rust`, which folds
 the cargo suite into the same DB, is specced but not yet implemented.)
 

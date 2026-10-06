@@ -1,6 +1,6 @@
 # Tests
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-06 -->
 
 Where each kind of test lives, the helpers they share, and how to add one.
 
@@ -169,7 +169,7 @@ count. Pick `N` by the cost of one case:
 | `cargo test -p elle --lib` | ~1.5 min | The inline unit tests |
 | `cargo test --test lib integration::NAME` | seconds to minutes | One integration file |
 | `cargo test --test '*'` | ~10 min | Every integration test and standalone binary |
-| `make smoke` | ~30 min, release | Both Elle suites, the doctests, the embedding demo, and the surface gate |
+| `make smoke` | ~30 min, release | `make qa`, then both Elle suites, the doctests, the embedding demo, and the surface gate |
 | `make test` | smoke + ~5 min | What the PR gate runs, locally |
 | `cargo test --workspace` | ~30 min | Everything — ask before running it |
 

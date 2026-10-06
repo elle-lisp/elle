@@ -1,6 +1,6 @@
 # CI and Triage
 
-<!-- audited: 2026-10-04 -->
+<!-- audited: 2026-10-06 -->
 
 CI structure, local workflow, and failure diagnosis.
 
@@ -34,7 +34,10 @@ set when the diff moves only the submodule pointer.
 | All Checks Passed | ubuntu | The one status check branch protection requires | — |
 
 The merge queue ([merge-queue.yml](../../.github/workflows/merge-queue.yml))
-runs `make smoke` alone, with `PROPTEST_CASES=1`. The weekly schedule
+runs `make smoke` alone, with `PROPTEST_CASES=1`. `make smoke` starts with
+`make qa`, so the queue runs QA on the merged result, which no pull-request job
+sees. Its toolchain therefore carries what the `QA` job's does: rustfmt,
+clippy, both cross-check targets and LLVM 22. The weekly schedule
 ([weekly.yml](../../.github/workflows/weekly.yml)) runs the whole workspace
 suite on beta and nightly at 128 cases, plus a dependency audit.
 
@@ -80,9 +83,10 @@ platform spends and roughly halves the wall clock, which is the trade the merge
 gate cares about.
 
 A Smoke job runs each pass of `make smoke` as a step of its own, not `make
-smoke` itself, so a failed step names the pass that failed. Each pass runs
-once. A `make smoke` step after the job's `doctest` step would run the doctests
-twice.
+smoke` itself, so a failed step names the pass that failed. The Makefile names
+the passes once, in `SMOKE_PASSES`. Each pass runs once. A `make smoke` step
+after the job's `doctest` step would run the doctests twice. A Smoke job runs
+no `make qa`: the `QA` job is the QA gate for every platform.
 
 Each job caches under its own key — set explicitly with
 `Swatinem/rust-cache`'s `shared-key` where a job wants a stable one, and taken
@@ -370,10 +374,10 @@ missing.
 # The fast inner loop
 cargo test -p elle --lib
 
-# The QA job, locally — run it before every push
+# The QA job, locally
 make qa
 
-# The corpus, plus the doctests and the embedding demo
+# QA, then the corpus, the doctests, the embedding demo and the surface gate
 make smoke
 
 # One corpus file
