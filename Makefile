@@ -525,6 +525,7 @@ signal-solve:  ## The signal solver spike: its fixtures, and both engines over l
 		$(SIGNAL_SOLVE) --expect parity.lisp && \
 		$(SIGNAL_SOLVE) --expect app.lisp && \
 		$(SIGNAL_SOLVE) --expect cyc_a.lisp && \
+		$(SIGNAL_SOLVE) --expect ceiling.lisp && \
 		$(SIGNAL_SOLVE) --expect --no-follow sep.lisp
 	$(SIGNAL_SOLVE) $$(find lib -name '*.lisp' | sort)
 
