@@ -196,10 +196,10 @@ page bytes an instance maps instead of running the front end. On a hit, boot
 hydrates it; on a miss, boot compiles from source and stores one for the next
 start. `elle image dump-boot FILE` writes one explicitly.
 
-The default is off. A hydrated stdlib reaches neither the JIT tier nor
-cross-unit inlining yet, so turning it on trades steady-state throughput for
-startup; [boot.md](impl/image/boot.md) owns the policy and names the two
-milestones the default waits on.
+The default is off. User code under an image boot compiles without cross-unit
+inlining yet, so turning it on trades steady-state throughput for startup;
+[boot.md](impl/image/boot.md) owns the policy and names what the default waits
+on.
 
 ## Elle API
 

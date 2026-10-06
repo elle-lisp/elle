@@ -1,6 +1,6 @@
 # Debugging and introspection
 
-<!-- audited: 2026-09-30 -->
+<!-- audited: 2026-10-06 -->
 
 The primitives a program uses to print its values, inspect a closure, and time its own work.
 
@@ -23,8 +23,8 @@ changing what the program computes.
 ## Inspecting a closure
 
 Each primitive below takes any value. A value that is not a closure answers
-`false`, or `nil` where the answer is a number. A native primitive such as
-`clock/monotonic` is not a closure.
+`false`, or `nil` where the answer is a number; `call-count` answers `0`. A
+native primitive such as `clock/monotonic` is not a closure.
 
 | Primitive | Answers |
 |-----------|---------|
@@ -42,6 +42,10 @@ Each primitive below takes any value. A value that is not a closure answers
 
 `mutates-params?`, `arity`, `captures` and `bytecode-size` are aliases of the
 `fn/` names. `(doc name)` gives each one's docstring.
+
+The VM counts a closure's calls only while the JIT is on, or under `--wasm=N`.
+An `mlir` or `wasm` build starts with the JIT off ([config](../config.md)), so
+there `call-count` answers `0` for a closure the program has called.
 
 ```lisp
 (defn add [a b]
@@ -65,6 +69,11 @@ Each primitive below takes any value. A value that is not a closure answers
     (fn [] (+ a b))))
 (assert (= (fn/captures sum-of-two) 2) "sum-of-two captures a and b")
 (assert (> (fn/bytecode-size add) 0))
+(add 1 2)
+(add 3 4)
+(assert (= (call-count add) (if (vm/config :jit) 2 0))
+        "the VM counted both calls, if the JIT is on")
+(assert (= (call-count 42) 0) "a value that is not a closure counts no calls")
 ```
 
 `fn/mutates-params?` reads the parameters the body assigns, which the compiler
