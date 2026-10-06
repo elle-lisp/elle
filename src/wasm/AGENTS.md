@@ -1,6 +1,6 @@
 # WASM Backend
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-06 -->
 
 LIR → WASM emission via `wasm-encoder`, execution via Wasmtime.
 
@@ -64,9 +64,10 @@ Int-to-float promotion for mixed operands. Bitwise ops remain integer-only.
 `handle_wasm_result` reads signal from memory after WASM call returns.
 Signals propagate through WASM↔host boundaries.
 
-For SIG_YIELD in suspending functions, `emit_call_suspending` checks the
-signal from the return value BEFORE the general early-return path, spills
-caller state, and returns suspended. Virtual resume blocks (CPS continuations
+For a call that parks — any signal but a halt, an error included — in a
+function that may signal, `emit_call_suspending` checks the suspended word
+BEFORE the general early-return path, spills caller state, and returns
+suspended. A host operation that raises parks its caller the same way. Virtual resume blocks (CPS continuations
 for mid-block call sites) use the same suspending-aware emission so that
 yield-through-call works correctly after resume.
 
@@ -142,7 +143,7 @@ and consumed from the front (innermost first during resume).
 6. New frames pushed by `rt_yield` go to the back, so they don't interfere
 
 **`drive_resume_chain`:** Loops `resume_wasm_closure` until all frames are
-consumed (Dead), a frame yields (Yielded), or a frame errors (Error).
+consumed (Dead) or a frame parks again (Yielded), an error included.
 
 **`handle_fiber_resume`:** Dispatches New (call_wasm_closure) vs Paused
 (drive_resume_chain). Sets fiber status and signal on completion.
@@ -184,7 +185,7 @@ Yielding functions become re-entrant via compile-time state machine:
 - `ctx` parameter (param 3) carries resume state on re-entry (0 = initial)
 - Yield spills all registers + local slots to ARGS_BASE, calls `rt_yield`, returns suspended
 - Resume prologue: if ctx!=0, dispatch via br_table to restore block, load saved regs
-- Yield-through-call: after Call in suspending functions, check SIG_YIELD, spill+return
+- Yield-through-call: after a call or host operation that may signal, check the suspended word, spill+return
 - Virtual resume blocks handle mid-block resume (instructions after the call + terminator)
 - Both real blocks and virtual resume blocks use `emit_call_suspending` for SuspendingCall
 - Host snapshots env, manages `WasmSuspensionFrame` deque, drives resume chain
@@ -223,9 +224,10 @@ funcref table has a single entry, so the gate refuses every shape whose
 execution would reach one:
 - No `TailCall`/`TailCallArrayMut` (`return_call_indirect` needs callee table
   indices + `rt_prepare_tail_call`)
-- No `SuspendingCall` and no `Emit` terminators — any signal emission, yield
-  and `(error …)` alike, routes through `rt_yield`'s suspension-frame
-  machinery (host-call errors are unaffected: they return via the status word)
+- No function that may signal. An emit, a suspending call, and an error a
+  call or host operation raises all park through `rt_yield`'s suspension-frame
+  machinery, which a standalone host does not have, so the gate admits only a
+  function whose inferred signal is silent
 - No `MakeClosure` without module context (`ClosureId` resolution; nested
   closures stay on the bytecode VM)
 

@@ -1,6 +1,6 @@
 # Settled invariants
 
-<!-- audited: 2026-09-21 -->
+<!-- audited: 2026-10-06 -->
 
 The invariants the region system upholds, one line each, with the spec that
 owns the argument.
@@ -77,8 +77,8 @@ these invariants close are [the model](../memory.md).
   it takes the fall-through like a normal completion
   ([signalexit.md](signalexit.md)).
 - An abandoned frame runs the releases it still owes, off the emitter's two
-  release tables, each route carrying its own receipt; a frame the restarts
-  system can replay is not abandoned ([unwind.md](unwind.md)).
+  release tables, each route carrying its own receipt; an error parks its whole
+  chain, so only a discard abandons a frame ([unwind.md](unwind.md)).
 - A squelch boundary abandons frames the same way, so it runs the same walk;
   the fiber's survival never enters the reading ([unwind.md](unwind.md)).
 - An arm that leaves through a callee takes a replica, not the anchor; a

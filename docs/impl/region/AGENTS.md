@@ -32,5 +32,5 @@ Up: [..](../AGENTS.md)
 - [settled.md](settled.md) — **Settled invariants** The invariants the region system upholds, one line each, with the spec that owns the argument.
 - [signalexit.md](signalexit.md) — **What a signal exit owes** A native tail call runs its fall-through block on normal completion alone, so a signal exit answers for the releases left in it.
 - [template.md](template.md) — **Code objects — a payload, a header and a code unit** A code object is a payload in a code region and a one-word header naming it, and a compile unit owns the region.
-- [unwind.md](unwind.md) — **An abandoned frame runs the releases it still owes** The two tables naming what an abandoned frame still owed, and the exits that walk them.
+- [unwind.md](unwind.md) — **An abandoned frame runs the releases it still owes** The two tables naming what an abandoned frame still owed, and the seams that walk them.
 - [window.md](window.md) — **The branch-arm release window** Where a branch puts the ONE release of a region several arms use.

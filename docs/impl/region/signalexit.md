@@ -1,6 +1,6 @@
 # What a signal exit owes
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-06 -->
 
 A native tail call runs its fall-through block on normal completion alone, so a
 signal exit answers for the releases left in it.
@@ -103,10 +103,10 @@ argument scratch ([owner.md](owner.md)).
 
 The **JIT** tier does not carry this channel. Its native tail call
 (`elle_jit_tail_call`) consumes no borrowed-argument retain on a signal exit. A
-compiled frame whose tail call SUSPENDS still owes nothing here, because it parks at
-the post-`TailCall` ip as the interpreter's driver does ([park.md](park.md)), and the
-replay runs the whole block, stash releases included. A compiled frame that leaves by
-an error strands the retain: a bounded over-keep, never an over-free. The
+compiled frame whose tail call suspends or raises still owes nothing here, because it
+parks at the post-`TailCall` ip as the interpreter's driver does ([park.md](park.md)),
+and the replay runs the whole block, stash releases included. A compiled frame whose
+park is discarded strands the retain: a bounded over-keep, never an over-free. The
 callee-adoption channels are a different matter, and the compiled tier carries both
 ([the relocation](relocate.md)).
 
@@ -149,8 +149,8 @@ holds every release the frame still owes for this call: one `DecrefValueRegion` 
 **owned argument** (the ownership move a native callee never runs in the caller's
 place), the return mint, and the result's own release. Handing the value out through
 `fiber.signal` and returning `SIG_OK` reaches none of them, and no other path runs them
-either — an absorbed outcome is not an error, so the abandoned-frame walk does not
-fire, and it is not a suspend, so no replay arrives.
+either — an absorbed outcome is neither an error nor a suspend, so nothing parks the
+frame and no replay arrives.
 
 The count argument the exemptions in the section above make is *why the fall-through
 is the answer rather than a walk*. That section keeps an argument's release in the

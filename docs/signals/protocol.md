@@ -1,6 +1,6 @@
 # Signal Protocol
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-06 -->
 
 How a signal is encoded, carried, caught and reported: the bits, the payload, propagation, I/O requests and the registry.
 
@@ -165,9 +165,9 @@ an error. The scheduler resumes the fiber with the result.
 
 An I/O request raises `|:io|` and nothing else. It does suspend the calling
 fiber — but so does every signal. Suspension follows from raising a signal at
-all, not from any particular bit: `signals::dispatch::is_suspending` parks on
-anything that is neither empty, nor an error, nor a halt, and the VM and the
-WASM tier both ask it.
+all, not from any particular bit: `signals::dispatch::parks` parks on anything
+that is neither empty, nor a halt, nor a request to the VM, an error included,
+and the VM and the WASM tier both ask it.
 
 So `:yield` means one thing: the cooperative suspension `(yield v)` raises and
 a `|:yield|` mask catches. A request that carried it too would be caught by

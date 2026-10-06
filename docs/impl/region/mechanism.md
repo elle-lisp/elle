@@ -1,6 +1,6 @@
 # The mechanism
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-06 -->
 
 The RC-instruction machinery the [rules](rules.md) constrain: how each
 instruction names its region, and when a static slot may stand in. Two nets keep
@@ -109,9 +109,11 @@ it, which is *inside* the call — a point no instruction can follow, because a
 frame-replacing tail callee never arrives at the block after `TailCallArrayMut`. So
 the release is the runtime's: each dispatcher takes the array's slot and frees the
 region once the callee holds what it needs. Taking the slot is what keeps the release
-single. A frame abandoned between the array's construction and the call — an
-`ArrayMutExtend` over a source that is not a sequence raises there — still has the
-slot mapped, so the walk reclaims it, and a frame that reached the call does not.
+single. A frame that raises between the array's construction and the call — an
+`ArrayMutExtend` over a source that is not a sequence raises there — parks with the
+slot still mapped. A restart runs on to the call, which takes the slot, and a
+discard's walk reclaims it. A frame that reached the call has nothing mapped for
+either to find.
 
 **The callee mints its own reference to every argument.** The store funnel counts each
 `ArrayMutPush` / `ArrayMutExtend`, so the array holds one counted reference per
@@ -199,7 +201,7 @@ release is PLACED, and what each placement owes, is argued next door.
 - [What a signal exit owes](signalexit.md) — the release a native's
   fall-through block would have run.
 - [An abandoned frame runs the releases it still owes](unwind.md) — the two
-  tables an error, a squelch boundary or a discard walks.
+  tables a call boundary, a refusing host or a discharge walks.
 
 Those arguments were sections of this document, and comments across the tree
 still name them. Each title below resolves in one step, so a pointer written

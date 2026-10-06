@@ -301,12 +301,16 @@ symmetric with its unpark; the node and the deferred set a park moves are
   requesting call pre-allocated — a port, a read's buffer — the allocation is that
   call's own `Fresh` mint, which the install that ends the park already releases.
 - **A restart delivers into an error park, and owes what the raise site left
-  unfunded.** A fiber stopped on an error parks its innermost frame just past the
-  raising call, with nothing on the stack in place of the call's result, and
-  `fiber/resume` restarts it there: the resume value takes that place, and the
-  continuation releases it like any result. What funds that release depends on the
-  raise, so the dispatch loop's error exit carries its site (`RaiseSite`) out to the
-  fiber boundary, and the boundary records it in the ledger (`park_error`). An
+  unfunded.** A fiber stopped on an error parks every frame from the raise to its
+  body. The innermost frame parks just past the raising call, with nothing on the
+  stack in place of the call's result, and `fiber/resume` restarts it there: the
+  resume value takes that place, and the continuation releases it like any result.
+  Each frame outside it parks at its call, as for a suspend. What funds the
+  innermost release depends on the raise, so the dispatch loop's error exit carries
+  its site (`RaiseSite`) out to the code that parks the raising frame —
+  `complete_call` for a callee, the fiber boundary for a body, the JIT's park
+  helper for a compiled frame — and that code records it in the ledger
+  (`park_error`). An
   `Emit` raise (`(error v)`) owes nothing, because its continuation funds its own
   release of the resume value, as for any emit park (the rule on a resume value,
   below). A raise with no result position (`NoResult`),
@@ -337,8 +341,8 @@ symmetric with its unpark; the node and the deferred set a park moves are
   `signal`. That fiber's resumer then reads the payload as its resume result and runs the
   compiler-emitted release on it — the same consumer an `Emit` funds with its `EmitEscape`
   mint. Re-parking a value the child already parked mints nothing, so that release consumes
-  a reference the propagate never took. One propagate hides the theft: an error unwind runs
-  no continuation, so the raising body's own reference is stranded and unclaimed, and the
+  a reference the propagate never took. One propagate hides the theft: an error park nobody
+  restarts runs no continuation, so the raising body's own reference is stranded and unclaimed, and the
   release eats that instead. Two propagates do not, nor does a native error, whose payload
   reaches `fiber.signal` with no body reference at all. The count then runs one short of the
   recorded `fiber → payload` edges, and the last fiber's free cascade reclaims the payload

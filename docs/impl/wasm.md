@@ -54,10 +54,12 @@ Two execution modes:
   to WASM on demand during bytecode VM execution. Complements the VM
   rather than replacing it. A closure runs on the tier from its Nth call, so
   `--wasm=1` compiles it on the first; the tier counts the calls itself,
-  because a `wasm` build has no JIT tier to share a count with. Currently
-  limited to leaf functions (no closures, tail calls, or yield). The tier keys
-  each compiled module, and each closure it refused, by the closure's bytecode
-  address, so each entry pins that code region ([jit.md](jit.md)).
+  because a `wasm` build has no JIT tier to share a count with. The tier
+  holds no park, so it compiles only a function that cannot signal: no
+  yield, no tail call, and nothing that can raise, since an error parks. The
+  tier keys each compiled module, and each closure it refused, by the
+  closure's bytecode address, so each entry pins that code region
+  ([jit.md](jit.md)).
 
 ### Pipeline (full-module)
 
@@ -140,11 +142,11 @@ Closure WASM type: `(env_ptr: i32, args_ptr: i32, nargs: i32, ctx: i32) -> (tag:
 - `status`: 0 = normal return, >0 = suspended (resume state ID).
 
 A compiled function reports on **two channels, and both must be read**.
-`status` says whether the function suspended. The `SignalBits` it raised
+`status` says whether the function parked. The `SignalBits` it raised
 go to `SIGNAL_SLOT`, the 8 bytes at the base of linear memory. Neither
-word implies the other: a function can raise `:error` and return
-(`status = 0`, signal set), suspend carrying `:io` (`status > 0`, signal
-on the frame), or return a value (both clear).
+word implies the other: a function can park carrying `:io` or `:error`
+(`status > 0`, signal on the frame), halt (`status = 0`, signal set), or
+return a value (both clear).
 
 Tail calls use `return_call_indirect` (WASM tail-call proposal) via
 `rt_prepare_tail_call`, which resolves the target and builds the
@@ -154,13 +156,14 @@ callee's env at the caller's env position.
 
 `rt_call` returns four words: `(tag: i64, payload: i64, signal: i64,
 suspended: i64)`. `suspended` is the host's answer to "must my caller
-park?", and the emitted code branches on it alone.
+park?", and the emitted code branches on it alone. Every signal but a halt
+parks the caller, an error included.
 
 Emitted code must not derive that answer from the signal word. The
 callee's signal is its own vocabulary — `:io`, `:wait`, a user bit — and
-which of those suspend is the interpreter's rule, not the emitter's.
-`signals::dispatch::classify` owns it, and `rt_call` applies it once so
-the tiers cannot disagree.
+which of those park is the interpreter's rule, not the emitter's.
+`signals::dispatch::parks` owns it, and `rt_call` applies it once so the
+tiers cannot disagree.
 
 Testing a bit instead costs correctness twice over. A suspending signal
 need not carry any particular bit — `fiber/emit` of a bare `|:io|` does
@@ -171,11 +174,11 @@ puts that bit where programs can see it: `fiber/bits` reports
 `|:io :yield|` where the VM reports `|:io|`. Pinned by
 [wasm-suspend-not-by-bit.lisp](../../tests/impl/wasm-suspend-not-by-bit.lisp).
 
-A non-zero `status` likewise does not mean "parked". `(yield v)` and
-`(error …)` both compile to an `Emit` terminator and both route through
-`rt_yield`, so an error also returns `status > 0`. `handle_wasm_result`
-reads the signal off the frame `rt_yield` pushed and classifies it, which
-is what makes an uncaught error unwind rather than park.
+`(yield v)` and `(error …)` both compile to an `Emit` terminator, both
+route through `rt_yield`, and both park, because an error unwinds nothing
+([unwind.md](region/unwind.md)). `handle_wasm_result` reads the signal off
+the frame `rt_yield` pushed. An error nothing catches reaches the root
+driver, which drops the parked chain and reports the error.
 
 ### Callee dispatch spectrum
 
@@ -222,7 +225,7 @@ A resume adds the resumer's set to the fiber it drives, as `with_child_fiber`
 does on the VM. [capabilities.md](../signals/capabilities.md) states both rules.
 
 The denial travels back as the call's own signal, classified by the same
-`is_suspending` rule as any other — never by a test on the denied bits. Where
+`parks` rule as any other — never by a test on the denied bits. Where
 the fiber then comes to rest is its own mask's answer: `:paused` holding the
 payload where the mask names the denied bit, propagating to the resumer where it
 does not. The handle table that `value_to_wasm` inserts the payload into is what
@@ -236,14 +239,14 @@ struct whichever tier ran its body. Pinned by
 
 Yielding closures use a CPS-like scheme:
 
-1. At each yield point and yield-through call site, the emitter
-   assigns a resume state ID.
+1. In a function that may signal, the emitter assigns a resume state ID
+   to each emit and to each call or host operation that may signal.
 2. On yield: live registers are spilled to linear memory, then
    `rt_yield` saves them as a `WasmSuspensionFrame` on the host.
 3. On resume: `ctx` parameter is non-zero. The resume prologue
    dispatches on `ctx` via `br_table`, restores saved registers,
    and jumps to the continuation block.
-4. For yield-through-call (callee yields through a non-yielding
+4. For yield-through-call (a callee or a host operation parks under its
    caller), the caller's frame is saved too, forming a chain.
    `drive_resume_chain` ([resume.rs](../../src/wasm/resume.rs)) walks the chain.
 

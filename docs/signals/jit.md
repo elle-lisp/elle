@@ -1,9 +1,9 @@
 # Signals and JIT
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-06 -->
 
 A function's signal decides nothing about whether the JIT compiles it. It
-decides the checks around each call and how a yield leaves compiled code.
+decides the checks around each call and how a signal leaves compiled code.
 
 ## What the JIT refuses
 
@@ -22,20 +22,19 @@ A refused function runs in the interpreter, and the VM never submits it again.
 
 A compiled function in a fiber is one more frame on that fiber. Every call it
 makes leaves through a runtime dispatch helper; compiled functions never call
-each other directly. After the call returns:
+each other directly. After the call returns, the compiled code checks whether
+the callee signalled. On a halt it returns to its caller at once. On any other
+signal, an error included, it builds its own suspended frame and returns to the
+interpreter, because an error parks the frames it passes as a yield does.
 
-1. The compiled code checks for a pending error, and on one it returns to its
-   caller through the error exit.
-2. In a function that is not silent, it also checks whether the callee yielded.
-   On a yield it builds its own suspended frame and returns to the interpreter.
-
-A silent function skips the second check. The emitter records resume metadata
-only for the calls of a function that is not silent. An error-only function
-counts as not silent here.
+The emitter records resume metadata for the calls of a function that is not
+silent, and for each instruction in it that may raise. An error-only function
+counts as not silent here. A silent function can receive nothing but a halt,
+so it checks for that alone.
 
 ## Yielding from compiled code
 
-A `yield` inside a compiled function leaves by side-exit. The code spills its
+A `yield` or an `error` inside a compiled function leaves by side-exit. The code spills its
 live registers, a runtime helper builds a suspended frame at the matching
 bytecode offset, and the function returns a sentinel. When the fiber resumes,
 the interpreter continues from that frame. The compiled code never saves or

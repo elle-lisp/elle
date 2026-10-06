@@ -1,28 +1,30 @@
 # An abandoned frame runs the releases it still owes
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-06 -->
 
-The two tables naming what an abandoned frame still owed, and the exits that walk
-them. An error, a call boundary, a discard and a compiled unwind share one walk.
+The two tables naming what an abandoned frame still owed, and the seams that walk
+them. A call boundary, a refusing host and a discharge share one walk.
 
 [What a signal exit owes](signalexit.md) places one release in the block a signal
-exit skips. That block is not the only thing skipped. An **error** leaves through
-the signal machinery, so *none* of the frame's remaining instructions run — and
-every release the frame still owed is among them. The frame that called the raising
-native holds the arguments it materialized for that call, and every binding whose
-last use lies past it; each of those is one region nobody releases. The rate is per
-unwound frame and per pending value, so a `try`/`protect` in a loop grows without
-bound — the shape a retry loop and a server request loop both are.
+exit skips. That block is not the only thing skipped. A parked frame runs none of
+its remaining instructions until a resume replays them, and every release the
+frame still owed is among them. The frame that called a raising native holds the
+arguments it materialized for that call, and every binding whose last use lies
+past it. A park that nothing resumes leaves each of those as one region nobody
+releases: a fiber released while it waits, a call boundary's refusal, a host that
+cannot hold the park. The rate is per abandoned frame and per pending value, so a
+`try`/`protect` in a loop grows without bound — the shape a retry loop and a
+server request loop both are.
 
-The frame is gone, so the release cannot be reached by resuming it — the runtime
-runs it at the exit instead. What that needs is the set the frame still owes,
-and the emitter already names it. A **value-routed** release is three
-instructions, `LoadLocal s; DecrefValueRegion; StoreLocal s nil` ([two
+The frame will not run again, so the release cannot be reached by resuming it,
+and the seam that ends the park runs it instead. What that needs is the set the
+frame still owes, and the emitter already names it. A **value-routed** release is
+three instructions, `LoadLocal s; DecrefValueRegion; StoreLocal s nil` ([two
 resolutions](mechanism.md)), and the slot `s` is its whole identity: the
 instruction releases whatever `s` holds at the moment it runs, and the nil stamp
 is what records that it ran. `Code::frame_release_slots` carries those slots per
-function; an error exit walks them, and a slot still holding a heap value is a
-release that did not run.
+function; the walk reads them, and a slot still holding a heap value is a release
+that did not run.
 
 **The slot is the release, not the value.** Three facts make the walk *that* release
 rather than a new one:
@@ -68,8 +70,8 @@ to answer for.
 The tables are not everything the exit runs. A release the frame took over from
 a frame-replacing tail call has no route and no receipt to record — the
 instruction that would have run it is the *caller's*, dead past the `TailCall` —
-so it is carried on the activation itself and discharged at the same exits, on
-the same `walk_abandoned` question ([owner.md](owner.md)).
+so it is carried on the activation itself, parked with it, and discharged at the
+same seams ([owner.md](owner.md)).
 
 **What the signal carries is not abandoned — unless the raise minted its delivery.**
 The error's payload leaves with the signal, and the catcher's read of it is funded by
@@ -101,23 +103,27 @@ walk may release, and the two raise paths differ:
 
 The same reading governs the parked frame's discharge: `Fiber::take_parked_state`
 withholds its payload protection exactly where the mint is recorded, so the free-path
-discharge runs the parked body frame's owed release for an emitted payload and leaves a
+discharge runs each parked frame's owed release for an emitted payload and leaves a
 native payload's standing. Nothing else survives the frame either way: a value the
 frame stored elsewhere is held by a counted edge the store funnel recorded, which this
 release cannot take below that holder's count.
 
-**A frame the restarts system can replay is not abandoned.** A fiber body's first run
-parks its own frame on an error exit (`do_fiber_first_resume`), so a restart replays
-those instructions and the releases among them; running them here as well would release
-twice. The parking caller says so with a one-shot (`VM::pending_error_park`), taken at
-the activation's entry so the frames that body *calls* — which nothing parks — still
-walk. A replayed frame that raises is parked the same way: `resume_suspended` re-parks
-it and keeps the outer frames of the chain behind it, so a replayed error parks its
-whole chain and nothing in it is abandoned. What the parked frame owes runs where no
-resume can reach it either: the fiber's
-own discharge reads the same two tables off each parked `BytecodeFrame`, its saved
-locals and its saved activation map standing in for the live ones
-([owner.md](owner.md)).
+**An error parks its chain, so nothing walks at the raise.** An error exit parks
+every frame from the raise to the fiber body, as a suspend does: the raising frame,
+and each caller behind it (`complete_call`, `do_fiber_first_resume`,
+`resume_suspended`). A restart replays those instructions and the releases among
+them, so a walk at the raise would release twice. What a parked frame owes runs
+where no resume can reach it: the fiber's own discharge reads the same two tables
+off each parked `BytecodeFrame`, its saved locals and its saved activation map
+standing in for the live ones ([owner.md](owner.md)).
+
+**A host discards an error's chain as it discards a refused park.** `eval`,
+`import`, the compile hosts, `compile/run-on`, the root driver, macro expansion and
+the other re-entrant callers run code on the current fiber and cannot hold a park
+of it. An error the hosted code raises parks its chain all the same, and the host
+ends that park through `VM::discard_suspended_frames` before it raises at its own
+call. The discard protects the error's payload, which leaves with the host's
+error, and runs every other release the tables name.
 
 **A call boundary abandons frames the same way, so it runs the same walk.** A
 `squelch`/`attune` boundary raises a `signal-violation`, and a silent function's proof
@@ -174,39 +180,28 @@ frame's to release like any other. That retain is then the boundary's own to rel
 along with whatever a displacing install would have owed — the park having ended with
 neither a reader nor an install ([owner.md](owner.md)).
 
-**The compiled tier runs the same walk.** A compiled frame leaves by an error at two
-points, and each runs the walk before its activation's region-map pop: the check after
-a call, which finds the callee's raise, and an `Emit` of `SIG_ERROR`, which parks no
-frame to resume. The tables are compile-time constants, so the prologue materializes
-them once — each in its own stack slot, at its own width — and every exit hands the
-runtime both, with the frame's locals spilled in slot order. The value route resolves
-`s` to the spilled `LoadLocal s`; the slot route reads the very activation map the
-compiled prologue pushed. The two tiers share the walk itself; only where the slots
-are read differs.
+**A compiled frame parks, so the compiled tier walks nothing.** A compiled frame
+leaves by an error at the check after a call or after an instruction that may raise,
+and at an `Emit` of `SIG_ERROR`. Each exit parks the frame as a bytecode frame at the
+raising site's resume ip, from the locals and operands the emitter recorded for that
+site ([jit.md](../jit.md)), exactly as a suspend parks it. The parked frame then
+answers to the interpreter's seams like any other: a restart replays it, and a
+discard reads its tables off its own `Code`.
 
-Nothing is spilled back. The compiled frame returns as the walk completes, so the nil
-stamp that is the interpreter's receipt has no compiled counterpart and needs none: a
-table names each slot once, and one error exit runs per unwind.
+Every exit — compiled or not — pops the map it pushed, and the park depends on it:
+the park clones `last()`, which must be the parking activation's own frame, not a
+callee's leftover. `execute_bytecode_saving_stack` asserts the balance in debug
+builds, so an exit path that returns without popping detonates at the first
+activation to return through it rather than resolving some later release against
+the wrong frame.
 
-A compiled frame is never one a restart replays, so `VM::pending_error_park` has no
-compiled reader. A fiber body's first run enters through
-`execute_bytecode_saving_stack`, and compiled code is reached only from a call site
-inside it, so the parked frame is always an interpreter frame.
-
-Every exit — compiled or not — pops the map it pushed, and the walk depends on it:
-`last()` must be the abandoned activation's own frame, not a callee's leftover.
-`execute_bytecode_saving_stack` asserts the balance in debug builds, so an exit path
-that returns without popping detonates at the first activation to return through it
-rather than resolving some later release against the wrong frame.
-
-The rule reaches the exits an error never takes. A compiled frame whose CALLEE
-suspends parks itself at the post-call yield check and returns the yield sentinel,
-and that exit pops too: the park reads the map first, so what the pop discards is a
-frame nothing needs again. Left behind, it is what `last()` names for the interpreter
-activation above — which then parks a map that was never its own — and the remap stack
-never shrinks back, one frame per suspend through a compiled callee. That the exit is a
-suspend rather than an unwind changes only what runs before the pop: nothing, because
-the frame resumes and still owes its releases to the resumed body.
+A compiled frame whose callee suspends or raises parks itself at the post-call check
+and returns the yield sentinel, and that exit pops too: the park reads the map first,
+so what the pop discards is a frame nothing needs again. Left behind, it is what
+`last()` names for the interpreter activation above — which then parks a map that was
+never its own — and the remap stack never shrinks back, one frame per park through a
+compiled callee. Nothing runs before the pop, because the frame resumes and still
+owes its releases to the resumed body.
 `jit::compiler::tests::every_compiled_exit_pops_the_region_map` pins it on the emitted
 code, where a missing pop is visible without an activation having to return first.
 
@@ -215,7 +210,7 @@ release of a raising call's argument, of two of them, of a binding live across
 the raising call, and of an enclosing frame, each bounded beside a control that
 raises holding nothing), the `error-payload*` closed controls in
 [oracle.lisp](../../../tests/impl/oracle.lisp) (the emitted payload's own region, bounded per face —
-raised in the parked body frame, in a walked non-tail callee, handed down as an
+raised in the parked body frame, in a parked non-tail callee, handed down as an
 owned parameter, and as a two-region struct — beside the native-raise control
 whose gap isolates the recorded mint from the walk and discharge) with
 [region-error-payload-uaf.lisp](../../../tests/impl/region-error-payload-uaf.lisp) as their guardfree complement (the
@@ -226,10 +221,10 @@ tables cannot name), [region-jit-error-unwind.lisp](../../../tests/impl/region-j
 [region-jit-error-unwind-uaf.lisp](../../../tests/impl/region-jit-error-unwind-uaf.lisp) as its guardfree complement (the
 compiled face — one subject per compiled error exit, and, on the soundness side,
 the caller's binding live across a compiled callee's exit),
-`vm::core::region::tests::a_compiled_frames_*` (the spilled locals stand in for
-the frame stack, and the payload exemption reads the same) and
-`jit::dispatch::tests::release_abandoned_frame_runs_both_routes_off_the_compiled_exits_buffers`
-(the two tables reach the runtime as separate buffers of different widths),
+[region-error-park.lisp](../../../tests/impl/region-error-park.lisp) with
+[region-error-park-uaf.lisp](../../../tests/impl/region-error-park-uaf.lisp) as its guardfree complement (a
+callee's error chain restarted, discarded by the fiber's release, and discarded by
+a host),
 `lir::lower::tests::release::frametables::{frame_release_tables_name_exactly_the_routes_emitted,
 a_reassigned_binding_records_no_value_route}` (the tables are the emit sites, so
 a route the emitter declined has no entry),
