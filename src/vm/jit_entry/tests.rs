@@ -40,15 +40,16 @@ fn code_region(vm: &mut VM, t: &ClosureTemplate) -> (u32, u32) {
 #[test]
 fn a_jit_cache_entry_pins_its_code_region() {
     let mut vm = VM::new();
-    let (unit, template) = probe(&mut vm, 7, 371);
-    let (id, generation) = code_region(&mut vm, &template);
-
-    vm.install_jit_code(
-        template.clone(),
-        Arc::new(JitCode::test_with_yield_points(Vec::new())),
-    );
-    drop(unit);
-    drop(template);
+    // The unit and every handle on its entry go out of scope at the brace.
+    let (id, generation) = {
+        let (_unit, template) = probe(&mut vm, 7, 371);
+        let region = code_region(&mut vm, &template);
+        vm.install_jit_code(
+            template,
+            Arc::new(JitCode::test_with_yield_points(Vec::new())),
+        );
+        region
+    };
     assert_eq!(
         vm.heap().region_generation(id),
         generation,
@@ -70,12 +71,12 @@ fn a_jit_cache_entry_pins_its_code_region() {
 #[test]
 fn a_pending_compile_pins_its_code_region() {
     let mut vm = VM::new();
-    let (unit, template) = probe(&mut vm, 9, 373);
-    let (id, generation) = code_region(&mut vm, &template);
-
-    vm.record_jit_pending(template.clone());
-    drop(unit);
-    drop(template);
+    let (id, generation) = {
+        let (_unit, template) = probe(&mut vm, 9, 373);
+        let region = code_region(&mut vm, &template);
+        vm.record_jit_pending(template);
+        region
+    };
     assert_eq!(
         vm.heap().region_generation(id),
         generation,
