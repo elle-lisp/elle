@@ -241,7 +241,7 @@ impl<'a> MergedSlots<'a> {
 pub struct MaskRef<'a>(&'a [u64]);
 
 impl<'a> MaskRef<'a> {
-    pub(super) fn new(words: &'a [u64]) -> Self {
+    pub(crate) fn new(words: &'a [u64]) -> Self {
         MaskRef(words)
     }
 

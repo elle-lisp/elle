@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-10-06
 // src/lir/AGENTS.md
 //! Compact human-readable display for LIR instructions and terminators.
 //!
@@ -340,11 +340,11 @@ impl fmt::Display for LirInstr {
             // === Dynamic Parameters ===
             LirInstr::PushParamFrame { pairs } => {
                 write!(f, "push-param-frame(")?;
-                for (i, (param, value)) in pairs.iter().enumerate() {
+                for (i, pair) in pairs.chunks(2).enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{}={}", param, value)?;
+                    write!(f, "{}={}", pair[0], pair[1])?;
                 }
                 write!(f, ")")
             }

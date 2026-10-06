@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! LIR → WASM emission: the module's shape, the emitter's state, and what
 //! drives one function body after another.
 //!
@@ -66,8 +66,9 @@ fn instr_args_slots(instr: &LirInstr) -> usize {
         LirInstr::MakeClosure { captures, .. } => captures.len() + 72,
         // `src` slot plus one per excluded key (`OP_STRUCT_REST`).
         LirInstr::StructRest { exclude_keys, .. } => 1 + exclude_keys.len(),
-        // Each pair is written with a 32-byte stride (two 16-byte slots).
-        LirInstr::PushParamFrame { pairs } => pairs.len() * 2,
+        // Each pair is written with a 32-byte stride (two 16-byte slots), one
+        // slot per register of the flat list.
+        LirInstr::PushParamFrame { pairs } => pairs.len(),
         _ => 0,
     }
 }

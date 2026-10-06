@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! The LIR's types: a module, its functions' blocks and registers, and the operations and constants they hold.
 //!
 //! src/lir/AGENTS.md
@@ -36,7 +36,9 @@ pub fn closure_value_const_count() -> usize {
 }
 
 /// Virtual register
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct Reg(pub u32);
 
 /// Index into an `LirModule`'s closure list.

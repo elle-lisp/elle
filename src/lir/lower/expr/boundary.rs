@@ -1,3 +1,5 @@
+// audited: 2026-10-06
+// src/lir/lower/AGENTS.md
 //! Ownership / dynamic-scope boundary lowering: `Return` and `Parameterize`.
 //!
 //! Grouped because both wrap a body evaluation in boundary bookkeeping —
@@ -76,12 +78,11 @@ impl<'a> Lowerer<'a> {
         bindings: &[(Hir, Hir)],
         body: &Hir,
     ) -> Result<Reg, String> {
-        // Lower all param/value pairs
-        let mut pairs = Vec::new();
+        // Lower all param/value pairs, flat: parameter, then value.
+        let mut pairs = Vec::with_capacity(bindings.len() * 2);
         for (param, value) in bindings {
-            let param_reg = self.lower_expr(param)?;
-            let value_reg = self.lower_expr(value)?;
-            pairs.push((param_reg, value_reg));
+            pairs.push(self.lower_expr(param)?);
+            pairs.push(self.lower_expr(value)?);
         }
 
         // Emit PushParamFrame

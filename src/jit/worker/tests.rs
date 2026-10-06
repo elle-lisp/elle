@@ -1,4 +1,4 @@
-// audited: 2026-10-01
+// audited: 2026-10-06
 // docs/impl/jit.md
 //! A worker that its VM drops discards its queue instead of compiling it.
 
@@ -22,6 +22,16 @@ fn identity_lir() -> LirFunction {
             Terminator::Return(Reg(0)),
         )
         .build()
+}
+
+/// A task crosses to the worker thread, so it must be `Send` — and by its type,
+/// since the frozen LIR it carries is plain data and its values are two words
+/// each. A hand-written `unsafe impl` would hold this however the task grew,
+/// which is why it is the claim the type should carry instead.
+#[test]
+fn a_jit_task_is_send_by_type() {
+    fn assert_send<T: Send>() {}
+    assert_send::<JitTask>();
 }
 
 /// The counter-factual is a worker that drains its queue after the drop: every

@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-10-06
 // src/wasm/AGENTS.md
 //! Emitting one LIR instruction as WASM.
 //!
@@ -400,12 +400,12 @@ impl WasmEmitter {
                 self.emit_make_closure(f, *dst, *closure_id, captures);
             }
             LirInstr::PushParamFrame { pairs } => {
-                for (i, (param_reg, val_reg)) in pairs.iter().enumerate() {
-                    self.write_val_to_mem_offset(f, *param_reg, ARGS_BASE + (i as i32) * 32);
-                    self.write_val_to_mem_offset(f, *val_reg, ARGS_BASE + (i as i32) * 32 + 16);
+                for (i, pair) in pairs.chunks(2).enumerate() {
+                    self.write_val_to_mem_offset(f, pair[0], ARGS_BASE + (i as i32) * 32);
+                    self.write_val_to_mem_offset(f, pair[1], ARGS_BASE + (i as i32) * 32 + 16);
                 }
                 f.instruction(&Instruction::I32Const(ARGS_BASE));
-                f.instruction(&Instruction::I32Const(pairs.len() as i32));
+                f.instruction(&Instruction::I32Const((pairs.len() / 2) as i32));
                 f.instruction(&Instruction::Call(FN_RT_PUSH_PARAM));
             }
             LirInstr::PopParamFrame => {

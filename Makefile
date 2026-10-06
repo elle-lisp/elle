@@ -4,7 +4,8 @@
        elle-nojit elle-pool elle-mlir elle-noffi elle-wasm check-wasm \
        doctest doctest-list myplugin plugins plugins-all \
        plugins-verify smoke-plugins mcp embedding semver-check \
-       fmt fmt-check audit agents agents-check
+       fmt fmt-check audit agents agents-check \
+       bytecode-golden bytecode-golden-check
 
 .DEFAULT_GOAL := all
 
@@ -384,6 +385,18 @@ smoke-boot-image: elle  ## The language suite booted from an image (dump-boot's 
 		     exit 1; }
 	@echo "=== the language suite, each file booted from the image in $(BOOT_IMAGE_DIR) ==="
 	$(call RUN_SUITE,$(LANG_FILES),--isolate '--boot-image=$(BOOT_IMAGE_DIR)')
+
+# The bytecode golden (docs/config.md): every corpus file's and the standard
+# library's `--dump=bytecode`, recorded under target/ by one binary and
+# compared against by a later one. A change that must not move one emitted
+# instruction records before it and checks after it.
+BYTECODE_GOLDEN ?= target/bytecode-golden
+
+bytecode-golden: elle  ## Record every corpus file's and stdlib's --dump=bytecode under target/bytecode-golden
+	scripts/bytecode-golden record $(ELLE) $(BYTECODE_GOLDEN) $(JOBS)
+
+bytecode-golden-check: elle  ## Compare this build's --dump=bytecode with the recorded golden
+	scripts/bytecode-golden check $(ELLE) $(BYTECODE_GOLDEN) $(JOBS)
 
 # Each variant below is a build of its own, and runs the language suite as the
 # default build does: every file, no flag. A build is its features

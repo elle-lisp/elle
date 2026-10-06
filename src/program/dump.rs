@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! `--dump=STAGE[,STAGE,...]`: run the compiler up to each requested stage,
 //! print the artifact, and exit without executing.
 //!
@@ -13,9 +13,9 @@ use crate::pipeline::CompileCtx;
 use crate::SymbolTable;
 
 /// Implementation of `--dump=...`. Each requested stage prints a banner
-/// followed by the artifact. Stages run in pipeline order (git, ast, hir,
-/// lir, cfg, dfa, jit), so asking for multiple stages gives a coherent
-/// top-to-bottom dump of the compiler.
+/// followed by the artifact. Stages run in pipeline order (ast, fhir, defuse,
+/// regions, hir, lir, cfg, dfa, jit, git, escape, bytecode), so asking for
+/// multiple stages gives a coherent top-to-bottom dump of the compiler.
 pub(super) fn run_dump(
     contents: &str,
     source_name: &str,
@@ -93,10 +93,38 @@ pub(super) fn run_dump(
             "hir" | "lir" | "cfg" | "dfa" | "jit" | "git" | "escape"
         )
     });
-    if !needs_pipeline {
-        return Ok(());
+    if needs_pipeline {
+        lowered_stages(contents, source_name, symbols, cctx)?;
     }
 
+    // Bytecode — the run path's own compile, so the dump is what the emitter
+    // writes when the file runs.
+    if cfg.dump.contains("bytecode") {
+        println!(";; ── bytecode ───────────────────────────────────────────────");
+        let result =
+            crate::pipeline::compile_file(contents, symbols, cctx, source_name).map_err(|e| {
+                eprintln!("{}", e);
+                e
+            })?;
+        print!(
+            "{}",
+            crate::dump::bytecode_unit(&result.bytecode, Some(symbols))
+        );
+    }
+
+    let _ = dump_bits::ALL; // keep import used even if a stage is added lazily
+    Ok(())
+}
+
+/// The stages that share one lowered module: hir, lir, cfg, dfa, jit, git and
+/// escape, in that order.
+fn lowered_stages(
+    contents: &str,
+    source_name: &str,
+    symbols: &mut SymbolTable,
+    cctx: &mut CompileCtx,
+) -> Result<(), String> {
+    let cfg = crate::config::get();
     let module = crate::pipeline::compile_file_to_lir(contents, symbols, cctx, source_name, 0)
         .map_err(|e| {
             eprintln!("{}", e);
@@ -153,8 +181,6 @@ pub(super) fn run_dump(
             crate::dump::escape_module(&hir, &arena, &escape, &rinfo, &module, Some(symbols))
         );
     }
-
-    let _ = dump_bits::ALL; // keep import used even if a stage is added lazily
     Ok(())
 }
 

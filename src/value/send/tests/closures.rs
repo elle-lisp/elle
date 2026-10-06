@@ -140,6 +140,89 @@ fn test_send_bundle_patches_closure_value_const_in_lir() {
     });
 }
 
+/// A closure's LIR crosses with the values its `ValueConst`s load — a closure
+/// and a heap list here — and the worker's JIT compiles what arrives. The
+/// counter-factual is a sender that cannot carry one of the two and drops the
+/// LIR: the closure still runs on the interpreter with the right answer, so
+/// only the arriving LIR and its compile can tell.
+#[test]
+fn a_closure_crosses_with_its_lir_and_the_values_it_loads() {
+    crate::value::arena::with_test_region(|| {
+        let heap_ptr = crate::value::arena::leaked_test_heap();
+        let inner = make_test_closure(heap_ptr, "inner", None);
+        let list = crate::value::heap::alloc(
+            unsafe { &mut *heap_ptr },
+            HeapObject::Pair(crate::value::heap::Pair {
+                first: Value::int(1),
+                rest: Value::EMPTY_LIST,
+                traits: Value::NIL,
+            }),
+        );
+        let lir = LirFixture::new(Arity::Exact(0))
+            .block(
+                0,
+                vec![
+                    LirInstr::ValueConst {
+                        dst: Reg(0),
+                        value: inner,
+                    },
+                    LirInstr::ValueConst {
+                        dst: Reg(1),
+                        value: list,
+                    },
+                ],
+                Terminator::Return(Reg(1)),
+            )
+            .build();
+        // The bytecode pool holds every value a `ValueConst` loads.
+        let outer = TemplateProto {
+            lir_function: Some(Rc::new(lir)),
+            name: Some("outer".to_string()),
+            ..TemplateProto::new(Vec::new(), Arity::Exact(0), vec![inner, list])
+        };
+        let outer_val = crate::value::heap::alloc(
+            unsafe { &mut *heap_ptr },
+            HeapObject::Closure {
+                closure: Closure::new(
+                    crate::value::closure::test_template(unsafe { &mut *heap_ptr }, outer),
+                    crate::value::region_slice::RegionSlice::empty(),
+                    SignalBits::EMPTY,
+                ),
+                traits: Value::NIL,
+            },
+        );
+
+        let bundle = SendBundle::from_value(outer_val, unsafe { &*heap_ptr }, None)
+            .expect("the closure is sendable");
+        let restored = into_value_in_region(|ctx| bundle.into_value(ctx, None));
+        let restored = restored.as_closure().expect("a closure arrives");
+        let lir = restored
+            .template
+            .lir_function()
+            .expect("the LIR crosses with the closure");
+
+        let mut loaded = Vec::new();
+        for block in &lir.blocks {
+            for si in &block.instructions {
+                if let LirInstr::ValueConst { value, .. } = &si.instr {
+                    loaded.push(*value);
+                }
+            }
+        }
+        assert_eq!(loaded.len(), 2, "both ValueConsts arrive as ValueConsts");
+        assert!(loaded[0].as_closure().is_some(), "the closure arrives");
+        let pair = loaded[1].as_pair().expect("the list arrives");
+        assert_eq!(pair.first, Value::int(1));
+        assert!(pair.rest.is_empty_list());
+
+        #[cfg(feature = "jit")]
+        crate::jit::JitCompiler::new()
+            .expect("a compiler")
+            .compile(lir, Vec::new())
+            .expect("the worker's JIT compiles the LIR that arrived");
+    });
+}
+
 // ── an abandoned frame's release tables cross the boundary ───────────
 
 #[test]

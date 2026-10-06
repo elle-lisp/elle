@@ -516,9 +516,10 @@ pub enum LirInstr {
     AssertRegionMatches { region_id: StaticRegion, src: Reg },
 
     // === Dynamic Parameters ===
-    /// Push a parameter frame. `pairs` contains (param_reg, value_reg) pairs.
-    /// All param/value registers are consumed from the stack.
-    PushParamFrame { pairs: Vec<(Reg, Reg)> },
+    /// Push a parameter frame. `pairs` holds (param_reg, value_reg) pairs
+    /// flat, parameter first, so its length is even. All param/value
+    /// registers are consumed from the stack.
+    PushParamFrame { pairs: Vec<Reg> },
     /// Pop the top parameter frame.
     /// No registers produced or consumed.
     PopParamFrame,

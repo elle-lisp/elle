@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-10-06
 //! Introspection primitives: what a closure is, `doc`, `vm/query`, the signal registry, and `keyword`.
 //!
 //! docs/functions.md
@@ -233,9 +233,7 @@ pub(crate) fn prim_keyword(
 /// instructions converted to `ClosureRef` by the LIR cross-thread
 /// serializer during this process's lifetime.
 ///
-/// tests/impl/spawn-lir-closure-ref.lisp reads it to assert the conversion
-/// runs on a real spawn. See `LirFunction::convert_value_consts_for_send`
-/// (src/lir/types/func.rs).
+/// See `LirFunction::convert_value_consts_for_send` (src/lir/types/func.rs).
 pub(crate) fn prim_closure_value_const_count(
     _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     _args: &[Value],

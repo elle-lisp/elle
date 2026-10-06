@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-10-06
 // src/lir/AGENTS.md
 //! Emitting the operator, region-refcount and parameter-frame instructions.
 //!
@@ -386,17 +386,15 @@ impl Emitter {
             }
 
             LirInstr::PushParamFrame { pairs } => {
-                // Push all param/value pairs onto the stack
-                for (param, value) in pairs {
-                    self.ensure_on_top(*param);
-                    self.ensure_on_top(*value);
+                // Push all param/value pairs onto the stack, parameter first
+                for r in pairs {
+                    self.ensure_on_top(*r);
                 }
                 self.bytecode.emit(Instruction::PushParamFrame);
-                self.bytecode.emit_byte(pairs.len() as u8);
-                // All pairs consumed from stack
+                self.bytecode.emit_byte((pairs.len() / 2) as u8);
+                // Every register is consumed from the stack
                 for _ in pairs {
-                    self.pop(); // value
-                    self.pop(); // param
+                    self.pop();
                 }
             }
 

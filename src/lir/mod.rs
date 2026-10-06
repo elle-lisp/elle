@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-10-06
 // docs/impl/lir.md
 //! Low-level Intermediate Representation: SSA form with basic blocks and
 //! virtual registers, close to the target but architecture-independent.
@@ -8,6 +8,7 @@
 //! HIR → Lower → LIR → Emit → Bytecode
 //! ```
 
+pub mod code;
 mod display;
 mod emit;
 pub mod intrinsics;

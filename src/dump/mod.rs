@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! In-process rendering of the compiler's `--dump` artifacts.
 //!
 //! docs/test-runner.md
@@ -19,7 +19,9 @@
 //! So the markers tests/integration/dump_cli.rs reads (`block0:`, `←`, `→`,
 //! `capture_params_mask=`, `eligible=`, …) are the ones the runner captures.
 
+mod bytecode;
 mod escape;
+pub use bytecode::bytecode_unit;
 pub use escape::escape_module;
 
 use crate::lir::LirModule;

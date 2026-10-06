@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 // docs/impl/jit.md
 //! Lowering the region-count, type-test, data-access and parameter-frame instructions.
 
@@ -179,7 +179,8 @@ impl<'a> FunctionTranslator<'a> {
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("PushParamFrame without vm pointer".to_string())
                 })?;
-                let count = pairs.len();
+                // `pairs` is flat, parameter first: one spill slot per register.
+                let count = pairs.len() / 2;
                 if count == 0 {
                     let null_ptr = builder.ins().iconst(I64, 0);
                     let count_val = builder.ins().iconst(I64, 0);
@@ -196,11 +197,9 @@ impl<'a> FunctionTranslator<'a> {
                             (count * 2 * 16) as u32,
                             0,
                         ));
-                    for (i, (param_reg, val_reg)) in pairs.iter().enumerate() {
-                        let (pt, pp) = self.use_var_pair(builder, param_reg.0);
-                        let (vt, vp) = self.use_var_pair(builder, val_reg.0);
-                        store_value_slot(builder, slot, (2 * i) as u32, pt, pp);
-                        store_value_slot(builder, slot, (2 * i + 1) as u32, vt, vp);
+                    for (i, reg) in pairs.iter().enumerate() {
+                        let (t, p) = self.use_var_pair(builder, reg.0);
+                        store_value_slot(builder, slot, i as u32, t, p);
                     }
                     let pairs_ptr = builder.ins().stack_addr(I64, slot, 0);
                     let count_val = builder.ins().iconst(I64, count as i64);

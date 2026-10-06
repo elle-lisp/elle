@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-10-06
 // src/lir/AGENTS.md
 //! Assembling a `LirFunction` by hand, for the unit tests of the backends that
 //! consume it.
@@ -67,6 +67,21 @@ impl LirFixture {
         self
     }
 
+    pub(crate) fn num_local_params(mut self, num_local_params: usize) -> Self {
+        self.func.num_local_params = num_local_params;
+        self
+    }
+
+    pub(crate) fn capture_params_mask(mut self, mask: u64) -> Self {
+        self.func.capture_params_mask = mask;
+        self
+    }
+
+    pub(crate) fn vararg_kind(mut self, kind: crate::hir::VarargKind) -> Self {
+        self.func.vararg_kind = kind;
+        self
+    }
+
     pub(crate) fn closure_id(mut self, closure_id: ClosureId) -> Self {
         self.func.closure_id = Some(closure_id);
         self
@@ -114,6 +129,12 @@ impl LirFixture {
     }
 
     pub(crate) fn build(self) -> LirFunction {
+        self.build_working()
+    }
+
+    /// The function in its working form, before freezing — for a test whose
+    /// subject is freezing itself.
+    pub(crate) fn build_working(self) -> LirFunction {
         let mut func = self.func;
         func.num_regs = self.declared_regs.unwrap_or_else(|| registers_used(&func));
         func

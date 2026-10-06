@@ -1,3 +1,5 @@
+// audited: 2026-10-06
+// src/lir/AGENTS.md
 //! The registers an instruction or terminator writes and reads.
 //!
 //! The single answer to that question for the whole crate: the WASM register
@@ -253,9 +255,8 @@ pub fn for_each_use(instr: &LirInstr, mut f: impl FnMut(Reg)) {
         }
 
         LirInstr::PushParamFrame { pairs } => {
-            for (param, value) in pairs {
-                f(*param);
-                f(*value);
+            for r in pairs {
+                f(*r);
             }
         }
 
