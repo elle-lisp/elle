@@ -5,8 +5,9 @@
 The module system Elle is building toward: compiled once per instance, linked across files, and shipped as images.
 
 [modules.md](modules.md) describes the module system as it is. This document
-states the design it becomes, and the argument for each part. Of the parts,
-only [the raw primitives](#the-raw-primitives-are-raw) are implemented.
+states the design it becomes, and the argument for each part. Two parts are
+implemented: [the raw primitives](#the-raw-primitives-are-raw) and
+[contained expansion](#expansion-is-contained).
 [solver.md](impl/solver.md) owns the cross-file signal solver that linking
 uses. The decisions that belong to the language's owner are
 listed under [Open decisions](#open-decisions).
@@ -34,10 +35,9 @@ listed under [Open decisions](#open-decisions).
 
 The defects below carry issue numbers. The measurements were taken on a
 release build at `8fe781a03`; [Measuring](#measuring) gives the method.
-[modules.md](modules.md) states three more under its architectural
-constraints: a literal `import-file` compiles its target twice (#881), no call
-uses the projection that compile reads (#1232), and a cycle of literal imports
-overflows the stack at compile time (#1323).
+[modules.md](modules.md) states two more under its architectural
+constraints: every load compiles its file again (#881), and no signal crosses a
+file boundary, so a call into another file takes every bit (#1232).
 
 **A function body infers less than a file.** A file's top level converges by a
 fixpoint, and a function body runs none ([pipeline.md](pipeline.md)). A
@@ -50,23 +50,14 @@ infer silent and raise at run time (#1320). So do `eval` (#1243), a muffled
 signal (#1236), and the `(silence p)` entry check (#1233). An uncaught raise
 from such a function aborts the process as a silence violation.
 
-**Expansion is not contained.**
-
-- A macro run on behalf of a fiber ignores the capabilities the fiber
-  withholds (#1321).
-- A transformer runs with no fuel budget, so a looping macro hangs every tool
-  that compiles the file (#1322).
-- `compile/analyze` of an importer runs the macros of each file it imports.
-- A transformer may read files and load shared libraries. Scheduler I/O
-  fails inside one as an unexpected signal. `eval` and `import` fail because
-  expansion has no compile context, not because a rule forbids them.
+**A transformer may still reach outside its unit.** Where no fiber withholds
+the capability, a transformer may read files and load shared libraries.
+Scheduler I/O fails inside one as an unexpected signal. `eval` and `import`
+fail because expansion has no compile context, not because a rule forbids
+them. Which of these a macro may do is an [open decision](#open-decisions).
 
 **Expansion depends on more than its input.**
 
-- A macro typed at the REPL reaches the compile of every later import in the
-  session ([pipeline](../src/pipeline/AGENTS.md)). So does a `def` typed
-  there: a module that names a binding only the REPL defined compiles under
-  the REPL and fails as a file.
 - State kept in `begin-for-syntax` resets on every compile, so it is fixed by
   the unit's source and is not an input of its own.
 - `gensym` draws from a process-global counter, and scope ids from a
@@ -74,7 +65,6 @@ from such a function aborts the process as a silence violation.
 - A user signal's bit is assigned in declaration order, process-wide:
   `:alpha` is bit 32 or 33 depending on which declaration ran first. Compiled
   code carries the bit number.
-- The projection cache is keyed by path and never invalidated.
 
 **The standard library already has the shape.** 69 of the 70 files in
 [lib/](../lib/) end in a `(fn …)` that builds the export struct; `lua.lisp` is
@@ -213,20 +203,24 @@ directory searched sets `ELLE_PATH=.`.
 
 ## Expansion is contained
 
-- A fiber's withheld capabilities reach every macro expanded on its behalf
-  (#1321).
-- Each transformer call runs under a fuel budget; exhausting it is a compile
-  error naming the macro (#1322).
-- A module compiles against the prelude, its own definitions and its
-  includes. REPL macros and REPL definitions reach the REPL's own lines, not
-  an imported file. This rewrites the sixth invariant in
-  [pipeline](../src/pipeline/AGENTS.md), and that file changes with it.
+- A compile that code on a fiber starts expands every macro with the
+  capabilities that fiber withholds. A denied primitive in a transformer fails
+  the compile, naming the macro and the primitive (#1321,
+  [capabilities.md](signals/capabilities.md)).
+- Each transformer call and each `begin-for-syntax` definition runs under a
+  fuel budget of its own. Exhausting it fails the compile, naming the macro
+  (#1322, [runtime.md](runtime.md)).
+- A file compiles against the prelude, the standard library, the bindings an
+  embedder registers, its own definitions and its includes. REPL macros and
+  REPL definitions reach later REPL lines, not a file a line imports
+  ([pipeline](../src/pipeline/AGENTS.md)).
 - A file's analysis never compiles another file. It states facts about its own
-  code, and [linking](#linking) joins them, so a cycle of literal imports
-  cannot recurse at compile time (#1323).
+  code, and [linking](#linking) joins them. A cycle of literal imports
+  therefore reaches the loader, which names the cycle (#1323,
+  [modules.md](modules.md)).
 
-Containment is what makes it safe to run another file's macros, which the LSP,
-the linter and `compile/analyze` already do.
+Containment is what makes it safe to expand a file its reader did not write,
+which the LSP, the linter and `compile/analyze` do.
 
 ## Expansion is deterministic
 
@@ -246,6 +240,7 @@ The compile inputs, as far as they are known:
 | The source text, and every included file's text | The forms themselves |
 | The epoch and the Unicode generation | Migration rules and string semantics |
 | The binary's build identity and the primitive table | Codegen, primitive ids, the prelude and stdlib |
+| The bindings an embedder registers | Every compile in the instance resolves them, as it resolves a primitive |
 | The macro environment | Prelude, plus the unit's own macros; plus the macros of every literal import once modules export them |
 | The resolved path of every literal `import-file` and every `include` | The writer's directory and the search paths decide which file a path names |
 | The facts of every literal import | Linking reads them to solve the file's signals |
@@ -336,7 +331,7 @@ suspending:
 
 1. The set of imports in progress belongs to the VM, not to a fiber. A
    suspended top level would keep its mark, so a second fiber importing the
-   same file would get "circular dependency detected".
+   same file would get "circular dependency".
 2. Under (b), a shared top level that runs interleaved with other fibers could
    build a different value on each run.
 3. An asynchronous read buys little. The file read and path resolution block
@@ -375,18 +370,18 @@ Treat `((import-file "literal"))` as a dependency the compiler knows before
 anything runs:
 
 - The export shape becomes part of the rule: the lambda's body ends in a
-  struct literal. Projection, `compile/exports`, the semver surface and IDE
-  completion then work for every module.
-- Signals cross files as facts, not as a projection. Each file states its
-  signals over free variables: its own parameters, captured parameters, fields
-  of parameters, and the exports of its imports. Linking joins the files
+  struct literal. `compile/exports`, the semver surface and IDE completion then
+  work for every module.
+- Signals cross files as facts, not as a per-field summary. Each file states
+  its signals over free variables: its own parameters, captured parameters,
+  fields of parameters, and the exports of its imports. Linking joins the files
   through their literal imports and solves the whole graph at once
   ([solver.md](impl/solver.md)).
 - A call through `module:field` uses the solved signal, which closes #1232.
-  The projection, a map from field to signal, cannot hold that answer: it has
-  no way to say "field `:connect` of parameter 0". The `propagates` mask in
-  `Signal` becomes the special case where every free variable is one of the
-  function's own parameters.
+  A map from field to signal cannot hold that answer: it has no way to say
+  "field `:connect` of parameter 0". The `propagates` mask in `Signal` becomes
+  the special case where every free variable is one of the function's own
+  parameters.
 - A cycle between function bodies is legal, and its files solve jointly. A
   cycle of top-level imports is an instantiation cycle, and the runtime check
   reports it by name.
@@ -473,19 +468,19 @@ what it needs. `import-file` picks by name, and each loader declares its need.
 
 ## Measuring
 
-The double compile is visible per file and per phase. Run this from the
+The repeated compile is visible per file and per phase. Run this from the
 repository root:
 
 ```sh
-echo '(def h ((import-file "lib/http2.lisp")))' | elle --trace=compile -
+echo '(def a ((import-file "lib/base64.lisp"))) (def b ((import-file "lib/base64.lisp")))' | elle --trace=compile -
 ```
 
-`lib/http2.lisp` appears twice. The first appearance is nested inside the
-importing file's analysis, and the second is the load. One compile per file is
-done when each file appears once.
+`lib/base64.lisp` appears twice, once for each load. One compile per file is
+done when it appears once.
 
-On a release build at `8fe781a03`, where `((import "std/http2"))` read
-projections and so did the imports inside `std/http2`:
+On a release build at `8fe781a03`, where an importer's analysis compiled each
+literal import for its projection, and so did the analysis of each import
+inside `std/http2`:
 
 | Measure | Value |
 |---------|-------|
