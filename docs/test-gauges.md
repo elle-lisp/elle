@@ -1,6 +1,6 @@
 # The test runner's heap gauges
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-06 -->
 
 What each file of an `elle test` run cost the runner's own heap, and the heaps its test code ran on.
 
@@ -140,14 +140,24 @@ two batchings of different order and size, every file's objects read the same.
 A cost the file pays once per runtime, such as a cache entry keyed by the
 file, falls in the first run, so the reading does not show it.
 
-The live regions and the page claims are not readings yet, because the second
-run's window still holds work whose size follows timing. In the same two
-batchings, 83 files moved by a region and 299 by up to 783 pages. A timed join
-of a worker that has already finished claims 6 pages, and one that waits
-claims 22, so a loaded box moves the page count. Six `h2-` files moved by 325 to
-783 pages. A form whose value cannot cross back from its worker runs in the
-runner's own heap ([test-runner](test-runner.md)), and its test's own work
-would then land in the window; which of the six do so is not yet measured.
+The live regions and the page claims are not readings yet. The second run's
+window holds runner work whose size follows the files that ran before, or the
+text the test printed. Two batchings of different order and size moved 80
+files by a region and 273 by pages, and a repeat of one batching moved 2 and 9.
+The form's own execution moved neither in any file. Three parts of the
+runner's own work did:
+
+- Compiling a file in the runner's VM can mint a region and claim pages on
+  every second compile of it, and the files compiled before it decide which
+  compile the second run is. That moved a file by a region and by one to four
+  pages.
+- A form's profile names every user signal registered in the process when the
+  form's inferred signal holds every bit. The registry is the process's, and a
+  test's worker registers into it too ([threads](threads.md)). So a file pays 4
+  pages for each signal that an earlier file declared.
+- A test that prints different text on each run makes its second run write
+  that output to the CAS. The write claimed about 400 pages, which a run that
+  repeats its first run's output does not.
 
 The readings are recorded against the last result of the file's second run.
 A row of the file's that the run did not read is `missing`. `--charge` refuses
