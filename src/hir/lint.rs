@@ -1,14 +1,14 @@
-//! HIR-based linter
+// audited: 2026-10-05
+//! The HIR linter: walks an analyzed tree and calls each rule where its form appears.
 //!
-//! Walks HIR trees and produces diagnostics. Uses the same rules as the
-//! legacy Expr-based linter but operates on the new pipeline's HIR.
+//! docs/cookbook/lint-rules.md
 
 use std::collections::HashSet;
 
 use crate::hir::arena::BindingArena;
 use crate::hir::binding::Binding;
 use crate::hir::defuse::DefUseBuilder;
-use crate::hir::expr::{Hir, HirKind};
+use crate::hir::expr::{CallArg, Hir, HirKind};
 use crate::lint::diagnostics::{Diagnostic, Severity};
 use crate::lint::rules;
 use crate::reader::SourceLoc;
@@ -123,6 +123,58 @@ impl HirLinter {
         (self.current_fn, self.current_fn_binding) = prev;
     }
 
+    /// Read a call to the `fiber/new` primitive whose body is a function
+    /// literal against its mask and its `:deny` set ([`rules::check_fiber_body`]).
+    /// The callee must be the primitive itself, under any of its names: a
+    /// binding that shadows one is some other function.
+    fn check_fiber_new(
+        &mut self,
+        func: &Hir,
+        args: &[CallArg],
+        loc: &Option<SourceLoc>,
+        symbols: &SymbolTable,
+        arena: &BindingArena,
+    ) {
+        let HirKind::Var(callee) = &func.kind else {
+            return;
+        };
+        let callee = arena.get(*callee);
+        let is_fiber_new = callee.is_primitive
+            && symbols
+                .name(callee.name)
+                .and_then(crate::primitives::registration::def_by_name)
+                .is_some_and(|def| def.name == "fiber/new");
+        let [body, mask, rest @ ..] = args else {
+            return;
+        };
+        if !is_fiber_new || body.spliced {
+            return;
+        }
+        let HirKind::Lambda {
+            inferred_signals, ..
+        } = &body.expr.kind
+        else {
+            return;
+        };
+        let literal = |arg: &CallArg| {
+            (!arg.spliced)
+                .then(|| crate::hir::spec::literal_signal_bits(&arg.expr, arena))
+                .flatten()
+        };
+        let deny = rest
+            .windows(2)
+            .find(|pair| matches!(&pair[0].expr.kind, HirKind::Keyword(k) if k == "deny"))
+            .and_then(|pair| literal(&pair[1]));
+        rules::check_fiber_body(
+            inferred_signals.bits,
+            literal(mask),
+            deny,
+            loc,
+            self.current_fn.and_then(|s| symbols.name(s)),
+            &mut self.diagnostics,
+        );
+    }
+
     fn check(&mut self, hir: &Hir, symbols: &SymbolTable, arena: &BindingArena) {
         let loc = Self::span_to_loc(&hir.span);
 
@@ -231,6 +283,7 @@ impl HirLinter {
                         &mut self.diagnostics,
                     );
                 }
+                self.check_fiber_new(func, args, &loc, symbols, arena);
             }
 
             HirKind::Assign { value, .. } => {

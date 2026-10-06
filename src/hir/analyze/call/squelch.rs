@@ -17,9 +17,9 @@ impl<'a> Analyzer<'a> {
             return;
         }
         let blocked = if self.is_primitive_named(func, "squelch") {
-            self.resolve_squelch_mask(&args[0].expr)
+            crate::hir::spec::literal_signal_bits(&args[0].expr, self.arena)
         } else if self.is_primitive_named(func, "attune") {
-            self.resolve_squelch_mask(&args[0].expr)
+            crate::hir::spec::literal_signal_bits(&args[0].expr, self.arena)
                 .map(|permitted| crate::signals::CAP_MASK.subtract(permitted))
         } else {
             return;
@@ -27,45 +27,6 @@ impl<'a> Analyzer<'a> {
         if let Some(mask) = blocked {
             let target = self.resolve_arg_signal(&args[1].expr);
             self.last_squelch_signal = Some(target.squelch(mask));
-        }
-    }
-
-    /// Resolve a compile-time squelch mask from a keyword or set literal.
-    ///
-    /// Returns `Some(mask)` for:
-    /// - `:keyword` → single signal bit
-    /// - `|:kw1 :kw2|` → union of signal bits (set literal in HIR)
-    ///
-    /// Returns `None` for dynamic values.
-    fn resolve_squelch_mask(&self, arg: &Hir) -> Option<crate::value::fiber::SignalBits> {
-        use crate::value::fiber::SignalBits;
-        match &arg.kind {
-            HirKind::Keyword(kw) => {
-                let reg = crate::signals::registry::global_registry().lock().unwrap();
-                reg.lookup(kw).map(SignalBits::from_bit)
-            }
-            // Set literal: Call to the `set` primitive with keyword args
-            HirKind::Call { func, args, .. } => {
-                if let HirKind::Var(binding) = &func.kind {
-                    let name = self.symbols.name(self.arena.get(*binding).name)?;
-                    if name != "set" {
-                        return None;
-                    }
-                    let reg = crate::signals::registry::global_registry().lock().unwrap();
-                    let mut mask = SignalBits::EMPTY;
-                    for call_arg in args {
-                        if let HirKind::Keyword(kw) = &call_arg.expr.kind {
-                            mask = mask.union(SignalBits::from_bit(reg.lookup(kw)?));
-                        } else {
-                            return None;
-                        }
-                    }
-                    Some(mask)
-                } else {
-                    None
-                }
-            }
-            _ => None,
         }
     }
 }

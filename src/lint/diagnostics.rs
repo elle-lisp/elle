@@ -24,8 +24,8 @@ impl fmt::Display for Severity {
     }
 }
 
-/// A warning the linter can raise: its code and the rule name that always
-/// travels with it.
+/// A code the linter reports, a warning's or a hint's: the code and the rule
+/// name that always travels with it.
 ///
 /// The pair has one home, so a rule cannot pick up a second code — or a code a
 /// second name — by being spelled out again at a new emission site.
@@ -67,6 +67,8 @@ pub const MUTABLE_BINDING_NEVER_ASSIGNED: LintCode =
     LintCode::new("W003", "mutable-binding-never-assigned");
 pub const UNUSED_BINDING: LintCode = LintCode::new("W004", "unused-binding");
 pub const NON_TAIL_SELF_RECURSION: LintCode = LintCode::new("W005", "non-tail-self-recursion");
+pub const DENIED_FIBER_CALL: LintCode = LintCode::new("I001", "denied-fiber-call");
+pub const FIBER_SIGNAL_PASSES: LintCode = LintCode::new("I002", "fiber-signal-passes");
 
 /// Every warning the linter raises, in code order.
 ///
@@ -82,7 +84,7 @@ pub const WARNINGS: &[LintCode] = &[
 
 /// Every hint the linter gives, in code order, published in the cookbook
 /// beside [`WARNINGS`].
-pub const HINTS: &[LintCode] = &[];
+pub const HINTS: &[LintCode] = &[DENIED_FIBER_CALL, FIBER_SIGNAL_PASSES];
 
 pub const ANALYSIS_ERROR: LintCode = LintCode::new("E000", "analysis-error");
 pub const UNDEFINED_VARIABLE: LintCode = LintCode::new("E001", "undefined-variable");
@@ -145,6 +147,12 @@ impl Diagnostic {
     /// one: the code and the rule name arrive together and cannot disagree.
     pub fn warn(lint: LintCode, message: impl Into<String>, location: Option<SourceLoc>) -> Self {
         Self::new(Severity::Warning, lint.code, lint.rule, message, location)
+    }
+
+    /// A hint built from its registry entry: what a program does that a reader
+    /// may not see at once, which is no fault.
+    pub fn hint(lint: LintCode, message: impl Into<String>, location: Option<SourceLoc>) -> Self {
+        Self::new(Severity::Info, lint.code, lint.rule, message, location)
     }
 
     /// Format as human-readable output

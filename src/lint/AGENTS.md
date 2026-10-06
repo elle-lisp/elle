@@ -1,5 +1,7 @@
 # lint
 
+<!-- audited: 2026-10-05 -->
+
 Pipeline-agnostic lint types and rules.
 
 ## Responsibility
@@ -14,11 +16,12 @@ provides the shared types and rule implementations.
 |------|---------|
 | `Diagnostic` | Lint finding with severity, code, message, location |
 | `Severity` | `Info`, `Warning`, `Error` |
-| `LintCode` | A warning code and the rule name it travels with |
+| `LintCode` | A warning or hint code and the rule name it travels with |
 
 | Constant | Purpose |
 |----------|---------|
 | `WARNINGS` | Every warning code the linter raises, in code order |
+| `HINTS` | Every hint code the linter gives, in code order, at severity `Info` |
 
 | Function | Code | Purpose |
 |----------|------|---------|
@@ -26,9 +29,11 @@ provides the shared types and rule implementations.
 | `check_mutable_never_assigned` | `W003` | Warns on a `var`/`@` binding no `assign` targets |
 | `check_unused_binding` | `W004` | Warns on a `def`/`let`/`letrec` binding with zero uses |
 | `check_non_tail_self_recursion` | `W005` | Warns on a self-call outside tail position |
+| `check_fiber_body` | `I001`, `I002` | Hints at a literal `fiber/new` body's bits that its `:deny` set withholds, and that its mask does not name |
 
-Each code above names a `LintCode` in `diagnostics::WARNINGS`, which the
-emission site passes to `Diagnostic::warn` rather than spelling out.
+Each code above names a `LintCode` in `diagnostics::WARNINGS` or
+`diagnostics::HINTS`, which the emission site passes to `Diagnostic::warn` or
+`Diagnostic::hint` rather than spelling out.
 
 Every binding rule shares one exemption set — synthetic, primitive, and
 `_`-prefixed names — through `reportable_name`.
