@@ -1,6 +1,6 @@
 // audited: 2026-10-05
-// The committed ledgers: every producer on the ratchet has one, every row of
-// one names a subject its producer reads, and no row is in two files.
+// The committed ledgers: each producer has one, each row names a subject its
+// producer reads, and no row is in two files.
 //
 // docs/ratchet.md
 //
