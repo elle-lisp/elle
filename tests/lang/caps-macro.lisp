@@ -16,6 +16,18 @@
 (defn reader-macro [name]
   (string/join ["(defmacro " name " [] (file/read \"" secret "\"))"] ""))
 
+# Source text that defines the reader macro NAME and then calls it.
+(defn reader-forms [name]
+  (string/join [(reader-macro name) " (" name ")"] ""))
+
+# The same two forms as one, for a compile that takes a single form.
+(defn reader-program [name]
+  (string/join ["(begin " (reader-forms name) ")"] ""))
+
+# Source text for `(include-file PATH)`.
+(defn include-program [path]
+  (string/join ["(include-file \"" path "\")"] ""))
+
 # Run `body` in a fiber that withholds `deny`, and answer what it returns or
 # signals. A caught error leaves the fiber :paused, as an escaped denial
 # does, so the value tells the two apart: the mask catches the denied bits
@@ -43,19 +55,14 @@
 # `eval` expands on the calling fiber. The counter-factual reported an
 # unexpected signal from the transformer and named neither the macro nor the
 # primitive.
-(assert-denied (sandboxed |:fs|
-                          (fn []
-                            (eval (read (string/join ["(begin "
-                                        (reader-macro "m") " (m))"] "")))))
+(assert-denied (sandboxed |:fs| (fn [] (eval (read (reader-program "m")))))
                "file/read" "eval")
 
 # `import/load-syntax` compiles on the instance's macro VM. The counter-factual
 # ran the transformer there with every capability and answered "3311".
-(assert-denied (sandboxed |:fs|
-                          (fn []
-                            (import/load-syntax (read (string/join ["(begin "
-                            (reader-macro "m") " (m))"] ""))))) "file/read"
-               "import/load-syntax")
+(defn load-reader []
+  (import/load-syntax (read (reader-program "m"))))
+(assert-denied (sandboxed |:fs| load-reader) "file/read" "import/load-syntax")
 
 # A file loaded through `import-file` compiles on the macro VM as well. The
 # loader needs :fs, so this fiber withholds :ffi, and the module's macro calls
@@ -67,39 +74,31 @@
                "import-file")
 
 # `compile/analyze` expands on the calling fiber, as `eval` does.
-(assert-denied (sandboxed |:fs|
-                          (fn []
-                            (compile/analyze (string/join [(reader-macro "m")
-                            " (m)"] "")))) "file/read" "compile/analyze")
+(assert-denied (sandboxed |:fs| (fn [] (compile/analyze (reader-forms "m"))))
+               "file/read" "compile/analyze")
 
 # ── An include reads under the same rule ──────────────────────────────
 
 # The counter-factual spliced the file in and answered 42.
 (def included (path/join root "inc.lisp"))
 (file/write included "42\n")
-(let [v (sandboxed |:fs|
-                   (fn []
-                     (import/load-syntax (read (string/join ["(include-file \""
-                     included "\")"] "")))))]
+(defn load-include []
+  (import/load-syntax (read (include-program included))))
+(let [v (sandboxed |:fs| load-include)]
   (assert-compile-error v "include-file under :deny |:fs|")
   (assert (string/contains? (get v :message) "include")
           "the error names the include"))
 
 # ── A compile no fiber restricts ──────────────────────────────────────
 
-(assert (= "3311"
-           (eval (read (string/join ["(begin " (reader-macro "u") " (u))"] ""))))
+(assert (= "3311" (eval (read (reader-program "u"))))
         "eval of an unrestricted fiber runs a macro that reads a file")
 
 # The denials above ran on the instance's macro VM, and what they withheld
 # does not outlast them.
-(assert (= "3311"
-           (import/load-syntax (read (string/join ["(begin " (reader-macro "v")
-                                     " (v))"] ""))))
+(assert (= "3311" (import/load-syntax (read (reader-program "v"))))
         "a later compile no fiber restricts reads the file")
-(assert (= 42
-           (import/load-syntax (read (string/join ["(include-file \"" included
-                                     "\")"] "")))) "and includes one")
+(assert (= 42 (load-include)) "and includes one")
 
 (file/delete-dir-all root)
 (println "caps-macro: OK")
