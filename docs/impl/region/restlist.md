@@ -51,8 +51,9 @@ and every reference to it is one of these:
   is never a cell, and the primitive keeps no argument;
 - the argument of `first` or `second`, whose built-in method answers an
   element of the list, never a cell of it;
-- an operand of `%first`, `%length`, `%eq`, `%ne`, `%identical?`, `%not`,
-  `%type-of` or a type predicate such as `%pair?`;
+- an operand of `%eq`, `%ne`, `%identical?`, `%not`, `%type-of` or a type
+  predicate such as `%pair?`, the intrinsics that need no proof of their
+  operand ([intrinsics](../../intrinsics.md)) and answer an immediate;
 - a spliced argument, `(f ;xs)`, which is what `apply` expands to: the callee
   receives the elements, not the cells.
 
