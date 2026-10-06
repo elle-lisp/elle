@@ -159,12 +159,12 @@ fn inc_promotes(rt: &mut Runtime) -> bool {
         let t = &inc.as_closure().expect("inc is a closure").template;
         (t.bytecode().as_ptr(), t.signal(), t.arity())
     };
-    // A REPL binding the compiler knows only by value, so the call below is a
+    // A host binding the compiler knows only by value, so the call below is a
     // call: a name the inline registry carries would have its body spliced in.
     let sym = rt.symbols().intern("tier-f");
     {
         let (cctx, heap) = rt.compile_and_heap();
-        cctx.register_repl_binding(
+        cctx.register_host_binding(
             heap,
             sym,
             inc,
