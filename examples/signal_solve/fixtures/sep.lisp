@@ -1,5 +1,5 @@
 (elle/epoch 14)
-# audited: 2026-10-05
+# audited: 2026-10-06
 # A per-file summary, checked with --no-follow, whose imports stay open.
 # examples/signal_solve/main.rs
 
@@ -10,8 +10,8 @@
 # expect go2 |:error| import connect
 # expect gen2 |:yield :error| import each-with
 # expect pure2 |:error| import each-with
-(def mq ((import "mq") ((import "fakeplug"))))
-(def hof ((import "hof")))
+(def mq ((import-file "mq.lisp") ((import-file "fakeplug.lisp"))))
+(def hof ((import-file "hof.lisp")))
 (defn go2 []
   (mq:connect "somewhere"))
 (defn gen2 []

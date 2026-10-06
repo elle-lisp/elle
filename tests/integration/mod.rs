@@ -60,6 +60,9 @@ mod bins {
 mod argv_cli {
     include!("argv_cli.rs");
 }
+mod module_cli {
+    include!("module_cli.rs");
+}
 mod dispatch {
     include!("dispatch.rs");
 }
