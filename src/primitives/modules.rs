@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-05
 //! The import-file primitive: resolve a module spec, then run a .lisp module or
 //! load a native plugin, with circular-import detection.
 //!
@@ -60,7 +60,7 @@ fn elle_root() -> Option<PathBuf> {
 }
 
 /// Resolve a module specifier to a concrete file path.
-pub(crate) fn resolve_import(spec: &str) -> Option<String> {
+pub fn resolve_import(spec: &str) -> Option<String> {
     let as_path = Path::new(spec);
 
     // Virtual prefix: std/X → <repo-root>/lib/X.lisp

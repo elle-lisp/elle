@@ -1,6 +1,6 @@
 # hir
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-10-05 -->
 
 High-level Intermediate Representation: the analyzed program, with bindings
 resolved, captures computed and signals inferred, and the passes over it.
@@ -40,6 +40,7 @@ Does NOT:
 | `BlockId` | Unique identifier for a block, used by `break` to target the correct block |
 | `Analyzer` | Transforms Syntax → HIR; takes `&mut BindingArena` |
 | `AnalysisResult` | HIR produced by the analyzer |
+| `LambdaDecl` | A lambda's declared ceiling and muffle bits, which the HIR keeps only as their result. `take_lambda_decls` hands them over, keyed by the lambda's `HirId` |
 | `HirLinter` | HIR-based linter producing Diagnostics (no constructor args) |
 | `extract_symbols_from_hir` | Builds SymbolIndex from HIR (3 args: hir, symbols, arena) |
 
@@ -207,8 +208,9 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     `LoadConst` for a primitive. Compile-time checks use the `Binding`
     identity: `(assign + 42)` is a compile error.
 
-23. **Tail calls are marked on every `AnalyzeResult`.** `pipeline::analyze`
-    and `analyze_file` run `mark_tail_calls` before returning, so `is_tail`
+23. **Tail calls are marked on every `AnalyzeResult`.** `pipeline::analyze`,
+    `analyze_file` and `analyze_file_detached` run `mark_tail_calls` before
+    returning, so `is_tail`
     is a fact on the analyzed tree rather than a default. The linter's
     non-tail-self-recursion rule and the `compile/callees` call graph both
     read it there. `regularize` marks again, because map fusion mints call

@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-10-05
 //! Syntax to HIR analysis
 //!
 //! docs/impl/hir.md
@@ -214,9 +214,10 @@ pub struct Analyzer<'a> {
     arity_env: HashMap<Binding, Arity>,
 
     /// Signal projections for bindings initialized from imported modules.
-    /// Maps a binding to a keyword→signal projection so that qualified
-    /// access (`module:field`) uses the projected signal instead of the
-    /// conservative `Polymorphic` fallback.
+    /// Maps a binding to a keyword→signal projection. Qualified access
+    /// (`module:field`) gives its `get` node the projected signal; a call
+    /// through it still takes the unknown signal, because its callee is a
+    /// call expression.
     projection_env: HashMap<Binding, HashMap<String, Signal>>,
     /// Compile-time squelch result signal. Set during call analysis when
     /// the analyzer detects `(squelch f mask)` and computes the resulting
@@ -251,8 +252,9 @@ pub struct Analyzer<'a> {
     /// Accumulated parameter bounds from silence forms in current lambda.
     /// Populated by `analyze_silence`, consumed by `analyze_lambda`.
     current_param_bounds: HashMap<Binding, Signal>,
-    /// Accumulated function-level constraint from silence forms in current lambda.
-    /// Populated by `analyze_silence`, consumed by `analyze_lambda`.
+    /// The function-level ceiling that `(silence)` or `(attune! …)` declared in
+    /// the current lambda. Populated by `analyze_silence` and
+    /// `analyze_attune_assert`, consumed by `analyze_lambda`.
     current_declared_ceiling: Option<Signal>,
     /// Accumulated muffle bits from muffle forms in current lambda.
     /// Populated by `analyze_muffle`, consumed by `analyze_lambda`.
@@ -288,10 +290,24 @@ pub struct Analyzer<'a> {
     /// signal projections during analysis (`get_or_compile_projection`). Set by
     /// the file frontend via [`set_compile_ctx`](Analyzer::set_compile_ctx); the
     /// frontend owns the `CompileCtx`, outlives this analyzer, and never touches
-    /// it while analysis runs, so the reborrow is sound. `None` in pure-analysis
-    /// contexts (lint/LSP/tests), where imports fall back to the conservative
-    /// `Polymorphic` projection.
+    /// it while analysis runs, so the reborrow is sound. `None` where nothing
+    /// sets it — single-form `compile`, runtime `eval`, the core bootstrap and
+    /// the test kit — and a literal import there gets no projection.
     import_ctx: Option<*mut crate::pipeline::CompileCtx>,
+    /// Each lambda's declared ceiling and muffle bits, keyed by the lambda
+    /// node. The HIR keeps only the signal that results from applying them;
+    /// a reader that solves signals itself needs the declarations.
+    lambda_decls: HashMap<super::expr::HirId, LambdaDecl>,
+}
+
+/// What a lambda's body declared about its own signal.
+#[derive(Debug, Clone, Copy)]
+pub struct LambdaDecl {
+    /// `(silence)` or `(attune! spec)`: the signal the function claims.
+    pub ceiling: Option<Signal>,
+    /// `(muffle spec)`: bits removed from the inferred signal. Beside a
+    /// ceiling, these bits widen the ceiling instead.
+    pub muffle: crate::value::fiber::SignalBits,
 }
 
 mod scopes;
@@ -356,6 +372,7 @@ impl<'a> Analyzer<'a> {
             unicode_generation: crate::config::get().unicode_generation(),
             signals_declared: HashSet::new(),
             import_ctx: None,
+            lambda_decls: HashMap::new(),
         };
         // Initialize with a global scope so top-level bindings can be registered
         analyzer.push_definition_scope();
@@ -436,6 +453,11 @@ impl<'a> Analyzer<'a> {
     /// Return accumulated errors (for the pipeline to check).
     pub fn take_errors(&mut self) -> Vec<LError> {
         std::mem::take(&mut self.errors)
+    }
+
+    /// Take every lambda's declared ceiling and muffle bits.
+    pub fn take_lambda_decls(&mut self) -> HashMap<super::expr::HirId, LambdaDecl> {
+        std::mem::take(&mut self.lambda_decls)
     }
 
     /// Take the signal projection computed by `analyze_file_letrec`.

@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-10-05
 // src/pipeline/AGENTS.md
 //! `CompileCtx`: one instance's compile-time state.
 //!
@@ -68,21 +68,22 @@ pub struct CompileCtx {
     meta: PrimitiveMeta,
     /// Signal projection cache: resolved file path → keyword→signal projection.
     /// Populated lazily when the analyzer encounters `(import "...")` with a
-    /// literal string argument. Per-instance, though projections are in fact
-    /// deterministic from file content (an instance never shares one).
+    /// literal string argument. Per-instance, keyed by resolved path, and never
+    /// invalidated: an edit to the file during the instance's life does not
+    /// reach the cached projection.
     projections: HashMap<String, Option<HashMap<String, Signal>>>,
     /// Container-dispatch wrappers collected across every compile in this
     /// instance, keyed by name. Populated when `stdlib.lisp` compiles (its
     /// `push`/`put`), consumed by every later unit so a user→stdlib wrapper call
-    /// monomorphizes as an intra-unit one does (the F1b close, `monomorphize.rs`).
+    /// monomorphizes as an intra-unit one does (`monomorphize.rs`).
     /// Compile-time-only state: it drives an HIR rewrite and never reaches the VM.
     dispatch_wrappers: DispatchWrapperRegistry,
     /// Cross-unit-inlineable function templates collected across every compile in
     /// this instance, keyed by name. Populated when `stdlib.lisp` compiles (its
     /// `inc`/`dec`/… bodies), consumed by every later unit so a user→stdlib
-    /// `(map inc xs)` inlines the stdlib body as a same-unit named fn would (the
-    /// dissolution leg across the compile-unit boundary, `fuse.rs`). Like
-    /// `dispatch_wrappers`, compile-time-only state that never reaches the VM.
+    /// `(map inc xs)` inlines the stdlib body as a same-unit named fn would
+    /// (`fuse.rs`). Like `dispatch_wrappers`, compile-time-only state that never
+    /// reaches the VM.
     fn_inline: FnInlineRegistry,
     /// The core and stdlib export aggregates this instance booted with.
     exports: BootExports,
@@ -100,7 +101,7 @@ impl CompileCtx {
     /// externally-owned heap (`RuntimeCore`'s). core.lisp's exports are runtime
     /// closures created here on the macro VM; sharing the instance heap is what
     /// lets the program VM resolve and call them without a cross-heap reference
-    /// (tls.md § the ownership flip).
+    /// (docs/impl/region/ctx.md).
     pub fn new_with_heap(heap_ptr: *mut crate::value::fiberheap::FiberHeap) -> Self {
         Self::on_vm(VM::new_with_heap(heap_ptr))
     }
@@ -306,6 +307,12 @@ impl CompileCtx {
         self.expander.core_env.clone()
     }
 
+    /// The full compile metadata user code is analyzed against: primitives,
+    /// core.lisp exports, stdlib exports and REPL value bindings.
+    pub fn meta(&self) -> &PrimitiveMeta {
+        &self.meta
+    }
+
     /// The primitive(+stdlib) metadata for lowering's `PrimitiveClassification`
     /// and for macro-body compilation. Excludes core.lisp exports and REPL
     /// value bindings.
@@ -386,9 +393,9 @@ impl CompileCtx {
     /// Look up or compute the signal projection for an imported file.
     ///
     /// On a miss, compiles the file in this instance's context and caches the
-    /// projection from the resulting bytecode. Returns `None` if the file's
-    /// return value is not a projectable struct (cached as `None` to avoid
-    /// recompiling).
+    /// projection from the resulting bytecode. Returns `None` when the file
+    /// cannot be read or compiled, or its return value is not a projectable
+    /// struct; the `None` is cached too, so the file is not compiled again.
     pub fn get_or_compile_projection(
         &mut self,
         resolved_path: &str,

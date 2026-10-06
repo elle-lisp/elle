@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-10-05
 // src/hir/AGENTS.md
 //! High-level Intermediate Representation (HIR)
 //!
@@ -38,7 +38,7 @@ pub(crate) mod testkit;
 pub mod typeinfer;
 pub mod types;
 
-pub use analyze::{classify_form, AnalysisResult, Analyzer, FileForm};
+pub use analyze::{classify_form, AnalysisResult, Analyzer, FileForm, LambdaDecl};
 pub use arena::{BindingArena, BindingInner, BindingScope};
 pub use binding::{Binding, CaptureInfo, CaptureKind};
 pub use dataflow::{analyze_dataflow, format_dataflow, DataflowInfo};

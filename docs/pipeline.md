@@ -1,6 +1,6 @@
 # Compilation Pipeline
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-05 -->
 
 Compilation entry points: source reaches bytecode through the reader, expander, analyzer, lowerer and emitter.
 
@@ -13,21 +13,21 @@ Module: [src/pipeline](../src/pipeline/AGENTS.md).
 - [Expander lifecycle](#expander-lifecycle)
 - [The fixpoint loop](#the-fixpoint-loop)
 - [Compilation phases (single-form)](#compilation-phases-single-form)
-- [Compile context](#compile-context-in-srcpipelinecachersrs)
+- [Compile context](#compile-context)
 - [Known issues](#known-issues)
 
 | File | Purpose |
 |------|---------|
-| `mod.rs` | `CompileResult`, `AnalyzeResult`, re-exports |
-| `cache.rs` | `CompileCtx`: per-instance compile state (macro VM, Expander, PrimitiveMeta, projection cache) |
-| `bootstrap.rs` | Compile and run core.lisp before any compile context exists |
-| `sources.rs` | The core, prelude and stdlib sources a boot compiles, embedded at build time |
-| `directives.rs` | Validate and strip `(elle/version …)` and `(elle/migration …)` |
-| `compile.rs` | `compile()`, `compile_file()`, `compile_file_repl()`, and the whole-module entry points |
-| `compile/frontend.rs` | Read, expand, and classify forms ahead of analysis |
-| `compile/transforms.rs` | Post-analysis HIR transforms |
-| `analyze.rs` | `analyze()`, `analyze_file()` |
-| `eval.rs` | `eval()`, `eval_all()`, `eval_syntax()`, `eval_file()` |
+| [mod.rs](../src/pipeline/mod.rs) | `CompileResult`, `AnalyzeResult`, re-exports |
+| [cache.rs](../src/pipeline/cache.rs) | `CompileCtx`: per-instance compile state (macro VM, Expander, PrimitiveMeta, projection cache) |
+| [bootstrap.rs](../src/pipeline/bootstrap.rs) | Compile and run core.lisp before any compile context exists |
+| [sources.rs](../src/pipeline/sources.rs) | The core, prelude and stdlib sources a boot compiles, embedded at build time |
+| [directives.rs](../src/pipeline/directives.rs) | Validate and strip `(elle/version …)` and `(elle/migration …)` |
+| [compile.rs](../src/pipeline/compile.rs) | `compile()`, `compile_file()`, `compile_file_repl()`, and the whole-module entry points |
+| [frontend.rs](../src/pipeline/compile/frontend.rs) | Read, expand, and classify forms ahead of analysis |
+| [transforms.rs](../src/pipeline/compile/transforms.rs) | Post-analysis HIR transforms |
+| [analyze.rs](../src/pipeline/analyze.rs) | `analyze()`, `analyze_file()`, `analyze_file_detached()` |
+| [eval.rs](../src/pipeline/eval.rs) | `eval()`, `eval_all()`, `eval_syntax()`, `eval_file()` |
 
 ## Public API
 
@@ -40,21 +40,32 @@ pub struct CompileResult {
 
 pub struct AnalyzeResult {
     pub hir: Hir,
+    pub arena: BindingArena,
+    pub errors: Vec<LError>,
+    pub lambda_decls: HashMap<HirId, LambdaDecl>,
 }
 ```
+
+`lambda_decls` holds each lambda's declared ceiling and muffle bits. The HIR
+keeps only the signal that results from applying them.
 
 ### Functions
 
 | Function | VM for macros | Fixpoint? | Callers |
 |----------|---------------|-----------|---------|
 | `compile` | Internal | No | Integration tests |
-| `compile_file` | Internal | Yes | `elle::program::run_source` (file, stdin, `-e`), `import-file`, the stdlib load |
+| `compile_file` | Internal | Yes | `elle::program::run_source` (file, stdin, `-e`), `import-file`, the stdlib load, `eval_all`, `eval_file`, the analyzer's projection lookup |
 | `eval` | Borrowed | No | Tests |
 | `eval_all` | Internal (delegates to `compile_file`) | Yes | Tests |
 | `eval_file` | Borrowed | Yes | Tests |
-| `eval_syntax` | Borrowed | No | Macro body evaluation (src/syntax/expand/macro_expand.rs) |
+| `eval_syntax` | Borrowed | No | Macro body evaluation ([macro_expand.rs](../src/syntax/expand/macro_expand.rs)) |
 | `analyze` | Borrowed | No | Tests |
 | `analyze_file` | Borrowed | Yes | The LSP, the linter, `compile/analyze` |
+| `analyze_file_detached` | Borrowed | Yes | A reader that needs the file without the projections of its imports |
+
+`analyze_file` compiles the target of each `((import "literal"))` to read its
+signal projection. `analyze_file_detached` skips that compile, so an import
+cycle does not recurse.
 
 ### Signatures
 
@@ -72,6 +83,7 @@ pub fn eval_file(source: &str, symbols: &mut SymbolTable, vm: &mut VM, cctx: &mu
 pub fn eval_syntax(syntax: Syntax, expander: &mut Expander, symbols: &mut SymbolTable, vm: &mut VM) -> Result<Value, String>
 pub fn analyze(source: &str, symbols: &mut SymbolTable, vm: &mut VM, cctx: &mut CompileCtx, source_name: &str) -> Result<AnalyzeResult, String>
 pub fn analyze_file(source: &str, symbols: &mut SymbolTable, vm: &mut VM, cctx: &mut CompileCtx, source_name: &str) -> Result<AnalyzeResult, String>
+pub fn analyze_file_detached(source: &str, symbols: &mut SymbolTable, vm: &mut VM, cctx: &mut CompileCtx, source_name: &str) -> Result<AnalyzeResult, String>
 ```
 
 ## VM ownership patterns
@@ -86,12 +98,12 @@ with a cloned `Expander`. They need no caller VM, so they take only
 `symbols` + `cctx`. This is the correct pattern for batch compilation where
 the caller doesn't need a running VM.
 
-**Borrowed VM** (`eval`, `eval_syntax`, `analyze`, `analyze_file`):
-These borrow the caller's `&mut VM`. The same VM is used for both macro
-expansion and (for `eval`) execution, so macro side effects persist in the
-caller's VM. This is the correct pattern for stdlib initialization and macro
-body evaluation where state must accumulate. They obtain a cloned `Expander`
-and `PrimitiveMeta` from the context via `cctx.expander_and_meta()`.
+**Borrowed VM** (`eval`, `eval_syntax`, `analyze`, `analyze_file`,
+`analyze_file_detached`): These borrow the caller's `&mut VM`. The same VM is
+used for both macro expansion and (for `eval`) execution, so macro side effects
+persist in the caller's VM. Macro body evaluation uses this pattern, because
+its state must accumulate. The rest obtain a cloned `Expander` and
+`PrimitiveMeta` from the context via `cctx.expander_and_meta()`.
 
 **Hybrid** (`eval_all`): Delegates compilation to `compile_file` (which expands
 on the context's macro VM), then executes each compiled form on the caller's
@@ -107,9 +119,9 @@ borrow is needed mid-expansion.
 
 ## Expander lifecycle
 
-The prelude (`prelude.lisp`, embedded at build time) defines macros like
+The prelude ([prelude.lisp](../src/prelude.lisp), embedded at build time) defines macros like
 `defn`, `let*`, `when`, `unless` and `try`/`catch`. It is loaded once, into the
-`CompileCtx`'s `Expander`, when the context is built (`cache.rs`). Every entry
+`CompileCtx`'s `Expander`, when the context is built ([cache.rs](../src/pipeline/cache.rs)). Every entry
 point expands with a clone of that `Expander`: `compile` and `compile_file`
 through `with_macro_expansion`, the `eval` and `analyze` families through
 `expander_and_meta`. A clone carries the loaded prelude, so no call parses it
@@ -120,16 +132,21 @@ again.
 ## The fixpoint loop
 
 Signal inference for mutually recursive definitions converges by fixpoint. The
-loop lives in `analyze_file_letrec` (`src/hir/analyze/fileletrec/letrec.rs`),
+loop lives in `analyze_file_letrec` ([letrec.rs](../src/hir/analyze/fileletrec/letrec.rs)),
 not in the pipeline module: `compile_file` and `analyze_file` both classify a
 file's forms and hand them to that one function, so the file *is* a letrec and
 the file-level fixpoint and the letrec fixpoint are the same mechanism. Local
-`(letrec ...)` forms run the same loop in `src/hir/analyze/letrec.rs`.
+`(letrec ...)` forms run the same loop in [letrec.rs](../src/hir/analyze/letrec.rs).
+
+A function body is an implicit letrec too, and it runs no fixpoint. A call to
+a sibling that the body defines later finds no signal yet and takes the unknown
+one. A lambda inside a definition that calls that definition reads the silent
+seed.
 
 The signal inference computed here is exposed to tools and agents via:
 - **`compile/signal`** — Get the inferred signal of a function
 - **`portrait`** — Semantic portrait showing signal profile, composition properties, and observations
-- **MCP server** — RDF knowledge graph with signal predicates (`elle:signal-yields`, `elle:signal-io`, etc.)
+- **MCP server** — RDF knowledge graph with signal predicates (`urn:elle:signal-yields`, `urn:elle:signal-io`, etc.)
 
 See [MCP server documentation](mcp.md) and [Agent Reasoning](analysis/agent-reasoning.md) for how to query this information.
 
@@ -186,25 +203,33 @@ enforcement in `attune`/`silence` is the backstop, not the guarantee.
 ### Scope
 
 Convergence is per-file. Mutual recursion across a file boundary does not
-converge, because each import is a separate compilation — see
-[signals/inference.md](signals/inference.md) for why that is a design choice and what `squelch` does about it.
+converge, because each import is a separate compilation.
+[signals/inference.md](signals/inference.md) describes the projection that
+carries a signal across a file boundary.
 
 
 ## Compilation phases (single-form)
 
-Every compilation path follows the same five phases:
+`compile` runs these phases:
 
-1. **Read**: `read_syntax(source, source_name)` → `Syntax`
-2. **Expand**: `expander.expand(syntax, symbols, vm)` → expanded `Syntax`
-3. **Analyze**: `Analyzer::new_with_primitives(symbols, signals, arities)` →
-   `analyzer.analyze(&expanded)` → `AnalysisResult { hir, .. }`
-4. **Tail call marking**: `mark_tail_calls(&mut analysis.hir)` (mutates HIR in place)
-5. **Lower + Emit**: `Lowerer::new().with_intrinsics(intrinsics).lower(&hir)` →
-   `LirFunction` → `Emitter::new().emit(&lir_func)` → `Bytecode`
+1. **Read**: `read_syntax(arena, source, source_name)` → `Syntax`
+2. **Expand**: `expander.expand(syntax, symbols, macro_vm)` → expanded `Syntax`
+3. **Analyze**: `Analyzer::new_with_primitives(symbols, arena, signals, arities)`,
+   then `bind_primitives`, then `analyzer.analyze(&expanded)` → `AnalysisResult`
+4. **Regularize**: `crate::hir::regularize` rewrites the HIR in place: it
+   prunes dead `(type-of x)` arms, fuses `map` chains, removes dead bindings,
+   marks tail calls, functionalizes, ANF-lifts and infers types
+5. **Region inference**: `analyze_regions_with` → `RegionInfo`
+6. **Lower**: `Lowerer` with the primitive classification, the region
+   information and the type information → `LirModule`
+7. **Emit**: `Emitter::emit_module` → `Bytecode`
 
-`analyze` and `analyze_file` stop after phase 3 (no lowering or emission).
+`analyze` and `analyze_file` stop after phase 3, and mark tail calls.
 
-## Compile context (in `src/pipeline/cache.rs`)
+## Compile context
+
+[cache.rs](../src/pipeline/cache.rs) holds it.
+
 
 `CompileCtx` is the per-instance compile-time state: a macro-expansion VM
 (primitives registered), the core.lisp/prelude `Expander`, the
@@ -223,22 +248,23 @@ Used by `compile` and `compile_file`.
 ### `expander_and_meta()`
 
 Returns a cloned `(Expander, PrimitiveMeta)` without borrowing the macro VM.
-Used by `eval`, `analyze`, and `analyze_file`, which run expansion on their
-own VM.
+Used by `eval`, `analyze`, `analyze_file` and `analyze_file_detached`, which
+run expansion on their own VM.
 
 ### Invariants
 
 - Prelude must be 100% defmacro (no runtime definitions)
 - Primitives must be registered in the context's macro VM at construction
-- Pipeline functions are not re-entrant (no nested compile/compile_file)
+- A compile may run another inside it: the analyzer's projection lookup
+  compiles an imported file while the importer is still being analyzed
+  (`get_or_compile_projection`)
 
 ## Known issues
 
-Single-form functions
-(`compile`, `eval`, `analyze`) don't benefit from cross-form signal inference —
-a file compiled via `compile` instead of `compile_file` will treat all
-cross-form calls as `Polymorphic`. The REPL compiles each form individually
-via `compile_file_repl` and registers def bindings in the compilation cache
+Single-form functions (`compile`, `eval`, `analyze`) analyze one form. A call
+to a name that another form defines, and that no earlier compile registered,
+takes the unknown signal. The REPL compiles each form individually via
+`compile_file_repl` and registers def bindings in the compilation cache
 (`register_repl_binding`) so they are visible to subsequent compilations.
 However, cross-form signal inference within a single REPL input is limited
 to what `compile_file` can infer for each form in isolation.
