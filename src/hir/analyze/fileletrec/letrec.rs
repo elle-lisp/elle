@@ -231,11 +231,6 @@ impl<'a> Analyzer<'a> {
             }
         }
 
-        // Compute signal projection from the last binding's init value.
-        let projection = bindings
-            .last()
-            .and_then(|(_, value)| self.compute_signal_projection(value));
-
         // Body: reference to the last binding (the file's return value).
         let body = match last_binding {
             Some(binding) => Hir::silent(HirKind::Var(binding), span),
@@ -243,9 +238,6 @@ impl<'a> Analyzer<'a> {
         };
 
         self.pop_scope();
-
-        // Stash the projection on the Analyzer for the pipeline to retrieve.
-        self.last_signal_projection = projection;
 
         // Mark every direct file-letrec binding as module scope: a top-level
         // `def`, `var` or expression statement, a destructure leaf, or a

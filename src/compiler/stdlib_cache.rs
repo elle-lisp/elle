@@ -4,10 +4,8 @@
 //!
 //! docs/impl/stdlib-cache.md
 
-use crate::signals::Signal;
 use crate::value::CodeUnit;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Version tag: bump when the serialized layout changes in an incompatible way.
 const FORMAT_VERSION: u32 = 12;
@@ -52,7 +50,6 @@ pub struct StoredBytecode {
     /// name hashes and cross unchanged; without this table they would still
     /// compare correctly but print as `#<symbol:hash>`.
     pub names: Vec<(u64, Box<str>)>,
-    pub signal_projection: Option<HashMap<String, Signal>>,
 }
 /// Where a runtime caches its compiled stdlib.
 ///
@@ -245,7 +242,6 @@ pub fn store_bytecode(
         entry,
         intern_table: sent.intern_table,
         names: sent.names,
-        signal_projection: unit.signal_projection().cloned(),
     })
 }
 
@@ -287,7 +283,7 @@ pub fn load_bytecode(
     let entry = parts
         .pop()
         .expect("deserialize_templates returns one per input");
-    Ok(CodeUnit::of_parts(code, entry, stored.signal_projection))
+    Ok(CodeUnit::of_parts(code, entry))
 }
 
 #[cfg(test)]

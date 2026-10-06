@@ -17,6 +17,7 @@ pub mod dispatch;
 pub mod env;
 pub mod eval;
 pub mod execute;
+pub mod expansion;
 pub mod fiber;
 // Not pub: jit_entry only adds `impl VM` methods.
 #[cfg(feature = "jit")]

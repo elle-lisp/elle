@@ -234,21 +234,11 @@ pub struct Analyzer<'a> {
     /// (docs/signals/inference.md).
     bound_env: HashMap<Binding, Vec<ParamBoundAt>>,
 
-    /// Signal projections for bindings initialized from imported modules.
-    /// Maps a binding to a keyword→signal projection. Qualified access
-    /// (`module:field`) gives its `get` node the projected signal; a call
-    /// through it still takes the unknown signal, because its callee is a
-    /// call expression.
-    projection_env: HashMap<Binding, HashMap<String, Signal>>,
     /// Compile-time squelch result signal. Set during call analysis when
     /// the analyzer meets `(squelch spec f)` or `(attune spec f)` with a
     /// literal spec, and computes the resulting closure's signal statically.
     /// Consumed by binding analysis to seed the binding's signal_env entry.
     last_squelch_signal: Option<Signal>,
-    /// Import projection detected during call analysis. Set when the
-    /// analyzer sees `((import-file "literal"))` and the target file has a
-    /// projection. Consumed by binding analysis to populate projection_env.
-    last_import_projection: Option<HashMap<String, Signal>>,
     /// Tracks signal sources within the current lambda body for polymorphic inference
     current_signal_sources: SignalSources,
     /// Parameters of the current lambda being analyzed (for polymorphic inference)
@@ -283,9 +273,6 @@ pub struct Analyzer<'a> {
     errors: Vec<LError>,
     /// Set by `(numeric!)` assertion form. Consumed by `analyze_lambda`.
     current_numeric_assert: bool,
-    /// Signal projection computed by `analyze_file_letrec`. Retrieved by
-    /// the pipeline to store on `Bytecode.signal_projection`.
-    last_signal_projection: Option<HashMap<String, Signal>>,
     /// Set by `(immutable! x)` assertion form. Consumed by `analyze_lambda`.
     current_immutability_asserts: HashSet<Binding>,
     /// When true, bindings without `@` prefix are immutable.
@@ -296,14 +283,6 @@ pub struct Analyzer<'a> {
     /// its version. Wired from the CompileCtx by the pipeline; analyzers
     /// with no VM behind them (LSP, lint) keep the process default.
     unicode_generation: crate::segment::Generation,
-    /// The owning instance's compile context, for resolving `(import-file "literal")`
-    /// signal projections during analysis (`get_or_compile_projection`). Set by
-    /// the file frontend via [`set_compile_ctx`](Analyzer::set_compile_ctx); the
-    /// frontend owns the `CompileCtx`, outlives this analyzer, and never touches
-    /// it while analysis runs, so the reborrow is sound. `None` where nothing
-    /// sets it — single-form `compile`, runtime `eval`, the core bootstrap and
-    /// the test kit — and a literal import there gets no projection.
-    import_ctx: Option<*mut crate::pipeline::CompileCtx>,
     /// Each lambda's declared ceiling, keyed by the lambda node. The HIR keeps
     /// the inferred signal and drops the ceiling it was checked against; a
     /// reader that solves signals itself needs the declarations.
@@ -358,10 +337,7 @@ impl<'a> Analyzer<'a> {
             arity_env: HashMap::new(),
             keyword_collectors: HashSet::new(),
             bound_env: HashMap::new(),
-
-            projection_env: HashMap::new(),
             last_squelch_signal: None,
-            last_import_projection: None,
             current_signal_sources: SignalSources::default(),
             current_lambda_params: Vec::new(),
             block_contexts: Vec::new(),
@@ -373,24 +349,14 @@ impl<'a> Analyzer<'a> {
             current_declared_ceiling: None,
             errors: Vec::new(),
             current_numeric_assert: false,
-            last_signal_projection: None,
             current_immutability_asserts: HashSet::new(),
             immutable_by_default: true,
             unicode_generation: crate::config::get().unicode_generation(),
-            import_ctx: None,
             lambda_decls: HashMap::new(),
         };
         // Initialize with a global scope so top-level bindings can be registered
         analyzer.push_definition_scope();
         analyzer
-    }
-
-    /// Provide the owning instance's compile context so that `(import-file
-    /// "literal")` forms resolve their signal projection during analysis. Called
-    /// by the file frontend, which owns the `CompileCtx` for the analyzer's
-    /// whole lifetime. See the `import_ctx` field.
-    pub fn set_compile_ctx(&mut self, cctx: &mut crate::pipeline::CompileCtx) {
-        self.import_ctx = Some(cctx as *mut _);
     }
 
     /// Declare a user signal `(signal :kw)`. A keyword that is already a user
@@ -461,11 +427,6 @@ impl<'a> Analyzer<'a> {
     /// Take every lambda's declared ceiling.
     pub fn take_lambda_decls(&mut self) -> HashMap<super::expr::HirId, LambdaDecl> {
         std::mem::take(&mut self.lambda_decls)
-    }
-
-    /// Take the signal projection computed by `analyze_file_letrec`.
-    pub fn take_signal_projection(&mut self) -> Option<HashMap<String, Signal>> {
-        self.last_signal_projection.take()
     }
 
     /// Set whether bindings without `@` are immutable by default.
