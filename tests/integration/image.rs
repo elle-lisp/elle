@@ -277,7 +277,7 @@ fn bind_hydrated(rt: &mut Runtime, path: &std::path::Path) -> Value {
     let sym = rt.symbols().intern("hydrated-f");
     {
         let (cctx, heap) = rt.compile_and_heap();
-        cctx.register_repl_binding(
+        cctx.register_host_binding(
             heap,
             sym,
             hydrated.root,

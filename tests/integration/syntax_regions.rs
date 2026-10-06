@@ -1,13 +1,13 @@
-// audited: 2026-10-20
-// Pins how long a syntax tree lives: a unit's tree dies with the unit, and a macro template outlives it.
+// audited: 2026-10-06
+// Where a syntax tree lives and how long: a unit's tree dies with the unit, and a macro template outlives its unit.
 // docs/impl/syntax.md
 //
 // The tree is region data, so its lifetime is a region's lifetime.
 
+use elle::compile_file;
 use elle::pipeline::compile_file_repl;
 use elle::runtime::Runtime;
 use elle::syntax::{Syntax, SyntaxHeap};
-use elle::{compile_file, eval_all};
 
 /// How many regions the instance's heap has live.
 fn live_regions(rt: &mut Runtime) -> usize {
@@ -26,8 +26,8 @@ fn a_units_syntax_arena_is_freed_with_the_unit() {
     let mut rt = Runtime::new();
     let source = "(defn double (x) (* x 2)) (double 21)";
 
-    // Warm up: the first compiles fill lazily-populated instance state, such
-    // as the macro transformer caches, that is not this unit's tree.
+    // Warm up: the first compiles fill lazily-populated instance state
+    // (transformer caches, cross-unit registries) that is not this unit's tree.
     for _ in 0..2 {
         let (_vm, symbols, cctx) = rt.parts();
         compile_file(source, symbols, cctx, "<warm>").expect("compiles");
@@ -52,10 +52,9 @@ fn a_units_syntax_arena_is_freed_with_the_unit() {
 /// was copied into the instance's template arena as it was registered, so it
 /// survives the death of the working arena the `defmacro` form was read into.
 ///
-/// The REPL path is the one that persists a macro across units:
-/// `compile_file_repl` hands back the unit's expander, and
-/// `register_repl_macros` merges its macros into the instance. So it is what
-/// this drives.
+/// The REPL path is the one that persists a macro across units
+/// (`register_repl_macros` keeps a line's macros for later REPL lines), so it
+/// is what this drives, and the later unit is a REPL line too.
 ///
 /// The counter-factual: a template left in the defining unit's arena would be
 /// freed with that unit, and this expansion would read released pages.
@@ -82,7 +81,11 @@ fn a_macro_template_outlives_the_unit_that_defined_it() {
     }
 
     let (vm, symbols, cctx) = rt.parts();
-    let out = eval_all("(triple 14)", symbols, vm, cctx, "<user>").expect("expands and runs");
+    let (line, _) =
+        compile_file_repl("(triple 14)", symbols, cctx, "<user>").expect("the line expands");
+    let out = vm
+        .execute_scheduled(&line, cctx)
+        .expect("the line runs");
     assert_eq!(out.as_int(), Some(42));
 }
 
