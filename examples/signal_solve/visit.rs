@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-06
 //! Visit a HIR node's direct children, and find the `.lisp` files a file's literal imports name.
 //!
 //! docs/impl/solver.md
@@ -13,21 +13,21 @@ pub fn canonical(path: &str) -> String {
         .unwrap_or_else(|_| path.to_string())
 }
 
-/// Resolve an import spec as `import` does, to a `.lisp` file.
-pub fn resolve(spec: &str) -> Option<String> {
-    elle::primitives::modules::resolve_import(spec)
-        .filter(|p| p.ends_with(".lisp"))
-        .map(|p| canonical(&p))
+/// The `.lisp` file a literal load names, in canonical spelling. A literal
+/// `import-file` path reaches the HIR already absolute, as the argument of
+/// `import/load-file`; a library loads through `import/load-plugin` instead.
+pub fn resolve(path: &str) -> Option<String> {
+    path.ends_with(".lisp").then(|| canonical(path))
 }
 
-/// The resolved `.lisp` paths of every `(import "literal")` in a file.
+/// The `.lisp` paths of every literal `((import-file "path"))` in a file.
 pub fn literal_imports(hir: &Hir, arena: &BindingArena, out: &mut Vec<String>) {
     if let HirKind::Call { func, args, .. } = &hir.kind {
-        let is_import = matches!(&func.kind, HirKind::Var(b)
-            if arena.get(*b).is_primitive && arena.get(*b).name == SymbolId::of("import"));
-        if is_import {
-            if let Some(HirKind::String(spec)) = args.first().map(|a| &a.expr.kind) {
-                if let Some(path) = resolve(spec) {
+        let is_load = matches!(&func.kind, HirKind::Var(b)
+            if arena.get(*b).is_primitive && arena.get(*b).name == SymbolId::of("import/load-file"));
+        if is_load {
+            if let Some(HirKind::String(literal)) = args.first().map(|a| &a.expr.kind) {
+                if let Some(path) = resolve(literal) {
                     if !out.contains(&path) {
                         out.push(path);
                     }
