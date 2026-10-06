@@ -87,16 +87,33 @@
     (fiber/refuse f :denied)
     (fiber/value f)))
 
-# An error emit is denied too, and parks rather than unwinding.
+# An error emit is denied too, and parks rather than unwinding. A fiber denied
+# :error cannot call a primitive that declares it, which a struct literal and
+# `nil?` both do, so this body allocates its payload with an array literal and
+# tests the answer with `if` alone. A denied call there would park first, and
+# the resume would answer it instead of the emit.
 (defn error-body ()
-  (let [r (error {:error :mine :data @[1 2]})]
-    (if (nil? r) 0 5)))
+  (let [r (error @[1 2])]
+    (if r 5 0)))
 (defn mk-error ()
   (fiber/new error-body |:error| :deny |:error|))
 (defn w-error-resume ()
   (let [f (mk-error)]
     (fiber/resume f)
     (fiber/resume f @[7])))
+
+# The same denial left parked. It parks under `SIG_ERROR`, a terminal bit, so
+# the discharge of a dropped or killed fiber still owes the denial struct the
+# reference its allocation left (docs/impl/region/park.md).
+(defn w-error-cold ()
+  (let [f (mk-error)]
+    (fiber/resume f)
+    3))
+(defn w-error-cancel ()
+  (let [f (mk-error)]
+    (fiber/resume f)
+    (fiber/cancel f :gone)
+    3))
 
 # controls: the parks nobody displaces ────────────────────────────────────────
 
@@ -124,6 +141,8 @@
 (def protect-resume-d (measure w-protect-resume 100 window))
 (def protect-refuse-d (measure w-protect-refuse 100 window))
 (def error-resume-d (measure w-error-resume 100 window))
+(def error-cold-d (measure w-error-cold 100 window))
+(def error-cancel-d (measure w-error-cancel 100 window))
 (def cold-d (measure c-cold 100 window))
 (def cancel-d (measure c-cancel 100 window))
 
@@ -132,7 +151,8 @@
          refuse-d "  abort " abort-d)
 (println "  through protect: resume " protect-resume-d "  refuse "
          protect-refuse-d)
-(println "  error emit: resume " error-resume-d)
+(println "  error emit: resume " error-resume-d "  discard " error-cold-d
+         "  cancel " error-cancel-d)
 (println "  controls: cold " cold-d "  cancel " cancel-d)
 
 (defn bounded? (d label)
@@ -150,6 +170,8 @@
 (bounded? protect-refuse-d
           "a denied emit inside a `protect`, answered by a refusal")
 (bounded? error-resume-d "a denied error emit answered by a resume")
+(bounded? error-cold-d "a denied error emit nobody displaces")
+(bounded? error-cancel-d "a denied error emit hard-killed")
 
 (assert (= (w-resume) 5) "a mediated resume lost the body's result")
 (assert (= (w-read-resume) 5) "reading the payload changed the body's result")

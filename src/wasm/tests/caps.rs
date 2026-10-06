@@ -249,15 +249,21 @@ fn wasm_full_denies_a_literal_emit_of_a_withheld_bit() {
 
 /// A denied `:error` emit parks on the denial, not on the error it names: the
 /// fiber holds the denial payload, and the resume answers the emit.
+///
+/// The trap: a fiber denied `:error` cannot call a primitive that declares it,
+/// and a struct literal is a call to `struct`, as `+` reaches one. Built inside
+/// the body, the payload is denied before the emit runs, and the resume answers
+/// that call instead. The payload is built outside, and the body calls nothing.
 #[test]
 fn wasm_full_denial_of_an_error_emit_parks() {
     assert_eq!(
         eval_with_stdlib(
-            "(let [f (fiber/new (fn [] (+ 1 (error {:error :mine}))) |:error| :deny |:error|)] \
+            "(let [mine {:error :mine} \
+                   f (fiber/new (fn [] [:after (error mine)]) |:error| :deny |:error|)] \
                (fiber/resume f) \
                (and (= :paused (fiber/status f)) \
-                    (= :capability-denied (get (fiber/value f) :error)) \
-                    (= 3 (fiber/resume f 2))))"
+                    (= [|:error| mine] (get (fiber/value f) :args)) \
+                    (= [:after 2] (fiber/resume f 2))))"
         ),
         "true",
         "an error emit the fiber withholds must park on a denial the resume answers"

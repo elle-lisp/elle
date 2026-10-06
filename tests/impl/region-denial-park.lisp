@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-06
 # A capability-denial payload the runtime built is released by the install that displaces it.
 # docs/impl/region/park.md
 #
@@ -135,23 +135,43 @@
     (fiber/resume f)
     3))
 
+# (h) a denial of `:error` parks under `SIG_ERROR`, a terminal bit, so its
+# payload also takes a terminal result's park retain, which the fiber's free
+# releases. The discharge still owes the reference the allocation left.
+# Counter-factual: a discharge that reads the terminal bit and releases nothing
+# strands one whole payload, the struct and its fields, per dropped fiber.
+(defn error-denied-body ()
+  (let [r (length "ab")]
+    5))
+(defn mk-error ()
+  (fiber/new error-denied-body |:error| :deny |:error|))
+(defn w-error-cold ()
+  (let [f (mk-error)]
+    (fiber/resume f)
+    3))
+(defn w-error-cancel ()
+  (let [f (mk-error)]
+    (fiber/resume f)
+    (fiber/cancel f :gone)
+    3))
+
 # controls ─────────────────────────────────────────────────────────────────────
 
-# (h) the denial park nobody displaces: the discard discharge releases it, so
+# (i) the denial park nobody displaces: the discard discharge releases it, so
 # this face is bounded without any install and isolates the install's share.
 (defn c-cold ()
   (let [f (mk)]
     (fiber/resume f)
     3))
 
-# (i) hard kill — the teardown route, likewise bounded without any install.
+# (j) hard kill — the teardown route, likewise bounded without any install.
 (defn c-cancel ()
   (let [f (mk)]
     (fiber/resume f)
     (fiber/cancel f :gone)
     3))
 
-# (j) an ordinary `emit` park displaced the same three ways. Its payload IS
+# (k) an ordinary `emit` park displaced the same three ways. Its payload IS
 # body-allocated, so the body's own continuation release answers for it and the
 # install owes nothing — a release added here would free it under the reader.
 (defn emit-body ()
@@ -178,6 +198,8 @@
 (def twice-d (measure w-twice 100 window))
 (def io-resume-d (measure w-io-resume 100 window))
 (def io-cold-d (measure c-io-cold 100 window))
+(def error-cold-d (measure w-error-cold 100 window))
+(def error-cancel-d (measure w-error-cancel 100 window))
 (def cold-d (measure c-cold 100 window))
 (def cancel-d (measure c-cancel 100 window))
 (def emit-resume-d (measure c-emit-resume 100 window))
@@ -190,6 +212,8 @@
          protect-refuse-d)
 (println "  :io denial (bits collide): resume " io-resume-d "  discard "
          io-cold-d)
+(println "  :error denial (terminal bits): discard " error-cold-d "  cancel "
+         error-cancel-d)
 (println "  controls: cold " cold-d "  cancel " cancel-d "  emit+resume "
          emit-resume-d "  emit+refuse " emit-refuse-d)
 
@@ -212,6 +236,8 @@
 (bounded? twice-d "two denials mediated in one session")
 (bounded? io-cold-d "an :io denial park nobody displaces")
 (bounded? io-resume-d "an :io denial payload displaced by a resume")
+(bounded? error-cold-d "an :error denial park nobody displaces")
+(bounded? error-cancel-d "an :error denial park hard-killed")
 
 # Value preservation: the release must not change what the mediation reads.
 (assert (= (w-resume) 5) "a mediated resume lost the body's result")

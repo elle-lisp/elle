@@ -94,19 +94,38 @@
         (+ r (length (get (get p :args) 1)))))))
 
 # ── (f) a denied error emit, answered ────────────────────────────────────────
+# A fiber denied :error cannot call a primitive that declares it, and most do:
+# `string`, `length`, `get`, a struct literal's `struct`. So the body builds its
+# value and its result with array literals alone, and the parent reads both.
 (defn error-body (n)
-  (let [mine (string "mine" n)
-        r (error {:error :mine :data mine})]
-    (+ (length mine) (length r))))
+  (let [mine @[n]
+        r (error mine)]
+    @[mine r]))
 (defn w-error-resume (n)
   (let [f (fiber/new (fn () (error-body n)) |:error| :deny |:error|)]
     (fiber/resume f)
     (let [p (fiber/value f)]
       (assert (denial? p) "the error emit was not denied")
       (let [r (fiber/resume f (string "answer" n))]
-        (assert (= :mine (get (get (get p :args) 1) :error))
+        (assert (= n (get (get (get p :args) 1) 0))
                 "the denied error's payload freed by the resume")
-        r))))
+        (+ (length (get r 0)) (length (get r 1)))))))
+
+# ── (g) a denied error emit left parked, its fiber dropped or killed ─────────
+# The discharge owes the denial struct its allocation's reference and no more,
+# though the park is under a terminal bit. The parent still holds the struct,
+# and through its `:args` the value the body emitted.
+(defn w-error-dropped (n)
+  (let [p (let [f (fiber/new (fn () (error-body n)) |:error| :deny |:error|)]
+            (fiber/resume f))]
+    (assert (denial? p) "the error emit was not denied")
+    (length (get (get p :args) 1))))
+(defn w-error-cancel (n)
+  (let [f (fiber/new (fn () (error-body n)) |:error| :deny |:error|)
+        p (fiber/resume f)]
+    (fiber/cancel f :gone)
+    (assert (denial? p) "payload freed by the cancel that killed its fiber")
+    (length (get (get p :args) 1))))
 
 # ── drive: a fresh payload per iteration keeps region ids churning ───────────
 (defn drive (reps)
@@ -116,7 +135,8 @@
     (assign
       out
       @[(w-hold-resume i) (w-alias-resume i) (w-stored i) (w-refuse i)
-        (w-abort i) (w-protect-resume i) (w-error-resume i)])
+        (w-abort i) (w-protect-resume i) (w-error-resume i) (w-error-dropped i)
+        (w-error-cancel i)])
     (assign denials @[])
     (assign i (%add i 1)))
   out)
@@ -128,6 +148,8 @@
   (assert (> (get r 3) 0) "payload freed under the read past the refusal")
   (assert (> (get r 4) 0) "payload freed under the read past the abort")
   (assert (> (get r 5) 0) "inner park's payload freed by the resume install")
-  (assert (> (get r 6) 0) "denied error's body freed past the resume"))
+  (assert (> (get r 6) 0) "denied error's body freed past the resume")
+  (assert (> (get r 7) 0) "denied error's payload freed with its dropped fiber")
+  (assert (> (get r 8) 0) "denied error's payload freed by the cancel"))
 
 (println "region-emit-denial-uaf: ok")

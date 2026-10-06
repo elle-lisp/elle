@@ -88,11 +88,16 @@
   (assert (= [|:yield| 1] (get d :args)))
   (assert (= :after (fiber/resume f)) "the resume continues past the yield"))
 
-(let [f (fiber/new (fn [] (error {:error :mine})) |:error| :deny |:error|)
+# A fiber denied :error cannot call a primitive that declares it either, and a
+# struct literal is a call to `struct`. So the error's payload is built outside
+# the fiber, and the bodies below call nothing else the denial covers.
+(def mine {:error :mine})
+
+(let [f (fiber/new (fn [] (error mine)) |:error| :deny |:error|)
       d (fiber/resume f)]
   (assert (denial? d) "a fiber denied :error cannot raise an error")
   (assert (= :paused (fiber/status f)) "the denial parks the fiber")
-  (assert (= [|:error| {:error :mine}] (get d :args)))
+  (assert (= [|:error| mine] (get d :args)))
   (assert (= 5 (fiber/resume f 5)) "the resume answers the error expression"))
 
 # ── A denial deeper than the fiber body ─────────────────────────────────
@@ -115,10 +120,10 @@
   (assert (= 9 (fiber/resume f 9)) "and the resume is the body's result"))
 
 (defn fail-deep []
-  (error {:error :deep}))
-(let [f (fiber/new (fn [] (+ 1 (fail-deep))) |:error| :deny |:error|)]
+  (error mine))
+(let [f (fiber/new (fn [] [:after (fail-deep)]) |:error| :deny |:error|)]
   (assert (denial? (fiber/resume f)) "an error in a callee is denied")
-  (assert (= 3 (fiber/resume f 2)) "the callee's caller runs on"))
+  (assert (= [:after 2] (fiber/resume f 2)) "the callee's caller runs on"))
 
 # ── Routing ─────────────────────────────────────────────────────────────
 
