@@ -36,7 +36,7 @@ on the VM it does, and the signal fixpoint over a file's letrec.
 | [compile.rs](compile.rs) | The bytecode, LIR and FHIR entry points, and the lowering they share |
 | [compile/frontend.rs](compile/frontend.rs) | The file front end: source text or forms to regularized HIR |
 | [compile/transforms.rs](compile/transforms.rs) | The two test-runner transforms, include splicing, and the entry points over them |
-| [analyze.rs](analyze.rs) | `analyze` and `analyze_file` |
+| [analyze.rs](analyze.rs) | `analyze`, `analyze_file` and `analyze_file_detached` |
 | [eval.rs](eval.rs) | `eval`, `eval_all`, `eval_file` and `eval_syntax` |
 | [cache.rs](cache.rs) | `CompileCtx` and `BootExports` |
 | [bootstrap.rs](bootstrap.rs) | The core.lisp compile, and `install_core_exports` |
@@ -48,8 +48,8 @@ on the VM it does, and the signal fixpoint over a file's letrec.
 Unless the table says otherwise, an entry point takes
 `(source, symbols, cctx, source_name)` and returns `Result<_, String>`. The
 `analyze` and `eval` families also take the caller's `vm`, between `symbols`
-and `cctx`. `analyze`, `analyze_file` and `eval` expand on that VM, while
-`eval_file` and `eval_all` only run the bytecode on it.
+and `cctx`. `analyze`, `analyze_file`, `analyze_file_detached` and `eval` expand
+on that VM, while `eval_file` and `eval_all` only run the bytecode on it.
 
 | Function | Answers | Purpose |
 |----------|---------|---------|
@@ -64,6 +64,7 @@ and `cctx`. `analyze`, `analyze_file` and `eval` expand on that VM, while
 | `splice_includes(source, source_name)` | `String` | The source text with each `include` and `include-file` inlined, for the WASM backend |
 | `analyze` | `AnalyzeResult` | One form to HIR, with tail calls marked. No regularize, no bytecode |
 | `analyze_file` | `AnalyzeResult` | A file as one letrec to HIR, with tail calls marked. No regularize, no bytecode |
+| `analyze_file_detached` | `AnalyzeResult` | `analyze_file`, without compiling the target of each literal import for its signal projection, so an import cycle does not recurse |
 | `eval` | `Value` | One form, compiled and run on the caller's VM |
 | `eval_file` | `Value` | `compile_file`, then `vm.execute` |
 | `eval_all` | `Value` | `compile_file`, then `vm.execute_scheduled`, which runs the program inside `ev/run` as the binary does |
@@ -73,7 +74,7 @@ and `cctx`. `analyze`, `analyze_file` and `eval` expand on that VM, while
 | Type | Purpose |
 |------|---------|
 | `CodeUnit` | The entry's code object, and one counted reference to the code region every payload of the unit lives in ([template.md](../../docs/impl/region/template.md)) |
-| `AnalyzeResult` | `hir`, its `arena`, and the non-fatal `errors` the analyzer collected |
+| `AnalyzeResult` | `hir`, its `arena`, the non-fatal `errors` the analyzer collected, and `lambda_decls`, the ceiling each lambda declares, which the HIR does not keep |
 | `CompileCtx` | The compile context of one instance ([cache.rs](cache.rs)) |
 | `BootExports` | The core and stdlib export structs a boot leaves, which a boot image carries as its roots |
 | `directives::SemverMeta` | The version and the migration majors that `extract_semver_directives` removed from a file |
