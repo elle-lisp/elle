@@ -36,7 +36,7 @@ Up: [..](../AGENTS.md)
 - [mcp-eval.md](mcp-eval.md) — **MCP `eval` tool** The `eval` tool collapses the MCP surface to a single verb: a monadic bind over a persistent Elle image held in the server.
 - [mcp.md](mcp.md) — **MCP Server** The Elle MCP server gives a coding assistant structured access to an Elle codebase over the Model Context Protocol.
 - [modules-proposal.md](modules-proposal.md) — **Modules: a proposal** The ordered changes that take Elle's modules from re-compiling every import to compiled, cacheable, linkable units.
-- [modules.md](modules.md) — **Modules** Elle's module system is built from Elle, plus one primitive: `import-file`.
+- [modules.md](modules.md) — **Modules** Elle's module system is one primitive, `import`, plus conventions built from closures, structs and keyword arguments.
 - [named-args.md](named-args.md) — **Named Arguments** Elle supports optional positional parameters, named keyword parameters, and collected keyword arguments.
 - [parameters.md](parameters.md) — **Dynamic Parameters** Dynamic parameters are fiber-local variables with scoped rebinding.
 - [philosophy.md](philosophy.md) — **Design Philosophy** Why Elle infers signals instead of asking for them, and the gap that leaves between what the compiler knows and what a reader sees.
