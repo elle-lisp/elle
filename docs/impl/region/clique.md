@@ -1,6 +1,6 @@
 # What a region-effect declaration buys
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-06 -->
 
 What the solver derives from a declared `RegionEffect`.
 
@@ -112,12 +112,13 @@ call:
   container's own reference (`arena::pop_with_decref`; the `raw-pop` oracle
   probe pins the double-count).
 - **`result_minted`** — the result was produced by compiled code run on the
-  driving VM (`import`'s module body, the `compile/*-module` test loaders'
-  setup accumulator, each via `run_thunk_to_completion`), so it left that code
-  through the return convention already carrying the caller's reference — a
-  **thunk-run result**. The claim binds every normally-completing path: a
-  declarant path that runs no thunk supplies the reference itself (`import`'s
-  plugin paths take an explicit `EscapeSite::NativeCallResult` retain).
+  driving VM (the module body `import/load-file` and `import/load-syntax` run,
+  the `compile/*-module` test loaders' setup accumulator, each via
+  `run_thunk_to_completion`), so it left that code through the return
+  convention already carrying the caller's reference — a **thunk-run result**.
+  The claim binds every normally-completing path: a declarant path that runs no
+  thunk supplies the reference itself (both `import/load-plugin` paths take an
+  explicit `EscapeSite::NativeCallResult` retain).
   Consumed at dispatch only — no solver site reads it. Pinned by the
   `import-result` probe in [oracle.lisp](../../../tests/impl/oracle.lisp).
 
