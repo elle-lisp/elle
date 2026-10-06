@@ -1,10 +1,10 @@
 // audited: 2026-10-05
 //! Join every file's facts through the import graph, then lower the call facts for the solver.
 //!
-//! docs/signals/inference.md
-//! docs/modules.md
+//! docs/impl/solver.md
+//! docs/modules-proposal.md
 
-use crate::extract::{use_fact, ModuleShape, Pending};
+use crate::extract::{ModuleShape, Pending};
 use crate::model::{Model, SiteId, VarId, VarKey};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -65,7 +65,7 @@ pub fn link(model: &mut Model, shapes: &HashMap<String, ModuleShape>, pending: V
         for (name, x) in &exports {
             let k = model.key(name);
             let inst = model.var(VarKey::Inst(*site, k));
-            use_fact(model, inst, *site, *x, owner, nargs);
+            model.use_fact(inst, *site, *x, owner, nargs);
             model.facts.hasfld.insert((obj, k));
             model.facts.fld.insert((obj, k, inst));
             export_of.insert(inst, *x);
@@ -73,7 +73,7 @@ pub fn link(model: &mut Model, shapes: &HashMap<String, ModuleShape>, pending: V
         }
         for (k, inst) in read_keys.get(site).cloned().unwrap_or_default() {
             if !seen.contains(&k) {
-                use_fact(model, inst, *site, unknown, unknown, 0);
+                model.use_fact(inst, *site, unknown, unknown, 0);
             }
         }
     }
@@ -83,15 +83,15 @@ pub fn link(model: &mut Model, shapes: &HashMap<String, ModuleShape>, pending: V
             match shapes.get(&path) {
                 Some(ModuleShape::Lambda { lam, .. }) => {
                     model.site_callee.insert(site, *lam);
-                    use_fact(model, ctx, site, *lam, *lam, nargs);
+                    model.use_fact(ctx, site, *lam, *lam, nargs);
                 }
-                Some(_) => use_fact(model, ctx, site, unknown, unknown, nargs),
+                Some(_) => model.use_fact(ctx, site, unknown, unknown, nargs),
                 None => {
                     // Instantiating a module this run did not analyze: free.
                     let obj = model.var(VarKey::Obj(site));
                     model.facts.dep.insert((obj, obj));
                     model.facts.owner.insert((obj, obj));
-                    use_fact(model, ctx, site, obj, unknown, nargs);
+                    model.use_fact(ctx, site, obj, unknown, nargs);
                 }
             }
         }
@@ -100,7 +100,7 @@ pub fn link(model: &mut Model, shapes: &HashMap<String, ModuleShape>, pending: V
                 .get(&call.callee)
                 .map(|x| owner_of(model, *x))
                 .unwrap_or(unknown);
-            use_fact(model, call.ctx, call.site, call.callee, owner, call.nargs);
+            model.use_fact(call.ctx, call.site, call.callee, owner, call.nargs);
         }
     }
 

@@ -67,9 +67,7 @@ melior = { version = "0.27", optional = true }
 [dev-dependencies]
 criterion = "0.5"
 proptest = "1.4"
-ascent = "0.8"
 datafrog = "2"
-crepe = "0.1"
 stats_alloc = { version = "0.1.10", features = ["nightly"] }
 
 [features]
