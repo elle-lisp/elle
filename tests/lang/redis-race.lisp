@@ -18,7 +18,7 @@
 #
 # Requires a live Redis on 127.0.0.1:6379.  Records a reasoned skip otherwise.
 
-(def redis ((import-file "lib/redis.lisp")))
+(def redis ((import "std/redis")))
 
 # Redis is shared infrastructure, so the key prefix carries this process's pid.
 # A fixed prefix collides the way a fixed scratch filename does: a second run

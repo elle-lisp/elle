@@ -1,10 +1,10 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 14)
+# audited: 2026-10-06
 # The IRC module parses and formats messages, tags included, with no network.
 # docs/libraries.md
 #
 
-(def irc ((import-file "lib/irc.lisp")))
+(def irc ((import "std/irc")))
 
 ## ── Verify exports ──────────────────────────────────────────────────
 

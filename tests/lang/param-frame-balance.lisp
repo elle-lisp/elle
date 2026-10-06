@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-23
+(elle/epoch 14)
+# audited: 2026-10-06
 # A parameterize frame survives a process scheduler run that starts while a return-value handoff is pending.
 # docs/parameters.md
 #
@@ -12,7 +12,7 @@
 # The counter-factual: (*witness*) then reads :fallback after the run, while
 # every other observable stays the same, so a status-only check would pass.
 
-(def process ((import-file "lib/process.lisp")))
+(def process ((import "std/process")))
 
 (def *witness* (make-parameter :fallback))
 
