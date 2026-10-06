@@ -200,7 +200,7 @@ prints each row it moved.
 ### A file's charge
 
 `--charge` runs each path in-process twice and reads what the second run cost
-the runner's own heap, as three readings per file for the producer `elle test`
+the runner's own heap, as one reading per file for the producer `elle test`
 ([test-gauges](test-gauges.md) says why the second run). It refuses
 `--isolate` and `-e`.
 

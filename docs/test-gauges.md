@@ -118,11 +118,9 @@ was measured and did not move.
 
 `elle test --charge PATHS` runs each path in-process twice. It reads the
 runner heap around the second run alone, from the moment that run starts until
-its results are recorded. Each file then has three readings for the producer
-`elle test`, with the path as the subject: `objects`, `regions` and `pages`
-([ratchet](ratchet.md)). The first two are what the run left live, and `pages`
-counts every page it claimed, freed or kept. The `gauge` rows still chain over
-both runs.
+its results are recorded. Each file then has one reading for the producer
+`elle test`, with the path as the subject: the `objects` the run left live
+([ratchet](ratchet.md)). The `gauge` rows still chain over both runs.
 
 The second run is the reading because a window over a file's first run holds
 work that is not the file's own, and its size follows what ran before:
@@ -137,10 +135,19 @@ work that is not the file's own, and its size follows what ran before:
   makes, and CI starts every job with a fresh store.
 
 The second run starts after its own first run filled the caches and the CAS,
-and its window opens after every earlier recording. Its charge is the same
-whatever ran before it, on a fresh store or a warm one, and on a loaded box.
+and its window opens after every earlier recording. Over the whole pass, run in
+two batchings of different order and size, every file's objects read the same.
 A cost the file pays once per runtime, such as a cache entry keyed by the
 file, falls in the first run, so the reading does not show it.
+
+The live regions and the page claims are not readings yet, because the second
+run's window still holds work whose size follows timing. In the same two
+batchings, 83 files moved by a region and 299 by up to 783 pages. A timed join
+of a worker that has already finished claims 6 pages, and one that waits
+claims 22, so a loaded box moves the page count. Six `h2-` files moved by 325 to
+783 pages. A form whose value cannot cross back from its worker runs in the
+runner's own heap ([test-runner](test-runner.md)), and its test's own work
+would then land in the window; which of the six do so is not yet measured.
 
 The readings are recorded against the last result of the file's second run.
 A row of the file's that the run did not read is `missing`. `--charge` refuses

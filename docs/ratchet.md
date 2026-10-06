@@ -280,7 +280,7 @@ The runner imports the ledger module for the row reader, the judge and the line
 reader, and the re-pin module for the rewrite.
 
 The runner is also a producer. Under `--charge` it reads what each file's
-second run charged its own heap, three readings per file for the producer
+second run left live in its own heap, one reading per file for the producer
 `elle test`, with the file's path as the subject
 ([test-gauges](test-gauges.md)).
 
