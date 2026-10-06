@@ -1,11 +1,16 @@
-(elle/epoch 13)
-# audited: 2026-10-05
+(elle/epoch 14)
+# audited: 2026-10-06
 # The h2 server: requests, headers, flow control, errors, CONTINUATION and lifecycle.
 # lib/http2.md
 
 (def http2 ((import "std/http2")))
+(def hpack ((import "std/http2/hpack") :huffman ((import "std/http2/huffman"))))
 
 ## ── Helpers ──────────────────────────────────────────────────────────────
+
+# RFC 9113's smallest SETTINGS_MAX_FRAME_SIZE. A header block one byte
+# over it cannot travel in a single frame to a peer that advertises it.
+(def frame-floor 16384)
 
 (defn listen-ephemeral []
   (let* [listener (tcp/listen "127.0.0.1" 0)
@@ -13,13 +18,17 @@
          lport (parse-int (slice lpath (+ 1 (string/find lpath ":"))))]
     [listener lport]))
 
-(defn with-server [handler test-fn &named on-error]
+(defn
+  with-server
+  [handler test-fn &named on-error server-max-frame client-max-frame]
   (let* [[listener lport] (listen-ephemeral)
          sf (ev/spawn (fn []
                         (let [[ok? _] (protect (http2:serve listener handler
-                              :on-error on-error))]
+                              :on-error on-error
+                              :max-frame-size server-max-frame))]
                           nil)))
-         session (http2:connect (concat "http://127.0.0.1:" (string lport)))]
+         session (http2:connect (concat "http://127.0.0.1:" (string lport))
+                                :max-frame-size client-max-frame)]
     (defer
       (begin
         (protect (http2:close session))
@@ -173,21 +182,47 @@
                    true))))
 
 ## ── Group 5: CONTINUATION frames ─────────────────────────────────────────
+#
+# The receiving side advertises `frame-floor`, and its reader refuses any
+# frame larger than that. So a header block over `frame-floor` that
+# arrives intact has crossed as HEADERS plus CONTINUATION; no single frame
+# could have carried it. Each test asserts the block really is over the
+# floor before it relies on that.
+#
+# The counter-factual is the default advertisement, 256 KiB on both
+# sides. A block of 16 KiB then travels in one HEADERS frame, and a test
+# that names CONTINUATION passes without one being sent.
+#
+# The values are `X` and `Z`, whose Huffman codes are a byte each. The
+# encoder sends such a string raw, so the blocks cost their size in bytes
+# and no Huffman work on either side.
+
+(defn raw-value [n]
+  "A header value of `n` bytes that HPACK sends raw."
+  (string/repeat "XZ" (/ n 2)))
+
+(def big-headers [["x-big-0" (raw-value 9000)] ["x-big-1" (raw-value 9000)]])
+
+(defn over-the-floor? [pairs]
+  "True when `pairs` encode, on a fresh encoder, to a block over
+   `frame-floor`."
+  (> (length (hpack:encode (hpack:make-encoder) pairs)) frame-floor))
 
 (defn test-large-response-headers []
-  (let [hdrs @{}]
-    (each i in (range 0 200)
-      (put hdrs (keyword (concat "x-hdr-" (string i)))
-           (apply concat (map (fn [_] "abcdefghij") (range 0 10)))))
-    (with-server (fn [req] {:status 200 :headers (freeze hdrs) :body "ok"})
-                 (fn [session]
-                   (let [resp (http2:send session "GET" "/big-headers")]
-                     (assert (= resp:status 200) "status 200")
-                     (assert (= (get resp:headers :x-hdr-0)
-                                (apply concat
-                                       (map (fn [_] "abcdefghij") (range 0 10))))
-                             "x-hdr-0 value")
-                     true)))))
+  (assert (over-the-floor? big-headers)
+          "the response block must exceed one frame")
+  (with-server (fn [req]
+                 {:status 200
+                  :headers {:x-big-0 (raw-value 9000) :x-big-1 (raw-value 9000)}
+                  :body "ok"})
+               (fn [session]
+                 (let [resp (http2:send session "GET" "/big-headers")]
+                   (assert (= resp:status 200) "status 200")
+                   (assert (= (get resp:headers :x-big-0) (raw-value 9000))
+                           "x-big-0 must arrive intact")
+                   (assert (= (get resp:headers :x-big-1) (raw-value 9000))
+                           "x-big-1 must arrive intact")
+                   true)) :client-max-frame frame-floor))
 
 ## ── Group 6: connection lifecycle ────────────────────────────────────────
 
@@ -228,25 +263,26 @@
                    true))))
 
 ## ── Group 8: large request headers (CONTINUATION) ─────────────────────
+#
+# Group 5's argument, with the roles swapped: the server advertises
+# `frame-floor`, so the client has to split.
 
 (defn test-large-request-headers []
-  (let [@req-hdrs @{}]
-    (each i in (range 0 200)
-      (put req-hdrs (keyword (concat "x-big-" (string i)))
-           (apply concat (map (fn [_] "abcdefghij") (range 0 10)))))
-    (with-server (fn [req]
-                   {:status 200 :body (string (length (keys req:headers)))})
-                 (fn [session]
-                   (let* [@send-hdrs @[]
-                          _ (each k in (keys req-hdrs)
-                              (push send-hdrs [(string k) (get req-hdrs k)]))
-                          resp (http2:send session "GET" "/big-req-hdrs"
-                          :headers (freeze send-hdrs))]
-                     (assert (= resp:status 200) "status 200")
-                     (assert (>= (parse-int (string resp:body)) 200)
-                             (concat "large req headers: server got "
-                                     (string resp:body) " headers"))
-                     true)))))
+  (assert (over-the-floor? big-headers)
+          "the request block must exceed one frame")
+  (with-server (fn [req]
+                 {:status 200
+                  :body (if (and (= (get req:headers :x-big-0) (raw-value 9000))
+                                 (= (get req:headers :x-big-1) (raw-value 9000)))
+                          "intact"
+                          "damaged")})
+               (fn [session]
+                 (let [resp (http2:send session "GET" "/big-req-hdrs"
+                                        :headers big-headers)]
+                   (assert (= resp:status 200) "status 200")
+                   (assert (= (string resp:body) "intact")
+                           "both request headers must reach the handler intact")
+                   true)) :server-max-frame frame-floor))
 
 ## ── Group 9: max-concurrent-streams ────────────────────────────────────
 
@@ -261,10 +297,16 @@
                                      (ev/spawn (fn []
                                        (http2:send session "GET"
                                        (concat "/conc-" (string i))))))
-                                   (range 0 3))
-                       results (map ev/join fibers)]
-                   (each r in results
-                     (assert (= r:status 200) "concurrent: status 200"))
+                                   (range 0 3))]
+                   # A deadline that aborts this test leaves the requests
+                   # running against a session the cleanup closes. Each
+                   # then fails, nobody joins it, and the failure ends the
+                   # whole file in place of the FAIL line naming this test.
+                   (defer
+                     (each f in fibers
+                       (protect (ev/abort f)))
+                     (each r in (map ev/join fibers)
+                       (assert (= r:status 200) "concurrent: status 200")))
                    true))))
 
 ## ── Run ──────────────────────────────────────────────────────────────────
