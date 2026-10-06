@@ -19,14 +19,14 @@ Module: [src/pipeline](../src/pipeline/AGENTS.md).
 | File | Purpose |
 |------|---------|
 | [mod.rs](../src/pipeline/mod.rs) | `CompileResult`, `AnalyzeResult`, re-exports |
-| [cache.rs](../src/pipeline/cache.rs) | `CompileCtx`: per-instance compile state (macro VM, Expander, PrimitiveMeta, projection cache) |
+| [cache.rs](../src/pipeline/cache.rs) | `CompileCtx`: per-instance compile state (macro VM, Expander, PrimitiveMeta, the REPL layer) |
 | [bootstrap.rs](../src/pipeline/bootstrap.rs) | Compile and run core.lisp before any compile context exists |
 | [sources.rs](../src/pipeline/sources.rs) | The core, prelude and stdlib sources a boot compiles, embedded at build time |
 | [directives.rs](../src/pipeline/directives.rs) | Validate and strip `(elle/version …)` and `(elle/migration …)` |
 | [compile.rs](../src/pipeline/compile.rs) | `compile()`, `compile_file()`, `compile_file_repl()`, and the whole-module entry points |
 | [frontend.rs](../src/pipeline/compile/frontend.rs) | Read, expand, and classify forms ahead of analysis |
 | [transforms.rs](../src/pipeline/compile/transforms.rs) | The test-mode transforms of the expanded forms, and `include` and `include-file` resolution |
-| [analyze.rs](../src/pipeline/analyze.rs) | `analyze()`, `analyze_file()`, `analyze_file_detached()` |
+| [analyze.rs](../src/pipeline/analyze.rs) | `analyze()`, `analyze_file()` |
 | [eval.rs](../src/pipeline/eval.rs) | `eval()`, `eval_all()`, `eval_syntax()`, `eval_file()` |
 
 ## Public API
@@ -54,18 +54,18 @@ keeps only the signal that results from applying them.
 | Function | VM for macros | Fixpoint? | Callers |
 |----------|---------------|-----------|---------|
 | `compile` | Internal | No | Integration tests |
-| `compile_file` | Internal | Yes | `elle::program::run_source` (file, stdin, `-e`), `import/load-file`, the stdlib load, `eval_all`, `eval_file`, the analyzer's projection lookup |
+| `compile_file` | Internal | Yes | `elle::program::run_source` (file, stdin, `-e`), `import/load-file`, the stdlib load, `eval_all`, `eval_file` |
+| `compile_file_repl` | Internal | Yes | The REPL, for each line |
 | `eval` | Borrowed | No | Tests |
 | `eval_all` | Internal (delegates to `compile_file`) | Yes | Tests |
 | `eval_file` | Borrowed | Yes | Tests |
 | `eval_syntax` | Borrowed | No | Macro body evaluation ([macro_expand.rs](../src/syntax/expand/macro_expand.rs)) |
 | `analyze` | Borrowed | No | Tests |
-| `analyze_file` | Borrowed | Yes | The LSP, the linter, `compile/analyze` |
-| `analyze_file_detached` | Borrowed | Yes | A reader that needs the file without the projections of its imports |
+| `analyze_file` | Borrowed | Yes | The LSP, the linter, `compile/analyze`, the signal solver |
 
-`analyze_file` compiles the target of each `((import-file "literal"))` to read its
-signal projection. `analyze_file_detached` skips that compile, so an import
-cycle does not recurse.
+No entry point compiles a file other than the one it is given. The analyzer
+reads nothing from the target of an `import-file`, so a cycle of imports does
+not recurse.
 
 ### Signatures
 
@@ -77,13 +77,13 @@ expand macros on the context's own macro VM, so they need no caller VM; the
 ```rust
 pub fn compile(source: &str, symbols: &mut SymbolTable, cctx: &mut CompileCtx, source_name: &str) -> Result<CompileResult, String>
 pub fn compile_file(source: &str, symbols: &mut SymbolTable, cctx: &mut CompileCtx, source_name: &str) -> Result<CompileResult, String>
+pub fn compile_file_repl(source: &str, symbols: &mut SymbolTable, cctx: &mut CompileCtx, source_name: &str) -> Result<(CompileResult, Expander), String>
 pub fn eval(source: &str, symbols: &mut SymbolTable, vm: &mut VM, cctx: &mut CompileCtx, source_name: &str) -> Result<Value, String>
 pub fn eval_all(source: &str, symbols: &mut SymbolTable, vm: &mut VM, cctx: &mut CompileCtx, source_name: &str) -> Result<Value, String>
 pub fn eval_file(source: &str, symbols: &mut SymbolTable, vm: &mut VM, cctx: &mut CompileCtx, source_name: &str) -> Result<Value, String>
 pub fn eval_syntax(syntax: Syntax, expander: &mut Expander, symbols: &mut SymbolTable, vm: &mut VM) -> Result<Value, String>
 pub fn analyze(source: &str, symbols: &mut SymbolTable, vm: &mut VM, cctx: &mut CompileCtx, source_name: &str) -> Result<AnalyzeResult, String>
 pub fn analyze_file(source: &str, symbols: &mut SymbolTable, vm: &mut VM, cctx: &mut CompileCtx, source_name: &str) -> Result<AnalyzeResult, String>
-pub fn analyze_file_detached(source: &str, symbols: &mut SymbolTable, vm: &mut VM, cctx: &mut CompileCtx, source_name: &str) -> Result<AnalyzeResult, String>
 ```
 
 ## VM ownership patterns
@@ -96,11 +96,14 @@ use it, and confusing them causes bugs:
 `CompileCtx`'s own macro VM (`with_macro_expansion`, fiber reset between uses)
 with a cloned `Expander`. They need no caller VM, so they take only
 `symbols` + `cctx`. This is the correct pattern for batch compilation where
-the caller doesn't need a running VM.
+the caller doesn't need a running VM. A primitive that compiles on behalf of a
+fiber, such as a loader, names that fiber's withheld capabilities to the
+context (`CompileCtx::on_behalf_of`), and the macro VM's fresh fiber withholds
+them too.
 
-**Borrowed VM** (`eval`, `eval_syntax`, `analyze`, `analyze_file`,
-`analyze_file_detached`): These borrow the caller's `&mut VM`. The same VM is
-used for both macro expansion and (for `eval`) execution, so macro side effects
+**Borrowed VM** (`eval`, `eval_syntax`, `analyze`, `analyze_file`): These
+borrow the caller's `&mut VM`. The same VM is used for both macro expansion
+and (for `eval`) execution, so macro side effects
 persist in the caller's VM. Macro body evaluation uses this pattern, because
 its state must accumulate. The rest obtain a cloned `Expander` and
 `PrimitiveMeta` from the context via `cctx.expander_and_meta()`.
@@ -127,7 +130,17 @@ through `with_macro_expansion`, the `eval` and `analyze` families through
 `expander_and_meta`. A clone carries the loaded prelude, so no call parses it
 again.
 
+A REPL line compiles through `compile_file_repl`. Its clone also carries the
+macros earlier lines defined, and its analysis the definitions they made. No
+other entry point sees either, so a file a line imports compiles as it would
+from any program.
+
 `eval_syntax` reuses the caller's `Expander` because it runs mid-expansion.
+
+Every transformer call runs through `VM::call_transformer`, and every
+`begin-for-syntax` definition through `eval_syntax`. Both run the body under
+the expansion fuel budget ([runtime.md](runtime.md)), and both turn a park
+the body raises into a compile error, because an expansion cannot hold one.
 
 ## The fixpoint loop
 
@@ -202,10 +215,9 @@ enforcement in `attune`/`silence` is the backstop, not the guarantee.
 
 ### Scope
 
-Convergence is per-file. Mutual recursion across a file boundary does not
-converge, because each import is a separate compilation.
-[signals/inference.md](signals/inference.md) describes the projection that
-carries a signal across a file boundary.
+Convergence is per-file. No signal crosses a file boundary
+([signals/inference.md](signals/inference.md)), so mutual recursion across one
+does not converge.
 
 
 ## Compilation phases (single-form)
@@ -233,10 +245,11 @@ carries a signal across a file boundary.
 
 `CompileCtx` is the per-instance compile-time state: a macro-expansion VM
 (primitives registered), the core.lisp/prelude `Expander`, the
-`PrimitiveMeta`, and the file→signal projection cache. It is built once when
-the instance's `RuntimeCore` is constructed and threaded explicitly through
-every pipeline call — two embedded Elle instances on one thread each own their
-own, so neither sees the other's exports or REPL definitions.
+`PrimitiveMeta`, and the REPL layer: the macros and definitions earlier REPL
+lines made. It is built once when the instance's `RuntimeCore` is constructed
+and threaded explicitly through every pipeline call — two embedded Elle
+instances on one thread each own their own, so neither sees the other's
+exports or REPL definitions.
 
 ### `with_macro_expansion()`
 
@@ -248,16 +261,15 @@ Used by `compile` and `compile_file`.
 ### `expander_and_meta()`
 
 Returns a cloned `(Expander, PrimitiveMeta)` without borrowing the macro VM.
-Used by `eval`, `analyze`, `analyze_file` and `analyze_file_detached`, which
-run expansion on their own VM.
+Used by `eval`, `analyze` and `analyze_file`, which run expansion on their own
+VM.
 
 ### Invariants
 
 - Prelude must be 100% defmacro (no runtime definitions)
 - Primitives must be registered in the context's macro VM at construction
-- A compile may run another inside it: the analyzer's projection lookup
-  compiles an imported file while the importer is still being analyzed
-  (`get_or_compile_projection`)
+- A compile never compiles another file. A file names its imports, and the
+  loader compiles each one when the import runs
 - A compile may run Elle code from the standard library: an `include` calls
   `import/resolve` to find its file, on the macro VM
   ([modules.md](modules.md))
@@ -268,6 +280,6 @@ Single-form functions (`compile`, `eval`, `analyze`) analyze one form. A call
 to a name that another form defines, and that no earlier compile registered,
 takes the unknown signal. The REPL compiles each form individually via
 `compile_file_repl` and registers def bindings in the compilation cache
-(`register_repl_binding`) so they are visible to subsequent compilations.
+(`register_repl_binding`) so later REPL lines see them.
 However, cross-form signal inference within a single REPL input is limited
 to what `compile_file` can infer for each form in isolation.

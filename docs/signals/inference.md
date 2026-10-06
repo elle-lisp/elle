@@ -274,20 +274,21 @@ then sees the narrower signal.
 A squelch that removes a bit adds `:error`, and `:error` cannot be squelched.
 So a squelch never turns a closure that signals into a silent one.
 
-## Across files: signal projection
+## Across files
 
-When a file returns a struct literal of closures, or a function whose body is
-one, the compiler records a projection: a signal for each field. The
-analyzer unwraps `begin`, `let`, `letrec` and `fn` bodies to find the struct,
-and takes the union of the two branches of an `if`. Any other return shape
-gives no projection.
+The analysis of a file never compiles another file, so it knows nothing about
+what an import returns. A call into another file, such as `(m:f)`, takes the
+signal of an unknown callee (#1232). A `(silence)` function therefore cannot
+call into another module. The file below imports one that does not exist, and
+its analysis still succeeds:
 
-An importing file that binds `((import-file "literal"))` looks the projection up.
-The analyzer reads no projection through `import`, which is a macro over a
-resolver the program may replace ([modules.md](../modules.md)).
-Today the projected signal never reaches a call through `module:field`, so a
-call into another file is treated as unknown (#1232). A `(silence)` function
-cannot call into another module until that is fixed.
+```lisp
+(def sig (signal-of "(def m ((import-file \"/nonexistent/m.lisp\"))) (defn g [] (m:f))" :g))
+(assert (contains? (get sig :bits) :io) "a call into another file may do anything")
+```
+
+[solver.md](../impl/solver.md) solves signals across the files of a program,
+and the [module design](../modules-proposal.md) links them with it.
 
 ## See also
 

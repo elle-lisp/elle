@@ -1,6 +1,6 @@
 # Standard Library Disk Cache
 
-<!-- audited: 2026-09-09 -->
+<!-- audited: 2026-10-06 -->
 
 `stdlib.lisp` (~2900 lines) is recompiled on every process start. The
 `compile_file` front end (expand → analyze → regions → lower → emit) is what
@@ -147,7 +147,6 @@ struct StoredBytecode {
     entry: SendableClosure,               // synthetic entry template
     intern_table: Vec<SendableClosure>,   // intern table of entry-reachable closure constants
     names: Vec<(u64, Box<str>)>,          // spellings, replayed into the loading display memo
-    signal_projection: Option<HashMap<String, Signal>>,
     dispatch_wrappers: StoredDispatchRegistry,  // cross-unit monomorphization
     fn_inline: StoredFnInlineRegistry,          // cross-unit HOF-argument inlining
 }
@@ -178,8 +177,8 @@ So the `Bytecode` is wrapped as a synthetic `ClosureTemplate` with arity
 - `frame_release_slots/regions`, `merged_slots` → region release tables
 - closure instances are deep-copied and interned by pointer
 
-`format_version`, `signal_projection` and the two registries have no
-`ClosureTemplate` field to travel in, so they ride alongside.
+`format_version` and the two registries have no `ClosureTemplate` field to
+travel in, so they ride alongside.
 
 ### LIR must be preserved
 

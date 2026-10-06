@@ -346,21 +346,23 @@ Elle instances can compile and run in one process — even on one thread — wit
 sharing macro definitions, stdlib exports, or REPL bindings. The capability is
 **`CompileCtx`** ([cache.rs](../../../src/pipeline/cache.rs)): the macro-expansion VM, the
 prelude/core `Expander`, the resident `PrimitiveMeta` (primitives + core.lisp +
-stdlib exports + REPL value bindings), and the file→signal projection cache. A
-compile names its instance's `CompileCtx` or it does not compile.
+stdlib exports + the bindings an embedder registers), and the REPL layer (the
+macros and definitions earlier REPL lines made). A compile names its instance's
+`CompileCtx` or it does not compile.
 
 An instance's three capabilities — the `VM`, the `SymbolTable`, and the
 `CompileCtx` — are owned together by a **`RuntimeCore`** ([core.rs](../../../src/runtime/core.rs)), which
 hands them out as the disjoint borrows `parts() -> (&mut VM, &mut SymbolTable,
 &mut CompileCtx)` that the pipeline entry points
 (`compile`/`compile_file`/`eval`/`analyze`/`execute_scheduled`) thread
-explicitly. `register_stdlib_exports`, the REPL-binding registration, and the
-projection lookup are `CompileCtx` methods. Two owners construct a `RuntimeCore`:
-`Runtime` (the `elle foo.lisp` / REPL / embedding path) and the `os/spawn` worker
+explicitly. `register_stdlib_exports`, the host-binding and REPL-binding
+registrations, and `on_behalf_of` are `CompileCtx` methods. Two owners
+construct a `RuntimeCore`: `Runtime` (the `elle foo.lisp` / REPL / embedding
+path) and the `os/spawn` worker
 ([worker.rs](../../../src/primitives/concurrency/worker.rs)), so a spawned thread compiles against
 its own instance, never a shared cache.
 
-Three seams reach the compile context where no `CompileCtx` parameter is in
+Two seams reach the compile context where no `CompileCtx` parameter is in
 scope, without reintroducing shared state:
 
 - **macro-body compiles** (`eval_syntax`, deep in expansion) read the
@@ -368,9 +370,7 @@ scope, without reintroducing shared state:
   `Expander`, so the expansion chain needs no `CompileCtx` threading;
 - the runtime **`eval`, `import/load-*` and `compile/*` instructions** reach the instance's
   `CompileCtx` through a `VM`-held pointer (`VM::set_compile_ctx`, the `heap_ptr`
-  idiom), set by the owner;
-- the **analyzer's import-projection compile** reaches it through a frontend-set
-  pointer (`Analyzer::set_compile_ctx`), so projections are the instance's own.
+  idiom), set by the owner.
 
 The pinning counterfactual is `two_instances_interleaved_defs_are_isolated`
 ([lifecycle.rs](../../../src/runtime/tests/lifecycle.rs)): two `Runtime`s on one thread each maintain their own

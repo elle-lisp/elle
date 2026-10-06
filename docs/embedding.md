@@ -1,6 +1,6 @@
 # Embedding
 
-<!-- audited: 2026-09-30 -->
+<!-- audited: 2026-10-06 -->
 
 Elle can be embedded as a scripting engine in Rust or C programs. The host
 creates a runtime, optionally registers custom primitives, compiles and
@@ -37,8 +37,8 @@ The init sequence:
    vendored generation. See the "Unicode version" section in
    [`strings.md`](strings.md).
 2. Register custom primitives via `PrimitiveDef`, then
-   `rt.compile_and_heap()` → `CompileCtx::register_repl_binding` so the
-   compiler sees them.
+   `rt.compile_and_heap()` → `CompileCtx::register_host_binding` so every
+   compile in the instance sees them, the files a program imports included.
 3. `let (vm, symbols, cctx) = rt.parts();` — borrow the three pieces the
    pipeline needs at once.
 4. `compile_file(source, symbols, cctx, filename)` — compile to bytecode.
@@ -59,7 +59,11 @@ Custom primitives are `fn(&mut NativeCtx, &[Value]) -> (SignalBits, Value)`
 wrapped in a `PrimitiveDef` struct with metadata (name, arity, signal, region
 effect, docs). The `NativeCtx` is the call's allocation capability: a primitive
 that builds a heap value names its region and heap through it. Register the
-resulting value through `register_repl_binding` so the compiler sees it.
+resulting value through `register_host_binding` so the compiler sees it.
+
+`register_repl_binding` is the REPL's own registration. A binding made that way
+reaches later REPL lines, compiled through `compile_file_repl`, and no other
+compile.
 
 See [the Rust host demo](../demos/embedding/src/main.rs) for the whole sequence
 in one file.

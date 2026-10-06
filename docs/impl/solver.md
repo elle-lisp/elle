@@ -17,10 +17,10 @@ The analyzer infers one file at a time ([signals/inference.md](../signals/infere
 - A file's top level converges by a fixpoint, and a function body runs none
   ([pipeline.md](../pipeline.md)). A forward reference inside a body gets every
   bit, and a lambda that calls its enclosing definition reads the silent seed.
-- A projection maps each exported field to a signal. It cannot say "field
-  `:connect` of parameter 0", a parameter captured from an enclosing function,
-  or a dependency on another module's export.
-- A call through `module:field` never uses the projection (#1232).
+- No signal crosses a file boundary, so a call into another file takes every
+  bit (#1232). A map from each exported field to a signal would not be enough:
+  it cannot say "field `:connect` of parameter 0", a parameter captured from an
+  enclosing function, or a dependency on another module's export.
 
 A call to a field of a parameter, such as a plugin a module is given, has a
 call expression for its callee, and the analyzer answers it with every bit.
@@ -53,9 +53,8 @@ fact instead of fifty.
 ## Facts
 
 [extract.rs](../../examples/signal_solve/extract.rs) walks each file's analyzed
-HIR and states facts about it. The file is analyzed without compiling its
-imports (`analyze_file_detached`, [pipeline.md](../pipeline.md)), so the walk
-never enters another file.
+HIR and states facts about it. A file's analysis never compiles its imports
+([pipeline.md](../pipeline.md)), so the walk never enters another file.
 
 - An `emit` adds its bits to the enclosing function. A `match` with no total
   arm adds `:error`.

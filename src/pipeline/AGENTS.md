@@ -128,4 +128,12 @@ Properties:
 
 6. **Macro expansion runs on the instance's `CompileCtx`.** Its macro VM and a
    clone of its `Expander`, which already holds the prelude, expand every form,
-   so no compile parses the prelude again (docs/pipeline.md).
+   so no compile parses the prelude again (docs/pipeline.md). Only a REPL line,
+   compiled through `compile_file_repl`, also sees the macros and definitions
+   earlier lines made. A file the REPL imports compiles as it would from any
+   program.
+
+7. **A compile never compiles another file.** The analyzer reads nothing from
+   the target of an `import-file`. The loader compiles that file when the
+   import runs, so a cycle of imports is a cycle of loads, which the loader
+   reports.

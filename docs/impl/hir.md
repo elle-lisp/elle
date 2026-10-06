@@ -197,17 +197,11 @@ the body must still collect it.
 There is **no "module layer."** A module is just the body's return value. Per
 [modules.md](../modules.md), a file runs as a single letrec whose last
 expression is its value, with no export declarations and no special syntax, and
-`import/load-file` compiles and runs it. The two things that looked like a
-layer are not bound to the body at all:
-
-- The **export projection** (`compute_signal_projection`) is an optional
-  compile-time *signal-inference cache* over the returned struct. Delete it and
-  modules still work, with conservative cross-file signals.
-- `(signal :kw)` is an orthogonal *declaration form*. Its compile-time effect
-  on the signal registry is exactly like `defmacro`'s effect on the expander.
-
-Strip both away and the file body is **strictly `letrec*`**, which is what
-modules.md already says it is.
+`import/load-file` compiles and runs it. The one thing that looked like a
+layer is not bound to the body at all: `(signal :kw)` is an orthogonal
+*declaration form*, and its compile-time effect on the signal registry is
+exactly like `defmacro`'s effect on the expander. Strip it away and the file
+body is **strictly `letrec*`**, which is what modules.md already says it is.
 
 **So `analyze_file_letrec` is an out-of-band driver to retire, not to rename.**
 It implements `letrec*`-with-redefinition as a bespoke path that no `eval` or
