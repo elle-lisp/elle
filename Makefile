@@ -166,9 +166,9 @@ semver-check: elle  ## Verify every versioned library surface against its commit
 # ── Test ────────────────────────────────────────────────────────────
 
 # Approximate runtimes (for guidance — vary by machine):
-#   make smoke    ~30min release: both suites, doctests, embedding, the surface gate
-#   make qa       ~2min: the PR gate's QA job (rustfmt, workspace clippy, crosscheck, rustdoc)
-#   make test     qa + smoke + the Rust unit, integration and rig tests
+#   make smoke    ~30min release: qa, both suites, doctests, embedding, the surface gate
+#   make qa       ~2min: the PR gate's QA job (rustfmt, indexes, clippy, crosscheck, rustdoc)
+#   make test     smoke + the Rust unit, integration and rig tests
 #   cargo test    ~60min full suite (unit + integration + property)
 #
 # `make test` exists to predict the PR gate, so it runs what the gate runs. A
@@ -545,9 +545,19 @@ embedding: elle  ## Build + run embedding demos (Rust + C hosts)
 	LD_LIBRARY_PATH=$(EMBED_TARGET_DIR) demos/embedding/chost
 
 
-# What a contributor runs before a push and what the merge queue runs: both
-# suites on this build, the documents, the embedding demo and the surface gate.
-smoke: smoke-lang smoke-impl doctest embedding semver-check  ## Both suites, the doctests, the embedding demo and the surface gate
+# What a contributor runs before a push and what the merge queue runs: `qa`,
+# then both suites on this build, the documents, the embedding demo and the
+# surface gate. `qa` takes about two minutes and the passes about thirty, so a
+# formatting or clippy failure stops the gate before the suites start.
+#
+# The passes run in a sub-make that starts only once `qa` has finished, whatever
+# `-j` says; as prerequisites beside `qa`, `make -j` would start them together.
+# A platform's Smoke job runs each pass as a step of its own, and no `qa`
+# (docs/analysis/ci.md).
+SMOKE_PASSES := smoke-lang smoke-impl doctest embedding semver-check
+
+smoke: qa  ## qa, then both suites, the doctests, the embedding demo and the surface gate
+	@$(MAKE) --no-print-directory $(SMOKE_PASSES)
 	@echo "=== all smoke tests passed ==="
 
 # CI documents private items too, and most of this crate is private — without
@@ -561,16 +571,14 @@ smoke: smoke-lang smoke-impl doctest embedding semver-check  ## Both suites, the
 #
 # `--all-features` builds the MLIR tier, which finds LLVM 22 through
 # `MLIR_SYS_220_PREFIX` in the environment (docs/impl/mlir.md).
-qa: audit crosscheck  ## The PR gate's QA job, locally (~2min, no smoke): rustfmt, workspace clippy, rustdoc, doctests
+qa: audit agents-check crosscheck  ## The PR gate's QA job, locally (~2min, no smoke): rustfmt, indexes, clippy, rustdoc, doctests
 	cargo fmt --check
 	cargo clippy --workspace --all-targets --all-features -- -D warnings
 	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --document-private-items
 	cargo test --workspace --doc
 
 
-# `qa` goes first: it takes about two minutes and the suites about thirty, so a
-# formatting or clippy failure stops the gate before the suites start.
-test: qa smoke  ## QA (fmt/clippy/crosscheck/rustdoc), then smoke, then the Rust unit, integration and rig tests
+test: smoke  ## smoke (qa first), then the Rust unit, integration and rig tests
 	cargo test --workspace --lib --all-features
 	cargo test --test '*' -- --skip property
 	cargo test -p elle-rig

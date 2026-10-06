@@ -23,10 +23,26 @@ jobs:
       # lets the upload below name it too — the default sits under HOME, which
       # moves with the runner image. See docs/analysis/ci.md.
       ELLE_STATE: ${{ github.workspace }}/target/elle-state
+      # `make smoke` starts with `make qa`, whose clippy and rustdoc build every
+      # feature, the MLIR tier among them. The PR's `qa` job sets the same three.
+      MLIR_SYS_220_PREFIX: /usr/lib/llvm-22
+      TABLEGEN_220_PREFIX: /usr/lib/llvm-22
+      LIBCLANG_PATH: /usr/lib/llvm-22/lib
     steps:
       - uses: actions/checkout@v4
+      # `make qa` runs rustfmt and clippy, and `make crosscheck` inside it
+      # prints SKIPPED and passes over a target the toolchain lacks.
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt,clippy
+          targets: x86_64-apple-darwin,aarch64-linux-android
       - uses: Swatinem/rust-cache@v2
+      - name: Install LLVM 22 (for mlir feature)
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update
+          sudo apt-get install -y llvm-22-dev libpolly-22-dev mlir-22-tools libmlir-22-dev libclang-22-dev clang-22
       - name: Install GNU parallel and Redis
         run: |
           sudo apt-get update
@@ -34,7 +50,7 @@ jobs:
           sudo systemctl start redis-server
       - name: Build the release binary and its rig
         run: cargo build --release -p elle -p elle-rig
-      - name: Run smoke tests
+      - name: QA, then smoke tests
         run: make smoke
       # Pass or fail: a red queue run is the one whose store a reader wants,
       # and the machine goes away with it. `elle test --import` merges the
