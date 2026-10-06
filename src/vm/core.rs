@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! The `VM` struct — the per-instance state a running program reaches — and the
 //! accessors that reborrow the allocations it points at.
 //!
@@ -146,7 +146,7 @@ pub struct VM {
     pub(crate) ffi: FFISubsystem,
     /// Modules currently being loaded (circular-import guard).
     /// Added before execution, removed after. If a module is in this set
-    /// when import-file is called, it's a circular dependency.
+    /// when a loader is called on it, the load is a cycle.
     pub loading_modules: std::collections::HashSet<String>,
     /// Plugins already loaded (path → return value). Prevents double-loading
     /// which would re-register primitives and leak library handles.

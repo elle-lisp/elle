@@ -2996,6 +2996,69 @@
   (fold * 1 xs))
 
 
+## ── Module resolution ───────────────────────────────────────────────
+
+(defn import/resolve [spec &opt dir]
+  "The absolute, normalized path of the file SPEC names, as import finds it.
+   std/X names lib/X.lisp under the project root, and plugin/X the plugin built
+   under the root's target/, running profile first; a prefix whose file does not
+   exist falls through to the search. A ./ or ../ SPEC is looked for in DIR
+   alone, and names nothing without DIR. An absolute SPEC is looked for from
+   the filesystem root alone. Any other SPEC is looked for in each --path entry,
+   then in home. Raises :io-error when SPEC names no file. docs/modules.md holds
+   the rules."
+  (let* [suffix (vm/config :plugin-suffix)
+         lib-name (string "libelle_" (path/filename spec) "." suffix)
+         spec-dir (or (path/parent spec) "")
+         file-in (fn [paths] (find path/file? paths))
+         probe (fn [d]
+                 (file-in [(path/join d (string spec ".lisp"))
+                           (path/join d spec) (path/join d spec-dir lib-name)
+                           (path/join d lib-name)]))
+         home (let [h (vm/config :home)]
+                (when (and h (path/dir? h)) h))
+         exe-dir (path/parent (elle/executable))
+         root (or home
+                  (letrec [up (fn [d]
+                                (cond
+                                  (nil? d) nil
+                                  (path/file? (path/join d "Cargo.toml")) d
+                                  (up (path/parent d))))]
+                    (up exe-dir)))
+         prefixed (fn [prefix]
+                    (when (and root (string/starts-with? spec prefix))
+                      (slice spec (length prefix))))
+         std-name (prefixed "std/")
+         plugin-name (prefixed "plugin/")
+         profile (elle/build-profile)
+         profiles [profile (if (= profile "release") "debug" "release")]
+         relative? (or (string/starts-with? spec "./")
+                       (string/starts-with? spec "../"))
+         dirs (cond
+                relative? (if dir [dir] [])
+                (path/absolute? spec) ["/"]
+                (filter path/dir?
+                        (map path/absolute
+                             (concat (vm/config :path)
+                                     (filter identity [(or home exe-dir)])))))
+         found (or (when std-name
+                     (file-in [(path/join root "lib" (string std-name ".lisp"))]))
+                   (when plugin-name
+                     (file-in (map (fn [p]
+                                     (path/join root "target" p
+                                     (string "libelle_" plugin-name "." suffix)))
+                                   profiles)))
+                   (letrec [search (fn [ds]
+                                     (when (nonempty? ds)
+                                       (or (probe (first ds)) (search (rest ds)))))]
+                     (search dirs)))]
+    (if found
+      (path/normalize (path/absolute found))
+      (error {:error :io-error
+              :spec spec
+              :message (string "import/resolve: module '" spec "' not found")}))))
+
+
 ## ── Module export closure ───────────────────────────────────────────
 ## Last expression: a closure returning a struct of all exports.
 ## Called by init_stdlib to register stdlib functions as primitives.
@@ -3128,6 +3191,7 @@
    :tcp/connect tcp/connect
    :service-up? service-up?
    :subprocess/system subprocess/system
+   :import/resolve import/resolve
    :sort-with sort-with
    :sort-by-cmp sort-by-cmp
    :ffi/pin ffi/pin

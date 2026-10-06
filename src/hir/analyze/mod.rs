@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-06
 //! Syntax to HIR analysis
 //!
 //! docs/impl/hir.md
@@ -225,7 +225,7 @@ pub struct Analyzer<'a> {
     /// the binding's signal_env entry.
     last_squelch_signal: Option<Signal>,
     /// Import projection detected during call analysis. Set when the
-    /// analyzer sees `((import "literal"))` and the target file has a
+    /// analyzer sees `((import-file "literal"))` and the target file has a
     /// projection. Consumed by binding analysis to populate projection_env.
     last_import_projection: Option<HashMap<String, Signal>>,
     /// Tracks signal sources within the current lambda body for polymorphic inference
@@ -286,7 +286,7 @@ pub struct Analyzer<'a> {
     /// registry persists across compiles, so the test runner recompiling a file
     /// once per tier would otherwise collide ("already registered").
     signals_declared: HashSet<String>,
-    /// The owning instance's compile context, for resolving `(import "literal")`
+    /// The owning instance's compile context, for resolving `(import-file "literal")`
     /// signal projections during analysis (`get_or_compile_projection`). Set by
     /// the file frontend via [`set_compile_ctx`](Analyzer::set_compile_ctx); the
     /// frontend owns the `CompileCtx`, outlives this analyzer, and never touches
@@ -379,7 +379,7 @@ impl<'a> Analyzer<'a> {
         analyzer
     }
 
-    /// Provide the owning instance's compile context so that `(import
+    /// Provide the owning instance's compile context so that `(import-file
     /// "literal")` forms resolve their signal projection during analysis. Called
     /// by the file frontend, which owns the `CompileCtx` for the analyzer's
     /// whole lifetime. See the `import_ctx` field.

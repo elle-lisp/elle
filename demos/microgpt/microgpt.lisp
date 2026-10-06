@@ -1,16 +1,18 @@
 #!/usr/bin/env elle
-(elle/epoch 12)
-# ── microgpt: minimal GPT in Elle ───────────────────────────────
+(elle/epoch 14)
+# audited: 2026-10-06
+# A minimal GPT: scalar autograd and a character-level model trained on names.
+# demos/README.md
 #
 # Port of https://github.com/karpathy/microgpt
-# Scalar autograd + character-level GPT trained on names.
 #
 # Usage: cargo run --release -- demos/microgpt/microgpt.lisp
 
 (def rng (import "plugin/random"))
-(def ag ((import "demos/microgpt/autograd.lisp")))
-(def helpers ((import "demos/microgpt/helpers.lisp")))
-(def gpt ((import "demos/microgpt/model.lisp") ag helpers rng))
+(def ag ((import "./autograd")))
+(def helpers ((import "./helpers")))
+(def gpt ((import "./model") ag helpers rng))
+(def here (path/parent (get (meta/location) :file)))
 
 # ── Data loading and tokenizer ──────────────────────────────────
 
@@ -145,7 +147,8 @@
   (let* [a (ag:make-value 3.0)
          b (ag:make-value 4.0)
          c (ag:v+ (ag:v* a b) (ag:vpow a 2.0))]
-    (ag:backward c)  # dc/da = b + 2a = 4 + 6 = 10, dc/db = a = 3
+    # dc/da = b + 2a = 4 + 6 = 10, dc/db = a = 3
+    (ag:backward c)
     (when (> (abs (- (ag:v-grad a) 10.0)) 0.000001)
       (error (string/format "grad check failed: da = {} (expected 10.0)"
                             (ag:v-grad a))))
@@ -161,7 +164,7 @@
   (check-grads)
 
   (println "Loading data...")
-  (let [names (rng:shuffle (load-data "demos/microgpt/input.txt"))]
+  (let [names (rng:shuffle (load-data (path/join here "input.txt")))]
     (println "Loaded " (length names) " names")
 
     (let [tokenizer (build-tokenizer names)]

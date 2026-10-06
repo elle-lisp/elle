@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! The `compile/*` queries that compile a test file or dump its stages, and
 //! run the setup module of a test file on this VM.
 //!
@@ -276,7 +276,7 @@ impl VM {
                 let (_, v) = self.fiber.signal.take().unwrap_or((SIG_OK, Value::NIL));
                 // The setup module's accumulator left its compiled top level
                 // through the return convention — it carries its return mint,
-                // exactly as `import`'s module value does. The raising
+                // exactly as the module value `import/load-file` runs does. The raising
                 // primitives declare `result_minted`, so the invoking
                 // `dispatch_native_call` skips the pass-through retain for
                 // this answer.

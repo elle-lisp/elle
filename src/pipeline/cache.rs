@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-06
 // src/pipeline/AGENTS.md
 //! `CompileCtx`: one instance's compile-time state.
 //!
@@ -67,8 +67,8 @@ pub struct CompileCtx {
     /// the runtime `ev/run` entry.
     meta: PrimitiveMeta,
     /// Signal projection cache: resolved file path → keyword→signal projection.
-    /// Populated lazily when the analyzer encounters `(import "...")` with a
-    /// literal string argument. Per-instance, keyed by resolved path, and never
+    /// Populated lazily when the analyzer encounters `((import-file "..."))`
+    /// with a literal string argument. Per-instance, keyed by resolved path, and never
     /// invalidated: an edit to the file during the instance's life does not
     /// reach the cached projection.
     projections: HashMap<String, Option<HashMap<String, Signal>>>,

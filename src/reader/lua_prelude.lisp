@@ -1,8 +1,7 @@
-(elle/epoch 11)
-## Lua compatibility prelude
-##
-## Provides Lua standard library functions mapped to Elle primitives.
-## Usage from .lua files:  `(import "std/lua")
+(elle/epoch 14)
+## audited: 2026-10-06
+## The Lua standard library mapped onto Elle, spliced ahead of every .lua program.
+## docs/lua.md
 
 # ============================================================================
 # Type system
@@ -156,7 +155,9 @@
 # Modules
 # ============================================================================
 
-(def require (fn (path) (import (string path ".lisp"))))
+# require("m") loads m.lisp from the working directory, where Lua's default
+# package.path (./?.lua) looks.
+(def require (fn (path) (import/load-file (string path ".lisp"))))
 
 # ============================================================================
 # Misc globals

@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-06
 //! The abstract value of an expression: what the extractor knows a callee, an argument or an export may be.
 //!
 //! docs/impl/solver.md
@@ -67,9 +67,9 @@ impl<'a> Extractor<'a> {
     }
 
     fn call_aval(&mut self, hir: &'a Hir, func: &'a Hir, args: &'a [elle::hir::CallArg]) -> AVal {
-        if self.is_prim_named(func, "import") {
-            if let Some(HirKind::String(spec)) = args.first().map(|a| &a.expr.kind) {
-                if let Some(path) = resolve(spec) {
+        if self.is_prim_named(func, "import/load-file") {
+            if let Some(HirKind::String(literal)) = args.first().map(|a| &a.expr.kind) {
+                if let Some(path) = resolve(literal) {
                     let site = self.site(hir.id);
                     return AVal::ModuleRef { path, site };
                 }

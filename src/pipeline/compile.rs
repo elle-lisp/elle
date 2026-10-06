@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-10-06
 // src/pipeline/AGENTS.md
 //! Compilation pipeline: source -> bytecode.
 
@@ -177,12 +177,13 @@ fn compile_file_to_lir_inner(
         cctx.with_macro_expansion(arena, |macro_vm, mut expander, meta| {
             let mut pending: std::collections::VecDeque<Syntax> = syntaxes.into();
             let mut expanded_forms = Vec::new();
-            let mut included: HashSet<String> = HashSet::from([source_name.to_string()]);
+            let mut included = included_root(source_name);
             while let Some(syntax) = pending.pop_front() {
                 if resolve_and_splice_include(
                     &arena,
                     &syntax,
-                    source_name,
+                    macro_vm,
+                    &meta,
                     &mut pending,
                     &mut included,
                 )? {
@@ -302,6 +303,23 @@ pub fn compile_file_repl(
     compile_file_inner(source, symbols, cctx, source_name)
 }
 
+/// Compile one form, handed over as a value, as a whole file: `compile_file`
+/// from a datum or a syntax object instead of source text. A syntax object keeps
+/// its own source locations. `import/load-syntax` compiles its form here.
+pub fn compile_value(
+    form: crate::value::Value,
+    symbols: &mut SymbolTable,
+    cctx: &mut CompileCtx,
+    source_name: &str,
+) -> Result<CompileResult, String> {
+    with_syntax_arena(cctx.heap_ptr(), |arena| {
+        let syntax = Syntax::from_value(&arena, &form, symbols, Span::synthetic())?;
+        compile_syntaxes_with_transform(vec![syntax], symbols, cctx, source_name, |_, forms, _| {
+            forms
+        })
+    })
+}
+
 fn compile_file_inner(
     source: &str,
     symbols: &mut SymbolTable,
@@ -387,13 +405,14 @@ fn compile_module_with_transform(
     xform: impl FnOnce(&SyntaxArena, Vec<Syntax>, crate::syntax::ScopeId) -> Vec<Syntax>,
 ) -> Result<CompileResult, String> {
     let frontend = compile_file_frontend_xform(source, symbols, cctx, source_name, xform)?;
-    lower_test_frontend(frontend, symbols, cctx)
+    lower_frontend(frontend, symbols, cctx)
 }
 
 /// Like `compile_module_with_transform`, but from already-read top-level
 /// `syntaxes` (parse once in one VM, compile in another). Powers
 /// `compile/whole-module-syntax` — the runner reads a legacy multi-form file in
-/// the main VM and ships its syntax to a worker that compiles it here.
+/// the main VM and ships its syntax to a worker that compiles it here — and
+/// `compile_value`.
 fn compile_syntaxes_with_transform(
     syntaxes: Vec<Syntax>,
     symbols: &mut SymbolTable,
@@ -402,12 +421,12 @@ fn compile_syntaxes_with_transform(
     xform: impl FnOnce(&SyntaxArena, Vec<Syntax>, crate::syntax::ScopeId) -> Vec<Syntax>,
 ) -> Result<CompileResult, String> {
     let frontend = compile_syntaxes_frontend_xform(syntaxes, symbols, cctx, source_name, xform)?;
-    lower_test_frontend(frontend, symbols, cctx)
+    lower_frontend(frontend, symbols, cctx)
 }
 
-/// Lower + emit a test-mode front-end result to bytecode. Shared by the source
-/// and syntax entry points so they differ only in how the front end is fed.
-fn lower_test_frontend(
+/// Lower + emit a front-end result to bytecode. Shared by the test modes and
+/// `compile_value`, so they differ only in how the front end is fed.
+fn lower_frontend(
     frontend: Frontend,
     symbols: &SymbolTable,
     cctx: &mut CompileCtx,
