@@ -1,5 +1,6 @@
 // audited: 2026-10-21
-//! Binding forms: `let`, `def` and `var`, and `assign`.
+//! The binding forms `let`, `def`, `var` and `assign`, and the analysis state a
+//! binding's initializer leaves for it.
 //!
 //! docs/bindings.md
 
@@ -315,7 +316,7 @@ impl<'a> Analyzer<'a> {
     /// and apply them to a binding. Called after analyzing a binding's value
     /// expression in `def`, `let`, `letrec`, and file-scope letrec.
     pub(crate) fn apply_transient_binding_state(&mut self, binding: Binding) {
-        // Import projection: the value was `((import "literal"))`
+        // Import projection: the value was `((import-file "literal"))`
         if let Some(proj) = self.last_import_projection.take() {
             self.projection_env.insert(binding, proj);
         }

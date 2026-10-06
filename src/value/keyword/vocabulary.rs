@@ -303,6 +303,8 @@ pub(crate) static VOCABULARY: &[&str] = &[
     "unicode",
     "max-depth",
     "jit-verify",
+    "home",
+    "plugin-suffix",
     "adaptive",
     "custom",
     "eager",

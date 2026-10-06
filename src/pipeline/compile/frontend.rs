@@ -131,12 +131,13 @@ fn compile_syntaxes_frontend_xform_inner(
             let file_scope = (!source_name.starts_with('<')).then(|| expander.fresh_scope());
             let mut pending: std::collections::VecDeque<Syntax> = syntaxes.into();
             let mut expanded_forms = Vec::new();
-            let mut included: HashSet<String> = HashSet::from([source_name.to_string()]);
+            let mut included = included_root(source_name);
             while let Some(syntax) = pending.pop_front() {
                 if resolve_and_splice_include(
                     &arena,
                     &syntax,
-                    source_name,
+                    macro_vm,
+                    &meta,
                     &mut pending,
                     &mut included,
                 )? {
