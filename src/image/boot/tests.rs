@@ -1,6 +1,5 @@
-// audited: 2026-09-21
-//! What a boot image carries that nothing outside this crate can see: the
-//! transformer caches, and the expander's scope counter.
+// audited: 2026-10-06
+//! What a boot image carries that only this crate can see: transformer caches, the scope counter, and the stdlib's JIT tier.
 //!
 //! docs/impl/image/boot.md
 
@@ -145,4 +144,65 @@ fn raising_the_scope_counter_only_moves_it_up() {
     assert_eq!(expander.scope_counter(), 50);
     expander.raise_scope_counter(20);
     assert_eq!(expander.scope_counter(), 50, "a lower watermark lowered it");
+}
+
+/// Whether a call to the stdlib's `inc`, made by a REPL form with the JIT
+/// eager, leaves compiled code for it in the cache.
+#[cfg(feature = "jit")]
+fn inc_promotes(rt: &mut Runtime) -> bool {
+    rt.vm().runtime_config.jit = crate::config::JitPolicy::Eager;
+    let inc = {
+        let (vm, symbols, cctx) = rt.parts();
+        crate::pipeline::eval_all("inc", symbols, vm, cctx, "<tier>").expect("inc")
+    };
+    let (bytecode, signal, arity) = {
+        let t = &inc.as_closure().expect("inc is a closure").template;
+        (t.bytecode().as_ptr(), t.signal(), t.arity())
+    };
+    // A REPL binding the compiler knows only by value, so the call below is a
+    // call: a name the inline registry carries would have its body spliced in.
+    let sym = rt.symbols().intern("tier-f");
+    {
+        let (cctx, heap) = rt.compile_and_heap();
+        cctx.register_repl_binding(
+            heap,
+            sym,
+            inc,
+            crate::value::arena::RootRef::Mint,
+            signal,
+            Some(arity),
+        );
+    }
+    let (vm, symbols, cctx) = rt.parts();
+    crate::pipeline::eval_all("(tier-f 1)", symbols, vm, cctx, "<tier>").expect("call");
+    vm.drain_jit_pending();
+    vm.jit_code_for(bytecode).is_some()
+}
+
+// § Test plan, "Tier parity" (docs/impl/image/plan.md): a hot stdlib function
+// reaches the JIT under an image boot exactly as under a source boot, because
+// the hydrated payload carries its LIR.
+//
+// The counter-factual is a hydrated header with no LIR: every call still
+// answers, on the interpreter, and only the cache can tell. The source boot
+// runs first, so a stdlib function the JIT refuses fails here rather than
+// passing both boots vacuously.
+#[cfg(feature = "jit")]
+#[test]
+fn a_hot_stdlib_function_compiles_on_the_jit_under_either_boot() {
+    let scratch = Scratch::new("tier");
+    let mut source = Runtime::with_caches(scratch.caches());
+    assert_eq!(source.boot_source(), BootSource::Compiled);
+    assert!(
+        inc_promotes(&mut source),
+        "a source boot does not compile inc, so this test exercises nothing"
+    );
+    drop(source);
+
+    let mut hydrated = Runtime::with_caches(scratch.caches());
+    assert_eq!(hydrated.boot_source(), BootSource::Image);
+    assert!(
+        inc_promotes(&mut hydrated),
+        "an image boot leaves inc on the interpreter tier"
+    );
 }

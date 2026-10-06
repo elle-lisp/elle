@@ -246,6 +246,13 @@ impl ClosureTemplate {
         self.payload().wasm_func_idx()
     }
 
+    /// The frozen function the JIT promotes this code object from, read out of
+    /// the payload, so a hydrated header answers it as a materialized one does.
+    #[inline]
+    pub fn lir(&self) -> Option<crate::lir::LirView<'_>> {
+        self.payload().lir()
+    }
+
     /// Where the source lambda was written, for `(meta/origin f)`. A span is
     /// plain data, so it rides on the payload rather than on the blueprint and
     /// a hydrated header answers it too (docs/impl/region/template.md).

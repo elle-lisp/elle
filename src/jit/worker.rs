@@ -8,7 +8,7 @@
 //! next call picks the code up from the cache.
 
 use crate::jit::{JitCode, JitCompiler, JitError};
-use crate::lir::LirOwned;
+use crate::lir::{LirOwned, LirView};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -125,17 +125,18 @@ impl Drop for JitWorker {
     }
 }
 
-/// Prepare a `JitTask` from a frozen function by copying it.
+/// Prepare a `JitTask` from a frozen function by copying it out of whatever
+/// pages hold it, which the worker's thread cannot read (docs/impl/jit.md).
 ///
 /// `display_name` backfills a nameless LIR (the common case — lowering
 /// names few functions) from the closure template, so the compile records
 /// a readable entry in the code-address registry (docs/impl/jit.md).
 pub(crate) fn prepare_task(
-    lir: &LirOwned,
+    lir: &LirView<'_>,
     bytecode_key: usize,
     display_name: Option<&str>,
 ) -> JitTask {
-    let mut lir = lir.clone();
+    let mut lir = lir.to_owned();
     if lir.view().name().is_none() {
         lir.set_name(display_name.map(String::from));
     }

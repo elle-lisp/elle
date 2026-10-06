@@ -10,7 +10,7 @@
 
 use super::instr::InstrRef;
 use super::op::Op;
-use super::owned::LirCode;
+use super::owned::{LirCode, LirOwned};
 use super::record::{BlockRec, ConstRec, Node, SiteRec, NO_FILE, NO_REG};
 use crate::hir::region::StaticRegion;
 use crate::lir::{ClosureId, Label, Reg, Terminator};
@@ -224,6 +224,35 @@ impl<'a> LirView<'a> {
     /// Whether any instruction is a `op`.
     pub fn has_op(&self, op: Op) -> bool {
         self.parts.nodes.iter().any(|n| n.op == op as u8)
+    }
+
+    /// A copy of everything this view reads, owned by nobody else. A function
+    /// leaves the pages it lives in this way — for the JIT worker, which runs
+    /// on another thread, and for a boundary that outlives those pages.
+    pub fn to_owned(&self) -> LirOwned {
+        LirOwned {
+            code: self.code.clone(),
+            values: self.parts.values.to_vec(),
+        }
+    }
+
+    /// The block records, for the tests that write a record's pad bytes.
+    #[cfg(test)]
+    pub(crate) fn block_records(&self) -> &'a [BlockRec] {
+        &self.code.blocks
+    }
+
+    /// The constant records, for the tests that write a record's pad bytes.
+    #[cfg(test)]
+    pub(crate) fn const_records(&self) -> &'a [ConstRec] {
+        self.parts.consts
+    }
+
+    /// The yield-point and call-site records, for the tests that write a
+    /// record's pad bytes.
+    #[cfg(test)]
+    pub(crate) fn site_records(&self) -> [&'a [SiteRec]; 2] {
+        [&self.code.yield_points, &self.code.call_sites]
     }
 }
 

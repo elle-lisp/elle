@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-10-06
 // What the serialized form carries across, and the one thing a restored
 // template loses.
 // docs/impl/stdlib-cache.md
@@ -54,11 +54,18 @@ fn bytecode_roundtrip_preserves_lir_and_closures() {
             assert_eq!(a.is_heap(), b.is_heap(), "heap-ness preserved");
         }
         // LIR must survive (JIT depends on it) and closures must be rebuilt.
+        // The JIT reads it out of the code payload, so the reloaded blueprint
+        // has to carry it as far as the payload a header materializes.
+        let mut heap = crate::value::fiberheap::FiberHeap::new();
         for (orig, reloaded) in bc.child_protos.iter().zip(&loaded.child_protos) {
+            let orig = orig.lir_function.as_ref().expect("a nested lambda has LIR");
+            let t = crate::value::ClosureTemplate::for_proto(&mut heap, reloaded);
+            let reloaded = t.lir().expect("the reloaded payload carries LIR");
+            let ops = |v: &crate::lir::LirView<'_>| v.nodes().map(|n| n.op()).collect::<Vec<_>>();
             assert_eq!(
-                orig.lir_function.is_some(),
-                reloaded.lir_function.is_some(),
-                "LIR presence preserved"
+                ops(&orig.view()),
+                ops(&reloaded),
+                "the reloaded LIR runs different instructions"
             );
         }
         let _ = vm;
@@ -200,6 +207,41 @@ fn a_cache_hit_inlines_the_stdlib_bodies_a_stdlib_compile_inlines() {
     assert_eq!(
         compiled_len, cached_len,
         "and the two paths must emit the same amount of code for it"
+    );
+}
+
+/// A cache hit's stdlib closures reach the JIT as a compiled stdlib's do: the
+/// restored templates carry their LIR into the payload every reader reads.
+/// The counter-factual is a hit whose closures run interpreted forever, which
+/// answers every call correctly and is visible only here and in a profile.
+#[test]
+fn a_cached_stdlib_closure_carries_its_lir() {
+    fn map_has_lir(rt: &mut Runtime) -> bool {
+        let (vm, symbols, cctx) = rt.parts();
+        let map = crate::pipeline::eval_all("map", symbols, vm, cctx, "<lir>").expect("map");
+        map.as_closure()
+            .expect("map is a closure")
+            .template
+            .lir()
+            .is_some()
+    }
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cache = StdlibCache::Dir(dir.path().to_path_buf());
+
+    let mut compiled = Runtime::with_stdlib_cache(cache.clone());
+    assert_eq!(compiled.stdlib_source(), StdlibSource::Compiled);
+    assert!(
+        map_has_lir(&mut compiled),
+        "a compiled stdlib's map has LIR"
+    );
+    drop(compiled);
+
+    let mut hit = Runtime::with_stdlib_cache(cache);
+    assert_eq!(hit.stdlib_source(), StdlibSource::Cache);
+    assert!(
+        map_has_lir(&mut hit),
+        "a cache hit's map lost its LIR, so it never reaches the JIT"
     );
 }
 

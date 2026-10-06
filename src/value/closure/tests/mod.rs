@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-10-06
 //! Which payload a header reads, and how long the region behind it lives.
 //! docs/impl/region/template.md
 //!
@@ -13,6 +13,7 @@ use crate::value::fiberheap::FiberHeap;
 use crate::value::heap::HeapObject;
 use crate::value::types::Arity;
 
+mod lir;
 mod payload;
 
 /// A fresh region to build a header in.

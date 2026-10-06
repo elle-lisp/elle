@@ -91,7 +91,7 @@ impl VM {
             && !self.jit_rejections.contains_key(&bytecode_ptr)
         {
             if let Some(lir_func) = closure.template.lir_function() {
-                self.submit_jit_task(lir_func, closure, bytecode_ptr);
+                self.submit_jit_task(&lir_func.view(), closure, bytecode_ptr);
             }
         }
 
@@ -183,7 +183,7 @@ impl VM {
     /// Submit a background JIT compilation task for a hot function.
     fn submit_jit_task(
         &mut self,
-        lir_func: &crate::lir::LirOwned,
+        lir_func: &crate::lir::LirView<'_>,
         closure: &crate::value::Closure,
         bytecode_ptr: *const u8,
     ) {

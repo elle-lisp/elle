@@ -90,11 +90,11 @@ fn a_closure_crosses_with_its_lir_and_the_values_it_loads() {
         let restored = restored.as_closure().expect("a closure arrives");
         let lir = restored
             .template
-            .lir_function()
+            .lir()
             .expect("the LIR crosses with the closure");
 
         let mut loaded = Vec::new();
-        for node in lir.view().nodes() {
+        for node in lir.nodes() {
             if let InstrRef::ValueConst { value, .. } = node.instr() {
                 loaded.push(value);
             }
@@ -108,7 +108,7 @@ fn a_closure_crosses_with_its_lir_and_the_values_it_loads() {
         #[cfg(feature = "jit")]
         crate::jit::JitCompiler::new()
             .expect("a compiler")
-            .compile(&lir.view(), Vec::new())
+            .compile(&lir, Vec::new())
             .expect("the worker's JIT compiles the LIR that arrived");
     });
 }

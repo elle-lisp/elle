@@ -173,7 +173,7 @@ pub enum CmpOp {
 }
 
 /// Block terminator - how control leaves a block
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Terminator {
     /// Return from function
     Return(Reg),

@@ -47,7 +47,7 @@ fn dropping_the_worker_discards_its_queue() {
     let results = worker.rx.clone();
     for key in 0..queued {
         assert!(
-            worker.submit(prepare_task(&lir, key, None)),
+            worker.submit(prepare_task(&lir.view(), key, None)),
             "the worker refused a task"
         );
     }

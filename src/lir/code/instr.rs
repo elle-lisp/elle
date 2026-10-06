@@ -98,7 +98,7 @@ impl<'a> ConstList<'a> {
 }
 
 /// One frozen instruction. `LirInstr` documents each variant.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum InstrRef<'a> {
     Const {
         dst: Reg,

@@ -420,4 +420,10 @@ impl CodePayload {
     pub fn rest_list_layout(&self) -> RestListLayout {
         self.rest_list
     }
+
+    /// The frozen function this payload carries, or `None` for a code object
+    /// with no LIR (docs/impl/lir.md).
+    pub fn lir(&self) -> Option<crate::lir::LirView<'_>> {
+        None
+    }
 }

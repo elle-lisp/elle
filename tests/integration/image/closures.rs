@@ -137,9 +137,10 @@ fn a_closures_code_object_round_trips_field_by_field() {
 }
 
 // A hydrated header has no blueprint, so the blueprint-only answers are
-// absence. The counter-factual is the source header, which answers
-// `lir_function` — only the dump can have dropped it. The origin is not one
-// of these: it rides on the payload, and origin.rs pins that it crosses.
+// absence. The counter-factual is the source header, which holds one — only
+// the dump can have dropped it. The origin and the LIR are not among those
+// answers: both ride on the payload, and origin.rs and the call test below pin
+// that each crosses.
 #[test]
 fn a_hydrated_header_has_no_blueprint() {
     let dir = crate::common::ScratchDir::new("image-closure-blueprint");
@@ -149,12 +150,16 @@ fn a_hydrated_header_has_no_blueprint() {
     let region = src.new_runtime_region();
     let (proto, _) = full_proto(&mut src, region);
     let root = closure_in(&mut src, region, &Rc::new(proto), &[], SignalBits::EMPTY);
+    assert!(
+        closure_of(root).template.proto().is_some(),
+        "the source header holds its blueprint"
+    );
     image::dump(&mut src, &SymbolTable::new(), root, &path).expect("dump");
 
     let mut dst = FiberHeap::new();
     let hydrated = image::hydrate_path(&mut dst, &mut SymbolTable::new(), &path).expect("hydrate");
     let t = &closure_of(hydrated.root).template;
-    assert!(t.lir_function().is_none(), "a hydrated header has no LIR");
+    assert!(t.proto().is_none(), "a hydrated header has a blueprint");
     assert!(t.child_protos().is_empty());
 }
 
@@ -285,7 +290,7 @@ fn an_env_capture_cell_refuses_the_dump() {
 // ── Determinism and hygiene ─────────────────────────────────────────
 
 // § Test plan, "Closures": a dumped closure writes one file across two dumps.
-// The payload is the widest record the dumper assembles — a struct of thirteen
+// The payload is the widest record the dumper assembles — a struct of
 // slice headers and a `repr(Rust)` arity — so its construction temporaries
 // are exactly where residue would come from.
 #[test]
@@ -349,8 +354,9 @@ fn freeing_a_hydrated_closure_region_returns_to_baseline() {
 
 // § Test plan, "Closures": a closure compiled in one runtime answers a call
 // in a fresh one, through a REPL binding and the ordinary dispatch path. The
-// source closure carries LIR (every compiled lambda does); the hydrated one
-// carries none, so the call below is also the interpreter-tier pin.
+// source closure carries LIR (every compiled lambda does), and the hydrated
+// one reads the same function out of the image's pages — the LIR the JIT
+// promotes it from.
 //
 // The trap is the body's spelling. A stdlib wrapper like `+` is itself a
 // closure the lambda captures, and stdlib closures build nested lambdas —
@@ -373,14 +379,12 @@ fn a_compiled_closure_answers_a_call_after_hydration() {
         )
         .expect("eval")
     };
-    assert!(
-        f.as_closure()
-            .expect("the eval produced a closure")
-            .template
-            .lir_function()
-            .is_some(),
-        "a compiled lambda carries LIR before the dump"
-    );
+    let want = f
+        .as_closure()
+        .expect("the eval produced a closure")
+        .template
+        .lir()
+        .expect("a compiled lambda carries LIR before the dump");
     {
         let (heap, symbols) = rt.heap_and_symbols();
         image::dump(heap, symbols, f, &path).expect("dump");
@@ -388,14 +392,15 @@ fn a_compiled_closure_answers_a_call_after_hydration() {
 
     let mut rt2 = Runtime::new();
     let root = bind_hydrated(&mut rt2, &path);
-    assert!(
-        root.as_closure()
-            .expect("the hydrated root is a closure")
-            .template
-            .lir_function()
-            .is_none(),
-        "a hydrated closure runs the interpreter tier"
-    );
+    let got = root
+        .as_closure()
+        .expect("the hydrated root is a closure")
+        .template
+        .lir()
+        .expect("a hydrated closure carries its LIR");
+    if let Some(diff) = want.first_difference(&got) {
+        panic!("the hydrated LIR differs from the source's at {diff}");
+    }
     let result = {
         let (vm, symbols, cctx) = rt2.parts();
         eval_all("(hydrated-f 2)", symbols, vm, cctx, "<image-closures>").expect("call")
@@ -404,5 +409,60 @@ fn a_compiled_closure_answers_a_call_after_hydration() {
         result.as_int(),
         Some(42),
         "the hydrated closure answered wrong"
+    );
+}
+
+// § Test plan, "lir-payload": a hydrated closure sent to a worker carries its
+// LIR, read out of the image's pages, so the worker's JIT can compile what
+// arrives. The counter-factual is a sender that reads LIR off the blueprint
+// alone: a hydrated header has none, and the worker would run the closure
+// interpreted with every answer still right.
+#[test]
+fn a_hydrated_closure_sends_its_lir() {
+    use elle::lir::code::Op;
+    use elle::lir::{LirOwned, LirView};
+    use elle::value::{SendBundle, SendValue};
+
+    let dir = crate::common::ScratchDir::new("image-closure-send-lir");
+    let path = dir.join("compiled.image");
+    let ops = |v: &LirView<'_>| v.nodes().map(|n| n.op()).collect::<Vec<Op>>();
+
+    let mut rt = Runtime::new();
+    let f = {
+        let (vm, symbols, cctx) = rt.parts();
+        eval_all(
+            "(fn [x] (if (%eq x 2) 42 7))",
+            symbols,
+            vm,
+            cctx,
+            "<image-closures>",
+        )
+        .expect("eval")
+    };
+    let want = ops(&f
+        .as_closure()
+        .expect("the eval produced a closure")
+        .template
+        .lir()
+        .expect("a compiled lambda carries LIR"));
+    {
+        let (heap, symbols) = rt.heap_and_symbols();
+        image::dump(heap, symbols, f, &path).expect("dump");
+    }
+
+    let mut dst = FiberHeap::new();
+    let hydrated = image::hydrate_path(&mut dst, &mut SymbolTable::new(), &path).expect("hydrate");
+    let bundle = SendBundle::from_value(hydrated.root, &dst, None).expect("a closure is sendable");
+    let SendValue::Ref(idx) = bundle.root else {
+        panic!("a closure bundle roots at an interned closure");
+    };
+    let sent = &bundle.closures[idx];
+    let code = sent.lir.clone().expect("the sent closure lost its LIR");
+    let arrived = LirOwned::from_parts(code, vec![Value::NIL; sent.lir_values.len()])
+        .expect("the sent LIR names every value it carries");
+    assert_eq!(
+        ops(&arrived.view()),
+        want,
+        "the sent LIR runs different instructions"
     );
 }

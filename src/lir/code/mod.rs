@@ -4,6 +4,7 @@
 //! src/lir/AGENTS.md
 //! docs/impl/lir.md
 
+mod compare;
 mod decode;
 mod freeze;
 mod gpu;
