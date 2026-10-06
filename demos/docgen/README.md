@@ -38,10 +38,10 @@ The API pages come from the running VM and from source:
 | Page | Source |
 |------|--------|
 | `primitives` | `vm/list-primitives` and `vm/primitive-meta`, grouped by category |
-| `prelude` | Each `(defmacro` in `src/prelude.lisp`, described by the `## ` lines above it |
-| `stdlib` | Each `(defn` in `src/stdlib.lisp`, under its `## ── Name ──` section, with the signals `compile/analyze` infers |
+| `prelude` | Each `(defmacro` in [src/prelude.lisp](../../src/prelude.lisp), described by the `## ` lines above it |
+| `stdlib` | Each `(defn` in [src/stdlib.lisp](../../src/stdlib.lisp), under its `## ── Name ──` section, with the signals `compile/analyze` infers |
 | `libraries` | Each `lib/*.lisp`, described by its first `## ` line, with its exports' signals |
-| `plugins` | Each `plugins/*/README.md`, rendered as markdown |
+| `plugins` | The README of each plugin under `plugins/`, rendered as markdown |
 
 ## Output
 
@@ -50,7 +50,7 @@ is `index.html`. A document page takes its name as its slug, or `DIR-NAME` in a
 section with `dir`, or `DIR` for that section's `index` page. An API page is
 `api-NAME.html`.
 
-A link in a document to another document, `foo.md`, becomes a link to that
+A link in a document to another markdown document becomes a link to that
 page's `.html` file.
 
 ## Files
@@ -65,7 +65,7 @@ page's `.html` file.
 
 The markdown parser reads headings, code fences, tables, unordered lists,
 blockquotes, horizontal rules and paragraphs. It has no ordered or nested
-lists. Inline, it reads `**bold**`, `*italic*`, `` `code` `` and `[text](url)`.
+lists. Inline, it reads `**bold**`, `*italic*`, `` `code` `` and links.
 
 ## Adding a page
 
