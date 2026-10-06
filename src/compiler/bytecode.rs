@@ -27,11 +27,6 @@ pub struct Bytecode {
     /// correct signal metadata for fiber scheduling and shared allocator
     /// provisioning.
     pub signal: crate::signals::Signal,
-    /// Signal projection: maps keyword field names to the signals of exported
-    /// closures. Populated by `compute_signal_projection` during file-scope
-    /// compilation. When an importing file sees `module:field`, the analyzer
-    /// uses this projection instead of the conservative `Polymorphic` fallback.
-    pub signal_projection: Option<std::collections::HashMap<String, crate::signals::Signal>>,
     /// The headers this code object's `MakeClosure` instructions index, in the
     /// unit's code region. Each `MakeClosure` writes its lambda's payload,
     /// pushes a header over it here, and emits the index; the instruction then
@@ -59,7 +54,6 @@ impl Bytecode {
             constants: Vec::new(),
             location_map: LocationMap::default(),
             signal: crate::signals::Signal::silent(),
-            signal_projection: None,
             children: Vec::new(),
             merged_slots: Vec::new(),
             frame_release_slots: Vec::new(),

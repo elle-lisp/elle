@@ -56,7 +56,7 @@ fn main() {
     let sym_id = rt.symbols().intern("host/add-ten");
     let native = Value::native_fn(&HOST_ADD_TEN);
     let (cctx, heap) = rt.compile_and_heap();
-    cctx.register_repl_binding(
+    cctx.register_host_binding(
         heap,
         sym_id,
         native,

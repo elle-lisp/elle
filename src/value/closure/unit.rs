@@ -6,7 +6,6 @@
 use std::collections::HashMap;
 
 use crate::hir::region::RuntimeRegion;
-use crate::signals::Signal;
 use crate::value::fiberheap::FiberHeap;
 use crate::value::Value;
 
@@ -21,9 +20,6 @@ use super::{ClosureTemplate, CodeArena, PayloadParts};
 pub struct CodeUnit {
     arena: CodeArena,
     entry: ClosureTemplate,
-    /// Keyword field name → signal of each exported closure, when the unit is
-    /// a file whose value is a projectable struct.
-    signal_projection: Option<HashMap<String, Signal>>,
 }
 
 impl std::fmt::Debug for CodeUnit {
@@ -39,38 +35,23 @@ impl CodeUnit {
     /// The unit an emission into `arena` produced, entered through
     /// `bytecode`, the entry function's buffer. Takes the reference the code
     /// region was born with.
-    pub fn new(arena: CodeArena, mut bytecode: crate::compiler::Bytecode) -> Self {
-        let signal_projection = bytecode.signal_projection.take();
-        Self::of_parts(arena, PayloadParts::entry(bytecode), signal_projection)
+    pub fn new(arena: CodeArena, bytecode: crate::compiler::Bytecode) -> Self {
+        Self::of_parts(arena, PayloadParts::entry(bytecode))
     }
 
     /// The unit whose entry is written from `entry` into `arena`, whose
     /// children are already there. Takes the reference the code region was
     /// born with.
-    pub(crate) fn of_parts(
-        arena: CodeArena,
-        entry: PayloadParts,
-        signal_projection: Option<HashMap<String, Signal>>,
-    ) -> Self {
+    pub(crate) fn of_parts(arena: CodeArena, entry: PayloadParts) -> Self {
         let entry = ClosureTemplate::new(arena.write(entry));
         unsafe { &mut *arena.heap_ptr() }.hold_code(arena.region(), true);
-        CodeUnit {
-            arena,
-            entry,
-            signal_projection,
-        }
+        CodeUnit { arena, entry }
     }
 
     /// The entry function's code object: a nullary function with no LIR,
     /// whose child table holds the lambdas the entry builds.
     pub fn entry(&self) -> &ClosureTemplate {
         &self.entry
-    }
-
-    /// Keyword field name → signal of each exported closure, when the unit is
-    /// a file whose value is a projectable struct.
-    pub fn signal_projection(&self) -> Option<&HashMap<String, Signal>> {
-        self.signal_projection.as_ref()
     }
 
     /// The code region every payload of the unit lives in.
@@ -96,7 +77,7 @@ impl CodeUnit {
         let arena = CodeArena::mint(heap);
         let mut copied: HashMap<usize, Value> = HashMap::new();
         let entry = copy_parts(&self.entry, arena, &mut copied);
-        Self::of_parts(arena, entry, self.signal_projection.clone())
+        Self::of_parts(arena, entry)
     }
 }
 
@@ -131,7 +112,6 @@ impl Clone for CodeUnit {
         CodeUnit {
             arena: self.arena,
             entry: self.entry.clone(),
-            signal_projection: self.signal_projection.clone(),
         }
     }
 }

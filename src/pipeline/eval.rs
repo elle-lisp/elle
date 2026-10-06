@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! The entry points that compile source or a syntax tree and run it on the caller's VM.
 //!
 //! docs/pipeline.md
@@ -18,7 +18,8 @@ use crate::vm::VM;
 /// transformer, or a `begin-for-syntax` value. The expander is the one mid
 /// expansion, so a macro call inside the tree expands in the same context.
 /// The tree is not regularized: no graft, no fold, and no type information
-/// reaches the lowerer.
+/// reaches the lowerer. The body runs under the expansion fuel budget
+/// (`VM::run_at_expansion`).
 pub fn eval_syntax(
     syntax: crate::syntax::Syntax,
     expander: &mut Expander,
@@ -76,8 +77,10 @@ pub fn eval_syntax(
     let mut emitter = Emitter::new(code);
     let bytecode = emitter.emit_module(&lir_module).bytecode;
 
-    vm.execute(&crate::value::CodeUnit::new(code, bytecode))
-        .map_err(|e| e.to_string())
+    // The body runs under the expansion fuel budget, and a park it raises is
+    // refused: an expansion cannot hold one.
+    vm.run_at_expansion(&crate::value::CodeUnit::new(code, bytecode))
+        .map_err(|fault| fault.describe())
 }
 
 /// Compile one form and run it. The caller's VM both expands the form and runs
@@ -122,7 +125,6 @@ fn eval_in_arena(
         meta.signals.clone(),
         meta.arities.clone(),
     );
-    analyzer.set_compile_ctx(cctx);
     analyzer.bind_primitives(&meta);
     if !expander.core_env.is_empty() {
         analyzer.bind_compile_time_env(&expander.core_env, true);
