@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-10-06
 //! Signal-bits resolution for fiber primitives.
 //!
 //! Fiber primitives accept signal specifications in many surface forms
@@ -179,8 +179,8 @@ pub(crate) fn resolve_signal_bits(
 /// alone — the requirement the capability gate tests against the emitting fiber
 /// (docs/signals/authority.md).
 ///
-/// This is the pure `bits_from_args` seam, the same one `io/submit` and `import`
-/// use for other domains. It needs no ctx: an integer passes through, and a
+/// This is the pure `bits_from_args` seam, the same one `io/submit` uses for
+/// another domain. It needs no ctx: an integer passes through, and a
 /// keyword or a keyword collection resolves through the registry by hash, which
 /// covers a user signal `(signal :kw)` coined without a symbol table. A spec the
 /// body's [`resolve_signal_bits`] would reject contributes no bits; the body

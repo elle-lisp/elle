@@ -45,10 +45,11 @@
 //!
 //! If the inner closure suspends (a yield, an I/O request),
 //! `execute_bytecode_saving_stack` returns the suspending bits with the outer
-//! stack restored. No host resumes the inner continuation. `eval`, `import`
-//! and the test-setup loader end the park through `VM::refuse_hosted_park` and
-//! raise at their own call. `arena/allocs` returns the signal from its own
-//! call, so its park ends there, through `VM::abandon_hosted_park`.
+//! stack restored. No host resumes the inner continuation. `eval`, the module
+//! loaders and the test-setup loader end the park through
+//! `VM::refuse_hosted_park` and raise at their own call. `arena/allocs` returns
+//! the signal from its own call, so its park ends there, through
+//! `VM::abandon_hosted_park`.
 //!
 //! ### Nested `fiber/resume` — the SIG_SWITCH obligation
 //!
@@ -74,10 +75,10 @@
 //! `SIG_SWITCH` to completion exactly as the root loop does, so a nested
 //! `fiber/resume` runs fully and the thunk produces its real result. Prefer it
 //! over a raw `execute_bytecode_saving_stack` for any caller that runs a thunk
-//! as part of the *current* fiber's execution (`eval`, `arena/allocs`, the
-//! test-setup module loader). Do NOT use it when running a *child fiber's* body
-//! (`do_fiber_first_resume`): there `SIG_SWITCH` must propagate to the child's
-//! own driving `do_fiber_resume`, not be driven here.
+//! as part of the *current* fiber's execution (`eval`, the module loaders,
+//! `arena/allocs`, the test-setup module loader). Do NOT use it when running a
+//! *child fiber's* body (`do_fiber_first_resume`): there `SIG_SWITCH` must
+//! propagate to the child's own driving `do_fiber_resume`, not be driven here.
 //!
 //! ### Rules for new callers
 //!
@@ -382,8 +383,8 @@ impl VM {
 
     /// Run a thunk on the CURRENT fiber to completion, driving the
     /// fiber-resume (`SIG_SWITCH`) trampoline — the safe entry for re-entrant
-    /// callers whose thunk is part of *this* fiber's execution (`eval`,
-    /// `arena/allocs`, the test-setup module loader).
+    /// callers whose thunk is part of *this* fiber's execution (`eval`, the
+    /// module loaders, `arena/allocs`, the test-setup module loader).
     ///
     /// It wraps [`Self::execute_bytecode_saving_stack`] with the same
     /// `SIG_SWITCH`-draining loop the root dispatch ([`VM::execute_code`])

@@ -94,6 +94,18 @@ impl Signal {
         }
     }
 
+    /// Reads a file and runs foreign code from it, and may error
+    /// (SIG_FS | SIG_FFI | SIG_ERROR).
+    ///
+    /// The signal of `import/load-plugin`, which reads a shared library and runs
+    /// its init. Denying either capability blocks the load.
+    pub const fn fs_ffi_errors() -> Self {
+        Signal {
+            bits: SIG_FS.union(SIG_FFI).union(SIG_ERROR),
+            propagates: 0,
+        }
+    }
+
     /// Opens a filesystem path through the I/O scheduler
     /// (SIG_FS | SIG_IO | SIG_ERROR).
     ///
