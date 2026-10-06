@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-06
 // The file-as-letrec pipeline, and what `import-file` reports when the file it
 // loads fails.
 //
@@ -247,9 +247,9 @@ fn test_import_file_destructure_exports() {
 #[test]
 fn test_import_file_does_not_corrupt_captured_bindings() {
     // A second import-file call must not corrupt bindings captured by closures
-    // defined before the import. The bug: import-file returned `true` (a
-    // boolean sentinel) for already-loaded modules instead of the module's
-    // cached return value. Calling `(true)` then failed with "Cannot call true".
+    // defined before the import. The counter-factual: import-file answered
+    // `true` (a boolean sentinel) for an already-loaded module instead of the
+    // module's value, and calling `(true)` failed with "Cannot call true".
     // Use a simple module that returns a struct with a function.
     // The test verifies that a second import-file call doesn't corrupt
     // closures that captured bindings from the first import.
@@ -306,7 +306,8 @@ fn a_module_that_failed_to_compile_reports_the_same_failure_on_the_next_import()
 
 #[test]
 fn a_module_that_imports_itself_is_a_circular_dependency() {
-    // The mark a load holds while it runs is what catches a real cycle.
+    // The mark a load holds while it runs is what catches a real cycle, and
+    // the error names the file where the cycle starts and where it closes.
     let message = evaluated_string(
         r#"
         (let [r (protect (import-file "tests/modules/self-import.lisp"))]
@@ -314,7 +315,21 @@ fn a_module_that_imports_itself_is_a_circular_dependency() {
           (get (get r 1) :message))
     "#,
     );
-    assert!(message.contains("circular dependency detected"), "{message}");
+    // The outer load reports the inner one's error inside its own, so the
+    // chain is found by its exact text. The test runs from the package root,
+    // which is where the relative path resolves.
+    let module = std::env::current_dir()
+        .expect("working directory")
+        .join("tests/modules/self-import.lisp");
+    let cycle = format!(
+        "circular dependency: {} -> {}",
+        module.display(),
+        module.display()
+    );
+    assert!(
+        message.contains(&cycle),
+        "the error names the cycle `{cycle}`: {message}"
+    );
 }
 
 // ============================================================================
