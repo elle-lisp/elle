@@ -1,21 +1,31 @@
 # Modules: a proposal
 
-<!-- audited: 2026-10-04 -->
+<!-- audited: 2026-10-05 -->
 
-The ordered changes that take Elle's modules from re-compiling every import to compiled, cacheable, linkable units.
+The module system Elle is building toward: compiled once per instance, linked across files, and shipped as images.
 
 [modules.md](modules.md) describes the module system as it is. This document
-proposes what it becomes, step by step. Nothing here is implemented. Each step
-names what it needs from the steps before it, and what it unlocks. The
-decisions that belong to the language's owner are listed last, under
-[Open decisions](#open-decisions).
+states the design it becomes, and the argument for each part. Nothing here is
+implemented. [solver.md](impl/solver.md) owns the cross-file signal solver
+that linking uses. The decisions that belong to the language's owner are
+listed under [Open decisions](#open-decisions).
 
 ## Contents
 
 - [Where the module system stands](#where-the-module-system-stands)
 - [Terms](#terms)
 - [Principles](#principles)
-- [The steps](#the-steps)
+- [Silent is sound](#silent-is-sound)
+- [The raw primitives are raw](#the-raw-primitives-are-raw)
+- [Expansion is contained](#expansion-is-contained)
+- [Expansion is deterministic](#expansion-is-deterministic)
+- [One compile per file](#one-compile-per-file)
+- [The module shape](#the-module-shape)
+- [A top level does not suspend](#a-top-level-does-not-suspend)
+- [What is shared is pure](#what-is-shared-is-pure)
+- [Linking](#linking)
+- [Images and exported macros](#images-and-exported-macros)
+- [Rejected alternatives](#rejected-alternatives)
 - [Open decisions](#open-decisions)
 - [Measuring](#measuring)
 
@@ -34,6 +44,11 @@ of the time the import adds.
 **The first compile buys nothing yet.** A call through `module:field` never
 uses the projection, so the analyzer treats it as a call to an unknown
 function (#1232).
+
+**A function body infers less than a file.** A file's top level converges by a
+fixpoint, and a function body runs none ([pipeline.md](pipeline.md)). A
+forward reference inside a body gets every bit, and a lambda that calls its
+enclosing definition reads the silent seed.
 
 **Silent does not mean silent.** Strict destructuring, qualified access, a
 spliced call to a known function, and `parameterize` on a non-parameter all
@@ -73,7 +88,8 @@ from such a function aborts the process as a silence violation.
 the importing file.
 
 **A cycle of literal imports overflows the stack** at compile time, before the
-runtime cycle check can run (#1323).
+runtime cycle check can run (#1323). A cycle between imports inside function
+bodies compiles.
 
 **The standard library already has the shape.** 69 of the 70 files in
 [lib/](../lib/) end in a `(fn …)` that builds the export struct; `lua.lisp` is
@@ -153,27 +169,27 @@ time, it is checked there too. Capabilities already work this way.
 cache, except by time. Every input that can change a compile is in the key,
 and every observable effect of an import still happens on a hit.
 
-**A step that changes what a program means is a decision of its own.** The
-steps that only remove defects come first. The steps that change module
-identity or the language come after, each behind an open decision.
+**A change to what a program means waits on a decision of its own.** A change
+that only removes a defect lands first. A change to module identity or to the
+language waits on its [open decision](#open-decisions).
 
-## The steps
+## Silent is sound
 
-### 1. Make silent sound
+A construct that can raise carries `:error`, the `(silence p)` entry check
+included (#1320, #1233). `eval` reports its signal to the enclosing function
+(#1243). `muffle` is checked at the function boundary as `squelch` is, so a
+muffled signal becomes `:signal-violation` instead of leaving the function
+(#1236). Removing `muffle` would change the language, which the fourth
+principle puts behind a decision.
 
-Fix #1320, #1243, #1236 and #1233. A construct that can raise carries
-`:error`, and `eval` reports its signal to the enclosing function. `muffle` is
-checked at the function boundary as `squelch` is, so a muffled signal becomes
-`:signal-violation` instead of leaving the function. Removing `muffle` would
-change the language, which the fourth principle puts behind a decision.
+Every later part reads an inferred signal, so each one depends on this.
 
-Needs: nothing. Unlocks: every later step that reads an inferred signal.
+## The raw primitives are raw
 
-### 2. Make the raw primitives raw
-
-Fix #1325. `import-file` and `include-file` load exactly the file named.
-`import` and `include` resolve `std/`, `plugin/`, the search paths, `.lisp`
-probing, and the platform's shared-object name and suffix.
+`import-file` and `include-file` load exactly the file named (#1325). `import`
+and `include` resolve `std/`, `plugin/`, the search paths, `.lisp` probing,
+and the platform's shared-object name and suffix. A reader can then state two
+resolution rules, one for the raw primitives and one for the resolving forms.
 
 Which directory a relative spec resolves against stays an
 [open decision](#open-decisions). Resolving against the importing file, as
@@ -181,26 +197,24 @@ Which directory a relative spec resolves against stays an
 primitive given a string. Either the call site's location reaches it at run
 time, or `import` becomes a form that bakes the directory in at compile time.
 
-Needs: nothing. Unlocks: two resolution rules a reader can state, one for the
-raw primitives and one for the resolving forms.
-
-### 3. Contain expansion
+## Expansion is contained
 
 - A fiber's withheld capabilities reach every macro expanded on its behalf
   (#1321).
 - Each transformer call runs under a fuel budget; exhausting it is a compile
   error naming the macro (#1322).
-- The projection compile tracks the files in progress and reports a cycle by
-  name (#1323).
 - A module compiles against the prelude, its own definitions and its
   includes. REPL macros and REPL definitions reach the REPL's own lines, not
   an imported file. This rewrites the sixth invariant in
   [pipeline](../src/pipeline/AGENTS.md), and that file changes with it.
+- A file's analysis never compiles another file. It states facts about its own
+  code, and [linking](#linking) joins them, so a cycle of literal imports
+  cannot recurse at compile time (#1323).
 
-Needs: nothing. Unlocks: running another file's macros safely, which the LSP,
+Containment is what makes it safe to run another file's macros, which the LSP,
 the linter and `compile/analyze` already do.
 
-### 4. Make expansion deterministic
+## Expansion is deterministic
 
 - Number gensyms and intro scopes per unit, so an expansion depends on its
   unit and not on what the process expanded before it.
@@ -209,8 +223,7 @@ the linter and `compile/analyze` already do.
   today: [image.md](impl/image.md) replays a signal table at hydration, and
   [sealing.md](impl/image/sealing.md) says no image carries one and refuses
   the dump. Relocation by name replaces both.
-- Write down the complete set of compile inputs. This is the cache key of
-  step 6.
+- Write down the complete set of compile inputs.
 
 The compile inputs, as far as they are known:
 
@@ -219,52 +232,35 @@ The compile inputs, as far as they are known:
 | The source text, and every included file's text | The forms themselves |
 | The epoch and the Unicode generation | Migration rules and string semantics |
 | The binary's build identity and the primitive table | Codegen, primitive ids, the prelude and stdlib |
-| The macro environment | Prelude, plus the unit's own macros; plus the macros of every literal import once step 10 exports them |
+| The macro environment | Prelude, plus the unit's own macros; plus the macros of every literal import once modules export them |
 | The resolved path of every import | The search paths decide which file a spec names |
-| The projection of every literal import | Signal inference reads them |
+| The facts of every literal import | Linking reads them to solve the file's signals |
 | User signal declarations | Bit numbers, until signals relocate by name |
 
-Needs: step 3, which fixes the macro environment. Unlocks: step 6.
+This table is the key of [one compile per file](#one-compile-per-file), and
+the digest of a module image, as the source digest is for the boot image
+([boot.md](impl/image/boot.md)). Containment comes first, because it fixes the
+macro environment.
 
-### 5. Reuse the projection compile
+## One compile per file
 
-Keep the bytecode the projection compile produced, keyed in the instance by
-resolved path and content hash, and let the runtime `import` run it instead
-of compiling again. This closes #881 and removes the second compile. No chdir
-primitive exists, so a resolved path is stable within an instance, and the key
-follows the content, so a REPL that edits a module gets the new code and the
-new projection.
+Keep the bytecode a file's compile produced, keyed in the instance by its
+compile inputs, and let the runtime `import` run it instead of compiling
+again. This closes #881. No chdir primitive exists, so a resolved path is
+stable within an instance. The key follows the content, so a REPL that edits a
+module gets the new code.
+
+An importer's key includes the keys of its literal imports. Once a call into
+another file uses the linked signal, the importer's bytecode depends on what
+its imports state. The store keeps each file's facts beside its bytecode, not
+the signals solved from them. A file solved with its imports left open is sound
+but loose ([solver.md](impl/solver.md)), and linking closes it.
 
 A compiled template may run twice: constants materialize per execution, so two
 runs share code and nothing else. Every import still runs the file, so module
 meaning does not change.
 
-Needs: step 3, which keeps REPL state out of a module's compile. Unlocks: fast
-imports in one instance, and the store step 6 writes to disk.
-
-### 6. Cache compiled code on disk
-
-Key the compiled bytecode of a file on step 4's inputs, with each imported
-file's key folded in, so the key covers the whole import graph. Resolution
-runs before the lookup, so a hit still pays the search-path walk.
-
-The cache stores code, not values. Every import still runs the file, so
-stateful modules keep independent state. A hit still requires `:fs`, so a
-sandboxed fiber sees the same denial either way.
-
-The [stdlib disk cache](impl/stdlib-cache.md) is the model: it already carries
-LIR for the JIT, symbol spellings for the display memo, and the registries
-later compiles read. Its store discipline carries over too: a temporary file
-renamed into place, pruning after the rename, and a key that follows the
-binary. So does its warning: a writable cache directory is a code-execution
-surface, and here it holds user modules. Source positions name files by
-process-local ids, so `meta/origin` is lost across processes unless file
-spellings travel too.
-
-Needs: steps 2, 4 and 5. Unlocks: fast imports across processes, and a store
-later steps build on.
-
-### 7. Decide the module shape
+## The module shape
 
 This is where module meaning changes. Three shapes are on the table:
 
@@ -276,15 +272,24 @@ This is where module meaning changes. Three shapes are on the table:
 
 Shape (b) splits link time from instantiation. Impurity moves into the lambda,
 so a stateful or effectful module stays possible: it opens its library, reads
-its environment and allocates its state when called.
+its environment and allocates its state when called. Within an instance, (b)
+evaluates the top level once; across processes, the speed comes from
+[module images](#images-and-exported-macros).
 
 Shape (c) is pure by construction, because a lambda literal is a value. A
 function body is already an implicit letrec, so the letrec moves inside the
-lambda instead of disappearing. Three costs follow. Work that every instance
-could share is repeated on each call until the compiler hoists it. Hoisting
-needs the purity analysis of step 8, so (c) moves the check into the compiler
-rather than removing it. `include` is spliced only at a file's top level
-today, so it would have to work inside the body.
+lambda instead of disappearing. Four costs follow:
+
+- Work that every instance could share is repeated on each call until the
+  compiler hoists it.
+- Hoisting needs the purity analysis below, so (c) moves the check into the
+  compiler rather than removing it.
+- `include` is spliced only at a file's top level today, so it would have to
+  work inside the body.
+- All module code moves into a function body, which infers less than a file
+  ([where it stands](#where-the-module-system-stands)). So (c) needs
+  [linking](#linking) first, or a fixpoint over function bodies. The solver
+  solves a body's definitions jointly, forward and mutual references included.
 
 Both (b) and (c) change identity. Today every import makes new closures,
 parameters and trait tables. Under (b) the top level is shared by every
@@ -295,17 +300,38 @@ it.
 Either shape moves the impure top levels in the table above into their
 lambdas. [captures.rs](../tests/integration/file_scope/captures.rs) imports a
 module that keeps a counter at its top level twice, and checks that the two
-counters are independent. Step 8 rejects that fixture under (b). Once the
-counter moves inside the lambda, the assertion holds unchanged.
+counters are independent. The purity check rejects that fixture under (b).
+Once the counter moves inside the lambda, the assertion holds unchanged.
 
 The lambda rule makes one mistake common. `(def b (import "std/base64"))`
 followed by `(b:encode "x")` reports "get: expected collection …, got
 closure". That case needs an error of its own.
 
-Needs: step 6 for the speed that makes the change worth it. Unlocks: steps 8
-to 10.
+## A top level does not suspend
 
-### 8. Check purity of what is shared
+`import` runs a module's top level on the current fiber and refuses a
+suspension, because it cannot hold one ([park.md](impl/region/park.md)). A top
+level that runs `ev/sleep` or `port/read-all` fails with `import: unexpected
+signal`. The lambda a module returns is an ordinary closure, and it may suspend
+when called directly and inside `ev/spawn`. So a module is already
+asynchronous where its work runs.
+
+The top level needs no rule of its own. Shape (b) makes it pure, shape (c)
+makes it one lambda literal, and neither suspends. Three reasons keep it from
+suspending:
+
+1. The set of imports in progress belongs to the VM, not to a fiber. A
+   suspended top level would keep its mark, so a second fiber importing the
+   same file would get "circular dependency detected".
+2. Under (b), a shared top level that runs interleaved with other fibers could
+   build a different value on each run.
+3. An asynchronous read buys little. The file read and path resolution block
+   briefly, and the compile is the cost: 0.29 s for `std/http2`, all of it CPU
+   on the one scheduler thread. One compile per file and linking remove the
+   runtime compile for a literal import. `lib/`, `tests/`, `demos/` and
+   `tools/` hold 439 literal specs and about 15 computed ones.
+
+## What is shared is pure
 
 Under (b), the top level must be pure. Signals answer whether it can raise.
 A second analysis answers whether it reads ambient state or changes shared
@@ -323,13 +349,13 @@ state:
   ambient reads carry none, so whether they gain one is an
   [open decision](#open-decisions); until then the analysis alone covers them.
 
-Literal imports at the top level need a rule of their own. Under step 9 a
-literal import of a pure module is a dependency, not an effect. A top level
+Literal imports at the top level need a rule of their own. Once imports link,
+a literal import of a pure module is a dependency, not an effect. A top level
 that calls an imported lambda is pure only if that lambda's body is.
 
-Needs: steps 1 and 7. Unlocks: step 9.
+The check reads sound signals, and it needs a decided shape.
 
-### 9. Link literal imports
+## Linking
 
 Treat `((import "literal"))` as a dependency the compiler knows before
 anything runs:
@@ -337,30 +363,64 @@ anything runs:
 - The export shape becomes part of the rule: the lambda's body ends in a
   struct literal. Projection, `compile/exports`, the semver surface and IDE
   completion then work for every module.
-- A call through `module:field` uses the projected signal, which closes
-  #1232.
+- Signals cross files as facts, not as a projection. Each file states its
+  signals over free variables: its own parameters, captured parameters, fields
+  of parameters, and the exports of its imports. Linking joins the files
+  through their literal imports and solves the whole graph at once
+  ([solver.md](impl/solver.md)).
+- A call through `module:field` uses the solved signal, which closes #1232.
+  The projection, a map from field to signal, cannot hold that answer: it has
+  no way to say "field `:connect` of parameter 0". The `propagates` mask in
+  `Signal` becomes the special case where every free variable is one of the
+  function's own parameters.
+- A cycle between function bodies is legal, and its files solve jointly. A
+  cycle of top-level imports is an instantiation cycle, and the runtime check
+  reports it by name.
 - A closure that captures no instantiation argument can be inlined into its
   importer, as stdlib bodies already are.
 - The WASM backend links an imported module in ahead of time, instead of
   running it on the host VM (#924).
 - Under shape (c), hoisting gives back the sharing that (b) writes by hand.
 
-Needs: step 8. Unlocks: step 10, and a module value an image can carry.
+Linking needs the purity check under (b), and sound signals under either
+shape. It gives a module value an image can carry.
 
-### 10. Images and exported macros
+## Images and exported macros
 
 A pure, linked module value can be saved as an image and mapped at load
-([image.md](impl/image.md)). Two image constraints apply to modules. A closure
-that carries a process-declared signal bit refuses the dump until signals
-relocate by name (step 4). An image-loaded closure reaches the JIT only after
-LIR becomes region-native.
+([image.md](impl/image.md)). A module image is a configuration of the image
+mechanism, layered over the boot image as an environment image is. Its digest
+is the compile-input table above, with each literal import's digest folded in.
+
+The rules images already state carry over:
+
+- Loading a module image still requires `:fs`, so a sandboxed fiber sees the
+  same denial as for a source import.
+- A directory of module images is a code-execution surface. Trust an image as
+  you would a `.so` ([image.md](impl/image.md)).
+- A closure that carries a process-declared signal bit refuses the dump until
+  signals relocate by name.
+
+[image.md](impl/image.md) describes the boot and environment configurations
+only. Module images wait on two image milestones
+([plan.md](impl/image/plan.md)): the environment configuration, and LIR that
+lives in regions. Until the second lands, an image-loaded closure never
+reaches the JIT.
 
 A module whose top level is pure can be evaluated while its importer compiles.
 Its macros can then be exported as values, and they join the macro environment
-in step 4's table. That removes the [warts](warts.md) entry saying a macro
-cannot be exported, and leaves `include` without its main use.
+in the compile-input table. That removes the [warts](warts.md) entry saying a
+macro cannot be exported, and leaves `include` without its main use.
 
-Needs: steps 8 and 9. Unlocks: modules that ship as compiled assets.
+## Rejected alternatives
+
+**A disk cache of compiled code beside each source file.** Key a file's
+bytecode on its compile inputs, store it, and load it in the next process. The
+[stdlib disk cache](impl/stdlib-cache.md) works that way, and it is a
+stopgap. A hit rebuilds every object through the send codec, which
+[image.md](impl/image.md) rejects as the CAS cache: an image maps a region and
+decodes no value. A module disk cache would repeat the rejected design for
+user code, so module images replace it.
 
 ## Open decisions
 
@@ -374,15 +434,14 @@ Needs: steps 8 and 9. Unlocks: modules that ship as compiled assets.
   macro read only through primitives that record what they read in the unit's
   key, as `include` already does. The second keeps file embedding,
   environment-driven configuration and `feature?` possible.
-- **The module shape**: (a), (b) or (c) in step 7.
+- **The module shape**: (a), (b) or (c).
 - **Identity under (b)**: whether one parameter and trait table per instance
   is the intended meaning.
 - **Raises at a shared top level**: whether a top level, or a hoisted
   binding, may raise `:error`. A cache tolerates it. A hoisted raise fails
   the import instead of the call.
 - **Ambient reads**: whether `sys/env`, `sys/args`, `sys/pid`, the clock and
-  `backend?` gain a capability bit, so the run-time check in step 8 covers
-  them.
+  `backend?` gain a capability bit, so the run-time purity check covers them.
 - **The raw primitives** (#1325). Which directory a relative spec resolves
   against. Whether `import-file` loads a shared object given its exact path.
   Whether a file that is not valid UTF-8 is still tried as a plugin. Whether
@@ -399,8 +458,8 @@ echo '(def h ((import "std/http2")))' | elle --trace=compile -
 ```
 
 Each module file appears twice. The first appearance is nested inside the
-importing file's analysis, and the second is the runtime import. Step 5 is
-done when each file appears once.
+importing file's analysis, and the second is the runtime import. One compile
+per file is done when each file appears once.
 
 On a release build at `8fe781a03`:
 
