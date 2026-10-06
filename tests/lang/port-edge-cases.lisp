@@ -1,7 +1,8 @@
 #!/usr/bin/env elle
-(elle/epoch 12)
-
-# Port I/O edge cases: zero-length reads/writes, negative counts, etc.
+(elle/epoch 14)
+# audited: 2026-10-06
+# Port edge cases: a zero-length read or write, a negative count, an empty file, and an empty HTTP body.
+# docs/io.md
 
 # Scratch dir for the file-port fixtures; removed in the teardown below.
 (def scratch (file/mktempdir))
@@ -33,7 +34,8 @@
 (let [conn (fresh-conn)]
   (let [result (port/read conn 0)]
     (assert (= (length result) 0) "port/read 0 returns empty")
-    (assert (bytes? result) "port/read 0 returns bytes"))  # Connection still usable
+    (assert (bytes? result) "port/read 0 returns bytes"))
+  # The connection is still usable.
   (let [data (port/read conn 5)]
     (assert (= (string data) "hello") "port still usable after 0-read"))
   (port/close conn))
@@ -126,7 +128,7 @@
 # ── HTTP empty body response ────────────────────────────────────────
 
 # 9. HTTP response with Content-Length: 0 → no hang
-(def http ((import-file "./lib/http.lisp")))
+(def http ((import "std/http")))
 (def received @[])
 (defn handler [request]
   (push received request:body)

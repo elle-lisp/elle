@@ -1,13 +1,12 @@
-(elle/epoch 12)
-
-## ZMQ FFI library integration tests
-## Tests lib/zmq.lisp (FFI bindings to system libzmq)
-##
-## Uses inproc:// transport — no network access needed.
-## Skipped if libzmq.so is not installed.
+(elle/epoch 14)
+# audited: 2026-10-06
+# The ZeroMQ library carries messages over inproc:// in each socket pattern, with frames and options.
+# docs/libraries.md
+#
+## inproc:// needs no network. The file is skipped when libzmq.so is not installed.
 
 # Gate the whole file on libzmq: if it can't load, re-raise as a loud :gated so
-# `elle test` records a file-level SKIP with a reason (docs § Gating). Eager
+# `elle test` records a file-level SKIP with a reason (docs/test-runner.md). Eager
 # (def …), so it gates during barrier-module setup, before any test thunk.
 # Never (sys/exit 0): under the runner that would kill the process mid-run.
 (def _libzmq
@@ -16,7 +15,7 @@
       true
       (error (struct :error :gated :reason "libzmq.so not installed")))))
 
-(def zmq ((import-file "lib/zmq.lisp")))
+(def zmq ((import "std/zmq")))
 
 ## ── Context creation ─────────────────────────────────────────────
 
@@ -67,11 +66,12 @@
   (zmq:subscribe sub "")
   (zmq:connect sub "inproc://test-pubsub")
 
-  # Give the subscription time to propagate
-  # (inproc is synchronous but SUB needs a moment)
+  # The receive waits at most 500 ms, so a lost subscription fails the test
+  # rather than hanging it.
   (zmq:set-option sub :rcvtimeo 500)
 
-  # Send several messages — first few may be lost before subscription completes
+  # A SUB socket drops what arrives before its subscription completes, so send
+  # ten copies.
   (each _ in (range 10)
     (zmq:send pub "broadcast"))
 

@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-06
 // What an analysis hands a signal solver: each lambda's declarations, and a file analyzed without compiling its imports.
 //
 // docs/impl/solver.md
@@ -20,7 +20,7 @@ fn module_with_marker(dir: &std::path::Path, marker: &str) -> String {
         format!("(fn [] (def marker '{marker}) {{:marker marker}})\n"),
     )
     .expect("write module");
-    format!("(def m ((import \"{}\")))\nm\n", module.display())
+    format!("(def m ((import-file \"{}\")))\nm\n", module.display())
 }
 
 #[test]

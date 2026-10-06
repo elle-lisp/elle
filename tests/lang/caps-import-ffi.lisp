@@ -1,17 +1,14 @@
-(elle/epoch 12)
-# audited: 2026-09-21
-# ── import requires :ffi to load a native library (#1074) ──────────────
-#
-# `import` declares `:fs` for the read, so denying `:ffi` did not stop loading
-# a shared library — which runs its `elle_plugin_init`, foreign code the `:ffi`
-# capability exists to withhold. The requirement now rides the path argument: a
-# `.so`/`.dylib`/`.dll` spec requires `:ffi`, a `.lisp` module does not. This is
-# the same bits_from_args gate `io/submit` uses, a different domain.
+(elle/epoch 14)
+# audited: 2026-10-06
+# Loading a native library under :deny |:ffi| is refused, and loading Elle source is not.
+# docs/signals/capabilities.md
 
-# The gate reads the extension, so a native-library spec is denied before it is
-# loaded and no real library need exist. Counterfactual: without the derived
-# requirement `import` declares only `:fs`, so `:deny |:ffi|` does not stop it
-# and the fiber ends :error on the missing file rather than :paused on a denial.
+# `import-file` hands a library name to `import/load-plugin`, which declares
+# :ffi because a library's `elle_plugin_init` is foreign code. The gate refuses
+# the call before the loader reads the path, so no real library need exist.
+# The counter-factual: a plugin loader that declares only :fs is not stopped by
+# `:deny |:ffi|`, and the fiber ends :error on the missing file rather than
+# :paused on a denial.
 (let [f (fiber/new (fn [] (import-file "nonexistent.so")) |:ffi :error|
                    :deny |:ffi|)]
   (fiber/resume f)
@@ -20,11 +17,10 @@
   (let [v (fiber/value f)]
     (assert (= :capability-denied (get v :error))
             "the denial is a capability denial")
-    (assert ((get v :denied) :ffi)
-            "the denial names :ffi, derived from the .so path")))
+    (assert ((get v :denied) :ffi) "the denial names :ffi")))
 
-# A .lisp module is not gated by :ffi: the requirement is the operation, not the
-# act of importing. Denying :ffi leaves a source import working.
+# A .lisp module loads through `import/load-file`, which declares :fs and no
+# :ffi, so denying :ffi leaves a source load working.
 (with-temp-dir dir
                (let [mod (path/join dir "m.lisp")]
                  (file/write mod "42")

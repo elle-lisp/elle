@@ -1,6 +1,6 @@
 #!/usr/bin/env elle
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 14)
+# audited: 2026-10-06
 # Two instances of one module, every function compiled eagerly, run a server fiber and a sleep loop without corrupting the heap.
 # docs/impl/jit.md
 #
@@ -19,8 +19,8 @@
 # corrupting within the eight sleep-loop iterations ("malloc(): unsorted double
 # linked list corrupted").
 
-(def http ((import-file "lib/http.lisp")))
-(def telemetry ((import-file "lib/telemetry.lisp")))
+(def http ((import "std/http")))
+(def telemetry ((import "std/telemetry")))
 
 (def received @[])
 (defn collector-handler [request]

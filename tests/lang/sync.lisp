@@ -1,10 +1,10 @@
-(elle/epoch 13)
-# audited: 2026-09-28
+(elle/epoch 14)
+# audited: 2026-10-06
 # lib/sync.lisp's primitives: futex, lock, semaphore, condvar, rwlock, barrier, latch, once, queue, monitor.
 # tests/AGENTS.md
 # docs/concurrency.md
 
-(def sync ((import-file "lib/sync.lisp")))
+(def sync ((import "std/sync")))
 
 # ============================================================================
 # 1. Futex basics
@@ -386,7 +386,7 @@
 # ============================================================================
 #
 # Two independently-imported sync modules must not collide in the
-# process-global scheduler park-queue.  Each (import-file ...) returns a
+# process-global scheduler park-queue.  Each (import ...) returns a
 # fresh module instance, so any module-LOCAL futex-id counter restarts at
 # the same values — a futex from instance A and a futex from instance B
 # then share a key.  Waking B's futex must wake B's waiter and ONLY B's
@@ -399,8 +399,8 @@
 # Tested at the futex layer so the main fiber never parks (it only
 # set+wakes); the waiters that stay parked are aborted at teardown.
 
-(let [syncA ((import-file "lib/sync.lisp"))
-      syncB ((import-file "lib/sync.lisp"))
+(let [syncA ((import "std/sync"))
+      syncB ((import "std/sync"))
       fxA (syncA:make-futex :a)
       fxB (syncB:make-futex :b)
       log @[]]

@@ -1,5 +1,5 @@
 (elle/epoch 14)
-# audited: 2026-10-05
+# audited: 2026-10-06
 # The other half of the import cycle that cyc_a.lisp starts.
 # examples/signal_solve/main.rs
 
@@ -7,6 +7,6 @@
 (fn []
   (defn b [n]
     (if n
-      ((get ((import "cyc_a")) :a) n)
+      ((get ((import-file "cyc_a.lisp")) :a) n)
       0))
   {:b b})

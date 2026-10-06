@@ -11,7 +11,7 @@
 # sub-namespace, so the runner can fire DIFFERENT redis files concurrently
 # against a shared Redis without one wiping another's keys mid-run.
 
-(def redis ((import-file "lib/redis.lisp")))
+(def redis ((import "std/redis")))
 
 # Redis is shared infrastructure, so this file's keyspace carries the running
 # process's pid.  The per-file namespace separates the files; the pid separates
