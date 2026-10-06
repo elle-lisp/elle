@@ -179,6 +179,10 @@ answers in `# expect` lines, which `--expect` checks:
 `import KEY` an open export, and `instantiate` an open module instance. The
 bits, parameters and free variables must match exactly.
 
+A `# violates NAME |BITS|` line states the bits the body of `NAME` raises past
+its ceiling. Under `--expect`, every violation the model finds in a fixture
+must be stated, and every stated one found.
+
 Where the analyzer answers with every bit, the solver is exact:
 
 - a forward or mutual reference inside a function body
@@ -188,6 +192,11 @@ Where the analyzer answers with every bit, the solver is exact:
 - a higher-order export, which solves to `|:yield|` or `||` by its argument
 - two modules that import each other inside function bodies, which solve
   jointly
+
+`ceiling.lisp` holds a `(silence)` function the analyzer accepts. It calls a
+function that passes its parameter to a callee which also yields by itself, and
+the analyzer keeps the parameter and drops the callee's own `:yield`. The solver
+keeps both, so it reports the ceiling exceeded by `:yield`.
 
 `sep.lisp` runs with `--no-follow`, so its imports stay open. Each function
 names the exports it calls, and a literal argument to an open export adds
