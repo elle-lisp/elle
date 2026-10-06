@@ -250,12 +250,11 @@ pub(crate) fn prim_meta_origin(
     (SIG_OK, ctx.struct_from(fields))
 }
 
-/// Eagerly compile SPIR-V, cache on template, return the closure.
+/// Eagerly compile SPIR-V, cache it on the VM, return the closure.
 ///
-/// `(git f)` compiles the closure to SPIR-V and caches the bytes on the
-/// blueprint its template came from. Returns `f`; every closure sharing that
-/// blueprint sees the cached SPIR-V. A template hydrated from an image has no
-/// blueprint, caches nothing, and recompiles (docs/impl/image/sealing.md).
+/// `(git f)` compiles the closure to SPIR-V and caches the bytes in the VM's
+/// SPIR-V cache under `f`'s bytecode. Returns `f`; every closure over the same
+/// payload sees the cached SPIR-V (docs/impl/jit.md).
 ///
 /// Optional second argument is workgroup size (default 256).
 pub(crate) fn prim_git(
@@ -274,7 +273,7 @@ pub(crate) fn prim_git(
     {
         let closure = prim_arg!(ctx, args, 0, as_closure, "git", "closure");
         // Fast path: already cached
-        if closure.template.spirv_bytes().is_some() {
+        if ctx.vm().spirv_for(&closure.template).is_some() {
             return (SIG_OK, args[0]);
         }
         // Check GPU eligibility upfront
@@ -303,15 +302,15 @@ pub(crate) fn prim_git(
     }
 }
 
-/// `(fn/git? f)` — true if the closure has cached SPIR-V bytes.
+/// `(fn/git? f)` — true if the VM caches SPIR-V for the closure.
 pub(crate) fn prim_fn_git(
-    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
     if let Some(closure) = args[0].as_closure() {
         (
             SIG_OK,
-            Value::bool(closure.template.spirv_bytes().is_some()),
+            Value::bool(ctx.vm().spirv_for(&closure.template).is_some()),
         )
     } else {
         (SIG_OK, Value::FALSE)
@@ -326,8 +325,9 @@ pub(crate) fn prim_disgit(
     args: &[Value],
 ) -> (SignalBits, Value) {
     let closure = prim_arg!(ctx, args, 0, as_closure, "disgit", "closure");
-    match closure.template.spirv_bytes() {
-        Some(bytes) => (SIG_OK, ctx.bytes(bytes.clone())),
+    let cached = ctx.vm().spirv_for(&closure.template).map(<[u8]>::to_vec);
+    match cached {
+        Some(bytes) => (SIG_OK, ctx.bytes(bytes)),
         None => (
             SIG_ERROR,
             ctx.error("mlir-error", "disgit: closure has not been GIT'd"),

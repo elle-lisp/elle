@@ -58,7 +58,7 @@ impl VM {
     /// stdlib closures (created on the macro/program VM) and the values user code
     /// builds at runtime all live in the same region store. Two embedded
     /// instances on one thread each own a distinct heap and pass it here, so
-    /// neither sees the other's regions (tls.md § Acceptance criterion).
+    /// neither sees the other's regions.
     pub fn new_with_heap(heap_ptr: *mut crate::value::fiberheap::FiberHeap) -> Self {
         Self::on_heap(heap_ptr)
     }
@@ -150,13 +150,14 @@ impl VM {
 
     /// Reset the VM's fiber and transient state for reuse.
     ///
-    /// Preserves: docs, ffi, jit_cache, eval_expander, env_cache,
+    /// Preserves: docs, ffi, jit_cache, spirv_cache, eval_expander, env_cache,
     /// tail_call_env_cache, and the heap, which the VM points at but never owns.
-    /// Resets: fiber, call state, location map,
-    /// loaded modules, closure call counts.
+    /// Resets: the fiber, the pending call state, the error location, the active
+    /// tier, the closure call counts, the JIT rejections and compile attempts,
+    /// and the set of modules loading.
     pub fn reset_fiber(&mut self) {
         // The VM heap is persistent — don't clear it. Values from previous
-        // execute_proto calls remain valid.
+        // execute calls remain valid.
         self.fiber = Fiber::new(root_closure(self.heap()), SIG_OK);
         self.fiber.status = crate::value::FiberStatus::Alive;
         self.current_fiber_handle = None;

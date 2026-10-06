@@ -53,8 +53,8 @@ pub struct LirCode {
     pub(crate) merged_slots: Vec<StaticRegion>,
     pub(crate) frame_release_slots: Vec<u16>,
     pub(crate) frame_release_regions: Vec<StaticRegion>,
-    /// The blueprint carries the docstring and the origin, and nothing reads
-    /// them off a serialized function, so neither crosses.
+    /// The code payload carries the docstring and the origin, and nothing
+    /// reads them off a serialized function, so neither crosses.
     #[serde(skip)]
     pub(crate) doc: Option<String>,
     #[serde(skip)]

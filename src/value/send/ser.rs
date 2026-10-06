@@ -330,8 +330,8 @@ pub(super) fn from_value_inner(
         }
 
         // A bare closure template is never a top-level user value (it is reached
-        // only as a closure instance's `Region` template, serialized via the
-        // Closure arm's `child_protos`), so it is never sent on its own.
+        // only as a closure instance's template, or through a child table,
+        // serialized via the Closure arm), so it is never sent on its own.
         HeapObject::ClosureTemplate(_) => Err("Cannot send a bare closure template".to_string()),
     }
 }

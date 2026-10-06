@@ -9,7 +9,7 @@
 //! the sealed set fails the copy, naming the variant, before any byte is
 //! written. Every symbol and keyword the walk meets — in a value position or
 //! as a struct key — leaves its spelling in the name table. A closure's
-//! header crosses without its blueprint; code.rs owns what the payload
+//! header crosses as its one payload slice; code.rs owns what the payload
 //! behind it costs, and crossing.rs owns the two fields that may name a
 //! process-owned resource (docs/impl/image/sealing.md).
 
@@ -39,8 +39,8 @@ use super::{primitive_name, ImageError};
 pub(super) struct Walk<'a> {
     /// Source payload address → its copy in the scratch region.
     visited: HashMap<usize, Value>,
-    /// Source code-payload backing → its copy, so two headers materialized
-    /// from one blueprint keep one payload copy (docs/impl/image/sealing.md).
+    /// Source code-payload backing → its copy, so two headers over one
+    /// payload keep one payload copy (docs/impl/image/sealing.md).
     /// code.rs is the only reader.
     pub(super) payloads: HashMap<usize, RegionSlice<CodePayload>>,
     /// Source code-payload backing → the body header the walk built for it as
@@ -314,9 +314,8 @@ pub(super) fn copy_value(
                 ));
             }
         },
-        // A header crosses as its payload alone: the blueprint is Rust-heap
-        // data the hydrating instance never holds, so the copy carries none
-        // and the hydrated header answers its questions with absence.
+        // A header is its payload slice and nothing else, so its copy is a
+        // header over the payload's copy.
         HeapObject::ClosureTemplate(t) => {
             let payload = copy_payload(heap, region, t, walk)?;
             heap.alloc_in_region(

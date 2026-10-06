@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-10-06
 // docs/impl/wasm.md
 // docs/impl/region/template.md
 //! Constant-pool and closure-construction host functions:
@@ -86,17 +86,17 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                 _ => crate::value::types::Arity::Exact(arity_count),
             };
 
-            // The blueprint: the dual-compiled one this module carries for this
-            // table index, plus the shape this call supplies. The constructor
-            // takes the first whole, so nothing it holds is this site's to
-            // remember.
-            let dual = caller
-                .data()
-                .closure_bytecodes
-                .get(table_idx as usize)
-                .cloned();
-            let proto = std::rc::Rc::new(crate::value::TemplateProto::wasm_closure(
-                dual.as_deref(),
+            // The closure, its header and its captured-env slice are built
+            // through a boundary ctx over its own fresh result region.
+            let heap = unsafe { &mut *caller.data().heap_ptr() };
+            let ctx = crate::primitives::ctx::Alloc::new(heap);
+
+            // The code object: the code half off the module's dual-compiled
+            // payload for this table index, the shape half off this call. The
+            // constructor takes the first whole, so nothing it holds is this
+            // site's to remember.
+            let code = caller.data_mut().closure_bytecodes.code_object(
+                table_idx as usize,
                 crate::value::WasmClosureMeta {
                     arity,
                     num_locals,
@@ -110,14 +110,10 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                     capture_locals_mask,
                     wasm_func_idx: table_idx as u32,
                 },
-            ));
-
-            // Build the code object, the closure, and its captured-env slice
-            // through a boundary ctx over its own fresh result region.
-            let heap = unsafe { &mut *caller.data().heap_ptr() };
-            let ctx = crate::primitives::ctx::Alloc::new(heap);
+                ctx.code_arena(),
+            );
             let closure = crate::value::closure::Closure::new(
-                crate::value::TemplateRef::region(ctx.template(&proto)),
+                crate::value::TemplateRef::region(ctx.template(&code)),
                 ctx.alloc_slice::<Value>(&captures),
                 crate::value::fiber::SignalBits::EMPTY,
             );

@@ -55,8 +55,8 @@ pub use capturemask::CaptureMask;
 
 // Export closure and fiber types
 pub use closure::{
-    Closure, ClosureTemplate, CodeArena, CodeBuilder, CodeUnit, RestListLayout, TemplateProto,
-    TemplateRef, VarargTag, WasmClosureMeta,
+    Closure, ClosureTemplate, CodeArena, CodeBuilder, CodePin, CodeUnit, PayloadParts,
+    RestListLayout, TemplateRef, VarargTag, WasmClosureMeta,
 };
 pub use code::Code;
 pub use fiber::{

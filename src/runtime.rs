@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-06
 //! The process runtime: one lifecycle for compile/evaluate, shared by every
 //! entry path (`elle foo.lisp`, the REPL, and the embedding API).
 //!
@@ -279,6 +279,10 @@ impl Runtime {
         // release borrow and the `&mut FiberHeap` it needs are disjoint.
         let heap_ptr = self.core.vm().heap_ptr;
         self.core.compile().release(unsafe { &mut *heap_ptr });
+        // The program VM's caches pin the code regions their keys name, from
+        // Rust where the RC sweep cannot see them; drop the pins first, so no
+        // pin holds a region past the sweep (docs/impl/jit.md).
+        self.core.vm().clear_code_pins();
         // The default trait tables are `alloc_root`'d into this instance's root
         // region the RC sweep below releases; clear the heap's table so a later
         // read sees `NIL` instead of `Value`s pointing into the freed region.
@@ -288,6 +292,14 @@ impl Runtime {
         //     roots by RC and let the cascade reclaim everything reachable.
         let roots_released =
             crate::value::arena::teardown_process_root_regions(unsafe { &mut *heap_ptr });
+        // Every code unit and cache pin is a Rust handle on a code region; one
+        // still live here outlives the regions the sweep just released
+        // (docs/impl/region/template.md).
+        debug_assert_eq!(
+            unsafe { &*heap_ptr }.live_code_handles(),
+            0,
+            "a code unit or a cache pin is still live at teardown"
+        );
 
         // (3) Observe the result. Every region is mortal, so every surviving
         //     region is leaked residue.

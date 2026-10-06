@@ -72,9 +72,9 @@ pub fn freeze(func: &LirFunction) -> Result<LirOwned, String> {
         vararg_kind: func.vararg_kind.clone(),
         rest_list_layout: func.rest_list_layout,
         region_table: func.region_table.clone(),
-        merged_slots: func.merged_slots.clone(),
-        frame_release_slots: func.frame_release_slots.clone(),
-        frame_release_regions: func.frame_release_regions.clone(),
+        merged_slots: ascending(&func.merged_slots, |s| s.get()),
+        frame_release_slots: ascending(&func.frame_release_slots, |s| *s),
+        frame_release_regions: ascending(&func.frame_release_regions, |r| r.get()),
         doc: func.doc.as_deref().map(str::to_string),
         origin: func.origin,
     };
@@ -82,6 +82,16 @@ pub fn freeze(func: &LirFunction) -> Result<LirOwned, String> {
         code,
         values: f.values,
     })
+}
+
+/// `table` sorted ascending by `key`. The merge set and the release tables are
+/// recorded this way, so the payload a function's code object holds and every
+/// view over the frozen function agree on order as well as content
+/// (docs/impl/lir.md).
+fn ascending<T: Copy, K: Ord>(table: &[T], key: impl Fn(&T) -> K) -> Vec<T> {
+    let mut sorted = table.to_vec();
+    sorted.sort_unstable_by_key(key);
+    sorted
 }
 
 impl LirModule {

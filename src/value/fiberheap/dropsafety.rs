@@ -1,4 +1,7 @@
-//! Per-tag drop/cascade classification.
+// audited: 2026-10-06
+//! Per-tag drop/cascade classification: which variants need `Drop`, and which hold region references.
+//!
+//! docs/impl/region/model.md
 //!
 //! These two exhaustive predicates drive region teardown: which HeapObject
 //! variants own inner allocations that must run Drop, and which non-dtor
@@ -37,12 +40,9 @@ pub(crate) fn needs_drop(tag: HeapTag) -> bool {
         HeapTag::Parameter => false,
         HeapTag::LSet => true,
         HeapTag::LSetMut => true,
-        // A materialized header holds the `Rc` to its blueprint, which must
-        // be dropped when the region frees — it is what keeps the blueprint's
-        // payload cached (docs/impl/region/template.md § "Who owns the
-        // payload region"). A hydrated header holds none, and its drop is a
-        // no-op.
-        HeapTag::ClosureTemplate => true,
+        // A header is one payload slice and owns no Rust heap memory
+        // (docs/impl/region/template.md).
+        HeapTag::ClosureTemplate => false,
     }
 }
 
@@ -52,6 +52,9 @@ pub(crate) fn holds_value_refs(tag: HeapTag) -> bool {
     match tag {
         HeapTag::Pair => true,
         HeapTag::Parameter => true,
+        // The header→payload edge into its compile unit's code region, and
+        // the payload's constants.
+        HeapTag::ClosureTemplate => true,
         HeapTag::Float => false,
         HeapTag::LibHandle => false,
         HeapTag::ManagedPointer => false,
@@ -73,9 +76,6 @@ pub(crate) fn holds_value_refs(tag: HeapTag) -> bool {
         | HeapTag::FFIType
         | HeapTag::External
         | HeapTag::LSet
-        | HeapTag::LSetMut
-        // ClosureTemplate is a dtor variant (needs_drop), so its cross-region
-        // refs cascade through the `dtors` walk; this non-dtor predicate is false.
-        | HeapTag::ClosureTemplate => false,
+        | HeapTag::LSetMut => false,
     }
 }

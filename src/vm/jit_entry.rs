@@ -9,7 +9,7 @@
 
 use crate::jit::{JitCode, JitRejectionInfo, JitValue, TAIL_CALL_SENTINEL, YIELD_SENTINEL};
 use crate::value::fiber::ParamDepth;
-use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT, SIG_YIELD};
+use crate::value::{CodePin, SignalBits, Value, SIG_ERROR, SIG_HALT, SIG_YIELD};
 use std::sync::Arc;
 
 use super::core::VM;
@@ -18,19 +18,22 @@ use super::core::VM;
 mod tests;
 
 impl VM {
-    /// Install compiled code for the function whose bytecode is `bytecode`.
-    /// The single write path into `jit_cache`: the key is derived from the
-    /// bytecode here, never passed separately, and the entry pins the
-    /// bytecode so the key stays sound (docs/impl/jit.md).
+    /// Install compiled code for the code object `template`. The entry pins
+    /// `template`'s code region so the key stays sound (docs/impl/jit.md).
     pub fn install_jit_code(
         &mut self,
         template: crate::value::ClosureTemplate,
         code: Arc<JitCode>,
     ) {
-        self.jit_cache.insert(
-            template.bytecode().as_ptr(),
-            crate::vm::core::JitCacheEntry::new(template, code),
-        );
+        let pin = CodePin::of(self.heap(), &template);
+        self.install_pinned_jit_code(pin, code);
+    }
+
+    /// The single write path into `jit_cache`: the key is derived from the
+    /// pin, never passed beside it.
+    fn install_pinned_jit_code(&mut self, pin: CodePin, code: Arc<JitCode>) {
+        self.jit_cache
+            .insert(pin.key(), crate::vm::core::JitCacheEntry::new(pin, code));
     }
 
     /// Compiled code for the function at `bytecode_ptr`, if cached.
@@ -38,12 +41,12 @@ impl VM {
         self.jit_cache.get(&bytecode_ptr).map(|e| e.code.clone())
     }
 
-    /// Record that a compile for `bytecode` is in flight on the worker. The
-    /// entry pins `bytecode` until the result installs, so the key the
-    /// worker echoes back still names this function.
+    /// Record that a compile for `template` is in flight on the worker. The
+    /// entry pins `template`'s code region until the result installs, so the
+    /// key the worker echoes back still names this function.
     pub(crate) fn record_jit_pending(&mut self, template: crate::value::ClosureTemplate) {
-        self.jit_pending
-            .insert(template.bytecode().as_ptr() as usize, template);
+        let pin = CodePin::of(self.heap(), &template);
+        self.jit_pending.insert(pin.key() as usize, pin);
     }
 
     /// Count one call of `closure`, and hand back the compiled code to run it
@@ -142,7 +145,7 @@ impl VM {
                             result.bytecode_key,
                         );
                     }
-                    self.install_jit_code(pin, Arc::new(jit_code));
+                    self.install_pinned_jit_code(pin, Arc::new(jit_code));
                 }
                 Err(e) => {
                     self.record_jit_failure(result.bytecode_key as *const u8, e, pin);
@@ -161,13 +164,13 @@ impl VM {
     /// the synchronous compile come through here, so a flag meant to show a
     /// codegen failure cannot be the one place that swallows it.
     ///
-    /// `pin` is the code object the key was derived from, and is `None` only
-    /// where the submission's pin was already lost.
+    /// `pin` holds the code region the key was derived from, and is `None`
+    /// only where the submission's pin was already lost.
     fn record_jit_failure(
         &mut self,
         bytecode_ptr: *const u8,
         error: crate::jit::JitError,
-        pin: Option<crate::value::ClosureTemplate>,
+        pin: Option<CodePin>,
     ) {
         if !matches!(
             error,
@@ -188,7 +191,6 @@ impl VM {
         bytecode_ptr: *const u8,
     ) {
         let label = closure.template.display_label();
-        let template = (*closure.template).clone();
         let task = crate::jit::worker::prepare_task(lir_func, bytecode_ptr as usize, Some(&label));
 
         // `--trace=syncjit`: compile here on the VM thread and install
@@ -200,6 +202,7 @@ impl VM {
         // suspected JIT race starts here; `--trace=jit,syncjit` logs each
         // synchronous install like the background path logs its own.
         if crate::config::get().has_trace("syncjit") {
+            let pin = CodePin::of(self.heap(), &closure.template);
             let res = crate::jit::JitCompiler::new().and_then(|c| c.compile(&task.lir.view()));
             match res {
                 Ok(jit_code) => {
@@ -212,9 +215,9 @@ impl VM {
                             bytecode_ptr as usize,
                         );
                     }
-                    self.install_jit_code(template, Arc::new(jit_code));
+                    self.install_pinned_jit_code(pin, Arc::new(jit_code));
                 }
-                Err(e) => self.record_jit_failure(bytecode_ptr, e, Some(template)),
+                Err(e) => self.record_jit_failure(bytecode_ptr, e, Some(pin)),
             }
             *self.jit_compile_attempts.entry(bytecode_ptr).or_insert(0) += 1;
             return;
@@ -226,7 +229,7 @@ impl VM {
             .get_or_insert_with(crate::jit::worker::JitWorker::new);
 
         if worker.submit(task) {
-            self.record_jit_pending(template);
+            self.record_jit_pending((*closure.template).clone());
             *self.jit_compile_attempts.entry(bytecode_ptr).or_insert(0) += 1;
             if self
                 .runtime_config
@@ -259,7 +262,7 @@ impl VM {
                     match result.result {
                         Ok(jit_code) => {
                             let Some(pin) = pin else { continue };
-                            self.install_jit_code(pin, Arc::new(jit_code));
+                            self.install_pinned_jit_code(pin, Arc::new(jit_code));
                         }
                         Err(e) => self.record_jit_failure(result.bytecode_key as *const u8, e, pin),
                     }

@@ -30,9 +30,9 @@ pub struct EmitResult {
     /// into its handle table before execution, and `rt_load_const(i)`
     /// returns the i-th constant.
     pub const_pool: Vec<Value>,
-    /// Bytecode for each closure, indexed by table index.
-    /// Used by spawn to execute WASM closures in new threads.
-    pub closure_bytecodes: Vec<super::host::ClosureBytecode>,
+    /// The module's dual-compiled bytecode, one payload per closure by table
+    /// index. Used by spawn to execute WASM closures in new threads.
+    pub closure_bytecodes: super::host::ModuleCode,
     /// Byte offset in linear memory where this module's env stack must begin.
     /// Sized above the module's widest args region so no call's args clobber a
     /// live closure env (see `env_stack_base`). The host initializes
@@ -110,7 +110,7 @@ fn env_stack_base_for_slots(max_slots: usize) -> usize {
         .max(super::host::ENV_STACK_BASE)
 }
 
-/// Emit a WASM module from an LirModule.
+/// Emit a WASM module from a frozen module.
 ///
 /// Closures in `stubbed` are emitted as minimal stubs (they have
 /// pre-compiled standalone Modules and are dispatched via rt_call).

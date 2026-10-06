@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! Wasmtime Engine/Store/Linker setup, and the closure-env builder both
 //! WASM hosts share.
 //!
@@ -194,7 +194,7 @@ pub fn create_engine() -> Result<Engine> {
 pub fn create_store(
     engine: &Engine,
     const_pool: Vec<Value>,
-    closure_bytecodes: Vec<super::host::ClosureBytecode>,
+    closure_bytecodes: super::host::ModuleCode,
     env_stack_base: usize,
 ) -> Store<ElleHost> {
     let mut host = ElleHost::new();

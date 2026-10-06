@@ -51,10 +51,8 @@ pub(crate) fn objects(
 
         // SAFETY: the discriminant byte matches a probed variant, and every
         // probed variant tolerates arbitrary bit patterns in its fields
-        // (raw pointers, integers, floats, `Value` words). A header's
-        // blueprint word is the one exception a bit pattern could hurt —
-        // dropping a fabricated `Rc` — and the check below refuses it while
-        // it is still only a word being read.
+        // (raw pointers, integers, floats, `Value` words), none of them an
+        // owner a drop would follow.
         let obj = unsafe { &*((base + off) as *const HeapObject) };
         for extent in slice_extents(obj).into_iter().flatten() {
             if !within(base, pages, extent) {
@@ -64,10 +62,9 @@ pub(crate) fn objects(
             }
         }
 
-        // A header names exactly one payload, its blueprint hydrates as
-        // absent, its own slices are bounded through the shell the extent
-        // above just admitted, and its child table names headers
-        // (docs/impl/image/sealing.md).
+        // A header names exactly one payload, the payload's own slices are
+        // bounded through the shell the extent above just admitted, and its
+        // child table names headers (docs/impl/image/sealing.md).
         if let HeapObject::ClosureTemplate(t) = obj {
             let slice = t.payload_slice();
             if slice.len() != 1 {
@@ -79,11 +76,6 @@ pub(crate) fn objects(
             if !(slice.as_ptr() as usize).is_multiple_of(align_of::<CodePayload>()) {
                 return Err(ImageError::Corrupt(format!(
                     "the header at {off} names a misaligned payload"
-                )));
-            }
-            if t.proto().is_some() {
-                return Err(ImageError::Corrupt(format!(
-                    "the header at {off} carries a blueprint pointer, which no image writes"
                 )));
             }
             payload_within(base, pages, off, payload_extents(t.payload()))?;
@@ -215,20 +207,14 @@ fn payload_extents(p: &CodePayload) -> Vec<Named> {
         ("lir.yield_points", extent(&lir.yield_points)),
         ("lir.call_sites", extent(&lir.call_sites)),
         ("lir.site_regs", extent(&lir.site_regs)),
-        ("lir.merged_slots", extent(&lir.merged_slots)),
-        ("lir.frame_release_slots", extent(&lir.frame_release_slots)),
-        (
-            "lir.frame_release_regions",
-            extent(&lir.frame_release_regions),
-        ),
     ]
 }
 
 /// Every child slot names an object the index calls a header.
 ///
 /// The one slot in the body whose target is read back as a header — its
-/// payload slice dereferenced, its blueprint word trusted — where every other
-/// slot's target is read as data. So a range check is not enough for this one
+/// payload slice dereferenced — where every other slot's target is read as
+/// data. So a range check is not enough for this one
 /// (docs/impl/image/sealing.md).
 fn children_are_headers(
     base: usize,

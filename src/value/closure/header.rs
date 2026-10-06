@@ -1,68 +1,38 @@
 // audited: 2026-10-06
-//! `ClosureTemplate` — the region-resident header of a code object.
+//! `ClosureTemplate` — the region-resident header of a code object: one slice naming its payload.
 //!
-//! Two words: a `RegionSlice` naming the shared payload, and an optional `Rc`
-//! to the blueprint it was materialized from — present on every header
-//! `MakeClosure` builds, absent on a header hydrated from an image
-//! (docs/impl/image/sealing.md). `MakeClosure` allocates one of these per
-//! closure creation, which is what makes a closure built in a loop cheap
-//! (docs/impl/region/template.md).
-
-use std::rc::Rc;
+//! docs/impl/region/template.md
+//!
+//! `MakeClosure` allocates one of these per closure creation, which is what
+//! makes a closure built in a loop cheap.
 
 use crate::hir::region::StaticRegion;
 use crate::signals::Signal;
 use crate::value::region_slice::RegionSlice;
 use crate::value::types::Arity;
-use crate::value::Value;
 
 use super::payload::{
     CodePayload, LocationTable, MaskRef, MergedSlots, RestListLayout, StrKeys, VarargTag,
 };
-use super::proto::TemplateProto;
 
-/// The code object a closure instance references: a shared payload plus the
-/// blueprint that made it.
+/// The code object a closure instance references: a payload in a code
+/// region, and nothing else.
 ///
 /// Never user-visible — it carries no `traits` and is never compared, hashed,
 /// or serialized as a user value.
 #[derive(Clone)]
 pub struct ClosureTemplate {
-    /// The shared payload, length one. Its backing lives in a payload region of
-    /// the heap's own, so allocating a header takes a counted cross-region
-    /// reference to it (docs/impl/region/rules.md Rule 5). A hydrated header's
-    /// backing lands in its own region instead — a self-edge.
+    /// The payload, length one. Its backing lives in its compile unit's code
+    /// region, so a header allocated in another region takes a counted
+    /// cross-region reference to it (docs/impl/region/rules.md Rule 5); a
+    /// header in the code region itself is a self-edge.
     payload: RegionSlice<CodePayload>,
-    /// The blueprint this header came from — the one Rust-heap owner left on a
-    /// code object. It answers the two questions the payload does not hold:
-    /// the nested-lambda blueprints a `MakeClosure` indexes, and the SPIR-V
-    /// cache. Holding it strongly is also what stops the heap's payload cache
-    /// from sweeping a payload this header still reads. A header hydrated from
-    /// an image has none — its payload backing is image pages no cache sweeps.
-    /// It answers the SPIR-V question with absence, and its children come off
-    /// the payload's child table instead (docs/impl/image/sealing.md).
-    proto: Option<Rc<TemplateProto>>,
-}
-
-/// One code object a `MakeClosure` indexes: the blueprint a materialized
-/// header carries, or the header an image's body carries beside its parent
-/// (docs/impl/image/sealing.md).
-///
-/// The two are the same question answered from the two sides a header can
-/// have, so every reader of one reads the other — a `MakeClosure`
-/// materializing a fresh header, the dumper copying a child into the body,
-/// the `send` encoder rebuilding a blueprint for a worker.
-pub enum ChildCode<'a> {
-    /// Compile-time data, held by the header that was materialized from it.
-    Blueprint(&'a Rc<TemplateProto>),
-    /// A body header, read out of the parent payload's child table.
-    Header(ClosureTemplate),
 }
 
 impl std::fmt::Debug for ClosureTemplate {
     /// What a reader needs from a code object: which function it is, how it is
-    /// called, and how big its body is. The payload slice and the blueprint
-    /// pointer are addresses — nothing a diagnostic can use.
+    /// called, and how big its body is. The payload slice is an address —
+    /// nothing a diagnostic can use.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ClosureTemplate")
             .field("name", &self.display_label())
@@ -75,44 +45,12 @@ impl std::fmt::Debug for ClosureTemplate {
 }
 
 impl ClosureTemplate {
-    /// A header over `payload`, with no blueprint: what the image hydrator's
-    /// bytes decode to (docs/impl/image/sealing.md).
+    /// A header over `payload`.
     pub(crate) fn new(payload: RegionSlice<CodePayload>) -> Self {
-        ClosureTemplate {
-            payload,
-            proto: None,
-        }
+        ClosureTemplate { payload }
     }
 
-    /// A header over `payload` holding the blueprint it was materialized from,
-    /// as `MakeClosure` and the entry paths build one.
-    pub(crate) fn with_blueprint(
-        payload: RegionSlice<CodePayload>,
-        proto: Rc<TemplateProto>,
-    ) -> Self {
-        ClosureTemplate {
-            payload,
-            proto: Some(proto),
-        }
-    }
-
-    /// The code object for `proto` on `heap`, with no header allocated in any
-    /// region.
-    ///
-    /// An entry thunk's or module body's code object is *executed*, never
-    /// referenced by a closure, so it needs no heap identity — but it must
-    /// still reach its bytecode the way every other code object does, or the
-    /// entry paths become a second shape for a synthetic thunk to drift into.
-    /// The blueprint held here keeps the payload's cache entry, and so its
-    /// region, alive for as long as this code object.
-    pub fn for_proto(
-        heap: &mut crate::value::fiberheap::FiberHeap,
-        proto: &Rc<TemplateProto>,
-    ) -> Self {
-        ClosureTemplate::with_blueprint(heap.template_payload(proto), Rc::clone(proto))
-    }
-
-    /// The shared payload.
+    /// The payload.
     #[inline]
     pub fn payload(&self) -> &CodePayload {
         &self.payload.as_slice()[0]
@@ -131,18 +69,11 @@ impl ClosureTemplate {
         std::mem::offset_of!(ClosureTemplate, payload)
     }
 
-    /// The pointer the payload's region owns — what the alloc scan turns into
-    /// this header's counted cross-region reference.
+    /// The pointer the code region owns — what the alloc scan turns into this
+    /// header's counted cross-region reference.
     #[inline]
     pub(crate) fn payload_backing(&self) -> *const () {
         self.payload.as_ptr() as *const ()
-    }
-
-    /// The blueprint this header was materialized from, absent on a header
-    /// hydrated from an image.
-    #[inline]
-    pub fn proto(&self) -> Option<&Rc<TemplateProto>> {
-        self.proto.as_ref()
     }
 
     // ── payload ────────────────────────────────────────────────────────
@@ -153,7 +84,7 @@ impl ClosureTemplate {
     }
 
     #[inline]
-    pub fn constants(&self) -> &[Value] {
+    pub fn constants(&self) -> &[crate::value::Value] {
         self.payload().constants()
     }
 
@@ -250,7 +181,7 @@ impl ClosureTemplate {
     }
 
     /// The frozen function the JIT promotes this code object from, read out of
-    /// the payload, so a hydrated header answers it as a materialized one does.
+    /// the payload.
     #[inline]
     pub fn lir(&self) -> Option<crate::lir::LirView<'_>> {
         self.payload().lir()
@@ -263,114 +194,46 @@ impl ClosureTemplate {
         self.payload().has_lir()
     }
 
-    /// Where the source lambda was written, for `(meta/origin f)`. A span is
-    /// plain data, so it rides on the payload rather than on the blueprint and
-    /// a hydrated header answers it too (docs/impl/region/template.md).
+    /// Where the source lambda was written, for `(meta/origin f)`.
     #[inline]
     pub fn origin(&self) -> Option<crate::syntax::Span> {
         self.payload().origin()
     }
 
     // ── children ───────────────────────────────────────────────────────
-    //
-    // A `MakeClosure` indexes these, and both sides of a header answer:
-    // blueprints where there is a blueprint, the payload's child table where
-    // there is not (docs/impl/image/sealing.md). Read them through
-    // [`Self::child`], which is the only place that decides which side
-    // answers.
 
     /// How many code objects this one's `MakeClosure` instructions index.
     #[inline]
     pub fn num_children(&self) -> usize {
-        match self.proto.as_ref() {
-            Some(p) => p.child_protos.len(),
-            None => self.payload().children().len(),
-        }
+        self.payload().children().len()
     }
 
     /// The header the `MakeClosure` at `idx` builds over, read out of the
-    /// payload's child table. A header that still holds a blueprint has an
-    /// empty table, and answers a header over its own payload naming the
-    /// child's blueprint.
-    pub fn child(&self, idx: usize) -> ClosureTemplate {
-        match self.child_code(idx) {
-            ChildCode::Header(child) => child,
-            ChildCode::Blueprint(proto) => {
-                ClosureTemplate::with_blueprint(self.payload, Rc::clone(proto))
-            }
-        }
-    }
-
-    /// The code object the `MakeClosure` at `idx` builds, from whichever side
-    /// of this header answers.
+    /// payload's child table.
     ///
     /// Panics for an index past the table, as a constant-pool read does: the
     /// index is baked into the instruction by the emitter that registered the
     /// child, so an out-of-range one is a corrupt code object.
-    pub(crate) fn child_code(&self, idx: usize) -> ChildCode<'_> {
-        let Some(proto) = self.proto.as_ref() else {
-            let value = self.payload().children()[idx];
-            let obj: &'static crate::value::heap::HeapObject =
-                unsafe { crate::value::arena::deref(value) };
-            let crate::value::heap::HeapObject::ClosureTemplate(child) = obj else {
-                unreachable!(
-                    "a child table entry is a code object, got {}",
-                    obj.type_name()
-                );
-            };
-            return ChildCode::Header(child.clone());
+    pub fn child(&self, idx: usize) -> ClosureTemplate {
+        let value = self.payload().children()[idx];
+        let obj: &'static crate::value::heap::HeapObject =
+            unsafe { crate::value::arena::deref(value) };
+        let crate::value::heap::HeapObject::ClosureTemplate(child) = obj else {
+            unreachable!(
+                "a child table entry is a code object, got {}",
+                obj.type_name()
+            );
         };
-        ChildCode::Blueprint(&proto.child_protos[idx])
-    }
-
-    /// A header over this one's payload and no blueprint, which is what a
-    /// `MakeClosure` materializes from a hydrated child: the instruction
-    /// allocates a fresh header per creation whichever side answered, so the
-    /// two boots build one shape (docs/impl/image/sealing.md).
-    #[inline]
-    pub(crate) fn without_blueprint(&self) -> ClosureTemplate {
-        ClosureTemplate::new(self.payload)
-    }
-
-    // ── blueprint ──────────────────────────────────────────────────────
-    //
-    // Each of these answers with absence for a blueprint-less header.
-
-    /// The blueprints this header's `MakeClosure` instructions index, for the
-    /// readers that want compile-time data and nothing else. A hydrated
-    /// header has none and answers empty; dispatch goes through
-    /// [`Self::child`], which reads the child table instead.
-    #[inline]
-    pub fn child_protos(&self) -> &[Rc<TemplateProto>] {
-        self.proto
-            .as_ref()
-            .map(|p| p.child_protos.as_slice())
-            .unwrap_or(&[])
-    }
-
-    /// The SPIR-V bytes `(git f)` compiled for this code object, if any.
-    #[inline]
-    pub fn spirv_bytes(&self) -> Option<&Vec<u8>> {
-        self.proto.as_ref()?.spirv.get()
-    }
-
-    /// Cache freshly compiled SPIR-V on the blueprint. Idempotent (the cell
-    /// keeps its first value); a blueprint-less header caches nothing, and
-    /// its caller recompiles.
-    #[inline]
-    pub fn cache_spirv(&self, bytes: Vec<u8>) {
-        if let Some(p) = self.proto.as_ref() {
-            let _ = p.spirv.set(bytes);
-        }
+        child.clone()
     }
 
     // ── owned re-forms ─────────────────────────────────────────────────
     //
-    // The boundaries that rebuild a *blueprint* out of a code object — the
-    // cross-thread `send` encoder and the stdlib disk cache — want the
-    // compile-time shapes back. Each allocates, so they are for those
-    // boundaries and not for the running VM, which reads the payload's own
-    // form.
+    // The boundaries that rebuild a code object somewhere else — the
+    // cross-thread `send` encoder, the stdlib disk cache, a copy onto another
+    // heap — want the compile-time shapes back. Each allocates, so they are
+    // for those boundaries and not for the running VM, which reads the
+    // payload's own form.
 
     /// The vararg kind in its owned compile-time form. The payload keeps the
     /// tag and the `&named` key set apart; this reassembles them.
@@ -413,7 +276,7 @@ impl ClosureTemplate {
     }
 
     /// The executable context for this code object. `Code` is this header and
-    /// nothing else, so building one copies two words and bumps one refcount.
+    /// nothing else, so building one copies one slice.
     #[inline]
     pub fn code(&self) -> crate::value::Code {
         crate::value::Code::new(self.clone())

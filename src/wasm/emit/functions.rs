@@ -105,21 +105,17 @@ impl WasmEmitter {
         }
         module.section(&code);
 
-        // Dual-compile bytecode for spawn.
-        // Use emit_module which handles MakeClosure → ClosureId resolution.
-        let mut scratch = crate::value::fiberheap::FiberHeap::new();
-        let mut bc_emitter = crate::lir::Emitter::new(crate::value::CodeArena::mint(&mut scratch));
-        let bc_compiled = bc_emitter.emit_module_closures(lir_module);
-        let mut closure_bytecodes = Vec::with_capacity(bc_compiled.len());
-        for (bytecode, _, _) in bc_compiled {
-            // The blueprint carries child_protos: the bytecode's MakeClosure
-            // instructions index that list, so a spawned worker building a code
-            // object from this needs it (rt_make_closure,
-            // src/wasm/linker/create/closure.rs). Without it the code object's
-            // child list is empty, and the worker panics on its first
-            // MakeClosure (`wasm::tests::closure`).
-            closure_bytecodes.push(std::rc::Rc::new(bytecode.into_proto()));
-        }
+        // Dual-compile bytecode for spawn, into a code unit of the module's own
+        // on the driving instance's heap. Each closure's payload carries its
+        // child table: the bytecode's MakeClosure instructions index it, so a
+        // spawned worker building a code object from this needs it
+        // (rt_make_closure, src/wasm/linker/create/closure.rs). Without it the
+        // worker panics on its first MakeClosure (`wasm::tests::closure`).
+        let code = crate::value::CodeArena::mint(unsafe { &mut *self.heap_ptr });
+        let ((entry, _, _), lambdas) =
+            crate::lir::Emitter::new(code).emit_module_with_lambdas(lir_module);
+        let closure_bytecodes =
+            super::super::host::ModuleCode::new(crate::value::CodeUnit::new(code, entry), lambdas);
 
         EmitResult {
             wasm_bytes: module.finish(),
@@ -179,7 +175,7 @@ impl WasmEmitter {
         EmitResult {
             wasm_bytes: module.finish(),
             const_pool: std::mem::take(&mut self.const_pool),
-            closure_bytecodes: Vec::new(),
+            closure_bytecodes: super::super::host::ModuleCode::none(),
             env_stack_base: super::env_stack_base_for_func(func),
         }
     }

@@ -1,5 +1,5 @@
 // audited: 2026-10-06
-//! Array-call, closure-construction, tail-call, and env-building JIT entry points.
+//! Array-call, tail-call, and env-building JIT entry points.
 //!
 //! docs/impl/jit.md
 //! docs/impl/region/relocate.md
@@ -138,48 +138,6 @@ pub extern "C" fn elle_jit_tail_call_array(
     };
     unsafe { &mut *(vm as *mut crate::vm::VM) }.release_splice_args(args_array);
     result
-}
-
-/// Create a closure from a code-object **blueprint** and captured environment.
-/// `template_ptr`: raw pointer to a `TemplateProto` owned by the JIT code
-/// object (`closure_protos`). `captures_ptr`: pointer to array of `count`
-/// Values (16 bytes each). Materializes a FRESH region-allocated
-/// `HeapObject::ClosureTemplate` header over the blueprint's shared payload,
-/// into `region`, and builds the instance referencing it (co-region → region
-/// RC, reclaimed when it frees).
-#[no_mangle]
-pub extern "C" fn elle_jit_make_closure(
-    template_ptr: i64,
-    captures_ptr: *const Value,
-    count: u64,
-    region: u32,
-    vm: *mut (),
-) -> JitValue {
-    // The blueprint is owned by the JIT code object for as long as any code it
-    // compiled can run, so this pointer is live. The header being built holds
-    // its own counted handle rather than borrowing the code object's, so a
-    // closure outliving its `JitCode` still reaches its blueprint.
-    let blueprint = unsafe {
-        let ptr = template_ptr as *const crate::value::TemplateProto;
-        std::rc::Rc::increment_strong_count(ptr);
-        std::rc::Rc::from_raw(ptr)
-    };
-    let count = count as usize;
-
-    let env_slice: &[Value] = if count == 0 {
-        &[]
-    } else {
-        unsafe { std::slice::from_raw_parts(captures_ptr, count) }
-    };
-
-    let region = crate::hir::region::RuntimeRegion::new(region)
-        .expect("JIT alloc region id is a live mortal region");
-    // The heap is the driving VM's own, reached through the threaded vm pointer —
-    // this instance's heap, not a per-thread slot (docs/impl/region/ctx.md).
-    let heap = unsafe { &mut *(*(vm as *mut crate::vm::VM)).heap_ptr };
-    let child = crate::value::ClosureTemplate::for_proto(heap, &blueprint);
-    let result = crate::vm::closure::materialize_closure_in_region(heap, &child, env_slice, region);
-    JitValue::from_value(result)
 }
 
 // =============================================================================

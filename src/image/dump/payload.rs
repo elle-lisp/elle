@@ -8,7 +8,6 @@
 //! many headers name it. The payload struct itself is written canonically by
 //! its `Backing`; this records what the struct names.
 
-use crate::hir::region::StaticRegion;
 use crate::lir::code::{BlockRec, ConstRec, Node, SiteRec};
 use crate::lir::{LirBody, Reg};
 use crate::value::closure::CodePayload;
@@ -83,10 +82,7 @@ impl Emitted {
         }
         self.records::<SiteRec>(&b.yield_points, layout::SITE_PAD, at, backings)?;
         self.records::<SiteRec>(&b.call_sites, layout::SITE_PAD, at, backings)?;
-        self.raw::<Reg>(&b.site_regs, at, backings)?;
-        self.raw::<StaticRegion>(&b.merged_slots, at, backings)?;
-        self.raw::<u16>(&b.frame_release_slots, at, backings)?;
-        self.raw::<StaticRegion>(&b.frame_release_regions, at, backings)
+        self.raw::<Reg>(&b.site_regs, at, backings)
     }
 
     /// A slice whose elements carry no padding and no pointer, so its bytes

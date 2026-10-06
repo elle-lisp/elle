@@ -33,8 +33,8 @@ impl VM {
     ///   — read or set the runtime configuration (config.rs)
     /// - (:"mlir/compile-spirv" . closure-or-pair) — SPIR-V bytes for a
     ///   GPU-eligible closure (`mlir` builds only)
-    /// - (:"git" . closure-or-pair) — the closure, its SPIR-V cached on its
-    ///   template (`mlir` builds only)
+    /// - (:"git" . closure-or-pair) — the closure, its SPIR-V cached in the
+    ///   VM's SPIR-V cache (`mlir` builds only)
     /// - `compile/run-on`, `compile/barrier-module`, `compile/whole-module`,
     ///   `compile/whole-module-syntax`, `compile/dumps` — run or compile a
     ///   closure or module (modules.rs)
@@ -402,7 +402,7 @@ impl VM {
                     None => return type_error!(ctx, closure_val, "git", "closure"),
                 };
                 // Already cached? Return early.
-                if closure.template.spirv_bytes().is_some() {
+                if self.spirv_for(&closure.template).is_some() {
                     return (SIG_OK, closure_val);
                 }
                 let lir = match closure.template.lir() {
@@ -424,14 +424,14 @@ impl VM {
                 let cache = self
                     .mlir_cache
                     .get_or_insert_with(crate::mlir::MlirCache::new);
-                match cache.compile_spirv(key, &lir, wg_size) {
-                    Ok(bytes) => {
-                        // Cache on the template (idempotent).
-                        closure.template.cache_spirv(bytes.to_vec());
-                        (SIG_OK, closure_val)
-                    }
-                    Err(e) => (SIG_ERROR, ctx.error("mlir-error", format!("git: {}", e))),
-                }
+                let bytes = match cache.compile_spirv(key, &lir, wg_size) {
+                    Ok(bytes) => bytes.to_vec(),
+                    Err(e) => return (SIG_ERROR, ctx.error("mlir-error", format!("git: {}", e))),
+                };
+                // The VM's cache entry pins the closure's code region, so the
+                // key keeps naming this function (docs/impl/jit.md).
+                self.install_spirv(&closure.template, bytes);
+                (SIG_OK, closure_val)
             }
             "compile/run-on" => self.dispatch_compile_run_on(ctx, arg),
             "compile/barrier-module" => self.dispatch_barrier_module(ctx, arg),

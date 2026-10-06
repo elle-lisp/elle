@@ -1,7 +1,7 @@
-//! The two disjoint region id-spaces: the compile-time static slot baked into
-//! bytecode (`StaticRegion`) and the runtime physical region minted per
-//! allocation execution (`RuntimeRegion`). They never meet as the same type —
-//! docs/impl/region/model.md § "Two id-spaces".
+// audited: 2026-10-06
+//! The two region id-spaces, a compile-time static slot and a runtime physical region, as types that never meet.
+//!
+//! docs/impl/region/model.md
 
 use std::num::NonZeroU32;
 
@@ -21,13 +21,30 @@ use std::num::NonZeroU32;
 /// `StaticRegion` lives in the typed LIR layer only. Serialized into bytecode it
 /// becomes a raw `u32`, and the VM decodes that `u32` slot and resolves it to a
 /// `RuntimeRegion` — the two never meet as the same type.
+///
+/// `repr(transparent)`, so a table of raw slots a code payload stores reads as
+/// a table of `StaticRegion`s through [`StaticRegion::slice_of`].
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
 )]
 #[serde(transparent)]
+#[repr(transparent)]
 pub struct StaticRegion(NonZeroU32);
 
 impl StaticRegion {
+    /// `raw` read as static slots, without a copy. Panics on a zero, which
+    /// names no slot: a payload writes its tables from `StaticRegion`s, so a
+    /// zero means the pages behind the table are not what wrote them.
+    pub fn slice_of(raw: &[u32]) -> &[StaticRegion] {
+        assert!(
+            !raw.contains(&0),
+            "a static-slot table holds a zero, which names no slot"
+        );
+        // SAFETY: `StaticRegion` is `repr(transparent)` over `NonZeroU32`, which
+        // is `repr(transparent)` over `u32`, and no element is zero.
+        unsafe { std::slice::from_raw_parts(raw.as_ptr() as *const StaticRegion, raw.len()) }
+    }
+
     /// Wrap a raw slot id, returning `None` for 0 (there is no slot 0).
     #[inline]
     pub const fn new(id: u32) -> Option<StaticRegion> {

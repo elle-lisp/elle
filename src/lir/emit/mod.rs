@@ -29,9 +29,9 @@ pub struct Emitter {
     stack: Vec<Reg>,
     /// Register to stack position mapping (for finding values)
     reg_to_stack: HashMap<Reg, usize>,
-    /// Saved stack state from yield terminators, keyed by resume label.
-    /// When a block ends with Terminator::Yield, the stack state is saved here
-    /// so the resume block can start with the correct simulation state.
+    /// The simulation a block still ahead of the cursor starts from, keyed by
+    /// its label. A `Jump` saves it for its target, a `Branch` for both
+    /// targets, and an `Emit` for its resume block.
     yield_stack_state: HashMap<Label, (Vec<Reg>, HashMap<Reg, usize>)>,
     /// Operand depth each already-emitted block started at, keyed by label.
     /// `yield_stack_state` answers the same question for a block still ahead of
@@ -52,10 +52,13 @@ pub struct Emitter {
     /// `None` when emitting a standalone function (tests, nested emit).
     compiled_closures: Option<Vec<ClosureCompiled>>,
     /// The frozen LIR of each closure. Parallel to `compiled_closures`.
-    /// Needed by MakeClosure to build ClosureTemplates.
+    /// Needed by MakeClosure to write the closure's payload.
     closure_lir_funcs: Option<Rc<[LirOwned]>>,
     /// The code region this emission writes its payloads into.
     arena: crate::value::CodeArena,
+    /// The header over each closure's payload, once a `MakeClosure` has
+    /// written it, so a lambda two sites build is one code object.
+    lambda_headers: HashMap<ClosureId, Value>,
 }
 
 mod instr;
@@ -78,7 +81,35 @@ impl Emitter {
             current_func_num_locals: 0,
             compiled_closures: None,
             closure_lir_funcs: None,
+            lambda_headers: HashMap::new(),
         }
+    }
+
+    /// The header over closure `id`'s payload in the unit's code region,
+    /// writing the payload the first time a `MakeClosure` names it.
+    ///
+    /// Panics outside module emission: the closure's compiled bytecode and its
+    /// frozen LIR come from `emit_module`'s pass, so code holding a
+    /// `MakeClosure` is emitted through it.
+    fn lambda_header(&mut self, id: ClosureId, num_captures: usize) -> Value {
+        if let Some(&header) = self.lambda_headers.get(&id) {
+            return header;
+        }
+        let compiled = self
+            .compiled_closures
+            .as_ref()
+            .expect("MakeClosure without compiled_closures context")
+            .get(id.0 as usize)
+            .expect("MakeClosure: invalid ClosureId")
+            .clone();
+        let func = &self
+            .closure_lir_funcs
+            .as_ref()
+            .expect("MakeClosure without closure_lir_funcs context")[id.0 as usize];
+        let parts = crate::value::PayloadParts::lambda(func, num_captures, compiled);
+        let header = self.arena.header(self.arena.write(parts));
+        self.lambda_headers.insert(id, header);
+        header
     }
 
     /// Emit bytecode from an LIR module.
@@ -87,6 +118,40 @@ impl Emitter {
     /// function's `MakeClosure` instructions reference pre-compiled
     /// closures by `ClosureId`.
     pub fn emit_module(&mut self, module: &FrozenModule) -> ClosureCompiled {
+        self.compile_closures(module);
+        let result = self.emit(&module.entry.view());
+        self.compiled_closures = None;
+        self.closure_lir_funcs = None;
+        result
+    }
+
+    /// Emit `module` as [`emit_module`](Self::emit_module) does, and answer the
+    /// header over every closure's payload beside the entry's result, indexed
+    /// by `ClosureId`. The WASM backend's dual compile reads these: its host
+    /// builds each closure's code object from the closure's own payload
+    /// (docs/impl/wasm.md).
+    pub fn emit_module_with_lambdas(
+        &mut self,
+        module: &FrozenModule,
+    ) -> (ClosureCompiled, Vec<Value>) {
+        self.compile_closures(module);
+        let result = self.emit(&module.entry.view());
+        // A closure no `MakeClosure` named is written here, with the capture
+        // count its own LIR records.
+        let lambdas = (0..module.closures.len())
+            .map(|i| {
+                let captures = module.closures[i].view().num_captures() as usize;
+                self.lambda_header(ClosureId(i as u32), captures)
+            })
+            .collect();
+        self.compiled_closures = None;
+        self.closure_lir_funcs = None;
+        (result, lambdas)
+    }
+
+    /// Emit every closure of `module` and keep the results, so the entry's
+    /// `MakeClosure`s find them.
+    fn compile_closures(&mut self, module: &FrozenModule) {
         // Compile closures in REVERSE order (post-order). Parents have
         // lower IDs than children (pre-order assignment), so compiling
         // in reverse ensures children are compiled before their parents.
@@ -94,6 +159,7 @@ impl Emitter {
         // pre-compiled bytecode.
         let n = module.closures.len();
         self.closure_lir_funcs = Some(Rc::from(module.closures.as_slice()));
+        self.lambda_headers.clear();
         // Pre-allocate with placeholders. Entries are filled in reverse
         // order; the MakeClosure handler only accesses children (higher
         // indices), which are filled before their parents.
@@ -107,52 +173,6 @@ impl Emitter {
             compiled[i] = result;
         }
         // All closures compiled.
-        self.compiled_closures = Some(compiled);
-        let result = self.emit(&module.entry.view());
-        self.compiled_closures = None;
-        self.closure_lir_funcs = None;
-        result
-    }
-
-    /// Compile all closures in a module, returning per-closure bytecodes.
-    ///
-    /// Like `emit_module` but returns the individual closure results
-    /// instead of the entry function result. Used by the WASM backend
-    /// for dual-compile (bytecode for spawn).
-    pub fn emit_module_closures(&mut self, module: &FrozenModule) -> Vec<ClosureCompiled> {
-        let n = module.closures.len();
-        self.closure_lir_funcs = Some(Rc::from(module.closures.as_slice()));
-        let mut compiled: Vec<ClosureCompiled> = (0..n)
-            .map(|_| (Bytecode::new(), Vec::new(), Vec::new()))
-            .collect();
-        for i in (0..n).rev() {
-            self.compiled_closures = Some(compiled);
-            let result = self.emit(&module.closures[i].view());
-            compiled = self.compiled_closures.take().unwrap();
-            compiled[i] = result;
-        }
-        self.compiled_closures = None;
-        self.closure_lir_funcs = None;
-        compiled
-    }
-
-    /// Set module context for MakeClosure resolution without
-    /// pre-compiling all closures. Used by the JIT to compile a
-    /// single closure that may contain MakeClosure instructions.
-    pub fn set_module_context(&mut self, closures: &[LirOwned]) {
-        self.closure_lir_funcs = Some(Rc::from(closures));
-        // Pre-compile all closures so MakeClosure can look them up.
-        // Uses reverse order (children before parents).
-        let n = closures.len();
-        let mut compiled: Vec<ClosureCompiled> = (0..n)
-            .map(|_| (Bytecode::new(), Vec::new(), Vec::new()))
-            .collect();
-        for i in (0..n).rev() {
-            self.compiled_closures = Some(compiled);
-            let result = self.emit(&closures[i].view());
-            compiled = self.compiled_closures.take().unwrap();
-            compiled[i] = result;
-        }
         self.compiled_closures = Some(compiled);
     }
 
@@ -206,11 +226,9 @@ impl Emitter {
         }
 
         // Carry this function's builder-idiom merge metadata into the bytecode so
-        // the entry-function path (`Bytecode → Code`) mint-or-reuses merged slots —
-        // the lambda path already carries it on the blueprint the `MakeClosure`
-        // build makes. Empty unless a merge fired. The payload stores both these
-        // and the release tables ascending, so nothing here depends on a hash
-        // order.
+        // the entry function's payload mint-or-reuses merged slots — a lambda's
+        // payload reads them off its frozen function. Empty unless a merge fired.
+        // Freezing records both these and the release tables ascending.
         self.bytecode.merged_slots = func.merged_slots().iter().map(|s| s.get()).collect();
         // Likewise the value-route release table, so the entry function's error
         // exit walks the releases its abandoned frame still owed.

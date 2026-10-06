@@ -25,7 +25,7 @@ mod mirror;
 mod ser;
 mod syntax;
 
-use de::{into_value_inner, template_from_sendable, DeserContext, ReconState};
+use de::{into_value_inner, parts_from_sendable, DeserContext, ReconState};
 use ser::{from_value_inner, sendable_from_template, SerContext};
 use syntax::{send_to_syntax, SendSyntax};
 
@@ -68,21 +68,20 @@ pub struct SendableClosure {
     /// values table holds them. They cross through the ordinary value walk, so
     /// a closure among them interns into the bundle like any other.
     pub lir_values: Vec<SendValue>,
-    /// Nested-lambda blueprints (`TemplateProto::child_protos`) this code
-    /// object's `MakeClosure` instructions index. Serialized inline (a blueprint
-    /// has no heap identity to intern) so the worker can rebuild them into the
-    /// reconstructed blueprint's `child_protos` and resolve `MakeClosure`. Each
-    /// has empty `env`/`squelch_mask` — a blueprint is a pure code description.
+    /// The code objects this one's `MakeClosure` instructions index, in
+    /// child-table order. Serialized inline (a code object has no heap identity
+    /// to intern) so the receiver writes each beside this one's payload and
+    /// fills the child table. Each has empty `env`/`squelch_mask`.
     pub child_protos: Vec<SendableClosure>,
     /// The static region slots this code object's allocations SHARE after a
-    /// builder-idiom merge (`ClosureTemplate.merged_slots`; docs/impl/region/merging.md
+    /// builder-idiom merge (`ClosureTemplate::merged_slots`; docs/impl/region/merging.md
     /// § Merging), serialized so the worker mint-or-reuses them and its region count
     /// matches the sender's. Empty unless a merge fired.
     pub merged_slots: Vec<u32>,
-    /// Value-routed release slots (`ClosureTemplate.frame_release_slots`), so an
+    /// Value-routed release slots (`ClosureTemplate::frame_release_slots`), so an
     /// abandoned frame on the worker runs the releases it still owes.
     pub frame_release_slots: Vec<u16>,
-    /// Slot-routed release regions (`ClosureTemplate.frame_release_regions`).
+    /// Slot-routed release regions (`ClosureTemplate::frame_release_regions`).
     pub frame_release_regions: Vec<u32>,
 }
 
@@ -91,7 +90,7 @@ pub struct SendableClosure {
 /// For immediate values (nil, bool, int, float, symbol, keyword), SendValue
 /// stores them directly; their spellings ride the bundle's name table.
 /// For heap values, SendValue stores owned copies of the heap data, ensuring
-/// the data remains valid even if the original Rc is dropped.
+/// the data remains valid even if the original is freed.
 #[derive(Clone)]
 pub enum SendValue {
     /// Immediate values that don't need copying
@@ -409,15 +408,15 @@ impl SendBundle {
     }
 }
 
-/// A serialized set of closure templates — what `SendBundle` is to a value,
-/// this is to a module's blueprints (the stdlib compilation cache stores one).
+/// A serialized set of code objects — what `SendBundle` is to a value, this is
+/// to a unit's code (the stdlib compilation cache stores one).
 ///
 /// A struct rather than a tuple because `templates` and `intern_table` have the
 /// same type: as positional arguments they are swappable at every call site
 /// with no compile error, and a swap would resolve every `Ref(idx)` against the
 /// wrong table.
 pub(crate) struct SendTemplates {
-    /// The blueprints themselves, in the order they were serialized.
+    /// The code objects themselves, in the order they were serialized.
     pub(crate) templates: Vec<SendableClosure>,
     /// Live closure instances lifted out of the templates' constant pools,
     /// referenced from the templates by `SendValue::Ref(idx)`.
@@ -428,22 +427,22 @@ pub(crate) struct SendTemplates {
     pub(crate) names: Vec<(u64, Box<str>)>,
 }
 
-/// Serialize a list of closure templates (e.g. a module's `child_protos`) into
-/// owned `SendableClosure`s, for the stdlib compilation cache.
+/// Serialize a list of code objects (a unit's entry) into owned
+/// `SendableClosure`s, for the stdlib compilation cache.
 ///
-/// Each template is a blueprint: `env`/`squelch_mask` are empty. Templates have
-/// no heap identity to intern, so they are emitted inline; their own
-/// `child_protos` recurse. Closure constants *inside* a template's constant
-/// pool are live heap instances and intern into the returned `intern_table` —
-/// the reconstructed templates reference it by `Ref(idx)`.
+/// `env`/`squelch_mask` are empty. A code object has no heap identity to
+/// intern, so each is emitted inline and its child table recurses. Closure
+/// constants *inside* a constant pool are live heap instances and intern into
+/// the returned `intern_table` — the reconstructed code objects reference it
+/// by `Ref(idx)`.
 pub(crate) fn serialize_templates(
-    protos: &[std::rc::Rc<crate::value::TemplateProto>],
+    code: &[&crate::value::ClosureTemplate],
     heap: &crate::value::fiberheap::FiberHeap,
     symbols: &crate::symbol::SymbolTable,
 ) -> Result<SendTemplates, String> {
     let mut ctx = SerContext::new(heap, Some(symbols));
-    let mut templates = Vec::with_capacity(protos.len());
-    for t in protos {
+    let mut templates = Vec::with_capacity(code.len());
+    for t in code {
         templates.push(sendable_from_template(t, &mut ctx)?);
     }
     let names = ctx.take_names();
@@ -454,12 +453,14 @@ pub(crate) fn serialize_templates(
     })
 }
 
-/// Reconstruct closure templates from a [`SendTemplates`]. The intern table is
-/// shared across all templates so `Ref(idx)` entries (closure constants)
-/// resolve.
+/// Reconstruct code objects from a [`SendTemplates`] as the fields of their
+/// payloads, each one's children written into `code` and named by its child
+/// table. The intern table is shared across all of them so `Ref(idx)` entries
+/// (closure constants) resolve.
 ///
-/// `Alloc` is the receiving context's allocation capability (every
-/// reconstructed heap object is born in its region).
+/// `Alloc` is the receiving context's allocation capability: every rebuilt
+/// value is born in its region, and so is the code object of every closure
+/// among them.
 ///
 /// The name table replays into `symbols`, the receiving instance's display
 /// memo, exactly as `SendBundle::into_value` does. Nothing else about a symbol
@@ -469,16 +470,17 @@ pub(crate) fn deserialize_templates(
     stored: SendTemplates,
     alloc: &mut crate::primitives::ctx::Alloc<'_>,
     symbols: &mut crate::symbol::SymbolTable,
-) -> Result<Vec<std::rc::Rc<crate::value::TemplateProto>>, String> {
+    code: crate::value::CodeArena,
+) -> Vec<crate::value::PayloadParts> {
     for (hash, name) in &stored.names {
         symbols.record_spelling(*hash, name);
     }
     let mut dctx = DeserContext::new(stored.intern_table, alloc);
-    let mut out = Vec::with_capacity(stored.templates.len());
-    for sc in stored.templates {
-        out.push(template_from_sendable(sc, &mut dctx));
-    }
-    Ok(out)
+    stored
+        .templates
+        .into_iter()
+        .map(|sc| parts_from_sendable(sc, &mut dctx, code))
+        .collect()
 }
 
 #[cfg(test)]

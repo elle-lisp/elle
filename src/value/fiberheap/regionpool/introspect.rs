@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! What a region pool can say about itself: its live objects and pages, and the cross-region references it holds.
 //!
 //! docs/impl/region/model.md
@@ -163,7 +163,7 @@ impl RegionPool {
             }
             HeapObject::Closure { closure, .. } => {
                 // The env RegionSlice backing usually lives in the closure's
-                // OWN region (built together by the lowerer), so the synthetic
+                // OWN region (built together by `MakeClosure`), so the synthetic
                 // backing ref below is filtered by `rid == own_id`. But a
                 // closure built by SHARING another closure's env — `squelch` /
                 // `attune` (src/primitives/meta/syntaxops.rs) clone the template and copy
@@ -252,7 +252,7 @@ impl RegionPool {
                 // The matching incref is added when the fiber parks/dies (see
                 // `incref_signal_region` in src/vm/fiber/refcount.rs).
                 let mut signal_val = Value::NIL;
-                // The fiber's closure holds a `Region` template (a region-allocated
+                // The fiber's closure holds a template (a region-allocated
                 // `HeapObject::ClosureTemplate`) usually CO-region with the env
                 // backing, but for an EMPTY-env closure there is no backing synth —
                 // so the template edge must be tracked explicitly, else the fiber's
@@ -329,24 +329,22 @@ impl RegionPool {
                 }
             }
             HeapObject::ClosureTemplate(t) => {
-                // The header→payload edge. A code object's payload lives in a
-                // payload region of the heap's own, shared by every header the
-                // same blueprint materializes (docs/impl/region/template.md), so
-                // it is a real cross-region reference: without it the payload
-                // region is freed while a header still reads its bytecode.
-                // Every slice of one payload lands in that one region by
-                // construction, so the payload's own backing covers them all.
+                // The header→payload edge. A code object's payload lives in its
+                // compile unit's code region (docs/impl/region/template.md), so
+                // a header in any other region holds a real cross-region
+                // reference: without it the code region frees while a header
+                // still reads its bytecode. Every slice of one payload lands in
+                // that one region by construction, so the payload's own backing
+                // covers them all, the child table's headers included.
                 // Synthesize a heap Value at it, as the closure-env arm does.
                 let payload =
                     Value::from_heap_ptr(t.payload_backing(), crate::value::repr::TAG_ARRAY);
                 check(&payload);
-                // The template's constant pool. These are immediates
-                // (string/quoted literals are their own `MaterializeConst`
-                // allocations, not pool Values), so this
-                // is normally a no-op — but scan it for symmetry so any future
-                // region-allocated constant is RC-tracked (alloc-scan increfs,
-                // free-cascade decrefs the same edge). The `child_protos`
-                // blueprints are plain `Rc` data with no region edge — skipped.
+                // The payload's constant pool. A string or quoted literal is a
+                // `MaterializeConst` allocation rather than a pool value, but a
+                // `ValueConst` can load a heap value — a closure — from a region
+                // of its own, so every constant is scanned like any other edge
+                // (alloc-scan increfs, free-cascade decrefs the same edge).
                 for v in t.constants().iter() {
                     check(v);
                 }

@@ -8,9 +8,9 @@
 //! (only when the closure could actually emit them). Use `effective_signal()`
 //! externally; `template.signal()` is the underlying code's signal.
 //!
-//! A code object is three things — a compile-time [`TemplateProto`], a shared
-//! region-resident [`CodePayload`], and the [`ClosureTemplate`] header a
-//! closure references. docs/impl/region/template.md owns that argument.
+//! A code object is two things — a region-resident [`CodePayload`] in its
+//! compile unit's code region, and the [`ClosureTemplate`] header a closure
+//! references. docs/impl/region/template.md owns that argument.
 
 use crate::signals::Signal;
 use crate::value::fiber::SignalBits;
@@ -19,20 +19,17 @@ use crate::value::Value;
 
 mod arena;
 mod builder;
-pub(crate) mod cache;
 mod header;
 mod payload;
-mod proto;
 mod unit;
 
-pub use arena::CodeArena;
+pub use arena::{CodeArena, PayloadParts, WasmClosureMeta};
 pub use builder::CodeBuilder;
-pub use header::{ChildCode, ClosureTemplate};
+pub use header::ClosureTemplate;
 pub use payload::{
     CodePayload, LocEntry, LocationTable, MaskRef, MergedSlots, RestListLayout, StrKeys, VarargTag,
 };
-pub use proto::{materialize, TemplateProto, WasmClosureMeta};
-pub use unit::CodeUnit;
+pub use unit::{CodePin, CodeUnit};
 
 /// A reference to a closure's per-definition code object.
 ///
@@ -93,18 +90,6 @@ impl std::ops::Deref for TemplateRef {
             ),
         }
     }
-}
-
-/// Materialize `proto` into a fresh region of `heap` and name it — the
-/// test-scaffolding shape of what `MakeClosure` does, for tests that need a
-/// code object without an executing frame to name its region.
-#[cfg(test)]
-pub fn test_template(
-    heap: &mut crate::value::fiberheap::FiberHeap,
-    proto: TemplateProto,
-) -> TemplateRef {
-    let region = heap.new_runtime_region();
-    TemplateRef::region(materialize(heap, &std::rc::Rc::new(proto), region))
 }
 
 /// Closure with captured environment
@@ -181,10 +166,10 @@ impl Closure {
 impl PartialEq for Closure {
     fn eq(&self, other: &Self) -> bool {
         let (a, b) = (&*self.template, &*other.template);
-        // Two headers from one blueprint share a payload, so pointer identity
-        // settles every code-object field at once. Distinct blueprints still
-        // compare field by field: equality on closures is structural, and two
-        // lambdas that compiled to the same code are the same function to a
+        // Two headers over one payload are one code object, so pointer
+        // identity settles every code-object field at once. Distinct payloads
+        // still compare field by field: equality on closures is structural, and
+        // two lambdas that compiled to the same code are the same function to a
         // caller.
         if std::ptr::eq(
             a.payload() as *const CodePayload,

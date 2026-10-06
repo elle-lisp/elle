@@ -10,11 +10,15 @@
 //! object — so
 //! `Code` carries the code object itself rather than a bundle of parts.
 //!
-//! Since a [`ClosureTemplate`] is a payload slice plus a blueprint pointer
+//! Since a [`ClosureTemplate`] is one payload slice
 //! (docs/impl/region/template.md), `Code` adds no fields of its own and a
-//! tail call that swaps the executing code object copies two words and bumps
-//! one refcount. A NEW code-object field is added to the payload or the
-//! blueprint and rides through suspend/resume and tail-call for free.
+//! tail call that swaps the executing code object copies that slice. A NEW
+//! code-object field is added to the payload and rides through
+//! suspend/resume and tail-call for free.
+//!
+//! A `Code` takes no reference: the payload outlives every activation that
+//! runs it, because some header over it, or its unit, is live while the body
+//! runs.
 //!
 //! The per-instance captured environment is deliberately NOT part of `Code`: an
 //! `env` belongs to a closure *instance*, while a `Code` is shared by every
@@ -22,7 +26,7 @@
 //! execution context; a tail call to a different function swaps both.
 
 use crate::hir::region::StaticRegion;
-use crate::value::closure::{ChildCode, ClosureTemplate, LocationTable, MergedSlots};
+use crate::value::closure::{ClosureTemplate, LocationTable, MergedSlots};
 use crate::value::Value;
 
 /// A code object's executable context. See the module docs.
@@ -61,14 +65,13 @@ impl Code {
         self.template.locations()
     }
 
-    /// The code object this code object's `MakeClosure` at `idx` builds — a
-    /// blueprint, or a header out of an image's body
-    /// (docs/impl/image/sealing.md). The instruction materializes a fresh
-    /// region-allocated header per execution from either, reclaimed by region
-    /// RC.
+    /// The code object this code object's `MakeClosure` at `idx` builds, out
+    /// of the payload's child table. The instruction allocates a fresh
+    /// region-allocated header over its payload per execution, reclaimed by
+    /// region RC.
     #[inline]
-    pub fn child(&self, idx: usize) -> ChildCode<'_> {
-        self.template.child_code(idx)
+    pub fn child(&self, idx: usize) -> ClosureTemplate {
+        self.template.child(idx)
     }
 
     /// The static region slots this function's allocations SHARE after a

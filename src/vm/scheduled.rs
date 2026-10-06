@@ -3,10 +3,9 @@
 //!
 //! docs/impl/vm.md
 
-use crate::compiler::bytecode::Instruction;
+use crate::compiler::bytecode::{Bytecode, Instruction};
 use crate::pipeline::CompileCtx;
-use crate::value::{SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT};
-use std::rc::Rc;
+use crate::value::{CodeArena, CodeUnit, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT};
 
 use super::core::VM;
 
@@ -51,7 +50,7 @@ impl VM {
             self.fiber.signal = Some((result_bits, result_value));
 
             // Rebuild fiber.suspended for uncaught signals: the outer code
-            // (execute_scheduled, execute_proto) needs the suspension chain
+            // (execute_scheduled, execute_code) needs the suspension chain
             // to resume after handling the signal (e.g., SIG_IO → sync I/O).
             // Prepend a FiberResume frame so resume_suspended can re-enter
             // the child fiber when the signal is handled.
@@ -77,23 +76,24 @@ impl VM {
     /// correctly.
     ///
     /// Falls back to direct execution if stdlib isn't loaded yet.
+    ///
+    /// A unit compiled on another heap runs from a copy on this VM's heap, as
+    /// `execute` does, and the copy is held for the run.
     pub fn execute_scheduled(
         &mut self,
-        unit: &crate::value::CodeUnit,
+        unit: &CodeUnit,
         cctx: &CompileCtx,
     ) -> Result<Value, String> {
         let ev_run = match cctx.lookup_stdlib_value(crate::value::SymbolId::of("ev/run")) {
             Some(v) => v,
             None => return self.execute(unit),
         };
-        let bytecode = unit.bytecode();
-
-        // The entry thunk's blueprint is the program's own: it runs the top-level
-        // bytecode, so it carries the real program's location table, nested-lambda
-        // blueprints, and builder-idiom merge metadata (docs/impl/region/merging.md
-        // § Merging). Without them the top-level merge would diverge from the
-        // unit/embedding paths, which carry it. Empty unless a merge fired.
-        let thunk_proto = Rc::new(bytecode.clone().into_proto());
+        // The entry thunk's code object is the unit's entry: it runs the
+        // top-level bytecode, so it carries the real program's location table,
+        // child table, and builder-idiom merge metadata
+        // (docs/impl/region/merging.md § Merging). Without them the top-level
+        // merge would diverge from the unit/embedding paths, which carry it.
+        let unit = unit.on_heap(self.heap());
 
         let call_region = crate::lir::lower::new_static_region();
         // The synthetic `Call` below is hand-encoded bytecode, so the slot is
@@ -128,13 +128,14 @@ impl VM {
         // Build the entry thunk as an ordinary allocation into `entry_region`
         // (mortal) — reclaimed by the termination sweep. The synthetic
         // `(ev/run thunk)` bytecode has no MakeClosure of its own; the real
-        // program's nested lambdas ride on the thunk blueprint's child_protos and
-        // resolve when `ev/run` calls the thunk. The thunk names its region
-        // explicitly and the wrapper's allocating opcodes resolve their own
-        // static region slots.
+        // program's nested lambdas sit in the entry payload's child table and
+        // resolve when `ev/run` calls the thunk. The thunk's header takes a
+        // counted reference to the unit's code region at its allocation, and
+        // the wrapper's allocating opcodes resolve their own static region
+        // slots.
         let thunk = {
             let heap = self.heap();
-            let template = crate::value::closure::materialize(heap, &thunk_proto, entry_region);
+            let template = crate::value::build::template(heap, unit.entry(), entry_region);
             crate::value::build::closure(
                 heap,
                 crate::value::Closure::new(
@@ -145,16 +146,14 @@ impl VM {
                 entry_region,
             )
         };
-        let synthetic_constants = vec![thunk, ev_run];
-        // The synthetic `(ev/run thunk)` wrapper has no allocations and no releases
-        // of its own; the real program's tables ride the thunk blueprint and
-        // resolve when `ev/run` calls it.
-        let wrapper = crate::value::TemplateProto::new(
-            synthetic_bc,
-            crate::value::Arity::Exact(0),
-            synthetic_constants,
-        );
-        let result = self.execute_proto(&Rc::new(wrapper), None);
+        // The synthetic `(ev/run thunk)` wrapper has no allocations and no
+        // releases of its own; the real program's tables ride the thunk's code
+        // object and resolve when `ev/run` calls it.
+        let mut wrapper = Bytecode::new();
+        wrapper.instructions = synthetic_bc;
+        wrapper.constants = vec![thunk, ev_run];
+        let wrapper = CodeUnit::new(CodeArena::mint(self.heap()), wrapper);
+        let result = self.execute(&wrapper);
         // The run is over, so this is the entry thunk's point of demise (Rule 4,
         // docs/impl/region/rules.md): the wrapper's hand-encoded bytecode carries
         // no `DecrefRegion` to fire, so the balance for the mint above is here.

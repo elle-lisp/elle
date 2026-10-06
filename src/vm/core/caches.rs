@@ -1,0 +1,93 @@
+// audited: 2026-10-06
+//! The VM's caches keyed by a code object's bytecode address, and the pins that keep each key's code region alive.
+//!
+//! docs/impl/jit.md
+
+use super::*;
+#[cfg(feature = "jit")]
+use std::sync::Arc;
+
+#[cfg(feature = "jit")]
+use crate::jit::JitCode;
+
+/// A `jit_cache` entry: the compiled code plus the pin that keeps the keyed
+/// bytecode alive (docs/impl/jit.md). The pin makes the raw-address key sound:
+/// bytecode lives in a code object's payload, and the pin holds that payload's
+/// code region, so the address cannot be reused by a different function while
+/// this entry lives.
+#[cfg(feature = "jit")]
+pub struct JitCacheEntry {
+    _pin: CodePin,
+    pub code: Arc<JitCode>,
+}
+
+#[cfg(feature = "jit")]
+impl JitCacheEntry {
+    /// Build an entry held by `pin`, which names the entry's key.
+    pub fn new(pin: CodePin, code: Arc<JitCode>) -> Self {
+        JitCacheEntry { _pin: pin, code }
+    }
+}
+
+/// A `spirv_cache` entry: the SPIR-V `(git f)` compiled, plus the pin that
+/// keeps the keyed bytecode alive, exactly as a `JitCacheEntry` does.
+pub struct SpirvEntry {
+    _pin: CodePin,
+    pub bytes: Vec<u8>,
+}
+
+impl SpirvEntry {
+    /// Build an entry held by `pin`, which names the entry's key.
+    pub fn new(pin: CodePin, bytes: Vec<u8>) -> Self {
+        SpirvEntry { _pin: pin, bytes }
+    }
+}
+
+impl VM {
+    /// The SPIR-V `(git f)` compiled for the code object `t`, if any.
+    pub fn spirv_for(&self, t: &crate::value::ClosureTemplate) -> Option<&[u8]> {
+        self.spirv_cache
+            .get(&t.bytecode().as_ptr())
+            .map(|e| e.bytes.as_slice())
+    }
+
+    /// Cache `bytes` as the SPIR-V compiled for the code object `t`. The
+    /// single write path into `spirv_cache`: the entry pins `t`'s code region
+    /// and derives its key from the pin (docs/impl/jit.md).
+    pub fn install_spirv(&mut self, t: &crate::value::ClosureTemplate, bytes: Vec<u8>) {
+        let pin = CodePin::of(self.heap(), t);
+        self.spirv_cache
+            .insert(pin.key(), SpirvEntry::new(pin, bytes));
+    }
+
+    /// Drop every cache entry that pins a code region: the JIT cache, the
+    /// compiles in flight, the JIT rejections and the SPIR-V cache. Teardown
+    /// runs this before it releases the process roots, so no pin holds a
+    /// region past the sweep (docs/impl/jit.md).
+    pub fn clear_code_pins(&mut self) {
+        #[cfg(feature = "jit")]
+        {
+            self.jit_cache.clear();
+            self.jit_pending.clear();
+            self.jit_rejections.clear();
+        }
+        self.spirv_cache.clear();
+    }
+
+    /// Record a closure call and return whether it is hot: called at least the
+    /// JIT threshold's number of times (ten by default; `(vm/config-set :jit N)`
+    /// sets it).
+    pub fn record_closure_call(&mut self, bytecode_ptr: *const u8) -> bool {
+        let count = self.closure_call_counts.entry(bytecode_ptr).or_insert(0);
+        *count += 1;
+        *count >= self.runtime_config.jit.threshold()
+    }
+
+    /// Get call count for a closure
+    pub fn get_closure_call_count(&self, bytecode_ptr: *const u8) -> usize {
+        self.closure_call_counts
+            .get(&bytecode_ptr)
+            .copied()
+            .unwrap_or(0)
+    }
+}

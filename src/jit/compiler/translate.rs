@@ -12,18 +12,19 @@ impl JitCompiler {
     /// The entry block extracts 6 parameters:
     ///   env_ptr, args_ptr, nargs, vm_ptr, self_tag, self_payload
     /// and loads arg Values (16 bytes each) into the doubled arg variables.
+    ///
+    /// Answers the constant templates the native code bakes pointers into,
+    /// which its `JitCode` keeps alive.
     pub(super) fn translate_function(
         &mut self,
         lir: &LirView<'_>,
         func: &mut Function,
-        module_closures: Vec<LirOwned>,
     ) -> Result<TranslatedConsts, JitError> {
         let mut builder_ctx = FunctionBuilderContext::new();
         let mut builder = FunctionBuilder::new(func, &mut builder_ctx);
 
         // Create translator context
         let mut translator = FunctionTranslator::new(&mut self.module, &self.helpers, *lir);
-        translator.module_closures = module_closures;
 
         // Variable layout: each LIR register index `r` maps to TWO Cranelift variables:
         //   tag     at Cranelift var index 2*r
@@ -386,6 +387,6 @@ impl JitCompiler {
         builder.seal_all_blocks();
         finalize_function(builder, translator.module);
 
-        Ok((translator.closure_protos, translator.templates))
+        Ok(translator.templates)
     }
 }

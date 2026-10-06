@@ -1,4 +1,4 @@
-// audited: 2026-09-10
+// audited: 2026-10-06
 //! The post-boot heap census: every live object in this instance's region
 //! store, and the graph a boot image must dump.
 //!
@@ -11,18 +11,18 @@
 //!
 //! Byte accounting is a dump-size estimate, not an allocator audit. Each
 //! object contributes its `HeapObject` shell plus its payload wherever the
-//! payload lives today — region pages (`RegionSlice` backings) or the Rust
-//! heap (struct `Vec`s, template bytecode, syntax trees), since the
-//! foundations move the latter into the body. Payloads shared through `Rc`
-//! or an aliased `RegionSlice` are counted once (first holder). Not counted:
-//! per-container `Rc`/`RefCell` bookkeeping, template location maps and
-//! masks, and fiber-internal state (fibers are refused from the body).
+//! payload lives — region pages (`RegionSlice` backings, syntax trees, code
+//! payloads) or, for a mutable container, the Rust heap. A payload shared
+//! through an aliased `RegionSlice` is counted once (first holder). Not
+//! counted: per-container `Rc`/`RefCell` bookkeeping, a code payload's region
+//! tables, masks, child table and LIR body, and fiber-internal state (fibers
+//! are refused from the body).
 //!
 //! Pointer-slot counting follows the image format's relocation definition
 //! (docs/impl/image/format.md): a heap-tagged `Value` slot or
 //! a non-empty `RegionSlice`'s `ptr`; native-fn slots (the primitive
 //! stream, remapped by name) are counted separately. `Rc` pointers are not
-//! counted — the foundations delete them from persistable objects.
+//! counted, because no sealed object holds one.
 
 use std::mem::size_of;
 
@@ -329,10 +329,10 @@ fn measure(obj: &HeapObject, seen: &mut FxHashSet<usize>) -> ObjStat {
             heap_slot(&closure.template.value(), &mut stat);
         }
         HeapObject::ClosureTemplate(t) => {
-            // A header is a payload slice and a blueprint pointer, so its own
-            // relocation load is the one payload backing. The payload's bytes
-            // are counted once per blueprint: every header the same blueprint
-            // materializes names the same backing (docs/impl/region/template.md).
+            // A header is one payload slice, so its own relocation load is
+            // that slice. The payload's bytes are counted once, however many
+            // headers name it: they all name one backing
+            // (docs/impl/region/template.md).
             stat.region_slices += 1;
             if seen.insert(t.payload_backing() as usize) {
                 let p = t.payload();

@@ -139,39 +139,14 @@ impl Emitter {
                     }
                 }
 
-                // Look up the pre-compiled closure by ClosureId.
-                // In emit_module mode, closures are pre-compiled.
-                // In standalone emit mode (tests), this panics — callers
-                // must use emit_module for code with MakeClosure.
-                let compiled = self
-                    .compiled_closures
-                    .as_ref()
-                    .expect("MakeClosure without compiled_closures context")
-                    .get(closure_id.0 as usize)
-                    .expect("MakeClosure: invalid ClosureId")
-                    .clone();
-
-                // Look up the closure's frozen LIR from the module for
-                // metadata: the blueprint needs its arity, signal, masks and
-                // tables, and the JIT later reads the LIR itself. The
-                // compiled_closures Vec is parallel to the module's closures.
-                let func = &self
-                    .closure_lir_funcs
-                    .as_ref()
-                    .expect("MakeClosure without closure_lir_funcs context")
-                    [closure_id.0 as usize];
-
-                // The nested lambda's TEMPLATE BLUEPRINT — plain compile-time
-                // data, NOT a heap `Value` (a heap literal is an ordinary,
-                // reclaimable allocation; closure templates are no exception).
-                let template =
-                    crate::value::TemplateProto::nested_lambda(func, captures.len(), compiled);
-
-                // Register the blueprint in THIS code object's child_protos and
-                // emit its index; the VM/JIT materialize a fresh region-allocated
-                // template from it per execution.
-                let proto_idx = self.bytecode.child_protos.len() as u16;
-                self.bytecode.child_protos.push(Rc::new(template));
+                // The nested lambda's code object, written into the unit's
+                // code region the first time a `MakeClosure` names it, and its
+                // header registered in THIS code object's child table. The
+                // instruction builds a fresh header over the payload per
+                // execution (docs/impl/region/template.md).
+                let header = self.lambda_header(*closure_id, captures.len());
+                let proto_idx = self.bytecode.children.len() as u16;
+                self.bytecode.children.push(header);
 
                 // Emit MakeClosure instruction (region operand emitted first so the region is in place before the alloc)
                 self.bytecode.emit(Instruction::MakeClosure);

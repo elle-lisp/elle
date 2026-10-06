@@ -194,9 +194,8 @@ impl Probed for HeapObject {
                     FieldExtent::new("traits", field_offset(self, traits as *const _ as _), value),
                 ]
             }
-            // A header's extents cover the payload slice and stop: the
-            // blueprint is a Rust-heap owner no image carries, so its bytes
-            // stay zero and hydrate as absent (docs/impl/image/sealing.md).
+            // A header is the payload slice and nothing else
+            // (docs/impl/image/sealing.md).
             HeapObject::ClosureTemplate(t) => {
                 let (slice_ptr, slice_len, slice_len_size) = RegionSlice::<u8>::header_layout();
                 let base = field_offset(self, t as *const _ as _)
@@ -256,8 +255,7 @@ impl Probed for HeapObject {
             ) => ia == ib && da == db && ta == tb,
             (HeapObject::Float(a), HeapObject::Float(b)) => a.to_bits() == b.to_bits(),
             // Compared as raw words and header fields: a probe exemplar's
-            // template names no object, so nothing behind it can be compared,
-            // and a rebuilt header's blueprint is absent by design.
+            // template names no object, so nothing behind it can be compared.
             (
                 HeapObject::Closure {
                     closure: a,
@@ -279,7 +277,6 @@ impl Probed for HeapObject {
             (HeapObject::ClosureTemplate(a), HeapObject::ClosureTemplate(b)) => {
                 a.payload_slice().as_ptr() == b.payload_slice().as_ptr()
                     && a.payload_slice().len() == b.payload_slice().len()
-                    && b.proto().is_none()
             }
             _ => false,
         }
@@ -287,7 +284,7 @@ impl Probed for HeapObject {
 }
 
 /// The extents of a variant that is one `RegionSlice` payload plus `traits` —
-/// the shape five of the seven share.
+/// the shape `LString`, `LBytes`, `LArray`, `LSet` and `LStruct` share.
 fn payload_extents(
     obj: &HeapObject,
     names: [&'static str; 2],

@@ -3,7 +3,6 @@
 //! deserializes it instead of running the front end again.
 //! docs/impl/stdlib-cache.md
 
-use crate::compiler::Bytecode;
 use crate::signals::Signal;
 use crate::value::CodeUnit;
 use serde::{Deserialize, Serialize};
@@ -32,20 +31,20 @@ fn payload_hash(bytes: &[u8]) -> u64 {
     hasher.finish()
 }
 
-/// The on-disk form of a compiled module's entry `Bytecode`.
+/// The on-disk form of a compiled module's code unit.
 ///
-/// The `Bytecode` rides in `entry`, wrapped as a synthetic `ClosureTemplate` so
-/// the send module's template path carries the whole cyclic closure graph
-/// (docs/impl/stdlib-cache.md). Every other field is one a `ClosureTemplate`
-/// has nowhere to hold.
+/// The unit's entry code object rides in `entry`, so the send module's
+/// template path carries the whole cyclic closure graph
+/// (docs/impl/stdlib-cache.md). Every other field is one a payload has nowhere
+/// to hold.
 #[derive(Serialize, Deserialize)]
 pub struct StoredBytecode {
     pub format_version: u32,
-    /// The entry template: `instructions` → bytecode, `constants` → entry
-    /// pool, `child_protos` → nested lambdas, each with its frozen LIR.
+    /// The entry code object: its bytecode and pool, and its child table →
+    /// `child_protos`, the nested lambdas, each with its frozen LIR.
     pub entry: crate::value::send::SendableClosure,
     /// Intern table of closure constants reachable from the entry's pool and
-    /// its child templates, referenced by `Ref(idx)`.
+    /// its children, referenced by `Ref(idx)`.
     pub intern_table: Vec<crate::value::send::SendableClosure>,
     /// Spelling table for every symbol and keyword the entry and its templates
     /// name, replayed into the loading instance's display memo. The ids are
@@ -247,26 +246,23 @@ fn prune_superseded(dir: &std::path::Path, keep: &std::path::Path) {
     }
 }
 
-/// Serialize compiled stdlib bytecode into the cache format.
+/// Serialize a compiled stdlib unit into the cache format.
 ///
-/// The `Bytecode` becomes a synthetic entry `ClosureTemplate` of arity
-/// `Exact(0)` — it runs as a thunk — and goes through the send module's
-/// template path, which carries the entry pool, the nested-lambda blueprints,
-/// their LIR and the region-release tables uniformly.
+/// The unit's entry code object — arity `Exact(0)`, run as a thunk — goes
+/// through the send module's template path, which carries the entry pool, the
+/// child table, the nested lambdas' LIR and the region-release tables
+/// uniformly.
 pub fn store_bytecode(
     unit: &CodeUnit,
     vm: &mut crate::vm::VM,
     symbols: &crate::symbol::SymbolTable,
     cctx: &mut crate::pipeline::CompileCtx,
 ) -> Result<StoredBytecode, String> {
-    let bytecode = unit.bytecode();
     let (dispatch_wrappers, fn_inline) = cctx.compile_registries_mut();
     let stored_dispatch = dispatch_wrappers.to_stored(symbols);
     let stored_fn_inline = fn_inline.to_stored(symbols);
     // The entry thunk is not JIT'd; the nested lambdas carry their own LIR.
-    let entry = std::rc::Rc::new(bytecode.clone().into_proto());
-    let sent =
-        crate::value::send::serialize_templates(std::slice::from_ref(&entry), vm.heap(), symbols)?;
+    let sent = crate::value::send::serialize_templates(&[unit.entry()], vm.heap(), symbols)?;
     let entry = sent
         .templates
         .into_iter()
@@ -277,13 +273,13 @@ pub fn store_bytecode(
         entry,
         intern_table: sent.intern_table,
         names: sent.names,
-        signal_projection: bytecode.signal_projection.clone(),
+        signal_projection: unit.signal_projection().cloned(),
         dispatch_wrappers: stored_dispatch,
         fn_inline: stored_fn_inline,
     })
 }
 
-/// Rebuild a `Bytecode` from the cache format.
+/// Rebuild a code unit on `vm`'s heap from the cache format.
 ///
 /// Symbol ids cross unchanged — an id is its name's hash — and the stored
 /// spelling table replays into the loading instance's display memo so the
@@ -301,11 +297,13 @@ pub fn load_bytecode(
         ));
     }
     let t0 = std::time::Instant::now();
-    // The templates this rebuilds are held Rust-side until the instance is
-    // gone, so nothing releases their region by value; it is a process root
-    // (docs/impl/region/ctx.md).
+    // The closure constants this rebuilds are held Rust-side until the
+    // instance is gone, so nothing releases their region by value; it is a
+    // process root (docs/impl/region/ctx.md). The unit's own payloads go into
+    // a code region of their own, as a compile's do.
+    let code = crate::value::CodeArena::mint(vm.heap());
     let mut alloc = crate::primitives::ctx::Alloc::process_root(vm.heap());
-    let mut templates = crate::value::send::deserialize_templates(
+    let mut parts = crate::value::send::deserialize_templates(
         crate::value::send::SendTemplates {
             templates: vec![stored.entry],
             intern_table: stored.intern_table,
@@ -313,47 +311,19 @@ pub fn load_bytecode(
         },
         &mut alloc,
         symbols,
-    )?;
+        code,
+    );
     let tracing = crate::trace::compile();
     crate::phase!(tracing, "compile", t0, "stdlib deserialize_templates");
-    let t1 = std::time::Instant::now();
-    let entry = templates
+    let entry = parts
         .pop()
         .expect("deserialize_templates returns one per input");
-    crate::phase!(tracing, "compile", t1, "stdlib pop+extract");
     // Restore the cross-unit registries the skipped stdlib compile would have
     // populated.
     let (dispatch_wrappers, fn_inline) = cctx.compile_registries_mut();
     dispatch_wrappers.restore(stored.dispatch_wrappers, symbols);
     fn_inline.restore(stored.fn_inline, symbols);
-    let entry = std::rc::Rc::try_unwrap(entry).unwrap_or_else(|rc| {
-        // One blueprint in, one out — a second holder would mean the intern
-        // table kept a reference, which the entry thunk never enters.
-        crate::value::TemplateProto {
-            location_map: rc.location_map.clone(),
-            child_protos: rc.child_protos.clone(),
-            merged_slots: rc.merged_slots.clone(),
-            frame_release_slots: rc.frame_release_slots.clone(),
-            frame_release_regions: rc.frame_release_regions.clone(),
-            signal: rc.signal,
-            ..crate::value::TemplateProto::new(rc.bytecode.clone(), rc.arity, rc.constants.clone())
-        }
-    });
-    let code = crate::value::CodeArena::mint(vm.heap());
-    Ok(CodeUnit::new(
-        code,
-        Bytecode {
-            instructions: entry.bytecode,
-            constants: entry.constants,
-            location_map: entry.location_map,
-            signal: entry.signal,
-            signal_projection: stored.signal_projection,
-            child_protos: entry.child_protos,
-            merged_slots: entry.merged_slots,
-            frame_release_slots: entry.frame_release_slots,
-            frame_release_regions: entry.frame_release_regions,
-        },
-    ))
+    Ok(CodeUnit::of_parts(code, entry, stored.signal_projection))
 }
 
 #[cfg(test)]

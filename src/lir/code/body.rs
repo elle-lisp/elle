@@ -11,7 +11,7 @@
 
 use super::record::{BlockRec, ConstRec, Node, SiteRec};
 use super::view::LirView;
-use crate::hir::region::{RuntimeRegion, StaticRegion};
+use crate::hir::region::RuntimeRegion;
 use crate::lir::Reg;
 use crate::value::fiberheap::FiberHeap;
 use crate::value::region_slice::RegionSlice;
@@ -38,12 +38,6 @@ pub struct LirBody {
     pub(crate) yield_points: RegionSlice<SiteRec>,
     pub(crate) call_sites: RegionSlice<SiteRec>,
     pub(crate) site_regs: RegionSlice<Reg>,
-    /// The merge set and the two release tables in the order freezing
-    /// recorded them. The payload keeps its own copies sorted for its binary
-    /// searches; a view answers these.
-    pub(crate) merged_slots: RegionSlice<StaticRegion>,
-    pub(crate) frame_release_slots: RegionSlice<u16>,
-    pub(crate) frame_release_regions: RegionSlice<StaticRegion>,
     /// Meaningful only when `has_closure_id`, so every byte of the field is
     /// written and none is an enum's uninitialized payload.
     pub(crate) closure_id: u32,
@@ -70,9 +64,6 @@ impl LirBody {
             yield_points: RegionSlice::empty(),
             call_sites: RegionSlice::empty(),
             site_regs: RegionSlice::empty(),
-            merged_slots: RegionSlice::empty(),
-            frame_release_slots: RegionSlice::empty(),
-            frame_release_regions: RegionSlice::empty(),
             closure_id: 0,
             entry: 0,
             num_regs: 0,
@@ -103,11 +94,6 @@ impl LirBody {
             yield_points: heap.alloc_region_slice_in_region(sites[0], region),
             call_sites: heap.alloc_region_slice_in_region(sites[1], region),
             site_regs: heap.alloc_region_slice_in_region(lir.site_regs(), region),
-            merged_slots: heap.alloc_region_slice_in_region(lir.merged_slots(), region),
-            frame_release_slots: heap
-                .alloc_region_slice_in_region(lir.frame_release_slots(), region),
-            frame_release_regions: heap
-                .alloc_region_slice_in_region(lir.frame_release_regions(), region),
             closure_id: lir.closure_id().map_or(0, |c| c.0),
             entry: lir.entry().0,
             num_regs: lir.num_regs(),

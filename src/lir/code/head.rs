@@ -37,6 +37,9 @@ pub(crate) struct PayloadHeader<'a> {
     pub(crate) strict_keys: StrKeys<'a>,
     pub(crate) rest_list_layout: RestListLayout,
     pub(crate) region_table: &'a [StaticRegion],
+    pub(crate) merged_slots: &'a [StaticRegion],
+    pub(crate) frame_release_slots: &'a [u16],
+    pub(crate) frame_release_regions: &'a [StaticRegion],
 }
 
 /// How a function's rest parameter collects, in whichever form its home
@@ -175,9 +178,9 @@ impl<'a> Head<'a> {
             vararg: Vararg::Tagged(payload.vararg, payload.strict_keys),
             rest_list_layout: payload.rest_list_layout,
             region_table: payload.region_table,
-            merged_slots: body.merged_slots.as_slice(),
-            frame_release_slots: body.frame_release_slots.as_slice(),
-            frame_release_regions: body.frame_release_regions.as_slice(),
+            merged_slots: payload.merged_slots,
+            frame_release_slots: payload.frame_release_slots,
+            frame_release_regions: payload.frame_release_regions,
         }
     }
 }

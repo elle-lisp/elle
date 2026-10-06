@@ -89,8 +89,6 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
     let signal_bound_sig = make_sig(module, &[I64, I64, I64, I64], &[I64, I64]);
     // push_param_frame: (pairs_ptr, count, vm) -> (tag, payload)
     let push_param_sig = make_sig(module, &[I64, I64, I64], &[I64, I64]);
-    // make_closure: (template_ptr, captures_ptr, count, region: I32, vm) -> (tag, payload)
-    let make_closure_sig = make_sig(module, &[I64, I64, I64, I32, I64], &[I64, I64]);
     // call_array: (func_tag, func_payload, arr_tag, arr_payload, vm, region_id,
     // args_region) -> (tag, payload). `args_region` is the args array's own slot,
     // which the helper takes to reclaim the array (docs/impl/region/mechanism.md
@@ -207,7 +205,6 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         pop_param_frame: declare(module, "elle_jit_pop_param_frame", &vm_only)?,
         call_array: declare(module, "elle_jit_call_array", &call_array_sig)?,
         tail_call_array: declare(module, "elle_jit_tail_call_array", &call_array_sig)?,
-        make_closure: declare(module, "elle_jit_make_closure", &make_closure_sig)?,
         jit_yield: declare(module, "elle_jit_yield", &yield_sig)?,
         jit_yield_through_call: declare(module, "elle_jit_yield_through_call", &ytc_sig)?,
         has_signal: declare(module, "elle_jit_has_signal", &vm_only)?,
@@ -302,7 +299,7 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         rotate_pools: declare(module, "elle_jit_rotate_pools", &vm_to_void)?,
         incref: declare(module, "elle_jit_incref", &value_unary)?,
         decref: declare(module, "elle_jit_decref", &value_unary)?,
-        // New intrinsic helpers
+        // Intrinsic helpers
         is_empty: declare(module, "elle_jit_is_empty", &value_unary)?,
         is_bool: declare(module, "elle_jit_is_bool", &value_unary)?,
         is_int: declare(module, "elle_jit_is_int", &value_unary)?,

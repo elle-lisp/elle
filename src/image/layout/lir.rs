@@ -21,7 +21,7 @@ use crate::value::region_slice::RegionSlice;
 /// Where a body keeps each field: the slice headers by name, and the tail.
 pub(crate) struct LirOffsets {
     /// `(name, offset)` per `RegionSlice` field, in declaration order.
-    pub slices: [(&'static str, usize); 13],
+    pub slices: [(&'static str, usize); 10],
     pub closure_id: usize,
     pub entry: usize,
     pub num_regs: usize,
@@ -44,15 +44,6 @@ pub(crate) fn lir_offsets() -> &'static LirOffsets {
             ("yield_points", offset_of!(LirBody, yield_points)),
             ("call_sites", offset_of!(LirBody, call_sites)),
             ("site_regs", offset_of!(LirBody, site_regs)),
-            ("merged_slots", offset_of!(LirBody, merged_slots)),
-            (
-                "frame_release_slots",
-                offset_of!(LirBody, frame_release_slots),
-            ),
-            (
-                "frame_release_regions",
-                offset_of!(LirBody, frame_release_regions),
-            ),
         ],
         closure_id: offset_of!(LirBody, closure_id),
         entry: offset_of!(LirBody, entry),

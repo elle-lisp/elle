@@ -1,6 +1,6 @@
-// audited: 2026-09-20
-//! Process roots, the program value's hand-off, the pinned root region, and the
-//! macro-expansion scope.
+// audited: 2026-10-06
+//! Process roots, the program value's hand-off, the pinned root region, and the macro-expansion scope.
+//!
 //! docs/impl/region/rules.md
 //! docs/impl/region/template.md
 //! docs/impl/region/model.md
@@ -72,16 +72,13 @@ pub fn release_program_value(heap: &mut FiberHeap, value: Value) {
 ///
 /// Draining the registry makes a second call a no-op, so teardown is idempotent.
 pub fn teardown_process_root_regions(heap: &mut FiberHeap) -> usize {
-    // Code payloads are released alongside the roots: nothing may still be
-    // executing at teardown, so every payload is dead whatever its blueprint's
-    // refcount says (docs/impl/region/template.md § "Who owns the payload
-    // region"). Like a root, each is a decref — the RC cascade does the rest.
-    heap.release_all_template_payloads();
     let roots = heap.take_process_roots();
     // The root region's slot is consumed here too: it was registered at mint, so
     // it is in `roots`; clearing the slot prevents a later mint from aliasing a
-    // recycled id onto a stale handle.
+    // recycled id onto a stale handle. The placeholder code object lives in that
+    // region, so its slot goes with it.
     heap.set_root_region(None);
+    heap.set_placeholder(None);
     let n = roots.len();
     for r in roots {
         heap.decref_region_if_present(r);
@@ -152,12 +149,13 @@ pub fn begin_macro_scope(heap: &mut FiberHeap) -> MacroScope {
 /// - the process-root registry, which owns the trait method tables a
 ///   transformer's first trait dispatch (`append`'s `empty?`) allocates;
 /// - the pinned root region those tables live in;
-/// - the code-payload cache, which a `MakeClosure` inside the transformer
-///   extends with a fresh region whenever the open one is full.
+/// - the code-hold registry, which names every code region a `CodeUnit` or a
+///   `CodePin` holds: a unit compiled inside the expansion, or a JIT entry a
+///   call inside the transformer submitted.
 ///
 /// Excluding them delays no reclamation, because each answers to its own
-/// owner: teardown for a process root, the death of the last blueprint packed
-/// into it for a payload region.
+/// owner: teardown for a process root, the drop of its last Rust handle for a
+/// code region.
 ///
 /// The transient argument region's physical id comes back here, and the recycle
 /// runs FIRST so it reads the region as the expansion left it. An expansion that
@@ -171,7 +169,7 @@ pub fn reclaim_macro_scope(heap: &mut FiberHeap, scope: MacroScope) {
     if let Some(root) = heap.root_region_slot() {
         protected.push(root);
     }
-    protected.extend(heap.template_payload_regions());
+    protected.extend(heap.code_hold_regions());
     heap.reclaim_region_mint_scope(&protected);
 }
 

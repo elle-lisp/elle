@@ -2,15 +2,15 @@
 // docs/threads.md
 //! Serializing a live closure instance into the bundle's intern table.
 //!
-//! Split from the value-tag `match` because the closure arm is by far the
-//! largest: it manages cycle detection (pre-inserting a placeholder before
-//! recursing into `env`/constants/LIR) and rebuilds the full nested-lambda
-//! blueprint tree. Isolating it keeps the tag dispatch readable.
+//! Split from the value-tag `match` because the closure arm manages cycle
+//! detection: it pre-inserts a placeholder before recursing into `env`, the
+//! constants and the LIR, and it carries the full nested-lambda tree.
+//! Isolating it keeps the tag dispatch readable.
 
 use super::super::*;
 use super::ctx::SerContext;
 use super::from_value_inner;
-use super::template::{send_lir, sendable_from_child, sendable_header};
+use super::template::{code_fields, send_children, send_lir};
 
 /// Serialize a closure instance reached at heap value `value`, interning it
 /// into `ctx.closures` with cycle detection and returning a `Ref` to its slot.
@@ -31,70 +31,40 @@ pub(super) fn send_closure(
         return Ok(SendValue::Ref(idx));
     }
 
-    // Reserve an index BEFORE recursing so back-references resolve to this entry.
+    // Reserve an index BEFORE recursing so back-references resolve to this
+    // entry. The placeholder is overwritten below.
+    let template = &closure_rc.template;
     let idx = ctx.closures.len();
-    // Push a placeholder (will be overwritten below).
-    ctx.closures.push(SendableClosure {
-        bytecode: Vec::new(),
-        arity: closure_rc.template.arity(),
-        num_locals: 0,
-        num_captures: 0,
-        num_params: 0,
-        constants: Vec::new(),
-        signal: closure_rc.template.signal(),
-        capture_params_mask: 0,
-        capture_locals_mask: crate::value::CaptureMask::empty(),
-        location_map: LocationMap::new(),
-        doc: None,
-        vararg_kind: closure_rc.template.vararg_kind(),
-        rest_list_layout: closure_rc.template.rest_list_layout(),
-        name: None,
-        squelch_mask: SignalBits::EMPTY,
-        env: Vec::new(),
-        lir: None,
-        lir_values: Vec::new(),
-        child_protos: Vec::new(),
-        merged_slots: Vec::new(),          // placeholder; replaced below
-        frame_release_slots: Vec::new(),   // placeholder; replaced below
-        frame_release_regions: Vec::new(), // placeholder; replaced below
-    });
+    ctx.closures
+        .push(code_fields(template, Vec::new(), SignalBits::EMPTY));
     ctx.visited.insert(key, idx);
 
     // Serialize environment (may contain back-references to this closure via LBox).
-    let env: Result<Vec<SendValue>, String> = closure_rc
+    let env = closure_rc
         .env
         .iter()
         .map(|v| from_value_inner(*v, ctx))
-        .collect();
-    let env = env?;
+        .collect::<Result<Vec<_>, _>>()?;
 
-    // Serialize constants.
-    let constants: Result<Vec<SendValue>, String> = closure_rc
-        .template
+    let constants = template
         .constants()
         .iter()
         .map(|v| from_value_inner(*v, ctx))
-        .collect();
-    let constants = constants?;
+        .collect::<Result<Vec<_>, _>>()?;
 
     // The LIR crosses with the closure, so the worker's JIT can compile it.
-    let (lir, lir_values) = send_lir(closure_rc.template.lir(), ctx)?;
+    let (lir, lir_values) = send_lir(template.lir(), ctx)?;
 
-    // Serialize the nested lambdas' code objects so the worker's reconstructed
-    // template carries them and `MakeClosure` resolves by index. A hydrated
-    // closure answers with body headers rather than blueprints, and the worker
-    // rebuilds a blueprint out of either (docs/impl/image/sealing.md).
-    let child_protos: Vec<SendableClosure> = (0..closure_rc.template.num_children())
-        .map(|i| sendable_from_child(closure_rc.template.child_code(i), ctx))
-        .collect::<Result<_, _>>()?;
+    // The nested lambdas' code objects cross beside the closure's, so the
+    // receiver fills the child table its `MakeClosure`s index.
+    let child_protos = send_children(template, ctx)?;
 
-    // Replace placeholder with complete entry.
     ctx.closures[idx] = SendableClosure {
-        squelch_mask: closure_rc.squelch_mask,
-        env,
+        constants,
         lir,
         lir_values,
-        ..sendable_header(&closure_rc.template, constants, child_protos)
+        child_protos,
+        ..code_fields(template, env, closure_rc.squelch_mask)
     };
 
     Ok(SendValue::Ref(idx))

@@ -73,8 +73,8 @@ fn eval_inner(
     symbols: &mut SymbolTable,
 ) -> LResult<Value> {
     // This eval is one compilation unit, so it gets one working syntax arena,
-    // released when the bytecode is built (docs/impl/syntax.md § "Where a node
-    // lives"). Every early return below goes through `finish`, which frees it.
+    // released once the form has run (docs/impl/syntax.md § "Where a node
+    // lives"). Every path out of `eval_in_arena` comes back here, which frees it.
     let heap_ptr = vm.heap_ptr;
     let arena = crate::syntax::SyntaxArena::mint(unsafe { &mut *heap_ptr });
     let out = eval_in_arena(vm, arena, expr_value, env_value, symbols);
@@ -224,12 +224,8 @@ fn eval_in_arena(
     // Execute. The entry payload carries the function's builder-idiom merge
     // metadata, so the alloc dispatch mint-or-reuses merged slots
     // (docs/impl/region/merging.md § Merging). The unit is held until the run
-    // ends.
-    let code = crate::value::ClosureTemplate::for_proto(
-        vm.heap(),
-        &Rc::new(unit.bytecode().clone().into_proto()),
-    )
-    .code();
+    // ends, because the entry's `Code` takes no reference of its own.
+    let code = unit.entry().code();
     let empty_env = Rc::new(vec![]);
 
     // Drive the evaluated code, including any nested fiber/resume SIG_SWITCH

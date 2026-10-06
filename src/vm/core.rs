@@ -10,41 +10,19 @@ use crate::hir::region::{MappedRegion, RuntimeRegion, StaticRegion};
 use crate::primitives::def::Doc;
 use crate::reader::SourceLoc;
 use crate::value::{
-    BytecodeFrame, Closure, Fiber, FiberHandle, SignalBits, SuspendedFrame, Value, SIG_ERROR,
-    SIG_FUEL, SIG_HALT, SIG_OK, SIG_SWITCH,
+    BytecodeFrame, Closure, CodePin, Fiber, FiberHandle, SignalBits, SuspendedFrame, Value,
+    SIG_ERROR, SIG_FUEL, SIG_HALT, SIG_OK, SIG_SWITCH,
 };
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 use std::rc::Rc;
-// `jit_cache` is the only `Arc` holder in this module.
-#[cfg(feature = "jit")]
-use std::sync::Arc;
 
 #[cfg(feature = "jit")]
-use crate::jit::{JitCode, JitRejectionInfo};
-
-/// A `jit_cache` entry: the compiled code plus the pin that keeps the keyed
-/// bytecode alive (docs/impl/jit.md). The pin makes the
-/// raw-address key sound: bytecode lives in a code object's payload, and the
-/// pinned code object holds that payload's region, so the address cannot be
-/// reused by a different function while this entry lives.
-#[cfg(feature = "jit")]
-pub struct JitCacheEntry {
-    _pin: crate::value::ClosureTemplate,
-    pub code: Arc<JitCode>,
-}
+use crate::jit::JitRejectionInfo;
 
 #[cfg(feature = "jit")]
-impl JitCacheEntry {
-    /// Build an entry pinning `template` — the code object the entry's cache
-    /// key was derived from.
-    pub fn new(template: crate::value::ClosureTemplate, code: Arc<JitCode>) -> Self {
-        JitCacheEntry {
-            _pin: template,
-            code,
-        }
-    }
-}
+pub use caches::JitCacheEntry;
+pub use caches::SpirvEntry;
 
 pub(crate) struct TailCallInfo {
     pub code: crate::value::Code,
@@ -161,7 +139,7 @@ pub struct VM {
     pub(crate) pending_fiber_resume: Option<PendingFiberResume>,
     /// One-shot "the closure whose body is about to run", set immediately before
     /// entering a body via `execute_bytecode_saving_stack` or the raw
-    /// `execute_proto`, which take it (resetting to `NIL`) and install it as
+    /// `execute_code`, which take it (resetting to `NIL`) and install it as
     /// `fiber.current_closure` for that activation. **Every entrant that runs a
     /// closure body through a re-entry must set it** — the JIT helpers'
     /// interpreter fallback and tail-call resolution, the forced-tier entries,
@@ -223,7 +201,7 @@ pub struct VM {
     /// closure, where the call stack is still empty.
     pub(crate) arena_site: Option<(SourceLoc, Option<&'static str>)>,
     /// Reason carried by the most recent uncaught `:gated` error to propagate
-    /// out of `execute_proto`. A loud `(gate! …)` whose condition is unmet
+    /// out of `execute_code`. A loud `(gate! …)` whose condition is unmet
     /// raises `{:error :gated :reason …}`; when that escapes to the top level
     /// uncaught, it is an intentional SKIP, not a failure. The top-level driver
     /// (`run_source`) reads this to exit 0 with a notice instead of erroring.
@@ -253,11 +231,11 @@ pub struct VM {
     #[cfg(feature = "jit")]
     pub(crate) jit_worker: Option<crate::jit::worker::JitWorker>,
     /// Compilations in flight on the worker, keyed by bytecode address. The
-    /// value pins the keyed allocation from submission until the result
+    /// value pins the keyed code region from submission until the result
     /// installs (docs/impl/jit.md); the pin then moves
     /// into `jit_cache` or `jit_rejections`.
     #[cfg(feature = "jit")]
-    pub(crate) jit_pending: FxHashMap<usize, crate::value::ClosureTemplate>,
+    pub(crate) jit_pending: FxHashMap<usize, CodePin>,
     /// Documentation for all named forms (primitives, special forms, macros).
     /// Keyed by name string for direct lookup via `doc` and `vm/primitive-meta`.
     pub docs: HashMap<String, Doc>,
@@ -273,9 +251,9 @@ pub struct VM {
     /// an unbounded `:attempts` in `(jit/rejections)`.
     #[cfg(feature = "jit")]
     pub jit_compile_attempts: FxHashMap<*const u8, usize>,
-    /// The SPIR-V `(git f)` compiled, keyed by bytecode address like
-    /// `jit_cache`. Read through [`VM::spirv_for`].
-    pub spirv_cache: FxHashMap<*const u8, Vec<u8>>,
+    /// The SPIR-V `(git f)` compiled, keyed and pinned like `jit_cache`.
+    /// Write through [`VM::install_spirv`]; read through [`VM::spirv_for`].
+    pub spirv_cache: FxHashMap<*const u8, SpirvEntry>,
     /// Cached Expander for runtime `eval`. Avoids re-loading the prelude
     /// on every eval call. Taken out during eval, put back after.
     pub eval_expander: Option<crate::syntax::Expander>,
@@ -305,6 +283,7 @@ pub struct VM {
     pub(crate) mlir_cache: Option<crate::mlir::MlirCache>,
 }
 
+mod caches;
 mod decode;
 mod discard;
 mod format;
@@ -393,30 +372,6 @@ impl VM {
     /// notice instead of reporting a failure. See `gated_exit_reason`.
     pub fn take_gated_exit_reason(&mut self) -> Option<String> {
         self.gated_exit_reason.take()
-    }
-
-    /// The SPIR-V `(git f)` compiled for the code object `t`, if any.
-    pub fn spirv_for(&self, t: &crate::value::ClosureTemplate) -> Option<&[u8]> {
-        self.spirv_cache
-            .get(&t.bytecode().as_ptr())
-            .map(Vec::as_slice)
-    }
-
-    /// Record a closure call and return whether it is hot: called at least the
-    /// JIT threshold's number of times (ten by default; `(vm/config-set :jit N)`
-    /// sets it).
-    pub fn record_closure_call(&mut self, bytecode_ptr: *const u8) -> bool {
-        let count = self.closure_call_counts.entry(bytecode_ptr).or_insert(0);
-        *count += 1;
-        *count >= self.runtime_config.jit.threshold()
-    }
-
-    /// Get call count for a closure
-    pub fn get_closure_call_count(&self, bytecode_ptr: *const u8) -> usize {
-        self.closure_call_counts
-            .get(&bytecode_ptr)
-            .copied()
-            .unwrap_or(0)
     }
 
     /// Check if a module is currently being loaded (circular dependency).

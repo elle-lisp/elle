@@ -19,7 +19,9 @@ use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{Linkage, Module};
 
 use crate::lir::code::Op;
-use crate::lir::{Label, LirOwned, LirView};
+#[cfg(test)]
+use crate::lir::LirOwned;
+use crate::lir::{Label, LirView};
 use crate::value::Arity;
 
 use super::code::JitCode;
@@ -27,13 +29,10 @@ use super::translate::{finalize_function, load_value_slot, FunctionTranslator};
 use super::vtable::{self, RuntimeHelpers};
 use super::JitError;
 
-/// What translating one function yields, kept alive by its `JitCode`:
-/// closure-template `Value`s referenced by `MakeClosure`, and string-literal
-/// template byte buffers the native code's baked pointers point into.
-type TranslatedConsts = (
-    Vec<std::rc::Rc<crate::value::TemplateProto>>,
-    Vec<Box<crate::value::ConstTemplate>>,
-);
+/// What translating one function yields, kept alive by its `JitCode`: the
+/// heap-literal templates the native code's baked pointers point into.
+#[allow(clippy::vec_box)] // the Box stable-address is the point (see `JitCode`)
+type TranslatedConsts = Vec<Box<crate::value::ConstTemplate>>;
 
 /// JIT compiler that translates frozen LIR to native code
 pub struct JitCompiler {
@@ -116,9 +115,9 @@ impl JitCompiler {
         }
 
         // Functions containing MakeClosure fall back to the interpreter. The
-        // translator handles MakeClosure (module_closures lookup + bytecode
-        // emission), but emitting every module closure's bytecode per compile
-        // costs more than the compile saves at a threshold of 1.
+        // translator has no lowering for one: a closure's code object is a
+        // payload in a code region, and the worker has no heap to write one
+        // into (docs/impl/jit.md). Refusing here skips the translation.
         if lir.has_op(Op::MakeClosure) {
             return Err(JitError::UnsupportedInstruction("MakeClosure".to_string()));
         }
@@ -139,8 +138,7 @@ impl JitCompiler {
         ctx.func.name = UserFuncName::user(0, func_id.as_u32());
 
         // Translate LIR to Cranelift IR
-        let (closure_protos, templates) =
-            self.translate_function(lir, &mut ctx.func, Vec::<LirOwned>::new())?;
+        let templates = self.translate_function(lir, &mut ctx.func)?;
 
         // Compile the function
         self.module
@@ -182,7 +180,6 @@ impl JitCompiler {
             self.module,
             yield_metas,
             call_site_metas,
-            closure_protos,
             templates,
         ))
     }
@@ -202,8 +199,8 @@ impl JitCompiler {
         ctx.func.signature = sig;
         ctx.func.name = UserFuncName::user(0, func_id.as_u32());
 
-        self.translate_function(lir, &mut ctx.func, Vec::new())?;
-        // closure_constants from clif_text are discarded — diagnostic only
+        // The constant templates are discarded: no native code points into them.
+        self.translate_function(lir, &mut ctx.func)?;
 
         let text = format!("{}", ctx.func);
         Ok(text.lines().map(String::from).collect())

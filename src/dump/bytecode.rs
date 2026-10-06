@@ -7,65 +7,49 @@
 //! an order the emitter fixed rather than one a hash map chose, and no
 //! constant prints an address.
 
-use crate::compiler::bytecode::{disassemble_lines, Bytecode};
+use crate::compiler::bytecode::disassemble_lines;
 use crate::symbol::SymbolTable;
-use crate::value::{TemplateProto, Value};
+use crate::value::{ClosureTemplate, Value};
 use std::fmt::Write;
 
 /// Every code object a compiled file builds: the entry function, then each
 /// nested lambda by its `MakeClosure` index path.
 pub fn bytecode_unit(unit: &crate::value::CodeUnit, symbols: Option<&SymbolTable>) -> String {
-    let bc: &Bytecode = unit.bytecode();
+    let entry = unit.entry();
     let mut s = String::new();
     let _ = writeln!(s, "; code object entry");
-    let mut merged: Vec<u32> = bc.merged_slots.iter().copied().collect();
-    merged.sort_unstable();
-    let _ = writeln!(s, "  signal={:?}", bc.signal);
-    tables(
-        &mut s,
-        &merged,
-        &bc.frame_release_slots,
-        &bc.frame_release_regions,
-    );
-    body(
-        &mut s,
-        &bc.instructions,
-        &bc.constants,
-        &bc.location_map,
-        symbols,
-    );
-    for (i, child) in bc.child_protos.iter().enumerate() {
-        proto(&mut s, &i.to_string(), child, symbols);
+    let _ = writeln!(s, "  signal={:?}", entry.signal());
+    tables(&mut s, entry);
+    body(&mut s, entry, symbols);
+    for i in 0..entry.num_children() {
+        child(&mut s, &i.to_string(), &entry.child(i), symbols);
     }
     s
 }
 
-fn proto(s: &mut String, path: &str, p: &TemplateProto, symbols: Option<&SymbolTable>) {
+fn child(s: &mut String, path: &str, p: &ClosureTemplate, symbols: Option<&SymbolTable>) {
     let _ = writeln!(
         s,
         "; code object [{path}] {} arity={} locals={} captures={} params={}",
-        p.name.as_deref().unwrap_or("<anon>"),
-        p.arity,
-        p.num_locals,
-        p.num_captures,
-        p.num_params,
+        p.name().unwrap_or("<anon>"),
+        p.arity(),
+        p.num_locals(),
+        p.num_captures(),
+        p.num_params(),
     );
     let _ = writeln!(
         s,
         "  signal={:?} vararg={:?} capture_params_mask=0x{:x} capture_locals={:?}",
-        p.signal,
-        p.vararg_kind,
-        p.capture_params_mask,
-        p.capture_locals_mask.words(),
+        p.signal(),
+        p.vararg_kind(),
+        p.capture_params_mask(),
+        p.capture_locals_mask().words(),
     );
-    let regions: Vec<u32> = p.region_table.iter().map(|r| r.get()).collect();
+    let regions: Vec<u32> = p.region_table().iter().map(|r| r.get()).collect();
     let _ = writeln!(s, "  region_table={regions:?}");
-    let mut merged: Vec<u32> = p.merged_slots.iter().copied().collect();
-    merged.sort_unstable();
-    tables(s, &merged, &p.frame_release_slots, &p.frame_release_regions);
-    body(s, &p.bytecode, &p.constants, &p.location_map, symbols);
-    if let Some(lir) = p.lir_function.as_ref() {
-        let lir = lir.view();
+    tables(s, p);
+    body(s, p, symbols);
+    if let Some(lir) = p.lir() {
         for yp in lir.yield_points() {
             let regs: Vec<u32> = yp.stack_regs.iter().map(|r| r.0).collect();
             let _ = writeln!(
@@ -83,39 +67,36 @@ fn proto(s: &mut String, path: &str, p: &TemplateProto, symbols: Option<&SymbolT
             );
         }
     }
-    for (i, child) in p.child_protos.iter().enumerate() {
-        proto(s, &format!("{path}.{i}"), child, symbols);
+    for i in 0..p.num_children() {
+        child(s, &format!("{path}.{i}"), &p.child(i), symbols);
     }
 }
 
-fn tables(s: &mut String, merged: &[u32], release_slots: &[u16], release_regions: &[u32]) {
+/// The merge set and the two release tables, each ascending as the payload
+/// stores it.
+fn tables(s: &mut String, p: &ClosureTemplate) {
     let _ = writeln!(
         s,
-        "  merged_slots={merged:?} release_slots={release_slots:?} release_regions={release_regions:?}"
+        "  merged_slots={:?} release_slots={:?} release_regions={:?}",
+        p.merged_slots().as_slice(),
+        p.frame_release_slots(),
+        p.frame_release_regions(),
     );
 }
 
-fn body(
-    s: &mut String,
-    code: &[u8],
-    constants: &[Value],
-    locations: &crate::error::LocationMap,
-    symbols: Option<&SymbolTable>,
-) {
+fn body(s: &mut String, p: &ClosureTemplate, symbols: Option<&SymbolTable>) {
+    let code = p.bytecode();
     let _ = writeln!(s, "  bytecode ({} bytes):", code.len());
     for line in disassemble_lines(code) {
         let _ = writeln!(s, "    {line}");
     }
     let _ = writeln!(s, "  constants:");
-    for (i, c) in constants.iter().enumerate() {
+    for (i, c) in p.constants().iter().enumerate() {
         let _ = writeln!(s, "    [{i}] {}", constant(*c, symbols));
     }
-    // The emitter's map is a hash map, so its iteration order is not the
-    // text's.
-    let mut locs: Vec<(&usize, &crate::reader::SourceLoc)> = locations.iter().collect();
-    locs.sort_unstable_by_key(|(off, _)| **off);
+    // The payload's location table is ascending by offset.
     let _ = writeln!(s, "  locations:");
-    for (off, loc) in locs {
+    for (off, loc) in p.locations().iter() {
         let _ = writeln!(s, "    {off} {loc}");
     }
 }

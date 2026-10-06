@@ -184,10 +184,8 @@ pub(super) fn emit(
             }
             // A header is one slot — its payload slice — and the payload
             // behind it is a record of its own, assembled from probed
-            // offsets like a node is. The blueprint field is not probed, so
-            // the canonical shell leaves it zero and it hydrates as absent.
-            // A later header naming the same payload records its own slot
-            // and nothing else.
+            // offsets like a node is. A later header naming the same payload
+            // records its own slot and nothing else.
             HeapObject::ClosureTemplate(t) => {
                 if let Some((rel, _)) = out.slice_backing(t.payload_slice(), at)? {
                     if payloads_walked.insert(rel) {

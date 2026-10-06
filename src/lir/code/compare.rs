@@ -3,7 +3,7 @@
 //!
 //! docs/impl/lir.md
 //!
-//! The views may sit over different homes — a blueprint's `Vec`s, a code
+//! The views may sit over different homes — a `LirOwned`'s `Vec`s, a code
 //! payload's region pages, an image's mapped pages — so the comparison reads
 //! only what a reader reads, never the records behind it.
 
