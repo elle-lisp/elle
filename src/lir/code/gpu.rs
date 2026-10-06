@@ -4,7 +4,8 @@
 //! docs/impl/mlir.md
 //! docs/impl/region/diagnostics.md
 
-use super::instr::{ConstRef, InstrRef};
+use super::instr::InstrRef;
+use super::operand::ConstRef;
 use super::view::LirView;
 use crate::lir::{ConvOp, Reg, Terminator};
 use crate::value::Arity;

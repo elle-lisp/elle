@@ -17,7 +17,7 @@ pub mod lower;
 pub(crate) mod testkit;
 mod types;
 
-pub use code::{FrozenModule, InstrRef, LirCode, LirOwned, LirView};
+pub use code::{FrozenModule, InstrRef, LirBody, LirCode, LirOwned, LirView};
 pub use display::terminator_kind;
 pub use emit::{ClosureCompiled, Emitter};
 pub use lower::Lowerer;

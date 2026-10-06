@@ -22,8 +22,8 @@ impl VM {
         args: &[Value],
     ) -> (SignalBits, Value) {
         // Closure must have LIR — primitives, macros, etc. don't.
-        let mut lir = match closure.template.lir_function() {
-            Some(l) => (**l).clone(),
+        let mut lir = match closure.template.lir() {
+            Some(l) => l.to_owned(),
             None => return (SIG_ERROR, rejected(self, "jit", "closure has no LIR")),
         };
         // Backfill a nameless LIR from the template so the compile records a

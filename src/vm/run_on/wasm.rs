@@ -18,8 +18,8 @@ impl VM {
         closure: &crate::value::Closure,
         args: &[Value],
     ) -> (SignalBits, Value) {
-        let lir = match closure.template.lir_function() {
-            Some(l) => Rc::clone(l),
+        let lir = match closure.template.lir() {
+            Some(l) => l,
             None => return (SIG_ERROR, rejected(self, "wasm", "closure has no LIR")),
         };
 
@@ -54,7 +54,7 @@ impl VM {
         // Force-compile if not already cached.
         let heap_ptr = self.heap_ptr;
         let tier = self.wasm_tier.as_mut().unwrap();
-        if !tier.is_compiled(bytecode_ptr) && !tier.compile(bytecode_ptr, &lir.view(), heap_ptr) {
+        if !tier.is_compiled(bytecode_ptr) && !tier.compile(bytecode_ptr, &lir, heap_ptr) {
             // Remove the temporary tier before returning.
             if !had_tier {
                 self.wasm_tier = None;

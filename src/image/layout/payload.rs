@@ -5,20 +5,23 @@
 //! docs/impl/image/format.md
 //! docs/impl/image/sealing.md
 //!
-//! A payload is the widest record the dumper writes: thirteen slice headers, a
-//! `repr(Rust)` arity, a signal, and a tail of scalars and flags. Copying one
-//! would carry its construction temporary's padding into the artifact, so a
-//! payload is assembled from these offsets like an object slot is.
+//! A payload is the widest record the dumper writes: thirteen slice headers, an
+//! LIR body (lir.rs), a `repr(Rust)` arity, a signal, and a tail of scalars and
+//! flags. Copying one would carry its construction temporary's padding into
+//! the artifact, so a payload is assembled from these offsets like an object
+//! slot is.
 
 use std::mem::{offset_of, size_of};
 use std::sync::OnceLock;
 
+use crate::lir::LirBody;
 use crate::signals::Signal;
 use crate::syntax::Span;
 use crate::value::closure::CodePayload;
 use crate::value::region_slice::RegionSlice;
 use crate::value::types::Arity;
 
+use super::lir::write_canonical_lir;
 use super::{field_offset, probe, write_canonical, FieldExtent, Probed, VariantLayout};
 
 /// How the probe names an arity variant. `Arity` has no tag type of its own.
@@ -89,6 +92,9 @@ pub(crate) struct PayloadOffsets {
     /// between them, so it is one extent rather than five.
     pub origin: usize,
     pub has_origin: usize,
+    /// Where the LIR body starts, which lir.rs assembles field by field.
+    pub lir: usize,
+    pub has_lir: usize,
     pub arity: usize,
     pub signal_bits: usize,
     pub signal_propagates: usize,
@@ -130,6 +136,8 @@ pub(crate) fn payload_offsets() -> &'static PayloadOffsets {
         ],
         origin: offset_of!(CodePayload, origin),
         has_origin: offset_of!(CodePayload, has_origin),
+        lir: offset_of!(CodePayload, lir),
+        has_lir: offset_of!(CodePayload, has_lir),
         arity: offset_of!(CodePayload, arity),
         signal_bits: offset_of!(CodePayload, signal) + offset_of!(Signal, bits),
         signal_propagates: offset_of!(CodePayload, signal) + offset_of!(Signal, propagates),
@@ -154,9 +162,10 @@ fn raw(p: &CodePayload, dst: &mut [u8], at: usize, len: usize) {
 }
 
 /// Copy one payload's canonical bytes into the zeroed slot `dst`: each slice
-/// header's `ptr` and `len`, the arity through its probe, and the scalar
-/// tail. Padding — inside the slice headers, after the arity's payload, and
-/// beside the signal — stays zero.
+/// header's `ptr` and `len`, the LIR body through its own writer, the arity
+/// through its probe, and the scalar tail. Padding — inside the slice headers
+/// and the body, after the arity's payload, and beside the signal — stays
+/// zero.
 pub(crate) fn write_canonical_payload(p: &CodePayload, dst: &mut [u8]) {
     debug_assert_eq!(dst.len(), size_of::<CodePayload>());
     let off = payload_offsets();
@@ -169,6 +178,8 @@ pub(crate) fn write_canonical_payload(p: &CodePayload, dst: &mut [u8]) {
     // the same reading of the same type the syntax probe makes (syntax.rs).
     raw(p, dst, off.origin, size_of::<Span>());
     raw(p, dst, off.has_origin, 1);
+    write_canonical_lir(&p.lir, &mut dst[off.lir..off.lir + size_of::<LirBody>()]);
+    raw(p, dst, off.has_lir, 1);
     write_canonical(
         &p.arity,
         &mut dst[off.arity..off.arity + size_of::<Arity>()],
@@ -208,9 +219,11 @@ pub(crate) fn fingerprint_component() -> String {
         out.push_str(&format!("{name}@{at}"));
     }
     out.push_str(&format!(
-        ",origin@{}+{},arity@{},signal@{}+{},cpm@{},nl@{},nc@{},np@{},wasm@{}+{},vararg@{},rl@{},hn@{},hd@{}",
+        ",origin@{}+{},lir@{}+{},arity@{},signal@{}+{},cpm@{},nl@{},nc@{},np@{},wasm@{}+{},vararg@{},rl@{},hn@{},hd@{}",
         off.origin,
         off.has_origin,
+        off.lir,
+        off.has_lir,
         off.arity,
         off.signal_bits,
         off.signal_propagates,

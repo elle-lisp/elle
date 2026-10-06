@@ -17,9 +17,10 @@ use crate::value::closure::{ChildCode, ClosureTemplate};
 
 /// A code object's frozen LIR as it crosses: the records verbatim, and the
 /// values its `ValueConst`s load through the ordinary value walk, so a closure
-/// among them interns into the bundle once.
+/// among them interns into the bundle once. Every side a code object can have
+/// — a blueprint, a materialized payload, an image's — crosses through here.
 pub(in crate::value::send) fn send_lir(
-    lir: Option<&std::rc::Rc<crate::lir::LirOwned>>,
+    lir: Option<crate::lir::LirView<'_>>,
     ctx: &mut SerContext<'_>,
 ) -> Result<(Option<crate::lir::LirCode>, Vec<SendValue>), String> {
     let Some(lir) = lir else {
@@ -30,7 +31,7 @@ pub(in crate::value::send) fn send_lir(
         .iter()
         .map(|v| from_value_inner(*v, ctx))
         .collect::<Result<_, _>>()?;
-    Ok((Some(lir.code().clone()), values))
+    Ok((Some(lir.to_owned().code), values))
 }
 
 /// Serialize one child code object, from whichever side its parent answered.
@@ -45,8 +46,8 @@ pub(in crate::value::send) fn sendable_from_child(
 }
 
 /// Serialize a child that came out of an image's body. Its blueprint did not
-/// cross, so every field comes off the payload and the LIR is absent — the
-/// worker runs it on the interpreter tier, exactly as this process does.
+/// cross, so every field comes off the payload — the LIR included, so the
+/// worker's JIT can promote it as this process's can.
 fn sendable_from_header(
     t: &ClosureTemplate,
     ctx: &mut SerContext<'_>,
@@ -57,11 +58,17 @@ fn sendable_from_header(
         .map(|v| from_value_inner(*v, ctx))
         .collect::<Result<_, _>>()?;
 
+    let (lir, lir_values) = send_lir(t.lir(), ctx)?;
+
     let child_protos: Vec<SendableClosure> = (0..t.num_children())
         .map(|i| sendable_from_child(t.child(i), ctx))
         .collect::<Result<_, _>>()?;
 
-    Ok(sendable_header(t, constants, child_protos))
+    Ok(SendableClosure {
+        lir,
+        lir_values,
+        ..sendable_header(t, constants, child_protos)
+    })
 }
 
 /// Every field a code object's header answers, around the constants and the
@@ -115,7 +122,7 @@ pub(in crate::value::send) fn sendable_from_template(
 
     let doc = t.doc.clone();
 
-    let (lir, lir_values) = send_lir(t.lir_function.as_ref(), ctx)?;
+    let (lir, lir_values) = send_lir(t.lir_function.as_ref().map(|l| l.view()), ctx)?;
 
     let child_protos: Vec<SendableClosure> = t
         .child_protos

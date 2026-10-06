@@ -21,12 +21,12 @@ impl VM {
         closure: &crate::value::Closure,
         args: &[Value],
     ) -> (SignalBits, Value) {
-        let lir = match closure.template.lir_function() {
-            Some(l) => std::rc::Rc::clone(l),
+        let lir = match closure.template.lir() {
+            Some(l) => l,
             None => return (SIG_ERROR, rejected(self, "mlir-cpu", "closure has no LIR")),
         };
 
-        if !lir.view().is_mlir_cpu_eligible() {
+        if !lir.is_mlir_cpu_eligible() {
             return (
                 SIG_ERROR,
                 rejected(self, "mlir-cpu", "closure is not MLIR-CPU eligible"),
@@ -96,13 +96,9 @@ impl VM {
 
         // Ensure compiled for this (capture_types, param_types) signature.
         if !cache.contains(bytecode_ptr, capture_types, param_types) {
-            if let Err(e) = cache.compile(
-                bytecode_ptr,
-                &lir.view(),
-                num_captures,
-                capture_types,
-                param_types,
-            ) {
+            if let Err(e) =
+                cache.compile(bytecode_ptr, &lir, num_captures, capture_types, param_types)
+            {
                 return (
                     SIG_ERROR,
                     rejected(self, "mlir-cpu", format!("MLIR compilation failed: {}", e)),

@@ -53,8 +53,8 @@ pub(crate) fn prim_gpu_eligible(
     args: &[Value],
 ) -> (SignalBits, Value) {
     if let Some(closure) = args[0].as_closure() {
-        let eligible = match &closure.template.lir_function() {
-            Some(lir) => lir.view().is_gpu_eligible(),
+        let eligible = match closure.template.lir() {
+            Some(lir) => lir.is_gpu_eligible(),
             None => closure.template.is_gpu_candidate(),
         };
         (SIG_OK, Value::bool(eligible))
@@ -262,7 +262,7 @@ pub(crate) fn prim_compile_spirv(
         );
     }
     let closure = prim_arg!(ctx, args, 0, as_closure, "mlir/compile-spirv", "closure");
-    let lir = match closure.template.lir_function() {
+    let lir = match closure.template.lir() {
         Some(lir) => lir,
         None => {
             return (
@@ -274,7 +274,7 @@ pub(crate) fn prim_compile_spirv(
             )
         }
     };
-    if !lir.view().is_gpu_eligible() {
+    if !lir.is_gpu_eligible() {
         return (
             SIG_ERROR,
             ctx.error(

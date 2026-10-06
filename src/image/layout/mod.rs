@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-10-06
 //! Layout probes for the records the dumper writes into page bytes: each
 //! variant's discriminant byte and the byte extents of its leaf fields.
 //!
@@ -21,12 +21,17 @@
 //! copies only the discriminant byte and these extents into zeroed slots, so
 //! a construction temporary's uninitialized padding never reaches the file
 //! and dumps are byte-identical whole files.
+//!
+//! A payload's LIR body carries no discriminant, so lir.rs measures it with
+//! `offset_of!` alone, with the records it names and their pads.
 
 mod heap;
 mod key;
+mod lir;
 mod payload;
 mod syntax;
 
+pub(crate) use lir::{BLOCK_PAD, CONST_PAD, SITE_PAD};
 pub(crate) use payload::{file_slot_in_payload, write_canonical_payload};
 pub(crate) use syntax::{file_slot_in_node, write_canonical_node};
 
@@ -67,7 +72,7 @@ pub(crate) struct VariantLayout<Tag: 'static> {
 
 /// A `repr(Rust)` enum the dumper writes into page bytes.
 ///
-/// The probe is written once against this trait, because the two records it
+/// The probe is written once against this trait, because the records it
 /// measures differ only in which variants they have and how a variant's
 /// fields are reached.
 pub(crate) trait Probed: Sized + 'static {
@@ -231,6 +236,8 @@ pub(crate) fn fingerprint_component() -> String {
     out.push_str(&syntax::fingerprint_component());
     out.push(';');
     out.push_str(&payload::fingerprint_component());
+    out.push(';');
+    out.push_str(&lir::fingerprint_component());
     describe::<crate::value::heap::HeapObject>(&mut out);
     describe::<TableKey>(&mut out);
     describe::<crate::syntax::SyntaxKind>(&mut out);
@@ -307,6 +314,23 @@ fn assert_nested_layout() {
             "StaticRegion",
             RegionSlice::<crate::hir::region::StaticRegion>::header_layout(),
         ),
+        (
+            "Node",
+            RegionSlice::<crate::lir::code::Node>::header_layout(),
+        ),
+        (
+            "BlockRec",
+            RegionSlice::<crate::lir::code::BlockRec>::header_layout(),
+        ),
+        (
+            "ConstRec",
+            RegionSlice::<crate::lir::code::ConstRec>::header_layout(),
+        ),
+        (
+            "SiteRec",
+            RegionSlice::<crate::lir::code::SiteRec>::header_layout(),
+        ),
+        ("Reg", RegionSlice::<crate::lir::Reg>::header_layout()),
         ("u16", RegionSlice::<u16>::header_layout()),
         ("u32", RegionSlice::<u32>::header_layout()),
         ("u64", RegionSlice::<u64>::header_layout()),

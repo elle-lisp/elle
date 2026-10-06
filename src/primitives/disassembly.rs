@@ -78,15 +78,15 @@ pub(crate) fn prim_disjit(
 ) -> (SignalBits, Value) {
     #[cfg(feature = "jit")]
     if let Some(closure) = args[0].as_closure() {
-        let lir = match closure.template.lir_function() {
-            Some(lir) => lir.clone(),
+        let lir = match closure.template.lir() {
+            Some(lir) => lir,
             None => return (SIG_OK, Value::NIL),
         };
         let compiler = match crate::jit::JitCompiler::new() {
             Ok(c) => c,
             Err(_) => return (SIG_OK, Value::NIL),
         };
-        match compiler.clif_text(&lir.view()) {
+        match compiler.clif_text(&lir) {
             Ok(lines) => {
                 return (
                     SIG_OK,
@@ -114,8 +114,8 @@ fn flow_from_closure(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     closure: &crate::value::heap::Closure,
 ) -> (SignalBits, Value) {
-    let lir = match closure.template.lir_function() {
-        Some(lir) => lir.view(),
+    let lir = match closure.template.lir() {
+        Some(lir) => lir,
         None => return (SIG_OK, Value::NIL),
     };
 

@@ -1,4 +1,4 @@
-// audited: 2026-09-11
+// audited: 2026-10-06
 //! The image file's geometry and the fingerprint that gates hydration, with
 //! the codecs its tables are written and read through.
 //!
@@ -45,21 +45,21 @@ pub(crate) fn pages_offset() -> usize {
 /// it: the first multiple of `base_page` at or after the header block.
 ///
 /// Split out from [`pages_offset`] so the alignment rule can be checked at
-/// page sizes this machine does not have — the defect it replaces was a
-/// fixed 4 KiB start, which no test on a 4 KiB host could distinguish from a
-/// correct one.
+/// page sizes this machine does not have: on a 4 KiB host, a fixed 4 KiB
+/// start passes every check that reads this machine's page size.
 pub(crate) fn pages_offset_for(base_page: usize) -> usize {
     HEADER_BLOCK.next_multiple_of(base_page)
 }
 
 /// The live process's image fingerprint. An image whose stored fingerprint
 /// differs is rejected at hydration — images are regenerated, never
-/// migrated. Beyond sizes and aligns, the fingerprint carries the probed
-/// per-variant layout (docs/impl/image/format.md): size checks alone
-/// cannot see a reordered field or a moved discriminant.
+/// migrated. Beyond sizes and aligns, the fingerprint carries both
+/// instruction sets and the probed per-variant layout
+/// (docs/impl/image/format.md): size checks alone cannot see a reordered
+/// field, a moved discriminant, or a renumbered opcode.
 pub fn fingerprint() -> String {
     format!(
-        "elle-image v{} rustc={} target={}-{} page={} value={}/{} heapobject={}/{} regionslice={}/{} epoch={} {}",
+        "elle-image v{} rustc={} target={}-{} page={} value={}/{} heapobject={}/{} regionslice={}/{} epoch={} {} {} {}",
         VERSION,
         env!("ELLE_RUSTC"),
         std::env::consts::ARCH,
@@ -72,8 +72,22 @@ pub fn fingerprint() -> String {
         size_of::<RegionSlice<u8>>(),
         align_of::<RegionSlice<u8>>(),
         crate::epoch::rules::CURRENT_EPOCH,
+        instruction_set(
+            "isa",
+            (0..=u8::MAX).map_while(crate::compiler::bytecode::Instruction::from_byte),
+        ),
+        instruction_set("lirops", crate::lir::code::Op::ALL.iter()),
         super::layout::fingerprint_component(),
     )
+}
+
+/// One instruction set as the fingerprint names it: its length, and a hash
+/// of its names in byte order. A body stores opcodes as bytes, so the order
+/// is the meaning and the hash has to see it.
+fn instruction_set<T: std::fmt::Debug>(tag: &str, ops: impl Iterator<Item = T>) -> String {
+    let names: Vec<String> = ops.map(|op| format!("{op:?}")).collect();
+    let hash = crate::namehash::name_hash(&names.join(","));
+    format!("{tag}={}:{hash:016x}", names.len())
 }
 
 /// One entry of the page table: a page's size and its two bump cursors.

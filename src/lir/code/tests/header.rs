@@ -53,7 +53,7 @@ fn the_header_round_trips() {
     assert!(!v.capture_locals_mask().is_set(66));
     assert_eq!(
         v.vararg_kind(),
-        &crate::hir::VarargKind::StrictStruct(vec!["k".into()])
+        crate::hir::VarargKind::StrictStruct(vec!["k".into()])
     );
     assert_eq!(v.closure_id(), Some(ClosureId(6)));
     assert_eq!(v.entry(), Label(4));

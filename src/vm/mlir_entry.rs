@@ -72,20 +72,14 @@ impl VM {
         // Full LIR instruction walk (only for hot functions).
         // Use the stricter MLIR-CPU eligibility check: the return register
         // must round-trip through i64 correctly.
-        let lir = closure.template.lir_function()?;
-        if !lir.view().is_mlir_cpu_eligible() {
+        let lir = closure.template.lir()?;
+        if !lir.is_mlir_cpu_eligible() {
             return None;
         }
 
         // Compile via MLIR
         let cache = self.mlir_cache.as_mut().unwrap();
-        match cache.compile(
-            bytecode_ptr,
-            &lir.view(),
-            num_captures,
-            capture_types,
-            param_types,
-        ) {
+        match cache.compile(bytecode_ptr, &lir, num_captures, capture_types, param_types) {
             Ok(_name) => {
                 if crate::config::get().has_trace("jit") {
                     eprintln!(

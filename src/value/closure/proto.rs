@@ -53,7 +53,8 @@ pub struct TemplateProto {
     /// Bytecode offset → source location, as the emitter records it. Sorted
     /// into a flat table at materialization.
     pub location_map: LocationMap,
-    /// The frozen LIR the JIT compiles from, with the sites emission recorded.
+    /// The frozen LIR, with the sites emission recorded. Materialization
+    /// copies it into the payload, which is where the JIT reads it.
     pub lir_function: Option<Rc<crate::lir::LirOwned>>,
     /// Docstring from the source lambda.
     pub doc: Option<String>,
@@ -175,7 +176,7 @@ impl TemplateProto {
             location_map: bytecode.location_map,
             doc: func.doc().map(str::to_string),
             origin: func.origin(),
-            vararg_kind: func.vararg_kind().clone(),
+            vararg_kind: func.vararg_kind(),
             rest_list_layout: func.rest_list_layout(),
             name: func.name().map(str::to_string),
             region_table: func.region_table().to_vec(),
@@ -322,6 +323,14 @@ pub(super) fn materialize_payload(
         _ => RegionSlice::empty(),
     };
 
+    // The frozen function lands beside the rest of the payload, so every
+    // reader of the code object — the JIT, an image, `send` — reads it here
+    // rather than off the blueprint (docs/impl/lir.md).
+    let lir = match &proto.lir_function {
+        Some(lir) => crate::lir::LirBody::build(heap, &lir.view(), region),
+        None => crate::lir::LirBody::empty(),
+    };
+
     let payload = CodePayload {
         bytecode,
         constants,
@@ -345,6 +354,8 @@ pub(super) fn materialize_payload(
         // (docs/impl/region/template.md).
         origin: proto.origin.unwrap_or_else(crate::syntax::Span::synthetic),
         has_origin: proto.origin.is_some(),
+        lir,
+        has_lir: proto.lir_function.is_some(),
         arity: proto.arity,
         signal: proto.signal,
         capture_params_mask: proto.capture_params_mask,

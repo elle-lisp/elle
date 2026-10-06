@@ -1,6 +1,6 @@
-// audited: 2026-09-21
-//! The code-object half of the compacting copy: a payload, and the child code
-//! objects its `MakeClosure` instructions index.
+// audited: 2026-10-06
+//! The code-object half of the compacting copy: a payload, its LIR body, and the
+//! child code objects its `MakeClosure` instructions index.
 //!
 //! docs/impl/image/sealing.md
 //!
@@ -10,6 +10,7 @@
 //! that would otherwise have answered for it is still in reach.
 
 use crate::hir::region::RuntimeRegion;
+use crate::lir::LirBody;
 use crate::value::closure::{ChildCode, ClosureTemplate, CodePayload};
 use crate::value::fiberheap::FiberHeap;
 use crate::value::heap::HeapObject;
@@ -20,8 +21,9 @@ use super::copy::{copy_value, Walk};
 use super::ImageError;
 
 /// Copy one code payload into the scratch region, deduplicated on the source
-/// backing so every header from one blueprint keeps one copy. Constants and
-/// children go through walks of their own; every other field is plain data.
+/// backing so every header from one blueprint keeps one copy. Constants, the
+/// LIR body's values and the children go through walks of their own; every
+/// other field is plain data.
 ///
 /// The refusal lives here because only the blueprint can answer it: a
 /// WASM-built closure dispatches through a function table this process holds
@@ -73,11 +75,46 @@ pub(super) fn copy_payload(
         capture_locals: heap.alloc_region_slice_in_region(src.capture_locals.as_slice(), region),
         strict_keys: copy_bytes_slices(heap, region, &src.strict_keys),
         children,
+        lir: copy_lir(heap, region, &src.lir, walk)?,
         ..src
     };
     let copy = heap.alloc_region_slice_in_region(&[payload], region);
     walk.payloads.insert(key, copy);
     Ok(copy)
+}
+
+/// Copy a payload's LIR body. The records are plain data and copy as they
+/// stand; the values its `ValueConst`s load go through the value walk, which
+/// the constant pool's copy has already taken them through; the file table
+/// is spellings, copied like a string's bytes (docs/impl/image/sealing.md).
+fn copy_lir(
+    heap: &mut FiberHeap,
+    region: RuntimeRegion,
+    src: &LirBody,
+    walk: &mut Walk,
+) -> Result<LirBody, ImageError> {
+    let mut values = Vec::with_capacity(src.values.len());
+    for &v in src.values.iter() {
+        values.push(copy_value(heap, region, v, walk)?);
+    }
+    Ok(LirBody {
+        nodes: heap.alloc_region_slice_in_region(src.nodes.as_slice(), region),
+        blocks: heap.alloc_region_slice_in_region(src.blocks.as_slice(), region),
+        pool: heap.alloc_region_slice_in_region(src.pool.as_slice(), region),
+        consts: heap.alloc_region_slice_in_region(src.consts.as_slice(), region),
+        data: heap.alloc_region_slice_in_region(src.data.as_slice(), region),
+        files: copy_bytes_slices(heap, region, &src.files),
+        values: heap.alloc_region_slice_in_region(&values, region),
+        yield_points: heap.alloc_region_slice_in_region(src.yield_points.as_slice(), region),
+        call_sites: heap.alloc_region_slice_in_region(src.call_sites.as_slice(), region),
+        site_regs: heap.alloc_region_slice_in_region(src.site_regs.as_slice(), region),
+        merged_slots: heap.alloc_region_slice_in_region(src.merged_slots.as_slice(), region),
+        frame_release_slots: heap
+            .alloc_region_slice_in_region(src.frame_release_slots.as_slice(), region),
+        frame_release_regions: heap
+            .alloc_region_slice_in_region(src.frame_release_regions.as_slice(), region),
+        ..*src
+    })
 }
 
 /// Copy one child code object into the body as a header of its own.
@@ -110,8 +147,9 @@ fn copy_child(
     Ok(copy)
 }
 
-/// Copy a slice of byte slices — a payload's interned file names, or its
-/// `&named` key set — every element's bytes landing in the scratch region.
+/// Copy a slice of byte slices — a payload's interned file names, its
+/// `&named` key set, or its LIR body's file spellings — every element's bytes
+/// landing in the scratch region.
 fn copy_bytes_slices(
     heap: &mut FiberHeap,
     region: RuntimeRegion,

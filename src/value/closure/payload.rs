@@ -122,6 +122,11 @@ pub struct CodePayload {
     /// the file table (docs/impl/image/format.md).
     pub(crate) origin: Span,
     pub(crate) has_origin: bool,
+    /// The frozen function the JIT promotes this code object from, its sites
+    /// and its values (docs/impl/lir.md). Meaningful only when `has_lir`: an
+    /// entry thunk's code object and a WASM-built closure's have no LIR.
+    pub(crate) lir: crate::lir::LirBody,
+    pub(crate) has_lir: bool,
     pub(crate) arity: Arity,
     pub(crate) signal: Signal,
     pub(crate) capture_params_mask: u64,
@@ -314,6 +319,8 @@ impl CodePayload {
             children: RegionSlice::empty(),
             origin: Span::synthetic(),
             has_origin: false,
+            lir: crate::lir::LirBody::empty(),
+            has_lir: false,
             arity: Arity::Exact(0),
             signal: Signal::silent(),
             capture_params_mask: 0,
@@ -422,8 +429,34 @@ impl CodePayload {
     }
 
     /// The frozen function this payload carries, or `None` for a code object
-    /// with no LIR (docs/impl/lir.md).
+    /// with no LIR. The body holds what LIR alone knows, and the view reads
+    /// every header field the two share off this payload (docs/impl/lir.md).
     pub fn lir(&self) -> Option<crate::lir::LirView<'_>> {
-        None
+        self.has_lir.then(|| {
+            crate::lir::LirView::over_body(
+                &self.lir,
+                crate::lir::code::PayloadHeader {
+                    name: self.name(),
+                    doc: self.doc(),
+                    origin: self.origin(),
+                    arity: self.arity,
+                    signal: self.signal,
+                    num_locals: self.num_locals as u16,
+                    num_params: self.num_params,
+                    capture_params_mask: self.capture_params_mask,
+                    capture_locals: self.capture_locals.as_slice(),
+                    vararg: self.vararg,
+                    strict_keys: self.strict_keys(),
+                    rest_list_layout: self.rest_list,
+                    region_table: self.region_table.as_slice(),
+                },
+            )
+        })
+    }
+
+    /// Whether this payload carries LIR, without building a view.
+    #[inline]
+    pub fn has_lir(&self) -> bool {
+        self.has_lir
     }
 }

@@ -49,12 +49,12 @@ impl VM {
         }
 
         // Need LIR to compile
-        let lir_func = std::rc::Rc::clone(closure.template.lir_function()?);
+        let lir = closure.template.lir()?;
 
         // Try to compile
         let heap_ptr = self.heap_ptr;
         let wasm_tier = self.wasm_tier.as_mut().unwrap();
-        if wasm_tier.compile(bytecode_ptr, &lir_func.view(), heap_ptr) {
+        if wasm_tier.compile(bytecode_ptr, &lir, heap_ptr) {
             return Some(self.run_wasm(bytecode_ptr, closure, args, self_val));
         }
 

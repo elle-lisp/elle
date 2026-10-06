@@ -19,15 +19,16 @@ impl<'a> LirView<'a> {
     /// it writes new block records over the same runs. A cut block's jump
     /// carries the original terminator's span.
     pub fn split_after(&self, at: impl Fn(Op) -> bool) -> LirOwned {
-        let code = self.code();
-        let mut next_label = code.blocks.iter().map(|b| b.label).max().unwrap_or(0) + 1;
-        let mut blocks = Vec::with_capacity(code.blocks.len());
-        for rec in &code.blocks {
+        let records = self.block_records();
+        let nodes = self.parts.nodes;
+        let mut next_label = records.iter().map(|b| b.label).max().unwrap_or(0) + 1;
+        let mut blocks = Vec::with_capacity(records.len());
+        for rec in records {
             let mut start = rec.first;
             let mut label = rec.label;
             let end = rec.first + rec.len;
             for i in rec.first..end.saturating_sub(1) {
-                let op = Op::from_byte(code.nodes[i as usize].op).expect("a frozen node's opcode");
+                let op = Op::from_byte(nodes[i as usize].op).expect("a frozen node's opcode");
                 if !at(op) {
                     continue;
                 }
@@ -53,11 +54,8 @@ impl<'a> LirView<'a> {
                 ..*rec
             });
         }
-        let mut code = code.clone();
-        code.blocks = blocks;
-        LirOwned {
-            code,
-            values: self.values().to_vec(),
-        }
+        let mut split = self.to_owned();
+        split.code.blocks = blocks;
+        split
     }
 }

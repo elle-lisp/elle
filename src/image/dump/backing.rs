@@ -1,12 +1,13 @@
-// audited: 2026-09-14
+// audited: 2026-10-06
 //! One slice's backing bytes, and how they reach the pages section.
 //!
 //! docs/impl/image.md
 //!
-//! emit.rs records where each backing lands; these write the bytes. A raw
-//! backing copies as it stands; the three assembled forms — struct entries,
-//! code payloads, slice headers — go through the layout probes, so no
-//! construction temporary's padding reaches the artifact.
+//! emit.rs and payload.rs record where each backing lands; these write the
+//! bytes. A raw backing copies as it stands; the three assembled forms —
+//! struct entries, code payloads, slice headers — go through the layout
+//! probes, so no construction temporary's padding reaches the artifact. LIR
+//! records copy whole and have their named pads zeroed.
 
 use std::mem::size_of;
 
@@ -26,13 +27,24 @@ pub(super) enum Backing {
     /// (docs/impl/image.md § Dumping).
     Entries { rel: u64, src: usize, count: usize },
     /// One code payload, assembled from probed offsets: thirteen slice headers,
-    /// an arity through its own probe, and a scalar tail
+    /// an LIR body, an arity through its own probe, and a scalar tail
     /// (docs/impl/image.md § Dumping).
     Payload { rel: u64, src: usize },
-    /// Slice headers end to end — a payload's file names or `&named` keys.
+    /// Slice headers end to end — a payload's file names, its `&named` keys, or
+    /// its LIR body's file spellings.
     /// Each element's `ptr` and `len` are copied and the padding after the
     /// length stays zero.
     SliceHeaders { rel: u64, src: usize, count: usize },
+    /// LIR records end to end — a body's blocks, constants or sites. Each is
+    /// copied whole and its named pad written zero, which is what freezing
+    /// wrote there: whatever a live record's pad holds stays out of the file.
+    Records {
+        rel: u64,
+        src: usize,
+        count: usize,
+        stride: usize,
+        pad: (usize, usize),
+    },
 }
 
 impl Backing {
@@ -59,6 +71,18 @@ impl Backing {
 
     pub(super) fn slice_headers(rel: u64, src: usize, count: usize) -> Backing {
         Backing::SliceHeaders { rel, src, count }
+    }
+
+    /// `count` records of `T` starting at `src`, each with its pad at `pad`
+    /// (an offset and a length, from layout/lir.rs).
+    pub(super) fn records<T>(rel: u64, src: usize, count: usize, pad: (usize, usize)) -> Backing {
+        Backing::Records {
+            rel,
+            src,
+            count,
+            stride: size_of::<T>(),
+            pad,
+        }
     }
 
     pub(super) fn write(&self, pages: &mut [u8]) {
@@ -94,6 +118,21 @@ impl Backing {
                         .copy_from_slice(&bytes[ptr_at..ptr_at + size_of::<*const u8>()]);
                     pages[at + len_at..at + len_at + len_size]
                         .copy_from_slice(&bytes[len_at..len_at + len_size]);
+                }
+            }
+            Backing::Records {
+                rel,
+                src,
+                count,
+                stride,
+                pad: (pad_at, pad_len),
+            } => {
+                let len = count * stride;
+                let bytes = unsafe { std::slice::from_raw_parts(src as *const u8, len) };
+                let dst = &mut pages[rel as usize..rel as usize + len];
+                dst.copy_from_slice(bytes);
+                for rec in dst.chunks_exact_mut(stride) {
+                    rec[pad_at..pad_at + pad_len].fill(0);
                 }
             }
         }

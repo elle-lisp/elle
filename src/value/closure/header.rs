@@ -34,14 +34,13 @@ pub struct ClosureTemplate {
     /// backing lands in its own region instead — a self-edge.
     payload: RegionSlice<CodePayload>,
     /// The blueprint this header came from — the one Rust-heap owner left on a
-    /// code object. It answers what the payload does not hold: the
-    /// nested-lambda blueprints a `MakeClosure` indexes, the LIR the JIT
-    /// promotes from, the defining span, and the SPIR-V cache. Holding it
-    /// strongly is also what stops the heap's payload cache from sweeping a
-    /// payload this header still reads. A header hydrated from an image has
-    /// none — its payload backing is image pages no cache sweeps — and answers
-    /// three of those four with absence. The fourth comes off the payload's
-    /// child table instead (docs/impl/image/sealing.md).
+    /// code object. It answers the two questions the payload does not hold:
+    /// the nested-lambda blueprints a `MakeClosure` indexes, and the SPIR-V
+    /// cache. Holding it strongly is also what stops the heap's payload cache
+    /// from sweeping a payload this header still reads. A header hydrated from
+    /// an image has none — its payload backing is image pages no cache sweeps.
+    /// It answers the SPIR-V question with absence, and its children come off
+    /// the payload's child table instead (docs/impl/image/sealing.md).
     proto: Option<Rc<TemplateProto>>,
 }
 
@@ -253,6 +252,13 @@ impl ClosureTemplate {
         self.payload().lir()
     }
 
+    /// Whether this code object carries LIR, without building a view: the
+    /// question a call path asks before it reaches for a compiled tier.
+    #[inline]
+    pub fn has_lir(&self) -> bool {
+        self.payload().has_lir()
+    }
+
     /// Where the source lambda was written, for `(meta/origin f)`. A span is
     /// plain data, so it rides on the payload rather than on the blueprint and
     /// a hydrated header answers it too (docs/impl/region/template.md).
@@ -322,11 +328,6 @@ impl ClosureTemplate {
             .as_ref()
             .map(|p| p.child_protos.as_slice())
             .unwrap_or(&[])
-    }
-
-    #[inline]
-    pub fn lir_function(&self) -> Option<&Rc<crate::lir::LirOwned>> {
-        self.proto.as_ref()?.lir_function.as_ref()
     }
 
     /// The SPIR-V bytes `(git f)` compiled for this code object, if any.

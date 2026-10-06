@@ -8,8 +8,9 @@
 //! corrupt index panics here rather than reading outside the function.
 
 use super::freeze::flag;
-use super::instr::{ConstList, ConstRef, InstrRef, Slots, TemplateBytes};
+use super::instr::InstrRef;
 use super::op::Op;
+use super::operand::{ConstList, ConstRef, Slots, TemplateBytes};
 use super::record::{kind, term, BlockRec, Node};
 use super::view::Parts;
 use crate::hir::region::StaticRegion;

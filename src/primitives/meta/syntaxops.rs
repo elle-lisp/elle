@@ -1,3 +1,9 @@
+// audited: 2026-10-06
+//! The syntax-object accessors, squelch and attune, `meta/origin`, and the SPIR-V primitives git, fn/git? and disgit.
+//!
+//! docs/macros.md
+//! docs/impl/spirv.md
+
 use super::*;
 
 pub(crate) fn prim_syntax_to_list(
@@ -122,7 +128,8 @@ pub(crate) fn prim_syntax_e(
 /// intercepts signals matching the specification and converts them to `:error`.
 /// The second argument is resolved via `resolve_signal_bits` — it can be a
 /// keyword, set, array, list, or integer.
-/// The new closure shares the same bytecode and environment (Rc clones — cheap).
+/// The new closure shares the template and the environment, which it copies
+/// as two handles.
 ///
 /// Error cases:
 /// - Wrong arity: arity-error
@@ -155,13 +162,12 @@ pub(crate) fn prim_squelch(
         Err(err) => return err,
     };
 
-    // Create new closure with OR'd squelch mask (composable — Rc bumps are cheap,
-    // RegionSlice copy is a (ptr, len) pair).
-    let new_closure = Closure {
-        template: closure_rc.template,
-        env: closure_rc.env,
-        squelch_mask: closure_rc.squelch_mask.union(new_bits),
-    };
+    // The masks OR together, so squelches compose.
+    let new_closure = Closure::new(
+        closure_rc.template,
+        closure_rc.env,
+        closure_rc.squelch_mask.union(new_bits),
+    );
 
     (SIG_OK, ctx.closure(new_closure))
 }
@@ -206,20 +212,20 @@ pub(crate) fn prim_attune(
     // Suppress everything the user DIDN'T permit (within the user-producible set).
     let suppress_bits = crate::signals::CAP_MASK.subtract(permitted_bits);
 
-    let new_closure = Closure {
-        template: closure_rc.template,
-        env: closure_rc.env,
-        squelch_mask: closure_rc.squelch_mask.union(suppress_bits),
-    };
+    let new_closure = Closure::new(
+        closure_rc.template,
+        closure_rc.env,
+        closure_rc.squelch_mask.union(suppress_bits),
+    );
 
     (SIG_OK, ctx.closure(new_closure))
 }
 
 /// Return the source location of a closure as `{:file :line :col}`, or `nil`.
 ///
-/// `(meta/origin f)` extracts the span from the closure's stored syntax node.
-/// Returns `nil` if `f` is not a closure, the closure has no syntax, or the
-/// syntax span has no file.
+/// `(meta/origin f)` reads the defining span the closure's code payload
+/// carries. Returns `nil` if `f` is not a closure, the closure has no origin,
+/// or the span names no file.
 pub(crate) fn prim_meta_origin(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -247,8 +253,9 @@ pub(crate) fn prim_meta_origin(
 /// Eagerly compile SPIR-V, cache on template, return the closure.
 ///
 /// `(git f)` compiles the closure to SPIR-V and caches the bytes on the
-/// closure template's `spirv` OnceCell. Returns `f` (the template is now
-/// GIT'd — all closures sharing this template see the cached SPIR-V).
+/// blueprint its template came from. Returns `f`; every closure sharing that
+/// blueprint sees the cached SPIR-V. A template hydrated from an image has no
+/// blueprint, caches nothing, and recompiles (docs/impl/image/sealing.md).
 ///
 /// Optional second argument is workgroup size (default 256).
 pub(crate) fn prim_git(
@@ -277,7 +284,7 @@ pub(crate) fn prim_git(
                 ctx.error("mlir-error", "git: closure is not GPU-eligible"),
             );
         }
-        if closure.template.lir_function().is_none() {
+        if !closure.template.has_lir() {
             return (
                 SIG_ERROR,
                 ctx.error("mlir-error", "git: closure has no LIR"),
@@ -327,5 +334,3 @@ pub(crate) fn prim_disgit(
         ),
     }
 }
-
-// Declarative primitive definitions for meta-programming operations.

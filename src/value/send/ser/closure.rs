@@ -78,7 +78,7 @@ pub(super) fn send_closure(
     let constants = constants?;
 
     // The LIR crosses with the closure, so the worker's JIT can compile it.
-    let (lir, lir_values) = send_lir(closure_rc.template.lir_function(), ctx)?;
+    let (lir, lir_values) = send_lir(closure_rc.template.lir(), ctx)?;
 
     // Serialize the nested lambdas' code objects so the worker's reconstructed
     // template carries them and `MakeClosure` resolves by index. A hydrated

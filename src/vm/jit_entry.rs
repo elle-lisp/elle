@@ -90,8 +90,8 @@ impl VM {
             && !self.jit_pending.contains_key(&(bytecode_ptr as usize))
             && !self.jit_rejections.contains_key(&bytecode_ptr)
         {
-            if let Some(lir_func) = closure.template.lir_function() {
-                self.submit_jit_task(&lir_func.view(), closure, bytecode_ptr);
+            if let Some(lir) = closure.template.lir() {
+                self.submit_jit_task(&lir, closure, bytecode_ptr);
             }
         }
 

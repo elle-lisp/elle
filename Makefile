@@ -357,9 +357,9 @@ smoke-impl: elle elle-rig  ## The implementation suite on the rig, the producers
 
 # The language suite booted from an image instead of from core.lisp,
 # prelude.lisp and stdlib.lisp — dump-boot's gate (docs/impl/image/boot.md).
-# `--boot-image=` is off by default and stays off while a hydrated stdlib
-# reaches neither the JIT tier nor cross-unit inlining, so nothing else in the
-# tree boots from one.
+# `--boot-image=` is off by default and stays off while user code under an
+# image boot compiles without cross-unit inlining, so nothing else in the tree
+# boots from one.
 #
 # The directory lives under target/ rather than the temp root: an image is
 # megabytes, a store prunes the one an earlier digest left, and `make clean`

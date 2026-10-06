@@ -356,7 +356,7 @@ impl VM {
                     Some(c) => c,
                     None => return type_error!(ctx, closure_val, "mlir/compile-spirv", "closure"),
                 };
-                let lir = match closure.template.lir_function() {
+                let lir = match closure.template.lir() {
                     Some(lir) => lir,
                     None => {
                         return (
@@ -368,7 +368,7 @@ impl VM {
                         )
                     }
                 };
-                if !lir.view().is_gpu_eligible() {
+                if !lir.is_gpu_eligible() {
                     return (
                         SIG_ERROR,
                         ctx.error(
@@ -381,7 +381,7 @@ impl VM {
                 let cache = self
                     .mlir_cache
                     .get_or_insert_with(crate::mlir::MlirCache::new);
-                match cache.compile_spirv(key, &lir.view(), wg_size) {
+                match cache.compile_spirv(key, &lir, wg_size) {
                     Ok(bytes) => (SIG_OK, ctx.bytes(bytes.to_vec())),
                     Err(e) => (
                         SIG_ERROR,
@@ -405,7 +405,7 @@ impl VM {
                 if closure.template.spirv_bytes().is_some() {
                     return (SIG_OK, closure_val);
                 }
-                let lir = match closure.template.lir_function() {
+                let lir = match closure.template.lir() {
                     Some(lir) => lir,
                     None => {
                         return (
@@ -414,7 +414,7 @@ impl VM {
                         )
                     }
                 };
-                if !lir.view().is_gpu_eligible() {
+                if !lir.is_gpu_eligible() {
                     return (
                         SIG_ERROR,
                         ctx.error("mlir-error", "git: closure is not GPU-eligible".to_string()),
@@ -424,7 +424,7 @@ impl VM {
                 let cache = self
                     .mlir_cache
                     .get_or_insert_with(crate::mlir::MlirCache::new);
-                match cache.compile_spirv(key, &lir.view(), wg_size) {
+                match cache.compile_spirv(key, &lir, wg_size) {
                     Ok(bytes) => {
                         // Cache on the template (idempotent).
                         closure.template.cache_spirv(bytes.to_vec());

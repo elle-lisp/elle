@@ -4,20 +4,26 @@
 //! src/lir/AGENTS.md
 //! docs/impl/lir.md
 
+mod body;
 mod compare;
 mod decode;
 mod freeze;
 mod gpu;
+mod head;
 mod instr;
 mod op;
+mod operand;
 mod owned;
 mod record;
 mod split;
 mod view;
 
+pub use body::LirBody;
 pub use freeze::freeze;
-pub use instr::{ConstList, ConstRef, InstrRef, Slots, TemplateBytes};
+pub(crate) use head::PayloadHeader;
+pub use instr::InstrRef;
 pub use op::Op;
+pub use operand::{ConstList, ConstRef, Slots, TemplateBytes};
 pub use owned::{FrozenModule, LirCode, LirOwned};
 pub use record::{BlockRec, ConstRec, Node, SiteRec, NO_FILE, NO_REG};
 pub use view::{BlockRef, LirView, NodeRef, SiteRef};
