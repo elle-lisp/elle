@@ -63,8 +63,8 @@ fn the_header_round_trips() {
     assert_eq!(v.merged_slots(), &[slot(12)]);
     assert_eq!(
         v.frame_release_slots(),
-        &[3, 1],
-        "in the order lowering found them"
+        &[1, 3],
+        "ascending, so the payload's copy and this one agree on order"
     );
     assert_eq!(v.frame_release_regions(), &[slot(13)]);
 }
