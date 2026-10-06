@@ -1,11 +1,11 @@
 // audited: 2026-10-05
-//! Compare the solver's least model with the analyzer's inferred signals, and check the fixtures' expectations.
+//! Compare the solver's least model with the analyzer's inferred signals, and print what the run found.
 //!
-//! docs/signals/inference.md
+//! docs/impl/solver.md
 
-use crate::datalog::Solution;
-use crate::extract::{each_child, ModuleShape, Unit};
-use crate::model::{Model, VarId, VarKey};
+use crate::extract::{ModuleShape, Unit};
+use crate::model::{Model, Solution, VarId, VarKey};
+use crate::visit::each_child;
 use elle::hir::{Hir, HirKind};
 use elle::signals::Signal;
 use elle::value::fiber::SignalBits;
@@ -28,21 +28,8 @@ pub struct Run<'a> {
     pub analyze_time: Duration,
     pub extract_time: Duration,
     pub solve_time: Duration,
-    pub program_bytes: usize,
-    pub deterministic: Option<bool>,
+    pub check_time: Duration,
     pub expect: bool,
-    pub native_time: Duration,
-    pub native_agrees: bool,
-    pub engines: &'a [EngineRun],
-}
-
-/// One in-process engine's fastest solve, and whether its model matches the others.
-pub struct EngineRun {
-    pub name: &'static str,
-    pub time: Duration,
-    pub same_as_worklist: bool,
-    pub same_as_z3: bool,
-    pub same_viol_as_z3: bool,
 }
 
 /// How the solver's answer for one lambda relates to the analyzer's.
@@ -57,13 +44,14 @@ enum Verdict {
     Incomparable,
 }
 
-fn fmt_bits(bits: u64) -> String {
+pub fn fmt_bits(bits: u64) -> String {
     elle::signals::registry::format_bits(SignalBits::new(bits))
 }
 
-struct Lambda {
-    unit: u32,
-    id: u32,
+/// A lambda node of an analyzed file, and what the analyzer inferred for it.
+pub struct Lambda {
+    pub unit: u32,
+    pub id: u32,
     line: usize,
     inferred: Signal,
 }
@@ -84,7 +72,8 @@ fn lambdas(hir: &Hir, unit: u32, out: &mut Vec<Lambda>) {
 }
 
 impl<'a> Context<'a> {
-    fn file(&self, unit: u32) -> String {
+    /// The last two components of a file's path.
+    pub fn file(&self, unit: u32) -> String {
         let p = &self.units[unit as usize].path;
         p.rsplit('/')
             .take(2)
@@ -93,6 +82,13 @@ impl<'a> Context<'a> {
             .rev()
             .collect::<Vec<_>>()
             .join("/")
+    }
+
+    /// A variable, named for a reader.
+    pub fn describe_var(&self, v: VarId, all: &[Lambda]) -> String {
+        let lines: HashMap<(u32, u32), usize> =
+            all.iter().map(|l| ((l.unit, l.id), l.line)).collect();
+        self.describe(v, &lines)
     }
 
     fn describe(&self, v: VarId, lines: &HashMap<(u32, u32), usize>) -> String {
@@ -129,6 +125,31 @@ impl<'a> Context<'a> {
     }
 }
 
+/// Name every tuple one model holds and the other lacks, for a run whose two
+/// engines disagree. Returns the number of tuples that differ.
+pub fn disagreement(ctx: &Context, check: &Solution) -> usize {
+    let s = ctx.solution;
+    let mut n = 0;
+    for (name, worklist, datafrog) in [
+        ("bits", &s.bits, &check.bits),
+        ("dep", &s.dep, &check.dep),
+        ("viol", &s.viol, &check.viol),
+    ] {
+        for (only, a, b) in [
+            ("the worklist", worklist, datafrog),
+            ("datafrog", datafrog, worklist),
+        ] {
+            for &(v, x) in a.difference(b) {
+                n += 1;
+                if n <= 20 {
+                    println!("  {name}({}, {x}) only in {only}", ctx.describe_var(v, &[]));
+                }
+            }
+        }
+    }
+    n
+}
+
 pub fn print(ctx: &Context, run: &Run) -> usize {
     let mut bits_of: HashMap<VarId, u64> = HashMap::new();
     for &(v, b) in &ctx.solution.bits {
@@ -151,34 +172,21 @@ pub fn print(ctx: &Context, run: &Run) -> usize {
         + f.fidx.len()
         + f.fld.len();
     println!(
-        "files {}  vars {}  sites {}  facts {}  program {} KiB",
+        "files {}  vars {}  sites {}  facts {}",
         ctx.units.len(),
         ctx.model.var_count(),
         ctx.model.sites,
-        nfacts,
-        run.program_bytes / 1024
+        nfacts
     );
     println!(
-        "analyze {:.0?}  extract {:.0?}  z3 {:.0?}  model: bits {} dep {}",
+        "analyze {:.0?}  extract {:.0?}  solve {:.2?}  check {:.2?}  model: bits {} dep {}",
         run.analyze_time,
         run.extract_time,
         run.solve_time,
+        run.check_time,
         ctx.solution.bits.len(),
         ctx.solution.dep.len()
     );
-    println!(
-        "worklist fixpoint in Rust {:.0?}; same model as z3: {}",
-        run.native_time, run.native_agrees
-    );
-    for e in run.engines {
-        println!(
-            "engine {:<9} {:>9.2?}  same as worklist: {}  same as z3: {}  same violations as z3: {}",
-            e.name, e.time, e.same_as_worklist, e.same_as_z3, e.same_viol_as_z3
-        );
-    }
-    if let Some(d) = run.deterministic {
-        println!("reversed fact order gives the same model: {}", d);
-    }
     for (path, err) in run.failed {
         println!(
             "not analyzed: {}: {}",
@@ -196,7 +204,7 @@ pub fn print(ctx: &Context, run: &Run) -> usize {
     let mut tally: BTreeMap<Verdict, usize> = BTreeMap::new();
     let mut rows: Vec<(Verdict, String)> = Vec::new();
     for l in &all {
-        let Some(v) = find(ctx.model, &VarKey::Lam(l.unit, l.id)) else {
+        let Some(v) = ctx.model.find(&VarKey::Lam(l.unit, l.id)) else {
             continue;
         };
         let s_bits = bits_of.get(&v).copied().unwrap_or(0);
@@ -298,7 +306,9 @@ pub fn print(ctx: &Context, run: &Run) -> usize {
             Some(ModuleShape::Struct { exports }) => format!("struct, {} exports", exports.len()),
             _ => "unknown".to_string(),
         };
-        let top = find(ctx.model, &VarKey::Top(u.id))
+        let top = ctx
+            .model
+            .find(&VarKey::Top(u.id))
             .and_then(|t| bits_of.get(&t).copied())
             .unwrap_or(0);
         if run.all || top != 0 {
@@ -327,138 +337,8 @@ pub fn print(ctx: &Context, run: &Run) -> usize {
     }
 
     if run.expect {
-        check(ctx, &all, &bits_of, &deps_of)
+        crate::expect::check(ctx, &all, &bits_of, &deps_of)
     } else {
         0
     }
-}
-
-/// Check every `# expect NAME |bits| [prop I] [field I KEY]` line in the
-/// analyzed files against the solver's answer for the lambda bound to NAME in
-/// that file. The parameters, fields and bits must match exactly. Returns the
-/// number of failures.
-fn check(
-    ctx: &Context,
-    all: &[Lambda],
-    bits_of: &HashMap<VarId, u64>,
-    deps_of: &HashMap<VarId, Vec<VarId>>,
-) -> usize {
-    let cap = elle::signals::CAP_MASK.raw();
-    let mut failures = 0;
-    for u in ctx.units {
-        let src = std::fs::read_to_string(&u.path).unwrap_or_default();
-        for line in src.lines() {
-            let Some(spec) = line.trim().strip_prefix("# expect ") else {
-                continue;
-            };
-            let (name, rest) = spec.split_once(' ').expect("expect NAME |bits|");
-            let rest = rest.trim().strip_prefix('|').expect("bits open with |");
-            let (lit, tail) = rest.split_once('|').expect("bits close with |");
-            let mut want_bits = 0u64;
-            {
-                let reg = elle::signals::registry::global_registry().lock().unwrap();
-                for kw in lit.split_whitespace() {
-                    let kw = kw.trim_start_matches(':');
-                    want_bits |= reg.to_signal_bits(kw).expect("known signal").raw();
-                }
-            }
-            let mut want_prop = 0u32;
-            let mut want_fields: Vec<(u32, String)> = Vec::new();
-            let toks: Vec<&str> = tail.split_whitespace().collect();
-            let mut t = 0;
-            while t < toks.len() {
-                match toks[t] {
-                    "prop" => {
-                        want_prop |= 1 << toks[t + 1].parse::<u32>().unwrap();
-                        t += 2;
-                    }
-                    // An open import's export, by key.
-                    "import" => {
-                        want_fields.push((IMPORT, toks[t + 1].to_string()));
-                        t += 2;
-                    }
-                    // An open module instantiation.
-                    "instantiate" => {
-                        want_fields.push((INSTANTIATE, String::new()));
-                        t += 1;
-                    }
-                    "field" => {
-                        want_fields.push((toks[t + 1].parse().unwrap(), toks[t + 2].to_string()));
-                        t += 3;
-                    }
-                    other => panic!("unknown expect token {other}"),
-                }
-            }
-            let found = all.iter().find(|l| {
-                l.unit == u.id
-                    && ctx
-                        .names
-                        .get(&(l.unit, l.id))
-                        .and_then(|s| ctx.symbols.name(*s))
-                        == Some(name)
-            });
-            let Some(l) = found else {
-                println!("FAIL {}: no lambda named {}", ctx.file(u.id), name);
-                failures += 1;
-                continue;
-            };
-            let v = find(ctx.model, &VarKey::Lam(l.unit, l.id)).unwrap();
-            let got_bits = bits_of.get(&v).copied().unwrap_or(0) & cap;
-            let mut got_prop = 0u32;
-            let mut got_fields: Vec<(u32, String)> = Vec::new();
-            let mut other_free = 0;
-            for &w in deps_of.get(&v).map(|d| d.as_slice()).unwrap_or(&[]) {
-                match ctx.model.keys_by_id[w as usize] {
-                    VarKey::Param(o, i) if o == v => got_prop |= 1 << i,
-                    VarKey::Field(p, k) => match ctx.model.keys_by_id[p as usize] {
-                        VarKey::Param(_, i) => {
-                            got_fields.push((i, ctx.model.key_names[k as usize].clone()))
-                        }
-                        _ => other_free += 1,
-                    },
-                    VarKey::Inst(_, k) => {
-                        got_fields.push((IMPORT, ctx.model.key_names[k as usize].clone()))
-                    }
-                    VarKey::Obj(_) => got_fields.push((INSTANTIATE, String::new())),
-                    _ => other_free += 1,
-                }
-            }
-            got_fields.sort();
-            want_fields.sort();
-            let ok = got_bits == want_bits
-                && got_prop == want_prop
-                && got_fields == want_fields
-                && other_free == 0;
-            if !ok {
-                failures += 1;
-            }
-            println!(
-                "{} {}:{}: want {} prop {:b} fields {:?}; got {} prop {:b} fields {:?}{}",
-                if ok { "ok  " } else { "FAIL" },
-                ctx.file(u.id),
-                name,
-                fmt_bits(want_bits),
-                want_prop,
-                want_fields,
-                fmt_bits(got_bits),
-                got_prop,
-                got_fields,
-                if other_free > 0 {
-                    format!(" + {} other free", other_free)
-                } else {
-                    String::new()
-                }
-            );
-        }
-    }
-    failures
-}
-
-/// Expectation markers in the field list: a free import export, and a free
-/// module instantiation.
-const IMPORT: u32 = u32::MAX;
-const INSTANTIATE: u32 = u32::MAX - 1;
-
-fn find(model: &Model, key: &VarKey) -> Option<VarId> {
-    model.find(key)
 }

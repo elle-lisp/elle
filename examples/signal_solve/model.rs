@@ -1,7 +1,7 @@
 // audited: 2026-10-05
 //! The solver's vocabulary: interned signal variables, and the facts that the extractor states over them.
 //!
-//! docs/signals/inference.md
+//! docs/impl/solver.md
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -203,4 +203,25 @@ pub fn to_word(bits: impl Iterator<Item = u32>) -> u64 {
             w | (1u64 << b)
         }
     })
+}
+
+/// The least model of the rules in docs/impl/solver.md: each variable's bits,
+/// its free variables, and each ceiling a body raises past.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Solution {
+    pub bits: BTreeSet<(VarId, u32)>,
+    pub dep: BTreeSet<(VarId, VarId)>,
+    pub viol: BTreeSet<(VarId, u32)>,
+}
+
+impl Model {
+    /// State `use(ctx, site, callee, owner)`, and `noarg` for each parameter
+    /// of the owner the call does not pass.
+    pub fn use_fact(&mut self, ctx: VarId, site: SiteId, callee: VarId, owner: VarId, nargs: u32) {
+        self.facts.uses.insert((ctx, site, callee, owner));
+        let n = self.nparams.get(&owner).copied().unwrap_or(0);
+        for i in nargs..n {
+            self.facts.noarg.insert((site, i));
+        }
+    }
 }
