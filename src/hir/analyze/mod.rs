@@ -235,9 +235,10 @@ pub struct Analyzer<'a> {
     bound_env: HashMap<Binding, Vec<ParamBoundAt>>,
 
     /// Signal projections for bindings initialized from imported modules.
-    /// Maps a binding to a keyword→signal projection so that qualified
-    /// access (`module:field`) uses the projected signal instead of the
-    /// conservative `Polymorphic` fallback.
+    /// Maps a binding to a keyword→signal projection. Qualified access
+    /// (`module:field`) gives its `get` node the projected signal; a call
+    /// through it still takes the unknown signal, because its callee is a
+    /// call expression.
     projection_env: HashMap<Binding, HashMap<String, Signal>>,
     /// Compile-time squelch result signal. Set during call analysis when
     /// the analyzer meets `(squelch spec f)` or `(attune spec f)` with a
@@ -299,10 +300,21 @@ pub struct Analyzer<'a> {
     /// signal projections during analysis (`get_or_compile_projection`). Set by
     /// the file frontend via [`set_compile_ctx`](Analyzer::set_compile_ctx); the
     /// frontend owns the `CompileCtx`, outlives this analyzer, and never touches
-    /// it while analysis runs, so the reborrow is sound. `None` in pure-analysis
-    /// contexts (lint/LSP/tests), where imports fall back to the conservative
-    /// `Polymorphic` projection.
+    /// it while analysis runs, so the reborrow is sound. `None` where nothing
+    /// sets it — single-form `compile`, runtime `eval`, the core bootstrap and
+    /// the test kit — and a literal import there gets no projection.
     import_ctx: Option<*mut crate::pipeline::CompileCtx>,
+    /// Each lambda's declared ceiling, keyed by the lambda node. The HIR keeps
+    /// the inferred signal and drops the ceiling it was checked against; a
+    /// reader that solves signals itself needs the declarations.
+    lambda_decls: HashMap<super::expr::HirId, LambdaDecl>,
+}
+
+/// What a lambda's body declared about its own signal.
+#[derive(Debug, Clone, Copy)]
+pub struct LambdaDecl {
+    /// `(silent!)` or `(attune! spec)`: the signals the function may emit.
+    pub ceiling: Option<Signal>,
 }
 
 mod scopes;
@@ -366,6 +378,7 @@ impl<'a> Analyzer<'a> {
             immutable_by_default: true,
             unicode_generation: crate::config::get().unicode_generation(),
             import_ctx: None,
+            lambda_decls: HashMap::new(),
         };
         // Initialize with a global scope so top-level bindings can be registered
         analyzer.push_definition_scope();
@@ -443,6 +456,11 @@ impl<'a> Analyzer<'a> {
     /// Return accumulated errors (for the pipeline to check).
     pub fn take_errors(&mut self) -> Vec<LError> {
         std::mem::take(&mut self.errors)
+    }
+
+    /// Take every lambda's declared ceiling.
+    pub fn take_lambda_decls(&mut self) -> HashMap<super::expr::HirId, LambdaDecl> {
+        std::mem::take(&mut self.lambda_decls)
     }
 
     /// Take the signal projection computed by `analyze_file_letrec`.

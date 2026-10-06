@@ -361,10 +361,13 @@ impl<'a> Analyzer<'a> {
             .doc(doc)
             .origin(origin)
             .numeric(assert_numeric);
-        Ok(Hir::new(
-            HirKind::Lambda(Box::new(lambda)),
-            span,
-            Signal::silent(),
-        ))
+        let hir = Hir::new(HirKind::Lambda(Box::new(lambda)), span, Signal::silent());
+        self.lambda_decls.insert(
+            hir.id,
+            LambdaDecl {
+                ceiling: declared_ceiling,
+            },
+        );
+        Ok(hir)
     }
 }
