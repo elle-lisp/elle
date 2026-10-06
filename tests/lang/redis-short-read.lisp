@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 14)
+# audited: 2026-10-06
 # resp-read reassembles a bulk string that spans more than one TCP segment.
 # lib/redis.md
 #
@@ -25,7 +25,7 @@
 #
 # Requires a live Redis on 127.0.0.1:6379.  Records a reasoned skip otherwise.
 
-(def redis ((import-file "lib/redis.lisp")))
+(def redis ((import "std/redis")))
 
 (def value-size 200000)
 (def n-rounds 200)
