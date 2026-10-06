@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 14)
+# audited: 2026-10-06
 # The redis client's commands against a live Redis, in a keyspace of its own.
 # lib/redis.md
 #
@@ -11,7 +11,7 @@
 # sub-namespace, so the runner can fire DIFFERENT redis files concurrently
 # against a shared Redis without one wiping another's keys mid-run.
 
-(def redis ((import-file "lib/redis.lisp")))
+(def redis ((import "std/redis")))
 
 # Redis is shared infrastructure, so this file's keyspace carries the running
 # process's pid.  The per-file namespace separates the files; the pid separates
