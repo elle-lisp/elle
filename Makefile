@@ -5,7 +5,8 @@
        doctest doctest-list myplugin plugins plugins-all \
        plugins-verify smoke-plugins mcp embedding semver-check \
        fmt fmt-check audit agents agents-check prose page-claims \
-       bytecode-golden bytecode-golden-check
+       bytecode-golden bytecode-golden-check \
+       signal-solve
 
 .DEFAULT_GOAL := all
 
@@ -570,6 +571,21 @@ embedding: elle  ## Build + run embedding demos (Rust + C hosts)
 	$(MAKE) -C demos/embedding chost TARGET_DIR=$(EMBED_TARGET_DIR)
 	LD_LIBRARY_PATH=$(EMBED_TARGET_DIR) demos/embedding/chost
 
+# The signal solver spike (docs/impl/solver.md): every fixture's `# expect`
+# lines, and the worklist and datafrog solving one model over all of lib/. An
+# import spec resolves against the working directory, so the fixtures run from
+# their own. The spike exits non-zero on a failed expectation or a disagreement.
+SIGNAL_SOLVE = $(CURDIR)/$(CARGO_OUT)/examples/signal_solve
+
+signal-solve:  ## The signal solver spike: its fixtures, and both engines over lib/
+	cargo build $(CARGO_PROFILE) --example signal_solve
+	cd examples/signal_solve/fixtures && \
+		$(SIGNAL_SOLVE) --expect parity.lisp && \
+		$(SIGNAL_SOLVE) --expect app.lisp && \
+		$(SIGNAL_SOLVE) --expect cyc_a.lisp && \
+		$(SIGNAL_SOLVE) --expect --no-follow sep.lisp
+	$(SIGNAL_SOLVE) $$(find lib -name '*.lisp' | sort)
+
 
 # What a contributor runs before a push and what the merge queue runs: `qa`,
 # then both suites on this build, the documents, the embedding demo and the
@@ -607,7 +623,7 @@ qa: prose audit agents-check crosscheck  ## The PR gate's QA job, locally (~2min
 	cargo test --workspace --doc
 
 
-test: smoke  ## smoke (qa first), then the Rust unit, integration and rig tests
+test: smoke signal-solve  ## smoke (qa first), then the solver spike, and the Rust unit, integration and rig tests
 	cargo test --workspace --lib --all-features
 	cargo test --test '*' -- --skip property
 	cargo test -p elle-rig
