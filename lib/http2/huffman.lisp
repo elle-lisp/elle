@@ -91,6 +91,44 @@
 
   (def decode-tree (build-decode-tree))
 
+  ## ── Byte-wide decode table ─────────────────────────────────────────────
+  ## For each 8-bit window of input: the symbol whose code of 8 bits or
+  ## fewer opens the window, and that code's length. A length of 0 marks a
+  ## window that opens a longer code; for it the table holds the trie node
+  ## the window's 8 bits reach, so the walk reads only the code's rest.
+
+  (defn build-fast-table []
+    (let [syms (array/new 256 0)
+          lens (array/new 256 0)
+          nodes (array/new 256 nil)]
+      (def @sym 0)
+      (while (< sym 256)
+        (let* [entry (get table sym)
+               code (get entry 0)
+               nbits (get entry 1)]
+          (when (<= nbits 8)
+            (let [base (bit/shl code (- 8 nbits))
+                  span (bit/shl 1 (- 8 nbits))]
+              (def @k 0)
+              (while (< k span)
+                (put syms (+ base k) sym)
+                (put lens (+ base k) nbits)
+                (assign k (+ k 1))))))
+        (assign sym (+ sym 1)))
+      (def @w 0)
+      (while (< w 256)
+        (when (= 0 (get lens w))
+          (def @node decode-tree)
+          (def @b 7)
+          (while (>= b 0)
+            (assign node (get node (bit/and (bit/shr w b) 1)))
+            (assign b (- b 1)))
+          (put nodes w node))
+        (assign w (+ w 1)))
+      [(freeze syms) (freeze lens) (freeze nodes)]))
+
+  (def [fast-syms fast-lens fast-nodes] (build-fast-table))
+
   ## ── Encode ─────────────────────────────────────────────────────────────
 
   (defn huffman-encode [input]
@@ -134,34 +172,71 @@
   ## ── Decode ─────────────────────────────────────────────────────────────
 
   (defn huffman-decode [input]
-    "Huffman-decode a byte sequence. Returns bytes."
+    "Huffman-decode a byte sequence. Returns bytes.
+     A code of 8 bits or fewer is read from the byte-wide table in one step;
+     a longer code, and whatever the input's last bits hold, walk the trie
+     one bit at a time. A code cut off by the end of the input is padding."
     (let* [src (if (string? input) (bytes input) input)
            len (length src)
            out @[]
-           @node decode-tree
-           @i 0]
-      # Reject missing trie paths and EOS symbols while decoding each bit.
-      (while (< i len)
-        (let [byte-val (get src i)]
-          (def @bit-idx 7)
-          (while (>= bit-idx 0)
-            (let* [bit (bit/and (bit/shr byte-val bit-idx) 1)
-                   next (get node bit)]
-              (cond
-                (nil? next) (error {:error :h2-error
-                                    :reason :compression-error
-                                    :message "Huffman: invalid code"})
-                (integer? next)
-                  (begin
-                    (when (= next 256)
-                      (error {:error :h2-error
-                              :reason :compression-error
-                              :message "Huffman: EOS symbol in encoded data"}))
-                    (push out next)
-                    (assign node decode-tree))
-                true (assign node next)))
-            (assign bit-idx (- bit-idx 1))))
-        (assign i (+ i 1)))
+           @acc 0  # unread input bits: the low `have` bits are valid
+           @have 0
+           @i 0
+           @done false]
+      (while (not done)
+        # Hold at least 8 unread bits while the input lasts. `acc` keeps
+        # under 16 bits: fewer than 8 are unread when a byte arrives.
+        (while (and (< have 8) (< i len))
+          (assign acc (bit/or (bit/and (bit/shl acc 8) 0xffff) (get src i)))
+          (assign have (+ have 8))
+          (assign i (+ i 1)))
+        (let* [window (when (>= have 8)
+                        (bit/and (bit/shr acc (- have 8)) 0xff))
+               n (if window (get fast-lens window) 0)]
+          (cond
+            (> n 0)
+              (begin
+                (push out (get fast-syms window))
+                (assign have (- have n)))
+            (= have 0) (assign done true)
+            true
+              # Walk the trie: a long code from the node its first 8 bits
+              # reach, or the input's last bits from the root. Reject a
+              # missing path and the EOS symbol at each step.
+              (let [@node (if window
+                            (begin
+                              (assign have (- have 8))
+                              (get fast-nodes window))
+                            decode-tree)
+                    @walking true]
+                (while walking
+                  (when (= have 0)
+                    (if (< i len)
+                      (begin
+                        (assign
+                          acc
+                          (bit/or (bit/and (bit/shl acc 8) 0xffff) (get src i)))
+                        (assign have 8)
+                        (assign i (+ i 1)))
+                      (begin
+                        (assign walking false)
+                        (assign done true))))
+                  (when walking
+                    (assign have (- have 1))
+                    (let [next (get node (bit/and (bit/shr acc have) 1))]
+                      (cond
+                        (integer? next)
+                          (begin
+                            (when (= next 256)
+                              (error {:error :h2-error
+                                      :reason :compression-error
+                                      :message "Huffman: EOS symbol in encoded data"}))
+                            (push out next)
+                            (assign walking false))
+                        (nil? next) (error {:error :h2-error
+                        :reason :compression-error
+                        :message "Huffman: invalid code"})
+                        true (assign node next)))))))))
       (apply bytes out)))
 
   ## ── Tests ──────────────────────────────────────────────────────────────
