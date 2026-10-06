@@ -1,6 +1,6 @@
-// audited: 2026-09-13
-//! What the layout probe answers for: the probed set, and what canonical
-//! bytes keep and drop.
+// audited: 2026-10-06
+//! What the layout probe answers for: the probed set, what canonical bytes
+//! keep and drop, and what the fingerprint names.
 //!
 //! docs/impl/image/format.md
 
@@ -154,4 +154,34 @@ fn canonical_bytes_preserve_field_values() {
     };
     assert_eq!(s.as_slice(), BACKING);
     assert_eq!(*traits, Value::NIL);
+}
+
+// A body stores two instruction sets as bytes: bytecode opcodes in a
+// payload's bytecode, LIR opcodes in its body's nodes. Both number their
+// opcodes in source order, so the fingerprint names each set, and the LIR
+// body's own layout beside the payload's (docs/impl/image/format.md).
+//
+// The counter-factual is a fingerprint that names neither: a build that adds
+// an opcode in the middle of either enum maps an image built before it, and
+// every instruction past the insertion runs as its neighbor. No layout probe
+// can see that, because no field moved.
+#[test]
+fn the_fingerprint_names_both_instruction_sets_and_the_lir_body() {
+    let fp = crate::image::fingerprint();
+    let isa = (0..=u8::MAX)
+        .map_while(crate::compiler::bytecode::Instruction::from_byte)
+        .count();
+    assert!(
+        fp.contains(&format!("isa={isa}:")),
+        "the fingerprint does not name the bytecode set's {isa} opcodes: {fp}"
+    );
+    let ops = crate::lir::code::Op::ALL.len();
+    assert!(
+        fp.contains(&format!("lirops={ops}:")),
+        "the fingerprint does not name the LIR's {ops} opcodes: {fp}"
+    );
+    assert!(
+        fp.contains("lir:nodes@"),
+        "the fingerprint does not record where a payload's LIR body keeps its slices: {fp}"
+    );
 }
