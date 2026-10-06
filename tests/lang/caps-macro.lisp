@@ -16,16 +16,22 @@
 (defn reader-macro [name]
   (string/join ["(defmacro " name " [] (file/read \"" secret "\"))"] ""))
 
-# Run `body` in a fiber that withholds `deny`, and answer its status and value.
-# The mask catches the denied bits too, so a denial that escaped the compile
-# would leave the fiber :paused rather than :error.
+# Run `body` in a fiber that withholds `deny`, and answer what it returns or
+# signals. A caught error leaves the fiber :paused, as an escaped denial
+# does, so the value tells the two apart: the mask catches the denied bits
+# too, and a denial that escaped the compile comes back as its payload.
 (defn sandboxed [deny body]
-  (let [f (fiber/new body |:fs :ffi :error| :deny deny)
-        v (fiber/resume f)]
-    [(fiber/status f) v]))
+  (fiber/resume (fiber/new body |:fs :ffi :error| :deny deny)))
 
-(defn assert-denied [[status v] primitive what]
-  (assert (= status :error) (string/join [what ": the compile fails"] ""))
+# Assert that `v` is the error a failed compile raised: `:eval-error` from
+# `eval` and the loaders, `:compile-error` from `compile/analyze`.
+(defn assert-compile-error [v what]
+  (assert (struct? v) (string/join [what ": the compile answers no value"] ""))
+  (assert (contains? |:eval-error :compile-error| (get v :error))
+          (string/join [what ": the compile fails, and no denial escapes it"] "")))
+
+(defn assert-denied [v primitive what]
+  (assert-compile-error v what)
   (let [msg (get v :message)]
     (assert (string/contains? msg "macro 'm'")
             (string/join [what ": the error names the macro: " msg] ""))
@@ -71,11 +77,11 @@
 # The counter-factual spliced the file in and answered 42.
 (def included (path/join root "inc.lisp"))
 (file/write included "42\n")
-(let [[status v] (sandboxed |:fs|
-                            (fn []
-                              (import/load-syntax (read (string/join ["(include-file \""
-                              included "\")"] "")))))]
-  (assert (= status :error) "include-file under :deny |:fs| fails the compile")
+(let [v (sandboxed |:fs|
+                   (fn []
+                     (import/load-syntax (read (string/join ["(include-file \""
+                     included "\")"] "")))))]
+  (assert-compile-error v "include-file under :deny |:fs|")
   (assert (string/contains? (get v :message) "include")
           "the error names the include"))
 
