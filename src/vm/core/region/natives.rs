@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! Dispatching a native call: the result region it mints, the pass-through
 //! retain it hands the caller, and the declaration oracle over both.
 //!
@@ -111,7 +111,9 @@ impl VM {
                 // Build the SIG_QUERY answer through THIS call's ctx, so it is
                 // born in `alloc_region` like any native result (the pass-through
                 // accounting below then treats it identically).
-                self.dispatch_query(&mut ctx, value)
+                let (bits, answer) = self.dispatch_query(&mut ctx, value);
+                self.release_query_carrier(alloc_region, answer);
+                (bits, answer)
             } else {
                 (bits, value)
             }
@@ -226,6 +228,20 @@ impl VM {
         // `alloc_region` to decide whether the result is fresh.
         self.release_unused_call_region(mint);
         (bits, value)
+    }
+
+    /// Release the call region that holds a query's `(op . arg)` pair when the
+    /// answer lives anywhere else (docs/impl/region/ctx.md). The pair was the
+    /// region's first allocation, so the region stands at its birth count, and
+    /// the caller's release of an immediate or borrowed answer never reaches
+    /// it. A value outside the region that still points into it holds a count
+    /// of its own, from its allocation scan, so this release frees nothing
+    /// such a value reads.
+    fn release_query_carrier(&mut self, alloc_region: RuntimeRegion, answer: Value) {
+        let heap = unsafe { &mut *self.heap_ptr };
+        if crate::value::arena::region_of(heap, answer) != Some(alloc_region) {
+            heap.decref_region_if_present(alloc_region);
+        }
     }
 }
 
