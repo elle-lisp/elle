@@ -215,9 +215,8 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     `LoadConst` for a primitive. Compile-time checks use the `Binding`
     identity: `(assign + 42)` is a compile error.
 
-23. **Tail calls are marked on every `AnalyzeResult`.** `pipeline::analyze`,
-    `analyze_file` and `analyze_file_detached` run `mark_tail_calls` before
-    returning, so `is_tail`
+23. **Tail calls are marked on every `AnalyzeResult`.** `pipeline::analyze`
+    and `analyze_file` run `mark_tail_calls` before returning, so `is_tail`
     is a fact on the analyzed tree rather than a default. The linter's
     non-tail-self-recursion rule and the `compile/callees` call graph both
     read it there. `regularize` marks again, because map fusion mints call
