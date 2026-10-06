@@ -1,6 +1,8 @@
 // audited: 2026-10-06
-//! The control-flow forms — `if`, `begin`, `block`, `break`, `while`, `and`, `or`,
-//! `eval` — and the quoted-datum, intrinsic and primitive helpers other forms share.
+//! The control-flow forms, and the quoted-datum, intrinsic and primitive helpers other forms share.
+//!
+//! The forms are `if`, `begin`, `block`, `break`, `while`, `and`, `or` and
+//! `eval`.
 //!
 //! docs/impl/hir.md
 

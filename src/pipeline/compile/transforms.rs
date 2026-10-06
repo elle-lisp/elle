@@ -80,7 +80,7 @@ pub(super) fn barrier_transform(
 /// macro-EXPANDED top-level forms and wraps **all** of them — `def`/`var` setup
 /// and expressions alike — into the body of a single 0-arg thunk, returned as
 /// one `[0 thunk]` entry. This is the legacy multi-form path: a file is an
-/// imperative script whose forms run in a load-bearing order, so it is run as one
+/// imperative script whose forms depend on their order, so it is run as one
 /// unit (in source order, once per tier, in isolation) rather than sliced into
 /// per-form thunks with `def`/`var` hoisted eagerly — which reorders the program
 /// (read-before-write) and re-runs shared mutations per tier. The thunk body is
