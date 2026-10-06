@@ -1,6 +1,6 @@
 # vm
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-06 -->
 
 The VM executes bytecode on a fiber's operand stack, with each local in a stack slot above the frame base.
 
@@ -240,7 +240,7 @@ parameter frames). Each re-entry nests on the Rust stack, so it halts with
 | Caller | File | Context |
 |--------|------|---------|
 | `Eval` instruction | [eval.rs](eval.rs) | Compiles and runs Elle source from within running code |
-| `import` | [modules.rs](../primitives/modules.rs) | Runs a module's body |
+| `import/load-file`, `import/load-syntax` | [modules.rs](../primitives/modules.rs) | Run a module's body |
 | The test-setup loader | [modules.rs](signal/modules.rs) | Runs a test file's setup module |
 | A fiber's first resume | [resume.rs](fiber/resume.rs) | Runs a new fiber's body |
 | `arena/allocs` SIG_QUERY handler | [config.rs](signal/config.rs) | Runs a thunk to measure its allocations |
@@ -252,9 +252,10 @@ parameter frames). Each re-entry nests on the Rust stack, so it halts with
 | FFI callback | [callback.rs](../ffi/callback.rs) | Runs a closure a C function calls back |
 
 A host that runs code on the current fiber cannot hold a suspension of that
-code. `eval`, `import`, the `compile/*-module` setup runs, `compile/run-on :jit`
-and the root driver refuse one: `refuse_hosted_park` ends the park through the
-discard chokepoint, and the host raises at its own call. `arena/allocs` and
+code. `eval`, `import/load-file`, `import/load-syntax`, the `compile/*-module`
+setup runs, `compile/run-on :jit` and the root driver refuse one:
+`refuse_hosted_park` ends the park through the discard chokepoint, and the host
+raises at its own call. `arena/allocs` and
 `compile/run-on :bytecode` hand the suspension on as their own call's park
 (`abandon_hosted_park`). The module doc of [execute.rs](execute.rs) holds the
 rules on what is preserved, what is overwritten, and how to add a caller.
@@ -290,7 +291,7 @@ Key methods:
   scheduler-facing entry points
 - `execute_bytecode_from_ip`: Executes from a given IP with the code object (`&Code`)
 - `execute_bytecode_saving_stack`: Saves/restores caller's stack, handles tail calls
-- `run_thunk_to_completion`: `execute_bytecode_saving_stack` + the `SIG_SWITCH` drain loop — the safe entry for re-entrant callers running a thunk on the current fiber (`eval`, `import`, `arena/allocs`, test-setup module loader)
+- `run_thunk_to_completion`: `execute_bytecode_saving_stack` + the `SIG_SWITCH` drain loop — the safe entry for re-entrant callers running a thunk on the current fiber (`eval`, `import/load-file`, `import/load-syntax`, `arena/allocs`, test-setup module loader)
 - `replay_suspended`: Replays `Vec<SuspendedFrame>`, handles re-yields and
   errors, and answers a `Replay` naming the error park it built; a fiber
   boundary records that park in the delivery ledger. `resume_suspended` is the

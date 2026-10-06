@@ -1,6 +1,6 @@
 # What a park retains, and who releases it
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-06 -->
 
 The references a suspended fiber's park leaves standing, and the one seam that consumes each.
 
@@ -188,8 +188,9 @@ symmetric with its unpark; the node and the deferred set a park moves are
   it out ([mechanism.md](mechanism.md) § "A squelch boundary abandons frames the same way, so
   it runs the same walk").
 
-  **A host that refuses a park ends it the same way.** `eval`, `import`, the
-  `compile/*-module` setup runs, `compile/run-on :jit` and the root driver run code on the
+  **A host that refuses a park ends it the same way.** `eval`, `import/load-file`,
+  `import/load-syntax`, the `compile/*-module` setup runs, `compile/run-on :jit` and the
+  root driver run code on the
   current fiber, and none can hold a suspension of it, so each answers one with an error at
   its own call. The refused park has no reader and no install, as at a squelch boundary, and
   the frames it parked never run again. So the host ends it through the same chokepoint

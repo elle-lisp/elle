@@ -366,7 +366,7 @@ scope, without reintroducing shared state:
 - **macro-body compiles** (`eval_syntax`, deep in expansion) read the
   primitive+stdlib meta from an `Rc<PrimitiveMeta>` (`eval_meta`) carried on the
   `Expander`, so the expansion chain needs no `CompileCtx` threading;
-- the runtime **`eval`/`import`/`compile/*` instructions** reach the instance's
+- the runtime **`eval`, `import/load-*` and `compile/*` instructions** reach the instance's
   `CompileCtx` through a `VM`-held pointer (`VM::set_compile_ctx`, the `heap_ptr`
   idiom), set by the owner;
 - the **analyzer's import-projection compile** reaches it through a frontend-set
