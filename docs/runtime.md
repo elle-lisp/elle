@@ -68,6 +68,14 @@ boundary of a silent function ([inference](signals/inference.md)). The MLIR,
 SPIR-V and WASM tiers carry no check, so a kill lands when control returns to
 a tier that does.
 
+### The expansion budget
+
+A macro transformer call, and each `begin-for-syntax` definition, runs under a
+budget of its own: 16,777,216 units, whatever the fiber's own fuel. What it
+spends is not charged to the fiber. An expansion cannot pause, so a transformer
+that exhausts the budget fails the compile, and the error names the macro
+([macros.md](macros.md)).
+
 ## SIG_QUERY
 
 A primitive returns `SIG_QUERY` to ask the running VM a question that only

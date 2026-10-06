@@ -18,12 +18,14 @@ whose VM that is, and a macro's side effects land on that VM.
 `CompileCtx::with_macro_expansion`. It resets the macro VM's fiber and hands
 the closure a clone of the expander and of the compile metadata. These entry
 points need no VM from the caller, and a macro's side effects stay on the
-macro VM.
+macro VM. A primitive that compiles for a fiber, such as a loader, names that
+fiber's withheld capabilities with `CompileCtx::on_behalf_of`, and the macro
+VM's fresh fiber withholds them too.
 
-**The caller's VM.** `eval`, `analyze`, `analyze_file` and
-`analyze_file_detached` expand on the VM the caller passes, with the clones
-`CompileCtx::expander_and_meta` answers. `eval` then runs the bytecode on that
-VM as well, so a macro's side effects and the program's share one VM.
+**The caller's VM.** `eval`, `analyze` and `analyze_file` expand on the VM the
+caller passes, with the clones `CompileCtx::expander_and_meta` answers. `eval`
+then runs the bytecode on that VM as well, so a macro's side effects and the
+program's share one VM.
 
 **Compile on one, run on the other.** `eval_file` and `eval_all` compile
 through `compile_file` on the macro VM, then run the bytecode on the caller's
@@ -37,12 +39,31 @@ on the expander (`eval_meta`), so it needs no borrow of the compile context
 while the context is mid expansion.
 
 Each clone is independent, so a compile nested inside an expansion, such as a
-`begin-for-syntax` that imports a file, does not alias the compile context. A
-macro one compile defines reaches a later compile only when the REPL registers
-it with `register_repl_macros`.
+`begin-for-syntax` that imports a file, does not alias the compile context.
 
-A compile may run Elle code from the standard library. An `include` calls
-`import/resolve` on the macro VM to find its file ([modules](modules.md)).
+Every transformer call runs through `VM::call_transformer`, and every
+`begin-for-syntax` definition through `eval_syntax`. Both run the body under
+the expansion fuel budget ([runtime signals](runtime.md)), and both turn a park
+the body raises into a compile error, because an expansion cannot hold one.
+
+## The REPL layer
+
+A REPL line compiles through `compile_file_repl`. Its clone also carries the
+macros earlier lines defined, and its analysis the definitions they made. No
+other entry point sees either, so a file a line imports compiles as it would
+from any program. A macro one compile defines reaches a later compile only
+when the REPL registers it with `register_repl_macros`.
+
+## No compile reads another file
+
+No entry point compiles a file other than the one it is given. The analyzer
+reads nothing from the target of an `import-file`, so a cycle of imports does
+not recurse. A file names its imports, and the loader compiles each one when
+the import runs.
+
+A compile may still run Elle code from the standard library. An `include`
+calls `import/resolve` on the macro VM to find its file
+([modules](modules.md)).
 
 ## Signal inference over a letrec
 
@@ -136,11 +157,9 @@ not the guarantee.
 
 ### Scope
 
-The fixpoint is per file. A mutual recursion across a file boundary does not
-settle, because each import is a separate compilation. The
-[signal inference document](signals/inference.md) says why that is a design
-choice, and describes the projection that carries a signal across a file
-boundary.
+The fixpoint is per file. No signal crosses a file boundary
+([signal inference](signals/inference.md)), so a mutual recursion across one
+does not settle.
 
 A function body seeds a `def` only as the `def` is reached. A lambda that
 calls a sibling defined later in the same body reads no seed for it. It takes

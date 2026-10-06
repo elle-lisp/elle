@@ -175,17 +175,13 @@ user code identically.
 
 ## Compiler state is part of the environment
 
-The heap is not the whole boot product. A later user compile reads two more
-things the stdlib compile leaves behind:
+The heap is not the whole boot product. A later user compile reads the body
+of each stdlib function, as a `LambdaFragment` encoded in the bytes its
+closure's code payload carries. A user compile grafts a call to a stdlib
+function from it ([grafting a call](graft.md)), and fusion inlines a named
+stdlib function from it ([dissolving a named function](dissolution/inline.md)).
 
-- The body of each stdlib function, as a `LambdaFragment` encoded in the
-  bytes its closure's code payload carries. A user compile grafts a call to a
-  stdlib function from it ([grafting a call](graft.md)), and fusion inlines a
-  named stdlib function from it
-  ([dissolving a named function](dissolution/inline.md)).
-- The signal-projection memo.
-
-An image boot that leaves these out compiles user code *differently* from a
+An image boot that leaves the fragments out compiles user code *differently* from a
 source boot — silently worse code, and divergent artifacts for anything keyed
 on compiler output. That is not acceptable: the two boot modes must produce
 identical user-code compiles.
