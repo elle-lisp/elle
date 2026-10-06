@@ -441,6 +441,16 @@
         `(,f (splice ,last-arg))
         `(,f ,;init-args (splice ,last-arg))))))
 
+## import - load a module by spec, as import/resolve (src/stdlib.lisp) names it
+## (import "std/http") => (import-file (import/resolve "std/http" DIR))
+## DIR is the directory of the file that calls import, or the working directory
+## for code with no file: a list a macro builds carries the location of the
+## call, so meta/location here names the caller. docs/modules.md holds the rules.
+(defmacro import (spec)
+  `(import-file (import/resolve ,spec
+                                (let [f (get (meta/location) :file)]
+                                  (if f (path/parent f) (path/cwd))))))
+
 ## ffi/with-stack - scoped FFI stack allocations
 ## (ffi/with-stack [[p :int 42] [buf 64]] body...)
 ## Each binding is [name type value] for typed scalars or [name size] for

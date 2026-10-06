@@ -25,7 +25,8 @@ pub use cache::{BootExports, CompileCtx};
 pub(crate) use compile::compile_file_to_typed_fhir;
 pub use compile::{
     compile, compile_barrier_module, compile_file, compile_file_repl, compile_file_to_fhir,
-    compile_file_to_lir, compile_whole_module, compile_whole_module_forms, splice_includes,
+    compile_file_to_lir, compile_value, compile_whole_module, compile_whole_module_forms,
+    splice_includes,
 };
 pub use eval::{eval, eval_all, eval_file, eval_syntax};
 

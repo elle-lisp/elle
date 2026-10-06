@@ -1,3 +1,8 @@
+// audited: 2026-10-06
+//! Python statements: definitions, control flow, assignment, try, assert and import.
+//!
+//! docs/impl/reader.md
+
 use super::*;
 
 impl PyParser {
@@ -93,7 +98,9 @@ impl PyParser {
                 let name = self.expect_ident()?;
                 self.eat_newlines();
                 let span = self.span_from(&loc);
-                let import_path = format!("lib/{}", name);
+                // import foo → (def foo (import "std/foo")): a Python import names a
+                // standard library module.
+                let import_path = format!("std/{}", name);
                 let import_str = self.str_lit(&import_path, span);
                 let import_call = self.list(vec![self.sym("import", &loc), import_str], span);
                 Ok(self.list(
@@ -119,11 +126,10 @@ impl PyParser {
                                 ));
                             }
                         }
-                        // At top level or function body level (depth <= 1),
-                        // `x = val` creates a new mutable binding with `var`.
-                        // Inside loops/ifs (depth > 1), use `assign` so that
-                        // the mutation reaches the enclosing function scope
-                        // (matching Python's function-scoped variables).
+                        // At top level (depth 0), `x = val` creates a new
+                        // mutable binding with `var`. Inside a block, `assign`
+                        // mutates, so the mutation reaches the enclosing
+                        // function scope (Python's function-scoped variables).
                         if matches!(&expr.kind, SyntaxKind::Symbol(_)) && self.depth == 0 {
                             Ok(self.list(vec![self.sym("var", &loc), expr, rhs], span))
                         } else {
@@ -408,7 +414,7 @@ impl PyParser {
                 break;
             }
             if *self.peek() == PyToken::StarStar {
-                // **kwargs — skip for now
+                // **kwargs is skipped.
                 self.advance();
                 self.expect_ident()?;
                 break;
@@ -427,6 +433,4 @@ impl PyParser {
 
         Ok(params)
     }
-
-    // ── Expression parsing (Pratt) ────────────────────────────────────
 }

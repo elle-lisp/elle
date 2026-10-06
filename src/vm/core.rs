@@ -93,7 +93,7 @@ pub struct VM {
     pub(crate) ffi: FFISubsystem,
     /// Modules currently being loaded (circular-import guard).
     /// Added before execution, removed after. If a module is in this set
-    /// when import-file is called, it's a circular dependency.
+    /// when a loader is called on it, the load is a cycle.
     pub loading_modules: std::collections::HashSet<String>,
     /// Plugins already loaded (path → return value). Prevents double-loading
     /// which would re-register primitives and leak library handles.

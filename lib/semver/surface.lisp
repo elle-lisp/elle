@@ -1,5 +1,5 @@
-(elle/epoch 13)
-## audited: 2026-09-28
+(elle/epoch 14)
+## audited: 2026-10-06
 ## lib/semver/surface.lisp — extract a module's public surface
 ##
 ## Hybrid extraction: the module is analyzed AND loaded. Runtime
@@ -182,7 +182,7 @@
           source (file/read path)
           version (declared-version source)
           sx (static-surface source path)
-          ctor (import-file path)]
+          ctor (import/load-file path)]
       (cond
         (fn? ctor)
           (let [csig (fn/signature ctor)

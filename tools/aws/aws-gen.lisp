@@ -1,17 +1,18 @@
-(elle/epoch 11)
-## tools/aws/aws-gen.lisp — Fetch Smithy models and generate Elle API modules
-##
-## Usage:
-##   elle tools/aws/aws-gen.lisp -- s3 dynamodb sts
-##
-## For each service:
-##   1. Fetches aws-models/{service}.json if missing (via HTTPS)
-##   2. Generates lib/aws/{service}.lisp if missing or model is newer
-##
-## To force regeneration, delete the generated file first.
+(elle/epoch 15)
+# audited: 2026-10-12
+# Fetches the AWS Smithy models a run names, and generates the Elle API module of each.
+# lib/aws/README.md
+#
+#   elle tools/aws/aws-gen.lisp -- s3 dynamodb sts
+#
+# Run it from the repository root, which the model and module paths below
+# resolve against. The imports resolve against this file's own directory. For
+# each service, it fetches aws-models/{service}.json if missing, over HTTPS,
+# then generates lib/aws/{service}.lisp if missing or older than the model.
+# To force regeneration, delete the generated file first.
 
-(def tls-p (import-file "target/debug/libelle_tls.so"))
-(def tls ((import-file "lib/tls.lisp") tls-p))
+(def tls-p (import-file "../../target/debug/libelle_tls.so"))
+(def tls ((import-file "../../lib/tls.lisp") tls-p))
 
 (defn https-get [host path]
   (def conn (tls:connect host 443))

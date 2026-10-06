@@ -96,8 +96,9 @@ primitive! {
         arity: Arity::Range(0, 1),
         doc: "Read runtime configuration. No args returns the full config struct. \
               Pass a keyword (:jit, :mlir, :trace, :stats, :max-depth, :unicode, \
-              :jit-verify) to read one field; a tier threshold reads nil when the \
-              tier is off, and :jit-verify reads whether Cranelift verifies JIT code.",
+              :jit-verify, :home, :path, :plugin-suffix) to read one field; a tier \
+              threshold reads nil when the tier is off, and :jit-verify reads whether \
+              Cranelift verifies JIT code.",
         params: &["key?"],
         category: "meta",
         example: "(vm/config :jit)",

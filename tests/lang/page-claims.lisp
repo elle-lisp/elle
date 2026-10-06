@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-11
+(elle/epoch 15)
+# audited: 2026-10-12
 # The page-claims tool: how it ranks a callgrind file, reads its arguments, and
 # plans the commands and the directory of one run.
 # tools/pageclaims/overview.md
@@ -13,9 +13,9 @@
 # that counts only the lines carrying a name undercounts every context after its
 # first call, and the ranking below would read 2 where it must read 5.
 
-(def {:rank rank} ((import-file "tools/pageclaims/rank.lisp")))
+(def {:rank rank} ((import-file "../../tools/pageclaims/rank.lisp")))
 (def {:options options :commands commands :run-dir run-dir}
-  ((import-file "tools/pageclaims/options.lisp")))
+  ((import-file "../../tools/pageclaims/options.lisp")))
 
 (defn reader [lines]
   "A read-line thunk over LINES: the next line on each call, then nil."

@@ -167,9 +167,10 @@ impl VM {
     }
 
     /// A host that runs code on the current fiber refused a park of that code.
-    /// `eval`, `import`, the `compile/*-module` setup runs,
-    /// `compile/run-on :jit` and the root driver cannot hold a suspension of
-    /// the code they run, so each answers one with an error at its own call.
+    /// `eval`, `import/load-file`, `import/load-syntax`, the `compile/*-module`
+    /// setup runs, `compile/run-on :jit` and the root driver cannot hold a
+    /// suspension of the code they run, so each answers one with an error at
+    /// its own call.
     /// The refused park has no reader and no install, and its frames never run
     /// again, so it ends as a boundary's park does: through
     /// [`Self::discard_suspended_frames`]. The host's error then parks the
