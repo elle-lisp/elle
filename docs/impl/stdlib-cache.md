@@ -154,7 +154,6 @@ struct StoredBytecode {
     entry: SendableClosure,               // the unit's entry code object
     intern_table: Vec<SendableClosure>,   // intern table of entry-reachable closure constants
     names: Vec<(u64, Box<str>)>,          // spellings, replayed into the loading display memo
-    signal_projection: Option<HashMap<String, Signal>>,
 }
 ```
 
@@ -185,8 +184,7 @@ code object:
 A load rebuilds the entry and every nested payload straight into a fresh code
 region, and the result is a code unit like the one a compile hands out.
 
-`format_version` and `signal_projection` have no payload field to travel in, so
-they ride alongside.
+`format_version` has no payload field to travel in, so it rides alongside.
 
 ### LIR must be preserved
 

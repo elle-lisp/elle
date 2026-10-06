@@ -49,6 +49,11 @@ path resolves against the working directory. Code calls `import-file` or
 it on the current fiber, and returns the file's last expression. The file runs
 as a single letrec. Every call compiles and runs the file again.
 
+A loader compiles on behalf of the fiber that calls it. The file's macros
+expand with the capabilities that fiber withholds, and each runs under the
+expansion fuel budget ([macros.md](macros.md)). The file compiles against the
+prelude and the standard library, never against what a REPL session defined.
+
 `import/load-plugin` loads the library, calls `elle_plugin_init`, and returns
 the struct of primitives that the init builds. A later call with the same path
 returns that struct and loads nothing. It is the one loader that requires
@@ -181,10 +186,6 @@ access, not special module syntax.
 What the closure does not return is private. `greeting` and
 `format-greeting` are not visible to the caller. Encapsulation comes from
 lexical scope, not from access modifiers.
-
-The compiler's signal projection reads this convention: a file that returns a
-struct literal, or a closure whose body ends in one, gets a signal for each
-field ([signals/inference.md](signals/inference.md)).
 
 
 ## Parametric modules
@@ -396,10 +397,8 @@ The module system makes four design choices, and each has a cost.
 
 ### No .lisp caching
 
-Every load of a `.lisp` file compiles and runs it again. If two modules both
-import `./utils`, the file runs twice. A literal `import-file`,
-`((import-file "literal"))`, compiles its target twice: once in the importer's
-analysis for its projection, and once when the load runs (#881).
+Every load of a `.lisp` file compiles and runs it again (#881). If two modules
+both import `./utils`, the file compiles twice and runs twice.
 
 **Why**: A cache would share state between independent callers and suppress
 side effects. A stateful module, one that holds a mutable `@` binding and
@@ -412,48 +411,30 @@ top level and pass the module value down the call stack.
 
 ### Circular import detection is at run time
 
-The VM tracks which files are being loaded. If file A loads file B, which
-loads file A, the second load raises an error:
+The VM keeps the loads in progress in order. If file A loads file B, which
+loads file A, the second load of A raises an error that names the cycle:
 
 ```text
-import/load-file: circular dependency detected for '/home/me/a.lisp'
+import/load-file: circular dependency: /home/me/a.lisp -> /home/me/b.lisp -> /home/me/a.lisp
 ```
 
-The set holds only the loads that are in progress. Every way out of a load
-releases its mark, so a file that failed — a compile error, a read failure, an
-error it raised — reports that same failure again when it is loaded once
-more, and only a load that is still on the stack reads as a cycle.
+Every way out of a load releases its mark, so a file that failed — a compile
+error, a read failure, an error it raised — reports that same failure again
+when it is loaded once more, and only a load that is still in progress reads
+as a cycle.
 
-A cycle of literal `import-file` forms at the top level never reaches that
-check. The analyzer compiles the target of each one for its projection, and
-the cycle overflows the stack at compile time (#1323).
+A cycle of literal `import-file` forms reaches the same check. Compiling a file
+never compiles a file it imports, so nothing recurses at compile time.
 
 **Why**: Loading happens at run time, so the check runs when a load re-enters
 a file that is still loading.
 
-### Cross-file signal inference via projection
+### No signal crosses a file boundary
 
 Signal inference within a file converges by a fixpoint loop, so mutual
-recursion inside a file is exact. Across files the compiler uses a **signal
-projection** instead.
-
-When a file returns a struct of closures, the compiler records a projection: a
-map from each keyword field to the signal of the closure it holds. When an
-importing file binds `((import-file "literal"))`, the analyzer compiles the
-target file, or finds it in the instance's cache, and reads its projection.
-[signals/inference.md](signals/inference.md) owns the mechanism.
-
-The compiler knows the file of a literal `import-file` alone. `import` is a
-macro over a resolver the program may replace, so `((import "std/x"))` is an
-ordinary call, and the analyzer reads no projection for it.
-
-A qualified access such as `math:add` gives its `get` node the projected
-signal. A call through it still takes the unknown signal, because the callee is
-a call expression (#1232). So today a projection does not narrow a call into
-another file.
-
-Convergence is per file. Mutual recursion across a file boundary does not
-converge, because each load is a separate compilation.
+recursion inside a file is exact. The analysis of a file reads nothing from the
+files it imports, so a call into another file takes the unknown signal
+(#1232). [signals/inference.md](signals/inference.md) owns the rule.
 
 ### Static analysis is limited across imports
 
@@ -461,8 +442,7 @@ The analyzer processes one file at a time. Arity checking, IDE completion and
 refactoring do not cross an import boundary.
 
 **Why**: Imports are dynamic. The return value depends on runtime
-parameters and computation. A projection reads only the shape of the return
-expression, so it needs the target's analysis and never runs it.
+parameters and computation.
 
 **Solution for agents**: The [MCP knowledge graph](mcp.md) gives cross-file
 visibility through SPARQL queries. See
@@ -479,14 +459,11 @@ reasoning patterns.
 | [stdlib.lisp](../src/stdlib.lisp) | `import/resolve` |
 | [plugin.rs](../src/plugin.rs) | `.so` plugin loading: `dlsym`, `elle_plugin_init`, the struct of primitives |
 | [registry.rs](../src/hir/analyze/forms/registry.rs) | The `import-file` and `meta/location` special forms |
-| [special.rs](../src/hir/analyze/forms/special.rs) | Qualified symbol desugaring (`a:b` → `(get a :b)`), and the projected signal of a qualified `get` |
-| [call.rs](../src/hir/analyze/call.rs) | Literal `import-file` detection, compile-time squelch inference |
-| [fileletrec.rs](../src/hir/analyze/fileletrec.rs) | `compute_signal_projection`: extracts the keyword→signal map from a struct-returning file |
-| [cache.rs](../src/pipeline/cache.rs) | The per-instance signal projection cache, `get_or_compile_projection` |
+| [special.rs](../src/hir/analyze/forms/special.rs) | Qualified symbol desugaring (`a:b` → `(get a :b)`) |
 | [lexer.rs](../src/reader/lexer.rs) | Qualified symbol lexing (`a:b` as a single token) |
-| [compile.rs](../src/pipeline/compile.rs) | `compile_file`: file-as-letrec compilation, `include`/`include-file` splicing, projection threading |
+| [compile.rs](../src/pipeline/compile.rs) | `compile_file`: file-as-letrec compilation and `include`/`include-file` splicing |
 | [transforms.rs](../src/pipeline/compile/transforms.rs) | `include` and `include-file` resolution, and the circular include check |
-| [projection.rs](../tests/integration/projection.rs) | Signal projection and compile-time squelch tests |
+| [module_cli.rs](../tests/integration/module_cli.rs) | A cycle of literal imports, run as a program and analyzed |
 | [modules.lisp](../tests/lang/modules.lisp) | Behavioral tests for module patterns |
 | [include.lisp](../tests/lang/include.lisp) | Behavioral tests for compile-time inclusion |
 | [modules/](../tests/modules) | Module fixtures (formatter, counter, test) |
