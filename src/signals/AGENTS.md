@@ -1,6 +1,6 @@
 # signals
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-06 -->
 
 Signal system for tracking which signals a function may emit. Includes the global signal registry for mapping signal keywords to bit positions.
 
@@ -32,6 +32,7 @@ Signal system for tracking which signals a function may emit. Includes the globa
 | `Signal::polymorphic_errors(n)` | Polymorphic + may error |
 | `squelched_bits(bits, mask)` | The bits a `squelch` or `attune` boundary carrying `mask` converts into a violation when `bits` leave it; every such site on every tier asks it. A signal that carries `:error`, `:halt` or the pause bit `:fuel` passes whole |
 | `breaks_proof(bits)` | Whether `bits` leaving a silent function break its proof: any signal but a halt or one that carries `:terminal`. Every tier asks it at a silent callee's boundary, and a true answer raises the terminal `:broken-proof` error |
+| `dispatch::parks(bits)` | Whether `bits` park the raising frame and every caller behind it: any signal but a completion, a halt or a request to the VM, an error included. The JIT and the WASM tier ask it where the interpreter parks in `complete_call` |
 | `bound::violation(value, allowed)` | The message a `(bound p spec)` bound raises for `value`, judged by a closure's effective signal or a native's declared one. A closure that passes on its arguments' signals fails, since its bits are a lower bound |
 
 ## Predicates

@@ -1,7 +1,7 @@
 // audited: 2026-10-06
 // docs/impl/wasm.md
-//! The capability gate on this tier: a native or an emit of a bit the calling
-//! fiber withholds is denied, and the fiber reads the shared denial payload.
+//! The capability gate on this tier: a native or an emit of a bit the fiber
+//! withholds is denied, with the shared denial payload.
 //!
 //! The trap every case here is built around: a body that reaches a primitive
 //! THROUGH a prelude function runs that function on the host VM, whose own gate

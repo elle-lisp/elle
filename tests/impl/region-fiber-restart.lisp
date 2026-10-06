@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-06
 # A restart delivers into an error park, and owes what the raise site left unfunded: the leak gauge.
 # docs/impl/region/park.md
 #
@@ -38,8 +38,11 @@
     (assign j (%add j 1)))
   (%sub (arena/count) before))
 
+# The restart answers the `get` inside the callee, which hands the value back
+# as its result, so the callee face delivers into a `Call` site.
 (defn raise-now []
-  (+ 100 (error :boom)))
+  (let [v (get nil :x)]
+    v))
 (defn yield-then-get []
   (yield 1)
   [:inner (get nil :x)])

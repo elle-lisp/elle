@@ -1,5 +1,5 @@
-// audited: 2026-09-29
-//! `classify` answers each signal shape with its action, and `is_suspending` agrees with it on every shape.
+// audited: 2026-10-06
+//! `classify` answers each signal shape with its action, `is_suspending` agrees with it, and `parks` adds the error.
 //!
 //! docs/signals/protocol.md
 
@@ -105,5 +105,40 @@ fn is_suspending_agrees_with_classify_on_every_shape() {
             by_classify,
             "is_suspending and classify disagree on {bits}"
         );
+    }
+}
+
+#[test]
+fn parks_answers_every_shape_but_a_completion_a_halt_and_a_request() {
+    // An error parks its frame like any other signal, so a restart answers the
+    // raising call. COUNTER-FACTUAL: a rule that excludes the error bit, which
+    // is the suspend route's, unwinds a compiled callee's frame on an error, and
+    // the restart answers the interpreted caller's call to it
+    // (tests/impl/jit-error-park.lisp).
+    let user_bit = SignalBits::from_bit(32);
+    let parking = [
+        SIG_ERROR,
+        SIG_YIELD,
+        SIG_IO,
+        SIG_DEBUG,
+        SIG_ABORT,
+        user_bit,
+        SIG_YIELD | SIG_IO,
+        SIG_ERROR | SIG_IO,
+        SIG_IO | user_bit,
+    ];
+    for bits in parking {
+        assert!(parks(bits), "{bits} must park");
+    }
+    let returning = [
+        SIG_OK,
+        SIG_HALT,
+        SIG_HALT | SIG_IO,
+        SIG_RESUME,
+        SIG_PROPAGATE,
+        SIG_QUERY,
+    ];
+    for bits in returning {
+        assert!(!parks(bits), "{bits} must not park");
     }
 }

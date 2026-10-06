@@ -5,9 +5,9 @@
 //! A standalone single-closure module is served by hosts whose suspension and
 //! tail-call imports are panic stubs (src/wasm/lazy/linker.rs) and whose funcref
 //! table has one entry, so `emit_single_closure` must refuse every shape whose
-//! execution would reach one of them — see src/wasm/AGENTS.md § "Constraints
-//! on per-closure compilation". Refusal means `None`: the tiered caller falls
-//! back to the bytecode VM, the precache caller to full-module dispatch.
+//! execution would reach one of them (src/wasm/AGENTS.md). Refusal means
+//! `None`: the tiered caller falls back to the bytecode VM, the precache caller
+//! to full-module dispatch.
 
 use super::*;
 
@@ -156,5 +156,31 @@ fn standalone_emission_refuses_module_less_make_closure() {
         )
         .is_some(),
         "MakeClosure with module context resolves through rt_make_closure"
+    );
+}
+
+#[test]
+fn standalone_emission_refuses_closures_that_may_raise() {
+    // An error parks the raising frame through rt_yield, a panic stub outside
+    // the full-module store, so the gate reads the inferred signal: a body with
+    // no Emit and no suspending call may still raise from a host operation.
+    let vm = crate::vm::VM::new();
+    let raising = LirFixture::new(Arity::Exact(1))
+        .closure_id(ClosureId(0))
+        .num_params(1)
+        .signal(Signal::errors())
+        .block(
+            0,
+            &[InstrRef::Const {
+                dst: Reg(0),
+                value: ConstRef::Int(7),
+            }],
+            Terminator::Return(Reg(0)),
+        )
+        .build();
+    assert!(
+        emit_single_closure(&raising.view(), None, vm.heap_ptr, std::ptr::null_mut()).is_none(),
+        "a closure that may raise compiled standalone would panic at the tiered \
+         host's rt_yield stub when its error parks"
     );
 }

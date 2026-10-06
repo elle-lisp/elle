@@ -21,6 +21,7 @@ mod frame;
 mod gate;
 mod gauge;
 mod query;
+mod restart;
 mod stdlib;
 mod toplevel;
 

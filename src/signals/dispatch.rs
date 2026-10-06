@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-06
 //! Signal classification for routing primitive return values.
 //!
 //! docs/signals/protocol.md
@@ -95,6 +95,17 @@ pub fn is_suspending(bits: SignalBits) -> bool {
         return false;
     }
     !bits.intersects(SIG_ERROR) && !bits.intersects(SIG_HALT)
+}
+
+/// True when `bits` parks the frame that raised it and every caller behind it.
+/// Every signal parks but an empty one, a halt, and a request to the VM; an
+/// error parks too, because an error unwinds nothing
+/// (docs/impl/region/unwind.md). The tiers that do not route through the
+/// interpreter's `complete_call` ask here: the JIT at a call site, and the
+/// WASM tier when it reports a call's outcome.
+#[inline]
+pub fn parks(bits: SignalBits) -> bool {
+    is_suspending(bits)
 }
 
 #[cfg(test)]
