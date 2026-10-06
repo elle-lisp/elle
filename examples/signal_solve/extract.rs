@@ -274,12 +274,10 @@ impl<'a> Extractor<'a> {
         // A collection literal and a qualified name build a call the analyzer
         // never charges to the enclosing function. Both give the callee the
         // span of the whole form, where a written call's callee has its own.
-        if func.span == hir.span {
-            if let AVal::Callable(v) = callee {
-                if let VarKey::Prim(_) = self.model.keys_by_id[v as usize] {
-                    return;
-                }
-            }
+        // A form the compiler builds, such as `import-file`'s load, spans its
+        // callee the same way and is charged, so the span alone cannot tell.
+        if func.span == hir.span && UNCHARGED.iter().any(|p| self.is_prim_named(func, p)) {
+            return;
         }
         match callee {
             AVal::Callable(v) => {
@@ -336,6 +334,13 @@ impl<'a> Extractor<'a> {
         self.model.use_fact(ctx, site, callee, owner, nargs);
     }
 }
+
+/// The primitives a collection literal or a qualified name calls: the
+/// analyzer's `analyze_collection_literal`, `meta/location` and the `a:b`
+/// desugaring build these calls without charging their signal.
+const UNCHARGED: &[&str] = &[
+    "array", "@array", "bytes", "@bytes", "struct", "@struct", "get",
+];
 
 /// The bits a literal keyword or keyword-set mask names.
 fn literal_mask(hir: &Hir) -> Option<u64> {
