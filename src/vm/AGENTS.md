@@ -1,6 +1,6 @@
 # vm
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-06 -->
 
 The VM executes bytecode on a fiber's operand stack, with each local in a stack slot above the frame base.
 
@@ -32,11 +32,12 @@ Does NOT:
 ## Data flow
 
 ```
-A code-object blueprint (TemplateProto)
+A compiled unit (CodeUnit)
     │
     ▼
-execute_proto()  ← public API, materializes the code object
-    │
+execute()        ← public API: copies a unit compiled on another heap,
+    │              then runs its entry header
+    ▼
     ▼
 execute_code()   ← tail-call and SIG_SWITCH trampolines, returns Result<Value, String>
     │
@@ -69,7 +70,7 @@ it act on each one:
 - `SIG_FUEL`: The instruction budget ran out.
 - `SIG_HALT`: Graceful VM termination. Non-resumable.
 
-`execute_code`, which `execute_proto` calls, is the translation boundary. It
+`execute_code`, which `execute` calls, is the translation boundary. It
 converts `SignalBits` to `Result<Value, String>` for external callers. On
 `SIG_ERROR`, it extracts the error struct from `fiber.signal` and formats the
 error message.
@@ -83,14 +84,14 @@ the stack consistent (invariant 7 below); one in tail position returns
 ## Threading the code object
 
 Bytecode, constants and the location table are threaded through the dispatch
-loop as one `Code` — the code object itself, a payload slice plus a blueprint
-pointer ([template.md](../../docs/impl/region/template.md)). Individual
-instruction handlers take slices (`&[u8]`, `&[Value]`) read off it. The
-dispatch loop, the call, emit and closure handlers, and the signal handlers
-they call take the `Code`. They clone it (two words and one refcount) when
-they build a `SuspendedFrame`, `TailCallInfo` or `PendingCall`.
+loop as one `Code` — the code object itself, one payload slice
+([template.md](../../docs/impl/region/template.md)). Individual instruction
+handlers take slices (`&[u8]`, `&[Value]`) read off it. The dispatch loop, the
+call, emit and closure handlers, and the signal handlers they call take the
+`Code`. They copy it (one word) when they build a `SuspendedFrame`,
+`TailCallInfo` or `PendingCall`.
 
-- `execute_proto` materializes the code object once at the public boundary
+- `execute` takes the unit's entry header at the public boundary
 - `execute_bytecode_from_ip` / `execute_bytecode_saving_stack` take a `&Code`
 - `TailCallInfo` carries the tail callee's `Code`, env `Rc`, the callee closure
   value (installed as `fiber.current_closure` on the frame replacement), and its
@@ -103,7 +104,7 @@ they build a `SuspendedFrame`, `TailCallInfo` or `PendingCall`.
   callee on the same loop ([vm.md](../../docs/impl/vm.md))
 - `execute_bytecode_from_ip`, `execute_bytecode_saving_stack` and
   `run_dispatch` take `&Rc<Vec<Value>>`, an empty `Rc` for no environment;
-  `execute_proto` and `execute_code` take an `Option`
+  `execute_code` takes an `Option`
 
 ## Primitive dispatch (NativeFn)
 
@@ -196,7 +197,8 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `heap_ptr` | `*mut FiberHeap` | This instance's single heap, owned by `RuntimeCore` (or privately leaked for a bare VM). All fibers share it; reach it via `heap()` |
 | `current_fiber_handle` | `Option<FiberHandle>` | Handle for current fiber (`None` for root) |
 | `current_fiber_value` | `Option<Value>` | Cached Value for current fiber (`None` for root) |
-| `jit_cache` | `FxHashMap<*const u8, JitCacheEntry>` | JIT code cache; each entry pins the bytecode allocation its key names ([jit.md](../../docs/impl/jit.md)). Write via `install_jit_code`, read via `jit_code_for` |
+| `jit_cache` | `FxHashMap<*const u8, JitCacheEntry>` | JIT code cache; each entry's `CodePin` holds the region its key's payload lives in ([jit.md](../../docs/impl/jit.md)). Write via `install_jit_code`, read via `jit_code_for` |
+| `spirv_cache` | `FxHashMap<*const u8, SpirvEntry>` | The SPIR-V `(git f)` compiled, keyed and pinned like `jit_cache` |
 | `jit_rejections` | `FxHashMap<*const u8, JitRejectionInfo>` | JIT rejection log: first rejection per closure template |
 | `closure_call_counts` | `FxHashMap<*const u8, usize>` | JIT hotness profiling (FxHash for pointer keys) |
 | `pending_tail_call` | `Option<TailCallInfo>` | Rc-based tail call info (transient) |
@@ -305,7 +307,7 @@ Key methods:
 
 The VM owns exactly one `FiberHeap`, reached via `vm.heap_ptr` / `vm.heap()`. It
 is owned by the instance's `RuntimeCore` (or privately leaked for a bare VM) and
-outlives the VM, so Values returned by `execute_proto` remain valid after the
+outlives the VM, so Values returned by `execute` remain valid after the
 VM drops. ALL fibers — including the root — share this one heap, reached the
 same way (`vm.heap_ptr`) on every fiber; isolation is per-region, not per-fiber.
 

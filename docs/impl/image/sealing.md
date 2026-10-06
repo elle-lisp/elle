@@ -37,7 +37,7 @@ agrees with, and a binary search over the mapped entries finds what it found
 before. The keys that rank by address instead belong to values the dumper
 refuses anyway.
 
-## A closure crosses without its blueprint
+## A closure crosses whole
 
 A closure instance is three sealed fields: the template it references, its env
 slice, and its squelch mask. All three cross whole, traits beside them, and
@@ -45,39 +45,29 @@ every env value goes through the ordinary walk — a capture cell in an env
 snaps to its content or fails the dump (§ "Capture cells are snapped, not
 persisted").
 
-A closure template is a header naming a shared payload, plus an `Rc` to the
-compile-time blueprint it came from
+A closure template is a header naming a payload, and nothing else
 ([region/template.md](../region/template.md)). The payload is sealed data and
 copies into the body: every slice lands in the image, constants go through the
-value walk, and two headers from one blueprint keep one payload copy. The
-blueprint is Rust-heap data and does not cross — a hydrated header carries
-none, and its slot hydrates as absent.
+value walk, and two headers over one payload keep one payload copy.
 
-Everything the payload answers is therefore identical after hydration:
+Everything a code object answers is therefore identical after hydration:
 bytecode, constants, arity, signal, masks, locations, the region tables, the
-defining span `meta/origin` reports, and the LIR the JIT promotes from. One
-blueprint-only answer degrades, within the design: the SPIR-V cache is absent,
-and the GPU path already recompiles (§ "What the body refuses").
+defining span `meta/origin` reports, the child table, and the LIR the JIT
+promotes from. The SPIR-V a `(git f)` compiled is not part of the code object;
+it lives in a cache on the VM, and the GPU path recompiles in a fresh process
+(§ "What the body refuses").
 
-The defining span is on the payload's side of the split rather than the
-blueprint's, so it needs no degrading answer. It is twenty bytes of plain
-data, and every header carries it whichever boot built it
-([region/template.md](../region/template.md)). Its file id is the one
+The defining span is twenty bytes of plain data. Its file id is the one
 process-local number a payload holds, and it travels by name like a syntax
 node's ([format.md](format.md)).
 
-The LIR is on the payload's side too, as the payload's `lir` body
-([lir.md](../lir.md) § "The frozen form"). Its records hold indices and plain
-bits, so they copy as bytes, with every pad written as zero. The values its
-`ValueConst` instructions load go through the value walk, where the copy of the
-constant pool has already met each of them. Its file table holds spellings,
-which copy like a string's bytes and need no file stream. A hydrated closure
-therefore reaches the JIT exactly as a source-booted one does.
-
-The other blueprint-only answer cannot degrade. The nested-lambda blueprints a
-`MakeClosure` indexes decide what that instruction builds, so an absent one
-leaves it with nothing — which is why they cross as body data instead (§ "A
-child code object crosses as a header").
+The LIR is the payload's `lir` body ([lir.md](../lir.md) § "The frozen form").
+Its records hold indices and plain bits, so they copy as bytes, with every pad
+written as zero. The values its `ValueConst` instructions load go through the
+value walk, where the copy of the constant pool has already met each of them.
+Its file table holds spellings, which copy like a string's bytes and need no
+file stream. A hydrated closure therefore reaches the JIT exactly as a
+source-booted one does.
 
 A closure a compiled WASM module built fails the dump by name: its dispatch
 index names a function table of the module this process holds, which no other
@@ -85,25 +75,19 @@ process can reopen.
 
 ## A child code object crosses as a header
 
-A payload carries a **child table**: the code objects this function's
-`MakeClosure` instructions index, in instruction order, each one a
-blueprint-less header in the body like the parent's own. So a `MakeClosure`
-has two places to find the code object it builds — the blueprint on a
-materialized header, the child table on a hydrated one — and materializes a
-fresh region-local header out of either. The header it builds is the same
-allocation in the same region under both boots.
+A payload carries a **child table**: the headers this function's `MakeClosure`
+instructions index, in instruction order. The emitter fills it, so every
+payload carries one, live or hydrated ([region/template.md](../region/template.md)).
+A `MakeClosure` reads the child's payload out of the table and builds a fresh
+region-local header over it, so the header it builds is the same allocation in
+the same region under both boots.
 
-A live payload's child table is empty. Filling it at materialization would
-materialize the payload of every lambda a function nests, run or not, and a
-header that has a blueprint already answers from it. The dumper fills the
-table instead, because the blueprint is the part that does not cross. It walks
-the blueprint's children in order, materializes each child's payload through
-the heap's ordinary cache, and copies it like any other payload.
-
-A child's own children are its payload's child table, so a nest of any depth
-crosses by one rule. A child payload two parents name copies once, exactly as
-a payload two headers name does. A child that dispatches into a WASM module
-fails the dump where any other WASM closure does.
+The dumper copies a child like any other header: the child's payload goes
+through the payload copy, and the copied header goes into the copied parent's
+table. A child's own children are its payload's child table, so a nest of any
+depth crosses by one rule. A child payload two parents name copies once,
+exactly as a payload two headers name does. A child that dispatches into a WASM
+module fails the dump where any other WASM closure does.
 
 ## Capture cells are snapped, not persisted
 
@@ -147,8 +131,9 @@ that has declared a signal can no longer dump a boot image. A boot dump runs
 before any program does, so the order holds where it matters. Mutable
 *bindings* may still be persisted through the side-stream where the image's
 dump policy permits it — the environment policy does, opt-in; the strict boot
-policy does not ([image.md](../image.md) owns the fork). The `spirv` kernel
-cache is the one true drop: the GPU path recompiles.
+policy does not ([image.md](../image.md) owns the fork). The SPIR-V kernel
+cache is VM state, not a code-object field, so nothing in it crosses: the GPU
+path recompiles.
 
 ## Process-owned resources reconstruct in place
 

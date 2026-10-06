@@ -209,15 +209,16 @@ is about to hand it to its consumer.
 
 7. **`capture_locals_mask` is set for locals that need env cells.** Slot i set means locally-defined variable i (0-indexed from the first local after params) needs a cell because it's captured by a nested closure or mutated via `assign`. The VM env builder (`populate_env`), the JIT prologue, and the WASM env builders all consult it to skip `CaptureCell` allocation for non-captured locals. It is a `CaptureMask` ([src/value/capturemask.rs](../../value/capturemask.rs)), unbounded in width: a local at any index is named precisely, so an uncaptured local beyond slot 63 gets a bare-NIL env slot instead of a dead, leaked cell. (`capture_params_mask` is still a `u64` — functions don't approach 64 parameters, and the params path has no `>=64` fallback to leak through.)
 
-8. **Docstring is threaded from HIR.** `LirFunction.doc` is copied from `HirKind::Lambda.doc` during lowering, then into `TemplateProto.doc`, which `ClosureTemplate::doc()` reads. It is never encoded in bytecode.
+8. **Docstring is threaded from HIR.** `LirFunction.doc` is copied from `HirKind::Lambda.doc` during lowering, and the emitter writes it into the code payload, where `ClosureTemplate::doc()` reads it. It is never encoded in bytecode.
 
 ## When to modify
 
 - **Adding a new special form**: Add a case in `lower_expr` ([expr.rs](expr.rs)), implement a `lower_your_form` method
 - **Changing binding lowering**: Update [binding.rs](binding.rs) and [binding/](binding/)
-- **Changing control flow**: Update [control.rs](control.rs) and
-  `control/{shortcircuit,matcharms,call}.rs`
-- **Changing pattern matching**: Update [pattern.rs](pattern.rs) and `pattern/{ctor,keyed,matching,seq}.rs`
+- **Changing control flow**: Update [control.rs](control.rs) and the files
+  under [control/](control/)
+- **Changing pattern matching**: Update [pattern.rs](pattern.rs) and the files
+  under [pattern/](pattern/)
 - **Changing region RC emission**: Update [regionemit.rs](regionemit.rs) or [regiondecref.rs](regiondecref.rs); to change *where* a region is released or which regions merge, edit the region solver in [infer.rs](../../hir/region/infer.rs), not the lowerer
 - **Changing tail-call ownership**: Update `tail_arg_is_borrowed` ([control.rs](control.rs)) and `tail_callee_defers_release` ([control/call/defer.rs](control/call/defer.rs))
 - **Adding new bytecode instructions**: Update [expr.rs](expr.rs), [control.rs](control.rs), [binding.rs](binding.rs), or [lambda.rs](lambda.rs) to emit them

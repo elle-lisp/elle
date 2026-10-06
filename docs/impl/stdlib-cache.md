@@ -7,7 +7,7 @@ process start. The `compile_file` front end (expand → analyze → regions → 
 is what boot spends its time on; executing the compiled artifact costs a few
 milliseconds. The front end is **deterministic**: same source, same elle binary
 → same bytecode. This design turns that work into a one-time cost by serializing
-the compiled `Bytecode` to disk, so later processes deserialize instead of
+the compiled code unit to disk, so later processes deserialize instead of
 recompiling.
 
 ## High-level flow
@@ -18,7 +18,7 @@ First start                  Later starts
 compile_file(STDLIB)         try_load (cache hit)
       │                            │
       ▼                            ▼
- try_store ──► cache.bin ──► deserialize & rebuild Bytecode
+ try_store ──► cache.bin ──► rebuild the code unit in a code region
       │                            │
       └──────────► vm.execute ◄────┘
 ```
@@ -116,7 +116,7 @@ directory because a rename is atomic only within one filesystem.
 
 ## What the cached path does not restore
 
-`TemplateProto.origin` — the span where the source lambda was written — does not
+A payload's origin — the span where the source lambda was written — does not
 cross the cache, because `SendableClosure` carries no field for it. Its only
 reader is `(meta/origin f)`, which reports a closure's `{:file :line :col}` from
 that span, so a stdlib closure has an origin on the compiled path and `nil` on
@@ -141,7 +141,7 @@ no `Rc`, no pointers, no process-local symbol-table ids:
 ```rust
 struct StoredBytecode {
     format_version: u32,
-    entry: SendableClosure,               // synthetic entry template
+    entry: SendableClosure,               // the unit's entry code object
     intern_table: Vec<SendableClosure>,   // intern table of entry-reachable closure constants
     names: Vec<(u64, Box<str>)>,          // spellings, replayed into the loading display memo
     signal_projection: Option<HashMap<String, Signal>>,
@@ -155,41 +155,43 @@ populates them. They drive an HIR rewrite in every later compile, so a snapshot
 that dropped entries would make the cached path compile user code differently
 from the compiled path.
 
-### Why wrap the whole Bytecode in a synthetic entry `ClosureTemplate`?
+### Why serialize the unit's entry header?
 
-The stdlib compile product is a `Bytecode`: entry instructions, a constant pool,
-and a `child_protos` tree of nested-lambda blueprints, over a hundred of them.
-The blueprints hold closures in their own constant pools, and the reference
-graph is cyclic — a closure names its template, and a template's constants name
-closures. A bespoke scalar format cannot represent that, but elle's
-[send module](../../src/value/send/mod.rs), which already moves closures across
-threads and processes, interns closure instances by pointer and refers to each
-by index.
+The stdlib compile product is a code unit: an entry header over a payload whose
+child table holds the nested lambdas' headers, over a hundred of them
+([region/template.md](region/template.md)). The payloads hold closures in their
+own constant pools, and the reference graph is cyclic — a closure names its
+template, and a template's constants name closures. A bespoke scalar format
+cannot represent that, but elle's [send module](../../src/value/send/mod.rs),
+which already moves closures across threads and processes, interns closure
+instances by pointer and refers to each by index.
 
-So the `Bytecode` is wrapped as a synthetic `ClosureTemplate` with arity
-`Exact(0)` (the entry runs as a thunk and is not JIT'd) and serialized through
-`serialize_templates` uniformly:
+So the entry header — arity `Exact(0)`, no LIR, because the entry runs as a
+thunk and is not JIT'd — is serialized through `serialize_templates` like any
+code object:
 
-- `instructions` → bytecode
-- `constants` → entry constant pool
-- `child_protos` → nested-lambda blueprints
+- the payload's bytecode and constant pool
+- the child table → the nested lambdas, each serialized whole
 - `frame_release_slots/regions`, `merged_slots` → region release tables
 - closure instances are deep-copied and interned by pointer
 
+A load rebuilds the entry and every nested payload straight into a fresh code
+region, and the result is a code unit like the one a compile hands out.
+
 `format_version`, `signal_projection` and the two registries have no
-`ClosureTemplate` field to travel in, so they ride alongside.
+payload field to travel in, so they ride alongside.
 
 ### LIR must be preserved
 
-The JIT compiles from the LIR a closure's code payload carries, which
-materialization copies from the template's blueprint. If the cache dropped LIR, every stdlib function would run **interpreted forever** (no
+The JIT compiles from the LIR a closure's code payload carries. If the cache
+dropped LIR, every stdlib function would run **interpreted forever** (no
 LIR → never submitted to the JIT worker) — a silent runtime regression, worse
 than not caching. Each template therefore stores its frozen LIR
 ([lir.md](lir.md) § "The frozen form"): the `LirCode` records verbatim, and the
 values its `ValueConst` instructions load as `SendValue`s beside it. A closure
 among those values interns into the same table as the template's constants, so
-it is stored once. The frozen function's docstring and origin are not stored:
-the template carries both, and the JIT reads neither.
+it is stored once. The frozen function's docstring is not stored with the LIR:
+the payload carries it, and the JIT reads neither it nor the origin.
 
 The stored LIR is part of the file's layout, so a change to the frozen form
 changes `FORMAT_VERSION`. A file written in the old form is then a miss, and
@@ -228,17 +230,18 @@ compile time and never enter the pool.
 
 `init_stdlib` in [module_init.rs](../../src/primitives/module_init.rs):
 
-1. `try_load`: on hit, deserialize and rebuild the `Bytecode`, then execute.
+1. `try_load`: on hit, rebuild the code unit, then execute.
 2. On miss (or decode failure): `compile_file`, then `try_store` to disk,
    then execute.
 3. Hit and miss share `register_exports` (registering exports into the
    compilation cache's PrimitiveMeta), so both paths behave identically.
 
-The values a hit restores are held Rust-side for the life of the instance, so
-no `DecrefValueRegion` ever runs against the region they are born in.
-`load_bytecode` therefore deserializes through a process-root allocation
-context, and the teardown sweep reclaims the reload by RC like any other root
-([the allocation capability](region/ctx.md)).
+The closure constants a hit restores are held Rust-side for the life of the
+instance, so no `DecrefValueRegion` ever runs against the region they are born
+in. `load_bytecode` therefore deserializes them through a process-root
+allocation context, and the teardown sweep reclaims the reload by RC like any
+other root ([the allocation capability](region/ctx.md)). The code unit itself
+is released after the run, as a compiled one is.
 
 ## Measured effect
 

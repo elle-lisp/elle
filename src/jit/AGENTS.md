@@ -46,8 +46,8 @@ finds no compiled code for the callee. Each visit polls for completed
 compilations via non-blocking `try_recv()`. Compiled code is inserted
 into `jit_cache`; rejections are recorded in `jit_rejections`; a submitted
 function waits in `jit_pending`. All three maps key by raw bytecode address,
-sound only because every entry pins the allocation it is keyed by
-([jit.md](../../docs/impl/jit.md)).
+sound only because every entry holds a `CodePin` on the region its key's
+payload lives in ([jit.md](../../docs/impl/jit.md)).
 
 Diagnostics (`jit/rejections`, `--dump=stats`) call `drain_jit_pending()`
 to block until all pending compilations finish before reporting.
@@ -120,7 +120,9 @@ Supported instructions:
 - **Terminators**: `Return`, `Jump`, `Branch`, `Emit` (below), `Unreachable`
 
 Unsupported (returns JitError::UnsupportedInstruction):
-- `MakeClosure` — rare in hot loops, deferred
+- `MakeClosure` — the translator has no lowering for it: a closure's code
+  object is a payload in a code region, and the worker has no heap to build one
+  in ([jit.md](../../docs/impl/jit.md))
 - Variadic functions with `Struct`/`StrictStruct` varargs — need fiber for keyword error reporting
 
 Supported in yielding functions (via side-exit):
@@ -157,7 +159,7 @@ houses:
 - **Metadata types**: `YieldPointMeta`, `CallSiteMeta`
 - **Exception check**: `elle_jit_has_exception`
 - **Function calls**: `elle_jit_call`, `elle_jit_tail_call`, `elle_jit_call_array`, `elle_jit_tail_call_array`
-- **Misc call helpers**: `elle_jit_pop_param_frame`, `elle_jit_make_closure`
+- **Misc call helpers**: `elle_jit_pop_param_frame`
 
 ### data.rs (heap/VM interaction)
 
@@ -314,10 +316,9 @@ No errors are silently swallowed.
 
 2. **Yield metadata is populated during emission.** `Emitter::emit()` returns
    `(Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>)`.
-   `TemplateProto::nested_lambda` writes both into the site tables of the
-   frozen LIR the blueprint keeps, and the code payload copies them with the
-   rest of that function. The JIT reads them as `SiteRef`s to generate
-   side-exit code.
+   `PayloadParts::lambda` writes both into the site tables of the code
+   payload's LIR body. The JIT reads them as `SiteRef`s to generate side-exit
+   code.
 
 3. **YieldPointMeta is derived from a yield point.** During JIT compilation,
    the length of a yield point's `stack_regs` becomes

@@ -1,77 +1,137 @@
-# Code objects — a blueprint, a payload, and a header
+# Code objects — a payload, a header and a code unit
 
 <!-- audited: 2026-10-06 -->
 
+A code object is a payload in a code region and a one-word header naming it, and a compile unit owns the region.
+
 A closure template is the code object of one lambda: its bytecode, constant
-pool, source locations, and the region tables its body needs. This doc owns the
-argument for how that object is represented and who owns each part. The
-foundation it serves is named in
-[image/foundations.md](../image/foundations.md); the rule it obeys is
-[model.md](model.md) § "Constants lower as ordinary allocations".
+pool, source locations, LIR, and the region tables its body needs. This doc owns
+the argument for how that object is represented and who owns each part. The
+foundation it serves is named in [image/foundations.md](../image/foundations.md);
+the rule it obeys is [model.md](model.md) § "Constants lower as ordinary
+allocations".
 
-## Three things, not one
+## Two things, not one
 
-The code object is split into three, because the three have different owners
-and different lifetimes:
+- **`CodePayload`** — the *payload*: every field of the code object, inline in
+  region pages. The emitter writes it once, at emission.
+- **`ClosureTemplate`** — the *header*, the thing `HeapObject::ClosureTemplate`
+  holds. It is one `RegionSlice<CodePayload>` of length one, and nothing else.
 
-- **`TemplateProto`** — the compile-time *blueprint*. Plain Rust data the
-  emitter builds, owned by whatever holds the compiled program: a `Bytecode`'s
-  `child_protos`, a JIT code object, a `Code`. It never enters a region.
-- **`CodePayload`** — the *payload*: every variable-length field of the code
-  object, flattened into region pages. One payload per blueprint, materialized
-  once per heap and shared by every header built from that blueprint.
-- **`ClosureTemplate`** — the region-resident *header*, the thing
-  `HeapObject::ClosureTemplate` holds. It is two words: a `RegionSlice` naming
-  its payload, and an optional `Rc` to the blueprint it came from — present on
-  every header `MakeClosure` materializes, absent on a hydrated one
-  (§ "What the header still carries, and what removes it").
+A closure instance references a header, and a header references a payload.
+`MakeClosure` builds a header, not a payload — that is the point of the split.
+No part of a code object is Rust-heap data, so the header and the payload are
+sealed data an image carries as they stand ([sealing.md](../image/sealing.md)).
 
-A closure instance references a header; a header references a payload; a
-blueprint owns the right to materialize more headers. `MakeClosure` builds a
-header, not a payload — that is the whole point of the split.
+## A compile unit owns one code region
 
-## One constructor builds a nested lambda's blueprint
+Every compile mints one **code region** on its heap, and names it with a
+`CodeArena`: a heap and a region, `Copy`, like a `SyntaxArena`
+([syntax.md](../syntax.md)). The emitter writes each payload into it at
+emission:
 
-Three backends build a blueprint at a `MakeClosure`. Two of them — the bytecode
-emitter and the JIT — hold the same two inputs: the lambda's frozen LIR, and
-the bytecode its own emission produced. So `TemplateProto::nested_lambda` takes
-those two and fills every field.
+1. A nested lambda's payload is written at the `MakeClosure` that builds the
+   lambda, and a header over it is allocated beside it.
+2. That header goes into the parent's **child table**, at the index the
+   `MakeClosure` instruction carries.
+3. The entry function's payload is written last, with its own header. Its
+   child table holds the headers of the lambdas the entry builds.
 
-The alternative is a hand-written literal at each site. Over twenty fields is more
-than a backend keeps track of, a field one of them leaves out gets the empty
-value `TemplateProto::new` supplies, and the code object it builds still runs.
+The result is a **`CodeUnit`**: the entry header, and one counted reference to
+the code region. `Bytecode` is the emitter's working buffer and nothing more;
+the pipeline hands out a `CodeUnit`.
 
-The two release tables are the fields that cost the most when one is left out.
-A closure materialized from such a blueprint carries real bytecode, so it runs
-correctly until one of its frames is abandoned. The error exit then walks an
-empty table, and every region that frame owed is stranded
-([mechanism.md](mechanism.md) § "An abandoned frame runs the releases it still
-owes"). Nothing reads wrong at the closure itself, and the loss arrives as a
-rate.
+Packing a whole unit into one region is the shape the old payload cache reached
+by accident of timing. The unit is the thing that has one lifetime, so the
+unit now owns the region outright, and no cache stands between them.
+
+## How long a code region lives
+
+A code region is an ordinary counted region. Four kinds of holder take a
+reference to it:
+
+| Holder | Reference |
+|--------|-----------|
+| a `CodeUnit` | one, taken at the compile and released when the handle drops |
+| a header in another region | a counted cross-region edge, recorded at its allocation |
+| a JIT or SPIR-V cache entry | one, through a `CodePin` ([jit.md](../jit.md)) |
+| a header or payload inside the code region | none: a self-edge |
+
+So a dropped unit's region frees when the last header built from it is freed.
+Nothing about a code object needs a second reclamation mechanism, and no unit
+is a process root. The standard library's unit and a REPL line's unit are
+released after their runs like any other. The exports and the bindings they
+leave behind are closures, and each closure's header holds the region.
+
+A `CodeUnit` is Rust-held, so it is RAII: cloning it takes a reference and
+dropping it releases one. A unit must not outlive the heap its region lives on.
+A debug build counts the live handles and checks the count at teardown.
+
+## Every reference held from Rust is named on the heap
+
+A macro expansion reclaims its scratch by balancing the references a scan of
+heap contents cannot explain ([rules.md](rules.md) § "Macro expansion — a
+closed allocation scope"). A `CodeUnit` and a `CodePin` hold their references in
+Rust, where that scan cannot reach them. So the heap keeps a **code-hold
+registry**: every code region a Rust handle holds, with the number of handles.
+The reclaim excludes those regions, exactly as it excludes the process roots.
+
+The registry is also what the teardown check reads, and the counter-factual for
+it is a unit compiled inside an expansion that outlives it. The reclaim would
+take the unit's reference, and the unit's own release would then free a region
+whose headers still read it.
+
+## A unit runs on the heap it was compiled on
+
+A payload is region data and belongs to one heap. An instance compiles on the
+heap its program runs on, but a standalone `CompileCtx` runs its macro VM on a
+heap of its own, and so does the embedding shape built on one
+([heaps.rs](../../../src/runtime/tests/heaps.rs)). Running a unit there would
+leave its payloads in regions the executing heap does not own: no edge the
+executing heap records would keep them, and no teardown of it would release
+them.
+
+So `VM::execute` and `VM::execute_scheduled` copy a unit compiled on another
+heap into a code region of the executing heap first, and run the copy. The
+copy keeps every payload's sharing, rewrites each child table to the copied
+headers, and copies constant and LIR values as they stand. A constant that
+names a value on the compile heap stays a foreign reference, which the alloc
+scan's ownership test already skips.
+
+## One constructor builds a nested lambda's payload
+
+The emitter holds two inputs at a `MakeClosure`: the lambda's frozen LIR, and
+the bytecode its own emission produced. `PayloadParts::lambda` takes those two
+and the capture count the site decided, and fills every field. The two release
+tables are the fields that cost the most when one is left out. A closure built
+from such a payload runs correctly until one of its frames is abandoned. The
+error exit then walks an empty table, and every region that frame owed is
+stranded ([mechanism.md](mechanism.md) § "An abandoned frame runs the releases
+it still owes").
+
+The JIT builds no payload. It refuses a function that holds a `MakeClosure`,
+and it has no translation for one.
 
 Pinned by
-`lir::emit::tests::a_nested_lambdas_blueprint_carries_the_frame_release_tables`
-and
-`jit::compiler::tests::blueprint::a_nested_lambdas_jit_blueprint_carries_the_frame_release_tables`.
+`lir::emit::tests::a_nested_lambdas_payload_carries_the_frame_release_tables`.
 
-## The WASM backend is handed a blueprint instead
+## The WASM backend copies the module's own payload
 
-The third site is `rt_make_closure`, the host function an emitted module calls
-at every closure creation. It has no LIR to read. What it holds is a
-blueprint the module carries for that closure, dual-compiled for the spawn path
-([wasm.md](../wasm.md) § "Cross-thread spawn"), and the shape of the frame the
-lambda runs in — arity, the three counts, the two capture masks, the signal —
-which the compiled code passes through linear memory.
+`rt_make_closure` is the host function an emitted module calls at every closure
+creation. It has no LIR to read. What it holds is the module's dual-compiled
+code unit, whose payload for that closure was written from the closure's LIR
+([wasm.md](../wasm.md) § "Cross-thread spawn"). The call also passes the shape
+of the frame the lambda runs in — arity, the three counts, the two capture
+masks, the signal — through linear memory.
 
-`TemplateProto::wasm_closure` takes those two. The **code half** comes off the
-blueprint whole; the **shape half** comes off the call. Splitting it there is
-what keeps the release tables: the blueprint carries them, and the location map,
-the merge set and the nested-lambda blueprints beside them, because
-`Bytecode::into_proto` built it from that closure's own emission. A site that
-copies the fields it happens to name copies three of the seven.
+`PayloadParts::wasm_closure` takes the two. The **code half** comes off the
+module's payload whole; the **shape half** comes off the call, and so does the
+dispatch index. The release tables, the location table, the merge set and the
+child table are in the code half, so none of them is the site's to remember.
 
 The dual-compiled bytecode is what a spawned OS-thread worker runs, so a frame
-of it abandoned on an error exit walks whichever table this constructor carried.
+of it abandoned on an error exit walks whichever table this constructor
+carried.
 
 Pinned by
 `wasm::tests::closure::a_wasm_built_closure_carries_the_frame_release_tables`
@@ -85,31 +145,22 @@ loop is once per iteration. Whatever it copies, it copies that often.
 The header is per-creation because the region model says so: a heap literal is
 an ordinary, reclaimable allocation born in the executing frame's region
 (model.md § "Constants lower as ordinary allocations"), and a closure template
-is a heap literal. The payload is not per-creation because copying a function's
-whole bytecode on every iteration of a loop that builds a closure is a cost the
-old representation did not have — the old blueprint was `Rc`-shared, and an
-`Rc` bump is not a `memcpy`.
+is a heap literal. The payload is not per-creation, because copying a
+function's whole bytecode on every iteration of a loop that builds a closure is
+a cost the old blueprint did not have.
 
-So the payload is materialized on first use and shared, and the header carries
-a `RegionSlice<CodePayload>` of length one that names it. Building a header
-copies two words and takes one cross-region reference. The rejected
-alternatives:
+So the header copies the child's payload slice out of the parent's child table,
+and building one copies one word and takes one cross-region reference. The
+rejected alternatives:
 
 - **Copy the payload per creation.** Every region stays self-contained, with no
-  cross-region edge and no cache — and every closure creation memcpys the
-  function's bytecode, constants, and location table. It trades a bounded win
-  for an unbounded loss on exactly the shape (a closure in a loop) that the
-  region model exists to make cheap.
-- **Materialize each blueprint's header once and reference it from every
-  instance.** Cheaper still — no per-creation allocation at all — but it makes
-  the header's lifetime the blueprint's rather than the frame's, which is the
-  promotion Rule 3 forbids, and it needs a root to pin the once-materialized
-  tree. Reconsider it when the image milestone gives code objects a root that
-  already outlives every instance.
-- **Keep the ~20 `Rc`/`Vec` fields and clone them.** What this replaces: 13
-  refcount bumps and two Rust-heap allocations (`region_table`,
-  `capture_locals_mask`) per closure creation, and a `HeapObject` whose size is
-  set by this one variant — 288 bytes, so a `Float` slot is ~95% padding.
+  cross-region edge — and every closure creation copies the function's bytecode,
+  constants and LIR. It trades a bounded win for an unbounded loss on exactly
+  the shape (a closure in a loop) that the region model exists to make cheap.
+- **Hand out the child table's own header.** No per-creation allocation at all,
+  but it makes the instance-to-template edge a cross-region edge on every
+  closure, and the header's lifetime the unit's rather than the frame's — the
+  promotion Rule 3 forbids.
 
 ## What the payload holds
 
@@ -133,16 +184,19 @@ image rewrites it from the file table ([format.md](../image/format.md)).
 | frame-release slots / regions | `RegionSlice<u16>` / `RegionSlice<u32>`, ascending |
 | capture-locals mask | `RegionSlice<u64>` — the mask's words, unbounded in width |
 | strict-struct keys | `RegionSlice<RegionSlice<u8>>` — the `&named` key set |
-| children | `RegionSlice<Value>` — the code objects a `MakeClosure` indexes, empty until a dump fills it ([sealing.md](../image/sealing.md)) |
+| children | `RegionSlice<Value>` — the headers a `MakeClosure` indexes, in instruction order |
 | origin | a `Span` and a present flag — where the lambda was written, for `meta/origin` |
-| lir | a `LirBody` and a present flag — the frozen function the JIT promotes from, its sites and its values ([lir.md](../lir.md)) |
+| lir | a `LirBody` and a present flag — the frozen function the JIT promotes from ([lir.md](../lir.md)) |
 | arity, param and local counts, signal, capture-params mask, vararg kind, rest-list layout ([restlist.md](restlist.md)), WASM index | scalars, inline |
 
-The LIR body is present on the payload of every nested lambda, and absent on
-an entry thunk's and on a WASM-built closure's, which have no LIR. It names its
-files by spelling, so it adds no process-local number to the payload.
+The LIR body is present on the payload of every nested lambda, and absent on an
+entry function's and on a placeholder's. The body holds only what LIR alone
+knows. Every header field the two share — the merge set and the two release
+tables among them — is the payload's, and a view over the body reads it there,
+off the one record. Freezing records those three tables ascending, so the
+payload's copy and a `LirCode`'s agree on order as well as content.
 
-Two of those changed shape rather than merely moving.
+Two of the fields changed shape rather than merely moving.
 
 **Source locations are a sorted table, not a hash map.** A `LocationMap` was
 `HashMap<usize, SourceLoc>` and a `SourceLoc` owned a `String` file name — two
@@ -156,135 +210,27 @@ search over a flat slice. The table is ascending by offset, which also makes
 binary search. The set is empty unless a builder-idiom merge fired
 ([merging.md](merging.md)), so the common case is a length check.
 
-## Who owns the payload region
+## The placeholder is a payload in the root region
 
-Payloads are packed into **payload regions** the heap mints and owns, one
-region serving many blueprints. The heap holds the initial reference; a header
-takes an ordinary counted cross-region reference to the payload region when it
-is allocated, and the free cascade releases it — the payload backing is a
-`RegionSlice` in another region, so it is a recorded edge like any other
-(region_slice.rs § "It is a borrowing handle").
-
-Packing several blueprints into one region is deliberate. One region per
-blueprint would mint a page per lambda — for the standard library, ~200 extra
-regions and ~800 KiB of pages for ~450 KiB of payload. Blueprints materialized
-close together in time are almost always the same compile unit, so packing them
-together gives the compile unit one region without threading a unit identity
-through the emitter. The heap opens a fresh payload region once the open one
-passes a size threshold, which bounds how long a short-lived blueprint's
-payload can pin a long-lived one's.
-
-The cache maps a blueprint's address to its payload and holds a `Weak` to the
-blueprint beside it. Entries whose blueprint has died are swept, and a payload
-region is released when the last blueprint packed into it is gone. Teardown
-releases whatever is left, so a payload region is an ordinary counted region on
-every path — no second reclamation mechanism, no carve-out in the leak suite.
-
-A header holds a strong `Rc` to its blueprint, so a blueprint cannot die while
-a header made from it is alive, and the sweep cannot pull a payload out from
-under a live header.
-
-## An entry pins the blueprint it is keyed by
-
-An address identifies an allocation only while that allocation is alive. The
-allocator hands a freed block to the next allocation of the same layout, so a
-new blueprint could land on a dead one's key and be given the dead one's code.
-The JIT caches key entries the same way and answer the same question
-([jit.md](../jit.md)).
-
-The `Weak` beside the entry is the pin, and it pins by **holding** rather than
-by checking. A `Weak` keeps the `Rc`'s allocation alive after the last strong
-reference goes: the value is dropped, the block is not freed. A cached
-blueprint's address is reserved for as long as its entry lives, so no live
-blueprint is ever at it and a key collision cannot occur.
-
-The lookup still confirms the strong count before trusting a payload. That
-costs one load and is what a key without a pin would need; behind this one it
-never has anything to report.
-
-## Every entry holds one claim on its region
-
-A payload region counts the entries naming it — one **claim** per entry — and
-that count is what decides when the region is released. Nothing else reads it,
-so a wrong count is invisible where it is made and comes due far away, as pages
-held until teardown.
-
-The claims move by one per entry and in one direction each way: an insert adds
-an entry and a claim, the sweep removes both. The pin is what leaves no third
-motion, because an insert that displaced an entry would take that entry's claim
-with it. The invariant is that the claims sum to the number of entries, and a
-debug build checks it wherever either moves.
-
-Pinning and claim tests:
-[closure/tests/mod.rs](../../../src/value/closure/tests/mod.rs).
-
-## The cache's reference is the one nothing on the heap points at
-
-A macro expansion is a closed allocation scope: it reclaims the transformer's
-scratch by balancing the references a scan of heap contents cannot explain
-([rules.md](rules.md) § "Macro expansion — a closed allocation scope"). The
-cache holds its reference in Rust, so that scan reaches nothing naming a
-payload region — the same shape as the process roots, whose owner is the root
-registry.
-
-A payload region minted while such a scope is open is therefore excluded from
-the reclaim, and a transformer that builds a closure mints one: `MakeClosure`
-materializes the payload of a blueprint used for the first time. The exclusion
-delays no reclamation. The region is still released when the last blueprint
-packed into it dies, and by teardown otherwise.
-
-## What the header still carries, and what removes it
-
-The header's `Rc<TemplateProto>` is the one Rust-heap owner left on a code
-object, and it is optional: `MakeClosure` materializes every header with one,
-and a header hydrated from an image has none
-([sealing.md](../image/sealing.md) § "A closure crosses without its
-blueprint"). It answers two questions the payload does not hold, and a
-blueprint-less header answers each without it:
-
-| Question | Answered by | Without a blueprint |
-|----------|-------------|---------------------|
-| Which code objects do my `MakeClosure` instructions index? | `child_protos` | the payload's child table, which the dumper fills because the blueprint cannot cross ([sealing.md](../image/sealing.md)) |
-| What SPIR-V did `(git f)` compile for me? | `spirv` | none, and nothing caches — the GPU path recompiles ([sealing.md](../image/sealing.md)) |
-
-Two questions are not among them, because the payload answers both on either
-side of a dump. "Where was I written?" is twenty bytes of plain data, so
-`meta/origin` reads the payload's span. "What LIR does the JIT promote me
-from?" is the payload's `lir` body, so a hydrated closure reaches the JIT as a
-materialized one does. Materializing either costs a copy of the function's own
-data, where the child table would cost the payload of every lambda the function
-nests.
-
-The census classifies `ClosureTemplate` as sealed on the strength of its
-payload, which is the part an image carries.
-
-## The LIR is stored twice until the blueprint retires
-
-A nested lambda's frozen function lives in two places. The blueprint holds a
-`LirOwned`, because the blueprint is what the emitter builds and what a
-materialization copies from. The payload holds a `LirBody`, because the payload
-is what every reader reaches and what an image carries. The first copy is
-compile-time data and the second is one copy per heap that runs the lambda.
-
-The cost is a second copy of the frozen records for every lambda a heap
-materializes. For the boot sources that is at most the 4,991 KiB the region
-form measured over all of their functions
-([image/measurements.md](../image/measurements.md) item 7), per heap. Retiring
-the blueprint deletes the first copy ([image/plan.md](../image/plan.md) orders
-that step).
+A fiber that runs no bytecode still names a code object — the root fiber, whose
+execution context is top-level bytecode rather than a closure, and a
+native-iterator fiber, which the resume path short-circuits. The instance
+writes one placeholder payload, a nullary body of a single `Return`, into its
+pinned root region, and every such fiber shares its header. The root region is
+a process root, so the placeholder lives as long as the instance.
 
 ## The executing context is the header
 
 `Code` — what the dispatch loop, the tail-call trampoline, and every suspended
 frame thread as the template-derived half of the execution context — is the
-header plus nothing. Bytecode, constants, locations, the merge set, and the two
-release tables all come from the payload, and so does the reserved-local
-count; the nested-lambda code objects come from whichever side the header has
-(§ "What the header still carries, and what removes it"). So `Code` wraps a
-`ClosureTemplate` and adds no fields of its own, and swapping the executing
-code object on a tail call copies two words and bumps one refcount.
+header plus nothing. Bytecode, constants, locations, the merge set, the two
+release tables, the reserved-local count and the child table all come from the
+payload. So `Code` wraps a `ClosureTemplate` and adds no fields of its own, and
+swapping the executing code object on a tail call copies one word.
 
-The entry paths that used to build a `Code` out of a `Bytecode`'s parts build a
-blueprint and materialize its payload instead, so every executing code object
-in the process reaches its bytecode the same way — there is no second shape for
-a synthetic thunk to drift into.
+A `Code` takes no reference, so a payload must outlive every activation that
+runs it. A closure's body runs while some header over its payload is live: its
+own closure's, or a sibling's from the same unit. An entry function runs while
+its caller holds the unit. A debug build checks the payload's region at every
+body entry, so an activation that outlives its code fails there rather than
+reading recycled pages.

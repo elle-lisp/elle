@@ -43,8 +43,9 @@ code, and each deletes image machinery
      LIR codec.
    - **lir-payload** — landed. The code payload carries the frozen function, so
      a hydrated closure reaches the JIT.
-   - **lir-retire** — `TemplateProto` and the payload cache retire, and a code
-     object is one payload slice.
+   - **lir-retire** — landed. `TemplateProto` and the payload cache are gone;
+     the emitter writes each compile unit's payloads into a code region the
+     unit owns, and a code object is one payload slice.
    - **lir-lower** — the lowerer builds the frozen form in a working region,
      and the Rust-heap working form is deleted.
 
@@ -141,7 +142,12 @@ Then the image milestones:
     for the JIT", which passes every other test here and keeps the second copy
     of the bytecode alive. A header is the size of one payload slice, a live
     closure's payload child table is filled, and a dropped unit's code region
-    is released once its last header is freed.
+    is released once its last header is freed. A JIT cache entry and an
+    in-flight compile each pin the region their key's payload lives in, and a
+    second `(git f)` hits the SPIR-V cache on the VM. A unit compiled on one
+    heap runs from a copy on the executing heap. The dumper copies a live
+    closure's children out of its payload, and the verifier refuses a header
+    four ways.
   - **lir-lower**: a pass that grows an instruction list answers as the `Vec`
     pass did, checked against a `Vec::splice` model over random operation
     sequences. The working region is freed after the compile, and the standard
@@ -170,12 +176,11 @@ Then the image milestones:
   region and no mapping behind. The four are a relocation slot outside the
   image, a relocation slot that is not 8-byte aligned, a `RegionSlice` whose
   extent leaves the image, and a page cursor that disagrees with the object
-  index. A closure header is refused the same way five ways. A nonzero
-  blueprint word is the first — the one bit pattern teardown could hurt on, a
-  fabricated `Rc`. The other four are a header naming zero payloads, a payload
-  landing misaligned, a payload field whose extent leaves the image, and a
-  child slot naming an object the index does not call a header. The child slot
-  is the one slot whose target is read back as a header rather than as data.
+  index. A closure header is refused the same way four ways: a header naming
+  zero payloads, a payload landing misaligned, a payload field whose extent
+  leaves the image, and a child slot naming an object the index does not call
+  a header. The child slot is the one slot whose target is read back as a
+  header rather than as data.
 - Hygiene: hydrate, run, exit — the live region count returns to baseline
   and the leak suite stays green with no image-specific carve-out. Free the
   hydrated region explicitly under `--trace=guardfree` and assert the
@@ -194,11 +199,11 @@ Then the image milestones:
   answers a call with the same result — through a REPL binding, so the call
   goes through the ordinary dispatch path. The payload survives field by
   field: bytecode, constants (a heap constant included), arity, signal,
-  name, doc, and the capture masks. Two headers materialized from one
-  blueprint hydrate naming one payload copy — the counter-factual is a
-  per-header deep copy, which round-trips equal and silently doubles every
-  payload. A hydrated header has no blueprint, and still answers its LIR,
-  because the LIR is the payload's. `meta/origin` still answers, because the defining span is the payload's:
+  name, doc, and the capture masks. Two headers over one payload hydrate
+  naming one payload copy — the counter-factual is a per-header deep copy,
+  which round-trips equal and silently doubles every payload. A hydrated header
+  answers its LIR, because the LIR is the payload's. `meta/origin` still
+  answers, because the defining span is the payload's:
   a hydrated closure reports the line, the column and the file it was
   written at. The file table decides the file — rename the spelling there
   and the origin follows it. A lambda with no origin still answers nil,
@@ -221,7 +226,7 @@ Then the image milestones:
   regions. A child a WASM module built refuses the dump like any other WASM
   closure, and a parent with a child writes one file across two dumps. A
   hydrated closure sent to a worker carries its children, which the worker
-  rebuilds as the blueprints its own `MakeClosure` indexes.
+  rebuilds into the child table its own `MakeClosure` indexes.
 - Traits: a value carrying its instance's default traitset hydrates carrying
   the *hydrating* instance's table for that tag, and a user traitset hydrates
   out of the body with its methods intact. The counter-factual is the identity

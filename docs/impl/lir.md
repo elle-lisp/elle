@@ -90,8 +90,8 @@ A frozen function has two homes, and both hold the same records:
 
 - **`LirCode`** holds the records, the tables and the function's header in
   `Vec`s. It is plain data: `Send`, and serializable with serde.
-  **`LirOwned`** is a `LirCode` plus its `values: Vec<Value>`. A `JitTask`
-  holds one, and so does the blueprint a `MakeClosure` registers.
+  **`LirOwned`** is a `LirCode` plus its `values: Vec<Value>`. Freezing
+  produces one per function, and a `JitTask` holds one.
 - **`LirBody`** holds them in region pages, as the `lir` field of a code
   payload ([region/template.md](region/template.md)). Every field is a
   `RegionSlice` or a scalar, so the body is sealed data and an image carries
@@ -99,13 +99,14 @@ A frozen function has two homes, and both hold the same records:
   `FileId`s, so a body holds no process-local number and needs no file stream.
 
 A body carries only what LIR alone knows: the closure id, the entry label, the
-register count, the capture and local-parameter counts, the sites, and the
-merge set and release tables in the order freezing recorded them. The payload
-keeps its own copy of those three tables, sorted for its binary searches. The
+register count, the capture and local-parameter counts, and the sites. The
 header fields the two share are the payload's, and a view over a payload reads
-them there: the name, the docstring, the origin, the arity, the signal, the
-local and parameter counts, the capture masks, the vararg kind, the rest-list
-layout and the region table.
+every one of them off that one record: the name, the docstring, the origin, the
+arity, the signal, the local and parameter counts, the capture masks, the
+vararg kind, the rest-list layout, the region table, the merge set and the two
+release tables. Freezing records the merge set and the release tables
+ascending, so a `LirCode`'s tables and a payload's agree on order as well as
+content.
 
 **`LirView<'a>`** is the one read API, over either home. It borrows the slices
 of a frozen function and answers its blocks, its instructions, its terminators,
@@ -145,10 +146,7 @@ Lowerer ──► LirModule (working form)
               ▼  Emitter reads each through a LirView
           ClosureCompiled = (Bytecode, yield points, call sites)
               │
-              ▼  TemplateProto::nested_lambda
-          blueprint: Rc<LirOwned> with its sites filled in
-              │
-              ▼  materialized once per heap
+              ▼  PayloadParts::lambda, written into the unit's code region
           code payload: a LirBody, read through ClosureTemplate::lir()
               │
               ├─► JIT worker: a JitTask owns the view's to_owned copy
@@ -158,10 +156,10 @@ Lowerer ──► LirModule (working form)
 ```
 
 Freezing runs once per compiled function, before emission. The yield points
-and call sites are the one part only emission can supply, so
-`TemplateProto::nested_lambda` writes them into the frozen function the
-blueprint keeps. Materializing the blueprint's payload copies that function
-into the payload's body, and every reader of a code object reads the body.
+and call sites are the one part only emission can supply, so the emitter
+writes them into the payload's body beside the frozen records, at the
+`MakeClosure` that builds the lambda ([region/template.md](region/template.md)).
+Every reader of a code object reads the body.
 
 ## The operand proof
 

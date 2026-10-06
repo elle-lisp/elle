@@ -69,7 +69,7 @@ The emitter, which reads the frozen form:
 
 | Type | Purpose |
 |------|---------|
-| `Emitter` | LIR → `ClosureCompiled`, that is `(Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>)` ([emit/mod.rs](emit/mod.rs)) |
+| `Emitter` | LIR → `ClosureCompiled`, that is `(Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>)`, writing each nested lambda's payload into the `CodeArena` it was built over ([emit/mod.rs](emit/mod.rs)) |
 | `YieldPointInfo` | What emission records at a yield point: resume IP, live registers, local count |
 | `CallSiteInfo` | What emission records at a call site, for yield-through-call |
 | `testkit::LirFixture` | Builds a frozen function by hand, for tests (`#[cfg(test)]`) |
@@ -179,14 +179,16 @@ Emitter, reading each function through a LirView
 ClosureCompiled = (Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>)
     │
     ▼
-TemplateProto::nested_lambda
-    ├─► location_map ← Bytecode.location_map
-    └─► lir_function ← a copy of the lambda's LirOwned, with its yield
-        points and call sites filled in, for the JIT's side exits
+PayloadParts::lambda, at the MakeClosure that builds the lambda
+    ├─► locations ← Bytecode.location_map, sorted
+    ├─► children ← Bytecode.children, the lambda's own child headers
+    └─► lir ← the lambda's frozen records, with its yield points and call
+        sites, for the JIT's side exits
     │
     ▼
-materialize_payload ──► CodePayload.lir: a LirBody, which every reader
-                        reaches through ClosureTemplate::lir()
+CodeArena::payload ──► a CodePayload in the unit's code region, whose
+                       LirBody every reader reaches through
+                       ClosureTemplate::lir()
 ```
 
 The emitter emits blocks in the order the lowerer appended them, and freezing
@@ -212,10 +214,9 @@ break that, because labels are allocated in creation order.
 
 4. **Yield and call-site metadata come from emission.** The emitter records a
    `YieldPointInfo` at each `Terminator::Emit` and a `CallSiteInfo` at each
-   call and each `TailCall`. `TemplateProto::nested_lambda`
-   ([src/value/closure/proto.rs](../value/closure/proto.rs)) writes both into
-   the blueprint's copy of the frozen function. The code payload copies them
-   with the rest of the function, and the JIT reads the payload's.
+   call and each `TailCall`. `PayloadParts::lambda` hands both to the code
+   payload's LIR body beside the frozen records, and the JIT reads the
+   payload's.
 
 5. **Call sites are recorded only where the function may suspend.**
    `Emitter.current_func_may_suspend`, set from `signal.may_suspend()`, gates

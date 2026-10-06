@@ -56,26 +56,25 @@ blueprint into the instance region on every closure creation — 13 refcount
 bumps and two Rust-heap allocations apiece, in a `HeapObject` variant whose 288
 bytes set the size of every other variant.
 
-A code object is now three things
-([region/template.md](../region/template.md) owns the argument): a compile-time
-blueprint, a `CodePayload` holding every variable-length field inline in region
-pages, and a two-word region-resident header naming that payload. The payload
-is materialized once per blueprint and shared, so `MakeClosure` copies two
-words and takes one cross-region reference rather than copying a function's
-bytecode per iteration of a loop that builds a closure. Payoff for images: the
-payload is body data — bytecode, constants, name and doc as region strings,
-masks and release tables as inline slices, and source locations as a sorted
+A code object is now two things
+([region/template.md](../region/template.md) owns the argument): a
+`CodePayload` holding every field inline in region pages, and a one-word
+region-resident header naming that payload. The emitter writes a compile
+unit's payloads into one code region, so `MakeClosure` copies one word and
+takes one cross-region reference rather than copying a function's bytecode per
+iteration of a loop that builds a closure. Payoff for images: the payload is
+body data — bytecode, constants, name and doc as region strings, masks and
+release tables as inline slices, and source locations as a sorted
 `RegionSlice<LocEntry>` over an interned file table, replacing a
 `HashMap<usize, SourceLoc>` whose `String` file names could not be sealed at
 any price.
 
-The header kept one `Rc` to its blueprint, for four questions the payload
-could not answer: the nested-lambda blueprints a `MakeClosure` indexes, the LIR
-the JIT promotes from, the defining syntax, and the SPIR-V cache. The syntax
-foundation removed one; the image milestone's own dump removed the second by
-making child templates body data; the third is the GPU cache the design drops.
-The LIR foundation below answered the fourth from the payload, and its next
-stage takes the `Rc` with it.
+The header used to keep an `Rc` to a compile-time blueprint, for four questions
+the payload could not answer: the nested lambdas a `MakeClosure` indexes, the
+LIR the JIT promotes from, the defining syntax, and the SPIR-V cache. The
+syntax foundation removed one, the child table another, and the SPIR-V cache
+moved to the VM. The LIR foundation below answered the last from the payload
+and deleted the blueprint.
 
 ## Region-native syntax — landed
 
@@ -110,12 +109,9 @@ baked into persisted syntax.
 
 A code payload carries its function's LIR as region-native records, and the
 JIT, the other backends, `send`, introspection and the image all read it there
-([lir.md](../lir.md) § "The frozen form"). The blueprint still holds the copy
-that materialization reads from, so `TemplateProto` stays alive. It is a second
-copy of the bytecode, the constants, the masks and the region tables the
-payload already holds region-natively, and now of the LIR as well. The stages
-still to land delete that copy, and then build the records in a region from
-the start.
+([lir.md](../lir.md) § "The frozen form"). The emitter writes each payload into
+its compile unit's code region, so no compile-time blueprint holds a second
+copy. The stage still to land builds the records in a region from the start.
 
 Four things the port buys. None is a compile-time number;
 [measurements.md](measurements.md) item 7 measured those, and they are real but
@@ -169,9 +165,9 @@ The port lands as a seam and then three stages, each green on its own:
 2. **LIR in the payload** — landed. The code payload carries the records as
    body data, so a closure hydrated from an image reaches the JIT. This is the
    image's goal.
-3. **Retire `TemplateProto`.** A code object becomes one payload slice, and the
-   payload cache, the blueprint arm of every header and the second copy of the
-   bytecode go with it.
+3. **Retire `TemplateProto`** — landed. A code object is one payload slice in
+   its compile unit's code region, and the payload cache, the blueprint arm of
+   every header and the second copy of the bytecode are gone.
 4. **A region-native lowerer.** The lowerer builds the records directly in a
    working region, through slices that grow in place, and the Rust-heap working
    form is deleted. This stage meets the wall above, so it starts with a

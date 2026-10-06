@@ -174,6 +174,10 @@ Not all functions can be JIT-compiled. The JIT rejects functions that:
 - Contain `MakeClosure`, or collect struct or named varargs
 - Fail Cranelift verification
 
+The translator has no lowering for `MakeClosure`. A closure's code object is a
+payload in its compile unit's code region, and the worker that compiles runs
+on another thread, with no heap to build one in.
+
 **Negative-cache invariant.** A function whose compilation is rejected is
 recorded in `jit_rejections` and **never re-submitted**: every subsequent
 call falls through to the interpreter directly. The rejection is keyed by the
@@ -206,27 +210,30 @@ one place that swallows it.
 `jit_cache`, `jit_pending`, and `jit_rejections` key entries by the raw
 address of a code object's bytecode (`bytecode().as_ptr()`). A raw address
 identifies a function only while that allocation is alive: bytecode lives in a
-code object's payload, one per lambda blueprint, in a region the heap releases
-when the last blueprint packed into it dies
+code object's payload, in its compile unit's code region, which frees when the
+unit and the last header built from it are gone
 ([region/template.md](region/template.md)). So a dropped compile unit frees its
-payload pages, and a later blueprint can land a NEW function's bytecode at a
-reused address. A cache entry that outlived its code object would then serve
-the old function's code to the new function — which runs the wrong body with
-the new closure's env and args, producing healthy-looking wrong values and no
-memory corruption.
+payload pages, and a later unit can land a NEW function's bytecode at a reused
+address. A cache entry that outlived its code object would then serve the old
+function's code to the new function — which runs the wrong body with the new
+closure's env and args, producing healthy-looking wrong values and no memory
+corruption.
 
-The invariant that makes the address key sound: **every entry pins the code
-object it was keyed by**, from submission until the entry is removed. The
-pinned header holds its blueprint, the blueprint holds its cache entry, and
-the cache entry holds the payload region — so the address cannot be reused and
-a key collision cannot occur. A header hydrated from an image has no blueprint.
-Its payload lives in the hydrated region, which an image boot registers as a
-process root for the instance's life ([image/boot.md](image/boot.md)), so its
-address is not reused either. The pin travels: recorded in `jit_pending` at
-submit, moved into `jit_cache` (or `jit_rejections`) when the result installs.
-The cost is that cached/rejected functions' payloads stay resident for the VM's
-lifetime — bounded by the amount of code the program compiles, the same order
-as the retained native code itself.
+The invariant that makes the address key sound: **every entry pins the region
+its code object's payload lives in**, from submission until the entry is
+removed. The pin is a `CodePin`: one counted reference to that region, taken
+when the pin is made and released when it drops. So the region cannot free,
+the address cannot be reused, and a key collision cannot occur. A header
+hydrated from an image is pinned the same way; its payload lives in the
+hydrated region. The pin travels: recorded in `jit_pending` at submit, moved
+into `jit_cache` (or `jit_rejections`) when the result installs. The cost is
+that cached/rejected functions' payloads stay resident for the VM's lifetime —
+bounded by the amount of code the program compiles, the same order as the
+retained native code itself. Teardown clears the three tables before it
+releases the process roots, so a pin never holds a region past the sweep.
+
+The SPIR-V cache `(git f)` fills is keyed and pinned the same way, on the VM
+beside these three.
 
 An alternative — validating entries at hit time by content — was rejected:
 it puts an O(bytecode) compare (or a hash plus per-template caching) on the
