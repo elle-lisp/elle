@@ -34,6 +34,7 @@ Up: [..](../AGENTS.md)
 - [reader.md](reader.md) — **Reader** The reader transforms source text into syntax trees, from s-expressions, Lua, JavaScript, Python or literate markdown.
 - [selfrec.md](selfrec.md) — **Self-recursion: the executing-closure mechanism (no cell)** How a self-recursive closure refers to itself without a forward cell, and is reclaimed by ordinary region RC.
 - [send.md](send.md) — **Sending a region** A design where a value crosses a thread as a sealed region whose pages move, and crosses a process as an image: one copy, and no decode.
+- [solver.md](solver.md) — **The signal solver** Signal inference across files: facts per file, a link through literal imports, and the least model of a few Datalog rules.
 - [spirv.md](spirv.md) — **SPIR-V Backend** Two paths turn Elle into SPIR-V compute kernels for Vulkan: the MLIR compiler path, and a hand-written emitter in pure Elle.
 - [stdlib-cache.md](stdlib-cache.md) — **Standard Library Disk Cache** A start that finds the compiled standard library on disk deserializes it instead of compiling it again.
 - [symbol.md](symbol.md) — **Symbols and keywords — identity is the name hash** A `SymbolId` is the 64-bit FNV-1a hash of the symbol's name.
