@@ -1,6 +1,6 @@
 # Capability enforcement
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-05 -->
 
 Capabilities flow down. A fiber's parent decides what the fiber is
 permitted to do. Operations the fiber can't perform become signals the
@@ -204,6 +204,28 @@ capability space that is NOT withheld:
   (fiber/caps f))
 # => |:debug :error :exec :gpu :halt :io :os-signal :yield|
 ```
+
+## Reading a body against its mask and deny set
+
+A `fiber/new` call can show both directions at once. When its body is a
+function literal and its mask and `:deny` set are literal keywords or sets,
+the compiler knows the signals the body may raise, the signals its parent
+catches, and the capabilities its parent withholds. The linter then gives two
+hints:
+
+- **A call that will be denied**: the body may raise a bit the `:deny` set
+  withholds, so the call that raises it does not run, and its denial reaches
+  the parent instead.
+- **A signal that will pass the parent**: the body may raise a bit the mask
+  does not name, so a signal that carries only that bit passes the parent to
+  the fiber above it.
+
+Each is a hint, not a warning. A denial is how the language mediates a call,
+and a signal passing the parent is how a request reaches the scheduler. The
+hints say what the program does, so that a reader sees it without tracing the
+bits by hand. A body that is not a function literal, and a mask or `:deny` set
+computed at run time, give no hint, because the compiler does not know one of
+the sides. [lint-rules.md](../cookbook/lint-rules.md) lists the codes.
 
 ## Transitivity
 
