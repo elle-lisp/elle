@@ -60,6 +60,9 @@ mod bins {
 mod argv_cli {
     include!("argv_cli.rs");
 }
+mod macro_fuel {
+    include!("macro_fuel.rs");
+}
 mod module_cli {
     include!("module_cli.rs");
 }
@@ -108,8 +111,8 @@ mod tier_cli {
 mod embedding {
     include!("embedding.rs");
 }
-mod projection {
-    include!("projection.rs");
+mod squelch {
+    include!("squelch.rs");
 }
 mod lsp {
     include!("lsp.rs");

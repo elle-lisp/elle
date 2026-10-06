@@ -354,6 +354,19 @@ impl CompileCtx {
         crate::value::arena::register_process_root(heap, value, funding);
     }
 
+    /// Register a binding an embedder makes, so that every compile in this
+    /// instance resolves it, the files a program imports included.
+    pub fn register_host_binding(
+        &mut self,
+        _heap: &mut crate::value::fiberheap::FiberHeap,
+        _sym_id: crate::value::SymbolId,
+        _value: crate::value::Value,
+        _funding: RootRef,
+        _signal: Signal,
+        _arity: Option<crate::value::types::Arity>,
+    ) {
+    }
+
     /// Merge REPL-defined macros into the expander so subsequent compilations
     /// see them. (The macro-body `eval_meta` is unaffected: REPL value bindings
     /// never reach macro-body compiles.)

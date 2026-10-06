@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-10-06
 // The image store milestone: dump a sealed value graph, hydrate it by
 // private file mapping, and prove the mechanism end to end.
 // docs/impl/image/plan.md
@@ -70,7 +70,12 @@ fn alloc_array(heap: &mut FiberHeap, region: RuntimeRegion, items: &[Value]) -> 
 /// builder sorts, because a set's whole contract is that its elements are in
 /// `Value` order — a probe is a binary search.
 fn alloc_set(heap: &mut FiberHeap, region: RuntimeRegion, items: &[Value]) -> Value {
-    let sorted: Vec<Value> = items.iter().copied().collect::<BTreeSet<_>>().into_iter().collect();
+    let sorted: Vec<Value> = items
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
     let slice = heap.alloc_region_slice_in_region(&sorted, region);
     heap.alloc_in_region(
         HeapObject::LSet {
@@ -82,7 +87,11 @@ fn alloc_set(heap: &mut FiberHeap, region: RuntimeRegion, items: &[Value]) -> Va
 }
 
 /// An immutable struct: entries sorted by key, inline in the region.
-fn alloc_struct(heap: &mut FiberHeap, region: RuntimeRegion, entries: &[(TableKey, Value)]) -> Value {
+fn alloc_struct(
+    heap: &mut FiberHeap,
+    region: RuntimeRegion,
+    entries: &[(TableKey, Value)],
+) -> Value {
     let sorted: Vec<(TableKey, Value)> = entries
         .iter()
         .copied()
@@ -137,7 +146,12 @@ fn build_graph(heap: &mut FiberHeap, region: RuntimeRegion) -> Value {
         ],
     );
     let tail = alloc_pair(heap, region, Value::bool(true), Value::EMPTY_LIST);
-    let named = alloc_pair(heap, region, Value::symbol(SymbolId::of(GRAPH_SYMBOL)), tail);
+    let named = alloc_pair(
+        heap,
+        region,
+        Value::symbol(SymbolId::of(GRAPH_SYMBOL)),
+        tail,
+    );
     let listed = alloc_pair(heap, region, members, named);
     let sorted = alloc_pair(heap, region, table, listed);
     let mid = alloc_pair(heap, region, inner, sorted);
@@ -223,7 +237,7 @@ fn bind_hydrated(rt: &mut Runtime, path: &std::path::Path) -> Value {
     let sym = rt.symbols().intern("hydrated-f");
     {
         let (cctx, heap) = rt.compile_and_heap();
-        cctx.register_repl_binding(
+        cctx.register_host_binding(
             heap,
             sym,
             hydrated.root,
