@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-06
 // The default build's suite targets: which files each pass runs, on which
 // program, under which flags.
 //
@@ -12,7 +12,7 @@
 
 use crate::common::{
     assert_plain_language_pass, assert_producer_pass, assert_rig_runs, charge_files,
-    isolated_impl_files, lang_files, make_expand, makefile, passes, Pass, CHARGE_SKIP,
+    isolated_impl_files, lang_files, make_expand, passes, Pass, CHARGE_SKIP,
 };
 use std::collections::BTreeSet;
 
@@ -171,20 +171,13 @@ fn smoke_boot_image_runs_the_language_suite_from_the_image() {
 }
 
 // `make smoke` is what the merge queue runs, and what a contributor runs
-// before a push. It carries both suites.
+// before a push. `SMOKE_PASSES` names what it runs after `qa`, and the dry run
+// shows it runs both suites' passes. The counter-factual: a `SMOKE_PASSES`
+// that `smoke` never hands to make reads right here and runs nothing.
 #[test]
 fn smoke_runs_both_suites() {
-    let text = makefile();
-    let line = text
-        .lines()
-        .find(|l| l.starts_with("smoke:"))
-        .expect("the Makefile defines `smoke`");
-    let deps: Vec<&str> = line
-        .split_once(':')
-        .map(|(_, rest)| rest.split('#').next().unwrap_or(""))
-        .unwrap_or("")
-        .split_whitespace()
-        .collect();
+    let named = make_expand("SMOKE_PASSES");
+    let named: Vec<&str> = named.split_whitespace().collect();
     for want in [
         "smoke-lang",
         "smoke-impl",
@@ -193,8 +186,21 @@ fn smoke_runs_both_suites() {
         "semver-check",
     ] {
         assert!(
-            deps.contains(&want),
-            "`make smoke` does not run {want}: {line}"
+            named.contains(&want),
+            "`make smoke` does not run {want}: SMOKE_PASSES is {named:?}"
         );
+    }
+    let smoke: BTreeSet<String> = passes("smoke", &[])
+        .into_iter()
+        .map(|p| p.command)
+        .collect();
+    for target in ["smoke-lang", "smoke-impl"] {
+        for pass in passes(target, &[]) {
+            assert!(
+                smoke.contains(&pass.command),
+                "`make smoke` does not run this pass of `make {target}`:\n  {}",
+                pass.command
+            );
+        }
     }
 }

@@ -1,4 +1,4 @@
-// audited: 2026-10-04
+// audited: 2026-10-06
 // A CI job that records runs publishes the store it recorded them in, so a red
 // job is read with a query rather than out of its log.
 //
@@ -15,7 +15,7 @@
 // is read out of the Makefile rather than written here, and a test below pins
 // the assumption that makes reading it sound.
 
-use crate::common::{job_steps, runs_target, workflow_files, workflow_jobs};
+use crate::common::{job_steps, make_expand, runs_target, workflow_files, workflow_jobs};
 use std::collections::{BTreeMap, BTreeSet};
 
 fn makefile() -> String {
@@ -58,8 +58,37 @@ fn rules(makefile: &str) -> BTreeMap<String, (String, String)> {
     out
 }
 
+/// The targets a recipe hands to a sub-make of this Makefile, with each
+/// `$(VAR)` word expanded by `make`. A `$(MAKE) -C DIR` line runs another
+/// Makefile, so its words name no target here.
+fn handed_targets(recipe: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for part in recipe.split("$(MAKE)").skip(1) {
+        let words: Vec<&str> = part
+            .split('\t')
+            .next()
+            .unwrap_or("")
+            .split_whitespace()
+            .collect();
+        if words.contains(&"-C") {
+            continue;
+        }
+        for word in words {
+            if word.starts_with('-') || word.contains('=') {
+                continue;
+            }
+            match word.strip_prefix("$(").and_then(|w| w.strip_suffix(')')) {
+                Some(var) => out.extend(make_expand(var).split_whitespace().map(str::to_string)),
+                None => out.push(word.to_string()),
+            }
+        }
+    }
+    out
+}
+
 /// Every make target that records runs: the ones whose recipe drives the
-/// runner, and every target that reaches one through its prerequisites.
+/// runner, and every target that reaches one through its prerequisites or
+/// through a sub-make its recipe starts.
 fn recording_targets(makefile: &str) -> BTreeSet<String> {
     let rules = rules(makefile);
     let mut found: BTreeSet<String> = rules
@@ -72,14 +101,22 @@ fn recording_targets(makefile: &str) -> BTreeSet<String> {
         "no makefile recipe calls RUN_SUITE; the parse is broken, not the Makefile"
     );
 
-    // A target that depends on a recording one records too, however deep the
-    // chain: `smoke` reaches the runner only through `smoke-lang` and
-    // `smoke-impl`.
+    // A target that depends on a recording one, or hands one to a sub-make,
+    // records too, however deep the chain: `smoke` reaches the runner only
+    // through the `smoke-lang` and `smoke-impl` its recipe hands to `$(MAKE)`.
+    let reaches: BTreeMap<&String, Vec<String>> = rules
+        .iter()
+        .map(|(name, (deps, recipe))| {
+            let mut next: Vec<String> = deps.split_whitespace().map(str::to_string).collect();
+            next.extend(handed_targets(recipe));
+            (name, next)
+        })
+        .collect();
     loop {
-        let grown: BTreeSet<String> = rules
+        let grown: BTreeSet<String> = reaches
             .iter()
-            .filter(|(_, (deps, _))| deps.split_whitespace().any(|d| found.contains(d)))
-            .map(|(name, _)| name.clone())
+            .filter(|(_, next)| next.iter().any(|t| found.contains(t)))
+            .map(|(name, _)| (*name).clone())
             .collect();
         let before = found.len();
         found.extend(grown);
@@ -122,6 +159,22 @@ fn recording_jobs() -> Vec<(String, String, String)> {
         }
     }
     out
+}
+
+/// The merge queue runs `make smoke`, which reaches the runner only through a
+/// sub-make. The counter-factual: a reading that follows prerequisites alone
+/// drops `smoke` once its recipe hands the passes to `$(MAKE)`, and the queue's
+/// upload goes unchecked with every test here still green.
+#[test]
+fn the_merge_queue_smoke_job_records_runs() {
+    let found = recording_jobs()
+        .into_iter()
+        .any(|(path, name, _)| path.ends_with("/merge-queue.yml") && name == "tests");
+    assert!(
+        found,
+        "the merge queue's `tests` job runs `make smoke` and reads as recording \
+         no run"
+    );
 }
 
 /// A store left on the runner is a store nobody can query. The upload has to
