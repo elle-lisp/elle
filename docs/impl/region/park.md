@@ -191,8 +191,9 @@ symmetric with its unpark; the node and the deferred set a park moves are
   name it, and the payload is exempted from those tables only where a fiber's result carries
   it out ([unwind.md](unwind.md)).
 
-  **A host that refuses a park ends it the same way.** `eval`, `import`, the
-  `compile/*-module` setup runs, `compile/run-on :jit` and the root driver run code on the
+  **A host that refuses a park ends it the same way.** `eval`, `import/load-file`,
+  `import/load-syntax`, the `compile/*-module` setup runs, `compile/run-on :jit` and the
+  root driver run code on the
   current fiber, and none can hold a suspension of it, so each answers one with an error at
   its own call. The refused park has no reader and no install, as at a call boundary, and
   the frames it parked never run again. So the host ends it through the same chokepoint
