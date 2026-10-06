@@ -84,10 +84,8 @@ fn merge_predecessors_leave_equal_operand_depth() {
     // most once between them; a second drop shortens the stack into the
     // reserved local region and the sentinel in slot 2 stops existing.
     let func = orphan_across_merge_func();
-    let mut emitter = Emitter::new();
-    let (bytecode, _, _) = emitter.emit(&func.view());
     let mut vm = crate::vm::VM::new();
-    let result = vm.execute(&bytecode);
+    let result = run_on(&mut vm, &func);
     assert_eq!(
         result.ok().and_then(|v| v.as_int()),
         Some(42),
@@ -162,9 +160,8 @@ fn orphan_in_loop_func(iterations: i64) -> LirOwned {
 /// for `iterations` passes, and the sentinel it returned.
 fn run_orphan_loop(iterations: i64) -> (usize, Option<i64>) {
     let func = orphan_in_loop_func(iterations);
-    let (bytecode, _, _) = Emitter::new().emit(&func.view());
     let mut vm = crate::vm::VM::new();
-    let result = vm.execute(&bytecode);
+    let result = run_on(&mut vm, &func);
     (vm.fiber.stack.len(), result.ok().and_then(|v| v.as_int()))
 }
 

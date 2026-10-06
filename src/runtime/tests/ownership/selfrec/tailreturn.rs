@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! A tail `or`/`and` that returns a short-circuit operand hands the caller an owning reference to it.
 //!
 //! docs/impl/region/mechanism.md
@@ -30,7 +30,7 @@ fn tail_or_short_circuit_returns_owned_param_no_uaf() {
     };
     let (vm, _symbols, cctx) = rt.parts();
     let v = vm
-        .execute_scheduled(&res.bytecode, cctx)
+        .execute_scheduled(&res, cctx)
         .expect("a tail `(or param …)` returning an owned heap param must not double-free it");
     assert!(
         v.is_string(),

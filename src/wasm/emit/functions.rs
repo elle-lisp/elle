@@ -107,7 +107,8 @@ impl WasmEmitter {
 
         // Dual-compile bytecode for spawn.
         // Use emit_module which handles MakeClosure → ClosureId resolution.
-        let mut bc_emitter = crate::lir::Emitter::new();
+        let mut scratch = crate::value::fiberheap::FiberHeap::new();
+        let mut bc_emitter = crate::lir::Emitter::new(crate::value::CodeArena::mint(&mut scratch));
         let bc_compiled = bc_emitter.emit_module_closures(lir_module);
         let mut closure_bytecodes = Vec::with_capacity(bc_compiled.len());
         for (bytecode, _, _) in bc_compiled {

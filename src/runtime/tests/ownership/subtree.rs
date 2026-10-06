@@ -1,11 +1,17 @@
+// audited: 2026-10-06
+//! Subtree-drop cuts end to end: the flat adopt, the interior, bare and nested cycles, and the capture chains.
+//!
+//! docs/impl/region/ownership.md
+//! docs/impl/region/adopt.md
+
 use super::*;
 
 /// End-to-end exercise of the ownership forest (docs/impl/region/ownership.md
 /// § "Adoption and subtree drop"). The never-mergeable shape — a Fresh mutable
 /// container `(@array)` and the value `(array 1 2)` pushed into it, both
 /// call-result regions no static slot can name, so MERGE cannot collapse them —
-/// compiled under `--region-ownership` emits `AdoptRegion(container, value)` at the
-/// push (pinned in `lir::lower::tests::adopt_region_emitted_for_owned_container_under_flag`).
+/// compiles to an `AdoptRegion(container, value)` at the push (pinned in
+/// `lir::lower::tests::adopt_region_emitted_for_owned_container_under_flag`).
 /// Running it must:
 ///  - execute cleanly: a broken adopt or subtree drop would free the value early or
 ///    twice, tripping a debug `decref`/generation assert (double-free / stale deref);
@@ -29,14 +35,14 @@ fn region_ownership_adopt_subtree_drop_reclaims_in_a_real_run() {
     // Warm-up run, then measure the steady-state live region count.
     {
         let (vm, _symbols, cctx) = rt.parts();
-        let v = vm.execute_scheduled(&result.bytecode, cctx).expect("runs");
+        let v = vm.execute_scheduled(&result, cctx).expect("runs");
         assert!(v.is_nil(), "the discarded-container program returns nil");
     }
     let baseline = rt.heap().active_region_count();
 
     for _ in 0..50 {
         let (vm, _symbols, cctx) = rt.parts();
-        let v = vm.execute_scheduled(&result.bytecode, cctx).expect("runs");
+        let v = vm.execute_scheduled(&result, cctx).expect("runs");
         assert!(v.is_nil());
     }
     let after = rt.heap().active_region_count();
@@ -51,16 +57,16 @@ fn region_ownership_adopt_subtree_drop_reclaims_in_a_real_run() {
 /// End-to-end exercise of the **interior-cycle** ownership cut. A Fresh container
 /// `root` directly holds two members
 /// `a` and `b`, which reference EACH OTHER (`a ⊇ b`, `b ⊇ a`). Per-region RC cannot
-/// collect the a↔b reference cycle (region/rules.md Rule 8), so flag-OFF this leaks —
-/// the live-region count grows every run. Under `--region-ownership` the cut adopts a
-/// and b directly by the root, whose single decref subtree-drops the whole cycle, so
-/// the count stays bounded. The push order makes `root` the last region used, so its
+/// collect the a↔b reference cycle (region/rules.md Rule 8), so RC alone leaks it —
+/// the live-region count grows every run. The cut adopts a and b directly by the
+/// root, whose single decref subtree-drops the whole cycle, so the count stays
+/// bounded. The push order makes `root` the last region used, so its
 /// `decref_point` post-dominates the members (the lifetime obligation).
 ///
-/// The flag-off measurement is the built-in counterfactual: the SAME bytecode shape
-/// must leak flag-off (proving the cut, not the shape, is what reclaims it) and be
-/// bounded flag-on. Running flag-on must also be panic-clean — a broken adopt/subtree
-/// drop would free a member early or twice, tripping a debug generation/decref assert.
+/// The leaking discriminator is the built-in counterfactual: beside it, a bounded
+/// reading proves the cut, not the shape, reclaims the cycle. The run must also be
+/// panic-clean — a broken adopt/subtree drop would free a member early or twice,
+/// tripping a debug generation/decref assert.
 #[test]
 fn region_ownership_reclaims_interior_cycle_subtree() {
     // root directly holds a and b, which reference EACH OTHER (`a ⊇ b`, `b ⊇ a`). The
@@ -92,11 +98,11 @@ fn region_ownership_reclaims_interior_cycle_subtree() {
 /// lowerer adopts `p` at the closure construction and suppresses `p`'s own compiler decref,
 /// so `p` is reclaimed solely by `c`'s subtree drop.
 ///
-/// Unlike the interior-cycle/nested cuts, the simple capture shape does NOT leak flag-off
-/// (per-region RC reclaims the immutable pair), so there is no leak counterfactual here —
-/// the test is a SOUNDNESS guard. Running flag-on must be panic-clean: the suppression is
-/// load-bearing — `p`'s `decref_point` is over-extended one structural step past the
-/// closure, so were its decref NOT suppressed it would fire AFTER the
+/// Unlike the interior-cycle/nested cuts, the simple capture shape does NOT leak under
+/// RC alone (per-region RC reclaims the immutable pair), so there is no leak
+/// counterfactual here — the test is a SOUNDNESS guard. The run must be panic-clean, and
+/// the suppression is what makes it so: `p`'s `decref_point` is over-extended one
+/// structural step past the closure, so were its decref NOT suppressed it would fire AFTER the
 /// subtree drop freed `p`, a direct decref of an absent region tripping the debug
 /// `regionstore` phantom/double-free assert. Bounded growth confirms the subtree is
 /// reclaimed each run (an un-adopted-yet-suppressed `p` would instead leak — unbounded
@@ -119,7 +125,7 @@ fn region_ownership_capture_adopt_reclaims_in_a_real_run() {
     };
     {
         let (vm, _symbols, cctx) = rt.parts();
-        let v = vm.execute_scheduled(&result.bytecode, cctx).expect("runs");
+        let v = vm.execute_scheduled(&result, cctx).expect("runs");
         assert!(
             v.is_nil(),
             "the discarded captured-value program returns nil"
@@ -128,7 +134,7 @@ fn region_ownership_capture_adopt_reclaims_in_a_real_run() {
     let baseline = rt.heap().active_region_count();
     for _ in 0..50 {
         let (vm, _symbols, cctx) = rt.parts();
-        let v = vm.execute_scheduled(&result.bytecode, cctx).expect("runs");
+        let v = vm.execute_scheduled(&result, cctx).expect("runs");
         assert!(v.is_nil());
     }
     let after = rt.heap().active_region_count();
@@ -144,16 +150,16 @@ fn region_ownership_capture_adopt_reclaims_in_a_real_run() {
 /// — two `@array`s pushing each other (`a ⊇ b`,
 /// `b ⊇ a`) with NO container parent — has no owner among its members, so neither the
 /// flat nor the interior-cycle adopt cut (both need a top container) can reclaim it.
-/// Per-region RC cannot collect the a↔b cycle (region/rules.md Rule 8), so flag-OFF this
-/// leaks — the live-region count grows every run. Under `--region-ownership` the cut frees
-/// the whole cycle as one `FreeRegionGroup` at its collective last use, so the count stays
-/// bounded. This is the distinguishing case from `region_ownership_reclaims_interior_cycle_subtree`,
+/// Per-region RC cannot collect the a↔b cycle (region/rules.md Rule 8), so RC alone
+/// leaks it — the live-region count grows every run. The cut frees the whole cycle as
+/// one `FreeRegionGroup` at its collective last use, so the count stays bounded. This is
+/// the distinguishing case from `region_ownership_reclaims_interior_cycle_subtree`,
 /// which has a `root` container holding the cycle; here there is none.
 ///
-/// The flag-off measurement is the built-in counterfactual: the SAME bytecode shape must
-/// leak flag-off (proving the cut, not the shape, reclaims it) and be bounded flag-on.
-/// Running flag-on must also be panic-clean — a broken group free would free a member
-/// early or twice, tripping a debug generation/decref assert.
+/// The leaking discriminator is the built-in counterfactual: beside it, a bounded
+/// reading proves the cut, not the shape, reclaims the cycle. The run must also be
+/// panic-clean — a broken group free would free a member early or twice, tripping a
+/// debug generation/decref assert.
 #[test]
 fn region_ownership_reclaims_bare_cycle_group() {
     // a ⊇ b (push a b); b ⊇ a (push b a). No container holds a or b — the bare cycle,
@@ -182,16 +188,15 @@ fn region_ownership_reclaims_bare_cycle_group() {
 /// End-to-end exercise of the **deep-nesting** cut. A Fresh container `root` holds `a`,
 /// and `a` holds `b`, which holds `a` back
 /// — a reference cycle `a ⊇ b ⊇ a` nested one level below the root, which holds only `a`
-/// directly (no `root ⊇ b` edge). The flat cut refused this subtree (`b` has no
-/// `member → root` edge), so under it the nested a↔b cycle leaks exactly as flag-off
-/// does; the deep-nesting cut adopts `b` by its actual parent `a` and `a` by the root, so
-/// the root's recursive subtree drop frees the whole chain — the case the flat cut could
-/// not reach.
+/// directly (no `root ⊇ b` edge). A cut that adopts only a root's direct members cannot
+/// reach `b` (it has no `member → root` edge); the deep-nesting cut adopts `b` by its
+/// actual parent `a` and `a` by the root, so the root's recursive subtree drop frees the
+/// whole chain.
 ///
-/// Counterfactual built in: the SAME bytecode must leak flag-off (the nested a↔b cycle is
-/// uncollectable by per-region RC, region/rules.md Rule 8) and be bounded flag-on, and
-/// flag-on must run panic-clean (a mis-ordered adopt or a missing recursive drop would
-/// free `b` early or twice, tripping a debug generation/decref assert).
+/// The leaking discriminator is the counterfactual (the nested a↔b cycle is
+/// uncollectable by per-region RC, region/rules.md Rule 8), and the run must be
+/// panic-clean (a mis-ordered adopt or a missing recursive drop would free `b` early or
+/// twice, tripping a debug generation/decref assert).
 #[test]
 fn region_ownership_reclaims_nested_cycle_subtree() {
     // root ⊇ a (push root a); a ⊇ b (push a b); b ⊇ a (push b a) — the a↔b cycle is
@@ -228,9 +233,9 @@ fn region_ownership_reclaims_nested_cycle_subtree() {
 /// `c`'s `owned_children` (holding `p`) survive `c`'s own adoption, so the root's
 /// RECURSIVE subtree drop reaches `p` two levels down.
 ///
-/// Like the lone-capture cut this acyclic chain reclaims flag-off (per-region RC frees
-/// the root→c→p chain), so it is a SOUNDNESS guard, not a leak counterfactual. Flag-on
-/// must run panic-clean — `p`'s own decref is suppressed (capture-adopt member), so were
+/// Like the lone-capture cut this acyclic chain reclaims under RC alone (per-region RC
+/// frees the root→c→p chain), so it is a SOUNDNESS guard, not a leak counterfactual. The
+/// run must be panic-clean — `p`'s own decref is suppressed (capture-adopt member), so were
 /// `p` NOT reached by the recursive drop it would be a stranded leak (caught by bounded
 /// growth), and a broken re-adoption that dropped `c`'s `owned_children` would either
 /// strand `p` (leak) or free it twice (a debug generation/decref panic). The `(c)` call
@@ -251,7 +256,7 @@ fn region_ownership_store_then_capture_chain_reclaims_in_a_real_run() {
     };
     {
         let (vm, _symbols, cctx) = rt.parts();
-        let v = vm.execute_scheduled(&result.bytecode, cctx).expect("runs");
+        let v = vm.execute_scheduled(&result, cctx).expect("runs");
         assert!(
             v.is_nil(),
             "the discarded container+closure program returns nil"
@@ -260,7 +265,7 @@ fn region_ownership_store_then_capture_chain_reclaims_in_a_real_run() {
     let baseline = rt.heap().active_region_count();
     for _ in 0..50 {
         let (vm, _symbols, cctx) = rt.parts();
-        let v = vm.execute_scheduled(&result.bytecode, cctx).expect("runs");
+        let v = vm.execute_scheduled(&result, cctx).expect("runs");
         assert!(v.is_nil());
     }
     let after = rt.heap().active_region_count();
@@ -294,7 +299,7 @@ fn region_ownership_store_then_capture_chain_reclaims_in_a_real_run() {
 /// `%pair` lowers as an inline intrinsic freed by a slot-resolved `DecrefRegion`,
 /// which is what puts the member's decref in the shared bucket. Bounded growth
 /// beside the leaking discriminator confirms the subtree still reclaims each
-/// iteration (the fix reorders releases, it does not refuse the adopt).
+/// iteration: the order is a release order, and the adopt still happens.
 #[test]
 fn region_ownership_pair_pushed_into_let_bound_array_in_loop_reclaims() {
     // The pushed pair is a store-adopted member of the let-bound container's Owned
@@ -308,8 +313,8 @@ fn region_ownership_pair_pushed_into_let_bound_array_in_loop_reclaims() {
                              (assign j (%add j 1))) \
                            nil)";
     let leak = leak_discriminator();
-    // Pre-fix this call panics on the first iteration's double-free (the counterfactual);
-    // post-fix it returns a bounded growth.
+    // With the release order inverted, this call panics on the first iteration's
+    // double-free (the counterfactual).
     let on = steady_region_growth(SUBJECT);
     assert!(
         leak > 0,

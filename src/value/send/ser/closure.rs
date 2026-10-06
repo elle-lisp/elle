@@ -85,7 +85,7 @@ pub(super) fn send_closure(
     // closure answers with body headers rather than blueprints, and the worker
     // rebuilds a blueprint out of either (docs/impl/image/sealing.md).
     let child_protos: Vec<SendableClosure> = (0..closure_rc.template.num_children())
-        .map(|i| sendable_from_child(closure_rc.template.child(i), ctx))
+        .map(|i| sendable_from_child(closure_rc.template.child_code(i), ctx))
         .collect::<Result<_, _>>()?;
 
     // Replace placeholder with complete entry.

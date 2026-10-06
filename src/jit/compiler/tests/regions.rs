@@ -44,9 +44,7 @@ fn adopt_into_activation_frees_member_at_compiled_return() {
 
     let lir = make_adopt_into_activation_lir();
     let compiler = JitCompiler::new().expect("Failed to create compiler");
-    let code = compiler
-        .compile(&lir.view(), Vec::new())
-        .expect("Failed to compile");
+    let code = compiler.compile(&lir.view()).expect("Failed to compile");
 
     let mut vm = crate::vm::VM::new();
     let heap_ptr = vm.heap_ptr;

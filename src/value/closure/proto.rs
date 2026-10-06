@@ -403,7 +403,7 @@ pub fn materialize(
     let payload = heap.template_payload(proto);
     alloc_in_region(
         heap,
-        HeapObject::ClosureTemplate(ClosureTemplate::new(payload, Some(Rc::clone(proto)))),
+        HeapObject::ClosureTemplate(ClosureTemplate::with_blueprint(payload, Rc::clone(proto))),
         region,
     )
 }

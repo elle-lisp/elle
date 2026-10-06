@@ -25,15 +25,16 @@ fn test_nqueens_eval_signals_are_silent() {
     let mut symbols = SymbolTable::new();
     let compiled = compile_with_stdlib(source, &mut symbols, "<test>").expect("compilation failed");
 
-    // The nqueens `fn`s compile to `MakeClosure` blueprints in the entry's
-    // child_protos (not the constant pool), so inspect them there.
+    // The nqueens `fn`s compile to `MakeClosure` code objects in the entry's
+    // child table (not the constant pool), so inspect them there.
+    let entry = compiled.entry();
     assert!(
-        !compiled.bytecode.child_protos.is_empty(),
-        "expected nqueens closures as child protos"
+        entry.num_children() > 0,
+        "expected nqueens closures in the entry's child table"
     );
-    for proto in compiled.bytecode.child_protos.iter() {
-        if let Some(lir) = proto.lir_function.as_ref() {
-            let lir = lir.view();
+    for i in 0..entry.num_children() {
+        let child = entry.child(i);
+        if let Some(lir) = child.lir() {
             let has_sc = lir.has_op(elle::lir::code::Op::SuspendingCall);
             let signal = lir.signal();
             let name = lir.name().unwrap_or("<anon>");

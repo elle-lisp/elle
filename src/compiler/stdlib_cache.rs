@@ -5,6 +5,7 @@
 
 use crate::compiler::Bytecode;
 use crate::signals::Signal;
+use crate::value::CodeUnit;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -147,7 +148,7 @@ pub fn try_load(
     vm: &mut crate::vm::VM,
     symbols: &mut crate::symbol::SymbolTable,
     cctx: &mut crate::pipeline::CompileCtx,
-) -> Option<Result<Bytecode, String>> {
+) -> Option<Result<CodeUnit, String>> {
     let path = cache.dir()?.join(cache_key(stdlib_source)?);
     let bytes = std::fs::read(&path).ok()?;
     if bytes.len() < PAYLOAD_HASH_BYTES {
@@ -170,7 +171,7 @@ pub fn try_load(
 pub fn try_store(
     stdlib_source: &str,
     cache: &StdlibCache,
-    bytecode: &Bytecode,
+    unit: &CodeUnit,
     vm: &mut crate::vm::VM,
     symbols: &crate::symbol::SymbolTable,
     cctx: &mut crate::pipeline::CompileCtx,
@@ -180,7 +181,7 @@ pub fn try_store(
         eprintln!("[stdlib-cache] mkdir failed: {e}");
         return;
     }
-    let stored = match store_bytecode(bytecode, vm, symbols, cctx) {
+    let stored = match store_bytecode(unit, vm, symbols, cctx) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("[stdlib-cache] store failed: {e}");
@@ -253,11 +254,12 @@ fn prune_superseded(dir: &std::path::Path, keep: &std::path::Path) {
 /// template path, which carries the entry pool, the nested-lambda blueprints,
 /// their LIR and the region-release tables uniformly.
 pub fn store_bytecode(
-    bytecode: &Bytecode,
+    unit: &CodeUnit,
     vm: &mut crate::vm::VM,
     symbols: &crate::symbol::SymbolTable,
     cctx: &mut crate::pipeline::CompileCtx,
 ) -> Result<StoredBytecode, String> {
+    let bytecode = unit.bytecode();
     let (dispatch_wrappers, fn_inline) = cctx.compile_registries_mut();
     let stored_dispatch = dispatch_wrappers.to_stored(symbols);
     let stored_fn_inline = fn_inline.to_stored(symbols);
@@ -291,7 +293,7 @@ pub fn load_bytecode(
     vm: &mut crate::vm::VM,
     symbols: &mut crate::symbol::SymbolTable,
     cctx: &mut crate::pipeline::CompileCtx,
-) -> Result<Bytecode, String> {
+) -> Result<CodeUnit, String> {
     if stored.format_version != FORMAT_VERSION {
         return Err(format!(
             "stdlib cache format mismatch: {} != {}",
@@ -337,17 +339,21 @@ pub fn load_bytecode(
             ..crate::value::TemplateProto::new(rc.bytecode.clone(), rc.arity, rc.constants.clone())
         }
     });
-    Ok(Bytecode {
-        instructions: entry.bytecode,
-        constants: entry.constants,
-        location_map: entry.location_map,
-        signal: entry.signal,
-        signal_projection: stored.signal_projection,
-        child_protos: entry.child_protos,
-        merged_slots: entry.merged_slots,
-        frame_release_slots: entry.frame_release_slots,
-        frame_release_regions: entry.frame_release_regions,
-    })
+    let code = crate::value::CodeArena::mint(vm.heap());
+    Ok(CodeUnit::new(
+        code,
+        Bytecode {
+            instructions: entry.bytecode,
+            constants: entry.constants,
+            location_map: entry.location_map,
+            signal: entry.signal,
+            signal_projection: stored.signal_projection,
+            child_protos: entry.child_protos,
+            merged_slots: entry.merged_slots,
+            frame_release_slots: entry.frame_release_slots,
+            frame_release_regions: entry.frame_release_regions,
+        },
+    ))
 }
 
 #[cfg(test)]

@@ -56,7 +56,7 @@ pub(super) fn copy_payload(
     // (docs/impl/image/sealing.md).
     let mut children = Vec::with_capacity(t.num_children());
     for i in 0..t.num_children() {
-        children.push(copy_child(heap, region, t.child(i), walk)?);
+        children.push(copy_child(heap, region, t.child_code(i), walk)?);
     }
     let children = heap.alloc_region_slice_in_region(&children, region);
     let payload = CodePayload {
@@ -140,7 +140,7 @@ fn copy_child(
     }
     let payload = copy_payload(heap, region, &header, walk)?;
     let copy = heap.alloc_in_region(
-        HeapObject::ClosureTemplate(ClosureTemplate::new(payload, None)),
+        HeapObject::ClosureTemplate(ClosureTemplate::new(payload)),
         region,
     );
     walk.children.insert(key, copy);

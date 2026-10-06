@@ -215,15 +215,21 @@ fn eval_in_arena(
         .and_then(|m| m.freeze())
         .map_err(|e| LError::generic(format!("eval: lowering failed: {}", e)))?;
 
-    // Emit
-    let mut emitter = Emitter::new();
+    // Emit into a code region on the heap that runs the form.
+    let code_arena = crate::value::CodeArena::mint(vm.heap());
+    let mut emitter = Emitter::new(code_arena);
     let (bytecode, _yield_points, _call_sites) = emitter.emit_module(&lir_module);
+    let unit = crate::value::CodeUnit::new(code_arena, bytecode);
 
-    // Execute. The blueprint carries the entry function's builder-idiom merge
-    // metadata with the rest of its payload, so the alloc dispatch mint-or-reuses
-    // merged slots (docs/impl/region/merging.md § Merging).
-    let code =
-        crate::value::ClosureTemplate::for_proto(vm.heap(), &Rc::new(bytecode.into_proto())).code();
+    // Execute. The entry payload carries the function's builder-idiom merge
+    // metadata, so the alloc dispatch mint-or-reuses merged slots
+    // (docs/impl/region/merging.md § Merging). The unit is held until the run
+    // ends.
+    let code = crate::value::ClosureTemplate::for_proto(
+        vm.heap(),
+        &Rc::new(unit.bytecode().clone().into_proto()),
+    )
+    .code();
     let empty_env = Rc::new(vec![]);
 
     // Drive the evaluated code, including any nested fiber/resume SIG_SWITCH

@@ -208,11 +208,13 @@ impl<'a> FunctionTranslator<'a> {
                     entry: func.clone(),
                     closures: self.module_closures.clone(),
                 };
-                let compiled = crate::lir::Emitter::new()
-                    .emit_module_closures(&lir_module)
-                    .into_iter()
-                    .nth(closure_id.0 as usize)
-                    .expect("emit_module_closures is parallel to the module's closures");
+                let mut scratch = crate::value::fiberheap::FiberHeap::new();
+                let compiled =
+                    crate::lir::Emitter::new(crate::value::CodeArena::mint(&mut scratch))
+                        .emit_module_closures(&lir_module)
+                        .into_iter()
+                        .nth(closure_id.0 as usize)
+                        .expect("emit_module_closures is parallel to the module's closures");
 
                 // The nested lambda's template BLUEPRINT — plain data, owned by
                 // the JIT code object (`closure_protos`), NOT a heap `Value`.

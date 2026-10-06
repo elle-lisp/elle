@@ -1,4 +1,7 @@
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-10-06
+//! The environment the stdlib export closure is called with.
+//!
+//! docs/impl/vm.md
 
 use super::*;
 use crate::pipeline::compile_file;
@@ -6,21 +9,18 @@ use crate::primitives::registration::register_primitives;
 
 #[test]
 fn build_closure_call_env_places_captures_before_locals() {
-    // Regression test for Finding 4.
-    //
     // `build_closure_call_env` constructs the env that the stdlib's
     // tail export closure receives at call time. The VM's
     // `LoadUpvalue` instruction indexes the env from zero, so the
-    // captures must sit at the front. The old layout reserved
-    // `num_locals` nil slots in front of the captures — invisible
-    // while `num_locals == 0` (its assumed state for a trivial
-    // `(fn [] {...})`), but the ANF lift introduces one local for
-    // every allocating subexpression in the closure body. The stdlib
-    // export closure contains an inline `(fn [port] ...)`, which the
-    // lift names into a local. That local then occupied env[0] and
-    // shifted every capture by one slot, so every capture read as
-    // nil — which is why `(+ 1 2)` came back nil during
-    // `init_stdlib`.
+    // captures must sit at the front.
+    //
+    // The counter-factual is a layout that reserves `num_locals` nil
+    // slots in front of the captures. It is invisible while
+    // `num_locals == 0`, but the ANF lift introduces one local for
+    // every allocating subexpression in the closure body, and the
+    // stdlib export closure holds an inline `(fn [port] ...)` the lift
+    // names into a local. That local takes env[0] and shifts every
+    // capture by one slot, so every capture reads as nil.
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
     let _ = register_primitives(&mut vm, &mut symbols);
@@ -34,7 +34,7 @@ fn build_closure_call_env_places_captures_before_locals() {
     let compiled =
         compile_file(source, &mut symbols, &mut cctx, "<test>").expect("source must compile");
     let closure_val = vm
-        .execute(&compiled.bytecode)
+        .execute(&compiled)
         .expect("top-level execution must succeed");
     let closure = closure_val
         .as_closure()

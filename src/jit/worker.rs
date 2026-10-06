@@ -74,7 +74,7 @@ impl JitWorker {
                     let key = task.bytecode_key;
                     let t0 = std::time::Instant::now();
                     let result = match JitCompiler::new() {
-                        Ok(compiler) => compiler.compile(&task.lir.view(), Vec::new()),
+                        Ok(compiler) => compiler.compile(&task.lir.view()),
                         Err(e) => Err(e),
                     };
                     JIT_COMPILE_NS.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);

@@ -1,5 +1,5 @@
-// audited: 2026-09-29
-//! The VM's execution entries: a blueprint, a code object at the root, and a
+// audited: 2026-10-06
+//! The VM's execution entries: a compiled unit, a code object at the root, and a
 //! program under the async scheduler. The module list sits above them.
 //!
 //! docs/impl/vm.md
@@ -38,14 +38,15 @@ mod wasm_entry;
 pub use crate::value::fiber::CallFrame;
 pub use core::VM;
 
-use crate::compiler::bytecode::Bytecode;
 use crate::value::fiber::TailSquelch;
+use crate::value::CodeUnit;
 use crate::value::{Value, SIG_ERROR, SIG_HALT, SIG_SWITCH};
 use std::rc::Rc;
 
 impl VM {
-    pub fn execute(&mut self, bytecode: &Bytecode) -> Result<Value, String> {
-        self.execute_proto(&Rc::new(bytecode.clone().into_proto()), None)
+    /// Run a compiled unit's entry function at the root.
+    pub fn execute(&mut self, unit: &CodeUnit) -> Result<Value, String> {
+        self.execute_proto(&Rc::new(unit.bytecode().clone().into_proto()), None)
     }
 
     /// Mint a fresh `RuntimeRegion` from the activation's heap for a VM-produced

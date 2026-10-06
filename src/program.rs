@@ -310,13 +310,10 @@ pub fn run_source(
     };
 
     if crate::config::get().has_trace("bytecode") {
-        eprintln!(
-            "{}",
-            crate::compiler::format_bytecode_with_protos(&result.bytecode)
-        );
+        eprintln!("{}", crate::compiler::format_bytecode_with_protos(&result));
     }
 
-    match vm.execute_scheduled(&result.bytecode, cctx) {
+    match vm.execute_scheduled(&result, cctx) {
         Ok(value) => {
             // The run hands its last form's value over with one owning
             // reference, and nothing here reads the value again: script mode is

@@ -15,13 +15,12 @@ use elle::signals::Signal;
 use elle::syntax::Span;
 use elle::value::{Arity, Value};
 
-// Local `eval`/`compile` shims preserving the pre-CompileCtx arity. Every site
-// here registers primitives only (no stdlib) and never evaluates the `(eval …)`
-// or `(import …)` runtime special forms, so a fresh `CompileCtx` per call
-// (primitives + core + prelude) reproduces the old bare-symbols path exactly —
-// no compile state needs to persist across calls, and the VM never reaches the
-// cctx through its runtime pointer. The cctx is dropped after the call returns,
-// which is safe precisely because nothing retains a pointer into it.
+// Local `eval`/`compile` helpers. Every site here registers primitives only (no
+// stdlib) and never evaluates the `(eval …)` or `(import …)` runtime special
+// forms, so a fresh `CompileCtx` per call (primitives + core + prelude) is all
+// it needs — no compile state persists across calls, and the VM never reaches
+// the cctx through its runtime pointer. The cctx is dropped after the call
+// returns, which is safe precisely because nothing retains a pointer into it.
 fn eval(
     source: &str,
     symbols: &mut elle::symbol::SymbolTable,
@@ -39,7 +38,7 @@ fn compile(
     source: &str,
     symbols: &mut elle::symbol::SymbolTable,
     source_name: &str,
-) -> Result<elle::CompileResult, String> {
+) -> Result<elle::CodeUnit, String> {
     let mut cctx = elle::pipeline::CompileCtx::new();
     elle::pipeline::compile(source, symbols, &mut cctx, source_name)
 }
@@ -83,7 +82,7 @@ fn compile_with_stdlib(
     source: &str,
     symbols: &mut elle::symbol::SymbolTable,
     source_name: &str,
-) -> Result<elle::CompileResult, String> {
+) -> Result<elle::CodeUnit, String> {
     let mut vm = elle::vm::VM::new();
     let _ = elle::register_primitives(&mut vm, symbols);
     let mut cctx = stdlib_cctx(symbols, &mut vm);
@@ -130,7 +129,7 @@ fn compile_and_call(lir: &LirFunction, args: &[Value]) -> Result<Value, JitError
     let _signals = register_primitives(&mut vm, &mut symbols);
 
     let compiler = JitCompiler::new()?;
-    let code = compiler.compile(&frozen(lir).view(), Vec::new())?;
+    let code = compiler.compile(&frozen(lir).view())?;
     // self_tag/self_payload = 0 since we're not testing self-tail-calls in these basic tests
     let result = unsafe {
         code.call(

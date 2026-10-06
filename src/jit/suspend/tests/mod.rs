@@ -1,7 +1,12 @@
-// Re-exported (`pub use`) so the per-theme submodules below can reach these
-// names through their own `use super::*;` — a private `use` glob is not visible
-// to child modules, so the test bodies (kept verbatim) would not otherwise
-// resolve `Value`, `SuspendedFrame`, `elle_jit_yield`, `YieldPointMeta`, etc.
+// audited: 2026-10-06
+//! The frame a compiled yield parks: the shared setup that installs a closure's
+//! compiled code, and one submodule per theme.
+//!
+//! docs/impl/jit.md
+//
+// The submodules reach these names through their own `use super::*;`, so the
+// imports below are what resolve `Value`, `SuspendedFrame`, `elle_jit_yield`
+// and `YieldPointMeta` in them.
 use super::super::dispatch::YieldPointMeta;
 use super::*;
 use crate::value::fiber::{SignalBits, SIG_YIELD};
@@ -20,15 +25,11 @@ fn setup_yield_test(
 ) -> (crate::vm::VM, Value) {
     use crate::signals::Signal;
     use crate::value::types::Arity;
-    use crate::value::TemplateProto;
 
-    use std::rc::Rc;
     use std::sync::Arc;
 
-    let proto = Rc::new(TemplateProto {
-        signal: Signal::yields(),
-        ..TemplateProto::new(bytecode, Arity::Exact(0), constants)
-    });
+    let code = crate::value::CodeBuilder::new(bytecode, Arity::Exact(0), constants)
+        .signal(Signal::yields());
 
     // VM must exist before allocating the closure env slice; it owns the heap.
     let mut vm = crate::vm::VM::new();
@@ -38,7 +39,7 @@ fn setup_yield_test(
     // the VM's own heap — the same heap the closure is allocated into below,
     // exactly as `MakeClosure` builds them.
     let region = unsafe { (*vm.heap_ptr).new_runtime_region() };
-    let template = crate::value::closure::materialize(unsafe { &mut *vm.heap_ptr }, &proto, region);
+    let template = code.build_in(unsafe { &mut *vm.heap_ptr }, region);
     let env_slice = crate::value::arena::alloc_region_slice_in_region::<Value>(
         unsafe { &mut *vm.heap_ptr },
         &env,
@@ -79,18 +80,14 @@ fn setup_yield_test_with_lbox(
 ) -> (crate::vm::VM, Value) {
     use crate::signals::Signal;
     use crate::value::types::Arity;
-    use crate::value::TemplateProto;
 
-    use std::rc::Rc;
     use std::sync::Arc;
 
-    let proto = Rc::new(TemplateProto {
-        num_params,
-        signal: Signal::yields(),
-        capture_params_mask,
-        capture_locals_mask: crate::value::CaptureMask::from_u64(capture_locals_mask),
-        ..TemplateProto::new(bytecode, Arity::Exact(num_params), constants)
-    });
+    let code = crate::value::CodeBuilder::new(bytecode, Arity::Exact(num_params), constants)
+        .num_params(num_params)
+        .signal(Signal::yields())
+        .capture_params_mask(capture_params_mask)
+        .capture_locals_mask(crate::value::CaptureMask::from_u64(capture_locals_mask));
 
     // VM must exist before allocating the closure env slice; it owns the heap.
     let mut vm = crate::vm::VM::new();
@@ -99,7 +96,7 @@ fn setup_yield_test_with_lbox(
     // + header share that region, named through the ctx) on the VM's own heap —
     // the same heap the closure is allocated into below.
     let region = unsafe { (*vm.heap_ptr).new_runtime_region() };
-    let template = crate::value::closure::materialize(unsafe { &mut *vm.heap_ptr }, &proto, region);
+    let template = code.build_in(unsafe { &mut *vm.heap_ptr }, region);
     let env_slice = crate::value::arena::alloc_region_slice_in_region::<Value>(
         unsafe { &mut *vm.heap_ptr },
         &env,

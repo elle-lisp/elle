@@ -1,5 +1,7 @@
-// audited: 2026-09-29
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-10-06
+//! The cross-region scan reports every channel each heap variant holds a value in.
+//!
+//! docs/impl/region/diagnostics.md
 
 use super::*;
 use crate::hir::region::RuntimeRegion;
@@ -61,16 +63,9 @@ fn obj_with_value_in_every_channel(
             crate::value::region_slice::RegionSlice::empty(),
         );
         let payload = store.alloc_region_slice(own, &[payload]);
-        let proto = Rc::new(crate::value::TemplateProto::new(
-            Vec::new(),
-            crate::value::Arity::Exact(0),
-            Vec::new(),
-        ));
         crate::value::TemplateRef::region(store.alloc_obj(
             own,
-            HeapObject::ClosureTemplate(crate::value::closure::ClosureTemplate::test_header(
-                payload, proto,
-            )),
+            HeapObject::ClosureTemplate(crate::value::closure::ClosureTemplate::new(payload)),
         ))
     };
     Some(match tag {
@@ -111,11 +106,9 @@ fn obj_with_value_in_every_channel(
             both,
         ),
         HeapTag::Closure => (
-            // Env contents are the channel; the env backing itself lives
-            // in `own` (the usual co-region layout), so only `v2`'s
-            // region is a cross edge. A Shared (Rc) template has no
-            // region Value — the Region-template edge is the
-            // ClosureTemplate arm's channel below.
+            // Env contents are the channel; the env backing and the
+            // template both live in `own` (the usual co-region layout), so
+            // only `v2`'s region is a cross edge.
             HeapObject::Closure {
                 closure: crate::value::closure::Closure::new(
                     empty_template(store),
@@ -173,8 +166,8 @@ fn obj_with_value_in_every_channel(
         HeapTag::Fiber => {
             // A parked fiber's channels: its closure's env contents (and
             // backing), its template, and its park-retained terminal
-            // signal value. Empty env + Shared template here; the signal
-            // value is the content channel under test (SIG_OK is
+            // signal value. Empty env and a template in `own` here; the
+            // signal value is the content channel under test (SIG_OK is
             // terminal).
             let closure = crate::value::closure::Closure::new(
                 empty_template(store),
@@ -263,19 +256,15 @@ fn obj_with_value_in_every_channel(
             both,
         ),
         HeapTag::ClosureTemplate => (
-            // The constant pool is the template's only channel (no
-            // traits field; child_protos are plain Rc data).
+            // The constant pool is the template's only channel: it has no
+            // traits field, and its child table names headers in its own
+            // code region.
             HeapObject::ClosureTemplate({
                 let payload = crate::value::closure::CodePayload::test_with_constants(
                     store.alloc_region_slice(own, &[v2]),
                 );
                 let payload = store.alloc_region_slice(own, &[payload]);
-                let proto = Rc::new(crate::value::TemplateProto::new(
-                    Vec::new(),
-                    crate::value::Arity::Exact(0),
-                    Vec::new(),
-                ));
-                crate::value::closure::ClosureTemplate::test_header(payload, proto)
+                crate::value::closure::ClosureTemplate::new(payload)
             }),
             Channels {
                 content: true,

@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! The gates on the post-teardown residue: what one run may leave behind.
 //!
 //! docs/impl/region/rules.md
@@ -22,7 +22,7 @@ fn process_teardown_is_observable_and_idempotent() {
     {
         let (vm, symbols, cctx) = rt.parts();
         let result = compile_file(src, symbols, cctx, "<teardown-test>").expect("compiles");
-        vm.execute_scheduled(&result.bytecode, cctx).expect("runs");
+        vm.execute_scheduled(&result, cctx).expect("runs");
     }
 
     let report = rt.teardown();
@@ -202,7 +202,7 @@ fn residue_after_teardown(mut rt: Runtime, src: &str, handoff: HandOff) -> usize
     let value = {
         let (vm, symbols, cctx) = rt.parts();
         let result = compile_file(src, symbols, cctx, "<residue>").expect("compiles");
-        vm.execute_scheduled(&result.bytecode, cctx).expect("runs")
+        vm.execute_scheduled(&result, cctx).expect("runs")
     };
     match handoff {
         HandOff::Root => elle::value::arena::register_process_root(

@@ -97,11 +97,7 @@ impl JitCompiler {
     }
 
     /// Compile a frozen function to native code.
-    pub fn compile(
-        mut self,
-        lir: &LirView<'_>,
-        module_closures: Vec<LirOwned>,
-    ) -> Result<JitCode, JitError> {
+    pub fn compile(mut self, lir: &LirView<'_>) -> Result<JitCode, JitError> {
         // Polymorphic and yielding functions are supported via side-exit.
         // The runtime helper elle_jit_call handles arbitrary callables
         // (closures, arrays, structs), and emit_yield_check_after_call
@@ -144,7 +140,7 @@ impl JitCompiler {
 
         // Translate LIR to Cranelift IR
         let (closure_protos, templates) =
-            self.translate_function(lir, &mut ctx.func, module_closures)?;
+            self.translate_function(lir, &mut ctx.func, Vec::<LirOwned>::new())?;
 
         // Compile the function
         self.module

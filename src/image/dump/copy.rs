@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-10-06
 //! The compacting copy: what the dumper accepts into an image's body, and
 //! the spellings it records on the way through.
 //!
@@ -320,7 +320,7 @@ pub(super) fn copy_value(
         HeapObject::ClosureTemplate(t) => {
             let payload = copy_payload(heap, region, t, walk)?;
             heap.alloc_in_region(
-                HeapObject::ClosureTemplate(ClosureTemplate::new(payload, None)),
+                HeapObject::ClosureTemplate(ClosureTemplate::new(payload)),
                 region,
             )
         }

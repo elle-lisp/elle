@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-10-06
 //! The heap-object half of the layout probe: exemplars and field extents for
 //! every `HeapObject` variant the dumper can emit.
 //!
@@ -93,7 +93,7 @@ impl Probed for HeapObject {
                 traits: Value::NIL,
             },
             HeapTag::ClosureTemplate => {
-                HeapObject::ClosureTemplate(ClosureTemplate::new(RegionSlice::empty(), None))
+                HeapObject::ClosureTemplate(ClosureTemplate::new(RegionSlice::empty()))
             }
             other => panic!("no exemplar for {other:?} (src/image/layout/heap.rs)"),
         }

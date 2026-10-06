@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! What a `FiberHeap` promises about the physical region ids it hands out, and
 //! what it does with a value whose region is gone.
 //!
@@ -335,8 +335,7 @@ fn transient_region_id_comes_from_heap_pool_not_global_counter() {
 #[test]
 fn closure_sharing_env_increfs_the_env_backing_region() {
     use crate::value::fiber::SignalBits;
-    use crate::value::{Arity, Closure};
-    use std::rc::Rc;
+    use crate::value::{Arity, Closure, CodeBuilder};
 
     let mut heap = FiberHeap::new();
     let region_a = rr(2); // where the shared env backing lives (the "outer" region)
@@ -351,14 +350,11 @@ fn closure_sharing_env_increfs_the_env_backing_region() {
         "A owns its env backing slice (rc=1, the owning-scope ref)"
     );
 
-    let proto = Rc::new(crate::value::TemplateProto::new(
-        Vec::new(),
-        Arity::Exact(0),
-        Vec::new(),
-    ));
-    // The code object is co-region with the closure below, so it adds no edge
-    // to A — the env backing is the one under test.
-    let template = crate::value::closure::materialize(&mut heap, &proto, region_b);
+    // The code object's header is co-region with the closure below, and its
+    // payload lives in a code region of its own, so it adds no edge to A — the
+    // env backing is the one under test.
+    let template =
+        CodeBuilder::new(Vec::new(), Arity::Exact(0), Vec::new()).build_in(&mut heap, region_b);
     // Mirror prim_squelch: a NEW closure that SHARES the env (backed in A) but
     // is itself allocated into a different region B.
     let shared = Closure::new(

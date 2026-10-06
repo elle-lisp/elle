@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! What a discard frees: the parked activations' owner nodes, and the releases their abandoned frames still owed.
 //!
 //! docs/impl/region/mechanism.md
@@ -25,11 +25,13 @@ fn discard_frees_parked_activation_owner_node() {
     use std::rc::Rc;
 
     // The adopt-then-yield body every cycle parks (same shape as
-    // `activation_owner_node_survives_yield_resume_completion`).
-    fn adopt_yield_code(
+    // `activation_owner_node_survives_yield_resume_completion`). The unit is
+    // the caller's to hold until the parked frame is discarded, and to drop
+    // after, so the cycle leaves no code region behind.
+    fn adopt_yield_unit(
         heap: &mut crate::value::fiberheap::FiberHeap,
         child: crate::value::Value,
-    ) -> crate::value::Code {
+    ) -> crate::value::CodeUnit {
         let mut bc = Bytecode::new();
         let idx = bc.add_constant(child);
         bc.emit(Instruction::LoadConst);
@@ -39,7 +41,7 @@ fn discard_frees_parked_activation_owner_node() {
         bc.emit(Instruction::Emit);
         bc.emit_signal_bits(crate::value::fiber::SIG_YIELD);
         bc.emit(Instruction::Return);
-        crate::value::ClosureTemplate::for_proto(heap, &Rc::new(bc.into_proto())).code()
+        crate::value::CodeBuilder::from_bytecode(bc).unit(heap)
     }
 
     let mut vm = crate::vm::VM::new();
@@ -50,9 +52,9 @@ fn discard_frees_parked_activation_owner_node() {
     for _ in 0..50 {
         let (child, child_rid) = alloc_in_fresh_region(unsafe { &mut *heap_ptr }, cons());
         let gen_before = unsafe { &*heap_ptr }.generation_raw(child_rid.get());
-        let code = adopt_yield_code(unsafe { &mut *heap_ptr }, child);
+        let unit = adopt_yield_unit(unsafe { &mut *heap_ptr }, child);
 
-        let result = vm.execute_bytecode_saving_stack(&code, &Rc::new(vec![]));
+        let result = vm.execute_bytecode_saving_stack(&unit.entry().code(), &Rc::new(vec![]));
         assert!(
             result.bits.intersects(crate::value::fiber::SIG_YIELD),
             "the body parks at the yield"
@@ -81,17 +83,13 @@ fn discard_frees_parked_activation_owner_node() {
         let gen_a = unsafe { &*heap_ptr }.generation_raw(rid_a.get());
         let gen_b = unsafe { &*heap_ptr }.generation_raw(rid_b.get());
 
-        let result = vm.execute_bytecode_saving_stack(
-            &adopt_yield_code(unsafe { &mut *heap_ptr }, child_a),
-            &Rc::new(vec![]),
-        );
+        let unit_a = adopt_yield_unit(unsafe { &mut *heap_ptr }, child_a);
+        let result = vm.execute_bytecode_saving_stack(&unit_a.entry().code(), &Rc::new(vec![]));
         assert!(result.bits.intersects(crate::value::fiber::SIG_YIELD));
         let mut chain = vm.fiber.suspended.take().expect("first park");
 
-        let result = vm.execute_bytecode_saving_stack(
-            &adopt_yield_code(unsafe { &mut *heap_ptr }, child_b),
-            &Rc::new(vec![]),
-        );
+        let unit_b = adopt_yield_unit(unsafe { &mut *heap_ptr }, child_b);
+        let result = vm.execute_bytecode_saving_stack(&unit_b.entry().code(), &Rc::new(vec![]));
         assert!(result.bits.intersects(crate::value::fiber::SIG_YIELD));
         chain.extend(vm.fiber.suspended.take().expect("second park"));
 
@@ -131,20 +129,17 @@ fn discard_frees_parked_activation_owner_node() {
 #[test]
 fn discard_runs_the_abandoned_frames_release_tables() {
     use crate::hir::region::{MappedRegion, RuntimeRegion};
-    use crate::value::{
-        Arity, BytecodeFrame, ClosureTemplate, SuspendedFrame, TemplateProto, Value,
-    };
+    use crate::value::{Arity, BytecodeFrame, CodeBuilder, SuspendedFrame, Value};
     use std::rc::Rc;
 
     /// A frame whose function releases value-route slot 1 and slot route 9, and
     /// nothing else.
     fn tabled_code(heap: &mut crate::value::fiberheap::FiberHeap) -> crate::value::Code {
-        let proto = Rc::new(TemplateProto {
-            frame_release_slots: vec![1],
-            frame_release_regions: vec![9],
-            ..TemplateProto::new(Vec::new(), Arity::Exact(0), Vec::new())
-        });
-        ClosureTemplate::for_proto(heap, &proto).code()
+        CodeBuilder::new(Vec::new(), Arity::Exact(0), Vec::new())
+            .frame_release_slots(vec![1])
+            .frame_release_regions(vec![9])
+            .build(heap)
+            .code()
     }
 
     /// Park one frame holding `stack`, with `mapped` as its activation's

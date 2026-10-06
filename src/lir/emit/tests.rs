@@ -1,7 +1,7 @@
 // audited: 2026-10-06
 // docs/impl/bytecode.md
 //! What the bytecode emitter writes: control flow, yield points, the
-//! coalescing oracle, and a nested lambda's blueprint. What an edge owes the
+//! coalescing oracle, and a nested lambda's payload. What an edge owes the
 //! operand stack is `depth`'s subject, and where a call parks is `callsite`'s.
 
 use super::*;
@@ -10,11 +10,29 @@ mod callsite;
 mod depth;
 mod opcodes;
 use crate::lir::testkit::LirFixture;
-use crate::value::Arity;
+use crate::value::{Arity, CodeArena};
+
+/// An emitter over a code region of a heap the test leaks, for the tests that
+/// read what the emitter wrote and run none of it.
+pub(super) fn emitter() -> Emitter {
+    Emitter::new(CodeArena::mint(unsafe {
+        &mut *crate::value::arena::leaked_test_heap()
+    }))
+}
+
+/// Emit `func` alone into a code region of `vm`'s heap and run it there.
+pub(super) fn run_on(
+    vm: &mut crate::vm::VM,
+    func: &LirOwned,
+) -> Result<crate::value::Value, String> {
+    let code = CodeArena::mint(vm.heap());
+    let (bytecode, _, _) = Emitter::new(code).emit(&func.view());
+    vm.execute(&crate::value::CodeUnit::new(code, bytecode))
+}
 
 #[test]
 fn test_emit_simple() {
-    let mut emitter = Emitter::new();
+    let mut emitter = emitter();
 
     let func = LirFixture::new(Arity::Exact(0))
         .block(
@@ -33,7 +51,7 @@ fn test_emit_simple() {
 
 #[test]
 fn test_emit_branch() {
-    let mut emitter = Emitter::new();
+    let mut emitter = emitter();
 
     let func = LirFixture::new(Arity::Exact(0))
         .block(
@@ -77,7 +95,7 @@ fn test_emit_branch() {
 
 #[test]
 fn test_yield_point_info_collected() {
-    let mut emitter = Emitter::new();
+    let mut emitter = emitter();
 
     // fn() { yield 42; resume_value }
     let func = LirFixture::new(Arity::Exact(0))
@@ -170,10 +188,8 @@ fn assert_region_matches_passes_on_correct_slot() {
     // false-positive on a genuinely coincident slot, which is every coalesced
     // site.)
     let func = oracle_probe_func(1, 1);
-    let mut emitter = Emitter::new();
-    let (bytecode, _, _) = emitter.emit(&func.view());
     let mut vm = crate::vm::VM::new();
-    let result = vm.execute(&bytecode);
+    let result = run_on(&mut vm, &func);
     assert!(
         result.is_ok(),
         "the coalescing oracle must stay silent when the slot names the value's \
@@ -195,10 +211,8 @@ fn assert_region_matches_panics_on_wrong_slot() {
     // handler's check reduced to a no-op, this returns normally, so the
     // assertion is what catches the mis-coalesce.
     let func = oracle_probe_func(1, 2);
-    let mut emitter = Emitter::new();
-    let (bytecode, _, _) = emitter.emit(&func.view());
     let mut vm = crate::vm::VM::new();
-    let _ = vm.execute(&bytecode);
+    let _ = run_on(&mut vm, &func);
 }
 
 #[cfg(feature = "jit")]
@@ -247,7 +261,7 @@ fn emit_terminator_carries_a_user_signal_bit_whole() {
         )
         .build();
 
-    let (bytecode, _, _) = Emitter::new().emit(&func.view());
+    let (bytecode, _, _) = emitter().emit(&func.view());
     let lines = disassemble_lines(&bytecode.instructions);
     let emit_line = lines
         .iter()
@@ -259,17 +273,16 @@ fn emit_terminator_carries_a_user_signal_bit_whole() {
     );
 }
 
-/// A nested lambda's blueprint carries both halves of the abandoned-frame
-/// release table, so a closure the emitted `MakeClosure` materializes reaches
-/// an error exit with the releases it still owes (docs/impl/region/template.md
-/// § "One constructor builds a nested lambda's blueprint").
+/// A nested lambda's payload carries both halves of the abandoned-frame
+/// release table, so a closure the emitted `MakeClosure` builds reaches an
+/// error exit with the releases it still owes (docs/impl/region/template.md
+/// § "One constructor builds a nested lambda's payload").
 #[test]
-fn a_nested_lambdas_blueprint_carries_the_frame_release_tables() {
-    // Counter-factual: leaving both tables to the empty value
-    // `TemplateProto::new` supplies fails nothing that runs. The closure built
-    // from such a blueprint carries real bytecode and returns the right
-    // answers; what it loses is one error exit's walk, which strands every
-    // region the abandoned frame still owed.
+fn a_nested_lambdas_payload_carries_the_frame_release_tables() {
+    // Counter-factual: a payload built with both tables empty fails nothing
+    // that runs. The closure built over it carries real bytecode and returns
+    // the right answers; what it loses is one error exit's walk, which
+    // strands every region the abandoned frame still owed.
     use crate::hir::region::StaticRegion;
     use crate::lir::ClosureId;
 
@@ -308,33 +321,36 @@ fn a_nested_lambdas_blueprint_carries_the_frame_release_tables() {
         closures: vec![nested],
     };
     let module = module.freeze().expect("the module freezes");
-    let (bytecode, _, _) = Emitter::new().emit_module(&module);
+    let code = CodeArena::mint(unsafe { &mut *crate::value::arena::leaked_test_heap() });
+    let (bytecode, _, _) = Emitter::new(code).emit_module(&module);
+    let unit = crate::value::CodeUnit::new(code, bytecode);
     assert_eq!(
-        bytecode.child_protos.len(),
+        unit.entry().num_children(),
         1,
-        "one MakeClosure registers one blueprint"
+        "one MakeClosure registers one child"
+    );
+    let child = unit.entry().child(0);
+    assert_eq!(
+        child.frame_release_slots(),
+        &[3u16, 7],
+        "the value route's slots reach the payload",
     );
     assert_eq!(
-        bytecode.child_protos[0].frame_release_slots,
-        vec![3u16, 7],
-        "the value route's slots reach the blueprint",
-    );
-    assert_eq!(
-        bytecode.child_protos[0].frame_release_regions,
-        vec![11u32, 13],
-        "the slot route's regions reach the blueprint",
+        child.frame_release_regions(),
+        &[11u32, 13],
+        "the slot route's regions reach the payload",
     );
 }
 
-/// A nested lambda's blueprint carries the rest-list layout the gate wrote onto
-/// its `LirFunction`, so a closure the emitted `MakeClosure` materializes builds
-/// its rest list the way the analysis proved it may
+/// A nested lambda's payload carries the rest-list layout the gate wrote onto
+/// its `LirFunction`, so a closure the emitted `MakeClosure` builds builds its
+/// rest list the way the analysis proved it may
 /// (docs/impl/region/restlist.md).
 #[test]
-fn a_nested_lambdas_blueprint_carries_its_rest_list_layout() {
-    // Counter-factual: a blueprint left at the layout `TemplateProto::new`
-    // supplies runs correctly and claims a page per rest argument, which no
-    // answer the closure returns can show.
+fn a_nested_lambdas_payload_carries_its_rest_list_layout() {
+    // Counter-factual: a payload left at the default layout runs correctly and
+    // claims a page per rest argument, which no answer the closure returns can
+    // show.
     use crate::hir::region::StaticRegion;
     use crate::lir::ClosureId;
     use crate::value::RestListLayout;
@@ -372,10 +388,12 @@ fn a_nested_lambdas_blueprint_carries_its_rest_list_layout() {
         closures: vec![nested],
     };
     let module = module.freeze().expect("the module freezes");
-    let (bytecode, _, _) = Emitter::new().emit_module(&module);
+    let code = CodeArena::mint(unsafe { &mut *crate::value::arena::leaked_test_heap() });
+    let (bytecode, _, _) = Emitter::new(code).emit_module(&module);
+    let unit = crate::value::CodeUnit::new(code, bytecode);
     assert_eq!(
-        bytecode.child_protos[0].rest_list_layout,
+        unit.entry().child(0).rest_list_layout(),
         RestListLayout::OneRegion,
-        "the gate's verdict reaches the blueprint"
+        "the gate's verdict reaches the payload"
     );
 }

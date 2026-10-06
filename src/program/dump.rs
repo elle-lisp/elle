@@ -106,10 +106,7 @@ pub(super) fn run_dump(
                 eprintln!("{}", e);
                 e
             })?;
-        print!(
-            "{}",
-            crate::dump::bytecode_unit(&result.bytecode, Some(symbols))
-        );
+        print!("{}", crate::dump::bytecode_unit(&result, Some(symbols)));
     }
 
     let _ = dump_bits::ALL; // keep import used even if a stage is added lazily

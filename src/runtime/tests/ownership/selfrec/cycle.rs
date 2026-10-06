@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! The closure-cycle merge reclaims a mutual-recursion cycle; a one-way sibling capture needs only RC.
 //!
 //! docs/impl/region/letrec.md
@@ -97,7 +97,7 @@ fn closure_cycle_discarded_release_is_prompt() {
                 .0
         };
         let (vm, _symbols, cctx) = rt.parts();
-        vm.execute_scheduled(&result.bytecode, cctx)
+        vm.execute_scheduled(&result, cctx)
             .expect("runs")
             .as_int()
             .expect("program returns the region-count delta as an int")

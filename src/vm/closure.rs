@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-10-06
 // docs/impl/region/template.md
 // docs/impl/image/sealing.md
 //! What `MakeClosure` builds: a closure instance and the fresh header it
@@ -7,7 +7,7 @@
 use super::core::VM;
 use crate::hir::region::{RuntimeRegion, StaticRegion};
 use crate::value::arena;
-use crate::value::closure::{materialize, ChildCode, TemplateRef};
+use crate::value::closure::{materialize, ChildCode, ClosureTemplate, TemplateRef};
 use crate::value::fiber::SignalBits;
 use crate::value::heap::{Closure, HeapObject};
 use crate::value::Value;
@@ -35,15 +35,15 @@ use crate::value::Value;
 /// interpreter and the JIT `MakeClosure` helper.
 pub(crate) fn materialize_closure_in_region(
     heap: &mut crate::value::fiberheap::FiberHeap,
-    child: ChildCode<'_>,
+    child: &ClosureTemplate,
     captures: &[Value],
     region_id: RuntimeRegion,
 ) -> Value {
     // Materialize the header into the instance's region first, so the
     // instance's alloc-scan sees a live template Value (self-edge, filtered).
-    let template_val = match child {
-        ChildCode::Blueprint(blueprint) => materialize(heap, blueprint, region_id),
-        ChildCode::Header(child) => arena::alloc_in_region(
+    let template_val = match child.proto() {
+        Some(blueprint) => materialize(heap, blueprint, region_id),
+        None => arena::alloc_in_region(
             heap,
             HeapObject::ClosureTemplate(child.without_blueprint()),
             region_id,
@@ -94,11 +94,11 @@ pub(crate) fn handle_make_closure(
 
     // `materialize_closure_in_region` allocates through the VM's heap
     // (`vm.heap_ptr`/`vm.heap()`), shared by interpreter and JIT.
-    let val = materialize_closure_in_region(
-        unsafe { &mut *vm.heap_ptr },
-        code.child(idx),
-        &captured,
-        region_id,
-    );
+    let heap = unsafe { &mut *vm.heap_ptr };
+    let child = match code.child(idx) {
+        ChildCode::Blueprint(blueprint) => ClosureTemplate::for_proto(heap, blueprint),
+        ChildCode::Header(child) => child,
+    };
+    let val = materialize_closure_in_region(heap, &child, &captured, region_id);
     vm.fiber.stack.push(val);
 }

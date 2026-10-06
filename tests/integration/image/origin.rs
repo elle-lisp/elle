@@ -1,10 +1,8 @@
-// audited: 2026-09-14
+// audited: 2026-10-06
 // The defining span crosses on the payload, so `meta/origin` answers after a
 // hydration.
 // docs/impl/image/sealing.md
 // docs/impl/image/plan.md
-
-use std::rc::Rc;
 
 use super::*;
 use elle::pipeline::eval_all;
@@ -20,20 +18,24 @@ fn origin_span() -> Span {
     Span::new(120, 140, 12, 5).with_file(ORIGIN_FILE)
 }
 
-/// A one-instruction lambda whose blueprint records `origin`.
-fn proto_with_origin(origin: Option<Span>) -> Rc<TemplateProto> {
-    let mut proto = TemplateProto::new(vec![1], Arity::Exact(0), Vec::new());
-    proto.origin = origin;
-    Rc::new(proto)
+/// A one-instruction lambda on `heap` whose payload records `origin`.
+fn code_with_origin(heap: &mut FiberHeap, origin: Option<Span>) -> TemplateRef {
+    let code = CodeBuilder::new(vec![1], Arity::Exact(0), Vec::new());
+    match origin {
+        Some(origin) => code.origin(origin),
+        None => code,
+    }
+    .build(heap)
 }
 
-/// Dump a closure over `proto` to `path` and hydrate it into a fresh heap,
-/// answering the hydrated root. The heap stays alive for the caller, because
-/// reading the root dereferences its pages.
-fn round_trip(proto: &Rc<TemplateProto>, path: &std::path::Path) -> (FiberHeap, Value) {
+/// Dump a closure recording `origin` to `path` and hydrate it into a fresh
+/// heap, answering the hydrated root. The heap stays alive for the caller,
+/// because reading the root dereferences its pages.
+fn round_trip(origin: Option<Span>, path: &std::path::Path) -> (FiberHeap, Value) {
     let mut src = FiberHeap::new();
     let region = src.new_runtime_region();
-    let root = closure_in(&mut src, region, proto, &[], SignalBits::EMPTY);
+    let code = code_with_origin(&mut src, origin);
+    let root = closure_in(&mut src, region, &code, &[], SignalBits::EMPTY);
     image::dump(&mut src, &SymbolTable::new(), root, path).expect("dump");
 
     let mut dst = FiberHeap::new();
@@ -49,8 +51,7 @@ fn a_hydrated_header_answers_the_origin_its_source_did() {
     let dir = crate::common::ScratchDir::new("image-origin-fields");
     let path = dir.join("origin.image");
 
-    let proto = proto_with_origin(Some(origin_span()));
-    let (_dst, root) = round_trip(&proto, &path);
+    let (_dst, root) = round_trip(Some(origin_span()), &path);
     assert_eq!(
         closure_of(root).template.origin(),
         Some(origin_span()),
@@ -70,8 +71,8 @@ fn a_hydrated_origin_names_the_file_the_table_spells() {
 
     let mut src = FiberHeap::new();
     let region = src.new_runtime_region();
-    let proto = proto_with_origin(Some(origin_span()));
-    let root = closure_in(&mut src, region, &proto, &[], SignalBits::EMPTY);
+    let code = code_with_origin(&mut src, Some(origin_span()));
+    let root = closure_in(&mut src, region, &code, &[], SignalBits::EMPTY);
     image::dump(&mut src, &SymbolTable::new(), root, &path).expect("dump");
 
     let mut bytes = std::fs::read(&path).expect("read image");
@@ -115,20 +116,10 @@ fn a_lambda_with_no_origin_still_answers_none() {
     // and the first entry is there to be written wrongly.
     let mut src = FiberHeap::new();
     let region = src.new_runtime_region();
-    let bare = closure_in(
-        &mut src,
-        region,
-        &proto_with_origin(None),
-        &[],
-        SignalBits::EMPTY,
-    );
-    let named = closure_in(
-        &mut src,
-        region,
-        &proto_with_origin(Some(origin_span())),
-        &[],
-        SignalBits::EMPTY,
-    );
+    let bare_code = code_with_origin(&mut src, None);
+    let bare = closure_in(&mut src, region, &bare_code, &[], SignalBits::EMPTY);
+    let named_code = code_with_origin(&mut src, Some(origin_span()));
+    let named = closure_in(&mut src, region, &named_code, &[], SignalBits::EMPTY);
     let root = alloc_pair(&mut src, region, bare, named);
     image::dump(&mut src, &SymbolTable::new(), root, &path).expect("dump");
 

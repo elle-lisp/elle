@@ -13,11 +13,10 @@
 use super::*;
 use crate::lir::testkit::LirFixture;
 use crate::lir::{InstrRef, LirConst, LirInstr, LirOwned, Reg, Terminator};
-use crate::value::closure::{Closure, TemplateProto};
+use crate::value::closure::{Closure, CodeBuilder};
 use crate::value::fiber::SignalBits;
 use crate::value::heap::HeapObject;
 use crate::value::types::Arity;
-use std::rc::Rc;
 
 /// Reconstruct a bundle/value through a ctx over a fresh region on a leaked test
 /// heap, NOT releasing the region: the result must outlive the call (the test

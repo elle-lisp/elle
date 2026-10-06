@@ -39,7 +39,7 @@ fn test_jit_tail_call_compiles() {
     func.entry = Label(0);
 
     let compiler = JitCompiler::new().unwrap();
-    let result = compiler.compile(&frozen(&func).view(), Vec::new());
+    let result = compiler.compile(&frozen(&func).view());
     // TailCall should now compile successfully
     assert!(result.is_ok(), "TailCall should compile: {:?}", result);
 }

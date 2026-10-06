@@ -1,5 +1,8 @@
-// Integration tests for file-scope compilation.
-// Tests immutable vs mutable capture behavior at runtime.
+// audited: 2026-10-06
+// File-scope compilation: a file is one letrec, and what its bindings capture
+// at runtime depends on whether they are mutable.
+//
+// src/pipeline/AGENTS.md
 
 use crate::common::eval_source;
 use elle::Value;
@@ -43,13 +46,15 @@ fn eval_file_source_stdlib<R>(input: &str, f: impl FnOnce(Result<Value, String>)
     f(result)
 }
 
-/// Helper: compile source through the file-as-letrec pipeline.
-fn compile_file_source(input: &str) -> Result<elle::CompileResult, String> {
+/// Helper: compile source through the file-as-letrec pipeline, and answer
+/// whether it compiled. The unit is dropped with the runtime that compiled it,
+/// so only the outcome leaves.
+fn compile_file_source(input: &str) -> Result<(), String> {
     use elle::runtime::Runtime;
 
     let mut rt = Runtime::without_stdlib();
     let (_, symbols, cctx) = rt.parts();
-    elle::compile_file(input, symbols, cctx, "<test>")
+    elle::compile_file(input, symbols, cctx, "<test>").map(drop)
 }
 
 /// Helper: evaluate source through the file-as-letrec pipeline with stdlib,

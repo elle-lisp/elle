@@ -19,7 +19,7 @@ fn compile_stdlib_to_bytecode() {
     let mut core = setup();
     let (_vm, symbols, cctx) = core.parts();
     match elle::pipeline::compile_file(STDLIB, symbols, cctx, "<stdlib>") {
-        Ok(r) => eprintln!("stdlib bytecode: {} bytes", r.bytecode.instructions.len()),
+        Ok(unit) => eprintln!("stdlib bytecode: {} bytes", unit.entry().bytecode().len()),
         Err(e) => panic!("stdlib bytecode compilation failed: {}", e),
     }
 }

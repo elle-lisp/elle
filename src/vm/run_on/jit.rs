@@ -52,7 +52,7 @@ impl VM {
                         )
                     }
                 };
-                match compiler.compile(&lir.view(), Vec::new()) {
+                match compiler.compile(&lir.view()) {
                     Ok(jc) => {
                         let jc = Arc::new(jc);
                         self.install_jit_code((*closure.template).clone(), jc.clone());

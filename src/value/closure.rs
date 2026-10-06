@@ -17,16 +17,22 @@ use crate::value::fiber::SignalBits;
 use crate::value::region_slice::RegionSlice;
 use crate::value::Value;
 
+mod arena;
+mod builder;
 pub(crate) mod cache;
 mod header;
 mod payload;
 mod proto;
+mod unit;
 
+pub use arena::CodeArena;
+pub use builder::CodeBuilder;
 pub use header::{ChildCode, ClosureTemplate};
 pub use payload::{
     CodePayload, LocEntry, LocationTable, MaskRef, MergedSlots, RestListLayout, StrKeys, VarargTag,
 };
 pub use proto::{materialize, TemplateProto, WasmClosureMeta};
+pub use unit::CodeUnit;
 
 /// A reference to a closure's per-definition code object.
 ///

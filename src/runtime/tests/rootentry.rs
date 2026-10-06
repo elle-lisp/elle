@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-06
 //! What the root entry does to the operand stack it finds: nothing.
 //!
 //! docs/impl/vm.md
@@ -19,14 +19,14 @@ fn run_over(
     below: &[crate::value::Value],
     src: &str,
 ) -> (crate::value::Value, Vec<crate::value::Value>, usize) {
-    let result = {
+    let unit = {
         let (_vm, symbols, cctx) = rt.parts();
         compile_file(src, symbols, cctx, "<rootentry>").expect("compiles")
     };
     let (vm, _symbols, _cctx) = rt.parts();
     vm.fiber.stack.clear();
     vm.fiber.stack.extend(below.iter().copied());
-    let value = vm.execute(&result.bytecode).expect("runs");
+    let value = vm.execute(&unit).expect("runs");
     let left = vm.fiber.stack.to_vec();
     (value, left, vm.root_exit_depth())
 }

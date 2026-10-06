@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-06
 //! Building a VM over a heap it owns or shares, and resetting one for reuse.
 //!
 //! docs/impl/vm.md
@@ -128,6 +128,7 @@ impl VM {
             jit_rejections: FxHashMap::default(),
             #[cfg(feature = "jit")]
             jit_compile_attempts: FxHashMap::default(),
+            spirv_cache: FxHashMap::default(),
             docs: HashMap::new(),
             eval_expander: None,
             user_args: Vec::new(),

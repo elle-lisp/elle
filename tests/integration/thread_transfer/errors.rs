@@ -1,3 +1,9 @@
+// audited: 2026-10-06
+// Errors a spawned closure raises reach the joining thread, and a compiled
+// closure carries the location table that names where they came from.
+//
+// docs/threads.md
+
 use super::*;
 
 // ============================================================================
@@ -135,10 +141,10 @@ fn test_compiled_closure_has_location_map() {
     assert!(result.is_ok(), "Compilation should succeed");
 
     let compiled = result.unwrap();
-    // The main bytecode should have a location map
+    // The entry function should have a location table
     assert!(
-        !compiled.bytecode.location_map.is_empty(),
-        "Compiled bytecode should have non-empty LocationMap"
+        !compiled.entry().locations().is_empty(),
+        "the compiled entry should have a non-empty location table"
     );
 }
 
@@ -206,7 +212,7 @@ fn test_location_map_has_valid_line_numbers() {
     let compiled = result.unwrap();
 
     // All entries should have line >= 1
-    for loc in compiled.bytecode.location_map.values() {
+    for (_, loc) in compiled.entry().locations().iter() {
         assert!(
             loc.line >= 1,
             "Line numbers should be >= 1, got {}",
@@ -233,13 +239,13 @@ proptest! {
 
         let compiled = result.unwrap();
         prop_assert!(
-            !compiled.bytecode.location_map.is_empty(),
-            "LocationMap should be non-empty for closure: {}",
+            !compiled.entry().locations().is_empty(),
+            "the location table should be non-empty for closure: {}",
             source
         );
 
         // Also verify all line numbers are valid
-        for loc in compiled.bytecode.location_map.values() {
+        for (_, loc) in compiled.entry().locations().iter() {
             prop_assert!(
                 loc.line >= 1,
                 "Line number should be >= 1, got {} for source: {}",

@@ -1,9 +1,6 @@
 // audited: 2026-10-06
 // docs/impl/values.md
-//! Value representation and tagged-union architecture
-//!
-//! This module implements the core value type for the Elle VM using a 16-byte
-//! tagged union (tag: u64, payload: u64).
+//! Value representation: the 16-byte tagged union, the heap objects it points at, and the types around them.
 
 pub mod allocator;
 pub mod arena;
@@ -58,8 +55,8 @@ pub use capturemask::CaptureMask;
 
 // Export closure and fiber types
 pub use closure::{
-    Closure, ClosureTemplate, RestListLayout, TemplateProto, TemplateRef, VarargTag,
-    WasmClosureMeta,
+    Closure, ClosureTemplate, CodeArena, CodeBuilder, CodeUnit, RestListLayout, TemplateProto,
+    TemplateRef, VarargTag, WasmClosureMeta,
 };
 pub use code::Code;
 pub use fiber::{

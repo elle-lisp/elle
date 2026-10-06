@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! A self-recursive `def` in a lambda releases its closure region once per call, by its body's route.
 //!
 //! docs/impl/selfrec.md
@@ -176,7 +176,7 @@ fn self_recursive_define_in_lambda_no_double_free() {
     };
     let (vm, _symbols, cctx) = rt.parts();
     let v = vm
-        .execute_scheduled(&res.bytecode, cctx)
+        .execute_scheduled(&res, cctx)
         .expect("a cell-free self-recursive `def` must not double-free its closure region");
     assert!(
         v.is_keyword(),
@@ -211,7 +211,7 @@ fn self_recursive_and_sibling_captured_no_double_free() {
     };
     let (vm, _symbols, cctx) = rt.parts();
     let v = vm
-        .execute_scheduled(&res.bytecode, cctx)
+        .execute_scheduled(&res, cctx)
         .expect("a sibling-captured self-recursive `def` must not double-free its closure region");
     assert!(
         v.is_keyword(),

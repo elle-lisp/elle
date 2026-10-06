@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-10-06
 //! Compiled bytecode: the instruction bytes, the constant pool, and the
 //! emit/patch surface the emitter writes through.
 //!
@@ -240,10 +240,10 @@ pub fn format_bytecode_with_constants(instructions: &[u8], constants: &[crate::V
 }
 
 /// Pretty print a whole compiled unit: the entry bytecode plus every nested
-/// lambda's template (`child_protos`), recursively, each labeled by its
-/// `MakeClosure` const_idx path so a dump can be matched to the instruction
-/// that materializes it.
-pub fn format_bytecode_with_protos(bytecode: &Bytecode) -> String {
+/// lambda's code object, recursively, each labeled by its `MakeClosure` index
+/// path so a dump can be matched to the instruction that builds it.
+pub fn format_bytecode_with_protos(unit: &crate::value::CodeUnit) -> String {
+    let bytecode = unit.bytecode();
     let mut output = format_bytecode_with_constants(&bytecode.instructions, &bytecode.constants);
     for (i, proto) in bytecode.child_protos.iter().enumerate() {
         format_proto(&mut output, &format!("{}", i), proto);

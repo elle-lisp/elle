@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-10-06
 //! The FIBER owner node: minted for a region the fiber itself owns, carried
 //! across parks, and freed at the fiber's normal completion.
 //!
@@ -145,11 +145,8 @@ fn fiber_owner_node_survives_parks_and_frees_at_completion() {
         let gen_b = unsafe { &*heap_ptr }.generation_raw(rid_b.get());
         let mut bc2 = Bytecode::new();
         bc2.emit(Instruction::Return);
-        let code2 = crate::value::ClosureTemplate::for_proto(
-            unsafe { &mut *heap_ptr },
-            &Rc::new(bc2.into_proto()),
-        )
-        .code();
+        let unit2 = crate::value::CodeBuilder::from_bytecode(bc2).unit(unsafe { &mut *heap_ptr });
+        let code2 = unit2.entry().code();
         let frame2 = BytecodeFrame::suspend(
             code2,
             Rc::new(vec![]),

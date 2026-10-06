@@ -1,3 +1,8 @@
+// audited: 2026-10-06
+// Closures compared, nested, inspected, scoped, and pushed to their edge cases.
+//
+// docs/functions.md
+
 use super::*;
 
 // ============================================================================
@@ -9,21 +14,13 @@ fn test_closures_never_equal() {
     // Closures should never compare equal (even with identical contents)
     let h = elle::primitives::ctx::TestHeap::new();
     let closure1 = h.ctx().closure(Closure {
-        template: template(h.heap(), TemplateProto::new(
-            vec![],
-            Arity::Exact(0),
-            vec![],
-        )),
+        template: template(h.heap(), CodeBuilder::new(vec![], Arity::Exact(0), vec![])),
         env: elle::value::region_slice::RegionSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     });
 
     let closure2 = h.ctx().closure(Closure {
-        template: template(h.heap(), TemplateProto::new(
-            vec![],
-            Arity::Exact(0),
-            vec![],
-        )),
+        template: template(h.heap(), CodeBuilder::new(vec![], Arity::Exact(0), vec![])),
         env: elle::value::region_slice::RegionSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     });
@@ -37,11 +34,7 @@ fn test_same_closure_reference_equality() {
     // Same closure reference should be equal via Rc
     let h = elle::primitives::ctx::TestHeap::new();
     let closure_rc = Rc::new(Closure {
-        template: template(h.heap(), TemplateProto::new(
-            vec![],
-            Arity::Exact(0),
-            vec![],
-        )),
+        template: template(h.heap(), CodeBuilder::new(vec![], Arity::Exact(0), vec![])),
         env: elle::value::region_slice::RegionSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     });
@@ -70,11 +63,7 @@ fn test_closure_with_nested_captured_values() {
     let captured = vec![nested_list];
     let env = elle::value::arena::alloc_region_slice::<Value>(rt.heap(), &captured);
     let closure = Closure {
-        template: template(h.heap(), TemplateProto::new(
-            vec![],
-            Arity::Exact(0),
-            vec![],
-        )),
+        template: template(h.heap(), CodeBuilder::new(vec![], Arity::Exact(0), vec![])),
         env,
         squelch_mask: SignalBits::EMPTY,
     };
@@ -87,21 +76,16 @@ fn test_closure_with_closure_in_constants() {
     // A closure's constants can contain other closures
     let h = elle::primitives::ctx::TestHeap::new();
     let inner_closure = h.ctx().closure(Closure {
-        template: template(h.heap(), TemplateProto::new(
-            vec![1],
-            Arity::Exact(0),
-            vec![],
-        )),
+        template: template(h.heap(), CodeBuilder::new(vec![1], Arity::Exact(0), vec![])),
         env: elle::value::region_slice::RegionSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     });
 
     let outer_closure = Closure {
-        template: template(h.heap(), TemplateProto::new(
-            vec![],
-            Arity::Exact(0),
-            vec![inner_closure],
-        )),
+        template: template(
+            h.heap(),
+            CodeBuilder::new(vec![], Arity::Exact(0), vec![inner_closure]),
+        ),
         env: elle::value::region_slice::RegionSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
@@ -117,11 +101,7 @@ fn test_closure_with_many_upvalues() {
     let env = elle::value::arena::alloc_region_slice::<Value>(rt.heap(), &captured);
 
     let closure = Closure {
-        template: template(rt.heap(), TemplateProto::new(
-            vec![],
-            Arity::Exact(0),
-            vec![],
-        )),
+        template: template(rt.heap(), CodeBuilder::new(vec![], Arity::Exact(0), vec![])),
         env,
         squelch_mask: SignalBits::EMPTY,
     };
@@ -141,9 +121,10 @@ fn test_closure_as_method() {
     // Priority-1 heap source: the VM already in scope.
     let env = elle::value::arena::alloc_region_slice::<Value>(vm.heap(), &[Value::int(10)]);
     let closure = Closure {
-        template: template(h.heap(), TemplateProto {
-            num_locals: 2,
-            ..TemplateProto::new(vec![], Arity::Exact(2), vec![]) }),
+        template: template(
+            h.heap(),
+            CodeBuilder::new(vec![], Arity::Exact(2), vec![]).num_locals(2),
+        ),
         env,
         squelch_mask: SignalBits::EMPTY,
     };
@@ -163,11 +144,7 @@ fn test_closure_as_method() {
 fn test_closure_type_check() {
     let h = elle::primitives::ctx::TestHeap::new();
     let closure = h.ctx().closure(Closure {
-        template: template(h.heap(), TemplateProto::new(
-            vec![],
-            Arity::Exact(0),
-            vec![],
-        )),
+        template: template(h.heap(), CodeBuilder::new(vec![], Arity::Exact(0), vec![])),
         env: elle::value::region_slice::RegionSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     });
@@ -190,21 +167,13 @@ fn test_closure_environment_isolation() {
     let env2 = elle::value::arena::alloc_region_slice::<Value>(rt.heap(), &[Value::int(2)]);
 
     let closure1 = Closure {
-        template: template(rt.heap(), TemplateProto::new(
-            vec![],
-            Arity::Exact(0),
-            vec![],
-        )),
+        template: template(rt.heap(), CodeBuilder::new(vec![], Arity::Exact(0), vec![])),
         env: env1,
         squelch_mask: SignalBits::EMPTY,
     };
 
     let closure2 = Closure {
-        template: template(rt.heap(), TemplateProto::new(
-            vec![],
-            Arity::Exact(0),
-            vec![],
-        )),
+        template: template(rt.heap(), CodeBuilder::new(vec![], Arity::Exact(0), vec![])),
         env: env2,
         squelch_mask: SignalBits::EMPTY,
     };
@@ -218,9 +187,10 @@ fn test_closure_local_variables_count() {
     // num_locals should indicate how many local variables are bound in closure
     for locals in 0..20 {
         let closure = Closure {
-            template: template(h.heap(), TemplateProto {
-                num_locals: locals,
-                ..TemplateProto::new(vec![], Arity::Exact(0), vec![]) }),
+            template: template(
+                h.heap(),
+                CodeBuilder::new(vec![], Arity::Exact(0), vec![]).num_locals(locals),
+            ),
             env: elle::value::region_slice::RegionSlice::empty(),
             squelch_mask: SignalBits::EMPTY,
         };
@@ -236,11 +206,7 @@ fn test_closure_local_variables_count() {
 fn test_closure_with_empty_bytecode() {
     let h = elle::primitives::ctx::TestHeap::new();
     let closure = Closure {
-        template: template(h.heap(), TemplateProto::new(
-            vec![],
-            Arity::Exact(0),
-            vec![],
-        )),
+        template: template(h.heap(), CodeBuilder::new(vec![], Arity::Exact(0), vec![])),
         env: elle::value::region_slice::RegionSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
@@ -253,11 +219,10 @@ fn test_closure_with_large_bytecode() {
     // Large bytecode should be handled correctly
     let large_code: Vec<u8> = (0..10000).map(|i| (i % 256) as u8).collect();
     let closure = Closure {
-        template: template(h.heap(), TemplateProto::new(
-            large_code.clone(),
-            Arity::Exact(0),
-            vec![],
-        )),
+        template: template(
+            h.heap(),
+            CodeBuilder::new(large_code.clone(), Arity::Exact(0), vec![]),
+        ),
         env: elle::value::region_slice::RegionSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
@@ -265,38 +230,22 @@ fn test_closure_with_large_bytecode() {
 }
 
 #[test]
-fn test_closure_header_keeps_its_blueprint_alive() {
-    // A code object's header holds an `Rc` to the blueprint it was materialized
-    // from, which is what keeps that blueprint's payload cached and readable
-    // (docs/impl/region/template.md). Dropping every other handle to the
-    // blueprint must therefore leave the header's bytecode intact.
+fn test_closure_header_reads_its_payload() {
+    // A header allocated in a region of its own is the only holder of the code
+    // region its payload lives in (docs/impl/region/template.md), so the payload
+    // stays readable through it for as long as the header lives.
     let h = elle::primitives::ctx::TestHeap::new();
-    let proto = Rc::new(TemplateProto::new(
-        vec![1, 2, 3],
-        Arity::Exact(0),
-        vec![],
-    ));
-    let weak = Rc::downgrade(&proto);
-
     let region = h.heap().new_runtime_region();
     let closure = Closure {
-        template: TemplateRef::region(elle::value::closure::materialize(
-            h.heap(),
-            &proto,
-            region,
-        )),
+        template: TemplateRef::region(
+            CodeBuilder::new(vec![1, 2, 3], Arity::Exact(0), vec![]).build_in(h.heap(), region),
+        ),
         env: elle::value::region_slice::RegionSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
 
     let value = h.ctx().closure(closure);
-    drop(proto);
 
-    assert!(
-        weak.upgrade().is_some(),
-        "the header holds the blueprint, so dropping the builder's handle must \
-         not free it"
-    );
     assert_eq!(
         value
             .as_closure()
@@ -314,13 +263,11 @@ fn test_closure_debug_format() {
     let mut rt = Runtime::without_stdlib();
     let env = elle::value::arena::alloc_region_slice::<Value>(rt.heap(), &[Value::int(42)]);
     let closure = Closure {
-        template: template(h.heap(), TemplateProto {
-            num_locals: 2,
-            ..TemplateProto::new(
-                vec![1, 2, 3],
-                Arity::Exact(2),
-                vec![h.ctx().string("test")],
-            ) }),
+        template: template(
+            h.heap(),
+            CodeBuilder::new(vec![1, 2, 3], Arity::Exact(2), vec![h.ctx().string("test")])
+                .num_locals(2),
+        ),
         env,
         squelch_mask: SignalBits::EMPTY,
     };

@@ -69,10 +69,14 @@ pub fn eval_syntax(
         .with_region_info(region_info);
     let lir_module = lowerer.lower(&analysis.hir)?.freeze()?;
 
-    let mut emitter = Emitter::new();
+    // The transformer body runs on this VM, so its code lands on this VM's
+    // heap (docs/impl/region/template.md).
+    let code = crate::value::CodeArena::mint(vm.heap());
+    let mut emitter = Emitter::new(code);
     let (bytecode, _yield_points, _call_sites) = emitter.emit_module(&lir_module);
 
-    vm.execute(&bytecode).map_err(|e| e.to_string())
+    vm.execute(&crate::value::CodeUnit::new(code, bytecode))
+        .map_err(|e| e.to_string())
 }
 
 /// Compile and execute using the pipeline.
@@ -147,10 +151,14 @@ fn eval_in_arena(
         .with_region_info(region_info);
     let lir_module = lowerer.lower(&analysis.hir)?.freeze()?;
 
-    let mut emitter = Emitter::new();
+    // The form runs on `vm`, whatever heap the compile context expands on,
+    // so its code lands on `vm`'s heap (docs/impl/region/template.md).
+    let code = crate::value::CodeArena::mint(vm.heap());
+    let mut emitter = Emitter::new(code);
     let (bytecode, _yield_points, _call_sites) = emitter.emit_module(&lir_module);
 
-    vm.execute(&bytecode).map_err(|e| e.to_string())
+    vm.execute(&crate::value::CodeUnit::new(code, bytecode))
+        .map_err(|e| e.to_string())
 }
 
 /// Compile and execute multiple top-level forms.
@@ -172,7 +180,7 @@ pub fn eval_all(
     // `chan/select`) work in the test harness. `execute_scheduled` falls back
     // to a plain `execute` when `ev/run` is absent (no stdlib loaded), so
     // bare-VM callers are unaffected.
-    vm.execute_scheduled(&result.bytecode, cctx)
+    vm.execute_scheduled(&result, cctx)
         .map_err(|e| e.to_string())
 }
 
@@ -188,5 +196,5 @@ pub fn eval_file(
     source_name: &str,
 ) -> Result<crate::value::Value, String> {
     let result = super::compile::compile_file(source, symbols, cctx, source_name)?;
-    vm.execute(&result.bytecode).map_err(|e| e.to_string())
+    vm.execute(&result).map_err(|e| e.to_string())
 }

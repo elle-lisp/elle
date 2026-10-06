@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-06
 //! What a loop leaves on the activation's operand stack.
 //!
 //! src/lir/AGENTS.md
@@ -35,7 +35,7 @@ fn operand_depth_after(src: &str) -> usize {
             .0
     };
     let (vm, _symbols, _cctx) = rt.parts();
-    vm.execute(&result.bytecode).expect("runs");
+    vm.execute(&result).expect("runs");
     vm.root_exit_depth()
 }
 

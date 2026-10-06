@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-10-06
 // docs/impl/region/template.md
 //! The template-derived execution context.
 //!
@@ -68,7 +68,7 @@ impl Code {
     /// RC.
     #[inline]
     pub fn child(&self, idx: usize) -> ChildCode<'_> {
-        self.template.child(idx)
+        self.template.child_code(idx)
     }
 
     /// The static region slots this function's allocations SHARE after a

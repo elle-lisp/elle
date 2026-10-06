@@ -1,4 +1,7 @@
+// audited: 2026-10-06
 // The instruction set as documented must match the instruction set as defined.
+//
+// docs/impl/bytecode.md
 //
 // `docs/impl/bytecode.md` and `src/compiler/AGENTS.md` are prose about an enum.
 // Nothing compiles them, so a name they spell is a claim no build checks. An
@@ -88,30 +91,34 @@ fn documented_instructions(doc: &str) -> Vec<(usize, String)> {
     found
 }
 
-/// The paths the `## Files` block of `docs/impl/bytecode.md` names, each with
-/// its line number. Every entry is repository-relative and sits first on its
-/// line, ahead of the description column.
+/// The paths the `## Files` table of `docs/impl/bytecode.md` names, each with
+/// its line number. Every row's first cell is a link to the file, relative to
+/// the document; the answer spells it from the repository root.
 fn documented_files(doc: &str) -> Vec<(usize, String)> {
     let mut found = Vec::new();
     let mut in_section = false;
-    let mut in_block = false;
 
     for (index, line) in doc.lines().enumerate() {
         if line.starts_with("## ") {
             in_section = line == "## Files";
             continue;
         }
-        if line.starts_with("```") {
-            in_block = in_section && !in_block;
+        if !in_section || !line.starts_with('|') {
             continue;
         }
-        if in_block {
-            if let Some(path) = line.split_whitespace().next() {
-                found.push((index + 1, path.to_string()));
-            }
+        let first_cell = line.trim_start_matches('|').split('|').next().unwrap_or("");
+        if let Some(target) = link_target(first_cell) {
+            found.push((index + 1, format!("docs/impl/{target}")));
         }
     }
     found
+}
+
+/// The target of the first markdown link in `text`: `[name](target)`.
+fn link_target(text: &str) -> Option<&str> {
+    let start = text.find("](")? + 2;
+    let len = text[start..].find(')')?;
+    Some(&text[start..start + len])
 }
 
 /// Every `*.rs` path spelled anywhere on one line, with markdown decoration
@@ -193,7 +200,7 @@ fn bytecode_doc_names_only_instructions_that_exist() {
     );
 }
 
-// The `## Files` block is where a reader goes to find the code behind the
+// The `## Files` table is where a reader goes to find the code behind the
 // prose. A path that no longer resolves sends them into an empty directory, and
 // splitting a module is exactly the edit that leaves it stale.
 #[test]
@@ -229,7 +236,11 @@ fn the_instruction_enum_lives_where_the_docs_say() {
 
     for doc_path in ["docs/impl/bytecode.md", "src/compiler/AGENTS.md"] {
         let doc = read_doc(doc_path);
-        let doc_dir = root.join(doc_path).parent().expect("doc has a parent").to_path_buf();
+        let doc_dir = root
+            .join(doc_path)
+            .parent()
+            .expect("doc has a parent")
+            .to_path_buf();
         let mut claims = 0;
 
         for (index, line) in doc.lines().enumerate() {
@@ -244,11 +255,15 @@ fn the_instruction_enum_lives_where_the_docs_say() {
                 continue;
             }
             claims += 1;
-            // A document beside the code names its neighbours relatively; one
-            // under docs/ spells the path from the repository root.
-            let names_home = paths
-                .iter()
-                .any(|p| root.join(p) == home || doc_dir.join(p) == home);
+            // A path is relative to the document that spells it, or to the
+            // repository root. Compared canonically, so `../..` resolves.
+            let canonical = |p: PathBuf| fs::canonicalize(p).ok();
+            let home_canonical = canonical(home.clone());
+            let names_home = paths.iter().any(|p| {
+                let at = |base: &Path| canonical(base.join(p));
+                home_canonical.is_some()
+                    && (at(&root) == home_canonical || at(&doc_dir) == home_canonical)
+            });
             assert!(
                 names_home,
                 "{doc_path}:{}: places the `Instruction` enum in {paths:?}, but it \

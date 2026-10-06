@@ -1,4 +1,21 @@
+// audited: 2026-10-06
+//! The interpreter's activation owner node: freed at completion, carried across parks and fuel pauses.
+//!
+//! docs/impl/region/owner.md
+
 use super::*;
+
+/// A hand-emitted body as the entry of a unit on the heap at `heap_ptr`.
+///
+/// The caller holds the unit until the body has finished, parks included, and
+/// drops it after. Each cycle's code region then goes with its unit, so the
+/// region counts below measure only what the activation left.
+fn body_unit(
+    heap_ptr: *mut crate::value::fiberheap::FiberHeap,
+    bc: crate::compiler::bytecode::Bytecode,
+) -> crate::value::CodeUnit {
+    crate::value::CodeBuilder::from_bytecode(bc).unit(unsafe { &mut *heap_ptr })
+}
 
 /// End-to-end exercise of the ACTIVATION OWNER NODE on the interpreter
 /// (docs/impl/region/owner.md § "Owner nodes — an activation as a forest root").
@@ -35,11 +52,8 @@ fn activation_owner_node_frees_adopted_member_on_normal_completion() {
         bc.emit(Instruction::AdoptIntoActivation);
         bc.emit(Instruction::Nil);
         bc.emit(Instruction::Return);
-        let code = crate::value::ClosureTemplate::for_proto(
-            unsafe { &mut *heap_ptr },
-            &Rc::new(bc.into_proto()),
-        )
-        .code();
+        let unit = body_unit(heap_ptr, bc);
+        let code = unit.entry().code();
 
         let result = vm.execute_bytecode_saving_stack(&code, &Rc::new(vec![]));
         assert!(
@@ -98,11 +112,8 @@ fn activation_owner_node_survives_yield_resume_completion() {
         bc.emit(Instruction::Emit);
         bc.emit_signal_bits(crate::value::fiber::SIG_YIELD);
         bc.emit(Instruction::Return);
-        let code = crate::value::ClosureTemplate::for_proto(
-            unsafe { &mut *heap_ptr },
-            &Rc::new(bc.into_proto()),
-        )
-        .code();
+        let unit = body_unit(heap_ptr, bc);
+        let code = unit.entry().code();
 
         let result = vm.execute_bytecode_saving_stack(&code, &Rc::new(vec![]));
         assert!(
@@ -142,7 +153,7 @@ fn activation_owner_node_survives_yield_resume_completion() {
 /// complete. The first park carries the node out of the unwinding activation;
 /// the resume restores it into the live slot; the second park (during the
 /// RESUMED execution) re-captures it; the final completion frees node + member
-/// exactly once. Both halves are load-bearing: dropping the restore or the
+/// exactly once. The test needs both halves: dropping the restore or the
 /// re-capture strands the Owned member (its generation never bumps), and a
 /// clone anywhere instead of a move would free it twice (the debug regionstore
 /// asserts detonate mid-loop).
@@ -174,11 +185,8 @@ fn activation_owner_node_survives_repeated_parks() {
         bc.emit(Instruction::Emit);
         bc.emit_signal_bits(crate::value::fiber::SIG_YIELD);
         bc.emit(Instruction::Return);
-        let code = crate::value::ClosureTemplate::for_proto(
-            unsafe { &mut *heap_ptr },
-            &Rc::new(bc.into_proto()),
-        )
-        .code();
+        let unit = body_unit(heap_ptr, bc);
+        let code = unit.entry().code();
 
         let result = vm.execute_bytecode_saving_stack(&code, &Rc::new(vec![]));
         assert!(
@@ -262,11 +270,8 @@ fn activation_owner_node_rides_exec_result_across_fuel_pause() {
         bc.emit(Instruction::Return);
         bc.emit(Instruction::Jump);
         bc.emit_i32(-7);
-        let code = crate::value::ClosureTemplate::for_proto(
-            unsafe { &mut *heap_ptr },
-            &Rc::new(bc.into_proto()),
-        )
-        .code();
+        let unit = body_unit(heap_ptr, bc);
+        let code = unit.entry().code();
 
         vm.fiber.fuel = Some(0);
         let result = vm.execute_bytecode_saving_stack(&code, &Rc::new(vec![]));

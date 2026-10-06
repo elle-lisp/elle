@@ -3,11 +3,11 @@
 // docs/impl/region/template.md
 //! The code object `rt_make_closure` builds for a WASM closure.
 //!
-//! The module carries one dual-compiled blueprint per closure, and the host
+//! The module carries one dual-compiled code payload per closure, and the host
 //! function builds the code object from it plus the shape the compiled code
 //! passes through linear memory. A spawned OS-thread VM worker runs that code
-//! object's bytecode, so every field of the blueprint is read there: the
-//! nested-lambda blueprints a `MakeClosure` indexes, and the release tables an
+//! object's bytecode, so every field of the payload's code half is read there:
+//! the child table a `MakeClosure` indexes, and the release tables an
 //! abandoned frame walks.
 
 use super::*;
@@ -17,11 +17,11 @@ use crate::value::closure::Closure;
 /// Where the nested lambda's one instruction is written. The fixture's spans
 /// are synthetic, and the emitter records a location only for a real one, so a
 /// test whose subject is the location map writes its own.
-const FILE: &str = "wasm-closure-blueprint.lisp";
+const FILE: &str = "wasm-closure-payload.lisp";
 const LINE: u32 = 12;
 const COL: u32 = 5;
 
-/// A nullary lambda carrying one of everything the dual-compiled blueprint
+/// A nullary lambda carrying one of everything the dual-compiled payload
 /// copies off its own emission: a source location, a merge set, and both
 /// release tables.
 fn nested_lambda_lir() -> LirOwned {
@@ -102,11 +102,10 @@ fn with_entry_closure<T>(read: impl FnOnce(&Closure) -> T) -> T {
 
 #[test]
 fn a_wasm_built_closure_carries_the_frame_release_tables() {
-    // Counter-factual: leaving both tables to the empty value
-    // `TemplateProto::new` supplies fails nothing that runs. The closure carries
-    // real bytecode and returns the right answers; what it loses is one error
-    // exit's walk on the spawned worker, which strands every region the
-    // abandoned frame still owed.
+    // Counter-factual: a code object built with both tables empty fails
+    // nothing that runs. The closure carries real bytecode and returns the
+    // right answers; what it loses is one error exit's walk on the spawned
+    // worker, which strands every region the abandoned frame still owed.
     let (slots, regions) = with_entry_closure(|closure| {
         (
             closure.template.frame_release_slots().to_vec(),
@@ -127,7 +126,7 @@ fn a_wasm_built_closure_carries_the_frame_release_tables() {
 
 #[test]
 fn a_wasm_built_closure_carries_the_locations_and_the_merge_set_its_body_names() {
-    // The other two fields the dual-compiled blueprint carries, and the same
+    // The other two fields the dual-compiled payload carries, and the same
     // silence: a merge set left empty mints a fresh region where the body meant
     // to reuse one, and a location map left empty reports an error against no
     // source line at all.
@@ -150,38 +149,38 @@ fn a_wasm_built_closure_carries_the_locations_and_the_merge_set_its_body_names()
 //
 // `sys/spawn`/`sys/spawn-vm` deep-copy a closure to a fresh OS-thread bytecode
 // VM and run its `template.code()` there (src/primitives/concurrency/worker.rs).
-// Under
-// `--wasm=full` the closure is built by `rt_make_closure`, which reconstructs a
-// `ClosureTemplate` from the module's dual-compiled bytecode. That bytecode's
-// `MakeClosure` instructions index into the template's `child_protos` (the
-// nested-lambda blueprints), so the reconstruction MUST carry them: without
-// them the worker's first `MakeClosure` indexes an empty list and panics
-// (`child_protos[idx]`, src/vm/closure.rs). The corpus spawn/concurrency files
-// (concurrency.lisp, send-lir.lisp, region-spawn-*.lisp …) all hit this. These
-// return an immediate int (see `eval_with_stdlib`'s caveat); a worker failure
-// aborts the join, so the value diverges from the expected int.
+// Under `--wasm=full` the closure is built by `rt_make_closure`, which builds a
+// `ClosureTemplate` from the module's dual-compiled payload. That bytecode's
+// `MakeClosure` instructions index into the payload's child table, so the
+// code object MUST carry it: without it the worker's first `MakeClosure`
+// indexes an empty table and panics (src/vm/closure.rs). The corpus
+// spawn/concurrency files (concurrency.lisp, send-lir.lisp,
+// region-spawn-*.lisp …) all hit this. These return an immediate int (see
+// `eval_with_stdlib`'s caveat); a worker failure aborts the join, so the value
+// diverges from the expected int.
 
 #[test]
 fn wasm_full_spawn_runs_closure_referencing_children() {
     // `(+ 100 1)` compiles to a body whose dual-compiled bytecode references the
-    // template's children; before child_protos were carried, the worker panicked
-    // on its first MakeClosure. Joining the worker must yield the sum.
+    // code object's children; a code object that left them behind makes the
+    // worker panic on its first MakeClosure. Joining the worker must yield the
+    // sum.
     assert_eq!(
         eval_with_stdlib("(sys/join (sys/spawn-vm (fn () (+ 100 1))))"),
         "101",
         "a WASM-built closure spawned to an OS-thread VM worker must carry its \
-         child prototypes so the worker can run it"
+         child table so the worker can run it"
     );
 }
 
 #[test]
 fn wasm_full_spawn_runs_nested_closure() {
     // A spawned closure that itself builds a nested closure (`g`) exercises the
-    // MakeClosure → child_protos path directly. Joining must yield g's result.
+    // MakeClosure → child table path directly. Joining must yield g's result.
     assert_eq!(
         eval_with_stdlib("(sys/join (sys/spawn-vm (fn () (let [g (fn [x] (* x x))] (g 6)))))"),
         "36",
         "a spawned WASM-built closure that constructs a nested closure must \
-         resolve it through the carried child prototypes"
+         resolve it through the carried child table"
     );
 }

@@ -54,13 +54,17 @@ pub struct Emitter {
     /// The frozen LIR of each closure. Parallel to `compiled_closures`.
     /// Needed by MakeClosure to build ClosureTemplates.
     closure_lir_funcs: Option<Rc<[LirOwned]>>,
+    /// The code region this emission writes its payloads into.
+    arena: crate::value::CodeArena,
 }
 
 mod instr;
 
 impl Emitter {
-    pub fn new() -> Self {
+    /// An emitter writing the code objects it builds into `arena`.
+    pub fn new(arena: crate::value::CodeArena) -> Self {
         Emitter {
+            arena,
             bytecode: Bytecode::new(),
             label_offsets: HashMap::new(),
             pending_jumps: Vec::new(),
@@ -353,9 +357,10 @@ impl Emitter {
     }
 }
 
-impl Default for Emitter {
-    fn default() -> Self {
-        Self::new()
+impl Emitter {
+    /// The code region this emission writes into.
+    pub fn arena(&self) -> crate::value::CodeArena {
+        self.arena
     }
 }
 

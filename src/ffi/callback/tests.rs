@@ -1,4 +1,7 @@
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-10-06
+//! Creating, storing and freeing an FFI callback, and the error slot its trampoline fills.
+//!
+//! docs/ffi.md
 
 use super::*;
 use crate::ffi::types::{CallingConvention, Signature, TypeDesc};
@@ -7,14 +10,11 @@ use crate::value::Closure;
 
 fn test_closure(heap: &mut crate::value::fiberheap::FiberHeap, arity: usize) -> Rc<Closure> {
     use crate::value::types::Arity;
-    use crate::value::TemplateProto;
-    let proto = TemplateProto {
-        num_locals: arity,
-        num_params: arity,
-        ..TemplateProto::new(Vec::new(), Arity::Exact(arity), Vec::new())
-    };
+    let code = crate::value::CodeBuilder::new(Vec::new(), Arity::Exact(arity), Vec::new())
+        .num_locals(arity)
+        .num_params(arity);
     Rc::new(Closure::new(
-        crate::value::closure::test_template(heap, proto),
+        code.build(heap),
         crate::value::region_slice::RegionSlice::empty(),
         SignalBits::EMPTY,
     ))

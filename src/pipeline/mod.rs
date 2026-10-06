@@ -28,12 +28,6 @@ pub use compile::{
 };
 pub use eval::{eval, eval_all, eval_file, eval_syntax};
 
-/// Compilation result
-#[derive(Debug)]
-pub struct CompileResult {
-    pub bytecode: crate::compiler::Bytecode,
-}
-
 /// Analysis-only result (no bytecode generation)
 /// Used by linter and LSP which need HIR but not bytecode
 #[derive(Debug)]

@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! How a primitive's signal is dispatched, and what each park records about the
 //! references it leaves standing.
 //!
@@ -12,15 +12,9 @@ use crate::value::{SIG_DEBUG, SIG_IO, SIG_YIELD};
 type TestFixtures = (crate::value::Code, Rc<Vec<Value>>);
 fn test_fixtures() -> TestFixtures {
     (
-        crate::value::ClosureTemplate::for_proto(
-            unsafe { &mut *crate::value::arena::leaked_test_heap() },
-            &Rc::new(crate::value::TemplateProto::new(
-                Vec::new(),
-                crate::value::Arity::Exact(0),
-                Vec::new(),
-            )),
-        )
-        .code(),
+        crate::value::CodeBuilder::new(Vec::new(), crate::value::Arity::Exact(0), Vec::new())
+            .build(unsafe { &mut *crate::value::arena::leaked_test_heap() })
+            .code(),
         Rc::new(vec![]),
     )
 }

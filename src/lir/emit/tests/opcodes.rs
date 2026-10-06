@@ -39,7 +39,7 @@ fn arithmetic_opcodes(op: BinOp, make_op: fn(Reg, BinOp, Reg, Reg) -> LirInstr) 
         )
         .build();
 
-    let (bytecode, _, _) = Emitter::new().emit(&func.view());
+    let (bytecode, _, _) = emitter().emit(&func.view());
     // The trap: every integer opcode name contains its polymorphic one, so a
     // substring search for "Add" also matches an emitted "AddInt". Split the
     // token off and compare it whole.

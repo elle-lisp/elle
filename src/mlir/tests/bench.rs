@@ -102,7 +102,7 @@ fn bench_mlir() {
     let cranelift_init = start.elapsed();
 
     let start = Instant::now();
-    let _jit_code = compiler.compile(&func.view(), vec![]).unwrap();
+    let _jit_code = compiler.compile(&func.view()).unwrap();
     let cranelift_compile = start.elapsed();
 
     eprintln!();

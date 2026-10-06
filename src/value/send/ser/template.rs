@@ -61,7 +61,7 @@ fn sendable_from_header(
     let (lir, lir_values) = send_lir(t.lir(), ctx)?;
 
     let child_protos: Vec<SendableClosure> = (0..t.num_children())
-        .map(|i| sendable_from_child(t.child(i), ctx))
+        .map(|i| sendable_from_child(t.child_code(i), ctx))
         .collect::<Result<_, _>>()?;
 
     Ok(SendableClosure {

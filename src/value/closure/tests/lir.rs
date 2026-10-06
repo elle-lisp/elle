@@ -1,117 +1,145 @@
 // audited: 2026-10-06
-//! A payload carries its function's LIR: the blueprint's function, in the
-//! payload's own pages, gone when they go.
+//! A payload carries its function's LIR: the function freezing produced, in
+//! its compile unit's code region, gone when that region goes.
 //! docs/impl/region/template.md
 //! docs/impl/lir.md
 
-use std::rc::Rc;
-
 use super::*;
 use crate::lir::code::Node;
-use crate::pipeline::compile_file;
-use crate::runtime::Runtime;
+use crate::lir::{Emitter, FrozenModule, LirView};
+use crate::value::CodeArena;
 
-/// Every nested-lambda blueprint `src` compiles to, each once, parents before
-/// their children.
-fn blueprints(rt: &mut Runtime, src: &str, file: &str) -> Vec<Rc<TemplateProto>> {
-    let (_vm, symbols, cctx) = rt.parts();
-    let result = compile_file(src, symbols, cctx, file).expect("the source compiles");
-    let mut out: Vec<Rc<TemplateProto>> = Vec::new();
-    let mut stack: Vec<Rc<TemplateProto>> =
-        result.bytecode.child_protos.iter().rev().cloned().collect();
-    while let Some(p) = stack.pop() {
-        if out.iter().any(|q| Rc::ptr_eq(q, &p)) {
-            continue;
+/// `src` frozen once, and emitted from that one freeze into a code region of
+/// `rt`'s heap: the module the payloads were written from, and the unit they
+/// were written into.
+///
+/// One freeze serves both sides because two compiles of one source do not
+/// agree on region slots, which come from a process-wide counter.
+fn frozen_and_emitted(rt: &mut Runtime, src: &str, file: &str) -> (FrozenModule, CodeUnit) {
+    let module = {
+        let (_vm, symbols, cctx) = rt.parts();
+        crate::pipeline::compile_file_to_lir(src, symbols, cctx, file, 0)
+            .expect("the source freezes")
+    };
+    let code = CodeArena::mint(rt.heap());
+    let (bytecode, _, _) = Emitter::new(code).emit_module(&module);
+    (module, CodeUnit::new(code, bytecode))
+}
+
+/// Every nested lambda's LIR the unit's child tables reach, each once, with
+/// its sites cleared: the sites are what emission adds, so a frozen module
+/// has none to compare them with.
+fn lambdas(unit: &CodeUnit) -> Vec<crate::lir::LirOwned> {
+    fn walk(t: &ClosureTemplate, out: &mut Vec<crate::lir::LirOwned>) {
+        let mut owned = t.lir().expect("a nested lambda carries LIR").to_owned();
+        owned.set_sites(&[], &[]);
+        out.push(owned);
+        for i in 0..t.num_children() {
+            walk(&t.child(i), out);
         }
-        stack.extend(p.child_protos.iter().rev().cloned());
-        out.push(p);
+    }
+    let mut out = Vec::new();
+    let entry = unit.entry();
+    for i in 0..entry.num_children() {
+        walk(&entry.child(i), &mut out);
     }
     out
 }
 
-/// The one lambda `src` compiles to.
-fn lambda(rt: &mut Runtime, src: &str) -> Rc<TemplateProto> {
-    let mut all = blueprints(rt, src, "<lir-payload>");
-    assert_eq!(all.len(), 1, "the source compiles to one lambda");
-    all.pop().expect("one lambda")
+/// A lambda with a branch, for the tests that need a function with more than
+/// one block. `numeric!` proves `x` for the intrinsics, which a runtime with
+/// no stdlib has no wrapper for.
+const LAMBDA: &str = "(fn [x] (numeric!) (if (%eq x 2) 40 (%add x 7)))";
+
+/// Bytes of node records `lir` holds.
+fn node_bytes(lir: &LirView<'_>) -> usize {
+    lir.nodes().count() * std::mem::size_of::<Node>()
 }
 
-/// A blueprint carrying every field of `p` but its LIR, so a payload built
-/// from it differs from `p`'s by the LIR alone.
-fn without_lir(p: &TemplateProto) -> TemplateProto {
-    TemplateProto {
-        num_locals: p.num_locals,
-        num_captures: p.num_captures,
-        num_params: p.num_params,
-        signal: p.signal,
-        capture_params_mask: p.capture_params_mask,
-        capture_locals_mask: p.capture_locals_mask.clone(),
-        location_map: p.location_map.clone(),
-        doc: p.doc.clone(),
-        origin: p.origin,
-        vararg_kind: p.vararg_kind.clone(),
-        rest_list_layout: p.rest_list_layout,
-        name: p.name.clone(),
-        region_table: p.region_table.clone(),
-        merged_slots: p.merged_slots.clone(),
-        frame_release_slots: p.frame_release_slots.clone(),
-        frame_release_regions: p.frame_release_regions.clone(),
-        ..TemplateProto::new(p.bytecode.clone(), p.arity, p.constants.clone())
-    }
-}
-
-/// Bytes of node records a blueprint's LIR holds.
-fn node_bytes(p: &TemplateProto) -> usize {
-    let lir = p
-        .lir_function
-        .as_ref()
-        .expect("a nested lambda carries LIR");
-    lir.view().nodes().count() * std::mem::size_of::<Node>()
+/// Bytes of slices written into `region`'s pages. Slices bump down from each
+/// page's end, so a page holds `len - data_cursor` bytes of them; committed
+/// bytes would count whole pages, which one small function's LIR need not
+/// add.
+fn slice_bytes(heap: &FiberHeap, region: RuntimeRegion) -> usize {
+    heap.region_pool(region)
+        .expect("the region is live")
+        .page_layouts()
+        .iter()
+        .map(|l| l.len - l.data_cursor)
+        .sum()
 }
 
 /// Every lambda the standard library compiles reads, out of its payload, the
-/// function its blueprint froze: every header field, every block, every
-/// instruction with its span, and every site. The payload is what every
-/// reader of a code object reads, so a field the copy loses is a field the
-/// JIT compiles wrong.
+/// function freezing produced: every header field, every block, every
+/// instruction with its span. The payload is what every reader of a code
+/// object reads, so a field the emitter leaves out is a field the JIT compiles
+/// wrong.
 ///
-/// The counter-factual is a payload that carries no LIR, which is what a
+/// The counter-factual is a payload written without its LIR, which is what a
 /// hydrated closure read before the LIR moved into the payload: the closure
 /// still runs, on the interpreter, and only this answer tells.
 #[test]
-fn every_stdlib_lambdas_payload_answers_its_blueprints_function() {
+fn every_stdlib_lambdas_payload_answers_its_frozen_function() {
     let mut rt = Runtime::new();
-    let protos = blueprints(&mut rt, crate::pipeline::sources::STDLIB, "stdlib.lisp");
+    let (module, unit) =
+        frozen_and_emitted(&mut rt, crate::pipeline::sources::STDLIB, "stdlib.lisp");
+    let got = lambdas(&unit);
     assert!(
-        protos.len() > 100,
+        got.len() > 100,
         "the standard library compiles to {} lambdas, so the walk missed most",
-        protos.len()
+        got.len()
     );
-    let mut heap = FiberHeap::new();
-    for p in &protos {
-        let want = p
-            .lir_function
-            .as_ref()
-            .expect("a nested lambda's blueprint carries LIR")
-            .view();
+    for lir in &got {
+        let lir = lir.view();
+        let id = lir.closure_id().expect("a nested lambda has a closure id");
+        let want = module.closures[id.0 as usize].view();
         let label = want.name().unwrap_or("<anon>").to_string();
-        let t = header(header_in(&mut heap, p));
-        let got = t
-            .lir()
-            .unwrap_or_else(|| panic!("{label}: the payload carries no LIR"));
-        if let Some(diff) = want.first_difference(&got) {
-            panic!("{label}: the payload's LIR differs from the blueprint's at {diff}");
+        if let Some(diff) = want.first_difference(&lir) {
+            panic!("{label}: the payload's LIR differs from the frozen function at {diff}");
         }
     }
 }
 
-/// A code object with no LIR — an entry thunk, a hand-built blueprint —
-/// answers none, rather than an empty function the JIT would compile.
+/// A code object with no LIR — an entry function, a hand-built one — answers
+/// none, rather than an empty function the JIT would compile.
 #[test]
 fn a_payload_without_lir_answers_none() {
     let mut heap = FiberHeap::new();
-    let t = header(header_in(&mut heap, &proto(vec![1, 2, 3])));
-    assert!(t.lir().is_none(), "a blueprint with no LIR grew one");
+    let t = CodeBuilder::new(vec![1, 2, 3], Arity::Exact(0), Vec::new()).build(&mut heap);
+    assert!(t.lir().is_none(), "a hand-built code object grew LIR");
+}
+
+/// Freezing records the merge set and both release tables ascending, so the
+/// frozen form a `JitTask` carries and the payload a view reads agree on order
+/// as well as content (docs/impl/lir.md).
+///
+/// The counter-factual is a frozen function that keeps the lowerer's discovery
+/// order: the payload sorts its copies for its binary searches, the two disagree,
+/// and a test comparing them reads the order as a lost field.
+#[test]
+fn freezing_records_the_release_tables_ascending() {
+    use crate::hir::region::StaticRegion;
+    use crate::lir::{LirConst, LirInstr, Reg, Terminator};
+
+    let s = |n| StaticRegion::new(n).unwrap();
+    let mut func = crate::lir::testkit::LirFixture::new(Arity::Exact(0))
+        .block(
+            0,
+            vec![LirInstr::Const {
+                dst: Reg(0),
+                value: LirConst::Nil,
+            }],
+            Terminator::Return(Reg(0)),
+        )
+        .build_working();
+    func.merged_slots = vec![s(9), s(4), s(7)];
+    func.frame_release_slots = vec![8, 3, 5];
+    func.frame_release_regions = vec![s(13), s(11), s(12)];
+    let frozen = crate::lir::code::freeze(&func).expect("the function freezes");
+    let view = frozen.view();
+    assert_eq!(view.merged_slots(), &[s(4), s(7), s(9)]);
+    assert_eq!(view.frame_release_slots(), &[3, 5, 8]);
+    assert_eq!(view.frame_release_regions(), &[s(11), s(12), s(13)]);
 }
 
 /// A promotion copies the function out of the payload, and the copy answers
@@ -123,36 +151,31 @@ fn a_payload_without_lir_answers_none() {
 /// correctly until the free lands, and this test frees it before reading.
 #[test]
 fn a_promotion_copy_answers_after_its_payload_region_is_freed() {
-    let mut rt = Runtime::new();
-    let p = lambda(&mut rt, "(fn [x] (if (%eq x 2) 40 (+ x 7)))");
-    let want = Rc::clone(p.lir_function.as_ref().expect("the lambda carries LIR"));
+    let mut rt = Runtime::without_stdlib();
+    let v = run(&mut rt, LAMBDA);
+    let closure = v.as_closure().expect("a closure").clone();
+    let code = code_region(rt.heap(), &closure);
+    let generation = rt.heap().region_generation(code.get());
+    let copy = closure
+        .template
+        .lir()
+        .expect("the payload carries LIR")
+        .to_owned();
+    let want = copy.clone();
 
-    let mut heap = FiberHeap::new();
-    let region = region(&mut heap);
-    let copy = {
-        let t = header(materialize(&mut heap, &p, region));
-        t.lir().expect("the payload carries LIR").to_owned()
-    };
-    let payload_regions = heap.template_payload_regions();
-    assert_eq!(
-        payload_regions.len(),
-        1,
-        "one blueprint, one payload region"
-    );
-
-    // Free the header, then the blueprint, then the payload's region.
-    heap.decref_region_if_present(region);
-    drop(p);
-    heap.release_dead_template_payloads();
-    assert!(
-        heap.template_payload_regions().is_empty(),
-        "the payload region outlived its blueprint, so nothing here was freed"
+    crate::value::arena::release_program_value(rt.heap(), v);
+    assert_ne!(
+        rt.heap().region_generation(code.get()),
+        generation,
+        "the closure was the code region's last holder, so the region must be freed \
+         or this test frees nothing"
     );
 
     // Claim the freed pages again and write over them.
-    let scribble = heap.new_runtime_region();
+    let scribble = rt.heap().new_runtime_region();
     for _ in 0..64 {
-        heap.alloc_region_slice_in_region(&[0xABu8; 4096], scribble);
+        rt.heap()
+            .alloc_region_slice_in_region(&[0xABu8; 4096], scribble);
     }
 
     if let Some(diff) = want.view().first_difference(&copy.view()) {
@@ -160,76 +183,51 @@ fn a_promotion_copy_answers_after_its_payload_region_is_freed() {
     }
 }
 
-/// A payload's LIR lands in the payload's region and leaves with it. The
-/// region grows by at least the node records the function holds, and freeing
-/// the blueprint returns the heap to the regions it had before.
+/// A payload's LIR lands in its unit's code region and leaves with it. The
+/// region holds at least the node records the function carries, and freeing
+/// the last closure over a dropped unit returns the heap to the regions it
+/// had before the compile.
 ///
 /// The counter-factual is LIR kept beside the payload in Rust memory: the
-/// region would not grow, and no region gauge could see the bytes.
+/// region would not hold the bytes, and no region gauge could see them.
 #[test]
-fn a_payloads_lir_lands_in_its_region_and_leaves_with_it() {
-    let mut rt = Runtime::new();
-    let p = lambda(&mut rt, "(fn [x] (if (%eq x 2) 40 (+ x 7)))");
-    let bare = Rc::new(without_lir(&p));
-
-    // Slices bump down from each page's end, so a page holds `len -
-    // data_cursor` bytes of them. Committed bytes would count whole pages,
-    // which one small function's LIR need not add.
-    let grown = |p: &Rc<TemplateProto>| {
-        let mut heap = FiberHeap::new();
-        let region = region(&mut heap);
-        materialize(&mut heap, p, region);
-        let payload = heap.template_payload_regions();
-        assert_eq!(payload.len(), 1, "one blueprint, one payload region");
-        heap.region_pool(payload[0])
-            .expect("the payload region is live")
-            .page_layouts()
-            .iter()
-            .map(|l| l.len - l.data_cursor)
-            .sum::<usize>()
-    };
-    let (with, without) = (grown(&p), grown(&bare));
+fn a_payloads_lir_lands_in_its_code_region_and_leaves_with_it() {
+    let mut rt = Runtime::without_stdlib();
+    let baseline = rt.heap().active_region_count();
+    let v = run(&mut rt, LAMBDA);
+    let closure = v.as_closure().expect("a closure").clone();
+    let code = code_region(rt.heap(), &closure);
+    let lir = closure.template.lir().expect("the payload carries LIR");
     assert!(
-        with >= without + node_bytes(&p),
-        "a payload with LIR allocated {with} bytes against {without} without; \
-         the {} bytes of node records are not in the region",
-        node_bytes(&p)
+        slice_bytes(rt.heap(), code) >= node_bytes(&lir),
+        "the code region holds {} bytes of slices, fewer than the {} bytes of node \
+         records the function carries",
+        slice_bytes(rt.heap(), code),
+        node_bytes(&lir)
     );
 
-    let mut heap = FiberHeap::new();
-    let baseline = heap.active_region_count();
-    let region = region(&mut heap);
-    materialize(&mut heap, &p, region);
-    heap.decref_region_if_present(region);
-    drop(p);
-    heap.release_dead_template_payloads();
+    crate::value::arena::release_program_value(rt.heap(), v);
     assert_eq!(
-        heap.active_region_count(),
+        rt.heap().active_region_count(),
         baseline,
-        "freeing the header and its blueprint left a region behind"
+        "freeing the last closure over a dropped unit left a region behind"
     );
 }
 
-/// The standard library's LIR is region pages the `arena/page-claims` gauge
-/// counts: materializing every stdlib lambda claims more pages than
-/// materializing the same code objects without their LIR.
+/// The standard library's LIR is region pages the region gauges count: its
+/// unit's code region holds every lambda's node records.
 #[test]
-fn the_stdlib_lir_shows_in_page_claims() {
+fn the_stdlib_lir_lands_in_its_code_region() {
     let mut rt = Runtime::new();
-    let protos = blueprints(&mut rt, crate::pipeline::sources::STDLIB, "stdlib.lisp");
-    let claims = |protos: &[Rc<TemplateProto>]| {
-        let mut heap = FiberHeap::new();
-        let before = heap.page_claims();
-        for p in protos {
-            header_in(&mut heap, p);
-        }
-        heap.page_claims() - before
-    };
-    let bare: Vec<Rc<TemplateProto>> = protos.iter().map(|p| Rc::new(without_lir(p))).collect();
-    let (with, without) = (claims(&protos), claims(&bare));
+    let (_module, unit) =
+        frozen_and_emitted(&mut rt, crate::pipeline::sources::STDLIB, "stdlib.lisp");
+    let code = RuntimeRegion::new(rt.heap().region_of_ptr(unit.entry().payload_backing()))
+        .expect("the entry payload lives in a real region");
+    let nodes: usize = lambdas(&unit).iter().map(|l| node_bytes(&l.view())).sum();
     assert!(
-        with > without,
-        "the stdlib's payloads claimed {with} pages with their LIR and \
-         {without} without, so the LIR is not in region pages"
+        slice_bytes(rt.heap(), code) >= nodes,
+        "the stdlib's code region holds {} bytes of slices, fewer than the {nodes} \
+         bytes of node records its lambdas carry, so the LIR is not in its pages",
+        slice_bytes(rt.heap(), code)
     );
 }

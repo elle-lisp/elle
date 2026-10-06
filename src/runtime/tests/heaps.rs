@@ -48,8 +48,8 @@ fn an_instance_compiles_on_the_heap_its_program_runs_on() {
             vm.heap_ptr,
             "an instance's compile heap is its program heap"
         );
-        let result = compile_file(LAMBDA, symbols, cctx, "<heaps>").expect("compiles");
-        vm.execute(&result.bytecode).expect("runs")
+        let unit = compile_file(LAMBDA, symbols, cctx, "<heaps>").expect("compiles");
+        vm.execute(&unit).expect("runs")
     };
     assert!(payload_on(rt.heap(), value));
     crate::value::arena::release_program_value(rt.heap(), value);
@@ -67,8 +67,8 @@ fn a_standalone_compile_context_compiles_on_a_heap_of_its_own() {
         vm.heap_ptr,
         "a standalone compile context runs its macro VM on a heap of its own"
     );
-    let result = compile_file(LAMBDA, &mut symbols, &mut cctx, "<heaps>").expect("compiles");
-    let value = vm.execute(&result.bytecode).expect("runs");
+    let unit = compile_file(LAMBDA, &mut symbols, &mut cctx, "<heaps>").expect("compiles");
+    let value = vm.execute(&unit).expect("runs");
     assert!(
         payload_on(vm.heap(), value),
         "the closure's payload lives on the heap that runs it"
@@ -97,8 +97,8 @@ fn the_scheduled_entry_runs_on_the_instance_heap() {
     let mut rt = Runtime::new();
     let value = {
         let (vm, symbols, cctx) = rt.parts();
-        let result = compile_file(LAMBDA, symbols, cctx, "<heaps>").expect("compiles");
-        vm.execute_scheduled(&result.bytecode, cctx).expect("runs")
+        let unit = compile_file(LAMBDA, symbols, cctx, "<heaps>").expect("compiles");
+        vm.execute_scheduled(&unit, cctx).expect("runs")
     };
     assert!(payload_on(rt.heap(), value));
     crate::value::arena::release_program_value(rt.heap(), value);
@@ -131,8 +131,8 @@ fn a_received_closure_is_rebuilt_on_the_receiving_heap() {
     let mut sender = Runtime::without_stdlib();
     let value = {
         let (vm, symbols, cctx) = sender.parts();
-        let result = compile_file(LAMBDA, symbols, cctx, "<heaps>").expect("compiles");
-        vm.execute(&result.bytecode).expect("runs")
+        let unit = compile_file(LAMBDA, symbols, cctx, "<heaps>").expect("compiles");
+        vm.execute(&unit).expect("runs")
     };
     let bundle =
         crate::value::send::SendBundle::from_value(value, sender.heap(), None).expect("sendable");

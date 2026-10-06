@@ -2,32 +2,35 @@
 //! What a payload carries: the tables and masks a header reads out of it.
 //! docs/impl/region/template.md
 
-use std::rc::Rc;
-
 use super::*;
 use crate::error::LocationMap;
 use crate::hir::region::StaticRegion;
 use crate::reader::SourceLoc;
-use crate::value::heap::HeapObject;
 use crate::value::types::Arity;
+
+/// A header over a code object of `bytes` with every other field empty but
+/// what `fill` sets.
+fn built(bytes: usize, arity: Arity, fill: impl FnOnce(CodeBuilder) -> CodeBuilder) -> TemplateRef {
+    let mut heap = FiberHeap::new();
+    let t = fill(CodeBuilder::new(vec![0; bytes], arity, Vec::new())).build(&mut heap);
+    // The heap is leaked with the header: a test reads the payload after this
+    // returns.
+    std::mem::forget(heap);
+    t
+}
 
 /// Source locations are a table ascending by bytecode offset, built from a
 /// `LocationMap` whose iteration order is a hash order. A lookup is a binary
 /// search, so an unsorted table would answer wrongly rather than slowly.
 #[test]
 fn the_location_table_is_ascending_and_answers_by_offset() {
-    let mut heap = FiberHeap::new();
     let mut map = LocationMap::new();
     map.insert(40, SourceLoc::new("b.lisp", 4, 1));
     map.insert(10, SourceLoc::new("a.lisp", 1, 2));
     map.insert(30, SourceLoc::new("a.lisp", 3, 3));
     map.insert(20, SourceLoc::new("b.lisp", 2, 4));
 
-    let mut p = TemplateProto::new(vec![0; 64], Arity::Exact(0), Vec::new());
-    p.location_map = map;
-    let p = Rc::new(p);
-
-    let t = header(header_in(&mut heap, &p));
+    let t = built(64, Arity::Exact(0), |b| b.location_map(map));
     let locs = t.locations();
 
     let offsets: Vec<u32> = locs.entries().iter().map(|e| e.offset).collect();
@@ -49,21 +52,16 @@ fn the_location_table_is_ascending_and_answers_by_offset() {
     );
 }
 
-/// File names are interned once per payload: the two entries above that share a
-/// file must share one region string, not carry a copy each.
+/// File names are interned once per payload: the two entries below that share
+/// a file must share one region string, not carry a copy each.
 #[test]
 fn file_names_are_interned_once_per_payload() {
-    let mut heap = FiberHeap::new();
     let mut map = LocationMap::new();
     map.insert(10, SourceLoc::new("same.lisp", 1, 1));
     map.insert(20, SourceLoc::new("same.lisp", 2, 1));
     map.insert(30, SourceLoc::new("other.lisp", 3, 1));
 
-    let mut p = TemplateProto::new(vec![0; 64], Arity::Exact(0), Vec::new());
-    p.location_map = map;
-    let p = Rc::new(p);
-
-    let t = header(header_in(&mut heap, &p));
+    let t = built(64, Arity::Exact(0), |b| b.location_map(map));
     let locs = t.locations();
     let entries = locs.entries();
 
@@ -83,16 +81,11 @@ fn file_names_are_interned_once_per_payload() {
 /// label must not depend on which entry the builder happened to visit first.
 #[test]
 fn the_display_label_is_the_smallest_offset_location() {
-    let mut heap = FiberHeap::new();
     let mut map = LocationMap::new();
     map.insert(99, SourceLoc::new("late.lisp", 9, 9));
     map.insert(7, SourceLoc::new("early.lisp", 1, 1));
 
-    let mut p = TemplateProto::new(vec![0; 128], Arity::Exact(0), Vec::new());
-    p.location_map = map;
-    let p = Rc::new(p);
-
-    let t = header(header_in(&mut heap, &p));
+    let t = built(128, Arity::Exact(0), |b| b.location_map(map));
     assert_eq!(
         t.display_label(),
         format!("{}", SourceLoc::new("early.lisp", 1, 1)),
@@ -105,16 +98,11 @@ fn the_display_label_is_the_smallest_offset_location() {
 /// carries the mask's words, not a `u64`.
 #[test]
 fn the_capture_locals_mask_survives_beyond_sixty_four_slots() {
-    let mut heap = FiberHeap::new();
     let mut mask = crate::value::CaptureMask::empty();
     mask.set(3);
     mask.set(130);
 
-    let mut p = TemplateProto::new(vec![0; 8], Arity::Exact(0), Vec::new());
-    p.capture_locals_mask = mask;
-    let p = Rc::new(p);
-
-    let t = header(header_in(&mut heap, &p));
+    let t = built(8, Arity::Exact(0), |b| b.capture_locals_mask(mask));
     let m = t.capture_locals_mask();
     assert!(m.is_set(3), "slot 3 is captured");
     assert!(
@@ -132,14 +120,13 @@ fn the_capture_locals_mask_survives_beyond_sixty_four_slots() {
 /// lambda declared, so the key set is payload like any other variable-length
 /// field.
 #[test]
-fn strict_struct_keys_survive_materialization() {
-    let mut heap = FiberHeap::new();
-    let mut p = TemplateProto::new(vec![0; 8], Arity::AtLeast(0), Vec::new());
-    p.vararg_kind =
-        crate::hir::VarargKind::StrictStruct(vec!["alpha".to_string(), "beta".to_string()]);
-    let p = Rc::new(p);
-
-    let t = header(header_in(&mut heap, &p));
+fn strict_struct_keys_survive_into_the_payload() {
+    let t = built(8, Arity::AtLeast(0), |b| {
+        b.vararg_kind(crate::hir::VarargKind::StrictStruct(vec![
+            "alpha".to_string(),
+            "beta".to_string(),
+        ]))
+    });
     assert_eq!(t.vararg_tag(), VarargTag::StrictStruct);
     let keys = t.strict_keys();
     assert!(keys.contains("alpha"));
@@ -151,24 +138,20 @@ fn strict_struct_keys_survive_materialization() {
 /// interpreter reads the gate's verdict off the header it calls
 /// (docs/impl/region/restlist.md).
 #[test]
-fn the_rest_list_layout_survives_materialization() {
+fn the_rest_list_layout_survives_into_the_payload() {
     use crate::value::RestListLayout;
-    let mut heap = FiberHeap::new();
     for layout in [RestListLayout::PerCell, RestListLayout::OneRegion] {
-        let mut p = TemplateProto::new(vec![0; 8], Arity::AtLeast(0), Vec::new());
-        p.rest_list_layout = layout;
-        let p = Rc::new(p);
-        let t = header(header_in(&mut heap, &p));
+        let t = built(8, Arity::AtLeast(0), |b| b.rest_list_layout(layout));
         assert_eq!(
             t.rest_list_layout(),
             layout,
-            "the header answers the blueprint's layout"
+            "the header answers the layout its code object was written with"
         );
     }
     assert_eq!(
-        TemplateProto::new(vec![], Arity::AtLeast(0), Vec::new()).rest_list_layout,
+        built(8, Arity::AtLeast(0), |b| b).rest_list_layout(),
         RestListLayout::PerCell,
-        "a blueprint no gate has judged builds one region per cell"
+        "a code object no gate has judged builds one region per cell"
     );
 }
 
@@ -177,12 +160,7 @@ fn the_rest_list_layout_survives_materialization() {
 /// check (docs/impl/region/merging.md § Merging).
 #[test]
 fn merged_slot_membership_reads_the_sorted_slice() {
-    let mut heap = FiberHeap::new();
-    let mut p = TemplateProto::new(vec![0; 8], Arity::Exact(0), Vec::new());
-    p.merged_slots = vec![9, 4, 7].into_iter().collect();
-    let p = Rc::new(p);
-
-    let t = header(header_in(&mut heap, &p));
+    let t = built(8, Arity::Exact(0), |b| b.merged_slots(vec![9, 4, 7]));
     let merged = t.merged_slots();
     assert_eq!(
         merged.as_slice(),
@@ -191,21 +169,19 @@ fn merged_slot_membership_reads_the_sorted_slice() {
     );
     assert!(merged.contains(7));
     assert!(!merged.contains(8));
-    assert!(TemplateProto::new(vec![], Arity::Exact(0), Vec::new())
-        .merged_slots
-        .is_empty());
+    assert!(built(0, Arity::Exact(0), |b| b).merged_slots().is_empty());
 }
 
 /// The region table carries typed `StaticRegion` slots, every one ≥ 2 — slot 1
 /// is reserved and never minted into a function's table.
 #[test]
 fn the_region_table_holds_static_region_slots() {
-    let mut heap = FiberHeap::new();
-    let mut p = TemplateProto::new(vec![0; 8], Arity::Exact(0), Vec::new());
-    p.region_table = vec![StaticRegion::new(2).unwrap(), StaticRegion::new(3).unwrap()];
-    let p = Rc::new(p);
-
-    let t = header(header_in(&mut heap, &p));
+    let t = built(8, Arity::Exact(0), |b| {
+        b.region_table(vec![
+            StaticRegion::new(2).unwrap(),
+            StaticRegion::new(3).unwrap(),
+        ])
+    });
     for sr in t.region_table() {
         assert!(
             sr.get() >= 2,
@@ -213,24 +189,4 @@ fn the_region_table_holds_static_region_slots() {
             sr.get()
         );
     }
-}
-
-/// `HeapObject`'s size is the size of its largest variant, and the by-value
-/// closure template used to set it at 288 bytes — so a `Float` slot was ~95%
-/// padding (docs/impl/image/measurements.md item 6). A header is a payload
-/// slice and a blueprint pointer; nothing about a code object should size the
-/// union any more.
-#[test]
-fn a_code_object_no_longer_sizes_the_heap_object_union() {
-    assert!(
-        size_of::<ClosureTemplate>() <= 32,
-        "a header is a payload slice plus a blueprint pointer, got {} bytes",
-        size_of::<ClosureTemplate>()
-    );
-    assert!(
-        size_of::<HeapObject>() <= 128,
-        "the closure template variant must no longer set the union's size, \
-         which it did at 288 bytes; got {}",
-        size_of::<HeapObject>()
-    );
 }

@@ -1,6 +1,6 @@
 // audited: 2026-10-06
-// A closure and its code object cross the body; the header hydrates without
-// its blueprint.
+// A closure and its code object cross the body, field by field and sharing
+// kept.
 // docs/impl/image/sealing.md
 // docs/impl/image/plan.md
 
@@ -16,11 +16,11 @@ use elle::value::heap::deref;
 use elle::value::{Arity, CaptureMask, RestListLayout};
 use elle::SourceLoc;
 
-/// A blueprint exercising every payload field a data closure carries: real
+/// A code object exercising every payload field a data closure carries: real
 /// locations with two interned files, both release tables, a merge set, the
 /// capture masks, a `&named` key set, the rest-list layout, and a mixed
-/// constant pool.
-fn full_proto(heap: &mut FiberHeap, region: RuntimeRegion) -> (TemplateProto, Value) {
+/// constant pool. Answers the code object and its shared string constant.
+fn full_code(heap: &mut FiberHeap, region: RuntimeRegion) -> (TemplateRef, Value) {
     let shared = alloc_str(heap, region, "shared payload");
     let insert = Value::native_fn(
         elle::primitives::prim_table_snapshot()
@@ -28,36 +28,38 @@ fn full_proto(heap: &mut FiberHeap, region: RuntimeRegion) -> (TemplateProto, Va
             .find(|d| d.name == "insert")
             .expect("insert is a canonical primitive"),
     );
-    let mut proto = TemplateProto::new(
+    let mut locations = elle::error::LocationMap::new();
+    locations.insert(0, SourceLoc::new("closure-a.lisp", 3, 9));
+    locations.insert(2, SourceLoc::new("closure-b.lisp", 14, 1));
+    let code = CodeBuilder::new(
         vec![7, 1, 4, 1, 9],
         Arity::AtLeast(1),
         vec![Value::int(9), shared, insert, Value::keyword("payload-kw")],
-    );
-    proto.num_locals = 3;
-    proto.num_captures = 2;
-    proto.num_params = 2;
-    proto.signal = Signal::errors();
-    proto.capture_params_mask = 0b10;
-    proto.capture_locals_mask = CaptureMask::from_words(vec![0b100]);
-    proto
-        .location_map
-        .insert(0, SourceLoc::new("closure-a.lisp", 3, 9));
-    proto
-        .location_map
-        .insert(2, SourceLoc::new("closure-b.lisp", 14, 1));
-    proto.name = Some("image-closure".to_string());
-    proto.doc = Some("crosses the body".to_string());
-    proto.vararg_kind = VarargKind::StrictStruct(vec!["alpha".to_string(), "beta".to_string()]);
-    proto.rest_list_layout = RestListLayout::OneRegion;
-    proto.region_table = vec![
+    )
+    .num_locals(3)
+    .num_captures(2)
+    .num_params(2)
+    .signal(Signal::errors())
+    .capture_params_mask(0b10)
+    .capture_locals_mask(CaptureMask::from_words(vec![0b100]))
+    .location_map(locations)
+    .name("image-closure")
+    .doc("crosses the body")
+    .vararg_kind(VarargKind::StrictStruct(vec![
+        "alpha".to_string(),
+        "beta".to_string(),
+    ]))
+    .rest_list_layout(RestListLayout::OneRegion)
+    .region_table(vec![
         StaticRegion::new(2).expect("slot 2 is a slot"),
         StaticRegion::new(4).expect("slot 4 is a slot"),
-    ];
-    proto.merged_slots.extend([5u32, 2]);
-    proto.frame_release_slots = vec![4, 1];
-    proto.frame_release_regions = vec![9, 3];
-    proto.origin = Some(elle::syntax::Span::synthetic());
-    (proto, shared)
+    ])
+    .merged_slots(vec![5, 2])
+    .frame_release_slots(vec![4, 1])
+    .frame_release_regions(vec![9, 3])
+    .origin(elle::syntax::Span::synthetic())
+    .build(heap);
+    (code, shared)
 }
 
 // § Test plan, "Closures": the payload survives field by field, and the env
@@ -70,11 +72,11 @@ fn a_closures_code_object_round_trips_field_by_field() {
 
     let mut src = FiberHeap::new();
     let region = src.new_runtime_region();
-    let (proto, shared) = full_proto(&mut src, region);
+    let (code, shared) = full_code(&mut src, region);
     let root = closure_in(
         &mut src,
         region,
-        &Rc::new(proto),
+        &code,
         &[shared, Value::int(5)],
         SignalBits::from_bit(33),
     );
@@ -136,51 +138,21 @@ fn a_closures_code_object_round_trips_field_by_field() {
     assert_eq!(closure.squelch_mask, SignalBits::from_bit(33));
 }
 
-// A hydrated header has no blueprint, so the blueprint-only answers are
-// absence. The counter-factual is the source header, which holds one — only
-// the dump can have dropped it. The origin and the LIR are not among those
-// answers: both ride on the payload, and origin.rs and the call test below pin
-// that each crosses.
+// § Test plan, "Closures": two headers over one payload hydrate naming one
+// payload copy. The counter-factual is a per-header deep copy, which
+// round-trips structurally equal and silently doubles every payload — only
+// pointer identity can see it.
 #[test]
-fn a_hydrated_header_has_no_blueprint() {
-    let dir = crate::common::ScratchDir::new("image-closure-blueprint");
-    let path = dir.join("closure.image");
-
-    let mut src = FiberHeap::new();
-    let region = src.new_runtime_region();
-    let (proto, _) = full_proto(&mut src, region);
-    let root = closure_in(&mut src, region, &Rc::new(proto), &[], SignalBits::EMPTY);
-    assert!(
-        closure_of(root).template.proto().is_some(),
-        "the source header holds its blueprint"
-    );
-    image::dump(&mut src, &SymbolTable::new(), root, &path).expect("dump");
-
-    let mut dst = FiberHeap::new();
-    let hydrated = image::hydrate_path(&mut dst, &mut SymbolTable::new(), &path).expect("hydrate");
-    let t = &closure_of(hydrated.root).template;
-    assert!(t.proto().is_none(), "a hydrated header has a blueprint");
-    assert!(t.child_protos().is_empty());
-}
-
-// § Test plan, "Closures": two headers materialized from one blueprint
-// hydrate naming one payload copy. The counter-factual is a per-header deep
-// copy, which round-trips structurally equal and silently doubles every
-// payload — only pointer identity can see it.
-#[test]
-fn two_headers_from_one_blueprint_hydrate_sharing_one_payload() {
+fn two_headers_over_one_payload_hydrate_sharing_one_payload() {
     let dir = crate::common::ScratchDir::new("image-closure-payload");
     let path = dir.join("pair.image");
 
     let mut src = FiberHeap::new();
     let region = src.new_runtime_region();
-    let proto = Rc::new(TemplateProto::new(
-        vec![3, 1, 4],
-        Arity::Exact(1),
-        vec![Value::int(6)],
-    ));
-    let a = closure_in(&mut src, region, &proto, &[], SignalBits::EMPTY);
-    let b = closure_in(&mut src, region, &proto, &[], SignalBits::EMPTY);
+    let code =
+        CodeBuilder::new(vec![3, 1, 4], Arity::Exact(1), vec![Value::int(6)]).build(&mut src);
+    let a = closure_in(&mut src, region, &code, &[], SignalBits::EMPTY);
+    let b = closure_in(&mut src, region, &code, &[], SignalBits::EMPTY);
     assert_eq!(
         closure_of(a).template.bytecode().as_ptr(),
         closure_of(b).template.bytecode().as_ptr(),
@@ -219,13 +191,10 @@ fn a_shared_payloads_slots_relocate_once() {
 
     let mut src = FiberHeap::new();
     let region = src.new_runtime_region();
-    let proto = Rc::new(TemplateProto::new(
-        vec![3, 1, 4],
-        Arity::Exact(1),
-        vec![Value::int(6)],
-    ));
-    let a = closure_in(&mut src, region, &proto, &[], SignalBits::EMPTY);
-    let b = closure_in(&mut src, region, &proto, &[], SignalBits::EMPTY);
+    let code =
+        CodeBuilder::new(vec![3, 1, 4], Arity::Exact(1), vec![Value::int(6)]).build(&mut src);
+    let a = closure_in(&mut src, region, &code, &[], SignalBits::EMPTY);
+    let b = closure_in(&mut src, region, &code, &[], SignalBits::EMPTY);
     let root = alloc_pair(&mut src, region, a, b);
     image::dump(&mut src, &SymbolTable::new(), root, &path).expect("dump");
 
@@ -258,10 +227,11 @@ fn a_wasm_closure_refuses_the_dump() {
 
     let mut src = FiberHeap::new();
     let region = src.new_runtime_region();
-    let mut proto = TemplateProto::new(vec![1], Arity::Exact(0), Vec::new());
-    proto.name = Some("wasm-borne".to_string());
-    proto.wasm_func_idx = Some(3);
-    let root = closure_in(&mut src, region, &Rc::new(proto), &[], SignalBits::EMPTY);
+    let code = CodeBuilder::new(vec![1], Arity::Exact(0), Vec::new())
+        .name("wasm-borne")
+        .wasm_func_idx(3)
+        .build(&mut src);
+    let root = closure_in(&mut src, region, &code, &[], SignalBits::EMPTY);
     refused(&mut src, root, &path, "wasm-borne");
 }
 
@@ -282,8 +252,8 @@ fn an_env_capture_cell_refuses_the_dump() {
         },
         region,
     );
-    let proto = Rc::new(TemplateProto::new(vec![1], Arity::Exact(0), Vec::new()));
-    let root = closure_in(&mut src, region, &proto, &[cell], SignalBits::EMPTY);
+    let code = CodeBuilder::new(vec![1], Arity::Exact(0), Vec::new()).build(&mut src);
+    let root = closure_in(&mut src, region, &code, &[cell], SignalBits::EMPTY);
     refused(&mut src, root, &path, "CaptureCell");
 }
 
@@ -301,14 +271,8 @@ fn a_closure_dump_is_byte_deterministic() {
 
     let mut src = FiberHeap::new();
     let region = src.new_runtime_region();
-    let (proto, shared) = full_proto(&mut src, region);
-    let root = closure_in(
-        &mut src,
-        region,
-        &Rc::new(proto),
-        &[shared],
-        SignalBits::EMPTY,
-    );
+    let (code, shared) = full_code(&mut src, region);
+    let root = closure_in(&mut src, region, &code, &[shared], SignalBits::EMPTY);
     paint_stack(0xAA, 16);
     image::dump(&mut src, &SymbolTable::new(), root, &a).expect("dump a");
     paint_stack(0x55, 16);
@@ -321,7 +285,7 @@ fn a_closure_dump_is_byte_deterministic() {
 }
 
 // Hydrate, free, and the store returns to baseline: a hydrated closure region
-// tears down like any other region, blueprint-less headers included.
+// tears down like any other region, its headers included.
 #[test]
 fn freeing_a_hydrated_closure_region_returns_to_baseline() {
     let dir = crate::common::ScratchDir::new("image-closure-hygiene");
@@ -329,14 +293,8 @@ fn freeing_a_hydrated_closure_region_returns_to_baseline() {
 
     let mut src = FiberHeap::new();
     let region = src.new_runtime_region();
-    let (proto, shared) = full_proto(&mut src, region);
-    let root = closure_in(
-        &mut src,
-        region,
-        &Rc::new(proto),
-        &[shared],
-        SignalBits::EMPTY,
-    );
+    let (code, shared) = full_code(&mut src, region);
+    let root = closure_in(&mut src, region, &code, &[shared], SignalBits::EMPTY);
     image::dump(&mut src, &SymbolTable::new(), root, &path).expect("dump");
 
     let mut dst = FiberHeap::new();
@@ -414,9 +372,8 @@ fn a_compiled_closure_answers_a_call_after_hydration() {
 
 // § Test plan, "lir-payload": a hydrated closure sent to a worker carries its
 // LIR, read out of the image's pages, so the worker's JIT can compile what
-// arrives. The counter-factual is a sender that reads LIR off the blueprint
-// alone: a hydrated header has none, and the worker would run the closure
-// interpreted with every answer still right.
+// arrives. The counter-factual is a sender that drops the LIR: the worker would
+// run the closure interpreted with every answer still right.
 #[test]
 fn a_hydrated_closure_sends_its_lir() {
     use elle::lir::code::Op;

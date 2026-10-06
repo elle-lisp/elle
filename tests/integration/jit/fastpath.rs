@@ -124,7 +124,7 @@ fn test_jit_accepts_yields_errors_signal() {
     func.entry = Label(0);
 
     let compiler = JitCompiler::new().unwrap();
-    let result = compiler.compile(&frozen(&func).view(), Vec::new());
+    let result = compiler.compile(&frozen(&func).view());
     assert!(
         result.is_ok(),
         "JIT should accept yields_errors signal via side-exit: {:?}",
@@ -155,7 +155,7 @@ fn test_jit_accepts_errors_only_signal() {
     func.entry = Label(0);
 
     let compiler = JitCompiler::new().unwrap();
-    let result = compiler.compile(&frozen(&func).view(), Vec::new());
+    let result = compiler.compile(&frozen(&func).view());
     assert!(
         result.is_ok(),
         "JIT should accept errors-only signal: {:?}",

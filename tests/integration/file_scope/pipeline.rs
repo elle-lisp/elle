@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-06
 // The file-as-letrec pipeline, and what `import-file` reports when the file it
 // loads fails.
 //
@@ -144,7 +144,7 @@ fn test_file_last_def_is_return() {
 
 #[test]
 fn test_file_compile_produces_single_result() {
-    // compile_file returns a single CompileResult, not a Vec.
+    // compile_file returns one unit, not one per form.
     let result = compile_file_source("(def x 1) (def y 2) (%add x y)");
     assert!(result.is_ok());
 }
@@ -247,12 +247,11 @@ fn test_import_file_destructure_exports() {
 #[test]
 fn test_import_file_does_not_corrupt_captured_bindings() {
     // A second import-file call must not corrupt bindings captured by closures
-    // defined before the import. The bug: import-file returned `true` (a
-    // boolean sentinel) for already-loaded modules instead of the module's
-    // cached return value. Calling `(true)` then failed with "Cannot call true".
-    // Use a simple module that returns a struct with a function.
-    // The test verifies that a second import-file call doesn't corrupt
-    // closures that captured bindings from the first import.
+    // defined before the import. The counter-factual is an import-file that
+    // answers an already-loaded module with a boolean sentinel instead of the
+    // module's own value: calling the result then fails with "Cannot call
+    // true". The module returns a struct holding a function, and the closures
+    // that captured its bindings must keep working after the second import.
     eval_file_source_with_stdlib(
         r#"
         (def {:inc inc} ((import-file "./tests/modules/counter.lisp")))
@@ -314,7 +313,10 @@ fn a_module_that_imports_itself_is_a_circular_dependency() {
           (get (get r 1) :message))
     "#,
     );
-    assert!(message.contains("circular dependency detected"), "{message}");
+    assert!(
+        message.contains("circular dependency detected"),
+        "{message}"
+    );
 }
 
 // ============================================================================

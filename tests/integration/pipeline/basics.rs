@@ -1,3 +1,8 @@
+// audited: 2026-10-06
+// What compiles, and what a compiled literal, form or comparison evaluates to.
+//
+// src/pipeline/AGENTS.md
+
 use super::*;
 
 #[test]
@@ -7,7 +12,7 @@ fn test_compile_literal() {
     let result = compile("42", symbols, cctx, "<test>");
     assert!(result.is_ok());
     let compiled = result.unwrap();
-    assert!(!compiled.bytecode.instructions.is_empty());
+    assert!(!compiled.entry().bytecode().is_empty());
 }
 
 #[test]

@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! `compile/run-on` names a tier the build does not compile in as `:feature-disabled`, on every build.
 //!
 //! docs/impl/differential.md
@@ -29,7 +29,7 @@ fn probe(tier: &str) -> i64 {
             .0
     };
     let (vm, _symbols, cctx) = rt.parts();
-    vm.execute_scheduled(&result.bytecode, cctx)
+    vm.execute_scheduled(&result, cctx)
         .expect("runs")
         .as_int()
         .expect("the probe answers an int")

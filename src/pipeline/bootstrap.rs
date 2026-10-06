@@ -166,11 +166,12 @@ pub(super) fn compile_core(
         .and_then(|m| m.freeze())
         .expect("core.lisp lowering must succeed");
 
-    let mut emitter = Emitter::new();
+    let code = crate::value::CodeArena::mint(unsafe { &mut *heap_ptr });
+    let mut emitter = Emitter::new(code);
     let (bytecode, _yield_points, _call_sites) = emitter.emit_module(&lir_module);
 
     let closure_val = vm
-        .execute(&bytecode)
+        .execute(&crate::value::CodeUnit::new(code, bytecode))
         .expect("core.lisp execution must succeed");
 
     let closure = closure_val

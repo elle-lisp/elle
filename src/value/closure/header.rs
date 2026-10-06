@@ -75,17 +75,21 @@ impl std::fmt::Debug for ClosureTemplate {
 }
 
 impl ClosureTemplate {
-    /// A header over `payload`. `MakeClosure` and the entry paths pass the
-    /// blueprint; the image hydrator's bytes decode with none
-    /// (docs/impl/image/sealing.md).
-    pub(crate) fn new(payload: RegionSlice<CodePayload>, proto: Option<Rc<TemplateProto>>) -> Self {
-        ClosureTemplate { payload, proto }
+    /// A header over `payload`, with no blueprint: what the image hydrator's
+    /// bytes decode to (docs/impl/image/sealing.md).
+    pub(crate) fn new(payload: RegionSlice<CodePayload>) -> Self {
+        ClosureTemplate {
+            payload,
+            proto: None,
+        }
     }
 
-    /// A header over a payload the caller allocated, for the store-level tests
-    /// that have no `FiberHeap` to materialize a blueprint through.
-    #[cfg(test)]
-    pub(crate) fn test_header(payload: RegionSlice<CodePayload>, proto: Rc<TemplateProto>) -> Self {
+    /// A header over `payload` holding the blueprint it was materialized from,
+    /// as `MakeClosure` and the entry paths build one.
+    pub(crate) fn with_blueprint(
+        payload: RegionSlice<CodePayload>,
+        proto: Rc<TemplateProto>,
+    ) -> Self {
         ClosureTemplate {
             payload,
             proto: Some(proto),
@@ -105,7 +109,7 @@ impl ClosureTemplate {
         heap: &mut crate::value::fiberheap::FiberHeap,
         proto: &Rc<TemplateProto>,
     ) -> Self {
-        ClosureTemplate::new(heap.template_payload(proto), Some(Rc::clone(proto)))
+        ClosureTemplate::with_blueprint(heap.template_payload(proto), Rc::clone(proto))
     }
 
     /// The shared payload.
@@ -284,12 +288,26 @@ impl ClosureTemplate {
         }
     }
 
-    /// The code object the `MakeClosure` at `idx` builds.
+    /// The header the `MakeClosure` at `idx` builds over, read out of the
+    /// payload's child table. A header that still holds a blueprint has an
+    /// empty table, and answers a header over its own payload naming the
+    /// child's blueprint.
+    pub fn child(&self, idx: usize) -> ClosureTemplate {
+        match self.child_code(idx) {
+            ChildCode::Header(child) => child,
+            ChildCode::Blueprint(proto) => {
+                ClosureTemplate::with_blueprint(self.payload, Rc::clone(proto))
+            }
+        }
+    }
+
+    /// The code object the `MakeClosure` at `idx` builds, from whichever side
+    /// of this header answers.
     ///
     /// Panics for an index past the table, as a constant-pool read does: the
     /// index is baked into the instruction by the emitter that registered the
     /// child, so an out-of-range one is a corrupt code object.
-    pub fn child(&self, idx: usize) -> ChildCode<'_> {
+    pub(crate) fn child_code(&self, idx: usize) -> ChildCode<'_> {
         let Some(proto) = self.proto.as_ref() else {
             let value = self.payload().children()[idx];
             let obj: &'static crate::value::heap::HeapObject =
@@ -311,7 +329,7 @@ impl ClosureTemplate {
     /// two boots build one shape (docs/impl/image/sealing.md).
     #[inline]
     pub(crate) fn without_blueprint(&self) -> ClosureTemplate {
-        ClosureTemplate::new(self.payload, None)
+        ClosureTemplate::new(self.payload)
     }
 
     // ── blueprint ──────────────────────────────────────────────────────

@@ -1,6 +1,11 @@
+// audited: 2026-10-06
+// The meta and runtime primitives: gensym, package metadata, import-file,
+// thread spawn, sleep, trace, the clocks, and memory usage.
+//
+// docs/stdlib.md
+
 use super::*;
 
-// Macro and meta-programming tests
 #[test]
 fn test_gensym_generation() {
     let (_vm, mut symbols, meta) = setup();
@@ -61,8 +66,6 @@ fn test_package_manager() {
     assert_eq!(vec.len(), 3);
 }
 
-// Phase 5: Advanced Runtime Features Tests
-
 #[test]
 fn test_import_file_primitive() {
     let (_vm, mut symbols, meta) = setup();
@@ -121,18 +124,13 @@ fn test_spawn_primitive() {
 
     // Create a simple closure to spawn
     let closure = h.ctx().closure(Closure {
-        template: {
-            let region = h.heap().new_runtime_region();
-            elle::value::TemplateRef::region(elle::value::closure::materialize(
-                h.heap(),
-                &std::rc::Rc::new(elle::value::TemplateProto::new(
-                    vec![0u8], // dummy bytecode
-                    elle::value::Arity::Exact(0),
-                    Vec::new(),
-                )),
-                region,
-            ))
-        },
+        // One byte of bytecode: the worker never runs it, only receives it.
+        template: elle::value::CodeBuilder::new(
+            vec![0u8],
+            elle::value::Arity::Exact(0),
+            Vec::new(),
+        )
+        .build(h.heap()),
         env: elle::value::region_slice::RegionSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     });
@@ -323,29 +321,4 @@ fn test_memory_usage_primitive() {
         }
         _ => panic!("memory-usage should return a list"),
     }
-}
-
-#[test]
-fn test_module_loading_path_tracking() {
-    let _vm = VM::new();
-
-    // Add search paths
-    // vm.add_module_search_path(std::path::PathBuf::from("./lib"));
-    // vm.add_module_search_path(std::path::PathBuf::from("./modules"));
-
-    // Paths should be trackable (internal state, not exposed via API)
-    // This test verifies the VM accepts path additions without panic
-}
-
-#[test]
-fn test_module_circular_dependency_prevention() {
-    let _vm = VM::new();
-
-    // Try to load the same module twice
-    // let result1 = vm.load_module("test-module".to_string(), "");
-    // let result2 = vm.load_module("test-module".to_string(), "");
-
-    // Both should succeed (second is no-op due to circular dep prevention)
-    // assert!(result1.is_ok());
-    // assert!(result2.is_ok());
 }

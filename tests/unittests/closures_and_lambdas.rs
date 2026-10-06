@@ -1,10 +1,13 @@
-use elle::value::fiber::SignalBits;
-// DEFENSE: Unit tests for closure and lambda primitives
-// Tests the basic building blocks of closure and lambda functionality
+// audited: 2026-10-06
+// Closures and lambdas: construction, arity, captured environments, and the
+// code object's accessors.
+//
+// docs/functions.md
 use elle::primitives::register_primitives;
 use elle::runtime::Runtime;
 use elle::symbol::SymbolTable;
-use elle::value::{Arity, Closure, TemplateProto, TemplateRef, Value};
+use elle::value::fiber::SignalBits;
+use elle::value::{Arity, Closure, CodeBuilder, TemplateRef, Value};
 use elle::vm::VM;
 use std::rc::Rc;
 
@@ -15,19 +18,10 @@ fn setup() -> (VM, SymbolTable) {
     (vm, symbols)
 }
 
-/// Materialize a code object for `proto` into a fresh region of `heap` and name
-/// it — the shape `MakeClosure` builds: a header over the blueprint's shared
-/// payload (docs/impl/region/template.md).
-fn template(
-    heap: &mut elle::value::fiberheap::FiberHeap,
-    proto: TemplateProto,
-) -> TemplateRef {
-    let region = heap.new_runtime_region();
-    TemplateRef::region(elle::value::closure::materialize(
-        heap,
-        &Rc::new(proto),
-        region,
-    ))
+/// Write `code` into a fresh code region of `heap` and name its header
+/// (docs/impl/region/template.md).
+fn template(heap: &mut elle::value::fiberheap::FiberHeap, code: CodeBuilder) -> TemplateRef {
+    code.build(heap)
 }
 
 // Sections 1-5: closure construction, type identity, arity, environment

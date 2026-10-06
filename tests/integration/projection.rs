@@ -1,10 +1,13 @@
-// Integration tests for signal projection and compile-time squelch
+// audited: 2026-10-06
+// Signal projection and compile-time squelch.
 //
 // Signal projection: the compiler extracts signal profiles from exported
 // closures in module files, enabling cross-file signal inference.
 //
 // Compile-time squelch: the analyzer recognizes (squelch f :kw) as a
 // signal-narrowing operation and computes the result signal statically.
+//
+// docs/signals/inference.md
 
 use elle::hir::HirKind;
 use elle::primitives::register_primitives;
@@ -20,10 +23,10 @@ fn setup() -> (SymbolTable, VM) {
     (symbols, vm)
 }
 
-// Local `analyze_file` shim preserving the pre-CompileCtx arity. These tests
-// analyze a single module file in isolation (no stdlib, no execution), so a
-// fresh `CompileCtx` per call (primitives + core + prelude) gives exactly the
-// old bare path; no projection or compile-time state is shared across calls.
+// A local `analyze_file`: these tests analyze a single module file in
+// isolation (no stdlib, no execution), so a fresh `CompileCtx` per call
+// (primitives + core + prelude) is all they need, and no projection or
+// compile-time state is shared across calls.
 fn analyze_file(
     source: &str,
     symbols: &mut SymbolTable,
@@ -39,7 +42,7 @@ fn compile_file(
     source: &str,
     symbols: &mut SymbolTable,
     source_name: &str,
-) -> Result<elle::CompileResult, String> {
+) -> Result<elle::CodeUnit, String> {
     let mut cctx = elle::pipeline::CompileCtx::new();
     elle::pipeline::compile_file(source, symbols, &mut cctx, source_name)
 }
@@ -106,11 +109,7 @@ fn test_projection_struct_literal() {
             // Each closure value in the struct should have errors-only signal
             for i in (1..args.len()).step_by(2) {
                 let sig = &args[i].expr.signal;
-                assert!(
-                    !sig.may_suspend(),
-                    "field at {} should not suspend",
-                    i
-                );
+                assert!(!sig.may_suspend(), "field at {} should not suspend", i);
             }
         } else {
             // Might be wrapped differently; just check the projection was computed
@@ -183,7 +182,7 @@ safe
 
 #[test]
 fn test_projection_bytecode_field() {
-    // compile_file should populate signal_projection on the bytecode.
+    // compile_file should populate the unit's signal projection.
     // `(numeric!)` proves the params for the intrinsic operand contract
     // without adding an :error guard — the projections must stay silent
     // for the may_suspend assertions below.
@@ -194,10 +193,10 @@ fn test_projection_bytecode_field() {
 "#;
     let mut symbols = SymbolTable::new();
     let result = compile_file(source, &mut symbols, "<test>").unwrap();
-    let proj = result.bytecode.signal_projection;
+    let proj = result.signal_projection();
     assert!(
         proj.is_some(),
-        "bytecode should have signal_projection for struct-returning file"
+        "the unit should have a signal projection for a struct-returning file"
     );
     let proj = proj.unwrap();
     assert!(proj.contains_key("add"), "projection should contain :add");
@@ -206,10 +205,7 @@ fn test_projection_bytecode_field() {
         "projection should contain :double"
     );
     // Both are pure arithmetic — errors only, not yields
-    assert!(
-        !proj["add"].may_suspend(),
-        ":add should not be suspending"
-    );
+    assert!(!proj["add"].may_suspend(), ":add should not be suspending");
     assert!(
         !proj["double"].may_suspend(),
         ":double should not be suspending"
@@ -223,7 +219,7 @@ fn test_projection_non_struct_returns_none() {
     let mut symbols = SymbolTable::new();
     let result = compile_file(source, &mut symbols, "<test>").unwrap();
     assert!(
-        result.bytecode.signal_projection.is_none(),
+        result.signal_projection().is_none(),
         "non-struct file should have no projection"
     );
 }
@@ -237,11 +233,8 @@ fn test_projection_yields_function() {
 "#;
     let mut symbols = SymbolTable::new();
     let result = compile_file(source, &mut symbols, "<test>").unwrap();
-    let proj = result.bytecode.signal_projection.unwrap();
-    assert!(
-        proj["producer"].may_yield(),
-        ":producer should be yields"
-    );
+    let proj = result.signal_projection().unwrap();
+    assert!(proj["producer"].may_yield(), ":producer should be yields");
 }
 
 // ============================================================================
@@ -296,9 +289,10 @@ fn each_keeps_its_collection_when_an_import_probe_expanded_the_macro_first() {
     // Here the import projection probe is that first compile: this runtime loads
     // no stdlib, so nothing has warmed the transformer, and compiling the main
     // file runs the probe over a module that uses `each`. The probe compiles in
-    // its own symbol table (`CompileCtx::get_or_compile_projection`), so this is
-    // also what pins that the two tables agree. The second compile, on the same
-    // context, is the one that must still read its `in`.
+    // the caller's symbol table (`CompileCtx::get_or_compile_projection`), so
+    // the transformer it caches learned its spellings in the table every later
+    // compile uses. The second compile, on the same context, is the one that
+    // must still read its `in`.
     //
     // The counter-factual: the assertion names the elements the loop visited
     // rather than settling for a successful compile. When the comparison against

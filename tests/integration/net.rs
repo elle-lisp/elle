@@ -1,3 +1,9 @@
+// audited: 2026-10-06
+// TCP, UDP and Unix sockets round-trip through `execute_scheduled`, which
+// services the I/O a fiber parks on.
+//
+// docs/io.md
+
 use elle::runtime::Runtime;
 use elle::{compile_file, Value};
 
@@ -21,7 +27,7 @@ fn setup_scheduled() -> Runtime {
 fn run_scheduled(input: &str, rt: &mut Runtime) -> Result<Value, String> {
     let (vm, symbols, cctx) = rt.parts();
     let result = compile_file(input, symbols, cctx, "<test>")?;
-    let value = vm.execute_scheduled(&result.bytecode, cctx)?;
+    let value = vm.execute_scheduled(&result, cctx)?;
     Ok(value)
 }
 
@@ -86,7 +92,7 @@ fn test_tcp_echo_roundtrip() {
     connect_thread.join().unwrap();
 }
 
-// Regression: UDP recv data must survive the completion path. The result struct
+// UDP recv data must survive the completion path. The result struct
 // `{:data ...}` is pre-allocated on the requesting fiber's heap
 // (`prim_udp_recv_from`) and filled in place at completion — the iovec receives
 // the payload zero-copy into `:data` — so the region-backed bytes are not freed

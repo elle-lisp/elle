@@ -20,3 +20,5 @@ mod operandstack;
 mod ownership;
 mod rootentry;
 mod selfrec;
+#[cfg(feature = "mlir")]
+mod spirv;

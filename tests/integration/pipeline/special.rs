@@ -1,3 +1,8 @@
+// audited: 2026-10-06
+// Immutable bindings, compile-time arity checks, and the `eval` special form.
+//
+// src/pipeline/AGENTS.md
+
 use super::*;
 
 #[test]
@@ -61,7 +66,7 @@ fn test_const_cross_form_reference() {
     let result = compile_file("(def x 42)\n(%add x 1)", symbols, cctx, "<test>");
     assert!(result.is_ok());
     let result = result.unwrap();
-    let _ = vm.execute(&result.bytecode);
+    let _ = vm.execute(&result);
 }
 
 #[test]

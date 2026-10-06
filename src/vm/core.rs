@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! The `VM` struct — the per-instance state a running program reaches — and the
 //! accessors that reborrow the allocations it points at.
 //!
@@ -273,6 +273,9 @@ pub struct VM {
     /// an unbounded `:attempts` in `(jit/rejections)`.
     #[cfg(feature = "jit")]
     pub jit_compile_attempts: FxHashMap<*const u8, usize>,
+    /// The SPIR-V `(git f)` compiled, keyed by bytecode address like
+    /// `jit_cache`. Read through [`VM::spirv_for`].
+    pub spirv_cache: FxHashMap<*const u8, Vec<u8>>,
     /// Cached Expander for runtime `eval`. Avoids re-loading the prelude
     /// on every eval call. Taken out during eval, put back after.
     pub eval_expander: Option<crate::syntax::Expander>,
@@ -392,6 +395,13 @@ impl VM {
         self.gated_exit_reason.take()
     }
 
+    /// The SPIR-V `(git f)` compiled for the code object `t`, if any.
+    pub fn spirv_for(&self, t: &crate::value::ClosureTemplate) -> Option<&[u8]> {
+        self.spirv_cache
+            .get(&t.bytecode().as_ptr())
+            .map(Vec::as_slice)
+    }
+
     /// Record a closure call and return whether it is hot: called at least the
     /// JIT threshold's number of times (ten by default; `(vm/config-set :jit N)`
     /// sets it).
@@ -442,20 +452,21 @@ impl VM {
     }
 
     /// Push a synthetic trace frame for `name`, whose call site is at `ip` in a
-    /// code object carrying `location_map`. Both code objects are built here
-    /// from blueprints, so a trace test exercises the same path a real call
+    /// code object carrying `location_map`. Both code objects are real payloads
+    /// on this VM's heap, so a trace test exercises the same path a real call
     /// takes.
     #[cfg(test)]
     fn push_call_frame(&mut self, name: &str, ip: usize, location_map: crate::error::LocationMap) {
-        let mut callee =
-            crate::value::TemplateProto::new(Vec::new(), crate::value::Arity::Exact(0), Vec::new());
-        callee.name = Some(name.to_string());
-        let mut caller =
-            crate::value::TemplateProto::new(Vec::new(), crate::value::Arity::Exact(0), Vec::new());
-        caller.location_map = location_map;
+        use crate::value::{Arity, CodeBuilder};
         let heap = self.heap();
-        let callee = crate::value::ClosureTemplate::for_proto(heap, &Rc::new(callee)).code();
-        let caller = crate::value::ClosureTemplate::for_proto(heap, &Rc::new(caller)).code();
+        let callee = CodeBuilder::new(Vec::new(), Arity::Exact(0), Vec::new())
+            .name(name)
+            .build(heap)
+            .code();
+        let caller = CodeBuilder::new(Vec::new(), Arity::Exact(0), Vec::new())
+            .location_map(location_map)
+            .build(heap)
+            .code();
 
         let frame_base = self.fiber.stack.len();
         self.fiber.call_depth += 1;

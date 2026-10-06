@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! Array-call, closure-construction, tail-call, and env-building JIT entry points.
 //!
 //! docs/impl/jit.md
@@ -145,9 +145,8 @@ pub extern "C" fn elle_jit_tail_call_array(
 /// object (`closure_protos`). `captures_ptr`: pointer to array of `count`
 /// Values (16 bytes each). Materializes a FRESH region-allocated
 /// `HeapObject::ClosureTemplate` header over the blueprint's shared payload,
-/// into the current alloc region (set by the surrounding `push_alloc_region`
-/// bracket), and builds the instance referencing it (co-region → region RC,
-/// reclaimed when it frees).
+/// into `region`, and builds the instance referencing it (co-region → region
+/// RC, reclaimed when it frees).
 #[no_mangle]
 pub extern "C" fn elle_jit_make_closure(
     template_ptr: i64,
@@ -178,12 +177,8 @@ pub extern "C" fn elle_jit_make_closure(
     // The heap is the driving VM's own, reached through the threaded vm pointer —
     // this instance's heap, not a per-thread slot (docs/impl/region/ctx.md).
     let heap = unsafe { &mut *(*(vm as *mut crate::vm::VM)).heap_ptr };
-    let result = crate::vm::closure::materialize_closure_in_region(
-        heap,
-        crate::value::closure::ChildCode::Blueprint(&blueprint),
-        env_slice,
-        region,
-    );
+    let child = crate::value::ClosureTemplate::for_proto(heap, &blueprint);
+    let result = crate::vm::closure::materialize_closure_in_region(heap, &child, env_slice, region);
     JitValue::from_value(result)
 }
 

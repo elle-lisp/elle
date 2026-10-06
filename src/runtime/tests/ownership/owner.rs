@@ -1,3 +1,9 @@
+// audited: 2026-10-06
+//! Owner-node cuts end to end: the capture-back-edge cycle, the transferred returned cycle, and their parks.
+//!
+//! docs/impl/region/owner.md
+//! docs/impl/region/adopt.md
+
 use super::*;
 
 /// End-to-end reclamation of the **capture-back-edge cycle** — the activation-owner cut
@@ -7,9 +13,8 @@ use super::*;
 /// captures `m` back (capture `c ⊇ m`) — the m↔c cycle through a closure env. No REGION root
 /// can own it: `m` is captured, so its `decref_point` over-extends past the closure while its
 /// own `DecrefValueRegion` stays live — the owner-aware lifetime obligation refuses (the
-/// permanent refusal `adopt_edges_refuses_captured_store_member_on_lifetime` pins; before it,
-/// flag-on freed `m` at the root's subtree drop and the trailing decref-value SIGSEGV'd under
-/// guardfree — running 50× panic-clean keeps guarding that over-free). The ACTIVATION owns it
+/// refusal `adopt_edges_refuses_captured_store_member_on_lifetime` pins; running 50×
+/// panic-clean guards the over-free a region-root adopt of `m` would cause). The ACTIVATION owns it
 /// instead: both members are `AdoptIntoActivation`'d at the SCC's enclosing scope, their own
 /// decrefs suppressed, and the activation's completion release subtree-drops the cycle —
 /// interior m↔c references reclaiming with the set.
@@ -102,9 +107,9 @@ fn region_ownership_parked_capture_back_edge_scc_reclaims_on_abandonment() {
 /// `region::infer::tests::adopt::transfer_adopts_returned_cycle_to_consumer`). A
 /// producer `mk` builds an a↔b cycle and returns its root; the top-level
 /// consumer discards it. No region root can own it (the root crosses the
-/// return frontier) and per-region RC cannot collect the cycle, so flag-off it
-/// leaks per call. Under `--region-ownership` the producer's interior adopt
-/// hangs `b` under the returned root and the consumer's release is replaced by
+/// return frontier) and per-region RC cannot collect the cycle, so RC alone
+/// leaks it per call. The producer's interior adopt hangs `b` under the
+/// returned root and the consumer's release is replaced by
 /// `AdoptIntoActivation`, so the activation's completion release set-drops the
 /// whole cycle.
 ///
@@ -171,26 +176,21 @@ fn region_ownership_reclaims_fiber_terminal_cycle() {
     );
 }
 
-/// The transfer adopt **rides parks and the fiber teardown** — the S7 wiring,
-/// exercised end-to-end by production-emitted adopts. The consumer is a FIBER
-/// BODY that calls the producer, yields (parking its activation node with the
-/// adopted cycle), and either completes (the resumed body's clean break frees
-/// node + members) or is hard-killed mid-park (`fiber/cancel` → the terminal
-/// teardown frees the parked node's members). The carrier-retain residue of
-/// suspending resumes leaks identically at BOTH flag settings (a pre-existing
-/// class, not this cut's), so the counterfactual is the flag DELTA: flag-on
-/// must reclaim the cycles' regions on top of whatever both settings leak.
+/// The transfer adopt **rides parks and the fiber teardown**, exercised
+/// end-to-end by production-emitted adopts. The consumer is a FIBER BODY that
+/// calls the producer, yields (parking its activation node with the adopted
+/// cycle), and either completes (the resumed body's clean break frees node +
+/// members) or is hard-killed mid-park (`fiber/cancel` → the terminal teardown
+/// frees the parked node's members).
 #[test]
 fn region_ownership_transfer_adopt_rides_parks_and_fiber_teardown() {
     // This is a SOUNDNESS pin for the park/resume/cancel/teardown wiring: the transfer
     // adopt + owner node must ride the park, restore, and terminal teardown WITHOUT
     // double-freeing or dangling — a broken adopt or a doubled member release trips a
-    // debug generation/decref assert, so completing 50× panic-clean is the pin. (The
-    // reclamation AMOUNT the cut adds over the suspending-resume carrier-retain residue
-    // was a flag delta the unconditional forest can no longer A/B; the hand-emitted
-    // `activation_owner_node_*` / `fiber_owner_node_*` tests below isolate the
-    // reclamation directly via generation bumps, and the non-parked
-    // `region_ownership_reclaims_fiber_terminal_cycle` pins the growth.)
+    // debug generation/decref assert, so completing 50× panic-clean is the pin. The
+    // amount reclaimed is pinned elsewhere: the hand-emitted owner-node tests read it
+    // through generation bumps, and `region_ownership_reclaims_fiber_terminal_cycle`
+    // pins the growth of the non-parked shape.
 
     // Drained to completion: two cycles adopted into the body's activation node, a yield
     // parking the node between them; the resumed body's completion frees node + members.
@@ -216,7 +216,7 @@ fn region_ownership_transfer_adopt_rides_parks_and_fiber_teardown() {
 /// and the consumer's `AdoptIntoActivation` + owner-node completion release all
 /// run through compiled code. The consumer wrapper carries no `MakeClosure`
 /// (the producer is a top-level def), so it JIT-compiles; `jit_compiled` guards
-/// a vacuous reading exactly as the S-series JIT pins do.
+/// a vacuous reading exactly as the pins in `jit.rs` do.
 #[cfg(feature = "jit")]
 #[test]
 fn region_ownership_reclaims_returned_cycle_under_jit() {
@@ -239,7 +239,7 @@ fn region_ownership_reclaims_returned_cycle_under_jit() {
         {
             let (vm, _symbols, cctx) = rt.parts();
             let v = vm
-                .execute_scheduled(&prog.bytecode, cctx)
+                .execute_scheduled(&prog, cctx)
                 .expect("runs (submits the JIT task)");
             assert!(v.is_nil());
         }
@@ -247,13 +247,13 @@ fn region_ownership_reclaims_returned_cycle_under_jit() {
         let jit_compiled = !rt.vm().jit_cache.is_empty();
         {
             let (vm, _symbols, cctx) = rt.parts();
-            let v = vm.execute_scheduled(&prog.bytecode, cctx).expect("runs");
+            let v = vm.execute_scheduled(&prog, cctx).expect("runs");
             assert!(v.is_nil());
         }
         let baseline = rt.heap().active_region_count() as i64;
         for _ in 0..50 {
             let (vm, _symbols, cctx) = rt.parts();
-            let v = vm.execute_scheduled(&prog.bytecode, cctx).expect("runs");
+            let v = vm.execute_scheduled(&prog, cctx).expect("runs");
             assert!(v.is_nil());
         }
         (
@@ -311,13 +311,10 @@ fn adopt_into_activation_absorbs_redelivery() {
         bc.emit(Instruction::AdoptIntoActivation);
         bc.emit(Instruction::Nil);
         bc.emit(Instruction::Return);
-        let code = crate::value::ClosureTemplate::for_proto(
-            unsafe { &mut *heap_ptr },
-            &Rc::new(bc.into_proto()),
-        )
-        .code();
+        // The unit lives until the body completes, and goes with this cycle.
+        let unit = crate::value::CodeBuilder::from_bytecode(bc).unit(unsafe { &mut *heap_ptr });
 
-        let result = vm.execute_bytecode_saving_stack(&code, &Rc::new(vec![]));
+        let result = vm.execute_bytecode_saving_stack(&unit.entry().code(), &Rc::new(vec![]));
         assert!(
             result.bits.is_empty(),
             "the double-adopt body completes normally"
@@ -417,7 +414,7 @@ fn reassign_toplevel_prior_release_is_bounded() {
                 .0
         };
         let (vm, _symbols, cctx) = rt.parts();
-        vm.execute_scheduled(&result.bytecode, cctx)
+        vm.execute_scheduled(&result, cctx)
             .expect("runs")
             .as_int()
             .expect("program returns the region-count delta as an int")

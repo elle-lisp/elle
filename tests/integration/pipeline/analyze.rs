@@ -1,3 +1,8 @@
+// audited: 2026-10-06
+// The HIR `analyze` builds, and the purity mutual recursion infers.
+//
+// src/pipeline/AGENTS.md
+
 use super::*;
 
 // === analyze tests ===
@@ -77,7 +82,7 @@ fn test_mutual_recursion_execution() {
     let result = result.unwrap();
 
     // f(5) -> g(4) -> f(3) -> g(2) -> f(1) -> g(0) -> 2
-    let val = vm.execute(&result.bytecode).unwrap();
+    let val = vm.execute(&result).unwrap();
     assert_eq!(val, Value::int(2));
 }
 
@@ -98,7 +103,7 @@ fn test_mutual_recursion_signals_are_pure() {
     let result = result.unwrap();
 
     // Check that the closures don't suspend
-    for constant in &result.bytecode.constants {
+    for constant in result.entry().constants() {
         if let Some(closure) = constant.as_closure() {
             assert!(
                 !closure.signal().may_suspend(),
@@ -169,17 +174,19 @@ fn test_nqueens_functions_are_pure() {
     assert!(result.is_ok(), "Compilation should succeed");
     let result = result.unwrap();
 
-    // The 4 top-level `(var … (fn …))` defs compile to `MakeClosure` blueprints
-    // in the entry's child_protos (the standard nested-lambda home), not the
+    // The 4 top-level `(var … (fn …))` defs compile to `MakeClosure` code
+    // objects in the entry's child table (the nested-lambda home), not the
     // constant pool. Each should be pure — it may error via stdlib calls, but
     // error is a suspension-for-safety, not an IO/yield effect.
+    let entry = result.entry();
     let mut found_closures = 0;
-    for proto in &result.bytecode.child_protos {
+    for i in 0..entry.num_children() {
         found_closures += 1;
+        let signal = entry.child(i).signal();
         assert!(
-            !proto.signal.may_yield(),
+            !signal.may_yield(),
             "Closure should not yield, got {:?}",
-            proto.signal
+            signal
         );
     }
     assert_eq!(found_closures, 4, "Should have 4 closures");

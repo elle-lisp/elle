@@ -14,7 +14,8 @@ use std::fmt::Write;
 
 /// Every code object a compiled file builds: the entry function, then each
 /// nested lambda by its `MakeClosure` index path.
-pub fn bytecode_unit(bc: &Bytecode, symbols: Option<&SymbolTable>) -> String {
+pub fn bytecode_unit(unit: &crate::value::CodeUnit, symbols: Option<&SymbolTable>) -> String {
+    let bc: &Bytecode = unit.bytecode();
     let mut s = String::new();
     let _ = writeln!(s, "; code object entry");
     let mut merged: Vec<u32> = bc.merged_slots.iter().copied().collect();

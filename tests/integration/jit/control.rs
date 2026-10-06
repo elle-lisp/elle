@@ -230,7 +230,7 @@ fn test_jit_accepts_yielding() {
     func.entry = Label(0);
 
     let compiler = JitCompiler::new().unwrap();
-    let result = compiler.compile(&frozen(&func).view(), Vec::new());
+    let result = compiler.compile(&frozen(&func).view());
     assert!(
         result.is_ok(),
         "JIT should accept yielding functions via side-exit: {:?}",
@@ -263,16 +263,15 @@ fn test_jit_call_compiles() {
     func.entry = Label(0);
 
     let compiler = JitCompiler::new().unwrap();
-    let result = compiler.compile(&frozen(&func).view(), Vec::new());
+    let result = compiler.compile(&frozen(&func).view());
     // Call should now compile successfully
     assert!(result.is_ok(), "Call should compile: {:?}", result);
 }
 
 #[test]
 fn test_jit_rejects_make_closure() {
-    // MakeClosure is rejected at the gate — the per-compilation cost of
-    // emitting module closures' bytecodes is too high. Functions with
-    // MakeClosure fall back to the interpreter.
+    // MakeClosure is rejected at the gate: the JIT has no translation for it,
+    // so a function holding one runs on the interpreter.
     let mut func = LirFunction::new(Arity::Exact(0));
     func.num_regs = 1;
     func.num_captures = 0;
@@ -295,7 +294,7 @@ fn test_jit_rejects_make_closure() {
     func.entry = Label(0);
 
     let compiler = JitCompiler::new().unwrap();
-    let result = compiler.compile(&frozen(&func).view(), Vec::new());
+    let result = compiler.compile(&frozen(&func).view());
     assert!(
         matches!(result, Err(elle::jit::JitError::UnsupportedInstruction(_))),
         "MakeClosure should be rejected: {:?}",

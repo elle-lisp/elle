@@ -200,8 +200,7 @@ impl VM {
         // suspected JIT race starts here; `--trace=jit,syncjit` logs each
         // synchronous install like the background path logs its own.
         if crate::config::get().has_trace("syncjit") {
-            let res = crate::jit::JitCompiler::new()
-                .and_then(|c| c.compile(&task.lir.view(), Vec::new()));
+            let res = crate::jit::JitCompiler::new().and_then(|c| c.compile(&task.lir.view()));
             match res {
                 Ok(jit_code) => {
                     if self

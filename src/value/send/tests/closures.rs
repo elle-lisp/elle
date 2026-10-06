@@ -11,15 +11,15 @@ fn make_test_closure(
     name: &str,
     lir: Option<LirOwned>,
 ) -> Value {
-    let proto = TemplateProto {
-        num_locals: 1,
-        num_params: 1,
-        lir_function: lir.map(Rc::new),
-        name: Some(name.to_string()),
-        ..TemplateProto::new(Vec::new(), Arity::Exact(1), Vec::new())
-    };
+    let mut code = CodeBuilder::new(Vec::new(), Arity::Exact(1), Vec::new())
+        .num_locals(1)
+        .num_params(1)
+        .name(name);
+    if let Some(lir) = lir {
+        code = code.lir(lir);
+    }
     let closure = Closure::new(
-        crate::value::closure::test_template(unsafe { &mut *heap }, proto),
+        code.build(unsafe { &mut *heap }),
         crate::value::region_slice::RegionSlice::empty(),
         SignalBits::EMPTY,
     );
@@ -67,16 +67,14 @@ fn a_closure_crosses_with_its_lir_and_the_values_it_loads() {
             )
             .build();
         // The bytecode pool holds every value a `ValueConst` loads.
-        let outer = TemplateProto {
-            lir_function: Some(Rc::new(lir)),
-            name: Some("outer".to_string()),
-            ..TemplateProto::new(Vec::new(), Arity::Exact(0), vec![inner, list])
-        };
+        let outer = CodeBuilder::new(Vec::new(), Arity::Exact(0), vec![inner, list])
+            .lir(lir)
+            .name("outer");
         let outer_val = crate::value::heap::alloc(
             unsafe { &mut *heap_ptr },
             HeapObject::Closure {
                 closure: Closure::new(
-                    crate::value::closure::test_template(unsafe { &mut *heap_ptr }, outer),
+                    outer.build(unsafe { &mut *heap_ptr }),
                     crate::value::region_slice::RegionSlice::empty(),
                     SignalBits::EMPTY,
                 ),
@@ -108,7 +106,7 @@ fn a_closure_crosses_with_its_lir_and_the_values_it_loads() {
         #[cfg(feature = "jit")]
         crate::jit::JitCompiler::new()
             .expect("a compiler")
-            .compile(&lir, Vec::new())
+            .compile(&lir)
             .expect("the worker's JIT compiles the LIR that arrived");
     });
 }
@@ -124,24 +122,20 @@ fn closure_round_trips_preserving_frame_release_tables() {
     // region an erroring worker frame owed is stranded.
     crate::value::arena::with_test_region(|| {
         let heap_ptr = crate::value::arena::leaked_test_heap();
-        let child = Rc::new(TemplateProto {
-            frame_release_slots: vec![21u16],
-            frame_release_regions: vec![23u32],
-            ..TemplateProto::new(Vec::new(), Arity::Exact(0), Vec::new())
-        });
-        let template = TemplateProto {
-            num_locals: 1,
-            num_params: 1,
-            frame_release_slots: vec![3u16, 7],
-            frame_release_regions: vec![11u32, 13],
-            child_protos: vec![child],
-            ..TemplateProto::new(Vec::new(), Arity::Exact(1), Vec::new())
-        };
+        let child = CodeBuilder::new(Vec::new(), Arity::Exact(0), Vec::new())
+            .frame_release_slots(vec![21u16])
+            .frame_release_regions(vec![23u32]);
+        let template = CodeBuilder::new(Vec::new(), Arity::Exact(1), Vec::new())
+            .num_locals(1)
+            .num_params(1)
+            .frame_release_slots(vec![3u16, 7])
+            .frame_release_regions(vec![11u32, 13])
+            .children(vec![child]);
         let val = crate::value::heap::alloc(
             unsafe { &mut *heap_ptr },
             HeapObject::Closure {
                 closure: Closure::new(
-                    crate::value::closure::test_template(unsafe { &mut *heap_ptr }, template),
+                    template.build(unsafe { &mut *heap_ptr }),
                     crate::value::region_slice::RegionSlice::empty(),
                     SignalBits::EMPTY,
                 ),
@@ -166,14 +160,14 @@ fn closure_round_trips_preserving_frame_release_tables() {
             "the slot-routed release regions must cross with them; the two \
              halves of one table are useless apart"
         );
-        let child = &closure.template.child_protos()[0];
+        let child = closure.template.child(0);
         assert_eq!(
-            &child.frame_release_slots[..],
+            child.frame_release_slots(),
             &[21u16],
-            "a nested-lambda blueprint crosses via sendable_from_template and \
-             template_from_sendable, not send_closure — its tables must cross too"
+            "a nested lambda's code object crosses beside the closure's, not as \
+             a closure of its own — its tables must cross too"
         );
-        assert_eq!(&child.frame_release_regions[..], &[23u32]);
+        assert_eq!(child.frame_release_regions(), &[23u32]);
     });
 }
 
@@ -184,28 +178,24 @@ fn closure_round_trips_preserving_its_rest_list_layout() {
     // The layout is the gate's verdict on the closure's own body
     // (docs/impl/region/restlist.md). A worker that reconstructs it at the
     // default runs correctly and claims a page per rest argument, so only the
-    // field itself shows the loss. The child blueprint crosses by the template
+    // field itself shows the loss. The child's code object crosses by the
     // path the stdlib cache also takes.
     use crate::value::RestListLayout;
     crate::value::arena::with_test_region(|| {
         let heap_ptr = crate::value::arena::leaked_test_heap();
-        let child = Rc::new(TemplateProto {
-            num_params: 1,
-            rest_list_layout: RestListLayout::OneRegion,
-            ..TemplateProto::new(Vec::new(), Arity::AtLeast(0), Vec::new())
-        });
-        let template = TemplateProto {
-            num_locals: 1,
-            num_params: 1,
-            rest_list_layout: RestListLayout::OneRegion,
-            child_protos: vec![child],
-            ..TemplateProto::new(Vec::new(), Arity::AtLeast(0), Vec::new())
-        };
+        let child = CodeBuilder::new(Vec::new(), Arity::AtLeast(0), Vec::new())
+            .num_params(1)
+            .rest_list_layout(RestListLayout::OneRegion);
+        let template = CodeBuilder::new(Vec::new(), Arity::AtLeast(0), Vec::new())
+            .num_locals(1)
+            .num_params(1)
+            .rest_list_layout(RestListLayout::OneRegion)
+            .children(vec![child]);
         let val = crate::value::heap::alloc(
             unsafe { &mut *heap_ptr },
             HeapObject::Closure {
                 closure: Closure::new(
-                    crate::value::closure::test_template(unsafe { &mut *heap_ptr }, template),
+                    template.build(unsafe { &mut *heap_ptr }),
                     crate::value::region_slice::RegionSlice::empty(),
                     SignalBits::EMPTY,
                 ),
@@ -224,9 +214,10 @@ fn closure_round_trips_preserving_its_rest_list_layout() {
             "the closure's own layout crosses by send_closure"
         );
         assert_eq!(
-            closure.template.child_protos()[0].rest_list_layout,
+            closure.template.child(0).rest_list_layout(),
             RestListLayout::OneRegion,
-            "a nested-lambda blueprint's layout crosses by the template path"
+            "a nested lambda's code object crosses beside the closure's, layout \
+             and all"
         );
     });
 }

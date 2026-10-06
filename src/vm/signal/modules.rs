@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! The `compile/*` queries that compile a test file or dump its stages, and
 //! run the setup module of a test file on this VM.
 //!
@@ -69,7 +69,7 @@ impl VM {
             &mut crate::symbol::SymbolTable,
             &mut crate::pipeline::CompileCtx,
             &str,
-        ) -> Result<crate::pipeline::CompileResult, String>,
+        ) -> Result<crate::value::CodeUnit, String>,
     ) -> (SignalBits, Value) {
         let parts = match arg.list_to_vec_in(ctx.heap_mut()) {
             Ok(v) => v,
@@ -254,15 +254,15 @@ impl VM {
     pub(super) fn execute_test_setup(
         &mut self,
         ctx: &mut crate::primitives::ctx::Alloc,
-        result: crate::pipeline::CompileResult,
+        unit: crate::value::CodeUnit,
         prim: &str,
     ) -> (SignalBits, Value) {
-        // The blueprint carries the module body's builder-idiom merge metadata
+        // The entry carries the module body's builder-idiom merge metadata
         // (mint-or-reuse; docs/impl/region/merging.md § Merging) with the rest of
         // its payload. Empty unless a merge fired.
         let code = crate::value::ClosureTemplate::for_proto(
             self.heap(),
-            &Rc::new(result.bytecode.into_proto()),
+            &Rc::new(unit.bytecode().clone().into_proto()),
         )
         .code();
         let empty_env = Rc::new(vec![]);

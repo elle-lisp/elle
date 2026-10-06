@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-06
 // src/pipeline/AGENTS.md
 //! `CompileCtx`: one instance's compile-time state.
 //!
@@ -429,7 +429,7 @@ impl CompileCtx {
         // the probe is often the first expansion on that path too.
         let projection = super::compile::compile_file(&source, symbols, self, resolved_path)
             .ok()
-            .and_then(|result| result.bytecode.signal_projection);
+            .and_then(|unit| unit.signal_projection().cloned());
 
         self.projections
             .insert(resolved_path.to_string(), projection.clone());

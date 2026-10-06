@@ -1,9 +1,9 @@
-// audited: 2026-09-28
+// audited: 2026-10-06
 //! VM entry points that connect bytecode execution to the async scheduler.
 //!
 //! docs/impl/vm.md
 
-use crate::compiler::bytecode::{Bytecode, Instruction};
+use crate::compiler::bytecode::Instruction;
 use crate::pipeline::CompileCtx;
 use crate::value::{SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT};
 use std::rc::Rc;
@@ -69,23 +69,24 @@ impl VM {
         }
     }
 
-    /// Execute user bytecode under the async scheduler.
+    /// Run a compiled unit under the async scheduler.
     ///
-    /// Wraps the bytecode in a thunk and calls `(ev/run thunk)` to
-    /// install the async scheduler. The thunk carries the bytecode's
-    /// inferred signal so fiber scheduling and shared allocator
-    /// provisioning work correctly.
+    /// Wraps the unit's entry function in a thunk and calls `(ev/run thunk)`
+    /// to install the async scheduler. The thunk carries the entry's inferred
+    /// signal so fiber scheduling and shared allocator provisioning work
+    /// correctly.
     ///
     /// Falls back to direct execution if stdlib isn't loaded yet.
     pub fn execute_scheduled(
         &mut self,
-        bytecode: &Bytecode,
+        unit: &crate::value::CodeUnit,
         cctx: &CompileCtx,
     ) -> Result<Value, String> {
         let ev_run = match cctx.lookup_stdlib_value(crate::value::SymbolId::of("ev/run")) {
             Some(v) => v,
-            None => return self.execute(bytecode),
+            None => return self.execute(unit),
         };
+        let bytecode = unit.bytecode();
 
         // The entry thunk's blueprint is the program's own: it runs the top-level
         // bytecode, so it carries the real program's location table, nested-lambda
