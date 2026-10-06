@@ -73,14 +73,16 @@
 # A datum that eval compiles has no file, so its path resolves against the
 # working directory, the repository root under the runner. The first form
 # proves the load succeeds; without it the second would pass on a missing file.
+# The stdlib has an `inc` of one argument, so a call of none fails unless the
+# module's `inc` of none leaked into this scope.
 (let [[ok? _] (protect (eval '(import-file "tests/modules/counter.lisp")))]
   (assert ok? "an eval'd import-file resolves against the working directory"))
 (let [[ok? err] (protect (eval '(do
                                   (import-file "tests/modules/counter.lisp")
                                   (inc))))]
   (assert (not ok?) "defn in imported file is not visible in caller scope")
-  (assert (string/contains? (get err :message) "inc")
-          "the failure is the undefined name, not the load"))
+  (assert (string/contains? (get err :message) "arity-error")
+          "the call reached the stdlib inc, not the module's"))
 
 # ============================================================================
 # 7. Existing module fixtures

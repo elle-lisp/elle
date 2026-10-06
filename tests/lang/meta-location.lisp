@@ -13,12 +13,11 @@
 (assert (= here:file (path/normalize here:file)) "the file is normalized")
 
 # Exact lines move when the formatter rewrites the file, so compare two forms.
-(def first-line (meta/location))
-(def second-line (meta/location))
-(assert (= (+ 1 first-line:line) second-line:line)
-        "each form answers its own line")
-(assert (= first-line:col second-line:col)
-        "two forms at one indentation answer one column")
+# The two names have one length, so the two forms start in one column.
+(def line-a (meta/location))
+(def line-b (meta/location))
+(assert (= (+ 1 line-a:line) line-b:line) "each form answers its own line")
+(assert (= line-a:col line-b:col) "two forms in one column answer one column")
 
 # The macro comes from another file. Its expansion answers this file, because
 # a form a macro builds takes the location of the macro call. The
