@@ -1,6 +1,6 @@
 # elle semver
 
-<!-- audited: 2026-09-27 -->
+<!-- audited: 2026-10-06 -->
 
 `elle semver` computes and verifies the version bump a library's surface change requires.
 
@@ -102,8 +102,9 @@ its shape and changes its answers; the old tests can.
    baseline rev by listing that commit's tree.
 3. The old files materialize in a scratch directory (removed
    afterwards) and run as `elle test` in a child whose working
-   directory is the worktree, so their imports resolve through the
-   ordinary search path to the new code. No import is rewritten.
+   directory is the worktree, with the worktree first on `ELLE_PATH`.
+   A bare import spec in an old test then resolves to the new code
+   ([modules.md](modules.md)). No import is rewritten.
 4. The child failing rejects the claim: `compat claim rejected`,
    exit 1.
 
