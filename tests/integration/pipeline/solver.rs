@@ -12,7 +12,7 @@ use elle::value::SymbolId;
 
 /// A module file whose compile interns `marker`, a quoted symbol nothing else
 /// in this test binary spells. Interning is the only trace a compile of the
-/// module leaves, because neither analysis runs the import.
+/// module leaves, because no test here runs the import.
 fn module_with_marker(dir: &std::path::Path, marker: &str) -> String {
     let module = dir.join(format!("{marker}.lisp"));
     std::fs::write(
@@ -24,44 +24,61 @@ fn module_with_marker(dir: &std::path::Path, marker: &str) -> String {
 }
 
 #[test]
-fn an_attached_analysis_compiles_each_literal_import() {
-    // The counter-factual for the test below: without it, a marker that never
-    // answers could mean the probe does not intern, and the detached test
-    // would pass for that reason alone.
+fn compiling_the_module_interns_its_marker() {
+    // The control for the two tests below: an absent marker means the module
+    // never compiled only if a compile of the module interns it.
     let tmp = tempfile::tempdir().expect("scratch dir");
-    let source = module_with_marker(tmp.path(), "attached-solver-marker");
+    module_with_marker(tmp.path(), "compiled-solver-marker");
+    let module = std::fs::read_to_string(tmp.path().join("compiled-solver-marker.lisp"))
+        .expect("read module");
     let mut rt = setup();
-    let (vm, symbols, cctx) = rt.parts();
-    let analysis = elle::pipeline::analyze_file(&source, symbols, vm, cctx, "<attached>")
-        .expect("the importer analyzes");
-    assert!(analysis.errors.is_empty(), "{:?}", analysis.errors);
+    let (_, symbols, cctx) = rt.parts();
+    compile_file(&module, symbols, cctx, "<module>").expect("the module compiles");
     assert!(
         symbols
-            .name(SymbolId::of("attached-solver-marker"))
+            .name(SymbolId::of("compiled-solver-marker"))
             .is_some(),
-        "analyze_file compiles a literal import for its projection, so the \
-         module's quoted marker is interned"
+        "a compile of the module interns its quoted marker"
     );
 }
 
 #[test]
-fn a_detached_analysis_never_compiles_a_literal_import() {
+fn analysis_never_compiles_a_literal_import() {
     // A solver states facts per file and links them, so it must be able to
     // analyze a file whose import graph has a cycle. A compile of each import
     // recurses on such a cycle until the stack overflows.
     let tmp = tempfile::tempdir().expect("scratch dir");
-    let source = module_with_marker(tmp.path(), "detached-solver-marker");
+    let source = module_with_marker(tmp.path(), "analyzed-solver-marker");
     let mut rt = setup();
     let (vm, symbols, cctx) = rt.parts();
-    let analysis = elle::pipeline::analyze_file_detached(&source, symbols, vm, cctx, "<detached>")
+    let analysis = elle::pipeline::analyze_file(&source, symbols, vm, cctx, "<analyzed>")
         .expect("the importer analyzes");
     assert!(analysis.errors.is_empty(), "{:?}", analysis.errors);
     assert!(
         symbols
-            .name(SymbolId::of("detached-solver-marker"))
+            .name(SymbolId::of("analyzed-solver-marker"))
             .is_none(),
-        "analyze_file_detached must not compile the imported module, so its \
-         quoted marker is never interned"
+        "analyze_file must not compile the imported module, so its quoted \
+         marker is never interned"
+    );
+}
+
+#[test]
+fn compiling_a_file_never_compiles_its_literal_import() {
+    // The loader compiles the module when the import runs, and this compile
+    // runs nothing. The counter-factual is the projection probe, which
+    // compiled each literal import while the importer was analyzed.
+    let tmp = tempfile::tempdir().expect("scratch dir");
+    let source = module_with_marker(tmp.path(), "importer-solver-marker");
+    let mut rt = setup();
+    let (_, symbols, cctx) = rt.parts();
+    compile_file(&source, symbols, cctx, "<importer>").expect("the importer compiles");
+    assert!(
+        symbols
+            .name(SymbolId::of("importer-solver-marker"))
+            .is_none(),
+        "compile_file must not compile the imported module, so its quoted \
+         marker is never interned"
     );
 }
 
