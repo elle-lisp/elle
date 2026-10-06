@@ -1,12 +1,12 @@
 #!/usr/bin/env elle
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 14)
+# audited: 2026-10-06
 # telemetry:flush delivers an OTLP payload from bindings made at the top level of a program.
 # docs/libraries.md
 #
 
-(def http ((import-file "./lib/http.lisp")))
-(def telemetry ((import-file "lib/telemetry.lisp")))
+(def http ((import "std/http")))
+(def telemetry ((import "std/telemetry")))
 
 (def received @[])
 

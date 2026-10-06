@@ -1,9 +1,9 @@
-(elle/epoch 12)
-## DNS client tests
-##
-## Tests the wire-format codec and pure helpers from lib/dns.lisp.
+(elle/epoch 14)
+# audited: 2026-10-06
+# The DNS library exports its client and constants, and builds a query its own parser reads back.
+# docs/libraries.md
 
-(def dns ((import-file "lib/dns.lisp")))
+(def dns ((import "std/dns")))
 
 # ============================================================================
 # Internal wire-format tests (pure, no network)

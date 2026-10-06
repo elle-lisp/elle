@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 14)
+# audited: 2026-10-06
 ## port/write writes every byte before it returns, and returns that count.
 ## docs/io.md
 ##
@@ -62,8 +62,8 @@
                       (assign received (+ received (length chunk)))))
                   (port/close conn))))
     (let* [conn (if (> sndbuf 0)
-                  (tcp/connect "127.0.0.1" port-num :sndbuf sndbuf :timeout 5000)
-                  (tcp/connect "127.0.0.1" port-num :timeout 5000))
+                  (tcp/connect "127.0.0.1" port-num :sndbuf sndbuf :timeout 5)
+                  (tcp/connect "127.0.0.1" port-num :timeout 5))
            returned (port/write conn (bytes (string/repeat "x" payload-size)))]
       ## Close the write side so the reader sees EOF, then let it finish.
       (port/close conn)
@@ -121,14 +121,11 @@
 (def tls-payload 8000000)
 (def tls-deadline 60)
 
-## Try release build first, fall back to debug. Unlike `tls.lisp` this file does
-## not gate on the plugin: cases 1 and 2 need no plugin and must still run.
+## Unlike `tls.lisp` this file does not gate on the plugin: cases 1 and 2 need
+## no plugin and must still run.
 (def tls-plugin
-  (let [[ok? r] (protect (import-file "target/release/libelle_tls.so"))]
-    (if ok?
-      r
-      (let [[ok2? r2] (protect (import-file "target/debug/libelle_tls.so"))]
-        (if ok2? r2 nil)))))
+  (let [[ok? r] (protect (import "plugin/tls"))]
+    (if ok? r nil)))
 
 (defn tls-write-once [tls cert-path key-path payload]
   "Send `payload` bytes over one loopback TLS connection and report
@@ -171,7 +168,7 @@
 (if (nil? tls-plugin)
   (println "  3. TLS: SKIPPED (elle-tls plugin not built)")
   (begin
-    (def tls ((import-file "lib/tls.lisp") tls-plugin))
+    (def tls ((import "std/tls") tls-plugin))
     ## The scratch dir is created only on the path that uses it, and removed
     ## below whether or not openssl produced a certificate.
     (def scratch (file/mktempdir))

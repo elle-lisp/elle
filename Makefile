@@ -514,19 +514,20 @@ embedding: elle  ## Build + run embedding demos (Rust + C hosts)
 	LD_LIBRARY_PATH=$(EMBED_TARGET_DIR) demos/embedding/chost
 
 # The signal solver spike (docs/impl/solver.md): every fixture's `# expect`
-# lines, and the worklist and datafrog solving one model over all of lib/. An
-# import spec resolves against the working directory, so the fixtures run from
-# their own. The spike exits non-zero on a failed expectation or a disagreement.
+# lines, and the worklist and datafrog solving one model over all of lib/. A
+# fixture names each import by a path relative to itself, so the fixtures run
+# from the repository root. The spike exits non-zero on a failed expectation or
+# a disagreement.
 SIGNAL_SOLVE = $(CURDIR)/$(CARGO_OUT)/examples/signal_solve
+SOLVE_FIXTURES = examples/signal_solve/fixtures
 
 signal-solve:  ## The signal solver spike: its fixtures, and both engines over lib/
 	cargo build $(CARGO_PROFILE) --example signal_solve
-	cd examples/signal_solve/fixtures && \
-		$(SIGNAL_SOLVE) --expect parity.lisp && \
-		$(SIGNAL_SOLVE) --expect app.lisp && \
-		$(SIGNAL_SOLVE) --expect cyc_a.lisp && \
-		$(SIGNAL_SOLVE) --expect ceiling.lisp && \
-		$(SIGNAL_SOLVE) --expect --no-follow sep.lisp
+	$(SIGNAL_SOLVE) --expect $(SOLVE_FIXTURES)/parity.lisp
+	$(SIGNAL_SOLVE) --expect $(SOLVE_FIXTURES)/app.lisp
+	$(SIGNAL_SOLVE) --expect $(SOLVE_FIXTURES)/cyc_a.lisp
+	$(SIGNAL_SOLVE) --expect $(SOLVE_FIXTURES)/ceiling.lisp
+	$(SIGNAL_SOLVE) --expect --no-follow $(SOLVE_FIXTURES)/sep.lisp
 	$(SIGNAL_SOLVE) $$(find lib -name '*.lisp' | sort)
 
 

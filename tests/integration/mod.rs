@@ -1,4 +1,4 @@
-// audited: 2026-10-04
+// audited: 2026-10-06
 // Registers every integration test file, which is what makes one run.
 //
 // tests/AGENTS.md
@@ -59,6 +59,9 @@ mod bins {
 }
 mod argv_cli {
     include!("argv_cli.rs");
+}
+mod module_cli {
+    include!("module_cli.rs");
 }
 mod dispatch {
     include!("dispatch.rs");

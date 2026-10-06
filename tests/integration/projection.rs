@@ -1,4 +1,8 @@
-// Integration tests for signal projection and compile-time squelch
+// audited: 2026-10-06
+// A module file's signal projection, the import-file probe that reads it, and compile-time squelch.
+//
+// docs/signals/inference.md
+// docs/modules.md
 //
 // Signal projection: the compiler extracts signal profiles from exported
 // closures in module files, enabling cross-file signal inference.
@@ -20,10 +24,10 @@ fn setup() -> (SymbolTable, VM) {
     (symbols, vm)
 }
 
-// Local `analyze_file` shim preserving the pre-CompileCtx arity. These tests
-// analyze a single module file in isolation (no stdlib, no execution), so a
-// fresh `CompileCtx` per call (primitives + core + prelude) gives exactly the
-// old bare path; no projection or compile-time state is shared across calls.
+// Local `analyze_file` shim. These tests analyze one module file alone (no
+// stdlib, no execution), so each call takes a fresh `CompileCtx` (primitives,
+// core and prelude), and no projection or compile-time state is shared across
+// calls.
 fn analyze_file(
     source: &str,
     symbols: &mut SymbolTable,
@@ -84,57 +88,25 @@ fn test_squelch_multi() {
 // ============================================================================
 
 #[test]
-fn test_projection_struct_literal() {
-    // A file returning {:add add :double double} where both are pure
-    // should produce a projection mapping :add and :double to errors-only.
+fn a_file_returning_a_lambda_over_a_struct_projects_its_fields() {
+    // The closure-as-module convention returns a lambda whose body ends in the
+    // export struct, and the projection reads through the lambda to the struct.
+    // `test_projection_bytecode_field` below holds the bare struct literal.
     let source = r#"
-(defn add [x y] (%add x y))
-(defn double [x] (%mul x 2))
-{:add add :double double}
-"#;
-    let (mut symbols, mut vm) = setup();
-    let result = analyze_file(source, &mut symbols, &mut vm, "<test>").unwrap();
-
-    // The file letrec's last binding is the struct literal.
-    // Walk into the Letrec to find the struct call.
-    if let HirKind::Letrec { bindings, .. } = &result.hir.kind {
-        // Last binding's value should be the struct call
-        let (_, value) = bindings.last().unwrap();
-        if let HirKind::Call { args, .. } = &value.kind {
-            // Check it's a struct call with keyword-value pairs
-            assert!(args.len() >= 4, "struct should have at least 4 args");
-            // Each closure value in the struct should have errors-only signal
-            for i in (1..args.len()).step_by(2) {
-                let sig = &args[i].expr.signal;
-                assert!(
-                    !sig.may_suspend(),
-                    "field at {} should not suspend",
-                    i
-                );
-            }
-        } else {
-            // Might be wrapped differently; just check the projection was computed
-            // by verifying the overall file signal is reasonable
-        }
-    }
-}
-
-#[test]
-fn test_projection_lambda_returning_struct() {
-    // A file returning (fn [] {:add add :double double}) should produce
-    // the same projection as a direct struct literal.
-    let source = r#"
-(defn add [x y] (%add x y))
-(defn double [x] (%mul x 2))
+(defn add [x y] (numeric!) (%add x y))
+(defn double [x] (numeric!) (%mul x 2))
 (fn [] {:add add :double double})
 "#;
-    let (mut symbols, mut vm) = setup();
-    let result = analyze_file(source, &mut symbols, &mut vm, "<test>").unwrap();
-
-    // The file should compile successfully
+    let mut symbols = SymbolTable::new();
+    let result = compile_file(source, &mut symbols, "<test>").unwrap();
+    let proj = result
+        .bytecode
+        .signal_projection
+        .expect("a lambda over a struct literal has a projection");
+    assert!(proj.contains_key("add"), "projection should contain :add");
     assert!(
-        !matches!(result.hir.kind, HirKind::Error),
-        "file should compile without errors"
+        proj.contains_key("double"),
+        "projection should contain :double"
     );
 }
 
@@ -144,9 +116,8 @@ fn test_projection_lambda_returning_struct() {
 
 #[test]
 fn test_squelch_binding_signal_inference() {
-    // (def safe (squelch f :error)) where f has signal {:error}
-    // should infer safe as silent (squelch removes :error, but since
-    // the mask catches all signal bits, the result is just {:error} from squelch itself).
+    // A binding whose value is a compile-time squelch analyzes. The squelch
+    // algebra itself is pinned by the `Signal::squelch` tests above.
     let source = r#"
 (defn f [x] (+ x 1))
 (def safe (squelch f :error))
@@ -163,10 +134,10 @@ safe
 
 #[test]
 fn test_squelch_set_mask() {
-    // (squelch f |:yield :io|) should handle set masks.
+    // A squelch whose mask is a set literal analyzes.
     let source = r#"
 (defn f [] (yield 1))
-(def safe (squelch f :yield))
+(def safe (squelch f |:yield :io|))
 safe
 "#;
     let (mut symbols, mut vm) = setup();
@@ -178,7 +149,7 @@ safe
 }
 
 // ============================================================================
-// 4. PROJECTION + SQUELCH COMPOSITION
+// 4. THE PROJECTION ON THE BYTECODE
 // ============================================================================
 
 #[test]
@@ -206,10 +177,7 @@ fn test_projection_bytecode_field() {
         "projection should contain :double"
     );
     // Both are pure arithmetic — errors only, not yields
-    assert!(
-        !proj["add"].may_suspend(),
-        ":add should not be suspending"
-    );
+    assert!(!proj["add"].may_suspend(), ":add should not be suspending");
     assert!(
         !proj["double"].may_suspend(),
         ":double should not be suspending"
@@ -238,22 +206,19 @@ fn test_projection_yields_function() {
     let mut symbols = SymbolTable::new();
     let result = compile_file(source, &mut symbols, "<test>").unwrap();
     let proj = result.bytecode.signal_projection.unwrap();
-    assert!(
-        proj["producer"].may_yield(),
-        ":producer should be yields"
-    );
+    assert!(proj["producer"].may_yield(), ":producer should be yields");
 }
 
 // ============================================================================
-// 4. THE IMPORT PROJECTION PROBE
+// 5. THE IMPORT PROJECTION PROBE
 // ============================================================================
 
 #[test]
 fn import_projection_probe_compiles_the_imported_module() {
-    // `((import "…"))` makes the analyzer compile the imported file to read its
-    // signal projection (src/hir/analyze/call.rs § "Import projection
-    // detection"). `compile_file` never executes the import, so the probe is the
-    // only thing that reaches the module's source at all.
+    // `((import-file "…"))` makes the analyzer compile the imported file to read
+    // its signal projection (src/hir/analyze/call.rs). `compile_file` never
+    // executes the import, so the probe is the only thing that reaches the
+    // module's source at all.
     //
     // The trap: `SymbolId::of` derives an id without recording anything, so the
     // name answers here only if some compile interned it. The module's marker is
@@ -271,7 +236,7 @@ fn import_projection_probe_compiles_the_imported_module() {
     .expect("write module");
 
     let mut symbols = SymbolTable::new();
-    let source = format!("(def m ((import \"{}\")))\nm\n", module.display());
+    let source = format!("(def m ((import-file \"{}\")))\nm\n", module.display());
     compile_file(&source, &mut symbols, "<probe-main>").expect("main file compiles");
 
     assert!(
@@ -279,6 +244,39 @@ fn import_projection_probe_compiles_the_imported_module() {
         "compiling a file whose import is probed must compile the module: with \
          no probe nothing reads the module's source, so its quoted data is never \
          interned and the import falls back to the conservative projection"
+    );
+}
+
+#[test]
+fn the_analyzer_reads_no_projection_through_the_import_macro() {
+    // `import` is a macro over `import/resolve`, which a program may replace, so
+    // the compiler does not know its file and must not compile one. The
+    // counter-factual: an analyzer that still probes a literal `import` spec
+    // compiles the module, and the module's quoted marker is interned. The
+    // marker spelling is unique for the reason the probe test above gives.
+    //
+    // `import/resolve` lives in the stdlib, so this runtime loads it.
+    let tmp = tempfile::tempdir().expect("scratch dir");
+    let module = tmp.path().join("unprobed_module.lisp");
+    std::fs::write(
+        &module,
+        "(fn [] (def marker 'import-macro-unprobed-marker) {:marker marker})\n",
+    )
+    .expect("write module");
+
+    let mut rt = elle::runtime::Runtime::new();
+    let (_, symbols, cctx) = rt.parts();
+    let main = format!("(def m ((import \"{}\")))\nm\n", module.display());
+    elle::pipeline::compile_file(&main, symbols, cctx, "<unprobed-main>")
+        .expect("main file compiles");
+
+    assert!(
+        symbols
+            .name(SymbolId::of("import-macro-unprobed-marker"))
+            .is_none(),
+        "compiling a file that imports through the `import` macro must not \
+         compile the module: the compiler knows the file of a literal \
+         `import-file` alone"
     );
 }
 
@@ -330,7 +328,7 @@ fn each_keeps_its_collection_when_an_import_probe_expanded_the_macro_first() {
     let mut rt = elle::runtime::Runtime::without_stdlib();
     let (vm, symbols, cctx) = rt.parts();
 
-    let main = format!("(def m ((import \"{}\")))\nm\n", module.display());
+    let main = format!("(def m ((import-file \"{}\")))\nm\n", module.display());
     elle::pipeline::compile_file(&main, symbols, cctx, "<each-probe-main>")
         .expect("main file compiles");
 

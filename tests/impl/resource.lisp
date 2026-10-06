@@ -1,12 +1,12 @@
-(elle/epoch 13)
-# audited: 2026-09-28
+(elle/epoch 14)
+# audited: 2026-10-06
 # Resource consumption measurement tests
 #
 # Uses lib/resource.lisp to measure deterministic resource counters
 # across representative scenarios. Output is machine-parseable for CI
 # regression detection.
 
-(def res ((import-file "lib/resource.lisp")))
+(def res ((import "std/resource")))
 
 # ── Helper definitions ────────────────────────────────────────────
 
