@@ -1,6 +1,6 @@
 # What the experiments measured
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-10-06 -->
 
 Seven questions the image design turned on, each answered by an experiment,
 with the numbers it produced.
@@ -107,9 +107,9 @@ and [plan.md](plan.md) the order everything lands in.
    `intern_primitive_names` and its five call sites, and the `CompileCtx`
    registration-order invariant (including the bullet in
    [pipeline.md](../../pipeline.md)). The audit also found two live
-   cross-table id holes that stable ids close: `send` ships
+   cross-table id holes that stable ids close: `send` shipped
    `LirConst::Symbol` inside the live `LirFunction` verbatim, so worker-side
-   JIT re-emission pools sender-space ids; and `TableKey::Symbol` keys inside
+   JIT re-emission pooled sender-space ids; and `TableKey::Symbol` keys inside
    sent structs cross untranslated. The symbol milestone must land regression
    tests for both.
 5. **Expander mutation parity — dispatched, parity exceeded.** A throwaway
@@ -211,10 +211,10 @@ and [plan.md](plan.md) the order everything lands in.
    | Per instruction | Rust-heap `LirFunction` | Region prototype |
    |-----------------|------------------------|------------------|
    | build — a vector per block, a push per instruction | 21.5 ns | 17.4 ns |
-   | copy — what `prepare_task` makes per promotion | 13.8 ns | 8.7 ns |
+   | copy — a deep copy, the shape of a JIT promotion | 13.8 ns | 8.7 ns |
    | walk — a backend's read, L3-resident | 3.1 ns | 1.4 ns |
    | walk — the same read, from memory | 12.3 ns | 7.5 ns |
-   | rewrite — `send`'s `ValueConst` pass, in place | 1.2 ns | 0.8 ns |
+   | rewrite — a `ValueConst` pass, in place | 1.2 ns | 0.8 ns |
    | teardown | 5.8 ns | 1.7 ns |
 
    One build's allocator traffic: **21,281 malloc calls and 23,396 KiB
