@@ -24,7 +24,7 @@ signal profiles.
 A `Binding` addresses a `BindingArena`, and the arena is not part of the term.
 An HIR body on its own therefore means nothing outside the unit that analyzed
 it: its indices name a table the reader does not hold. Carrying such a body to
-another unit, or to a file, means carrying the binding facts it needs — and a
+another unit, or to a file, means carrying the binding facts it needs. A
 carrier that hoists a chosen few of them out of `BindingInner` is wrong the day
 someone adds the twelfth field.
 
@@ -39,10 +39,10 @@ each entry says what the binding is:
 
 `HirFragment::close` builds a fragment from a body, its parameters, and the
 defining arena. `HirFragment::graft` re-hosts one into any arena, minting fresh
-`HirId`s — a reused id collides in the region walk's per-id side tables. Both
-run over one rebuild (`rebind`), so `close` declines exactly the forms `graft`
-could not rebuild: a fragment that exists always rebuilds, and the only thing
-left for `graft` to refuse is a global the host unit cannot name.
+`HirId`s, because a reused id collides in the region walk's per-id side
+tables. Both run over one rebuild (`rebind`), so `close` declines exactly the
+forms `graft` could not rebuild. A fragment that exists always rebuilds, and the
+only thing left for `graft` to refuse is a global the host unit cannot name.
 
 The admitted forms are the pure-expression ones (literals, `Var`, `Call`, `if`,
 `cond`, `begin`, `and`/`or`, `emit`, and a raw `%`-intrinsic) plus `let` and
@@ -74,7 +74,7 @@ compile user code to the same bytecode a stdlib compile does.
 1. **Binding resolution** — names → `Binding` arena indices, recording
    each binding's scope (`Parameter`/`Local`), mutation, and capture
    status in the `BindingArena`
-2. **Capture analysis** — which free variables a closure captures,
+2. **Capture analysis** — which free variables a closure captures, and
    whether they are mutable. Each capture carries a `CaptureKind`: `Local`
    (from the parent's slot), `Capture` (transitive, from the parent's own
    captures), or `Recursive` (the closure captures its *own* enclosing
@@ -128,15 +128,15 @@ So the pass proves effect-freedom, not silence, and it proves it from two
 facts that cannot lie:
 
 - **The node's signal is `Signal::silent()`.** The analyzer combines the callee
-  signal with every argument's signal, so a silent call node also means every
-  argument is silent, and that a polymorphic callee got silent arguments. A
-  yielding callback handed to an otherwise-silent higher-order function shows up
-  here and blocks elimination.
+  signal with every argument's signal. A silent call node therefore also means
+  every argument is silent, and that a polymorphic callee got silent arguments.
+  A yielding callback handed to an otherwise-silent higher-order function shows
+  up here and blocks elimination.
 - **The callee stores nothing.** For a primitive, `RegionEffect::Immediate` and
   `RegionEffect::Fresh` are the two declarations that state no argument is
-  stored anywhere outliving the call, and `moves_out` marks the natives that
-  remove an element from a container argument. In-place mutation is a store into
-  an argument, so `Funnel`, `Stores`, `Sends`, `Mixed`, and `PassThrough` are all
+  stored anywhere outliving the call. `moves_out` marks the natives that remove
+  an element from a container argument. In-place mutation is a store into an
+  argument, so `Funnel`, `Stores`, `Sends`, `Mixed`, and `PassThrough` are all
   rejected. For a user-defined callee, the same predicate runs over its lambda
   body, to a fixpoint.
 
@@ -160,7 +160,7 @@ termination question: it can only delete calls that provably return.
 
 ## Kernel and sugar (design target)
 
-`HirKind` is currently a **wide** vocabulary: `functionalize` and `anf_lift`
+`HirKind` is currently a **wide** vocabulary. `functionalize` and `anf_lift`
 normalize a few constructs (`while → loop/recur`, `assign → ssa-let/setcell`,
 captured `var → derefcell`) and ANF names allocating subexpressions, but they
 eliminate almost nothing — the lowerer still matches all 37 variants, so
@@ -179,8 +179,9 @@ irreducible **kernel**:
   `match`→`if`+gets, `destructure`→`intrinsic` gets, `begin`→`let`-chain,
   `while`→`loop`, `assign`→ssa/`setcell`, **`do`/`def`**→`let`/`letrec`
 
-The kernel boundary is set by *what lowering needs to name* (hence `loop`/`return`
-are kernel despite being semantically derivable), not by surface convenience.
+What lowering needs to name sets the kernel boundary, not surface convenience.
+That is why `loop` and `return` are kernel although they are semantically
+derivable.
 
 ## Bodies and `def`
 
@@ -195,23 +196,25 @@ non-recursive) and `letrec` (= `letrec*`, sequential, recursive). Each surface
 | file / module body | `letrec*` — strict; the body's *value* is the module |
 
 `def` is **polymorphic sugar**: "extend the enclosing body with one binding." In
-a sequential body it desugars to a nested `let` (`(do (def x 4) (def x (+ x 1)))`
-→ `(let [x 4] (let [x (+ x 1)] x))` — shadowing is free); in a recursive body it
-is a `letrec` binding. It is a *body-level*, post-macro-expansion rewrite (a
-`def` may be produced by a macro and must still be collected), not a closed-form
-local macro.
+a sequential body it desugars to a nested `let`: `(do (def x 4) (def x (+ x
+1)))` → `(let [x 4] (let [x (+ x 1)] x))`, and shadowing is free. In a recursive
+body it is a `letrec` binding. It is a *body-level*, post-macro-expansion
+rewrite, not a closed-form local macro, because a macro may produce a `def` and
+the body must still collect it.
 
-There is **no "module layer."** A module is just the body's return value — per
-[modules.md](../modules.md), a file *"runs as a single letrec, and whatever its
-last expression evaluates to becomes the return value"*, with no export
-declarations and no special syntax; `import-file` is *"essentially
-`(eval (slurp path))`"*. The two things that looked like a layer aren't bound to
-the body at all: the **export projection** (`compute_signal_projection`) is an
-optional compile-time *signal-inference cache* over the returned struct (delete
-it and modules still work, just with conservative cross-file signals), and
-`(signal :kw)` is an orthogonal *declaration form* with a compile-time effect on
-the signal registry, exactly like `defmacro`'s effect on the expander. Strip
-both away and the file body is **strictly `letrec*`** — which is what
+There is **no "module layer."** A module is just the body's return value. Per
+[modules.md](../modules.md), a file runs as a single letrec whose last
+expression is its value, with no export declarations and no special syntax, and
+`import/load-file` compiles and runs it. The two things that looked like a
+layer are not bound to the body at all:
+
+- The **export projection** (`compute_signal_projection`) is an optional
+  compile-time *signal-inference cache* over the returned struct. Delete it and
+  modules still work, with conservative cross-file signals.
+- `(signal :kw)` is an orthogonal *declaration form*. Its compile-time effect
+  on the signal registry is exactly like `defmacro`'s effect on the expander.
+
+Strip both away and the file body is **strictly `letrec*`**, which is what
 modules.md already says it is.
 
 **So `analyze_file_letrec` is an out-of-band driver to retire, not to rename.**
@@ -222,7 +225,7 @@ definition, later references the second) and should instead be a
 duplicate-definition error. The target is just the ordinary `letrec*` kernel:
 the loader collects file forms into a `letrec` (via the same `def`-as-body sugar
 and gensym-expr encoding) and runs them through the normal
-expand→analyze→emit→`eval` path — which is what `import-file` already does. If a
+expand→analyze→emit→`eval` path — which is what `import/load-file` already does. If a
 user-replaceable top-level wrapper is wanted (Racket `#%module-begin`-style), it
 is a macro named in valid Elle (e.g. `body*` — **not** `#%body`, since `#` is the
 comment char and `%` the intrinsic prefix) whose default expansion is exactly

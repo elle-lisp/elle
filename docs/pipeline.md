@@ -41,6 +41,9 @@ Each clone is independent, so a compile nested inside an expansion, such as a
 macro one compile defines reaches a later compile only when the REPL registers
 it with `register_repl_macros`.
 
+A compile may run Elle code from the standard library. An `include` calls
+`import/resolve` on the macro VM to find its file ([modules](modules.md)).
+
 ## Signal inference over a letrec
 
 A file compiles as one letrec, and a local `letrec` form is the same shape. A
