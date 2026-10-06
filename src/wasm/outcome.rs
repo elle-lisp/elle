@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! What a call reports back to emitted WASM code.
 //!
 //! docs/impl/wasm.md
@@ -15,7 +15,7 @@ use crate::value::fiber::SignalBits;
 /// This exists as a struct rather than a tuple because the two words are both
 /// `i64` on the wire and mean opposite things: returning one where the other
 /// belongs type-checks, compiles, and produces a silent wrong answer, the kind
-/// tests/impl/wasm-tier-error-signal.lisp checks for. Build one through a
+/// `wasm::tests::tier` checks for. Build one through a
 /// constructor and the pair cannot be crossed.
 #[derive(Clone, Copy, Debug)]
 pub(in crate::wasm) struct CallOutcome {

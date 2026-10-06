@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-06
 // Each variant build's target: the binaries it builds, their features, and the
 // suite passes it runs on them.
 //
@@ -45,7 +45,7 @@ fn smoke_wasm_runs_the_language_suite_in_process_on_elle_wasm() {
 // each forces its closures onto the tier itself.
 //
 // The counter-factual: a `smoke-wasm` with no such pass leaves
-// tests/impl/wasm-tier-error-signal.lisp on no wasm build at all, since the
+// tests/impl/wasm-tier.lisp on no wasm build at all, since the
 // full-module pass skips it.
 #[test]
 fn smoke_wasm_runs_the_implementation_suite_on_the_wasm_rig() {

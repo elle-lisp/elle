@@ -23,6 +23,7 @@ mod gauge;
 mod query;
 mod restart;
 mod stdlib;
+mod tier;
 mod toplevel;
 
 /// A trivial non-suspending entry that just returns nil, so the module has a

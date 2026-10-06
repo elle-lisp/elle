@@ -441,9 +441,8 @@ make smoke-wasm
 elle-wasm --wasm=full tests/lang/arithmetic.lisp
 elle-rig-wasm --profile tests/impl/profiles/wasm-full.toml tests/impl/region-capture-cell-loop-uaf.lisp
 
-# Tiered backend tests, on the wasm build's rig
+# Tiered backend test, on the wasm build's rig
 elle-rig-wasm tests/impl/wasm-tier.lisp
-elle-rig-wasm tests/impl/wasm-tier-error-signal.lisp
 
 # Rust-side WASM tests — the feature is off by default, so name it
 cargo test -p elle --lib --features wasm wasm::
