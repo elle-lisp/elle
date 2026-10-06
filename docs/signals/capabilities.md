@@ -1,6 +1,6 @@
 # Capability enforcement
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-06 -->
 
 Capabilities flow down. A fiber's parent decides what the fiber is
 permitted to do. Operations the fiber can't perform become signals the
@@ -72,21 +72,22 @@ released ([what a park retains](../impl/region/park.md)).
 ## Deniable capabilities
 
 Every signal bit is a capability bit. A fiber's `:deny` set is tested
-against the bits a primitive *declares*, so any bit a primitive declares
-is one a parent can withhold. Some bits also drive dispatch — `:io`
-routes a request through the scheduler — and some do no dispatch work at
-all. That distinction belongs to the VM. It changes neither what a mask
+against the bits a primitive *declares* and the bits an `emit` names, so
+any such bit is one a parent can withhold. Some bits also drive dispatch —
+`:io` routes a request through the scheduler — and some do no dispatch work
+at all. That distinction belongs to the VM. It changes neither what a mask
 can deny nor what it can catch.
 
-`:yield` is not in this table. It is the cooperative suspension `(yield v)`
-raises, not a capability: an I/O request raises `|:io|` alone, so a
-generator masked `|:yield|` catches its own yields while its reads travel
-out to the scheduler. See [protocol.md](protocol.md).
+`:yield` is the cooperative suspension `(yield v)` raises, and no I/O
+request carries it: a request raises `|:io|` alone. So a generator masked
+`|:yield|` catches its own yields while its reads travel out to the
+scheduler, and a fiber denied `:yield` cannot yield but can still read. See
+[protocol.md](protocol.md).
 
 | Keyword | Bit | Effect when denied | Dispatch |
 |---------|-----|--------------------|----------|
-| `:error` | 0 | Blocks every primitive that may error | yes |
-| `:yield` | 1 | Blocks cooperative suspension | yes |
+| `:error` | 0 | Blocks every primitive that may error, and `error` | yes |
+| `:yield` | 1 | Blocks cooperative suspension, `yield` included | yes |
 | `:debug` | 2 | Blocks breakpoints/tracing | yes |
 | `:ffi` | 4 | Blocks foreign function calls | no |
 | `:halt` | 8 | Blocks VM termination | yes |
@@ -96,8 +97,8 @@ out to the scheduler. See [protocol.md](protocol.md).
 | `:os-signal` | 16 | Blocks POSIX signal send/raise | no |
 | `:fs` | 17 | Blocks filesystem access | no |
 
-VM-internal signals (resume, propagate, abort, query, terminal,
-switch, wait) cannot be denied.
+VM-internal signals (resume, propagate, query, terminal, fuel, switch,
+wait) cannot be denied.
 
 ## Filesystem authority is `:fs`, not `:io`
 
@@ -134,7 +135,8 @@ filesystem and do.
 
 When a fiber calls a primitive whose declared signal bits overlap
 with the fiber's withheld capabilities, the primitive does not run.
-Instead, the fiber emits a signal with:
+An `emit` of a withheld bit raises nothing, as a call to `fiber/emit`
+would not run ([emit.md](emit.md)). Instead, the fiber emits a signal with:
 
 - **Bits**: the blocked capability bits, for example `:io`
 - **Payload**: a struct describing the denial
@@ -165,8 +167,10 @@ Three primitives work this way, each in its own domain:
 - native `import` runs a shared library's `elle_plugin_init`, which is foreign
   code, so a `.so`/`.dylib`/`.dll` spec needs `:ffi`. A `.lisp` module needs only
   the `:fs` that `import` already declares.
-- dynamic `emit` raises the bits its first argument names, so it needs those
-  bits.
+- `emit` raises the bits its first argument names, so it needs those bits. The
+  literal form compiles to the `Emit` instruction rather than a call, and that
+  instruction asks the same question of the bits it carries
+  ([emit.md](emit.md)).
 
 ```lisp
 # The first fiber may build the request; `f` may not spend it.
@@ -181,14 +185,15 @@ Three primitives work this way, each in its own domain:
   (assert (= (get (fiber/value f) :denied) |:exec|)))
 ```
 
-Three edges the gate does not reach. `io/submit` tests the fiber that submits, so
+Two edges the gate does not reach. `io/submit` tests the fiber that submits, so
 a scheduler that submits a request on another fiber's behalf spends its own
 authority. A loaded module's own primitives carry whatever bits the plugin
-declared, so a fiber handed a module still reaches them. And the literal `emit`
-compiles to a bytecode instruction rather than a call, so a fiber raises any
-literal bit it names — a mask therefore audits a cooperative child, not a hostile
-one. [authority.md](authority.md) states the model these follow from, and
-[emit.md](emit.md) covers what `emit` does not check.
+declared, so a fiber handed a module still reaches them.
+[authority.md](authority.md) states the model these follow from.
+
+Since no fiber raises a bit it withholds, a parent that denies a bit and names
+it in the mask sees every attempt to raise it, from a hostile child as from a
+cooperative one.
 
 ## Introspection
 

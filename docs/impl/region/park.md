@@ -1,6 +1,6 @@
 # What a park retains, and who releases it
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-06 -->
 
 The references a suspended fiber's park leaves standing, and the one seam that consumes each.
 
@@ -105,7 +105,9 @@ symmetric with its unpark; the node and the deferred set a park moves are
   is an uncounted marker, compared bit-wise like the mint record.
   `release_displaced_bodyless_payload` releases exactly what the record names, and takes
   the record (`take_bodyless`) as the receipt. An install that finds no record releases
-  nothing.
+  nothing. An `Emit` of a withheld bit parks a denial too, and records
+  `park_emit_denial`: its struct has no body reference, as for any denial, and its resume
+  owes no mint, as for any `Emit` park.
 
   **A shared region exempts no install.** A `Fresh` io op (`port/read`, `accept`) mints
   ONE region for the call and builds both the request and the completion buffer in it,
@@ -406,7 +408,8 @@ symmetric with its unpark; the node and the deferred set a park moves are
   dynamic `emit`), `park_request(bits, payload)` (an io op: a primitive park whose request
   has no body reference), `park_denial(bits, payload)` (a capability denial: a primitive
   park whose payload has no body reference either), `park_emit(bits, payload)` (an `Emit`
-  park, which owes no resume mint), `park_error(site, payload)` (an error park, which owes
+  park, which owes no resume mint), `park_emit_denial(bits, payload)` (an `Emit` of a
+  withheld bit: a denial's payload, and an `Emit` park's resume funding), `park_error(site, payload)` (an error park, which owes
   a resume mint for a `Call` site and none for an `Emit` site, and leaves standing the
   funding of a denial park recorded for the same payload), `record_mint(payload)` (a raise
   minted the payload's delivery), `raise_in_park(payload)` (an in-place abort or refusal:

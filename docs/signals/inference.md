@@ -1,6 +1,6 @@
 # Signal Inference
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-06 -->
 
 How the compiler infers each function's signal, and the forms that bound,
 narrow or check it.
@@ -363,7 +363,9 @@ breakpoint's `|:debug :fuel|`, and it passes whole too.
 When a `def` or `let` binds `(squelch spec f)` or `(attune spec f)` with a
 literal spec, the analyzer computes the new closure's signal. It removes the
 blocked bits, and adds `:error` when it removed any. A caller of the binding
-then sees the narrower signal.
+then sees the narrower signal. A literal spec is a keyword or a set literal.
+A set literal is a call to `set`, so where a binding shadows `set` the spec
+is computed, and the binding is not narrowed.
 
 ```lisp
 (def sig (signal-of "(defn p [] (yield 1))
