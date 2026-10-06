@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-23
+(elle/epoch 14)
+# audited: 2026-10-06
 # A return of a captured upvalue hands the caller its own owning reference, never the closure env's.
 # docs/impl/region/mechanism.md
 #
@@ -35,7 +35,7 @@
 
 (def cfg {:tag :live})
 
-(let [m ((import-file "tests/modules/captured-return.lisp") :cfg cfg)]
+(let [m ((import-file "../modules/captured-return.lisp") :cfg cfg)]
   (m:a)
   (m:b)
   (m:c)

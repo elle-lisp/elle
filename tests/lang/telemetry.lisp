@@ -1,6 +1,6 @@
 #!/usr/bin/env elle
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 14)
+# audited: 2026-10-06
 # lib/telemetry.lisp builds OTLP JSON payloads, encodes attributes and aggregates metrics with no collector.
 # docs/libraries.md
 #
@@ -8,7 +8,7 @@
 # metric aggregation, and the v0.2 features without a running collector.
 # Run: elle tests/lang/telemetry.lisp
 
-(def telemetry ((import-file "lib/telemetry.lisp")))
+(def telemetry ((import "std/telemetry")))
 
 (println "=== telemetry: attribute encoding ===")
 
