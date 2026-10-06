@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 // docs/impl/bytecode.md
 //! What the bytecode emitter writes: control flow, yield points, the
 //! coalescing oracle, and a nested lambda's blueprint. What an edge owes the
@@ -322,5 +322,58 @@ fn a_nested_lambdas_blueprint_carries_the_frame_release_tables() {
         bytecode.child_protos[0].frame_release_regions,
         vec![11u32, 13],
         "the slot route's regions reach the blueprint",
+    );
+}
+
+/// A nested lambda's blueprint carries the rest-list layout the gate wrote onto
+/// its `LirFunction`, so a closure the emitted `MakeClosure` materializes builds
+/// its rest list the way the analysis proved it may
+/// (docs/impl/region/restlist.md).
+#[test]
+fn a_nested_lambdas_blueprint_carries_its_rest_list_layout() {
+    // Counter-factual: a blueprint left at the layout `TemplateProto::new`
+    // supplies runs correctly and claims a page per rest argument, which no
+    // answer the closure returns can show.
+    use crate::hir::region::StaticRegion;
+    use crate::lir::ClosureId;
+    use crate::value::RestListLayout;
+
+    let mut nested = LirFixture::new(Arity::AtLeast(0))
+        .name("nested")
+        .num_params(1)
+        .num_locals(1)
+        .block(
+            0,
+            vec![LirInstr::Const {
+                dst: Reg(0),
+                value: LirConst::Nil,
+            }],
+            Terminator::Return(Reg(0)),
+        )
+        .build();
+    nested.rest_list_layout = RestListLayout::OneRegion;
+
+    let outer = LirFixture::new(Arity::Exact(0))
+        .block(
+            0,
+            vec![LirInstr::MakeClosure {
+                dst: Reg(0),
+                closure_id: ClosureId(0),
+                captures: vec![],
+                region: StaticRegion::new(2).unwrap(),
+            }],
+            Terminator::Return(Reg(0)),
+        )
+        .build();
+
+    let module = LirModule {
+        entry: outer,
+        closures: vec![nested],
+    };
+    let (bytecode, _, _) = Emitter::new().emit_module(&module);
+    assert_eq!(
+        bytecode.child_protos[0].rest_list_layout,
+        RestListLayout::OneRegion,
+        "the gate's verdict reaches the blueprint"
     );
 }

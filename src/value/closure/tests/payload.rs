@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-10-06
 //! What a payload carries: the tables and masks a header reads out of it.
 //! docs/impl/region/template.md
 
@@ -145,6 +145,31 @@ fn strict_struct_keys_survive_materialization() {
     assert!(keys.contains("alpha"));
     assert!(keys.contains("beta"));
     assert!(!keys.contains("gamma"), "an undeclared key is rejected");
+}
+
+/// The rest-list layout is a payload scalar beside the vararg tag, so the
+/// interpreter reads the gate's verdict off the header it calls
+/// (docs/impl/region/restlist.md).
+#[test]
+fn the_rest_list_layout_survives_materialization() {
+    use crate::value::RestListLayout;
+    let mut heap = FiberHeap::new();
+    for layout in [RestListLayout::PerCell, RestListLayout::OneRegion] {
+        let mut p = TemplateProto::new(vec![0; 8], Arity::AtLeast(0), Vec::new());
+        p.rest_list_layout = layout;
+        let p = Rc::new(p);
+        let t = header(header_in(&mut heap, &p));
+        assert_eq!(
+            t.rest_list_layout(),
+            layout,
+            "the header answers the blueprint's layout"
+        );
+    }
+    assert_eq!(
+        TemplateProto::new(vec![], Arity::AtLeast(0), Vec::new()).rest_list_layout,
+        RestListLayout::PerCell,
+        "a blueprint no gate has judged builds one region per cell"
+    );
 }
 
 /// The merge set is a sorted slice searched by binary search, not a hash set.

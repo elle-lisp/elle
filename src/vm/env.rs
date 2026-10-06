@@ -1,8 +1,9 @@
-// audited: 2026-09-23
-//! Closure environment building: captures, arguments, the rest collection and local cells, each env value in its own region.
+// audited: 2026-10-06
+//! Closure environment building: captures, arguments, the rest collection and local cells, each in regions of its own.
 //!
 //! docs/impl/region/rules.md
 //! docs/impl/region/mechanism.md
+//! docs/impl/region/restlist.md
 //!
 //! Constructs the `Vec<Value>` environment a closure receives at call time:
 //! captured variables, positional arguments (celled when the capture mask
@@ -22,14 +23,17 @@ use super::core::VM;
 mod rest;
 
 /// Mint the runtime region for one closure-env value — a capture cell, a
-/// rest-arg cons, the `&keys`/`&named` struct, or a captured-local cell.
+/// rest list or one cons of it, the `&keys`/`&named` struct, or a
+/// captured-local cell.
 ///
 /// Rule 6 (no commingling) and the principle "every value its own region": each
 /// env value gets its OWN fresh runtime region, never one shared per-call "env
 /// region". A value-based release of any one (the owned-params calling
 /// convention) then frees only that value, never a co-located live neighbour —
 /// so an owned-param `DecrefValueRegion` cannot free a shared region out from
-/// under a still-live `CaptureCell`.
+/// under a still-live `CaptureCell`. A rest list takes one region per cons, or
+/// one for the whole list where no cons can outlive the head
+/// (docs/impl/region/restlist.md).
 #[inline]
 fn env_value_region(heap: &mut crate::value::fiberheap::FiberHeap) -> RuntimeRegion {
     heap.new_runtime_region()
@@ -118,12 +122,11 @@ impl VM {
     /// reference nothing balances (the trampoline never decrefs), leaking the
     /// converted arg.
     ///
-    /// The env values `populate_env` itself constructs (capture cells, rest-list
-    /// conses, captured-local cells, `&keys`/`&named` structs) each get their
-    /// OWN fresh per-execution region via `env_value_region` (Rule 6, no
-    /// commingling). `populate_env` allocates every env value through
-    /// an explicit region (`env_value_region`/`alloc_in_region`), so no region is
-    /// established here.
+    /// The env values `populate_env` itself constructs (capture cells, the rest
+    /// list, captured-local cells, `&keys`/`&named` structs) each get regions of
+    /// their OWN via `env_value_region` (Rule 6, no commingling). `populate_env`
+    /// allocates every env value through an explicit region
+    /// (`env_value_region`/`alloc_in_region`), so no region is established here.
     ///
     /// Returns `None` (error set on the fiber) on bad `&keys`/`&named` args.
     pub fn build_callback_env(
@@ -155,8 +158,9 @@ impl VM {
     /// can't alias — a tail call may occur inside a closure call that is
     /// still using `env_cache`.
     ///
-    /// Capture cells and rest-arg cons cells are allocated directly via
-    /// `heap.alloc_in_region()`, each into its own region (`env_value_region`).
+    /// Capture cells and rest-list cons cells are allocated directly via
+    /// `heap.alloc_in_region()`, into regions of their own (`env_value_region`):
+    /// one per value, and one per cons or one per list for a rest list.
     ///
     /// Returns `false` if keyword argument collection fails (error set on fiber).
     ///
@@ -223,7 +227,9 @@ impl VM {
                     &[]
                 };
                 let collected = match closure.template.vararg_tag() {
-                    crate::value::VarargTag::List => Self::args_to_list(rest_args, heap),
+                    crate::value::VarargTag::List => {
+                        Self::args_to_list(rest_args, closure.template.rest_list_layout(), heap)
+                    }
                     crate::value::VarargTag::Struct => {
                         match Self::collect_struct_in_own_region(
                             fiber, heap, rest_args, None, symbols,

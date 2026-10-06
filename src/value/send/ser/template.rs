@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-10-06
 // docs/threads.md
 // docs/impl/image/sealing.md
 //! Serializing a code object a `MakeClosure` indexes into a `SendableClosure`.
@@ -44,7 +44,18 @@ fn sendable_from_header(
         .map(|i| sendable_from_child(t.child(i), ctx))
         .collect::<Result<_, _>>()?;
 
-    Ok(SendableClosure {
+    Ok(sendable_header(t, constants, child_protos))
+}
+
+/// Every field a code object's header answers, around the constants and the
+/// children the caller serialized through its own context. The instance fields
+/// and the LIR are empty; a caller that has them sets them over this.
+pub(in crate::value::send) fn sendable_header(
+    t: &ClosureTemplate,
+    constants: Vec<SendValue>,
+    child_protos: Vec<SendableClosure>,
+) -> SendableClosure {
+    SendableClosure {
         bytecode: t.bytecode().to_vec(),
         arity: t.arity(),
         num_locals: t.num_locals(),
@@ -57,6 +68,7 @@ fn sendable_from_header(
         location_map: t.location_map(),
         doc: t.doc().map(str::to_string),
         vararg_kind: t.vararg_kind(),
+        rest_list_layout: t.rest_list_layout(),
         name: t.name().map(str::to_string),
         squelch_mask: SignalBits::EMPTY,
         env: Vec::new(),
@@ -66,7 +78,7 @@ fn sendable_from_header(
         merged_slots: t.merged_slots().as_slice().to_vec(),
         frame_release_slots: t.frame_release_slots().to_vec(),
         frame_release_regions: t.frame_release_regions().to_vec(),
-    })
+    }
 }
 
 /// Serialize a nested-lambda blueprint into a `SendableClosure`. A blueprint
@@ -117,6 +129,7 @@ pub(in crate::value::send) fn sendable_from_template(
         location_map: t.location_map.clone(),
         doc,
         vararg_kind: t.vararg_kind.clone(),
+        rest_list_layout: t.rest_list_layout,
         name: t.name.clone(),
         squelch_mask: SignalBits::EMPTY,
         env: Vec::new(),

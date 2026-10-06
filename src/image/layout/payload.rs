@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-10-06
 //! The code-payload half of the layout probe: where a `CodePayload` keeps
 //! each field, the `Arity` probe, and the writer that assembles one.
 //!
@@ -99,6 +99,7 @@ pub(crate) struct PayloadOffsets {
     pub wasm_func_idx: usize,
     pub has_wasm_idx: usize,
     pub vararg: usize,
+    pub rest_list: usize,
     pub has_name: usize,
     pub has_doc: usize,
 }
@@ -139,6 +140,7 @@ pub(crate) fn payload_offsets() -> &'static PayloadOffsets {
         wasm_func_idx: offset_of!(CodePayload, wasm_func_idx),
         has_wasm_idx: offset_of!(CodePayload, has_wasm_idx),
         vararg: offset_of!(CodePayload, vararg),
+        rest_list: offset_of!(CodePayload, rest_list),
         has_name: offset_of!(CodePayload, has_name),
         has_doc: offset_of!(CodePayload, has_doc),
     })
@@ -180,6 +182,7 @@ pub(crate) fn write_canonical_payload(p: &CodePayload, dst: &mut [u8]) {
     raw(p, dst, off.wasm_func_idx, 4);
     raw(p, dst, off.has_wasm_idx, 1);
     raw(p, dst, off.vararg, 1);
+    raw(p, dst, off.rest_list, 1);
     raw(p, dst, off.has_name, 1);
     raw(p, dst, off.has_doc, 1);
 }
@@ -205,7 +208,7 @@ pub(crate) fn fingerprint_component() -> String {
         out.push_str(&format!("{name}@{at}"));
     }
     out.push_str(&format!(
-        ",origin@{}+{},arity@{},signal@{}+{},cpm@{},nl@{},nc@{},np@{},wasm@{}+{},vararg@{},hn@{},hd@{}",
+        ",origin@{}+{},arity@{},signal@{}+{},cpm@{},nl@{},nc@{},np@{},wasm@{}+{},vararg@{},rl@{},hn@{},hd@{}",
         off.origin,
         off.has_origin,
         off.arity,
@@ -218,6 +221,7 @@ pub(crate) fn fingerprint_component() -> String {
         off.wasm_func_idx,
         off.has_wasm_idx,
         off.vararg,
+        off.rest_list,
         off.has_name,
         off.has_doc,
     ));

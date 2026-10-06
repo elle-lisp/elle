@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-06
 //! Tofte-Talpin region inference for functional HIR: the walk's state, and how
 //! it mints a region.
 //!
@@ -415,6 +415,7 @@ mod merge;
 mod ownership;
 mod placeholder;
 mod postdom;
+mod restlist;
 mod tree;
 mod walk;
 mod yieldborrow;

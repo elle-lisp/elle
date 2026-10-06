@@ -1,6 +1,6 @@
 # lir/lower
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-06 -->
 
 HIR to LIR lowering: explicit control flow, binding slot allocation, capture cells, and region RC instruction emission.
 
@@ -73,6 +73,9 @@ lowerer emits what `RegionInfo` says. See
   the region's release.
 - `cross_region_refs` — cross-region edges that drive `IncrefRegion`
   emission at the storage site (`emit_increfs_for`).
+- `rest_list_layout(lambda)` — how a variadic lambda builds its `&` rest
+  list, which `lower_lambda_expr` writes onto the lambda's `LirFunction`
+  ([restlist.md](../../../docs/impl/region/restlist.md)).
 
 `with_region_info` ([order.rs](order.rs)) builds two reverse indexes once:
 `increfs_by_site` over `cross_region_refs`, and `decrefs_by_decref_point` over

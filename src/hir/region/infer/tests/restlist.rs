@@ -79,10 +79,12 @@ fn an_intrinsic_that_needs_no_proof_reads_the_list() {
     assert_one_region("(%pair? xs)");
 }
 
+/// The trap: this fixture loads no prelude, so `apply` is an unbound name
+/// here, not the macro that expands to a splice. region-rest-list.lisp reads
+/// `apply` through the whole pipeline.
 #[test]
 fn a_spliced_argument_hands_over_the_elements() {
     assert_one_region("(string ;xs)");
-    assert_one_region("(apply string xs)");
 }
 
 #[test]

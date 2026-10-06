@@ -1,4 +1,4 @@
-// audited: 2026-09-15
+// audited: 2026-10-06
 //! Assembling `RegionInfo` from the walk's outputs, and marking which of its
 //! fields a later post-pass fills.
 //!
@@ -100,6 +100,9 @@ impl RegionInference {
             // regions are canonicalized through the merge forest, which is not
             // built yet here.
             tail_callee_facts: HashMap::new(),
+            // Set by `analyze_regions_with` from the rest-list gate, which reads
+            // the HIR and the call classification rather than the walk. Empty here.
+            one_region_rest_lists: FxHashSet::default(),
             live_regions,
             cross_region_refs,
             region_data: HashMap::new(),

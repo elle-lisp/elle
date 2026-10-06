@@ -1,6 +1,12 @@
-//! Closure construction: capture collection, `MakeClosure`, and the
-//! capture-adopt region accounting that links captured value regions into the
-//! new closure's Owned subtree.
+// audited: 2026-10-06
+//! Closure construction: capture collection, `MakeClosure`, the capture adopts, and the lambda's rest-list layout.
+//!
+//! docs/impl/region/adopt.md
+//! docs/impl/region/restlist.md
+//!
+//! A captured value region that is an interior member of the new closure's
+//! Owned subtree is adopted into it; every other capture keeps the baseline
+//! incref.
 
 use crate::hir::{CaptureInfo, ParamBound};
 use crate::lir::lower::*;
@@ -9,9 +15,8 @@ use crate::value::Arity;
 impl<'a> Lowerer<'a> {
     /// Lower a lambda expression (creates closure with captures).
     ///
-    /// `pub(in crate::lir::lower)` preserves the original `pub(super)` reach:
-    /// `super` was `lir::lower` when this lived one level up; the caller
-    /// (`lower_expr`) still resolves it from that module.
+    /// `pub(in crate::lir::lower)` so that `lower_expr`, in that module, can
+    /// call it.
     #[allow(clippy::too_many_arguments)]
     pub(in crate::lir::lower) fn lower_lambda_expr(
         &mut self,
@@ -28,6 +33,9 @@ impl<'a> Lowerer<'a> {
         origin: Option<crate::syntax::Span>,
         assert_numeric: bool,
     ) -> Result<Reg, String> {
+        // `lower_expr` set this to the Lambda's own id before dispatching here.
+        let lambda_id = self.current_hir_id;
+
         // Collect capture registers
         let mut capture_regs = Vec::new();
         for cap in captures {
@@ -147,6 +155,9 @@ impl<'a> Lowerer<'a> {
             origin,
         )?;
         nested_lir.closure_id = Some(closure_id);
+        if let Some(lambda_id) = lambda_id {
+            nested_lir.rest_list_layout = self.region_info.rest_list_layout(lambda_id);
+        }
 
         // Check numeric! assertion after lowering
         if assert_numeric && !nested_lir.is_gpu_eligible() {

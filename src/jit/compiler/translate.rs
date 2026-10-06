@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 // docs/impl/jit.md
 //! The prologue: what a compiled function does with its six parameters before
 //! the first LIR block runs.
@@ -192,21 +192,23 @@ impl JitCompiler {
                 }
             }
 
-            // Collect args[non_rest_params..nargs] into the rest list. Each cons
-            // is minted in its OWN fresh per-execution region with ownership
-            // transfer down the chain — `elle_jit_collect_rest_list`, the JIT
-            // analog of the interpreter's `args_to_list` (src/vm/env/rest.rs). Each
-            // cons owning its own per-execution region keeps the rest list's
-            // regions independent of a JIT->JIT callee's. docs/impl/region/rules.md.
+            // Collect args[non_rest_params..nargs] into the rest list, in regions
+            // of the list's own — one per cons, or one for the list as
+            // `rest_list_layout` says — by `elle_jit_collect_rest_list`, which
+            // calls the interpreter's `args_to_list` (src/vm/env/rest.rs). Regions
+            // of its own keep the rest list independent of a JIT->JIT callee's
+            // region. docs/impl/region/rules.md, docs/impl/region/restlist.md.
             let rest_var_idx = arg_var_base + non_rest_params as u32;
             let start_const = builder.ins().iconst(I32, non_rest_params as i64);
             let nargs_i32 = builder.ins().ireduce(I32, nargs);
+            let layout_const = builder.ins().iconst(I32, lir.rest_list_layout as i64);
             let rest_ref = translator
                 .module
                 .declare_func_in_func(translator.helpers.collect_rest_list, builder.func);
-            let rest_call = builder
-                .ins()
-                .call(rest_ref, &[args_ptr, start_const, nargs_i32, vm_ptr]);
+            let rest_call = builder.ins().call(
+                rest_ref,
+                &[args_ptr, start_const, nargs_i32, layout_const, vm_ptr],
+            );
             let rest_tag = builder.inst_results(rest_call)[0];
             let rest_payload = builder.inst_results(rest_call)[1];
 

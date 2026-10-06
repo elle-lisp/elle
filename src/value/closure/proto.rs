@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-10-06
 // docs/impl/region/template.md
 //! `TemplateProto` — a code object's compile-time blueprint.
 //!
@@ -23,7 +23,7 @@ use crate::value::CaptureMask;
 use crate::value::Value;
 
 use super::header::ClosureTemplate;
-use super::payload::{CodePayload, LocEntry, VarargTag};
+use super::payload::{CodePayload, LocEntry, RestListLayout, VarargTag};
 
 /// The compile-time blueprint of one lambda: everything the emitter knows about
 /// a code object, before any of it reaches a region.
@@ -61,6 +61,10 @@ pub struct TemplateProto {
     pub origin: Option<crate::syntax::Span>,
     /// How varargs collect. Only meaningful when `arity` is `AtLeast`.
     pub vararg_kind: VarargKind,
+    /// How a `&` rest list is built, as the region analysis proved it may be
+    /// (docs/impl/region/restlist.md). Only meaningful when `vararg_kind` is
+    /// `List`.
+    pub rest_list_layout: RestListLayout,
     /// Declared name, for stack traces and diagnostics.
     pub name: Option<String>,
     /// WASM function table index. When set, `rt_call` dispatches to this WASM
@@ -124,6 +128,7 @@ impl TemplateProto {
             doc: None,
             origin: None,
             vararg_kind: VarargKind::List,
+            rest_list_layout: RestListLayout::PerCell,
             name: None,
             wasm_func_idx: None,
             spirv: OnceCell::new(),
@@ -169,6 +174,7 @@ impl TemplateProto {
             doc: func.doc.as_deref().map(str::to_string),
             origin: func.origin,
             vararg_kind: func.vararg_kind.clone(),
+            rest_list_layout: func.rest_list_layout,
             name: func.name.clone(),
             region_table: func.region_table.clone(),
             merged_slots: func.merged_slots.iter().map(|s| s.get()).collect(),
@@ -341,6 +347,7 @@ pub(super) fn materialize_payload(
         wasm_func_idx: proto.wasm_func_idx.unwrap_or(0),
         has_wasm_idx: proto.wasm_func_idx.is_some(),
         vararg: proto.vararg_tag(),
+        rest_list: proto.rest_list_layout,
         has_name: name.1,
         has_doc: doc.1,
     };

@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-10-06
 // docs/impl/region/template.md
 //! Closure type for the Elle runtime
 //!
@@ -23,7 +23,9 @@ mod payload;
 mod proto;
 
 pub use header::{ChildCode, ClosureTemplate};
-pub use payload::{CodePayload, LocEntry, LocationTable, MaskRef, MergedSlots, StrKeys, VarargTag};
+pub use payload::{
+    CodePayload, LocEntry, LocationTable, MaskRef, MergedSlots, RestListLayout, StrKeys, VarargTag,
+};
 pub use proto::{materialize, TemplateProto, WasmClosureMeta};
 
 /// A reference to a closure's per-definition code object.
@@ -196,6 +198,7 @@ impl PartialEq for Closure {
             && a.locations().iter().eq(b.locations().iter())
             && a.doc() == b.doc()
             && a.vararg_tag() == b.vararg_tag()
+            && a.rest_list_layout() == b.rest_list_layout()
             && a.num_params() == b.num_params()
             && a.name() == b.name()
             && self.squelch_mask == other.squelch_mask

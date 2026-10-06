@@ -1,13 +1,15 @@
+// audited: 2026-10-06
 //! SendValue wrapper for thread-safe value transmission
+//!
+//! docs/threads.md
 //!
 //! This module provides SendValue, a wrapper around Value that implements Send
 //! by deep-copying heap values instead of sharing raw pointers.
 //!
-//! The problem with raw Value copies: Value contains raw pointers to Rc
-//! heap objects. When sent to another thread, the original Rc may drop and free the
-//! heap object while the thread still holds a raw pointer to it.
-//!
-//! The solution: SendValue stores owned copies of heap data, not raw pointers.
+//! A heap `Value` is a raw pointer into a region of the sending heap. The
+//! receiving thread runs its own heap, which neither counts that region nor
+//! keeps it alive, so a copied pointer would dangle once the sender frees it.
+//! SendValue stores owned copies of heap data instead.
 
 use super::heap::{deref, HeapObject, HeapTag};
 use super::repr::Value;
@@ -27,18 +29,15 @@ use de::{into_value_inner, template_from_sendable, DeserContext, ReconState};
 use ser::{from_value_inner, sendable_from_template, SerContext};
 use syntax::{send_to_syntax, SendSyntax};
 
-/// Sendable snapshot of a closure.
+/// Sendable snapshot of a closure: its code object, owned, plus the instance
+/// fields `env` and `squelch_mask`.
 ///
-/// All `Rc`-wrapped fields from `ClosureTemplate` are owned here.
-/// Fields that are not portable across thread boundaries (`jit_code`,
-/// `lir_function`, `syntax`) are absent — they are set to `None` on
-/// reconstruction.
+/// The LIR crosses, with its value constants lifted into `lir_value_pool`. The
+/// code object's own defining span, its WASM index and its SPIR-V cache do not
+/// cross, and a reconstructed code object answers each with absence.
 ///
 /// `env` holds the captured environment (upvalues), converted recursively
 /// to `SendValue`. Constants are stored separately in `constants`.
-///
-/// This struct is `pub(crate)` — it is part of the public interface of
-/// `SendBundle` but not independently useful outside `send.rs`.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct SendableClosure {
     pub bytecode: Vec<u8>,
@@ -53,6 +52,8 @@ pub struct SendableClosure {
     pub location_map: LocationMap,
     pub doc: Option<String>,
     pub vararg_kind: VarargKind,
+    /// How the `&` rest list is built (docs/impl/region/restlist.md).
+    pub rest_list_layout: crate::value::RestListLayout,
     pub name: Option<String>,
     pub squelch_mask: SignalBits,
     pub env: Vec<SendValue>,
@@ -101,7 +102,7 @@ pub enum SendValue {
     /// Deep copy of pair cells (with traits)
     Pair(Box<SendValue>, Box<SendValue>, Box<SendValue>),
 
-    /// Deep copy of arrays (with traits)
+    /// Deep copy of @arrays (mutable, with traits)
     Array(Vec<SendValue>, Box<SendValue>),
 
     /// Deep copy of structs (immutable maps, with traits)
@@ -116,7 +117,7 @@ pub enum SendValue {
     /// Deep copy of @strings (mutable byte sequences, with traits)
     Buffer(Vec<u8>, Box<SendValue>),
 
-    /// Deep copy of @bytes (immutable binary data, with traits)
+    /// Deep copy of bytes (immutable binary data, with traits)
     Bytes(Vec<u8>, Box<SendValue>),
 
     /// Deep copy of @bytes (mutable binary data, with traits)
@@ -143,12 +144,12 @@ pub enum SendValue {
     /// A parsed syntax tree (pre-analysis). Self-contained — see `SendSyntax`.
     Syntax(Box<SendSyntax>),
 
-    // (Native-fns are immediates now — `Value{TAG_NATIVE_FN, prim_id}` — and ride
+    // (Native fns are immediates — `Value{TAG_NATIVE_FN, prim_id}` — and ride
     // the `Immediate` arm. The prim_id is stable across the boundary via
     // deterministic registration, so no dedicated SendValue variant is needed.)
-    /// Deep copy of a closure (template + captured environment).
-    /// Only appears as an entry in `SendBundle::closures`.
-    /// The root `SendValue` tree and closure envs reference closures via `Ref(idx)`.
+    /// Deep copy of a closure (template + captured environment). Nothing builds
+    /// one: `SendBundle::closures` holds each closure as a `SendableClosure`,
+    /// and the root tree and closure envs reference it by `Ref(idx)`.
     Closure(Box<SendableClosure>),
 
     /// Back-reference into `SendBundle::closures` by index.
@@ -303,8 +304,8 @@ unsafe impl Sync for SendBundle {}
 impl SendValue {
     /// Convert a Value to SendValue by deep-copying heap data.
     ///
-    /// Returns Err if the value contains non-sendable data (mutable @structs,
-    /// native functions, FFI handles, etc.).
+    /// Returns Err if the value contains non-sendable data (a fiber, an FFI
+    /// handle, a file or socket port, and the like).
     ///
     /// Note: this wrapper asserts that no closures are encountered. For values
     /// that may contain closures, use `SendBundle::from_value` instead.
@@ -344,7 +345,7 @@ impl SendBundle {
     /// may itself be a `Ref(0)` if `value` is a closure.
     ///
     /// Returns `Err` if any value in the reachable graph is not sendable
-    /// (e.g., mutable @struct, fiber, FFI handle).
+    /// (a fiber, an FFI handle, a file or socket port, and the like).
     ///
     /// `symbols` is the sender's display memo; every symbol met during
     /// serialization takes its name from it into the bundle's name table.
