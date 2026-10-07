@@ -1,6 +1,6 @@
 # Per-arm compensation
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-06 -->
 
 The releases a branch adds one per arm, each funded by a retain on its own node.
 The head route takes an arm that never names the region, the tail route one that
@@ -209,7 +209,7 @@ arms of each. The `env-cell-read-arm` probe in
 rate.
 
 The analysis pins are in
-[region::infer::tests::compensate::cells](../../../src/hir/region/infer/tests/compensate/cells.rs):
+[region::infer::tests::compensate::envcell](../../../src/hir/region/infer/tests/compensate/envcell.rs):
 `a_falling_through_arm_compensates_the_env_cell_its_sibling_relocated`,
 `a_reassigned_holder_does_not_withdraw_its_env_cell_compensation` and
 `an_env_cell_takes_the_tail_route_on_the_arm_that_reads_it`. The counterfactual

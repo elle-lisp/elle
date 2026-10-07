@@ -171,6 +171,7 @@ recovery value goes nowhere. A `parameterize` that raised binds nothing, so
 its body runs with the bindings around it:
 
 ```lisp
+(def depth (make-parameter 0))
 (def not-a-parameter 42)
 (def unbound
   (fiber/new (fn []

@@ -32,7 +32,7 @@ table and the environment configuration have not.
 ## The problem
 
 Every process start compiles core.lisp, prelude.lisp, and stdlib.lisp — about
-3700 lines — through the full pipeline: read, expand, letrec analysis,
+4300 lines — through the full pipeline: read, expand, letrec analysis,
 regularize, type inference, region inference, lower, emit, execute. Every
 `sys/spawn` worker repeats it on its own heap. The WASM entry repeats it too.
 Nothing persists between runs.
@@ -113,8 +113,8 @@ environment-over-boot are simply the two depths this design ships.
 ## The binary lock is the current configuration
 
 An image is a region snapshot, and regions are in the language specification
-([spec](../spec.md) § Images). The fingerprint locks an image to the binary
-layout that dumped it ([format.md](image/format.md) § Fingerprint). That lock
+([spec](../spec.md)). The fingerprint locks an image to the binary layout that
+dumped it ([the image file](image/format.md)). That lock
 solves this implementation's portability problem, and it is the configuration
 the format ships today. It is not a property of an image.
 
@@ -126,7 +126,7 @@ describes.
 
 The HIR fragments an image carries (§ Compiler state is part of the
 environment) are optional data to any other implementation. One that ignores
-them loses cross-unit inlining, and every call stays a call. This
+them grafts and fuses nothing across units, and every call stays a call. This
 implementation still requires them, because its two boot modes must compile
 user code identically.
 
@@ -179,7 +179,7 @@ things the stdlib compile leaves behind:
 - The body of each stdlib function, as an `HirFragment` on its closure's
   template. A user compile grafts a call to a stdlib function from it
   ([grafting a call](graft.md)), and fusion inlines a named stdlib function
-  from it ([dissolving a named function](dissolution/functions.md)).
+  from it ([dissolving a named function](dissolution/inline.md)).
 - The signal-projection memo.
 
 An image boot that leaves these out compiles user code *differently* from a

@@ -5,7 +5,7 @@
 A start that finds the compiled standard library on disk deserializes it instead of compiling it again.
 
 Without the cache, every process start compiles
-[stdlib.lisp](../../src/stdlib.lisp) (~3200 lines). The `compile_file` front
+[stdlib.lisp](../../src/stdlib.lisp) (about 3300 lines). The `compile_file` front
 end (expand → analyze → regions → lower → freeze → emit) is what boot spends its
 time on; executing the compiled artifact costs a few milliseconds. The front end is **deterministic**: same source, same elle binary
 → same bytecode. This design turns that work into a one-time cost by serializing

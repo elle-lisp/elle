@@ -1,6 +1,6 @@
 # HIR — High-level IR
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-06 -->
 
 The HIR pass converts expanded syntax trees into a typed intermediate
 representation. It resolves bindings, computes captures, and infers
@@ -61,7 +61,7 @@ with it like any other field, and the whole fragment is plain serializable data.
 A function's template carries the fragment of its own body, closed before
 functionalization in the unit that defines it. The graft
 ([grafting a call](graft.md)) and loop fusion
-([named functions](dissolution/functions.md)) read a callee's fragment off the
+([named functions](dissolution/inline.md)) read a callee's fragment off the
 value its binding holds, so a body crosses a unit boundary with the function
 itself. The stdlib disk cache stores the fragment with the template
 ([the stdlib cache](stdlib-cache.md)), so a cache hit compiles user code to the
@@ -227,7 +227,7 @@ comment char and `%` the intrinsic prefix) whose default expansion is exactly
 that `letrec`. Two consequences fall out: the file body stops being special, and
 its heap literals are **ordinary allocations** (`MaterializeConst`) into the file
 body's own per-activation regions, freed by the termination sweep (see
-[region/model.md](region/model.md) — *Constants lower as ordinary allocations*),
+[region/model.md](region/model.md)),
 closing the per-`eval` leak.
 
 ## Files

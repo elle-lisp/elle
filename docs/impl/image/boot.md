@@ -191,7 +191,7 @@ Per-worker hydration is a milestone of its own ([the landing plan](plan.md)).
 beside its template, a hydrated closure carries none. User code then compiles
 with every call to a library function left a call: none is grafted
 ([graft.md](../graft.md)), and no named library function is fused
-([dissolution/functions.md](../dissolution/functions.md)). A source boot does
+([dissolution/inline.md](../dissolution/inline.md)). A source boot does
 not pay that.
 
 The tier half of parity has landed. A hydrated closure carries its LIR in its

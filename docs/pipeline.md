@@ -55,15 +55,18 @@ in a form compiled alone.
 
 ### The problem
 
-A single pass in order reads a sibling defined later before it is analyzed:
+A single pass in order reads a sibling defined later before it is analyzed.
+Below, the pass analyzes `foo` first, and `foo` reads `bar`'s seed. `foo` would
+then carry whatever that seed said, not what `bar` turned out to be. The
+algorithm below gives `foo` the yield `bar` settles on:
 
-```text
-(def foo (fn [] (bar)))              # analyzed first, reads bar's seed
-(def bar (fn [] (yield 1) (foo)))    # analyzed second, yields
+```lisp
+(def pair (compile/analyze "(def foo (fn [] (bar)))
+                            (def bar (fn [] (yield 1) (foo)))"
+                           {:file "pair.lisp"}))
+(assert (get (compile/signal pair :bar) :yields) "bar yields")
+(assert (get (compile/signal pair :foo) :yields) "foo, analyzed first, yields too")
 ```
-
-`foo` then carries whatever `bar`'s seed said, not what `bar` turned out to
-be.
 
 A function that refers to itself reads its own seed the same way. Below, the
 lambda inside `walk` calls `walk` while `walk` is still being analyzed. One

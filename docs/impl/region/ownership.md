@@ -1,6 +1,6 @@
 # Adoption and subtree drop (the ownership forest)
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-06 -->
 
 Adoption links regions into a parent→child tree, so a whole subtree frees as a
 unit when its root frees.
@@ -210,3 +210,27 @@ member. Pinned by `regionstore::tests::rescue` and, end to end under guardfree, 
 a struct member stored into a module-level capture cell survives its parent's
 subtree drop and frees at the cell's release.
 
+
+## A rootless cycle frees at its scope
+
+A store-only cycle with no container parent, such as `(push a b) (push b a)`,
+has no member to root a subtree at. The co-owned group cut
+(`region::infer::ownership::compute_owned_region_groups`) frees its members
+together, with one `FreeRegionGroup` at the innermost structural scope that
+encloses every member's allocation. The end of that scope post-dominates each
+member's release inside it, and the release of each store's pass-through
+result.
+
+The end of the scope does not post-dominate a release outside it. When the
+scope's value is a member, a consumer outside the scope reads that member after
+the scope ends. That is the `let` that builds the cycle and answers `a`, handed
+to `length`. The cut refuses such a group, because its free would run before
+the read. The members stay on per-region RC, which strands the cycle and never
+frees it under a reader. The drop site does not follow the value out, because
+the free loads each member from its binding's slot, and the binding's scope is
+the one that ended.
+
+Pinned by
+`region::infer::tests::owned::owned_region_groups_refuses_a_cycle_the_scope_value_carries_out`
+and, under guardfree, by
+[region-cycle-scope-value-uaf.lisp](../../../tests/impl/region-cycle-scope-value-uaf.lisp).

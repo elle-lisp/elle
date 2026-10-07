@@ -1,6 +1,6 @@
 # The branch-arm release window
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-06 -->
 
 Where a branch puts the ONE release of a region several arms use. The anchor is
 the merge every path reaches, not the arm that happens to name it last.
@@ -133,7 +133,7 @@ The mutated refusal is a claim about a *route*, so it reaches exactly as far as
 the route does. A value-routed release loads the holder's slot, and frees the
 region of whatever value it finds there. So a slot the program repoints cannot
 carry one, and the release is skipped for such a slot entirely
-([bindings.md](bindings.md), "a mutated slot is not a release route").
+([bindings.md](bindings.md)).
 
 **One binding owns that route.** `region_to_slot` is keyed on a region's
 **allocation** site (`record_region_slot`). The slot a value-routed release
@@ -175,7 +175,7 @@ is read by *what introduced it* rather than by a blanket refusal:
 The emitter states the same refusal at its two mutated-slot backstops, and the
 emitter decides what runs. So an admission the emitter then declines over-keeps
 rather than over-frees. The tests in
-[region::infer::tests::compensate::refusals](../../../src/hir/region/infer/tests/compensate/refusals.rs)
+[region::infer::tests::compensate::mutated](../../../src/hir/region/infer/tests/compensate/mutated.rs)
 are the references: `a_reassigned_destructured_name_refuses_nothing` for the
 pattern name, `a_reassigned_parameter_has_no_route_but_its_box` for the
 parameter, and `a_reassigned_allocating_binder_refuses_its_own_release` for the

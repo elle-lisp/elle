@@ -316,6 +316,18 @@ stdlib's `even?` guards `%rem x 2` with exactly this condition.
 
 - A guard that raises in a grafted body raises the same error value, from the
   caller's frame. A backtrace no longer shows the wrapper's frame.
+- A raise in a grafted body is a raise in the caller's frame. On a fiber's
+  first run a restart therefore answers the raise, and the grafted body runs
+  on, as the language asks ([fiber primitives](../signals/primitives.md)). A
+  callee whose call stays a call loses its frames to a first-run raise
+  instead.
+- A grafted body from this unit keeps the source locations it was written
+  with. So an error it raises names the raising form, as it did while the call
+  stayed a call ([the VM](vm.md)).
+- A grafted body from another unit takes the location of the call it replaced.
+  Its own spans name files another process may have interned, as a fragment
+  read from the stdlib cache does. So an error a grafted stdlib wrapper raises
+  names the program's call.
 - A grafted call to a variadic wrapper allocates no rest list, so an exact
   allocation count moves.
 - `(fn/disasm f)` shows the grafted code.
@@ -377,7 +389,12 @@ still runs, and deletes what the types decide around the calls that stay.
   the graft, and a function the program defines grafts while its definition
   still proves its parameters. A call inside a function nothing calls stays a
   call. Under `GraftPolicy::Off` every call stays a call, to a function the
-  program defines and to the stdlib, and the stdlib keeps its own grafts.
+  program defines and to the stdlib, and the stdlib keeps its own grafts. A
+  body the program defines keeps its own lines where it grafts, and a stdlib
+  body takes the line of the call.
+- [the error-location tests](../../tests/integration/error_reporting.rs) — an
+  error raised in a grafted body of the program is reported at the raising
+  form.
 - `hir::typeinfer::tests::fold::*` — what the fold decides: a guard over a
   proven operand, a `type-of` dispatch over a proven container in the program
   and in the stdlib, a certain raise that keeps what follows it, a resume that

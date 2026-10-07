@@ -3,7 +3,7 @@
 //!
 //! docs/impl/typeinfer.md
 //! docs/intrinsics.md
-//! docs/impl/dissolution/functions.md
+//! docs/impl/dissolution/inline.md
 
 use super::super::*;
 

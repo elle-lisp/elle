@@ -2,7 +2,7 @@
 //! Closes every lambda of the unit into the fragment its template will carry, and names the functions a call may graft.
 //!
 //! docs/impl/graft.md
-//! docs/impl/dissolution/functions.md
+//! docs/impl/dissolution/inline.md
 
 use super::super::fuse::classify_base;
 use super::super::prune::concrete_init_keywords;
