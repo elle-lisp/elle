@@ -247,6 +247,18 @@ An alternative — validating entries at hit time by content — was rejected:
 it puts an O(bytecode) compare (or a hash plus per-template caching) on the
 hot dispatch path to detect a situation the pin makes impossible.
 
+**The call counts take no pin.** `closure_call_counts` keys by the same
+address, but every function a counting tier calls gets a count, so a pin per
+count would hold every unit the VM ever ran until the VM ends. A count records
+instead the code region its function's payload lives in, and that region's
+generation when the count began ([region/generations.md](region/generations.md)).
+Freeing a region moves its generation, so a count whose generation has moved
+belongs to a freed function. It reads as zero, and the next call to whatever
+function lands at that address starts a fresh count. The check costs one
+indexed read of a counter beside the hash lookup the count already pays. Dead
+counts would otherwise pile up in a program that compiles in a loop, so the
+table drops them each time it doubles in size.
+
 Pinning tests: [jit_entry/tests.rs](../../src/vm/jit_entry/tests.rs).
 
 Native samplers (`/usr/bin/sample`, `eu-stack`) cannot name JIT frames: the

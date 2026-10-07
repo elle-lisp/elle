@@ -1,6 +1,6 @@
 # vm
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-07 -->
 
 The VM executes bytecode on a fiber's operand stack, with each local in a stack slot above the frame base.
 
@@ -200,7 +200,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `jit_cache` | `FxHashMap<*const u8, JitCacheEntry>` | JIT code cache; each entry's `CodePin` holds the region its key's payload lives in ([jit.md](../../docs/impl/jit.md)). Write via `install_jit_code`, read via `jit_code_for` |
 | `spirv_cache` | `FxHashMap<*const u8, SpirvEntry>` | The SPIR-V `git` and `mlir/compile-spirv` compiled: one entry per code object, pinned like `jit_cache`, holding a kernel per workgroup size ([spirv.md](../../docs/impl/spirv.md)) |
 | `jit_rejections` | `FxHashMap<*const u8, JitRejectionInfo>` | JIT rejection log: first rejection per closure template |
-| `closure_call_counts` | `FxHashMap<*const u8, usize>` | JIT hotness profiling (FxHash for pointer keys) |
+| `closure_call_counts` | `CallCounts` | Hotness profiling by bytecode address; each count carries its code region's generation, so a freed function's count reads as zero ([jit.md](../../docs/impl/jit.md)) |
 | `pending_tail_call` | `Option<TailCallInfo>` | Rc-based tail call info (transient) |
 | `pending_call` | `Option<PendingCall>` | The non-tail callee `call_inner` hands to `run_dispatch` (transient) |
 | `root_exit_depth` | `usize` | The operand depth the last root body left at its exit, recorded before `execute_code` restores the stack it took ([vm.md](../../docs/impl/vm.md)) |
