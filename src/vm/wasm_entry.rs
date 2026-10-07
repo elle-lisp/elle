@@ -41,9 +41,7 @@ impl VM {
         let crate::config::WasmPolicy::Lazy { threshold } = self.runtime_config.wasm else {
             return None;
         };
-        let count = self.closure_call_counts.entry(bytecode_ptr).or_insert(0);
-        let earlier_calls = *count;
-        *count += 1;
+        let earlier_calls = self.count_closure_call(&closure.template) - 1;
         if earlier_calls < threshold {
             return None;
         }

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-07
 //! What `elle` and the rig share: the run path of one `Runtime`, from a file, `-e`, stdin or the REPL, and the subcommands.
 //!
 //! docs/config.md
@@ -370,11 +370,11 @@ fn print_jit_stats(vm: &mut VM) {
     if rejected > 0 {
         // Sort by call count ascending
         let mut entries: Vec<_> = vm.jit_rejections.iter().collect();
-        entries.sort_by_key(|(ptr, _)| vm.closure_call_counts.get(ptr).copied().unwrap_or(0));
+        entries.sort_by_key(|(ptr, _)| vm.closure_call_count(**ptr));
 
         for (ptr, info) in &entries {
             let name = info.name.as_deref().unwrap_or("<anon>");
-            let calls = vm.closure_call_counts.get(ptr).copied().unwrap_or(0);
+            let calls = vm.closure_call_count(**ptr);
             eprintln!("    {:<24} {}  [called {}x]", name, info.reason, calls);
         }
     }

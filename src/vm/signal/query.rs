@@ -80,7 +80,7 @@ impl VM {
             "call-count" => {
                 if let Some(closure) = arg.as_closure() {
                     let ptr = closure.template.bytecode().as_ptr();
-                    (SIG_OK, Value::int(self.get_closure_call_count(ptr) as i64))
+                    (SIG_OK, Value::int(self.closure_call_count(ptr) as i64))
                 } else {
                     (SIG_OK, Value::int(0))
                 }
@@ -279,9 +279,7 @@ impl VM {
 
                 // Sort by call count ascending (coldest first, hottest last).
                 let mut entries: Vec<_> = self.jit_rejections.iter().collect();
-                entries.sort_by_key(|(ptr, _)| {
-                    self.closure_call_counts.get(ptr).copied().unwrap_or(0)
-                });
+                entries.sort_by_key(|(ptr, _)| self.closure_call_count(**ptr));
 
                 let structs: Vec<Value> = entries
                     .into_iter()
@@ -293,7 +291,7 @@ impl VM {
                             TableKey::keyword("reason"),
                             ctx.string(info.reason.to_string()),
                         );
-                        let calls = self.closure_call_counts.get(ptr).copied().unwrap_or(0);
+                        let calls = self.closure_call_count(*ptr);
                         fields.insert(TableKey::keyword("calls"), Value::int(calls as i64));
                         fields.insert(
                             TableKey::keyword("attempts"),

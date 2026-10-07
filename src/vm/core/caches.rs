@@ -176,32 +176,24 @@ impl VM {
         }
     }
 
+    /// Count one call of the code object `t`, and answer its count including
+    /// this call (docs/impl/jit.md).
+    pub fn count_closure_call(&mut self, t: &crate::value::ClosureTemplate) -> usize {
+        let heap = unsafe { &*self.heap_ptr };
+        self.closure_call_counts.record(heap, t)
+    }
+
     /// Record a call of the code object `t` and return whether it is hot:
     /// called at least the JIT threshold's number of times (ten by default;
     /// `(vm/config-set :jit N)` sets it).
     pub fn record_closure_call(&mut self, t: &crate::value::ClosureTemplate) -> bool {
-        let count = self
-            .closure_call_counts
-            .entry(t.bytecode().as_ptr())
-            .or_insert(0);
-        *count += 1;
-        *count >= self.runtime_config.jit.threshold()
+        self.count_closure_call(t) >= self.runtime_config.jit.threshold()
     }
 
     /// The call count of the function at `bytecode_ptr`, or 0 when no count
     /// names a live function there.
     pub fn closure_call_count(&self, bytecode_ptr: *const u8) -> usize {
-        self.closure_call_counts
-            .get(&bytecode_ptr)
-            .copied()
-            .unwrap_or(0)
-    }
-
-    /// Get call count for a closure
-    pub fn get_closure_call_count(&self, bytecode_ptr: *const u8) -> usize {
-        self.closure_call_counts
-            .get(&bytecode_ptr)
-            .copied()
-            .unwrap_or(0)
+        let heap = unsafe { &*self.heap_ptr };
+        self.closure_call_counts.get(heap, bytecode_ptr)
     }
 }

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-07
 //! MLIR tier-2 compilation entry point.
 //!
 //! docs/impl/mlir.md
@@ -68,7 +68,7 @@ impl VM {
 
         // Check hotness without incrementing — the counter is owned
         // by try_jit_call which runs after us. We just read it.
-        let count = self.get_closure_call_count(bytecode_ptr);
+        let count = self.closure_call_count(bytecode_ptr);
         if count < self.runtime_config.mlir.threshold() {
             return None;
         }

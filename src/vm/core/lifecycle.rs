@@ -102,7 +102,7 @@ impl VM {
             ffi: FFISubsystem::new(),
             loading_modules: std::collections::HashSet::new(),
             loaded_plugins: HashMap::new(),
-            closure_call_counts: FxHashMap::default(),
+            closure_call_counts: CallCounts::default(),
             tail_call_env_cache: Vec::with_capacity(256),
             env_cache: Vec::with_capacity(256),
             pending_tail_call: None,

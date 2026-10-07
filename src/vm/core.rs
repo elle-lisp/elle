@@ -23,6 +23,7 @@ use crate::jit::JitRejectionInfo;
 #[cfg(feature = "jit")]
 pub use caches::JitCacheEntry;
 pub use caches::{SpirvEntry, WorkgroupSize};
+pub use counts::CallCounts;
 
 pub(crate) struct TailCallInfo {
     pub code: crate::value::Code,
@@ -129,7 +130,9 @@ pub struct VM {
     /// Plugins already loaded (path → return value). Prevents double-loading
     /// which would re-register primitives and leak library handles.
     pub loaded_plugins: HashMap<String, Value>,
-    pub closure_call_counts: FxHashMap<*const u8, usize>,
+    /// Call counts by bytecode address; a freed function's count reads as
+    /// zero ([`CallCounts`]).
+    pub closure_call_counts: CallCounts,
     pub tail_call_env_cache: Vec<Value>,
     pub env_cache: Vec<Value>,
     pub(crate) pending_tail_call: Option<TailCallInfo>,
@@ -283,6 +286,7 @@ pub struct VM {
 }
 
 mod caches;
+mod counts;
 mod decode;
 mod discard;
 mod format;
