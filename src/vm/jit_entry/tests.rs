@@ -1,5 +1,5 @@
-// audited: 2026-10-06
-//! A JIT cache entry, and a compile in flight, each pin the code region their key's payload lives in.
+// audited: 2026-10-07
+//! A JIT cache entry and a compile in flight pin their code region; a call count takes no pin and dies with its function.
 //!
 //! docs/impl/jit.md
 //!
@@ -89,4 +89,57 @@ fn a_pending_compile_pins_its_code_region() {
         generation,
         "with the compile settled nothing holds the code region, so it frees"
     );
+}
+
+/// A call count takes no pin, so a freed function's count must not survive
+/// its function (docs/impl/jit.md).
+///
+/// The counter-factual is a count keyed by address alone: it answers 3 for an
+/// address whose function is gone, and the next function to land there starts
+/// three calls closer to hot than it has run.
+#[test]
+fn a_freed_functions_call_count_reads_as_zero() {
+    let mut vm = VM::new();
+    let key = {
+        let (_unit, template) = probe(&mut vm, 11, 375);
+        for _ in 0..3 {
+            vm.record_closure_call(&template);
+        }
+        let key = template.bytecode().as_ptr();
+        assert_eq!(vm.closure_call_count(key), 3, "three calls, counted");
+        key
+    };
+    assert_eq!(
+        vm.closure_call_count(key),
+        0,
+        "the unit and every header are gone, so the count names no function"
+    );
+}
+
+/// Counts of freed functions leave the table as it grows, so a program that
+/// compiles in a loop does not keep one count per function it ever called.
+///
+/// The second set is built while the first is alive, so no address of the
+/// second names a function of the first, and nothing but the sweep can drop
+/// the first set's counts. The counter-factual is a table that never drops
+/// one: it ends holding both sets.
+#[test]
+fn dead_call_counts_leave_the_table() {
+    const N: usize = 2000;
+    let mut vm = VM::new();
+    let first: Vec<_> = (0..N).map(|_| probe(&mut vm, 13, 64)).collect();
+    for (_, template) in &first {
+        vm.record_closure_call(template);
+    }
+    let second: Vec<_> = (0..N).map(|_| probe(&mut vm, 17, 64)).collect();
+    drop(first);
+    for (_, template) in &second {
+        vm.record_closure_call(template);
+    }
+    assert!(
+        vm.closure_call_counts.len() <= N,
+        "only the live set's counts remain, not the freed set's: the table holds {}",
+        vm.closure_call_counts.len()
+    );
+    drop(second);
 }

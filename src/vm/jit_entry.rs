@@ -80,7 +80,7 @@ impl VM {
             return None;
         }
         let bytecode_ptr = closure.template.bytecode().as_ptr();
-        let is_hot = self.record_closure_call(bytecode_ptr);
+        let is_hot = self.record_closure_call(&closure.template);
 
         // Poll for completed background compilations (cheap: non-blocking recv)
         self.poll_jit_completions();
