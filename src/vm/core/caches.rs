@@ -47,19 +47,65 @@ impl WorkgroupSize {
     pub fn get(self) -> u32 {
         self.0
     }
+
+    /// The workgroup size `v` names, for the primitive `who`: a `:type-error`
+    /// for a value that is not an integer, and a `:value-error` for an
+    /// integer that is not a positive 32-bit one. The pair is the error's kind
+    /// and message.
+    pub(crate) fn of_value(v: Value, who: &str) -> Result<Self, (&'static str, String)> {
+        let Some(n) = v.as_int() else {
+            return Err((
+                "type-error",
+                format!(
+                    "{who}: expected an integer workgroup size, got {}",
+                    v.type_name()
+                ),
+            ));
+        };
+        u32::try_from(n)
+            .ok()
+            .and_then(WorkgroupSize::new)
+            .ok_or_else(|| {
+                (
+                    "value-error",
+                    format!("{who}: a workgroup size is a positive 32-bit integer, got {n}"),
+                )
+            })
+    }
 }
 
-/// A `spirv_cache` entry: the SPIR-V `(git f)` compiled, plus the pin that
-/// keeps the keyed bytecode alive, exactly as a `JitCacheEntry` does.
+/// A `spirv_cache` entry: the kernels compiled for one code object, one per
+/// workgroup size, plus the pin that keeps the keyed bytecode alive, exactly
+/// as a `JitCacheEntry` does.
 pub struct SpirvEntry {
     _pin: CodePin,
-    pub bytes: Vec<u8>,
+    kernels: Vec<(WorkgroupSize, Vec<u8>)>,
 }
 
 impl SpirvEntry {
-    /// Build an entry held by `pin`, which names the entry's key.
-    pub fn new(pin: CodePin, bytes: Vec<u8>) -> Self {
-        SpirvEntry { _pin: pin, bytes }
+    /// An entry with no kernel yet, held by `pin`, which names the entry's key.
+    pub fn new(pin: CodePin) -> Self {
+        SpirvEntry {
+            _pin: pin,
+            kernels: Vec::new(),
+        }
+    }
+
+    /// The kernel compiled at `size`, if any.
+    pub fn kernel(&self, size: WorkgroupSize) -> Option<&[u8]> {
+        self.kernels
+            .iter()
+            .find(|(s, _)| *s == size)
+            .map(|(_, bytes)| bytes.as_slice())
+    }
+
+    /// Hold `bytes` as the kernel compiled at `size`, in place of any earlier
+    /// one.
+    fn insert(&mut self, size: WorkgroupSize, bytes: Vec<u8>) {
+        match self.kernels.iter_mut().find(|(s, _)| *s == size) {
+            Some((_, held)) => *held = bytes,
+            None => self.kernels.push((size, bytes)),
+        }
     }
 }
 
@@ -71,32 +117,44 @@ impl VM {
         t: &crate::value::ClosureTemplate,
         size: WorkgroupSize,
     ) -> Option<&[u8]> {
-        let _ = size;
         self.spirv_cache
             .get(&t.bytecode().as_ptr())
-            .map(|e| e.bytes.as_slice())
+            .and_then(|e| e.kernel(size))
+    }
+
+    /// Whether any SPIR-V is cached for the code object `t`, at any size: the
+    /// question the call path asks before a GIT'd closure runs, which needs
+    /// the `:gpu` capability (docs/impl/spirv.md).
+    pub fn has_spirv(&self, t: &crate::value::ClosureTemplate) -> bool {
+        self.spirv_cache.contains_key(&t.bytecode().as_ptr())
     }
 
     /// Cache `bytes` as the SPIR-V compiled for the code object `t` at
     /// workgroup size `size`. The single write path into `spirv_cache`: the
-    /// entry pins `t`'s code region and derives its key from the pin
-    /// (docs/impl/jit.md).
+    /// first kernel for `t` makes the entry, which pins `t`'s code region and
+    /// derives its key from the pin (docs/impl/jit.md).
     pub fn install_spirv(
         &mut self,
         t: &crate::value::ClosureTemplate,
         size: WorkgroupSize,
         bytes: Vec<u8>,
     ) {
-        let _ = size;
-        let pin = CodePin::of(self.heap(), t);
+        let key = t.bytecode().as_ptr();
+        if !self.spirv_cache.contains_key(&key) {
+            let pin = CodePin::of(self.heap(), t);
+            self.spirv_cache.insert(pin.key(), SpirvEntry::new(pin));
+        }
         self.spirv_cache
-            .insert(pin.key(), SpirvEntry::new(pin, bytes));
+            .get_mut(&key)
+            .expect("the entry for `t` exists, made above if it was missing")
+            .insert(size, bytes);
     }
 
     /// Drop every cache entry that pins a code region: the JIT cache, the
-    /// compiles in flight, the JIT rejections and the SPIR-V cache. Teardown
-    /// runs this before it releases the process roots, so no pin holds a
-    /// region past the sweep (docs/impl/jit.md).
+    /// compiles in flight, the JIT rejections, the SPIR-V cache, and the MLIR
+    /// tier's engines and rejections. Teardown runs this before it releases
+    /// the process roots, so no pin holds a region past the sweep
+    /// (docs/impl/jit.md).
     pub fn clear_code_pins(&mut self) {
         #[cfg(feature = "jit")]
         {

@@ -251,8 +251,10 @@ pub struct VM {
     /// an unbounded `:attempts` in `(jit/rejections)`.
     #[cfg(feature = "jit")]
     pub jit_compile_attempts: FxHashMap<*const u8, usize>,
-    /// The SPIR-V `(git f)` compiled, keyed and pinned like `jit_cache`.
-    /// Write through [`VM::install_spirv`]; read through [`VM::spirv_for`].
+    /// The SPIR-V `git` and `mlir/compile-spirv` compiled: one entry per code
+    /// object, keyed and pinned like `jit_cache`, holding a kernel per
+    /// workgroup size. Write through [`VM::install_spirv`]; read through
+    /// [`VM::spirv_for`] and [`VM::has_spirv`].
     pub spirv_cache: FxHashMap<*const u8, SpirvEntry>,
     /// Cached Expander for runtime `eval`. Avoids re-loading the prelude
     /// on every eval call. Taken out during eval, put back after.

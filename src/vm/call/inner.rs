@@ -157,10 +157,7 @@ impl VM {
 
             // GPU capability check: if this closure has been GIT'd (has SPIR-V),
             // it requires GPU hardware. Check capability before dispatch.
-            if self
-                .spirv_for(&closure.template, crate::vm::core::WorkgroupSize::DEFAULT)
-                .is_some()
-            {
+            if self.has_spirv(&closure.template) {
                 let gpu_bit = crate::signals::SIG_GPU;
                 let blocked = gpu_bit
                     .intersection(self.fiber.withheld)

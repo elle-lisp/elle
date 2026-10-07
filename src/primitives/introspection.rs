@@ -283,14 +283,13 @@ pub(crate) fn prim_compile_spirv(
             ),
         );
     }
-    let workgroup_size = if args.len() == 2 {
-        args[1].as_int().unwrap_or(256) as u32
-    } else {
-        256
+    let size = match crate::primitives::meta::workgroup_arg(ctx, args, "mlir/compile-spirv") {
+        Ok(size) => size,
+        Err(raised) => return raised,
     };
-    // Use SIG_QUERY to access the VM's MlirCache for shared context
-    // and SPIR-V caching. The VM handles the query in dispatch_query.
-    let payload = ctx.pair(args[0], Value::int(workgroup_size as i64));
+    // Use SIG_QUERY to reach the VM's SPIR-V cache and the MlirCache's shared
+    // context. The VM handles the query in dispatch_query.
+    let payload = ctx.pair(args[0], Value::int(size.get() as i64));
     (
         SIG_QUERY,
         ctx.pair(Value::keyword("mlir/compile-spirv"), payload),
