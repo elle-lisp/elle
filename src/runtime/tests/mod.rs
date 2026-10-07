@@ -25,3 +25,5 @@ mod rootentry;
 mod selfrec;
 #[cfg(feature = "mlir")]
 mod spirv;
+#[cfg(feature = "wasm")]
+mod wasm;
