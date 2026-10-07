@@ -232,8 +232,11 @@ bounded by the amount of code the program compiles, the same order as the
 retained native code itself. Teardown clears the three tables before it
 releases the process roots, so a pin never holds a region past the sweep.
 
-The SPIR-V cache `(git f)` fills is keyed and pinned the same way, on the VM
-beside these three.
+Two more caches key by the same address and pin the same way. The VM's SPIR-V
+cache, which `git` and `mlir/compile-spirv` fill, adds the workgroup size to
+the key ([spirv.md](spirv.md)). The MLIR tier's engines and rejections add the
+capture and parameter type masks ([mlir.md](mlir.md)). Teardown clears both
+with the three.
 
 An alternative — validating entries at hit time by content — was rejected:
 it puts an O(bytecode) compare (or a hash plus per-template caching) on the

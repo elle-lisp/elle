@@ -43,9 +43,6 @@ The GPU path has defects that keep it from working end to end:
 - **Only `:i64` matches the kernel.** The generated kernel reads and writes
   `i64` elements. `gpu:map` accepts `:dtype :i32`, `:u32` and `:f32`, and
   uploads 4-byte elements the kernel reads as 8-byte ones.
-- **The workgroup size is not part of the SPIR-V cache key**
-  ([impl/spirv.md](spirv.md)), so a second compile of one closure at a new
-  size returns the first kernel.
 - **Teardown crashes.** `VulkanState::drop` destroys the device, and the
   allocator field drops after it and frees its memory through the destroyed
   device.
@@ -76,8 +73,9 @@ What happens:
 
 1. Verify `(fn/arity f)` matches the number of input arrays.
 2. Verify all input arrays have the same length `n`.
-3. SPIR-V: if `(fn/git? f)` use cached bytes via `(disgit f)`,
-   otherwise compile fresh via `(mlir/compile-spirv f wg-size)`.
+3. SPIR-V: if `(fn/git? f wg-size)`, use the cached bytes via
+   `(disgit f wg-size)`. Otherwise compile via
+   `(mlir/compile-spirv f wg-size)`, which caches the bytes at that size.
 4. Build the compute pipeline: `(plugin:shader ctx spirv num-bufs)`.
 5. Build buffer specs: each input gets `{:data ... :usage :input
    :dtype dtype}`; one output buffer of size `n * elem-size`.

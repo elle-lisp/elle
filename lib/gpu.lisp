@@ -1,7 +1,7 @@
-(elle/epoch 12)
-## lib/gpu.lisp — GPU compute library
-##
-## Wraps the vulkan plugin and SPIR-V emitter.
+(elle/epoch 14)
+# audited: 2026-10-06
+## GPU compute over the vulkan plugin: compiled closures through gpu:map, hand-written shaders through gpu:compile.
+## docs/impl/gpu.md
 ##
 ## Usage:
 ##   (def vk  (import "plugin/vulkan"))
@@ -95,8 +95,9 @@
 
    Requires elle built with --features mlir.
 
-   If f has been GIT'd (via (git f)), the cached SPIR-V is reused;
-   otherwise SPIR-V is compiled on the fly via mlir/compile-spirv.
+   If the VM caches SPIR-V for f at :wg-size, from (git f) or an earlier
+   call, the cached kernel is reused; otherwise mlir/compile-spirv compiles
+   it at that size and caches it.
 
    Optional keyword args:
      :ctx       — Vulkan context (created if not given)

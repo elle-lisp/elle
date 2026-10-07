@@ -446,7 +446,8 @@ primitive!(
         "mlir/compile-spirv" => prim_compile_spirv {
             signal: Signal::query_errors(),
             arity: Arity::Range(1, 2),
-            doc: "Compile a GPU-eligible closure to SPIR-V bytes.",
+            doc: "Compile a GPU-eligible closure to SPIR-V bytes at the workgroup size \
+                  (default 256), and cache them in the VM as git does.",
             params: &["closure", "workgroup-size"],
             category: "mlir",
             example: "(mlir/compile-spirv (fn [a b] (+ a b)))",

@@ -114,28 +114,34 @@ workgroup size argument on the compiler path.
 
 ## Caching
 
-Two caches hold SPIR-V, and both key it by the closure's bytecode pointer. No
-key includes the workgroup size:
+One cache holds SPIR-V: the VM's `spirv_cache`
+([src/vm/core/caches.rs](../../src/vm/core/caches.rs)). It keys a kernel by the
+closure's bytecode and the workgroup size, because the size is written into
+the kernel's entry point. `mlir/compile-spirv` and `git` both look there first
+and fill it on a miss, so a repeated call at one size is a lookup.
 
-- `MlirCache` carries a `spirv_cache` beside the shared MLIR context.
-  `mlir/compile-spirv` and `git` compile through it, so a repeated call for
-  the same closure is a lookup.
-- `(git f)` also installs the bytes in the VM's `spirv_cache`
-  ([src/vm/core/caches.rs](../../src/vm/core/caches.rs)). That entry pins
-  the code region of the closure's code object, so the key keeps naming the
-  same function. `(fn/git? f)` asks whether this cache holds the closure;
-  `(disgit f)` returns its bytes.
+Each entry pins the code region of the closure's code object, so its key keeps
+naming the same function. [jit.md](jit.md) owns that argument, under cache
+identity. `MlirCache` holds no SPIR-V of its own: it lends its MLIR context to
+the compile, and the bytes go to the VM's cache.
 
-`gpu:map` consults `(fn/git? f)` first and falls back to
-`mlir/compile-spirv` — letting users pre-compile hot kernels with
-`(git f)` and amortize the SPIR-V build.
+`(fn/git? f)` asks whether the cache holds a kernel for the closure, and
+`(disgit f)` returns its bytes. Both take the workgroup size as an optional
+second argument, 256 by default, as `git` and `mlir/compile-spirv` do. A
+workgroup size is a positive integer that fits in 32 bits. Any other integer is
+a `:value-error`, and a value that is not an integer is a `:type-error`.
+
+`gpu:map` asks `(fn/git? f wg-size)` first and falls back to
+`(mlir/compile-spirv f wg-size)`, so a kernel pre-compiled with `(git f)` serves
+every later call at the same size.
 
 ## Files
 
 | File | Content |
 |------|---------|
 | [src/mlir/spirv.rs](../../src/mlir/spirv.rs) | Compiler path: LIR → MLIR `gpu.module` → SPIR-V bytes |
-| [src/mlir/cache.rs](../../src/mlir/cache.rs) | `compile_spirv` and `get_spirv` on `MlirCache` |
+| [src/mlir/cache.rs](../../src/mlir/cache.rs) | `MlirCache::compile_spirv`, which lowers through the shared MLIR context |
+| [src/vm/core/caches.rs](../../src/vm/core/caches.rs) | The VM's SPIR-V cache, keyed by bytecode and workgroup size |
 | [src/vm/signal/query.rs](../../src/vm/signal/query.rs) | The handlers for `mlir/compile-spirv` and `git` |
 | [src/primitives/introspection.rs](../../src/primitives/introspection.rs) | Primitive definitions: `mlir/compile-spirv`, `fn/gpu-eligible?` |
 | [src/primitives/meta.rs](../../src/primitives/meta.rs) | Primitive definitions: `git`, `fn/git?`, `disgit` |
@@ -148,18 +154,24 @@ the `plugins` submodule.
 
 | Name | Signal | Returns |
 |------|--------|---------|
-| `mlir/compile-spirv` | query+errors | the SPIR-V `bytes` of a GPU-eligible closure; only in an MLIR build |
-| `git` | query+errors+gpu | the closure, with its SPIR-V cached in the VM; only in an MLIR build |
-| `fn/git?` | silent | whether the VM caches SPIR-V for the closure; false for a non-closure |
-| `disgit` | errors | the cached SPIR-V `bytes`; an error if the closure was never GIT'd |
+| `mlir/compile-spirv` | query+errors | the SPIR-V `bytes` of a GPU-eligible closure at a workgroup size, cached in the VM; only in an MLIR build |
+| `git` | query+errors+gpu | the closure, with its SPIR-V at a workgroup size cached in the VM; only in an MLIR build |
+| `fn/git?` | errors | whether the VM caches SPIR-V for the closure at a workgroup size; false for a non-closure |
+| `disgit` | errors | the SPIR-V `bytes` cached at a workgroup size; an error if nothing is cached at that size |
 
 ```lisp
 (def plain (fn [x] x))
 (assert (not (fn/git? plain)))
+(assert (not (fn/git? plain 64)))
 (assert (not (fn/git? 1)))
-(def [dis-ok? dis-err] (protect (disgit plain)))
+(def [dis-ok? dis-err] (protect (disgit plain 64)))
 (assert (not dis-ok?))
 (assert (= (get dis-err :error) :mlir-error))
+(def [size-ok? size-err] (protect (fn/git? plain 0)))
+(assert (not size-ok?))
+(assert (= (get size-err :error) :value-error))
+(def [kind-ok? kind-err] (protect (disgit plain :wide)))
+(assert (= (get kind-err :error) :type-error))
 ```
 
 ## See also

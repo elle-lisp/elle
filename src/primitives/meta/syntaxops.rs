@@ -252,11 +252,10 @@ pub(crate) fn prim_meta_origin(
 
 /// Eagerly compile SPIR-V, cache it on the VM, return the closure.
 ///
-/// `(git f)` compiles the closure to SPIR-V and caches the bytes in the VM's
-/// SPIR-V cache under `f`'s bytecode. Returns `f`; every closure over the same
-/// payload sees the cached SPIR-V (docs/impl/jit.md).
-///
-/// Optional second argument is workgroup size (default 256).
+/// `(git f [workgroup-size])` compiles the closure to SPIR-V and caches the
+/// bytes in the VM's SPIR-V cache under `f`'s bytecode and the workgroup size,
+/// 256 when none is given. Returns `f`; every closure over the same payload
+/// sees the cached SPIR-V.
 pub(crate) fn prim_git(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -302,7 +301,8 @@ pub(crate) fn prim_git(
     }
 }
 
-/// `(fn/git? f)` — true if the VM caches SPIR-V for the closure.
+/// `(fn/git? f [workgroup-size])` — true if the VM caches SPIR-V for the
+/// closure at that size, 256 when none is given.
 pub(crate) fn prim_fn_git(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -317,9 +317,10 @@ pub(crate) fn prim_fn_git(
     }
 }
 
-/// `(disgit f)` — return cached SPIR-V bytes from a GIT'd closure.
+/// `(disgit f [workgroup-size])` — the SPIR-V bytes the VM caches for the
+/// closure at that size, 256 when none is given.
 ///
-/// Errors if `f` is not a closure or has not been GIT'd.
+/// Errors if `f` is not a closure or nothing is cached at that size.
 pub(crate) fn prim_disgit(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
