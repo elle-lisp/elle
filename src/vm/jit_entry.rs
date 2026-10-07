@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-07
 //! Where a closure call meets the JIT: the hotness counter, the code cache, and the trampolines back into the interpreter.
 //!
 //! docs/impl/jit.md
@@ -39,6 +39,15 @@ impl VM {
     /// Compiled code for the function at `bytecode_ptr`, if cached.
     pub fn jit_code_for(&self, bytecode_ptr: *const u8) -> Option<Arc<JitCode>> {
         self.jit_cache.get(&bytecode_ptr).map(|e| e.code.clone())
+    }
+
+    /// How many compiles of the function at `bytecode_ptr` came back
+    /// rejected, or 0 when the JIT holds no rejection for it.
+    pub fn jit_attempts(&self, bytecode_ptr: *const u8) -> usize {
+        self.jit_compile_attempts
+            .get(&bytecode_ptr)
+            .copied()
+            .unwrap_or(0)
     }
 
     /// Record that a compile for `template` is in flight on the worker. The

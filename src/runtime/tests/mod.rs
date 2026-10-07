@@ -14,6 +14,8 @@ fn cons() -> HeapObject {
     ))
 }
 
+#[cfg(feature = "jit")]
+mod attempts;
 mod heaps;
 mod lifecycle;
 mod macros;
