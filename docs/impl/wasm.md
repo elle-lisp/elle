@@ -55,7 +55,9 @@ Two execution modes:
   rather than replacing it. A closure runs on the tier from its Nth call, so
   `--wasm=1` compiles it on the first; the tier counts the calls itself,
   because a `wasm` build has no JIT tier to share a count with. Currently
-  limited to leaf functions (no closures, tail calls, or yield).
+  limited to leaf functions (no closures, tail calls, or yield). The tier keys
+  each compiled module, and each closure it refused, by the closure's bytecode
+  address, so each entry pins that code region ([jit.md](jit.md)).
 
 ### Pipeline (full-module)
 

@@ -232,11 +232,13 @@ bounded by the amount of code the program compiles, the same order as the
 retained native code itself. Teardown clears the three tables before it
 releases the process roots, so a pin never holds a region past the sweep.
 
-Two more caches key by the same address and pin the same way. The VM's SPIR-V
-cache, which `git` and `mlir/compile-spirv` fill, holds a kernel per workgroup
-size under each key ([spirv.md](spirv.md)). The MLIR tier's engines and rejections add the
-capture and parameter type masks ([mlir.md](mlir.md)). Teardown clears both
-with the three.
+Three more caches key by the same address and pin the same way. The VM's
+SPIR-V cache, which `git` and `mlir/compile-spirv` fill, holds a kernel per
+workgroup size under each key ([spirv.md](spirv.md)). The MLIR tier's engines
+and rejections add the capture and parameter type masks ([mlir.md](mlir.md)).
+The tiered WASM backend's compiled modules and the closures it refused key by
+the address alone ([wasm.md](wasm.md)). Teardown clears all three with the
+JIT's.
 
 An alternative — validating entries at hit time by content — was rejected:
 it puts an O(bytecode) compare (or a hash plus per-template caching) on the
