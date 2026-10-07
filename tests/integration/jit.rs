@@ -8,11 +8,11 @@
 
 use elle::jit::{JitCompiler, JitError};
 use elle::lir::{
-    BasicBlock, BinOp, CmpOp, Label, LirConst, LirFunction, LirInstr, Reg, SpannedInstr,
-    SpannedTerminator, Terminator, UnaryOp,
+    BinOp, CmpOp, ConstRef, InstrRef, Label, LirBuilder, LirOwned, Reg, Terminator, UnaryOp,
 };
 use elle::signals::Signal;
 use elle::syntax::Span;
+use elle::value::fiberheap::FiberHeap;
 use elle::value::{Arity, Value};
 
 // Local `eval`/`compile` helpers. Every site here registers primitives only (no
@@ -99,22 +99,64 @@ fn span() -> Span {
 
 /// Create a LoadCapture instruction to load an argument into a register.
 /// With num_captures=0, LoadCapture index N loads from args[N].
-fn load_arg(dst: Reg, arg_index: u16) -> SpannedInstr {
-    SpannedInstr::new(
-        LirInstr::LoadCapture {
-            dst,
-            index: arg_index,
-        },
-        span(),
+fn load_arg(dst: Reg, arg_index: u16) -> InstrRef<'static> {
+    InstrRef::LoadCapture {
+        dst,
+        index: arg_index,
+    }
+}
+
+/// One block of a hand-built function: its label, its instructions in order,
+/// and how it exits.
+type Block<'a> = (u32, &'a [InstrRef<'a>], Terminator);
+
+/// A function of `arity` over `num_regs` registers with `signal`, built block
+/// by block through a `LirBuilder` and frozen: the form the JIT reads. Label 0
+/// is the entry, and every span is synthetic.
+fn function(arity: Arity, num_regs: u32, signal: Signal, blocks: &[Block<'_>]) -> LirOwned {
+    let mut heap = FiberHeap::new();
+    let mut builder = LirBuilder::new(&mut heap);
+    builder.begin_function(arity);
+    builder.head().num_regs = num_regs;
+    builder.head().signal = signal;
+    for &(label, instrs, terminator) in blocks {
+        builder.open_block(Label(label));
+        for instr in instrs {
+            builder.emit(*instr, span());
+        }
+        builder.terminate(terminator, span());
+        builder.finish_block();
+    }
+    builder
+        .finish_function()
+        .expect("a hand-built function freezes")
+}
+
+/// fn(x, y) -> `op`, where `op` reads `Reg(0)` and `Reg(1)` and writes `Reg(2)`.
+fn binary(op: InstrRef<'_>) -> LirOwned {
+    function(
+        Arity::Exact(2),
+        3,
+        Signal::silent(),
+        &[(
+            0,
+            &[load_arg(Reg(0), 0), load_arg(Reg(1), 1), op],
+            Terminator::Return(Reg(2)),
+        )],
     )
 }
 
-/// `lir` frozen, the form the JIT reads.
-fn frozen(lir: &LirFunction) -> elle::lir::LirOwned {
-    elle::lir::code::freeze(lir).expect("a hand-built function freezes")
+/// fn(x) -> `op`, where `op` reads `Reg(0)` and writes `Reg(1)`.
+fn unary(op: InstrRef<'_>) -> LirOwned {
+    function(
+        Arity::Exact(1),
+        2,
+        Signal::silent(),
+        &[(0, &[load_arg(Reg(0), 0), op], Terminator::Return(Reg(1)))],
+    )
 }
 
-fn compile_and_call(lir: &LirFunction, args: &[Value]) -> Result<Value, JitError> {
+fn compile_and_call(lir: &LirOwned, args: &[Value]) -> Result<Value, JitError> {
     use elle::primitives::register_primitives;
     use elle::symbol::SymbolTable;
     use elle::vm::VM;
@@ -129,7 +171,7 @@ fn compile_and_call(lir: &LirFunction, args: &[Value]) -> Result<Value, JitError
     let _signals = register_primitives(&mut vm, &mut symbols);
 
     let compiler = JitCompiler::new()?;
-    let code = compiler.compile(&frozen(lir).view())?;
+    let code = compiler.compile(&lir.view())?;
     // self_tag/self_payload = 0 since we're not testing self-tail-calls in these basic tests
     let result = unsafe {
         code.call(

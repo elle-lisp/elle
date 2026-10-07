@@ -9,200 +9,68 @@ use super::*;
 // Control Flow Tests
 // =============================================================================
 
+/// fn(x) -> if x then 1 else 0
+fn one_if_truthy() -> LirOwned {
+    function(
+        Arity::Exact(1),
+        2,
+        Signal::silent(),
+        &[
+            // Entry block: load arg, branch on x
+            (
+                0,
+                &[load_arg(Reg(0), 0)],
+                Terminator::Branch {
+                    cond: Reg(0),
+                    then_label: Label(1),
+                    else_label: Label(2),
+                },
+            ),
+            // Then block: return 1
+            (
+                1,
+                &[InstrRef::Const {
+                    dst: Reg(1),
+                    value: ConstRef::Int(1),
+                }],
+                Terminator::Return(Reg(1)),
+            ),
+            // Else block: return 0
+            (
+                2,
+                &[InstrRef::Const {
+                    dst: Reg(1),
+                    value: ConstRef::Int(0),
+                }],
+                Terminator::Return(Reg(1)),
+            ),
+        ],
+    )
+}
+
 #[test]
 fn test_jit_branch_true() {
-    // fn(x) -> if x then 1 else 0
-    let mut func = LirFunction::new(Arity::Exact(1));
-    func.num_regs = 2;
-    func.num_captures = 0;
-    func.signal = Signal::silent();
-
-    // Entry block: load arg, branch on x
-    let mut entry = BasicBlock::new(Label(0));
-    entry.instructions.push(load_arg(Reg(0), 0));
-    entry.terminator = SpannedTerminator::new(
-        Terminator::Branch {
-            cond: Reg(0),
-            then_label: Label(1),
-            else_label: Label(2),
-        },
-        span(),
-    );
-
-    // Then block: return 1
-    let mut then_block = BasicBlock::new(Label(1));
-    then_block.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(1),
-            value: LirConst::Int(1),
-        },
-        span(),
-    ));
-    then_block.terminator = SpannedTerminator::new(Terminator::Return(Reg(1)), span());
-
-    // Else block: return 0
-    let mut else_block = BasicBlock::new(Label(2));
-    else_block.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(1),
-            value: LirConst::Int(0),
-        },
-        span(),
-    ));
-    else_block.terminator = SpannedTerminator::new(Terminator::Return(Reg(1)), span());
-
-    func.blocks.push(entry);
-    func.blocks.push(then_block);
-    func.blocks.push(else_block);
-    func.entry = Label(0);
-
-    // Test with true
-    let result = compile_and_call(&func, &[Value::TRUE]).unwrap();
+    let result = compile_and_call(&one_if_truthy(), &[Value::TRUE]).unwrap();
     assert_eq!(result.as_int(), Some(1));
 }
 
 #[test]
 fn test_jit_branch_false() {
-    // fn(x) -> if x then 1 else 0
-    let mut func = LirFunction::new(Arity::Exact(1));
-    func.num_regs = 2;
-    func.num_captures = 0;
-    func.signal = Signal::silent();
-
-    let mut entry = BasicBlock::new(Label(0));
-    entry.instructions.push(load_arg(Reg(0), 0));
-    entry.terminator = SpannedTerminator::new(
-        Terminator::Branch {
-            cond: Reg(0),
-            then_label: Label(1),
-            else_label: Label(2),
-        },
-        span(),
-    );
-
-    let mut then_block = BasicBlock::new(Label(1));
-    then_block.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(1),
-            value: LirConst::Int(1),
-        },
-        span(),
-    ));
-    then_block.terminator = SpannedTerminator::new(Terminator::Return(Reg(1)), span());
-
-    let mut else_block = BasicBlock::new(Label(2));
-    else_block.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(1),
-            value: LirConst::Int(0),
-        },
-        span(),
-    ));
-    else_block.terminator = SpannedTerminator::new(Terminator::Return(Reg(1)), span());
-
-    func.blocks.push(entry);
-    func.blocks.push(then_block);
-    func.blocks.push(else_block);
-    func.entry = Label(0);
-
-    // Test with false
-    let result = compile_and_call(&func, &[Value::FALSE]).unwrap();
+    let result = compile_and_call(&one_if_truthy(), &[Value::FALSE]).unwrap();
     assert_eq!(result.as_int(), Some(0));
 }
 
 #[test]
 fn test_jit_branch_nil() {
     // nil is falsy
-    let mut func = LirFunction::new(Arity::Exact(1));
-    func.num_regs = 2;
-    func.num_captures = 0;
-    func.signal = Signal::silent();
-
-    let mut entry = BasicBlock::new(Label(0));
-    entry.instructions.push(load_arg(Reg(0), 0));
-    entry.terminator = SpannedTerminator::new(
-        Terminator::Branch {
-            cond: Reg(0),
-            then_label: Label(1),
-            else_label: Label(2),
-        },
-        span(),
-    );
-
-    let mut then_block = BasicBlock::new(Label(1));
-    then_block.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(1),
-            value: LirConst::Int(1),
-        },
-        span(),
-    ));
-    then_block.terminator = SpannedTerminator::new(Terminator::Return(Reg(1)), span());
-
-    let mut else_block = BasicBlock::new(Label(2));
-    else_block.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(1),
-            value: LirConst::Int(0),
-        },
-        span(),
-    ));
-    else_block.terminator = SpannedTerminator::new(Terminator::Return(Reg(1)), span());
-
-    func.blocks.push(entry);
-    func.blocks.push(then_block);
-    func.blocks.push(else_block);
-    func.entry = Label(0);
-
-    let result = compile_and_call(&func, &[Value::NIL]).unwrap();
+    let result = compile_and_call(&one_if_truthy(), &[Value::NIL]).unwrap();
     assert_eq!(result.as_int(), Some(0));
 }
 
 #[test]
 fn test_jit_branch_integer_truthy() {
     // Non-zero integers are truthy
-    let mut func = LirFunction::new(Arity::Exact(1));
-    func.num_regs = 2;
-    func.num_captures = 0;
-    func.signal = Signal::silent();
-
-    let mut entry = BasicBlock::new(Label(0));
-    entry.instructions.push(load_arg(Reg(0), 0));
-    entry.terminator = SpannedTerminator::new(
-        Terminator::Branch {
-            cond: Reg(0),
-            then_label: Label(1),
-            else_label: Label(2),
-        },
-        span(),
-    );
-
-    let mut then_block = BasicBlock::new(Label(1));
-    then_block.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(1),
-            value: LirConst::Int(1),
-        },
-        span(),
-    ));
-    then_block.terminator = SpannedTerminator::new(Terminator::Return(Reg(1)), span());
-
-    let mut else_block = BasicBlock::new(Label(2));
-    else_block.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(1),
-            value: LirConst::Int(0),
-        },
-        span(),
-    ));
-    else_block.terminator = SpannedTerminator::new(Terminator::Return(Reg(1)), span());
-
-    func.blocks.push(entry);
-    func.blocks.push(then_block);
-    func.blocks.push(else_block);
-    func.entry = Label(0);
-
-    let result = compile_and_call(&func, &[Value::int(42)]).unwrap();
+    let result = compile_and_call(&one_if_truthy(), &[Value::int(42)]).unwrap();
     assert_eq!(result.as_int(), Some(1));
 }
 
@@ -212,25 +80,22 @@ fn test_jit_branch_integer_truthy() {
 
 #[test]
 fn test_jit_accepts_yielding() {
-    let mut func = LirFunction::new(Arity::Exact(0));
-    func.num_regs = 1;
-    func.num_captures = 0;
-    func.signal = Signal::yields();
-
-    let mut entry = BasicBlock::new(Label(0));
-    entry.instructions.push(SpannedInstr::new(
-        LirInstr::Const {
-            dst: Reg(0),
-            value: LirConst::Int(42),
-        },
-        span(),
-    ));
-    entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(0)), span());
-    func.blocks.push(entry);
-    func.entry = Label(0);
+    let func = function(
+        Arity::Exact(0),
+        1,
+        Signal::yields(),
+        &[(
+            0,
+            &[InstrRef::Const {
+                dst: Reg(0),
+                value: ConstRef::Int(42),
+            }],
+            Terminator::Return(Reg(0)),
+        )],
+    );
 
     let compiler = JitCompiler::new().unwrap();
-    let result = compiler.compile(&frozen(&func).view());
+    let result = compiler.compile(&func.view());
     assert!(
         result.is_ok(),
         "JIT should accept yielding functions via side-exit: {:?}",
@@ -241,29 +106,28 @@ fn test_jit_accepts_yielding() {
 #[test]
 fn test_jit_call_compiles() {
     // Test that Call instruction compiles
-    let mut func = LirFunction::new(Arity::Exact(1));
-    func.num_regs = 2;
-    func.num_captures = 0;
-    func.signal = Signal::silent();
-
-    let mut entry = BasicBlock::new(Label(0));
-    entry.instructions.push(load_arg(Reg(0), 0));
-    entry.instructions.push(SpannedInstr::new(
-        LirInstr::Call {
-            dst: Reg(1),
-            func: Reg(0),
-            args: vec![],
-            arity_checked: false,
-            region: elle::hir::region::StaticRegion::new(2).unwrap(),
-        },
-        span(),
-    ));
-    entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(1)), span());
-    func.blocks.push(entry);
-    func.entry = Label(0);
+    let func = function(
+        Arity::Exact(1),
+        2,
+        Signal::silent(),
+        &[(
+            0,
+            &[
+                load_arg(Reg(0), 0),
+                InstrRef::Call {
+                    dst: Reg(1),
+                    func: Reg(0),
+                    args: &[],
+                    arity_checked: false,
+                    region: elle::hir::region::StaticRegion::new(2).unwrap(),
+                },
+            ],
+            Terminator::Return(Reg(1)),
+        )],
+    );
 
     let compiler = JitCompiler::new().unwrap();
-    let result = compiler.compile(&frozen(&func).view());
+    let result = compiler.compile(&func.view());
     // Call should now compile successfully
     assert!(result.is_ok(), "Call should compile: {:?}", result);
 }
@@ -272,29 +136,26 @@ fn test_jit_call_compiles() {
 fn test_jit_rejects_make_closure() {
     // MakeClosure is rejected at the gate: the JIT has no translation for it,
     // so a function holding one runs on the interpreter.
-    let mut func = LirFunction::new(Arity::Exact(0));
-    func.num_regs = 1;
-    func.num_captures = 0;
-    func.signal = Signal::silent();
-
-    let mut entry = BasicBlock::new(Label(0));
-    entry.instructions.push(SpannedInstr::new(
-        LirInstr::MakeClosure {
-            dst: Reg(0),
-            closure_id: elle::lir::ClosureId(0),
-            captures: vec![],
-            // A real per-execution slot (>= 2). The lowerer assigns real slots
-            // to allocating instructions.
-            region: elle::hir::region::StaticRegion::new(2).unwrap(),
-        },
-        span(),
-    ));
-    entry.terminator = SpannedTerminator::new(Terminator::Return(Reg(0)), span());
-    func.blocks.push(entry);
-    func.entry = Label(0);
+    let func = function(
+        Arity::Exact(0),
+        1,
+        Signal::silent(),
+        &[(
+            0,
+            &[InstrRef::MakeClosure {
+                dst: Reg(0),
+                closure_id: elle::lir::ClosureId(0),
+                captures: &[],
+                // A real per-execution slot (>= 2). The lowerer assigns real slots
+                // to allocating instructions.
+                region: elle::hir::region::StaticRegion::new(2).unwrap(),
+            }],
+            Terminator::Return(Reg(0)),
+        )],
+    );
 
     let compiler = JitCompiler::new().unwrap();
-    let result = compiler.compile(&frozen(&func).view());
+    let result = compiler.compile(&func.view());
     assert!(
         matches!(result, Err(elle::jit::JitError::UnsupportedInstruction(_))),
         "MakeClosure should be rejected: {:?}",
