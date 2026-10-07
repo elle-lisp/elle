@@ -161,6 +161,12 @@ pub extern "C" fn elle_jit_yield(
     let raised = if denied {
         vm.park_denied_emit(sig, blocked, yielded);
         false
+    } else if sig.intersects(crate::value::fiber::SIG_HALT) {
+        // A halt takes neither the retain nor the record: the halted fiber is
+        // promoted to `:dead` and never resumed, so its delivery has no
+        // consumer (docs/impl/region/park.md).
+        vm.fiber.signal = Some((sig, yielded));
+        false
     } else {
         // Escape retain for the emitted value — the exact mirror of the
         // interpreter's `Emit` handler (`handle_emit`, src/vm/dispatch.rs). The
