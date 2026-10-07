@@ -1,8 +1,9 @@
 // audited: 2026-10-06
-//! Expression lowering: the `lower_expr` dispatch, and the retains and releases each node owes once it is lowered.
+//! The `lower_expr` dispatch: one arm per `HirKind`, then the retains and releases the solver placed at the node.
 //!
-//! src/lir/lower/AGENTS.md
 //! docs/impl/lir.md
+//! docs/impl/region/model.md
+//! docs/impl/region/compensate.md
 
 use super::*;
 
@@ -14,17 +15,17 @@ mod loops;
 mod var;
 
 impl<'a> Lowerer<'a> {
-    /// Lower a HIR expression to LIR
+    /// Lower one HIR expression to LIR, and return the register that holds its value.
     pub(super) fn lower_expr(&mut self, hir: &Hir) -> Result<Reg, String> {
         let saved_span = self.current_span;
         let saved_hir_id = self.current_hir_id;
         self.current_span = hir.span;
         self.current_hir_id = Some(hir.id);
 
-        // Per-path branch compensation: if this node is a branch arm body whose
-        // sibling arm holds a live-in region's `decref_point`, free that region at
-        // this arm's head (it would otherwise leak on this path). Emitted into the
-        // arm's basic block, before the arm body — hence before any tail call.
+        // When this node is a branch arm whose sibling arm holds a live-in region's
+        // `decref_point`, release that region here, at the head of this arm. The
+        // release lands in the arm's basic block, before the arm body and so before
+        // any tail call the arm makes.
         self.emit_branch_compensation(hir.id);
 
         let result = match &hir.kind {
@@ -48,33 +49,7 @@ impl<'a> Lowerer<'a> {
             HirKind::Var(binding) => self.lower_var(binding, &hir.span),
             HirKind::Let { bindings, body } => self.lower_let(bindings, body, hir.id),
             HirKind::Letrec { bindings, body } => self.lower_letrec(bindings, body, hir.id),
-            HirKind::Lambda {
-                params,
-                num_required,
-                rest_param,
-                vararg_kind,
-                captures,
-                body,
-                num_locals,
-                inferred_signals,
-                param_bounds,
-                doc,
-                origin,
-                assert_numeric,
-            } => self.lower_lambda_expr(
-                params,
-                *num_required,
-                rest_param.as_ref(),
-                vararg_kind,
-                captures,
-                body,
-                *num_locals,
-                inferred_signals,
-                param_bounds,
-                doc.clone(),
-                *origin,
-                *assert_numeric,
-            ),
+            HirKind::Lambda(lambda) => self.lower_lambda_expr(lambda),
 
             HirKind::If {
                 cond,
@@ -140,22 +115,21 @@ impl<'a> Lowerer<'a> {
             )),
         };
 
-        // Emit IncrefRegion for cross-region references at this node,
-        // then DecrefRegion for every region whose `decref_point` HirId is
-        // this node: the lowerer is driven by per-region last-use, not by
-        // scope exits.
+        // Emit the retains for the cross-region references at this node, then
+        // the release of every region whose `decref_point` is this node. Each
+        // region's last use drives its release, not a scope exit.
         if let Ok(result_reg) = result {
             self.emit_increfs_for(hir.id);
-            // A caller may defer this node's decrefs to emit them itself at
-            // a better point (e.g. `lower_let` emits a binding init's decref
-            // only after storing the init value into the slot the decref
-            // reloads — otherwise it decrefs the slot's stamped `nil` and the
-            // value leaks).
+            // A caller may defer this node's releases and emit them itself. For
+            // example, `lower_let` releases a binding's initializer only after it
+            // stores the value into the slot the release reloads. Released
+            // earlier, the slot would still hold its stamped `nil`, and the value
+            // would leak.
             if !self.deferred_decref_points.contains(&hir.id) {
                 self.emit_decrefs_for(hir.id, Some(result_reg));
             }
-            // Per-arm sibling-arm releases (used-in-multiple-arms): after the
-            // node's own decrefs, so the release follows the arm's use of the value.
+            // The per-arm releases come after the node's own releases, so each
+            // one follows the arm's use of the value.
             self.emit_arm_decrefs(hir.id);
         }
 

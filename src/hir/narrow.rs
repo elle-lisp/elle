@@ -1,8 +1,11 @@
-//! Type-aware signal narrowing and re-propagation.
+// audited: 2026-10-06
+//! Signal narrowing: drops `:error` from a primitive call whose argument types rule the error out.
 //!
-//! After type inference, strips SIG_ERROR from calls to known primitives
-//! when argument types prove the error path is unreachable. Then
-//! recomputes parent signals bottom-up so narrowed leaves propagate.
+//! After type inference, `narrow_signals` strips SIG_ERROR from those calls.
+//! `repropagate_signals` then recomputes parent signals bottom-up, so a
+//! narrowed leaf reaches its ancestors.
+//!
+//! docs/impl/typeinfer.md
 
 use super::arena::BindingArena;
 use super::binding::Binding;
@@ -67,8 +70,7 @@ fn should_narrow_error(
     binding_min_length: &HashMap<Binding, usize>,
 ) -> bool {
     // Const patterns over the name's hash rather than a resolved spelling:
-    // recognition is identity, so it needs no symbol table (docs/impl/symbol.md
-    // § "Reading a name, and not reading one").
+    // recognition is identity, so it needs no symbol table (docs/impl/symbol.md).
     const PTR_P: SymbolId = SymbolId::of("ptr?");
     const POINTER_P: SymbolId = SymbolId::of("pointer?");
     const TYPE: SymbolId = SymbolId::of("type");
@@ -178,8 +180,8 @@ fn extract_target_min_length(
 pub(super) fn repropagate_signals(hir: &mut Hir) {
     match &mut hir.kind {
         // Lambda: separate signal scope — recurse inside but don't propagate
-        HirKind::Lambda { body, .. } => {
-            repropagate_signals(body);
+        HirKind::Lambda(lambda) => {
+            repropagate_signals(&mut lambda.body);
         }
 
         // Call: preserve narrowed signal, combine with child signals
@@ -207,7 +209,7 @@ pub(super) fn repropagate_signals(hir: &mut Hir) {
             repropagate_signals(env);
         }
 
-        // Intrinsic: already silent — just recurse
+        // Intrinsic: keep the node's own signal, and recurse
         HirKind::Intrinsic { args, .. } => {
             for arg in args.iter_mut() {
                 repropagate_signals(arg);

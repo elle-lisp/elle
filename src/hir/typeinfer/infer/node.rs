@@ -1,9 +1,10 @@
-// audited: 2026-09-08
-// src/hir/AGENTS.md
-// docs/impl/typeinfer.md
-//! The transfer function: one node's type, given the environment the ascent has
-//! built so far. The binding forms, the branching forms and the call rules are
-//! each a submodule; what stays here is the dispatch and the leaves.
+// audited: 2026-10-06
+//! The transfer function: one node's type, given the environment the ascent has built so far.
+//!
+//! The binding forms, the branching forms and the call rules are each a
+//! submodule. What stays here is the dispatch and the leaves.
+//!
+//! docs/impl/typeinfer.md
 
 use super::*;
 
@@ -66,23 +67,23 @@ impl Infer<'_> {
                 else_branch,
             } => self.infer_cond(clauses, else_branch.as_deref()),
             HirKind::Begin(exprs) => self.infer_sequence(exprs),
-            HirKind::Block { body, .. } => self.infer_sequence(body),
+            HirKind::Block { block_id, body, .. } => self.infer_block(*block_id, body),
+            HirKind::Break { block_id, value } => self.infer_break(*block_id, value),
             HirKind::And(exprs) | HirKind::Or(exprs) => self.infer_shortcircuit(exprs),
 
             // Call — `call.rs`
             HirKind::Call { func, args, .. } => self.infer_call(func, args),
 
             // Lambda — infer body type; the lambda value itself is a closure
-            HirKind::Lambda { params, body, .. } => {
-                // A `(numeric!)` declaration is the programmer's numeric contract for
-                // the whole body (the GPU-eligibility gate holds the lowered code to
-                // it), so it proves every parameter ⊑ Number for the operand contracts
-                // — the declared analog of a call-site join. It is read from the
-                // parameter bindings, the single place it is recorded. An undeclared
-                // parameter is left ALONE — absence from the environment is meaningful
-                // (the ascent's Kleene start: an unproven parameter reads as Top, a
-                // provable one is seeded at Bottom).
-                for p in params
+            HirKind::Lambda(lambda) => {
+                // A `(numeric!)` declaration is the programmer's numeric contract
+                // for the whole body, which the GPU-eligibility gate holds the
+                // lowered code to. So it proves every parameter ⊑ Number for the
+                // operand contracts, as a call-site join would. An undeclared
+                // parameter is left alone: its absence from the environment reads
+                // as Top, and a provable one is seeded at Bottom.
+                for p in lambda
+                    .params
                     .iter()
                     .filter(|p| self.arena.get(**p).declared_numeric)
                 {
@@ -94,15 +95,27 @@ impl Infer<'_> {
                     let floored = declared_floor(*p, old, self.arena, &self.interner);
                     self.binding_types.insert(*p, floored);
                 }
-                let body_ty = self.infer(body);
-                self.hir_types.insert(body.id, body_ty);
+                let body_ty = self.infer(&lambda.body);
+                self.hir_types.insert(lambda.body.id, body_ty);
                 TypeInterner::TOP
             }
 
-            // Return — the function-return ownership boundary is region-only and
-            // type-transparent: the result is the same value. Without this arm a
-            // lambda's body type (wrapped in Return by wrap_tail_returns) would
-            // read Top and no callee return type would ever flow to callers.
+            // A pattern write: the pass does not follow the value into the
+            // pattern, so every binding it writes is unknown — never the `nil`
+            // placeholder a file-level `(def [a b] …)` pre-bound it to.
+            HirKind::Destructure { pattern, value, .. } => {
+                let ty = self.infer(value);
+                self.hir_types.insert(value.id, ty);
+                for b in pattern.bindings().bindings {
+                    self.binding_types.insert(b, TypeInterner::TOP);
+                }
+                TypeInterner::TOP
+            }
+
+            // Return marks a region boundary and leaves the value as it is, so
+            // it takes its value's type. `wrap_tail_returns` wraps a lambda's
+            // tail in one, and reading Top here would hide every callee's
+            // return type from its callers.
             HirKind::Return { value } => {
                 let ty = self.infer(value);
                 self.hir_types.insert(value.id, ty);

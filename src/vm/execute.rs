@@ -98,6 +98,9 @@
 //!    `VM::run_thunk_to_completion` (not raw `execute_bytecode_saving_stack`)
 //!    so the `SIG_SWITCH` trampoline is driven inside your scope — see the
 //!    SIG_SWITCH section above.
+//!
+//! docs/impl/vm.md
+//! docs/impl/region/relocate.md
 
 use crate::value::fiber::{RaiseSite, TailBoundary};
 use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT};
@@ -152,6 +155,7 @@ impl VM {
         // moved into the callee), so drop them to the frame base before the
         // callee runs (runtime::tests::ownership::frame).
         self.fiber.stack.truncate(self.current_frame_base());
+        self.clear_region_map_for_tail_callee();
         // The frame is reused in place but now runs the tail callee: track it as
         // the executing closure so a self-edge resolved after this replacement
         // names the right closure (a self-recursive `loop` re-installs itself; a

@@ -4,9 +4,8 @@
 //! src/lir/lower/AGENTS.md
 //! docs/impl/lir.md
 
-use crate::hir::{CaptureInfo, ParamBound};
+use crate::hir::Lambda;
 use crate::lir::lower::*;
-use crate::value::Arity;
 
 impl<'a> Lowerer<'a> {
     /// Lower a lambda body to a function of its own, `closure_id` in the
@@ -14,25 +13,13 @@ impl<'a> Lowerer<'a> {
     ///
     /// The builder sets the enclosing function aside, its open block included,
     /// and resumes it when this one finishes.
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn lower_lambda_body(
         &mut self,
         closure_id: ClosureId,
-        params: &[Binding],
-        num_required: usize,
-        rest_param: Option<&Binding>,
-        vararg_kind: &crate::hir::VarargKind,
+        lambda: &Lambda,
         rest_list_layout: crate::value::RestListLayout,
-        captures: &[CaptureInfo],
-        body: &Hir,
-        _num_locals: u16,
-        inferred_signal: crate::signals::Signal,
-        param_bounds: &[ParamBound],
-        doc: Option<std::rc::Rc<str>>,
-        origin: Option<crate::syntax::Span>,
     ) -> Result<LirOwned, String> {
-        // Compute arity
-        let arity = Arity::for_lambda(rest_param.is_some(), num_required, params.len());
+        let arity = lambda.arity();
 
         self.b().begin_function(arity);
         self.open_block(Label(0));
@@ -42,12 +29,12 @@ impl<'a> Lowerer<'a> {
         let head = self.head();
         head.name = name;
         head.closure_id = Some(closure_id);
-        head.num_captures = captures.len() as u16;
-        head.doc = doc;
-        head.origin = origin;
-        head.vararg_kind = vararg_kind.clone();
+        head.num_captures = lambda.captures.len() as u16;
+        head.doc = lambda.doc.clone();
+        head.origin = lambda.origin;
+        head.vararg_kind = lambda.vararg_kind.clone();
         head.rest_list_layout = rest_list_layout;
-        head.num_params = params.len();
+        head.num_params = lambda.params.len();
 
         // Save state
         let saved_reg = self.next_reg;
@@ -63,30 +50,23 @@ impl<'a> Lowerer<'a> {
         let saved_compiled_cell_bindings = std::mem::take(&mut self.compiled_cell_bindings);
         let saved_discard_slot = self.discard_slot;
         let saved_region_to_table = std::mem::take(&mut self.region_to_table);
-        // `region_to_slot` is the post-ANF replacement for the
-        // retired `call_region_slot` shadow map: it lets
-        // `emit_decrefs_for` find the slot owning a
-        // call_result_region. Slots are per-function (LIR's local
-        // slot index space is per-function), so the map must be
-        // empty inside the new lambda body and the parent's map
-        // must be restored on exit. Without this, an outer Call's
-        // region could be associated with a stale slot index from
-        // the inner function.
+        // `region_to_slot` lets `emit_decrefs_for` find the slot that holds a
+        // region's value. Slot indices are per-function, so the map starts empty
+        // here and the parent's map comes back on exit. A map left in place would
+        // pair an outer call's region with a slot index of this function.
         let saved_region_to_slot = std::mem::take(&mut self.region_to_slot);
         // A tail-exit relocation point names an index into ONE block's
-        // instruction list of ONE function, and a fresh body starts at `Label(0)`
-        // and block 0 exactly as the enclosing one did — so the enclosing points,
-        // and the arm collection a branch mid-lowering is filling, must be put
-        // away rather than left to be matched by a colliding label or index.
+        // instruction list of ONE function. A fresh body starts at `Label(0)` and
+        // block 0, as the enclosing one did. So put away the enclosing points and
+        // the arm collection a branch mid-lowering is filling; a colliding label
+        // or index would match them otherwise.
         let saved_tail_exit_hoist = std::mem::take(&mut self.tail_exit_hoist);
         let saved_arm_exit_hoists = std::mem::take(&mut self.arm_exit_hoists);
         // Reassigned-local slots are this function's local index space (per-
         // function, like `region_to_slot`), so reset for the new body.
         let saved_reassigned_local_slots = std::mem::take(&mut self.reassigned_local_slots);
-        // Save function context. It's set by the caller (lower_letrec,
-        // lower_define) before lower_expr so escape analysis can detect
-        // self-tail-calls. We save it here and restore it for the
-        // post-lowering escape analysis.
+        // `lower_define` and `lower_letrec` set the function context before they
+        // lower a lambda initializer. Take it here; the body gets it back below.
         let saved_function_binding = self.current_function_binding.take();
         let saved_function_params = self.current_function_params.take();
         // The self-recursive binding of THIS lambda body: the binding this lambda
@@ -98,7 +78,7 @@ impl<'a> Lowerer<'a> {
         // (`needs_capture()`): the self-edge is resolved by the executing closure in
         // every case. Saved/restored so a nested lambda restores the enclosing value.
         let saved_self_binding = self.current_self_binding.take();
-        let this_self_binding: Option<Binding> = captures.iter().find_map(|cap| {
+        let this_self_binding: Option<Binding> = lambda.captures.iter().find_map(|cap| {
             if let crate::hir::CaptureKind::Recursive { binding } = cap.kind {
                 Some(binding)
             } else {
@@ -113,7 +93,7 @@ impl<'a> Lowerer<'a> {
         self.next_label = 1;
         self.discard_slot = None;
         self.in_lambda = true;
-        self.num_captures = captures.len() as u16;
+        self.num_captures = lambda.captures.len() as u16;
         self.num_local_params = 0;
 
         // In a closure, the environment is laid out as:
@@ -123,28 +103,28 @@ impl<'a> Lowerer<'a> {
         // - Parameters are at indices [num_captures, num_captures + num_params)
 
         // Bind captured variables to upvalue indices
-        for (i, cap) in captures.iter().enumerate() {
+        for (i, cap) in lambda.captures.iter().enumerate() {
             self.binding_to_slot.insert(cap.binding, i as u16);
             self.upvalue_bindings.insert(cap.binding);
         }
 
         // Build capture_params_mask and bind parameters.
-        // LBox params → upvalues in the env (LoadCapture/StoreCapture).
-        // Non-LBox params → locals (LoadLocal/StoreLocal), copied from env at entry.
+        // A cell-held param stays in the env as an upvalue (LoadCapture/StoreCapture).
+        // Any other param is a local (LoadLocal/StoreLocal), copied from the env at entry.
         let mut capture_params_mask: u64 = 0;
-        for (i, param) in params.iter().enumerate() {
+        for (i, param) in lambda.params.iter().enumerate() {
             let needs_capture = self.arena.get(*param).needs_capture();
 
             if needs_capture {
                 if i < 64 {
                     capture_params_mask |= 1 << i;
                 }
-                // LBox param: lives in env as upvalue
+                // Cell-held param: lives in the env as an upvalue
                 let upvalue_idx = self.num_captures + i as u16;
                 self.binding_to_slot.insert(*param, upvalue_idx);
                 self.upvalue_bindings.insert(*param);
             } else {
-                // Non-LBox param: allocate a local slot.
+                // Stack-held param: allocate a local slot.
                 // We'll copy from env into this local at function entry.
                 let slot = self.fresh_local();
                 self.num_local_params += 1;
@@ -154,10 +134,10 @@ impl<'a> Lowerer<'a> {
         }
         self.head().capture_params_mask = capture_params_mask;
 
-        // Copy non-LBox params from env into their local slots.
-        // The VM/host populates the env as [captures..., params...].
-        // Non-LBox params are at env index (num_captures + i).
-        for (i, param) in params.iter().enumerate() {
+        // Copy stack-held params from the env into their local slots.
+        // The VM/host populates the env as [captures..., params...],
+        // so param i sits at env index (num_captures + i).
+        for (i, param) in lambda.params.iter().enumerate() {
             let needs_capture = self.arena.get(*param).needs_capture();
             if !needs_capture {
                 let env_idx = self.num_captures + i as u16;
@@ -182,10 +162,10 @@ impl<'a> Lowerer<'a> {
         // holds the right slot for each kind:
         //   - non-captured param → a LOCAL slot; released `LoadLocal` +
         //     `DecrefValueRegion` (drops the arg's runtime region).
-        //   - captured (LBox) param → the UPVALUE/env index; its placeholder is
-        //     in `cell_release_regions`, released `LoadCaptureRaw` +
+        //   - captured (cell-held) param → the UPVALUE/env index; its placeholder
+        //     is in `cell_release_regions`, released `LoadCaptureRaw` +
         //     `DecrefCellRegion` (frees the env cell's own region).
-        for param in params.iter() {
+        for param in lambda.params.iter() {
             let Some(&slot) = self.binding_to_slot.get(param) else {
                 continue;
             };
@@ -199,8 +179,7 @@ impl<'a> Lowerer<'a> {
             }
         }
 
-        // Restore function context for body lowering — needed by
-        // emit_drop_dead_params to detect self-tail-calls.
+        // Give the body back the function context taken above.
         self.current_function_binding = saved_function_binding;
         self.current_function_params = saved_function_params.clone();
         // This body's self-reference resolves to the executing closure (value
@@ -208,7 +187,7 @@ impl<'a> Lowerer<'a> {
         self.current_self_binding = this_self_binding;
 
         // Emit signal bound checks for each bounded parameter
-        for pb in param_bounds {
+        for pb in &lambda.param_bounds {
             if let Some(&slot) = self.binding_to_slot.get(&pb.binding) {
                 let src = self.fresh_reg();
                 let is_upvalue = self.upvalue_bindings.contains(&pb.binding);
@@ -227,19 +206,16 @@ impl<'a> Lowerer<'a> {
             }
         }
 
-        // Lower body. (No tail-region suppression: ownership transfer
-        // to the caller is carried by `IncrefValueRegion` at each
-        // `Return` — the return-wrapping pass — and the callee's own
-        // `DecrefRegion` fires normally at the `return_sites`-extended
-        // decref_point. See `emit_decrefs_for`.)
-        let result_reg = self.lower_expr(body)?;
+        // Lower the body. Each `Return` the return-wrapping pass
+        // (src/hir/return_incref.rs) placed mints the caller's reference, so
+        // the body's own releases fire at their `decref_point`s as usual.
+        let result_reg = self.lower_expr(&lambda.body)?;
 
         // Fallback release for UNUSED non-captured params. A used param's
         // placeholder region gets a `decref_point` (from its uses) and is
         // released by `emit_decrefs_for`; an unused param has no `region_data`
-        // entry, so without this its moved-in arg would leak. The retain
-        // ordering note in `lower_return` does not apply: an unused param is
-        // never the return value, so no `IncrefValueRegion` precedes this.
+        // entry, so without this its moved-in arg would leak. No return mint
+        // precedes this release: an unused param is never the return value.
         //
         // A param the body's tail call MOVES is released by the callee instead,
         // and that is why the release goes through the relocation wrapper rather
@@ -250,12 +226,13 @@ impl<'a> Lowerer<'a> {
         // keeps a param used ONLY as such an argument out of the hoist
         // (docs/impl/region/mechanism.md).
         //
-        // The nil stamp is what makes the release SELF-CANCELLING, and with it
-        // replicable into the arms of a branch the body ends in: whichever copy a
-        // path reaches first blanks the slot, so a later copy loads `nil` and
+        // The nil stamp makes the release SELF-CANCELLING, so it can be
+        // replicated into the arms of a branch the body ends in. Whichever copy a
+        // path reaches first blanks the slot, and a later copy loads `nil` and
         // no-ops. Blanking is free here — the param is used nowhere, so nothing
         // reads the slot again.
-        let unused_params: Vec<(u16, crate::hir::region::Region)> = params
+        let unused_params: Vec<(u16, crate::hir::region::Region)> = lambda
+            .params
             .iter()
             .filter(|p| !self.arena.get(**p).needs_capture())
             .filter_map(|p| {
@@ -286,7 +263,7 @@ impl<'a> Lowerer<'a> {
         let head = self.head();
         head.entry = Label(0);
         head.num_regs = num_regs;
-        head.signal = inferred_signal;
+        head.signal = lambda.inferred_signals;
 
         self.current_function_binding = None;
         self.current_function_params = None;

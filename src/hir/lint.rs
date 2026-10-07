@@ -47,8 +47,8 @@ impl HirLinter {
     ///
     /// `hir` must be a complete compilation unit: the def-use pass below runs
     /// over it once, and a binding whose only use sits outside the subtree would
-    /// read as unused. Analysis marks tail calls (`pipeline::analyze`), so the
-    /// `is_tail` flags this reads are the same ones lowering acts on.
+    /// read as unused. Analysis marks tail calls before it returns
+    /// (`pipeline::analyze`), so the `is_tail` flags this reads are set.
     pub fn lint(&mut self, hir: &Hir, symbols: &SymbolTable, arena: &BindingArena) {
         let mut defuse = DefUseBuilder::new();
         defuse.walk(hir);
@@ -90,7 +90,7 @@ impl HirLinter {
     /// bindings never reach it, which is why their bindings are not flagged.
     fn check_binding_site(
         &mut self,
-        binding: crate::hir::Binding,
+        binding: Binding,
         init: &Hir,
         loc: &Option<SourceLoc>,
         symbols: &SymbolTable,
@@ -115,7 +115,7 @@ impl HirLinter {
             &mut self.diagnostics,
         );
         let prev = (self.current_fn, self.current_fn_binding);
-        if !arena.get(binding).is_synthetic && matches!(init.kind, HirKind::Lambda { .. }) {
+        if !arena.get(binding).is_synthetic && matches!(init.kind, HirKind::Lambda(_)) {
             self.current_fn = Some(arena.get(binding).name);
             self.current_fn_binding = Some(binding);
         }
@@ -150,12 +150,10 @@ impl HirLinter {
         if !is_fiber_new || body.spliced {
             return;
         }
-        let HirKind::Lambda {
-            inferred_signals, ..
-        } = &body.expr.kind
-        else {
+        let HirKind::Lambda(lambda) = &body.expr.kind else {
             return;
         };
+        let inferred_signals = &lambda.inferred_signals;
         let literal = |arg: &CallArg| {
             (!arg.spliced)
                 .then(|| crate::hir::spec::literal_signal_bits(&arg.expr, arena))
@@ -205,8 +203,8 @@ impl HirLinter {
                 self.check(body, symbols, arena);
             }
 
-            HirKind::Lambda { body, .. } => {
-                self.check(body, symbols, arena);
+            HirKind::Lambda(lambda) => {
+                self.check(&lambda.body, symbols, arena);
             }
 
             HirKind::If {

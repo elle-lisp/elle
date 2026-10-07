@@ -7,6 +7,10 @@
 use super::*;
 
 impl<'a> Analyzer<'a> {
+    /// Analyze a file's top-level forms as one letrec. Pass 1 pre-binds every
+    /// name, Pass 2 analyzes the initializers in order, and Pass 3 re-analyzes
+    /// the lambdas until their signals stop changing. The letrec body names the
+    /// last binding a form declares, and an empty file is `nil`.
     pub(crate) fn analyze_file_letrec(
         &mut self,
         forms: Vec<FileForm>,
@@ -98,7 +102,7 @@ impl<'a> Analyzer<'a> {
             }
         }
 
-        // Snapshot scope after Pass 1: contains only pre-bound def/var names.
+        // Snapshot scope after Pass 1: it holds only the names Pass 1 bound.
         // Used by Pass 3 to isolate fixpoint re-analysis from any bindings
         // that Pass 2 adds while analyzing expression entries.
         let pass1_scope_snapshot = self.scopes.last().map(|s| s.bindings.clone());
@@ -118,11 +122,9 @@ impl<'a> Analyzer<'a> {
                     value_syntax,
                     deferred,
                 } => {
-                    // Self-recursion context: a self-edge inside a top-level `def`'s
-                    // lambda classifies `CaptureKind::Recursive` (the whole-module
-                    // `%file-body` thunk makes `in_lambda` true, so such a binding
-                    // resolves its self-edge to the executing closure — cell-free — like a
-                    // nested self-recursive one).
+                    // `analyze_initializer` sets the self-recursion context, so a
+                    // self-edge inside a top-level `def`'s lambda classifies
+                    // `CaptureKind::Recursive`.
                     let value = self.analyze_initializer(*binding, value_syntax)?;
                     // Register deferred (duplicate-name) bindings AFTER analyzing
                     // the RHS so the RHS sees the previous binding, not the new
@@ -135,6 +137,22 @@ impl<'a> Analyzer<'a> {
                     let bindings_idx = bindings.len();
                     if self.record_lambda_facts(*binding, &value) {
                         lambda_entries.push((bindings_idx, *binding, *value_syntax));
+                    } else if let HirKind::Var(source) = &value.kind {
+                        // `(def dynamic-eq %eq)` names a primitive, whose signal
+                        // and arity are fixed, so a call through the new name
+                        // signals what a call to the primitive does.
+                        let source_inner = self.arena.get(*source);
+                        if self.arena.get(*binding).is_immutable
+                            && source_inner.is_primitive
+                            && source_inner.is_immutable
+                        {
+                            if let Some(sig) = self.signal_env.get(source).copied() {
+                                self.signal_env.insert(*binding, sig);
+                            }
+                            if let Some(arity) = self.arity_env.get(source).copied() {
+                                self.arity_env.insert(*binding, arity);
+                            }
+                        }
                     }
                     self.apply_transient_binding_state(*binding);
 
@@ -214,7 +232,6 @@ impl<'a> Analyzer<'a> {
         }
 
         // Compute signal projection from the last binding's init value.
-        // This must happen before pop_scope so signal_env is still populated.
         let projection = bindings
             .last()
             .and_then(|(_, value)| self.compute_signal_projection(value));
@@ -230,14 +247,11 @@ impl<'a> Analyzer<'a> {
         // Stash the projection on the Analyzer for the pipeline to retrieve.
         self.last_signal_projection = projection;
 
-        // Mark every direct file-letrec binding as MODULE-SCOPE. These are the
-        // program/module-extent names (top-level `def`/`var`/expr statements and
-        // their destructure leaves); their lifetime is the file-letrec scope, not
-        // a per-activation scope exit. The region solver keys the reassigned-mutable
-        // container classification off this so a top-level mutable behaves
-        // identically whether the file-letrec is the outermost code object
-        // (`elle FILE`) or the body of the synthetic `%file-body` whole-module thunk
-        // (`elle test`), where `in_lambda` is spuriously true (the thunk wrapper).
+        // Mark every direct file-letrec binding as module scope: a top-level
+        // `def`, `var` or expression statement, a destructure leaf, or a
+        // temporary. Its lifetime is the file-letrec, also when the file-letrec
+        // is the body of the `%file-body` whole-module thunk
+        // (`BindingInner::is_file_scope`).
         for (b, _) in &bindings {
             self.arena.get_mut(*b).is_file_scope = true;
         }

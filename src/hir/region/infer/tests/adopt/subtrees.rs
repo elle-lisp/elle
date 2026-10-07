@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-06
 //! Pins adopt-edge emission for combined subtrees: store, capture and deep nesting threaded through one owner assignment.
 //!
 //! docs/impl/region/adopt.md
@@ -41,7 +41,7 @@ fn adopt_edges_chains_store_and_capture_in_one_subtree() {
     // the closure's last use — the lifetime obligation `member_dp ≤ root_dp` an
     // owner-dies-before-member order would (correctly) refuse.
     //
-    // Spec (compute_adopt_edges doc, "Both feed owner assignment"): store adopt (c→root),
+    // Spec (the actual-parent rule in `compute_adopt_edges`): store adopt (c→root),
     // capture adopt (p→c); each member rides exactly one map.
     let (hir, info, edges) = adopt_edges(
         "(begin (let [p (%pair 1 2) root (@array)] \
@@ -216,8 +216,8 @@ fn adopt_edges_refuses_nested_capture_on_lifetime_overextension() {
     let (hir, info, edges) = adopt_edges(src);
     let p = sole_pair_region(&hir, &info);
     // (1) The subtree is admitted as externally unique — the refusal is at the adopt stage,
-    // not the subtree stage (so a fix lands in `compute_adopt_edges`/the last-use, not the
-    // external-uniqueness walk).
+    // not the subtree stage (so a change that admits it belongs in `compute_adopt_edges` or
+    // the last-use, not the external-uniqueness walk).
     let (_, _, owned) = owned_subtrees_with_effects(src);
     let root = owned
         .iter()

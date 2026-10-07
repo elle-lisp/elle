@@ -1,7 +1,7 @@
-// audited: 2026-10-06
-// What the serialized form carries across, and the one thing a restored
-// template loses.
-// docs/impl/stdlib-cache.md
+// audited: 2026-10-13
+//! What the serialized stdlib carries across, and the one thing a restored code object loses.
+//!
+//! docs/impl/stdlib-cache.md
 
 use super::super::*;
 use crate::pipeline::compile_file;
@@ -26,7 +26,7 @@ fn bytecode_roundtrip_preserves_lir_and_closures() {
         let unit = compile_file(src, symbols, cctx, "<test>").expect("compiles");
         assert!(!unit.entry().bytecode().is_empty());
 
-        let stored = store_bytecode(&unit, vm, symbols, cctx).expect("stores");
+        let stored = store_bytecode(&unit, vm, symbols).expect("stores");
         let stored_names = stored.names.len();
         let bytes = bincode::serialize(&stored).expect("serializes");
         let decoded: StoredBytecode = bincode::deserialize(&bytes).expect("deserializes");
@@ -36,7 +36,7 @@ fn bytecode_roundtrip_preserves_lir_and_closures() {
             "the spelling table survives bincode; without it every reloaded \
              symbol prints as #<symbol:hash>"
         );
-        let loaded = load_bytecode(decoded, vm, symbols, cctx).expect("loads");
+        let loaded = load_bytecode(decoded, vm, symbols).expect("loads");
         let (a, b) = (unit.entry(), loaded.entry());
         assert_eq!(b.bytecode(), a.bytecode(), "instructions equal");
         assert_eq!(b.signal(), a.signal());
@@ -80,59 +80,10 @@ fn bytecode_roundtrip_preserves_lir_and_closures() {
     let r_loaded = run(&loaded);
     assert_eq!(r_orig, r_loaded, "original and reloaded units agree");
 }
-/// The registry a cache hit restores must be the registry the stdlib
-/// compile recorded. It drives an HIR rewrite in every later compile, so a
-/// snapshot that drops entries makes the cached path compile user code
-/// differently from the compiled path — and caching is on by default, so
-/// the first run of a program and every run after it disagree.
-///
-/// The counter-factual: a snapshot that omits the templates whose body is a
-/// `let` — the shape whose clone needed the defining arena — loses seven of
-/// the stdlib's thirty-six, and the assertion names them.
-#[test]
-fn the_stored_inline_registry_keeps_every_template_the_compile_recorded() {
-    use std::collections::BTreeSet;
-
-    fn names(
-        reg: &crate::hir::typeinfer::FnInlineRegistry,
-        symbols: &crate::symbol::SymbolTable,
-    ) -> BTreeSet<String> {
-        reg.by_name
-            .keys()
-            .map(|n| symbols.name(*n).unwrap_or("?").to_string())
-            .collect()
-    }
-
-    let dir = tempfile::tempdir().expect("tempdir");
-    let mut rt = Runtime::with_stdlib_cache(StdlibCache::Dir(dir.path().to_path_buf()));
-    let (_vm, symbols, cctx) = rt.parts();
-
-    let (recorded, stored) = {
-        let (_, fn_inline) = cctx.compile_registries_mut();
-        (names(fn_inline, symbols), fn_inline.to_stored(symbols))
-    };
-    assert!(
-        !recorded.is_empty(),
-        "the stdlib compile must record cross-unit inline templates, or \
-         this test proves nothing about what the snapshot keeps"
-    );
-
-    let mut restored = crate::hir::typeinfer::FnInlineRegistry::default();
-    restored.restore(stored, symbols);
-
-    let survived = names(&restored, symbols);
-    let lost: Vec<_> = recorded.difference(&survived).collect();
-    assert!(
-        lost.is_empty(),
-        "a cache hit must inline what a stdlib compile inlines; these \
-         templates do not survive the snapshot: {lost:?}"
-    );
-}
 
 /// Two boot paths, one rewrite. `fn/cfg-label` is a stdlib `defn` whose body
-/// is a `let` — the shape a registry that could not carry bindings had to
-/// drop — and fusing it into a `map` splices that body into the emitted
-/// loop, leaving no call to it at all.
+/// is a `let`, which binds names the fragment must carry. Fusing it into a
+/// `map` splices that body into the emitted loop, leaving no call to it at all.
 ///
 /// The trap: the two paths' instruction streams are not byte-identical even
 /// for `(+ 1 2)`, because bytecode operands carry ids from a process-global
@@ -196,7 +147,7 @@ fn a_cache_hit_inlines_the_stdlib_bodies_a_stdlib_compile_inlines() {
     );
     assert_eq!(
         cached_calls, 0,
-        "a cache hit must fuse the same call; a registry that dropped the \
+        "a cache hit must fuse the same call; a cache that dropped the \
          fragment leaves the un-fused call behind"
     );
     assert_eq!(

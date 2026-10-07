@@ -1,6 +1,7 @@
-// audited: 2026-10-12
-// src/pipeline/AGENTS.md
-//! Evaluation pipeline: source -> value.
+// audited: 2026-10-06
+//! The entry points that compile source or a syntax tree and run it on the caller's VM.
+//!
+//! docs/pipeline.md
 
 use super::compile::compile_file;
 use super::CompileCtx;
@@ -13,12 +14,11 @@ use crate::symbol::SymbolTable;
 use crate::syntax::Expander;
 use crate::vm::VM;
 
-/// Compile and execute a Syntax tree, reusing the caller's Expander.
-///
-/// This is the entry point for macro body evaluation: the Expander builds
-/// a let-expression wrapping the macro body, then calls this to compile
-/// and run it in the VM. The same Expander is threaded through so nested
-/// macro calls work.
+/// Compile and run a syntax tree with the caller's expander: a macro
+/// transformer, or a `begin-for-syntax` value. The expander is the one mid
+/// expansion, so a macro call inside the tree expands in the same context.
+/// The tree is not regularized: no graft, no fold, and no type information
+/// reaches the lowerer.
 pub fn eval_syntax(
     syntax: crate::syntax::Syntax,
     expander: &mut Expander,
@@ -80,9 +80,8 @@ pub fn eval_syntax(
         .map_err(|e| e.to_string())
 }
 
-/// Compile and execute using the pipeline.
-///
-/// Shares the caller's VM for both macro expansion and execution.
+/// Compile one form and run it. The caller's VM both expands the form and runs
+/// it. Like `eval_syntax`, it does not regularize.
 pub fn eval(
     source: &str,
     symbols: &mut SymbolTable,
@@ -176,20 +175,16 @@ pub fn eval_all(
     source_name: &str,
 ) -> Result<crate::value::Value, String> {
     let result = compile_file(source, symbols, cctx, source_name)?;
-    // Run under the async scheduler, exactly as the binary's `run_source`
-    // does — top-level Elle always executes inside `ev/run`. This is what
-    // lets scheduler-cooperative primitives (e.g. `sys/join`'s deadline via
-    // `chan/select`) work in the test harness. `execute_scheduled` falls back
-    // to a plain `execute` when `ev/run` is absent (no stdlib loaded), so
-    // bare-VM callers are unaffected.
+    // Run inside `ev/run`, as the binary's `run_source` does, so a primitive
+    // that cooperates with the scheduler works in a test. With no stdlib loaded
+    // there is no `ev/run`, and `execute_scheduled` runs the bytecode directly.
     vm.execute_scheduled(&result, cctx)
         .map_err(|e| e.to_string())
 }
 
 /// Compile and execute a file as a single synthetic letrec.
 ///
-/// Returns the value of the last expression. Primitives are pre-bound
-/// as immutable Global bindings.
+/// Returns the value of the last expression.
 pub fn eval_file(
     source: &str,
     symbols: &mut SymbolTable,

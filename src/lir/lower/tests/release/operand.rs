@@ -1,34 +1,31 @@
-// audited: 2026-09-23
-// docs/impl/region/relocate.md
+// audited: 2026-10-13
 //! What a tail-call operand hands the call: an allocating `%`-op's own region, never the operands it holds by count.
+//!
+//! docs/impl/region/relocate.md
 
 use super::*;
 
 /// The block of `module`'s closures that makes a frame-replacing tail call:
 /// the slots its `%pair` read its tail operand from, and the slots it releases
 /// by value before the `TailCall`.
-fn pair_tail_and_early_releases(module: &crate::lir::LirModule) -> (Option<u16>, Vec<u16>) {
-    let block = module
+fn pair_tail_and_early_releases(module: &FrozenModule) -> (Option<u16>, Vec<u16>) {
+    let (block, _) = module
         .closures
         .iter()
-        .flat_map(|f| f.blocks.iter())
-        .find(|b| {
-            b.instructions
-                .iter()
-                .any(|i| matches!(i.instr, LirInstr::TailCall { .. }))
-        })
+        .flat_map(tail_call_blocks_of)
+        .next()
         .expect("the recursive arm lowers to a TailCall");
     let mut from_slot: rustc_hash::FxHashMap<Reg, u16> = rustc_hash::FxHashMap::default();
     let mut pair_tail = None;
     let mut released = Vec::new();
-    for i in &block.instructions {
-        match &i.instr {
-            LirInstr::LoadLocal { dst, slot } => {
-                from_slot.insert(*dst, *slot);
+    for i in block.instrs() {
+        match i {
+            InstrRef::LoadLocal { dst, slot } => {
+                from_slot.insert(dst, slot);
             }
-            LirInstr::List { tail, .. } => pair_tail = from_slot.get(tail).copied(),
-            LirInstr::DecrefValueRegion { src } => released.extend(from_slot.get(src)),
-            LirInstr::TailCall { .. } => break,
+            InstrRef::List { tail, .. } => pair_tail = from_slot.get(&tail).copied(),
+            InstrRef::DecrefValueRegion { src } => released.extend(from_slot.get(&src)),
+            InstrRef::TailCall { .. } => break,
             _ => {}
         }
     }

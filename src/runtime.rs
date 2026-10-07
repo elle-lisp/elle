@@ -1,26 +1,27 @@
-// audited: 2026-10-07
-//! The process runtime: one lifecycle for compile/evaluate, shared by every
-//! entry path (`elle foo.lisp`, the REPL, and the embedding API).
+// audited: 2026-10-06
+//! The process runtime: one compile-and-run lifecycle and one teardown sweep, shared by every entry path.
 //!
-//! A [`Runtime`] owns the VM, symbol table, and per-instance compile state
-//! (a [`RuntimeCore`], which points the VM at the symbol table and compile
-//! context), registers primitives and
-//! (optionally) loads the stdlib, and — on `Drop` or an explicit
-//! [`Runtime::teardown`] — runs the **process teardown sweep** specified in
-//! docs/impl/region/rules.md § "Teardown — every region frees":
+//! docs/impl/region/rules.md
+//! docs/impl/image/boot.md
+//!
+//! A [`Runtime`] owns a [`RuntimeCore`], which holds the VM, the symbol table
+//! and the compile context, and points the VM at the other two. It registers
+//! the primitives and, when asked, loads the stdlib. On `Drop` or an explicit
+//! [`Runtime::teardown`] it runs the process teardown sweep that
+//! docs/impl/region/rules.md specifies:
 //!
 //! 1. **RC-driven, never iterate-and-free.** It releases the registered process
 //!    roots (each decref'd once) and lets the ordinary region RC cascade reclaim
-//!    everything reachable. It never walks the region table freeing entries —
-//!    that would mask the very leaks this contract exists to surface.
+//!    everything reachable. It never walks the region table freeing entries,
+//!    because that would hide the leaks the sweep exists to show.
 //! 2. **Observable.** It returns a [`TeardownReport`] naming the live region
-//!    residue (the open leaks); the end-state target is zero regions remaining.
+//!    residue. The target is zero regions remaining.
 //!
-//! Because all three paths run this one routine, their teardown behaviour cannot
-//! drift. The naive user model holds: `elle foo.lisp` is
+//! `elle foo.lisp`, the REPL and the embedding API all run this one routine, so
+//! their teardown cannot drift. The naive user model holds: `elle foo.lisp` is
 //! `(eval (wrap-in-letrec (read-all (slurp "foo.lisp"))))`, and afterward the
-//! world returns to its pre-`main` state — only the native-fn primitives persist
-//! (immediates, occupying no region).
+//! world returns to its pre-`main` state. Only the native-fn primitives
+//! persist, and they are immediates that occupy no region.
 
 mod core;
 
@@ -32,8 +33,8 @@ use crate::pipeline::CompileCtx;
 use crate::symbol::SymbolTable;
 use crate::vm::VM;
 
-/// The observable result of a teardown sweep (docs/impl/region/rules.md §
-/// "Teardown — every region frees", property 2). The standing target is
+/// The observable result of a teardown sweep, the sweep's second property in
+/// docs/impl/region/rules.md. The standing target is
 /// `live_regions == 0`; a non-zero value is the current set of open leaks — the
 /// remaining work, not a tuning knob.
 #[derive(Debug, Clone)]
@@ -155,6 +156,10 @@ impl Runtime {
             }
             (false, _) => (StdlibSource::Compiled, BootSource::Compiled),
         };
+        // The boot compiled under the graft. Every unit from here on compiles
+        // under the process's policy (docs/impl/graft.md).
+        core.compile().set_graft(crate::config::get().graft);
+
         // Record the caller's stdlib cache on the VM whichever arm ran: a
         // `sys/spawn` worker reaches the spawning instance only through
         // `ctx.vm()`, and it compiles its own stdlib whether or not this
@@ -305,8 +310,8 @@ impl Runtime {
         //     region is leaked residue.
         let regions: Vec<(u32, u32, usize)> = unsafe { &*heap_ptr }.region_info_vec();
 
-        // The teardown leak dump (docs/impl/region/diagnostics.md §
-        // Diagnostics): each survivor's `arena/dump` line, then the
+        // The teardown leak dump (docs/impl/region/diagnostics.md): each
+        // survivor's `arena/dump` line, then the
         // cross-region edges among them — enough to compute externally-pinned
         // roots (rc > in-edges) and reference cycles offline.
         if crate::trace::residue() {

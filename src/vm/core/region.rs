@@ -17,7 +17,7 @@ impl VM {
     ///
     /// The site is the running function and the place it was called from — the
     /// same two facts a stack-trace line carries, read from the innermost
-    /// `CallFrame`. `what` names the mint kind and, for a mint the compiler
+    /// `CallFrame`. `kind` names the mint and `slot`, for a mint the compiler
     /// assigned a slot, that slot: `--dump=regions` on the running function maps
     /// `rN` back to the allocation node, which the call site alone cannot do
     /// when a function allocates in several places.
@@ -71,7 +71,7 @@ impl VM {
     /// allocation that has a matching compiler-emitted `DecrefRegion` at its
     /// decref_point (Pair, arrays, structs, closures, capture cells).
     ///
-    /// Tofte-Talpin (docs/impl/region/merging.md): **every allocation execution gets
+    /// Tofte-Talpin: **every allocation execution gets
     /// its own physical region, period** — merging is the only thing that may
     /// collapse regions onto a shared slot, and a merged slot routes through
     /// `runtime_region_for_alloc_slot_maybe_merged` / `_for_merged_alloc_slot`
@@ -80,17 +80,11 @@ impl VM {
     /// `DecrefRegion` to find* (`take_runtime_region_for_drop_slot` reads then clears
     /// it); it does **not** return a cached region.
     ///
-    /// Returning the cached entry would let a *re-executed* slot reuse the prior
-    /// region — commingling distinct values in one region (Rule 6) — and, when
-    /// the slot's `DecrefRegion` is dead (a tail-moved alloc whose decref lands
-    /// past the `TailCall`, so `take_runtime_region_for_drop_slot` never clears
-    /// the slot), every iteration of a tail-recursive body would pile into one
-    /// never-cleared region. A `while` loop is unaffected: its reachable
-    /// `DecrefRegion` clears the slot each iteration, so the map was already
-    /// empty at the next alloc. Overwriting a still-mapped entry is sound — that
-    /// entry can only survive a previous alloc when its `DecrefRegion` was dead,
-    /// so its region was already going to leak; orphaning the stale mapping
-    /// changes nothing.
+    /// Returning the cached entry would let a *re-executed* slot whose
+    /// `DecrefRegion` did not run reuse the prior region, commingling distinct
+    /// values in one region (Rule 6). A `while` loop's reachable `DecrefRegion`
+    /// clears the slot each iteration, so the map is already empty at the next
+    /// alloc, and a frame-replacing tail call empties the map for its callee.
     #[inline]
     pub(crate) fn runtime_region_for_alloc_slot(
         &mut self,
@@ -197,6 +191,16 @@ impl VM {
             .last_mut()
             .and_then(|frame| frame.remove(&static_id.get()))
             .map(|m| m.region)
+    }
+    /// Hand a frame-replacing tail callee an empty slot map, as the frame hands
+    /// it NIL locals. Every entry left here belongs to the caller's code, and
+    /// its release is dead past the `TailCall`. A merged slot reuses a mapped
+    /// entry, so a stale one would put the callee's allocations in the
+    /// caller's region, which a release of the moved argument then frees.
+    pub(crate) fn clear_region_map_for_tail_callee(&mut self) {
+        if let Some(frame) = self.fiber.activation_region_maps.last_mut() {
+            frame.clear();
+        }
     }
     /// Claim a spliced call's args array — the array the calling convention built
     /// for this call and no binding of the program names

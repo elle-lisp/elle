@@ -214,6 +214,7 @@ impl VM {
                 // A top-level tail call re-enters the frame as the callee closure.
                 #[cfg(debug_assertions)]
                 Self::debug_assert_entry_closure_matches(tail.closure, &tail.code);
+                self.clear_region_map_for_tail_callee();
                 self.fiber.current_closure = tail.closure;
                 current_code = tail.code;
                 current_env = tail.env;

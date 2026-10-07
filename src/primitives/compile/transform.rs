@@ -1,14 +1,15 @@
-// audited: 2026-09-21
+// audited: 2026-10-06
 //! The `compile/*` primitives that change a program or run one.
 //!
-//! Rename, extract, add-handler, the forced-tier call, and the module compiles
-//! the test runner drives.
+//! Rename, extract, parallelize, add-handler, apply-rules, the forced-tier
+//! call, the dumps, and the module compiles the test runner drives.
 //!
+//! docs/analysis/agent-reasoning.md
 //! docs/test-runner.md
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::hir::{Binding, HirKind};
+use crate::hir::Binding;
 use crate::rewrite::edit::{apply_edits, Edit};
 use crate::signals::registry::with_registry;
 use crate::signals::Signal;
@@ -54,7 +55,7 @@ pub(super) fn prim_compile_rename(
     let symbols = unsafe { &*symbols_ptr };
 
     // Pick the binding named old_name that carries source spans, skipping any
-    // phantom file-scope prebind that shares the name but holds no spans.
+    // binding that shares the name but holds no spans.
     let target_binding =
         super::binding_for_name(&handle.arena, symbols, &handle.symbol_index, &old_name);
     let binding = match target_binding {
@@ -229,10 +230,12 @@ pub(super) fn prim_compile_add_handler(
 
 /// `(compile/run-on tier f & args)` — force-dispatch `f` on the named tier.
 ///
-/// Powers `lib/differential.lisp`. Returns the result, or signals
-/// `:tier-rejected` if the tier doesn't accept this closure.
+/// The test runner forces a per-form thunk onto a tier through this. Returns
+/// the result, or signals `:tier-rejected` if the tier doesn't accept this
+/// closure.
 ///
-/// Tiers: `:bytecode`, `:jit`, `:mlir-cpu` (the last requires `--features mlir`).
+/// Tiers: `:bytecode`, `:jit`, `:wasm` (requires `--features wasm`) and
+/// `:mlir-cpu` (requires `--features mlir`).
 ///
 /// Implementation: returns `SIG_QUERY` with payload `(tier closure arg1 arg2 ...)`;
 /// the VM's `dispatch_compile_run_on` handler does the actual work because it
@@ -277,10 +280,10 @@ pub(super) fn prim_compile_run_on(
 // ── compile/barrier-module ──────────────────────────────────────────────
 
 /// `(compile/barrier-module source name)` — compile a file in the per-form
-/// fault-barrier test mode (docs/test-runner.md § Mechanism). Returns a mutable
-/// array of `[index thunk]` pairs (one 0-arg thunk per test/expression form,
-/// each capturing the file's shared bindings), or signals an error on a
-/// compile failure / def-initializer fault (a file-level failure for the runner).
+/// fault-barrier test mode. Returns a mutable array of `[index thunk]` pairs:
+/// one 0-arg thunk per expression form, each capturing the file's shared
+/// bindings. A compile failure or a def-initializer fault signals an error,
+/// which the runner reports as a file-level failure.
 ///
 /// Implementation: returns `SIG_QUERY` with payload `(source name)`; the VM's
 /// `dispatch_barrier_module` handler does the work because it needs `&mut VM`
@@ -318,7 +321,7 @@ pub(super) fn prim_compile_barrier_module(
 /// 0-arg thunk, returned as one `[0 thunk]` entry. Unlike `compile/barrier-module`
 /// (which hoists `def`/`var` eagerly and slices each expression into its own
 /// thunk), this runs every form in source order, once per tier, in isolation —
-/// matching a direct file run. See docs/test-runner.md § Multi-form files.
+/// matching a direct file run.
 ///
 /// Like `compile/barrier-module`, returns `SIG_QUERY` (the VM handler does the
 /// work — it needs the driving VM's own symbol table).
@@ -351,13 +354,13 @@ pub(super) fn prim_compile_whole_module(
 }
 
 /// `(compile/read-forms source name)` — parse SOURCE into a list of syntax
-/// values (spans preserved), without expanding or compiling. The companion to
-/// `compile/whole-module-syntax`: the test runner reads a multi-form file
-/// ONCE in the main VM with this, then ships the resulting syntax to a worker
-/// (syntax is sendable across `os/spawn`) that compiles + runs it with its own
-/// stdlib — so the file's runtime `import`s and the worker's `ev/run` scheduler
-/// share one set of dynamic parameters. Reading needs no symbol table, so this
-/// answers directly (no VM dispatch).
+/// values (spans preserved), without expanding or compiling. The test runner
+/// reads a multi-form file once in the main VM with this. It ships the syntax
+/// to a worker over `os/spawn`, and the worker compiles it with
+/// `compile/whole-module-syntax` against its own stdlib. The file's runtime
+/// `import`s and the worker's `ev/run` scheduler then share one set of dynamic
+/// parameters. Reading needs no symbol table, so this answers directly (no VM
+/// dispatch).
 pub(super) fn prim_compile_read_forms(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -439,11 +442,9 @@ pub(super) fn prim_compile_whole_module_syntax(
 /// `(compile/dumps source name)` — compile a module once through the real file
 /// front-end and return a struct mapping each available dump kind to its
 /// rendered text: `{:ast … :fhir … :defuse … :regions … :hir … :lir … :cfg …
-/// :dfa … :jit … :escape …}`. These are the same artifacts `elle --dump=KIND`
-/// prints, returned in-process instead of printed-and-exit, so the test runner
-/// (`src/test`) can capture them per form into the CAS (docs/test-runner.md
-/// § CAS asset capture). A stage that fails to compile or yields nothing is
-/// omitted from the struct.
+/// :dfa … :jit … :escape …}`. These are the artifacts `elle --dump=KIND`
+/// prints, returned in-process instead of printed before exit. A stage that
+/// fails to compile or yields nothing is omitted from the struct.
 ///
 /// Implementation: returns `SIG_QUERY` with payload `(source name)`; the VM's
 /// `dispatch_compile_dumps` handler does the work because it needs the driving

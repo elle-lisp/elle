@@ -1,14 +1,16 @@
-//! Callee fixpoint pre-pass: classify letrec-bound lambdas that provably
-//! return an immediate (`super` = `hir::regions`).
+// audited: 2026-10-06
+//! The pre-pass that finds the letrec-bound lambdas whose bodies provably return an immediate.
+//!
+//! docs/impl/region/effects.md
 
 use super::*;
 
-// ── Callee fixpoint pre-pass ────────────────────────────────────
-
-/// Classify letrec-bound lambdas: does the body provably return an immediate?
+/// The letrec-bound lambdas whose bodies provably return an immediate. The region
+/// walk reads the result as `CallClassification::user_immediates`, so a call to
+/// one of them claims no region.
 ///
-/// Iterates to a fixpoint because function A may call function B
-/// (both letrec-bound), so A's classification depends on B's.
+/// The pass iterates to a fixpoint, because a letrec-bound function A may call a
+/// letrec-bound function B, so A's classification depends on B's.
 pub(super) fn classify_letrec_callees(
     hir: &Hir,
     arena: &BindingArena,
@@ -44,12 +46,14 @@ pub(super) fn classify_letrec_callees(
     immediates
 }
 
-/// Walk the HIR to find letrec-bound lambdas.
+/// Collect the letrec-bound lambdas. The walk descends only binding forms, `If`,
+/// `Begin`, `Loop`, `Block` and lambda bodies. A letrec anywhere else stays
+/// unclassified, which costs precision and nothing else.
 fn collect_letrec_lambdas<'a>(hir: &'a Hir, out: &mut HashMap<Binding, &'a Hir>) {
     match &hir.kind {
         HirKind::Letrec { bindings, body } => {
             for (b, init) in bindings {
-                if matches!(&init.kind, HirKind::Lambda { .. }) {
+                if matches!(&init.kind, HirKind::Lambda(_)) {
                     out.insert(*b, init);
                 }
                 collect_letrec_lambdas(init, out);
@@ -62,8 +66,8 @@ fn collect_letrec_lambdas<'a>(hir: &'a Hir, out: &mut HashMap<Binding, &'a Hir>)
             }
             collect_letrec_lambdas(body, out);
         }
-        HirKind::Lambda { body, .. } => {
-            collect_letrec_lambdas(body, out);
+        HirKind::Lambda(lambda) => {
+            collect_letrec_lambdas(&lambda.body, out);
         }
         HirKind::If {
             cond,
@@ -97,10 +101,8 @@ fn collect_letrec_lambdas<'a>(hir: &'a Hir, out: &mut HashMap<Binding, &'a Hir>)
     }
 }
 
-/// Does a lambda body provably return an immediate value?
-///
-/// Conservative: returns false for anything uncertain. For Lambda nodes,
-/// checks the body (the last expression determines return type).
+/// Does a lambda body provably return an immediate value? Anything uncertain
+/// answers false. A `Lambda` node answers for its body.
 fn body_returns_immediate(
     hir: &Hir,
     arena: &BindingArena,
@@ -120,8 +122,8 @@ fn body_returns_immediate(
         HirKind::String(_) | HirKind::Quote(_) => false,
 
         // Lambda: check the body to classify the function's return type
-        HirKind::Lambda { body, .. } => {
-            body_returns_immediate(body, arena, call_class, user_immediates)
+        HirKind::Lambda(lambda) => {
+            body_returns_immediate(&lambda.body, arena, call_class, user_immediates)
         }
 
         // Non-allocating intrinsics return immediates

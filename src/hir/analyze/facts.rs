@@ -75,28 +75,18 @@ impl<'a> Analyzer<'a> {
     /// arguments, and the bounds its parameters carry. Answers whether it was
     /// a lambda.
     pub(crate) fn record_lambda_facts(&mut self, binding: Binding, value: &Hir) -> bool {
-        let HirKind::Lambda {
-            params,
-            num_required,
-            rest_param,
-            vararg_kind,
-            inferred_signals,
-            param_bounds,
-            ..
-        } = &value.kind
-        else {
+        let HirKind::Lambda(lambda) = &value.kind else {
             return false;
         };
-        self.signal_env.insert(binding, *inferred_signals);
-        let bounds = Self::bounds_by_position(params, param_bounds);
+        self.signal_env.insert(binding, lambda.inferred_signals);
+        let bounds = Self::bounds_by_position(&lambda.params, &lambda.param_bounds);
         if bounds.is_empty() {
             self.bound_env.remove(&binding);
         } else {
             self.bound_env.insert(binding, bounds);
         }
-        let arity = Arity::for_lambda(rest_param.is_some(), *num_required, params.len());
-        self.arity_env.insert(binding, arity);
-        if rest_param.is_some() && collects_keywords(vararg_kind) {
+        self.arity_env.insert(binding, lambda.arity());
+        if lambda.rest_param.is_some() && collects_keywords(&lambda.vararg_kind) {
             self.keyword_collectors.insert(binding);
         } else {
             self.keyword_collectors.remove(&binding);
@@ -142,11 +132,9 @@ impl<'a> Analyzer<'a> {
     /// call checks its keyword arguments at run time.
     pub(crate) fn callee_collects_keywords(&self, callee: &Hir) -> bool {
         match &callee.kind {
-            HirKind::Lambda {
-                rest_param,
-                vararg_kind,
-                ..
-            } => rest_param.is_some() && collects_keywords(vararg_kind),
+            HirKind::Lambda(lambda) => {
+                lambda.rest_param.is_some() && collects_keywords(&lambda.vararg_kind)
+            }
             HirKind::Var(binding) => self.keyword_collectors.contains(binding),
             _ => false,
         }

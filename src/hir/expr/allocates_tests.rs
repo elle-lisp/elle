@@ -1,7 +1,7 @@
-// audited: 2026-10-05
-// Which HIR nodes `Hir::allocates` counts, and so which ones the ANF lift names.
-//
-// docs/impl/anf.md
+// audited: 2026-10-13
+//! Which HIR node kinds `Hir::allocates` counts as producing a fresh heap value at their own id.
+//!
+//! docs/impl/anf.md
 
 use super::*;
 use crate::hir::binding::Binding;
@@ -69,28 +69,13 @@ fn emit_allocates() {
 
 #[test]
 fn lambda_allocates() {
-    let lam = Hir::silent(
-        HirKind::Lambda {
-            params: vec![],
-            num_required: 0,
-            rest_param: None,
-            vararg_kind: VarargKind::List,
-            captures: vec![],
-            body: Box::new(nil()),
-            num_locals: 0,
-            inferred_signals: crate::signals::Signal::silent(),
-            param_bounds: vec![],
-            doc: None,
-            origin: None,
-            assert_numeric: false,
-        },
-        Span::synthetic(),
-    );
+    let lambda = Lambda::new(vec![], 0, None, VarargKind::List, nil());
+    let lam = Hir::silent(HirKind::Lambda(Box::new(lambda)), Span::synthetic());
     assert!(lam.allocates());
 }
 
 #[test]
-fn allocating_intrinsic_propagates() {
+fn pair_intrinsic_allocates() {
     let pair = Hir::silent(
         HirKind::Intrinsic {
             op: IntrinsicOp::Pair,
@@ -115,9 +100,8 @@ fn non_allocating_intrinsic_does_not() {
 
 #[test]
 fn if_does_not_allocate_itself() {
-    // The If form is propagating; its allocations come from branches,
-    // which the ANF traversal handles separately. The If node itself
-    // does not produce a fresh heap value at its own HirId.
+    // An If produces no fresh heap value at its own HirId. What its
+    // branches allocate, the ANF lift names inside the branches.
     let i = Hir::silent(
         HirKind::If {
             cond: Box::new(nil()),

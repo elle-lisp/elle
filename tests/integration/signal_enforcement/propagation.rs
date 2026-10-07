@@ -18,8 +18,8 @@ fn test_signal_direct_yield() {
     assert_eq!(result.hir.signal, Signal::silent());
 
     // But the body should be Yields
-    if let HirKind::Lambda { body, .. } = &result.hir.kind {
-        assert_eq!(body.signal, Signal::yields());
+    if let Some(lambda) = result.hir.kind.as_lambda() {
+        assert_eq!(lambda.body.signal, Signal::yields());
     } else {
         panic!("Expected Lambda");
     }

@@ -1,6 +1,7 @@
 // audited: 2026-10-06
-// docs/impl/escape.md
 //! The escape analysis tests (`super` = `hir::escape`), and the fixtures they compile through.
+//!
+//! docs/impl/escape.md
 //!
 //! One module per question: `capture` for the capture facet, `containment` for
 //! which stores hand a value to an uncounted holder, and `flow` for value flow
@@ -44,7 +45,7 @@ fn compile_with_cc(
 /// Compile a source under the real classification and return its
 /// `EscapeInfo` alongside the HIR and arena — the fixture every spec test
 /// reads. Escape is the **authority**; these tests assert its four-facet spec
-/// directly (`docs/impl/escape.md`), never agreement with any other analysis.
+/// directly, never agreement with any other analysis.
 fn escape_of(src: &str) -> (Hir, BindingArena, EscapeInfo) {
     let mut symbols = crate::symbol::SymbolTable::new();
     let (hir, arena) = compile_fhir(src, &mut symbols);
@@ -81,12 +82,12 @@ fn assert_binding_escape(src: &str, expect: &[(&str, bool, bool)]) {
     }
 }
 
-/// Every lambda in a compiled program (post-order), paired with the bindings
+/// Every lambda in a compiled program (pre-order), paired with the bindings
 /// it captures. Shared by the capture-facet tests.
 fn lambdas_with_captures(hir: &Hir) -> Vec<(HirId, Vec<Binding>)> {
     fn walk(h: &Hir, out: &mut Vec<(HirId, Vec<Binding>)>) {
-        if let HirKind::Lambda { captures, .. } = &h.kind {
-            out.push((h.id, captures.iter().map(|c| c.binding).collect()));
+        if let HirKind::Lambda(lambda) = &h.kind {
+            out.push((h.id, lambda.captures.iter().map(|c| c.binding).collect()));
         }
         h.for_each_child(|c| walk(c, out));
     }

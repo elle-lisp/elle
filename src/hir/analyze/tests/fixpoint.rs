@@ -38,11 +38,8 @@ fn analyze_form(source: &str) -> AnalyzeResult {
 /// The inferred signal of every lambda in `hir`, outermost first.
 fn lambda_signals(hir: &Hir) -> Vec<Signal> {
     fn collect(hir: &Hir, out: &mut Vec<Signal>) {
-        if let HirKind::Lambda {
-            inferred_signals, ..
-        } = &hir.kind
-        {
-            out.push(*inferred_signals);
+        if let HirKind::Lambda(lambda) = &hir.kind {
+            out.push(lambda.inferred_signals);
         }
         hir.for_each_child(|child| collect(child, out));
     }

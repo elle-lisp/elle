@@ -1,9 +1,10 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! Whether a tail call's callee closure dies at the call, so the new
 //! activation must take over the release the frame replacement strands.
 //!
 //! docs/impl/selfrec.md
-//! docs/impl/region/letrec.md
+//! docs/impl/region/cycletail.md
+//! docs/impl/region/relocate.md
 
 use super::*;
 
@@ -101,32 +102,20 @@ impl<'a> Lowerer<'a> {
         // its release LIVE, and deferring it too would free the region twice (the
         // executing-closure re-dispatch then reads a recycled page).
         //
-        // The channel asks escape NOTHING. The strand loses exactly one reference —
-        // the frame's own, taken where the closure was allocated — and this deferral
-        // is a decref that supplies exactly that one, at the recursion's normal
-        // completion. Every facet a gate could read belongs to some OTHER reference:
-        // store/capture are CONTAINMENT (a closure held by a local container dies WITH
-        // the activation, so refusing there re-strands the release into a leak); the
-        // RETURN facet is funded by the callee's own `Return` mint, which runs before
-        // `trampoline_loop` breaks and fires the deferred decref; and a FIBER crossing
-        // counts its own reference as it crosses — the emit's park retain into
-        // `fiber.signal`, which the resumer's result release consumes, and
-        // `chan/send`'s send-site incref, held until a receive builds the result
-        // carrying the message. The crossing is a node of the same body, so it runs
-        // first; a crossing INSIDE the recursion suspends, and a suspending exit
-        // abandons the trampoline's whole deferred set — an over-keep, never a second
-        // release (docs/impl/selfrec.md).
+        // The channel asks escape NOTHING. The strand loses exactly the frame's own
+        // reference, and this decref supplies exactly that one at the recursion's
+        // normal completion (docs/impl/selfrec.md).
         if let HirKind::Var(b) = &func.kind {
             if self.stranded_self_bindings.contains(b) {
                 // Invariant: a stranded self-recursive binding is CELL-FREE
                 // (`!needs_capture()`; the strand sites in `binding/define.rs` and
                 // `binding/let.rs` both gate on it, docs/impl/selfrec.md). A sibling-captured
                 // (`needs_capture`) member's closure region is released by its forward
-                // cell's cascade; deferring its release here decrefs that region a SECOND time,
-                // under the still-live cell — the captured-self-tail double-free
+                // cell's cascade; deferring its release here decrefs that region a SECOND
+                // time, under the still-live cell
                 // (tests/impl/region-selfrec-captured-tail-release.lisp). Asserting at
-                // the CONSUMER catches any future strand path that skips the gate,
-                // turning that UAF into a loud panic at the seam.
+                // the CONSUMER catches any strand path that skips the gate, as a panic
+                // at the seam.
                 debug_assert!(
                     !self.arena.get(*b).needs_capture(),
                     "stranded self-recursive binding {b:?} is needs_capture: its forward \
@@ -145,14 +134,13 @@ impl<'a> Lowerer<'a> {
             // upvalue — and a nested closure's activation completes before later
             // uses of the arena, so deferring there would free it early.
             //
-            // The escape gate is the FIBER frontier alone, for the same reason and by
-            // the same argument as the self path above: this deferral also runs at the
-            // recursion's normal completion, after the `Return` mint that funds the
-            // caller's reference — and the merge collapses a returned member's region
-            // onto the arena, so that mint raises the arena's own count. The merge
-            // admits a returned cycle only where every tail exit of the letrec body is
-            // a member call, which is what makes this deferral the arena's sole release
-            // (docs/impl/region/letrec.md). A member reaches this
+            // The escape gate is the FIBER frontier alone. The return facet is funded
+            // as on the self path above: this deferral also runs at the recursion's
+            // normal completion, after the `Return` mint that funds the caller's
+            // reference, and the merge collapses a returned member's region onto the
+            // arena, so that mint raises the arena's own count. The merge
+            // admits a returned cycle only where the arena's release runs after that
+            // mint (docs/impl/region/letrec.md). A member reaches this
             // marking only through an ADMITTED merge, so the gate never re-argues
             // admission; it is kept whole so both ends of the channel state the same
             // premise.
@@ -166,7 +154,6 @@ impl<'a> Lowerer<'a> {
             // The relocation must leave that release where it is, the call being
             // about to enter the very closure it would free, so the exemption's
             // premise that the new activation takes it over is only true if this
-            // channel runs it (docs/impl/region/relocate.md).
             //
             // The escape gate is the FIBER frontier alone, by the same ordering
             // argument the two channels above make: this deferral is a decref that

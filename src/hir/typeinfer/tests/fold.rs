@@ -1,9 +1,9 @@
-// audited: 2026-09-23
-// src/hir/AGENTS.md
-// docs/impl/graft.md
-//! What the fold deletes after inference: a guard, a `cond` clause, an `and` or
-//! `or` operand, or a dispatch arm the recorded types decide. What it keeps: the
-//! statements after a raise, which a resume reaches.
+// audited: 2026-10-06
+//! What the fold deletes after inference: a guard, a `cond` clause, an `and` or `or` operand, or a dispatch arm the types decide.
+//!
+//! docs/impl/graft.md
+//!
+//! What it keeps: the statements after a raise, which a resume reaches.
 
 use super::{compile_booted, count_calls_to, count_emits, count_intrinsics, count_ops, run_booted};
 use crate::hir::{BindingArena, Hir, HirKind};
@@ -256,8 +256,8 @@ fn a_dissolved_body_raises_nothing() {
 }
 
 fn lambda_bodies(h: &Hir, out: &mut Vec<crate::signals::Signal>) {
-    if let HirKind::Lambda { body, .. } = &h.kind {
-        out.push(body.signal);
+    if let HirKind::Lambda(lambda) = &h.kind {
+        out.push(lambda.body.signal);
     }
     h.for_each_child(|c| lambda_bodies(c, out));
 }

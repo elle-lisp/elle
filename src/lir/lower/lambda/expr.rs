@@ -9,53 +9,39 @@
 //! Owned subtree is adopted into it; every other capture keeps the baseline
 //! incref.
 
-use crate::hir::{CaptureInfo, ParamBound};
+use crate::hir::Lambda;
 use crate::lir::lower::*;
 
 impl<'a> Lowerer<'a> {
-    /// Lower a lambda expression (creates closure with captures).
-    ///
-    /// Visible to `crate::lir::lower`, where its caller `lower_expr` lives.
-    #[allow(clippy::too_many_arguments)]
+    /// Lower a lambda expression to a `MakeClosure` over its captures, and
+    /// return the register that holds the closure.
     pub(in crate::lir::lower) fn lower_lambda_expr(
         &mut self,
-        params: &[Binding],
-        num_required: usize,
-        rest_param: Option<&Binding>,
-        vararg_kind: &crate::hir::VarargKind,
-        captures: &[CaptureInfo],
-        body: &Hir,
-        num_locals: u16,
-        inferred_signal: &crate::signals::Signal,
-        param_bounds: &[ParamBound],
-        doc: Option<std::rc::Rc<str>>,
-        origin: Option<crate::syntax::Span>,
-        assert_numeric: bool,
+        lambda: &Lambda,
     ) -> Result<Reg, String> {
         // `lower_expr` set this to the Lambda's own id before dispatching here.
         let lambda_id = self.current_hir_id;
 
         // Collect capture registers
         let mut capture_regs = Vec::new();
-        for cap in captures {
+        for cap in &lambda.captures {
             use crate::hir::CaptureKind;
 
             let reg = self.fresh_reg();
 
-            // Check if this binding needs a cell (captured locals, mutated params)
-            // We need to preserve the cell when capturing so mutations are shared
+            // A binding that needs a capture cell is captured as the cell itself,
+            // not the value the cell holds.
             let binding_needs_capture = self.arena.get(cap.binding).needs_capture();
 
             match cap.kind {
-                // A self-edge is resolved by `LoadSelf` / a self-call (the executing
-                // closure), never by loading this env slot, so the slot is a dead
-                // placeholder — emit NIL. Keeping the slot (rather than dropping it and
-                // renumbering) leaves every following capture's env index unchanged, so
-                // a transitive `Capture { index }` into this closure's env still
-                // resolves. NIL mints no heap cell: a binding captured only by
-                // self-edges is cell-free. (A binding a *sibling* also captures keeps
-                // its cell for that sibling, reached through the binding's own slot,
-                // not this self-slot.)
+                // `LoadSelf` or a self-call resolves a self-edge to the executing
+                // closure, and never loads this env slot, so the slot holds NIL.
+                // Keeping the slot leaves every following capture's env index
+                // unchanged, so a transitive `Capture { index }` into this closure's
+                // env still resolves. NIL mints no heap cell, so a binding captured
+                // only by self-edges is cell-free. A binding a sibling also captures
+                // keeps its cell for that sibling, reached through the binding's own
+                // slot, not this one.
                 CaptureKind::Recursive { .. } => {
                     self.emit(InstrRef::Const {
                         dst: reg,
@@ -88,7 +74,7 @@ impl<'a> Lowerer<'a> {
                             self.emit(InstrRef::LoadLocal { dst: reg, slot });
                         }
                     } else {
-                        // Binding not found in current context - this shouldn't happen
+                        // The analyzer captured a binding this function never slotted.
                         return Err(format!(
                             "Capture binding {:?} not found in current context",
                             cap.binding
@@ -120,22 +106,22 @@ impl<'a> Lowerer<'a> {
             }
         }
 
-        // Record the self-recursive binding (if any) this closure is the initializer
-        // of: the binding it captures as `CaptureKind::Recursive` (a same-binding
-        // self-edge). Such a closure is cell-free, but its region lives through the
-        // whole recursion (its self-reference borrows the executing closure), so a
-        // recursive tail call strands its scope-end release — `tail_callee_defers_release`
-        // reads this set to supply it via the runtime deferred release. Recorded BEFORE lowering
-        // the body so a self-tail-call inside the body already sees the fact.
-        for cap in captures {
+        // Record the binding this closure initializes when it captures that binding
+        // as `CaptureKind::Recursive`. Such a closure is cell-free, but its region
+        // lives through the whole recursion, so a recursive tail call strands its
+        // scope-end release. `lower_letrec` and `lower_define` read this set to mark
+        // the stranded bindings whose release `tail_callee_defers_release` defers.
+        // The set is written before the body lowers, so a self-tail-call inside the
+        // body already sees it.
+        for cap in &lambda.captures {
             if let crate::hir::CaptureKind::Recursive { binding } = cap.kind {
                 self.self_recursive_bindings.insert(binding);
             }
         }
 
-        // Reserve a slot in the module's closure list BEFORE lowering
-        // the body. This gives pre-order numbering: parent IDs are lower
-        // than children's. Matches collect_nested_functions traversal order.
+        // Reserve a slot in the module's closure list before lowering the body.
+        // This numbers closures in pre-order: a parent's ID is lower than its
+        // children's.
         let closure_id = ClosureId(self.closures.len() as u32);
         self.closures.push(None);
 
@@ -147,25 +133,11 @@ impl<'a> Lowerer<'a> {
         });
 
         // Lower the lambda body — children get higher IDs
-        let nested = self.lower_lambda_body(
-            closure_id,
-            params,
-            num_required,
-            rest_param,
-            vararg_kind,
-            rest_list_layout,
-            captures,
-            body,
-            num_locals,
-            *inferred_signal,
-            param_bounds,
-            doc,
-            origin,
-        )?;
+        let nested = self.lower_lambda_body(closure_id, lambda, rest_list_layout)?;
 
         // Check numeric! assertion after lowering. Eligibility is a question
         // the frozen form answers.
-        if assert_numeric && !nested.view().is_gpu_eligible() {
+        if lambda.assert_numeric && !nested.view().is_gpu_eligible() {
             return Err("numeric! assertion failed: function is not GPU-eligible".to_string());
         }
 
@@ -181,17 +153,14 @@ impl<'a> Lowerer<'a> {
             captures: &capture_regs,
         });
 
-        // Closure-capture region accounting, two modes per capture:
+        // Each capture takes one of two region accountings:
         //
-        // - **Owned (forest)**: a capture whose value region is
-        //   an interior member of this closure's Owned subtree (`capture_adopt_edges[lambda]`,
-        //   the capture cut) is ADOPTED — emit a value-resolved
-        //   `AdoptRegion(closure, captured)` linking the captured value's runtime region into
-        //   the closure's subtree, so the closure's free subtree-drops it. The member's own
-        //   compiler decref is suppressed in `analyze_regions_with` (it is freed only by the
-        //   drop, never both). No `IncrefRegion`: the ownership edge is not reference-counted;
-        //   the runtime auto-incref over the `Closure` env (which the cascade would balance) is
-        //   absorbed by the frozen-RC no-op on the dropped member.
+        // - A capture whose region is a member of this closure's Owned subtree
+        //   (`capture_adopt_edges` at this lambda) is adopted: a value-resolved
+        //   adopt links the captured value's runtime region into the closure's
+        //   subtree, and no `IncrefRegion` is emitted. The ownership passes
+        //   (`apply_ownership`) suppressed the member's own release, so the
+        //   closure's subtree drop is its one reclamation.
         //
         // - **Shared (baseline)**: every other cross-region capture keeps the per-region-RC
         //   baseline incref of the binding's scope region. For a genuinely-Shared member it is
@@ -221,29 +190,28 @@ impl<'a> Lowerer<'a> {
                     Slot(u16),
                     Env { index: u16, raw: bool },
                 }
-                // Each adopt reload with whether it names a CELL (a re-pointed
-                // `closure ⊇ cell` edge → `AdoptCellRegion`, the cell's OWN region) or a
-                // by-value capture (`closure ⊇ content` → `AdoptRegion`).
+                // Each adopt reload, and whether it names a cell. A cell capture is a
+                // `closure ⊇ cell` edge, adopted with `AdoptCellRegion`. A by-value
+                // capture is a `closure ⊇ content` edge, adopted with `AdoptRegion`.
                 let mut adopt_loads: Vec<(AdoptReload, bool)> = Vec::new();
-                // The member regions actually adopted here — checked against `adopt_edges`
-                // below so a suppressed-decref member can never be left un-adopted (a leak).
+                // The member regions adopted here. The check below compares them
+                // with `adopt_edges`, so no member whose release was suppressed is
+                // left unadopted, which would leak it.
                 let mut adopted_members = Vec::new();
-                for cap in captures {
-                    // A self-edge is a NIL env placeholder (resolved by the executing
-                    // closure), so it names no captured value region — nothing to adopt
-                    // or incref.
+                for cap in &lambda.captures {
+                    // A self-edge's env slot holds NIL, so it names no captured
+                    // region, and there is nothing to adopt or retain.
                     if matches!(cap.kind, crate::hir::CaptureKind::Recursive { .. }) {
                         continue;
                     }
                     // Mirror the capture-collection loop's access paths exactly.
                     let needs_cell = self.arena.get(cap.binding).needs_capture();
-                    // The member regions of this capture that are children of an adopt edge
-                    // into this closure. For a CELL-materialized capture the edge names the
-                    // CELL region (re-pointed by `capture_containment_edges`), not the
-                    // value's `binding_source_regions` — the closure holds the cell, and
-                    // `AdoptCellRegion` will adopt the cell's own region. For a by-value
-                    // capture the edge names the value's region. The edge keys the *static*
-                    // region; the emit is value-resolved off the reload.
+                    // The member regions of this capture that an adopt edge links into
+                    // this closure. For a capture held in a cell, the edge names the cell's
+                    // region (`capture_containment_edges` points it there), because the
+                    // closure holds the cell. For a by-value capture, the edge names the
+                    // value's region. The edge names the static region; the emitted adopt
+                    // reads the runtime region off the reloaded value.
                     let candidate_regions: Vec<crate::hir::region::Region> = if needs_cell {
                         self.cell_region_of_binding(cap.binding)
                             .into_iter()
@@ -300,11 +268,10 @@ impl<'a> Lowerer<'a> {
                         }
                     }
                 }
-                // The capture-adopt contract: every `adopt_edges` member had its own decref
-                // suppressed by `analyze_regions_with` (reclaimed solely by this closure's
-                // subtree drop), so each MUST have been adopted above — suppressed yet never
-                // adopted LEAKS. The reloads cover every capture kind, so a miss means the
-                // edge names a region no capture of this closure holds (an inference bug).
+                // Every `adopt_edges` member had its own release suppressed by
+                // `apply_ownership`, so each must have been adopted above, or it
+                // leaks. The reloads cover every capture kind, so a miss means the
+                // edge names a region no capture of this closure holds.
                 debug_assert!(
                     adopt_edges
                         .iter()
@@ -318,15 +285,11 @@ impl<'a> Lowerer<'a> {
                     adopted_members,
                 );
                 if !adopt_loads.is_empty() {
-                    // Park the closure in a scratch slot (consuming `dst`), then link each
-                    // captured value's runtime region into the closure's subtree with a
-                    // value-resolved `AdoptRegion` — both operands loaded FRESH so the
-                    // instruction's operand consumption (`ensure_binary_on_top` + two pops)
-                    // is harmless. Finally restore the closure into `dst` for the caller
-                    // (the same store/load roundtrip `emit_decrefs_for` uses for a discarded
-                    // result). `dst` itself cannot be the adopt operand: it is the closure
-                    // the caller binds next, and the capture registers were already consumed
-                    // by `MakeClosure`.
+                    // Park the closure in the scratch slot, then emit one adopt per
+                    // captured value. Each adopt consumes both of its operands, so both
+                    // are loaded fresh. `dst` cannot be an operand, because the caller
+                    // binds it next, and `MakeClosure` already consumed the capture
+                    // registers. Last, reload the closure into `dst` for the caller.
                     let scratch = self.scratch_slot();
                     self.emit(InstrRef::StoreLocal {
                         slot: scratch,
@@ -353,10 +316,9 @@ impl<'a> Lowerer<'a> {
                                 ("env-raw", index)
                             }
                         };
-                        // A cell capture (`closure ⊇ cell`) adopts the cell's OWN region
-                        // via `AdoptCellRegion` (`region_of`, not the unwrapped content —
-                        // the reload gives the raw cell); a by-value capture adopts the
-                        // value's region via `AdoptRegion`.
+                        // `AdoptCellRegion` adopts the cell's own region, not its
+                        // content's, since the reload gives the raw cell. `AdoptRegion`
+                        // adopts a by-value capture's region.
                         if is_cell {
                             self.emit(InstrRef::AdoptCellRegion {
                                 parent: preg,

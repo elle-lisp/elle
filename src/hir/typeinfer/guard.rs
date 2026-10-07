@@ -1,21 +1,25 @@
-// audited: 2026-09-28
+// audited: 2026-10-06
 //! Guard-fact extraction: what a condition proves about bindings.
 //!
 //! docs/intrinsics.md
 //!
-//! One recognizer serves both consumers of guard knowledge:
+//! One recognizer serves every consumer of guard knowledge:
 //!
-//! - `infer.rs` narrows **types** — inside an `If`'s branches, and across the
-//!   rest of a `Begin` after a *diverging* guard statement (the stdlib wrapper
-//!   shape: `(when (%not (number? b)) (error …))` proves `b : Number` on the
-//!   fall-through path, because every path where it is not has diverged).
-//! - `contract.rs` tracks **nonzero** facts for the `%div`/`%rem`/`%mod`
-//!   divisor obligation, with the same branch/fall-through interpretation.
+//! - `infer.rs` narrows types inside a branch, and across the rest of a
+//!   sequence after a guard statement whose taken branch diverges. After
+//!   `(when (%not (number? b)) (error …))`, `b` is a Number, because every
+//!   path where it is not has diverged.
+//! - `contract.rs` tracks nonzero facts for the `%div`/`%rem`/`%mod` divisor
+//!   obligation, with the same reading of branches and fall-through.
+//! - The fold reads the predicate types to decide a type test.
 //!
 //! A condition yields two fact sets: what holds when it is truthy and what
 //! holds when it is falsy. `(%not P)` swaps them; `and` accumulates the truthy
-//! side, `or` the falsy side (De Morgan's sound halves — the other halves are
-//! disjunctions the flat fact sets cannot express, so they stay empty).
+//! side, and `or` the falsy side. The other halves are disjunctions the flat
+//! fact sets cannot express, so they stay empty.
+//!
+//! docs/impl/typeinfer.md
+//! docs/impl/graft.md
 
 use super::*;
 use crate::value::SymbolId;
@@ -57,11 +61,10 @@ fn subject(h: &Hir) -> Option<Binding> {
 
 /// The type a 1-arg intrinsic predicate proves for its subject when truthy.
 ///
-/// Only predicates whose truth pins a single lattice point appear: `%string?`
-/// and `%bytes?` accept both mutabilities, `%array?`/`%struct?`/`%set?` both
-/// mutabilities of their family, so their truth proves no single `TyId` and
-/// they narrow nothing (the flat lattice has no unions).
-fn intrinsic_predicate_type(op: IntrinsicOp) -> Option<TyId> {
+/// Only predicates whose truth pins a single lattice point appear. `%string?`,
+/// `%bytes?`, `%array?`, `%struct?` and `%set?` accept both mutabilities, and
+/// the lattice has no type for the pair, so they narrow nothing.
+pub(super) fn intrinsic_predicate_type(op: IntrinsicOp) -> Option<TyId> {
     match op {
         IntrinsicOp::IsInt => Some(TypeInterner::INT),
         IntrinsicOp::IsFloat => Some(TypeInterner::FLOAT),
@@ -78,13 +81,13 @@ fn intrinsic_predicate_type(op: IntrinsicOp) -> Option<TyId> {
 /// The type a *stdlib-named* predicate call proves when truthy. Recognition is
 /// by callee name, the same authority the `match (type-of x)` narrowing uses:
 /// these names are the language's stable predicate vocabulary.
-fn named_predicate_type(sym: SymbolId) -> Option<TyId> {
+pub(super) fn named_predicate_type(sym: SymbolId) -> Option<TyId> {
     // Const patterns, not `symbols.name(sym)`: the question is identity, and
     // `SymbolId::of` is a `const fn` over the name's hash, so these compile to
     // integer compares against constants with no table in scope
-    // (docs/impl/symbol.md § "Reading a name, and not reading one"). Several of
-    // these predicates are defined in the stdlib rather than the primitive
-    // tables, so nothing build-time could hand back their spelling anyway.
+    // (docs/impl/symbol.md). Several of these predicates are stdlib functions,
+    // in no primitive table, so nothing built at compile time could hand back
+    // their spelling.
     const INT_P: SymbolId = SymbolId::of("int?");
     const INTEGER_P: SymbolId = SymbolId::of("integer?");
     const FLOAT_P: SymbolId = SymbolId::of("float?");
@@ -134,10 +137,34 @@ fn zero_comparison_subject(args: &[Hir]) -> Option<Binding> {
 
 /// Extract the facts `cond` proves, by truth value.
 pub(super) fn cond_facts(cond: &Hir, arena: &BindingArena) -> CondFacts {
+    facts_in(cond, arena, &mut Vec::new())
+}
+
+/// [`cond_facts`], with `env` holding the `let` bindings the condition itself
+/// introduced around the part being read: a condition that reads such a local
+/// proves what the value it was bound to proves. A graft introduces them, so a
+/// guard written with `not` or `integer?` still narrows once both are grafted.
+fn facts_in<'h>(
+    cond: &'h Hir,
+    arena: &BindingArena,
+    env: &mut Vec<(Binding, &'h Hir)>,
+) -> CondFacts {
     let cond = unwrap_anf_let(cond);
     match &cond.kind {
+        HirKind::Var(b) => match env.iter().rev().find(|(x, _)| x == b) {
+            Some(&(_, init)) => facts_in(init, arena, env),
+            None => CondFacts::none(),
+        },
+        HirKind::Let { bindings, body } => {
+            let depth = env.len();
+            env.extend(bindings.iter().map(|(b, init)| (*b, init)));
+            let facts = facts_in(body, arena, env);
+            env.truncate(depth);
+            facts
+        }
+        HirKind::Match { value, arms } => typeof_match_facts(value, arms, arena),
         HirKind::Intrinsic { op, args } => match op {
-            IntrinsicOp::Not if args.len() == 1 => cond_facts(&args[0], arena).negate(),
+            IntrinsicOp::Not if args.len() == 1 => facts_in(&args[0], arena, env).negate(),
             // (%eq x 0): falsy ⇒ x ≠ 0. (%ne x 0): truthy ⇒ x ≠ 0.
             IntrinsicOp::Eq => match zero_comparison_subject(args) {
                 Some(b) => CondFacts {
@@ -188,9 +215,13 @@ pub(super) fn cond_facts(cond: &Hir, arena: &BindingArena) -> CondFacts {
             const NOT: SymbolId = SymbolId::of("not");
             const ZERO_P: SymbolId = SymbolId::of("zero?");
             const EQ: SymbolId = SymbolId::of("=");
-            let callee_sym = arena.get(callee).name;
+            let inner = arena.get(callee);
+            let callee_sym = inner.name;
+            // `not` and a predicate prove a type only as the binding the
+            // runtime supplies, never as a parameter that shares its name.
+            let supplied = inner.is_primitive && inner.is_immutable && !inner.is_mutated;
             match (callee_sym, args.len()) {
-                (NOT, 1) => cond_facts(&args[0].expr, arena).negate(),
+                (NOT, 1) if supplied => facts_in(&args[0].expr, arena, env).negate(),
                 (ZERO_P, 1) => match subject(&args[0].expr) {
                     Some(b) => CondFacts {
                         when_true: vec![],
@@ -214,53 +245,119 @@ pub(super) fn cond_facts(cond: &Hir, arena: &BindingArena) -> CondFacts {
                         None => CondFacts::none(),
                     }
                 }
-                (_, 1) => match (named_predicate_type(callee_sym), subject(&args[0].expr)) {
-                    (Some(ty), Some(b)) => CondFacts {
-                        when_true: vec![Fact::TypeIs(b, ty)],
-                        when_false: vec![],
-                    },
-                    _ => CondFacts::none(),
-                },
+                (_, 1) if supplied => {
+                    match (named_predicate_type(callee_sym), subject(&args[0].expr)) {
+                        (Some(ty), Some(b)) => CondFacts {
+                            when_true: vec![Fact::TypeIs(b, ty)],
+                            when_false: vec![],
+                        },
+                        _ => CondFacts::none(),
+                    }
+                }
                 _ => CondFacts::none(),
             }
         }
         // (and a b): truthy ⇒ every conjunct truthy. The falsy side is a
         // disjunction the flat fact set cannot express.
-        HirKind::And(items) => CondFacts {
-            when_true: items
-                .iter()
-                .flat_map(|i| cond_facts(i, arena).when_true)
-                .collect(),
-            when_false: vec![],
-        },
+        HirKind::And(items) => {
+            let mut when_true = Vec::new();
+            for i in items {
+                when_true.extend(facts_in(i, arena, env).when_true);
+            }
+            CondFacts {
+                when_true,
+                when_false: vec![],
+            }
+        }
         // (or a b): falsy ⇒ every disjunct falsy.
-        HirKind::Or(items) => CondFacts {
-            when_true: vec![],
-            when_false: items
-                .iter()
-                .flat_map(|i| cond_facts(i, arena).when_false)
-                .collect(),
-        },
+        HirKind::Or(items) => {
+            let mut when_false = Vec::new();
+            for i in items {
+                when_false.extend(facts_in(i, arena, env).when_false);
+            }
+            CondFacts {
+                when_true: vec![],
+                when_false,
+            }
+        }
         _ => CondFacts::none(),
+    }
+}
+
+/// What a `(match (type-of x) …)` whose arms answer `true` or `false` proves
+/// when truthy: that `x` has one of the types whose arms answer `true`. That
+/// set is a fact only when the lattice holds it exactly — `:integer` and
+/// `:float` join to Number, while `:string` and `:@string` join to Top, which
+/// proves nothing. An arm the grafted `number?` or `integer?` brings is this
+/// shape.
+fn typeof_match_facts(
+    value: &Hir,
+    arms: &[(crate::hir::pattern::HirPattern, Option<Hir>, Hir)],
+    arena: &BindingArena,
+) -> CondFacts {
+    use crate::hir::pattern::HirPattern;
+    let Some(subject) = typeof_call_subject(unwrap_anf_let(value), arena) else {
+        return CondFacts::none();
+    };
+    let mut when_true: Vec<TyId> = Vec::new();
+    for (pat, guard, body) in arms {
+        let HirKind::Bool(answer) = body.kind else {
+            return CondFacts::none();
+        };
+        if guard.is_some() {
+            return CondFacts::none();
+        }
+        let alternatives: &[HirPattern] = match pat {
+            HirPattern::Wildcard if answer => return CondFacts::none(),
+            // Nothing after a wildcard can run.
+            HirPattern::Wildcard => break,
+            HirPattern::Or(alts) => alts,
+            other => std::slice::from_ref(other),
+        };
+        for alt in alternatives {
+            match (pattern_type_keyword(alt), answer) {
+                (Some(ty), true) => when_true.push(ty),
+                (Some(_), false) => {}
+                // A keyword the lattice has no type for answers true, so the
+                // truthy side is not a type.
+                (None, true) => return CondFacts::none(),
+                (None, false) if matches!(alt, HirPattern::Literal(_)) => {}
+                (None, false) => return CondFacts::none(),
+            }
+        }
+    }
+    when_true.sort_by_key(|t| t.0);
+    when_true.dedup();
+    let proven = match when_true.as_slice() {
+        [t] => *t,
+        [TypeInterner::INT, TypeInterner::FLOAT] => TypeInterner::NUMBER,
+        _ => return CondFacts::none(),
+    };
+    CondFacts {
+        when_true: vec![Fact::TypeIs(subject, proven)],
+        when_false: vec![],
     }
 }
 
 /// Does this expression never fall through to the next statement — every path
 /// through it raises or transfers control?
 ///
-/// The recognized diverging leaf is `(emit :error …)` (what the prelude
-/// `error` macro expands to); `break`/`recur` transfer control. This is what
-/// makes a guard's fall-through narrowing sound: after
+/// The diverging leaf is an `emit` that carries `:error`; `break` and `recur`
+/// transfer control. This makes a guard's fall-through narrowing sound: after
 /// `(when (%not (number? b)) (error …))`, every continuation where `b` is not
 /// a number has left the straight-line path.
 ///
 /// A `let` runs its inits before its body, so a diverging init diverges the
 /// form. The ANF lift names a raise that way: `(let [t (error …)] t)`.
+/// A `block` that a `break` inside it names falls through to the statement
+/// after it, whatever its tail does.
 pub(super) fn diverges(h: &Hir) -> bool {
     match &h.kind {
         HirKind::Emit { signal, .. } => signal.intersects(crate::value::SIG_ERROR),
         HirKind::Begin(xs) => xs.last().is_some_and(diverges),
-        HirKind::Block { body, .. } => body.last().is_some_and(diverges),
+        HirKind::Block { block_id, body, .. } => {
+            body.last().is_some_and(diverges) && !body.iter().any(|s| breaks_to(s, *block_id))
+        }
         HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
             bindings.iter().any(|(_, init)| diverges(init)) || diverges(body)
         }
@@ -275,9 +372,23 @@ pub(super) fn diverges(h: &Hir) -> bool {
     }
 }
 
-/// The facts that hold for the statements *after* `stmt` in a sequence: a
-/// one-armed `If` whose taken branch diverges leaves the other branch's
-/// entry facts standing on the fall-through.
+/// Does a `break` inside `h` name the block `id`? A `break` never crosses a
+/// function boundary, so a lambda's body is not searched.
+fn breaks_to(h: &Hir, id: crate::hir::expr::BlockId) -> bool {
+    match &h.kind {
+        HirKind::Break { block_id, .. } if *block_id == id => true,
+        HirKind::Lambda(_) => false,
+        _ => {
+            let mut found = false;
+            h.for_each_child(|c| found = found || breaks_to(c, id));
+            found
+        }
+    }
+}
+
+/// The facts that hold for the statements after `stmt` in a sequence: an `If`
+/// with exactly one diverging branch leaves the other branch's entry facts
+/// standing on the fall-through.
 pub(super) fn facts_after_statement(stmt: &Hir, arena: &BindingArena) -> Vec<Fact> {
     let HirKind::If {
         cond,

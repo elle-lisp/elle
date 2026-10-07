@@ -2,8 +2,8 @@
 
 <!-- audited: 2026-10-06 -->
 
-High-level Intermediate Representation: the analyzed program, with bindings
-resolved, captures computed and signals inferred, and the passes over it.
+The analyzed program, with bindings resolved, captures computed and signals
+inferred, and the passes over it.
 
 ## Responsibility
 
@@ -30,6 +30,7 @@ Does NOT:
 |------|---------|
 | `Hir` | Expression node with kind, span, signal, and a unique `HirId` |
 | `HirKind` | Expression variants (literals, control flow, etc.) |
+| `Lambda` | A function literal: parameters, captures, body, call signal, in [expr/lambda.rs](expr/lambda.rs). `HirKind::Lambda` holds it boxed. Build it with `Lambda::new` and its setters; rebuild it with `with_body`; reach it with `HirKind::as_lambda` or `as_lambda_mut` |
 | `Binding` | `u32` index into `BindingArena` — 4 bytes, Copy, identity by integer equality |
 | `BindingArena` | Owns all `BindingInner` values for a compilation unit |
 | `BindingInner` | Binding metadata: name, scope, and the analysis flags in [arena.rs](arena.rs) |
@@ -99,7 +100,7 @@ Lowerer (&BindingArena) — read-only access to binding metadata
    Box<Hir> }`. `yield` is a prelude macro that expands to
    `(emit :yield val)`.
 
-5. **Captures are computed per-fn.** Each `HirKind::Lambda` carries its
+5. **Captures are computed per-fn.** Each `Lambda` carries its
    own `Vec<CaptureInfo>` listing what it captures and how.
 
 6. **Empty lists become `HirKind::EmptyList`, not `HirKind::Nil`.** The
@@ -156,7 +157,7 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     handler reaches the symbol table through the driving VM's `symbols_ptr`
     and caches the Expander on the VM.
 
-15. **A docstring is a leading string literal.** `HirKind::Lambda` has a
+15. **A docstring is a leading string literal.** `Lambda` has a
     `doc: Option<Rc<str>>` field. The analyzer takes a leading string literal
     as the docstring only when the body has two or more forms. The lowerer
     copies it to `LirHead::doc`, and the emitter writes it into the code
@@ -181,7 +182,7 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     compile error. All synthesized nodes carry the literal's span.
 
 18. **A lambda's source location is captured for `meta/origin`.**
-    `HirKind::Lambda` has an `origin: Option<Span>` field, set in
+    `Lambda` has an `origin: Option<Span>` field, set in
     `analyze_lambda` from the form's span. The lowerer copies it to
     `LirHead::origin`, and the emitter writes it into the code payload.
     `(meta/origin f)` reads it through `ClosureTemplate::origin()`.
@@ -247,7 +248,8 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     as it joins a call site, so the definition keeps its proofs. A call in
     a function nothing live reaches stays a call. The graft runs in
     `regularize` after map fusion and before dead-binding elimination, and
-    it reads no name. See
+    it reads no name. Under `GraftPolicy::Off`, `regularize` skips the graft
+    and every call stays a call. See
     [grafting a call](../../docs/impl/graft.md).
 
 27. **After inference, the fold deletes what the types decide.** A condition,

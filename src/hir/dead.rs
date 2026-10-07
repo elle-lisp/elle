@@ -1,13 +1,10 @@
-//! Dead binding elimination for unused `let`/`letrec` bindings.
+// audited: 2026-10-06
+//! Dead binding elimination: removes an unread `let`/`letrec` binding whose initializer is effect-free.
 //!
-//! A binding nothing reads, whose initializer nothing can observe, is removable
-//! along with the initializer. That deletes the dead call the initializer makes,
-//! so it never reaches LIR and never mints a region.
+//! Removing the initializer deletes the dead call it makes, so the call never
+//! reaches LIR and never mints a region.
 //!
-//! The design argument — why an effect-free proof rather than a silence check,
-//! what the pass declines to touch, and why this altitude — lives in
-//! [docs/impl/hir.md](../../docs/impl/hir.md) § "Dead binding elimination". The
-//! comments here say only what a reader of this file would otherwise get wrong.
+//! docs/impl/hir.md
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -80,7 +77,7 @@ fn eliminable(
     {
         return false;
     }
-    if matches!(init.kind, HirKind::Lambda { .. }) {
+    if matches!(init.kind, HirKind::Lambda(_)) {
         return false;
     }
     is_effect_free(init, arena, symbols, pure)
@@ -246,8 +243,8 @@ fn admit_pure_lambdas(
         if !inner.is_immutable || inner.is_mutated {
             return;
         }
-        if let HirKind::Lambda { body, .. } = &value.kind {
-            if is_effect_free(body, arena, symbols, pure) {
+        if let HirKind::Lambda(lambda) = &value.kind {
+            if is_effect_free(&lambda.body, arena, symbols, pure) {
                 pure.insert(b);
                 *grew = true;
             }

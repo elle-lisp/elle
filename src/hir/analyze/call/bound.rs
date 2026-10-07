@@ -17,11 +17,9 @@ impl<'a> Analyzer<'a> {
         span: Span,
     ) -> Result<(), String> {
         let bounds = match &callee.kind {
-            HirKind::Lambda {
-                params,
-                param_bounds,
-                ..
-            } => Self::bounds_by_position(params, param_bounds),
+            HirKind::Lambda(lambda) => {
+                Self::bounds_by_position(&lambda.params, &lambda.param_bounds)
+            }
             HirKind::Var(binding) => match self.bound_env.get(binding) {
                 Some(bounds) => bounds.clone(),
                 None => return Ok(()),
@@ -66,9 +64,7 @@ impl<'a> Analyzer<'a> {
     /// never assigned. Anything else could hold another value by the call.
     fn known_arg_signal(&self, arg: &Hir) -> Option<Signal> {
         match &arg.kind {
-            HirKind::Lambda {
-                inferred_signals, ..
-            } => Some(*inferred_signals),
+            HirKind::Lambda(lambda) => Some(lambda.inferred_signals),
             HirKind::Var(binding) => {
                 let inner = self.arena.get(*binding);
                 if inner.is_mutated || !inner.is_immutable {

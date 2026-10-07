@@ -8,27 +8,27 @@ use super::*;
 // ── The coalescing staticness predicate ─────────────────────────────────────
 //
 // `coalescible_region` / `coalescible_solver_region`
-// (src/lir/lower/regionemit/coalesce.rs) classify whether a value's region-RC
-// mint can be slot-resolved (the value is a fresh local allocation whose region
-// is statically nameable) or must stay value-resolved (the dynamic boundary).
-// The predicate is computed and logged under --trace=rc; emission consumes it
-// without changing behavior.
+// (src/lir/lower/regionemit/coalesce.rs) classify whether a value's region-RC mint
+// can be slot-resolved (the value is a fresh local allocation whose region is
+// statically nameable) or must stay value-resolved (the dynamic boundary). Either
+// encoding moves the same runtime region count; the slot-resolved one skips a
+// runtime region lookup.
 //
-// These pins are written from docs/impl/region/mechanism.md, NOT from emission
-// output: each is counterfactual against a predicate that misclassifies the
-// case (an accept-all-live predicate accepts every "refused" pin; a reject-all
-// predicate refuses every "accepted" pin).
+// These pins are written from the design document, NOT from emission output:
+// each is counterfactual against a predicate that misclassifies the case (an
+// accept-all-live predicate accepts every "refused" pin; a reject-all predicate
+// refuses every "accepted" pin).
 
 #[test]
 fn coalescible_predicate_class_logic() {
     // The predicate's class logic in isolation, over a hand-built `RegionInfo`.
-    // This pins every dynamic-class exclusion — including the reassign classes
+    // This pins every dynamic-class exclusion, including the reassign classes
     // (`suppressed_decref_regions`, `mutated_binding_value_regions`,
-    // `cell_stored_regions`) that functionalize's assignment-conversion makes
-    // unreachable from straight-line Elle source in this unit harness — exactly
-    // per docs/impl/region/mechanism.md: Some iff the region is `live` and in
-    // NONE of the dynamic classes, and (for a returned `Var`)
-    // `binding_source_regions` names exactly one region.
+    // `cell_stored_regions`). Functionalize's assignment-conversion makes those
+    // unreachable from straight-line Elle source in this unit harness. The rule,
+    // per the design document: Some iff the region is `live` and in NONE of the
+    // dynamic classes, and (for a returned `Var`) `binding_source_regions` names
+    // exactly one region.
     use crate::hir::region::Region;
     let arena = crate::hir::BindingArena::new();
 
@@ -147,14 +147,14 @@ fn coalescible_predicate_class_logic() {
 #[test]
 fn coalescible_region_requires_locally_emitted_slot() {
     // `coalescible_region` (the slot wrapper consumed by `lower_return`) layers a
-    // runtime-population guard over the class predicate: the region's slot must be
+    // runtime-population guard over the class predicate. The region's slot must be
     // mapped (`region_to_table`) AND stamped by an allocation emitted in THIS
     // function (`emitted_alloc_regions`), so the activation map populates it at
-    // runtime. A value whose region is class-coalescible yet allocated in another
-    // activation — an immutable captured upvalue, a `sys/spawn-vm` thunk returning
-    // a captured string (tests/lang/concurrency.lisp) — has no slot stamped here,
-    // so a slot-resolved `IncrefRegion` would resolve to None and free a live
-    // region. Counterfactual: a wrapper that minted on demand (or omitted the
+    // runtime. A value can be class-coalescible yet allocated in another
+    // activation: an immutable captured upvalue, or a `sys/spawn-vm` thunk
+    // returning a captured string (tests/lang/concurrency.lisp). Such a value has
+    // no slot stamped here, so a slot-resolved `IncrefRegion` would resolve to
+    // None and free a live region. Counterfactual: a wrapper that minted on demand (or omitted the
     // emitted-alloc guard) would accept the unstamped region — `AssertRegionMatches`
     // then detonates on the spawned thread.
     use crate::hir::region::{Region, StaticRegion};
@@ -201,9 +201,8 @@ fn coalescible_region_requires_locally_emitted_slot() {
 fn coalescible_accepts_returned_fresh_pair() {
     // `(fn () (%pair 1 2))` — the tail is a fresh `%pair` allocation wrapped in
     // `Return`. Its region is a real local allocation (walk.rs `op.allocates()`),
-    // so the return mint is coalescible (docs/impl/region/mechanism.md, the
-    // direct-alloc branch). Counterfactual: a
-    // reject-all predicate refuses it.
+    // so the return mint is coalescible (the predicate's direct-alloc branch).
+    // Counterfactual: a reject-all predicate refuses it.
     let (lowerer, hir) = make_lowerer("(fn () (%pair 1 2))");
     let mut found = false;
     for p in return_value_ptrs(&hir) {
@@ -268,15 +267,14 @@ fn coalescible_accepts_returned_string_literal() {
 #[test]
 fn coalescible_refuses_a_cell_stored_value() {
     // A fn-local mutable accumulated across a `while` and handed back takes the
-    // 1-slot-container model, so its content is a RUNTIME fact: the container
-    // re-mints it at every store and each store's producer release unmaps the
+    // 1-slot-container model, so its content is a RUNTIME fact. The container
+    // re-mints it at every store, and each store's producer release unmaps the
     // allocation's static slot, leaving nothing for a later mint to resolve. The
     // returned `Var` must therefore take the value-resolved encoding
     // (docs/impl/region/bindings.md). Counterfactual: without the
     // `cell_stored_regions` row the `%pair`'s region reads as a clean local
-    // allocation and the return mint is slot-resolved — `AssertRegionMatches`
-    // then detonates on the emptied slot
-    // (tests/impl/region-pair-heap-content-uaf.lisp).
+    // allocation and the return mint is slot-resolved. `AssertRegionMatches` then
+    // detonates on the emptied slot (tests/impl/region-pair-heap-content-uaf.lisp).
     let (lowerer, hir) = make_lowerer(
         "(fn (n) (let [@acc (%pair 0 0)] \
             (var i 0) \
@@ -424,8 +422,8 @@ fn coalescible_refuses_returned_captured_upvalue() {
     // closure captures, read from the lambda capture sets in the HIR.
     let (lowerer, hir) = make_lowerer("(fn (@x) (g (fn () x)))");
     fn captured_in(h: &Hir, out: &mut std::collections::HashSet<crate::hir::Binding>) {
-        if let HirKind::Lambda { captures, .. } = &h.kind {
-            for c in captures {
+        if let HirKind::Lambda(lambda) = &h.kind {
+            for c in &lambda.captures {
                 out.insert(c.binding);
             }
         }

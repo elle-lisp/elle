@@ -1,3 +1,9 @@
+// audited: 2026-10-06
+//! Closing a body into an `HirFragment` and grafting it into another arena: what crosses whole, and what declines.
+//!
+//! docs/impl/hir.md
+//! docs/impl/graft.md
+
 use super::*;
 use crate::hir::arena::BindingScope;
 use crate::hir::testkit::{HirFixture, Stage};
@@ -27,14 +33,12 @@ fn lambda(source: &str) -> Lambda {
         if out.is_some() {
             return;
         }
-        if let HirKind::Lambda {
-            params,
-            body,
-            assert_numeric,
-            ..
-        } = &h.kind
-        {
-            *out = Some((params.clone(), (**body).clone(), *assert_numeric));
+        if let Some(lambda) = h.kind.as_lambda() {
+            *out = Some((
+                lambda.params.clone(),
+                lambda.body.clone(),
+                lambda.assert_numeric,
+            ));
             return;
         }
         h.for_each_child(|c| find(c, out));
@@ -51,7 +55,7 @@ fn lambda(source: &str) -> Lambda {
 }
 
 /// Every primitive in `arena`, by name — the map a graft resolves globals
-/// through, built exactly as `fuse.rs` builds it.
+/// through, built exactly as `typeinfer/fuse.rs` builds it.
 fn primitives_by_name(arena: &BindingArena) -> FxHashMap<SymbolId, Binding> {
     let mut out = FxHashMap::default();
     for i in 0..arena.len() as u32 {

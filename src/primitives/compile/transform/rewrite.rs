@@ -1,4 +1,10 @@
+// audited: 2026-10-06
+//! `compile/extract` and `compile/parallelize`, which read a named function's HIR to move code or to check it.
+//!
+//! docs/analysis/agent-reasoning.md
+
 use super::*;
+use crate::hir::Lambda;
 
 /// (compile/extract analysis {:from :fn :lines [s e] :name :new}) → {:source :new-function :captures :signal}
 pub(crate) fn prim_compile_extract(
@@ -109,7 +115,7 @@ pub(crate) fn prim_compile_extract(
     let mut defined = BTreeSet::new();
     let mut signal = Signal::silent();
 
-    if let HirKind::Lambda { body, .. } = &lambda.kind {
+    if let Some(Lambda { body, .. }) = lambda.kind.as_lambda() {
         collect_vars_in_range(
             body,
             start_byte,
@@ -179,7 +185,8 @@ pub(crate) fn prim_compile_extract(
     (SIG_OK, ctx.struct_from(fields))
 }
 
-/// (compile/parallelize analysis [:fn-a :fn-b]) → {:safe bool :reason "..." :code "..." :signal {...}}
+/// (compile/parallelize analysis [:fn-a :fn-b]) → {:safe bool :reason "..." :code "..." :signal {...}},
+/// with `:shared-captures` in place of `:code` when the functions are not safe to run in parallel.
 pub(crate) fn prim_compile_parallelize(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -240,7 +247,7 @@ pub(crate) fn prim_compile_parallelize(
         }
         let mut caps = Vec::new();
         if let Some(lambda) = find_named_lambda(&handle.hir, &handle.arena, symbols, name) {
-            if let HirKind::Lambda { captures, .. } = &lambda.kind {
+            if let Some(Lambda { captures, .. }) = lambda.kind.as_lambda() {
                 for cap in captures {
                     let inner = handle.arena.get(cap.binding);
                     caps.push((cap.binding, inner.is_mutated));

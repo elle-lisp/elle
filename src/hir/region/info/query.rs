@@ -1,6 +1,5 @@
 // audited: 2026-10-06
-//! The queries over [`RegionInfo`]: what a binding holds, what an operand hands a
-//! call, where a region merges, and each rest-list layout.
+//! The queries over [`RegionInfo`]: what a binding holds, what an operand hands a call, and where a merge sends a region.
 //!
 //! docs/impl/region/merging.md
 //! docs/impl/region/relocate.md
@@ -45,16 +44,15 @@ impl RegionInfo {
     ///
     /// Each node in a value-producing position contributes its own
     /// `alloc_region` and, for a `Var`, its binding's source regions,
-    /// canonicalized through the merge forest. The descent stops at a `Call`
-    /// and at a `Lambda`, whose values each carry a count of their own, and
-    /// passes through everything else — an inline `%`-`Intrinsic` included,
-    /// which mints no region. Descending an unrecognised node
-    /// over-approximates, the leak-preserving direction.
+    /// canonicalized through the merge forest. The descent stops at a `Call`,
+    /// at a `Lambda` and at an allocating `%`-`Intrinsic` (`%pair`, `%freeze`,
+    /// `%thaw`), whose values each hold their operands by a count of their own.
+    /// It passes through everything else, a non-allocating `%`-op included,
+    /// such as `%first`, whose result borrows its operand's region. Descending
+    /// an unrecognized node over-approximates, the leak-preserving direction.
     ///
     /// Read by the lowerer's frame-exit exemption and by the branch-arm
     /// window's per-point funding question.
-    ///
-    /// docs/impl/region/relocate.md
     pub fn operand_value_regions(&self, h: &Hir, out: &mut FxHashSet<Region>) {
         if let Some(&r) = self.alloc_region.get(&h.id) {
             out.insert(self.merged_root(r));
@@ -64,8 +62,10 @@ impl RegionInfo {
                 out.insert(self.merged_root(r));
             }
         }
-        if matches!(h.kind, HirKind::Call { .. } | HirKind::Lambda { .. }) {
-            return;
+        match &h.kind {
+            HirKind::Call { .. } | HirKind::Lambda { .. } => return,
+            HirKind::Intrinsic { op, .. } if op.allocates() => return,
+            _ => {}
         }
         h.for_each_child(|c| self.operand_value_regions(c, out));
     }
@@ -108,8 +108,6 @@ impl RegionInfo {
     /// comparison can only ever read it as unmoved. Every other region the name
     /// carries is the scrutinee's, so the question is asked per region.
     /// `region` is a merged root.
-    ///
-    /// docs/impl/region/relocate.md
     pub fn names_built_rest_collection(&self, binding: Binding, region: Region) -> bool {
         self.pattern_rest_regions
             .values()
@@ -117,7 +115,8 @@ impl RegionInfo {
             .any(|c| c.holders.contains(&binding) && self.merged_root(c.region) == region)
     }
 
-    /// Does this scope have any allocations whose solved region matches it?
+    /// Does any allocation lie under this scope's region? True when the
+    /// scope's region is in `live_regions`.
     pub fn scope_has_local_allocs(&self, hir_id: HirId) -> bool {
         self.scope_region
             .get(&hir_id)
@@ -126,10 +125,9 @@ impl RegionInfo {
 
     /// The region a builder-idiom merge collapses `r` onto — the outermost
     /// ancestor in the `merged_parent` forest, or `r` itself when it is not a
-    /// merge child. Bounded by the forest depth; the guard rejects a cycle,
-    /// of which there are none by construction.
-    ///
-    /// docs/impl/region/merging.md
+    /// merge child. Bounded by the forest depth. A guard stops the walk after
+    /// 10,000 steps, which only a cycle could reach, and the forest has none by
+    /// construction.
     pub fn merged_root(&self, r: Region) -> Region {
         let mut cur = r;
         let mut guard = 0u32;

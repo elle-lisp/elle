@@ -54,18 +54,16 @@ fn test_lower_begin() {
     assert!(func.entry.view().block_count() > 0);
 }
 
-// ── Ownership forest: AdoptRegion emission (docs/impl/region/ownership.md
-// § "Adoption and subtree drop") ──
+// ── Ownership forest: AdoptRegion emission ──
 //
 // The never-mergeable shape: a Fresh mutable container (`@array`) and the value
 // pushed into it (`array`) are both call-result regions — no static slot, so
-// MERGE cannot collapse them. The lowerer classifies `{container, value}` as an
-// externally-unique Owned subtree and emits `AdoptRegion(container, value)` at the
-// push site (instead of the interior edge's inert IncrefRegion), so the
-// container's free subtree-drops the value. This is unconditional — the ownership
-// forest is how the language runs (§ "One semantics, every backend"); a shape the
-// inference cannot prove externally unique stays Shared and emits the per-region-RC
-// baseline instead, so no `AdoptRegion` appears for it.
+// MERGE cannot collapse them. The solver classifies `{container, value}` as an
+// externally-unique Owned subtree and the lowerer emits `AdoptRegion(container,
+// value)` at the push site (instead of the interior edge's inert IncrefRegion), so
+// the container's free subtree-drops the value. The ownership forest is
+// unconditional. A shape the inference cannot prove externally unique stays Shared
+// and emits the per-region-RC baseline instead, so no `AdoptRegion` appears for it.
 
 #[test]
 fn adopt_region_emitted_for_owned_container() {
@@ -87,8 +85,8 @@ fn adopt_region_emitted_per_member_for_interior_cycle() {
     // Each member is adopted DIRECTLY by the root, so TWO AdoptRegions are emitted (one
     // per member); the interior a↔b edges carry no adopt of their own. The push order
     // makes `root` outlive both members (its pushes come last), so the lifetime
-    // obligation holds. Counterfactual: the prior flat cut refused the whole subtree
-    // (an interior edge's target is a member, not the root) — zero adopts, RED.
+    // obligation holds. Counterfactual: a flat cut that refuses the whole subtree
+    // (an interior edge's target is a member, not the root) emits zero adopts.
     let module = compile_to_lir(
         "(begin (let [root (@array) a (@array) b (@array)] \
                   (begin (%array-push a b) (%array-push b a) \
@@ -108,9 +106,8 @@ fn adopt_region_emitted_for_deep_nesting_chain() {
     // Deep nesting: `root` holds `a` and `a` holds `b`, but `root` does NOT hold `b`
     // directly (`root ⊇ a ⊇ b`). `b` is adopted by its ACTUAL parent `a`, and `a` by the
     // root — TWO AdoptRegions forming a multi-level owner chain the root's recursive
-    // subtree drop frees as a unit. Counterfactual: the prior flat cut refused the whole
-    // subtree (`b` has no `member → root` edge), emitting zero adopts — RED before the
-    // deep-nesting cut.
+    // subtree drop frees as a unit. Counterfactual: a flat cut that refuses the whole
+    // subtree (`b` has no `member → root` edge) emits zero adopts.
     let module = compile_to_lir(
         "(begin (let [root (@array) a (@array) b (@array)] \
                   (begin (%array-push a b) (%array-push root a) nil)) \
@@ -126,12 +123,12 @@ fn adopt_region_emitted_for_deep_nesting_chain() {
 
 #[test]
 fn adopt_region_emitted_for_captured_value() {
-    // The capture cut: a pair `p` captured by a LOCAL
-    // closure `c` (called in place, discarded). Tight last-use for a captured-and-owned
-    // value admits the Owned subtree {closure, p}, so the lowerer emits a value-resolved
-    // `AdoptRegion(closure, p)` at the closure-construction site (MakeClosure) — capture
-    // records no `cross_region_refs` store site, so the adopt rides the closure rather than
-    // a store node — and the closure's subtree drop then frees `p`.
+    // The capture cut: a pair `p` captured by a LOCAL closure `c` (called in place,
+    // discarded). Tight last-use for a captured-and-owned value admits the Owned
+    // subtree {closure, p}. The lowerer emits a value-resolved `AdoptRegion(closure, p)`
+    // at the closure-construction site (MakeClosure), and the closure's subtree drop
+    // then frees `p`. Capture records no `cross_region_refs` store site, so the adopt
+    // rides the closure rather than a store node.
     let module =
         compile_to_lir("(begin (let [p (%pair 1 2)] (let [c (fn [] (length p))] (c))) nil)");
     assert!(
@@ -144,21 +141,20 @@ fn adopt_region_emitted_for_captured_value() {
 
 #[test]
 fn capture_adopt_reloads_upvalue_via_load_capture() {
-    // The capture-adopt contract's env-reload half (region/adopt.md § "The capture
-    // adopt"): a `capture_adopt_edges` entry whose captured binding is an UPVALUE of the
-    // constructing function (the enclosing lambda also captures it, forwarding) is
-    // emitted by reloading the captured value from the closure environment
-    // (`LoadCapture`) rather than a local slot. No shape's inference produces such an
-    // edge — a region-rooted upvalue owner is refused on the lifetime obligation, and
-    // the owner that CAN hold one is the activation/fiber node — so the edge is
-    // INJECTED at the `make_lowerer_with` seam; this pins the emit capability the
-    // owner-node cuts rely on ("suppress ⊆ adopt" held by capability, not refusal).
+    // The capture-adopt contract's env-reload half. A `capture_adopt_edges` entry
+    // may name a captured binding that is an UPVALUE of the constructing function
+    // (the enclosing lambda also captures it, forwarding). The lowerer emits it by
+    // reloading the captured value from the closure environment (`LoadCapture`)
+    // rather than a local slot. No shape's inference produces such an edge: the
+    // lifetime obligation refuses a region-rooted upvalue owner, and the owner
+    // that CAN hold one is the activation/fiber node. So the test INJECTS the edge
+    // at the `make_lowerer_with` seam. It pins the emit capability the owner-node
+    // cuts rely on ("suppress ⊆ adopt" held by capability, not refusal).
     //
-    // Counterfactual: before the env-reload emit, an injected upvalue edge was
-    // suppressed-but-unadoptable — lowering tripped the capture-adopt-contract
-    // debug_assert in `lower_lambda_expr` (a leak made loud), failing this test by
-    // panic. With the emit landed, the nested closure's construction site carries a
-    // LoadCapture immediately feeding an AdoptRegion.
+    // Counterfactual: a lowerer with no env-reload emit leaves the injected upvalue
+    // edge suppressed but unadopted, so the capture-adopt-contract debug_assert in
+    // `lower_lambda_expr` panics. With the emit, the nested closure's construction
+    // site carries a LoadCapture immediately feeding an AdoptRegion.
     let (mut lowerer, hir) = make_lowerer_with(
         "(begin (let [m (%pair 1 2)] \
            (let [outer (fn [] (let [o (fn [] (%first m))] (o)))] (outer))) nil)",
@@ -188,8 +184,8 @@ fn capture_adopt_reloads_upvalue_via_load_capture() {
                 depth: usize,
                 best: &mut Option<(usize, HirId)>,
             ) {
-                let child_depth = if let HirKind::Lambda { captures, .. } = &h.kind {
-                    let captures_m = captures.iter().any(|c| {
+                let child_depth = if let HirKind::Lambda(lambda) = &h.kind {
+                    let captures_m = lambda.captures.iter().any(|c| {
                         info.binding_source_regions
                             .get(&c.binding)
                             .is_some_and(|rs| rs.contains(&m))
@@ -210,7 +206,8 @@ fn capture_adopt_reloads_upvalue_via_load_capture() {
                 .alloc_region
                 .get(&o_id)
                 .expect("the nested closure has an alloc region");
-            // Mirror `analyze_regions_with`'s flag-on block: the edge plus the
+            // Mirror what the solver records for a capture adopt
+            // (src/hir/region/infer/analyze/adopt.rs): the edge plus the
             // member's suppressed decref (reclaimed solely by the subtree drop).
             info.capture_adopt_edges
                 .entry(o_id)
@@ -245,15 +242,12 @@ fn capture_adopt_reloads_upvalue_via_load_capture() {
     );
 }
 
-// ── Self-reference: LoadSelf resolves both positions (docs/impl/vm.md § "Self-reference") ──
+// ── Self-reference: LoadSelf resolves both positions ──
 //
-// A self-recursive closure that references ITSELF — whether in value position
-// (`go` handed back, stored, or passed to a HOF) or in call position (`(go …)`) —
-// resolves that reference to the currently-executing closure via `LoadSelf`, never a
-// capture-slot load of a forward cell. The value path materializes the executing
-// closure and uses it; the call path re-dispatches through it (re-entering the same
-// code+env with new args). Both routes go through the one op, so each isolated shape
-// below emits exactly one `LoadSelf`.
+// A self-recursive closure's reference to ITSELF lowers to `LoadSelf`, never a
+// capture-slot load of a forward cell. That holds in value position (`go` handed
+// back, stored, or passed to a HOF) and in call position (`(go …)`). Both routes go
+// through the one op, so each isolated shape below emits exactly one `LoadSelf`.
 
 #[test]
 fn value_position_self_reference_lowers_to_load_self() {
@@ -285,8 +279,8 @@ fn call_position_self_reference_lowers_to_load_self() {
 // ── Compiled forward cells: one mint, one address space ──────────
 //
 // A binding whose forward cell is COMPILED holds the cell in its OWN stack slot
-// (`BindingInner::compiled_forward_cell`), so `populate_env` must not mint a
-// shadow env cell over it and every later recording of the binding's address
+// (`BindingInner::compiled_forward_cell`). So `populate_env` must not mint a
+// shadow env cell over it, and every later recording of the binding's address
 // space must say `Local`. Both halves read `compiled_cell_bindings`, which
 // `allocate_compiled_cell_slot` writes as it mints the cell — the pairing the
 // solver keeps in `record_compiled_cell`.

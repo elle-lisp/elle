@@ -1,6 +1,9 @@
-// audited: 2026-10-12
-// src/pipeline/AGENTS.md
-//! Compilation pipeline: source -> bytecode.
+// audited: 2026-10-06
+//! The bytecode, LIR and FHIR compile entry points, and the lowering they share.
+//!
+//! src/pipeline/AGENTS.md
+//! docs/pipeline.md
+//! docs/impl/syntax.md
 
 use super::CompileCtx;
 use crate::hir::{classify_form, Analyzer, BindingArena, FileForm};
@@ -23,20 +26,19 @@ use frontend::{
 };
 
 /// Run `f` under a fresh transient region on `heap`, freeing it when `f`
-/// returns. `heap` is this compilation's own heap (`cctx.heap_ptr()` — the macro
-/// VM's heap, which is the owning instance's when built with `new_with_heap`), so
-/// the per-compilation scratch (anything bare-allocated during parse/expand/
-/// analyze) lands in the same region store as the macro expander's allocations
-/// and is reclaimed when the result is promoted out. The macro expander mints its
-/// OWN per-expansion transient (`expand_macro_call`), so nothing the surviving
-/// compile result references lives in this region.
+/// returns. `heap` is this compilation's own heap: `cctx.heap_ptr()`, the macro
+/// VM's heap, which is the owning instance's when built with `new_with_heap`.
+/// So the per-compilation scratch, anything bare-allocated while reading,
+/// expanding and analyzing, lands in the same region store as the macro
+/// expander's allocations. The macro expander mints its own per-expansion
+/// transient (`expand_macro_call`), so nothing the surviving compile result
+/// references lives in this region.
 ///
 /// This region is also the unit's **syntax working arena**: `f` receives it as
 /// a [`SyntaxArena`], and the parsed tree, every intermediate expansion, and
 /// the expanded tree are born in it. Nothing that outlives the unit points
-/// into it — macro templates are copied to the template arena when they are
-/// defined, and a syntax `Value` owns its own copy
-/// (docs/impl/syntax.md).
+/// into it: macro templates are copied to the template arena when they are
+/// defined, and a syntax `Value` owns its own copy.
 fn with_syntax_arena<R>(
     heap: *mut crate::value::fiberheap::FiberHeap,
     f: impl FnOnce(SyntaxArena) -> R,
@@ -47,10 +49,10 @@ fn with_syntax_arena<R>(
     out
 }
 
-/// Compile source code to bytecode.
+/// Compile one form of source code to bytecode.
 ///
-/// Creates an internal VM for macro expansion. Macro side effects
-/// don't persist beyond compilation.
+/// Expansion runs on the compile context's macro VM with a clone of its
+/// expander, so a macro the form defines does not persist past this compile.
 pub fn compile(
     source: &str,
     symbols: &mut SymbolTable,
@@ -98,15 +100,14 @@ fn compile_inner(
     let prim_values = analyzer.primitive_values().clone();
     drop(analyzer);
 
-    // Phase 3.5: regularize the analyzed HIR — prune dead `(type-of x)` arms,
-    // mark tail calls, functionalize, ANF-lift, type inference (crate::hir::regularize).
-    let (dispatch_wrappers, fn_inline) = cctx.compile_registries_mut();
+    // Phase 3.5: regularize the analyzed HIR; `crate::hir::regularize` names
+    // its passes and their order.
     let types = crate::hir::regularize(
         &mut analysis.hir,
         &mut arena,
         symbols,
-        dispatch_wrappers,
-        fn_inline,
+        &prim_values,
+        cctx.graft(),
     )?;
 
     // Phase 4: Lower to LIR with intrinsic specialization
@@ -227,11 +228,10 @@ fn compile_file_to_lir_inner(
     let errors = analyzer.take_errors();
     drop(analyzer);
 
-    // If analysis accumulated any recoverable errors (undefined vars,
-    // signal mismatches, etc.), surface the first one now in the standard
-    // "file:line:col: message" format. Without this, poison nodes from
-    // accumulated errors reach the lowerer and surface as the opaque
-    // "internal: error poison node in lowerer".
+    // If analysis collected recoverable errors, such as an undefined variable
+    // or a signal mismatch, report the first one as "file:line:col: message".
+    // Without this, the poison nodes those errors left reach the lowerer and
+    // report the opaque "internal: error poison node in lowerer".
     if !errors.is_empty() {
         let err = &errors[0];
         let msg = match &err.location {
@@ -247,9 +247,7 @@ fn compile_file_to_lir_inner(
         return Err(msg);
     }
 
-    let (dispatch_wrappers, fn_inline) = cctx.compile_registries_mut();
-    let types =
-        crate::hir::regularize(&mut hir, &mut arena, symbols, dispatch_wrappers, fn_inline)?;
+    let types = crate::hir::regularize(&mut hir, &mut arena, symbols, &prim_values, cctx.graft())?;
 
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(cctx.primitive_meta());
     let region_info =
@@ -410,9 +408,9 @@ fn compile_module_with_transform(
 }
 
 /// Like `compile_module_with_transform`, but from already-read top-level
-/// `syntaxes` (parse once in one VM, compile in another). Powers
-/// `compile/whole-module-syntax` — the runner reads a legacy multi-form file in
-/// the main VM and ships its syntax to a worker that compiles it here.
+/// `syntaxes`, read in one VM and compiled in another. Powers
+/// `compile/whole-module-syntax`: the runner reads a multi-form file in the
+/// main VM and ships its syntax to a worker that compiles it here.
 fn compile_syntaxes_with_transform(
     syntaxes: Vec<Syntax>,
     symbols: &mut SymbolTable,

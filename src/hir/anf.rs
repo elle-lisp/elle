@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-06
 //! A-normal form (ANF) lift: each value a frame releases through a slot gets a
 //! binding naming that slot.
 //!
@@ -14,9 +14,8 @@ use super::expr::{CallArg, Hir, HirKind};
 pub fn anf_lift(hir: &mut Hir, arena: &mut BindingArena) {
     let mut ctx = AnfCtx { arena };
     *hir = ctx.r(hir);
-    // After ANF, tail positions are settled. Mark each function's tail
-    // value with a `Return` ownership boundary (the callee side of the
-    // prediction-free calling convention).
+    // After ANF, tail positions are settled. Wrap each function's tail
+    // value that is not a tail call in `Return`, the return mint.
     super::return_incref::wrap_tail_returns(hir);
 }
 
@@ -188,33 +187,9 @@ impl<'a> AnfCtx<'a> {
             },
 
             // ── Lambda body: a returning position ──
-            HirKind::Lambda {
-                params,
-                num_required,
-                rest_param,
-                vararg_kind,
-                captures,
-                body,
-                num_locals,
-                inferred_signals,
-                param_bounds,
-                doc,
-                origin,
-                assert_numeric,
-            } => HirKind::Lambda {
-                params: params.clone(),
-                num_required: *num_required,
-                rest_param: *rest_param,
-                vararg_kind: vararg_kind.clone(),
-                captures: captures.clone(),
-                body: Box::new(self.r(body)),
-                num_locals: *num_locals,
-                inferred_signals: *inferred_signals,
-                param_bounds: param_bounds.clone(),
-                doc: doc.clone(),
-                origin: *origin,
-                assert_numeric: *assert_numeric,
-            },
+            HirKind::Lambda(lambda) => {
+                HirKind::Lambda(Box::new(lambda.with_body(self.r(&lambda.body))))
+            }
 
             // ── Call: func and args wrap ──
             HirKind::Call {
@@ -265,7 +240,7 @@ impl<'a> AnfCtx<'a> {
             // ── Begin: every expression wraps. Non-last positions
             // discard the value; the binding's slot is what
             // `emit_decrefs_for` uses to release the call result
-            // region (the retired shadow stash slot is gone). ──
+            // region. ──
             HirKind::Begin(exprs) => HirKind::Begin(exprs.iter().map(|e| self.w(e)).collect()),
 
             // ── Block: every expression wraps; same rationale. ──
@@ -395,7 +370,7 @@ fn is_anf_wrapped(hir: &Hir) -> bool {
 fn kind_label(k: &HirKind) -> &'static str {
     match k {
         HirKind::Call { .. } => "call",
-        HirKind::Lambda { .. } => "lambda",
+        HirKind::Lambda(_) => "lambda",
         HirKind::Eval { .. } => "eval",
         HirKind::Emit { .. } => "emit",
         HirKind::Intrinsic { .. } => "intrinsic",

@@ -4,12 +4,15 @@
 //!
 //! docs/impl/hir.md
 
-use super::binding::{Binding, CaptureInfo};
+use super::binding::Binding;
 use super::pattern::HirPattern;
 use crate::signals::Signal;
 use crate::syntax::Span;
 use crate::value::Value;
 use std::sync::atomic::{AtomicU32, Ordering};
+
+mod lambda;
+pub use lambda::{Lambda, ParamBound, VarargKind};
 
 mod op;
 pub use op::*;
@@ -38,13 +41,6 @@ pub fn reset_hir_ids() {
 
 fn fresh_hir_id() -> HirId {
     HirId(NEXT_HIR_ID.fetch_add(1, Ordering::Relaxed))
-}
-
-/// A declared signal bound on a function parameter.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ParamBound {
-    pub binding: Binding,
-    pub signal: Signal,
 }
 
 /// HIR expression with source location, signal, and unique ID.
@@ -90,19 +86,6 @@ pub struct CallArg {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct BlockId(pub u32);
 
-/// How extra arguments beyond fixed params are collected.
-/// Only meaningful when `rest_param` is `Some`.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum VarargKind {
-    /// Collect into a list (existing `&` behavior)
-    List,
-    /// Collect into an immutable struct (`&keys`)
-    Struct,
-    /// Collect into an immutable struct (`&named`) with strict key validation.
-    /// Contains the set of valid keyword names.
-    StrictStruct(Vec<String>),
-}
-
 /// HIR expression kinds - fully analyzed forms
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum HirKind {
@@ -132,49 +115,9 @@ pub enum HirKind {
         body: Box<Hir>,
     },
 
-    /// Lambda expression
-    Lambda {
-        params: Vec<Binding>,
-        /// Number of required parameters (before &opt).
-        /// When no &opt, equals the count of fixed params
-        /// (params.len() if no rest_param, params.len() - 1 if rest_param).
-        num_required: usize,
-        /// If present, this function is variadic: extra args are collected
-        /// into a list or struct and bound to this parameter.
-        rest_param: Option<Binding>,
-        /// How the rest parameter's args are collected.
-        /// Only meaningful when rest_param is Some.
-        vararg_kind: VarargKind,
-        captures: Vec<CaptureInfo>,
-        body: Box<Hir>,
-        /// Number of local slots needed (params + locals)
-        num_locals: u16,
-        /// The inferred signal of CALLING this lambda.
-        /// This may differ from body.signal for higher-order functions:
-        /// - body.signal is the raw signal of the body expression
-        /// - a call to parameter i puts i in `inferred_signals.propagates`
-        /// - a parameter `(bound p spec)` bounds contributes `spec` when
-        ///   called, not the argument's signal.
-        inferred_signals: Signal,
-        /// The bounds `(bound p spec)` declares, one per bounded parameter.
-        /// They feed `inferred_signals`, and the lowerer emits a
-        /// `CheckSignalBound` at entry for each.
-        param_bounds: Vec<ParamBound>,
-        /// Optional docstring extracted from the lambda body. Plain compile-time
-        /// string data (`Rc<str>`), NOT a heap `Value`. It rides the closure
-        /// template (held alive by RC with it) and is materialized as a fresh
-        /// ordinary (reclaimable) allocation when `(doc f)` reads it.
-        #[serde(skip)]
-        doc: Option<std::rc::Rc<str>>,
-        /// Where this lambda was written, for `(meta/origin f)`. A span, not
-        /// the lambda's syntax tree: `meta/origin` reads a file, a line, and a
-        /// column, and nothing reads the tree (docs/impl/syntax.md).
-        #[serde(skip)]
-        origin: Option<crate::syntax::Span>,
-        /// True if the function body contains `(numeric!)` assertion.
-        /// The lowerer checks `is_gpu_eligible()` after lowering.
-        assert_numeric: bool,
-    },
+    /// Lambda expression. Boxed because it is the largest kind by far, and
+    /// every other node would otherwise pay its size.
+    Lambda(Box<Lambda>),
 
     // === Control Flow ===
     /// If expression
@@ -284,8 +227,9 @@ pub enum HirKind {
     // === Destructuring ===
     /// Unconditional destructuring: extract values from a compound and bind them.
     /// Used by def/var/let/let*/fn when the binding position is a list or array.
-    /// `strict`: if true (binding forms: def/var/let/fn body), missing values signal error.
-    /// `strict`: if false (parameter context: &opt, &keys patterns), missing values → nil.
+    /// `strict`: if true (binding forms, required parameters, `&keys` patterns),
+    /// missing values signal an error.
+    /// `strict`: if false (`&opt` and `&named` parameters), missing values → nil.
     Destructure {
         pattern: HirPattern,
         value: Box<Hir>,
@@ -309,8 +253,9 @@ pub enum HirKind {
     },
 
     // === Cell operations (explicit CaptureCell) ===
-    /// Wrap a value in a mutable cell (CaptureCell).
-    /// Produced by functionalize for bindings that needs_capture().
+    /// Wrap a value in a mutable cell (CaptureCell). No pass builds this node:
+    /// the lowerer creates a `needs_capture()` binding's cell at its binding
+    /// site, and lowers a `MakeCell` as its inner value.
     MakeCell {
         value: Box<Hir>,
     },
@@ -359,6 +304,24 @@ pub enum HirKind {
     Error,
 }
 
+impl HirKind {
+    /// The lambda this kind holds, if it is one.
+    pub fn as_lambda(&self) -> Option<&Lambda> {
+        match self {
+            HirKind::Lambda(lambda) => Some(lambda),
+            _ => None,
+        }
+    }
+
+    /// The lambda this kind holds, if it is one, for a pass that rewrites it.
+    pub fn as_lambda_mut(&mut self) -> Option<&mut Lambda> {
+        match self {
+            HirKind::Lambda(lambda) => Some(lambda),
+            _ => None,
+        }
+    }
+}
+
 impl Hir {
     /// Create an error poison node (for error accumulation)
     pub fn error(span: Span) -> Self {
@@ -387,8 +350,8 @@ impl Hir {
     /// - `Emit` allocates for the same reason: its value is the resume
     ///   value, which `lower_emit` mints a reference for, and only a
     ///   named slot releases it (docs/impl/anf.md).
-    /// - `Intrinsic` defers to `IntrinsicOp::allocates` (currently
-    ///   `Pair`, `Freeze`, `Thaw`).
+    /// - `Intrinsic` defers to `IntrinsicOp::allocates` and
+    ///   `IntrinsicOp::produces_call_result_region`.
     /// - `Match` allocates iff any arm's pattern would allocate at
     ///   the destructure site (see `HirPattern::allocates`).
     /// - A form with a **propagating tail** is not allocating either. It has no
@@ -396,15 +359,15 @@ impl Hir {
     ///   (see [`Hir::propagating_tail_mut`]).
     pub fn allocates(&self) -> bool {
         match &self.kind {
-            HirKind::Lambda { .. } => true,
+            HirKind::Lambda(_) => true,
             HirKind::Call { .. } => true,
             HirKind::Eval { .. } => true,
             HirKind::Emit { .. } => true,
-            // `produces_call_result_region`: %put/%del/%string-push/
-            // %array-push/%bytes-push are call-results (region freed by value),
-            // so ANF must NAME them to give the result a slot — otherwise the
-            // `DecrefValueRegion` is orphaned when the value is consumed as an
-            // operand or discarded.
+            // `produces_call_result_region`: the put, add, del, push,
+            // string-push and bytes-push ops return call results, whose region
+            // is freed by value. ANF names them to give the result a slot, or
+            // the `DecrefValueRegion` is orphaned when the value is consumed as
+            // an operand or discarded.
             HirKind::Intrinsic { op, .. } => op.allocates() || op.produces_call_result_region(),
             HirKind::Match { arms, .. } => arms.iter().any(|(p, _, _)| p.allocates()),
             _ => false,

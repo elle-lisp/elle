@@ -1,3 +1,8 @@
+// audited: 2026-10-06
+//! The signal map and the call graph that `compile/analyze` builds from the analyzed HIR.
+//!
+//! docs/analysis/portrait.md
+
 use super::*;
 
 pub(crate) fn build_signal_map(
@@ -9,6 +14,7 @@ pub(crate) fn build_signal_map(
     collect_fn_signals(hir, arena, symbols, &mut map);
     map
 }
+
 pub(crate) fn collect_fn_signals(
     hir: &Hir,
     arena: &BindingArena,
@@ -18,12 +24,9 @@ pub(crate) fn collect_fn_signals(
     match &hir.kind {
         HirKind::Letrec { bindings, body } | HirKind::Let { bindings, body } => {
             for (binding, value) in bindings {
-                if let HirKind::Lambda {
-                    inferred_signals, ..
-                } = &value.kind
-                {
+                if let Some(lambda) = value.kind.as_lambda() {
                     if let Some(name) = symbols.name(arena.get(*binding).name) {
-                        map.insert(name.to_string(), *inferred_signals);
+                        map.insert(name.to_string(), lambda.inferred_signals);
                     }
                 }
                 collect_fn_signals(value, arena, symbols, map);
@@ -31,18 +34,15 @@ pub(crate) fn collect_fn_signals(
             collect_fn_signals(body, arena, symbols, map);
         }
         HirKind::Define { binding, value } => {
-            if let HirKind::Lambda {
-                inferred_signals, ..
-            } = &value.kind
-            {
+            if let Some(lambda) = value.kind.as_lambda() {
                 if let Some(name) = symbols.name(arena.get(*binding).name) {
-                    map.insert(name.to_string(), *inferred_signals);
+                    map.insert(name.to_string(), lambda.inferred_signals);
                 }
             }
             collect_fn_signals(value, arena, symbols, map);
         }
-        HirKind::Lambda { body, .. } => {
-            collect_fn_signals(body, arena, symbols, map);
+        HirKind::Lambda(lambda) => {
+            collect_fn_signals(&lambda.body, arena, symbols, map);
         }
         HirKind::If {
             cond,
@@ -157,6 +157,7 @@ pub(crate) fn collect_fn_signals(
         HirKind::Error => {}
     }
 }
+
 pub(crate) fn build_call_graph(
     hir: &Hir,
     arena: &BindingArena,
@@ -192,7 +193,7 @@ pub(crate) fn build_call_graph(
         .cloned()
         .collect();
 
-    // Leaves: defined functions that call no other user-defined functions.
+    // Leaves: defined functions that make no call through a named binding.
     let leaves: Vec<String> = defined
         .iter()
         .filter(|name| edges.get(*name).map(|e| e.is_empty()).unwrap_or(true))
@@ -206,6 +207,7 @@ pub(crate) fn build_call_graph(
         leaves,
     }
 }
+
 pub(crate) fn collect_call_edges(
     hir: &Hir,
     arena: &BindingArena,
@@ -214,11 +216,11 @@ pub(crate) fn collect_call_edges(
     current_fn: Option<&str>,
 ) {
     match &hir.kind {
-        // Track the current function context via Define/Letrec bindings.
+        // A lambda bound by Let, Letrec or Define names the function context.
         HirKind::Letrec { bindings, body } | HirKind::Let { bindings, body } => {
             for (binding, value) in bindings {
                 let name = symbols.name(arena.get(*binding).name);
-                if matches!(value.kind, HirKind::Lambda { .. }) {
+                if matches!(value.kind, HirKind::Lambda(_)) {
                     let fn_name = name.map(|n| n.to_string());
                     let ctx = fn_name.as_deref().or(current_fn);
                     collect_call_edges(value, arena, symbols, edges, ctx);
@@ -230,7 +232,7 @@ pub(crate) fn collect_call_edges(
         }
         HirKind::Define { binding, value } => {
             let name = symbols.name(arena.get(*binding).name);
-            if matches!(value.kind, HirKind::Lambda { .. }) {
+            if matches!(value.kind, HirKind::Lambda(_)) {
                 let fn_name = name.map(|n| n.to_string());
                 let ctx = fn_name.as_deref().or(current_fn);
                 collect_call_edges(value, arena, symbols, edges, ctx);
@@ -263,12 +265,11 @@ pub(crate) fn collect_call_edges(
             }
         }
 
-        // Don't descend into nested lambdas — they're their own function
-        // context.  We DO descend, but without the parent's current_fn.
-        HirKind::Lambda { body, .. } => {
-            // If we reached here, this is an anonymous lambda not bound
-            // via Define/Letrec — descend without function context.
-            collect_call_edges(body, arena, symbols, edges, current_fn);
+        // A lambda's calls belong to `current_fn`: a bound lambda arrives
+        // with its own name there, an anonymous one with its enclosing
+        // function's name.
+        HirKind::Lambda(lambda) => {
+            collect_call_edges(&lambda.body, arena, symbols, edges, current_fn);
         }
 
         // Recurse into all other forms.

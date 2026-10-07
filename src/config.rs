@@ -115,7 +115,7 @@ pub struct RuntimeConfig {
 
 /// The depth cap a VM starts with: deep enough for any recursion a program
 /// means, shallow enough that a runaway one stops after a few gigabytes
-/// (docs/impl/vm.md § "The depth cap").
+/// (docs/impl/vm.md).
 pub const DEFAULT_MAX_DEPTH: usize = 10_000_000;
 
 impl RuntimeConfig {
@@ -240,13 +240,18 @@ pub struct Config {
     /// executing.
     pub dump: HashSet<String>,
 
+    /// Whether a unit compiled after the boot grafts its calls
+    /// (docs/impl/graft.md). No flag sets it. The rig sets it, and an embedding
+    /// host may.
+    pub graft: GraftPolicy,
+
     /// Trace keywords from `--trace=kw1,kw2,...`.
     /// Stored here from CLI parsing, then merged into RuntimeConfig on VM init.
     pub trace_keywords: Vec<String>,
 
     /// Initial page size for region allocation (CLI: --region-page-size).
     /// Must be a power of two >= the OS page size, which is also the default
-    /// (docs/impl/region/model.md § "The base page is the OS page").
+    /// (docs/impl/region/model.md).
     pub region_page_size: usize,
 
     /// Maximum bytes to cache in the per-thread page pool
@@ -292,6 +297,7 @@ impl Default for Config {
             wasm_chunk: false,
             wasm_sparse_spill: true,
             dump: HashSet::new(),
+            graft: GraftPolicy::On,
             trace_keywords: Vec::new(),
             region_page_size: crate::value::fiberheap::pagepool::base_page(),
             page_pool_max: 4 * 1024 * 1024,

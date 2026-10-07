@@ -1,26 +1,24 @@
-// audited: 2026-09-09
-// src/hir/AGENTS.md
-// docs/impl/typeinfer.md
-//! The inference pass and the environment it carries: one context owns every
-//! map a pass reads and rewrites. Each per-node rule names only what it uses.
+// audited: 2026-10-06
+//! The inference pass, and the one context that owns every map a pass reads and rewrites.
 //!
 //! - `fixpoint` — the ascent: passes over the whole tree until the environment
-//!   stops moving (docs/impl/typeinfer.md).
+//!   stops moving.
 //! - `collect`  — the pre-passes that build the program facts `Infer::new`
 //!   reads (lambda params, mutated bindings, value-position uses, `type-of`
 //!   aliases).
-//! - `node`     — the per-node transfer function that is the heart of the pass,
-//!   with the binding forms in `node::binder`, the branching forms in
-//!   `node::branch`, and the call rules in `node::call`.
+//! - `node`     — the per-node transfer function, with the binding forms in
+//!   `node::binder`, the branching forms in `node::branch`, and the call rules
+//!   in `node::call`.
 //! - `subject`  — the `(type-of x)` scrutinee discrimination and the small
 //!   `Var`/ANF/keyword helpers that feed match-arm narrowing.
-//! - `facts`    — apply/restore of guard-derived narrowing facts on the binding
-//!   environment (save/restore discipline shared by `If`/`Cond`/`Begin`).
+//! - `facts`    — the declared floor, and the apply and restore of guard facts
+//!   on the binding environment, shared by `If`, `Cond` and `Begin`.
 //!
-//! The per-op operand contracts and the prove-or-reject walk live in
-//! `contract.rs` (`check_intrinsic_operand_proofs`) — the generalization of the
-//! monomorphic-container obligation to every %-intrinsic in call position.
+//! The operand contracts and the prove-or-reject walk live in `contract.rs`.
+//!
+//! docs/impl/typeinfer.md
 
+use super::graft::{GraftRecord, Operand};
 use super::*;
 use std::collections::HashSet;
 
@@ -30,9 +28,8 @@ pub(in crate::hir::typeinfer) mod fixpoint;
 mod node;
 mod subject;
 
-// Re-export at `pub(super)` so every path that resolved as
-// `crate::hir::typeinfer::infer::<Item>` before the split still resolves: the
-// parent's `use infer::*` and prune.rs's `super::infer::{…}` both depend on it.
+// The parent's `use infer::*`, and the fold's and prune.rs's
+// `super::infer::{…}`, reach these items through this re-export.
 pub(super) use collect::*;
 pub(super) use facts::*;
 pub(super) use subject::*;
@@ -46,13 +43,15 @@ pub(super) struct Infer<'a> {
 
     // ── the program's facts: collected once, never rewritten ──
     /// Which bindings are lambdas, and what their parameters are.
-    lambda_params: HashMap<Binding, Vec<Binding>>,
+    lambda_params: HashMap<Binding, LambdaSig>,
+    /// What each graft bound to a parameter of this unit's functions, joined
+    /// into the parameter at the end of every pass as a call site is.
+    record: &'a GraftRecord,
     /// Bindings written by `Assign`/`SetCell` anywhere in the unit. A write
-    /// gives a binding flow the per-pass recomputation cannot see, and that
-    /// costs the binding two proofs: a parameter in this set never receives
-    /// call-site proofs (guards only), and a lambda binding in it records Top
-    /// for its result rather than its initializer's body type
-    /// (docs/impl/typeinfer.md).
+    /// gives a binding flow the per-pass recomputation cannot see. So a
+    /// parameter in this set never receives call-site proofs, only guard
+    /// facts. A lambda binding in it records Top for its result rather than
+    /// its initializer's body type.
     mutated: HashSet<Binding>,
     /// Bindings with at least one value-position use
     /// (`collect_value_position_uses`): their callers are not all visible, so
@@ -69,23 +68,23 @@ pub(super) struct Infer<'a> {
     /// call reads its result here, a self-recursive call included.
     lambda_body_type: HashMap<Binding, TyId>,
     pub(super) binding_min_length: HashMap<Binding, usize>,
-    /// This pass's call-site contributions to parameter types. RECOMPUTED per
-    /// pass (the ascent replaces each contributed parameter's binding type
-    /// wholesale at pass end): a join that only ever accumulates can never come
-    /// back down, so unknown-typed call sites would have to be skipped — and a
-    /// skipped unknown is exactly the unsound "typed callers alone prove the
-    /// parameter" hole. Here Top contributes honestly.
+    /// The join of the values each open block's `break`s carry, which the
+    /// block joins with its tail when it closes.
+    break_types: HashMap<crate::hir::expr::BlockId, TyId>,
+    /// This pass's call-site contributions to parameter types, rebuilt every
+    /// pass. At pass end the ascent replaces each contributed parameter's type
+    /// with its join here, so a call site's Top counts.
     param_joins: HashMap<Binding, TyId>,
-    /// The entries the ascent gave up on: an estimate still moving when the
+    /// The entries the ascent gave up on. An estimate still moving when the
     /// pass budget ran out is held at Top for the rest of the run, so nothing
-    /// reads a proof out of it (`fixpoint.rs`).
+    /// reads a proof out of it.
     widened: HashSet<Binding>,
 }
 
 impl<'a> Infer<'a> {
     /// Collect one unit's program facts and seed the ascent's start.
-    pub(super) fn new(hir: &Hir, arena: &'a BindingArena) -> Self {
-        let mut lambda_params: HashMap<Binding, Vec<Binding>> = HashMap::new();
+    pub(super) fn new(hir: &Hir, arena: &'a BindingArena, record: &'a GraftRecord) -> Self {
+        let mut lambda_params: HashMap<Binding, LambdaSig> = HashMap::new();
         collect_lambda_info(hir, arena, &mut lambda_params);
         let mutated = collect_mutated_bindings(hir);
         let mut value_used = HashSet::new();
@@ -93,24 +92,20 @@ impl<'a> Infer<'a> {
         let mut typeof_aliases: HashMap<Binding, Binding> = HashMap::new();
         collect_typeof_aliases(hir, arena, &mut typeof_aliases);
 
-        // Kleene start: every parameter that CAN be proven by complete
-        // call-site enumeration (callee-only binding, unmutated param) begins
-        // at BOTTOM, so an identity-passed argument in a self/mutual recursion
-        // contributes nothing on the way up instead of reading the Top default
-        // and pinning itself there. Parameters of value-used bindings stay
-        // ABSENT (read as Top): their callers are not enumerable, so optimism
-        // there would let the checker pass on ⊥.
+        // The Kleene start: a parameter complete call-site enumeration can
+        // prove (a callee-only binding, an unmutated parameter) begins at
+        // Bottom. A value-used binding's parameters stay absent, which reads as
+        // Top, because their callers are not all visible.
         //
         // The start is not a proof, and a never-called function's parameters
-        // never leave it. Reaching the limit still at ⊥ says only that nothing
-        // contributed, so `Infer::settle` raises those to Top before the map
-        // leaves the pass (docs/impl/typeinfer.md § "Bottom is not a proof").
+        // never leave it. `Infer::settle` raises every Bottom left in the node
+        // map to Top before the map leaves the pass.
         let mut binding_types: HashMap<Binding, TyId> = HashMap::new();
-        for (b, params) in &lambda_params {
+        for (b, sig) in &lambda_params {
             if value_used.contains(b) {
                 continue;
             }
-            for p in params {
+            for p in &sig.all {
                 if !mutated.contains(p) {
                     binding_types.insert(*p, TypeInterner::BOTTOM);
                 }
@@ -121,6 +116,7 @@ impl<'a> Infer<'a> {
             interner: TypeInterner::new(),
             arena,
             lambda_params,
+            record,
             mutated,
             value_used,
             typeof_aliases,
@@ -128,6 +124,7 @@ impl<'a> Infer<'a> {
             hir_types: HashMap::new(),
             lambda_body_type: HashMap::new(),
             binding_min_length: HashMap::new(),
+            break_types: HashMap::new(),
             param_joins: HashMap::new(),
             widened: HashSet::new(),
         }

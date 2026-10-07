@@ -1,11 +1,10 @@
 // audited: 2026-10-06
-//! Tofte-Talpin region inference for functional HIR: the walk's state, and how
-//! it mints a region.
+//! Tofte-Talpin region inference for functional HIR: the walk's state, and how it mints a region.
 //!
 //! docs/impl/region/model.md
 //!
-//! A single forward walk assigns every allocation its own unique region — no
-//! constraint solver, no merging at this layer. The types this produces live in
+//! A single forward walk assigns every allocation its own unique region, with no
+//! constraint solver and no merging at this layer. The types this produces live in
 //! the parent module. What the walk RECORDS against that state is a submodule
 //! per subject; the walk itself is `walk`, and the post-passes are `analyze`.
 
@@ -26,8 +25,9 @@ use tree::RegionTree;
 
 struct RegionInference {
     tree: RegionTree,
-    /// HirId → unique region assigned to that allocation site.
-    /// Every alloc_here() call inserts a fresh entry here.
+    /// HirId → unique region assigned to that allocation site. The structural
+    /// walk's `alloc_here` inserts one fresh entry per site; an inline re-walk
+    /// reuses it.
     alloc_region: HashMap<HirId, Region>,
     /// HirId → region for scope nodes (Let, Letrec, Loop, Block,
     /// Lambda body, non-suspending While). Feeds the `live_regions`
@@ -36,31 +36,32 @@ struct RegionInference {
     /// Binding → region where the binding was defined (scope region).
     binding_region: HashMap<Binding, Region>,
     /// Binding → set of source regions a Var(b) reference may produce.
-    /// Empty for opaque bindings (params, pattern bindings).
-    /// Var(b) returns `binding_regions[b]` to propagate value flow.
+    /// Var(b) returns `binding_regions[b]` to propagate value flow. Empty when
+    /// the walk knows of no heap value the binding holds.
     binding_regions: HashMap<Binding, Vec<Region>>,
-    /// Binding → its stores (each an assign/set-cell site with the regions of
-    /// the value stored there) for a TOP-LEVEL (file-letrec,
-    /// `in_lambda_depth == 0`), non-capture binding that is reassigned. Drives
+    /// Binding → its stores, each an assign/set-cell site with the regions of
+    /// the value stored there. Recorded for a reassigned MODULE-SCOPE non-capture
+    /// binding: one outside every lambda, or a file-scope binding
+    /// (`is_file_scope`) inside the whole-module thunk. Drives
     /// the mutable-reassign decref placement in `analyze_regions_with`.
     top_level_reassigns: HashMap<Binding, CellStores>,
-    /// Top-level CAPTURED (`needs_capture`, outside a lambda) bindings that are
-    /// reassigned — the `@x`-boxed-in-a-`MakeCaptureCell`-and-reassigned class.
-    /// These are excluded from `top_level_reassigns` (the cell's RC is owned by
-    /// `handle_make_capture`/`handle_update_capture`, not the 1-slot model), but
-    /// the lowerer still needs to know: a reassigned cell's content CHANGES, so
-    /// the init value's alloc reference must be dropped at the define off its own
-    /// register, NOT routed through the cell slot (which a later reassignment has
-    /// repointed). See `Lowerer::store_captured_cell_init` and
-    /// tests/impl/region-capture-cell-reassign-loop-uaf.lisp.
+    /// Reassigned CAPTURED (`needs_capture`) bindings, whatever scope the write
+    /// sits in. They are excluded from `top_level_reassigns` and
+    /// `local_reassigns`, because `handle_make_capture` and
+    /// `handle_update_capture` own the cell's RC, not the 1-slot model. The
+    /// lowerer still needs to know them: a reassigned cell's content CHANGES.
+    /// So the init value's alloc reference is dropped at the define off its own
+    /// register, NOT routed through the cell slot, which a later reassignment
+    /// has repointed. See `Lowerer::store_captured_cell_init`; pinned by
+    /// tests/impl/region-capture-cell-reassign-uaf.lisp.
     captured_reassigns: rustc_hash::FxHashSet<Binding>,
-    /// Binding → (assign/set-cell sites, value regions stored) for an
-    /// IN-LAMBDA (fn-local, `in_lambda_depth > 0`), non-capture binding that is
-    /// reassigned. Same 1-slot-container model as `top_level_reassigns`, but the
-    /// post-pass suppresses ONLY the init region's decref, not the assign-value
-    /// regions': a fn-local cell's final value is freed at the binding's
-    /// scope-exit `decref_point` (it is not a program-lifetime root), so its
-    /// assign-value decrefs must stay. The cell's counted reference comes from
+    /// Binding → (assign/set-cell sites, value regions stored) for a FN-LOCAL
+    /// non-capture binding that is reassigned: inside a lambda, and not
+    /// file-scope. Same 1-slot-container model as `top_level_reassigns`, but the
+    /// post-pass suppresses ONLY the init region's decref. A fn-local cell's
+    /// final value is freed at the binding's scope-exit `decref_point`, not held
+    /// as a program-lifetime root, so its assign-value decrefs must stay. The
+    /// cell's counted reference comes from
     /// `lower_assign`'s incref-on-store; drop-on-overwrite releases the priors,
     /// the first overwrite releases the (decref-suppressed) init. Without this,
     /// the cell slot holds an UNCOUNTED reference yet still receives a scope-exit
@@ -72,19 +73,20 @@ struct RegionInference {
     /// standing in for it at every later read. Both versions therefore record the
     /// same source regions while holding ONE reference between them (a `Var` read
     /// mints nothing), which the reassign 1-slot gate's sole-held check must not
-    /// read as two holders of one name — see `RegionHolders::with_aliases` and
+    /// read as two holders of one name. See `RegionHolders::with_aliases` and
     /// docs/impl/region/bindings.md. An entry is recorded only for an
     /// init that is a bare `Var`; any other init expression is a real value the
     /// parameter does not merely carry forward.
     loop_forwarded_params: HashMap<Binding, Binding>,
-    /// Begin HirId → per-binding region for each pre-allocated capture cell
-    /// (mirrors `lower_begin`'s MakeCaptureCell pre-pass; one region PER CELL —
-    /// see `RegionInfo::begin_cell_regions`).
+    /// Scope HirId (`Begin`, `Let` or `Letrec`) → per-binding region for each
+    /// compiled capture cell the lowerer mints there, one region PER CELL. See
+    /// `RegionInfo::begin_cell_regions`.
     begin_cell_regions: HashMap<HirId, Vec<(Binding, Region)>>,
     /// `Destructure`/`Match` HirId → one entry per collection the node's
     /// pattern BUILDS (see `RegionInfo::pattern_rest_regions`).
     pattern_rest_regions: HashMap<HirId, Vec<RestCollection>>,
-    /// Every binding a scope arm above minted a COMPILED cell for. Its forward
+    /// Every binding a scope arm (`Begin`, `Let`, `Letrec`) minted a COMPILED
+    /// cell for. Its forward
     /// cell lives in the binding's own slot, so it takes no `populate_env` env
     /// cell — the mirror of the lowerer's own `compiled_cell_bindings`. The
     /// scope arms mint before they walk their inits, so a binding is recorded
@@ -96,19 +98,23 @@ struct RegionInference {
     /// Call sites whose edges are hard (declared native uncounted-store
     /// effects). See `RegionInfo::hard_edge_sites`.
     hard_edge_sites: rustc_hash::FxHashSet<HirId>,
-    /// Regions whose `alloc_here` happened at a Call HirId. Lowerer
-    /// uses these to choose `DecrefValueRegion(reg)` over
-    /// `DecrefRegion(rid)` at `decref_point`.
+    /// Regions no static slot names: call, `Emit` and `Eval` results, and the
+    /// placeholders minted for values with no compiled allocation. A placeholder
+    /// stands for a parameter, a rest collection, an env cell or a counted cell
+    /// read. The lowerer releases these by value
+    /// (`DecrefValueRegion`, or `DecrefCellRegion` for `cell_release_regions`)
+    /// rather than by `DecrefRegion` at `decref_point`.
     call_result_regions: rustc_hash::FxHashSet<Region>,
-    /// Binding-init HirIds that are a whole-value read of a reassigned captured
-    /// cell — the reader half of the 1-slot container. See
+    /// Binding-init HirIds that are a whole-value read of a 1-slot container, a
+    /// reassigned binding with or without a cell: the reader half of the
+    /// container. See
     /// `RegionInfo::counted_cell_read_sites`.
     counted_cell_read_sites: rustc_hash::FxHashSet<HirId>,
     /// Binding → the HirId of the init a BINDER stores into its slot
     /// (`Let`/`Letrec`/`Define`). The reassign gate reads this to place the
-    /// counted-init retain of a 1-slot container whose init value is aliased:
-    /// the retain has to sit where the value is on the operand stack, just ahead
-    /// of that store. A binding whose value arrives some other way — a
+    /// counted-init retain of a 1-slot container whose init value is aliased.
+    /// The retain has to sit just ahead of that store, where the value is on
+    /// the operand stack. A binding whose value arrives some other way — a
     /// parameter, a `Loop` parameter's forwarding init — has no entry, and the
     /// gate keeps donate-or-refuse for it (docs/impl/region/bindings.md). The
     /// three arms that record here are exactly the three lowering sites that
@@ -131,18 +137,18 @@ struct RegionInference {
     /// containment_edges` and the `Funnel` arm in `region::infer::walk`.
     mutable_container_regions: rustc_hash::FxHashSet<Region>,
     /// Structural containment edges `(site, contained, container)` for the ownership
-    /// inference, from two sources: a `Funnel` store into a mutable retaining container
-    /// (`container ⊇ value`, recovered from the container's `RetType`), and a `Fresh`
-    /// native's declared **embed** (`result ⊇ embedded_arg`, from `call_embeds` — e.g.
-    /// `with-traits`'s trait side-field). Both are site-keyed exactly like
+    /// inference. A `Funnel` store into a mutable retaining container gives
+    /// `container ⊇ value`, recovered from the container's `RetType`. A `Fresh`
+    /// native's declared **embed** gives `result ⊇ embedded_arg`, from `call_embeds`,
+    /// for example `with-traits`'s trait side-field. Both are site-keyed exactly like
     /// `cross_region_refs`, so the forest can hang a value-resolved `AdoptRegion` on the
-    /// call (the funnel store face), and both drive NO `IncrefRegion` (the funnel
-    /// counts the store at runtime; the alloc-scan counts the embedding), feeding only
-    /// the ownership inference. See `RegionInfo::containment_edges`.
+    /// call (the funnel store face). Neither drives an `IncrefRegion`: the funnel
+    /// counts the store at runtime, and the alloc-scan counts the embedding. See
+    /// `RegionInfo::containment_edges`.
     containment_edges: Vec<(HirId, Region, Region)>,
-    /// Funnel-store call site → the regions of the heap values stored there (the
-    /// non-container args of a `Funnel` intrinsic — `%put`/`%array-push`/…). The
-    /// runtime funnel increfs each, so a value stored at such a site has its RC
+    /// Retaining funnel-store call site (`%put`/`%array-push`/…) → the regions of
+    /// the value stored there, its last argument, less the container's own
+    /// regions. The runtime funnel increfs it, so a value stored at such a site has its RC
     /// raised regardless of whether the container's type is statically known
     /// (unlike `containment_edges`, which needs a recognized
     /// `mutable_container_regions` container). Read by `region::infer::compensate` to
@@ -156,12 +162,12 @@ struct RegionInference {
     /// `Emit` (`yield`/`emit`) site → the regions its payload may live in. See
     /// `RegionInfo::emit_payload_regions`.
     emit_payload_regions: HashMap<HirId, Vec<Region>>,
-    /// Pass-through funnel-store call site → the CONTAINER argument (arg0) regions,
-    /// recorded only for a `-mut` store whose declared return is a mutable container
-    /// (the funnel returns arg0 in place). A dispatch wrapper's mutable arm returns
-    /// this container pass-through, stranding the owned-param reference the wrapper
-    /// holds; `region::infer::compensate` places a per-arm release there. See
-    /// `RegionInfo::funnel_container_sites`.
+    /// Monomorphic store/remove funnel call site → the CONTAINER argument (arg0)
+    /// regions, recorded when the declared return is a recognized container type
+    /// of either mutability. A dispatch wrapper uses its container in every arm
+    /// while its one release sits in a single arm, stranding the owned-param
+    /// reference on the others; `region::infer::compensate` places a per-arm
+    /// release there. See `RegionInfo::funnel_container_sites`.
     funnel_container_sites: HashMap<HirId, Vec<Region>>,
     /// The `-mut` PASS-THROUGH subset of `funnel_container_sites` (the funnel returns
     /// arg0 in place). Gates the lowerer's ReturnValue suppression to the case where
@@ -202,10 +208,10 @@ struct RegionInference {
     destructure_leaf_bindings: rustc_hash::FxHashSet<Binding>,
     /// `(return_node_id, regions of the returned value)` for every
     /// `HirKind::Return`. The post-pass extends each region's `decref_point`
-    /// to the Return node so the region's `DecrefRegion` is emitted
-    /// *after* the node's `IncrefValueRegion` (the retain must precede
-    /// the callee's own release of a freshly-allocated result region —
-    /// otherwise the result is freed before it is handed back).
+    /// to the Return node, so the region's `DecrefRegion` is emitted
+    /// *after* the node's `IncrefValueRegion`. The retain must precede the
+    /// callee's own release of a freshly-allocated result region, or the result
+    /// is freed before it is handed back.
     return_sites: Vec<(HirId, Vec<Region>)>,
     /// `(destructure_node_id, regions of the destructured value)` for every
     /// `HirKind::Destructure`. A Destructure is a *consuming node*: its
@@ -213,21 +219,21 @@ struct RegionInference {
     /// last read, so the post-pass extends each region's `decref_point` to
     /// the Destructure node (docs/impl/region/rules.md Rule 4). Without it, a
     /// destructure whose bindings are all unused anchors the value's
-    /// release at the inner read and the extraction reads freed pages
-    /// (tests/impl/region-named-param-uaf.lisp).
+    /// release at the inner read, and the extraction reads freed pages.
+    /// Pinned by tests/impl/region-named-param-uaf.lisp.
     destructure_sites: Vec<(HirId, Vec<Region>)>,
     /// BlockId → enclosing region at the point the block was entered.
-    /// Reserved for tooling; the region walk does not read it.
+    /// The `Block` arm writes it, and nothing reads it.
     block_regions: HashMap<super::super::expr::BlockId, Region>,
     /// BlockId → the regions of every `break` value handed to that block, in
-    /// walk order. A `break` TRANSFERS its value to the block — the block's
-    /// value is its fall-through value OR any break's — so the `Block` arm
-    /// unions these into its own result regions and clears the entry
-    /// (docs/impl/region/anchors.md). Without the union, a binding named to the block's
-    /// value holds NO region, the binding-chain `decref_point` extension never
-    /// sees the broken value, and its release stays at the block's exit label —
-    /// under every later read of the result. Drained at the `Block` node into
-    /// `break_sites`.
+    /// walk order. A `break` TRANSFERS its value to the block, whose value is
+    /// its fall-through value OR any break's. So the `Block` arm unions these
+    /// into its own result regions and clears the entry
+    /// (docs/impl/region/anchors.md). Without the union, a binding named to the
+    /// block's value holds NO region, and the binding-chain `decref_point`
+    /// extension never sees the broken value. Its release then stays at the
+    /// block's exit label, under every later read of the result. Drained at the
+    /// `Block` node into `break_sites`.
     block_break_regions: HashMap<super::super::expr::BlockId, Vec<Region>>,
     /// BlockId → the HirId of every `break` targeting that block, in walk order.
     /// Recorded for EVERY break, valueless and immediate-valued ones included —
@@ -237,17 +243,17 @@ struct RegionInference {
     /// the break carries. Drained at the `Block` node into `break_skip_blocks`.
     block_break_nodes: HashMap<super::super::expr::BlockId, Vec<HirId>>,
     /// `Block` node HirId → the HirIds of the breaks targeting it. The post-pass
-    /// re-anchors every region whose `decref_point` falls in the window those
-    /// breaks jump over — from the earliest break site to the exit label — onto
-    /// the block, since a release emitted there never runs on the break path
+    /// re-anchors onto the block every region whose `decref_point` falls in the
+    /// window those breaks jump over, from the earliest break site to the exit
+    /// label. A release emitted in that window never runs on the break path
     /// (docs/impl/region/anchors.md).
     break_skip_blocks: Vec<(HirId, Vec<HirId>)>,
     /// `Block` node HirId → the regions every targeting `break` hands it. The
-    /// dual of `return_sites`: a `Break` is a *transferring* node, so the
+    /// dual of `return_sites`: a `Break` is a *transferring* node. So the
     /// post-pass extends each broken region's `decref_point` to where the
-    /// BLOCK's value is consumed (`last_use[block]` — the block itself when
-    /// nothing consumes it, whose decrefs the lowerer emits after the exit
-    /// label). A release left inside the body is jumped over and never runs
+    /// BLOCK's value is consumed, `last_use[block]`. That is the block itself
+    /// when nothing consumes it, and the lowerer emits its decrefs after the exit
+    /// label. A release left inside the body is jumped over and never runs
     /// (docs/impl/region/rules.md Rule 4).
     break_sites: Vec<(HirId, Vec<Region>)>,
     /// HirIds of the tail `Call`s whose callee may be a bytecode closure — the
@@ -265,34 +271,33 @@ struct RegionInference {
     /// Arena for looking up binding metadata (captures, names)
     arena: *const BindingArena,
     /// Binding → Lambda HIR node for inlining at Call sites.
-    /// Populated when a Let/Letrec/Define binds a Lambda. Inlining lets
+    /// Populated when a Let or Letrec binds a Lambda. Inlining lets
     /// the walk see intrinsics (push/put/pair) inside known lambda
     /// bodies and emit the corresponding cross-region edges at the call
     /// site.
     binding_lambda: HashMap<Binding, *const Hir>,
-    /// Depth counter to prevent infinite recursion during inlining.
+    /// Inline nesting depth. `try_inline_call` stops at four levels.
     inline_depth: u32,
-    /// Regions currently bound to an inlined callee's params — i.e. the CALLER's
+    /// The lambdas whose bodies the walk is inside, structurally or through an
+    /// inline. A call to one of them reaches a new activation of a body whose
+    /// allocation sites this walk already names, so it is not inlined
+    /// (docs/impl/region/mechanism.md).
+    walking_lambdas: Vec<*const Hir>,
+    /// Regions currently bound to an inlined callee's params, that is the CALLER's
     /// arg regions, live across an active `try_inline_call`. A `Return` reached
     /// during an inline re-walk names whatever `binding_regions` its value
-    /// resolves to; when that is a param, it is one of these caller regions, and
-    /// pushing it into `return_sites` would extend the caller region's
-    /// `decref_point` to a node inside the callee body. For a self-tail-recursive
-    /// callee whose accumulator arg the tail call transfers forward (stdlib
-    /// `fold`'s `go`), that pins the arg's release onto the base-case (sibling)
-    /// arm, and under self-tail-call frame reuse the branch-union release
-    /// over-frees the value the tail call already moved into the next
-    /// accumulator. The caller's own structural walk owns an arg region's release
-    /// (including its own `return_sites` if the caller returns it), so the inline
-    /// filters these out — while still propagating the callee's genuine
-    /// body-result regions, which the call site needs. Empty outside an inline.
+    /// resolves to. When that is a param, it is one of these caller regions.
+    /// Pushing it into `return_sites` would extend the caller region's
+    /// `decref_point` to a node inside the callee body. The caller's own
+    /// structural walk owns an arg region's release, including its own
+    /// `return_sites` if the caller returns it, so the inline filters these out
+    /// (docs/impl/region/mechanism.md). Empty outside an inline.
     inline_bound_regions: rustc_hash::FxHashSet<Region>,
-    /// Lambda nesting depth — incremented around lambda body walks.
-    /// Used to mirror the lowerer's `!self.in_lambda` predicate: inside
-    /// a lambda body, MakeCaptureCell is not emitted by `lower_begin` /
-    /// `lower_letrec` (the VM materializes cells via the closure-
-    /// construction path), so the regions walker must not register an
-    /// alloc_region for Begin/Letrec inside a lambda either.
+    /// Lambda nesting depth, raised around a lambda body's walk and around an
+    /// inline's re-walk of a callee body. `in_lambda()` mirrors the lowerer's
+    /// own `in_lambda`: it decides which compiled capture cells a scope arm
+    /// mints, whether a captured binding takes an env cell placeholder, and
+    /// whether a reassigned binding is module-scope.
     in_lambda_depth: u32,
 }
 
@@ -346,6 +351,7 @@ impl RegionInference {
             arena: arena as *const BindingArena,
             binding_lambda: HashMap::new(),
             inline_depth: 0,
+            walking_lambdas: Vec::new(),
             inline_bound_regions: rustc_hash::FxHashSet::default(),
             in_lambda_depth: 0,
         }
@@ -356,7 +362,8 @@ impl RegionInference {
     }
 
     fn arena(&self) -> &BindingArena {
-        // SAFETY: the arena outlives RegionInference (both created in analyze_regions)
+        // SAFETY: the arena is borrowed for the whole `analyze_regions_with` call,
+        // and RegionInference lives only inside that call.
         unsafe { &*self.arena }
     }
 
@@ -377,17 +384,15 @@ impl RegionInference {
     /// with the SAME ids as the structural walk. The structural walk OWNS
     /// `alloc_region`. A fresh mint here during a re-walk would OVERWRITE the
     /// structural entry with a region parented in the caller's context. The
-    /// ownership/compensation passes read escape's return frontier *projected
-    /// through* `alloc_region`, so a clobbered entry desyncs the projection from
-    /// the lowerer's `alloc_region`: for a body whose tail allocation is reached in
-    /// a discarding caller context, the lowerer emits a discarded-result
-    /// `DecrefValueRegion` INSIDE the closure body — the closure frees the value it
-    /// returns and the caller's release derefs freed memory
-    /// (tests/impl/region-loop-local-closure-tail-uaf.lisp). Reuse the
-    /// structural region instead. Edge discovery — the re-walk's only purpose — is
-    /// unaffected: edges bind to the value's real (structural) region. Mirrors
-    /// `env_cell_placeholder`'s re-walk idempotency below. The structural walk
-    /// (`inline_depth == 0`) always visits every node and is the sole writer.
+    /// ownership and compensation passes read escape's return frontier projected
+    /// through `alloc_region`. A clobbered entry desyncs that projection from the
+    /// lowerer's `alloc_region`, and a closure can then release the value it
+    /// returns (pinned by tests/impl/region-loop-local-closure-tail-uaf.lisp).
+    /// Reuse the structural region instead. Edge discovery, the re-walk's only
+    /// purpose, is unaffected: edges bind to the value's real (structural)
+    /// region. `env_cell_placeholder` (in `placeholder`) is idempotent under a
+    /// re-walk the same way. The structural walk (`inline_depth == 0`) visits
+    /// every node and is the sole writer.
     fn alloc_here(&mut self, hir_id: HirId) -> Region {
         if self.inline_depth > 0 {
             if let Some(&r) = self.alloc_region.get(&hir_id) {

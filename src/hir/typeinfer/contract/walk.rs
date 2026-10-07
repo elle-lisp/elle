@@ -1,5 +1,8 @@
-//! The evaluation-order tree walk that carries nonzero-divisor path facts and
-//! dispatches each call-position `%`-intrinsic to its per-site contract check.
+// audited: 2026-10-06
+//! The walk that checks each call-position `%`-intrinsic in evaluation order, carrying nonzero-divisor facts.
+//!
+//! docs/intrinsics.md
+//! docs/impl/graft.md
 
 use super::*;
 
@@ -29,10 +32,10 @@ pub(super) fn walk(
             for a in args {
                 recurse!(&a.expr, env)?;
             }
-            // A call whose callee is the %-named NativeFn is the storing ops'
-            // call-position form — same proof, native lowering. A spliced
-            // argument list has no per-operand types to check; the native's
-            // own runtime validation covers that (dynamic) shape.
+            // A call to a `%`-named native is the call-position form of an op
+            // that lowers through the native: the same proof applies. A
+            // spliced argument list has no per-operand types to check, and the
+            // native validates it at run time.
             if let HirKind::Var(b) = &func.kind {
                 if let Some(name) = crate::primitives::registration::static_name(arena.get(*b).name)
                 {
@@ -46,21 +49,17 @@ pub(super) fn walk(
             }
             Ok(())
         }
-        // Statement sequences: a diverging one-armed guard leaves its
-        // fall-through facts standing for the rest of the sequence.
-        HirKind::Begin(exprs) => {
+        // Statement sequences: a guard with one diverging branch leaves its
+        // fall-through facts standing for the rest of the sequence. A
+        // statement that diverges ends the check: only a resume of its raise
+        // reaches what follows, over operands no type proves.
+        HirKind::Begin(exprs) | HirKind::Block { body: exprs, .. } => {
             let saved = env.clone();
             for e in exprs {
                 recurse!(e, env)?;
-                env.apply(&guard::facts_after_statement(e, arena));
-            }
-            *env = saved;
-            Ok(())
-        }
-        HirKind::Block { body, .. } => {
-            let saved = env.clone();
-            for e in body {
-                recurse!(e, env)?;
+                if guard::diverges(e) {
+                    break;
+                }
                 env.apply(&guard::facts_after_statement(e, arena));
             }
             *env = saved;
@@ -155,9 +154,9 @@ pub(super) fn walk(
         }
         // A lambda body runs at unknown times relative to the surrounding
         // flow; it starts with no path facts.
-        HirKind::Lambda { body, .. } => {
+        HirKind::Lambda(lambda) => {
             let mut fresh = NonzeroEnv::default();
-            recurse!(body, &mut fresh)
+            recurse!(&lambda.body, &mut fresh)
         }
         HirKind::Match { value, arms } => {
             recurse!(value, env)?;

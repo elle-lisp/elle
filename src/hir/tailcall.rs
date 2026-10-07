@@ -1,9 +1,5 @@
-//! Tail call marking pass for HIR
-//!
-//! This pass walks the HIR tree after analysis and marks `Call` nodes
-//! that are in tail position with `is_tail: true`. A call is in tail
-//! position if its result is immediately returned from the enclosing
-//! lambda without further computation.
+// audited: 2026-10-06
+//! Tail call marking: sets `is_tail` on each `Call` whose result the enclosing lambda returns unchanged.
 //!
 //! Tail position is defined recursively:
 //! - The body of a lambda is in tail position
@@ -12,18 +8,21 @@
 //! - The body of `let`/`letrec` inherits tail position
 //! - Clause bodies and else branch of `cond` inherit tail position
 //! - Arm bodies of `match` inherit tail position
-//! - Handler bodies of `handler-case` inherit tail position (but NOT the protected body)
 //! - The last expression of `and`/`or` inherits tail position
-//! - The body of `block` inherits tail position (last expression)
+//! - The last expression of a `block` in tail position inherits it
+//! - The value of a `break` whose target block is in tail position inherits it
 //!
-//! NOT in tail position:
+//! Not in tail position:
 //! - Conditions of `if`, `cond`, `while`
 //! - Arguments to calls
 //! - Function position of calls
 //! - Value expressions in bindings
-//! - Loop bodies (`while`)
-//! - `throw` value, `yield` value
+//! - Loop bodies (`while`, `loop`) and the body of `parameterize`
+//! - The value of `emit`
 //! - Match scrutinee and guards
+//!
+//! docs/impl/hir.md
+//! docs/impl/region/anchors.md
 
 use std::collections::HashSet;
 
@@ -46,10 +45,10 @@ pub(crate) fn mark_tail_calls(hir: &mut Hir) {
 fn mark(hir: &mut Hir, in_tail: bool, tail_blocks: &HashSet<BlockId>) {
     match &mut hir.kind {
         // Lambda body is always in tail position.
-        // Reset tail_blocks — a new function boundary means no enclosing
-        // blocks are reachable via tail call.
-        HirKind::Lambda { body, .. } => {
-            mark(body, true, &HashSet::new());
+        // Reset tail_blocks: a `break` cannot cross a function boundary,
+        // so no enclosing block is reachable from the body.
+        HirKind::Lambda(lambda) => {
+            mark(&mut lambda.body, true, &HashSet::new());
         }
 
         // Call: mark as tail if in tail position, recurse into func/args
@@ -198,8 +197,8 @@ fn mark(hir: &mut Hir, in_tail: bool, tail_blocks: &HashSet<BlockId>) {
             mark(expr, false, tail_blocks);
         }
 
-        // Return is inserted after this pass; defensive — its value
-        // inherits the Return's tail position.
+        // `wrap_tail_returns` inserts `Return` after this pass. Where one is
+        // already present, its value inherits the `Return`'s tail position.
         HirKind::Return { value } => {
             mark(value, in_tail, tail_blocks);
         }

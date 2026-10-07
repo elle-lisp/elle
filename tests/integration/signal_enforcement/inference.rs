@@ -17,14 +17,11 @@ fn test_polymorphic_inference_single_param() {
     .unwrap();
 
     if let HirKind::Define { value, .. } = &result.hir.kind {
-        if let HirKind::Lambda {
-            inferred_signals, ..
-        } = &value.kind
-        {
+        if let Some(lambda) = value.kind.as_lambda() {
             // Polymorphic on param 0, and the call to `f` may raise: the
             // compiler cannot check the count of a call to a parameter.
             assert_eq!(
-                *inferred_signals,
+                lambda.inferred_signals,
                 Signal::polymorphic_errors(0),
                 "apply-fn should have Polymorphic(0) signal, plus errors"
             );
@@ -213,12 +210,9 @@ fn test_polymorphic_inference_keeps_a_direct_yield() {
     .unwrap();
 
     if let HirKind::Define { value, .. } = &result.hir.kind {
-        if let HirKind::Lambda {
-            inferred_signals, ..
-        } = &value.kind
-        {
+        if let Some(lambda) = value.kind.as_lambda() {
             assert_eq!(
-                *inferred_signals,
+                lambda.inferred_signals,
                 Signal {
                     bits: SIG_YIELD.union(SIG_ERROR),
                     propagates: 1,
@@ -245,13 +239,10 @@ fn test_polymorphic_inference_two_params() {
     .unwrap();
 
     if let HirKind::Define { value, .. } = &result.hir.kind {
-        if let HirKind::Lambda {
-            inferred_signals, ..
-        } = &value.kind
-        {
+        if let Some(lambda) = value.kind.as_lambda() {
             // Polymorphic on params 0 and 1, and each call to one may raise
             assert_eq!(
-                *inferred_signals,
+                lambda.inferred_signals,
                 Signal {
                     bits: SIG_ERROR,
                     propagates: 0b11,
@@ -307,12 +298,9 @@ fn test_polymorphic_inference_second_param() {
     .unwrap();
 
     if let HirKind::Define { value, .. } = &result.hir.kind {
-        if let HirKind::Lambda {
-            inferred_signals, ..
-        } = &value.kind
-        {
+        if let Some(lambda) = value.kind.as_lambda() {
             assert_eq!(
-                *inferred_signals,
+                lambda.inferred_signals,
                 Signal::polymorphic_errors(1),
                 "apply-second should have Polymorphic(1) signal, plus errors"
             );
@@ -342,12 +330,9 @@ fn test_polymorphic_inference_with_known_yielding_call() {
     if let HirKind::Begin(exprs) = &result.hir.kind {
         let bad_def = exprs.last().unwrap();
         if let HirKind::Define { value, .. } = &bad_def.kind {
-            if let HirKind::Lambda {
-                inferred_signals, ..
-            } = &value.kind
-            {
+            if let Some(lambda) = value.kind.as_lambda() {
                 assert_eq!(
-                *inferred_signals,
+                lambda.inferred_signals,
                     Signal {
                         bits: SIG_YIELD.union(SIG_ERROR),
                         propagates: 1,

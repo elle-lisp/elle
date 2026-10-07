@@ -11,7 +11,7 @@ fn reified_keys(hir: &Hir) -> Vec<crate::value::SymbolId> {
     let mut node = hir;
     loop {
         match &node.kind {
-            HirKind::Lambda { body, .. } => node = body,
+            HirKind::Lambda(lambda) => node = &lambda.body,
             HirKind::Begin(exprs) if !exprs.is_empty() => node = &exprs[exprs.len() - 1],
             HirKind::Call { args, .. } => {
                 return args

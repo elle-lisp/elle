@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-06
 //! Pins adopt-edge emission: which Owned-subtree member each owner adopts, and where a
 //! subtree is refused to Shared.
 //!
@@ -50,7 +50,7 @@ mod transfer;
 /// combined-shape probes capture into. (Each probe has exactly one closure.)
 fn sole_closure_region(hir: &Hir, info: &RegionInfo) -> Region {
     fn first_lambda(h: &Hir, out: &mut Option<HirId>) {
-        if matches!(&h.kind, HirKind::Lambda { .. }) && out.is_none() {
+        if matches!(&h.kind, HirKind::Lambda(_)) && out.is_none() {
             *out = Some(h.id);
         }
         h.for_each_child(|c| first_lambda(c, out));
@@ -68,9 +68,9 @@ fn sole_closure_region(hir: &Hir, info: &RegionInfo) -> Region {
 /// member's value (from a slot or the env) for the value-resolved adopt?
 fn closure_captures_region(hir: &Hir, info: &RegionInfo, member: Region, closure: Region) -> bool {
     fn walk(h: &Hir, info: &RegionInfo, member: Region, closure: Region, found: &mut bool) {
-        if let HirKind::Lambda { captures, .. } = &h.kind {
+        if let HirKind::Lambda(lambda) = &h.kind {
             if info.alloc_region.get(&h.id) == Some(&closure)
-                && captures.iter().any(|c| {
+                && lambda.captures.iter().any(|c| {
                     info.binding_source_regions
                         .get(&c.binding)
                         .is_some_and(|rs| rs.contains(&member))

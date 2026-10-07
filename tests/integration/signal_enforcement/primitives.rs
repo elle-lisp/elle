@@ -78,8 +78,8 @@ fn test_lambda_body_signal_yields() {
     let (mut symbols, mut vm) = setup();
     let result = analyze("(fn (x) (yield x))", &mut symbols, &mut vm, "<test>").unwrap();
 
-    if let HirKind::Lambda { body, .. } = &result.hir.kind {
-        assert_eq!(body.signal, Signal::yields());
+    if let Some(lambda) = result.hir.kind.as_lambda() {
+        assert_eq!(lambda.body.signal, Signal::yields());
     } else {
         panic!("Expected Lambda");
     }
@@ -96,8 +96,8 @@ fn test_lambda_body_signal_nested_yield() {
     )
     .unwrap();
 
-    if let HirKind::Lambda { body, .. } = &result.hir.kind {
-        assert_eq!(body.signal, Signal::yields());
+    if let Some(lambda) = result.hir.kind.as_lambda() {
+        assert_eq!(lambda.body.signal, Signal::yields());
     } else {
         panic!("Expected Lambda");
     }
@@ -112,9 +112,9 @@ fn test_signal_parameter_call_yields_errors() {
     // Calling a function parameter: yields_errors() (may yield + inherent error)
     let (mut symbols, mut vm) = setup();
     let result = analyze("(fn (f) (f 42))", &mut symbols, &mut vm, "<test>").unwrap();
-    if let HirKind::Lambda { body, .. } = &result.hir.kind {
+    if let Some(lambda) = result.hir.kind.as_lambda() {
         assert_eq!(
-            body.signal,
+            lambda.body.signal,
             Signal::yields_errors(),
             "Calling a function parameter has yields_errors() signal"
         );

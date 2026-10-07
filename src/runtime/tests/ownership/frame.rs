@@ -98,17 +98,13 @@ fn tail_call_frame_delivers_an_empty_region_map() {
     callee_bc.emit(Instruction::Pair);
     callee_bc.emit_u32(5);
     callee_bc.emit(Instruction::Return);
-    let mut callee_proto = callee_bc.into_proto();
-    callee_proto.merged_slots.insert(5);
     let heap = unsafe { &mut *heap_ptr };
     let callee_region = heap.new_runtime_region();
-    let callee_proto = std::rc::Rc::new(callee_proto);
-    let callee_value = crate::vm::closure::materialize_closure_in_region(
-        heap,
-        crate::value::closure::ChildCode::Blueprint(&callee_proto),
-        &[],
-        callee_region,
-    );
+    let callee = crate::value::CodeBuilder::from_bytecode(callee_bc)
+        .merged_slots(vec![5])
+        .build(heap);
+    let callee_value =
+        crate::vm::closure::materialize_closure_in_region(heap, &callee, &[], callee_region);
 
     // Caller: build a pair in slot 5, which maps the slot, then a zero-arg
     // tail call. The pair's release would sit past the call, so none is run.

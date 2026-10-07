@@ -1,16 +1,7 @@
-// audited: 2026-10-05
-//! High-level Intermediate Representation (HIR): the analyzed program, and the passes over it.
+// audited: 2026-10-06
+//! HIR: the tree the analyzer builds from expanded Syntax, and the passes that prepare it for lowering.
 //!
 //! docs/impl/hir.md
-//!
-//! HIR is the fully-analyzed form produced from expanded Syntax. All bindings
-//! are resolved, signals are inferred, and captures are computed. This is the
-//! input to the lowering phase that produces LIR.
-//!
-//! Pipeline:
-//! ```text
-//! Syntax → Expand → Syntax → Analyze → HIR → Lower → LIR → Emit → Bytecode
-//! ```
 
 pub(crate) mod analyze;
 pub mod anf;
@@ -47,7 +38,8 @@ pub use dataflow::{analyze_dataflow, format_dataflow, DataflowInfo};
 pub use defuse::ValueOrigin;
 pub use escape::{analyze_escape, EscapeInfo};
 pub use expr::{
-    reset_hir_ids, BlockId, CallArg, Hir, HirId, HirKind, IntrinsicOp, ParamBound, VarargKind,
+    reset_hir_ids, BlockId, CallArg, Hir, HirId, HirKind, IntrinsicOp, Lambda, ParamBound,
+    VarargKind,
 };
 pub use fragment::{FragmentBinding, HirFragment};
 pub use lint::HirLinter;

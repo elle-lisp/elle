@@ -1,6 +1,5 @@
-// audited: 2026-09-28
-//! Where the solver places a release around a loop: once per activation for a
-//! cell, once per iteration for what the body allocates.
+// audited: 2026-10-06
+//! Release placement around loops and sibling top-level forms, and the tail region of a closure inlined in a loop.
 //!
 //! docs/impl/region/cells.md
 //! docs/impl/region/anchors.md
@@ -43,7 +42,7 @@ fn begin_capture_cell_region_extends_to_binding_last_use_across_sibling_forms() 
                 HirKind::Define { binding, .. } => {
                     *binding == target && arena.get(*binding).needs_capture()
                 }
-                HirKind::Lambda { .. } => false,
+                HirKind::Lambda(_) => false,
                 _ => {
                     let mut found = false;
                     h.for_each_child(|c| {
@@ -393,8 +392,8 @@ fn loop_local_closure_tail_alloc_region_matches_return_frontier() {
     // For each Lambda, record (lambda id, body-tail id, whether the tail is a
     // %pair allocation). Owned Copy data only — no escaping HIR references.
     fn collect_lambda_tails(h: &Hir, out: &mut Vec<(HirId, HirId, bool)>) {
-        if let HirKind::Lambda { body, .. } = &h.kind {
-            let t = tail_expr(body);
+        if let HirKind::Lambda(lambda) = &h.kind {
+            let t = tail_expr(&lambda.body);
             let is_pair = matches!(
                 &t.kind,
                 HirKind::Intrinsic {

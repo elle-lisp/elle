@@ -31,16 +31,12 @@ struct Gate<'a> {
 
 impl Gate<'_> {
     fn collect(&self, hir: &Hir, admitted: &mut FxHashSet<HirId>) {
-        if let HirKind::Lambda {
-            rest_param: Some(rest),
-            vararg_kind: VarargKind::List,
-            body,
-            ..
-        } = &hir.kind
-        {
-            let b = self.arena.get(*rest);
-            if b.is_immutable && !b.is_mutated && self.only_reads(body, *rest) {
-                admitted.insert(hir.id);
+        if let HirKind::Lambda(lambda) = &hir.kind {
+            if let (Some(rest), VarargKind::List) = (lambda.rest_param, &lambda.vararg_kind) {
+                let b = self.arena.get(rest);
+                if b.is_immutable && !b.is_mutated && self.only_reads(&lambda.body, rest) {
+                    admitted.insert(hir.id);
+                }
             }
         }
         hir.for_each_child(|c| self.collect(c, admitted));
@@ -52,8 +48,8 @@ impl Gate<'_> {
     fn only_reads(&self, hir: &Hir, rest: Binding) -> bool {
         match &hir.kind {
             HirKind::Var(b) => *b != rest,
-            HirKind::Lambda { captures, body, .. } => {
-                !captures.iter().any(|c| c.binding == rest) && !mentions(body, rest)
+            HirKind::Lambda(lambda) => {
+                !lambda.captures.iter().any(|c| c.binding == rest) && !mentions(&lambda.body, rest)
             }
             HirKind::Call { func, args, .. } => {
                 let reads = self.callee_reads_its_arguments(func, args.len());
@@ -132,8 +128,8 @@ fn mentions(hir: &Hir, b: Binding) -> bool {
     if is_var(hir, b) {
         return true;
     }
-    if let HirKind::Lambda { captures, .. } = &hir.kind {
-        if captures.iter().any(|c| c.binding == b) {
+    if let HirKind::Lambda(lambda) = &hir.kind {
+        if lambda.captures.iter().any(|c| c.binding == b) {
             return true;
         }
     }

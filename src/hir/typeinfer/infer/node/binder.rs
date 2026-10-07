@@ -1,10 +1,7 @@
-// audited: 2026-09-09
-// src/hir/AGENTS.md
-// docs/impl/typeinfer.md
-//! What a binder records: the type a `let`, a `def` or a cell write leaves for
-//! every later read of that binding. A lambda init also records its body type,
-//! which is what the binding's callers read — unless the unit writes the
-//! binding, where no body type is an answer about the call.
+// audited: 2026-10-06
+//! What a binder records: the type a `let`, a `def` or a cell write leaves for every later read of that binding.
+//!
+//! docs/impl/typeinfer.md
 
 use super::*;
 
@@ -15,10 +12,9 @@ impl Infer<'_> {
     ///
     /// For a lambda (possibly cell-wrapped when self-recursive or captured)
     /// that is the body's return type, which every call to the binding reads, a
-    /// self-call included (docs/impl/typeinfer.md). REPLACE, don't join: each
-    /// pass re-derives the body type from strictly more information, and a join
-    /// could never come back down from the estimate an earlier pass computed
-    /// with less.
+    /// self-call included. REPLACE, don't join: each pass re-derives the body
+    /// type from strictly more information, and a join could never come back
+    /// down from the estimate an earlier pass computed with less.
     ///
     /// A binding this unit WRITES records Top instead. An `assign` puts a
     /// different lambda there and no pass can say which one a given call
@@ -31,14 +27,14 @@ impl Infer<'_> {
     /// defeats it — functionalization sends a mutated binding's write to
     /// `SetCell`, which records no body type, and leaves the rest to `Assign`.
     fn record_lambda_body_type(&mut self, binding: Binding, init: &Hir) {
-        let HirKind::Lambda { body, .. } = &unwrap_make_cell(init).kind else {
+        let HirKind::Lambda(lambda) = &unwrap_make_cell(init).kind else {
             return;
         };
         let ty = if self.mutated.contains(&binding) {
             TypeInterner::TOP
         } else {
             self.hir_types
-                .get(&body.id)
+                .get(&lambda.body.id)
                 .copied()
                 .unwrap_or(TypeInterner::TOP)
         };
@@ -51,7 +47,7 @@ impl Infer<'_> {
             let ty = self.infer(init);
             self.hir_types.insert(init.id, ty);
             self.record_lambda_body_type(*binding, init);
-            if !matches!(unwrap_make_cell(init).kind, HirKind::Lambda { .. }) {
+            if !matches!(unwrap_make_cell(init).kind, HirKind::Lambda(_)) {
                 let old = self
                     .binding_types
                     .get(binding)

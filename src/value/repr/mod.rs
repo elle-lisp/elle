@@ -1,14 +1,18 @@
-//! 16-byte tagged-union Value representation.
+// audited: 2026-10-06
+//! The 16-byte tagged-union `Value`: its tags, its immediate predicates, and its scalar serde.
 //!
 //! Every value is exactly 16 bytes:
 //!   tag:     u64 — type discriminant (TAG_* constants below)
 //!   payload: u64 — type-specific data:
-//!                  integers: i64 reinterpreted as u64
-//!                  floats:   f64::to_bits()
-//!                  symbols:  u32 symbol ID
-//!                  keywords: u64 hash from intern_keyword
-//!                  cpointer: usize address
-//!                  heap:     *const () pointer to HeapObject
+//!                  integers:  i64 reinterpreted as u64
+//!                  floats:    f64::to_bits()
+//!                  symbols:   u64 FNV-1a hash of the name
+//!                  keywords:  u64 FNV-1a hash of the name
+//!                  native fn: u32 prim_id
+//!                  cpointer:  usize address
+//!                  heap:      *const () pointer to HeapObject
+//!
+//! docs/impl/values.md
 
 mod accessors;
 mod constructors;
@@ -33,10 +37,9 @@ pub const TAG_KEYWORD: u64 = 7;
 pub const TAG_UNDEFINED: u64 = 8;
 pub const TAG_CPOINTER: u64 = 9;
 
-// Native-fns are IMMEDIATE: tag below TAG_HEAP_START, payload is a prim_id
-// (index into the canonical primitives::table()). TAG_NATIVE_FN(10) and
-// TAG_STRING(26) are swapped from their historical values so native-fn sits
-// below the heap boundary; nothing hardcodes the numeric tags (all uses by name).
+// Native-fns are immediate: the tag sits below TAG_HEAP_START, and the payload
+// is a prim_id that `primitives::prim_def` resolves. Every use names a tag by
+// its constant, never by its number.
 pub const TAG_NATIVE_FN: u64 = 10;
 
 // Heap types (tag >= TAG_HEAP_START means is_heap() is true)
@@ -94,7 +97,8 @@ impl Value {
     /// object — never structural equality (`PartialEq` compares immutable heap
     /// contents, so two distinct allocations can be `==` while living in
     /// different regions). Use this where a match stands for "the very value
-    /// recorded earlier", e.g. the delivery ledger's records (`Fiber::delivery`).
+    /// recorded earlier", for example the delivery ledger's records
+    /// (`Fiber::delivery`).
     #[inline]
     pub(crate) fn bit_identical(self, other: Value) -> bool {
         self.tag == other.tag && self.payload == other.payload
@@ -209,8 +213,8 @@ impl Value {
     /// The reason these bits cannot be a live `Value`, or `None` when they can.
     ///
     /// A conservative structural check for the park/resume tripwires
-    /// (`elle_jit_yield`, `resume_suspended`): the tag must be a known
-    /// `TAG_*` constant, and a heap tag must carry a non-null, 8-byte-aligned
+    /// (`elle_jit_yield`, `resume_suspended`): the tag must not exceed the
+    /// largest `TAG_*` constant, and a heap tag must carry a non-null, 8-byte-aligned
     /// payload. A permutation of valid values passes — this catches torn or
     /// zeroed slots, not misplaced ones.
     pub fn malformed_reason(&self) -> Option<&'static str> {
@@ -310,8 +314,8 @@ impl Value {
 //
 // The cache serializes `Value` constants in `Bytecode`/`ClosureTemplate` pools
 // and in LIR `ValueConst` operands. After `convert_lir_for_send`, the values
-// that reach this path are non-heap scalars (int/float/bool/nil/symbol/keyword)
-// and native-fn immediates. A symbol and a keyword carry their name's hash
+// that reach this path are non-heap scalars (int, float, bool, nil, the empty
+// list, symbol, keyword) and native-fn immediates. A symbol and a keyword carry their name's hash
 // (docs/impl/symbol.md), which is the same in every process, so the payload
 // travels as it stands; only the spelling needs the bundle's name table. Every
 // malformed input must come back as a serde error, never a panic: the cache
@@ -336,6 +340,8 @@ impl serde::Serialize for Value {
             ScalarPayload::NativeFn(self.payload as u32)
         } else if self.is_nil() {
             ScalarPayload::Nil
+        } else if self.is_empty_list() {
+            ScalarPayload::EmptyList
         } else if let Some(n) = self.as_int() {
             ScalarPayload::Int(n)
         } else if let Some(f) = self.as_float() {
@@ -351,6 +357,7 @@ impl<'de> serde::Deserialize<'de> for Value {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         Ok(match ScalarPayload::deserialize(d)? {
             ScalarPayload::Nil => Value::NIL,
+            ScalarPayload::EmptyList => Value::EMPTY_LIST,
             ScalarPayload::Bool(b) => Value::bool(b),
             ScalarPayload::Int(n) => Value::int(n),
             ScalarPayload::Float(f) => Value::float(f),
@@ -374,6 +381,7 @@ impl<'de> serde::Deserialize<'de> for Value {
 #[derive(serde::Serialize, serde::Deserialize)]
 enum ScalarPayload {
     Nil,
+    EmptyList,
     Bool(bool),
     Int(i64),
     Float(f64),

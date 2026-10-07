@@ -1,14 +1,16 @@
-// audited: 2026-09-21
-// src/pipeline/AGENTS.md
-//! Shared file/syntax compilation front end: parse → epoch-migrate → macro
-//! expand (with include splicing) → classify → analyze → regularize. Every
-//! backend (bytecode, LIR, FHIR, the test-mode transforms) feeds off the HIR
-//! this stage produces, so it lives apart from the per-backend lowering wrappers.
+// audited: 2026-10-06
+//! The file front end: source text or read forms to regularized HIR, shared by every file entry point but `compile_file_to_lir`.
+//!
+//! src/pipeline/AGENTS.md
+//! docs/pipeline.md
+//!
+//! The stages run in order: read, strip declarations, migrate, expand with
+//! include splicing, transform, classify, analyze and regularize.
 
 use super::*;
 
-/// What the file/syntax front end produces, shared by the source and syntax
-/// test-compile entry points (see `lower_test_frontend`).
+/// What the file front end produces, for `compile_file`, the FHIR entry
+/// points and the test-mode entry points alike.
 ///
 /// A caller that does not need a field ignores it.
 pub(super) struct Frontend {
@@ -25,9 +27,9 @@ pub(super) struct Frontend {
 
 pub(super) type FrontendResult = Result<Frontend, String>;
 
-/// Shared front-end for file compilation: parse, epoch migration, macro
-/// expansion (with file-scope stamping and include resolution), analysis,
-/// error surfacing, tail-call marking, and functionalization.
+/// The front end for file compilation: read, epoch migration, macro expansion
+/// with file-scope stamping and include resolution, analysis, which fails with
+/// the first error it collected, and `regularize`.
 pub(super) fn compile_file_frontend(
     source: &str,
     symbols: &mut SymbolTable,
@@ -44,14 +46,14 @@ pub(super) fn compile_file_frontend(
 }
 
 /// Like `compile_file_frontend`, but applies `xform` to the macro-expanded
-/// top-level forms before classification/analysis. The fault-barrier test
-/// compilation mode (`compile_barrier_module`) uses this to wrap each test
-/// form in a captured thunk while leaving `def`/`var` setup forms intact —
-/// preserving the whole-module `analyze_file_letrec` path (binding resolution,
-/// capture analysis, signal inference, epoch) that per-form `eval` cannot.
+/// top-level forms before classification and analysis. The fault-barrier test
+/// mode (`compile_barrier_module`) uses this to wrap each test form in a
+/// captured thunk and leave the `def` and `var` setup forms intact. The file
+/// then still takes the whole-module `analyze_file_letrec` path, which
+/// per-form `eval` cannot.
 ///
-/// Reads + compiles inside a transient region so the per-compilation scratch
-/// allocations are reclaimed once the frontend result is promoted out.
+/// Reads and compiles inside the unit's syntax arena, which
+/// `with_syntax_arena` frees on return.
 pub(super) fn compile_file_frontend_xform(
     source: &str,
     symbols: &mut SymbolTable,
@@ -75,12 +77,12 @@ pub(super) fn compile_file_frontend_xform(
 }
 
 /// Like `compile_file_frontend_xform`, but starts from already-read top-level
-/// `syntaxes` instead of source text. Lets a caller parse once and compile the
-/// resulting forms elsewhere — the test runner reads a legacy multi-form file in
-/// the main VM and ships the forms to a worker, which compiles + runs them with
-/// its OWN stdlib (so the file's runtime `import`s and the worker's `ev/run`
-/// scheduler share one set of dynamic parameters). Epoch migration, macro
-/// expansion, the `xform`, and analysis are identical to the text path.
+/// `syntaxes` instead of source text, so a caller can read once and compile
+/// the forms elsewhere. The test runner reads a multi-form file in the main VM
+/// and ships the forms to a worker. The worker compiles and runs them with its
+/// own stdlib, so the file's runtime `import`s and the worker's `ev/run`
+/// scheduler share one set of dynamic parameters. Every later stage is the
+/// text path's.
 pub(super) fn compile_syntaxes_frontend_xform(
     syntaxes: Vec<Syntax>,
     symbols: &mut SymbolTable,
@@ -98,9 +100,9 @@ pub(super) fn compile_syntaxes_frontend_xform(
     })
 }
 
-/// Shared frontend worker (epoch-migrate → expand → `xform` → classify →
-/// analyze). Run inside `with_syntax_arena` by every public caller so
-/// per-compilation scratch is reclaimed while the result is promoted out.
+/// The front end past reading: migrate, expand, `xform`, classify, analyze and
+/// regularize. Every caller runs it inside `with_syntax_arena`, so the
+/// per-compilation scratch is freed when the caller returns.
 #[allow(clippy::type_complexity)]
 fn compile_syntaxes_frontend_xform_inner(
     arena: SyntaxArena,
@@ -203,9 +205,7 @@ fn compile_syntaxes_frontend_xform_inner(
         return Err(msg);
     }
 
-    let (dispatch_wrappers, fn_inline) = cctx.compile_registries_mut();
-    let types =
-        crate::hir::regularize(&mut hir, &mut arena, symbols, dispatch_wrappers, fn_inline)?;
+    let types = crate::hir::regularize(&mut hir, &mut arena, symbols, &prim_values, cctx.graft())?;
     crate::phase!(ct, "compile", t, "{} analyze", source_name);
 
     Ok(Frontend {

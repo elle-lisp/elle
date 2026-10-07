@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-13
 //! Call analysis: the compile-time arity check, and the signal each call raises
 //! across function boundaries.
 //!
@@ -65,12 +65,12 @@ impl<'a> Analyzer<'a> {
         let raw_callee_signal = self.get_raw_callee_signal(&func);
 
         // Refine a call to `emit` when its first argument is known at compile
-        // time. A literal keyword or set never reaches this call: `(emit :kw v)`
-        // is the special form (forms/expr.rs), and a keyword with any other
-        // argument count fails the arity check above. So this is a dynamic emit,
-        // and an integer literal is the one first argument that still names its
-        // bits statically; it replaces the registered, conservative signal. The
-        // keyword arm below is unreachable for the same reason.
+        // time. `(emit :kw)` and `(emit :kw v)` over a literal keyword or set
+        // are the special form (forms/expr.rs), and a keyword with another
+        // argument count fails the arity check above. A keyword reaches the
+        // arm below only past a splice, or through a user binding spelled
+        // `emit`. An integer literal names its bits statically and replaces
+        // the registered, conservative signal.
         let raw_callee_signal = if self.is_emit(&func) {
             if let Some(first_arg_kind) = args.first().map(|a| &a.expr.kind) {
                 match first_arg_kind {
@@ -86,8 +86,8 @@ impl<'a> Analyzer<'a> {
                             // gets a resumable continuation only when its signal
                             // meets `SIG_YIELD | SIG_DEBUG | SIG_IO | SIG_WAIT`
                             // (src/lir/lower/control/call.rs), and a user bit is
-                            // in none of them — so without this, the code after
-                            // `(emit :my-signal v)` would be lost on resume.
+                            // in none of them. Without SIG_YIELD, the code after
+                            // the emit would be lost on resume.
                             //
                             // Compile-time only: the runtime bits come from
                             // `prim_emit` resolving the keyword set the program
@@ -182,19 +182,10 @@ impl<'a> Analyzer<'a> {
     /// Get the callee's known arity, if available.
     fn get_callee_arity(&self, callee: &Hir) -> Option<Arity> {
         match &callee.kind {
-            HirKind::Lambda {
-                params,
-                num_required,
-                rest_param,
-                ..
-            } => Some(Arity::for_lambda(
-                rest_param.is_some(),
-                *num_required,
-                params.len(),
-            )),
+            HirKind::Lambda(lambda) => Some(lambda.arity()),
             HirKind::Var(binding) => {
                 // The arity env covers primitives (`bind_primitives`) and
-                // bindings initialized with a lambda (binding.rs). A user shadow
+                // bindings initialized with a lambda (`record_lambda_call`). A user shadow
                 // is a new binding, so it carries its own arity or none — never
                 // the primitive's.
                 self.arity_env.get(binding).copied()
@@ -212,7 +203,7 @@ impl<'a> Analyzer<'a> {
                 }
                 "<unknown>".to_string()
             }
-            HirKind::Lambda { .. } => "<lambda>".to_string(),
+            HirKind::Lambda(_) => "<lambda>".to_string(),
             _ => "<expression>".to_string(),
         }
     }
@@ -227,9 +218,9 @@ impl<'a> Analyzer<'a> {
         self.is_primitive_named(func, "import")
     }
 
-    /// Check if a callee HIR node is a binding spelled `name` — one hash
-    /// compare, no memo (docs/impl/symbol.md). It reads the name alone, so a
-    /// user binding of the same spelling answers true as well.
+    /// Check if a callee HIR node is a binding spelled `name`: one hash
+    /// compare, with no name memo. It reads the name alone, so a user binding
+    /// of the same spelling answers true as well.
     fn is_primitive_named(&self, func: &Hir, name: &str) -> bool {
         if let HirKind::Var(binding) = &func.kind {
             self.arena.get(*binding).name == crate::value::SymbolId::of(name)
@@ -244,11 +235,11 @@ impl<'a> Analyzer<'a> {
     /// lookup finds a primitive's signal for ANY binding that shares its
     /// spelling. It is sound only for a binding that is the primitive itself.
     /// `bind_primitives` sets `is_primitive` and always seeds `signal_env` for
-    /// those, so this path does not fire for a real primitive either (that hits
-    /// `signal_env` first). Gating on `is_primitive` therefore keeps a same-named
-    /// *user* binding (a `var` shadowing `length`, or one reassigned via
-    /// `assign`, which clears its `signal_env` entry) from inheriting the
-    /// primitive's signal instead of the sound conservative `unknown`.
+    /// those, so a real primitive hits `signal_env` first. The `is_primitive`
+    /// gate keeps a same-named user binding from inheriting the primitive's
+    /// signal. Examples are a `var` shadowing `length`, or a binding whose
+    /// `assign` cleared its `signal_env` entry. Such a binding gets the sound
+    /// `unknown` instead.
     fn primitive_signal_of(&self, binding: Binding) -> Option<Signal> {
         let b = self.arena.get(binding);
         if !b.is_primitive {
@@ -260,9 +251,7 @@ impl<'a> Analyzer<'a> {
     /// Get the raw callee signal without resolving polymorphic signals.
     pub(crate) fn get_raw_callee_signal(&self, func: &Hir) -> Signal {
         match &func.kind {
-            HirKind::Lambda {
-                inferred_signals, ..
-            } => *inferred_signals,
+            HirKind::Lambda(lambda) => lambda.inferred_signals,
             HirKind::Var(binding) => {
                 if let Some(signal) = self.signal_env.get(binding) {
                     *signal
@@ -278,9 +267,9 @@ impl<'a> Analyzer<'a> {
                     // callable, wrong arity, callback errors).
                     Signal::yields_errors()
                 } else {
-                    // Calling a value whose origin is opaque to static analysis
-                    // (e.g., bound to a dynamic expression result). We cannot
-                    // determine its effects — use the sound conservative signal.
+                    // Calling a value whose origin is opaque to static analysis,
+                    // for example one bound to a dynamic expression result. Its
+                    // effects are unknown, so use the sound conservative signal.
                     Signal::unknown()
                 }
             }
@@ -375,9 +364,7 @@ impl<'a> Analyzer<'a> {
     /// we can determine its signal.
     pub(crate) fn resolve_arg_signal(&self, arg: &Hir) -> Signal {
         match &arg.kind {
-            HirKind::Lambda {
-                inferred_signals, ..
-            } => *inferred_signals,
+            HirKind::Lambda(lambda) => lambda.inferred_signals,
             HirKind::Var(binding) => self
                 .signal_env
                 .get(binding)

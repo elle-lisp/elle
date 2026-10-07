@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-06
 //! The HIR child walks: `for_each_child` and its mutable twin visit a node's children in execution order.
 //!
 //! docs/impl/hir.md
@@ -27,7 +27,7 @@ impl Hir {
                 }
                 f(body);
             }
-            HirKind::Lambda { body, .. } => f(body),
+            HirKind::Lambda(lambda) => f(&mut lambda.body),
             HirKind::If {
                 cond,
                 then_branch,
@@ -166,7 +166,7 @@ impl Hir {
                 }
                 f(body);
             }
-            HirKind::Lambda { body, .. } => f(body),
+            HirKind::Lambda(lambda) => f(&lambda.body),
             HirKind::If {
                 cond,
                 then_branch,
@@ -187,9 +187,8 @@ impl Hir {
                 }
             }
             HirKind::Break { value, .. } => f(value),
-            // Call children in EXECUTION order (args, then func) — see the
-            // `for_each_child_mut` Call arm above; the two must stay
-            // identical.
+            // Arguments, then the callee, as in `for_each_child_mut` above;
+            // the two must stay identical.
             HirKind::Call { func, args, .. } => {
                 for a in args {
                     f(&a.expr);
@@ -251,9 +250,7 @@ impl Hir {
                 f(expr);
                 f(env);
             }
-            // Key before value, matching `lower_parameterize` (and the
-            // mutable twin above). See that arm for why the key must be a
-            // visited child.
+            // Key before value, as in `for_each_child_mut` above.
             HirKind::Parameterize { bindings, body } => {
                 for (k, v) in bindings {
                     f(k);

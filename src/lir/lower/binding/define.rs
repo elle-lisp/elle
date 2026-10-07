@@ -2,10 +2,8 @@
 //! The non-scoped mutating binding forms: `define` (a local `def`) and `set` (`lower_assign`).
 //!
 //! docs/impl/region/bindings.md
+//! docs/impl/region/cells.md
 //! docs/impl/selfrec.md
-//!
-//! They share the capture-cell store and reload, and the reference discipline of
-//! a 1-slot container that drops its content on overwrite.
 
 use super::*;
 
@@ -15,10 +13,9 @@ impl<'a> Lowerer<'a> {
         binding: Binding,
         value: &Hir,
     ) -> Result<Reg, String> {
-        // Local define
         // Allocate the slot BEFORE lowering the value so that recursive
-        // references can find the binding (like letrec)
-        // The slot might already be allocated by the Begin pre-pass
+        // references can find the binding (like letrec).
+        // The Begin pre-pass may have allocated the slot already.
         let slot = if let Some(&existing_slot) = self.binding_to_slot.get(&binding) {
             existing_slot
         } else {
@@ -37,11 +34,11 @@ impl<'a> Lowerer<'a> {
             self.upvalue_bindings.insert(binding);
         }
 
-        // Name the lambda this binder initializes. The binding and params are
-        // kept for the duration of the lowering, and no decision reads them.
-        if let HirKind::Lambda { params, .. } = &value.kind {
+        // Name the lambda for `lower_lambda_body`, and record the binding and
+        // its parameters as the function context.
+        if let HirKind::Lambda(lambda) = &value.kind {
             self.current_function_binding = Some(binding);
-            self.current_function_params = Some(params.clone());
+            self.current_function_params = Some(lambda.params.clone());
             self.pending_lambda_name = self.binder_name(binding);
         }
 

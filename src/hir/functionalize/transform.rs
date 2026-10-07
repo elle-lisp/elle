@@ -1,6 +1,5 @@
-// audited: 2026-10-05
-//! The functionalize walk: one arm per HIR kind, renaming through the SSA map
-//! and inserting cell operations.
+// audited: 2026-10-06
+//! The functionalize transform's main walk: one arm per `HirKind`, delegating `begin`, `while` and branches.
 //!
 //! docs/impl/hir.md
 
@@ -16,6 +15,9 @@ impl<'a> FnCtx<'a> {
             HirKind::Var(b) => {
                 let resolved = self.resolve(*b);
                 let var_node = Hir::new(HirKind::Var(resolved), span, signal);
+                if self.tracked.contains(&hir.id) {
+                    self.moved.entry(hir.id).or_default().push(var_node.id);
+                }
                 if self.cell_bindings.contains(&resolved) {
                     Hir::new(
                         HirKind::DerefCell {
@@ -62,52 +64,26 @@ impl<'a> FnCtx<'a> {
             HirKind::Begin(exprs) => self.transform_begin(exprs, span, signal),
 
             // Lambda: transform body in a fresh renaming scope
-            HirKind::Lambda {
-                params,
-                num_required,
-                rest_param,
-                vararg_kind,
-                captures,
-                body,
-                num_locals,
-                inferred_signals,
-                param_bounds,
-                doc,
-                origin,
-                assert_numeric,
-            } => {
+            HirKind::Lambda(lambda) => {
                 let saved_renames = self.renames.clone();
                 let saved_cells = self.cell_bindings.clone();
                 // Mark captured bindings that need cells
-                for cap in captures {
+                for cap in &lambda.captures {
                     if self.arena.get(cap.binding).needs_capture() {
                         self.cell_bindings.insert(cap.binding);
                     }
                 }
                 // Mark mutated parameters as cell bindings
-                for p in params.iter().chain(rest_param.iter()) {
+                for p in lambda.params.iter().chain(lambda.rest_param.iter()) {
                     if self.arena.get(*p).needs_capture() {
                         self.cell_bindings.insert(*p);
                     }
                 }
-                let new_body = self.transform(body);
+                let new_body = self.transform(&lambda.body);
                 self.renames = saved_renames;
                 self.cell_bindings = saved_cells;
                 Hir::new(
-                    HirKind::Lambda {
-                        params: params.clone(),
-                        num_required: *num_required,
-                        rest_param: *rest_param,
-                        vararg_kind: vararg_kind.clone(),
-                        captures: captures.clone(),
-                        body: Box::new(new_body),
-                        num_locals: *num_locals,
-                        inferred_signals: *inferred_signals,
-                        param_bounds: param_bounds.clone(),
-                        doc: doc.clone(),
-                        origin: *origin,
-                        assert_numeric: *assert_numeric,
-                    },
+                    HirKind::Lambda(Box::new(lambda.with_body(new_body))),
                     span,
                     signal,
                 )
@@ -357,8 +333,9 @@ impl<'a> FnCtx<'a> {
                 Hir::new(HirKind::Recur { args: new_args }, span, signal)
             }
 
-            // Cell ops are produced by this transform; they should not
-            // appear in the input HIR. Handle them structurally for safety.
+            // This transform produces DerefCell and SetCell, and no pass
+            // produces MakeCell, so none appears in the input HIR. Handle them
+            // structurally anyway.
             HirKind::MakeCell { value } => {
                 let new_value = self.transform(value);
                 Hir::new(

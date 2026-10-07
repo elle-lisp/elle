@@ -1,19 +1,21 @@
-//! Region-ownership test helpers (pair-store edges, shared seeds, owned
-//! subtrees, adopt edges). Split from `helpers.rs` to keep each file < 500
-//! lines. `super::ownership` resolves via the re-export in `mod.rs`.
+// audited: 2026-10-06
+//! Region-ownership test helpers: compile a shape and re-run one ownership walk on its `RegionInfo`.
+//!
+//! docs/impl/region/adopt.md
+//! docs/impl/region/ownership.md
+//!
+//! `super::ownership` resolves through the re-export in `mod.rs`.
 use super::*;
 
-/// The ownership forest is unconditional, so `analyze_regions`/`analyze_regions_with`
-/// run the ownership pass and, AFTER computing the adopt/group maps, suppress each
-/// capture-adopted and activation-adopted member's own decref (adding them to
-/// `suppressed_decref_regions`). A test helper that re-runs a `compute_*` ownership walk
-/// directly on the returned `RegionInfo` would then see those members as `not_ownable`
-/// (`ownership::inputs::not_ownable` reads `suppressed_decref_regions`) — a self-poisoning
-/// the production single pass never hits, because suppression is applied only AFTER the
-/// walks run internally. Undo exactly the ownership-added suppressions so a direct re-run
-/// reproduces the pre-suppression view the internal pass computed against. The
-/// reassign-gate suppressions (the other contributor to `suppressed_decref_regions`) are
-/// left intact — `not_ownable` must still see them.
+/// `analyze_regions_with` runs the ownership pass, which suppresses each
+/// capture-adopted and activation-adopted member's own decref
+/// (`suppressed_decref_regions`). A helper that re-runs a `compute_*` walk on the
+/// returned `RegionInfo` would see those members as `not_ownable`, which reads that
+/// set. So undo exactly the ownership-added suppressions, which restores the view
+/// `compute_adopt_edges` ran against. The production group walk runs after the
+/// capture suppressions, so a group re-run here sees those capture members as ownable
+/// where production did not. The reassign-gate suppressions stay, because
+/// `not_ownable` must still see them.
 fn restore_pre_ownership_view(info: &mut RegionInfo) {
     let ownership_suppressed: Vec<Region> = info
         .capture_adopt_edges
@@ -151,7 +153,7 @@ pub(super) fn in_some_owned_subtree(
 /// is an opaque `Funnel` native call recording NO `cross_region_refs` edge —
 /// its containment reaches the adopt walk as site-keyed funnel-recovered
 /// `containment_edges`, and the emitted adopt is keyed at the funnel call
-/// site (region/adopt.md § The funnel adopt). Mirrors
+/// site. Mirrors
 /// `owned_subtrees_with_effects`, threading the `compute_order` index
 /// `compute_adopt_edges` needs for the lifetime obligation.
 pub(super) fn adopt_edges(source: &str) -> (Hir, RegionInfo, super::ownership::AdoptEdges) {
@@ -175,8 +177,8 @@ pub(super) fn adopt_edges(source: &str) -> (Hir, RegionInfo, super::ownership::A
 /// Returns the arena alongside so a test can read a captured binding's
 /// `is_restorable_capture_cell` classification and the info's `single_cell_region_of`.
 /// These edges read only the WALK's output (`binding_source_regions`, `alloc_region`,
-/// `begin_cell_regions`), untouched by the ownership-pass suppressions, so no
-/// pre-ownership-view restore is needed.
+/// `begin_cell_regions`, `live_regions`), untouched by the ownership-pass
+/// suppressions, so no pre-ownership-view restore is needed.
 pub(super) fn capture_edges(
     source: &str,
 ) -> (Hir, BindingArena, RegionInfo, Vec<(HirId, Region, Region)>) {
@@ -249,8 +251,8 @@ pub(super) fn container_root_and_members(info: &RegionInfo) -> (Region, Vec<Regi
 
 /// Which reload path would `lower_lambda_expr` use for the capture-adopt edge
 /// `(member, closure)` — true for a LOCAL-SLOT reload (`LoadLocal`), false for an
-/// env reload (`LoadCapture` — an upvalue or transitive capture; region/adopt.md
-/// § "The capture adopt"). Slot-loaded iff the lambda whose `alloc_region` is
+/// env reload (`LoadCapture` — an upvalue or transitive capture). Slot-loaded iff
+/// the lambda whose `alloc_region` is
 /// `closure` captures the binding holding `member` with `CaptureKind::Local` AND no
 /// lambda lexically *enclosing* it also captures that binding. Both paths are
 /// emittable; boundary pins use this to assert a shape genuinely exercises the
@@ -269,10 +271,10 @@ pub(super) fn capture_is_local_slot_loaded(
         closure: Region,
         enclosing: &mut Vec<rustc_hash::FxHashSet<crate::hir::Binding>>,
     ) -> Option<bool> {
-        if let HirKind::Lambda { captures, .. } = &h.kind {
+        if let HirKind::Lambda(lambda) = &h.kind {
             if info.alloc_region.get(&h.id) == Some(&closure) {
                 // The capturing closure: find its capture of the binding holding `member`.
-                let cap = captures.iter().find(|c| {
+                let cap = lambda.captures.iter().find(|c| {
                     info.binding_source_regions
                         .get(&c.binding)
                         .is_some_and(|rs| rs.contains(&member))
@@ -282,7 +284,7 @@ pub(super) fn capture_is_local_slot_loaded(
                         && !enclosing.iter().any(|e| e.contains(&c.binding))
                 }));
             }
-            enclosing.push(captures.iter().map(|c| c.binding).collect());
+            enclosing.push(lambda.captures.iter().map(|c| c.binding).collect());
             let mut res = None;
             h.for_each_child(|c| {
                 if res.is_none() {

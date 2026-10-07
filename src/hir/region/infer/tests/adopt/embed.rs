@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-06
 //! Pins a `Fresh` native's embed declaration: an embedded capture that escapes through the result stays out of every Owned subtree.
 //!
 //! docs/impl/region/adopt.md
@@ -20,9 +20,9 @@ use super::*;
 /// has exactly one capture (the trait table); panics otherwise.
 fn sole_captured_region(hir: &Hir, info: &RegionInfo, closure: Region) -> Region {
     fn walk(h: &Hir, info: &RegionInfo, closure: Region, out: &mut Vec<Region>) {
-        if let HirKind::Lambda { captures, .. } = &h.kind {
+        if let HirKind::Lambda(lambda) = &h.kind {
             if info.alloc_region.get(&h.id) == Some(&closure) {
-                for c in captures {
+                for c in &lambda.captures {
                     if let Some(rs) = info.binding_source_regions.get(&c.binding) {
                         out.extend(rs.iter().copied().filter(|&r| r != closure));
                     }

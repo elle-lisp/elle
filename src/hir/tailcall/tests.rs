@@ -1,4 +1,7 @@
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-10-06
+//! Tests for `mark_tail_calls`: which calls each form leaves in tail position.
+//!
+//! docs/impl/hir.md
 
 use super::*;
 use crate::hir::testkit::{HirFixture, Stage};
@@ -16,6 +19,8 @@ fn analyze_and_mark(source: &str) -> Hir {
     hir
 }
 
+/// The `is_tail` flag of every call, in walk order: a call before its callee
+/// expression, and the callee before the arguments.
 fn find_calls(hir: &Hir) -> Vec<bool> {
     let mut calls = Vec::new();
     collect_calls(hir, &mut calls);
@@ -35,7 +40,7 @@ fn collect_calls(hir: &Hir, calls: &mut Vec<bool>) {
                 collect_calls(&arg.expr, calls);
             }
         }
-        HirKind::Lambda { body, .. } => collect_calls(body, calls),
+        HirKind::Lambda(lambda) => collect_calls(&lambda.body, calls),
         HirKind::If {
             cond,
             then_branch,
@@ -158,10 +163,9 @@ fn test_simple_tail_call() {
 
 #[test]
 fn test_non_tail_call_in_addition() {
-    // (fn (x) (+ (f x) 1)) - the call to f is NOT in tail position
+    // The outer `+` is in tail position; `f` is its argument.
     let hir = analyze_and_mark("(fn (x) (+ (f x) 1))");
     let calls = find_calls(&hir);
-    // First call is +, second is f - both are not tail (+ is outer, f is arg)
     assert_eq!(calls, vec![true, false]); // + is tail, f is not
 }
 
@@ -210,8 +214,8 @@ fn test_recursive_tail_call() {
     // Classic tail-recursive countdown
     let hir = analyze_and_mark("(def count-down (fn (n) (if (<= n 0) 0 (count-down (- n 1)))))");
     let calls = find_calls(&hir);
-    // Calls: <=, -, count-down
-    // <= is in condition (not tail), - is arg (not tail), count-down is tail
+    // Walk order: `<=` (condition, not tail), `count-down` (tail), then `-`
+    // (its argument, not tail).
     assert_eq!(calls, vec![false, true, false]);
 }
 
@@ -258,7 +262,6 @@ fn test_while_body_not_tail() {
 
 #[test]
 fn test_cond_bodies_are_tail() {
-    // (fn (x) (cond ((= x 1) (f)) ((= x 2) (g)) (else (h))))
     let hir = analyze_and_mark("(fn (x) (cond (= x 1) (f) (= x 2) (g) (h)))");
     let calls = find_calls(&hir);
     // Calls: = (not tail), f (tail), = (not tail), g (tail), h (tail)

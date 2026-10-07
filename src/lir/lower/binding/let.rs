@@ -1,12 +1,13 @@
 // audited: 2026-10-13
 //! The recursive and scoped binding forms: `let` and `letrec`.
 //!
-//! docs/impl/region/letrec.md
 //! docs/impl/region/cells.md
+//! docs/impl/region/letrec.md
+//! docs/impl/region/relocate.md
 //!
-//! They share the region-scope, capture-cell, and tail-call stranding
-//! machinery, kept together so the parallel `lower_let`/`lower_letrec`
-//! ordering (slot-before-init, deferred decrefs) reads side by side.
+//! The two binders share the region-scope, capture-cell and tail-call stranding
+//! machinery. They sit together so their parallel ordering (slot before init,
+//! deferred decrefs) reads side by side.
 
 use super::*;
 
@@ -199,14 +200,14 @@ impl<'a> Lowerer<'a> {
             let bi = self.arena.get(*binding);
             let needs_capture = bi.needs_capture();
             // A COMPILED forward cell lives in the binding's own stack slot. That
-            // is every captured binding at top level, and inside a lambda the
-            // immutable lambda-initialized shape, the closure-cycle merge's
-            // static-slot cells. Every other in-lambda captured binding keeps the
-            // env-cell route (StoreCapture into the `populate_env` cell). Both
+            // covers every captured binding at top level, and the immutable
+            // lambda-initialized shape inside a lambda (the closure-cycle merge's
+            // static-slot cells). Every other in-lambda captured binding keeps
+            // the env-cell route (StoreCapture into the `populate_env` cell). Both
             // binder forms mint that cell through the one constructor, which also
             // registers the binding (`allocate_compiled_cell_slot`).
-            let compiled_cell = bi
-                .compiled_forward_cell(matches!(init.kind, HirKind::Lambda { .. }), self.in_lambda);
+            let compiled_cell =
+                bi.compiled_forward_cell(matches!(init.kind, HirKind::Lambda(_)), self.in_lambda);
             if compiled_cell {
                 self.allocate_compiled_cell_slot(*binding)?;
                 continue;
@@ -225,12 +226,11 @@ impl<'a> Lowerer<'a> {
         }
         // Then initialize
         for (binding, init) in bindings.iter() {
-            // Name the lambda this binder initializes. The binding and params
-            // are kept for the duration of the lowering, and no decision reads
-            // them.
-            if let HirKind::Lambda { params, .. } = &init.kind {
+            // Name the lambda for `lower_lambda_body`, and record the binding
+            // and its parameters as the function context.
+            if let HirKind::Lambda(lambda) = &init.kind {
                 self.current_function_binding = Some(*binding);
-                self.current_function_params = Some(params.clone());
+                self.current_function_params = Some(lambda.params.clone());
                 self.pending_lambda_name = self.binder_name(*binding);
             }
             let slot = self.binding_to_slot[binding];
@@ -328,14 +328,14 @@ impl<'a> Lowerer<'a> {
 
     /// Mark what a binding scope's BODY strands when it leaves by a tail call.
     ///
-    /// A frame-replacing tail call leaves everything the scope node emits after
-    /// the body — the scope-end releases — in dead code, so each marking below
-    /// asks which release that stranding takes out and which channel supplies it.
+    /// A frame-replacing tail call leaves the scope-end releases, which the scope
+    /// node emits after the body, in dead code. Each marking below asks which
+    /// release that stranding takes out and which channel supplies it.
     ///
     /// Read by both binder forms of a mutual-recursion cycle, because both leave
     /// the same releases stranded: a `Letrec`'s body, and the last expression of
-    /// the `Begin` a run of local `defn`s sits in (docs/impl/region/letrec.md).
-    /// `scope_id` is the node whose scope-end releases the tail call passes over.
+    /// the `Begin` a run of local `defn`s sits in. `scope_id` is the node
+    /// whose scope-end releases the tail call passes over.
     pub(in crate::lir::lower) fn mark_body_tail_strands(&mut self, scope_id: HirId, body: &Hir) {
         // Every tail call the body makes, by callee binding.
         let mut tail_callees: Vec<Binding> = Vec::new();
@@ -440,7 +440,7 @@ impl<'a> Lowerer<'a> {
     /// that closure's own activation, not the letrec's, so they neither strand
     /// nor may free the letrec's merged arena.
     fn collect_body_tail_callees(hir: &Hir, out: &mut Vec<Binding>) {
-        if matches!(hir.kind, HirKind::Lambda { .. }) {
+        if matches!(hir.kind, HirKind::Lambda(_)) {
             return;
         }
         if let HirKind::Call {

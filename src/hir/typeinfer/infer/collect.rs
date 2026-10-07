@@ -1,10 +1,10 @@
-// audited: 2026-09-08
-// src/hir/AGENTS.md
-// docs/impl/typeinfer.md
-//! The pre-passes: the program facts one walk of the tree yields, which every
-//! later pass reads without recomputing them.
+// audited: 2026-10-06
+//! The pre-passes: the program facts one walk of the tree yields, which every later pass reads.
+//!
+//! docs/impl/typeinfer.md
 
 use super::*;
+use crate::hir::{Lambda, VarargKind};
 
 /// A binding initializer with any capture-cell wrapper peeled off: a
 /// self-recursive or captured lambda arrives as `MakeCell { Lambda }`, and
@@ -42,8 +42,8 @@ pub(crate) fn collect_mutated_bindings(hir: &Hir) -> std::collections::HashSet<B
 /// Collect every binding read in VALUE position — anywhere except as the
 /// direct callee of a `Call`. A lambda binding with even one value-position
 /// use (stored, passed as an argument, returned, exported) has callers the
-/// call-site scan cannot see, so its parameter joins are not a proof
-/// (`infer_node`'s forwarding consults this set).
+/// call-site scan cannot see, so its parameter joins are not a proof.
+/// `infer_call` consults this set before it forwards operand types.
 pub(crate) fn collect_value_position_uses(hir: &Hir, out: &mut std::collections::HashSet<Binding>) {
     match &hir.kind {
         HirKind::Call { func, args, .. } => {
@@ -74,6 +74,18 @@ pub(crate) fn collect_value_position_uses(hir: &Hir, out: &mut std::collections:
     }
 }
 
+/// A lambda binding's parameters, split the way a call's operands reach them.
+pub(crate) struct LambdaSig {
+    /// Every parameter, the rest parameter included.
+    pub(crate) all: Vec<Binding>,
+    /// The fixed parameters, in order: the one operand in each position
+    /// reaches each, and an `&opt` one a call gives no operand is nil.
+    pub(crate) fixed: Vec<Binding>,
+    /// The rest parameter, which receives the list of the extra operands when
+    /// it collects a list, and a struct otherwise.
+    pub(crate) rest: Option<(Binding, bool)>,
+}
+
 /// Collect which bindings are lambda definitions and what their params are. A
 /// `(numeric!)` declaration is NOT collected here — it lives on the parameter
 /// bindings themselves (`BindingInner::declared_numeric`, applied through
@@ -81,12 +93,34 @@ pub(crate) fn collect_value_position_uses(hir: &Hir, out: &mut std::collections:
 pub(crate) fn collect_lambda_info(
     hir: &Hir,
     _arena: &BindingArena,
-    lambda_params: &mut HashMap<Binding, Vec<Binding>>,
+    lambda_params: &mut HashMap<Binding, LambdaSig>,
 ) {
     let record =
-        |binding: &Binding, value: &Hir, lambda_params: &mut HashMap<Binding, Vec<Binding>>| {
-            if let HirKind::Lambda { params, .. } = &unwrap_make_cell(value).kind {
-                lambda_params.insert(*binding, params.clone());
+        |binding: &Binding, value: &Hir, lambda_params: &mut HashMap<Binding, LambdaSig>| {
+            if let Some(Lambda {
+                params,
+                rest_param,
+                vararg_kind,
+                ..
+            }) = unwrap_make_cell(value).kind.as_lambda()
+            {
+                let collects_list = *vararg_kind == VarargKind::List;
+                lambda_params.insert(
+                    *binding,
+                    LambdaSig {
+                        all: params
+                            .iter()
+                            .copied()
+                            .chain(rest_param.iter().copied().filter(|r| !params.contains(r)))
+                            .collect(),
+                        fixed: params
+                            .iter()
+                            .copied()
+                            .filter(|p| Some(*p) != *rest_param)
+                            .collect(),
+                        rest: rest_param.map(|r| (r, collects_list)),
+                    },
+                );
             }
         };
     match &hir.kind {
@@ -108,18 +142,14 @@ pub(crate) fn collect_lambda_info(
 }
 
 /// Map each immutable, unmutated binding whose initializer is `(type-of a)` to
-/// its subject `a` — provided `a` is itself unmutated, so the `type-of` measured
-/// at the binding still describes `a` at the later match scrutinee. Feeds
-/// `typeof_subject_binding` so the `(let [ta (type-of a)] (match ta …))` idiom
-/// narrows and prunes exactly like the inline `(match (type-of a) …)` form. Both
-/// conditions are soundness requirements, enforced conservatively: the alias must
-/// be a stable single value (a rebindable alias could hold a different value at
-/// the match — the same `is_immutable && !is_mutated` gate `prune.rs`'s
-/// `collect_inits` uses), and the subject must be stable (a reassigned subject
-/// could hold a different type than the arm proves). The subject gate is
-/// belt-and-suspenders — a mutated subject is cell-held and its `DerefCell` reads
-/// are not narrowed by the binding-type override anyway — but it keeps this
-/// resolution self-evidently sound without depending on that distant fact.
+/// its subject `a`, provided `a` is itself unmutated. `typeof_subject_binding`
+/// reads the map, so the `(let [ta (type-of a)] (match ta …))` idiom narrows
+/// and prunes as the inline `(match (type-of a) …)` form does.
+///
+/// Both gates keep the narrowing sound. A rebindable alias could hold a
+/// different value at the match, which is the gate `prune.rs`'s
+/// `collect_inits` applies too. A reassigned subject could hold a type other
+/// than the one the arm proves.
 pub(crate) fn collect_typeof_aliases(
     hir: &Hir,
     arena: &BindingArena,

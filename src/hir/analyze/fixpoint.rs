@@ -40,12 +40,9 @@ impl<'a> Analyzer<'a> {
                 // `analyze_initializer`, which classifies a self-edge as
                 // `Recursive`.
                 let value = self.analyze_initializer(binding, value_syntax)?;
-                if let HirKind::Lambda {
-                    inferred_signals, ..
-                } = &value.kind
-                {
-                    if *inferred_signals != old {
-                        self.signal_env.insert(binding, *inferred_signals);
+                if let HirKind::Lambda(lambda) = &value.kind {
+                    if lambda.inferred_signals != old {
+                        self.signal_env.insert(binding, lambda.inferred_signals);
                         moved = true;
                     }
                 }
@@ -73,7 +70,7 @@ impl<'a> Analyzer<'a> {
     /// it is one of the lambda's captures, whether the lambda makes it directly
     /// or a lambda nested inside it does.
     pub(super) fn refers_to_itself(binding: Binding, value: &Hir) -> bool {
-        matches!(&value.kind, HirKind::Lambda { captures, .. }
-            if captures.iter().any(|capture| capture.binding == binding))
+        matches!(&value.kind, HirKind::Lambda(lambda)
+            if lambda.captures.iter().any(|capture| capture.binding == binding))
     }
 }
