@@ -111,7 +111,7 @@ pub fn rewrite_rust(f: &mut LirFunction) -> u64 {
 pub fn build_rust(corpus: &[LirFunction]) -> Vec<LirFunction> {
     let mut out = Vec::with_capacity(corpus.len());
     for f in corpus {
-        let mut nf = LirFunction::new(f.arity);
+        let mut nf = shell(f);
         for b in &f.blocks {
             let mut nb = elle::lir::BasicBlock::new(b.label);
             for si in &b.instructions {
@@ -120,29 +120,36 @@ pub fn build_rust(corpus: &[LirFunction]) -> Vec<LirFunction> {
             nb.terminator = b.terminator.clone();
             nf.blocks.push(nb);
         }
-        nf.closure_id = f.closure_id;
-        nf.name = f.name.clone();
-        nf.entry = f.entry;
-        nf.constants = f.constants.clone();
-        nf.num_regs = f.num_regs;
-        nf.num_locals = f.num_locals;
-        nf.num_captures = f.num_captures;
-        nf.capture_params_mask = f.capture_params_mask;
-        nf.capture_locals_mask = f.capture_locals_mask.clone();
-        nf.signal = f.signal;
-        nf.doc = f.doc.clone();
-        nf.origin = f.origin;
-        nf.vararg_kind = f.vararg_kind.clone();
-        nf.rest_list_layout = f.rest_list_layout;
-        nf.num_params = f.num_params;
-        nf.num_local_params = f.num_local_params;
-        nf.region_table = f.region_table.clone();
-        nf.merged_slots = f.merged_slots.clone();
-        nf.frame_release_slots = f.frame_release_slots.clone();
-        nf.frame_release_regions = f.frame_release_regions.clone();
         out.push(nf);
     }
     out
+}
+
+/// `f`'s header on a function with no blocks yet: what the lowerer has set by
+/// the time it fills the first block.
+pub fn shell(f: &LirFunction) -> LirFunction {
+    let mut nf = LirFunction::new(f.arity);
+    nf.closure_id = f.closure_id;
+    nf.name = f.name.clone();
+    nf.entry = f.entry;
+    nf.constants = f.constants.clone();
+    nf.num_regs = f.num_regs;
+    nf.num_locals = f.num_locals;
+    nf.num_captures = f.num_captures;
+    nf.capture_params_mask = f.capture_params_mask;
+    nf.capture_locals_mask = f.capture_locals_mask.clone();
+    nf.signal = f.signal;
+    nf.doc = f.doc.clone();
+    nf.origin = f.origin;
+    nf.vararg_kind = f.vararg_kind.clone();
+    nf.rest_list_layout = f.rest_list_layout;
+    nf.num_params = f.num_params;
+    nf.num_local_params = f.num_local_params;
+    nf.region_table = f.region_table.clone();
+    nf.merged_slots = f.merged_slots.clone();
+    nf.frame_release_slots = f.frame_release_slots.clone();
+    nf.frame_release_regions = f.frame_release_regions.clone();
+    nf
 }
 
 /// The same rewrite over the region form: the opcode byte and the pooled

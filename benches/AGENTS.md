@@ -1,6 +1,6 @@
 # benches
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-06 -->
 
 Criterion and reporting benchmarks for the Elle compiler and VM.
 
@@ -11,7 +11,7 @@ Criterion and reporting benchmarks for the Elle compiler and VM.
 | [benchmarks.rs](benchmarks.rs) | Criterion | Wall-clock benchmarks: parsing, symbol interning, compilation, VM execution, end-to-end eval, macro expansion |
 | [memory.rs](memory.rs) | reporting | Heap allocations and bytes, total and net, while four programs compile and run: fib, n-queens, a list build, a closure loop |
 | [regionrc.rs](regionrc.rs) | reporting | Compile-time RC-coalescing win: value→slot mint reduction (transform 1) and merge-induced self-edges eliminated (transform 2), over the stdlib load and both Elle suites |
-| [lirshape](lirshape/main.rs) | reporting | Region-native LIR against the Rust-heap `LirFunction`: build, copy, walk, rewrite, teardown, allocator traffic and resident bytes, over the LIR of the three boot sources |
+| [lirshape](lirshape/main.rs) | reporting | Region-native LIR against the Rust-heap `LirFunction`: build, copy, walk, rewrite, teardown, allocator traffic and resident bytes, over the LIR of the three boot sources; then the lowerer's shape replayed into a `Vec` and into a `RegionVec` per block |
 
 ## Benchmark groups in benchmarks.rs
 
@@ -68,13 +68,23 @@ The bench encodes the LIR of core.lisp, prelude.lisp and stdlib.lisp into a
 region as a fixed-size POD node, then runs the same five operations over both
 forms and reports each side by side
 ([measurements.md](../docs/impl/image/measurements.md) item 7 records what it
-answered). Reporting, like regionrc: it prints numbers and asserts only that
-the two forms carry the same instruction and operand counts.
+answered).
 
-Six files: `main.rs` drives and reports, `node.rs` defines the node,
+It then replays the lowerer's own shape over the same corpus twice: a push per
+instruction, a `finish_block` per block, a nested lambda before its
+`MakeClosure`, and both relocation splices at every tail call. One replay grows
+a `Vec` per block and freezes; the other grows a `RegionVec` per block in a
+working region and compacts each function as it ends (item 8).
+
+Reporting, like regionrc: it prints numbers. It asserts only that the two forms
+carry the same instruction and operand counts, and that the two replays hold
+the same blocks and opcodes.
+
+Eight files: `main.rs` drives and reports, `node.rs` defines the node,
 `opcode.rs` gives each `LirInstr` variant its byte, `build.rs` encodes, `ops.rs`
-holds each measured operation written twice, and `size.rs` counts where each
-form's bytes go.
+holds each measured operation written twice, `size.rs` counts where each form's
+bytes go, `grow.rs` is the `RegionVec`, and `replay.rs` replays the lowerer's
+shape both ways.
 
 ```bash
 cargo bench --bench lirshape

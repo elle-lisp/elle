@@ -6,23 +6,26 @@
 //!
 //! Reports build, walk, rewrite and teardown for the shipped Rust-heap
 //! `LirFunction` and for a region-native prototype carrying the same graph,
-//! plus the allocator traffic and the resident bytes of each. Like
-//! `benches/regionrc.rs` this is a *reporting* bench: it prints numbers and
-//! asserts nothing, beyond the census check that the two forms agree.
+//! plus the allocator traffic and the resident bytes of each, then replays the
+//! lowerer's shape into each (`replay.rs`). Like `benches/regionrc.rs` this is
+//! a *reporting* bench: it prints numbers and asserts nothing, beyond the
+//! checks that the two forms and the two replays agree.
 //!
 //! Run with: cargo bench --bench lirshape
 
 mod build;
+mod grow;
 mod node;
 mod opcode;
 mod ops;
+mod replay;
 mod size;
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
-use elle::lir::LirFunction;
+use elle::lir::{LirFunction, LirModule};
 use elle::pipeline::{lower_file_to_lir, sources};
 use elle::runtime::Runtime;
 
@@ -79,9 +82,9 @@ fn allocs() -> (u64, u64) {
 
 // ── the corpus ────────────────────────────────────────────────────
 
-/// Every function the three boot sources lower to: the largest real Elle
+/// The modules the three boot sources lower to: the largest real Elle
 /// compilation unit, and the one a boot image would have to carry.
-fn corpus(rt: &mut Runtime) -> Vec<LirFunction> {
+fn modules(rt: &mut Runtime) -> Vec<LirModule> {
     let mut out = Vec::new();
     for (name, src) in [
         ("core.lisp", sources::CORE),
@@ -90,14 +93,20 @@ fn corpus(rt: &mut Runtime) -> Vec<LirFunction> {
     ] {
         let (_, symbols, cctx) = rt.parts();
         match lower_file_to_lir(src, symbols, cctx, name, 0) {
-            Ok(module) => {
-                out.push(module.entry);
-                out.extend(module.closures);
-            }
+            Ok(module) => out.push(module),
             Err(e) => println!("  (skipped {name}: {e})"),
         }
     }
     out
+}
+
+/// Every function of `modules`, entry first in each.
+fn corpus(modules: &[LirModule]) -> Vec<LirFunction> {
+    modules
+        .iter()
+        .flat_map(|m| std::iter::once(&m.entry).chain(m.closures.iter()))
+        .cloned()
+        .collect()
 }
 
 // ── the measurements ──────────────────────────────────────────────
@@ -155,7 +164,8 @@ fn main() {
     println!();
 
     let mut rt = Runtime::new();
-    let corpus = corpus(&mut rt);
+    let modules = modules(&mut rt);
+    let corpus = corpus(&modules);
     let instrs: usize = corpus.iter().map(|f| ops::census_rust(f).0).sum();
     let uses: usize = corpus.iter().map(|f| ops::census_rust(f).1).sum();
     let blocks: usize = corpus.iter().map(|f| f.blocks.len()).sum();
@@ -470,5 +480,9 @@ fn main() {
     println!();
 
     rt.heap().decref_region_if_present(region);
+
+    println!("the lowerer's shape — a Vec per block against a RegionVec per block");
+    println!();
+    replay::report(&mut rt, &modules);
     rt.teardown();
 }

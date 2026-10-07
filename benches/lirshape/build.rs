@@ -20,6 +20,24 @@ use elle::value::ConstTemplate;
 use crate::node::{PBlock, PConst, PFunc, PInstr, PTemplate, NO_REG};
 use crate::opcode::opcode;
 
+/// The tables one function's encode fills beside its nodes, set aside whole
+/// while a nested function fills its own.
+#[derive(Default)]
+pub struct Tables {
+    consts: Vec<PConst>,
+    pool: Vec<u32>,
+    templates: Vec<PTemplate>,
+}
+
+impl Tables {
+    /// Empty the tables and keep their capacity, for the next function.
+    pub fn clear(&mut self) {
+        self.consts.clear();
+        self.pool.clear();
+        self.templates.clear();
+    }
+}
+
 /// The scratch a build reuses across functions, beside the region it fills.
 pub struct Builder {
     heap: *mut FiberHeap,
@@ -119,6 +137,23 @@ impl Builder {
             self.blocks = built;
             s
         };
+        self.finish(f, blocks)
+    }
+
+    /// Hand the tables one function's encode fills to the caller, taking
+    /// `spare` in their place: a nested function encodes into its own while its
+    /// parent's wait.
+    pub fn swap_tables(&mut self, spare: Tables) -> Tables {
+        Tables {
+            consts: std::mem::replace(&mut self.consts, spare.consts),
+            pool: std::mem::replace(&mut self.pool, spare.pool),
+            templates: std::mem::replace(&mut self.templates, spare.templates),
+        }
+    }
+
+    /// Copy this function's tables into the region, exact size, and write its
+    /// header beside `blocks`.
+    pub fn finish(&mut self, f: &LirFunction, blocks: RegionSlice<PBlock>) -> PFunc {
         let consts = {
             let built = std::mem::take(&mut self.consts);
             let s = self.slice(&built);
@@ -215,7 +250,7 @@ impl Builder {
         }
     }
 
-    fn terminator(&mut self, t: &Terminator) -> (u8, u32, u32, u32) {
+    pub fn terminator(&mut self, t: &Terminator) -> (u8, u32, u32, u32) {
         match t {
             Terminator::Return(r) => (0, r.0, NO_REG, NO_REG),
             Terminator::Jump(l) => (1, l.0, NO_REG, NO_REG),
@@ -241,7 +276,7 @@ impl Builder {
         (self.consts.len() - 1) as u32
     }
 
-    fn instr(&mut self, si: &SpannedInstr) -> PInstr {
+    pub fn instr(&mut self, si: &SpannedInstr) -> PInstr {
         let i = &si.instr;
         let mut dst = NO_REG;
         for_each_def(i, |r| dst = r.0);
