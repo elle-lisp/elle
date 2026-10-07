@@ -1,11 +1,12 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 14)
+# audited: 2026-10-06
 # jit-compiled-caller-promotes-callee.lisp with every function compiled on its
 # first call, on the VM thread.
 # docs/impl/jit.md
 #
 # The caller is compiled before it makes its first call, so it has no
 # interpreted window at all, and the callee is reached only through
-# `elle_jit_call` from the start.
+# `elle_jit_call` from the start. As there, the sidecar turns the graft off, so
+# each `(hand-to …)` stays a call.
 
 (include-file "jit-compiled-caller-promotes-callee.lisp")

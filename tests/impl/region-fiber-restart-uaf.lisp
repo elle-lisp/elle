@@ -17,7 +17,9 @@
 # compares it against an equal string built afterwards. Where the freed page
 # was recycled the compare fails on any run; where it was not, the read is
 # stale but mapped, so the sidecar arms guardfree, which unmaps the page and
-# faults on it. The `emit` and abort-at-a-yield faces need no delivery mint and
+# faults on it. The sidecar also turns the graft off, so the callee faces raise
+# in a callee rather than in a body grafted into the fiber's own.
+# The `emit` and abort-at-a-yield faces need no delivery mint and
 # are the controls: the same program, one path already funded. The leak face
 # is region-fiber-restart.lisp.
 

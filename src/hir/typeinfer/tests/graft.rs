@@ -341,3 +341,56 @@ fn a_call_the_graft_off_keeps_still_proves_its_callee() {
     let err = compile_ungrafted(rejected).expect_err("a string caller refutes x");
     assert!(err.contains("%mul"), "{rejected}: {err}");
 }
+
+/// The line of every `emit` node in `h`, sorted.
+fn emit_lines(h: &Hir) -> Vec<u32> {
+    fn walk(h: &Hir, out: &mut Vec<u32>) {
+        if matches!(h.kind, HirKind::Emit { .. }) {
+            out.push(h.span.line);
+        }
+        h.for_each_child(|c| walk(c, out));
+    }
+    let mut out = Vec::new();
+    walk(h, &mut out);
+    out.sort_unstable();
+    out
+}
+
+/// A body this unit defines keeps the lines it was written on where it grafts,
+/// so an error it raises names the raising form (docs/impl/vm.md). The
+/// definition's raise and the grafted copy both sit on line 2.
+///
+/// The counter-factual: a graft that stamps the call's span on every node it
+/// rebuilds puts the copy on line 3, and the error names the call.
+#[test]
+fn a_grafted_body_of_the_unit_keeps_its_own_lines() {
+    let src = "(defn raise-it []\n  (error {:error :here}))\n(raise-it)";
+    let (hir, arena) = compiled(src);
+    assert_eq!(
+        count_calls_to(&hir, &arena, "raise-it"),
+        0,
+        "{src}: the call grafts"
+    );
+    assert_eq!(emit_lines(&hir), vec![2, 2], "{src}");
+}
+
+/// A stdlib body takes the line of the call it replaced, wherever that call
+/// came from. Here `(+ a 1)` grafts in `h`'s definition, and again in the copy
+/// of `h` grafted at line 3, which keeps `h`'s own line 2.
+///
+/// The counter-factual is either wrong reading: the call's span stamped on the
+/// copy of `h` puts its guards on line 3, and the stdlib's own spans put them
+/// on the lines of `+` in the stdlib.
+#[test]
+fn a_grafted_stdlib_body_takes_the_line_of_its_call() {
+    let src = "(defn h [a]\n  (+ a 1))\n(h :k)";
+    let (hir, arena) = compiled(src);
+    assert_eq!(
+        count_calls_to(&hir, &arena, "h") + count_calls_to(&hir, &arena, "+"),
+        0,
+        "{src}: both calls graft"
+    );
+    let lines = emit_lines(&hir);
+    assert!(!lines.is_empty(), "{src}: a keyword operand keeps a guard");
+    assert!(lines.iter().all(|l| *l == 2), "{src}: {lines:?}");
+}

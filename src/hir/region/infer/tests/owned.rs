@@ -1,6 +1,12 @@
+// audited: 2026-10-06
+//! Pins the ownership cuts: the subtrees that free under one root, and the rootless cycles that free as one group.
+//!
+//! docs/impl/region/ownership.md
+//! docs/impl/region/adopt.md
+
 use super::*;
 
-// ── ownership inference: externally-unique Owned subtrees (step 2) ─────────
+// ── ownership inference: externally-unique Owned subtrees ───────────────────
 //
 // `region::infer::ownership::compute_owned_subtrees` consumes the Shared-seed set and walks
 // the region containment graph (`cross_region_refs` plus the funnel-recovered
@@ -12,7 +18,7 @@ use super::*;
 // allocation; the negatives are counterfactuals each proven to bite a deliberately-greedy
 // walk — a returned root (seed), an escaping interior child (interior seed), region-level
 // aliasing (outside-references-in), and a may-store clique (a hard edge defeats
-// uniqueness). The map is computed, not yet consumed.
+// uniqueness).
 
 #[test]
 fn owned_subtree_claims_discarded_nested_literal() {
@@ -236,8 +242,9 @@ fn owned_subtree_refuses_captured_by_escaping_closure() {
 //
 // A mutual reference cycle with no container parent has no owner among its members, so
 // `compute_owned_subtrees` (which roots only at top containers) refuses it. The
-// co-owned-cycle cut claims it as one symmetric group, reclaimed wholesale at its
-// collective last use. These pins are written from that definition.
+// co-owned-cycle cut claims it as one symmetric group, reclaimed wholesale at the end of
+// the innermost scope enclosing its allocations. These pins are written from that
+// definition.
 
 #[test]
 fn owned_region_groups_claims_bare_cycle() {
@@ -361,6 +368,36 @@ fn owned_region_groups_drop_site_post_dominates_pass_through_aliases() {
 }
 
 #[test]
+fn owned_region_groups_refuses_a_cycle_the_scope_value_carries_out() {
+    // The `let` that builds the cycle answers `a`, and `length` reads it after the `let`
+    // ends. The innermost scope enclosing both allocations is that `let`, so a group freed
+    // there frees `a` under the read. The cycle must stay on per-region RC.
+    //
+    // The counter-factual is the bare cycle above, whose scope answers nil: the same two
+    // pushes form the same SCC, and there the group is claimed.
+    let src = "(length (let [a (@array) b (@array)] \
+                         (%array-push a b) (%array-push b a) a))";
+    let (_, info, groups) = owned_region_groups(src);
+    let mut members = rustc_hash::FxHashSet::default();
+    for &(_site, src_r, dst_r) in &info.containment_edges {
+        members.insert(src_r);
+        members.insert(dst_r);
+    }
+    assert_eq!(
+        members.len(),
+        2,
+        "precondition: the two pushes form the cycle; got {:?}",
+        members
+    );
+    assert!(
+        groups.is_empty(),
+        "a cycle whose member leaves its scope as the scope's value must not be a \
+         co-owned group; got {:?}",
+        groups
+    );
+}
+
+#[test]
 fn owned_subtree_claims_mutable_container_over_call_result() {
     // The production-path shape (and the scheduler's mutable cell in miniature): a
     // mutable container and its stored value are both `Fresh` native CALL results —
@@ -420,7 +457,7 @@ fn owned_subtree_no_funnel_containment_for_immutable_container() {
     // Array, not MutableArray, so it is not a mutable retaining container and the
     // recovery records NO containment edge. Recording `arg0 ⊇ value` here would be
     // a use-after-free (subtree-dropping the immutable array would free a value it
-    // never retained), so the mutable-only gate is load-bearing, not an optimization.
+    // never retained), so the mutable-only gate is a soundness gate, not an optimization.
     let (_, info, _owned) =
         owned_subtrees_with_effects("(begin (%array-push (array 1 2) (array 3 4)) nil)");
     assert!(

@@ -1,4 +1,4 @@
-// audited: 2026-10-03
+// audited: 2026-10-06
 // The tier a build starts, read back out of a running VM, and the flags a user
 // build no longer has.
 //
@@ -7,8 +7,9 @@
 // src/config/tests.rs pins what `Config::parse` builds from the argv. That is
 // a different question from what the binary does: `main` resolves the config,
 // installs it into the process cell, and each VM seeds its RuntimeConfig from
-// there. A default that never reaches the dispatcher reads correctly in the
-// struct and compiles nothing, which is the gap these tests close.
+// there. Whether the dispatcher compiles at that threshold needs a call that
+// stays a call, which only the rig can promise, so
+// tests/impl/jit-threshold.lisp holds that half.
 
 use std::process::{Command, Output};
 
@@ -38,20 +39,6 @@ fn run(args: &[&str], source: &str) -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
-/// A hot loop over `hot`, then whether the JIT compiled it. `--trace=syncjit`
-/// compiles on the VM thread, so `jit?` does not race the `elle-jit` worker.
-#[cfg(all(feature = "jit", not(feature = "mlir"), not(feature = "wasm")))]
-fn compiled_after(calls: usize, prelude: &str) -> String {
-    run(
-        &["--trace=syncjit"],
-        &format!(
-            "{prelude} (defn hot [n] (+ n 1)) \
-             (def @i 0) (while (< i {calls}) (hot i) (assign i (+ i 1))) \
-             (println (jit? hot))"
-        ),
-    )
-}
-
 #[test]
 #[cfg(all(feature = "jit", not(feature = "mlir"), not(feature = "wasm")))]
 fn the_default_build_reports_the_jit_threshold() {
@@ -66,32 +53,8 @@ fn a_build_without_mlir_reports_no_mlir_threshold() {
 
 #[test]
 #[cfg(all(feature = "jit", not(feature = "mlir"), not(feature = "wasm")))]
-fn a_hot_function_compiles_with_no_flag_at_all() {
-    // The counter-factual the threshold alone cannot give: a threshold the
-    // dispatcher never consults still reads back. Drive a function past it and
-    // ask whether native code exists for it.
-    assert_eq!(
-        compiled_after(50, ""),
-        "true",
-        "50 calls with no flag must leave native code behind"
-    );
-}
-
-#[test]
-#[cfg(all(feature = "jit", not(feature = "mlir"), not(feature = "wasm")))]
-fn a_cold_function_stays_interpreted() {
-    // The other half of the pair: three calls stay under the default threshold
-    // of ten. Without it, a `jit?` that answered `true` unconditionally would
-    // pass the test above, and so would the one below.
-    assert_eq!(compiled_after(3, ""), "false");
-}
-
-#[test]
-#[cfg(all(feature = "jit", not(feature = "mlir"), not(feature = "wasm")))]
-fn a_program_lowers_the_threshold_through_vm_config() {
-    // The threshold is the one JIT setting a program owns. Set to one, three
-    // calls compile what the default leaves interpreted (above).
-    assert_eq!(compiled_after(3, "(vm/config-set :jit 1)"), "true");
+fn a_program_reads_back_the_threshold_it_sets() {
+    // The threshold is the one JIT setting a program owns.
     assert_eq!(
         run(&[], "(vm/config-set :jit 20) (println (vm/config :jit))"),
         "20"
