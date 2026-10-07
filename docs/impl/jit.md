@@ -233,8 +233,8 @@ retained native code itself. Teardown clears the three tables before it
 releases the process roots, so a pin never holds a region past the sweep.
 
 Two more caches key by the same address and pin the same way. The VM's SPIR-V
-cache, which `git` and `mlir/compile-spirv` fill, adds the workgroup size to
-the key ([spirv.md](spirv.md)). The MLIR tier's engines and rejections add the
+cache, which `git` and `mlir/compile-spirv` fill, holds a kernel per workgroup
+size under each key ([spirv.md](spirv.md)). The MLIR tier's engines and rejections add the
 capture and parameter type masks ([mlir.md](mlir.md)). Teardown clears both
 with the three.
 

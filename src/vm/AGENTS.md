@@ -198,7 +198,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `current_fiber_handle` | `Option<FiberHandle>` | Handle for current fiber (`None` for root) |
 | `current_fiber_value` | `Option<Value>` | Cached Value for current fiber (`None` for root) |
 | `jit_cache` | `FxHashMap<*const u8, JitCacheEntry>` | JIT code cache; each entry's `CodePin` holds the region its key's payload lives in ([jit.md](../../docs/impl/jit.md)). Write via `install_jit_code`, read via `jit_code_for` |
-| `spirv_cache` | `FxHashMap<(*const u8, WorkgroupSize), SpirvEntry>` | The SPIR-V `git` and `mlir/compile-spirv` compiled, by bytecode and workgroup size, pinned like `jit_cache` ([spirv.md](../../docs/impl/spirv.md)) |
+| `spirv_cache` | `FxHashMap<*const u8, SpirvEntry>` | The SPIR-V `git` and `mlir/compile-spirv` compiled: one entry per code object, pinned like `jit_cache`, holding a kernel per workgroup size ([spirv.md](../../docs/impl/spirv.md)) |
 | `jit_rejections` | `FxHashMap<*const u8, JitRejectionInfo>` | JIT rejection log: first rejection per closure template |
 | `closure_call_counts` | `FxHashMap<*const u8, usize>` | JIT hotness profiling (FxHash for pointer keys) |
 | `pending_tail_call` | `Option<TailCallInfo>` | Rc-based tail call info (transient) |

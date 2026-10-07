@@ -115,10 +115,13 @@ workgroup size argument on the compiler path.
 ## Caching
 
 One cache holds SPIR-V: the VM's `spirv_cache`
-([src/vm/core/caches.rs](../../src/vm/core/caches.rs)). It keys a kernel by the
-closure's bytecode and the workgroup size, because the size is written into
-the kernel's entry point. `mlir/compile-spirv` and `git` both look there first
-and fill it on a miss, so a repeated call at one size is a lookup.
+([src/vm/core/caches.rs](../../src/vm/core/caches.rs)). It holds one entry per
+code object, keyed by the closure's bytecode, and the entry holds a kernel per
+workgroup size, because the size is written into the kernel's entry point.
+`mlir/compile-spirv` and `git` both look there first and fill it on a miss, so
+a repeated call at one size is a lookup. The call path asks the same entry
+whether any kernel is cached, which is what makes a GIT'd closure need the
+`:gpu` capability.
 
 Each entry pins the code region of the closure's code object, so its key keeps
 naming the same function. [jit.md](jit.md) owns that argument, under cache
@@ -141,7 +144,7 @@ every later call at the same size.
 |------|---------|
 | [src/mlir/spirv.rs](../../src/mlir/spirv.rs) | Compiler path: LIR → MLIR `gpu.module` → SPIR-V bytes |
 | [src/mlir/cache.rs](../../src/mlir/cache.rs) | `MlirCache::compile_spirv`, which lowers through the shared MLIR context |
-| [src/vm/core/caches.rs](../../src/vm/core/caches.rs) | The VM's SPIR-V cache, keyed by bytecode and workgroup size |
+| [src/vm/core/caches.rs](../../src/vm/core/caches.rs) | The VM's SPIR-V cache: one pinned entry per code object, a kernel per workgroup size |
 | [src/vm/signal/query.rs](../../src/vm/signal/query.rs) | The handlers for `mlir/compile-spirv` and `git` |
 | [src/primitives/introspection.rs](../../src/primitives/introspection.rs) | Primitive definitions: `mlir/compile-spirv`, `fn/gpu-eligible?` |
 | [src/primitives/meta.rs](../../src/primitives/meta.rs) | Primitive definitions: `git`, `fn/git?`, `disgit` |
