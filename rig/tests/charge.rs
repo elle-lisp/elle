@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-06
 // A file's charge: what its second run in-process cost the runner's heap, judged as the producer `elle test`.
 // docs/test-gauges.md
 // docs/ratchet.md
@@ -59,6 +59,26 @@ fn verdict(db: &Path, subject: &str, axis: &str) -> String {
              WHERE run_id = (SELECT max(id) FROM run) AND subject = '{subject}' \
              AND axis = '{axis}'"
         ),
+    )
+}
+
+/// Every row the latest run recorded about `subject`: read, judged or missing.
+fn rows_of(db: &Path, subject: &str) -> String {
+    query(
+        db,
+        &format!(
+            "SELECT axis, value, verdict FROM measurement \
+             WHERE run_id = (SELECT max(id) FROM run) AND subject = '{subject}'"
+        ),
+    )
+}
+
+/// The distinct statuses of the latest run's results, in order.
+fn statuses(db: &Path) -> String {
+    query(
+        db,
+        "SELECT DISTINCT status FROM result \
+         WHERE run_id = (SELECT max(id) FROM run) ORDER BY status",
     )
 }
 
@@ -158,6 +178,73 @@ fn a_charge_is_judged_against_the_rows_of_the_producer_elle_test() {
     assert!(
         verdict(&db, "f.lisp", "bytes").contains("missing"),
         "and a row of the file's that the charge never read is missing"
+    );
+}
+
+#[test]
+fn a_file_gated_on_every_tier_has_no_charge_and_its_row_is_left_alone() {
+    // What a gated run leaves live follows what the box has installed:
+    // tests/lang/zmq.lisp reads 3 objects fewer where libzmq is absent than
+    // where its tests run, so a pin set on one box read stale on the other.
+    let dir = bench(
+        "gated",
+        &[("runner.lisp", vec![own("[\"gated.lisp\" :objects 1000000")])],
+    );
+    dir.write(
+        "gated.lisp",
+        "(def why \"the library is absent\")\n(error {:error :gated :reason why})\n",
+    );
+    let db = dir.path().join("s.db");
+    let out = run(dir.path(), &db, &["--charge", "gated.lisp"]);
+    assert_eq!(
+        statuses(&db),
+        "{:status \"skip\"}\n",
+        "the file skips on every tier"
+    );
+    assert_eq!(
+        rows_of(&db, "gated.lisp"),
+        "",
+        "it records no reading, and its row is not missing"
+    );
+    assert!(
+        out.status.success(),
+        "so the row it never read leaves the run green:\n{}{}",
+        stdout(&out),
+        stderr(&out)
+    );
+}
+
+#[test]
+fn a_file_that_ran_on_any_tier_is_charged() {
+    // A tier can refuse a file the same way on every box, so a skip on one
+    // tier says nothing about what the box has installed. This file skips
+    // with the JIT off and runs with it on.
+    let dir = bench(
+        "half",
+        &[("runner.lisp", vec![own("[\"half.lisp\" :objects 1000000")])],
+    );
+    dir.write(
+        "half.lisp",
+        "(def jit (vm/config :jit))\n\
+         (when (nil? jit) (error {:error :gated :reason \"no JIT on this tier\"}))\n\
+         (assert (= (+ 1 1) 2) \"one and one\")\n",
+    );
+    let db = dir.path().join("s.db");
+    let out = run(dir.path(), &db, &["--charge", "half.lisp"]);
+    assert_eq!(
+        statuses(&db),
+        "{:status \"pass\"}\n{:status \"skip\"}\n",
+        "the file passes on one tier and skips on the other"
+    );
+    assert!(
+        verdict(&db, "half.lisp", "objects").contains("stale"),
+        "its charge is read and judged:\n{}",
+        rows_of(&db, "half.lisp")
+    );
+    assert!(
+        !out.status.success(),
+        "and the stale pin gates the run:\n{}",
+        stderr(&out)
     );
 }
 
