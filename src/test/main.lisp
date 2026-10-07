@@ -1,5 +1,5 @@
 (elle/epoch 14)
-# audited: 2026-10-05
+# audited: 2026-10-06
 ## elle test — the command line, the store it opens, and the run it drives.
 ## docs/test-cli.md
 ##
@@ -277,15 +277,29 @@
 # (docs/test-gauges.md).
 (def gauge-prev (gauge-baseline))
 
+(defn charge-skips-from? [statuses i n]
+  "Whether every one of STATUSES from index I to N is a skip."
+  (or (= i n)
+      (and (= (get statuses i) :skip) (charge-skips-from? statuses (+ i 1) n))))
+
+(defn charge-skipped-every-tier? [statuses]
+  "Whether a file's STATUSES say it skipped on every tier. An index walk, so
+   the answer allocates nothing inside a charge's window."
+  (let [n (length statuses)]
+    (and (> n 0) (charge-skips-from? statuses 0 n))))
+
 # Run FILE in-process a second time, and record what that run left live on the
 # runner's heap. The window opens after the first run's rows are written and
-# closes once the second run's are, so it holds the second run alone
-# (docs/test-gauges.md).
+# closes once the second run's are, so it holds the second run alone. A run
+# that skipped on every tier records nothing (docs/test-gauges.md). Its
+# statuses are read down to a boolean before the window closes, so the list
+# is not live at the reading.
 (defn charge-file [conn run-id file]
-  (let [before (gauge-baseline)]
-    (parameterize ((*form-budget-ms* (budget-for file)))
-      (process-file conn run-id file))
-    (let [after (gauge-baseline)]
+  (let [before (gauge-baseline)
+        skipped (charge-skipped-every-tier? (parameterize ((*form-budget-ms* (budget-for file)))
+          (process-file conn run-id file)))
+        after (gauge-baseline)]
+    (unless skipped
       (record-charge conn run-id file
                      (- (get after "objects") (get before "objects"))))))
 
