@@ -54,8 +54,10 @@ loads it. A new error site raises the count of contexts, and a known site
 repeated leaves it alone. `--trace=syncjit` compiles on the VM thread, so the
 JIT program's report does not depend on when a background compile lands.
 
-The producer gates itself out when `valgrind` is not on the path, and when the
-rig is not a release build. A ledger row's build names no profile, so a debug
-rig would read its own counts against the release rows. The eight measured
+The producer gates itself out when the rig is not a release build, and then
+when `valgrind` is not on the path. A ledger row's build names no profile, so a
+debug rig would read its own counts against the release rows. The profile is
+checked first, so a debug rig gives the same reason on every box, whether or
+not `valgrind` is installed. The eight measured
 runs start together, because the producer runs once per JIT policy, and
 memcheck runs a program at a fraction of its native speed.
