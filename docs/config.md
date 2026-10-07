@@ -317,4 +317,6 @@ instruction.
 
 An embedding host builds a `Config` itself, so the policies a user build does
 not expose are reachable from Rust: `JitPolicy::Off` and `JitPolicy::Eager`
-are what the rig sets for a sidecar that asks for them.
+are what the rig sets for a sidecar that asks for them. `GraftPolicy::Off` is
+another, and keeps every call a call in the units an instance compiles after
+its boot ([grafting a call](impl/graft.md)).

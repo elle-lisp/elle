@@ -346,6 +346,25 @@ written with `%not` does. The container wrappers
 `push`, `put`, `add` and `del` dispatch on `(type-of coll)`, and `put` takes its
 optional value through the rest list.
 
+## Turning the graft off
+
+An implementation test whose subject is a call needs the call to stay one: a
+test of the region a call hands its callee, or of the frame a callee owns. Such
+a test turns the graft off. It does not write a callee the graft declines, such
+as one with an unused `&opt` parameter, because that relies on a limit of the
+graft and not on a rule of the language ([spec](../spec.md)).
+
+An Elle file names `graft = false` in its rig sidecar
+([the rig](../../rig/overview.md)). A Rust test sets `GraftPolicy::Off` on the
+`CompileCtx` it compiles through. No flag of `elle` and no `vm/config` key
+reaches the setting.
+
+The setting holds for each unit an instance compiles after its boot: the
+program, the files it imports, and a `compile/whole-module` source. The boot
+compiled the stdlib under the graft, so the stdlib's own bodies keep their
+grafts, while a call from the program into the stdlib stays a call. The fold
+still runs, and deletes what the types decide around the calls that stay.
+
 ## Pinning tests
 
 - `hir::typeinfer::tests::graft::*` — which calls graft. Each arithmetic and
@@ -357,7 +376,8 @@ optional value through the rest list.
   recursive function stays a call, a `(numeric!)` parameter keeps its floor in
   the graft, and a function the program defines grafts while its definition
   still proves its parameters. A call inside a function nothing calls stays a
-  call.
+  call. Under `GraftPolicy::Off` every call stays a call, to a function the
+  program defines and to the stdlib, and the stdlib keeps its own grafts.
 - `hir::typeinfer::tests::fold::*` — what the fold decides: a guard over a
   proven operand, a `type-of` dispatch over a proven container in the program
   and in the stdlib, a certain raise that keeps what follows it, a resume that
@@ -375,6 +395,11 @@ optional value through the rest list.
 - [the wrapper corpus test](../../tests/impl/wrapper-lowering.lisp) — each
   wrapper over two proven numbers leaves no `Emit` in the disassembly, and over
   unproven operands it keeps its guards.
+- [the graft-off corpus test](../../tests/impl/graft-off.lisp) — under
+  `graft = false`, a call to a function the file defines and a call to `+`
+  each stay a call in the disassembly.
+- [the rig's sidecar tests](../../rig/tests/sidecar.rs) — the rig reads
+  `graft`, prints it back, and refuses a value that is not a boolean.
 - [the operators test](../../tests/lang/operators.lisp), a language test —
   each wrapper answers at every arity and raises what it raises. It answers
   alike over literal operands, over operands a function receives, and called

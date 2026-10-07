@@ -22,7 +22,8 @@ language test. What makes it an implementation test is what it reads or needs:
 - a tier — `jit?`, `jit/rejections`, `compile/run-on`, `vm/tier`,
   `(vm/config :jit)`;
 - an artifact — `fn/disasm`, `fn/cfg`, `compile/dumps`;
-- a mode — the JIT off or eager, `--trace=guardfree`, `--trace=syncjit`;
+- a mode — the JIT off or eager, the graft off, `--trace=guardfree`,
+  `--trace=syncjit`;
 - a mechanism as its subject — a calling convention, a tail move, an owned
   parameter, a region release — even where its assertions read values.
 

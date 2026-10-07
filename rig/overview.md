@@ -8,10 +8,10 @@ in ways a user build cannot.
 The implementation suite runs on the rig ([spec](../docs/spec.md)). A user
 build has one runtime per build: no flag chooses a tier, and no flag turns the
 JIT off. An implementation test sometimes needs exactly that — the interpreter
-alone, every function compiled on its first call, the use-after-free oracle
-armed — and the rig is where those settings live. The rig is a second
-executable over the `elle` library, so a program that runs under `elle` runs
-under the rig unchanged. Nothing in a user build accepts a rig setting, so none
+alone, every function compiled on its first call, every call kept a call, the
+use-after-free oracle armed — and the rig is where those settings live. The rig
+is a second executable over the `elle` library, so a program that runs under
+`elle` runs under the rig unchanged. Nothing in a user build accepts a rig setting, so none
 reaches user documentation.
 
 ## Running a file
@@ -38,14 +38,16 @@ failing file's configuration reproduces its run. It has one line per setting:
 
 ```toml
 jit = 10
+graft = true
 trace = ["guardfree", "scrub"]
 ```
 
-`jit` prints a threshold, `"eager"` or `"off"`. `trace` prints the keywords
-sorted, each once. `mlir` prints only in a build that carries the MLIR tier,
-and `wasm` only in a build that carries the WebAssembly backend. A file with no
-sidecar prints the build's defaults: `jit = 10` and `trace = []` in the default
-build.
+`jit` prints a threshold, `"eager"` or `"off"`. `graft` prints `true` or
+`false`. `trace` prints the keywords sorted, each once. `mlir` prints only in a
+build that carries the MLIR tier, and `wasm` only in a build that carries the
+WebAssembly backend. A file with no
+sidecar prints the build's defaults: `jit = 10`, `graft = true` and `trace = []`
+in the default build.
 
 The rig also answers `elle`'s subcommands — `elle-rig test`, `elle-rig semver`,
 `elle-rig fmt` — through the same library code `elle` calls. A program that runs
@@ -95,6 +97,7 @@ trace = ["guardfree"]
 | `jit` | `"off"`, `"eager"`, or a positive integer | The interpreter alone; compile on the first call; or compile after that many calls |
 | `mlir` | the same | The MLIR tier's policy, in a build that carries it |
 | `wasm` | `"off"`, `"full"`, or a positive integer | The WebAssembly backend's policy, in a build that carries it, read as `--wasm=` reads it: off; the whole program as one module; or each closure from that call on |
+| `graft` | `true` or `false` | `false` keeps every call a call in each unit the program compiles; the stdlib keeps the grafts its boot made ([grafting a call](../docs/impl/graft.md)) |
 | `trace` | an array of trace keywords | The build's trace keywords (`TRACE_KEYWORDS`), `guardfree` and `scrub` among them |
 
 The rig refuses a sidecar and runs nothing when the sidecar has a key the rig
@@ -120,8 +123,8 @@ same rules. The implementation suite uses three, under
   the rig of a `wasm` build, with each file compiled whole to one
   WebAssembly module ([wasm](../docs/impl/wasm.md)).
 
-A profile's `jit`, `mlir` and `wasm` replace the sidecar's, and its `trace`
-keywords join the sidecar's.
+A profile's `jit`, `mlir`, `wasm` and `graft` replace the sidecar's, and its
+`trace` keywords join the sidecar's.
 
 ## How the suite drives it
 
