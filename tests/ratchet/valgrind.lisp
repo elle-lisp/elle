@@ -6,12 +6,13 @@
 
 (def r ((import "std/ratchet")))
 
-(let [[ok? _] (protect (subprocess/system "valgrind" ["--version"]))]
-  (unless ok? (error {:error :gated :reason "valgrind is not on the path"})))
+# The profile first, so a debug rig gives one reason with valgrind or without.
 (unless (= (elle/build-profile) "release")
   (error {:error :gated
           :reason (string "the rig is a " (elle/build-profile)
                           " build, and the rows are a release build's")}))
+(let [[ok? _] (protect (subprocess/system "valgrind" ["--version"]))]
+  (unless ok? (error {:error :gated :reason "valgrind is not on the path"})))
 
 # A definite leak counts as an error, so it raises the contexts too. Only the
 # definite leaks are listed, which keeps a report to a few kilobytes.
