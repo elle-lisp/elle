@@ -164,6 +164,14 @@ A row of the file's that the run did not read is `missing`. `--charge` refuses
 `--isolate`, whose child would leave the runner nothing but the spawn to
 charge, and `-e`, whose form has no file to name.
 
+A file whose second run skipped on every tier gated itself out, and has no
+charge. It records no reading, and its row is left alone rather than
+`missing`, as a producer's rows are when the producer gates itself out
+([ratchet](ratchet.md)). What a gated run leaves live follows what the box
+has installed rather than the file: [zmq.lisp](../tests/lang/zmq.lisp) leaves 3 objects fewer where
+libzmq is absent than where its tests run. A file that ran on any tier is
+charged.
+
 `make smoke-impl` runs `--charge` on the rig, in a pass of its own, over the
 language suite and the implementation files with no sidecar. A file with a
 sidecar needs a mode that an in-process run cannot give it. The pass leaves
