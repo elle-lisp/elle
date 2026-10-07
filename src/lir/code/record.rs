@@ -4,7 +4,7 @@
 //! docs/impl/lir.md
 //!
 //! Every record is `repr(C)` with no implicit padding — a pad is a named field
-//! that freezing writes as zero — so a copy of a record's bytes is a copy of
+//! that the encoder writes as zero — so a copy of a record's bytes is a copy of
 //! its meaning and nothing else.
 
 use crate::lir::Reg;
@@ -31,7 +31,7 @@ pub struct Node {
     pub(crate) file: u32,
     /// The variant's `dst` field, or `NO_REG` for a variant with none.
     pub(crate) dst: u32,
-    /// What `LirInstr::region` answers, or zero for a variant with no region.
+    /// What `InstrRef::region` answers, or zero for a variant with no region.
     pub(crate) region: u32,
     /// The variant's one scalar beside its registers: a slot, a capture
     /// index, a closure id, a region slot, or an index into a function table.
@@ -99,6 +99,15 @@ impl ConstRec {
             bits,
         }
     }
+
+    /// The record of raw bits a variant carries: a signal mask, a symbol id.
+    pub const fn bits(bits: u64) -> ConstRec {
+        ConstRec {
+            kind: kind::BITS,
+            pad: [0; 7],
+            bits,
+        }
+    }
 }
 
 /// A yield point or a call site: where the interpreter resumes, and the
@@ -112,6 +121,21 @@ pub struct SiteRec {
     /// The site's run in the function's site-register table.
     pub(crate) regs: u32,
     pub(crate) n_regs: u32,
+}
+
+/// `Node::flags`, bit by bit. The low four bits select a sub-operation; the
+/// booleans sit above them.
+pub(crate) mod flag {
+    /// `Call`, `SuspendingCall`, `TailCall`: the compiler checked the arity.
+    pub(crate) const ARITY_CHECKED: u8 = 1 << 4;
+    /// `TailCall`: the runtime adopts the callee closure.
+    pub(crate) const DEFER_CALLEE: u8 = 1 << 5;
+    /// `BinOp`, `Compare`, `UnaryOp`: the operands are proven integers.
+    pub(crate) const PROOF_INT: u8 = 1 << 4;
+    /// `MakeCaptureCell`: the unit assigns the binding.
+    pub(crate) const MUTATED: u8 = 1 << 4;
+    /// The sub-operation selector.
+    pub(crate) const SUB: u8 = 0x0f;
 }
 
 /// `BlockRec::term_op`: how a block exits.

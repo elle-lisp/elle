@@ -1,5 +1,5 @@
 // audited: 2026-10-06
-//! The borrowed operands an `InstrRef` carries where `LirInstr` holds an owned value.
+//! The borrowed operands an `InstrRef` carries: a template's bytes, a tail call's stash slots, a run of constants.
 //!
 //! src/lir/AGENTS.md
 //! docs/impl/lir.md
@@ -105,8 +105,9 @@ impl<'a> ConstList<'a> {
     }
 }
 
-// Each borrowed operand prints as the value `LirInstr` holds in its place, so
-// an instruction's `Debug` text reads the same in either form.
+// Each borrowed operand prints as the value it stands for — a template, a
+// slot list, a key list — so an instruction's `Debug` text reads its meaning
+// rather than its encoding.
 
 impl std::fmt::Debug for TemplateBytes<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

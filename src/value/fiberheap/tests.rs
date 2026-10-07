@@ -132,7 +132,7 @@ fn pass_through_borrow_detonates_at_region_of() {
     // The pass-through borrow's check is `region_of` itself — NOT a
     // recorded-generation handle like the cross-fiber param snapshot
     // (docs/impl/region/generations.md). The
-    // `%first`/`%rest`/`%get` intrinsics (`LirInstr::First`/`Rest`/`Get`) hand back
+    // `%first`/`%rest`/`%get` intrinsics (`InstrRef::First`/`Rest`/`Get`) hand back
     // a value that aliases into the *source* collection's region with NO incref —
     // an uncounted borrow (unlike a *native* `first`/`rest`/`get`, whose result the
     // pass-through retain in `dispatch_native_call` counts). Such a borrow is a

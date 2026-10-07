@@ -1,9 +1,10 @@
-// audited: 2026-09-16
+// audited: 2026-10-06
 //! Keyed and or-pattern lowering: `Struct`, `Table`, `Or`.
 //!
 //! docs/match.md
 
 use super::*;
+use crate::lir::lower::access::{excluded_keys, pattern_key_const};
 
 impl<'a> Lowerer<'a> {
     pub(in crate::lir::lower) fn lower_keyed_pattern(
@@ -17,9 +18,8 @@ impl<'a> Lowerer<'a> {
                 // Struct {...} pattern matching for `match`.
                 // Check if value is a struct, then use StructGetOrNil for each key.
                 // Temp slots are always stack-local (never LBox cells).
-                let temp_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                self.emit(LirInstr::StoreLocal {
+                let temp_slot = self.fresh_local();
+                self.emit(InstrRef::StoreLocal {
                     slot: temp_slot,
                     src: value_reg,
                 });
@@ -27,12 +27,12 @@ impl<'a> Lowerer<'a> {
                 // Type guard: reject non-struct values.
                 // Reload from temp slot — value_reg was consumed by StoreLocal.
                 let reloaded_for_type = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
+                self.emit(InstrRef::LoadLocal {
                     dst: reloaded_for_type,
                     slot: temp_slot,
                 });
                 let is_struct_reg = self.fresh_reg();
-                self.emit(LirInstr::IsStruct {
+                self.emit(InstrRef::IsStruct {
                     dst: is_struct_reg,
                     src: reloaded_for_type,
                 });
@@ -44,26 +44,20 @@ impl<'a> Lowerer<'a> {
                     else_label: fail_label,
                 });
                 self.finish_block();
-                self.current_block = BasicBlock::new(continue_label);
+                self.open_block(continue_label);
 
                 for (key, sub_pattern) in entries.iter() {
                     let reloaded = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
+                    self.emit(InstrRef::LoadLocal {
                         dst: reloaded,
                         slot: temp_slot,
                     });
 
                     let elem_reg = self.fresh_reg();
-                    let lir_key = match key {
-                        PatternKey::Keyword(k) => {
-                            LirConst::Keyword(crate::value::keyword::keyword_hash(k))
-                        }
-                        PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
-                    };
-                    self.emit(LirInstr::StructGetOrNil {
+                    self.emit(InstrRef::StructGetOrNil {
                         dst: elem_reg,
                         src: reloaded,
-                        key: lir_key,
+                        key: pattern_key_const(key),
                     });
 
                     self.lower_pattern_match(sub_pattern, elem_reg, fail_label)?;
@@ -71,24 +65,16 @@ impl<'a> Lowerer<'a> {
 
                 if let Some(rest_pat) = rest.as_deref().filter(|_| pattern.own_rest_builds()) {
                     let reloaded = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
+                    self.emit(InstrRef::LoadLocal {
                         dst: reloaded,
                         slot: temp_slot,
                     });
                     let rest_reg = self.fresh_reg();
-                    let exclude: Vec<LirConst> = entries
-                        .iter()
-                        .map(|(key, _)| match key {
-                            PatternKey::Keyword(k) => {
-                                LirConst::Keyword(crate::value::keyword::keyword_hash(k))
-                            }
-                            PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
-                        })
-                        .collect();
-                    self.emit(LirInstr::StructRest {
+                    let keys = excluded_keys(entries.iter().map(|(key, _)| key));
+                    self.emit(InstrRef::StructRest {
                         dst: rest_reg,
                         src: reloaded,
-                        exclude_keys: exclude,
+                        exclude_keys: ConstList::new(&keys),
                     });
                     let rest_reg = self.park_rest_collection(rest_pat, rest_reg);
                     self.lower_pattern_match(rest_pat, rest_reg, fail_label)?;
@@ -100,9 +86,8 @@ impl<'a> Lowerer<'a> {
                 // @struct @{...} pattern matching for `match`.
                 // Check if value is a @struct, then use StructGetOrNil for each key.
                 // Temp slots are always stack-local (never LBox cells).
-                let temp_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                self.emit(LirInstr::StoreLocal {
+                let temp_slot = self.fresh_local();
+                self.emit(InstrRef::StoreLocal {
                     slot: temp_slot,
                     src: value_reg,
                 });
@@ -110,12 +95,12 @@ impl<'a> Lowerer<'a> {
                 // Type guard: reject non-@struct values.
                 // Reload from temp slot — value_reg was consumed by StoreLocal.
                 let reloaded_for_type = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
+                self.emit(InstrRef::LoadLocal {
                     dst: reloaded_for_type,
                     slot: temp_slot,
                 });
                 let is_table_reg = self.fresh_reg();
-                self.emit(LirInstr::IsStructMut {
+                self.emit(InstrRef::IsStructMut {
                     dst: is_table_reg,
                     src: reloaded_for_type,
                 });
@@ -127,26 +112,20 @@ impl<'a> Lowerer<'a> {
                     else_label: fail_label,
                 });
                 self.finish_block();
-                self.current_block = BasicBlock::new(continue_label);
+                self.open_block(continue_label);
 
                 for (key, sub_pattern) in entries.iter() {
                     let reloaded = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
+                    self.emit(InstrRef::LoadLocal {
                         dst: reloaded,
                         slot: temp_slot,
                     });
 
                     let elem_reg = self.fresh_reg();
-                    let lir_key = match key {
-                        PatternKey::Keyword(k) => {
-                            LirConst::Keyword(crate::value::keyword::keyword_hash(k))
-                        }
-                        PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
-                    };
-                    self.emit(LirInstr::StructGetOrNil {
+                    self.emit(InstrRef::StructGetOrNil {
                         dst: elem_reg,
                         src: reloaded,
-                        key: lir_key,
+                        key: pattern_key_const(key),
                     });
 
                     self.lower_pattern_match(sub_pattern, elem_reg, fail_label)?;
@@ -154,24 +133,16 @@ impl<'a> Lowerer<'a> {
 
                 if let Some(rest_pat) = rest.as_deref().filter(|_| pattern.own_rest_builds()) {
                     let reloaded = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
+                    self.emit(InstrRef::LoadLocal {
                         dst: reloaded,
                         slot: temp_slot,
                     });
                     let rest_reg = self.fresh_reg();
-                    let exclude: Vec<LirConst> = entries
-                        .iter()
-                        .map(|(key, _)| match key {
-                            PatternKey::Keyword(k) => {
-                                LirConst::Keyword(crate::value::keyword::keyword_hash(k))
-                            }
-                            PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
-                        })
-                        .collect();
-                    self.emit(LirInstr::StructRest {
+                    let keys = excluded_keys(entries.iter().map(|(key, _)| key));
+                    self.emit(InstrRef::StructRest {
                         dst: rest_reg,
                         src: reloaded,
-                        exclude_keys: exclude,
+                        exclude_keys: ConstList::new(&keys),
                     });
                     let rest_reg = self.park_rest_collection(rest_pat, rest_reg);
                     self.lower_pattern_match(rest_pat, rest_reg, fail_label)?;
@@ -183,9 +154,8 @@ impl<'a> Lowerer<'a> {
                 // Or-pattern: try each alternative sequentially.
                 // Store value to temp slot so we can reload for each alternative.
                 // Temp slots are always stack-local (never LBox cells).
-                let temp_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                self.emit(LirInstr::StoreLocal {
+                let temp_slot = self.fresh_local();
+                self.emit(InstrRef::StoreLocal {
                     slot: temp_slot,
                     src: value_reg,
                 });
@@ -201,7 +171,7 @@ impl<'a> Lowerer<'a> {
 
                     // Reload value for this alternative
                     let reloaded = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
+                    self.emit(InstrRef::LoadLocal {
                         dst: reloaded,
                         slot: temp_slot,
                     });
@@ -213,11 +183,11 @@ impl<'a> Lowerer<'a> {
                     self.finish_block();
 
                     if i + 1 < alternatives.len() {
-                        self.current_block = BasicBlock::new(next_alt_label);
+                        self.open_block(next_alt_label);
                     }
                 }
 
-                self.current_block = BasicBlock::new(success_label);
+                self.open_block(success_label);
                 Ok(())
             }
             _ => unreachable!("lower_keyed_pattern: unexpected pattern"),

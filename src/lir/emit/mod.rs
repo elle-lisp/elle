@@ -194,7 +194,7 @@ impl Emitter {
         //
         // The lowerer appends blocks by calling finish_block(), which means
         // predecessor blocks are always appended before their successors —
-        // EXCEPT for merge/done blocks, which are left as `current_block`
+        // EXCEPT for merge/done blocks, which are left open
         // and appended last (after all blocks that jump to them). This
         // guarantees that by the time the emitter processes a done/merge
         // block, all predecessors have already emitted their Jump/Branch
@@ -209,8 +209,8 @@ impl Emitter {
         // stack state they carry.
         //
         // Invariant: the first block is always the entry block (Label 0),
-        // because the lowerer always starts with BasicBlock::new(Label(0))
-        // and finish_block() appends it when the first branch is encountered.
+        // because the lowerer always opens Label(0) first, and finish_block()
+        // appends it when the first branch is encountered.
         for block in func.blocks() {
             self.label_offsets
                 .insert(block.label(), self.bytecode.current_pos());

@@ -165,6 +165,9 @@ pub(super) fn compile_core(
     let lir_module = lowerer
         .lower(&hir)
         .expect("core.lisp lowering must succeed");
+    // The lowerer borrows `symbols` until it drops, and the exports below
+    // intern into them.
+    drop(lowerer);
 
     let code = crate::value::CodeArena::mint(unsafe { &mut *heap_ptr });
     let mut emitter = Emitter::new(code);

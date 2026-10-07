@@ -406,7 +406,7 @@ coverage cannot drift. How to run all three gauges is
   [binding.rs](../../src/lir/lower/binding.rs),
   [lambda.rs](../../src/lir/lower/lambda.rs),
   [control/call.rs](../../src/lir/lower/control/call.rs);
-  [src/lir/types/instr.rs](../../src/lir/types/instr.rs);
+  [src/lir/code/instr.rs](../../src/lir/code/instr.rs);
   [src/compiler/bytecode.rs](../../src/compiler/bytecode.rs).
 - **Runtime:** [src/vm/core/region.rs](../../src/vm/core/region.rs);
   [regionstore.rs](../../src/value/fiberheap/regionstore.rs) and

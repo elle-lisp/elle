@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! The recursive and scoped binding forms: `let` and `letrec`.
 //!
 //! docs/impl/region/letrec.md
@@ -108,7 +108,7 @@ impl<'a> Lowerer<'a> {
                 // this binding's last use (`LoadCaptureRaw` + `DecrefCellRegion`),
                 // exactly as `lower_define` does for the same cell.
                 self.record_env_cell_release_slot(*binding, slot);
-                self.emit(LirInstr::StoreCapture {
+                self.emit(InstrRef::StoreCapture {
                     index: slot,
                     src: init_reg,
                 });
@@ -132,11 +132,11 @@ impl<'a> Lowerer<'a> {
                     // releases whatever sits on top instead. `UpdateCapture`
                     // pushes the value back, so the init drop has an operand.
                     let region = self.cell_region_for(*binding);
-                    let nil_reg = self.emit_const(LirConst::Nil)?;
+                    let nil_reg = self.emit_const(ConstRef::Nil)?;
                     let cell_reg = self.fresh_reg();
                     let bi = self.arena.get(*binding);
                     let (name, mutated) = (bi.name, bi.is_mutated);
-                    self.emit_alloc_in(region, |region| LirInstr::MakeCaptureCell {
+                    self.emit_alloc_in(region, |region| InstrRef::MakeCaptureCell {
                         region,
                         dst: cell_reg,
                         value: nil_reg,
@@ -211,11 +211,11 @@ impl<'a> Lowerer<'a> {
                 self.allocate_compiled_cell_slot(*binding)?;
                 continue;
             }
-            let nil_reg = self.emit_const(LirConst::Nil)?;
+            let nil_reg = self.emit_const(ConstRef::Nil)?;
             let slot = self.allocate_slot_routed(*binding, self.in_lambda && needs_capture);
             if self.in_lambda && needs_capture {
                 self.upvalue_bindings.insert(*binding);
-                self.emit(LirInstr::StoreCapture {
+                self.emit(InstrRef::StoreCapture {
                     index: slot,
                     src: nil_reg,
                 });
@@ -275,7 +275,7 @@ impl<'a> Lowerer<'a> {
             self.current_function_params = None;
 
             // Seed immutable_values after init so subsequent bindings
-            // and the body can use LoadConst for this constant.
+            // and the body can use ValueConst for this constant.
             // Skip nil inits — letrec destructure leaves are initialized
             // to nil here and later updated by a Destructure node in the body.
             // For non-nil inits, evict any stale value first (file-scope
@@ -296,7 +296,7 @@ impl<'a> Lowerer<'a> {
             if compiled_cell {
                 self.store_captured_cell_init(*binding, slot, init_reg, init, captured_reassigned);
             } else if self.in_lambda && is_upvalue {
-                self.emit(LirInstr::StoreCapture {
+                self.emit(InstrRef::StoreCapture {
                     index: slot,
                     src: init_reg,
                 });

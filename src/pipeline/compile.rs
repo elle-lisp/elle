@@ -150,51 +150,19 @@ pub fn compile_file_to_lir(
     epoch_skip: usize,
 ) -> Result<crate::lir::FrozenModule, String> {
     with_syntax_arena(cctx.heap_ptr(), |arena| {
-        compile_file_to_lir_inner(
-            arena,
-            source,
-            symbols,
-            cctx,
-            source_name,
-            epoch_skip,
-            |lowerer, hir| lowerer.lower(hir),
-        )
+        compile_file_to_lir_inner(arena, source, symbols, cctx, source_name, epoch_skip)
     })
 }
 
-/// [`compile_file_to_lir`] before freezing: the lowerer's working form, for a
-/// measurement of the lowerer itself.
-pub fn lower_file_to_lir(
-    source: &str,
-    symbols: &mut SymbolTable,
-    cctx: &mut CompileCtx,
-    source_name: &str,
-    epoch_skip: usize,
-) -> Result<crate::lir::LirModule, String> {
-    with_syntax_arena(cctx.heap_ptr(), |arena| {
-        compile_file_to_lir_inner(
-            arena,
-            source,
-            symbols,
-            cctx,
-            source_name,
-            epoch_skip,
-            |lowerer, hir| lowerer.lower_working(hir),
-        )
-    })
-}
-
-/// Read, expand and analyze a file as one letrec, then hand the configured
-/// lowerer and the HIR to `lower`.
-fn compile_file_to_lir_inner<R>(
+/// Read, expand and analyze a file as one letrec, then lower it.
+fn compile_file_to_lir_inner(
     arena: SyntaxArena,
     source: &str,
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
     source_name: &str,
     epoch_skip: usize,
-    lower: impl FnOnce(&mut Lowerer<'_>, &crate::hir::Hir) -> Result<R, String>,
-) -> Result<R, String> {
+) -> Result<crate::lir::FrozenModule, String> {
     let mut syntaxes = read_syntax_all_for(arena, source, source_name)?;
     crate::epoch::check_lexicon_agreement(&syntaxes, source, source_name)?;
 
@@ -299,7 +267,7 @@ fn compile_file_to_lir_inner<R>(
         .with_primitive_values(prim_values)
         .with_region_info(region_info)
         .with_type_info(types);
-    lower(&mut lowerer, &hir)
+    lowerer.lower(&hir)
 }
 
 /// Compile a file as a single synthetic letrec.

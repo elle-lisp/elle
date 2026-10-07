@@ -1,6 +1,5 @@
-// audited: 2026-09-19
-//! Lowering a spliced call: the args array the convention builds, consumes,
-//! and reclaims, and the retain its native fall-through owes.
+// audited: 2026-10-06
+//! Lowering a spliced call: the args array the convention builds, consumes and reclaims, and the retain its native fall-through owes.
 //!
 //! docs/impl/region/mechanism.md
 
@@ -41,7 +40,7 @@ impl<'a> Lowerer<'a> {
         // frame that reached the call does not: the call took the slot, and
         // the walk's own take then finds nothing. The slot is minted per call
         // site, so it can enter the table only once.
-        self.current_func.frame_release_regions.push(args_region);
+        self.head().frame_release_regions.push(args_region);
 
         // Build the args array incrementally
         // Start with MakeArrayMut of the first run of non-spliced args
@@ -52,23 +51,23 @@ impl<'a> Lowerer<'a> {
                 (None, false) => {
                     // First arg, not spliced: create array with one element
                     let dst = self.fresh_reg();
-                    self.emit_alloc_with_slot(args_region, |region| LirInstr::MakeArrayMut {
+                    self.emit_alloc_with_slot(args_region, |region| InstrRef::MakeArrayMut {
                         region,
                         dst,
-                        elements: vec![*reg],
+                        elements: std::slice::from_ref(reg),
                     });
                     args_reg = Some(dst);
                 }
                 (None, true) => {
                     // First arg, spliced: create empty array, then extend
                     let empty = self.fresh_reg();
-                    self.emit_alloc_with_slot(args_region, |region| LirInstr::MakeArrayMut {
+                    self.emit_alloc_with_slot(args_region, |region| InstrRef::MakeArrayMut {
                         region,
                         dst: empty,
-                        elements: vec![],
+                        elements: &[],
                     });
                     let dst = self.fresh_reg();
-                    self.emit(LirInstr::ArrayMutExtend {
+                    self.emit(InstrRef::ArrayMutExtend {
                         dst,
                         array: empty,
                         source: *reg,
@@ -77,7 +76,7 @@ impl<'a> Lowerer<'a> {
                 }
                 (Some(arr), false) => {
                     let dst = self.fresh_reg();
-                    self.emit(LirInstr::ArrayMutPush {
+                    self.emit(InstrRef::ArrayMutPush {
                         dst,
                         array: arr,
                         value: *reg,
@@ -86,7 +85,7 @@ impl<'a> Lowerer<'a> {
                 }
                 (Some(arr), true) => {
                     let dst = self.fresh_reg();
-                    self.emit(LirInstr::ArrayMutExtend {
+                    self.emit(InstrRef::ArrayMutExtend {
                         dst,
                         array: arr,
                         source: *reg,
@@ -98,17 +97,17 @@ impl<'a> Lowerer<'a> {
 
         let final_args = args_reg.unwrap_or_else(|| {
             let dst = self.fresh_reg();
-            self.emit_alloc_with_slot(args_region, |region| LirInstr::MakeArrayMut {
+            self.emit_alloc_with_slot(args_region, |region| InstrRef::MakeArrayMut {
                 region,
                 dst,
-                elements: vec![],
+                elements: &[],
             });
             dst
         });
 
         if is_tail {
             self.emit_pending_free_regions();
-            self.emit_alloc(|region| LirInstr::TailCallArrayMut {
+            self.emit_alloc(|region| InstrRef::TailCallArrayMut {
                 region,
                 func: func_reg,
                 args: final_args,
@@ -141,12 +140,12 @@ impl<'a> Lowerer<'a> {
             // call's result and a `Return` mints for it.
             let dst = self.fresh_reg();
             if !self.return_mint_covers_here() {
-                self.emit(LirInstr::IncrefValueRegion { src: dst });
+                self.emit(InstrRef::IncrefValueRegion { src: dst });
             }
             Ok(dst)
         } else {
             let dst = self.fresh_reg();
-            self.emit_alloc(|region| LirInstr::CallArrayMut {
+            self.emit_alloc(|region| InstrRef::CallArrayMut {
                 region,
                 dst,
                 func: func_reg,

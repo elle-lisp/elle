@@ -1,38 +1,78 @@
-// audited: 2026-09-19
+// audited: 2026-10-06
 //! Register and slot allocation, instruction emission, and block management for
-//! the LIR lowerer.
+//! the LIR lowerer, written through the unit's `LirBuilder`.
 //!
 //! docs/impl/lir.md
 
 use super::*;
 
-/// Short, stable name for an allocating `LirInstr` variant — used only
-/// in the `--trace=rc:emit` lines to disambiguate which kind of alloc
-/// was stamped on a phantom region's HirId.
-fn instr_kind_name(instr: &LirInstr) -> &'static str {
+/// Short, stable name for an allocating instruction — used only in the
+/// `--trace=rc:emit` lines to disambiguate which kind of alloc was stamped on a
+/// phantom region's HirId.
+fn instr_kind_name(instr: &InstrRef<'_>) -> &'static str {
     match instr {
-        LirInstr::MakeClosure { .. } => "MakeClosure",
-        LirInstr::MakeCaptureCell { .. } => "MakeCaptureCell",
-        LirInstr::MakeArrayMut { .. } => "MakeArrayMut",
-        LirInstr::List { .. } => "List",
-        LirInstr::Call { .. } => "Call",
-        LirInstr::SuspendingCall { .. } => "SuspendingCall",
-        LirInstr::TailCall { .. } => "TailCall",
-        LirInstr::CallArrayMut { .. } => "CallArrayMut",
-        LirInstr::TailCallArrayMut { .. } => "TailCallArrayMut",
-        LirInstr::Freeze { .. } => "Freeze",
-        LirInstr::Thaw { .. } => "Thaw",
+        InstrRef::MakeClosure { .. } => "MakeClosure",
+        InstrRef::MakeCaptureCell { .. } => "MakeCaptureCell",
+        InstrRef::MakeArrayMut { .. } => "MakeArrayMut",
+        InstrRef::List { .. } => "List",
+        InstrRef::Call { .. } => "Call",
+        InstrRef::SuspendingCall { .. } => "SuspendingCall",
+        InstrRef::TailCall { .. } => "TailCall",
+        InstrRef::CallArrayMut { .. } => "CallArrayMut",
+        InstrRef::TailCallArrayMut { .. } => "TailCallArrayMut",
+        InstrRef::Freeze { .. } => "Freeze",
+        InstrRef::Thaw { .. } => "Thaw",
         _ => "other",
     }
 }
 
+/// `template` as the bytes `ConstTemplate::encode` writes, which a
+/// `MaterializeConst` carries.
+fn template_bytes(template: &crate::value::ConstTemplate) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    template.encode(&mut bytes);
+    bytes
+}
+
 impl<'a> Lowerer<'a> {
+    // === The working form ===
+
+    /// The unit's builder. Present only while `lower` runs, which is the only
+    /// time anything emits.
+    pub(super) fn b(&mut self) -> &mut LirBuilder<'a> {
+        self.builder
+            .as_mut()
+            .expect("the lowerer emits only inside `lower`")
+    }
+
+    /// The unit's builder, for the questions the lowerer asks of what it has
+    /// emitted.
+    pub(super) fn built(&self) -> &LirBuilder<'a> {
+        self.builder
+            .as_ref()
+            .expect("the lowerer reads its nodes only inside `lower`")
+    }
+
+    /// The header of the function being lowered.
+    pub(super) fn head(&mut self) -> &mut LirHead {
+        self.b().head()
+    }
+
     // === Helper Methods ===
 
     pub(super) fn fresh_reg(&mut self) -> Reg {
         let r = Reg::new(self.next_reg);
         self.next_reg += 1;
         r
+    }
+
+    /// A fresh stack slot of the function being lowered, belonging to no
+    /// binding: a temporary, a result slot, a stash.
+    pub(super) fn fresh_local(&mut self) -> u16 {
+        let head = self.head();
+        let slot = head.num_locals;
+        head.num_locals += 1;
+        slot
     }
 
     pub(super) fn allocate_slot(&mut self, binding: Binding) -> u16 {
@@ -58,27 +98,29 @@ impl<'a> Lowerer<'a> {
         // LBox locals get ENV-relative slots (num_captures + num_locals).
         // Non-LBox locals get STACK-relative slots (num_locals).
         // Both increment num_locals to keep env placeholder slots aligned.
-        let slot = if self.in_lambda {
+        let in_lambda = self.in_lambda;
+        let num_captures = self.num_captures;
+        let num_local_params = self.num_local_params;
+        let head = self.head();
+        let slot = if in_lambda {
             // local_index is relative to locally-defined vars (after param locals)
-            let local_index = self.current_func.num_locals - self.num_local_params;
+            let local_index = head.num_locals - num_local_params;
             // Record EVERY env-celled local, at any index. The mask is unbounded
             // (`CaptureMask`), so a celled slot >= 64 is named precisely
             // instead of relying on a conservative >=64 fallback that also
             // celled — and leaked — uncaptured high locals.
             if env_celled {
-                self.current_func
-                    .capture_locals_mask
-                    .set(local_index as usize);
+                head.capture_locals_mask.set(local_index as usize);
                 // Env-relative: for LoadCapture/StoreCapture
-                self.num_captures + self.current_func.num_locals
+                num_captures + head.num_locals
             } else {
                 // Stack-relative: for LoadLocal/StoreLocal
-                self.current_func.num_locals
+                head.num_locals
             }
         } else {
-            self.current_func.num_locals
+            head.num_locals
         };
-        self.current_func.num_locals += 1;
+        head.num_locals += 1;
         self.binding_to_slot.insert(binding, slot);
         // Track the slot of a fn-local reassigned mutable binding so
         // `emit_decrefs_for` never nil-stamps it mid-scope (the reassigned-loop-
@@ -95,8 +137,8 @@ impl<'a> Lowerer<'a> {
         }
         if !env_celled || !self.in_lambda {
             // Initialize slot to NIL so LoadLocal finds a valid value.
-            if let Ok(nil_reg) = self.emit_const(LirConst::Nil) {
-                self.emit(LirInstr::StoreLocal { slot, src: nil_reg });
+            if let Ok(nil_reg) = self.emit_const(ConstRef::Nil) {
+                self.emit(InstrRef::StoreLocal { slot, src: nil_reg });
             }
         }
         slot
@@ -124,11 +166,11 @@ impl<'a> Lowerer<'a> {
         // region — the shared-slot capture-cell leak (docs/impl/region/model.md,
         // "one allocation execution per slot between drops").
         let region = self.cell_region_for(binding);
-        let nil_reg = self.emit_const(LirConst::Nil)?;
+        let nil_reg = self.emit_const(ConstRef::Nil)?;
         let cell_reg = self.fresh_reg();
         let bi = self.arena.get(binding);
         let (name, mutated) = (bi.name, bi.is_mutated);
-        self.emit_alloc_in(region, |region| LirInstr::MakeCaptureCell {
+        self.emit_alloc_in(region, |region| InstrRef::MakeCaptureCell {
             region,
             dst: cell_reg,
             value: nil_reg,
@@ -142,7 +184,7 @@ impl<'a> Lowerer<'a> {
     /// Extract a compile-time constant value from an HIR node.
     /// Returns `Some(value)` for literals and references to already-known
     /// constants. Used to seed `immutable_values` so reads of immutable
-    /// bindings emit `LoadConst` instead of `LoadLocal`.
+    /// bindings emit `ValueConst` instead of `LoadLocal`.
     pub(super) fn hir_const_value(&self, hir: &Hir) -> Option<Value> {
         match &hir.kind {
             HirKind::Int(n) => Some(Value::int(*n)),
@@ -159,7 +201,7 @@ impl<'a> Lowerer<'a> {
 
     /// If `binding` is immutable and `init` is a compile-time constant,
     /// record it in `immutable_values` so that subsequent reads of this
-    /// binding emit `LoadConst` instead of slot loads.
+    /// binding emit `ValueConst` instead of slot loads.
     pub(super) fn try_seed_immutable(&mut self, binding: Binding, init: &Hir) {
         if self.arena.get(binding).is_immutable {
             if let Some(val) = self.hir_const_value(init) {
@@ -168,10 +210,10 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    pub(super) fn emit(&mut self, instr: LirInstr) {
-        self.current_block
-            .instructions
-            .push(SpannedInstr::new(instr, self.current_span));
+    /// Append `instr` to the open block, at the span of the node being lowered.
+    pub(super) fn emit(&mut self, instr: InstrRef<'_>) {
+        let span = self.current_span;
+        self.b().emit(instr, span);
     }
 
     /// Emit a heap-allocating instruction, building it with the region
@@ -182,7 +224,7 @@ impl<'a> Lowerer<'a> {
     /// already set — there is no "build with no region, stamp later" window in
     /// which an allocation could exist without a region. Panics if the solver
     /// assigned no region (Rule 1: every allocation must have one).
-    pub(super) fn emit_alloc(&mut self, build: impl FnOnce(StaticRegion) -> LirInstr) {
+    pub(super) fn emit_alloc<'i>(&mut self, build: impl FnOnce(StaticRegion) -> InstrRef<'i>) {
         let region = self.alloc_region_id().unwrap_or_else(|| {
             panic!(
                 "emit_alloc: no region for hir_id {:?} — solver must assign a region to every allocation",
@@ -199,10 +241,10 @@ impl<'a> Lowerer<'a> {
     /// orphan all but the last minted physical region
     /// (docs/impl/region/model.md, "one allocation execution per slot between
     /// drops").
-    pub(super) fn emit_alloc_in(
+    pub(super) fn emit_alloc_in<'i>(
         &mut self,
         region: crate::hir::region::Region,
-        build: impl FnOnce(StaticRegion) -> LirInstr,
+        build: impl FnOnce(StaticRegion) -> InstrRef<'i>,
     ) {
         let slot = self.static_slot(region);
         self.emit_alloc_with_slot(slot, build);
@@ -212,10 +254,10 @@ impl<'a> Lowerer<'a> {
     /// the two wrappers above, or a synthetic one from
     /// [`Self::fresh_managed_region`] for an allocation region inference does not
     /// track (the splice args array, whose release is the calling convention's).
-    pub(super) fn emit_alloc_with_slot(
+    pub(super) fn emit_alloc_with_slot<'i>(
         &mut self,
         region: StaticRegion,
-        build: impl FnOnce(StaticRegion) -> LirInstr,
+        build: impl FnOnce(StaticRegion) -> InstrRef<'i>,
     ) {
         let instr = build(region);
         if crate::config::get().has_trace("rc") {
@@ -232,9 +274,7 @@ impl<'a> Lowerer<'a> {
             );
         }
         self.emitted_alloc_regions.insert(region);
-        self.current_block
-            .instructions
-            .push(SpannedInstr::new(instr, self.current_span));
+        self.emit(instr);
     }
 
     /// The solver-minted region for `binding`'s pre-allocated capture cell at
@@ -314,7 +354,7 @@ impl<'a> Lowerer<'a> {
             slot
         } else {
             let slot = new_static_region();
-            self.current_func.region_table.push(slot);
+            self.head().region_table.push(slot);
             self.region_to_table.insert(region, slot);
             slot
         }
@@ -329,24 +369,55 @@ impl<'a> Lowerer<'a> {
     /// compare-string is materialized, read once, and freed in place.
     pub(super) fn fresh_managed_region(&mut self) -> StaticRegion {
         let slot = new_static_region();
-        self.current_func.region_table.push(slot);
+        self.head().region_table.push(slot);
         slot
     }
 
-    pub(super) fn emit_const(&mut self, c: LirConst) -> Result<Reg, String> {
+    pub(super) fn emit_const(&mut self, c: ConstRef) -> Result<Reg, String> {
         let dst = self.fresh_reg();
-        self.emit(LirInstr::Const { dst, value: c });
+        self.emit(InstrRef::Const { dst, value: c });
         Ok(dst)
+    }
+
+    /// Materialize a fresh value from `template` into `region`, and answer the
+    /// register that holds it. A heap literal is an ordinary allocation, never a
+    /// pool load (docs/impl/region/model.md).
+    pub(super) fn emit_materialize_in(
+        &mut self,
+        region: StaticRegion,
+        template: &crate::value::ConstTemplate,
+    ) -> Reg {
+        let dst = self.fresh_reg();
+        let bytes = template_bytes(template);
+        self.emit_alloc_with_slot(region, |region| InstrRef::MaterializeConst {
+            dst,
+            template: TemplateBytes::new(&bytes),
+            region,
+        });
+        dst
+    }
+
+    /// [`Self::emit_materialize_in`] the region the solver assigned the node
+    /// being lowered. Panics where it assigned none, as `emit_alloc` does.
+    pub(super) fn emit_materialize(&mut self, template: &crate::value::ConstTemplate) -> Reg {
+        let region = self.alloc_region_id().unwrap_or_else(|| {
+            panic!(
+                "emit_materialize: no region for hir_id {:?} — solver must assign a region to every allocation",
+                self.current_hir_id
+            )
+        });
+        self.emit_materialize_in(region, template)
     }
 
     pub(super) fn emit_value_const(&mut self, value: Value) -> Result<Reg, String> {
         let dst = self.fresh_reg();
-        self.emit(LirInstr::ValueConst { dst, value });
+        self.emit(InstrRef::ValueConst { dst, value });
         Ok(dst)
     }
 
     pub(super) fn terminate(&mut self, term: Terminator) {
-        self.current_block.terminator = SpannedTerminator::new(term, self.current_span);
+        let span = self.current_span;
+        self.b().terminate(term, span);
     }
 
     pub(super) fn finish_block(&mut self) {
@@ -365,8 +436,7 @@ impl<'a> Lowerer<'a> {
         // popped, and no further (`retain_open_break_points`).
         self.tail_exit_hoist.retain(|h| h.left_block.is_some());
         self.retain_open_break_points();
-        let block = std::mem::replace(&mut self.current_block, BasicBlock::new(Label(0)));
-        self.current_func.blocks.push(block);
+        self.b().finish_block();
     }
 
     /// Allocate a new basic block label.
@@ -376,15 +446,20 @@ impl<'a> Lowerer<'a> {
         label
     }
 
+    /// Open a block labelled `label`. The previous block must be finished.
+    pub(super) fn open_block(&mut self, label: Label) {
+        self.b().open_block(label);
+    }
+
     /// Finish the current block and start a new one with the given label.
     pub(super) fn start_new_block(&mut self, label: Label) {
         self.finish_block();
-        self.current_block = BasicBlock::new(label);
+        self.open_block(label);
     }
 
     /// Emit a store for a named binding.
     pub(super) fn emit_binding_store(&mut self, slot: u16, src: Reg) {
-        self.emit(LirInstr::StoreLocal { slot, src });
+        self.emit(InstrRef::StoreLocal { slot, src });
     }
 
     /// The function's lazily-allocated scratch slot — shared by value
@@ -394,8 +469,7 @@ impl<'a> Lowerer<'a> {
         match self.discard_slot {
             Some(s) => s,
             None => {
-                let s = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
+                let s = self.fresh_local();
                 self.discard_slot = Some(s);
                 s
             }
@@ -406,6 +480,6 @@ impl<'a> Lowerer<'a> {
     /// StoreLocal does not incref, so no refcount tracking needed.
     pub(super) fn discard(&mut self, src: Reg) {
         let slot = self.scratch_slot();
-        self.emit(LirInstr::StoreLocal { slot, src });
+        self.emit(InstrRef::StoreLocal { slot, src });
     }
 }

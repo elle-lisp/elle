@@ -143,11 +143,5 @@ pub(crate) fn prepare_task(
     JitTask { lir, bytecode_key }
 }
 
-// A string literal lowers to `MaterializeConst` in every position (value:
-// `HirKind::String`; pattern: the materialize-compare-free in
-// `lir/lower/pattern/ctor.rs`), which the JIT translates via
-// `elle_jit_materialize_const` — so no raw `LirConst::String` reaches the
-// translator.
-
 #[cfg(test)]
 mod tests;

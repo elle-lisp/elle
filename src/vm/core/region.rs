@@ -1,6 +1,5 @@
-// audited: 2026-09-20
-//! Resolving a compiler region slot to the physical region this activation
-//! allocates into, drops, or hands a spliced call.
+// audited: 2026-10-06
+//! Resolving a compiler region slot to the physical region this activation allocates into, drops, or hands a spliced call.
 //!
 //! docs/impl/region/model.md
 //! docs/impl/region/merging.md
@@ -29,8 +28,6 @@ impl VM {
     /// `rN` back to the allocation node, which the call site alone cannot do
     /// when a function allocates in several places.
     ///
-    /// Off by default and one relaxed atomic load then: the string is built only
-    /// while the bit is set.
     /// `kind` names the mint; `slot` is the compiler's region slot where the mint
     /// has one. Nothing is formatted unless the bit is set, so the allocation path
     /// pays one relaxed atomic load in an ordinary run.
@@ -150,7 +147,7 @@ impl VM {
     /// a prior member of the merge tree already minted for this activation (the
     /// parent reusing the child's region), else mint fresh (the first/child member).
     /// The JIT calls this directly (`elle_jit_resolve_alloc_region_merged`) for a
-    /// slot it determined at compile time to be in `LirFunction.merged_slots`; the
+    /// slot it determined at compile time to be in `LirView::merged_slots`; the
     /// interpreter reaches it through the merged branch of
     /// `runtime_region_for_alloc_slot_maybe_merged`. The single `DecrefRegion` at the
     /// merged root's `decref_point` clears the slot each loop iteration

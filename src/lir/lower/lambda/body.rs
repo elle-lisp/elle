@@ -1,23 +1,28 @@
-// audited: 2026-09-21
-//! Lambda body compilation: state save/restore, environment layout, and
-//! lowering the body into its own `LirFunction`.
+// audited: 2026-10-06
+//! Lambda body compilation: state save and restore, environment layout, and the body frozen as a function of its own.
+//!
+//! src/lir/lower/AGENTS.md
+//! docs/impl/lir.md
 
 use crate::hir::{CaptureInfo, ParamBound};
 use crate::lir::lower::*;
 use crate::value::Arity;
 
 impl<'a> Lowerer<'a> {
-    /// Lower a lambda body to a separate LirFunction.
+    /// Lower a lambda body to a function of its own, `closure_id` in the
+    /// unit's closure list, and answer it frozen.
     ///
-    /// `pub(super)` so the sibling `expr` submodule (`lower_lambda_expr`) can
-    /// reach it; it was a module-private `fn` when both lived in one file.
+    /// The builder sets the enclosing function aside, its open block included,
+    /// and resumes it when this one finishes.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn lower_lambda_body(
         &mut self,
+        closure_id: ClosureId,
         params: &[Binding],
         num_required: usize,
         rest_param: Option<&Binding>,
         vararg_kind: &crate::hir::VarargKind,
+        rest_list_layout: crate::value::RestListLayout,
         captures: &[CaptureInfo],
         body: &Hir,
         _num_locals: u16,
@@ -25,16 +30,26 @@ impl<'a> Lowerer<'a> {
         param_bounds: &[ParamBound],
         doc: Option<std::rc::Rc<str>>,
         origin: Option<crate::syntax::Span>,
-    ) -> Result<LirFunction, String> {
+    ) -> Result<LirOwned, String> {
         // Compute arity
         let arity = Arity::for_lambda(rest_param.is_some(), num_required, params.len());
 
-        // Save state
-        let saved_func = std::mem::replace(&mut self.current_func, LirFunction::new(arity));
+        self.b().begin_function(arity);
+        self.open_block(Label(0));
         // Taken, not read: only the lambda the binder named gets it, never a
         // nested anonymous one.
-        self.current_func.name = self.pending_lambda_name.take();
-        let saved_block = std::mem::replace(&mut self.current_block, BasicBlock::new(Label(0)));
+        let name = self.pending_lambda_name.take();
+        let head = self.head();
+        head.name = name;
+        head.closure_id = Some(closure_id);
+        head.num_captures = captures.len() as u16;
+        head.doc = doc;
+        head.origin = origin;
+        head.vararg_kind = vararg_kind.clone();
+        head.rest_list_layout = rest_list_layout;
+        head.num_params = params.len();
+
+        // Save state
         let saved_reg = self.next_reg;
         let saved_label = self.next_label;
         let saved_bindings = std::mem::take(&mut self.binding_to_slot);
@@ -91,22 +106,15 @@ impl<'a> Lowerer<'a> {
             }
         });
 
-        self.next_reg = 0;
-        self.next_label = 1;
-        self.discard_slot = None;
         // num_locals starts at 0; non-LBox params and let-bound vars
         // will increment it as they're allocated.
         // LBox params go into the env (not counted in num_locals for stack frame).
-        self.current_func.num_locals = 0;
-        self.current_func.num_captures = captures.len() as u16;
+        self.next_reg = 0;
+        self.next_label = 1;
+        self.discard_slot = None;
         self.in_lambda = true;
         self.num_captures = captures.len() as u16;
         self.num_local_params = 0;
-        self.discard_slot = None;
-        self.current_func.doc = doc;
-        self.current_func.origin = origin;
-        self.current_func.vararg_kind = vararg_kind.clone();
-        self.current_func.num_params = params.len();
 
         // In a closure, the environment is laid out as:
         // [captured_vars..., parameters..., locally_defined_cells...]
@@ -138,14 +146,13 @@ impl<'a> Lowerer<'a> {
             } else {
                 // Non-LBox param: allocate a local slot.
                 // We'll copy from env into this local at function entry.
-                let slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
+                let slot = self.fresh_local();
                 self.num_local_params += 1;
                 self.binding_to_slot.insert(*param, slot);
                 // NOT added to upvalue_bindings → uses LoadLocal/StoreLocal
             }
         }
-        self.current_func.capture_params_mask = capture_params_mask;
+        self.head().capture_params_mask = capture_params_mask;
 
         // Copy non-LBox params from env into their local slots.
         // The VM/host populates the env as [captures..., params...].
@@ -156,15 +163,16 @@ impl<'a> Lowerer<'a> {
                 let env_idx = self.num_captures + i as u16;
                 let slot = *self.binding_to_slot.get(param).unwrap();
                 let tmp = self.fresh_reg();
-                self.emit(LirInstr::LoadCaptureRaw {
+                self.emit(InstrRef::LoadCaptureRaw {
                     dst: tmp,
                     index: env_idx,
                 });
-                self.emit(LirInstr::StoreLocal { slot, src: tmp });
+                self.emit(InstrRef::StoreLocal { slot, src: tmp });
             }
         }
 
-        self.current_func.num_local_params = self.num_local_params as usize;
+        let num_local_params = self.num_local_params as usize;
+        self.head().num_local_params = num_local_params;
 
         // Each param is an OWNED binding: the analysis gave it a placeholder
         // region in `call_result_regions` (see the Lambda arm of `regions.rs`).
@@ -204,14 +212,14 @@ impl<'a> Lowerer<'a> {
                 let src = self.fresh_reg();
                 let is_upvalue = self.upvalue_bindings.contains(&pb.binding);
                 if is_upvalue {
-                    self.emit(LirInstr::LoadCapture {
+                    self.emit(InstrRef::LoadCapture {
                         dst: src,
                         index: slot,
                     });
                 } else {
-                    self.emit(LirInstr::LoadLocal { dst: src, slot });
+                    self.emit(InstrRef::LoadLocal { dst: src, slot });
                 }
-                self.emit(LirInstr::CheckSignalBound {
+                self.emit(InstrRef::CheckSignalBound {
                     src,
                     allowed_bits: pb.signal.bits,
                 });
@@ -263,10 +271,10 @@ impl<'a> Lowerer<'a> {
         for (slot, region) in unused_params {
             self.with_tail_exit_hoist(region, |s| {
                 let val_reg = s.fresh_reg();
-                s.emit(LirInstr::LoadLocal { dst: val_reg, slot });
-                s.emit(LirInstr::DecrefValueRegion { src: val_reg });
-                if let Ok(nil_reg) = s.emit_const(crate::lir::LirConst::Nil) {
-                    s.emit(LirInstr::StoreLocal { slot, src: nil_reg });
+                s.emit(InstrRef::LoadLocal { dst: val_reg, slot });
+                s.emit(InstrRef::DecrefValueRegion { src: val_reg });
+                if let Ok(nil_reg) = s.emit_const(ConstRef::Nil) {
+                    s.emit(InstrRef::StoreLocal { slot, src: nil_reg });
                 }
             });
         }
@@ -274,10 +282,12 @@ impl<'a> Lowerer<'a> {
         self.terminate(Terminator::Return(result_reg));
         self.finish_block();
 
-        self.current_func.entry = Label(0);
-        self.current_func.num_regs = self.next_reg;
+        let num_regs = self.next_reg;
+        let head = self.head();
+        head.entry = Label(0);
+        head.num_regs = num_regs;
         // Propagate inferred signal to LIR function
-        self.current_func.signal = inferred_signal;
+        head.signal = inferred_signal;
 
         self.current_function_binding = None;
         self.current_function_params = None;
@@ -287,10 +297,9 @@ impl<'a> Lowerer<'a> {
         // merge fired in this lambda — see `record_merged_slots`.
         self.record_merged_slots();
 
-        let func = std::mem::replace(&mut self.current_func, saved_func);
+        let func = self.b().finish_function()?;
 
         // Restore state
-        self.current_block = saved_block;
         self.next_reg = saved_reg;
         self.next_label = saved_label;
         self.binding_to_slot = saved_bindings;

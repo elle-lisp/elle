@@ -1,11 +1,11 @@
-// audited: 2026-09-16
-//! Lowering a binding form's destructure: the extraction each pattern shape
-//! emits, and the slot each extracted value is stored into.
+// audited: 2026-10-06
+//! Lowering a binding form's destructure: the extraction each pattern shape emits, and the slot each value lands in.
 //!
 //! src/lir/lower/AGENTS.md
 //! docs/destructuring.md
 
 use super::*;
+use crate::lir::lower::access::{excluded_keys, pattern_key_const};
 
 /// A cursor over the collections one destructure's pattern builds, counting in
 /// the order this file reaches them.
@@ -57,8 +57,7 @@ impl<'a> Lowerer<'a> {
                 let has_rest = rest.is_some();
 
                 // Allocate one temp slot for the entire list traversal
-                let temp_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
+                let temp_slot = self.fresh_local();
 
                 for (i, element) in elements.iter().enumerate() {
                     let is_last = i == elements.len() - 1 && !has_rest;
@@ -66,12 +65,12 @@ impl<'a> Lowerer<'a> {
                         // Last fixed element, no rest: just take head
                         let head = self.fresh_reg();
                         if strict {
-                            self.emit(LirInstr::FirstDestructure {
+                            self.emit(InstrRef::FirstDestructure {
                                 dst: head,
                                 src: current,
                             });
                         } else {
-                            self.emit(LirInstr::FirstOrNil {
+                            self.emit(InstrRef::FirstOrNil {
                                 dst: head,
                                 src: current,
                             });
@@ -79,42 +78,42 @@ impl<'a> Lowerer<'a> {
                         self.lower_destructure(element, head, strict, builds)?;
                     } else {
                         // Store current to temp slot, reload for each extraction
-                        self.emit(LirInstr::StoreLocal {
+                        self.emit(InstrRef::StoreLocal {
                             slot: temp_slot,
                             src: current,
                         });
 
                         let load_for_cdr = self.fresh_reg();
-                        self.emit(LirInstr::LoadLocal {
+                        self.emit(InstrRef::LoadLocal {
                             dst: load_for_cdr,
                             slot: temp_slot,
                         });
                         let tail = self.fresh_reg();
                         if strict {
-                            self.emit(LirInstr::RestDestructure {
+                            self.emit(InstrRef::RestDestructure {
                                 dst: tail,
                                 src: load_for_cdr,
                             });
                         } else {
-                            self.emit(LirInstr::RestOrNil {
+                            self.emit(InstrRef::RestOrNil {
                                 dst: tail,
                                 src: load_for_cdr,
                             });
                         }
 
                         let load_for_car = self.fresh_reg();
-                        self.emit(LirInstr::LoadLocal {
+                        self.emit(InstrRef::LoadLocal {
                             dst: load_for_car,
                             slot: temp_slot,
                         });
                         let head = self.fresh_reg();
                         if strict {
-                            self.emit(LirInstr::FirstDestructure {
+                            self.emit(InstrRef::FirstDestructure {
                                 dst: head,
                                 src: load_for_car,
                             });
                         } else {
-                            self.emit(LirInstr::FirstOrNil {
+                            self.emit(InstrRef::FirstOrNil {
                                 dst: head,
                                 src: load_for_car,
                             });
@@ -137,9 +136,8 @@ impl<'a> Lowerer<'a> {
             }
             HirPattern::Array { elements, rest } => {
                 // Allocate one temp slot for the array
-                let temp_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                self.emit(LirInstr::StoreLocal {
+                let temp_slot = self.fresh_local();
+                self.emit(InstrRef::StoreLocal {
                     slot: temp_slot,
                     src: value_reg,
                 });
@@ -147,19 +145,19 @@ impl<'a> Lowerer<'a> {
                 for (i, element) in elements.iter().enumerate() {
                     // Reload from slot for each extraction
                     let reloaded = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
+                    self.emit(InstrRef::LoadLocal {
                         dst: reloaded,
                         slot: temp_slot,
                     });
                     let elem = self.fresh_reg();
                     if strict {
-                        self.emit(LirInstr::ArrayMutRefDestructure {
+                        self.emit(InstrRef::ArrayMutRefDestructure {
                             dst: elem,
                             src: reloaded,
                             index: i as u16,
                         });
                     } else {
-                        self.emit(LirInstr::ArrayMutRefOrNil {
+                        self.emit(InstrRef::ArrayMutRefOrNil {
                             dst: elem,
                             src: reloaded,
                             index: i as u16,
@@ -175,28 +173,27 @@ impl<'a> Lowerer<'a> {
             }
             HirPattern::Tuple { elements, rest } => {
                 // Arrays are immutable indexed sequences
-                let temp_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                self.emit(LirInstr::StoreLocal {
+                let temp_slot = self.fresh_local();
+                self.emit(InstrRef::StoreLocal {
                     slot: temp_slot,
                     src: value_reg,
                 });
 
                 for (i, element) in elements.iter().enumerate() {
                     let reloaded = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
+                    self.emit(InstrRef::LoadLocal {
                         dst: reloaded,
                         slot: temp_slot,
                     });
                     let elem = self.fresh_reg();
                     if strict {
-                        self.emit(LirInstr::ArrayMutRefDestructure {
+                        self.emit(InstrRef::ArrayMutRefDestructure {
                             dst: elem,
                             src: reloaded,
                             index: i as u16,
                         });
                     } else {
-                        self.emit(LirInstr::ArrayMutRefOrNil {
+                        self.emit(InstrRef::ArrayMutRefOrNil {
                             dst: elem,
                             src: reloaded,
                             index: i as u16,
@@ -213,27 +210,21 @@ impl<'a> Lowerer<'a> {
             }
             HirPattern::NamedStruct { entries } => {
                 // &named parameter destructuring: missing keys always produce nil (not errors).
-                let temp_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                self.emit(LirInstr::StoreLocal {
+                let temp_slot = self.fresh_local();
+                self.emit(InstrRef::StoreLocal {
                     slot: temp_slot,
                     src: value_reg,
                 });
 
                 for (key, sub_pattern) in entries {
                     let reloaded = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
+                    self.emit(InstrRef::LoadLocal {
                         dst: reloaded,
                         slot: temp_slot,
                     });
                     let elem = self.fresh_reg();
-                    let lir_key = match key {
-                        PatternKey::Keyword(k) => {
-                            LirConst::Keyword(crate::value::keyword::keyword_hash(k))
-                        }
-                        PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
-                    };
-                    self.emit(LirInstr::StructGetOrNil {
+                    let lir_key = pattern_key_const(key);
+                    self.emit(InstrRef::StructGetOrNil {
                         dst: elem,
                         src: reloaded,
                         key: lir_key,
@@ -244,34 +235,28 @@ impl<'a> Lowerer<'a> {
             }
             HirPattern::Struct { entries, rest } => {
                 // Structs are immutable key-value maps
-                let temp_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                self.emit(LirInstr::StoreLocal {
+                let temp_slot = self.fresh_local();
+                self.emit(InstrRef::StoreLocal {
                     slot: temp_slot,
                     src: value_reg,
                 });
 
                 for (key, sub_pattern) in entries.iter() {
                     let reloaded = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
+                    self.emit(InstrRef::LoadLocal {
                         dst: reloaded,
                         slot: temp_slot,
                     });
                     let elem = self.fresh_reg();
-                    let lir_key = match key {
-                        PatternKey::Keyword(k) => {
-                            LirConst::Keyword(crate::value::keyword::keyword_hash(k))
-                        }
-                        PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
-                    };
+                    let lir_key = pattern_key_const(key);
                     if strict {
-                        self.emit(LirInstr::StructGetDestructure {
+                        self.emit(InstrRef::StructGetDestructure {
                             dst: elem,
                             src: reloaded,
                             key: lir_key,
                         });
                     } else {
-                        self.emit(LirInstr::StructGetOrNil {
+                        self.emit(InstrRef::StructGetOrNil {
                             dst: elem,
                             src: reloaded,
                             key: lir_key,
@@ -288,34 +273,28 @@ impl<'a> Lowerer<'a> {
                 Ok(())
             }
             HirPattern::Table { entries, rest } => {
-                let temp_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                self.emit(LirInstr::StoreLocal {
+                let temp_slot = self.fresh_local();
+                self.emit(InstrRef::StoreLocal {
                     slot: temp_slot,
                     src: value_reg,
                 });
 
                 for (key, sub_pattern) in entries.iter() {
                     let reloaded = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
+                    self.emit(InstrRef::LoadLocal {
                         dst: reloaded,
                         slot: temp_slot,
                     });
                     let elem = self.fresh_reg();
-                    let lir_key = match key {
-                        PatternKey::Keyword(k) => {
-                            LirConst::Keyword(crate::value::keyword::keyword_hash(k))
-                        }
-                        PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
-                    };
+                    let lir_key = pattern_key_const(key);
                     if strict {
-                        self.emit(LirInstr::StructGetDestructure {
+                        self.emit(InstrRef::StructGetDestructure {
                             dst: elem,
                             src: reloaded,
                             key: lir_key,
                         });
                     } else {
-                        self.emit(LirInstr::StructGetOrNil {
+                        self.emit(InstrRef::StructGetOrNil {
                             dst: elem,
                             src: reloaded,
                             key: lir_key,
@@ -339,12 +318,12 @@ impl<'a> Lowerer<'a> {
     /// `index` on — and park it against the placeholder `builds` names next.
     fn build_array_rest(&mut self, temp_slot: u16, index: usize, builds: &mut RestBuilds) -> Reg {
         let reloaded = self.fresh_reg();
-        self.emit(LirInstr::LoadLocal {
+        self.emit(InstrRef::LoadLocal {
             dst: reloaded,
             slot: temp_slot,
         });
         let slice = self.fresh_reg();
-        self.emit(LirInstr::ArrayMutSliceFrom {
+        self.emit(InstrRef::ArrayMutSliceFrom {
             dst: slice,
             src: reloaded,
             index: index as u16,
@@ -362,22 +341,16 @@ impl<'a> Lowerer<'a> {
         builds: &mut RestBuilds,
     ) -> Reg {
         let reloaded = self.fresh_reg();
-        self.emit(LirInstr::LoadLocal {
+        self.emit(InstrRef::LoadLocal {
             dst: reloaded,
             slot: temp_slot,
         });
         let rest_reg = self.fresh_reg();
-        let exclude_keys: Vec<LirConst> = entries
-            .iter()
-            .map(|(key, _)| match key {
-                PatternKey::Keyword(k) => LirConst::Keyword(crate::value::keyword::keyword_hash(k)),
-                PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
-            })
-            .collect();
-        self.emit(LirInstr::StructRest {
+        let keys = excluded_keys(entries.iter().map(|(key, _)| key));
+        self.emit(InstrRef::StructRest {
             dst: rest_reg,
             src: reloaded,
-            exclude_keys,
+            exclude_keys: ConstList::new(&keys),
         });
         let at = builds.next();
         self.park_rest_collection_at(at, rest_reg)

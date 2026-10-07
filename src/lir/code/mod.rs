@@ -7,7 +7,6 @@
 mod body;
 mod compare;
 mod decode;
-mod freeze;
 mod gpu;
 mod head;
 mod instr;
@@ -20,13 +19,14 @@ mod split;
 mod view;
 
 pub use body::LirBody;
-pub use freeze::freeze;
-pub(crate) use head::PayloadHeader;
+pub(crate) use head::{Files, PayloadHeader};
 pub use instr::InstrRef;
 pub use op::Op;
 pub use operand::{ConstList, ConstRef, Slots, TemplateBytes};
 pub use owned::{FrozenModule, LirCode, LirOwned};
+pub(crate) use record::{flag, term};
 pub use record::{BlockRec, ConstRec, Node, SiteRec, NO_FILE, NO_REG};
+pub(crate) use view::Parts;
 pub use view::{BlockRef, LirView, NodeRef, SiteRef};
 
 #[cfg(test)]

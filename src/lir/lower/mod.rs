@@ -22,6 +22,9 @@ mod setup;
 mod splice;
 mod tailcall;
 
+use super::build::{LirBuilder, LirHead};
+use super::code::{ConstList, ConstRec, ConstRef, FrozenModule, InstrRef, LirOwned};
+use super::code::{Slots, TemplateBytes};
 use super::intrinsics::IntrinsicOp;
 use super::types::*;
 use crate::hir::arena::BindingArena;
@@ -66,17 +69,16 @@ struct BlockLowerContext {
 pub struct Lowerer<'a> {
     arena: &'a BindingArena,
     /// The heap the unit's working region is minted on, named by `with_heap`.
+    /// The builder holds it while `lower` runs.
     heap: Option<&'a mut crate::value::fiberheap::FiberHeap>,
+    /// The working form, present only while `lower` runs.
+    builder: Option<LirBuilder<'a>>,
     /// The owning instance's display memo, for naming a binding in an error.
     /// Lowering never resolves a name to decide anything — the only reader is
     /// the `undefined variable` message, which is a user's own spelling and so
     /// is not in the static vocabulary (docs/impl/symbol.md). `None` degrades
     /// that one message to the hash.
     symbols: Option<&'a crate::symbol::SymbolTable>,
-    /// Current function being built
-    current_func: LirFunction,
-    /// Current block being built
-    current_block: BasicBlock,
     /// Next register ID
     next_reg: u32,
     /// Next label ID
@@ -143,10 +145,11 @@ pub struct Lowerer<'a> {
     /// Lazily allocated on first use. Reused across all discards
     /// within the same function, so only one extra local slot.
     discard_slot: Option<u16>,
-    /// Flat list of closure bodies. `MakeClosure` instructions reference
+    /// Flat list of frozen closure bodies. `MakeClosure` instructions reference
     /// closures by `ClosureId` (index into this list). Built depth-first
-    /// during lowering.
-    closures: Vec<LirFunction>,
+    /// during lowering: a slot is reserved before its body is lowered, so a
+    /// parent's id is lower than its children's.
+    closures: Vec<Option<LirOwned>>,
     /// Binding of the current function being analyzed (for self-tail-call
     /// detection in escape analysis and drop insertion).
     current_function_binding: Option<Binding>,
@@ -154,7 +157,7 @@ pub struct Lowerer<'a> {
     /// sites that bind a lambda initializer (`lower_letrec`, `lower_define`)
     /// and CONSUMED by `lower_lambda_body` — taken, not read, so a nested
     /// anonymous lambda never inherits its binder's name. It becomes
-    /// `LirFunction::name` and rides to the code payload for `fn/signature`
+    /// `LirHead::name` and rides to the code payload for `fn/signature`
     /// and `display_label`.
     pending_lambda_name: Option<String>,
     /// The self-recursive binding of the lambda body currently being lowered:
@@ -366,14 +369,23 @@ impl<'a> Lowerer<'a> {
     /// Lower a HIR expression to its frozen functions: the entry function and a
     /// flat list of closure bodies, each an independent compilation unit
     /// referenced by `ClosureId`.
-    pub fn lower(&mut self, hir: &Hir) -> Result<crate::lir::FrozenModule, String> {
-        let _heap = self.heap.as_deref_mut();
-        self.lower_working(hir)?.freeze()
+    ///
+    /// The functions are built in a working region minted on the heap
+    /// `with_heap` named, and the region is freed before this returns, whether
+    /// lowering succeeded or failed.
+    pub fn lower(&mut self, hir: &Hir) -> Result<FrozenModule, String> {
+        let heap = self
+            .heap
+            .take()
+            .ok_or("lower: no heap to build on; name one with `with_heap`")?;
+        self.builder = Some(LirBuilder::new(heap));
+        let module = self.lower_unit(hir);
+        let builder = self.builder.take().expect("the builder `lower` installed");
+        self.heap = Some(builder.into_heap());
+        module
     }
 
-    /// Lower a HIR expression to its working form, for a measurement of the
-    /// lowerer itself.
-    pub fn lower_working(&mut self, hir: &Hir) -> Result<LirModule, String> {
+    fn lower_unit(&mut self, hir: &Hir) -> Result<FrozenModule, String> {
         // Escape analysis is whole-module, like region inference — compute it
         // once over the full canonical HIR before lowering recurses into
         // closures. Computing it here keeps the pass on every real lowering path
@@ -390,8 +402,8 @@ impl<'a> Lowerer<'a> {
         self.destructure_alias_bindings.clear();
         self.precompute_destructure_aliases(hir);
 
-        self.current_func = LirFunction::new(Arity::Exact(0));
-        self.current_block = BasicBlock::new(Label(0));
+        self.b().begin_function(Arity::Exact(0));
+        self.open_block(Label(0));
         self.next_reg = 0;
         self.next_label = 1;
         self.binding_to_slot.clear();
@@ -402,20 +414,25 @@ impl<'a> Lowerer<'a> {
         self.terminate(Terminator::Return(result_reg));
         self.finish_block();
 
-        self.current_func.entry = Label(0);
-        self.current_func.num_regs = self.next_reg;
+        let num_regs = self.next_reg;
+        let head = self.head();
+        head.entry = Label(0);
+        head.num_regs = num_regs;
         // Propagate signal from HIR to top-level LIR function
-        self.current_func.signal = hir.signal;
+        head.signal = hir.signal;
 
         // Record the entry function's merged slots — the root slots a builder-idiom
         // merge shares, for runtime mint-or-reuse (see `record_merged_slots`). Empty
         // unless a merge fired.
         self.record_merged_slots();
 
-        let entry = std::mem::replace(&mut self.current_func, LirFunction::new(Arity::Exact(0)));
-        let closures = std::mem::take(&mut self.closures);
+        let entry = self.b().finish_function()?;
+        let closures = std::mem::take(&mut self.closures)
+            .into_iter()
+            .map(|c| c.expect("every reserved closure slot is filled"))
+            .collect();
 
-        let module = LirModule { entry, closures };
+        let module = FrozenModule { entry, closures };
         #[cfg(debug_assertions)]
         assert_cells_outlive_their_readers(&module);
         Ok(module)

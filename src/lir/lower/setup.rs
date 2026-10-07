@@ -11,9 +11,8 @@ impl<'a> Lowerer<'a> {
         Lowerer {
             arena,
             heap: None,
+            builder: None,
             symbols: None,
-            current_func: LirFunction::new(Arity::Exact(0)),
-            current_block: BasicBlock::new(Label(0)),
             next_reg: 0,
             next_label: 1, // 0 is entry
             binding_to_slot: HashMap::new(),
@@ -97,7 +96,7 @@ impl<'a> Lowerer<'a> {
 
     /// Give lowering the instance's display memo. An `undefined variable`
     /// error names the variable the user wrote, and a lambda that `def` or
-    /// `letrec` binds carries its binder's name on its `LirFunction`.
+    /// `letrec` binds carries its binder's name on its `LirHead`.
     pub fn with_symbols(mut self, symbols: &'a crate::symbol::SymbolTable) -> Self {
         self.symbols = Some(symbols);
         self

@@ -1,6 +1,5 @@
-// audited: 2026-09-08
-//! `match` lowering: the decision tree, and the sequential fallback a suspending
-//! guard forces.
+// audited: 2026-10-06
+//! `match` lowering: the decision tree, and the sequential fallback a suspending guard forces.
 //!
 //! docs/match.md
 
@@ -17,17 +16,15 @@ impl<'a> Lowerer<'a> {
         // the entry block, so StoreLocal never clobbers operand values
         // from enclosing expressions.
         let value_reg = self.lower_expr(value)?;
-        let scrutinee_slot = self.current_func.num_locals;
-        self.current_func.num_locals += 1;
-        self.emit(LirInstr::StoreLocal {
+        let scrutinee_slot = self.fresh_local();
+        self.emit(InstrRef::StoreLocal {
             slot: scrutinee_slot,
             src: value_reg,
         });
 
         // Allocate result register and result slot
         let result_reg = self.fresh_reg();
-        let result_slot = self.current_func.num_locals;
-        self.current_func.num_locals += 1;
+        let result_slot = self.fresh_local();
         let done_label = self.fresh_label();
 
         // Guard signal safety valve: if any guard may suspend, the decision
@@ -68,9 +65,9 @@ impl<'a> Lowerer<'a> {
         )?;
 
         // Done block: reload result
-        self.current_block = BasicBlock::new(done_label);
+        self.open_block(done_label);
         self.open_branch_merge(branch_hoists);
-        self.emit(LirInstr::LoadLocal {
+        self.emit(InstrRef::LoadLocal {
             dst: result_reg,
             slot: result_slot,
         });
@@ -130,7 +127,7 @@ impl<'a> Lowerer<'a> {
 
                 // Reload the scrutinee for this alternative's test.
                 let alt_value_reg = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
+                self.emit(InstrRef::LoadLocal {
                     dst: alt_value_reg,
                     slot: scrutinee_slot,
                 });
@@ -152,14 +149,14 @@ impl<'a> Lowerer<'a> {
                 // Start the next alternative's block (the last alternative's
                 // `next_label` is another arm's block, opened by the outer loop).
                 if j + 1 < alternatives.len() {
-                    self.current_block = BasicBlock::new(next_label);
+                    self.open_block(next_label);
                 }
             }
 
             // Shared body block for this arm.
-            self.current_block = BasicBlock::new(body_label);
+            self.open_block(body_label);
             let body_reg = self.lower_expr(body)?;
-            self.emit(LirInstr::StoreLocal {
+            self.emit(InstrRef::StoreLocal {
                 slot: result_slot,
                 src: body_reg,
             });
@@ -169,17 +166,17 @@ impl<'a> Lowerer<'a> {
 
             // Start the next arm's block.
             if i + 1 < arms.len() {
-                self.current_block = BasicBlock::new(arm_labels[i + 1]);
+                self.open_block(arm_labels[i + 1]);
             }
         }
 
         // No match block: raise :match-error carrying the scrutinee
-        self.current_block = BasicBlock::new(no_match_label);
+        self.open_block(no_match_label);
         self.emit_no_match(scrutinee_slot, result_slot, done_label)?;
 
         // Done block
-        self.current_block = BasicBlock::new(done_label);
-        self.emit(LirInstr::LoadLocal {
+        self.open_block(done_label);
+        self.emit(InstrRef::LoadLocal {
             dst: result_reg,
             slot: result_slot,
         });

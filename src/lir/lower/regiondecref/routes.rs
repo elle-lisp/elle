@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! The release routes a region's demise can take: a value off its slot, an env cell's box, a 1-slot container's content, a co-owned group.
 //!
 //! docs/impl/region/replicate.md
@@ -18,10 +18,10 @@ impl<'a> Lowerer<'a> {
     /// value this release freed.
     pub(super) fn emit_slot_value_release(&mut self, slot: u16) {
         let val_reg = self.fresh_reg();
-        self.emit(LirInstr::LoadLocal { dst: val_reg, slot });
-        self.emit(LirInstr::DecrefValueRegion { src: val_reg });
-        if let Ok(nil_reg) = self.emit_const(crate::lir::LirConst::Nil) {
-            self.emit(LirInstr::StoreLocal { slot, src: nil_reg });
+        self.emit(InstrRef::LoadLocal { dst: val_reg, slot });
+        self.emit(InstrRef::DecrefValueRegion { src: val_reg });
+        if let Ok(nil_reg) = self.emit_const(ConstRef::Nil) {
+            self.emit(InstrRef::StoreLocal { slot, src: nil_reg });
         }
     }
 
@@ -30,8 +30,9 @@ impl<'a> Lowerer<'a> {
     /// a route that stamps its slot `nil` as it releases: the stamp is what tells
     /// the walk that the release already ran.
     pub(in crate::lir::lower) fn record_value_route(&mut self, slot: u16) {
-        if !self.current_func.frame_release_slots.contains(&slot) {
-            self.current_func.frame_release_slots.push(slot);
+        let head = self.head();
+        if !head.frame_release_slots.contains(&slot) {
+            head.frame_release_slots.push(slot);
         }
     }
 
@@ -60,11 +61,11 @@ impl<'a> Lowerer<'a> {
     /// sibling arm's tail compensation (docs/impl/region/compensate.md).
     pub(super) fn emit_cell_region_release(&mut self, index: u16, site: HirId) {
         let val_reg = self.fresh_reg();
-        self.emit(LirInstr::LoadCaptureRaw {
+        self.emit(InstrRef::LoadCaptureRaw {
             dst: val_reg,
             index,
         });
-        self.emit(LirInstr::DecrefCellRegion { src: val_reg });
+        self.emit(InstrRef::DecrefCellRegion { src: val_reg });
         if crate::config::get().has_trace("rc") {
             eprintln!(
                 "[trace:rc:emit] emit_decref_cell_region hir_id={:?} upvalue_slot={} span={}",
@@ -128,7 +129,7 @@ impl<'a> Lowerer<'a> {
                 return;
             };
             let reg = self.fresh_reg();
-            self.emit(LirInstr::LoadLocal { dst: reg, slot });
+            self.emit(InstrRef::LoadLocal { dst: reg, slot });
             regs.push(reg);
         }
         if regs.is_empty() {
@@ -140,6 +141,6 @@ impl<'a> Lowerer<'a> {
                 members.iter().map(|r| r.0).collect::<Vec<_>>()
             );
         }
-        self.emit(LirInstr::FreeRegionGroup { members: regs });
+        self.emit(InstrRef::FreeRegionGroup { members: &regs });
     }
 }

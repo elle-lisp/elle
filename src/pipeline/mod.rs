@@ -23,8 +23,7 @@ pub use bootstrap::install_core_exports;
 pub use cache::{BootExports, CompileCtx};
 pub use compile::{
     compile, compile_barrier_module, compile_file, compile_file_repl, compile_file_to_fhir,
-    compile_file_to_lir, compile_whole_module, compile_whole_module_forms, lower_file_to_lir,
-    splice_includes,
+    compile_file_to_lir, compile_whole_module, compile_whole_module_forms, splice_includes,
 };
 pub use eval::{eval, eval_all, eval_file, eval_syntax};
 

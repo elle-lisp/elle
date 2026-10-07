@@ -4,14 +4,14 @@
 //! src/lir/AGENTS.md
 //! docs/impl/lir.md
 //!
-//! The inverse of `freeze`, field for field. Every read indexes a slice, so a
-//! corrupt index panics here rather than reading outside the function.
+//! The inverse of the encoder in `src/lir/build/encode.rs`, field for field.
+//! Every read indexes a slice, so a corrupt index panics here rather than
+//! reading outside the function.
 
-use super::freeze::flag;
 use super::instr::InstrRef;
 use super::op::Op;
 use super::operand::{ConstList, ConstRef, Slots, TemplateBytes};
-use super::record::{kind, term, BlockRec, Node};
+use super::record::{flag, kind, term, BlockRec, Node};
 use super::view::Parts;
 use crate::hir::region::StaticRegion;
 use crate::lir::{BinOp, ClosureId, CmpOp, ConvOp, Label, OperandProof, Reg, Terminator, UnaryOp};
@@ -49,7 +49,7 @@ fn regs(words: &[u32]) -> &[Reg] {
     unsafe { std::slice::from_raw_parts(words.as_ptr() as *const Reg, words.len()) }
 }
 
-/// The registers `node` reads, in `for_each_use` order.
+/// The registers `node` reads, in the order the encoder wrote them.
 pub(crate) fn uses<'a>(node: &'a Node, parts: &Parts<'a>) -> &'a [Reg] {
     let n = node.n_uses as usize;
     if n <= 2 {

@@ -114,16 +114,17 @@ workgroup size argument on the compiler path.
 
 ## Caching
 
-The MLIR `MlirCache` carries a `spirv_cache: HashMap<*const u8, Vec<u8>>`
-keyed by the closure's bytecode pointer. The key does not include the
-workgroup size:
+Two caches hold SPIR-V, and both key it by the closure's bytecode pointer. No
+key includes the workgroup size:
 
-- `mlir/compile-spirv` always re-uses the cache (and the shared MLIR
-  context) — repeated calls for the same closure are O(1).
-- `(git f)` additionally stores the bytes inside the closure's
-  `template.spirv: OnceCell<Vec<u8>>`, so subsequent calls skip the
-  cache lookup entirely. `(fn/git? f)` predicates on this cell;
-  `(disgit f)` returns the cached bytes.
+- `MlirCache` carries a `spirv_cache` beside the shared MLIR context.
+  `mlir/compile-spirv` and `git` compile through it, so a repeated call for
+  the same closure is a lookup.
+- `(git f)` also installs the bytes in the VM's `spirv_cache`
+  ([src/vm/core/caches.rs](../../src/vm/core/caches.rs)). That entry pins
+  the code region of the closure's code object, so the key keeps naming the
+  same function. `(fn/git? f)` asks whether this cache holds the closure;
+  `(disgit f)` returns its bytes.
 
 `gpu:map` consults `(fn/git? f)` first and falls back to
 `mlir/compile-spirv` — letting users pre-compile hot kernels with
@@ -148,8 +149,8 @@ the `plugins` submodule.
 | Name | Signal | Returns |
 |------|--------|---------|
 | `mlir/compile-spirv` | query+errors | the SPIR-V `bytes` of a GPU-eligible closure; only in an MLIR build |
-| `git` | query+errors+gpu | the closure, with its SPIR-V cached on the template; only in an MLIR build |
-| `fn/git?` | silent | whether the closure's template holds SPIR-V; false for a non-closure |
+| `git` | query+errors+gpu | the closure, with its SPIR-V cached in the VM; only in an MLIR build |
+| `fn/git?` | silent | whether the VM caches SPIR-V for the closure; false for a non-closure |
 | `disgit` | errors | the cached SPIR-V `bytes`; an error if the closure was never GIT'd |
 
 ```lisp
@@ -163,7 +164,7 @@ the `plugins` submodule.
 
 ## See also
 
-- [impl/mlir.md](mlir.md) — the LIR → MLIR lowering shared with the CPU path
+- [impl/mlir.md](mlir.md) — the LIR → MLIR lowering shared with the CPU path,
+  and the eligibility predicate
 - [impl/gpu.md](gpu.md) — Vulkan dispatch consuming SPIR-V bytes
-- [impl/lir.md](lir.md) — the eligibility predicate and instruction whitelist
 - [lib/spirv.lisp](../../lib/spirv.lisp) — the DSL's source

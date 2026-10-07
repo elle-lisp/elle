@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-10-06
 //! `and`/`or` lowering: the branch a short-circuit operator compiles to.
 //!
 //! docs/impl/region/replicate.md
@@ -8,15 +8,14 @@ use super::*;
 impl<'a> Lowerer<'a> {
     pub(in crate::lir::lower) fn lower_and(&mut self, exprs: &[Hir]) -> Result<Reg, String> {
         if exprs.is_empty() {
-            return self.emit_const(LirConst::Bool(true));
+            return self.emit_const(ConstRef::Bool(true));
         }
         if exprs.len() == 1 {
             return self.lower_expr(&exprs[0]);
         }
 
         // Allocate result slot (same pattern as lower_cond/lower_if)
-        let result_slot = self.current_func.num_locals;
-        self.current_func.num_locals += 1;
+        let result_slot = self.fresh_local();
         let done_label = self.fresh_label();
 
         // Every operand's block branches or jumps to the done block, so each is an
@@ -30,7 +29,7 @@ impl<'a> Lowerer<'a> {
             let val_reg = self.lower_expr(expr)?;
 
             // Store value to result slot
-            self.emit(LirInstr::StoreLocal {
+            self.emit(InstrRef::StoreLocal {
                 slot: result_slot,
                 src: val_reg,
             });
@@ -38,7 +37,7 @@ impl<'a> Lowerer<'a> {
             if i < exprs.len() - 1 {
                 // Not the last expression: reload for branch test
                 let cond_reg = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
+                self.emit(InstrRef::LoadLocal {
                     dst: cond_reg,
                     slot: result_slot,
                 });
@@ -54,7 +53,7 @@ impl<'a> Lowerer<'a> {
                 self.seal_arm_hoists();
                 self.finish_block();
 
-                self.current_block = BasicBlock::new(next_label);
+                self.open_block(next_label);
             } else {
                 // Last expression: jump to done (value already in slot)
                 self.terminate(Terminator::Jump(done_label));
@@ -64,10 +63,10 @@ impl<'a> Lowerer<'a> {
         }
 
         // Done block: load result from slot
-        self.current_block = BasicBlock::new(done_label);
+        self.open_block(done_label);
         self.open_branch_merge(branch_hoists);
         let result_reg = self.fresh_reg();
-        self.emit(LirInstr::LoadLocal {
+        self.emit(InstrRef::LoadLocal {
             dst: result_reg,
             slot: result_slot,
         });
@@ -77,14 +76,13 @@ impl<'a> Lowerer<'a> {
 
     pub(in crate::lir::lower) fn lower_or(&mut self, exprs: &[Hir]) -> Result<Reg, String> {
         if exprs.is_empty() {
-            return self.emit_const(LirConst::Bool(false));
+            return self.emit_const(ConstRef::Bool(false));
         }
         if exprs.len() == 1 {
             return self.lower_expr(&exprs[0]);
         }
 
-        let result_slot = self.current_func.num_locals;
-        self.current_func.num_locals += 1;
+        let result_slot = self.fresh_local();
         let done_label = self.fresh_label();
 
         // The arms and the merge are `lower_and`'s, with the branch inverted.
@@ -93,14 +91,14 @@ impl<'a> Lowerer<'a> {
         for (i, expr) in exprs.iter().enumerate() {
             let val_reg = self.lower_expr(expr)?;
 
-            self.emit(LirInstr::StoreLocal {
+            self.emit(InstrRef::StoreLocal {
                 slot: result_slot,
                 src: val_reg,
             });
 
             if i < exprs.len() - 1 {
                 let cond_reg = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
+                self.emit(InstrRef::LoadLocal {
                     dst: cond_reg,
                     slot: result_slot,
                 });
@@ -116,7 +114,7 @@ impl<'a> Lowerer<'a> {
                 self.seal_arm_hoists();
                 self.finish_block();
 
-                self.current_block = BasicBlock::new(next_label);
+                self.open_block(next_label);
             } else {
                 self.terminate(Terminator::Jump(done_label));
                 self.seal_arm_hoists();
@@ -124,10 +122,10 @@ impl<'a> Lowerer<'a> {
             }
         }
 
-        self.current_block = BasicBlock::new(done_label);
+        self.open_block(done_label);
         self.open_branch_merge(branch_hoists);
         let result_reg = self.fresh_reg();
-        self.emit(LirInstr::LoadLocal {
+        self.emit(InstrRef::LoadLocal {
             dst: result_reg,
             slot: result_slot,
         });

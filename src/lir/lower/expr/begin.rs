@@ -1,4 +1,8 @@
-//! `Begin` lowering and its slot pre-pass.
+// audited: 2026-10-06
+//! `Begin` lowering, and the pre-pass that allocates its bindings' slots before any expression is lowered.
+//!
+//! src/lir/lower/AGENTS.md
+//! docs/impl/region/letrec.md
 //!
 //! Split out because `lower_begin` is fronted by a structural pre-pass
 //! (`collect_preallocate_bindings`) that pre-allocates slots for mutually
@@ -94,7 +98,7 @@ impl<'a> Lowerer<'a> {
         // Now lower all expressions (slots are available for capture lookup)
         // Pop intermediate results to keep the stack clean
         if exprs.is_empty() {
-            return self.emit_const(LirConst::Nil);
+            return self.emit_const(ConstRef::Nil);
         }
 
         // A `Begin` that prebound forward cells is a mutual-recursion cycle's

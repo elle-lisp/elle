@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! `FiberHeap` region-allocator surface.
 //!
 //! Everything that allocates into, reference-counts, adopts, or inspects the
@@ -71,6 +71,17 @@ impl FiberHeap {
         fill: impl FnOnce(&mut [u8]),
     ) -> crate::value::region_slice::RegionSlice<u8> {
         self.region_store.alloc_bytes_with(region_id, len, fill)
+    }
+
+    /// Room for `n` values of `T` directly in a specific region, aligned for
+    /// `T` and not yet written: the extent a slice that grows in a region
+    /// claims (src/lir/build/grow.rs).
+    pub(crate) fn alloc_room_in_region<T: Copy + 'static>(
+        &mut self,
+        n: usize,
+        region_id: RuntimeRegion,
+    ) -> *mut T {
+        self.region_store.alloc_room(region_id, n)
     }
 
     /// Mint a fresh **runtime** region id — a real, pages-owning region in the

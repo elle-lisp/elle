@@ -1,5 +1,5 @@
 // audited: 2026-10-06
-//! `Op`: the opcode byte a frozen node carries, one per `LirInstr` variant.
+//! `Op`: the opcode byte a node carries, one per `InstrRef` variant.
 //!
 //! docs/impl/lir.md
 //!
@@ -7,12 +7,11 @@
 //! added to one and missed in the other.
 
 use super::instr::InstrRef;
-use crate::lir::LirInstr;
 
 macro_rules! ops {
     ($($name:ident),* $(,)?) => {
-        /// One opcode per `LirInstr` variant, in declaration order. A variant
-        /// means what the `LirInstr` variant of the same name means.
+        /// One opcode per `InstrRef` variant, in declaration order. A variant
+        /// means what the `InstrRef` variant of the same name means.
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
         #[repr(u8)]
         pub enum Op {
@@ -126,13 +125,7 @@ impl Op {
     /// The opcode of an instruction. Exhaustive, so a new variant cannot be
     /// encoded until it has an opcode.
     pub fn of(instr: &InstrRef<'_>) -> Op {
-        Op::of_working(&super::super::build::working_instr(*instr))
-    }
-
-    /// The opcode of a working-form instruction. Exhaustive, so a new variant
-    /// has no frozen form until it has an opcode.
-    pub fn of_working(instr: &LirInstr) -> Op {
-        use LirInstr as I;
+        use InstrRef as I;
         match instr {
             I::Const { .. } => Op::Const,
             I::ValueConst { .. } => Op::ValueConst,

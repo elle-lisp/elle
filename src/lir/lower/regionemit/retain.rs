@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! What a node emits for the references its own stores take.
 //!
 //! docs/impl/region/mechanism.md
@@ -31,16 +31,16 @@ impl<'a> Lowerer<'a> {
             return;
         };
         let preg = self.fresh_reg();
-        self.emit(LirInstr::LoadLocal {
+        self.emit(InstrRef::LoadLocal {
             dst: preg,
             slot: pslot,
         });
         let creg = self.fresh_reg();
-        self.emit(LirInstr::LoadLocal {
+        self.emit(InstrRef::LoadLocal {
             dst: creg,
             slot: cslot,
         });
-        self.emit(LirInstr::AdoptRegion {
+        self.emit(InstrRef::AdoptRegion {
             parent: preg,
             child: creg,
         });
@@ -77,8 +77,8 @@ impl<'a> Lowerer<'a> {
                 continue;
             }
             let reg = self.fresh_reg();
-            self.emit(LirInstr::LoadLocal { dst: reg, slot });
-            self.emit(LirInstr::AdoptIntoActivation { child: reg });
+            self.emit(InstrRef::LoadLocal { dst: reg, slot });
+            self.emit(InstrRef::AdoptIntoActivation { child: reg });
             if crate::config::get().has_trace("rc") {
                 eprintln!(
                     "[trace:rc:emit] adopt_into_activation member={} local_slot={}",
@@ -156,14 +156,14 @@ impl<'a> Lowerer<'a> {
             {
                 if let Some(slot) = self.region_to_slot.get(&src).and_then(|s| s.local()) {
                     let val_reg = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal { dst: val_reg, slot });
-                    self.emit(LirInstr::IncrefValueRegion { src: val_reg });
+                    self.emit(InstrRef::LoadLocal { dst: val_reg, slot });
+                    self.emit(InstrRef::IncrefValueRegion { src: val_reg });
                     // `IncrefValueRegion` peeks (Return-position contract: the
                     // value must stay on top for the caller); mid-stream that
                     // leaves an unconsumed entry that skews the emitter's
                     // stack model. Store the value back to its own slot — a
                     // semantic no-op whose emission consumes the entry.
-                    self.emit(LirInstr::StoreLocal { slot, src: val_reg });
+                    self.emit(InstrRef::StoreLocal { slot, src: val_reg });
                 }
                 // No slot: nothing to load — the same net no-op as the
                 // unpopulated-slot `IncrefRegion` this replaces.
@@ -190,7 +190,7 @@ impl<'a> Lowerer<'a> {
                 continue;
             }
             let region_id = self.static_slot(src);
-            self.emit(LirInstr::IncrefRegion { region_id });
+            self.emit(InstrRef::IncrefRegion { region_id });
         }
     }
     /// Emit pending `DecrefRegion` instructions. Called at tail-call

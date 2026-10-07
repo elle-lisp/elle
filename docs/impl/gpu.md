@@ -1,6 +1,6 @@
 # GPU Compute
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-06 -->
 
 How a plain Elle closure becomes a dispatched compute kernel, across the
 MLIR backend and the Vulkan plugin.
@@ -201,8 +201,7 @@ GPU is missing, the error propagates. A test gates itself out with a
 | [src/mlir/spirv.rs](../../src/mlir/spirv.rs) | Compiler-generated SPIR-V |
 | [src/primitives/meta.rs](../../src/primitives/meta.rs) | `git`, `fn/git?`, `disgit` |
 | [src/primitives/introspection.rs](../../src/primitives/introspection.rs) | `fn/gpu-eligible?`, `mlir/compile-spirv` |
-| [src/lir/types/func.rs](../../src/lir/types/func.rs) | `is_gpu_eligible`, `is_mlir_cpu_eligible` |
-| [src/lir/types/mod.rs](../../src/lir/types/mod.rs) | `is_gpu_instruction` |
+| [src/lir/code/gpu.rs](../../src/lir/code/gpu.rs) | `is_gpu_eligible`, `is_mlir_cpu_eligible` and the instruction whitelist |
 
 The Vulkan plugin lives in the `plugins` submodule, under `vulkan/src/`:
 `lib.rs` holds the entry, the primitive table and the buffer specs;
@@ -248,9 +247,9 @@ them turns nothing on:
 
 ## See also
 
-- [impl/mlir.md](mlir.md) — LIR → MLIR lowering and CPU tier
+- [impl/mlir.md](mlir.md) — LIR → MLIR lowering, CPU tier, and the
+  eligibility predicate
 - [impl/spirv.md](spirv.md) — SPIR-V emission paths and caching
-- [impl/lir.md](lir.md) — eligibility predicate
 - [plugins.md](../plugins.md) — the plugin system, and the submodule the Vulkan
   plugin's own reference lives in
 - [lib/AGENTS.md](../../lib/AGENTS.md) — Elle library reference (lib/gpu, lib/spirv)

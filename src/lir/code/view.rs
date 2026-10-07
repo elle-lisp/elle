@@ -34,6 +34,11 @@ pub(crate) struct Parts<'a> {
 }
 
 impl<'a> Parts<'a> {
+    /// The instruction `node` holds, decoded against these slices.
+    pub(crate) fn instr(&self, node: &'a Node) -> InstrRef<'a> {
+        super::decode::instr(node, self)
+    }
+
     /// The span four fields and a file index spell.
     pub(crate) fn span(&self, start: u32, end: u32, line: u32, col: u32, file: u32) -> Span {
         let mut span = Span::new(start as usize, end as usize, line, col);
@@ -404,7 +409,7 @@ impl<'a> NodeRef<'a> {
     }
 
     /// The region slot an allocating or calling instruction routes to, as
-    /// `LirInstr::region` answers it.
+    /// `InstrRef::region` answers it.
     pub fn region(&self) -> Option<StaticRegion> {
         StaticRegion::new(self.node.region)
     }

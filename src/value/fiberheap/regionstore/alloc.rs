@@ -1,4 +1,4 @@
-//! audited: 2026-09-23
+//! audited: 2026-10-06
 //! Minting, lazy region creation, and allocation into a region.
 //!
 //! docs/impl/region/model.md
@@ -198,6 +198,17 @@ impl RegionStore {
         self.ensure_raw(id);
         let entry = self.regions[id as usize].as_mut().unwrap();
         entry.pool.alloc_region_slice(items, &mut self.pool)
+    }
+
+    /// Room for `n` values of `T` in a mortal region, aligned for `T` and not
+    /// yet written. The caller writes each value before anything reads it.
+    pub fn alloc_room<T: Copy + 'static>(&mut self, id: RuntimeRegion, n: usize) -> *mut T {
+        self.ensure_raw(id.get());
+        let entry = self.regions[id.get() as usize].as_mut().unwrap();
+        let size = std::mem::size_of::<T>() * n;
+        entry
+            .pool
+            .alloc_data(size, std::mem::align_of::<T>(), &mut self.pool) as *mut T
     }
 
     /// Allocate `len` bytes in a mortal region and let `fill` write every one

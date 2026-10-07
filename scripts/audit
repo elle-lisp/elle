@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# audited: 2026-10-05
+# audited: 2026-10-07
 # Names the files whose stale documentation costs the most, and gates a commit
 # on the files it stages carrying today's stamp.
 # docs/impl/audit.md
@@ -76,7 +76,7 @@ eligible() {
     # queued. Each is named by path so every file beside it stays. See
     # docs/impl/audit.md.
     case "$1" in
-        src/stdlib.lisp | src/lir/types/instr.rs) return 1 ;;
+        src/stdlib.lisp | src/lir/code/instr.rs) return 1 ;;
         scripts/* | *.rs | *.lisp | *.md) return 0 ;;
         *) return 1 ;;
     esac

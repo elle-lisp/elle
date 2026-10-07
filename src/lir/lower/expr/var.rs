@@ -1,4 +1,7 @@
-//! Variable-reference lowering — the `HirKind::Var` arm of `lower_expr`.
+// audited: 2026-10-06
+//! Variable-reference lowering: the `HirKind::Var` arm of `lower_expr`.
+//!
+//! src/lir/lower/AGENTS.md
 //!
 //! Split out because resolving a binding (immutable-value inline, self-closure
 //! `LoadSelf`, upvalue vs. local slot, capture-cell unwrap) is its own concern
@@ -9,7 +12,7 @@ use super::*;
 impl<'a> Lowerer<'a> {
     pub(super) fn lower_var(&mut self, binding: &Binding, span: &Span) -> Result<Reg, String> {
         // Check immutable_values first — primitive bindings and immutable
-        // globals with literal values are compiled to LoadConst without
+        // globals with literal values are compiled to ValueConst without
         // needing a slot allocation.
         if let Some(&literal_value) = self.immutable_values.get(binding) {
             return self.emit_value_const(literal_value);
@@ -26,7 +29,7 @@ impl<'a> Lowerer<'a> {
         // closure-cycle merge), so this fires for exactly the self-references.
         if self.current_self_binding == Some(*binding) {
             let dst = self.fresh_reg();
-            self.emit(LirInstr::LoadSelf { dst });
+            self.emit(InstrRef::LoadSelf { dst });
             return Ok(dst);
         }
 
@@ -40,22 +43,22 @@ impl<'a> Lowerer<'a> {
             let dst = self.fresh_reg();
             if self.in_lambda && is_upvalue {
                 if needs_capture {
-                    self.emit(LirInstr::LoadCapture { dst, index: slot });
+                    self.emit(InstrRef::LoadCapture { dst, index: slot });
                 } else {
-                    self.emit(LirInstr::LoadCaptureRaw { dst, index: slot });
+                    self.emit(InstrRef::LoadCaptureRaw { dst, index: slot });
                 }
                 Ok(dst)
             } else {
                 // A plain stack slot: every non-upvalue binding — outside
                 // lambdas, and in-lambda for a compiled-cell letrec binding
                 // (compiled_forward_cell) whose slot holds the MakeCaptureCell.
-                self.emit(LirInstr::LoadLocal { dst, slot });
+                self.emit(InstrRef::LoadLocal { dst, slot });
 
                 if needs_capture {
                     // Unwrap the cell to get the actual value
                     // Only needed for locals, not captures (LoadCapture auto-unwraps)
                     let value_reg = self.fresh_reg();
-                    self.emit(LirInstr::LoadCaptureCell {
+                    self.emit(InstrRef::LoadCaptureCell {
                         dst: value_reg,
                         cell: dst,
                     });

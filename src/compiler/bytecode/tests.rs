@@ -1,3 +1,8 @@
+// audited: 2026-10-06
+//! Bytecode encoding, constant dedup, opcode decode, and the disassembler's operand skips.
+//!
+//! docs/impl/bytecode.md
+
 use super::*;
 use crate::value::fiber::SignalBits;
 
@@ -154,7 +159,7 @@ fn disassemble_skips_tail_call_operands() {
     // then one u16 each). The disassembler must skip exactly those and decode
     // the following opcode, so the closure-cycle adopt slot (0 = None) and a
     // VARIABLE-length stash list both keep the stream aligned. See
-    // `LirInstr::TailCall::{deferred_release_slot, borrowed_arg_slots}`.
+    // `InstrRef::TailCall::{deferred_release_slot, borrowed_arg_slots}`.
     let mut bc = Bytecode::new();
     bc.emit(Instruction::TailCall);
     bc.emit_u16(2); // arg_count

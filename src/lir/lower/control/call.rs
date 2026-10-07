@@ -1,6 +1,5 @@
-// audited: 2026-09-29
-//! Lowering a call: the argument loop that decides what each argument owes,
-//! and the dispatch to the tail, spliced and ordinary arms.
+// audited: 2026-10-06
+//! Lowering a call: the argument loop that decides what each argument owes, and the dispatch to the tail, spliced and ordinary arms.
 //!
 //! docs/impl/region/rules.md
 
@@ -166,15 +165,14 @@ impl<'a> Lowerer<'a> {
             // `IncrefValueRegion` does not pop, so the arg stays in place for
             // the rest of the arg/func pushes and the `TailCall`.
             if borrowed {
-                self.emit(LirInstr::IncrefValueRegion { src: reg });
+                self.emit(InstrRef::IncrefValueRegion { src: reg });
                 // Stash-and-reload: `StoreLocal` consumes the value (the
                 // emitter auto-pops), so reload it as the arg actually
                 // handed to the call — same value, layout intact.
-                let slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                self.emit(LirInstr::StoreLocal { slot, src: reg });
+                let slot = self.fresh_local();
+                self.emit(InstrRef::StoreLocal { slot, src: reg });
                 let reloaded = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
+                self.emit(InstrRef::LoadLocal {
                     dst: reloaded,
                     slot,
                 });
@@ -187,9 +185,8 @@ impl<'a> Lowerer<'a> {
             // it) so a later argument's loop cannot clobber it; the value flows
             // through the local unchanged, immediates included.
             if spill_across_loop {
-                let slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                self.emit(LirInstr::StoreLocal { slot, src: reg });
+                let slot = self.fresh_local();
+                self.emit(InstrRef::StoreLocal { slot, src: reg });
                 arg_spill_slots.push(Some(slot));
             } else {
                 arg_spill_slots.push(None);
@@ -202,7 +199,7 @@ impl<'a> Lowerer<'a> {
         for (i, slot) in arg_spill_slots.iter().enumerate() {
             if let Some(slot) = *slot {
                 let reloaded = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
+                self.emit(InstrRef::LoadLocal {
                     dst: reloaded,
                     slot,
                 });
@@ -262,19 +259,19 @@ impl<'a> Lowerer<'a> {
                 .union(crate::signals::SIG_IO)
                 .union(crate::signals::SIG_WAIT),
         ) {
-            self.emit_alloc(|region| LirInstr::SuspendingCall {
+            self.emit_alloc(|region| InstrRef::SuspendingCall {
                 region,
                 dst,
                 func: func_reg,
-                args: arg_regs,
+                args: &arg_regs,
                 arity_checked,
             });
         } else {
-            self.emit_alloc(|region| LirInstr::Call {
+            self.emit_alloc(|region| InstrRef::Call {
                 region,
                 dst,
                 func: func_reg,
-                args: arg_regs,
+                args: &arg_regs,
                 arity_checked,
             });
         }

@@ -1,8 +1,9 @@
-// audited: 2026-09-05
+// audited: 2026-10-06
 //! Placing a release so every path runs it once: a move ahead of a tail call,
 //! or a replica in each closed block that leaves before reaching it.
 //!
 //! docs/impl/region/replicate.md
+//! docs/impl/lir.md
 
 use super::*;
 
@@ -70,23 +71,23 @@ impl<'a> Lowerer<'a> {
         if let super::HoistBlock::Current(label) = self.tail_exit_hoist[0].block {
             // A tail call in this very block dominates everything after it, so it
             // is the only point and the placement is the move.
-            if label != self.current_block.label || !admitted(&self.tail_exit_hoist[0]) {
+            if label != self.built().open_label() || !admitted(&self.tail_exit_hoist[0]) {
                 f(self);
                 return;
             }
             let at = self.tail_exit_hoist[0].at;
-            let start = self.current_block.instructions.len();
+            let start = self.built().open_len();
             f(self);
-            let moved: Vec<_> = self.current_block.instructions.drain(start..).collect();
-            if moved.is_empty()
-                || !self.hoistable_run(0, &moved)
-                || self.move_frees_a_cell_the_window_reads(at, &moved)
+            let moved = self.built().open_len() - start;
+            // A run that may not move stays where `f` emitted it.
+            if moved == 0
+                || !self.hoistable_run(0, start)
+                || self.move_frees_a_cell_the_window_reads(at, start)
             {
-                self.current_block.instructions.extend(moved);
                 return;
             }
-            self.tail_exit_hoist[0].at += moved.len();
-            self.current_block.instructions.splice(at..at, moved);
+            self.tail_exit_hoist[0].at += moved;
+            self.b().move_run(start, at);
             return;
         }
         // Points inherited from the arms of a branch. The release stays here for
@@ -102,9 +103,9 @@ impl<'a> Lowerer<'a> {
             .iter()
             .any(|h| matches!(h.block, super::HoistBlock::Finished(_)) && admitted(h));
         let saved = std::mem::replace(&mut self.replicating_release, replicates);
-        let start = self.current_block.instructions.len();
+        let start = self.built().open_len();
         f(self);
-        if !self.self_cancelling_run(&self.current_block.instructions[start..]) {
+        if !self.self_cancelling_run(start) {
             self.replicating_release = saved;
             return;
         }
@@ -117,10 +118,14 @@ impl<'a> Lowerer<'a> {
             }
             // Re-run rather than clone the emitted run: each replica then names
             // its own registers, so no register is defined twice.
-            let start = self.current_block.instructions.len();
+            let mark = self.built().mark();
+            let start = self.built().open_len();
             f(self);
-            let copy: Vec<_> = self.current_block.instructions.drain(start..).collect();
-            if !self.hoistable_run(i, &copy) || !self.self_cancelling_run(&copy) {
+            let copied = self.built().open_len() - start;
+            if !self.hoistable_run(i, start) || !self.self_cancelling_run(start) {
+                // A replica that may not go is taken back whole, with the
+                // table entries only it names.
+                self.b().retract(mark);
                 continue;
             }
             let at = self.tail_exit_hoist[i].at;
@@ -136,23 +141,18 @@ impl<'a> Lowerer<'a> {
             // rather than an out-of-bounds stack read at runtime.
             debug_assert!(
                 if self.tail_exit_hoist[i].left_block.is_some() {
-                    at == self.current_func.blocks[block].instructions.len()
+                    at == self.built().finished_block_len(block)
                 } else {
                     matches!(
-                        self.current_func.blocks[block].instructions.get(at),
-                        Some(SpannedInstr {
-                            instr: LirInstr::TailCall { .. } | LirInstr::TailCallArrayMut { .. },
-                            ..
-                        })
+                        self.built().finished_instr(block, at),
+                        Some(InstrRef::TailCall { .. } | InstrRef::TailCallArrayMut { .. })
                     )
                 },
                 "a relocation point's index must still name its exit position: \
                  block={block} at={at}"
             );
-            self.tail_exit_hoist[i].at += copy.len();
-            self.current_func.blocks[block]
-                .instructions
-                .splice(at..at, copy);
+            self.tail_exit_hoist[i].at += copied;
+            self.b().move_run_to(start, block, at);
         }
         self.replicating_release = saved;
     }
@@ -169,29 +169,31 @@ impl<'a> Lowerer<'a> {
     /// than an accident of the vocabulary: a `DecrefRegion` by region id, a capture
     /// cell's `DecrefCellRegion` and the transfer `AdoptIntoActivation` all leave
     /// the holder as it was, so a second copy on one path would count twice.
-    fn self_cancelling_run(&self, run: &[SpannedInstr]) -> bool {
+    ///
+    /// The run is the open block's instructions from `start` on.
+    fn self_cancelling_run(&self, start: usize) -> bool {
         let mut released: Option<u16> = None;
         let mut nil_regs: rustc_hash::FxHashSet<Reg> = rustc_hash::FxHashSet::default();
         let mut loaded: rustc_hash::FxHashMap<Reg, u16> = rustc_hash::FxHashMap::default();
         let mut stamped = false;
-        for i in run {
-            match &i.instr {
-                LirInstr::LoadLocal { dst, slot } => {
-                    loaded.insert(*dst, *slot);
+        for i in self.built().open_instrs(start) {
+            match i {
+                InstrRef::LoadLocal { dst, slot } => {
+                    loaded.insert(dst, slot);
                 }
-                LirInstr::Const {
+                InstrRef::Const {
                     dst,
-                    value: LirConst::Nil,
+                    value: ConstRef::Nil,
                 } => {
-                    nil_regs.insert(*dst);
+                    nil_regs.insert(dst);
                 }
-                LirInstr::DecrefValueRegion { src } => match loaded.get(src) {
+                InstrRef::DecrefValueRegion { src } => match loaded.get(&src) {
                     // One release, of a value this run loaded from a slot.
                     Some(slot) if released.is_none() => released = Some(*slot),
                     _ => return false,
                 },
-                LirInstr::StoreLocal { slot, src } => {
-                    if released == Some(*slot) && nil_regs.contains(src) {
+                InstrRef::StoreLocal { slot, src } => {
+                    if released == Some(slot) && nil_regs.contains(&src) {
                         stamped = true;
                     }
                 }
@@ -212,7 +214,7 @@ impl<'a> Lowerer<'a> {
     /// inverts the order the `decref_point` clamp established
     /// (docs/impl/region/bindings.md).
     ///
-    /// The window is everything from `at` to the end of the open block — the
+    /// The window is everything from `at` to the start of the run, `start` — the
     /// `TailCall` and every release already emitted after it. Reading it is enough
     /// because the clamp fixes the emission order: a release routed through the
     /// cell is already in the window by the time the cell's own release asks to
@@ -221,16 +223,16 @@ impl<'a> Lowerer<'a> {
     ///
     /// The replica placement needs no such question: only a self-cancelling run is
     /// replicated, and a cell release is not one ([`Self::self_cancelling_run`]).
-    fn move_frees_a_cell_the_window_reads(&self, at: usize, run: &[SpannedInstr]) -> bool {
+    fn move_frees_a_cell_the_window_reads(&self, at: usize, start: usize) -> bool {
         let mut from_index: rustc_hash::FxHashMap<Reg, u16> = rustc_hash::FxHashMap::default();
         let mut freed: rustc_hash::FxHashSet<u16> = rustc_hash::FxHashSet::default();
-        for i in run {
-            match &i.instr {
-                LirInstr::LoadCapture { dst, index } | LirInstr::LoadCaptureRaw { dst, index } => {
-                    from_index.insert(*dst, *index);
+        for i in self.built().open_instrs(start) {
+            match i {
+                InstrRef::LoadCapture { dst, index } | InstrRef::LoadCaptureRaw { dst, index } => {
+                    from_index.insert(dst, index);
                 }
-                LirInstr::DecrefCellRegion { src } => {
-                    freed.extend(from_index.get(src).copied());
+                InstrRef::DecrefCellRegion { src } => {
+                    freed.extend(from_index.get(&src).copied());
                 }
                 _ => {}
             }
@@ -238,11 +240,11 @@ impl<'a> Lowerer<'a> {
         if freed.is_empty() {
             return false;
         }
-        self.current_block.instructions[at..].iter().any(|i| {
+        self.built().open_instrs(at).take(start - at).any(|i| {
             matches!(
-                &i.instr,
-                LirInstr::LoadCapture { index, .. } | LirInstr::LoadCaptureRaw { index, .. }
-                    if freed.contains(index)
+                i,
+                InstrRef::LoadCapture { index, .. } | InstrRef::LoadCaptureRaw { index, .. }
+                    if freed.contains(&index)
             )
         })
     }
@@ -261,37 +263,39 @@ impl<'a> Lowerer<'a> {
     ///   whose subtree ends in the tail call is produced BY that call — a
     ///   definition the hoist point precedes. (This is the discarded-result route
     ///   of `emit_decrefs_for`.)
-    fn hoistable_run(&self, index: usize, run: &[SpannedInstr]) -> bool {
+    ///
+    /// The run is the open block's instructions from `start` on.
+    fn hoistable_run(&self, index: usize, start: usize) -> bool {
         let Some(h) = self.tail_exit_hoist.get(index) else {
             return false;
         };
         let mut defined: rustc_hash::FxHashSet<Reg> = rustc_hash::FxHashSet::default();
-        for i in run {
-            match &i.instr {
-                LirInstr::LoadLocal { dst, slot } => {
-                    if h.operand_locals.contains(slot) {
+        for i in self.built().open_instrs(start) {
+            match i {
+                InstrRef::LoadLocal { dst, slot } => {
+                    if h.operand_locals.contains(&slot) {
                         return false;
                     }
-                    defined.insert(*dst);
+                    defined.insert(dst);
                 }
-                LirInstr::LoadCapture { dst, index } | LirInstr::LoadCaptureRaw { dst, index } => {
-                    if h.operand_captures.contains(index) {
+                InstrRef::LoadCapture { dst, index } | InstrRef::LoadCaptureRaw { dst, index } => {
+                    if h.operand_captures.contains(&index) {
                         return false;
                     }
-                    defined.insert(*dst);
+                    defined.insert(dst);
                 }
-                LirInstr::Const { dst, .. } => {
-                    defined.insert(*dst);
+                InstrRef::Const { dst, .. } => {
+                    defined.insert(dst);
                 }
-                LirInstr::StoreLocal { src, .. }
-                | LirInstr::DecrefValueRegion { src }
-                | LirInstr::DecrefCellRegion { src }
-                | LirInstr::AdoptIntoActivation { child: src } => {
-                    if !defined.contains(src) {
+                InstrRef::StoreLocal { src, .. }
+                | InstrRef::DecrefValueRegion { src }
+                | InstrRef::DecrefCellRegion { src }
+                | InstrRef::AdoptIntoActivation { child: src } => {
+                    if !defined.contains(&src) {
                         return false;
                     }
                 }
-                LirInstr::DecrefRegion { .. } => {}
+                InstrRef::DecrefRegion { .. } => {}
                 // Anything else is outside the release vocabulary this wrapper
                 // was written for; leave it where the lowerer put it.
                 _ => return false,

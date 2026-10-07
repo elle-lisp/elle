@@ -151,7 +151,7 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) pop_region_map: FuncId,
     pub(crate) resolve_alloc_region: FuncId,
     /// The mint-or-reuse variant of `resolve_alloc_region`, selected at emit time
-    /// for a slot in `LirFunction.merged_slots` (builder-idiom merge;
+    /// for a slot in `LirView::merged_slots` (builder-idiom merge;
     /// docs/impl/region/merging.md § Merging).
     pub(crate) resolve_alloc_region_merged: FuncId,
     #[allow(dead_code)]

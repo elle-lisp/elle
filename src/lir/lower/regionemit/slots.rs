@@ -1,10 +1,11 @@
-// audited: 2026-09-14
+// audited: 2026-10-06
 //! The static slots this function's emission resolves.
+//!
+//! docs/impl/region/mechanism.md
+//! docs/impl/region/merging.md
 //!
 //! Which slot a region's value is read from, the address space that slot was
 //! minted in, and the slots a builder-idiom merge collapses onto one.
-//! docs/impl/region/mechanism.md
-//! docs/impl/region/merging.md
 
 use super::*;
 
@@ -119,13 +120,9 @@ impl<'a> Lowerer<'a> {
         #[cfg(debug_assertions)]
         for &slot in &merged {
             let decref_count = self
-                .current_func
-                .blocks
-                .iter()
-                .flat_map(|b| b.instructions.iter())
-                .filter(|si| {
-                    matches!(&si.instr, LirInstr::DecrefRegion { region_id } if *region_id == slot)
-                })
+                .built()
+                .finished_instrs()
+                .filter(|i| matches!(i, InstrRef::DecrefRegion { region_id } if *region_id == slot))
                 .count();
             debug_assert_eq!(
                 decref_count, 1,
@@ -134,6 +131,6 @@ impl<'a> Lowerer<'a> {
                 slot, decref_count
             );
         }
-        self.current_func.merged_slots = merged.into_iter().collect();
+        self.head().merged_slots = merged.into_iter().collect();
     }
 }

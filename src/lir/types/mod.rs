@@ -1,20 +1,8 @@
 // audited: 2026-10-06
-//! The LIR's types: a module, its functions' blocks and registers, and the operations and constants they hold.
+//! The LIR's scalar types: registers, labels, operators, terminators, and the site records emission produces.
 //!
 //! src/lir/AGENTS.md
 //! docs/impl/lir.md
-
-use crate::hir::region::StaticRegion;
-use crate::signals::Signal;
-use crate::syntax::Span;
-use crate::value::{Arity, SymbolId};
-
-mod func;
-mod instr;
-mod regs;
-pub use func::*;
-pub use instr::*;
-pub use regs::*;
 
 /// Virtual register. `repr(transparent)`, so a frozen function's pool of `u32`
 /// words reads as a slice of registers without a copy.
@@ -24,23 +12,12 @@ pub use regs::*;
 #[repr(transparent)]
 pub struct Reg(pub u32);
 
-/// Index into an `LirModule`'s closure list.
+/// Index into a compile unit's closure list.
 ///
 /// `MakeClosure` references closures by ID rather than owning them,
 /// so each closure is an independent compilation unit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ClosureId(pub u32);
-
-/// A module: an entry function plus independently compiled closures.
-///
-/// The entry function's `MakeClosure` instructions reference closures
-/// by `ClosureId` (index into `closures`). Nested closures within
-/// closures also reference by ID — the list is flat, depth-first.
-#[derive(Debug, Clone)]
-pub struct LirModule {
-    pub entry: LirFunction,
-    pub closures: Vec<LirFunction>,
-}
 
 impl Reg {
     pub fn new(id: u32) -> Self {
@@ -55,57 +32,6 @@ pub struct Label(pub u32);
 impl Label {
     pub fn new(id: u32) -> Self {
         Label(id)
-    }
-}
-
-/// An LIR instruction with source location.
-///
-/// There is no uniform `region` field: a region is carried by the *variants*
-/// that need one (a mandatory `region: StaticRegion` field), and absent from
-/// those that don't. "Region not applicable here" is encoded structurally by
-/// the absence of the field — never by a sentinel 0 or an `Option` that every
-/// instruction must drag along (which would let an allocation be built with no
-/// region, the exact invalid state the newtype exists to forbid).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct SpannedInstr {
-    pub instr: LirInstr,
-    pub span: Span,
-}
-
-impl SpannedInstr {
-    pub fn new(instr: LirInstr, span: Span) -> Self {
-        SpannedInstr { instr, span }
-    }
-}
-
-/// A terminator with source location
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct SpannedTerminator {
-    pub terminator: Terminator,
-    pub span: Span,
-}
-
-impl SpannedTerminator {
-    pub fn new(terminator: Terminator, span: Span) -> Self {
-        SpannedTerminator { terminator, span }
-    }
-}
-
-/// A basic block - sequence of instructions ending in a terminator
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct BasicBlock {
-    pub label: Label,
-    pub instructions: Vec<SpannedInstr>,
-    pub terminator: SpannedTerminator,
-}
-
-impl BasicBlock {
-    pub fn new(label: Label) -> Self {
-        BasicBlock {
-            label,
-            instructions: Vec::new(),
-            terminator: SpannedTerminator::new(Terminator::Unreachable, Span::synthetic()),
-        }
     }
 }
 
@@ -197,17 +123,57 @@ pub enum Terminator {
     Unreachable,
 }
 
-/// Constant values in LIR
+/// Calls `f` with each register `term` reads: a returned value, a branch
+/// condition, an emitted payload. A node answers the same question for an
+/// instruction (`NodeRef::uses`).
+pub fn for_each_terminator_use(term: &Terminator, mut f: impl FnMut(Reg)) {
+    match term {
+        Terminator::Return(reg) => f(*reg),
+        Terminator::Branch { cond, .. } => f(*cond),
+        Terminator::Emit { value, .. } => f(*value),
+        Terminator::Jump(_) | Terminator::Unreachable => {}
+    }
+}
+
+/// Metadata about a yield point, collected during bytecode emission.
+/// The JIT reads this to know how to spill registers and where to
+/// resume in the interpreter.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum LirConst {
-    Nil,
-    EmptyList,
-    Bool(bool),
-    Int(i64),
-    Float(f64),
-    /// No producer emits it: a string literal lowers to `MaterializeConst`,
-    /// and freezing refuses this variant by name.
-    String(String),
-    Symbol(SymbolId),
-    Keyword(u64),
+pub struct YieldPointInfo {
+    /// Bytecode IP to resume at (the instruction after the Yield opcode).
+    /// This is the IP stored in the SuspendedFrame so the interpreter
+    /// can resume from the correct point.
+    pub resume_ip: usize,
+    /// Registers on the operand stack at the yield point, bottom-to-top.
+    /// The JIT spills these Cranelift variables in this order to
+    /// reconstruct the interpreter's operand stack on resume.
+    pub stack_regs: Vec<Reg>,
+    /// Number of local variable slots (params + locally-defined).
+    /// The interpreter stores locals at `[frame_base, frame_base + num_locals)`.
+    /// The JIT must spill local values first, then operand stack registers,
+    /// so the SuspendedFrame stack matches the interpreter's layout.
+    pub num_locals: u16,
+}
+
+/// Metadata about a call site, collected during bytecode emission.
+/// The JIT reads this to know the bytecode IP at each call instruction,
+/// which is needed to build SuspendedFrames for yield-through-call.
+///
+/// Only populated for functions where `signal.may_suspend()`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CallSiteInfo {
+    /// Bytecode IP after the Call instruction and its operands.
+    /// This is the IP the interpreter would store in SuspendedFrame.ip
+    /// when yield propagates through this call.
+    pub resume_ip: usize,
+    /// Registers on the operand stack at the call site, after popping
+    /// func and args but before pushing the result. This matches the
+    /// interpreter's stack state when yield propagates through a call
+    /// (`complete_call` parks it with `self.fiber.stack.drain(..).collect()`).
+    pub stack_regs: Vec<Reg>,
+    /// Number of local variable slots (params + locally-defined).
+    /// The interpreter stores locals at `[frame_base, frame_base + num_locals)`.
+    /// The JIT must spill local values first, then operand stack registers,
+    /// so the SuspendedFrame stack matches the interpreter's layout.
+    pub num_locals: u16,
 }

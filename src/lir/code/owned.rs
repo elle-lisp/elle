@@ -145,8 +145,8 @@ fn site(regs: &mut Vec<Reg>, resume_ip: usize, num_locals: u16, stack: &[Reg]) -
     }
 }
 
-/// A `LirModule` frozen: the entry function and the closures its
-/// `MakeClosure` instructions name by `ClosureId`.
+/// A compile unit's functions, frozen: the entry function and the closures
+/// its `MakeClosure` instructions name by `ClosureId`.
 #[derive(Clone, Debug)]
 pub struct FrozenModule {
     pub entry: LirOwned,

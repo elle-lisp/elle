@@ -27,7 +27,6 @@ pub use display::terminator_kind;
 pub use emit::{ClosureCompiled, Emitter};
 pub use lower::Lowerer;
 pub use types::{
-    for_each_def, for_each_terminator_use, for_each_use, BasicBlock, BinOp, CallSiteInfo,
-    ClosureId, CmpOp, ConvOp, Label, LirConst, LirFunction, LirInstr, LirModule, OperandProof, Reg,
-    SpannedInstr, SpannedTerminator, Terminator, UnaryOp, YieldPointInfo,
+    for_each_terminator_use, BinOp, CallSiteInfo, ClosureId, CmpOp, ConvOp, Label, OperandProof,
+    Reg, Terminator, UnaryOp, YieldPointInfo,
 };

@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-10-06
 //! Call and TailCall instruction handlers.
 //!
 //! Handles:
@@ -171,7 +171,7 @@ impl VM {
         let defer_callee_release = self.read_u8(bytecode, ip) != 0;
         // Closure-cycle merged-arena release slot: `0` encodes `None` (a
         // `StaticRegion` is `NonZeroU32`, so a real slot is never 0). See
-        // `LirInstr::TailCall::deferred_release_slot`.
+        // `InstrRef::TailCall::deferred_release_slot`.
         let deferred_release_slot = StaticRegion::new(self.read_u32(bytecode, ip));
         // The borrowed-argument stash slots. Decoded unconditionally so `ip`
         // stays aligned; a SIGNAL exit consumes their retains
@@ -255,11 +255,10 @@ impl VM {
             return Some(SIG_ERROR);
         };
 
-        // Splice/apply tail call (`TailCallArrayMut`): the closure-callee deferred
-        // release and the closure-cycle merged-arena release slot are not wired through this
-        // path yet — `false`/`None` keep today's behaviour (no regression). The
-        // common `(f …)` tail call uses `TailCall`, which carries both — and the
-        // borrowed-argument stash list with them.
+        // Splice/apply tail call (`TailCallArrayMut`): the instruction carries no
+        // closure-callee deferred release, no closure-cycle merged-arena release
+        // slot and no borrowed-argument stash, so `false`/`None`/`&[]` stand in.
+        // The common `(f …)` tail call uses `TailCall`, which carries all three.
         let bits = self.tail_call_inner(func, args, checked, region_id, false, None, &[], true);
         // The array's reclaim, on the one path every outcome of this call passes
         // through: a frame-replacing closure callee never arrives at the block

@@ -1,7 +1,8 @@
-// audited: 2026-09-16
-// src/lir/lower/AGENTS.md
-// docs/destructuring.md
+// audited: 2026-10-06
 //! Lowering the sequence patterns: pair, list, tuple, array.
+//!
+//! src/lir/lower/AGENTS.md
+//! docs/destructuring.md
 //!
 //! Each one parks the scrutinee in a temp slot and reloads it. A nested pattern
 //! may end the block, so a register read across that boundary is a register the
@@ -22,23 +23,22 @@ impl<'a> Lowerer<'a> {
                 // reload it after the block boundary.
                 // Inside a lambda, slots need to account for the captures offset.
                 // Temp slots are always stack-local (never LBox cells).
-                let temp_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                self.emit(LirInstr::StoreLocal {
+                let temp_slot = self.fresh_local();
+                self.emit(InstrRef::StoreLocal {
                     slot: temp_slot,
                     src: value_reg,
                 });
 
                 // Reload for type check (auto-pop consumed value_reg)
                 let reloaded_for_check = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
+                self.emit(InstrRef::LoadLocal {
                     dst: reloaded_for_check,
                     slot: temp_slot,
                 });
 
                 // Check if value is a pair
                 let is_pair_reg = self.fresh_reg();
-                self.emit(LirInstr::IsPair {
+                self.emit(InstrRef::IsPair {
                     dst: is_pair_reg,
                     src: reloaded_for_check,
                 });
@@ -50,7 +50,7 @@ impl<'a> Lowerer<'a> {
                     else_label: fail_label,
                 });
                 self.finish_block();
-                self.current_block = BasicBlock::new(continue_label);
+                self.open_block(continue_label);
 
                 // Extract car, match head pattern, THEN extract cdr and match tail.
                 // This ordering is critical: the head pattern match may create
@@ -61,13 +61,13 @@ impl<'a> Lowerer<'a> {
 
                 // Reload for car
                 let reloaded_for_car = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
+                self.emit(InstrRef::LoadLocal {
                     dst: reloaded_for_car,
                     slot: temp_slot,
                 });
 
                 let head_reg = self.fresh_reg();
-                self.emit(LirInstr::First {
+                self.emit(InstrRef::First {
                     dst: head_reg,
                     pair: reloaded_for_car,
                 });
@@ -77,13 +77,13 @@ impl<'a> Lowerer<'a> {
 
                 // Now reload for cdr — in whatever block the head match left us in
                 let reloaded_for_cdr = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
+                self.emit(InstrRef::LoadLocal {
                     dst: reloaded_for_cdr,
                     slot: temp_slot,
                 });
 
                 let tail_reg = self.fresh_reg();
-                self.emit(LirInstr::Rest {
+                self.emit(InstrRef::Rest {
                     dst: tail_reg,
                     pair: reloaded_for_cdr,
                 });
@@ -108,23 +108,22 @@ impl<'a> Lowerer<'a> {
                     // Store current to a temporary slot BEFORE IsPair, so we can
                     // reload it after the block boundary.
                     // Inside a lambda, slots need to account for the captures offset.
-                    let temp_slot = self.current_func.num_locals;
-                    self.current_func.num_locals += 1;
-                    self.emit(LirInstr::StoreLocal {
+                    let temp_slot = self.fresh_local();
+                    self.emit(InstrRef::StoreLocal {
                         slot: temp_slot,
                         src: current_reg,
                     });
 
                     // Reload for type check (auto-pop consumed current_reg)
                     let reloaded_for_check = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
+                    self.emit(InstrRef::LoadLocal {
                         dst: reloaded_for_check,
                         slot: temp_slot,
                     });
 
                     // Check if current is a pair
                     let is_pair_reg = self.fresh_reg();
-                    self.emit(LirInstr::IsPair {
+                    self.emit(InstrRef::IsPair {
                         dst: is_pair_reg,
                         src: reloaded_for_check,
                     });
@@ -136,18 +135,18 @@ impl<'a> Lowerer<'a> {
                         else_label: fail_label,
                     });
                     self.finish_block();
-                    self.current_block = BasicBlock::new(continue_label);
+                    self.open_block(continue_label);
 
                     // Load for car extraction
                     let current_for_car = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
+                    self.emit(InstrRef::LoadLocal {
                         dst: current_for_car,
                         slot: temp_slot,
                     });
 
                     // Extract head
                     let head_reg = self.fresh_reg();
-                    self.emit(LirInstr::First {
+                    self.emit(InstrRef::First {
                         dst: head_reg,
                         pair: current_for_car,
                     });
@@ -158,14 +157,14 @@ impl<'a> Lowerer<'a> {
                     // Load for cdr extraction — always needed for next
                     // element, rest binding, or EMPTY_LIST check at end
                     let current_for_cdr = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
+                    self.emit(InstrRef::LoadLocal {
                         dst: current_for_cdr,
                         slot: temp_slot,
                     });
 
                     // Extract tail for next iteration
                     let tail_reg = self.fresh_reg();
-                    self.emit(LirInstr::Rest {
+                    self.emit(InstrRef::Rest {
                         dst: tail_reg,
                         pair: current_for_cdr,
                     });
@@ -184,12 +183,12 @@ impl<'a> Lowerer<'a> {
                 } else {
                     // Without rest: check that tail is empty_list (exact length)
                     let empty_list_reg = self.fresh_reg();
-                    self.emit(LirInstr::ValueConst {
+                    self.emit(InstrRef::ValueConst {
                         dst: empty_list_reg,
                         value: Value::EMPTY_LIST,
                     });
                     let is_empty_reg = self.fresh_reg();
-                    self.emit(LirInstr::compare(
+                    self.emit(InstrRef::compare(
                         is_empty_reg,
                         CmpOp::Eq,
                         current_reg,
@@ -203,7 +202,7 @@ impl<'a> Lowerer<'a> {
                         else_label: fail_label,
                     });
                     self.finish_block();
-                    self.current_block = BasicBlock::new(continue_label);
+                    self.open_block(continue_label);
                 }
 
                 Ok(())
@@ -212,9 +211,8 @@ impl<'a> Lowerer<'a> {
                 // Array [...] pattern matching for `match`.
                 // Check if value is an array, then use ArrayMutRefDestructure for each element.
                 // Temp slots are always stack-local (never LBox cells).
-                let temp_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                self.emit(LirInstr::StoreLocal {
+                let temp_slot = self.fresh_local();
+                self.emit(InstrRef::StoreLocal {
                     slot: temp_slot,
                     src: value_reg,
                 });
@@ -223,12 +221,12 @@ impl<'a> Lowerer<'a> {
                 // Reload from temp slot — value_reg was consumed by StoreLocal
                 // and cannot be reused in stack-based bytecode emission.
                 let reloaded_for_type = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
+                self.emit(InstrRef::LoadLocal {
                     dst: reloaded_for_type,
                     slot: temp_slot,
                 });
                 let is_tuple_reg = self.fresh_reg();
-                self.emit(LirInstr::IsArray {
+                self.emit(InstrRef::IsArray {
                     dst: is_tuple_reg,
                     src: reloaded_for_type,
                 });
@@ -240,28 +238,28 @@ impl<'a> Lowerer<'a> {
                     else_label: fail_label,
                 });
                 self.finish_block();
-                self.current_block = BasicBlock::new(type_ok_label);
+                self.open_block(type_ok_label);
 
                 // Step 3: Check array length
                 // Reload from temp slot
                 let reloaded_for_len = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
+                self.emit(InstrRef::LoadLocal {
                     dst: reloaded_for_len,
                     slot: temp_slot,
                 });
 
                 let len_reg = self.fresh_reg();
-                self.emit(LirInstr::ArrayMutLen {
+                self.emit(InstrRef::ArrayMutLen {
                     dst: len_reg,
                     src: reloaded_for_len,
                 });
 
-                let expected_len = self.emit_const(LirConst::Int(elements.len() as i64))?;
+                let expected_len = self.emit_const(ConstRef::Int(elements.len() as i64))?;
                 let len_ok_reg = self.fresh_reg();
 
                 if rest.is_some() {
                     // With & rest: length must be >= number of fixed elements
-                    self.emit(LirInstr::compare(
+                    self.emit(InstrRef::compare(
                         len_ok_reg,
                         CmpOp::Ge,
                         len_reg,
@@ -269,7 +267,7 @@ impl<'a> Lowerer<'a> {
                     ));
                 } else {
                     // Without rest: length must be exactly equal
-                    self.emit(LirInstr::compare(
+                    self.emit(InstrRef::compare(
                         len_ok_reg,
                         CmpOp::Eq,
                         len_reg,
@@ -284,19 +282,19 @@ impl<'a> Lowerer<'a> {
                     else_label: fail_label,
                 });
                 self.finish_block();
-                self.current_block = BasicBlock::new(len_ok_label);
+                self.open_block(len_ok_label);
 
                 // Step 4: Match each element using ArrayMutRefDestructure
                 for (i, element_pat) in elements.iter().enumerate() {
                     // Reload the array from temp slot for each element
                     let reloaded = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
+                    self.emit(InstrRef::LoadLocal {
                         dst: reloaded,
                         slot: temp_slot,
                     });
 
                     let elem_reg = self.fresh_reg();
-                    self.emit(LirInstr::ArrayMutRefDestructure {
+                    self.emit(InstrRef::ArrayMutRefDestructure {
                         dst: elem_reg,
                         src: reloaded,
                         index: i as u16,
@@ -309,13 +307,13 @@ impl<'a> Lowerer<'a> {
                 // Step 5: Handle & rest
                 if let Some(rest_pat) = rest.as_deref().filter(|_| pattern.own_rest_builds()) {
                     let reloaded = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
+                    self.emit(InstrRef::LoadLocal {
                         dst: reloaded,
                         slot: temp_slot,
                     });
 
                     let slice_reg = self.fresh_reg();
-                    self.emit(LirInstr::ArrayMutSliceFrom {
+                    self.emit(InstrRef::ArrayMutSliceFrom {
                         dst: slice_reg,
                         src: reloaded,
                         index: elements.len() as u16,
@@ -332,9 +330,8 @@ impl<'a> Lowerer<'a> {
                 // Array @[...] pattern matching for `match`.
                 // Check if value is an array, then use ArrayMutRefDestructure for each element.
                 // Temp slots are always stack-local (never LBox cells).
-                let temp_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                self.emit(LirInstr::StoreLocal {
+                let temp_slot = self.fresh_local();
+                self.emit(InstrRef::StoreLocal {
                     slot: temp_slot,
                     src: value_reg,
                 });
@@ -342,12 +339,12 @@ impl<'a> Lowerer<'a> {
                 // Step 2: Check if value is a mutable array.
                 // Reload from temp slot — value_reg was consumed by StoreLocal.
                 let reloaded_for_type = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
+                self.emit(InstrRef::LoadLocal {
                     dst: reloaded_for_type,
                     slot: temp_slot,
                 });
                 let is_array_reg = self.fresh_reg();
-                self.emit(LirInstr::IsArrayMut {
+                self.emit(InstrRef::IsArrayMut {
                     dst: is_array_reg,
                     src: reloaded_for_type,
                 });
@@ -359,28 +356,28 @@ impl<'a> Lowerer<'a> {
                     else_label: fail_label,
                 });
                 self.finish_block();
-                self.current_block = BasicBlock::new(type_ok_label);
+                self.open_block(type_ok_label);
 
                 // Step 3: Check array length
                 // Reload from temp slot
                 let reloaded_for_len = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
+                self.emit(InstrRef::LoadLocal {
                     dst: reloaded_for_len,
                     slot: temp_slot,
                 });
 
                 let len_reg = self.fresh_reg();
-                self.emit(LirInstr::ArrayMutLen {
+                self.emit(InstrRef::ArrayMutLen {
                     dst: len_reg,
                     src: reloaded_for_len,
                 });
 
-                let expected_len = self.emit_const(LirConst::Int(elements.len() as i64))?;
+                let expected_len = self.emit_const(ConstRef::Int(elements.len() as i64))?;
                 let len_ok_reg = self.fresh_reg();
 
                 if rest.is_some() {
                     // With & rest: length must be >= number of fixed elements
-                    self.emit(LirInstr::compare(
+                    self.emit(InstrRef::compare(
                         len_ok_reg,
                         CmpOp::Ge,
                         len_reg,
@@ -388,7 +385,7 @@ impl<'a> Lowerer<'a> {
                     ));
                 } else {
                     // Without rest: length must be exactly equal
-                    self.emit(LirInstr::compare(
+                    self.emit(InstrRef::compare(
                         len_ok_reg,
                         CmpOp::Eq,
                         len_reg,
@@ -403,19 +400,19 @@ impl<'a> Lowerer<'a> {
                     else_label: fail_label,
                 });
                 self.finish_block();
-                self.current_block = BasicBlock::new(len_ok_label);
+                self.open_block(len_ok_label);
 
                 // Step 4: Match each element using ArrayMutRefOrNil
                 for (i, element_pat) in elements.iter().enumerate() {
                     // Reload the array from temp slot for each element
                     let reloaded = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
+                    self.emit(InstrRef::LoadLocal {
                         dst: reloaded,
                         slot: temp_slot,
                     });
 
                     let elem_reg = self.fresh_reg();
-                    self.emit(LirInstr::ArrayMutRefDestructure {
+                    self.emit(InstrRef::ArrayMutRefDestructure {
                         dst: elem_reg,
                         src: reloaded,
                         index: i as u16,
@@ -428,13 +425,13 @@ impl<'a> Lowerer<'a> {
                 // Step 5: Handle & rest
                 if let Some(rest_pat) = rest.as_deref().filter(|_| pattern.own_rest_builds()) {
                     let reloaded = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
+                    self.emit(InstrRef::LoadLocal {
                         dst: reloaded,
                         slot: temp_slot,
                     });
 
                     let slice_reg = self.fresh_reg();
-                    self.emit(LirInstr::ArrayMutSliceFrom {
+                    self.emit(InstrRef::ArrayMutSliceFrom {
                         dst: slice_reg,
                         src: reloaded,
                         index: elements.len() as u16,

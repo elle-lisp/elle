@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! The non-scoped mutating binding forms: `define` (a local `def`) and `set` (`lower_assign`).
 //!
 //! docs/impl/region/bindings.md
@@ -105,12 +105,12 @@ impl<'a> Lowerer<'a> {
             self.store_captured_cell_init(binding, slot, value_reg, value, captured_reassigned);
             // Reload from cell
             let cell_reg2 = self.fresh_reg();
-            self.emit(LirInstr::LoadLocal {
+            self.emit(InstrRef::LoadLocal {
                 dst: cell_reg2,
                 slot,
             });
             let result = self.fresh_reg();
-            self.emit(LirInstr::LoadCaptureCell {
+            self.emit(InstrRef::LoadCaptureCell {
                 dst: result,
                 cell: cell_reg2,
             });
@@ -124,12 +124,12 @@ impl<'a> Lowerer<'a> {
             // (`needs_capture() == false`) and never reaches this branch; only a
             // binding a sibling captures does, and it owns a genuine cell to release.
             self.record_env_cell_release_slot(binding, slot);
-            self.emit(LirInstr::StoreCapture {
+            self.emit(InstrRef::StoreCapture {
                 index: slot,
                 src: value_reg,
             });
             let result = self.fresh_reg();
-            self.emit(LirInstr::LoadCapture {
+            self.emit(InstrRef::LoadCapture {
                 dst: result,
                 index: slot,
             });
@@ -137,7 +137,7 @@ impl<'a> Lowerer<'a> {
         } else {
             self.emit_binding_store(slot, value_reg);
             let result = self.fresh_reg();
-            self.emit(LirInstr::LoadLocal { dst: result, slot });
+            self.emit(InstrRef::LoadLocal { dst: result, slot });
             Ok(result)
         }
     }
@@ -161,12 +161,12 @@ impl<'a> Lowerer<'a> {
         if let Some(&slot) = self.binding_to_slot.get(target) {
             if self.in_lambda && is_upvalue && needs_capture {
                 // For LBox upvalues, use StoreCapture (updates cell) + LoadCapture (unwraps)
-                self.emit(LirInstr::StoreCapture {
+                self.emit(InstrRef::StoreCapture {
                     index: slot,
                     src: value_reg,
                 });
                 let result = self.fresh_reg();
-                self.emit(LirInstr::LoadCapture {
+                self.emit(InstrRef::LoadCapture {
                     dst: result,
                     index: slot,
                 });
@@ -174,21 +174,21 @@ impl<'a> Lowerer<'a> {
             } else if needs_capture {
                 // For local variables that need cells, load the cell and update it
                 let cell_reg = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
+                self.emit(InstrRef::LoadLocal {
                     dst: cell_reg,
                     slot,
                 });
-                self.emit(LirInstr::StoreCaptureCell {
+                self.emit(InstrRef::StoreCaptureCell {
                     cell: cell_reg,
                     value: value_reg,
                 });
                 let cell_reg2 = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
+                self.emit(InstrRef::LoadLocal {
                     dst: cell_reg2,
                     slot,
                 });
                 let result = self.fresh_reg();
-                self.emit(LirInstr::LoadCaptureCell {
+                self.emit(InstrRef::LoadCaptureCell {
                     dst: result,
                     cell: cell_reg2,
                 });
@@ -214,7 +214,7 @@ impl<'a> Lowerer<'a> {
                 // suppressed by `analyze_regions_with`; the init value is released
                 // by the first overwrite's old-decref below.
                 let old_reg = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal { dst: old_reg, slot });
+                self.emit(InstrRef::LoadLocal { dst: old_reg, slot });
                 // Pin the new content as the cell's reference — UNLESS the cell
                 // already owns the producer's reference outright. A MODULE-SCOPE
                 // 1-slot container's value regions have their ordinary decref
@@ -240,13 +240,13 @@ impl<'a> Lowerer<'a> {
                     match coalesced {
                         Some(region_id) => {
                             #[cfg(debug_assertions)]
-                            self.emit(LirInstr::AssertRegionMatches {
+                            self.emit(InstrRef::AssertRegionMatches {
                                 region_id,
                                 src: value_reg,
                             });
-                            self.emit(LirInstr::IncrefRegion { region_id });
+                            self.emit(InstrRef::IncrefRegion { region_id });
                         }
-                        None => self.emit(LirInstr::IncrefValueRegion { src: value_reg }),
+                        None => self.emit(InstrRef::IncrefValueRegion { src: value_reg }),
                     }
                 }
                 // The store consumes `value_reg` (`StoreLocal` auto-pops), so the
@@ -257,24 +257,24 @@ impl<'a> Lowerer<'a> {
                 // `nil` on the first overwrite), pinning nothing and leaving the
                 // stored value's own release unbalanced. Same retain-while-on-top
                 // discipline as `lower_call`'s borrowed-arg retain.
-                self.emit(LirInstr::StoreLocal {
+                self.emit(InstrRef::StoreLocal {
                     slot,
                     src: value_reg,
                 });
                 // Drop the cell's reference to the displaced content (the displaced
                 // 1-slot content is a runtime fact — stays value-resolved, the
                 // dynamic boundary).
-                self.emit(LirInstr::DecrefValueRegion { src: old_reg });
+                self.emit(InstrRef::DecrefValueRegion { src: old_reg });
                 let result = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal { dst: result, slot });
+                self.emit(InstrRef::LoadLocal { dst: result, slot });
                 Ok(result)
             } else {
-                self.emit(LirInstr::StoreLocal {
+                self.emit(InstrRef::StoreLocal {
                     slot,
                     src: value_reg,
                 });
                 let result = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal { dst: result, slot });
+                self.emit(InstrRef::LoadLocal { dst: result, slot });
                 Ok(result)
             }
         } else {
