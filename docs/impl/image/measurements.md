@@ -2,12 +2,14 @@
 
 <!-- audited: 2026-10-06 -->
 
-Seven questions the image design turned on, each answered by an experiment,
+Eight questions the image design turned on, each answered by an experiment,
 with the numbers it produced.
 
 The first six were cheap to test and expensive to be wrong about, so they ran
 before the foundations landed. The seventh ran after the boot configuration
-landed, against the premise that kept LIR out of the image body.
+landed, against the premise that kept LIR out of the image body. The eighth
+ran before the lowerer moved into a region, against the one shape the seventh
+left unmeasured.
 [image.md](../image.md) owns the design they support,
 [foundations.md](foundations.md) the representation fixes two of them cleared,
 and [plan.md](plan.md) the order everything lands in.
@@ -273,5 +275,72 @@ and [plan.md](plan.md) the order everything lands in.
    The prototype is not the whole port. The shipped passes mutate LIR in place
    and resize it, which a fixed-extent slice turns into build-then-materialize,
    exactly as syntax had to copy as it stamps. Nothing here measures that
-   route, and it is the part of the port worth prototyping next. To redo:
-   `cargo bench --bench lirshape`.
+   route; item 8 does. To redo: `cargo bench --bench lirshape`.
+8. **A growable region slice — measured, parity held.** A lowerer that builds
+   in a region needs a slice that grows where it lies, because it pushes into
+   a block, finishes it, and later splices into it. A region bumps its data
+   down from the top of a page, so nothing grows in place. The prototype
+   `RegionVec` therefore doubles into a fresh extent when full and leaves the
+   old one dead until its region is freed.
+
+   The op mix comes from a counter patch on the lowerer, over one boot of
+   core.lisp, prelude.lisp and stdlib.lisp:
+
+   | Operation | Count | Nodes |
+   |-----------|-------|-------|
+   | push | 93,989 | — |
+   | `finish_block` | 7,909 | — |
+   | move a release run ahead of a tail call in the open block | 105 | 333 moved, 980 shifted |
+   | splice a replica into a finished block | 831 | 3,324 inserted, 9,072 shifted |
+   | a run taken out and then put back | 0 | — |
+   | a nested lambda body, its parent's open block set aside | 383 | — |
+
+   Splices are one operation in a hundred, and every run the lowerer takes
+   out of a block is spliced somewhere.
+
+   `benches/lirshape` replays that shape over the same corpus twice. Each
+   instruction is one push, each block one `finish_block`, and a nested lambda
+   is replayed at its `MakeClosure`. Every tail call takes one move and one
+   replica, which comes to 920 splices of four nodes against the lowerer's
+   936. The shipped side pushes `SpannedInstr` into a `Vec` per block, splices
+   as `splice.rs` does, and freezes. The prototype pushes 48-byte nodes into a
+   `RegionVec` per block in one working region per source. It compacts each
+   function into exact slices as the function ends, which is freezing's job
+   in the port. The bench asserts that the two hold the same blocks and
+   opcodes. Fastest of 30 rounds, release build, one 7950X core, 94,900 nodes:
+
+   | | `Vec`, then `freeze` | `RegionVec`, compacted |
+   |-|---------------------|------------------------|
+   | build: push, finish, splice | 2.25 ms | 2.10 ms, compaction included |
+   | freeze | 1.56 ms | — |
+   | teardown | 0.55 ms | 0.22 ms |
+   | **total** | **4.36 ms** | **2.32 ms** |
+   | malloc calls per round | 36,464 | 21 |
+   | memory held while live | 22,633 KiB of Rust heap | 18,432 KiB of region pages |
+
+   Three runs agree to within 3%. Of the region pages, 5,738 KiB are extents
+   a slice grew out of, and the large blocks account for most of them. The
+   top-level block of a source holds thousands of nodes, and each doubling
+   leaves its predecessor behind. The working region frees them with
+   everything else, so they cost memory for the length of one compile and
+   nothing after.
+
+   Against the compile they belong to: a warm release start reports the
+   stdlib `lower` phase at 13.2 ms and `freeze` at 3.3 ms
+   (`--trace=compile`). The stdlib makes 93% of the corpus's pushes, so the
+   container work the port replaces is about 4 ms of those 16.5 ms, and the
+   prototype does it in about 2. The rest of the lower phase is the lowerer's
+   own decisions, which the port does not change. Parity holds with room to
+   spare.
+
+   One row overstates the prototype. Its build encodes each node from a
+   `SpannedInstr` through `for_each_def` and `for_each_use`, which a lowerer
+   writing nodes directly does not run.
+
+   What the experiment decided: the lowerer can build in a region with no
+   compile-time cost, and with a malloc count that no longer grows with the
+   program. Growth leaves dead extents in the working region, bounded by the
+   nodes the compile wrote and freed with that region. To redo: `cargo bench
+   --bench lirshape`, and for the op mix, a counter patch at `emit`,
+   `emit_alloc_with_slot`, `finish_block`, the two splice sites in
+   `with_tail_exit_hoist`, and the block `lower_lambda_body` sets aside.
