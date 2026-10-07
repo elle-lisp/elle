@@ -29,6 +29,26 @@ impl JitCacheEntry {
     }
 }
 
+/// The workgroup size a SPIR-V kernel is compiled for: a positive 32-bit
+/// integer, written into the kernel's entry point (docs/impl/spirv.md).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct WorkgroupSize(u32);
+
+impl WorkgroupSize {
+    /// The size `git`, `fn/git?`, `disgit` and `mlir/compile-spirv` take when
+    /// none is given.
+    pub const DEFAULT: WorkgroupSize = WorkgroupSize(256);
+
+    /// `n` as a workgroup size, or `None` for zero.
+    pub fn new(n: u32) -> Option<Self> {
+        (n > 0).then_some(WorkgroupSize(n))
+    }
+
+    pub fn get(self) -> u32 {
+        self.0
+    }
+}
+
 /// A `spirv_cache` entry: the SPIR-V `(git f)` compiled, plus the pin that
 /// keeps the keyed bytecode alive, exactly as a `JitCacheEntry` does.
 pub struct SpirvEntry {
@@ -44,17 +64,30 @@ impl SpirvEntry {
 }
 
 impl VM {
-    /// The SPIR-V `(git f)` compiled for the code object `t`, if any.
-    pub fn spirv_for(&self, t: &crate::value::ClosureTemplate) -> Option<&[u8]> {
+    /// The SPIR-V compiled for the code object `t` at workgroup size `size`,
+    /// if any.
+    pub fn spirv_for(
+        &self,
+        t: &crate::value::ClosureTemplate,
+        size: WorkgroupSize,
+    ) -> Option<&[u8]> {
+        let _ = size;
         self.spirv_cache
             .get(&t.bytecode().as_ptr())
             .map(|e| e.bytes.as_slice())
     }
 
-    /// Cache `bytes` as the SPIR-V compiled for the code object `t`. The
-    /// single write path into `spirv_cache`: the entry pins `t`'s code region
-    /// and derives its key from the pin (docs/impl/jit.md).
-    pub fn install_spirv(&mut self, t: &crate::value::ClosureTemplate, bytes: Vec<u8>) {
+    /// Cache `bytes` as the SPIR-V compiled for the code object `t` at
+    /// workgroup size `size`. The single write path into `spirv_cache`: the
+    /// entry pins `t`'s code region and derives its key from the pin
+    /// (docs/impl/jit.md).
+    pub fn install_spirv(
+        &mut self,
+        t: &crate::value::ClosureTemplate,
+        size: WorkgroupSize,
+        bytes: Vec<u8>,
+    ) {
+        let _ = size;
         let pin = CodePin::of(self.heap(), t);
         self.spirv_cache
             .insert(pin.key(), SpirvEntry::new(pin, bytes));
@@ -72,6 +105,10 @@ impl VM {
             self.jit_rejections.clear();
         }
         self.spirv_cache.clear();
+        #[cfg(feature = "mlir")]
+        if let Some(cache) = self.mlir_cache.as_mut() {
+            cache.clear_pins();
+        }
     }
 
     /// Record a closure call and return whether it is hot: called at least the

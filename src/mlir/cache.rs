@@ -7,10 +7,21 @@
 //! amortize the 4ms initialization cost.
 
 use crate::lir::LirView;
+use crate::value::CodePin;
 use melior::ExecutionEngine;
 use std::collections::HashMap;
 
 use super::lower::{create_context, lower_to_module, ScalarType};
+
+/// Which captures and which parameters arrive as floats: bit `i` of each mask
+/// set means slot `i` is an `f64` bitcast to `i64`. One compiled function per
+/// signature, so the pair is part of every cache key. Named fields, so a call
+/// site cannot swap the two masks.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct MlirSig {
+    pub captures: u64,
+    pub params: u64,
+}
 
 /// Cached MLIR compilation state for the VM.
 ///
@@ -49,25 +60,32 @@ impl MlirCache {
     }
 
     /// Record a compilation failure so we don't retry.
-    pub fn reject(&mut self, key: *const u8, capture_types: u64, param_types: u64) {
-        self.rejections.insert((key, capture_types, param_types));
+    pub fn reject(&mut self, pin: CodePin, sig: MlirSig) {
+        let key = pin.key();
+        drop(pin);
+        self.rejections.insert((key, sig.captures, sig.params));
     }
 
     /// Check if a function was previously rejected.
-    pub fn is_rejected(&self, key: *const u8, capture_types: u64, param_types: u64) -> bool {
-        self.rejections.contains(&(key, capture_types, param_types))
+    pub fn is_rejected(&self, key: *const u8, sig: MlirSig) -> bool {
+        self.rejections.contains(&(key, sig.captures, sig.params))
     }
+
+    /// Drop every entry and the pin it holds, keeping the context.
+    pub fn clear_pins(&mut self) {}
 
     /// Compile a GPU-eligible frozen function and cache the result.
     /// Returns the function name for subsequent invocation.
     pub fn compile(
         &mut self,
-        key: *const u8,
+        pin: CodePin,
         lir: &LirView<'_>,
         num_captures: u16,
-        capture_types: u64,
-        param_types: u64,
+        sig: MlirSig,
     ) -> Result<&str, String> {
+        let key = pin.key();
+        drop(pin);
+        let (capture_types, param_types) = (sig.captures, sig.params);
         let (mut module, scalar_type) =
             lower_to_module(&self.context, lir, num_captures, capture_types, param_types)?;
 
@@ -85,27 +103,16 @@ impl MlirCache {
     }
 
     /// Get the return type for a cached function.
-    pub fn return_type(
-        &self,
-        key: *const u8,
-        capture_types: u64,
-        param_types: u64,
-    ) -> Option<ScalarType> {
+    pub fn return_type(&self, key: *const u8, sig: MlirSig) -> Option<ScalarType> {
         self.engines
-            .get(&(key, capture_types, param_types))
+            .get(&(key, sig.captures, sig.params))
             .map(|(_, _, st)| *st)
     }
 
     /// Call a cached MLIR-compiled function with i64 arguments.
     /// Returns the i64 result, or None if the function is not cached.
-    pub fn call(
-        &self,
-        key: *const u8,
-        args: &[i64],
-        capture_types: u64,
-        param_types: u64,
-    ) -> Option<Result<i64, String>> {
-        let (engine, name, _) = self.engines.get(&(key, capture_types, param_types))?;
+    pub fn call(&self, key: *const u8, args: &[i64], sig: MlirSig) -> Option<Result<i64, String>> {
+        let (engine, name, _) = self.engines.get(&(key, sig.captures, sig.params))?;
 
         let mut arg_values: Vec<i64> = args.to_vec();
         let mut result: i64 = 0;
@@ -125,9 +132,8 @@ impl MlirCache {
     }
 
     /// Check if a function is already compiled (CPU JIT).
-    pub fn contains(&self, key: *const u8, capture_types: u64, param_types: u64) -> bool {
-        self.engines
-            .contains_key(&(key, capture_types, param_types))
+    pub fn contains(&self, key: *const u8, sig: MlirSig) -> bool {
+        self.engines.contains_key(&(key, sig.captures, sig.params))
     }
 
     /// Compile a GPU-eligible frozen function to SPIR-V bytes, using the

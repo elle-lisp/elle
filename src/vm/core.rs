@@ -22,7 +22,7 @@ use crate::jit::JitRejectionInfo;
 
 #[cfg(feature = "jit")]
 pub use caches::JitCacheEntry;
-pub use caches::SpirvEntry;
+pub use caches::{SpirvEntry, WorkgroupSize};
 
 pub(crate) struct TailCallInfo {
     pub code: crate::value::Code,

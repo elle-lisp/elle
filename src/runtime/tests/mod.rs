@@ -17,6 +17,8 @@ fn cons() -> HeapObject {
 mod heaps;
 mod lifecycle;
 mod macros;
+#[cfg(feature = "mlir")]
+mod mlir;
 mod operandstack;
 mod ownership;
 mod rootentry;

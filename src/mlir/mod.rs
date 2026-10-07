@@ -11,7 +11,7 @@ mod execute;
 mod lower;
 mod spirv;
 
-pub use cache::MlirCache;
+pub use cache::{MlirCache, MlirSig};
 pub use execute::mlir_call;
 pub use lower::{check_slot_types, lower_to_mlir, ScalarType};
 pub use spirv::lower_to_spirv;

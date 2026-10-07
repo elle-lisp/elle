@@ -402,7 +402,10 @@ impl VM {
                     None => return type_error!(ctx, closure_val, "git", "closure"),
                 };
                 // Already cached? Return early.
-                if self.spirv_for(&closure.template).is_some() {
+                if self
+                    .spirv_for(&closure.template, crate::vm::core::WorkgroupSize::DEFAULT)
+                    .is_some()
+                {
                     return (SIG_OK, closure_val);
                 }
                 let lir = match closure.template.lir() {
@@ -430,7 +433,11 @@ impl VM {
                 };
                 // The VM's cache entry pins the closure's code region, so the
                 // key keeps naming this function (docs/impl/jit.md).
-                self.install_spirv(&closure.template, bytes);
+                self.install_spirv(
+                    &closure.template,
+                    crate::vm::core::WorkgroupSize::DEFAULT,
+                    bytes,
+                );
                 (SIG_OK, closure_val)
             }
             "compile/run-on" => self.dispatch_compile_run_on(ctx, arg),

@@ -416,20 +416,21 @@ primitive! {
         effect: RegionEffect::Mixed,
     }
     "fn/git?" => prim_fn_git {
-        arity: Arity::Exact(1),
+        signal: Signal::errors(),
+        arity: Arity::Range(1, 2),
         doc: "Returns true if the VM caches SPIR-V for the closure at the workgroup size \
               (default 256). False for a non-closure.",
-        params: &["f"],
+        params: &["f", "workgroup-size"],
         category: "fn",
         example: "(fn/git? (fn [a b] (+ a b)))",
         effect: RegionEffect::Immediate,
     }
     "disgit" => prim_disgit {
         signal: Signal::errors(),
-        arity: Arity::Exact(1),
+        arity: Arity::Range(1, 2),
         doc: "Return the SPIR-V bytes the VM caches for a closure at the workgroup size \
               (default 256). Errors if nothing is cached at that size.",
-        params: &["f"],
+        params: &["f", "workgroup-size"],
         category: "fn",
         example: "(disgit (git (fn [a b] (+ a b))))",
         aliases: &["fn/disgit"],

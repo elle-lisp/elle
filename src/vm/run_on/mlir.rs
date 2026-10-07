@@ -90,15 +90,21 @@ impl VM {
         }
 
         let bytecode_ptr = closure.template.bytecode().as_ptr();
-        let cache = self
-            .mlir_cache
-            .get_or_insert_with(crate::mlir::MlirCache::new);
+        let sig = crate::mlir::MlirSig {
+            captures: capture_types,
+            params: param_types,
+        };
 
-        // Ensure compiled for this (capture_types, param_types) signature.
-        if !cache.contains(bytecode_ptr, capture_types, param_types) {
-            if let Err(e) =
-                cache.compile(bytecode_ptr, &lir, num_captures, capture_types, param_types)
-            {
+        // Ensure compiled for this signature. The entry pins the closure's
+        // code region, so its key keeps naming this function.
+        let compiled = self
+            .mlir_cache
+            .get_or_insert_with(crate::mlir::MlirCache::new)
+            .contains(bytecode_ptr, sig);
+        if !compiled {
+            let pin = crate::value::CodePin::of(self.heap(), &closure.template);
+            let cache = self.mlir_cache.as_mut().unwrap();
+            if let Err(e) = cache.compile(pin, &lir, num_captures, sig) {
                 return (
                     SIG_ERROR,
                     rejected(self, "mlir-cpu", format!("MLIR compilation failed: {}", e)),
@@ -108,10 +114,10 @@ impl VM {
 
         // Reborrow as immutable for call.
         let cache = self.mlir_cache.as_ref().unwrap();
-        match cache.call(bytecode_ptr, &int_args, capture_types, param_types) {
+        match cache.call(bytecode_ptr, &int_args, sig) {
             Some(Ok(result)) => {
                 // Rebox based on the compiled function's return type.
-                let val = match cache.return_type(bytecode_ptr, capture_types, param_types) {
+                let val = match cache.return_type(bytecode_ptr, sig) {
                     Some(crate::mlir::ScalarType::Float) => {
                         Value::float(f64::from_bits(result as u64))
                     }

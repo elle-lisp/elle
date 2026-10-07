@@ -272,7 +272,11 @@ pub(crate) fn prim_git(
     {
         let closure = prim_arg!(ctx, args, 0, as_closure, "git", "closure");
         // Fast path: already cached
-        if ctx.vm().spirv_for(&closure.template).is_some() {
+        if ctx
+            .vm()
+            .spirv_for(&closure.template, crate::vm::core::WorkgroupSize::DEFAULT)
+            .is_some()
+        {
             return (SIG_OK, args[0]);
         }
         // Check GPU eligibility upfront
@@ -310,7 +314,11 @@ pub(crate) fn prim_fn_git(
     if let Some(closure) = args[0].as_closure() {
         (
             SIG_OK,
-            Value::bool(ctx.vm().spirv_for(&closure.template).is_some()),
+            Value::bool(
+                ctx.vm()
+                    .spirv_for(&closure.template, crate::vm::core::WorkgroupSize::DEFAULT)
+                    .is_some(),
+            ),
         )
     } else {
         (SIG_OK, Value::FALSE)
@@ -326,7 +334,10 @@ pub(crate) fn prim_disgit(
     args: &[Value],
 ) -> (SignalBits, Value) {
     let closure = prim_arg!(ctx, args, 0, as_closure, "disgit", "closure");
-    let cached = ctx.vm().spirv_for(&closure.template).map(<[u8]>::to_vec);
+    let cached = ctx
+        .vm()
+        .spirv_for(&closure.template, crate::vm::core::WorkgroupSize::DEFAULT)
+        .map(<[u8]>::to_vec);
     match cached {
         Some(bytes) => (SIG_OK, ctx.bytes(bytes)),
         None => (
