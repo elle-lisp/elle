@@ -85,9 +85,14 @@ value that appears exactly once across the whole argument list may be released;
 one that appears twice shares a single moved reference, and a second release
 would free it out from under a live use. So the release step needs each
 value's occurrence count — and it takes them from one counting pass, not from
-comparing every argument with every other. `(apply f xs)` in tail position over
-a 40000-element `xs` is a 40000-step operation, not a 1.6-billion-step one
+comparing every argument with every other. A tail call that writes out 4000
+arguments is a 4000-step operation, not a 16-million-step one
 ([apply-tail-linear.lisp](../../tests/impl/apply-tail-linear.lisp)).
+
+A spliced call, `(apply f xs)` or `(f ;xs)`, moves nothing. Its arguments come
+out of an array the calling convention owns, so the callee takes a reference of
+its own to each, and no reference is surplus
+([mechanism.md](../impl/region/mechanism.md)).
 
 ## What you can do
 

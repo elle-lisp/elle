@@ -84,9 +84,10 @@ impl VM {
     /// The occurrence counts come from ONE pass over `all_args`, so the whole
     /// step is linear in the argument count. Counting per rest arg instead —
     /// rescanning `all_args` for each — is quadratic, and every comparison is a
-    /// `region_of` page-header walk, so a large `(apply f xs)` in tail position
-    /// pays it in full (`tests/impl/apply-tail-linear.lisp`,
-    /// docs/regions/performance.md).
+    /// `region_of` page-header walk, so a tail call that writes out thousands of
+    /// arguments pays it in full (`tests/impl/apply-tail-linear.lisp`,
+    /// docs/regions/performance.md). A spliced call never reaches here: it
+    /// moves nothing (docs/impl/region/mechanism.md).
     ///
     /// Counting first and releasing second gives the same answers as
     /// interleaving them. A release here can only FREE regions (its own and
