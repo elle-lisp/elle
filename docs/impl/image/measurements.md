@@ -275,7 +275,10 @@ and [plan.md](plan.md) the order everything lands in.
    The prototype is not the whole port. The shipped passes mutate LIR in place
    and resize it, which a fixed-extent slice turns into build-then-materialize,
    exactly as syntax had to copy as it stamps. Nothing here measures that
-   route; item 8 does. To redo: `cargo bench --bench lirshape`.
+   route; item 8 does. To redo: run `cargo bench --bench lirshape` on the
+   parent of the commit that deleted the bench, which `git log --diff-filter=D
+   -- benches/lirshape/main.rs` names. The bench went with the Rust-heap form
+   it measured against.
 8. **A growable region slice — measured, parity held.** A lowerer that builds
    in a region needs a slice that grows where it lies, because it pushes into
    a block, finishes it, and later splices into it. A region bumps its data
@@ -338,9 +341,14 @@ and [plan.md](plan.md) the order everything lands in.
    writing nodes directly does not run.
 
    What the experiment decided: the lowerer can build in a region with no
-   compile-time cost, and with a malloc count that no longer grows with the
-   program. Growth leaves dead extents in the working region, bounded by the
-   nodes the compile wrote and freed with that region. To redo: `cargo bench
-   --bench lirshape`, and for the op mix, a counter patch at `emit`,
-   `emit_alloc_with_slot`, `finish_block`, the two splice sites in
-   `with_tail_exit_hoist`, and the block `lower_lambda_body` sets aside.
+   compile-time cost. Growth leaves dead extents in the working region, bounded
+   by the nodes the compile wrote and freed with that region. The prototype's
+   21 calls a round are the replay's own. The port freezes each finished
+   function into exact-size `Vec`s ([lir.md](../lir.md) § "The working form"),
+   which costs a fixed handful of calls per function rather than one per
+   instruction.
+
+   To redo: run the bench where item 7 says. For the op mix, apply a counter
+   patch at `emit`, `emit_alloc_with_slot`, `finish_block`, the two splice
+   sites in `with_tail_exit_hoist`, and the block `lower_lambda_body` sets
+   aside, on the same commit.

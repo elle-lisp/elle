@@ -21,7 +21,7 @@ argument. Six companions carry the rest:
   gates a load.
 - [plan.md](image/plan.md) — the landing order, and the pins each milestone
   must land with.
-- [measurements.md](image/measurements.md) — the seven experiments that
+- [measurements.md](image/measurements.md) — the eight experiments that
   answered the design's open questions, with their numbers.
 
 This document states the design, not its progress. [plan.md](image/plan.md)
@@ -383,12 +383,12 @@ hydrated stdlib closure promotes exactly as a compiled one does, so the tier
 half of parity holds; the boot image's default waits on the compile half
 ([image/boot.md](image/boot.md)).
 
-The cost of the change is measured and small: the region form is faster on
-every operation a `LirFunction` meets, by about a third of one percent of the
-compile it belongs to, and it holds less than half the memory
-([image/measurements.md](image/measurements.md) item 7). The case for it is
-never that number. It is that an image stops needing a mechanism of its own
-for one type.
+The cost of the change is measured and small: the region form was faster on
+every operation the Rust-heap form met, by about a third of one percent of the
+compile it belongs to, and it held less memory
+([image/measurements.md](image/measurements.md) items 7 and 8). The case for
+it is never that number. It is that an image stops needing a mechanism of its
+own for one type.
 
 ## Build integration
 

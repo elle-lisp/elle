@@ -1,6 +1,6 @@
 # The audit queue
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-06 -->
 
 Every file carries the day it last met the documentation policy, and the queue
 names what to read next by what a stale file costs.
@@ -120,7 +120,7 @@ the thing that gets audited. An `AGENTS.md` is exempt when it carries the
 marker [the generator](agents-index.md) writes, and queued when it does not.
 
 [The Makefile](../../Makefile), [the standard library](../../src/stdlib.lisp)
-and [the LIR instruction enum](../../src/lir/types/instr.rs) are exempt, and
+and [the LIR instruction enum](../../src/lir/code/instr.rs) are exempt, and
 they are the only repository files exempted by name. Everything else in the
 queue is read whole by somebody: a document off an index, a source file off a
 call site. Nobody reads these three that way:

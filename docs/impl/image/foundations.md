@@ -105,13 +105,14 @@ Hygiene scope ids minted by the expander remain process-local counters; the
 image records a scope watermark so a fresh expander mints above every scope
 baked into persisted syntax.
 
-## Region-native LIR — in progress
+## Region-native LIR — landed
 
 A code payload carries its function's LIR as region-native records, and the
 JIT, the other backends, `send`, introspection and the image all read it there
 ([lir.md](../lir.md) § "The frozen form"). The emitter writes each payload into
 its compile unit's code region, so no compile-time blueprint holds a second
-copy. The stage still to land builds the records in a region from the start.
+copy. The lowerer builds the same records in a working region from the start
+([lir.md](../lir.md) § "The working form"), so no Rust-heap form of LIR is left.
 
 Four things the port buys. None is a compile-time number;
 [measurements.md](measurements.md) item 7 measured those, and they are real but
@@ -128,23 +129,25 @@ small.
 - **One portability rule.** Sealed region data crosses a worker, an image and a
   socket the way every other value does. The hand-written `Send` claim on
   `JitTask` becomes a property of the type instead of a comment.
-- **Allocation the project can see.** Building the boot sources' LIR costs
-  21,281 `malloc` calls, which no gauge the region system owns can see. As
-  region pages they answer to `--region-page-size`, `--page-pool-max`,
-  `arena/page-claims`, the leak suite, `--trace=scrub` and `--trace=guardfree`.
+- **Allocation the project can see.** Building the boot sources' LIR in a
+  Rust-heap working form cost 21,281 `malloc` calls, and no gauge the region
+  system owns could see one of them. Built in a working region, the LIR answers
+  to `--region-page-size`, `--page-pool-max`, `arena/page-claims`, the leak
+  suite, `--trace=scrub` and `--trace=guardfree`.
 
-Two things stay work rather than argument. The JIT worker runs on another
+Two things stayed work rather than argument. The JIT worker runs on another
 thread and a region belongs to one `RegionStore`, so a promotion still copies
 its function out — 8.7 ns an instruction against the Rust clone's 13.8 ns, but
-a copy either way. And the passes that rewrite LIR in place also resize it,
-which a fixed-extent slice turns into build-then-materialize. Syntax met that
-wall and answered it by copying as it stamps ([syntax.md](../syntax.md)); the
-better answer is a slice that grows in its own region, which no foundation has
-needed yet.
+a copy either way. And the lowerer splices into blocks it has already
+finished, which a fixed-extent slice cannot take. Syntax met that wall and
+answered it by copying as it stamps ([syntax.md](../syntax.md)). LIR answers it
+with a slice that grows in its own region, `RegionVec`, which
+[measurements.md](measurements.md) item 8 measured at parity before the
+lowerer moved onto it.
 
 ### The shape
 
-The `benches/lirshape` prototype's node is the shape, and
+The node [measurements.md](measurements.md) item 7 prototyped is the shape, and
 [lir.md](../lir.md) § "The frozen form" owns its details. An instruction is a
 48-byte `repr(C)` record with no implicit padding, and its variable-length
 operands sit in one pool per function, named by index. A function refers to its
@@ -168,9 +171,10 @@ The port lands as a seam and then three stages, each green on its own:
 3. **Retire `TemplateProto`** — landed. A code object is one payload slice in
    its compile unit's code region, and the payload cache, the blueprint arm of
    every header and the second copy of the bytecode are gone.
-4. **A region-native lowerer.** The lowerer builds the records directly in a
-   working region, through slices that grow in place, and the Rust-heap working
-   form is deleted. This stage meets the wall above, so it starts with a
-   prototype of the growable slice.
+4. **A region-native lowerer** — landed. The lowerer builds the records in a
+   working region, through slices that grow, and freezes each function as it
+   finishes. `LirInstr`, `LirFunction`, `BasicBlock`, `SpannedInstr`,
+   `LirModule` and `LirConst` are gone: `InstrRef` is the one instruction type,
+   built by the lowerer and decoded by every reader.
 
 [plan.md](plan.md) records the pins each stage lands with.

@@ -156,7 +156,7 @@ Lowerer (&BindingArena) — read-only access to binding metadata
 15. **A docstring is a leading string literal.** `HirKind::Lambda` has a
     `doc: Option<Rc<str>>` field. The analyzer takes a leading string literal
     as the docstring only when the body has two or more forms. The lowerer
-    copies it to `LirFunction.doc`, and the emitter writes it into the code
+    copies it to `LirHead::doc`, and the emitter writes it into the code
     payload, where `ClosureTemplate::doc()` reads it for `(doc name)` and LSP
     hover.
 
@@ -177,7 +177,7 @@ Lowerer (&BindingArena) — read-only access to binding metadata
 18. **A lambda's source location is captured for `meta/origin`.**
     `HirKind::Lambda` has an `origin: Option<Span>` field, set in
     `analyze_lambda` from the form's span. The lowerer copies it to
-    `LirFunction.origin`, and the emitter writes it into the code payload.
+    `LirHead::origin`, and the emitter writes it into the code payload.
     `(meta/origin f)` reads it through `ClosureTemplate::origin()`.
 
 19. **Qualified symbols are desugared to nested `get` calls.**

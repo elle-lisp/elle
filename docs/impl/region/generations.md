@@ -1,6 +1,6 @@
 # Region generations: stale derefs detonate in debug builds
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-06 -->
 
 The per-region generation counter and page stamps that turn a stale region deref
 into a debug-build panic at the deref site. Pairs with the `--trace=guardfree` oracle described in
@@ -237,7 +237,7 @@ page stamp. Pinned by `a_slot_with_no_slot_routed_release_is_not_a_borrow`
 ([borrow_tests.rs](../../../src/vm/fiber/borrow_tests.rs)).
 
 A **pass-through borrow** is the other shape and needs
-no handle. The `%first`/`%rest`/`%get` intrinsics (`LirInstr::First`/`Rest`/`Get`)
+no handle. The `%first`/`%rest`/`%get` intrinsics (`InstrRef::First`/`Rest`/`Get`)
 hand back a value that aliases into the source collection's region with no incref —
 an uncounted borrow — but it is a transient SSA value with a compile-time-bounded
 lifetime and no persistent home to record a handle on. Its derefs route through

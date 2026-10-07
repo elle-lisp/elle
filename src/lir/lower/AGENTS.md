@@ -4,13 +4,15 @@
 
 HIR to LIR lowering: explicit control flow, binding slot allocation, capture cells, and region RC instruction emission.
 
-The LIR types themselves (`LirFunction`, `BasicBlock`, `LirInstr`,
-`SpannedInstr`, `Terminator`, `Reg`, `Label`), the emitter, source-location
-tracking and the instruction set are described in [../AGENTS.md](../AGENTS.md).
-This file covers what the `Lowerer` decides.
+The LIR types themselves (`InstrRef`, `Terminator`, `Reg`, `Label`), the
+`LirBuilder` the lowerer writes through, the emitter, source-location tracking
+and the instruction set are described in [../AGENTS.md](../AGENTS.md). This
+file covers what the `Lowerer` decides.
 
 ## Responsibility
 
+- Build each function of the unit through a `LirBuilder`, in a working region
+  that lives for one call to `lower`, and hand back the `FrozenModule`
 - Lower HIR to explicit control flow (basic blocks, jumps)
 - Translate `Binding` references to concrete slot indices
 - Emit capture-cell operations for captured and mutated bindings
@@ -28,11 +30,14 @@ Does NOT:
 | Type | Purpose |
 |------|---------|
 | `Lowerer` | Main struct that transforms HIR → LIR ([mod.rs](mod.rs)) |
+| `LirBuilder` | The working form: the function stack, the open block, the splices, and the freeze as a function finishes ([../build/](../build/mod.rs)) |
 | `BlockLowerContext` | Active block for `break` lowering (block_id, result_reg, result_slot, exit_label) |
 | `LoopLowerContext` | Active loop for `Recur` lowering (loop_label, binding_slots, region_id) |
 
 The lowerer reads binding metadata through `&BindingArena` (passed to
-`Lowerer::new`), so analysis-phase metadata cannot change during lowering.
+`Lowerer::new`), so analysis-phase metadata cannot change during lowering. It
+builds on the heap `with_heap` names. `lower` mints its working region there
+and frees it before returning, on the error path too.
 
 ## Immutable constant propagation
 
@@ -74,7 +79,7 @@ lowerer emits what `RegionInfo` says. See
 - `cross_region_refs` — cross-region edges that drive `IncrefRegion`
   emission at the storage site (`emit_increfs_for`).
 - `rest_list_layout(lambda)` — how a variadic lambda builds its `&` rest
-  list, which `lower_lambda_expr` writes onto the lambda's `LirFunction`
+  list, which `lower_lambda_expr` writes onto the lambda's `LirHead`
   ([restlist.md](../../../docs/impl/region/restlist.md)).
 
 `with_region_info` ([order.rs](order.rs)) builds two reverse indexes once:
@@ -195,7 +200,7 @@ is about to hand it to its consumer.
 
 1. **Each register assigned exactly once.** SSA form. If you see a register used before definition, lowering is broken.
 
-2. **Every block ends with a terminator.** `Return`, `Jump`, `Branch`, `Emit`, or `Unreachable`. No fall-through.
+2. **Every block ends with a terminator.** `Return`, `Jump`, `Branch`, `Emit`, or `Unreachable`. No fall-through. A block finished without a `terminate` exits `Unreachable`.
 
 3. **`binding_to_slot` maps all accessed bindings.** If lowering fails with "unknown binding," the HIR→LIR mapping is incomplete. The key is `Binding` (a `u32` arena index), the value is the `u16` slot index.
 
@@ -209,7 +214,7 @@ is about to hand it to its consumer.
 
 7. **`capture_locals_mask` is set for locals that need env cells.** Slot i set means locally-defined variable i (0-indexed from the first local after params) needs a cell because it's captured by a nested closure or mutated via `assign`. The VM env builder (`populate_env`), the JIT prologue, and the WASM env builders all consult it to skip `CaptureCell` allocation for non-captured locals. It is a `CaptureMask` ([src/value/capturemask.rs](../../value/capturemask.rs)), unbounded in width: a local at any index is named precisely, so an uncaptured local beyond slot 63 gets a bare-NIL env slot instead of a dead, leaked cell. (`capture_params_mask` is still a `u64` — functions don't approach 64 parameters, and the params path has no `>=64` fallback to leak through.)
 
-8. **Docstring is threaded from HIR.** `LirFunction.doc` is copied from `HirKind::Lambda.doc` during lowering, and the emitter writes it into the code payload, where `ClosureTemplate::doc()` reads it. It is never encoded in bytecode.
+8. **Docstring is threaded from HIR.** `LirHead::doc` is copied from `HirKind::Lambda.doc` during lowering, and the emitter writes it into the code payload, where `ClosureTemplate::doc()` reads it. It is never encoded in bytecode.
 
 ## When to modify
 

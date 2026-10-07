@@ -6,7 +6,7 @@ Up: [..](../AGENTS.md)
 
 ## Documents
 
-- [bytecode.md](bytecode.md) — **Adding a New Bytecode Instruction** An instruction flows through three layers: definition (`compiler`), emission (`lir`), and execution (`vm`).
+- [bytecode.md](bytecode.md) — **Adding a New Bytecode Instruction** An instruction runs through four layers: its opcode, the LIR instruction that carries it, the emission between them, and the VM handler.
 - [heap-types.md](heap-types.md) — **Adding a New Heap Type** A heap type is a new kind of runtime value stored behind a tagged-union pointer.
 - [index.md](index.md) — **Cookbook** Step-by-step recipes for common additions to the Elle codebase.
 - [lint-rules.md](lint-rules.md) — **Adding a New Lint Rule** Linting operates on HIR trees.

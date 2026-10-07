@@ -31,13 +31,14 @@ code, and each deletes image machinery
    design would otherwise have needed, the `Box<Syntax>` inside
    `HeapObject::Syntax`, and the retained lambda tree on every closure
    template.
-5. **lir** — in progress. Region-native LIR
-   ([foundations.md](foundations.md) argues it); deletes the encoded-LIR
+5. **lir** — landed. Region-native LIR
+   ([foundations.md](foundations.md) argues it); deleted the encoded-LIR
    side-stream this design would otherwise have needed, `send`'s LIR codec,
-   and `TemplateProto` — the last Rust-heap owner on a code object. It lands
-   after boot rather than before it, because the measurement that sized it
-   ([measurements.md](measurements.md) item 7) needed a boot configuration to
-   point at. It lands in four steps, each green on its own:
+   `TemplateProto` — the last Rust-heap owner on a code object — and the
+   Rust-heap working form. It landed after boot rather than before it, because
+   the measurement that sized it ([measurements.md](measurements.md) item 7)
+   needed a boot configuration to point at. It landed in four steps, each green
+   on its own:
    - **lir-view** — landed. Freezing, and one read form: every reader except
      the lowerer reads a frozen function through `LirView`. Deleted `send`'s
      LIR codec.
@@ -46,8 +47,9 @@ code, and each deletes image machinery
    - **lir-retire** — landed. `TemplateProto` and the payload cache are gone;
      the emitter writes each compile unit's payloads into a code region the
      unit owns, and a code object is one payload slice.
-   - **lir-lower** — the lowerer builds the frozen form in a working region,
-     and the Rust-heap working form is deleted.
+   - **lir-lower** — landed. The lowerer builds the records in a working
+     region and freezes each function as it finishes; `InstrRef` is the one
+     instruction type, and the Rust-heap working form is gone.
 
 Then the image milestones:
 
@@ -119,7 +121,8 @@ Then the image milestones:
     is the sum of its fields — the counter-factual is implicit padding, which
     would carry stray bytes into a dump. A third use lands in the pool, a tail
     call keeps its deferred-release slot and its borrowed-argument slots, and a
-    `LirConst::String` is refused by name. `JitTask` is `Send` by type, with no
+    string constant is refused by name, until **lir-lower** removed the
+    constant. `JitTask` is `Send` by type, with no
     hand-written claim. A closure whose LIR loads a stdlib closure and a list
     as `ValueConst`s crosses to a worker with its LIR and both values, and the
     worker's JIT compiles it.
@@ -148,10 +151,17 @@ Then the image milestones:
     heap runs from a copy on the executing heap. The dumper copies a live
     closure's children out of its payload, and the verifier refuses a header
     four ways.
-  - **lir-lower**: a pass that grows an instruction list answers as the `Vec`
-    pass did, checked against a `Vec::splice` model over random operation
-    sequences. The working region is freed after the compile, and the standard
-    library's LIR build shows in `arena/page-claims`.
+  - **lir-lower**: a `RegionVec` answers as a `Vec` does over random sequences
+    of pushes, truncations and insertions, checked against a `Vec::splice`
+    model, through growth into fresh extents and across pages; every extent it
+    claims lies in its own region. Lowering claims pages from the heap the
+    lowerer names, and returns with no region left behind, on a lowering that
+    fails as on one that succeeds; the counter-factual is a lowerer that keeps
+    its working form on the Rust heap, which claims no page at all. Every
+    opcode round-trips through `LirBuilder::emit` and the view, field by field,
+    from the list the compiler checks against `Op`. A string literal pattern
+    under a guard that may suspend compiles and matches, because no constant
+    holds a string; the counter-factual is the freeze that refused one.
 - Round-trip: dump a data graph, hydrate in a fresh runtime, assert
   structural equality — and a counter-factual load with a corrupted
   fingerprint falls back cleanly.

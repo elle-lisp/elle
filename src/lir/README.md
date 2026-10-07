@@ -1,6 +1,6 @@
 # Low-level Intermediate Representation (LIR)
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-10-06 -->
 
 LIR sits between HIR and bytecode: virtual registers and basic blocks that make control flow explicit.
 
@@ -46,7 +46,7 @@ further: the lowerer loads its value as a constant and reads no slot at all.
 
 ## Lambdas
 
-Each lambda lowers to its own `LirFunction`, held in the module's closure list.
+Each lambda lowers to its own function, frozen into the module's closure list.
 `MakeClosure` names it by `ClosureId` and takes the captured values from
 registers.
 

@@ -206,10 +206,11 @@ Every compilation path follows the same phases:
 4. **Regularize**: `crate::hir::regularize(&mut hir, ...)` marks tail calls,
    functionalizes, lifts to ANF and infers types, in place
 5. **Regions**: `analyze_regions_with(&hir, ...)` → `RegionInfo`
-6. **Lower**: `Lowerer::new(&arena)...lower(&hir)` → `LirModule`
-7. **Freeze**: `LirModule::freeze()` → `FrozenModule`
-   ([lir.md](impl/lir.md) § "Two forms of one function")
-8. **Emit**: `Emitter::new(code).emit_module(&frozen)` → the entry's
+6. **Lower**: `Lowerer::new(&arena).with_heap(heap)...lower(&hir)` →
+   `FrozenModule`, built in a working region on the compile's heap that
+   `lower` frees before it returns ([lir.md](impl/lir.md) § "Two forms of one
+   function")
+7. **Emit**: `Emitter::new(code).emit_module(&frozen)` → the entry's
    `Bytecode`, each nested lambda's payload written into the code region
    `code` names, and `CodeUnit::new(code, bytecode)` → the `CodeUnit`
 

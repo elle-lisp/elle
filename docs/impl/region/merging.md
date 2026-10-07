@@ -1,6 +1,6 @@
 # Merging
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-10-06 -->
 
 Merging puts two solver regions in one physical region, freed by one `DecrefRegion`, when the two values share a lifetime.
 
@@ -126,7 +126,7 @@ note anticipates:
   `R`; the single `DecrefRegion` at the root's `decref_point` frees both. All three
   tiers honour it: the interpreter alloc handlers, the JIT alloc helper (a merged
   slot routes to `elle_jit_resolve_alloc_region_merged`, selected at compile time
-  from `LirFunction.merged_slots`), and a cross-thread-sent closure (whose
+  from the frozen function's `merged_slots`), and a cross-thread-sent closure (whose
   `merged_slots` rides the `SendableClosure`).
 
 Per-iteration uniqueness in loops is preserved because that single `DecrefRegion`

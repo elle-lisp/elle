@@ -5,64 +5,62 @@
 The LIR's two forms, the registers each instruction reads and writes, and the emitter that turns LIR into stack bytecode.
 
 LIR is SSA form over virtual registers and basic blocks. The lowerer builds
-it in a working form and freezes it; everything else reads the frozen form.
-[lower/AGENTS.md](lower/AGENTS.md) owns how HIR becomes LIR: slots, capture
-cells, constants and the region instructions.
+it in a working form and freezes each function as it finishes; everything else
+reads the frozen form. [lower/AGENTS.md](lower/AGENTS.md) owns how HIR becomes
+LIR: slots, capture cells, constants and the region instructions.
 [docs/impl/lir.md](../../docs/impl/lir.md) owns the design: the two forms, the
 operand proof, heap literals and `LoadSelf`.
 
 ## Size
 
-[types/instr.rs](types/instr.rs) is past the 500-line reading budget, so it
+[code/instr.rs](code/instr.rs) is past the 500-line reading budget, so it
 carries no audit stamp and is exempt from the audit queue by name
-([docs/impl/audit.md](../../docs/impl/audit.md)). The file is one enum, and
-Rust gives no way to split one; bringing it inside the budget means nesting a
-group of variants into a sub-enum, which rewrites every exhaustive match in the
-crate. That is its own change, not a rider on whatever touches the file next.
+([docs/impl/audit.md](../../docs/impl/audit.md)). The file is one enum,
+`InstrRef`, with a doc comment per variant, and Rust gives no way to split one;
+bringing it inside the budget means nesting a group of variants into a sub-enum,
+which rewrites every exhaustive match in the crate. That is its own change, not
+a rider on whatever touches the file next.
 
 A match over the instruction set splits where an enum cannot:
 [emit/instr/ops.rs](emit/instr/ops.rs) hands its tail to
 [ops/intrinsics.rs](emit/instr/ops/intrinsics.rs), and every other file here
-takes the ordinary budget.
-
-The frozen form's mirror of the enum, `InstrRef` in
-[code/instr.rs](code/instr.rs), carries no per-variant docs and stays inside
-the budget: each variant means what the `LirInstr` variant of the same name
-means. Its decoder lives in [code/decode.rs](code/decode.rs), apart from it.
+takes the ordinary budget. The encoder lives in [build/](build/mod.rs) and
+the decoder in [code/decode.rs](code/decode.rs), each apart from the enum.
 
 ## Interface
 
-The working form, which the lowerer builds:
+The working form, which the lowerer builds ([build/](build/mod.rs)):
 
 | Type | Purpose |
 |------|---------|
-| `LirModule` | The lowerer's product: an entry function and its closures, which `MakeClosure` names by `ClosureId` |
-| `LirFunction` | Compilation unit: blocks, slot counts, capture masks, signal, docstring, origin and region tables ([types/func.rs](types/func.rs)) |
-| `BasicBlock` | Instructions + terminator |
-| `LirInstr` | Individual operation ([types/instr.rs](types/instr.rs)) |
+| `LirBuilder` | Builds one unit's functions in a working region it frees when dropped: a stack of functions under construction, each block's nodes in a `RegionVec`, the splices the relocation makes, and `finish_function`, which freezes a function into a `LirOwned` |
+| `LirHead` | The header of the function under construction: name, arity, signal, slot and capture counts, capture masks, docstring, origin, region table, merge set and release tables |
+| `RegionVec` | A slice that grows in the working region: push, truncate, and insert at an index |
+| `Lowerer` | HIR → LIR, answering a `FrozenModule` ([lower/AGENTS.md](lower/AGENTS.md)) |
+
+An instruction, in both forms:
+
+| Type | Purpose |
+|------|---------|
+| `InstrRef` | One operation: built by the lowerer, encoded by `LirBuilder::emit`, decoded by every reader ([code/instr.rs](code/instr.rs)) |
+| `ConstRef` | An immediate constant: nil, the empty list, a bool, a number, a symbol or a keyword |
+| `TemplateBytes`, `Slots`, `ConstList` | The borrowed operands an `InstrRef` carries: a `MaterializeConst`'s encoded template, a tail call's stash slots, a `StructRest`'s keys |
 | `OperandProof` | What the front end proved about an operation's operands: nothing, or that every one is an integer |
-| `SpannedInstr` | `LirInstr` + `Span` for source tracking |
-| `SpannedTerminator` | `Terminator` + `Span` for source tracking |
 | `Terminator` | How a block exits: `Return`, `Jump`, `Branch`, `Emit`, `Unreachable` |
-| `LirConst` | An immediate constant: nil, the empty list, a bool, number, string, symbol or keyword |
 | `Reg` | Virtual register, `repr(transparent)` over its `u32` |
 | `Label` | Basic block identifier |
-| `Lowerer` | HIR → LIR ([lower/AGENTS.md](lower/AGENTS.md)) |
 
 The frozen form, which every other reader reads ([code/](code/mod.rs)):
 
 | Type | Purpose |
 |------|---------|
-| `freeze` | `LirFunction` → `LirOwned`; refuses a `LirConst::String` by name |
-| `FrozenModule` | A `LirModule` frozen: one `LirOwned` per function |
-| `Op` | One opcode byte per `LirInstr` variant |
+| `FrozenModule` | The lowerer's product: an entry function and its closures, which `MakeClosure` names by `ClosureId`, each a `LirOwned` |
+| `Op` | One opcode byte per `InstrRef` variant |
 | `Node`, `BlockRec`, `ConstRec`, `SiteRec` | The plain records a frozen function is made of |
 | `LirCode` | The records, tables and header in `Vec`s: `Send`, and serializable |
 | `LirOwned` | A `LirCode` plus the `Value`s its `ValueConst` instructions load |
 | `LirBody` | The same records in region pages, as a code payload's `lir` field ([code/body.rs](code/body.rs)) |
 | `LirView` | The read API over either home: blocks, instructions, terminators, header, tables, sites |
-| `InstrRef` | One instruction, decoded: `LirInstr`'s variants over borrowed slices |
-| `ConstRef`, `TemplateBytes` | An immediate constant, and a `MaterializeConst`'s encoded template |
 | `SiteRef` | A yield point or a call site: resume IP, live registers, local count |
 
 The emitter, which reads the frozen form:
@@ -74,7 +72,7 @@ The emitter, which reads the frozen form:
 | `CallSiteInfo` | What emission records at a call site, for yield-through-call |
 | `testkit::LirFixture` | Builds a frozen function by hand, for tests (`#[cfg(test)]`) |
 
-`LirConst::Nil` and `LirConst::EmptyList` are distinct constants. Nil is falsy
+`ConstRef::Nil` and `ConstRef::EmptyList` are distinct constants. Nil is falsy
 and the empty list is truthy, and a list ends in the empty list, never in nil.
 
 ## Reading LIR
@@ -108,25 +106,25 @@ writes it. `for_each_terminator_use` reports what a `Terminator` reads. The
 WASM register allocator and its liveness analysis walk these, and nothing else
 answers the question.
 
-`for_each_def` and `for_each_use` ([types/regs.rs](types/regs.rs)) answer
-the same question for the working form, and freezing takes a node's uses from
-`for_each_use`. A new `LirInstr` variant must be added to both — the matches
-are exhaustive, so the compiler names the omission.
+`LirBuilder::emit` takes a node's uses from the `InstrRef` in the same fixed
+order, so a node answers exactly the registers its instruction names. The
+encoder's match is exhaustive, so a new variant cannot be emitted until it says
+which operands are uses.
 
 ## Building LIR in tests
 
 `testkit::LirFixture` ([testkit.rs](testkit.rs), `#[cfg(test)]`) assembles a
-`LirFunction` instruction by instruction and freezes it, for the unit tests of
-every reader of LIR: the emitter, the JIT, the WASM backend, the MLIR and
-SPIR-V tiers, and the cross-thread send path. It mirrors `hir::testkit`
+frozen function instruction by instruction, for the unit tests of every reader
+of LIR: the emitter, the JIT, the WASM backend, the MLIR and SPIR-V tiers, and
+the cross-thread send path. It mirrors `hir::testkit`
 ([src/hir/testkit.rs](../hir/testkit.rs)), which does the same job for the
-front-end passes.
+front-end passes. A test outside the crate builds through `LirBuilder` itself.
 
 ```rust
 let func = LirFixture::new(Arity::Exact(1))
     .name("abs")
     .signal(Signal::errors())
-    .block(0, vec![LirInstr::LoadCaptureRaw { dst: Reg(0), index: 0 }],
+    .block(0, &[InstrRef::LoadCaptureRaw { dst: Reg(0), index: 0 }],
            Terminator::Return(Reg(0)))
     .build();
 ```
@@ -135,17 +133,18 @@ The rules the fixture holds:
 
 1. **`block` appends.** Blocks land in call order, and the first one added
    sets `entry`.
-2. **Every span is synthetic.** The fixture wraps each `LirInstr` in a
-   `SpannedInstr` and the terminator in a `SpannedTerminator`, both with
-   `Span::synthetic()`. A test that needs real spans builds its blocks itself.
+2. **Every span is synthetic.** The fixture emits each instruction and the
+   terminator with `Span::synthetic()`. A test that needs real spans builds
+   through `LirBuilder`.
 3. **`build` infers `num_regs`**: one past the highest register id the blocks
    mention — a def, a use, a terminator use, or a `TailCall`'s result register.
    The count is therefore a fact about the instructions rather than a constant
    to maintain by hand.
 4. **`num_regs` overrides the inference**, for a test that wants a count the
    instructions do not justify.
-5. **`build` freezes.** It returns a `LirOwned`, which is what every reader
-   takes; `build_working` returns the `LirFunction` before freezing.
+5. **`build` freezes.** The fixture emits through a `LirBuilder` over a heap
+   of its own and returns the `LirOwned` its `finish_function` answers, which
+   is what every reader takes.
 
 The remaining setters — `name`, `signal`, `num_captures`, `num_locals`,
 `num_params`, `num_local_params`, `capture_params_mask`, `vararg_kind`,
@@ -162,11 +161,11 @@ HIR + spans
 Lowerer (lower/AGENTS.md)
     │
     ▼
-LirModule: LirFunctions of SpannedInstr blocks (the working form)
+LirBuilder: each block's nodes in a RegionVec, in a working region (the working form)
     │
     ▼
-freeze ──► FrozenModule: one LirOwned per function
-    │
+finish_function, per function ──► FrozenModule: one LirOwned per function
+    │                              (lower frees the working region here)
     ▼
 Emitter, reading each function through a LirView
     ├─► simulate the operand stack to place each register
@@ -191,7 +190,7 @@ CodeArena::write ──► a CodePayload in the unit's code region, whose
                      ClosureTemplate::lir()
 ```
 
-The emitter emits blocks in the order the lowerer appended them, and freezing
+The emitter emits blocks in the order the lowerer finished them, and freezing
 keeps that order. A merge block is appended after every block that jumps to it,
 so the emitter meets each predecessor first; sorting by label number would
 break that, because labels are allocated in creation order.
@@ -309,7 +308,7 @@ the orphan.
 
 ## Key instructions
 
-The enum in [types/instr.rs](types/instr.rs) is the full list, each variant
+The enum in [code/instr.rs](code/instr.rs) is the full list, each variant
 with its doc comment. These are the ones a reader of lowered code meets most.
 
 | Instruction | What it does |

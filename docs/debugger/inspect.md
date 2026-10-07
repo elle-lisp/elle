@@ -34,7 +34,7 @@ answers an exact offset; inspection adds the lookup that resolves an ip to
 the nearest preceding entry. Second, `name` is `None` for a lambda that no
 `def` or `let` binds, and for code lowered without a symbol table. Lowering
 takes the name from the binding (`binder_name`, [src/lir/lower/setup.rs](../../src/lir/lower/setup.rs)) into
-`LirFunction.name`, and the payload copies it from there
+`LirHead::name`, and the payload copies it from the frozen function
 (`PayloadParts::lambda`, [src/value/closure/arena.rs](../../src/value/closure/arena.rs)).
 
 Two additions, both on the template, flowing the same path as the location
@@ -43,7 +43,7 @@ table:
 - **`local_names`** — `(name, place, index)` entries for everything a
   frame binds. The lowerer's `binding_to_slot` map (declared in
   [src/lir/lower/mod.rs](../../src/lir/lower/mod.rs), filled in [src/lir/lower/emitops.rs](../../src/lir/lower/emitops.rs)) has the data
-  and dies before emit; it moves onto `LirFunction`. The place is
+  and dies before emit; it moves onto `LirHead`. The place is
   required because bindings live in two address spaces whose indices
   overlap, and in three shapes. A plain local lives in its stack
   slot. An in-lambda mutated-or-captured local is env-celled: its
