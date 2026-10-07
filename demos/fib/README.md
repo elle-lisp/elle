@@ -1,9 +1,9 @@
 # Fibonacci Benchmark
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-10-07 -->
 
 Naive recursive `fib(30)`: about 2.7 million calls, which measure the cost of a
-function call and of generic arithmetic.
+function call and of integer arithmetic.
 
 ## What it computes
 
@@ -33,18 +33,19 @@ On a release build, with the default adaptive JIT:
 
 ```
 fib(30) = 832040
-elapsed: 15597.389312 ms
+elapsed: 68.58399299999999 ms
 ```
 
-That is about 6 µs a call. Most of the time goes to generic arithmetic.
-`+`, `-` and `<` are standard-library functions that take a variable number of
-arguments and check each one's type, so each use is a full call. `-` builds a
-closure to loop over its rest arguments, and the JIT refuses a function that
-makes a closure, so every subtraction runs in the interpreter.
+That is about 25 ns a call. `<`, `-` and `+` are standard-library functions,
+and the compiler replaces each call to them with the function's body
+([grafting a call](../../docs/impl/graft.md)). The program's one call passes
+`fib` an integer, so type inference proves `n` and each result an integer.
+The fold then deletes the type guards, so each operator is one integer
+instruction, and the JIT compiles the whole function.
 
-The `%` intrinsics are single instructions on proven numbers; see
-[docs/intrinsics.md](../../docs/intrinsics.md). The same function written
-with them runs in about 63 ms on the same machine:
+The same function written with the `%` intrinsics
+([docs/intrinsics.md](../../docs/intrinsics.md)) folds to the same operations
+and takes the same time:
 
 ```lisp
 (defn fib [n]
@@ -53,9 +54,10 @@ with them runs in about 63 ms on the same machine:
     (%add (fib (%sub n 1)) (fib (%sub n 2)))))
 ```
 
-Performance is not the current focus. The planned path lowers generic
-arithmetic to the intrinsics wherever type inference proves the operands are
-numbers.
+The proof comes from the calls the program makes. When the program also passes
+`fib` as a value, for example to `type-of`, no type reaches `n`, the guards
+stay, and `fib(30)` takes about 300 ms. A build with no JIT tier takes about
+1.1 s.
 
 ## Running the demo
 

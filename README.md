@@ -1,6 +1,6 @@
 # Elle
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-07 -->
 
 A Lisp whose compiler infers what each function does and where each value dies,
 and runs on those facts.
@@ -21,8 +21,8 @@ an Elle program writes none of them. The few declarations Elle has, such as
 guard a program; they never enable one.
 
 This file explains those ideas, what works today, and what we are building
-toward. Elle is under active development. Its syntax changes between
-[epochs](docs/epochs.md), and its performance is not yet a focus. The
+toward. Elle is under active development, and its syntax changes between
+[epochs](docs/epochs.md). The
 [open issues](https://github.com/elle-lisp/elle/issues) list what is broken.
 
 ## Contents
@@ -195,15 +195,16 @@ and the bytes stay in the pages where they were born:
 
 I/O follows the same design. A read hands the kernel a buffer in the caller's
 region, and a write hands the kernel its payload in the pages where it lives,
-so neither one copies. A value that crosses to another thread is deep-copied, where it could move with
-its regions instead ([#1247](https://github.com/elle-lisp/elle/issues/1247)).
+so neither one copies. A value that crosses to another thread is deep-copied,
+where it could move with its regions instead ([#1247](https://github.com/elle-lisp/elle/issues/1247)).
 
 Freed pages return to a small per-thread cache, and pages past that cache go
 back to the operating system at once. So a long-running program's resident
 memory falls when its live data falls.
 
 This is where most of the current work goes. The project measures leaks with
-[gauges](tests/impl/oracle.lisp) and closes them one class at a time. Two costs remain visible today:
+[gauges](tests/impl/oracle.lisp) and closes them one class at a time. Two costs
+remain visible today:
 
 - A region owns at least one 4 KiB page. A value that keeps a region of its own
   (for example, each element a loop pushes into an `@array`) therefore costs
@@ -223,16 +224,18 @@ maps its pages privately and rewrites its pointers in one pass. No value is
 decoded, and pages that nothing touches are never read from disk.
 
 The boot image holds the whole standard library as one region. From a warm
-image, Elle starts in under 10 ms with 12 MB resident. Loading the library from
-the default bytecode cache takes 40 ms and 39 MB, and compiling it from source
-takes 230 ms and 100 MB. Try the image with a cache directory:
+image, Elle starts in under 10 ms with 13 MB resident. Loading the library from
+the default bytecode cache takes 45 ms and 45 MB, and compiling it from source
+takes 270 ms and 100 MB. Try the image with a cache directory:
 
 ```sh
 elle --boot-image=$HOME/.cache/elle script.lisp
 ```
 
-The boot image is opt-in for now. A closure loaded from an image carries no
-LIR yet, so the JIT cannot compile the library's functions. Saving and loading
+The boot image is opt-in for now. A closure loaded from an image carries
+neither LIR nor the body a graft reads yet. So the JIT cannot compile the
+library's functions, a call to `+` stays a call, and a recursive `fib` of 30
+takes 10 s where it takes 0.07 s without an image. Saving and loading
 a user session as an image comes next, and then [fleet](docs/impl/fleet.md):
 running a function on other machines by shipping its image. The
 [image design](docs/impl/image.md) holds the details.
@@ -270,14 +273,15 @@ surface ([versioning](docs/versioning.md)).
 
 - **Region merging.** Collapse regions that die together, so a collection and
   its elements share pages. This removes most of the per-value page cost.
-- **Performance.** Performance has not been a focus since the memory rewrite.
-  Today `+`, `-` and `<` are variadic library functions that the JIT cannot
-  compile. Plain numeric code runs 100 to 2,000 times slower than Janet or Lua,
-  and code written with `%` [intrinsics](docs/intrinsics.md) about 4 to 50 times
-  slower. Type inference and [dissolution](docs/impl/dissolution.md) are the
-  way back. Dissolution already fuses chains of `map`, `filter` and `fold` over
-  proven arrays into single loops. The plan lowers proven calls to intrinsics
-  and VM instructions, and restores the JIT's speed.
+- **Performance.** A call to a function the compiler can see becomes that
+  function's body, and the guards the proven types decide are deleted
+  ([grafting a call](docs/impl/graft.md)). So `(+ a b)` over proven integers is
+  one VM instruction, and the JIT compiles the function around it. On a release
+  build, a recursive `fib` of 32 takes 0.18 s, where Janet takes 0.17 s and Lua
+  0.13 s. With the JIT off it takes 2.9 s. A call to `+` with three operands
+  still reaches the variadic library function, which the JIT cannot compile.
+  [Dissolution](docs/impl/dissolution.md) already fuses chains of `map`,
+  `filter` and `fold` over proven arrays into single loops.
 - **Ownership in place of counting.** Extend the ownership forest, in the
   direction of Project Verona's regions, so fewer mutable stores need a
   reference count.
@@ -313,7 +317,8 @@ the compiler's diagnostics, `elle lsp` serves an editor over the Language
 Server Protocol, and `elle rewrite` migrates source between epochs.
 
 The [standard library](docs/libraries.md) and the
-[Rust plugins](docs/plugins.md) are written against the same primitives. The plugins and the MCP server live in submodules:
+[Rust plugins](docs/plugins.md) are written against the same primitives. The
+plugins and the MCP server live in submodules:
 
 ```sh
 git submodule update --init plugins mcp
