@@ -177,7 +177,8 @@ impl HirFragment {
     ///
     /// `span`, when given, replaces every node's span. A fragment restored from
     /// the stdlib cache carries spans whose file ids another process interned,
-    /// and a graft reports its errors from the call it replaced anyway.
+    /// so a graft of another unit's body passes the call's span. A graft of this
+    /// unit's body passes none, and keeps the spans an error it raises names.
     ///
     /// Returns the host binding for every fragment index, so a caller holding
     /// parameter indices reads its parameters straight out of it, and the

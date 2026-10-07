@@ -1,3 +1,9 @@
+// audited: 2026-10-06
+//! The ownership cuts that free a whole subtree under one root, and a rootless cycle as one group.
+//!
+//! docs/impl/region/ownership.md
+//! docs/impl/region/adopt.md
+
 use super::super::*;
 use super::capture::closure_regions;
 use super::inputs::OwnershipInputs;
@@ -25,8 +31,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 ///
 /// The graph also carries **capture edges** (`capture_containment_edges`): a closure's
 /// region contains every value it captures, but capture records *no* `cross_region_refs`
-/// edge (the RC double-count fix — see the module doc), so they are re-derived here from
-/// the HIR. They are eligible (a capture is a genuine containment, not a may-store) and
+/// edge (the runtime counts a closure's env itself — see the module doc), so they are
+/// re-derived here from the HIR. They are eligible (a capture is a genuine containment, not a may-store) and
 /// — like every edge — count against external uniqueness.
 ///
 /// And the **funnel-store containment** (`RegionInfo::containment_edges`): a value
@@ -116,9 +122,11 @@ pub(in crate::hir::region::infer) fn compute_owned_subtrees(
 /// A group qualifies iff its members form an SCC of size ≥ 2 (a genuine cycle), every
 /// member is ownable and sole-held, the SCC owns no downstream members
 /// (`reach(SCC) == SCC` — the smallest-cut restriction; a cycle that also owns a sub-tree
-/// awaits the downstream-inclusion refinement and meanwhile stays on the always-legal
-/// per-region-RC baseline), and it is externally unique (`outside_ref_in` false —
-/// equivalently a SOURCE in the condensation: no external container holds a member).
+/// stays on the always-legal per-region-RC baseline), it is externally unique
+/// (`outside_ref_in` false — equivalently a SOURCE in the condensation: no external
+/// container holds a member), and every member and within-SCC store result is released
+/// inside the drop site. The scope's value can carry a member out to a consumer past
+/// the scope, and the scope's end does not post-dominate that consumer's read.
 ///
 /// Disjoint from [`compute_owned_subtrees`] by construction: a source SCC is reached by
 /// no top container (being reached would mean an external container holds a member, i.e.
@@ -196,12 +204,10 @@ pub(in crate::hir::region::infer) fn compute_owned_region_groups(
             continue;
         }
         // Drop site = the innermost structural scope enclosing every member's allocation
-        // (approach 3 — see the fn doc). The scope's `emit_decrefs_for` fires after its
-        // whole body, post-dominating every member's last use AND every in-scope
-        // pass-through alias deref of a member; freeing the set there is the one point
-        // proven safe against the approach-2 stale-deref UAF. A member with no allocation
-        // site, or members sharing no common structural scope, refuses the group to the
-        // always-legal per-region-RC baseline.
+        // (see the fn doc). The scope's `emit_decrefs_for` fires after its whole body,
+        // after every in-scope release of a member and of a pass-through alias of one. A
+        // member with no allocation site, or members sharing no common structural scope,
+        // refuses the group to the always-legal per-region-RC baseline.
         let targets: FxHashSet<HirId> = scc
             .iter()
             .filter_map(|m| region_alloc_hir.get(m).copied())
@@ -212,39 +218,29 @@ pub(in crate::hir::region::infer) fn compute_owned_region_groups(
         let Some(drop_site) = innermost_enclosing_scope(hir, &targets) else {
             continue;
         };
-        // The drop site is a structural ancestor of every member allocation, so in
-        // post-order it post-dominates the whole subtree: every member `decref_point` and
-        // every within-SCC store's pass-through-alias release (`alloc_region[store_site]`).
-        // Pinned here so a future drift back to a body-internal drop point — the approach-2
-        // regression — detonates in debug rather than as a guardfree stale deref.
-        #[cfg(debug_assertions)]
-        {
-            let drop_ord = ord(drop_site);
-            for &m in scc {
-                if let Some(d) = info.region_data.get(&m) {
-                    debug_assert!(
-                        ord(d.decref_point) <= drop_ord,
-                        "co-owned group drop site must post-dominate member r{} decref_point",
-                        m.0,
-                    );
-                }
-            }
-            for &(site, src, dst) in &info.cross_region_refs {
-                if scc.contains(&src) && scc.contains(&dst) {
-                    if let Some(res_dp) = info
-                        .alloc_region
-                        .get(&site)
-                        .and_then(|res| info.region_data.get(res))
-                    {
-                        debug_assert!(
-                            ord(res_dp.decref_point) <= drop_ord,
-                            "co-owned group drop site must post-dominate the pass-through \
-                             result of within-SCC store @{}",
-                            site.0,
-                        );
-                    }
-                }
-            }
+        // The drop site frees the group after its whole body, which post-dominates the
+        // releases inside that body and no other. A member the scope's value carries out
+        // is released by a consumer past the scope, and so is the pass-through result of a
+        // within-SCC store that becomes the scope's value. Freeing the group at the scope
+        // would free that member under its consumer, so the group refuses to the
+        // per-region-RC baseline (docs/impl/region/ownership.md).
+        let drop_ord = ord(drop_site);
+        let released_inside = |r: &Region| {
+            info.region_data.get(r).is_none_or(|d| {
+                ord(d.decref_point) <= drop_ord && ord(d.lifetime_point) <= drop_ord
+            })
+        };
+        if !scc.iter().all(released_inside) {
+            continue;
+        }
+        let within_scc_results_inside = info
+            .cross_region_refs
+            .iter()
+            .chain(&info.containment_edges)
+            .filter(|&&(_, src, dst)| scc.contains(&src) && scc.contains(&dst))
+            .all(|(site, _, _)| info.alloc_region.get(site).is_none_or(released_inside));
+        if !within_scc_results_inside {
+            continue;
         }
         for &m in scc {
             claimed.insert(m);
@@ -271,8 +267,8 @@ pub(in crate::hir::region::infer) fn compute_owned_region_groups(
 
 /// The innermost structural scope node (`Let`/`Letrec`/`Begin`/`Loop`/`Block`) that
 /// lexically encloses every HirId in `targets`, or `None` if they share no common
-/// structural scope within one function body. This is the co-owned-cycle cut's approach-3
-/// drop point ([`compute_owned_region_groups`]): the lowerer's `emit_decrefs_for` on this
+/// structural scope within one function body. This is the co-owned-cycle cut's drop
+/// point ([`compute_owned_region_groups`]): the lowerer's `emit_decrefs_for` on this
 /// node fires after its whole body, so a `FreeRegionGroup` emitted there post-dominates
 /// every member's last use and every pass-through-alias release inside the scope.
 ///

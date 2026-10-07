@@ -64,10 +64,17 @@ impl<'a> Grafter<'a> {
                 FxHashMap::default()
             }
         };
+        // A body of this unit keeps the spans it was written with. Another
+        // unit's spans may name files this process never interned, so its
+        // body takes the call's.
+        let rebuilt_span = match own {
+            Some(_) => None,
+            None => Some(call.span),
+        };
         let prim_by_name = &self.prim_by_name;
         let (host, mut body) =
             arm.fragment
-                .graft_with(self.arena, Some(call.span), |index, name| match own {
+                .graft_with(self.arena, rebuilt_span, |index, name| match own {
                     Some(_) => globals.get(&index).copied(),
                     None => prim_by_name.get(&name).copied(),
                 })?;
