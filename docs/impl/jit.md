@@ -1,6 +1,6 @@
 # JIT
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-07 -->
 
 The JIT compiles hot functions from LIR to native code using Cranelift.
 
@@ -192,8 +192,11 @@ un-jit'able function called in a hot loop (for example stdlib `-`/`/`, which bui
 rest-arg closure → `MakeClosure` rejection) then saturates the JIT worker
 thread, re-compiling the same function thousands of times and burning CPU that
 dwarfs the program's real work. The `jit/rejections` report exposes a per-
-function `:attempts` count; the negative cache holds `attempts == 1` no matter
-how many times the function is called.
+function `:attempts` count: how many of that function's compiles came back
+rejected. The negative cache holds `attempts == 1` no matter how many times the
+function is called. The count lives on the rejection's own entry, which pins
+its code region, so no count outlives that pin and none passes to a later
+function at the same address.
 
 **Every failed compile is recorded**, whichever kind it is, so the negative
 cache covers all of them. A refusal the translator plans for —
