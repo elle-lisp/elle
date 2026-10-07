@@ -28,19 +28,19 @@ use super::*;
 /// past the old one — then consume the old value. What remains is the new
 /// value's original cell, which no register names any more.
 fn orphan_across_merge_func() -> LirOwned {
-    let konst = |dst: Reg, n: i64| LirInstr::Const {
+    let konst = |dst: Reg, n: i64| InstrRef::Const {
         dst,
-        value: LirConst::Int(n),
+        value: ConstRef::Int(n),
     };
-    let store = |slot: u16, src: Reg| LirInstr::StoreLocal { slot, src };
-    let load = |dst: Reg, slot: u16| LirInstr::LoadLocal { dst, slot };
+    let store = |slot: u16, src: Reg| InstrRef::StoreLocal { slot, src };
+    let load = |dst: Reg, slot: u16| InstrRef::LoadLocal { dst, slot };
 
     let mut func = LirFixture::new(Arity::Exact(0))
         .num_locals(3)
         // Entry: park the sentinel in slot 2, then manufacture the orphan.
         .block(
             0,
-            vec![
+            &[
                 konst(Reg(0), 42),
                 store(2, Reg(0)),
                 konst(Reg(1), 7), // the "new" value
@@ -56,11 +56,11 @@ fn orphan_across_merge_func() -> LirOwned {
             },
         )
         // The diamond's other arm: nothing but the jump to the merge.
-        .block(1, vec![], Terminator::Jump(Label(2)))
+        .block(1, &[], Terminator::Jump(Label(2)))
         // The merge, which branches again into a second diamond.
         .block(
             2,
-            vec![load(Reg(4), 1)],
+            &[load(Reg(4), 1)],
             Terminator::Branch {
                 cond: Reg(4),
                 then_label: Label(3),
@@ -69,11 +69,11 @@ fn orphan_across_merge_func() -> LirOwned {
         );
 
     for label in [3, 4] {
-        func = func.block(label, vec![], Terminator::Jump(Label(5)));
+        func = func.block(label, &[], Terminator::Jump(Label(5)));
     }
 
     // Exit: read the sentinel back out of the topmost local and return it.
-    func.block(5, vec![load(Reg(5), 2)], Terminator::Return(Reg(5)))
+    func.block(5, &[load(Reg(5), 2)], Terminator::Return(Reg(5)))
         .build()
 }
 
@@ -105,18 +105,18 @@ fn merge_predecessors_leave_equal_operand_depth() {
 ///
 /// Slot 0 is the counter, slot 3 the sentinel the function returns.
 fn orphan_in_loop_func(iterations: i64) -> LirOwned {
-    let konst = |dst: Reg, n: i64| LirInstr::Const {
+    let konst = |dst: Reg, n: i64| InstrRef::Const {
         dst,
-        value: LirConst::Int(n),
+        value: ConstRef::Int(n),
     };
-    let store = |slot: u16, src: Reg| LirInstr::StoreLocal { slot, src };
-    let load = |dst: Reg, slot: u16| LirInstr::LoadLocal { dst, slot };
+    let store = |slot: u16, src: Reg| InstrRef::StoreLocal { slot, src };
+    let load = |dst: Reg, slot: u16| InstrRef::LoadLocal { dst, slot };
 
     LirFixture::new(Arity::Exact(0))
         .num_locals(4)
         .block(
             0,
-            vec![
+            &[
                 konst(Reg(0), 0),
                 store(0, Reg(0)),
                 konst(Reg(1), 42),
@@ -127,10 +127,10 @@ fn orphan_in_loop_func(iterations: i64) -> LirOwned {
         // The header: keep going while the counter is below `iterations`.
         .block(
             1,
-            vec![
+            &[
                 load(Reg(2), 0),
                 konst(Reg(3), iterations),
-                LirInstr::compare(Reg(4), CmpOp::Lt, Reg(2), Reg(3)),
+                InstrRef::compare(Reg(4), CmpOp::Lt, Reg(2), Reg(3)),
             ],
             Terminator::Branch {
                 cond: Reg(4),
@@ -141,18 +141,18 @@ fn orphan_in_loop_func(iterations: i64) -> LirOwned {
         // The body, and the back edge into the header.
         .block(
             2,
-            vec![
+            &[
                 konst(Reg(5), 7), // the "new" value
                 konst(Reg(6), 9), // the "old" value, pushed above it
                 store(1, Reg(5)), // DupN past the old value, then store
                 load(Reg(7), 0),  // the counter, above the pair
                 konst(Reg(8), 1),
-                LirInstr::binop(Reg(9), BinOp::Add, Reg(7), Reg(8)),
+                InstrRef::binop(Reg(9), BinOp::Add, Reg(7), Reg(8)),
                 store(0, Reg(9)),
             ],
             Terminator::Jump(Label(1)),
         )
-        .block(3, vec![load(Reg(10), 3)], Terminator::Return(Reg(10)))
+        .block(3, &[load(Reg(10), 3)], Terminator::Return(Reg(10)))
         .build()
 }
 

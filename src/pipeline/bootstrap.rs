@@ -62,7 +62,7 @@ pub fn install_core_exports(
 
 /// Compile and execute core.lisp, storing exports in the Expander's core_env.
 ///
-/// Runs the full pipeline (read → expand → analyze → lower → freeze → emit → execute)
+/// Runs the full pipeline (read → expand → analyze → lower → emit → execute)
 /// without using a `CompileCtx` (we're inside its construction). The bare
 /// expander has no prelude macros — core.lisp uses only special forms and
 /// %-prefixed intrinsics.
@@ -156,6 +156,7 @@ pub(super) fn compile_core(
         );
     }
     let mut lowerer = Lowerer::new(&arena)
+        .with_heap(unsafe { &mut *heap_ptr })
         .with_symbols(symbols)
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
@@ -163,7 +164,6 @@ pub(super) fn compile_core(
         .with_type_info(types);
     let lir_module = lowerer
         .lower(&hir)
-        .and_then(|m| m.freeze())
         .expect("core.lisp lowering must succeed");
 
     let code = crate::value::CodeArena::mint(unsafe { &mut *heap_ptr });

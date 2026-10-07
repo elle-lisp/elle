@@ -13,7 +13,7 @@ fn make_capture_read_lir() -> LirOwned {
         .num_captures(1)
         .block(
             0,
-            vec![LirInstr::LoadCapture {
+            &[InstrRef::LoadCapture {
                 dst: Reg(0),
                 index: 0,
             }],
@@ -32,17 +32,17 @@ fn load_lines(clif: &[String]) -> Vec<&str> {
 
 /// fn(a, b) -> a `op` b, with the two arguments loaded from the argument array
 /// and the operation built by `make_op`.
-fn make_arith_lir(op: BinOp, make_op: fn(Reg, BinOp, Reg, Reg) -> LirInstr) -> LirOwned {
+fn make_arith_lir(op: BinOp, make_op: fn(Reg, BinOp, Reg, Reg) -> InstrRef<'static>) -> LirOwned {
     LirFixture::new(Arity::Exact(2))
         .signal(Signal::silent())
         .block(
             0,
-            vec![
-                LirInstr::LoadCapture {
+            &[
+                InstrRef::LoadCapture {
                     dst: Reg(0),
                     index: 0,
                 },
-                LirInstr::LoadCapture {
+                InstrRef::LoadCapture {
                     dst: Reg(1),
                     index: 1,
                 },
@@ -61,7 +61,7 @@ fn branch_lines(clif: &[String]) -> Vec<&str> {
         .collect()
 }
 
-fn arith_clif(op: BinOp, make_op: fn(Reg, BinOp, Reg, Reg) -> LirInstr) -> Vec<String> {
+fn arith_clif(op: BinOp, make_op: fn(Reg, BinOp, Reg, Reg) -> InstrRef<'static>) -> Vec<String> {
     JitCompiler::new()
         .expect("Failed to create compiler")
         .clif_text(&make_arith_lir(op, make_op).view())
@@ -77,7 +77,7 @@ fn an_unproven_arithmetic_op_compiles_to_a_tag_check_diamond() {
     // the diamond would pass "a proven op has no branch" trivially, while
     // computing garbage for every float operand that reaches an unproven site.
     for op in [BinOp::Add, BinOp::Sub, BinOp::Mul] {
-        let clif = arith_clif(op, LirInstr::binop);
+        let clif = arith_clif(op, InstrRef::binop);
         assert!(
             !branch_lines(&clif).is_empty(),
             "{op:?}: an unproven op must test its operands' tags; got:\n{}",
@@ -92,7 +92,7 @@ fn an_unproven_arithmetic_op_compiles_to_a_tag_check_diamond() {
 #[test]
 fn a_proven_arithmetic_op_compiles_without_a_tag_check() {
     for op in [BinOp::Add, BinOp::Sub, BinOp::Mul] {
-        let clif = arith_clif(op, LirInstr::int_binop);
+        let clif = arith_clif(op, InstrRef::int_binop);
         let branches = branch_lines(&clif);
         assert!(
             branches.is_empty(),
@@ -116,16 +116,16 @@ fn a_proven_comparison_compiles_without_a_tag_check() {
                     .signal(Signal::silent())
                     .block(
                         0,
-                        vec![
-                            LirInstr::LoadCapture {
+                        &[
+                            InstrRef::LoadCapture {
                                 dst: Reg(0),
                                 index: 0,
                             },
-                            LirInstr::LoadCapture {
+                            InstrRef::LoadCapture {
                                 dst: Reg(1),
                                 index: 1,
                             },
-                            LirInstr::compare(Reg(2), op, Reg(0), Reg(1)),
+                            InstrRef::compare(Reg(2), op, Reg(0), Reg(1)),
                         ],
                         Terminator::Return(Reg(2)),
                     )
@@ -145,16 +145,16 @@ fn a_proven_comparison_compiles_without_a_tag_check() {
                     .signal(Signal::silent())
                     .block(
                         0,
-                        vec![
-                            LirInstr::LoadCapture {
+                        &[
+                            InstrRef::LoadCapture {
                                 dst: Reg(0),
                                 index: 0,
                             },
-                            LirInstr::LoadCapture {
+                            InstrRef::LoadCapture {
                                 dst: Reg(1),
                                 index: 1,
                             },
-                            LirInstr::int_compare(Reg(2), op, Reg(0), Reg(1)),
+                            InstrRef::int_compare(Reg(2), op, Reg(0), Reg(1)),
                         ],
                         Terminator::Return(Reg(2)),
                     )
@@ -176,7 +176,7 @@ fn a_proven_comparison_compiles_without_a_tag_check() {
 /// (docs/impl/jit.md).
 #[test]
 fn a_proven_division_keeps_its_zero_test() {
-    let clif = arith_clif(BinOp::Div, LirInstr::int_binop);
+    let clif = arith_clif(BinOp::Div, InstrRef::int_binop);
     assert_eq!(
         branch_lines(&clif).len(),
         1,
@@ -250,15 +250,15 @@ fn make_suspending_call_lir() -> LirOwned {
         }])
         .block(
             0,
-            vec![
-                LirInstr::LoadCapture {
+            &[
+                InstrRef::LoadCapture {
                     dst: Reg(0),
                     index: 0,
                 },
-                LirInstr::Call {
+                InstrRef::Call {
                     dst: Reg(1),
                     func: Reg(0),
-                    args: vec![],
+                    args: &[],
                     arity_checked: false,
                     region: StaticRegion::new(1).unwrap(),
                 },
@@ -322,16 +322,16 @@ fn make_self_call_lir() -> LirOwned {
         .signal(Signal::silent())
         .block(
             0,
-            vec![
-                LirInstr::LoadCapture {
+            &[
+                InstrRef::LoadCapture {
                     dst: Reg(0),
                     index: 0,
                 },
-                LirInstr::LoadSelf { dst: Reg(1) },
-                LirInstr::Call {
+                InstrRef::LoadSelf { dst: Reg(1) },
+                InstrRef::Call {
                     dst: Reg(2),
                     func: Reg(1),
-                    args: vec![Reg(0)],
+                    args: &[Reg(0)],
                     arity_checked: false,
                     region: StaticRegion::new(1).unwrap(),
                 },

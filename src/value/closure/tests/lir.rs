@@ -119,23 +119,24 @@ fn a_payload_without_lir_answers_none() {
 #[test]
 fn freezing_records_the_release_tables_ascending() {
     use crate::hir::region::StaticRegion;
-    use crate::lir::{LirConst, LirInstr, Reg, Terminator};
+    use crate::lir::{ConstRef, InstrRef, Reg, Terminator};
 
     let s = |n| StaticRegion::new(n).unwrap();
-    let mut func = crate::lir::testkit::LirFixture::new(Arity::Exact(0))
+    let frozen = crate::lir::testkit::LirFixture::new(Arity::Exact(0))
+        .head(|h| {
+            h.merged_slots = vec![s(9), s(4), s(7)];
+            h.frame_release_slots = vec![8, 3, 5];
+            h.frame_release_regions = vec![s(13), s(11), s(12)];
+        })
         .block(
             0,
-            vec![LirInstr::Const {
+            &[InstrRef::Const {
                 dst: Reg(0),
-                value: LirConst::Nil,
+                value: ConstRef::Nil,
             }],
             Terminator::Return(Reg(0)),
         )
-        .build_working();
-    func.merged_slots = vec![s(9), s(4), s(7)];
-    func.frame_release_slots = vec![8, 3, 5];
-    func.frame_release_regions = vec![s(13), s(11), s(12)];
-    let frozen = crate::lir::code::freeze(&func).expect("the function freezes");
+        .build();
     let view = frozen.view();
     assert_eq!(view.merged_slots(), &[s(4), s(7), s(9)]);
     assert_eq!(view.frame_release_slots(), &[3, 5, 8]);

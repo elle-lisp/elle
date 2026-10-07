@@ -4,15 +4,19 @@
 //! docs/impl/lir.md
 
 use super::*;
-use crate::lir::{
-    BasicBlock, CallSiteInfo, Label, SpannedInstr, SpannedTerminator, YieldPointInfo,
-};
+use crate::lir::{CallSiteInfo, Label, LirBuilder, YieldPointInfo};
 use crate::signals::Signal;
 use crate::syntax::Span;
+use crate::value::fiberheap::FiberHeap;
+
+/// The origin `described` sets.
+fn origin() -> Span {
+    Span::new(1, 2, 3, 4).with_file("header.lisp")
+}
 
 /// A function with every header field set to a value no default holds.
-fn described() -> LirFunction {
-    let mut f = LirFixture::new(Arity::Range(1, 3))
+fn described() -> LirOwned {
+    LirFixture::new(Arity::Range(1, 3))
         .name("described")
         .signal(Signal::yields())
         .num_captures(2)
@@ -22,23 +26,24 @@ fn described() -> LirFunction {
         .capture_params_mask(0b101)
         .vararg_kind(crate::hir::VarargKind::StrictStruct(vec!["k".into()]))
         .closure_id(ClosureId(6))
-        .block(4, vec![], Terminator::Jump(Label(7)))
-        .block(7, vec![], Terminator::Return(r(0)))
-        .build_working();
-    f.capture_locals_mask = crate::value::CaptureMask::from_words(vec![0, 1 << 3]);
-    f.doc = Some("a docstring".into());
-    f.origin = Some(Span::new(1, 2, 3, 4).with_file("header.lisp"));
-    f.region_table = vec![slot(11), slot(12)];
-    f.merged_slots = vec![slot(12)];
-    f.frame_release_slots = vec![3, 1];
-    f.frame_release_regions = vec![slot(13)];
-    f
+        .head(|h| {
+            h.capture_locals_mask = crate::value::CaptureMask::from_words(vec![0, 1 << 3]);
+            h.doc = Some("a docstring".into());
+            h.origin = Some(origin());
+            h.rest_list_layout = crate::value::RestListLayout::OneRegion;
+            h.region_table = vec![slot(11), slot(12)];
+            h.merged_slots = vec![slot(12)];
+            h.frame_release_slots = vec![3, 1];
+            h.frame_release_regions = vec![slot(13)];
+        })
+        .block(4, &[], Terminator::Jump(Label(7)))
+        .block(7, &[], Terminator::Return(r(0)))
+        .build()
 }
 
 #[test]
 fn the_header_round_trips() {
-    let f = described();
-    let owned = freeze(&f).expect("freezes");
+    let owned = described();
     let v = owned.view();
     assert_eq!(v.name(), Some("described"));
     assert_eq!(v.arity(), Arity::Range(1, 3));
@@ -47,7 +52,7 @@ fn the_header_round_trips() {
     assert_eq!(v.num_locals(), 9);
     assert_eq!(v.num_params(), 3);
     assert_eq!(v.num_local_params(), 1);
-    assert_eq!(v.num_regs(), f.num_regs);
+    assert_eq!(v.num_regs(), 1, "the return names Reg(0)");
     assert_eq!(v.capture_params_mask(), 0b101);
     assert!(v.capture_locals_mask().is_set(67));
     assert!(!v.capture_locals_mask().is_set(66));
@@ -55,10 +60,14 @@ fn the_header_round_trips() {
         v.vararg_kind(),
         crate::hir::VarargKind::StrictStruct(vec!["k".into()])
     );
+    assert_eq!(
+        v.rest_list_layout(),
+        crate::value::RestListLayout::OneRegion
+    );
     assert_eq!(v.closure_id(), Some(ClosureId(6)));
     assert_eq!(v.entry(), Label(4));
     assert_eq!(v.doc(), Some("a docstring"));
-    assert_eq!(v.origin(), f.origin);
+    assert_eq!(v.origin(), Some(origin()));
     assert_eq!(v.region_table(), &[slot(11), slot(12)]);
     assert_eq!(v.merged_slots(), &[slot(12)]);
     assert_eq!(
@@ -69,7 +78,7 @@ fn the_header_round_trips() {
     assert_eq!(v.frame_release_regions(), &[slot(13)]);
 }
 
-/// Blocks keep the order the lowerer appended them in — the emitter's operand
+/// Blocks keep the order the lowerer finished them in — the emitter's operand
 /// depth depends on meeting every predecessor of a merge first — and each
 /// keeps its label and terminator.
 #[test]
@@ -92,9 +101,9 @@ fn blocks_keep_their_order_labels_and_terminators() {
     let labels = [5u32, 3, 2, 0, 9];
     let mut fixture = LirFixture::new(Arity::Exact(0));
     for (label, term) in labels.iter().zip(terms.iter()) {
-        fixture = fixture.block(*label, vec![], *term);
+        fixture = fixture.block(*label, &[], *term);
     }
-    let owned = freeze(&fixture.build_working()).expect("freezes");
+    let owned = fixture.build();
     let view = owned.view();
     let got: Vec<(Label, String)> = view
         .blocks()
@@ -115,17 +124,17 @@ fn spans_keep_their_files() {
     let a = Span::new(10, 20, 3, 4).with_file("one.lisp");
     let b = Span::new(30, 40, 5, 6).with_file("two.lisp");
     let t = Span::new(50, 60, 7, 8);
-    let mut block = BasicBlock::new(Label(0));
-    block.instructions = vec![
-        SpannedInstr::new(LirInstr::LoadSelf { dst: r(0) }, a),
-        SpannedInstr::new(LirInstr::LoadSelf { dst: r(1) }, b),
-        SpannedInstr::new(LirInstr::LoadSelf { dst: r(2) }, a),
-    ];
-    block.terminator = SpannedTerminator::new(Terminator::Return(r(2)), t);
-    let mut f = LirFunction::new(Arity::Exact(0));
-    f.blocks.push(block);
-    f.num_regs = 3;
-    let owned = freeze(&f).expect("freezes");
+    let mut heap = FiberHeap::new();
+    let mut builder = LirBuilder::new(&mut heap);
+    builder.begin_function(Arity::Exact(0));
+    builder.open_block(Label(0));
+    builder.emit(InstrRef::LoadSelf { dst: r(0) }, a);
+    builder.emit(InstrRef::LoadSelf { dst: r(1) }, b);
+    builder.emit(InstrRef::LoadSelf { dst: r(2) }, a);
+    builder.terminate(Terminator::Return(r(2)), t);
+    builder.finish_block();
+    builder.head().num_regs = 3;
+    let owned = builder.finish_function().expect("freezes");
     let view = owned.view();
     let block = view.blocks().next().unwrap();
     let spans: Vec<Span> = block.nodes().map(|n| n.span()).collect();
@@ -138,7 +147,7 @@ fn spans_keep_their_files() {
 /// they were recorded.
 #[test]
 fn sites_set_after_freezing_read_back() {
-    let mut owned = frozen(vec![]);
+    let mut owned = frozen(&[]);
     owned.set_sites(
         &[YieldPointInfo {
             resume_ip: 17,
@@ -175,10 +184,20 @@ fn sites_set_after_freezing_read_back() {
 /// wherever it lands.
 #[test]
 fn the_code_survives_serialization() {
-    let instrs: Vec<LirInstr> = Op::ALL.iter().map(|&op| exemplar(op)).collect();
-    let mut f = working(instrs);
-    f.blocks[0].instructions[0].span = Span::new(1, 2, 3, 4).with_file("ser.lisp");
-    let owned = freeze(&f).expect("freezes");
+    let mut heap = FiberHeap::new();
+    let mut builder = LirBuilder::new(&mut heap);
+    builder.begin_function(Arity::Exact(0));
+    builder.open_block(Label(0));
+    for (i, &op) in Op::ALL.iter().enumerate() {
+        let span = if i == 0 {
+            Span::new(1, 2, 3, 4).with_file("ser.lisp")
+        } else {
+            Span::synthetic()
+        };
+        builder.emit(exemplar(op), span);
+    }
+    builder.finish_block();
+    let owned = builder.finish_function().expect("freezes");
     let bytes = bincode::serialize(owned.code()).expect("serializes");
     let code: LirCode = bincode::deserialize(&bytes).expect("deserializes");
     let back = LirOwned::from_parts(code, owned.values().to_vec()).expect("the values fit");
@@ -200,7 +219,7 @@ fn the_code_survives_serialization() {
 /// would decode a `ValueConst` past the end of the table.
 #[test]
 fn a_function_rebuilt_without_its_values_is_refused() {
-    let owned = frozen(vec![LirInstr::ValueConst {
+    let owned = frozen(&[InstrRef::ValueConst {
         dst: r(0),
         value: Value::int(1),
     }]);

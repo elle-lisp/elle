@@ -14,6 +14,7 @@ mod instr;
 mod op;
 mod operand;
 mod owned;
+mod proof;
 mod record;
 mod split;
 mod view;

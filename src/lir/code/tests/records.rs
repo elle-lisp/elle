@@ -49,19 +49,19 @@ fn every_record_is_exactly_its_fields() {
 #[test]
 fn the_third_and_later_uses_land_in_the_pool() {
     let elements = vec![r(2), r(3), r(4), r(5)];
-    let owned = frozen(vec![
-        LirInstr::MakeArrayMut {
+    let owned = frozen(&[
+        InstrRef::MakeArrayMut {
             dst: r(1),
-            elements: elements.clone(),
+            elements: &elements,
             region: slot(21),
         },
-        LirInstr::Put {
+        InstrRef::Put {
             dst: r(6),
             obj: r(7),
             key: r(8),
             val: r(9),
         },
-        LirInstr::List {
+        InstrRef::List {
             dst: r(10),
             head: r(11),
             tail: r(12),
@@ -102,9 +102,9 @@ fn the_third_and_later_uses_land_in_the_pool() {
 /// nobody cleared, which differs between two freezes of one function.
 #[test]
 fn one_function_freezes_to_one_set_of_bytes() {
-    let instrs: Vec<LirInstr> = Op::ALL.iter().map(|&op| exemplar(op)).collect();
-    let a = frozen(instrs.clone());
-    let b = frozen(instrs);
+    let instrs: Vec<InstrRef<'_>> = Op::ALL.iter().map(|&op| exemplar(op)).collect();
+    let a = frozen(&instrs);
+    let b = frozen(&instrs);
     assert!(!a.code().nodes.is_empty());
     assert_eq!(bytes(&a.code().nodes), bytes(&b.code().nodes));
     assert_eq!(bytes(&a.code().blocks), bytes(&b.code().blocks));

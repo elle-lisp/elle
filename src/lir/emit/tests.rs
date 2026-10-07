@@ -37,9 +37,9 @@ fn test_emit_simple() {
     let func = LirFixture::new(Arity::Exact(0))
         .block(
             0,
-            vec![LirInstr::Const {
+            &[InstrRef::Const {
                 dst: Reg(0),
-                value: LirConst::Int(42),
+                value: ConstRef::Int(42),
             }],
             Terminator::Return(Reg(0)),
         )
@@ -56,9 +56,9 @@ fn test_emit_branch() {
     let func = LirFixture::new(Arity::Exact(0))
         .block(
             0,
-            vec![LirInstr::Const {
+            &[InstrRef::Const {
                 dst: Reg(0),
-                value: LirConst::Bool(true),
+                value: ConstRef::Bool(true),
             }],
             Terminator::Branch {
                 cond: Reg(0),
@@ -68,17 +68,17 @@ fn test_emit_branch() {
         )
         .block(
             1,
-            vec![LirInstr::Const {
+            &[InstrRef::Const {
                 dst: Reg(1),
-                value: LirConst::Int(1),
+                value: ConstRef::Int(1),
             }],
             Terminator::Return(Reg(1)),
         )
         .block(
             2,
-            vec![LirInstr::Const {
+            &[InstrRef::Const {
                 dst: Reg(2),
-                value: LirConst::Int(2),
+                value: ConstRef::Int(2),
             }],
             Terminator::Return(Reg(2)),
         )
@@ -102,9 +102,9 @@ fn test_yield_point_info_collected() {
         .signal(crate::signals::Signal::yields())
         .block(
             0,
-            vec![LirInstr::Const {
+            &[InstrRef::Const {
                 dst: Reg(0),
-                value: LirConst::Int(42),
+                value: ConstRef::Int(42),
             }],
             Terminator::Emit {
                 signal: crate::value::fiber::SIG_YIELD,
@@ -114,7 +114,7 @@ fn test_yield_point_info_collected() {
         )
         .block(
             1,
-            vec![LirInstr::LoadResumeValue { dst: Reg(1) }],
+            &[InstrRef::LoadResumeValue { dst: Reg(1) }],
             Terminator::Return(Reg(1)),
         )
         .build();
@@ -136,7 +136,7 @@ fn test_yield_point_info_collected() {
 // value actually lives in — turning a mis-coalesce (a UAF in waiting) into a
 // deterministic panic at the exact instruction. These pins prove the net both
 // *bites* (wrong slot → panic) and is *precise* (right slot → silent), built
-// from the spec in `LirInstr::AssertRegionMatches`, not from emission output.
+// from the spec in `InstrRef::AssertRegionMatches`, not from emission output.
 
 /// A one-block function that allocates a fresh pair in `alloc_slot`, then runs
 /// the oracle against `assert_slot` on that pair, then returns it. When the two
@@ -151,26 +151,26 @@ fn oracle_probe_func(alloc_slot: u32, assert_slot: u32) -> LirOwned {
     LirFixture::new(Arity::Exact(0))
         .block(
             0,
-            vec![
+            &[
                 // r0 ← nil (pair head), r1 ← () (pair tail).
-                LirInstr::Const {
+                InstrRef::Const {
                     dst: Reg(0),
-                    value: LirConst::Nil,
+                    value: ConstRef::Nil,
                 },
-                LirInstr::Const {
+                InstrRef::Const {
                     dst: Reg(1),
-                    value: LirConst::EmptyList,
+                    value: ConstRef::EmptyList,
                 },
                 // r2 ← pair(r0, r1), born in `s_alloc` (records slot→phys in the
                 // activation map).
-                LirInstr::List {
+                InstrRef::List {
                     dst: Reg(2),
                     head: Reg(0),
                     tail: Reg(1),
                     region: s_alloc,
                 },
                 // The oracle: assert `s_assert` names r2's physical region.
-                LirInstr::AssertRegionMatches {
+                InstrRef::AssertRegionMatches {
                     region_id: s_assert,
                     src: Reg(2),
                 },
@@ -244,9 +244,9 @@ fn emit_terminator_carries_a_user_signal_bit_whole() {
         .signal(crate::signals::Signal::of(signal))
         .block(
             0,
-            vec![LirInstr::Const {
+            &[InstrRef::Const {
                 dst: Reg(0),
-                value: LirConst::Int(42),
+                value: ConstRef::Int(42),
             }],
             Terminator::Emit {
                 signal,
@@ -256,7 +256,7 @@ fn emit_terminator_carries_a_user_signal_bit_whole() {
         )
         .block(
             1,
-            vec![LirInstr::LoadResumeValue { dst: Reg(1) }],
+            &[InstrRef::LoadResumeValue { dst: Reg(1) }],
             Terminator::Return(Reg(1)),
         )
         .build();
@@ -286,41 +286,42 @@ fn a_nested_lambdas_payload_carries_the_frame_release_tables() {
     use crate::hir::region::StaticRegion;
     use crate::lir::ClosureId;
 
-    let mut nested = LirFixture::new(Arity::Exact(0))
+    let nested = LirFixture::new(Arity::Exact(0))
         .name("nested")
+        .head(|h| {
+            h.frame_release_slots = vec![3, 7];
+            h.frame_release_regions = vec![
+                StaticRegion::new(11).unwrap(),
+                StaticRegion::new(13).unwrap(),
+            ];
+        })
         .block(
             0,
-            vec![LirInstr::Const {
+            &[InstrRef::Const {
                 dst: Reg(0),
-                value: LirConst::Nil,
+                value: ConstRef::Nil,
             }],
             Terminator::Return(Reg(0)),
         )
-        .build_working();
-    nested.frame_release_slots = vec![3, 7];
-    nested.frame_release_regions = vec![
-        StaticRegion::new(11).unwrap(),
-        StaticRegion::new(13).unwrap(),
-    ];
+        .build();
 
     let outer = LirFixture::new(Arity::Exact(0))
         .block(
             0,
-            vec![LirInstr::MakeClosure {
+            &[InstrRef::MakeClosure {
                 dst: Reg(0),
                 closure_id: ClosureId(0),
-                captures: vec![],
+                captures: &[],
                 region: StaticRegion::new(2).unwrap(),
             }],
             Terminator::Return(Reg(0)),
         )
-        .build_working();
+        .build();
 
-    let module = LirModule {
+    let module = FrozenModule {
         entry: outer,
         closures: vec![nested],
     };
-    let module = module.freeze().expect("the module freezes");
     let code = CodeArena::mint(unsafe { &mut *crate::value::arena::leaked_test_heap() });
     let (bytecode, _, _) = Emitter::new(code).emit_module(&module);
     let unit = crate::value::CodeUnit::new(code, bytecode);
@@ -343,9 +344,8 @@ fn a_nested_lambdas_payload_carries_the_frame_release_tables() {
 }
 
 /// A nested lambda's payload carries the rest-list layout the gate wrote onto
-/// its `LirFunction`, so a closure the emitted `MakeClosure` builds builds its
-/// rest list the way the analysis proved it may
-/// (docs/impl/region/restlist.md).
+/// its `LirHead`, so a closure the emitted `MakeClosure` builds builds its rest
+/// list the way the analysis proved it may (docs/impl/region/restlist.md).
 #[test]
 fn a_nested_lambdas_payload_carries_its_rest_list_layout() {
     // Counter-factual: a payload left at the default layout runs correctly and
@@ -355,39 +355,38 @@ fn a_nested_lambdas_payload_carries_its_rest_list_layout() {
     use crate::lir::ClosureId;
     use crate::value::RestListLayout;
 
-    let mut nested = LirFixture::new(Arity::AtLeast(0))
+    let nested = LirFixture::new(Arity::AtLeast(0))
         .name("nested")
         .num_params(1)
         .num_locals(1)
+        .head(|h| h.rest_list_layout = RestListLayout::OneRegion)
         .block(
             0,
-            vec![LirInstr::Const {
+            &[InstrRef::Const {
                 dst: Reg(0),
-                value: LirConst::Nil,
+                value: ConstRef::Nil,
             }],
             Terminator::Return(Reg(0)),
         )
-        .build_working();
-    nested.rest_list_layout = RestListLayout::OneRegion;
+        .build();
 
     let outer = LirFixture::new(Arity::Exact(0))
         .block(
             0,
-            vec![LirInstr::MakeClosure {
+            &[InstrRef::MakeClosure {
                 dst: Reg(0),
                 closure_id: ClosureId(0),
-                captures: vec![],
+                captures: &[],
                 region: StaticRegion::new(2).unwrap(),
             }],
             Terminator::Return(Reg(0)),
         )
-        .build_working();
+        .build();
 
-    let module = LirModule {
+    let module = FrozenModule {
         entry: outer,
         closures: vec![nested],
     };
-    let module = module.freeze().expect("the module freezes");
     let code = CodeArena::mint(unsafe { &mut *crate::value::arena::leaked_test_heap() });
     let (bytecode, _, _) = Emitter::new(code).emit_module(&module);
     let unit = crate::value::CodeUnit::new(code, bytecode);

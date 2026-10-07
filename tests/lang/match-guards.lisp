@@ -1,5 +1,5 @@
 (elle/epoch 14)
-# audited: 2026-09-30
+# audited: 2026-10-06
 # A guard is a condition an arm must pass as well as its pattern; a failed guard moves the match on to the next arm.
 # docs/match.md
 #
@@ -100,3 +100,35 @@
                (let [y (* x 2)]
                  y)
              x x) 20) "a guarded body is any expression")
+
+# ── A string literal arm beside a guard that may suspend ────────────
+#
+# A guard that may suspend changes how a match is compiled, and a string
+# literal arm must compile either way. The counter-factual is a compiler that
+# handles a string literal arm beside a pure guard and refuses the same arm
+# beside one that may suspend: the whole file then fails to compile.
+
+(defn pick-string [s ok?]
+  (match s
+    "a" when
+    (ok? s) :got-a
+    "b" :got-b
+    _ :other))
+
+(assert (= (pick-string "b" (fn [_] true)) :got-b)
+        "a string literal arm matches beside a guard that may suspend")
+(assert (= (pick-string "a" (fn [_] true)) :got-a)
+        "a string literal arm whose guard passes answers")
+(assert (= (pick-string "a" (fn [_] false)) :other)
+        "a string literal arm whose guard fails gives way to the wildcard")
+
+(def guarded
+  (fiber/new (fn []
+               (pick-string "a"
+                            (fn [x]
+                              (emit :yield x)
+                              true))) |:yield|))
+(assert (= (fiber/resume guarded) "a")
+        "a string literal arm's guard suspends with the scrutinee")
+(assert (= (fiber/resume guarded) :got-a)
+        "a string literal arm answers once its suspended guard resumes")

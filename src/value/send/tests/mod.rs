@@ -12,7 +12,7 @@
 
 use super::*;
 use crate::lir::testkit::LirFixture;
-use crate::lir::{InstrRef, LirConst, LirInstr, LirOwned, Reg, Terminator};
+use crate::lir::{InstrRef, LirOwned, Reg, Terminator};
 use crate::value::closure::{Closure, CodeBuilder};
 use crate::value::fiber::SignalBits;
 use crate::value::heap::HeapObject;

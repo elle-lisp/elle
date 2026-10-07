@@ -5,7 +5,7 @@
 
 use super::*;
 use crate::lir::testkit::LirFixture;
-use crate::lir::{BinOp, LirInstr, Reg, Terminator};
+use crate::lir::{BinOp, InstrRef, Reg, Terminator};
 use crate::signals::Signal;
 use crate::value::Arity;
 
@@ -21,7 +21,7 @@ mod stores;
 fn simple_fixture(arity: Arity) -> LirFixture {
     LirFixture::new(arity).signal(Signal::silent()).block(
         0,
-        vec![LirInstr::LoadCapture {
+        &[InstrRef::LoadCapture {
             dst: Reg(0),
             index: 0,
         }],
@@ -41,16 +41,16 @@ fn make_add_lir() -> LirOwned {
         .signal(Signal::silent())
         .block(
             0,
-            vec![
-                LirInstr::LoadCapture {
+            &[
+                InstrRef::LoadCapture {
                     dst: Reg(0),
                     index: 0,
                 },
-                LirInstr::LoadCapture {
+                InstrRef::LoadCapture {
                     dst: Reg(1),
                     index: 1,
                 },
-                LirInstr::binop(Reg(2), BinOp::Add, Reg(0), Reg(1)),
+                InstrRef::binop(Reg(2), BinOp::Add, Reg(0), Reg(1)),
             ],
             Terminator::Return(Reg(2)),
         )
@@ -145,9 +145,9 @@ fn test_compile_yielding_function() {
         }])
         .block(
             0,
-            vec![LirInstr::Const {
+            &[InstrRef::Const {
                 dst: Reg(0),
-                value: crate::lir::LirConst::Int(42),
+                value: crate::lir::ConstRef::Int(42),
             }],
             Terminator::Emit {
                 signal: crate::value::fiber::SIG_YIELD,
@@ -157,7 +157,7 @@ fn test_compile_yielding_function() {
         )
         .block(
             1,
-            vec![LirInstr::LoadResumeValue { dst: Reg(1) }],
+            &[InstrRef::LoadResumeValue { dst: Reg(1) }],
             Terminator::Return(Reg(1)),
         )
         .build();

@@ -64,10 +64,11 @@ pub fn eval_syntax(
         );
     }
     let mut lowerer = Lowerer::new(&arena)
+        .with_heap(unsafe { &mut *vm.heap_ptr })
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
         .with_region_info(region_info);
-    let lir_module = lowerer.lower(&analysis.hir)?.freeze()?;
+    let lir_module = lowerer.lower(&analysis.hir)?;
 
     // The transformer body runs on this VM, so its code lands on this VM's
     // heap (docs/impl/region/template.md).
@@ -146,10 +147,11 @@ fn eval_in_arena(
         );
     }
     let mut lowerer = Lowerer::new(&arena)
+        .with_heap(unsafe { &mut *cctx.heap_ptr() })
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
         .with_region_info(region_info);
-    let lir_module = lowerer.lower(&analysis.hir)?.freeze()?;
+    let lir_module = lowerer.lower(&analysis.hir)?;
 
     // The form runs on `vm`, whatever heap the compile context expands on,
     // so its code lands on `vm`'s heap (docs/impl/region/template.md).

@@ -16,17 +16,17 @@ fn make_mul_add() -> LirOwned {
         .signal(Signal::errors())
         .block(
             0,
-            vec![
-                LirInstr::LoadCaptureRaw {
+            &[
+                InstrRef::LoadCaptureRaw {
                     dst: Reg(0),
                     index: 0,
                 },
-                LirInstr::LoadCaptureRaw {
+                InstrRef::LoadCaptureRaw {
                     dst: Reg(1),
                     index: 1,
                 },
-                LirInstr::binop(Reg(2), BinOp::Mul, Reg(0), Reg(1)),
-                LirInstr::binop(Reg(3), BinOp::Add, Reg(2), Reg(0)),
+                InstrRef::binop(Reg(2), BinOp::Mul, Reg(0), Reg(1)),
+                InstrRef::binop(Reg(3), BinOp::Add, Reg(2), Reg(0)),
             ],
             Terminator::Return(Reg(3)),
         )

@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::lir::testkit::LirFixture;
-use crate::lir::{LirInstr, LirOwned, Reg, Terminator};
+use crate::lir::{InstrRef, LirOwned, Reg, Terminator};
 use crate::signals::Signal;
 use crate::value::Arity;
 
@@ -15,7 +15,7 @@ fn identity_lir() -> LirOwned {
         .signal(Signal::silent())
         .block(
             0,
-            vec![LirInstr::LoadCapture {
+            &[InstrRef::LoadCapture {
                 dst: Reg(0),
                 index: 0,
             }],

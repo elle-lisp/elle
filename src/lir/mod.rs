@@ -8,6 +8,7 @@
 //! HIR → Lower → LIR → Emit → Bytecode
 //! ```
 
+pub mod build;
 pub mod code;
 mod display;
 mod emit;
@@ -17,7 +18,11 @@ pub mod lower;
 pub(crate) mod testkit;
 mod types;
 
-pub use code::{FrozenModule, InstrRef, LirBody, LirCode, LirOwned, LirView};
+pub use build::{LirBuilder, LirHead};
+pub use code::{
+    ConstList, ConstRec, ConstRef, FrozenModule, InstrRef, LirBody, LirCode, LirOwned, LirView,
+    Slots, TemplateBytes,
+};
 pub use display::terminator_kind;
 pub use emit::{ClosureCompiled, Emitter};
 pub use lower::Lowerer;

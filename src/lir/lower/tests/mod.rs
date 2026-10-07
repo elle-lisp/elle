@@ -1,13 +1,22 @@
 // audited: 2026-10-06
-//! The lowerer unit tests: shared fixtures that lower a source fragment, and one submodule per subject.
+//! The lowerer's unit tests, and the helpers that lower a source and read back the frozen functions it answers.
 //!
 //! docs/impl/lir.md
+//! src/lir/lower/AGENTS.md
 
 use super::*;
+use crate::lir::{FrozenModule, InstrRef, LirOwned};
 use crate::syntax::Span;
+use crate::value::fiberheap::FiberHeap;
 
 fn make_span() -> Span {
     Span::new(0, 0, 1, 1)
+}
+
+/// A heap for one test's lowerer to build on, leaked so a `Lowerer<'static>`
+/// can borrow it.
+fn test_heap() -> &'static mut FiberHeap {
+    Box::leak(Box::new(FiberHeap::new()))
 }
 
 // ── Region-lifecycle emission tests ──────────────────────────────
@@ -47,6 +56,7 @@ fn make_lowerer_with(
         crate::hir::analyze_regions_with(&built.hir, arena, pc.call_classification.clone());
     mutate(&mut region_info, &built.hir);
     let lowerer = Lowerer::new(arena)
+        .with_heap(test_heap())
         .with_primitive_classification(pc)
         .with_primitive_values(built.primitive_values)
         .with_region_info(region_info)
@@ -54,53 +64,35 @@ fn make_lowerer_with(
     (lowerer, built.hir)
 }
 
-fn compile_to_lir(source: &str) -> crate::lir::LirModule {
+fn compile_to_lir(source: &str) -> FrozenModule {
     let (mut lowerer, hir) = make_lowerer(source);
     lowerer.lower(&hir).expect("lower")
 }
 
-fn count_decref_regions(module: &crate::lir::LirModule) -> usize {
-    fn count_in_func(func: &LirFunction) -> usize {
-        func.blocks
-            .iter()
-            .flat_map(|b| b.instructions.iter())
-            .filter(|i| matches!(i.instr, LirInstr::DecrefRegion { .. }))
-            .count()
-    }
-    count_in_func(&module.entry) + module.closures.iter().map(count_in_func).sum::<usize>()
+/// Every function of `module`, the entry first.
+fn functions(module: &FrozenModule) -> impl Iterator<Item = &LirOwned> {
+    std::iter::once(&module.entry).chain(&module.closures)
 }
 
-fn count_decref_value_regions(module: &crate::lir::LirModule) -> usize {
-    fn count_in_func(func: &LirFunction) -> usize {
-        func.blocks
-            .iter()
-            .flat_map(|b| b.instructions.iter())
-            .filter(|i| matches!(i.instr, LirInstr::DecrefValueRegion { .. }))
-            .count()
-    }
-    count_in_func(&module.entry) + module.closures.iter().map(count_in_func).sum::<usize>()
+/// How many instructions of every function in `module` satisfy `pred`.
+fn count_in_module(module: &FrozenModule, pred: impl Fn(&InstrRef<'_>) -> bool) -> usize {
+    functions(module).map(|f| func_count(f, &pred)).sum()
 }
 
-fn count_adopt_regions(module: &crate::lir::LirModule) -> usize {
-    fn count_in_func(func: &LirFunction) -> usize {
-        func.blocks
-            .iter()
-            .flat_map(|b| b.instructions.iter())
-            .filter(|i| matches!(i.instr, LirInstr::AdoptRegion { .. }))
-            .count()
-    }
-    count_in_func(&module.entry) + module.closures.iter().map(count_in_func).sum::<usize>()
+fn count_decref_regions(module: &FrozenModule) -> usize {
+    count_in_module(module, |i| matches!(i, InstrRef::DecrefRegion { .. }))
 }
 
-fn count_load_self(module: &crate::lir::LirModule) -> usize {
-    fn count_in_func(func: &LirFunction) -> usize {
-        func.blocks
-            .iter()
-            .flat_map(|b| b.instructions.iter())
-            .filter(|i| matches!(i.instr, LirInstr::LoadSelf { .. }))
-            .count()
-    }
-    count_in_func(&module.entry) + module.closures.iter().map(count_in_func).sum::<usize>()
+fn count_decref_value_regions(module: &FrozenModule) -> usize {
+    count_in_module(module, |i| matches!(i, InstrRef::DecrefValueRegion { .. }))
+}
+
+fn count_adopt_regions(module: &FrozenModule) -> usize {
+    count_in_module(module, |i| matches!(i, InstrRef::AdoptRegion { .. }))
+}
+
+fn count_load_self(module: &FrozenModule) -> usize {
+    count_in_module(module, |i| matches!(i, InstrRef::LoadSelf { .. }))
 }
 
 /// The canonical captured-non-reassigned-mutable shape
@@ -162,44 +154,40 @@ fn return_value_ptrs(hir: &Hir) -> Vec<*const Hir> {
 
 /// A function's instructions across all blocks, flattened in emission order —
 /// for order-sensitive region-RC assertions.
-fn flat_instrs(func: &LirFunction) -> Vec<&LirInstr> {
-    func.blocks
-        .iter()
-        .flat_map(|b| b.instructions.iter())
-        .map(|si| &si.instr)
-        .collect()
+fn flat_instrs(func: &LirOwned) -> Vec<InstrRef<'_>> {
+    func.view().nodes().map(|n| n.instr()).collect()
 }
 
-fn func_count(func: &LirFunction, pred: impl Fn(&LirInstr) -> bool) -> usize {
-    flat_instrs(func).into_iter().filter(|i| pred(i)).count()
+fn func_count(func: &LirOwned, pred: impl Fn(&InstrRef<'_>) -> bool) -> usize {
+    flat_instrs(func).iter().filter(|i| pred(i)).count()
 }
 
 /// True if any of the function's instructions names a static region (an
-/// allocation or a per-call routing region — `LirInstr::region`). A function with
+/// allocation or a per-call routing region — `InstrRef::region`). A function with
 /// none allocates nothing, so it has no fresh local region a return could coalesce
 /// onto — its tail mint must stay value-resolved.
-fn allocates_or_calls(func: &LirFunction) -> bool {
-    flat_instrs(func).into_iter().any(|i| i.region().is_some())
+fn allocates_or_calls(func: &LirOwned) -> bool {
+    func.view().nodes().any(|n| n.region().is_some())
 }
 
 /// Pin the C0 emit contract at a coalesced site: under `debug_assertions` the
 /// lowerer emits `AssertRegionMatches { region_id }` immediately before the
 /// coalesced `IncrefRegion { region_id }`, naming the SAME slot; in release it
 /// emits no oracle at all.
-fn assert_coalesced_oracle_precedes(func: &LirFunction) {
+fn assert_coalesced_oracle_precedes(func: &LirOwned) {
     let instrs = flat_instrs(func);
     let inc_pos = instrs
         .iter()
-        .position(|i| matches!(i, LirInstr::IncrefRegion { .. }))
+        .position(|i| matches!(i, InstrRef::IncrefRegion { .. }))
         .expect("a coalesced IncrefRegion");
     let inc_slot = match instrs[inc_pos] {
-        LirInstr::IncrefRegion { region_id } => *region_id,
+        InstrRef::IncrefRegion { region_id } => region_id,
         _ => unreachable!(),
     };
     if cfg!(debug_assertions) {
         match inc_pos.checked_sub(1).map(|p| instrs[p]) {
-            Some(LirInstr::AssertRegionMatches { region_id, .. }) => assert_eq!(
-                *region_id, inc_slot,
+            Some(InstrRef::AssertRegionMatches { region_id, .. }) => assert_eq!(
+                region_id, inc_slot,
                 "the oracle must guard the SAME slot the coalesced IncrefRegion uses",
             ),
             other => panic!(
@@ -211,7 +199,7 @@ fn assert_coalesced_oracle_precedes(func: &LirFunction) {
         assert!(
             !instrs
                 .iter()
-                .any(|i| matches!(i, LirInstr::AssertRegionMatches { .. })),
+                .any(|i| matches!(i, InstrRef::AssertRegionMatches { .. })),
             "release builds must not emit the debug-only AssertRegionMatches",
         );
     }
@@ -220,14 +208,14 @@ fn assert_coalesced_oracle_precedes(func: &LirFunction) {
 const BUILDER_IDIOM: &str = "(begin (%pair (%pair 1 2) 3) nil)";
 
 /// The static region slots the builder idiom's two `%pair` allocations
-/// (`LirInstr::List`) are emitted against, in the entry function. The discarded
+/// (`InstrRef::List`) are emitted against, in the entry function. The discarded
 /// nested literal is the only source of `List` in the entry (the letrec stub
 /// lambdas are `MakeClosure`s; their rest-arg bodies live in closures).
-fn builder_pair_slots(module: &crate::lir::LirModule) -> Vec<StaticRegion> {
+fn builder_pair_slots(module: &FrozenModule) -> Vec<StaticRegion> {
     flat_instrs(&module.entry)
         .into_iter()
         .filter_map(|i| match i {
-            LirInstr::List { region, .. } => Some(*region),
+            InstrRef::List { region, .. } => Some(region),
             _ => None,
         })
         .collect()
@@ -236,6 +224,7 @@ fn builder_pair_slots(module: &crate::lir::LirModule) -> Vec<StaticRegion> {
 // ── Themed test submodules ───────────────────────────────────────
 mod basics;
 mod coalesce;
+mod heap;
 mod merge;
 mod release;
 mod restlist;

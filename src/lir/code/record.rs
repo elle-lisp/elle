@@ -79,6 +79,28 @@ pub struct ConstRec {
     pub(crate) bits: u64,
 }
 
+impl ConstRec {
+    /// The record an immediate constant is stored as, for an instruction being
+    /// built: a `StructRest`'s keys are a run of these.
+    pub const fn immediate(c: super::operand::ConstRef) -> ConstRec {
+        use super::operand::ConstRef as C;
+        let (kind, bits) = match c {
+            C::Nil => (kind::NIL, 0),
+            C::EmptyList => (kind::EMPTY_LIST, 0),
+            C::Bool(b) => (kind::BOOL, b as u64),
+            C::Int(n) => (kind::INT, n as u64),
+            C::Float(f) => (kind::FLOAT, f.to_bits()),
+            C::Symbol(s) => (kind::SYMBOL, s.0),
+            C::Keyword(k) => (kind::KEYWORD, k),
+        };
+        ConstRec {
+            kind,
+            pad: [0; 7],
+            bits,
+        }
+    }
+}
+
 /// A yield point or a call site: where the interpreter resumes, and the
 /// registers live on the operand stack there.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

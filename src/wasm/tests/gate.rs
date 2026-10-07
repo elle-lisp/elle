@@ -19,20 +19,20 @@ fn tail_calling_closure() -> LirOwned {
         .num_params(1)
         .block(
             0,
-            vec![
-                LirInstr::Const {
+            &[
+                InstrRef::Const {
                     dst: Reg(0),
-                    value: LirConst::Int(1),
+                    value: ConstRef::Int(1),
                 },
-                LirInstr::TailCall {
+                InstrRef::TailCall {
                     dst: Reg(1),
                     func: Reg(0),
-                    args: vec![],
+                    args: &[],
                     arity_checked: false,
                     region: static_region(2),
                     defer_callee_release: false,
                     deferred_release_slot: None,
-                    borrowed_arg_slots: Vec::new(),
+                    borrowed_arg_slots: crate::lir::Slots::new(&[]),
                 },
             ],
             Terminator::Return(Reg(1)),
@@ -48,10 +48,10 @@ fn nested_closure_closure() -> LirOwned {
         .num_params(1)
         .block(
             0,
-            vec![LirInstr::MakeClosure {
+            &[InstrRef::MakeClosure {
                 dst: Reg(0),
                 closure_id: ClosureId(0),
-                captures: vec![],
+                captures: &[],
                 region: static_region(2),
             }],
             Terminator::Return(Reg(0)),
@@ -67,9 +67,9 @@ fn plain_closure() -> LirOwned {
         .num_params(1)
         .block(
             0,
-            vec![LirInstr::Const {
+            &[InstrRef::Const {
                 dst: Reg(0),
-                value: LirConst::Int(7),
+                value: ConstRef::Int(7),
             }],
             Terminator::Return(Reg(0)),
         )

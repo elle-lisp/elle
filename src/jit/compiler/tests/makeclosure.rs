@@ -13,10 +13,10 @@ fn outer_lir() -> LirOwned {
         .signal(Signal::silent())
         .block(
             0,
-            vec![LirInstr::MakeClosure {
+            &[InstrRef::MakeClosure {
                 dst: Reg(0),
                 closure_id: ClosureId(0),
-                captures: vec![],
+                captures: &[],
                 region: StaticRegion::new(2).unwrap(),
             }],
             Terminator::Return(Reg(0)),

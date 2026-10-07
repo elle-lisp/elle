@@ -12,16 +12,16 @@ fn make_add() -> LirOwned {
         .signal(Signal::errors())
         .block(
             0,
-            vec![
-                LirInstr::LoadCaptureRaw {
+            &[
+                InstrRef::LoadCaptureRaw {
                     dst: Reg(0),
                     index: 0,
                 },
-                LirInstr::LoadCaptureRaw {
+                InstrRef::LoadCaptureRaw {
                     dst: Reg(1),
                     index: 1,
                 },
-                LirInstr::binop(Reg(2), BinOp::Add, Reg(0), Reg(1)),
+                InstrRef::binop(Reg(2), BinOp::Add, Reg(0), Reg(1)),
             ],
             Terminator::Return(Reg(2)),
         )
@@ -34,9 +34,9 @@ fn make_const() -> LirOwned {
         .name("the_answer")
         .block(
             0,
-            vec![LirInstr::Const {
+            &[InstrRef::Const {
                 dst: Reg(0),
-                value: LirConst::Int(42),
+                value: ConstRef::Int(42),
             }],
             Terminator::Return(Reg(0)),
         )

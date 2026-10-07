@@ -41,6 +41,12 @@ impl ConstRef {
 pub struct TemplateBytes<'a>(pub(crate) &'a [u8]);
 
 impl<'a> TemplateBytes<'a> {
+    /// A template as `ConstTemplate::encode` wrote it, for an instruction
+    /// being built.
+    pub fn new(bytes: &'a [u8]) -> Self {
+        TemplateBytes(bytes)
+    }
+
     /// The encoded bytes, which the bytecode carries inline unchanged.
     pub fn bytes(&self) -> &'a [u8] {
         self.0
@@ -58,6 +64,11 @@ impl<'a> TemplateBytes<'a> {
 pub struct Slots<'a>(pub(crate) &'a [u32]);
 
 impl<'a> Slots<'a> {
+    /// Stash slots, each a local slot number, for an instruction being built.
+    pub fn new(slots: &'a [u32]) -> Self {
+        Slots(slots)
+    }
+
     pub fn len(&self) -> usize {
         self.0.len()
     }
@@ -76,6 +87,11 @@ impl<'a> Slots<'a> {
 pub struct ConstList<'a>(pub(crate) &'a [ConstRec]);
 
 impl<'a> ConstList<'a> {
+    /// A run of constant records, for an instruction being built.
+    pub fn new(keys: &'a [ConstRec]) -> Self {
+        ConstList(keys)
+    }
+
     pub fn len(&self) -> usize {
         self.0.len()
     }

@@ -12,16 +12,16 @@ fn make_float_add() -> LirOwned {
         .signal(Signal::errors())
         .block(
             0,
-            vec![
-                LirInstr::LoadCaptureRaw {
+            &[
+                InstrRef::LoadCaptureRaw {
                     dst: Reg(0),
                     index: 0,
                 },
-                LirInstr::Const {
+                InstrRef::Const {
                     dst: Reg(1),
-                    value: LirConst::Float(1.5),
+                    value: ConstRef::Float(1.5),
                 },
-                LirInstr::binop(Reg(2), BinOp::Add, Reg(0), Reg(1)),
+                InstrRef::binop(Reg(2), BinOp::Add, Reg(0), Reg(1)),
             ],
             Terminator::Return(Reg(2)),
         )
@@ -44,20 +44,20 @@ fn make_float_mul() -> LirOwned {
         .signal(Signal::errors())
         .block(
             0,
-            vec![
-                LirInstr::LoadCaptureRaw {
+            &[
+                InstrRef::LoadCaptureRaw {
                     dst: Reg(0),
                     index: 0,
                 },
-                LirInstr::Const {
+                InstrRef::Const {
                     dst: Reg(1),
-                    value: LirConst::Float(2.0),
+                    value: ConstRef::Float(2.0),
                 },
-                LirInstr::Const {
+                InstrRef::Const {
                     dst: Reg(2),
-                    value: LirConst::Float(3.0),
+                    value: ConstRef::Float(3.0),
                 },
-                LirInstr::binop(Reg(3), BinOp::Mul, Reg(1), Reg(2)),
+                InstrRef::binop(Reg(3), BinOp::Mul, Reg(1), Reg(2)),
             ],
             Terminator::Return(Reg(3)),
         )
@@ -94,24 +94,24 @@ fn make_storelocal_clobbers_reg() -> LirOwned {
         .num_locals(1)
         .block(
             0,
-            vec![
+            &[
                 // r0 = 10  → SSA name %c0_0
-                LirInstr::Const {
+                InstrRef::Const {
                     dst: Reg(0),
-                    value: LirConst::Int(10),
+                    value: ConstRef::Int(10),
                 },
                 // r1 = 20  → SSA name %c0_1
-                LirInstr::Const {
+                InstrRef::Const {
                     dst: Reg(1),
-                    value: LirConst::Int(20),
+                    value: ConstRef::Int(20),
                 },
                 // s = r1   (slot 0 ← r1); must leave r0 alone
-                LirInstr::StoreLocal {
+                InstrRef::StoreLocal {
                     slot: 0,
                     src: Reg(1),
                 },
                 // r2 = r0 + r0
-                LirInstr::binop(Reg(2), BinOp::Add, Reg(0), Reg(0)),
+                InstrRef::binop(Reg(2), BinOp::Add, Reg(0), Reg(0)),
             ],
             Terminator::Return(Reg(2)),
         )
@@ -150,20 +150,20 @@ fn make_if_merge_clobbers_param() -> LirOwned {
         // Block 0: load x → r0 (%arg0); s=0; cmp x>0; branch
         .block(
             0,
-            vec![
-                LirInstr::LoadCaptureRaw {
+            &[
+                InstrRef::LoadCaptureRaw {
                     dst: Reg(0),
                     index: 0,
                 },
-                LirInstr::Const {
+                InstrRef::Const {
                     dst: Reg(1),
-                    value: LirConst::Int(0),
+                    value: ConstRef::Int(0),
                 },
-                LirInstr::StoreLocal {
+                InstrRef::StoreLocal {
                     slot: 0,
                     src: Reg(1),
                 },
-                LirInstr::compare(Reg(2), CmpOp::Gt, Reg(0), Reg(1)),
+                InstrRef::compare(Reg(2), CmpOp::Gt, Reg(0), Reg(1)),
             ],
             Terminator::Branch {
                 cond: Reg(2),
@@ -174,12 +174,12 @@ fn make_if_merge_clobbers_param() -> LirOwned {
         // Block 1: then — s = 100; jump merge
         .block(
             1,
-            vec![
-                LirInstr::Const {
+            &[
+                InstrRef::Const {
                     dst: Reg(3),
-                    value: LirConst::Int(100),
+                    value: ConstRef::Int(100),
                 },
-                LirInstr::StoreLocal {
+                InstrRef::StoreLocal {
                     slot: 0,
                     src: Reg(3),
                 },
@@ -189,12 +189,12 @@ fn make_if_merge_clobbers_param() -> LirOwned {
         // Block 2: else — s = 200; jump merge
         .block(
             2,
-            vec![
-                LirInstr::Const {
+            &[
+                InstrRef::Const {
                     dst: Reg(4),
-                    value: LirConst::Int(200),
+                    value: ConstRef::Int(200),
                 },
-                LirInstr::StoreLocal {
+                InstrRef::StoreLocal {
                     slot: 0,
                     src: Reg(4),
                 },
@@ -204,12 +204,12 @@ fn make_if_merge_clobbers_param() -> LirOwned {
         // Block 3: merge — s' = load slot 0; return s' + x
         .block(
             3,
-            vec![
-                LirInstr::LoadLocal {
+            &[
+                InstrRef::LoadLocal {
                     dst: Reg(5),
                     slot: 0,
                 },
-                LirInstr::binop(Reg(6), BinOp::Add, Reg(5), Reg(0)),
+                InstrRef::binop(Reg(6), BinOp::Add, Reg(5), Reg(0)),
             ],
             Terminator::Return(Reg(6)),
         )

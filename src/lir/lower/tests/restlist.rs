@@ -1,5 +1,5 @@
 // audited: 2026-10-06
-//! The rest-list layout the lowerer writes onto each lambda's `LirFunction`.
+//! The rest-list layout the lowerer writes onto each lambda's `LirHead`.
 //!
 //! docs/impl/region/restlist.md
 
@@ -7,19 +7,20 @@ use super::*;
 use crate::value::RestListLayout;
 
 /// The layout of the closure a `letrec` named `name`.
-fn layout_of(module: &crate::lir::LirModule, name: &str) -> RestListLayout {
+fn layout_of(module: &FrozenModule, name: &str) -> RestListLayout {
     module
         .closures
         .iter()
-        .find(|f| f.name.as_deref() == Some(name))
+        .map(|f| f.view())
+        .find(|f| f.name() == Some(name))
         .unwrap_or_else(|| panic!("no closure named {name}"))
-        .rest_list_layout
+        .rest_list_layout()
 }
 
 #[test]
-fn a_fresh_lir_function_builds_one_region_per_cell() {
+fn a_fresh_head_builds_one_region_per_cell() {
     assert_eq!(
-        LirFunction::new(crate::value::Arity::AtLeast(0)).rest_list_layout,
+        crate::lir::LirHead::new(crate::value::Arity::AtLeast(0)).rest_list_layout,
         RestListLayout::PerCell,
         "a function no gate has judged keeps the layout that is always correct"
     );

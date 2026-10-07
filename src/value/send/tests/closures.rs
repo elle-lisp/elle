@@ -53,12 +53,12 @@ fn a_closure_crosses_with_its_lir_and_the_values_it_loads() {
         let lir = LirFixture::new(Arity::Exact(0))
             .block(
                 0,
-                vec![
-                    LirInstr::ValueConst {
+                &[
+                    InstrRef::ValueConst {
                         dst: Reg(0),
                         value: inner,
                     },
-                    LirInstr::ValueConst {
+                    InstrRef::ValueConst {
                         dst: Reg(1),
                         value: list,
                     },

@@ -13,16 +13,16 @@ fn make_abs() -> LirOwned {
         // Block 0: entry — load param, compare > 0, branch
         .block(
             0,
-            vec![
-                LirInstr::LoadCaptureRaw {
+            &[
+                InstrRef::LoadCaptureRaw {
                     dst: Reg(0),
                     index: 0,
                 },
-                LirInstr::Const {
+                InstrRef::Const {
                     dst: Reg(1),
-                    value: LirConst::Int(0),
+                    value: ConstRef::Int(0),
                 },
-                LirInstr::compare(Reg(2), CmpOp::Gt, Reg(0), Reg(1)),
+                InstrRef::compare(Reg(2), CmpOp::Gt, Reg(0), Reg(1)),
             ],
             Terminator::Branch {
                 cond: Reg(2),
@@ -31,11 +31,11 @@ fn make_abs() -> LirOwned {
             },
         )
         // Block 1: then — return x
-        .block(1, vec![], Terminator::Return(Reg(0)))
+        .block(1, &[], Terminator::Return(Reg(0)))
         // Block 2: else — return 0 - x
         .block(
             2,
-            vec![LirInstr::binop(Reg(3), BinOp::Sub, Reg(1), Reg(0))],
+            &[InstrRef::binop(Reg(3), BinOp::Sub, Reg(1), Reg(0))],
             Terminator::Return(Reg(3)),
         )
         .build()

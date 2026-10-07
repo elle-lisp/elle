@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-10-06
 //! HIR to LIR lowering: the `Lowerer` and the state one function's lowering
 //! carries. The passes themselves live in the sibling modules named below.
 //!
@@ -65,6 +65,8 @@ struct BlockLowerContext {
 /// Lowers HIR to LIR
 pub struct Lowerer<'a> {
     arena: &'a BindingArena,
+    /// The heap the unit's working region is minted on, named by `with_heap`.
+    heap: Option<&'a mut crate::value::fiberheap::FiberHeap>,
     /// The owning instance's display memo, for naming a binding in an error.
     /// Lowering never resolves a name to decide anything — the only reader is
     /// the `undefined variable` message, which is a user's own spelling and so
@@ -308,7 +310,7 @@ pub struct Lowerer<'a> {
     /// Tail-call HirIds whose result a `Return` mint already covers, so
     /// `lower_call`'s post-`TailCall` fall-through retain must stand down: the
     /// return mint is emitted exactly once per returned value
-    /// (docs/impl/region/mechanism.md � "The return mint is emitted exactly once").
+    /// (docs/impl/region/mechanism.md § "The return mint is emitted exactly once").
     ///
     /// The shape is ANF's canonical wrap of a tail call in a non-propagating tail
     /// position — `(let [t (f …)] (return t))`, built for a tail call nested in a
@@ -361,12 +363,17 @@ impl<'a> Lowerer<'a> {
         self.region_info.scope_has_local_allocs(hir_id)
     }
 
-    /// Lower a HIR expression to an LIR module.
-    ///
-    /// Returns an `LirModule` with the entry function and a flat list of
-    /// closure bodies. Each closure is an independent compilation unit
+    /// Lower a HIR expression to its frozen functions: the entry function and a
+    /// flat list of closure bodies, each an independent compilation unit
     /// referenced by `ClosureId`.
-    pub fn lower(&mut self, hir: &Hir) -> Result<LirModule, String> {
+    pub fn lower(&mut self, hir: &Hir) -> Result<crate::lir::FrozenModule, String> {
+        let _heap = self.heap.as_deref_mut();
+        self.lower_working(hir)?.freeze()
+    }
+
+    /// Lower a HIR expression to its working form, for a measurement of the
+    /// lowerer itself.
+    pub fn lower_working(&mut self, hir: &Hir) -> Result<LirModule, String> {
         // Escape analysis is whole-module, like region inference — compute it
         // once over the full canonical HIR before lowering recurses into
         // closures. Computing it here keeps the pass on every real lowering path

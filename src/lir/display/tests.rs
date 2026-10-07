@@ -9,9 +9,9 @@ use crate::value::Arity;
 
 /// How `--dump=lir` spells `instr`: frozen into a one-instruction function and
 /// read back through the view, as the dump reads it.
-fn shown(instr: LirInstr) -> String {
+fn shown(instr: InstrRef<'_>) -> String {
     let func = LirFixture::new(Arity::Exact(0))
-        .block(0, vec![instr], Terminator::Unreachable)
+        .block(0, &[instr], Terminator::Unreachable)
         .build();
     let text = func.view().block(0).node(0).instr().to_string();
     text
@@ -56,25 +56,25 @@ fn test_const_display() {
 
 #[test]
 fn test_instr_const() {
-    let instr = LirInstr::Const {
+    let instr = InstrRef::Const {
         dst: Reg(0),
-        value: LirConst::Int(42),
+        value: ConstRef::Int(42),
     };
     assert_eq!(shown(instr), "r0 ← 42");
 }
 
 #[test]
 fn test_instr_binop() {
-    let instr = LirInstr::binop(Reg(2), BinOp::Add, Reg(0), Reg(1));
+    let instr = InstrRef::binop(Reg(2), BinOp::Add, Reg(0), Reg(1));
     assert_eq!(shown(instr), "r2 ← r0 + r1");
 }
 
 #[test]
 fn test_instr_call() {
-    let instr = LirInstr::Call {
+    let instr = InstrRef::Call {
         dst: Reg(5),
         func: Reg(3),
-        args: vec![Reg(4)],
+        args: &[Reg(4)],
         arity_checked: false,
         region: crate::hir::region::StaticRegion::new(2).unwrap(),
     };
@@ -83,10 +83,10 @@ fn test_instr_call() {
 
 #[test]
 fn test_instr_call_multi_args() {
-    let instr = LirInstr::Call {
+    let instr = InstrRef::Call {
         dst: Reg(5),
         func: Reg(3),
-        args: vec![Reg(1), Reg(2)],
+        args: &[Reg(1), Reg(2)],
         arity_checked: false,
         region: crate::hir::region::StaticRegion::new(2).unwrap(),
     };
@@ -95,28 +95,28 @@ fn test_instr_call_multi_args() {
 
 #[test]
 fn test_instr_tailcall() {
-    let instr = LirInstr::TailCall {
+    let instr = InstrRef::TailCall {
         dst: Reg(5),
         func: Reg(0),
-        args: vec![Reg(1), Reg(2)],
+        args: &[Reg(1), Reg(2)],
         arity_checked: false,
         region: crate::hir::region::StaticRegion::new(2).unwrap(),
         defer_callee_release: false,
         deferred_release_slot: None,
-        borrowed_arg_slots: Vec::new(),
+        borrowed_arg_slots: crate::lir::Slots::new(&[]),
     };
     assert_eq!(shown(instr), "tailcall r0(r1, r2)");
 }
 
 #[test]
 fn test_instr_compare() {
-    let instr = LirInstr::compare(Reg(3), CmpOp::Lt, Reg(1), Reg(2));
+    let instr = InstrRef::compare(Reg(3), CmpOp::Lt, Reg(1), Reg(2));
     assert_eq!(shown(instr), "r3 ← r1 < r2");
 }
 
 #[test]
 fn test_instr_type_check() {
-    let instr = LirInstr::IsArray {
+    let instr = InstrRef::IsArray {
         dst: Reg(1),
         src: Reg(0),
     };
@@ -126,7 +126,7 @@ fn test_instr_type_check() {
 #[test]
 fn test_instr_destructuring() {
     assert_eq!(
-        shown(LirInstr::ArrayMutRefDestructure {
+        shown(InstrRef::ArrayMutRefDestructure {
             dst: Reg(2),
             src: Reg(0),
             index: 1
@@ -134,10 +134,10 @@ fn test_instr_destructuring() {
         "r2 ← r0[1]!"
     );
     assert_eq!(
-        shown(LirInstr::StructGetOrNil {
+        shown(InstrRef::StructGetOrNil {
             dst: Reg(3),
             src: Reg(0),
-            key: LirConst::Keyword(crate::value::keyword::keyword_hash("name"))
+            key: ConstRef::Keyword(crate::value::keyword::keyword_hash("name"))
         }),
         format!(
             "r3 ← r0.kw({:#x})?",
@@ -145,10 +145,10 @@ fn test_instr_destructuring() {
         )
     );
     assert_eq!(
-        shown(LirInstr::StructGetDestructure {
+        shown(InstrRef::StructGetDestructure {
             dst: Reg(3),
             src: Reg(0),
-            key: LirConst::Keyword(crate::value::keyword::keyword_hash("name"))
+            key: ConstRef::Keyword(crate::value::keyword::keyword_hash("name"))
         }),
         format!(
             "r3 ← r0.kw({:#x})!",
@@ -199,19 +199,19 @@ fn test_terminator_kind() {
 #[test]
 fn test_region_instructions() {
     assert_eq!(
-        shown(LirInstr::DecrefRegion {
+        shown(InstrRef::DecrefRegion {
             region_id: crate::hir::region::StaticRegion::new(1).unwrap()
         }),
         "decref-region 1"
     );
     assert_eq!(
-        shown(LirInstr::IncrefRegion {
+        shown(InstrRef::IncrefRegion {
             region_id: crate::hir::region::StaticRegion::new(2).unwrap()
         }),
         "incref-region 2"
     );
     assert_eq!(
-        shown(LirInstr::AdoptIntoActivation { child: Reg(3) }),
+        shown(InstrRef::AdoptIntoActivation { child: Reg(3) }),
         "adopt-into-activation r3"
     );
 }

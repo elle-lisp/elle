@@ -21,12 +21,12 @@ fn make_convert(name: &str, op: ConvOp) -> LirOwned {
         .signal(Signal::errors())
         .block(
             0,
-            vec![
-                LirInstr::LoadCaptureRaw {
+            &[
+                InstrRef::LoadCaptureRaw {
                     dst: Reg(0),
                     index: 0,
                 },
-                LirInstr::Convert {
+                InstrRef::Convert {
                     dst: Reg(1),
                     op,
                     src: Reg(0),

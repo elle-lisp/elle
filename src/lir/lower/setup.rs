@@ -10,6 +10,7 @@ impl<'a> Lowerer<'a> {
     pub fn new(arena: &'a BindingArena) -> Self {
         Lowerer {
             arena,
+            heap: None,
             symbols: None,
             current_func: LirFunction::new(Arity::Exact(0)),
             current_block: BasicBlock::new(Label(0)),
@@ -59,6 +60,13 @@ impl<'a> Lowerer<'a> {
         }
     }
 
+    /// Name the heap lowering builds on: `lower` mints the unit's working region
+    /// there and frees it before returning.
+    pub fn with_heap(mut self, heap: &'a mut crate::value::fiberheap::FiberHeap) -> Self {
+        self.heap = Some(heap);
+        self
+    }
+
     /// Give lowering the front end's inferred types, so a proven operation can
     /// carry its operand proof into LIR (docs/impl/lir.md).
     pub fn with_type_info(mut self, info: crate::hir::TypeInfo) -> Self {
@@ -80,7 +88,7 @@ impl<'a> Lowerer<'a> {
     ///
     /// Primitive bindings are `BindingScope::Local` with `mark_immutable()`.
     /// The lowerer never allocates slots for them — instead, `lower_var`
-    /// checks `immutable_values` first and emits `LoadConst` for any
+    /// checks `immutable_values` first and emits `ValueConst` for any
     /// binding with a known constant value.
     pub fn with_primitive_values(mut self, values: HashMap<Binding, Value>) -> Self {
         self.immutable_values.extend(values);

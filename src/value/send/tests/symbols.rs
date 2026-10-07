@@ -125,9 +125,9 @@ fn a_lir_symbol_const_names_the_same_symbol_on_both_sides() {
     let lir = LirFixture::new(Arity::Exact(0))
         .block(
             0,
-            vec![LirInstr::Const {
+            &[InstrRef::Const {
                 dst: Reg(0),
-                value: LirConst::Symbol(alpha),
+                value: ConstRef::Symbol(alpha),
             }],
             Terminator::Return(Reg(0)),
         )
@@ -202,15 +202,15 @@ fn a_keyword_names_the_same_keyword_on_both_sides() {
 #[test]
 fn a_lir_symbol_constant_survives_serialization_as_the_name_hash() {
     use crate::lir::code::ConstRef;
-    use crate::lir::{InstrRef, LirCode, LirConst, LirInstr, LirOwned, Reg, Terminator};
+    use crate::lir::{InstrRef, LirCode, LirOwned, Reg, Terminator};
     use crate::value::SymbolId;
 
     let lir = LirFixture::new(Arity::Exact(0))
         .block(
             0,
-            vec![LirInstr::Const {
+            &[InstrRef::Const {
                 dst: Reg(0),
-                value: LirConst::Symbol(SymbolId::of("answerish")),
+                value: ConstRef::Symbol(SymbolId::of("answerish")),
             }],
             Terminator::Return(Reg(0)),
         )

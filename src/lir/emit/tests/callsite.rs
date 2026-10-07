@@ -17,17 +17,17 @@ use crate::hir::region::StaticRegion;
 /// callee is pushed first, so the call copies it to the top and the original
 /// stays on the stack beneath.
 fn tail_call_func(signal: crate::signals::Signal, in_place: bool) -> LirOwned {
-    let operand = LirInstr::Const {
+    let operand = InstrRef::Const {
         dst: Reg(0),
-        value: LirConst::Int(7),
+        value: ConstRef::Int(7),
     };
-    let callee = LirInstr::Const {
+    let callee = InstrRef::Const {
         dst: Reg(1),
-        value: LirConst::Nil,
+        value: ConstRef::Nil,
     };
-    let arg = LirInstr::Const {
+    let arg = InstrRef::Const {
         dst: Reg(2),
-        value: LirConst::Int(1),
+        value: ConstRef::Int(1),
     };
     let [first, second, third] = if in_place {
         [operand, arg, callee]
@@ -38,19 +38,19 @@ fn tail_call_func(signal: crate::signals::Signal, in_place: bool) -> LirOwned {
         .signal(signal)
         .block(
             0,
-            vec![
+            &[
                 first,
                 second,
                 third,
-                LirInstr::TailCall {
+                InstrRef::TailCall {
                     dst: Reg(3),
                     func: Reg(1),
-                    args: vec![Reg(2)],
+                    args: &[Reg(2)],
                     arity_checked: false,
                     region: StaticRegion::new(1).unwrap(),
                     defer_callee_release: false,
                     deferred_release_slot: None,
-                    borrowed_arg_slots: vec![],
+                    borrowed_arg_slots: crate::lir::Slots::new(&[]),
                 },
             ],
             Terminator::Return(Reg(3)),

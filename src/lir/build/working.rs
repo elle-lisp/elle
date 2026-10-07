@@ -1,11 +1,12 @@
 // audited: 2026-10-06
-//! A decoded instruction back in the working form, field for field, so a test compares what froze with what decodes.
+//! An `InstrRef` copied into a `LirInstr`, field for field, for the builder to push into a block.
 //!
 //! docs/impl/lir.md
 
-use super::*;
+use crate::lir::code::{ConstRef, InstrRef};
+use crate::lir::{LirConst, LirInstr};
 
-fn thaw_const(c: ConstRef) -> LirConst {
+fn konst(c: ConstRef) -> LirConst {
     match c {
         ConstRef::Nil => LirConst::Nil,
         ConstRef::EmptyList => LirConst::EmptyList,
@@ -17,14 +18,14 @@ fn thaw_const(c: ConstRef) -> LirConst {
     }
 }
 
-/// A decoded instruction back in the working form, field for field.
-pub(super) fn thaw(i: InstrRef<'_>) -> LirInstr {
+/// `i` as a `LirInstr`, field for field.
+pub(crate) fn instr(i: InstrRef<'_>) -> LirInstr {
     use InstrRef as R;
     use LirInstr as I;
     match i {
         R::Const { dst, value } => I::Const {
             dst,
-            value: thaw_const(value),
+            value: konst(value),
         },
         R::ValueConst { dst, value } => I::ValueConst { dst, value },
         R::MaterializeConst {
@@ -176,12 +177,12 @@ pub(super) fn thaw(i: InstrRef<'_>) -> LirInstr {
         R::StructGetOrNil { dst, src, key } => I::StructGetOrNil {
             dst,
             src,
-            key: thaw_const(key),
+            key: konst(key),
         },
         R::StructGetDestructure { dst, src, key } => I::StructGetDestructure {
             dst,
             src,
-            key: thaw_const(key),
+            key: konst(key),
         },
         R::StructRest {
             dst,
@@ -190,7 +191,7 @@ pub(super) fn thaw(i: InstrRef<'_>) -> LirInstr {
         } => I::StructRest {
             dst,
             src,
-            exclude_keys: exclude_keys.iter().map(thaw_const).collect(),
+            exclude_keys: exclude_keys.iter().map(konst).collect(),
         },
         R::FirstOrNil { dst, src } => I::FirstOrNil { dst, src },
         R::RestOrNil { dst, src } => I::RestOrNil { dst, src },

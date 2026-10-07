@@ -1,3 +1,9 @@
+// audited: 2026-10-06
+//! A release past a frame-replacing tail call is carried ahead of it, unless it is the call's ownership move.
+//!
+//! docs/impl/region/mechanism.md
+//! docs/impl/region/relocate.md
+
 use super::*;
 
 // ── The frame-exit release ───────────────────────────────────────
@@ -13,28 +19,12 @@ use super::*;
 /// Position of the first `TailCall` in the function that contains one, with the
 /// indices of that block's `DecrefValueRegion`s. `None` if no block has a
 /// `TailCall`.
-fn tail_call_release_layout(module: &crate::lir::LirModule) -> Option<(usize, Vec<usize>)> {
-    let funcs = std::iter::once(&module.entry).chain(module.closures.iter());
-    for f in funcs {
-        for b in &f.blocks {
-            let Some(at) = b
-                .instructions
-                .iter()
-                .position(|i| matches!(i.instr, LirInstr::TailCall { .. }))
-            else {
-                continue;
-            };
-            let releases = b
-                .instructions
-                .iter()
-                .enumerate()
-                .filter(|(_, i)| matches!(i.instr, LirInstr::DecrefValueRegion { .. }))
-                .map(|(idx, _)| idx)
-                .collect();
-            return Some((at, releases));
-        }
-    }
-    None
+fn tail_call_release_layout(module: &FrozenModule) -> Option<(usize, Vec<usize>)> {
+    let (b, at) = first_tail_call_block(module)?;
+    Some((
+        at,
+        positions(&b, |i| matches!(i, InstrRef::DecrefValueRegion { .. })),
+    ))
 }
 
 #[test]
@@ -130,28 +120,12 @@ fn handback_the_callee_cannot_reach_precedes_the_tail_call() {
 /// indices of that block's `DecrefRegion`s — the slot-resolved twin of
 /// [`tail_call_release_layout`], which reads the value route. A self-recursive
 /// closure's region is released by id, so only this reading sees it.
-fn tail_call_region_release_layout(module: &crate::lir::LirModule) -> Option<(usize, Vec<usize>)> {
-    let funcs = std::iter::once(&module.entry).chain(module.closures.iter());
-    for f in funcs {
-        for b in &f.blocks {
-            let Some(at) = b
-                .instructions
-                .iter()
-                .position(|i| matches!(i.instr, LirInstr::TailCall { .. }))
-            else {
-                continue;
-            };
-            let releases = b
-                .instructions
-                .iter()
-                .enumerate()
-                .filter(|(_, i)| matches!(i.instr, LirInstr::DecrefRegion { .. }))
-                .map(|(idx, _)| idx)
-                .collect();
-            return Some((at, releases));
-        }
-    }
-    None
+fn tail_call_region_release_layout(module: &FrozenModule) -> Option<(usize, Vec<usize>)> {
+    let (b, at) = first_tail_call_block(module)?;
+    Some((
+        at,
+        positions(&b, |i| matches!(i, InstrRef::DecrefRegion { .. })),
+    ))
 }
 
 #[test]
@@ -177,6 +151,29 @@ fn region_an_argument_only_called_is_released_before_the_tail_call() {
     );
 }
 
+/// Position of the first `TailCall` in the function that contains one, with the
+/// indices of that block's `DecrefRegion`s naming the region `of` picks out of the
+/// same block's allocating instructions.
+///
+/// Reading by REGION rather than by instruction count is what makes a decline pin
+/// specific: a block releases several regions around its tail call, so "some
+/// release precedes it" says nothing about which one did.
+fn tail_call_slot_release_layout(
+    module: &FrozenModule,
+    of: impl Fn(&InstrRef<'_>) -> Option<StaticRegion>,
+) -> Option<(usize, Vec<usize>)> {
+    tail_call_blocks(module).find_map(|(b, at)| {
+        let want = b.instrs().find_map(|i| of(&i))?;
+        Some((
+            at,
+            positions(
+                &b,
+                |i| matches!(i, InstrRef::DecrefRegion { region_id } if *region_id == want),
+            ),
+        ))
+    })
+}
+
 #[test]
 fn container_of_an_opcode_read_argument_stays_after_the_tail_call() {
     // The over-free face of the same reading. An inline `%`-opcode mints no region
@@ -193,7 +190,7 @@ fn container_of_an_opcode_read_argument_stays_after_the_tail_call() {
     // ahead of the call (the materialized string's), so "some release precedes it"
     // says nothing about which.
     let (at, releases) = tail_call_slot_release_layout(&module, |i| match i {
-        LirInstr::List { region, .. } => Some(*region),
+        InstrRef::List { region, .. } => Some(*region),
         _ => None,
     })
     .expect("the body lowers to a TailCall over a cons cell");
@@ -208,16 +205,14 @@ fn container_of_an_opcode_read_argument_stays_after_the_tail_call() {
 /// order. Reading the flag rather than a release position is what makes the
 /// deferral pins specific: the release this channel supplies is emitted by the
 /// RUNTIME at the callee's completion, so no instruction in the caller records it.
-fn tail_call_deferrals(module: &crate::lir::LirModule) -> Vec<bool> {
-    let funcs = std::iter::once(&module.entry).chain(module.closures.iter());
-    funcs
-        .flat_map(|f| f.blocks.iter())
-        .flat_map(|b| b.instructions.iter())
-        .filter_map(|i| match &i.instr {
-            LirInstr::TailCall {
+fn tail_call_deferrals(module: &FrozenModule) -> Vec<bool> {
+    functions(module)
+        .flat_map(flat_instrs)
+        .filter_map(|i| match i {
+            InstrRef::TailCall {
                 defer_callee_release,
                 ..
-            } => Some(*defer_callee_release),
+            } => Some(defer_callee_release),
             _ => None,
         })
         .collect()
@@ -294,607 +289,6 @@ fn a_stranded_self_recursive_callee_defers_through_every_body_shape() {
     }
 }
 
-/// Position of the first `TailCall` in the function that contains one, with the
-/// indices of that block's `DecrefRegion`s naming the region `of` picks out of the
-/// same block's allocating instructions.
-///
-/// Reading by REGION rather than by instruction count is what makes a decline pin
-/// specific: a block releases several regions around its tail call, so "some
-/// release precedes it" says nothing about which one did.
-fn tail_call_slot_release_layout(
-    module: &crate::lir::LirModule,
-    of: impl Fn(&LirInstr) -> Option<StaticRegion>,
-) -> Option<(usize, Vec<usize>)> {
-    let funcs = std::iter::once(&module.entry).chain(module.closures.iter());
-    for f in funcs {
-        for b in &f.blocks {
-            let Some(at) = b
-                .instructions
-                .iter()
-                .position(|i| matches!(i.instr, LirInstr::TailCall { .. }))
-            else {
-                continue;
-            };
-            let Some(want) = b.instructions.iter().find_map(|i| of(&i.instr)) else {
-                continue;
-            };
-            let releases = b
-                .instructions
-                .iter()
-                .enumerate()
-                .filter(|(_, i)| {
-                    matches!(i.instr, LirInstr::DecrefRegion { region_id } if region_id == want)
-                })
-                .map(|(idx, _)| idx)
-                .collect();
-            return Some((at, releases));
-        }
-    }
-    None
-}
-
-/// Position of the first `TailCall` in the first block that has one AND releases
-/// a cell there, with the indices of that block's `DecrefCellRegion`s — the
-/// env-cell twin of [`tail_call_release_layout`], which reads the value route.
-///
-/// A block with no cell release is skipped rather than returned: its empty
-/// release list would satisfy a placement assertion in either direction, so
-/// returning it would let a pin pass while measuring nothing.
-fn tail_call_cell_release_layout(module: &crate::lir::LirModule) -> Option<(usize, Vec<usize>)> {
-    let funcs = std::iter::once(&module.entry).chain(module.closures.iter());
-    for f in funcs {
-        for b in &f.blocks {
-            let Some(at) = b
-                .instructions
-                .iter()
-                .position(|i| matches!(i.instr, LirInstr::TailCall { .. }))
-            else {
-                continue;
-            };
-            let releases: Vec<usize> = b
-                .instructions
-                .iter()
-                .enumerate()
-                .filter(|(_, i)| matches!(i.instr, LirInstr::DecrefCellRegion { .. }))
-                .map(|(idx, _)| idx)
-                .collect();
-            if releases.is_empty() {
-                continue;
-            }
-            return Some((at, releases));
-        }
-    }
-    None
-}
-
-/// For each block that makes no `TailCall` and does release a cell, the index of
-/// its last `LoadCapture` (the arm's read through the cell, `None` when it makes
-/// none) beside the indices of its `DecrefCellRegion`s.
-///
-/// A `tail`-route release must land AFTER the arm's read; a `head`-route one lands
-/// at the arm's head, before any read there is.
-fn fallthrough_cell_read_and_release(
-    module: &crate::lir::LirModule,
-) -> Vec<(Option<usize>, Vec<usize>)> {
-    let funcs = std::iter::once(&module.entry).chain(module.closures.iter());
-    funcs
-        .flat_map(|f| f.blocks.iter())
-        .filter(|b| {
-            !b.instructions
-                .iter()
-                .any(|i| matches!(i.instr, LirInstr::TailCall { .. }))
-        })
-        .filter_map(|b| {
-            let releases: Vec<usize> = b
-                .instructions
-                .iter()
-                .enumerate()
-                .filter(|(_, i)| matches!(i.instr, LirInstr::DecrefCellRegion { .. }))
-                .map(|(idx, _)| idx)
-                .collect();
-            if releases.is_empty() {
-                return None;
-            }
-            let read = b
-                .instructions
-                .iter()
-                .enumerate()
-                .filter(|(_, i)| matches!(i.instr, LirInstr::LoadCapture { .. }))
-                .map(|(idx, _)| idx)
-                .next_back();
-            Some((read, releases))
-        })
-        .collect()
-}
-
-/// The `DecrefCellRegion` counts of the blocks that make no `TailCall` at all —
-/// where a branch arm's head compensation lands when its sibling leaves through a
-/// callee.
-fn cell_releases_in_fallthrough_blocks(module: &crate::lir::LirModule) -> Vec<usize> {
-    let funcs = std::iter::once(&module.entry).chain(module.closures.iter());
-    funcs
-        .flat_map(|f| f.blocks.iter())
-        .filter(|b| {
-            !b.instructions
-                .iter()
-                .any(|i| matches!(i.instr, LirInstr::TailCall { .. }))
-        })
-        .map(|b| {
-            b.instructions
-                .iter()
-                .filter(|i| matches!(i.instr, LirInstr::DecrefCellRegion { .. }))
-                .count()
-        })
-        .collect()
-}
-
-#[test]
-fn reassigned_env_cell_release_precedes_the_frame_replacing_tail_call() {
-    // `c` is a captured local, so `populate_env` mints its cell box once per
-    // activation and the box's `DecrefCellRegion` lands in the dead block. It is
-    // hoisted even though `c` is REASSIGNED: the mutated refusal is compensation's
-    // release-ROUTE one, and this release names the box (`LoadCaptureRaw`), which
-    // an `assign` never repoints — it writes the cell's content
-    // (docs/impl/region/mechanism.md § "A mutated holder poisons its value route,
-    // not its cell box"; the `fresh-env-cell` probe).
-    let module = compile_to_lir(
-        "(begin (def f (fn () (def @c 0) \
-         (let [g (fn () (assign c (%add c 1)) c)] (g)))) (f))",
-    );
-    let (at, releases) =
-        tail_call_cell_release_layout(&module).expect("the body lowers to a TailCall");
-    assert!(
-        releases.iter().any(|&r| r < at),
-        "the reassigned env cell's release is still emitted after the TailCall \
-         (at={at}, releases={releases:?}) — dead on the closure path, one box \
-         stranded per activation",
-    );
-}
-
-/// Every place a block frees an env cell before something in that same block reads
-/// through it, as `(env index, release position, read position)`.
-///
-/// One reading serves both directions the pin needs: the release's own
-/// `LoadCaptureRaw` sits immediately BEFORE it, so a well-ordered block reports
-/// nothing, and any tuple here is a `DecrefCellRegion` that freed the box under a
-/// later unwrap of the same index.
-fn cell_release_inversions(module: &crate::lir::LirModule) -> Vec<(u16, usize, usize)> {
-    let funcs = std::iter::once(&module.entry).chain(module.closures.iter());
-    let mut out = Vec::new();
-    for f in funcs {
-        for b in &f.blocks {
-            let mut from_index: rustc_hash::FxHashMap<Reg, u16> = rustc_hash::FxHashMap::default();
-            let mut reads: Vec<(u16, usize)> = Vec::new();
-            let mut freed: Vec<(u16, usize)> = Vec::new();
-            for (idx, i) in b.instructions.iter().enumerate() {
-                match &i.instr {
-                    LirInstr::LoadCapture { dst, index }
-                    | LirInstr::LoadCaptureRaw { dst, index } => {
-                        from_index.insert(*dst, *index);
-                        reads.push((*index, idx));
-                    }
-                    LirInstr::DecrefCellRegion { src } => {
-                        freed.extend(from_index.get(src).map(|&index| (index, idx)));
-                    }
-                    _ => {}
-                }
-            }
-            for (index, at) in freed {
-                out.extend(
-                    reads
-                        .iter()
-                        .filter(|&&(i, r)| i == index && r > at)
-                        .map(|&(_, r)| (index, at, r)),
-                );
-            }
-        }
-    }
-    out
-}
-
-#[test]
-fn a_cell_release_declines_a_move_across_a_read_through_it() {
-    // The closure-as-module shape: `a` is a captured def, and the body's last form
-    // is a struct literal — a NATIVE tail call, so the dispatch loop falls through
-    // into the block after the `TailCall` and runs everything the lowerer put
-    // there.
-    //
-    // The trap is that `a`'s two releases are two REGIONS, and the relocation
-    // answers per region. `ptr/from-int` declares `RegionEffect::Immediate`, so the
-    // walk records no result region for the init and no binding names it — the
-    // frame-held admission refuses it for want of a holder, and its
-    // `DecrefValueRegion` keeps its place in the dead block. The env CELL is
-    // admitted on the binding's own verdict and moves ahead of the call. That value
-    // release loads the box RAW and unwraps it, so it reads the page the cell
-    // release frees (docs/impl/region/mechanism.md § "A move that crosses a read
-    // through the cell it frees is declined").
-    //
-    // The counter-factual: asserting only that some cell release precedes the
-    // `TailCall` passes on this witness while the box is freed under its own
-    // reader, because the move is exactly what the assertion asks for.
-    let module = compile_to_lir(
-        "(begin (def m (fn () \
-           (def a (ptr/from-int 0)) \
-           (def p (fn () a)) \
-           {:p p})) \
-         (m))",
-    );
-    let (at, releases) =
-        tail_call_cell_release_layout(&module).expect("the body lowers to a TailCall");
-    assert!(
-        releases.iter().all(|&r| r > at),
-        "the env cell's release was moved ahead of the TailCall \
-         (at={at}, releases={releases:?}) while the release routed through that \
-         cell stayed behind — the unwrap then reads a freed page",
-    );
-    let inversions = cell_release_inversions(&module);
-    assert!(
-        inversions.is_empty(),
-        "a cell is freed before a read through it; (env index, release, read) \
-         positions = {inversions:?}",
-    );
-}
-
-#[test]
-fn escaping_holder_env_cell_release_stays_after_the_tail_call() {
-    // The decline face: the closure holding the cell is STORED into an aggregate
-    // before the body tail-calls it, so escape's capture facet marks `c` escaping by a
-    // CONTAINMENT facet and both admissions refuse the box — the aggregate holds the
-    // closure through a hold no seam at the point counts. Only the mutated refusal is
-    // scoped to the value route; a containment facet no edge at the point replaces
-    // still refuses, and the release keeps its place in the dead block.
-    let module = compile_to_lir(
-        "(begin (def @sink nil) (def f (fn () (def @c 0) \
-         (let [g (fn () (assign c (%add c 1)) c)] \
-           (begin (assign sink (%pair g nil)) (g))))) \
-         (f))",
-    );
-    let (at, releases) =
-        tail_call_cell_release_layout(&module).expect("the body lowers to a TailCall");
-    assert!(
-        releases.iter().all(|&r| r > at),
-        "an escaping holder's env cell was hoisted ahead of the TailCall \
-         (at={at}, releases={releases:?}) — the closure leaves carrying the cell",
-    );
-}
-
-#[test]
-fn yielded_holder_env_cell_release_precedes_the_frame_replacing_tail_call() {
-    // The admitted face beside it: the closure holding the cell crosses the FIBER
-    // frontier rather than a containment one. Every seam that hands a value to another
-    // fiber counts a reference of its own — the park's `EmitEscape` retain going out,
-    // the resume value's own mint coming back — so the crossing is not the uncounted
-    // second holder the admission guards against, and the box's release is hoisted
-    // ahead of the `TailCall` like any other
-    // (docs/impl/region/mechanism.md § "A fiber crossing is a counted holder too").
-    let module = compile_to_lir(
-        "(begin (def f (fn () (def @c 0) \
-         (let [g (fn () (assign c (%add c 1)) c)] (begin (emit :yield g) (g))))) \
-         (fiber/new f |:yield|))",
-    );
-    let (at, releases) =
-        tail_call_cell_release_layout(&module).expect("the body lowers to a TailCall");
-    assert!(
-        releases.iter().any(|&r| r < at),
-        "a yielded holder's env cell release is still emitted after the TailCall \
-         (at={at}, releases={releases:?}) — dead on the closure path, one box \
-         stranded per activation",
-    );
-}
-
-#[test]
-fn a_falling_through_arm_head_releases_the_env_cell_its_sibling_relocated() {
-    // `(if t (g) 0)` — the box's one `DecrefCellRegion` relocates into the arm that
-    // tail-calls `g`, so the arm that falls through to the merge would release
-    // nothing. That arm names `c` nowhere, so branch compensation's head route
-    // covers it; the two are mutually exclusive by arm structure, which is what a
-    // cell release needs because it leaves no nil-stamp to make a replica no-op
-    // (docs/impl/region/mechanism.md § "A compensating release of an env cell names
-    // the box, not the holder's slot").
-    let module = compile_to_lir(
-        "(begin (def f (fn (t) (def @c 0) \
-         (let [g (fn () (assign c (%add c 1)) c)] (if t (g) 0)))) (f false))",
-    );
-    let (at, releases) =
-        tail_call_cell_release_layout(&module).expect("the body lowers to a TailCall");
-    assert!(
-        releases.iter().all(|&r| r < at),
-        "the tail-calling arm must keep its relocated cell release ahead of the \
-         TailCall (at={at}, releases={releases:?})",
-    );
-    let fallthrough = cell_releases_in_fallthrough_blocks(&module);
-    assert!(
-        fallthrough.contains(&1),
-        "some block that makes no tail call must release the cell exactly once — \
-         the falling-through arm's head compensation; per-block counts={fallthrough:?}",
-    );
-    assert!(
-        fallthrough.iter().all(|&n| n <= 1),
-        "no block may release the cell twice; per-block counts={fallthrough:?}",
-    );
-}
-
-#[test]
-fn a_reading_arm_tail_releases_the_env_cell_its_sibling_relocated() {
-    // `(if t c (g))` — the same relocation, and the sibling arm READS `c`. The
-    // capture-use of `c` resolves through `g`'s last use, so the `decref_point`
-    // follows the call rather than the read and lands in the LATER arm. A head
-    // release on the reading arm would free the box under that read, so the arm
-    // takes the `tail` route instead: one `DecrefCellRegion` after its
-    // `LoadCapture`. The route's same-node retain is a claim about the value the
-    // holder names; the box's own holders are the frame's env slot and the
-    // capturer's counted edge (docs/impl/region/mechanism.md § "A compensating
-    // release of an env cell names the box, not the holder's slot").
-    let module = compile_to_lir(
-        "(begin (def f (fn (n t) (def @c n) \
-         (let [g (fn () c)] (if t c (g))))) (f 1 true))",
-    );
-    let (at, releases) =
-        tail_call_cell_release_layout(&module).expect("the body lowers to a TailCall");
-    assert!(
-        releases.iter().all(|&r| r < at),
-        "the tail-calling arm must keep its relocated cell release ahead of the \
-         TailCall (at={at}, releases={releases:?})",
-    );
-    let arms = fallthrough_cell_read_and_release(&module);
-    assert!(
-        arms.iter()
-            .any(|(read, rel)| read.is_some_and(|r| rel.iter().all(|&d| d > r)) && rel.len() == 1),
-        "the reading arm must release the box exactly once, after its own read \
-         through the cell; per-block (last LoadCapture, DecrefCellRegion)={arms:?}",
-    );
-    assert!(
-        arms.iter().all(|(_, rel)| rel.len() <= 1),
-        "no block may release the cell twice; per-block reads/releases={arms:?}",
-    );
-}
-
-/// For the first function with two `TailCall`-bearing blocks — a branch whose
-/// arms each make one — the local slots each block releases BEFORE its call and
-/// those it releases after.
-///
-/// Reading by SLOT rather than by instruction count is what makes these pins
-/// specific: an arm carries the replicated release of *every* region the merge
-/// releases, so "some release precedes the call" says nothing about which.
-fn branch_arm_release_slots(module: &crate::lir::LirModule) -> Vec<(Vec<u16>, Vec<u16>)> {
-    let funcs = std::iter::once(&module.entry).chain(module.closures.iter());
-    for f in funcs {
-        let mut arms = Vec::new();
-        for b in &f.blocks {
-            let Some(at) = b
-                .instructions
-                .iter()
-                .position(|i| matches!(i.instr, LirInstr::TailCall { .. }))
-            else {
-                continue;
-            };
-            let mut from_slot: std::collections::HashMap<Reg, u16> =
-                std::collections::HashMap::new();
-            let (mut before, mut after) = (Vec::new(), Vec::new());
-            for (idx, i) in b.instructions.iter().enumerate() {
-                match &i.instr {
-                    LirInstr::LoadLocal { dst, slot } => {
-                        from_slot.insert(*dst, *slot);
-                    }
-                    LirInstr::DecrefValueRegion { src } => {
-                        if let Some(&slot) = from_slot.get(src) {
-                            if idx < at {
-                                before.push(slot);
-                            } else {
-                                after.push(slot);
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            arms.push((before, after));
-        }
-        if arms.len() >= 2 {
-            return arms;
-        }
-    }
-    Vec::new()
-}
-
-/// The local slot the first `MakeClosure` of the first function that leaves
-/// through a `TailCall` is stored into.
-///
-/// A `letrec`-bound closure's release names that slot, and reading the slot off
-/// the emission rather than counting locals is what keeps the pins below specific:
-/// which index a binder gets depends on how many parameters and ANF temporaries
-/// precede it.
-fn tail_calling_functions_closure_slot(module: &crate::lir::LirModule) -> Option<u16> {
-    let funcs = std::iter::once(&module.entry).chain(module.closures.iter());
-    for f in funcs {
-        if !f.blocks.iter().any(|b| {
-            b.instructions
-                .iter()
-                .any(|i| matches!(i.instr, LirInstr::TailCall { .. }))
-        }) {
-            continue;
-        }
-        let mut made: Option<Reg> = None;
-        for b in &f.blocks {
-            for i in &b.instructions {
-                match &i.instr {
-                    LirInstr::MakeClosure { dst, .. } => made = Some(*dst),
-                    LirInstr::StoreLocal { slot, src } if Some(*src) == made => return Some(*slot),
-                    _ => {}
-                }
-            }
-        }
-    }
-    None
-}
-
-/// For the first function that BRANCHES and builds a closure, that closure's
-/// region and slot beside the region ids the same function releases and the slots
-/// it releases by value.
-///
-/// Scoped to one function on purpose: every compile releases some closure region
-/// by id somewhere (each top-level `defn`'s own), so a module-wide reading would
-/// satisfy a route pin without measuring the subject.
-fn branching_functions_closure_routes(
-    module: &crate::lir::LirModule,
-) -> Option<(StaticRegion, u16, Vec<StaticRegion>, Vec<u16>)> {
-    let funcs = std::iter::once(&module.entry).chain(module.closures.iter());
-    for f in funcs {
-        if !f
-            .blocks
-            .iter()
-            .any(|b| matches!(b.terminator.terminator, Terminator::Branch { .. }))
-        {
-            continue;
-        }
-        let mut made: Option<(Reg, StaticRegion)> = None;
-        let mut subject: Option<(StaticRegion, u16)> = None;
-        let mut from_slot: std::collections::HashMap<Reg, u16> = std::collections::HashMap::new();
-        let (mut by_id, mut by_value) = (Vec::new(), Vec::new());
-        for b in &f.blocks {
-            for i in &b.instructions {
-                match &i.instr {
-                    LirInstr::MakeClosure { dst, region, .. } => made = Some((*dst, *region)),
-                    LirInstr::StoreLocal { slot, src } => {
-                        if let Some((reg, region)) = made {
-                            if reg == *src && subject.is_none() {
-                                subject = Some((region, *slot));
-                            }
-                        }
-                    }
-                    LirInstr::LoadLocal { dst, slot } => {
-                        from_slot.insert(*dst, *slot);
-                    }
-                    LirInstr::DecrefRegion { region_id } => by_id.push(*region_id),
-                    LirInstr::DecrefValueRegion { src } => {
-                        by_value.extend(from_slot.get(src).copied())
-                    }
-                    _ => {}
-                }
-            }
-        }
-        if let Some((region, slot)) = subject {
-            return Some((region, slot, by_id, by_value));
-        }
-    }
-    None
-}
-
-#[test]
-fn a_letrec_closure_under_a_branch_tail_is_replicated_into_every_arm() {
-    // The letrec body's tail is a branch whose arms each leave through a
-    // frame-replacing callee, so the closure region's scope-end release is emitted
-    // at a merge no path arrives at. A replica counts once only where the run
-    // nil-stamps the slot it read, which this region's DEFAULT release by region id
-    // does not — so it takes the value route of the slot its `letrec` binder
-    // recorded (docs/impl/region/mechanism.md § "Self-cancelling is a property of
-    // the ROUTE, not of the region's class").
-    let module = compile_to_lir(
-        "(begin (def s (fn () 0)) (def s2 (fn () 1)) \
-         (def f (fn (n t) \
-           (letrec [go (fn (m) (if (%lt m 1) 0 (go (%sub m 1))))] \
-             (go n) \
-             (if t (s) (s2))))) \
-         (f 3 true))",
-    );
-    let slot = tail_calling_functions_closure_slot(&module)
-        .expect("the letrec binder stores its closure into a slot");
-    let arms = branch_arm_release_slots(&module);
-    assert_eq!(arms.len(), 2, "the branch lowers to one TailCall per arm");
-    for (before, after) in &arms {
-        assert!(
-            before.contains(&slot),
-            "an arm takes no copy of the letrec closure's release \
-             (slot={slot}, before={before:?}, after={after:?}) — dead on that \
-             arm's closure path, one closure and env per call",
-        );
-    }
-}
-
-#[test]
-fn a_letrec_closure_no_arm_strands_keeps_its_release_by_id() {
-    // The narrowness of the reroute, and the reason the id route is the default:
-    // with no arm leaving through a callee the merge is a point every path
-    // reaches, so one instruction does the work of four and the release stays a
-    // `DecrefRegion` naming the closure's own region.
-    let module = compile_to_lir(
-        "(begin (def f (fn (n t) \
-           (letrec [go (fn (m) (if (%lt m 1) 0 (go (%sub m 1))))] \
-             (go n) \
-             (if t 4 5)))) \
-         (f 3 true))",
-    );
-    let (region, slot, by_id, by_value) = branching_functions_closure_routes(&module)
-        .expect("the letrec binder stores its closure into a slot");
-    assert!(
-        by_id.contains(&region) && !by_value.contains(&slot),
-        "the letrec closure did not keep its release by id (region={region}, \
-         slot={slot}, by_id={by_id:?}, by_value={by_value:?}) — the value route is \
-         for the releases a branch's frame-exiting arms make the relocation \
-         replicate, not for every release",
-    );
-}
-
-#[test]
-fn stranded_param_release_is_replicated_into_every_branch_arm() {
-    // The release lands past the MERGE, which each arm leaves through a
-    // frame-replacing tail call — so the merge copy alone reaches neither path.
-    // The merge's inherited relocation points put a copy ahead of each arm's
-    // `TailCall` (docs/impl/region/mechanism.md § "The relocation point outlives
-    // the block"; the `tail-frame-exit-arms` probe). `x` is the first parameter,
-    // hence local slot 0.
-    let module = compile_to_lir(
-        "(begin (def s (fn () 0)) (def s2 (fn () 1)) \
-         (def f (fn (x t) (if t (s) (s2)))) (f (list 1 2) true))",
-    );
-    let arms = branch_arm_release_slots(&module);
-    assert_eq!(arms.len(), 2, "the body lowers to one TailCall per arm");
-    for (before, after) in &arms {
-        assert!(
-            before.contains(&0),
-            "an arm's copy of the stranded parameter's release is missing \
-             (before={before:?}, after={after:?}) — dead on that arm's closure path",
-        );
-    }
-}
-
-#[test]
-fn moved_argument_takes_no_replica_in_the_arm_that_moves_it() {
-    // The exemption is read PER point. `x` (local slot 0) is the then-arm call's
-    // argument, so that arm takes no replica of `x`'s release — the callee's
-    // owned-parameter release is what frees it there. The same arm still takes a
-    // replica of `t`'s release, and the merge's other point, whose call names
-    // nothing, takes one of `x`'s.
-    let module = compile_to_lir(
-        "(begin (def s (fn (a) a)) (def s2 (fn () 1)) \
-         (def f (fn (x t) (if t (s x) (s2)))) (f (list 1 2) true))",
-    );
-    let arms = branch_arm_release_slots(&module);
-    assert_eq!(arms.len(), 2, "the body lowers to one TailCall per arm");
-    let (moving_before, moving_after) = &arms[0];
-    assert!(
-        !moving_before.contains(&0),
-        "the moved argument's release was replicated ahead of the arm's TailCall \
-         (before={moving_before:?}) — that release IS the ownership move",
-    );
-    assert!(
-        !moving_after.contains(&0),
-        "the moved argument's release was left in the arm's dead block \
-         (after={moving_after:?}) — nothing there runs",
-    );
-    assert!(
-        moving_before.contains(&1),
-        "the arm took no replica at all (before={moving_before:?}) — the exemption \
-         is read per REGION at each point, not per point",
-    );
-    let (other_before, _) = &arms[1];
-    assert!(
-        other_before.contains(&0),
-        "the sibling arm, whose call names nothing, did not take the replica \
-         (before={other_before:?})",
-    );
-}
-
 // ── What the fall-through owes, a signal exit owes too ───────────
 // The post-`TailCall` block consumes the borrowed-argument retains a native
 // callee never took over. That block runs on ONE outcome — the native's normal
@@ -904,22 +298,16 @@ fn moved_argument_takes_no_replica_in_the_arm_that_moves_it() {
 // consume what the lowerer recorded.
 
 /// Every `TailCall` in the module, as its `borrowed_arg_slots` list.
-fn tail_call_borrowed_slots(module: &crate::lir::LirModule) -> Vec<Vec<u16>> {
-    let funcs = std::iter::once(&module.entry).chain(module.closures.iter());
-    let mut out = Vec::new();
-    for f in funcs {
-        for b in &f.blocks {
-            for i in &b.instructions {
-                if let LirInstr::TailCall {
-                    borrowed_arg_slots, ..
-                } = &i.instr
-                {
-                    out.push(borrowed_arg_slots.clone());
-                }
-            }
-        }
-    }
-    out
+fn tail_call_borrowed_slots(module: &FrozenModule) -> Vec<Vec<u16>> {
+    functions(module)
+        .flat_map(flat_instrs)
+        .filter_map(|i| match i {
+            InstrRef::TailCall {
+                borrowed_arg_slots, ..
+            } => Some(borrowed_arg_slots.iter().collect()),
+            _ => None,
+        })
+        .collect()
 }
 
 #[test]

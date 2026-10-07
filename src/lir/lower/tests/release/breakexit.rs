@@ -1,8 +1,7 @@
-// audited: 2026-09-05
-// Placement pins for the relocation point a `break` opens at the end of the
-// block it leaves.
-//
-// docs/impl/region/replicate.md
+// audited: 2026-10-06
+//! Placement pins for the relocation point a `break` opens at the end of the block it leaves.
+//!
+//! docs/impl/region/replicate.md
 
 use super::*;
 
@@ -17,23 +16,12 @@ use super::*;
 /// Every stack slot this function releases by value in two or more DISTINCT
 /// blocks — the signature of a replicated release, since a slot the lowerer
 /// releases once appears in exactly one block.
-fn slots_released_in_several_blocks(func: &LirFunction) -> Vec<u16> {
+fn slots_released_in_several_blocks(func: &LirOwned) -> Vec<u16> {
     let mut per_slot: rustc_hash::FxHashMap<u16, rustc_hash::FxHashSet<usize>> =
         rustc_hash::FxHashMap::default();
-    for (bi, b) in func.blocks.iter().enumerate() {
-        let mut from_slot: rustc_hash::FxHashMap<Reg, u16> = rustc_hash::FxHashMap::default();
-        for i in &b.instructions {
-            match &i.instr {
-                LirInstr::LoadLocal { dst, slot } => {
-                    from_slot.insert(*dst, *slot);
-                }
-                LirInstr::DecrefValueRegion { src } => {
-                    if let Some(&slot) = from_slot.get(src) {
-                        per_slot.entry(slot).or_default().insert(bi);
-                    }
-                }
-                _ => {}
-            }
+    for (bi, b) in func.view().blocks().enumerate() {
+        for slot in value_released(b.instrs()) {
+            per_slot.entry(slot).or_default().insert(bi);
         }
     }
     let mut out: Vec<u16> = per_slot
@@ -46,7 +34,7 @@ fn slots_released_in_several_blocks(func: &LirFunction) -> Vec<u16> {
 }
 
 /// The same reading over every function in the module.
-fn replicated_slots(module: &crate::lir::LirModule) -> Vec<u16> {
+fn replicated_slots(module: &FrozenModule) -> Vec<u16> {
     std::iter::once(&module.entry)
         .chain(module.closures.iter())
         .flat_map(slots_released_in_several_blocks)

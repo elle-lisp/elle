@@ -14,16 +14,16 @@ fn make_compare() -> LirOwned {
         .signal(Signal::errors())
         .block(
             0,
-            vec![
-                LirInstr::LoadCaptureRaw {
+            &[
+                InstrRef::LoadCaptureRaw {
                     dst: Reg(0),
                     index: 0,
                 },
-                LirInstr::Const {
+                InstrRef::Const {
                     dst: Reg(1),
-                    value: LirConst::Int(0),
+                    value: ConstRef::Int(0),
                 },
-                LirInstr::compare(Reg(2), CmpOp::Gt, Reg(0), Reg(1)),
+                InstrRef::compare(Reg(2), CmpOp::Gt, Reg(0), Reg(1)),
             ],
             Terminator::Return(Reg(2)),
         )

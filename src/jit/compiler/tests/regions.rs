@@ -11,15 +11,15 @@ fn make_adopt_into_activation_lir() -> LirOwned {
         .signal(Signal::silent())
         .block(
             0,
-            vec![
-                LirInstr::LoadCapture {
+            &[
+                InstrRef::LoadCapture {
                     dst: Reg(0),
                     index: 0,
                 },
-                LirInstr::AdoptIntoActivation { child: Reg(0) },
-                LirInstr::Const {
+                InstrRef::AdoptIntoActivation { child: Reg(0) },
+                InstrRef::Const {
                     dst: Reg(1),
-                    value: crate::lir::LirConst::Nil,
+                    value: crate::lir::ConstRef::Nil,
                 },
             ],
             Terminator::Return(Reg(1)),

@@ -1,49 +1,45 @@
 // audited: 2026-10-06
-//! Every opcode survives freezing and decoding field by field, with the registers it reads and writes.
+//! Every opcode survives encoding and decoding field by field, with the registers it reads and writes.
 //!
 //! docs/impl/lir.md
 
+use super::regs::{expected_def, expected_uses};
 use super::*;
-use crate::lir::{for_each_def, for_each_use};
 
 /// The counter-factual is a decoder that reads one field from another's slot —
 /// an `args` run taken from the wrong pool offset, a flag from the wrong bit.
 /// Every field of every exemplar is distinct, so such a decoder reads back an
-/// instruction that prints differently from the one frozen.
+/// instruction that differs from the one encoded.
 #[test]
-fn every_opcode_round_trips_through_freeze_and_the_view() {
+fn every_opcode_round_trips_through_emit_and_the_view() {
     for &op in Op::ALL {
         let instr = exemplar(op);
         assert_eq!(Op::of(&instr), op, "the exemplar of {op:?} is that opcode");
-        let owned = frozen(vec![instr.clone()]);
+        let owned = frozen(&[instr]);
         let view = owned.view();
         let block = view.blocks().next().expect("one block");
         let node = block.nodes().next().expect("one instruction");
         assert_eq!(node.op(), op);
         assert_eq!(
-            format!("{:?}", thaw(node.instr())),
-            format!("{:?}", instr),
-            "{op:?} decodes to the instruction it froze from"
+            node.instr(),
+            instr,
+            "{op:?} decodes to the instruction it was built as"
         );
     }
 }
 
-/// A node's uses and def are what the working form's walkers report, in the
-/// same order — the WASM allocator's liveness reads them, and an operand it
-/// misses dies while still live.
+/// A node's uses and def are the registers its instruction names, in field
+/// order — the WASM allocator's liveness reads them, and an operand it misses
+/// dies while still live.
 #[test]
-fn every_opcode_reports_the_registers_the_walkers_report() {
+fn every_opcode_reports_the_registers_its_instruction_names() {
     for &op in Op::ALL {
         let instr = exemplar(op);
-        let owned = frozen(vec![instr.clone()]);
+        let owned = frozen(&[instr]);
         let view = owned.view();
         let node = view.nodes().next().expect("one instruction");
-        let mut uses = Vec::new();
-        for_each_use(&instr, |r| uses.push(r));
-        assert_eq!(node.uses(), &uses[..], "{op:?} uses");
-        let mut def = None;
-        for_each_def(&instr, |r| def = Some(r));
-        assert_eq!(node.def(), def, "{op:?} def");
+        assert_eq!(node.uses(), &expected_uses(&instr)[..], "{op:?} uses");
+        assert_eq!(node.def(), expected_def(&instr), "{op:?} def");
         assert_eq!(node.region(), instr.region(), "{op:?} region");
     }
 }
@@ -52,47 +48,35 @@ fn every_opcode_reports_the_registers_the_walkers_report() {
 #[test]
 fn every_immediate_constant_round_trips() {
     let consts = [
-        LirConst::Nil,
-        LirConst::EmptyList,
-        LirConst::Bool(true),
-        LirConst::Bool(false),
-        LirConst::Int(i64::MIN),
-        LirConst::Float(-0.0),
-        LirConst::Float(f64::NAN),
-        LirConst::Symbol(SymbolId::of("a-symbol")),
-        LirConst::Keyword(u64::MAX),
+        ConstRef::Nil,
+        ConstRef::EmptyList,
+        ConstRef::Bool(true),
+        ConstRef::Bool(false),
+        ConstRef::Int(i64::MIN),
+        ConstRef::Float(-0.0),
+        ConstRef::Float(f64::NAN),
+        ConstRef::Symbol(SymbolId::of("a-symbol")),
+        ConstRef::Keyword(u64::MAX),
     ];
-    let instrs: Vec<LirInstr> = consts
+    let instrs: Vec<InstrRef<'_>> = consts
         .iter()
         .enumerate()
-        .map(|(i, c)| LirInstr::Const {
+        .map(|(i, c)| InstrRef::Const {
             dst: r(i as u32),
-            value: c.clone(),
+            value: *c,
         })
         .collect();
-    let owned = frozen(instrs.clone());
+    let owned = frozen(&instrs);
     let view = owned.view();
-    let back: Vec<String> = view
-        .nodes()
-        .map(|n| format!("{:?}", thaw(n.instr())))
-        .collect();
+    // Compared as text, because a NaN is not equal to itself and its bits are
+    // what must survive.
+    let back: Vec<String> = view.nodes().map(|n| format!("{:?}", n.instr())).collect();
     let want: Vec<String> = instrs.iter().map(|i| format!("{i:?}")).collect();
     assert_eq!(back, want);
-}
-
-/// A string literal is a `MaterializeConst`, and the bytecode pool has nowhere
-/// reclaimable for a string to live, so freezing refuses the one constant with
-/// no frozen form and says which one it was.
-#[test]
-fn a_string_constant_is_refused_by_name() {
-    let func = working(vec![LirInstr::Const {
-        dst: r(0),
-        value: LirConst::String("no".into()),
-    }]);
-    let err = freeze(&func).expect_err("a string constant has no frozen form");
+    let nan = view.nodes().nth(6).map(|n| n.instr());
     assert!(
-        err.contains("LirConst::String"),
-        "the refusal names the constant: {err}"
+        matches!(nan, Some(InstrRef::Const { value: ConstRef::Float(f), .. }) if f.to_bits() == f64::NAN.to_bits()),
+        "the NaN keeps its bits: {nan:?}"
     );
 }
 
@@ -102,25 +86,21 @@ fn a_string_constant_is_refused_by_name() {
 #[test]
 fn a_tail_call_keeps_its_release_fields() {
     let with = exemplar(Op::TailCall);
-    let without = LirInstr::TailCall {
+    let without = InstrRef::TailCall {
         dst: r(9),
         func: r(8),
-        args: vec![],
+        args: &[],
         arity_checked: false,
         region: slot(40),
         defer_callee_release: false,
         deferred_release_slot: None,
-        borrowed_arg_slots: vec![],
+        borrowed_arg_slots: Slots::new(&[]),
     };
-    let owned = frozen(vec![with.clone(), without.clone()]);
+    let owned = frozen(&[with, without]);
     let view = owned.view();
-    let back: Vec<String> = view
-        .nodes()
-        .map(|n| format!("{:?}", thaw(n.instr())))
-        .collect();
-    assert_eq!(back, vec![format!("{with:?}"), format!("{without:?}")]);
-    let first = view.nodes().next().unwrap().instr();
-    match first {
+    let back: Vec<InstrRef<'_>> = view.nodes().map(|n| n.instr()).collect();
+    assert_eq!(back, vec![with, without]);
+    match back[0] {
         InstrRef::TailCall {
             deferred_release_slot,
             borrowed_arg_slots,
@@ -137,21 +117,20 @@ fn a_tail_call_keeps_its_release_fields() {
 /// once, and the instruction reads its own back.
 #[test]
 fn a_value_constant_lands_in_the_values_table() {
-    let instrs = vec![
-        LirInstr::ValueConst {
+    let owned = frozen(&[
+        InstrRef::ValueConst {
             dst: r(0),
             value: Value::int(5),
         },
-        LirInstr::ValueConst {
+        InstrRef::ValueConst {
             dst: r(1),
             value: Value::int(6),
         },
-        LirInstr::ValueConst {
+        InstrRef::ValueConst {
             dst: r(2),
             value: Value::int(5),
         },
-    ];
-    let owned = frozen(instrs);
+    ]);
     let view = owned.view();
     assert_eq!(view.values(), &[Value::int(5), Value::int(6)]);
     let loaded: Vec<Value> = view

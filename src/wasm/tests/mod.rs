@@ -6,7 +6,7 @@
 
 use super::emit::{emit_module, emit_single_closure};
 use crate::lir::testkit::LirFixture;
-use crate::lir::{ClosureId, FrozenModule, Label, LirConst, LirInstr, LirOwned, Reg, Terminator};
+use crate::lir::{ClosureId, ConstRef, FrozenModule, InstrRef, Label, LirOwned, Reg, Terminator};
 use crate::signals::{Signal, SIG_YIELD};
 use crate::value::Arity;
 
@@ -30,9 +30,9 @@ fn trivial_entry() -> LirOwned {
     LirFixture::new(Arity::Exact(0))
         .block(
             0,
-            vec![LirInstr::Const {
+            &[InstrRef::Const {
                 dst: Reg(0),
-                value: LirConst::Nil,
+                value: ConstRef::Nil,
             }],
             Terminator::Return(Reg(0)),
         )
@@ -54,9 +54,9 @@ fn suspending_closure(n_yields: u32, n_locals: u16) -> LirOwned {
         // Block 0 defines the carried value, then yields to block 1.
         .block(
             0,
-            vec![LirInstr::Const {
+            &[InstrRef::Const {
                 dst: Reg(0),
-                value: LirConst::Int(1),
+                value: ConstRef::Int(1),
             }],
             Terminator::Emit {
                 signal: SIG_YIELD,
@@ -68,7 +68,7 @@ fn suspending_closure(n_yields: u32, n_locals: u16) -> LirOwned {
     for i in 1..n_yields {
         f = f.block(
             i,
-            vec![],
+            &[],
             Terminator::Emit {
                 signal: SIG_YIELD,
                 value: Reg(0),
@@ -77,8 +77,7 @@ fn suspending_closure(n_yields: u32, n_locals: u16) -> LirOwned {
         );
     }
     // Final block returns the carried value.
-    f.block(n_yields, vec![], Terminator::Return(Reg(0)))
-        .build()
+    f.block(n_yields, &[], Terminator::Return(Reg(0))).build()
 }
 
 /// Emit a module whose single closure is `func`, returning the module bytes.

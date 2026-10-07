@@ -120,12 +120,13 @@ fn compile_inner(
         );
     }
     let mut lowerer = Lowerer::new(&arena)
+        .with_heap(unsafe { &mut *cctx.heap_ptr() })
         .with_symbols(symbols)
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
         .with_region_info(region_info)
         .with_type_info(types);
-    let lir_module = lowerer.lower(&analysis.hir)?.freeze()?;
+    let lir_module = lowerer.lower(&analysis.hir)?;
 
     // Phase 5: Emit bytecode into the unit's code region
     let code = crate::value::CodeArena::mint(unsafe { &mut *cctx.heap_ptr() });
@@ -148,7 +149,17 @@ pub fn compile_file_to_lir(
     source_name: &str,
     epoch_skip: usize,
 ) -> Result<crate::lir::FrozenModule, String> {
-    lower_file_to_lir(source, symbols, cctx, source_name, epoch_skip)?.freeze()
+    with_syntax_arena(cctx.heap_ptr(), |arena| {
+        compile_file_to_lir_inner(
+            arena,
+            source,
+            symbols,
+            cctx,
+            source_name,
+            epoch_skip,
+            |lowerer, hir| lowerer.lower(hir),
+        )
+    })
 }
 
 /// [`compile_file_to_lir`] before freezing: the lowerer's working form, for a
@@ -161,18 +172,29 @@ pub fn lower_file_to_lir(
     epoch_skip: usize,
 ) -> Result<crate::lir::LirModule, String> {
     with_syntax_arena(cctx.heap_ptr(), |arena| {
-        compile_file_to_lir_inner(arena, source, symbols, cctx, source_name, epoch_skip)
+        compile_file_to_lir_inner(
+            arena,
+            source,
+            symbols,
+            cctx,
+            source_name,
+            epoch_skip,
+            |lowerer, hir| lowerer.lower_working(hir),
+        )
     })
 }
 
-fn compile_file_to_lir_inner(
+/// Read, expand and analyze a file as one letrec, then hand the configured
+/// lowerer and the HIR to `lower`.
+fn compile_file_to_lir_inner<R>(
     arena: SyntaxArena,
     source: &str,
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
     source_name: &str,
     epoch_skip: usize,
-) -> Result<crate::lir::LirModule, String> {
+    lower: impl FnOnce(&mut Lowerer<'_>, &crate::hir::Hir) -> Result<R, String>,
+) -> Result<R, String> {
     let mut syntaxes = read_syntax_all_for(arena, source, source_name)?;
     crate::epoch::check_lexicon_agreement(&syntaxes, source, source_name)?;
 
@@ -271,12 +293,13 @@ fn compile_file_to_lir_inner(
         );
     }
     let mut lowerer = Lowerer::new(&arena)
+        .with_heap(unsafe { &mut *cctx.heap_ptr() })
         .with_symbols(symbols)
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
         .with_region_info(region_info)
         .with_type_info(types);
-    lowerer.lower(&hir)
+    lower(&mut lowerer, &hir)
 }
 
 /// Compile a file as a single synthetic letrec.
@@ -346,6 +369,7 @@ fn compile_file_inner(
     }
     let t = std::time::Instant::now();
     let mut lowerer = Lowerer::new(&arena)
+        .with_heap(unsafe { &mut *cctx.heap_ptr() })
         .with_symbols(symbols)
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
@@ -354,9 +378,6 @@ fn compile_file_inner(
 
     let lir_module = lowerer.lower(&hir)?;
     crate::phase!(ct, "compile", t, "{} lower", source_name);
-    let t = std::time::Instant::now();
-    let lir_module = lir_module.freeze()?;
-    crate::phase!(ct, "compile", t, "{} freeze", source_name);
 
     // Emit bytecode
     let t = std::time::Instant::now();
@@ -443,12 +464,13 @@ fn lower_test_frontend(
     let region_info =
         crate::hir::analyze_regions_with(&hir, &arena, pc.call_classification.clone());
     let mut lowerer = Lowerer::new(&arena)
+        .with_heap(unsafe { &mut *cctx.heap_ptr() })
         .with_symbols(symbols)
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
         .with_region_info(region_info)
         .with_type_info(types);
-    let lir_module = lowerer.lower(&hir)?.freeze()?;
+    let lir_module = lowerer.lower(&hir)?;
 
     let signal = lir_module.entry.view().signal();
     let code = crate::value::CodeArena::mint(unsafe { &mut *cctx.heap_ptr() });

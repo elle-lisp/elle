@@ -3,27 +3,22 @@
 //!
 //! docs/impl/lir.md
 //!
-//! `exemplar` builds one instruction per opcode and `thaw` turns a decoded one
-//! back into the working form, both by exhaustive match, so a new opcode is
+//! `exemplar` builds one instruction per opcode and `regs` names the registers
+//! each one reads and writes, both by exhaustive match, so a new opcode is
 //! named by the compiler here before any test can pass over it.
 
 use super::*;
 use crate::hir::region::StaticRegion;
 use crate::lir::testkit::LirFixture;
-use crate::lir::{
-    BinOp, ClosureId, CmpOp, ConvOp, LirConst, LirFunction, LirInstr, OperandProof, Reg,
-    Terminator, UnaryOp,
-};
+use crate::lir::{BinOp, ClosureId, CmpOp, ConvOp, OperandProof, Reg, Terminator, UnaryOp};
 use crate::value::fiber::SignalBits;
 use crate::value::{Arity, ConstTemplate, SymbolId, Value};
 
 mod gpu;
 mod header;
 mod records;
+mod regs;
 mod roundtrip;
-mod thaw;
-
-use thaw::thaw;
 
 fn r(n: u32) -> Reg {
     Reg(n)
@@ -33,14 +28,28 @@ fn slot(n: u32) -> StaticRegion {
     StaticRegion::new(n).expect("a test slot is nonzero")
 }
 
+/// `template` as the bytes `ConstTemplate::encode` writes, for as long as the
+/// test runs.
+pub(super) fn template_bytes(template: &ConstTemplate) -> TemplateBytes<'static> {
+    let mut bytes = Vec::new();
+    template.encode(&mut bytes);
+    TemplateBytes::new(Box::leak(bytes.into_boxed_slice()))
+}
+
+/// The keys the `StructRest` exemplar excludes.
+static EXCLUDED: [ConstRec; 2] = [
+    ConstRec::immediate(ConstRef::Keyword(0xbeef)),
+    ConstRec::immediate(ConstRef::Symbol(SymbolId::of("b-key"))),
+];
+
 /// One instruction of `op`'s variant, every field distinct from every other,
 /// so a decoder that swaps two fields reads back a different instruction.
-pub(super) fn exemplar(op: Op) -> LirInstr {
-    use LirInstr as I;
+pub(super) fn exemplar(op: Op) -> InstrRef<'static> {
+    use InstrRef as I;
     match op {
         Op::Const => I::Const {
             dst: r(1),
-            value: LirConst::Int(-7),
+            value: ConstRef::Int(-7),
         },
         Op::ValueConst => I::ValueConst {
             dst: r(1),
@@ -48,13 +57,13 @@ pub(super) fn exemplar(op: Op) -> LirInstr {
         },
         Op::MaterializeConst => I::MaterializeConst {
             dst: r(1),
-            template: ConstTemplate::Pair(
+            template: template_bytes(&ConstTemplate::Pair(
                 Box::new(ConstTemplate::Symbol("a".into())),
                 Box::new(ConstTemplate::Pair(
                     Box::new(ConstTemplate::String("b".into())),
                     Box::new(ConstTemplate::EmptyList),
                 )),
-            ),
+            )),
             region: slot(21),
         },
         Op::LoadLocal => I::LoadLocal { dst: r(1), slot: 5 },
@@ -75,33 +84,33 @@ pub(super) fn exemplar(op: Op) -> LirInstr {
         Op::MakeClosure => I::MakeClosure {
             dst: r(1),
             closure_id: ClosureId(4),
-            captures: vec![r(2), r(3), r(4)],
+            captures: &[Reg(2), Reg(3), Reg(4)],
             region: slot(22),
         },
         Op::LoadSelf => I::LoadSelf { dst: r(1) },
         Op::Call => I::Call {
             dst: r(1),
             func: r(2),
-            args: vec![r(3), r(4), r(5)],
+            args: &[Reg(3), Reg(4), Reg(5)],
             arity_checked: true,
             region: slot(23),
         },
         Op::SuspendingCall => I::SuspendingCall {
             dst: r(1),
             func: r(2),
-            args: vec![r(3)],
+            args: &[Reg(3)],
             arity_checked: false,
             region: slot(24),
         },
         Op::TailCall => I::TailCall {
             dst: r(1),
             func: r(2),
-            args: vec![r(3), r(4), r(5)],
+            args: &[Reg(3), Reg(4), Reg(5)],
             arity_checked: true,
             region: slot(25),
             defer_callee_release: true,
             deferred_release_slot: Some(slot(31)),
-            borrowed_arg_slots: vec![7, 9],
+            borrowed_arg_slots: Slots::new(&[7, 9]),
         },
         Op::List => I::List {
             dst: r(1),
@@ -111,7 +120,7 @@ pub(super) fn exemplar(op: Op) -> LirInstr {
         },
         Op::MakeArrayMut => I::MakeArrayMut {
             dst: r(1),
-            elements: vec![r(2), r(3), r(4), r(5)],
+            elements: &[Reg(2), Reg(3), Reg(4), Reg(5)],
             region: slot(27),
         },
         Op::First => I::First {
@@ -206,20 +215,17 @@ pub(super) fn exemplar(op: Op) -> LirInstr {
         Op::StructGetOrNil => I::StructGetOrNil {
             dst: r(1),
             src: r(2),
-            key: LirConst::Keyword(0x5eed),
+            key: ConstRef::Keyword(0x5eed),
         },
         Op::StructGetDestructure => I::StructGetDestructure {
             dst: r(1),
             src: r(2),
-            key: LirConst::Symbol(SymbolId::of("a-key")),
+            key: ConstRef::Symbol(SymbolId::of("a-key")),
         },
         Op::StructRest => I::StructRest {
             dst: r(1),
             src: r(2),
-            exclude_keys: vec![
-                LirConst::Keyword(0xbeef),
-                LirConst::Symbol(SymbolId::of("b-key")),
-            ],
+            exclude_keys: ConstList::new(&EXCLUDED),
         },
         Op::FirstOrNil => I::FirstOrNil {
             dst: r(1),
@@ -281,7 +287,7 @@ pub(super) fn exemplar(op: Op) -> LirInstr {
             child: r(3),
         },
         Op::FreeRegionGroup => I::FreeRegionGroup {
-            members: vec![r(2), r(3), r(4)],
+            members: &[Reg(2), Reg(3), Reg(4)],
         },
         Op::AdoptIntoActivation => I::AdoptIntoActivation { child: r(2) },
         Op::AssertRegionMatches => I::AssertRegionMatches {
@@ -289,7 +295,7 @@ pub(super) fn exemplar(op: Op) -> LirInstr {
             src: r(2),
         },
         Op::PushParamFrame => I::PushParamFrame {
-            pairs: vec![r(2), r(3), r(4), r(5)],
+            pairs: &[Reg(2), Reg(3), Reg(4), Reg(5)],
         },
         Op::PopParamFrame => I::PopParamFrame,
         Op::CheckSignalBound => I::CheckSignalBound {
@@ -406,14 +412,9 @@ pub(super) fn exemplar(op: Op) -> LirInstr {
     }
 }
 
-/// A function whose one block holds `instrs`, in its working form.
-pub(super) fn working(instrs: Vec<LirInstr>) -> LirFunction {
+/// A function whose one block holds `instrs`, frozen.
+pub(super) fn frozen(instrs: &[InstrRef<'_>]) -> LirOwned {
     LirFixture::new(Arity::Exact(0))
         .block(0, instrs, Terminator::Unreachable)
-        .build_working()
-}
-
-/// `instrs` frozen, through the one entry point every compile uses.
-pub(super) fn frozen(instrs: Vec<LirInstr>) -> LirOwned {
-    freeze(&working(instrs)).expect("freezing a function of immediates succeeds")
+        .build()
 }

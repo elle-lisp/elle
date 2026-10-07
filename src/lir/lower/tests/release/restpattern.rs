@@ -1,6 +1,9 @@
-// audited: 2026-09-16
-// ── The collection a rest pattern built: its route, and its place ─
-//
+// audited: 2026-10-06
+//! The collection a rest pattern built: the slot its release is routed through, and where that release lands.
+//!
+//! docs/impl/region/anchors.md
+//! docs/impl/region/relocate.md
+
 // THE TRAP: the collection's release route is the slot the lowerer parked it
 // in, and the call passes the binding's slot. A reading that compares those two
 // slots alone finds them different and carries the release ahead of the call.
@@ -9,97 +12,69 @@
 // counts are the same either way, so only position tells the ownership move
 // from a free under the callee's own read. The group above it pins the route
 // itself, for the builds no name of the program reaches.
-//
-// docs/impl/region/anchors.md
-// docs/impl/region/relocate.md
 
 use super::*;
 
-/// What the first `TailCall`-bearing block does with the collection a rest
-/// pattern built: the call's index, the index of the release routed through the
-/// PARKED slot, and the indices of every other value release in that block.
+/// One pass over a run of instructions: how many collections a rest pattern
+/// builds in it, and each `DecrefValueRegion` as its index and whether it loads
+/// a slot such a collection was parked in by then.
 ///
 /// The parked slot is read off the emission — the `StoreLocal` that takes the
-/// result of the building opcode (`ArrayMutSliceFrom` / `StructRest`) — because
-/// that is the one thing that tells this release from the scrutinee's, which
-/// shares the block and must land on the other side of the call.
-fn rest_collection_release_layout(
-    module: &crate::lir::LirModule,
-) -> Option<(usize, Vec<usize>, Vec<usize>)> {
-    let funcs = std::iter::once(&module.entry).chain(module.closures.iter());
-    for f in funcs {
-        for b in &f.blocks {
-            let Some(at) = b
-                .instructions
-                .iter()
-                .position(|i| matches!(i.instr, LirInstr::TailCall { .. }))
-            else {
-                continue;
-            };
-            // The register each building opcode produced, then the slot the
-            // store parked it in.
-            let mut built: rustc_hash::FxHashSet<Reg> = rustc_hash::FxHashSet::default();
-            let mut park_slots: rustc_hash::FxHashSet<u16> = rustc_hash::FxHashSet::default();
-            let mut from_slot: rustc_hash::FxHashMap<Reg, u16> = rustc_hash::FxHashMap::default();
-            let (mut parked, mut other) = (Vec::new(), Vec::new());
-            for (idx, i) in b.instructions.iter().enumerate() {
-                match &i.instr {
-                    LirInstr::ArrayMutSliceFrom { dst, .. } | LirInstr::StructRest { dst, .. } => {
-                        built.insert(*dst);
-                    }
-                    LirInstr::StoreLocal { slot, src } if built.contains(src) => {
-                        park_slots.insert(*slot);
-                    }
-                    LirInstr::LoadLocal { dst, slot } => {
-                        from_slot.insert(*dst, *slot);
-                    }
-                    LirInstr::DecrefValueRegion { src } => match from_slot.get(src) {
-                        Some(slot) if park_slots.contains(slot) => parked.push(idx),
-                        _ => other.push(idx),
-                    },
-                    _ => {}
-                }
+/// result of a building opcode (`ArrayMutSliceFrom` / `StructRest`) — because
+/// the lowerer's own slot is the one thing that tells these releases from the
+/// scrutinee's.
+fn rest_releases<'a>(
+    instrs: impl IntoIterator<Item = InstrRef<'a>>,
+) -> (usize, Vec<(usize, bool)>) {
+    let mut built: rustc_hash::FxHashSet<Reg> = rustc_hash::FxHashSet::default();
+    let mut park_slots: rustc_hash::FxHashSet<u16> = rustc_hash::FxHashSet::default();
+    let mut from_slot: rustc_hash::FxHashMap<Reg, u16> = rustc_hash::FxHashMap::default();
+    let (mut builds, mut releases) = (0, Vec::new());
+    for (idx, i) in instrs.into_iter().enumerate() {
+        match i {
+            InstrRef::ArrayMutSliceFrom { dst, .. } | InstrRef::StructRest { dst, .. } => {
+                builds += 1;
+                built.insert(dst);
             }
-            return Some((at, parked, other));
+            InstrRef::StoreLocal { slot, src } if built.contains(&src) => {
+                park_slots.insert(slot);
+            }
+            InstrRef::LoadLocal { dst, slot } => {
+                from_slot.insert(dst, slot);
+            }
+            InstrRef::DecrefValueRegion { src } => {
+                let parked = from_slot.get(&src).is_some_and(|s| park_slots.contains(s));
+                releases.push((idx, parked));
+            }
+            _ => {}
         }
     }
-    None
+    (builds, releases)
+}
+
+/// What the first `TailCall`-bearing block does with the collection a rest
+/// pattern built: the call's index, the index of the release routed through the
+/// PARKED slot, and the indices of every other value release in that block —
+/// the scrutinee's among them, which shares the block and must land on the
+/// other side of the call.
+fn rest_collection_release_layout(
+    module: &FrozenModule,
+) -> Option<(usize, Vec<usize>, Vec<usize>)> {
+    let (b, at) = first_tail_call_block(module)?;
+    let (_, releases) = rest_releases(b.instrs());
+    let (parked, other): (Vec<_>, Vec<_>) = releases.into_iter().partition(|&(_, p)| p);
+    let idx = |rs: Vec<(usize, bool)>| rs.into_iter().map(|(i, _)| i).collect();
+    Some((at, idx(parked), idx(other)))
 }
 
 /// How many collections a rest pattern BUILT across the module, and how many
 /// releases load the slot one of them was parked in.
-///
-/// The parked slot is read off the emission — the `StoreLocal` that takes the
-/// result of a building opcode — because the lowerer's own slot is the one
-/// thing that tells these releases from the scrutinee's.
-fn rest_build_and_release_counts(module: &crate::lir::LirModule) -> (usize, usize) {
+fn rest_build_and_release_counts(module: &FrozenModule) -> (usize, usize) {
     let (mut builds, mut releases) = (0, 0);
     for f in std::iter::once(&module.entry).chain(module.closures.iter()) {
-        let mut built: rustc_hash::FxHashSet<Reg> = rustc_hash::FxHashSet::default();
-        let mut park_slots: rustc_hash::FxHashSet<u16> = rustc_hash::FxHashSet::default();
-        let mut from_slot: rustc_hash::FxHashMap<Reg, u16> = rustc_hash::FxHashMap::default();
-        for b in &f.blocks {
-            for i in &b.instructions {
-                match &i.instr {
-                    LirInstr::ArrayMutSliceFrom { dst, .. } | LirInstr::StructRest { dst, .. } => {
-                        builds += 1;
-                        built.insert(*dst);
-                    }
-                    LirInstr::StoreLocal { slot, src } if built.contains(src) => {
-                        park_slots.insert(*slot);
-                    }
-                    LirInstr::LoadLocal { dst, slot } => {
-                        from_slot.insert(*dst, *slot);
-                    }
-                    LirInstr::DecrefValueRegion { src }
-                        if from_slot.get(src).is_some_and(|s| park_slots.contains(s)) =>
-                    {
-                        releases += 1;
-                    }
-                    _ => {}
-                }
-            }
-        }
+        let (built, released) = rest_releases(flat_instrs(f));
+        builds += built;
+        releases += released.iter().filter(|&&(_, parked)| parked).count();
     }
     (builds, releases)
 }

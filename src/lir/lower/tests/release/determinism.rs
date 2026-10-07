@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! The region analysis and the release order it drives are a pure function of the source.
 //!
 //! docs/impl/region/rules.md
@@ -74,10 +74,28 @@ fn release_order_is_deterministic_across_compiles() {
     // (docs/impl/region/rules.md Rule 4), up to the process-global static-region
     // counter (canonicalized away above). Two regions sharing a decref_point
     // are enough to expose a hash-ordered emission as a cross-compile diff.
-    let first = canonicalize_static_regions(&format!("{:?}", compile_to_lir(CAPTURE_CELL_SHAPE)));
+    //
+    // The stream is read decoded: a frozen node holds its region slot as a bare
+    // number, which the canonicalization cannot find, while `InstrRef` prints it
+    // as `StaticRegion(N)`.
+    fn stream(module: &FrozenModule) -> String {
+        let mut out = String::new();
+        for f in functions(module) {
+            let view = f.view();
+            for b in view.blocks() {
+                out.push_str(&format!("{:?}:\n", b.label()));
+                for i in b.instrs() {
+                    out.push_str(&format!("  {i:?}\n"));
+                }
+                out.push_str(&format!("  {:?}\n", b.terminator()));
+            }
+            out.push_str(&format!("merged: {:?}\n", view.merged_slots()));
+        }
+        canonicalize_static_regions(&out)
+    }
+    let first = stream(&compile_to_lir(CAPTURE_CELL_SHAPE));
     for round in 0..8 {
-        let again =
-            canonicalize_static_regions(&format!("{:?}", compile_to_lir(CAPTURE_CELL_SHAPE)));
+        let again = stream(&compile_to_lir(CAPTURE_CELL_SHAPE));
         assert_eq!(
             first, again,
             "round {round}: lowering the same source produced different \

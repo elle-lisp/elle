@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! Where a release lands across branch arms, and why a re-storable capture cell's slot is no release route.
 //!
 //! docs/impl/region/window.md
@@ -63,29 +63,19 @@ fn tail_call_argument_release_stays_the_ownership_move() {
                 && blocks.iter().any(|(exits, s)| !*exits && !s.is_empty())
         })
         .expect("a function with both a tail-calling and a falling-through block");
-    for b in &func.blocks {
+    for b in func.view().blocks() {
         let Some(at) = b
-            .instructions
-            .iter()
-            .position(|i| matches!(i.instr, LirInstr::TailCall { .. }))
+            .instrs()
+            .position(|i| matches!(i, InstrRef::TailCall { .. }))
         else {
             continue;
         };
-        let mut from_slot: rustc_hash::FxHashMap<Reg, u16> = rustc_hash::FxHashMap::default();
-        for (idx, i) in b.instructions.iter().enumerate() {
-            match &i.instr {
-                LirInstr::LoadLocal { dst, slot } => {
-                    from_slot.insert(*dst, *slot);
-                }
-                LirInstr::DecrefValueRegion { src } if from_slot.get(src) == Some(&0) => {
-                    assert!(
-                        idx > at,
-                        "the tail call's own argument was released ahead of it \
-                         — that release IS the ownership move",
-                    );
-                }
-                _ => {}
-            }
+        for (idx, slot) in value_releases(b.instrs()) {
+            assert!(
+                slot != 0 || idx > at,
+                "the tail call's own argument was released ahead of it \
+                 — that release IS the ownership move",
+            );
         }
     }
 }
@@ -108,52 +98,20 @@ fn tail_call_argument_release_stays_the_ownership_move() {
 
 /// The local slots that hold a compiled `MakeCaptureCell` in `func` — the cell
 /// boxes a `StoreLocal` parks right after the mint.
-fn compiled_cell_slots(func: &LirFunction) -> Vec<u16> {
-    let instrs: Vec<&LirInstr> = func
-        .blocks
-        .iter()
-        .flat_map(|b| b.instructions.iter())
-        .map(|si| &si.instr)
-        .collect();
+fn compiled_cell_slots(func: &LirOwned) -> Vec<u16> {
+    let instrs = flat_instrs(func);
     let mut slots = Vec::new();
     for (i, instr) in instrs.iter().enumerate() {
-        let LirInstr::MakeCaptureCell { dst, .. } = instr else {
+        let InstrRef::MakeCaptureCell { dst, .. } = instr else {
             continue;
         };
         for later in &instrs[i + 1..] {
-            if let LirInstr::StoreLocal { slot, src } = later {
+            if let InstrRef::StoreLocal { slot, src } = later {
                 if src == dst {
                     slots.push(*slot);
                     break;
                 }
             }
-        }
-    }
-    slots
-}
-
-/// The local slots `func` loads and then releases by value (`LoadLocal slot`
-/// feeding a `DecrefValueRegion` on the same register).
-fn value_released_slots(func: &LirFunction) -> Vec<u16> {
-    let instrs: Vec<&LirInstr> = func
-        .blocks
-        .iter()
-        .flat_map(|b| b.instructions.iter())
-        .map(|si| &si.instr)
-        .collect();
-    let mut loaded: rustc_hash::FxHashMap<Reg, u16> = rustc_hash::FxHashMap::default();
-    let mut slots = Vec::new();
-    for instr in &instrs {
-        match instr {
-            LirInstr::LoadLocal { dst, slot } => {
-                loaded.insert(*dst, *slot);
-            }
-            LirInstr::DecrefValueRegion { src } => {
-                if let Some(&slot) = loaded.get(src) {
-                    slots.push(slot);
-                }
-            }
-            _ => {}
         }
     }
     slots
@@ -166,7 +124,7 @@ fn assert_no_cell_slot_value_release(source: &str, what: &str) {
         if cells.is_empty() {
             continue;
         }
-        let released = value_released_slots(func);
+        let released = value_released(flat_instrs(func));
         for slot in &cells {
             assert!(
                 !released.contains(slot),

@@ -242,7 +242,7 @@ impl Freezer {
             extra: self.pool.len() as u32,
             n_uses: u16::try_from(n)
                 .map_err(|_| "freeze: an instruction reads more than 65535 registers")?,
-            op: Op::of(i) as u8,
+            op: Op::of_working(i) as u8,
             flags: 0,
         };
         if n > 2 {

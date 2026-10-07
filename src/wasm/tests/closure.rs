@@ -25,24 +25,28 @@ const COL: u32 = 5;
 /// copies off its own emission: a source location, a merge set, and both
 /// release tables.
 fn nested_lambda_lir() -> LirOwned {
-    let mut func = LirFixture::new(Arity::Exact(0))
-        .closure_id(ClosureId(0))
-        .name("nested")
-        .signal(Signal::silent())
-        .block(
-            0,
-            vec![LirInstr::Const {
-                dst: Reg(0),
-                value: LirConst::Nil,
-            }],
-            Terminator::Return(Reg(0)),
-        )
-        .build_working();
-    func.blocks[0].instructions[0].span = Span::new(0, 3, LINE, COL).with_file(FILE);
-    func.merged_slots = vec![static_region(5)];
-    func.frame_release_slots = vec![3, 7];
-    func.frame_release_regions = vec![static_region(11), static_region(13)];
-    crate::lir::code::freeze(&func).expect("the lambda freezes")
+    let mut heap = crate::value::fiberheap::FiberHeap::new();
+    let mut builder = crate::lir::LirBuilder::new(&mut heap);
+    builder.begin_function(Arity::Exact(0));
+    let head = builder.head();
+    head.closure_id = Some(ClosureId(0));
+    head.name = Some("nested".into());
+    head.signal = Signal::silent();
+    head.num_regs = 1;
+    head.merged_slots = vec![static_region(5)];
+    head.frame_release_slots = vec![3, 7];
+    head.frame_release_regions = vec![static_region(11), static_region(13)];
+    builder.open_block(Label(0));
+    builder.emit(
+        InstrRef::Const {
+            dst: Reg(0),
+            value: ConstRef::Nil,
+        },
+        Span::new(0, 3, LINE, COL).with_file(FILE),
+    );
+    builder.terminate(Terminator::Return(Reg(0)), Span::synthetic());
+    builder.finish_block();
+    builder.finish_function().expect("the lambda freezes")
 }
 
 /// A nullary entry whose whole body is one `MakeClosure` of closure 0, so the
@@ -52,10 +56,10 @@ fn entry_making_closure() -> LirOwned {
         .signal(Signal::silent())
         .block(
             0,
-            vec![LirInstr::MakeClosure {
+            &[InstrRef::MakeClosure {
                 dst: Reg(0),
                 closure_id: ClosureId(0),
-                captures: vec![],
+                captures: &[],
                 region: static_region(2),
             }],
             Terminator::Return(Reg(0)),

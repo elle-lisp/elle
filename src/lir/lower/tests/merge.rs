@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-10-06
 //! Pins the lowerer's slot-resolved RC instructions: coalesced mints, the merge's shared slot, and their counters.
 //!
 //! docs/impl/region/mechanism.md
@@ -27,15 +27,15 @@ fn coalesced_fresh_pair_return_is_slot_resolved() {
     let pair_fn = module
         .closures
         .iter()
-        .find(|f| func_count(f, |i| matches!(i, LirInstr::List { .. })) == 1)
+        .find(|f| func_count(f, |i| matches!(i, InstrRef::List { .. })) == 1)
         .expect("a closure tail-allocating a %pair (List)");
     assert_eq!(
-        func_count(pair_fn, |i| matches!(i, LirInstr::IncrefValueRegion { .. })),
+        func_count(pair_fn, |i| matches!(i, InstrRef::IncrefValueRegion { .. })),
         0,
         "the fresh-pair return mint must NOT stay value-resolved",
     );
     assert_eq!(
-        func_count(pair_fn, |i| matches!(i, LirInstr::IncrefRegion { .. })),
+        func_count(pair_fn, |i| matches!(i, InstrRef::IncrefRegion { .. })),
         1,
         "the fresh-pair return mint must be slot-resolved (one IncrefRegion)",
     );
@@ -52,15 +52,15 @@ fn coalesced_string_literal_return_is_slot_resolved() {
     let str_fn = module
         .closures
         .iter()
-        .find(|f| func_count(f, |i| matches!(i, LirInstr::MaterializeConst { .. })) == 1)
+        .find(|f| func_count(f, |i| matches!(i, InstrRef::MaterializeConst { .. })) == 1)
         .expect("a closure tail-allocating a string literal (MaterializeConst)");
     assert_eq!(
-        func_count(str_fn, |i| matches!(i, LirInstr::IncrefValueRegion { .. })),
+        func_count(str_fn, |i| matches!(i, InstrRef::IncrefValueRegion { .. })),
         0,
         "the string-literal return mint must NOT stay value-resolved",
     );
     assert_eq!(
-        func_count(str_fn, |i| matches!(i, LirInstr::IncrefRegion { .. })),
+        func_count(str_fn, |i| matches!(i, InstrRef::IncrefRegion { .. })),
         1,
         "the string-literal return mint must be slot-resolved (one IncrefRegion)",
     );
@@ -102,15 +102,15 @@ fn captured_reassign_init_drop_is_slot_resolved() {
         // The init-drop is the region-RC release emitted immediately after the
         // init's StoreCaptureCell (the reassignment's StoreCaptureCell is followed
         // by a LoadLocal, never a release).
-        if !matches!(instr, LirInstr::StoreCaptureCell { .. }) {
+        if !matches!(instr, InstrRef::StoreCaptureCell { .. }) {
             continue;
         }
         let (drop_pos, oracle) = match instrs.get(i + 1) {
-            Some(LirInstr::AssertRegionMatches { region_id, .. }) => (i + 2, Some(*region_id)),
+            Some(InstrRef::AssertRegionMatches { region_id, .. }) => (i + 2, Some(*region_id)),
             _ => (i + 1, None),
         };
         match instrs.get(drop_pos) {
-            Some(LirInstr::DecrefRegion { region_id }) => {
+            Some(InstrRef::DecrefRegion { region_id }) => {
                 found = true;
                 if cfg!(debug_assertions) {
                     assert_eq!(
@@ -123,7 +123,7 @@ fn captured_reassign_init_drop_is_slot_resolved() {
                     assert!(oracle.is_none(), "release builds emit no oracle");
                 }
             }
-            Some(LirInstr::DecrefValueRegion { .. }) => panic!(
+            Some(InstrRef::DecrefValueRegion { .. }) => panic!(
                 "the captured-reassign init-drop is still value-resolved \
                  (DecrefValueRegion after StoreCaptureCell) — the decref side \
                  did not coalesce",
@@ -153,11 +153,11 @@ fn param_return_stays_value_resolved() {
         if allocates_or_calls(f) {
             continue; // an allocating/calling closure may coalesce its own tail
         }
-        if func_count(f, |i| matches!(i, LirInstr::IncrefValueRegion { .. })) > 0 {
+        if func_count(f, |i| matches!(i, InstrRef::IncrefValueRegion { .. })) > 0 {
             saw_passthrough = true;
         }
         assert_eq!(
-            func_count(f, |i| matches!(i, LirInstr::IncrefRegion { .. })),
+            func_count(f, |i| matches!(i, InstrRef::IncrefRegion { .. })),
             0,
             "a closure that allocates nothing must not slot-resolve its return \
              mint (over-coalesce of a param/immediate — the dynamic boundary)",
@@ -184,7 +184,7 @@ fn param_return_stays_value_resolved() {
 //
 // The canonical shape is the discarded nested literal `(begin (%pair (%pair 1 2) 3)
 // nil)`, the source the merge-seed pins in src/hir/region/infer/tests/merge/seed.rs
-// fire on. `%pair` compiles as the `Pair` intrinsic (lowered to `LirInstr::List`)
+// fire on. `%pair` compiles as the `Pair` intrinsic (lowered to `InstrRef::List`)
 // on every compile, so the seed always has sites to merge.
 //
 // Each pin fails against a lowerer that ignores the merge: it allocates child and
@@ -222,7 +222,7 @@ fn merge_flip_emits_one_decref_for_the_merged_pair() {
         builder_pair_slots(&module).into_iter().collect();
     let decrefs = func_count(
         &module.entry,
-        |i| matches!(i, LirInstr::DecrefRegion { region_id } if slots.contains(region_id)),
+        |i| matches!(i, InstrRef::DecrefRegion { region_id } if slots.contains(region_id)),
     );
     assert_eq!(
         decrefs, 1,
@@ -241,7 +241,7 @@ fn merge_flip_drops_the_self_edge_incref() {
         builder_pair_slots(&module).into_iter().collect();
     let increfs = func_count(
         &module.entry,
-        |i| matches!(i, LirInstr::IncrefRegion { region_id } if slots.contains(region_id)),
+        |i| matches!(i, InstrRef::IncrefRegion { region_id } if slots.contains(region_id)),
     );
     assert_eq!(
         increfs, 0,
@@ -259,21 +259,16 @@ fn merge_flip_records_merged_slot_metadata() {
     let module = compile_to_lir(BUILDER_IDIOM);
     let pair_slots: std::collections::HashSet<StaticRegion> =
         builder_pair_slots(&module).into_iter().collect();
+    let merged = module.entry.view().merged_slots();
     assert!(
-        !module.entry.merged_slots.is_empty(),
+        !merged.is_empty(),
         "the builder-idiom merge must record a merged slot for runtime mint-or-reuse; \
          got empty merged_slots",
     );
     assert!(
-        module
-            .entry
-            .merged_slots
-            .iter()
-            .any(|s| pair_slots.contains(s)),
+        merged.iter().any(|s| pair_slots.contains(s)),
         "a recorded merged slot must be one the builder pairs allocate against; \
-         merged_slots={:?}, pair_slots={:?}",
-        module.entry.merged_slots,
-        pair_slots,
+         merged_slots={merged:?}, pair_slots={pair_slots:?}",
     );
 }
 
@@ -291,15 +286,15 @@ fn merge_flip_inert_without_a_merge() {
         1,
         "a single %pair has one List alloc; got {slots:?}"
     );
+    let merged = module.entry.view().merged_slots();
     assert!(
-        module.entry.merged_slots.is_empty(),
-        "a lone %pair (no child to merge) must record no merged slot; got {:?}",
-        module.entry.merged_slots,
+        merged.is_empty(),
+        "a lone %pair (no child to merge) must record no merged slot; got {merged:?}",
     );
     let slot = slots[0];
     let decrefs = func_count(
         &module.entry,
-        |i| matches!(i, LirInstr::DecrefRegion { region_id } if *region_id == slot),
+        |i| matches!(i, InstrRef::DecrefRegion { region_id } if *region_id == slot),
     );
     assert_eq!(
         decrefs, 1,

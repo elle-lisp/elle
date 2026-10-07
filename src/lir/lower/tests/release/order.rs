@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! The order releases take when several land on one `decref_point`: readers before the free, members before owners.
 //!
 //! docs/impl/region/rules.md
@@ -249,16 +249,16 @@ fn a_cell_box_release_follows_every_release_that_unwraps_it() {
         let mut unwraps: rustc_hash::FxHashMap<u16, usize> = rustc_hash::FxHashMap::default();
         for (pos, instr) in instrs.iter().enumerate() {
             match instr {
-                LirInstr::LoadCaptureRaw { dst, index } => {
+                InstrRef::LoadCaptureRaw { dst, index } => {
                     raw_from.insert(*dst, *index);
                 }
-                LirInstr::DecrefValueRegion { src } => {
+                InstrRef::DecrefValueRegion { src } => {
                     if let Some(&index) = raw_from.get(src) {
                         let e = unwraps.entry(index).or_insert(pos);
                         *e = (*e).max(pos);
                     }
                 }
-                LirInstr::DecrefCellRegion { src } => {
+                InstrRef::DecrefCellRegion { src } => {
                     if let Some(&index) = raw_from.get(src) {
                         let e = frees.entry(index).or_insert(pos);
                         *e = (*e).max(pos);

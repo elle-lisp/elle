@@ -16,19 +16,19 @@ fn make_capture_add() -> LirOwned {
         .num_captures(1)
         .block(
             0,
-            vec![
+            &[
                 // Load capture (index 0 = first capture)
-                LirInstr::LoadCapture {
+                InstrRef::LoadCapture {
                     dst: Reg(0),
                     index: 0,
                 },
                 // Load param (index 1 = first param, since 1 capture)
-                LirInstr::LoadCaptureRaw {
+                InstrRef::LoadCaptureRaw {
                     dst: Reg(1),
                     index: 1,
                 },
                 // cap + param
-                LirInstr::binop(Reg(2), BinOp::Add, Reg(0), Reg(1)),
+                InstrRef::binop(Reg(2), BinOp::Add, Reg(0), Reg(1)),
             ],
             Terminator::Return(Reg(2)),
         )
@@ -109,28 +109,28 @@ fn make_capture_param_collision() -> LirOwned {
         .num_locals(1) // one local slot for param copy
         .block(
             0,
-            vec![
+            &[
                 // Copy param from env index 1 to local slot 0
-                LirInstr::LoadCaptureRaw {
+                InstrRef::LoadCaptureRaw {
                     dst: Reg(0),
                     index: 1, // param y
                 },
-                LirInstr::StoreLocal {
+                InstrRef::StoreLocal {
                     slot: 0,
                     src: Reg(0),
                 },
                 // Load capture from env index 0
-                LirInstr::LoadCaptureRaw {
+                InstrRef::LoadCaptureRaw {
                     dst: Reg(1),
                     index: 0, // capture x
                 },
                 // Load param from local slot
-                LirInstr::LoadLocal {
+                InstrRef::LoadLocal {
                     dst: Reg(2),
                     slot: 0,
                 },
                 // x + y
-                LirInstr::binop(Reg(3), BinOp::Add, Reg(1), Reg(2)),
+                InstrRef::binop(Reg(3), BinOp::Add, Reg(1), Reg(2)),
             ],
             Terminator::Return(Reg(3)),
         )

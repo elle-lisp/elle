@@ -207,12 +207,12 @@ fn eval_in_arena(
     let region_info =
         crate::hir::analyze_regions_with(&analysis.hir, &arena, pc.call_classification.clone());
     let mut lowerer = Lowerer::new(&arena)
+        .with_heap(unsafe { &mut *vm.heap_ptr })
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
         .with_region_info(region_info);
     let lir_module = lowerer
         .lower(&analysis.hir)
-        .and_then(|m| m.freeze())
         .map_err(|e| LError::generic(format!("eval: lowering failed: {}", e)))?;
 
     // Emit into a code region on the heap that runs the form.
