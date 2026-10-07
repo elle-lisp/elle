@@ -44,10 +44,9 @@ impl VM {
     /// How many compiles of the function at `bytecode_ptr` came back
     /// rejected, or 0 when the JIT holds no rejection for it.
     pub fn jit_attempts(&self, bytecode_ptr: *const u8) -> usize {
-        self.jit_compile_attempts
+        self.jit_rejections
             .get(&bytecode_ptr)
-            .copied()
-            .unwrap_or(0)
+            .map_or(0, |info| info.attempts)
     }
 
     /// Record that a compile for `template` is in flight on the worker. The
@@ -189,6 +188,7 @@ impl VM {
         }
         self.jit_rejections
             .entry(bytecode_ptr)
+            .and_modify(|info| info.attempts += 1)
             .or_insert_with(|| JitRejectionInfo::new(error, pin));
     }
 
@@ -228,7 +228,6 @@ impl VM {
                 }
                 Err(e) => self.record_jit_failure(bytecode_ptr, e, Some(pin)),
             }
-            *self.jit_compile_attempts.entry(bytecode_ptr).or_insert(0) += 1;
             return;
         }
 
@@ -239,7 +238,6 @@ impl VM {
 
         if worker.submit(task) {
             self.record_jit_pending((*closure.template).clone());
-            *self.jit_compile_attempts.entry(bytecode_ptr).or_insert(0) += 1;
             if self
                 .runtime_config
                 .has_trace_bit(crate::config::trace_bits::JIT)

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-07
 //! Building a VM over a heap it owns or shares, and resetting one for reuse.
 //!
 //! docs/impl/vm.md
@@ -126,8 +126,6 @@ impl VM {
             jit_pending: FxHashMap::default(),
             #[cfg(feature = "jit")]
             jit_rejections: FxHashMap::default(),
-            #[cfg(feature = "jit")]
-            jit_compile_attempts: FxHashMap::default(),
             spirv_cache: FxHashMap::default(),
             docs: HashMap::new(),
             eval_expander: None,
@@ -153,8 +151,8 @@ impl VM {
     /// Preserves: docs, ffi, jit_cache, spirv_cache, eval_expander, env_cache,
     /// tail_call_env_cache, and the heap, which the VM points at but never owns.
     /// Resets: the fiber, the pending call state, the error location, the active
-    /// tier, the closure call counts, the JIT rejections and compile attempts,
-    /// and the set of modules loading.
+    /// tier, the closure call counts, the JIT rejections, and the set of modules
+    /// loading.
     pub fn reset_fiber(&mut self) {
         // The VM heap is persistent — don't clear it. Values from previous
         // execute calls remain valid.
@@ -173,8 +171,6 @@ impl VM {
         self.closure_call_counts.clear();
         #[cfg(feature = "jit")]
         self.jit_rejections.clear();
-        #[cfg(feature = "jit")]
-        self.jit_compile_attempts.clear();
         self.loading_modules.clear();
     }
 }

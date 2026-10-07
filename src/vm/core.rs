@@ -242,15 +242,11 @@ pub struct VM {
     /// JIT rejection log: bytecode pointer → rejection info.
     /// Records first rejection per closure template. Used by
     /// `(jit/rejections)` primitive and `--dump=stats`.
+    /// Each entry counts the function's rejected compiles, which the
+    /// negative-cache invariant (docs/impl/jit.md) holds at 1 whatever the call
+    /// count; a regression shows up as an unbounded `:attempts`.
     #[cfg(feature = "jit")]
     pub jit_rejections: FxHashMap<*const u8, JitRejectionInfo>,
-    /// Per-template count of background JIT compilations submitted.
-    /// Incremented on every `submit_jit_task`. The negative-cache
-    /// invariant (see docs/impl/jit.md) holds this at 1 for a rejected
-    /// function regardless of call count; a regression shows up here as
-    /// an unbounded `:attempts` in `(jit/rejections)`.
-    #[cfg(feature = "jit")]
-    pub jit_compile_attempts: FxHashMap<*const u8, usize>,
     /// The SPIR-V `git` and `mlir/compile-spirv` compiled: one entry per code
     /// object, keyed and pinned like `jit_cache`, holding a kernel per
     /// workgroup size. Write through [`VM::install_spirv`]; read through

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-07
 //! `SIG_QUERY` dispatch: the questions a primitive asks the running VM.
 //!
 //! docs/runtime.md
@@ -295,8 +295,10 @@ impl VM {
                         );
                         let calls = self.closure_call_counts.get(ptr).copied().unwrap_or(0);
                         fields.insert(TableKey::keyword("calls"), Value::int(calls as i64));
-                        let attempts = self.jit_compile_attempts.get(ptr).copied().unwrap_or(0);
-                        fields.insert(TableKey::keyword("attempts"), Value::int(attempts as i64));
+                        fields.insert(
+                            TableKey::keyword("attempts"),
+                            Value::int(info.attempts as i64),
+                        );
                         ctx.struct_from(fields)
                     })
                     .collect();

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-07
 // docs/impl/jit.md
 //! Cranelift JIT compilation of LIR functions, and the types every stage of it
 //! shares.
@@ -179,22 +179,26 @@ pub struct JitRejectionInfo {
     pub name: Option<String>,
     /// Why the JIT rejected this closure.
     pub reason: JitError,
+    /// How many of this function's compiles came back rejected: 1 while the
+    /// negative cache holds, and more only if something re-submitted it.
+    pub attempts: usize,
     /// Pin on the code region of the code object whose bytecode this
     /// rejection is keyed by (docs/impl/jit.md § "Cache identity"): while the
     /// entry lives, the address cannot be reused by a different function, so
     /// the negative cache can never wrongly block a new function from
-    /// compiling.
+    /// compiling, and the attempt count can never pass to one.
     _pin: Option<crate::value::CodePin>,
 }
 
 impl JitRejectionInfo {
-    /// Build a rejection record pinning the code region it is keyed by. `pin`
-    /// is `None` only when the submission's pin was already lost (a worker
-    /// result with no matching pending entry).
+    /// Build the record of a first rejected compile, pinning the code region
+    /// it is keyed by. `pin` is `None` only when the submission's pin was
+    /// already lost (a worker result with no matching pending entry).
     pub fn new(reason: JitError, pin: Option<crate::value::CodePin>) -> Self {
         JitRejectionInfo {
             name: None,
             reason,
+            attempts: 1,
             _pin: pin,
         }
     }
