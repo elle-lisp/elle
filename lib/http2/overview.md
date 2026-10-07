@@ -1,6 +1,6 @@
 # http2
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-06 -->
 
 The submodules behind [http2.lisp](../http2.lisp): HPACK, the frame codec, stream state, the session loops and the server.
 
@@ -54,6 +54,15 @@ handshake.
   the TCP and TLS transports. [http2.lisp](../http2.lisp) loads it once,
   uses it for the client, and hands it to the server.
 
+- **Huffman decode reads a byte-wide table.** A code of 8 bits or fewer
+  covers every letter and digit and the common punctuation, and the
+  decoder reads it in one step from a 256-entry table indexed by the next
+  8 bits of input. A longer code walks the trie a bit at a time. Walking
+  every code bit by bit costs eight loop steps per input byte, and in a
+  header-heavy exchange that walk outweighs the rest of the session.
+  [huffman-decode.lisp](../../tests/impl/huffman-decode.lisp) reads the
+  pages a decode claims, which track those loop steps.
+
 - **HPACK encode and send are atomic.** `encode-and-send-headers`
   encodes and enqueues HEADERS plus every CONTINUATION without yielding.
   A yield between them lets another fiber encode against the same
@@ -76,7 +85,8 @@ handshake.
 4. Stream ids: client odd, server even.
 5. PUSH_PROMISE draws RST_STREAM REFUSED_STREAM.
 6. A handler fiber always runs inside `protect` and `defer`.
-7. A header block over max-frame-size splits across CONTINUATION frames.
+7. A header block over the peer's max-frame-size splits into one HEADERS
+   frame and as many CONTINUATION frames as the rest needs.
 8. `apply-remote-settings` shifts every existing stream's send window by
    the delta.
 9. SETTINGS values are validated: ENABLE_PUSH is 0 or 1,
@@ -87,6 +97,16 @@ handshake.
 12. `local-settings` and `remote-settings` are mutable structs.
 13. Closing a session returns in bounded time, whatever the peer does.
     The server's connection handler waits under the same bound.
+14. `:max-frame-size` on `connect`, `serve` and `serve-streaming` sets the
+    SETTINGS_MAX_FRAME_SIZE a session advertises, which is also the
+    largest frame its reader accepts. It defaults to 256 KiB. A value
+    outside 16384..16777215 raises an h2-error whose `:reason` is
+    `:invalid-max-frame-size`, before the call opens or accepts a
+    connection.
+15. The HPACK encoder Huffman-codes a string only when the code is
+    shorter than the string. Otherwise it sends the string raw.
+16. A request that waits on a stream whose session closes raises an
+    h2-error whose `:reason` is `:connection-closed`.
 
 Invariants 4 and 9, run against the session module:
 
@@ -109,7 +129,10 @@ Invariants 4 and 9, run against the session module:
 
 ## Running tests
 
+Each submodule's own tests run from
+[h2-modules.lisp](../../tests/lang/h2-modules.lisp), and
+[the module's document](../http2.md) names the rest.
+
 ```bash
-elle tests/http2/modules.lisp
-elle tests/http2/all.lisp
+elle tests/lang/h2-modules.lisp
 ```

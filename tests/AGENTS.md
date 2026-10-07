@@ -1,6 +1,6 @@
 # Tests
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-06 -->
 
 Where each kind of test lives, the helpers they share, and how to add one.
 
@@ -19,11 +19,16 @@ tests/
 ├── lang/               # The language suite: what every implementation must do
 ├── impl/               # The implementation suite's Elle half, run on the rig
 ├── runner/             # The `elle test` runner's own acceptance tests and fixtures
+├── ledger/             # The ratchet's bounds: one data file per producer (docs/ratchet.md)
+├── ratchet/            # Producers that drive a tool outside Elle and read its counts
+├── golden/             # The snapshots impl/escape-golden.lisp compares against
 ├── modules/            # Modules the integration tests import
 ├── property/           # Property-based tests (proptest)
 ├── integration/        # Full-pipeline and repository tests
 ├── unittests/          # Rust APIs tested directly
 ├── io_copies/          # The measuring helper `io_copies.rs` uses
+├── image_boot/         # The modules of image_boot.rs; so too region_process_teardown/, wasm_smoke/
+├── README.md           # The suites and the command that runs each
 └── *.rs                # One standalone binary each — see below
 ```
 
@@ -164,7 +169,7 @@ count. Pick `N` by the cost of one case:
 | `cargo test -p elle --lib` | ~1.5 min | The inline unit tests |
 | `cargo test --test lib integration::NAME` | seconds to minutes | One integration file |
 | `cargo test --test '*'` | ~10 min | Every integration test and standalone binary |
-| `make smoke` | ~30 min, release | Both Elle suites, the doctests, the embedding demo, and the surface gate |
+| `make smoke` | ~30 min, release | `make qa`, then both Elle suites, the doctests, the embedding demo, and the surface gate |
 | `make test` | smoke + ~5 min | What the PR gate runs, locally |
 | `cargo test --workspace` | ~30 min | Everything — ask before running it |
 

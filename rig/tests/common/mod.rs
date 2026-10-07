@@ -1,5 +1,5 @@
-// audited: 2026-09-29
-// What the rig's tests share: a scratch directory, and a run of the rig binary.
+// audited: 2026-10-05
+// What the rig's tests share: a scratch directory, a run of the rig binary, and the ratchet's scratch producer.
 // rig/overview.md
 
 #![allow(dead_code)]
@@ -7,6 +7,8 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+pub mod ratchet;
 
 /// A directory under the temp root, unique to one test, removed on drop.
 ///

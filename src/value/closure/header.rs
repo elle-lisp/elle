@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-10-06
 //! `ClosureTemplate` — the region-resident header of a code object.
 //!
 //! Two words: a `RegionSlice` naming the shared payload, and an optional `Rc`
@@ -16,7 +16,9 @@ use crate::value::region_slice::RegionSlice;
 use crate::value::types::Arity;
 use crate::value::Value;
 
-use super::payload::{CodePayload, LocationTable, MaskRef, MergedSlots, StrKeys, VarargTag};
+use super::payload::{
+    CodePayload, LocationTable, MaskRef, MergedSlots, RestListLayout, StrKeys, VarargTag,
+};
 use super::proto::TemplateProto;
 
 /// The code object a closure instance references: a shared payload plus the
@@ -225,6 +227,13 @@ impl ClosureTemplate {
     #[inline]
     pub fn vararg_tag(&self) -> VarargTag {
         self.payload().vararg_tag()
+    }
+
+    /// How a call to this code object builds its `&` rest list
+    /// (docs/impl/region/restlist.md).
+    #[inline]
+    pub fn rest_list_layout(&self) -> RestListLayout {
+        self.payload().rest_list_layout()
     }
 
     #[inline]

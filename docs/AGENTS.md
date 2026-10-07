@@ -44,6 +44,7 @@ Up: [..](../AGENTS.md)
 - [posix-signals.md](posix-signals.md) — **POSIX signals** Elle programs can send POSIX signals to other processes and observe signals delivered to themselves.
 - [process-scheduler.md](process-scheduler.md) — **Process scheduler** How a process scheduler runs sub-fibers, forwards its I/O to the scheduler it runs in, and nests.
 - [processes.md](processes.md) — **Processes** [lib/process.lisp](../lib/process.lisp) provides Erlang-style concurrent processes built on Elle's fiber scheduler.
+- [ratchet.md](ratchet.md) — **The ratchet** One library measures, one committed ledger holds every bound, and the runner judges, records and re-pins; nothing else carries a number.
 - [regions.md](regions.md) — **Region-Based Memory Management** Elle frees memory at compile-time-known program points: no tracing collector, no liveness scan, and no GC pause.
 - [runtime.md](runtime.md) — **Runtime Signals** The runtime uses fiber signals for internal coordination.
 - [scheduler.md](scheduler.md) — **Scheduler** The async scheduler is the only supported execution backend, and user code runs inside it automatically.

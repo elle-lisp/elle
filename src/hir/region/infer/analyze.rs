@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-06
 //! The region-inference pipeline: the walk, then every post-pass that decides
 //! where a release lands. The order is the point — each pass reads answers the
 //! ones before it settled.
@@ -40,6 +40,11 @@ pub fn analyze_regions_with(
     // (`call_class.effects`) for its store facet, already populated.
     let escape_info = crate::hir::analyze_escape(hir, arena, &call_class);
 
+    // Which variadic lambdas build their `&` rest list in one region. Decided
+    // here, before `call_class` moves into the inference: the gate reads which
+    // natives declare `Immediate` (docs/impl/region/restlist.md).
+    let one_region_rest_lists = super::restlist::one_region_rest_lists(hir, arena, &call_class);
+
     // The transferred-returned-subtree cut reads the call classification AFTER
     // the walk consumes it — the declared effects gate its consumer sites (an
     // `Immediate`-native read is harmless) and the fiber symbols name its fiber
@@ -72,6 +77,7 @@ pub fn analyze_regions_with(
     };
     let captured_reassigns = std::mem::take(&mut ri.captured_reassigns);
     let mut info = ri.build_info();
+    info.one_region_rest_lists = one_region_rest_lists;
     // Mirror to the public surface so tests and downstream consumers can
     // inspect which source regions each binding may point into without
     // re-running the inference. Single owner; clone is cheap relative

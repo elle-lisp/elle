@@ -1,13 +1,16 @@
-(elle/epoch 13)
-# audited: 2026-09-28
-# Resource consumption measurement tests
+(elle/epoch 14)
+# audited: 2026-10-05
+# Resource consumption across representative scenarios: each one's net heap
+# objects and its high-water mark, read against the rows of
+# tests/ledger/resource.lisp.
+# docs/ratchet.md
 #
-# Uses lib/resource.lisp to measure deterministic resource counters
-# across representative scenarios. Output is machine-parseable for CI
-# regression detection.
+# Uses lib/resource.lisp to measure deterministic resource counters. The
+# suite prints its table for a reader; the ratchet reads two numbers per
+# scenario out of it.
 
 (def res ((import-file "lib/resource.lisp")))
-
+(def r ((import "std/ratchet")))
 # ── Helper definitions ────────────────────────────────────────────
 
 (defn fib [n]
@@ -175,83 +178,13 @@
 (println "# interns=new interned strings  symbols=new symbols  keywords=new keywords")
 (def results (res:suite scenarios))
 
-# ── Assertions (canaries) ─────────────────────────────────────────
+# ── The readings ──────────────────────────────────────────────────
+# The byte delta is printed and not read: a page's size is the platform's.
 
-(defn find-result [name]
-  "Find measurement for a named scenario."
-  (letrec [loop (fn [i]
-                  (if (>= i (length results))
-                    nil
-                    (let [entry (results i)]
-                      (if (= (entry 0) name) (entry 1) (loop (%add i 1))))))]
-    (loop 0)))
-
-# TCO: net allocs and peak must be small — not proportional to iteration count
-(let [m (find-result "tco-loop-10000")]
-  (assert (< (m :allocs) 100)
-          "tco-loop-10000: net allocs must be bounded (swap pool rotation working)")
-  (assert (< (m :peak) 10)
-          "tco-loop-10000: peak must be bounded (no per-iteration allocs)"))
-
-# TCO with a per-iteration struct EMBEDDING a pair: both the struct and its
-# inner pair are retained to teardown (~2N) — the loop-scope over-keep for a
-# param-threaded aggregate with a heap member (the F1-class scratch retain;
-# contrast tco-replace below, whose member-free struct rotates at ~0).
-# CANARY, shrink-only: a fix lowers this pin.
-(let [m (find-result "tco-alloc-10000")]
-  (assert (< (m :allocs) 20100)
-          "tco-alloc-10000: struct + inner pair retained (~2/iter, canary)"))
-
-# TCO replace: a fresh struct threaded as the tail-call arg each iteration;
-# every displaced prior is retained to scope exit (~1/iter) — the
-# param-threaded tail-arg over-keep (the F1-class scratch retain).
-# CANARY, shrink-only: a fix lowers this pin.
-(let [m (find-result "tco-replace-10000")]
-  (assert (< (m :allocs) 10100)
-          "tco-replace-10000: displaced prior structs retained (~1/iter, canary)"))
-
-# TCO mixed: `acc` grows via (pair i acc) — all pairs are live (the result
-# is a 10000-element linked list, N genuine allocs) — and the per-iteration
-# `prev` struct rides the same param-threaded tail-arg over-keep as
-# tco-replace (~1/iter more). CANARY on the struct half, shrink-only.
-(let [m (find-result "tco-mixed-10000")]
-  (assert (< (m :allocs) 20100)
-          "tco-mixed-10000: live pair chain O(N) + displaced structs (canary)"))
-
-# fib: pure arithmetic, no heap objects expected
-(let [m (find-result "fib-15")]
-  (assert (= (m :allocs) 0)
-          "fib-15: pure arithmetic should allocate 0 heap objects"))
-
-# pair-build-100: builds a 100-element linked list via tail recursion.
-# All 100 pairs are live in the return value — allocs = N.
-(let [m (find-result "pair-build-100")]
-  (assert (= (m :allocs) 100) "pair-build-100: 100 live pairs in result"))
-
-# string-build-100: flip rotation resets alloc_count at each tail call,
-# so net allocs may be 0 despite actual heap activity. Check peak instead.
-(let [m (find-result "string-build-100")]
-  (assert (> (m :peak) 0)
-          "string-build-100: peak shows heap activity from string concatenation"))
-
-# let-drop-struct: outer letrec loops 100 iters; each inner let allocates
-# two structs. Escape analysis rejects scope allocation (the body reads
-# from both a and b via callable struct syntax before the tail call),
-# so allocs scale with iteration count (~2 per iter = 200 + overhead).
-(let [m (find-result "let-drop-struct")]
-  (assert (< (m :allocs) 300)
-          "let-drop-struct: allocs bounded by 2 per iteration"))
-
-# tco-pair-replace: the same param-threaded tail-arg over-keep as
-# tco-replace, with a pair cell (~1/iter). CANARY, shrink-only.
-(let [m (find-result "tco-pair-replace")]
-  (assert (< (m :allocs) 10100)
-          "tco-pair-replace: displaced prior pairs retained (~1/iter, canary)"))
-
-# All measurements should have non-negative allocs
 (each entry in results
   (let [name (entry 0)
         m (entry 1)]
-    (assert (>= (m :allocs) 0) (string name ": allocs must be non-negative"))))
+    (r:read name :allocs (m :allocs))
+    (r:read name :peak (m :peak))))
 
-(println "# all assertions passed")
+(println "# all scenarios read")

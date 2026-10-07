@@ -1,4 +1,5 @@
-(elle/epoch 12)
+(elle/epoch 14)
+# audited: 2026-10-05
 # A fresh heap value handed to a collector parameter over a frame-replacing tail
 # call, and what the callee owes for it.
 #
@@ -11,17 +12,20 @@
 # nothing in the callee names it.
 #
 # docs/impl/region/mechanism.md § "A collector parameter takes the moved
-# reference over itself" owns the argument. This file measures the rate.
+# reference over itself" owns the argument. This file measures the rate, per
+# call, on the object and region counts, against the rows of
+# tests/ledger/region-collector-arg-move.lisp.
 #
 # ── The counter-factual ──────────────────────────────────────────────
 #
-# A ceiling on a single drive proves nothing about a rate, so each shape runs at
-# two counts and both must read 0. The controls are what tell a real reclamation
-# from a dead gauge in the other direction: a positional parameter takes the same
-# move through the ordinary owned-param release and must also read 0, and the
-# retaining case at the end must read MORE than 0 — a callee that stores its
-# collected struct in a module-level sink keeps every value handed to it, so a
-# run where these numbers all came back 0 for the wrong reason fails there.
+# Every rate runs the block-size check, so a reading of 0 is a per-call rate
+# rather than a per-block artifact. The controls are what tell a real
+# reclamation from a dead gauge in the other direction: a positional parameter
+# takes the same move through the ordinary owned-param release and must also
+# read 0, and the retaining case at the end must read one per call — a callee
+# that stores its collected struct in a module-level sink keeps every value
+# handed to it, so a run where these numbers all came back 0 for the wrong
+# reason fails there.
 #
 # ── The trap ─────────────────────────────────────────────────────────
 #
@@ -31,49 +35,11 @@
 # reads 0 whatever the collector does, which is why both appear below as their
 # own cases rather than as the way the leaking cases are written.
 
-(def small 20)
-(def large 60)
+(def r ((import "std/ratchet")))
 
-# ── The gauge ────────────────────────────────────────────────────────
-#
-# One run ahead of every window is not counted: the first call through a shape
-# pays one-off costs (the callee's code, its template) that are not per call.
-# The delta is compared against `ceiling × n` rather than divided, so a
-# sub-integer rate cannot floor to 0 and report a leak as reclaimed.
-
-(defn residue [n body]
-  (body 0)
-  (let [c0 (arena/count)
-        r0 (arena/region-count)]
-    (def @i 0)
-    (while (< i n)
-      (body i)
-      (assign i (+ i 1)))
-    [(- (arena/count) c0) (- (arena/region-count) r0)]))
-
-(defn bounded [label body]
-  "`body` leaves nothing behind, at two counts."
-  (def @c 0)
-  (each n in [small large]
-    (let [[objects regions] (residue n body)]
-      (assert (= objects 0)
-              (string label " n=" n ": " objects " objects retained, expected 0"))
-      (assert (= regions 0)
-              (string label " n=" n ": " regions " regions retained, expected 0"))
-      (println "  " label " n=" n ": " objects " objects, " regions " regions")))
-  true)
-
-(defn grows [label body]
-  "`body` retains at least one object and one region per run."
-  (let [[objects regions] (residue large body)]
-    (assert (<= large objects)
-            (string "GAUGE DEAD: " label " retained " objects " objects over "
-                    large " runs — every bound in this file" " is void"))
-    (assert (<= large regions)
-            (string "GAUGE DEAD: " label " retained " regions " regions over "
-                    large " runs — every bound in this file" " is void"))
-    (println "  " label " n=" large ": " objects " objects, " regions " regions"))
-  true)
+(defn moved-rate [subject probe]
+  (r:rate subject probe :on [r:objects r:regions] :stable true :block 20 :min 4
+          :max 8))
 
 # ── The callees ──────────────────────────────────────────────────────
 #
@@ -106,10 +72,10 @@
 
 (println "one fresh value moved into a collector...")
 
-(bounded "& rest list" (fn [i] (drive-rest)))
-(bounded "&keys struct" (fn [i] (drive-keys)))
-(bounded "&named struct" (fn [i] (drive-named)))
-(bounded "positional parameter" (fn [i] (drive-plain)))
+(moved-rate "& rest list" (fn [j] (drive-rest)))
+(moved-rate "&keys struct" (fn [j] (drive-keys)))
+(moved-rate "&named struct" (fn [j] (drive-named)))
+(moved-rate "positional parameter" (fn [j] (drive-plain)))
 
 # ── Several values ───────────────────────────────────────────────────
 #
@@ -124,8 +90,8 @@
 
 (println "several fresh values into one collector...")
 
-(bounded "& rest list, three values" (fn [i] (drive-rest-three)))
-(bounded "&keys struct, three values" (fn [i] (drive-keys-three)))
+(moved-rate "& rest list, three values" (fn [j] (drive-rest-three)))
+(moved-rate "&keys struct, three values" (fn [j] (drive-keys-three)))
 
 # ── The same value twice: what the release must not read past ────────
 #
@@ -134,28 +100,12 @@
 # would free a value the callee still holds, so the release is declined for any
 # value occurring more than once. That is a deliberate trade in the leak
 # direction — never a mis-free — so these shapes retain the one reference nobody
-# took over, and the rate below is that conservatism, not a defect in the
-# release.
+# took over, and the rate is that conservatism, not a defect in the release.
 #
 # Each case asserts the callee's answer as well as the rate. That is the half
 # that cannot be traded away: a release moved past the aliasing check shows up
 # here as a wrong answer or a fault, where the rate alone would only get
 # smaller and look like an improvement.
-
-(def max-aliased-regions-per-call 1)
-
-(defn at-most [label per-call body]
-  "`body` retains no more than `per-call` objects and regions per run."
-  (each n in [small large]
-    (let [[objects regions] (residue n body)]
-      (assert (<= objects (* per-call n))
-              (string label " n=" n ": " objects " objects exceeds the "
-                      per-call "/call ceiling"))
-      (assert (<= regions (* per-call n))
-              (string label " n=" n ": " regions " regions exceeds the "
-                      per-call "/call ceiling"))
-      (println "  " label " n=" n ": " objects " objects, " regions " regions")))
-  true)
 
 (defn take-rest-len [x & xs]
   (length xs))
@@ -172,14 +122,14 @@
 
 (println "one value in two argument positions...")
 
-(at-most "& rest list, aliased value" max-aliased-regions-per-call
-         (fn [i]
-           (assert (= (drive-rest-aliased) 2)
-                   "the callee saw both rest arguments")))
-(at-most "&keys struct, aliased value" max-aliased-regions-per-call
-         (fn [i]
-           (assert (= (drive-keys-aliased) 6)
-                   "the callee read the aliased value")))
+(moved-rate "& rest list, aliased value"
+            (fn [j]
+              (assert (= (drive-rest-aliased) 2)
+                      "the callee saw both rest arguments")))
+(moved-rate "&keys struct, aliased value"
+            (fn [j]
+              (assert (= (drive-keys-aliased) 6)
+                      "the callee read the aliased value")))
 
 # ── The value in a collector position is still readable ──────────────
 #
@@ -194,10 +144,10 @@
 
 (println "the collected value survives the call it was collected for...")
 
-(bounded "&named struct, callee reads the value"
-         (fn [i]
-           (assert (= (drive-named-read) 6)
-                   "the callee read its collected value")))
+(moved-rate "&named struct, callee reads the value"
+            (fn [j]
+              (assert (= (drive-named-read) 6)
+                      "the callee read its collected value")))
 
 # ── The shapes that read 0 for a different reason ────────────────────
 #
@@ -216,15 +166,14 @@
 
 (println "no move to take over...")
 
-(bounded "&keys struct, call not in tail" (fn [i] (drive-keys-nontail)))
-(bounded "&keys struct, value the caller never owned"
-         (fn [i] (drive-keys-borrowed)))
+(moved-rate "&keys struct, call not in tail" (fn [j] (drive-keys-nontail)))
+(moved-rate "&keys struct, value the caller never owned"
+            (fn [j] (drive-keys-borrowed)))
 
-# ── The gauge-live gate ──────────────────────────────────────────────
+# ── The callee that keeps what it collects ───────────────────────────
 #
-# Every bound above passes for two reasons: the release runs, or the gauge is
-# dead. A callee that keeps what it collects is unbounded by construction, so it
-# must read at least one object and one region per run through the same helper.
+# Unbounded by construction: its rows are growth floors at one per call, so a
+# run in which it reads less voids every rate on its axis.
 
 (def @sink @[])
 
@@ -234,10 +183,8 @@
 (defn drive-keys-kept []
   (take-keys-keeps 1 :body (bytes "abcdef")))
 
-(println "gauge-live gate...")
+(println "a callee that keeps its collected struct...")
 
-(grows "&keys struct the callee keeps" (fn [i] (drive-keys-kept)))
-
-(assert (= (length sink) (+ large 1)) "the sink kept every struct it was given")
+(moved-rate "&keys struct the callee keeps" (fn [j] (drive-keys-kept)))
 
 (println "region collector arg move: every moved reference was taken over")

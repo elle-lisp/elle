@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-28
+(elle/epoch 14)
+# audited: 2026-10-06
 ## lib/http2/reader.lisp — the frame reader both an h2 client and an h2 server run
 ##
 ## Loaded via:
@@ -140,10 +140,12 @@
                       (let [headers (hpack:decode sess:hpack-decoder payload)
                             end? (has-flag? flags C:flag-end-stream)]
                         (on-headers sess s sid headers end?))
-                      (begin  # §6.2: track continuation expectation
+                      # §6.2: track continuation expectation. END_STREAM rides
+                      # in :pending-headers, and on-headers makes the stream's
+                      # transition once the block is whole, as it does for a
+                      # block that arrived in one frame.
+                      (begin
                         (put sess :expecting-continuation-sid sid)
-                        (when (has-flag? flags C:flag-end-stream)
-                          (stream:transition s :recv-end-stream))
                         (put s
                              :pending-headers @{:data payload
                              :end-stream (has-flag? flags C:flag-end-stream)})))))

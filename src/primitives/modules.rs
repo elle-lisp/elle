@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-09-30
 //! The import-file primitive: resolve a module spec, then run a .lisp module or
 //! load a native plugin, with circular-import detection.
 //!
@@ -41,7 +41,7 @@ fn import_required_bits(args: &[Value]) -> SignalBits {
 
 /// Resolve the Elle project root.
 /// Checks `--home` config first, then walks up from the binary to find `Cargo.toml`.
-fn elle_root() -> Option<PathBuf> {
+pub(crate) fn elle_root() -> Option<PathBuf> {
     if let Some(home) = &crate::config::get().home {
         let p = PathBuf::from(home);
         if p.is_dir() {

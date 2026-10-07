@@ -1,6 +1,6 @@
 # Region performance — merging and the cost model
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-06 -->
 
 This is the consumer's view of where region performance comes from and what you
 can and cannot affect. The implementor's account of the page pool is in
@@ -47,7 +47,7 @@ value baseline affordable.
 The cache is bounded. Past that bound a released page is unmapped instead of
 kept, which is where memory returns to the OS; a page inside the bound stays
 resident because it is about to be handed out again. The implementor's account
-is in [impl/region/model.md](../impl/region/model.md) § "Page recycling".
+is in [impl/region/model.md](../impl/region/model.md).
 
 ## A call into a variadic stdlib operator allocates
 
@@ -57,6 +57,13 @@ arguments builds the two-cons rest list and the `letrec` closure that the
 definition asks for, and each of those objects is born in its own region, which
 owns a page. `(+ a b)` therefore claims three pages, where `(%add a b)` is one
 VM instruction and claims none.
+
+A rest list costs one page per argument when the callee might keep a tail of
+it. When the callee only reads it — counts it, tests it for empty, takes its
+first element, or splices it into another call — the whole list shares one
+region and costs one page ([restlist](../impl/region/restlist.md) gives the
+rule). `+` hands its list to the `letrec` helper that walks it, so it pays per
+argument.
 
 That is the price of the wrapper's polymorphism, its runtime type checks, and
 its `:error` signal — and it is the reason
@@ -78,9 +85,14 @@ value that appears exactly once across the whole argument list may be released;
 one that appears twice shares a single moved reference, and a second release
 would free it out from under a live use. So the release step needs each
 value's occurrence count — and it takes them from one counting pass, not from
-comparing every argument with every other. `(apply f xs)` in tail position over
-a 40000-element `xs` is a 40000-step operation, not a 1.6-billion-step one
+comparing every argument with every other. A tail call that writes out 4000
+arguments is a 4000-step operation, not a 16-million-step one
 ([apply-tail-linear.lisp](../../tests/impl/apply-tail-linear.lisp)).
+
+A spliced call, `(apply f xs)` or `(f ;xs)`, moves nothing. Its arguments come
+out of an array the calling convention owns, so the callee takes a reference of
+its own to each, and no reference is surplus
+([mechanism.md](../impl/region/mechanism.md)).
 
 ## What you can do
 

@@ -1,10 +1,10 @@
-// audited: 2026-09-21
+// audited: 2026-10-05
 // src/pipeline/AGENTS.md
 //! `CompileCtx`: one instance's compile-time state.
 //!
 //! A macro-expansion VM, the prelude/core `Expander`, the `PrimitiveMeta`
-//! (primitives + core.lisp + stdlib exports + REPL value bindings), and the
-//! file→signal projection map.
+//! (primitives + host primitives + core.lisp + stdlib exports + REPL value
+//! bindings), and the file→signal projection map.
 //!
 //! This is owned by the instance's `RuntimeCore` (a sibling of the `VM` and
 //! `SymbolTable`) and threaded explicitly through the pipeline: two embedded Elle
@@ -345,6 +345,26 @@ impl CompileCtx {
             self.meta.arities.insert(sym_id, a);
         }
         crate::value::arena::register_process_root(heap, value, funding);
+    }
+
+    /// Register a host primitive under its name and aliases, so compiled code
+    /// and `eval` both resolve it as they resolve a built-in.
+    ///
+    /// A REPL binding reaches the compile `meta` alone, and `eval` compiles
+    /// against the macro-body `eval_meta`; a primitive belongs in both. A
+    /// primitive value is an immediate, so nothing here needs a root.
+    pub fn register_primitive(
+        &mut self,
+        symbols: &mut SymbolTable,
+        def: &'static crate::primitives::def::PrimitiveDef,
+    ) {
+        let mut eval_meta = self.expander.eval_meta().clone();
+        for name in std::iter::once(&def.name).chain(def.aliases) {
+            let sym_id = symbols.intern(name);
+            self.meta.insert_def(sym_id, def);
+            eval_meta.insert_def(sym_id, def);
+        }
+        self.expander.set_eval_meta(eval_meta);
     }
 
     /// Merge REPL-defined macros into the expander so subsequent compilations

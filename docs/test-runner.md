@@ -1,6 +1,6 @@
 # Agent-First Test Runner
 
-<!-- audited: 2026-09-30 -->
+<!-- audited: 2026-10-05 -->
 
 How a run executes: each file compiled, isolated, gated, run on every tier its
 build carries, and recorded honestly.
@@ -150,11 +150,11 @@ covers program teardown.
 
 `--isolate FLAGS` runs each selected path as its own child — `elle FLAGS PATH`,
 one process per path — and records it on the `process` tier. The flag string is
-split on spaces and may be empty. `--host PROGRAM` names the program each child
-runs instead of this `elle`: `elle test --host target/release/elle-rig
---isolate ''` runs each path as `elle-rig PATH`, which reads the path's sidecar
-([rig](../rig/overview.md)). The implementation suite runs this way
-([testing](testing.md)).
+split on spaces and may be empty. The child is the runner's own executable, so
+`elle-rig test --isolate ''` runs each path as `elle-rig PATH`, which reads the
+path's sidecar ([rig](../rig/overview.md)). The implementation suite runs this
+way ([testing](testing.md)). `--host PROGRAM` names another program for each
+child, and a run with it has no build ([ratchet](ratchet.md)).
 
 A child is one process and leaves one exit status, so an isolated run has no
 per-tier rows and no differential: the child runs on whatever its program and
@@ -298,7 +298,13 @@ the differential is its job. The rig sets a tier per file through its sidecar
 **Where the differential runs.** Each build's language pass is one `elle test`
 over the language suite, in-process, so every language file meets every tier
 its build carries ([testing](testing.md)). The implementation suite runs each
-file as its own child on the rig, under the file's sidecar. A directed
+file as its own child on the rig, under the file's sidecar, except the
+producers, the files `tests/ledger` names ([ratchet](ratchet.md)). They run
+in-process under `elle-rig test`, in a pass of their own, so each producer's
+readings come from both JIT policies. The rest of the suite stays isolated for
+three reasons. `--trace=guardfree` reports a use-after-free as a SIGSEGV that
+would end the runner. A sidecar configures a process, and a worker shares the
+runner's. And only a process of its own covers program teardown. A directed
 tier-parity test, one that pins a specific tier pair on a specific construct,
 is an implementation test. It lives in `tests/impl/` and calls `compile/run-on`
 itself ([differential](impl/differential.md)).

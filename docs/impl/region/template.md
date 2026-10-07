@@ -1,6 +1,6 @@
 # Code objects — a blueprint, a payload, and a header
 
-<!-- audited: 2026-09-14 -->
+<!-- audited: 2026-10-06 -->
 
 A closure template is the code object of one lambda: its bytecode, constant
 pool, source locations, and the region tables its body needs. This doc owns the
@@ -37,7 +37,7 @@ emitter and the JIT — hold the same two inputs: the lambda's `LirFunction`, an
 the bytecode its own emission produced. So `TemplateProto::nested_lambda` takes
 those two and fills every field.
 
-The alternative is a hand-written literal at each site. Twenty fields is more
+The alternative is a hand-written literal at each site. Over twenty fields is more
 than a backend keeps track of, a field one of them leaves out gets the empty
 value `TemplateProto::new` supplies, and the code object it builds still runs.
 
@@ -135,7 +135,7 @@ image rewrites it from the file table ([format.md](../image/format.md)).
 | strict-struct keys | `RegionSlice<RegionSlice<u8>>` — the `&named` key set |
 | children | `RegionSlice<Value>` — the code objects a `MakeClosure` indexes, empty until a dump fills it ([sealing.md](../image/sealing.md)) |
 | origin | a `Span` and a present flag — where the lambda was written, for `meta/origin` |
-| arity, param and local counts, signal, capture-params mask, vararg kind, WASM index | scalars, inline |
+| arity, param and local counts, signal, capture-params mask, vararg kind, rest-list layout ([restlist.md](restlist.md)), WASM index | scalars, inline |
 
 Two of those changed shape rather than merely moving.
 

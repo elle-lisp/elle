@@ -1,6 +1,6 @@
 # The implementation suite
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-05 -->
 
 Elle programs that check this implementation: its gauges, its tiers, its crashes
 and its mechanisms, each run on the rig.
@@ -49,7 +49,6 @@ The sidecar says what the file needs; the file's header comment says why.
 The suite runs the files at the top of this directory. The directories under it
 hold what those files read, and the suite runs none of them:
 
-- `lib/` holds the leak estimator the two dashboards import.
 - `probe/` holds the oracle's rows, one module per shape family, which
   [oracle.lisp](oracle.lisp) includes.
 - `tailexit/` holds the tail-exit ledgers, which
@@ -61,17 +60,21 @@ hold what those files read, and the suite runs none of them:
 ## The dashboards
 
 [oracle.lisp](oracle.lisp) measures the leak rate of each residual class, and
-[plumb.lisp](plumb.lisp) measures the I/O leak rates. Each loops a shape
-under a heap gauge and reports a verdict per class through the measurement
-channel ([test-store](../../docs/test-store.md)).
+[plumb.lisp](plumb.lisp) measures the I/O leak rates. Each drives a shape
+under the ratchet's gauges and prints one reading per subject, which the
+runner judges against the row its ledger under `tests/ledger` holds for the
+run's build ([ratchet](../../docs/ratchet.md)).
 [docs/impl/region/diagnostics.md](../../docs/impl/region/diagnostics.md) owns
-their instruments.
+the gauges they read.
 
 ## Running
 
-`make smoke-impl` runs every file here as its own child of `elle test --host
-elle-rig`, so each verdict lands in the session store. It then runs the
-suites once more under each profile the pass names. `make smoke-pool` runs the
+`make smoke-impl` runs every file here as its own child of `elle-rig test
+--isolate ''`, so each verdict lands in the session store, and each reading is
+judged as the rig's build. The files `tests/ledger` names are the exception:
+they run in-process under `elle-rig test`, in a pass of their own
+([test-runner](../../docs/test-runner.md)). It then runs the suites once more
+under each profile the pass names, less those files. `make smoke-pool` runs the
 files here again on the thread-pool build's rig, `make smoke-mlir` on the MLIR
 build's rig, and `make smoke-wasm` on the `wasm` build's rig. A file that reads
 a resource only one build has gates

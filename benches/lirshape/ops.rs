@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-10-06
 //! The operations each form is measured on, written twice.
 //!
 //! docs/impl/image/measurements.md
@@ -135,6 +135,7 @@ pub fn build_rust(corpus: &[LirFunction]) -> Vec<LirFunction> {
         nf.doc = f.doc.clone();
         nf.origin = f.origin;
         nf.vararg_kind = f.vararg_kind.clone();
+        nf.rest_list_layout = f.rest_list_layout;
         nf.num_params = f.num_params;
         nf.num_local_params = f.num_local_params;
         nf.yield_points = f.yield_points.clone();

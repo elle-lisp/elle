@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-05
 //! elle's subcommands — `fmt`, `lint`, `lsp`, `rewrite`, `image`, `semver`, `test` — dispatched for `elle` and the rig alike.
 //!
 //! rig/overview.md
@@ -7,7 +7,8 @@
 //! A program can run its own executable with a subcommand, as the semver
 //! tool's tests do with `(elle/executable)`. Under the rig that executable is
 //! `elle-rig`, so both binaries answer the subcommands here, and a program runs
-//! under the rig unchanged.
+//! under the rig unchanged. The rig runs `test` through [`Test`] on a runtime
+//! it builds, so that runtime carries the rig's own primitive.
 
 use crate::runtime::Runtime;
 
@@ -15,10 +16,13 @@ use crate::runtime::Runtime;
 /// definitions are evaluated. See docs/test-runner.md.
 const TEST_RUNNER_FRAGMENTS: &[&str] = &[
     include_str!("../test/store.lisp"),
+    include_str!("../test/ledger.lisp"),
     include_str!("../test/import.lisp"),
     include_str!("../test/exec.lisp"),
+    include_str!("../test/child.lisp"),
     include_str!("../test/record.lisp"),
     include_str!("../test/view.lisp"),
+    include_str!("../test/repin.lisp"),
     include_str!("../test/main.lisp"),
 ];
 
@@ -89,7 +93,8 @@ pub(super) fn split_own_flags(
 ///
 /// Each fragment is a whole Elle file — formatted, stamped, and read on its
 /// own — so each carries the epoch declaration a file needs. A module declares
-/// its epoch once, so every fragment past the first drops the line here.
+/// its epoch once, so every fragment past the first drops the line here, and
+/// every fragment has to declare the first one's.
 fn test_runner_source() -> String {
     let mut src = String::new();
     for (i, fragment) in TEST_RUNNER_FRAGMENTS.iter().enumerate() {
@@ -104,43 +109,89 @@ fn test_runner_source() -> String {
     src
 }
 
-/// `elle test ...` — set up a full VM and run the embedded runner with the
-/// post-`test` arguments exposed to it as the program argv (via `(sys/argv)`).
-/// The runner calls `(os/exit ...)` itself with the gate code; the Ok/Err
-/// mapping here is the fallback if it returns without exiting.
+/// `elle test ...` — set up a full VM and run the embedded runner on it.
 fn run_test(sub_args: Vec<String>) -> i32 {
-    // Split off elle's own flags so the embedded runner's VM (and the off-VM
-    // free-log / page-claim histogram) honour them; the rest become the
-    // runner's argv. A runner flag's value is the runner's even when it spells
-    // one of elle's flags: `--isolate '--trace=scrub'` hands the flag to each
-    // child, not to this VM. `--boot-image=` boots this instance from an image,
-    // which is how a suite is compiled against a hydrated stdlib
-    // (docs/impl/image/boot.md).
-    let (config_flags, sub_args) = split_own_flags(sub_args, RUNNER_VALUE_FLAGS);
-    let (mut config, _rest) = crate::config::Config::parse(&config_flags).unwrap_or_else(|e| {
-        eprintln!("elle test: {}", e);
-        std::process::exit(1);
-    });
-    // The runner's workers run a whole-file script with the JIT off and with it
-    // eager, and this is the one process that may set either
-    // (docs/test-runner.md).
-    config.test_runner = true;
-    crate::config::init(config);
-    crate::io::init_process_signals();
-
-    // One runtime, one teardown — the same lifecycle every entry path uses.
+    let test = Test::prepare(sub_args);
     let mut rt = Runtime::new();
-    rt.vm().source_arg = "<test>".to_string();
-    rt.vm().user_args = sub_args;
+    test.drive(&mut rt)
+}
 
-    let code = {
+/// One `test` invocation: the runner's own arguments, with the process
+/// configuration already installed. The rig builds the runtime between
+/// [`Test::prepare`] and [`Test::drive`], as `elle test` does with
+/// `Runtime::new()` (rig/overview.md).
+pub struct Test {
+    runner_args: Vec<String>,
+}
+
+impl Test {
+    /// Split elle's own flags off the post-`test` arguments, install the
+    /// configuration they set, and keep the rest as the runner's argv. A
+    /// configuration flag the runner cannot read exits 1.
+    pub fn prepare(sub_args: Vec<String>) -> Test {
+        // Split off elle's own flags so the embedded runner's VM (and the
+        // off-VM free-log / page-claim histogram) honour them; the rest become
+        // the runner's argv. A runner flag's value is the runner's even when it
+        // spells one of elle's flags: `--isolate '--trace=scrub'` hands the
+        // flag to each child, not to this VM. `--boot-image=` boots this
+        // instance from an image, which is how a suite is compiled against a
+        // hydrated stdlib (docs/impl/image/boot.md).
+        let (config_flags, runner_args) = split_own_flags(sub_args, RUNNER_VALUE_FLAGS);
+        let (mut config, _rest) = crate::config::Config::parse(&config_flags).unwrap_or_else(|e| {
+            eprintln!("elle test: {}", e);
+            std::process::exit(1);
+        });
+        // The runner's workers run a whole-file script with the JIT off and
+        // with it eager, and this is the one process that may set either
+        // (docs/test-runner.md).
+        config.test_runner = true;
+        crate::config::init(config);
+        crate::io::init_process_signals();
+        Test { runner_args }
+    }
+
+    /// Run the embedded runner on `rt`, with the runner's arguments exposed
+    /// as the program argv (via `(sys/argv)`). The runner calls
+    /// `(os/exit ...)` itself with the gate code; the answer here is the
+    /// fallback if it returns without exiting, and on that graceful return
+    /// `rt`'s Drop runs the principled teardown sweep.
+    pub fn drive(self, rt: &mut Runtime) -> i32 {
+        rt.vm().source_arg = "<test>".to_string();
+        rt.vm().user_args = self.runner_args;
         let (vm, symbols, cctx) = rt.parts();
         match super::run_source(&test_runner_source(), "src/test", vm, symbols, cctx) {
             Ok(_) => 0,
             Err(_) => 1,
         }
-    };
-    // The runner usually calls `(os/exit …)` itself (skipping Drop); on a
-    // graceful return `rt`'s Drop runs the principled teardown sweep.
-    code
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TEST_RUNNER_FRAGMENTS;
+
+    /// The `(elle/epoch N)` a fragment opens with.
+    fn epoch_line(fragment: &str) -> &str {
+        fragment
+            .lines()
+            .find(|l| l.starts_with("(elle/epoch"))
+            .unwrap_or("no epoch declaration")
+    }
+
+    /// The trap: the module compiles under the epoch of its first fragment,
+    /// and the rest drop their declaration. `elle fmt` migrates only the files
+    /// a commit stages, so a commit that migrated some fragments compiled the
+    /// others under rules they were never migrated to, and every runner test
+    /// failed far from the cause.
+    #[test]
+    fn every_fragment_declares_the_epoch_the_module_compiles_under() {
+        let first = epoch_line(TEST_RUNNER_FRAGMENTS[0]);
+        for (i, fragment) in TEST_RUNNER_FRAGMENTS.iter().enumerate() {
+            assert_eq!(
+                epoch_line(fragment),
+                first,
+                "runner fragment {i} declares another epoch than the first"
+            );
+        }
+    }
 }

@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 13)
+# audited: 2026-09-30
 # Discarded call results and break escapes, the branch-arm release window in each of its faces, and the frame-exit rows.
 #
 # docs/impl/region/diagnostics.md
@@ -10,48 +10,48 @@
 # probes below are here to measure — the block, not the enclosing call, is what
 # must anchor a release the break's jump passes over.
 (println "── folded suite: call-result + break ──")
-(pin (measure-core "branch-call"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       # %rem (not the mod wrapper): j is a proven local int
-                       # and the wrapper's result would be untyped
-                       (if (%lt (%rem j 2) 1) (t17-h) (t17-h2))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(r:drive "branch-call"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             # %rem (not the mod wrapper): j is a proven local int
+             # and the wrapper's result would be untyped
+             (if (%lt (%rem j 2) 1) (t17-h) (t17-h2))
+             (assign j (%add j 1)))))
 # The raw `%array-push`/`%put` into a fresh container, discarded: the CONTROL for
 # the stdlib `put`/`push` type-dispatch WRAPPER. The raw intrinsic reclaims the
 # container in BOTH intrinsics modes (rate 0), so a rate `put-churn` shows below
 # rides the wrapper, not the store funnel. Direct while-statements (a thunk
 # wrapper's return convention would inflate the rate by 1).
-(pin (measure-core "push-slot-source"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (let [items @[]]
-                         (%array-push items (%pair 1 2)))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "put-slot-source"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (let [s @{}]
-                         (%put s :k (%pair 1 2)))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(r:drive "push-slot-source"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (let [items @[]]
+               (%array-push items (%pair 1 2)))
+             (assign j (%add j 1)))))
+(r:drive "put-slot-source"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (let [s @{}]
+               (%put s :k (%pair 1 2)))
+             (assign j (%add j 1)))))
 # The raw `%add-set-mut` into a fresh @set, discarded — the set-family CONTROL,
 # the peer of push-slot-source/put-slot-source. The raw silent intrinsic reclaims
 # the container (rate 0), so a rate `set-add` (probe/store.lisp) shows rides the
 # stdlib `add` type-dispatch WRAPPER, not the set-add funnel (`set_add_with_incref`).
-(pin (measure-core "set-add-slot-source"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (let [s @||]
-                         (%add-set-mut s (%pair 1 2)))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(r:drive "set-add-slot-source"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (let [s @||]
+               (%add-set-mut s (%pair 1 2)))
+             (assign j (%add j 1)))))
 # put-churn mints a FRESH @struct container per op and hands it through the stdlib
 # `put`; its `:@struct` arm's `%put-struct-mut` returns the container pass-through,
 # and the wrapper's per-arm container release (`container_release_sites`,
@@ -59,14 +59,14 @@
 # cascading the stored struct — rate 0 in both intrinsics modes, every tier. A
 # CLOSED control beside `put-slot-source`; it opens if the container compensation
 # regresses.
-(pin (measure-core "put-churn"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (let [s @{}]
-                         (put s :k {:v j}))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(r:drive "put-churn"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (let [s @{}]
+               (put s :k {:v j}))
+             (assign j (%add j 1)))))
 # Per-arm compensation over a `Match`, both faces. `match-dead-arm` is a CLOSED
 # control: the taken arm has no use of the pre-allocated local, so the head release
 # frees it (docs/impl/region/compensate.md — the premises are stated over arms, so
@@ -78,26 +78,25 @@
 # over-frees: an arm that used the region may hold an uncounted borrow the solver
 # does not name, which is why the window is a placement argument and not a count
 # one.
-(pin (measure-core "match-dead-arm"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (t21-dead-arm :skip)
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "match-used-arm"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (t21-used-arm :a)
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(r:drive "match-dead-arm"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (t21-dead-arm :skip)
+             (assign j (%add j 1)))))
+(r:drive "match-used-arm"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (t21-used-arm :a)
+             (assign j (%add j 1)))))
 # The owned-parameter face of the same branch structure, and its `If` twin. Both
 # are CLOSED controls for the branch-arm release window: the argument's whole
 # region (3 cons cells) strands on every arm that is not the one naming it last,
-# unless the single release is anchored where every arm reaches it. Undeclared,
-# like `rest-array-copy`, so a regression trips the completeness gate loudly
-# rather than being absorbed as a declared strand. Their counterfactual and the
+# unless the single release is anchored where every arm reaches it. Their
+# counterfactual and the
 # window boundaries are `tests/impl/region-branch-arm-window.lisp` and
 # `tests/impl/region-branch-arm-tailcall.lisp`; the soundness complement is
 # `region-branch-arm-window-uaf.lisp`.
@@ -118,75 +117,73 @@
 # lowerer emits after the loop, so the boundary that declines a loop is the loop's
 # BODY and this class is admitted; reading the boundary as the closed subtree
 # interval strands the argument on every arm but the looping one.
-(pin (measure-core "param-used-arm"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (t22-param-arm (list 1 2 3) :a)
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "param-used-arm-if"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (t22-param-if (list 1 2 3) true)
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "arm-alias-inside"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (t22-arm-alias-inside (list 1 2 3) :a)
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "arm-seq-read"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (t22-arm-seq-read (list 1 2 3) :a)
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "arm-loop-read"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (t22-arm-loop-read (list 1 2 3) :a)
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "branch-arm-tailcall-sibling"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (t22-tailcall-sibling (list 1 2 3) :a)
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "branch-arm-return-captured"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (t22-returned-captured (@string) "xy")
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(r:drive "param-used-arm"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (t22-param-arm (list 1 2 3) :a)
+             (assign j (%add j 1)))))
+(r:drive "param-used-arm-if"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (t22-param-if (list 1 2 3) true)
+             (assign j (%add j 1)))))
+(r:drive "arm-alias-inside"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (t22-arm-alias-inside (list 1 2 3) :a)
+             (assign j (%add j 1)))))
+(r:drive "arm-seq-read"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (t22-arm-seq-read (list 1 2 3) :a)
+             (assign j (%add j 1)))))
+(r:drive "arm-loop-read"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (t22-arm-loop-read (list 1 2 3) :a)
+             (assign j (%add j 1)))))
+(r:drive "branch-arm-tailcall-sibling"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (t22-tailcall-sibling (list 1 2 3) :a)
+             (assign j (%add j 1)))))
+(r:drive "branch-arm-return-captured"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (t22-returned-captured (@string) "xy")
+             (assign j (%add j 1)))))
 # The scope-map face of the same `Match`: the arm READS a name its pattern bound,
 # and that read is a borrowing read of the SCRUTINEE (rules.md Rule 4), so it is
 # what places a whole fresh struct's release. A pattern whose scope goes
 # unrecorded reads as bound outside this loop, hoisting that release past the loop
 # and stranding every iteration's scrutinee but the last
-# (docs/impl/region/anchors.md). CLOSED control — undeclared, like
-# `param-used-arm`, so a regression trips the completeness gate loudly rather
-# than being absorbed as a declared strand. The
+# (docs/impl/region/anchors.md). A control at 0. The
 # per-shape rows and the arm-not-taken / guard / nested-loop faces are
 # `tests/impl/region-match-bind-loop.lisp`; the soundness complement is
 # `region-match-bind-loop-uaf.lisp`.
-(pin (measure-core "struct-match"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (match {:type :a :v j}
-                         {:type :a :v v} v
-                         _ 0)
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(r:drive "struct-match"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (match {:type :a :v j}
+               {:type :a :v v} v
+               _ 0)
+             (assign j (%add j 1)))))
 # The frame-exit release, thirteen CLOSED controls. A frame-replacing tail call means
 # everything the lowerer emits after it runs only on the NATIVE fall-through, so a
 # release landing there is emitted where control may never arrive; the relocation
@@ -227,104 +224,102 @@
 # together: `and`'s branch
 # is `or`'s mirror — the first operand settles on FALSE rather than on true — so
 # the two reach the same arm through opposite conditions and a reading that
-# recovered one polarity alone would close one of them.
-# Undeclared, like `param-used-arm`, so a regression trips the
-# completeness gate loudly rather than being absorbed as declared scratch. The
+# recovered one polarity alone would close one of them. The
 # counterfactual and the boundary rows live in
 # `tests/impl/region-tail-frame-exit.lisp` and its `-capture` and `-letrec`
 # siblings; the soundness complement is
 # `region-tail-frame-exit-uaf.lisp`.
-(pin (measure-core "tail-frame-exit-unused"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (t23-unused (list 1 2 3))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "tail-frame-exit-arms"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (t23-arms (list 1 2 3) true)
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "tail-frame-exit-captured"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (t23-captured (list 1 2 3))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "tail-frame-exit-handback"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (t23-drive-handback (list 1 2 3))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "tail-frame-exit-moved"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (t23-moved (list 1 2 3))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "tail-frame-exit-fwd-cell"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (t23-fwd-cell 3)
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "tail-frame-exit-fwd-cell-ret"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (t23-fwd-cell-ret 3)
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "tail-frame-exit-fwd-cell-sib"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (t23-fwd-cell-sib 3)
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "tail-frame-exit-operand-value"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (t23-operand-value 3)
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "tail-frame-exit-callee-member"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (t23-callee-member 3)
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "tail-frame-exit-fold-driver"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (t23-fold-drive 3)
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "tail-frame-exit-or-arm"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (t23-or-arm (list 1 2 3) false)
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "tail-frame-exit-and-arm"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (t23-and-arm (list 1 2 3) true)
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(r:drive "tail-frame-exit-unused"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (t23-unused (list 1 2 3))
+             (assign j (%add j 1)))))
+(r:drive "tail-frame-exit-arms"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (t23-arms (list 1 2 3) true)
+             (assign j (%add j 1)))))
+(r:drive "tail-frame-exit-captured"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (t23-captured (list 1 2 3))
+             (assign j (%add j 1)))))
+(r:drive "tail-frame-exit-handback"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (t23-drive-handback (list 1 2 3))
+             (assign j (%add j 1)))))
+(r:drive "tail-frame-exit-moved"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (t23-moved (list 1 2 3))
+             (assign j (%add j 1)))))
+(r:drive "tail-frame-exit-fwd-cell"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (t23-fwd-cell 3)
+             (assign j (%add j 1)))))
+(r:drive "tail-frame-exit-fwd-cell-ret"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (t23-fwd-cell-ret 3)
+             (assign j (%add j 1)))))
+(r:drive "tail-frame-exit-fwd-cell-sib"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (t23-fwd-cell-sib 3)
+             (assign j (%add j 1)))))
+(r:drive "tail-frame-exit-operand-value"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (t23-operand-value 3)
+             (assign j (%add j 1)))))
+(r:drive "tail-frame-exit-callee-member"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (t23-callee-member 3)
+             (assign j (%add j 1)))))
+(r:drive "tail-frame-exit-fold-driver"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (t23-fold-drive 3)
+             (assign j (%add j 1)))))
+(r:drive "tail-frame-exit-or-arm"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (t23-or-arm (list 1 2 3) false)
+             (assign j (%add j 1)))))
+(r:drive "tail-frame-exit-and-arm"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (t23-and-arm (list 1 2 3) true)
+             (assign j (%add j 1)))))
 # The three `break-value*` probes are CLOSED controls for the break TRANSFER
 # (docs/impl/region/anchors.md): the value a
 # `break` carries out is the BLOCK's value, so its release is anchored where the
@@ -332,31 +327,31 @@
 # itself, emitted after the exit label and reached on both paths — instead of
 # inside the body the break jumps out of. Discarded, consumed, and heap-literal
 # placements all reclaim; they open if the transfer regresses.
-(pin (measure-core "break-value"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (block (let [x (t17-h)]
-                                (break x)))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "break-value-used"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (let [r (block (let [x (t17-h)]
-                                        (break x)))]
-                         (get r :a))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "break-value-lit"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (block (let [x {:a j}]
-                                (break x)))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(r:drive "break-value"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (block (let [x (t17-h)]
+                      (break x)))
+             (assign j (%add j 1)))))
+(r:drive "break-value-used"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (let [r (block (let [x (t17-h)]
+                              (break x)))]
+               (get r :a))
+             (assign j (%add j 1)))))
+(r:drive "break-value-lit"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (block (let [x {:a j}]
+                      (break x)))
+             (assign j (%add j 1)))))
 # The OTHER face of the break window, also CLOSED: a region whose value is NOT
 # the one broken out, but whose `decref_point` sits between the break site and
 # the block's exit label. The transfer does not reach it — the release is simply
@@ -366,21 +361,21 @@
 # the window pin regresses. The three boundaries the window stops at — a loop or
 # a lambda nested inside it, and a frame-replacing tail call on the block's
 # fall-through — are gauged by tests/impl/region-break-skip.lisp, not here.
-(pin (measure-core "break-skipped"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (block (let [x (t17-h)]
-                                (when (%lt -1 j) (break 1))
-                                (%struct? x)))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "break-skipped-nobreak"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (block (let [x (t17-h)]
-                                (when (%lt j -1) (break 1))
-                                (%struct? x)))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(r:drive "break-skipped"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (block (let [x (t17-h)]
+                      (when (%lt -1 j) (break 1))
+                      (%struct? x)))
+             (assign j (%add j 1)))))
+(r:drive "break-skipped-nobreak"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (block (let [x (t17-h)]
+                      (when (%lt j -1) (break 1))
+                      (%struct? x)))
+             (assign j (%add j 1)))))

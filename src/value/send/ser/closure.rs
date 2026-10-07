@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-10-06
 // docs/threads.md
 //! Serializing a live closure instance into the bundle's intern table.
 //!
@@ -11,7 +11,7 @@ use super::super::*;
 use super::ctx::SerContext;
 use super::from_value_inner;
 use super::lir::convert_lir_for_send;
-use super::template::sendable_from_child;
+use super::template::{sendable_from_child, sendable_header};
 
 /// Serialize a closure instance reached at heap value `value`, interning it
 /// into `ctx.closures` with cycle detection and returning a `Ref` to its slot.
@@ -48,6 +48,7 @@ pub(super) fn send_closure(
         location_map: LocationMap::new(),
         doc: None,
         vararg_kind: closure_rc.template.vararg_kind(),
+        rest_list_layout: closure_rc.template.rest_list_layout(),
         name: None,
         squelch_mask: SignalBits::EMPTY,
         env: Vec::new(),
@@ -77,10 +78,7 @@ pub(super) fn send_closure(
         .collect();
     let constants = constants?;
 
-    // Serialize doc (optional) — plain string data, not a heap Value.
-    let doc = closure_rc.template.doc().map(str::to_string);
-
-    // Clone LIR for JIT in spawned threads. Strip doc (a Value/Rc), then
+    // Clone LIR for JIT in spawned threads. Strip doc (an `Rc<str>`), then
     // convert every cross-thread-unsafe ValueConst: scalars inline, closures →
     // ClosureRef, compounds → ValueRef into `lir_value_pool` (serialized
     // through `ctx` so nested closures intern correctly). The LIR is preserved
@@ -110,27 +108,11 @@ pub(super) fn send_closure(
 
     // Replace placeholder with complete entry.
     ctx.closures[idx] = SendableClosure {
-        bytecode: closure_rc.template.bytecode().to_vec(),
-        arity: closure_rc.template.arity(),
-        num_locals: closure_rc.template.num_locals(),
-        num_captures: closure_rc.template.num_captures(),
-        num_params: closure_rc.template.num_params(),
-        constants,
-        signal: closure_rc.template.signal(),
-        capture_params_mask: closure_rc.template.capture_params_mask(),
-        capture_locals_mask: closure_rc.template.owned_capture_locals_mask(),
-        location_map: closure_rc.template.location_map(),
-        doc,
-        vararg_kind: closure_rc.template.vararg_kind(),
-        name: closure_rc.template.name().map(str::to_string),
         squelch_mask: closure_rc.squelch_mask,
         env,
         lir_function,
         lir_value_pool,
-        child_protos,
-        merged_slots: closure_rc.template.merged_slots().as_slice().to_vec(),
-        frame_release_slots: closure_rc.template.frame_release_slots().to_vec(),
-        frame_release_regions: closure_rc.template.frame_release_regions().to_vec(),
+        ..sendable_header(&closure_rc.template, constants, child_protos)
     };
 
     Ok(SendValue::Ref(idx))

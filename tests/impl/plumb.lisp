@@ -1,61 +1,24 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 14)
+# audited: 2026-10-05
 # The I/O leak dashboard: a leak rate for every probe whose drive reaches the I/O backend.
+# docs/ratchet.md
 # docs/impl/region/diagnostics.md
 #
-# oracle.lisp is the pure region dashboard and owns the discipline this file
-# follows — the estimator, the gauge-live discriminator rule, the
-# defect/by-design split, and the completeness gate (oracle.lisp's header;
-# lib/estimator.lisp is the shared instrument). Split from the oracle because io
-# probes need axes it lacks: fixtures with setup and teardown, wall-clock
-# tolerance in their own epsilons, and the backend as a run dimension — while an
-# io fixture failure must not void the pure dashboard's verdicts. Every probe
-# here is read on the object count AND the region count in one drive
-# (`measure-2`): io machinery moves whole region entries between fibers, the
-# scheduler, and requests, so the region dimension is representable for every
-# shape in the file and no dual-read table is needed until a probe diverges.
+# oracle.lisp is the pure region dashboard. This file is split from it because
+# io probes need axes it lacks — fixtures with setup and teardown, and the
+# backend as a run dimension — and an io fixture failure must not void the
+# pure dashboard's readings. Every probe here is read on the object count AND
+# the region count in one drive: io machinery moves whole region entries
+# between fibers, the scheduler and requests, so the region dimension is
+# representable for every shape in the file. Every pin is a row in
+# tests/ledger/plumb.lisp (lib/ratchet.md).
+(def r ((import "std/ratchet")))
+(def both [r:objects r:regions])
 
-# The estimator, the gauges, the ledger, and the `check` macro — spliced at
-# compile time, so this dashboard compiles its own copy with fresh ledger
-# state.
-(include-file "lib/estimator.lisp")
-
-# This process's gauges must prove live on their own — a discriminator's
-# verdict never carries across processes.
-(each l in ["discriminator (live-growth)" "region discriminator (live-growth)"]
-  (put by-design l true))
-
-# ── Discriminators ────────────────────────────────────────────────────
-(def @disc-sink @[])
-(defn probe-disc [j]
-  (push disc-sink {:k j}))
-(def @region-disc-sink @[])
-(defn probe-region-disc [j]
-  (push region-disc-sink {:k j}))
+(defn rate-io [label probe]
+  (r:rate label probe :on both))
 
 (println "── plumb: io leak dashboard ──")
-# The over-free gate, opened here and closed after the last probe — the same two
-# reads oracle.lisp makes, and the same argument for them
-# (tests/impl/oracle.lisp). The io backend moves whole region entries between
-# fibers, the scheduler, and requests, so a release that runs twice is as
-# reachable here as anywhere and this file's probes are not covered by the
-# oracle's gate.
-(def over-frees-before (arena/over-frees))
-(def disc (measure "discriminator (live-growth)" probe-disc 200 6 60 0.4 0.5))
-(show disc)
-(check (assert (= (get disc :verdict) :open)
-               (string "GAUGE DEAD: discriminator read " (get disc :verdict)
-                       " — every 'closed' verdict this run is void")))
-(def region-disc
-  (measure-core "region discriminator (live-growth)"
-                (fn [b] (run-thunk-block probe-region-disc b)) region-gauge 200
-                6 60 0.4 0.5))
-(show region-disc)
-(check (assert (= (get region-disc :verdict) :open)
-               (string "REGION GAUGE DEAD: region discriminator read "
-                       (get region-disc :verdict)
-                       " — every region-gauge 'closed' verdict this run is "
-                       "void")))
 
 # ── The pumped round trip ─────────────────────────────────────────────
 # A yielding io op, the whole round trip: ev/sleep is the clean shape
@@ -69,15 +32,8 @@
 # rather than a per-block artifact.
 (defn probe-io-yield [j]
   (ev/sleep 0))
-(def io (measure-stable "io-yield ev/sleep" probe-io-yield 200 8 80 0.4 0.5))
-(show io)
-(check (assert (not= (get io :verdict) :contaminated)
-               (string "io-yield rate is block-dependent (B vs 2B): "
-                       (get io :rate) " vs " (get io :alt-rate)
-                       " — a per-block artifact, not a per-op rate")))
-(check (assert (= (get io :verdict) :closed)
-               (string "io-yield leaked: " (get io :verdict) " rate="
-                       (get io :rate))))
+(r:rate "io-yield ev/sleep" probe-io-yield :on both :block 200 :min 8 :max 80
+        :stable true)
 
 # ── The displaced io park ─────────────────────────────────────────────
 # The three exits of a parked io op. Its `IoRequest` is the RUNTIME's value —
@@ -107,16 +63,9 @@
   (let [f (mk-io)]
     (fiber/resume f)
     (fiber/refuse f "no")))
-(defn pin-io-2-at [label probe opin rpin block minb maxb]
-  (let [[r rr] (measure-2 label (fn [b] (run-thunk-block probe b)) count-gauge
-                          0.4 0.5 "regions" region-gauge 0.4 0.5 block minb maxb)]
-    (pin r opin)
-    (pin rr rpin)))
-(defn pin-io-2 [label probe opin rpin]
-  (pin-io-2-at label probe opin rpin 100 6 60))
-(pin-io-2 "io-drop" probe-io-drop 0 0)
-(pin-io-2 "io-abort" probe-io-abort 0 0)
-(pin-io-2 "io-refuse" probe-io-refuse 0 0)
+(rate-io "io-drop" probe-io-drop)
+(rate-io "io-abort" probe-io-abort)
+(rate-io "io-refuse" probe-io-refuse)
 
 # ── The abort the scheduler routes ────────────────────────────────────
 # `io-abort` above ends a park through `fiber/abort` with no scheduler in the picture.
@@ -139,8 +88,8 @@
     (ev/abort f)))
 (defn probe-ev-timeout [j]
   (ev/timeout 30 (fn [] j)))
-(pin-io-2 "ev-abort" probe-ev-abort 0 0)
-(pin-io-2 "ev-timeout" probe-ev-timeout 0 0)
+(rate-io "ev-abort" probe-ev-abort)
+(rate-io "ev-timeout" probe-ev-timeout)
 
 # ── The answer a completion BUILDS ────────────────────────────────────
 # `io-yield ev/sleep` above answers with nil, so its completion builds nothing
@@ -179,39 +128,16 @@
     (length s)))
 (defn probe-subprocess-system [j]
   (get (subprocess/system "/bin/sh" ["-c" "echo plumb"]) :exit))
-(pin-io-2-at "subprocess-exec" probe-subprocess-exec 0 0 10 6 40)
-(pin-io-2 "port-read-all" probe-read-all 0 0)
-(pin-io-2-at "subprocess-system" probe-subprocess-system 0 0 10 6 40)
+(r:rate "subprocess-exec" probe-subprocess-exec :on both :block 10 :max 40)
+(rate-io "port-read-all" probe-read-all)
+(r:rate "subprocess-system" probe-subprocess-system :on both :block 10 :max 40)
 (delete-file built-path)
 (delete-directory built-dir)
 
-# The over-free gate closes here, over every probe above and the load before it.
-(def over-frees-after (arena/over-frees))
-(check (assert (= over-frees-after 0)
-               (string "over-free: " over-frees-after
-                       " direct double-release(s) this process, "
-                       (- over-frees-after over-frees-before)
-                       " of them across the probes — a release that ran twice, "
-                       "which no leak rate can see "
-                       "(docs/impl/region/diagnostics.md)")))
+# The double-release counter, read once after the last probe: the io backend
+# moves whole region entries between fibers, the scheduler and requests, so a
+# release that runs twice is as reachable here as anywhere, and this file's
+# probes are not under the oracle's reading (docs/impl/region/diagnostics.md).
+(r:read "over-free" :releases (arena/over-frees))
 
-# ── The split headline ────────────────────────────────────────────────
-(println "── split ──")
-(def split-tally (stats))
-(println "open defects: " split-tally:defects " across " split-tally:roots
-         " roots; by-design: " split-tally:by-design
-         (if (= (length split-tally:unclassified) 0)
-           ""
-           (string "; UNCLASSIFIED: " (length split-tally:unclassified) " "
-                   split-tally:unclassified)))
-(check (assert (= (length split-tally:unclassified) 0)
-               (string "unclassified open probe(s): " split-tally:unclassified
-                       " — every open probe must be a declared root or "
-                       "by-design (the split ledger is stale)")))
-(check (assert (= split-tally:by-design 2)
-               (string "by-design tally " split-tally:by-design
-                       " ≠ 2 — the object-count and region live-growth "
-                       "discriminators must each read open")))
-
-(report)
 (println "plumb: ok")

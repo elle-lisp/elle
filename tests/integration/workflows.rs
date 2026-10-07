@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-10-06
 // What `.github/workflows/pr.yml` claims to gate must be what it gates, and
 // what each job builds must let its own checks run.
 //
@@ -175,7 +175,9 @@ fn a_job_builds_every_plugin_in_the_submodule() {
 
     let building: Vec<(String, String)> = jobs(&text)
         .into_iter()
-        .filter(|(_, body)| body.contains("make plugins-all") && body.contains("make smoke-plugins"))
+        .filter(|(_, body)| {
+            body.contains("make plugins-all") && body.contains("make smoke-plugins")
+        })
         .collect();
     assert!(
         !building.is_empty(),
@@ -408,17 +410,9 @@ fn steps(body: &str) -> Vec<&str> {
         .collect()
 }
 
-/// The passes `make smoke` runs, as its rule's prerequisites name them.
+/// The passes `make smoke` runs after `qa`, as `SMOKE_PASSES` names them.
 fn smoke_passes() -> Vec<String> {
-    let text = crate::common::makefile();
-    let line = text
-        .lines()
-        .find(|l| l.starts_with("smoke:"))
-        .expect("the Makefile defines `smoke`");
-    let (_, rest) = line.split_once(':').unwrap_or_default();
-    rest.split('#')
-        .next()
-        .unwrap_or("")
+    crate::common::make_expand("SMOKE_PASSES")
         .split_whitespace()
         .map(str::to_string)
         .collect()
@@ -427,7 +421,8 @@ fn smoke_passes() -> Vec<String> {
 // A Smoke job runs each pass of `make smoke` as a step of its own, and each
 // once (docs/analysis/ci.md). The counter-factual: a `make doctest` step, then
 // a `make smoke` step, runs the doctests twice, and a red `make smoke` step
-// names no pass.
+// names no pass. A Smoke job runs no `make qa`, which is not a pass: the QA
+// job is the QA gate.
 #[test]
 fn each_platform_smoke_job_runs_every_pass_of_make_smoke_once() {
     let text = workflow_text();
@@ -446,6 +441,10 @@ fn each_platform_smoke_job_runs_every_pass_of_make_smoke_once() {
         assert!(
             !steps.iter().any(|line| runs_target(line, "smoke")),
             "job `{job}` runs `make smoke` whole, so a red step names no pass"
+        );
+        assert!(
+            !passes.iter().any(|pass| pass == "qa"),
+            "`SMOKE_PASSES` names `qa`, so every Smoke job would run QA again"
         );
         for pass in &passes {
             let n = steps.iter().filter(|line| runs_target(line, pass)).count();

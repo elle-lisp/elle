@@ -1,197 +1,178 @@
-// audited: 2026-09-30
-// A dashboard verdict is a row: what the measurement channel carries, what the
-// runner writes, and what a direct run still does not write.
+// audited: 2026-10-05
+// A run under `elle test` has no build: it records no reading, judges none,
+// gates on none, and refuses to re-pin.
 //
+// docs/ratchet.md
 // docs/test-store.md
 //
-// The counter-factual: a rate printed only to stdout exists only as prose in a
-// terminal. No query can ask what it was three commits ago, and a dashboard's
-// coverage can be checked against nothing. These read the rows that answer both.
+// The counter-factual: a row with no :build belonged to every build that had
+// none of its own, so `elle test`, the runner a developer iterates with, judged
+// a pool or MLIR reading against the reference build's footprint and failed
+// it. `elle` names no build, so a run under it has no rows to judge against.
+// The runner's cases that need a build are the rig's (rig/tests).
 
 use crate::common::query;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
 
 fn elle_binary() -> &'static str {
     env!("CARGO_BIN_EXE_elle")
 }
 
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+/// A producer of several forms, the whole-file shape the runner runs in a
+/// worker under each JIT policy, that reads one number.
+const PRODUCER: &str = "(def r ((import \"std/ratchet\")))\n\
+                        (def answer 42)\n\
+                        (r:read \"answer\" :count answer)\n";
+
+/// The row every case pins: 41 against a reading of 42, a regression on any
+/// build that judged it.
+const ROWS: &str = "[\"answer\" :count 41]";
+
+/// A scratch working directory holding the producer, its ledger under
+/// `tests/ledger`, and a session DB of its own.
+struct Bench {
+    dir: crate::common::ScratchDir,
 }
 
-/// The miniature dashboard: one probe read on the object count and the region
-/// count, through the same estimator the leak dashboards use.
-fn dashboard() -> PathBuf {
-    repo_root().join("tests/impl/measure-channel.lisp")
+impl Bench {
+    fn new(tag: &str) -> Bench {
+        let dir = crate::common::ScratchDir::new(&format!("measure-{tag}"));
+        std::fs::write(dir.join("producer.lisp"), PRODUCER).expect("write the producer");
+        let ledger = dir.join("tests/ledger");
+        std::fs::create_dir_all(&ledger).expect("create the ledger dir");
+        std::fs::write(
+            ledger.join("producer.lisp"),
+            format!("(elle/epoch 13)\n(producer \"producer.lisp\")\n{ROWS}\n"),
+        )
+        .expect("write the ledger");
+        Bench { dir }
+    }
+
+    fn ledger(&self) -> String {
+        std::fs::read_to_string(self.dir.join("tests/ledger/producer.lisp"))
+            .expect("read the ledger")
+    }
+
+    /// `elle test ARGS producer.lisp` from the scratch directory, whose
+    /// `tests/ledger` a run with a build would judge against.
+    fn run(&self, args: &[&str]) -> Output {
+        Command::new(elle_binary())
+            .arg("test")
+            .args(args)
+            .args(["--timeout", "60000"])
+            .arg("--db")
+            .arg(self.dir.join("s.db"))
+            .arg("producer.lisp")
+            .current_dir(self.dir.path())
+            .env_remove("RUST_MIN_STACK")
+            .output()
+            .expect("run elle test")
+    }
+
+    fn measurements(&self) -> String {
+        query(
+            &self.dir.join("s.db"),
+            "SELECT count(*) AS c FROM measurement",
+        )
+    }
 }
 
-/// Run the dashboard as an isolated child, which is what opens the channel.
-fn isolate(db: &Path) -> std::process::Output {
-    Command::new(elle_binary())
-        .args(["test", "--isolate", "", "--timeout", "60000"])
-        .arg("--db")
-        .arg(db)
-        .arg(dashboard())
-        .current_dir(repo_root())
-        .env_remove("RUST_MIN_STACK")
-        .env_remove("ELLE_TEST_MEASUREMENTS")
-        .output()
-        .expect("run elle test --isolate")
+fn stderr(out: &Output) -> String {
+    String::from_utf8_lossy(&out.stderr).into_owned()
 }
 
 #[test]
-fn a_dashboard_verdict_lands_in_the_measurement_table() {
-    let dir = crate::common::ScratchDir::new("measure-rows");
-    let db = dir.join("s.db");
-    let out = isolate(&db);
+fn a_run_with_no_build_records_no_reading_and_gates_on_none() {
+    let b = Bench::new("nobuild");
+    let out = b.run(&[]);
     assert!(
         out.status.success(),
-        "the dashboard passes, so the run gates green; stderr:\n{}",
-        String::from_utf8_lossy(&out.stderr)
+        "a reading that would regress gates nothing with no build to judge it:\n{}",
+        stderr(&out)
     );
-
-    let rows = query(
-        &db,
-        "SELECT subject AS subject, axis AS axis, value AS value, \
-         unit AS unit, verdict AS verdict FROM measurement \
-         WHERE run_id = (SELECT max(id) FROM run) ORDER BY axis",
-    );
-
-    // One probe, two gauges: one subject, two axes. The suffix the dashboard
-    // displays (`channel-keep@regions`) is a rendering, so it must not reach
-    // the subject column — otherwise no query can group the two readings.
+    let count = b.measurements();
     assert!(
-        rows.contains(":subject \"channel-keep\""),
-        "the subject is the probe's label without its display suffix, got:\n{rows}"
+        count.contains(":c 0"),
+        "no measurement row is written, got:\n{count}"
     );
+    let err = stderr(&out);
     assert!(
-        !rows.contains("channel-keep@regions"),
-        "the display suffix is not part of the subject, got:\n{rows}"
-    );
-    assert!(
-        rows.contains(":axis \"objects\"") && rows.contains(":axis \"regions\""),
-        "each gauge names the dimension it read, got:\n{rows}"
-    );
-    assert!(
-        rows.contains(":unit \"objects/op\"") && rows.contains(":unit \"regions/op\""),
-        "and the unit a rate on it carries, got:\n{rows}"
-    );
-    // The probe keeps every object it makes, so both rates are ~1/op. A rate
-    // recorded as 0 would be the dead-gauge reading, which is the one number
-    // that must never pass for a measurement.
-    assert!(
-        rows.contains(":value 1.0"),
-        "the measured rate is the value, got:\n{rows}"
-    );
-    // The probe is declared by-design, so it displays and records `growth`:
-    // `open` in this table means a defect, exactly as on the dashboard.
-    assert!(
-        rows.contains(":verdict \"growth\"") && !rows.contains(":verdict \"open\""),
-        "the recorded verdict is the displayed one, got:\n{rows}"
-    );
-
-    // A measurement belongs to the result that produced it, or nothing can say
-    // which file a rate came from.
-    let joined = query(
-        &db,
-        "SELECT f.file AS file FROM measurement m \
-         JOIN result r ON r.id = m.result_id JOIN form f ON f.hash = r.form_hash \
-         WHERE m.run_id = (SELECT max(id) FROM run)",
-    );
-    assert!(
-        joined.contains("measure-channel.lisp"),
-        "a measurement joins to the file that reported it, got:\n{joined}"
+        err.contains("no build"),
+        "the summary says the readings were neither recorded nor judged, so a \
+         green run does not read as a passed gate:\n{err}"
     );
 }
 
 #[test]
-fn the_summary_names_the_measurements() {
-    let dir = crate::common::ScratchDir::new("measure-summary");
-    let db = dir.join("s.db");
-    isolate(&db);
-
-    let out = Command::new(elle_binary())
-        .args(["test", "--summary"])
-        .arg("--db")
-        .arg(&db)
-        .output()
-        .expect("summary");
-    let summary = String::from_utf8_lossy(&out.stderr);
+fn an_isolated_child_of_elle_test_records_none_either() {
+    let b = Bench::new("nobuild-child");
+    let out = b.run(&["--isolate", ""]);
+    assert!(out.status.success(), "the child passes:\n{}", stderr(&out));
+    let count = b.measurements();
     assert!(
-        summary.contains("measurement"),
-        "--summary must show the run's measurements, got:\n{summary}"
-    );
-    assert!(
-        summary.contains("growth"),
-        "and tally them by verdict, got:\n{summary}"
+        count.contains(":c 0"),
+        "a child of a run with no build records nothing, got:\n{count}"
     );
 }
 
-/// The channel is a file the environment names, so a dashboard writes to it
-/// only when something opened it. Unset, the dashboard prints and records
-/// nothing, so a direct run of tests/impl/oracle.lisp only prints.
 #[test]
-fn the_channel_is_closed_unless_the_environment_opens_it() {
-    let dir = crate::common::ScratchDir::new("measure-channel-env");
-    let sink = dir.join("measurements.ndjson");
+fn a_charge_with_no_build_records_none_and_says_so() {
+    // The charge is the runner's own reading, never a line a file printed,
+    // and a run with no build records it no more than it records a line.
+    let b = Bench::new("nobuild-charge");
+    let out = b.run(&["--charge"]);
+    assert!(
+        out.status.success(),
+        "the charge gates nothing with no build to judge it:\n{}",
+        stderr(&out)
+    );
+    let count = b.measurements();
+    assert!(
+        count.contains(":c 0"),
+        "no measurement row is written, got:\n{count}"
+    );
+    assert!(
+        stderr(&out).contains("no build"),
+        "and the summary says the readings were neither recorded nor judged:\n{}",
+        stderr(&out)
+    );
+}
 
-    let closed = Command::new(elle_binary())
-        .arg(dashboard())
-        .current_dir(repo_root())
-        .env_remove("ELLE_TEST_MEASUREMENTS")
-        .output()
-        .expect("run the dashboard directly");
+#[test]
+fn repin_with_no_build_refuses_and_leaves_the_ledger_alone() {
+    let b = Bench::new("nobuild-repin");
+    let before = b.ledger();
+    let out = b.run(&["--repin"]);
     assert!(
-        closed.status.success(),
-        "the dashboard passes on its own; stderr:\n{}",
-        String::from_utf8_lossy(&closed.stderr)
+        !out.status.success(),
+        "--repin with no build refuses:\n{}",
+        stderr(&out)
     );
-    let printed = String::from_utf8_lossy(&closed.stdout);
+    let err = stderr(&out);
     assert!(
-        printed.contains("channel-keep") && printed.contains("rate="),
-        "stdout keeps the human rendering, got:\n{printed}"
+        err.contains("no build") && err.contains("elle-rig test"),
+        "and says why, and what to run instead:\n{err}"
     );
-    assert!(
-        !sink.exists(),
-        "a closed channel writes nothing at {}",
-        sink.display()
-    );
-
-    let opened = Command::new(elle_binary())
-        .arg(dashboard())
-        .current_dir(repo_root())
-        .env("ELLE_TEST_MEASUREMENTS", &sink)
-        .output()
-        .expect("run the dashboard with the channel open");
-    assert!(
-        opened.status.success(),
-        "opening the channel changes nothing about the run; stderr:\n{}",
-        String::from_utf8_lossy(&opened.stderr)
-    );
-    assert!(
-        String::from_utf8_lossy(&opened.stdout).contains("rate="),
-        "and stdout still carries the same rendering"
-    );
-
-    let written =
-        std::fs::read_to_string(&sink).unwrap_or_else(|e| panic!("read {}: {e}", sink.display()));
-    let lines: Vec<&str> = written.lines().filter(|l| !l.trim().is_empty()).collect();
     assert_eq!(
-        lines.len(),
-        2,
-        "one line per verdict the dashboard reported, got:\n{written}"
+        b.ledger(),
+        before,
+        "the ledger is byte for byte what it was"
     );
-    for want in [
-        "\"subject\":\"channel-keep\"",
-        "\"axis\":\"objects\"",
-        "\"axis\":\"regions\"",
-        "\"unit\":\"objects/op\"",
-        "\"verdict\":\"growth\"",
-    ] {
-        assert!(
-            written.contains(want),
-            "the record must carry {want}, got:\n{written}"
-        );
-    }
+}
+
+#[test]
+fn elle_names_no_build() {
+    // The rig registers `elle/build` on the runtimes it builds; a user build
+    // has no such primitive. A test that pins the name's absence guards
+    // against the primitive moving into the shipped runtime.
+    let out = Command::new(elle_binary())
+        .args(["-e", "(elle/build)"])
+        .env_remove("RUST_MIN_STACK")
+        .output()
+        .expect("run elle -e");
+    let err = stderr(&out);
+    assert!(
+        !out.status.success() && err.contains("undefined variable") && err.contains("elle/build"),
+        "`elle/build` is an undefined variable under elle:\n{err}"
+    );
 }

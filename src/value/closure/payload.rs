@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-10-06
 // docs/impl/region/template.md
 // docs/impl/image/sealing.md
 //! `CodePayload` — a code object's variable-length data, inline in region pages.
@@ -29,6 +29,37 @@ pub enum VarargTag {
     /// `&named` — collect into an immutable struct, keys validated against the
     /// declared set ([`CodePayload::strict_keys`]).
     StrictStruct,
+}
+
+/// How a variadic call builds its `&` rest list: one region per cell, or one
+/// region for the whole list. The region analysis proves which one a lambda may
+/// take (docs/impl/region/restlist.md); every carrier that cannot say falls
+/// back to `PerCell`, which is always correct.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[repr(u8)]
+pub enum RestListLayout {
+    /// Each cell in a region of its own, so a tail the callee hands out
+    /// outlives the head it came from.
+    PerCell,
+    /// Every cell in one region, freed with the head. Admitted only where no
+    /// cell can outlive the head.
+    OneRegion,
+}
+
+impl RestListLayout {
+    /// The layout a JIT prologue passes its helper as a `u32`, the inverse of
+    /// `layout as u32`.
+    pub fn from_raw(raw: u32) -> Self {
+        if raw == RestListLayout::OneRegion as u32 {
+            return RestListLayout::OneRegion;
+        }
+        debug_assert_eq!(
+            raw,
+            RestListLayout::PerCell as u32,
+            "a JIT prologue passes a layout the type names"
+        );
+        RestListLayout::PerCell
+    }
 }
 
 /// One bytecode offset's source location: the offset, an index into the
@@ -104,6 +135,8 @@ pub struct CodePayload {
     pub(crate) wasm_func_idx: u32,
     pub(crate) has_wasm_idx: bool,
     pub(crate) vararg: VarargTag,
+    /// How the `&` rest list is built. Meaningful only when `vararg` is `List`.
+    pub(crate) rest_list: RestListLayout,
     /// Whether `name`/`doc` are present at all: an absent docstring and an
     /// empty one are different answers to `(doc f)`, and both are empty slices.
     pub(crate) has_name: bool,
@@ -290,6 +323,7 @@ impl CodePayload {
             wasm_func_idx: 0,
             has_wasm_idx: false,
             vararg: VarargTag::List,
+            rest_list: RestListLayout::PerCell,
             has_name: false,
             has_doc: false,
         }
@@ -381,5 +415,9 @@ impl CodePayload {
 
     pub fn vararg_tag(&self) -> VarargTag {
         self.vararg
+    }
+
+    pub fn rest_list_layout(&self) -> RestListLayout {
+        self.rest_list
     }
 }

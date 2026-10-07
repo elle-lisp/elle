@@ -1,6 +1,6 @@
 # http2
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-05 -->
 
 HTTP/2 client and server (RFC 9113 + RFC 7541), over TLS with ALPN or as cleartext h2c.
 
@@ -40,9 +40,9 @@ the `std/tls` module built from the plugin, `(import "plugin/tls")`, as
 
 ## Running tests
 
+The module's tests are language tests: `tests/lang/http2.lisp` and every
+`tests/lang/h2-*.lisp`.
+
 ```bash
-elle tests/lang/http2.lisp
-elle tests/lang/h2-close-on-dead-peer.lisp
-elle tests/http2/all.lisp
-elle tests/http2/flow.lisp
+elle test tests/lang/http2.lisp tests/lang/h2-*.lisp
 ```

@@ -1,34 +1,49 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! Rest-parameter collection: the `&` list, the `&keys`/`&named` structs, and the release a collector takes over.
 //!
 //! docs/impl/region/mechanism.md
+//! docs/impl/region/restlist.md
 //! docs/named-args.md
 
-use crate::value::Value;
+use crate::value::{RestListLayout, Value};
 
 use super::super::core::VM;
 use super::env_value_region;
 
 impl VM {
-    /// Collect values into an Elle list (pair chain terminated by EMPTY_LIST).
+    /// Collect values into an Elle list (pair chain terminated by EMPTY_LIST),
+    /// in regions of the list's own: one per cons, or one for the whole list,
+    /// as `layout` says (docs/impl/region/restlist.md). No values is the empty
+    /// list, which mints nothing. The JIT prologue builds its rest list here
+    /// too.
     ///
-    /// One region per cons, with ownership transfer down the chain so a single
-    /// release of the HEAD cascade-frees the whole list (every value its own
-    /// region — see `env_value_region`). Built tail→head: each new cons points
-    /// at the prior head via its `rest`, so `alloc_in_region`'s cross-region
-    /// scan increfs the prior head's region (rc 1→2). We then drop our minting
-    /// reference on that prior head (rc 2→1), leaving it owned solely by the new
-    /// cons's edge. Only the final head keeps its minting rc=1 — the one owning
-    /// reference the owned-params move carries into the callee (or releases).
-    /// Freeing the head then cascades head→cons₂→…→tail, each rc 1→0.
-    pub(super) fn args_to_list(
+    /// Either way the HEAD carries the one owning reference the owned-params
+    /// move hands the callee, and its release frees the whole list. Built
+    /// tail→head: each new cons points at the prior head via its `rest`.
+    ///
+    /// - One region per cons: `alloc_in_region`'s cross-region scan increfs
+    ///   the prior head's region (rc 1→2), and the minting reference on it is
+    ///   then dropped (rc 2→1), so the new cons's edge owns it. Freeing the head
+    ///   cascades head→cons₂→…→tail, each rc 1→0.
+    /// - One region: the prior head shares the new cons's region, so its `rest`
+    ///   is a self-edge the scan does not count, and the region keeps the one
+    ///   reference it was minted with.
+    pub(crate) fn args_to_list(
         args: &[Value],
+        layout: RestListLayout,
         heap: &mut crate::value::fiberheap::FiberHeap,
     ) -> Value {
         use crate::value::heap::{HeapObject, HeapTag, Pair};
+        if args.is_empty() {
+            return Value::EMPTY_LIST;
+        }
+        let list_region = match layout {
+            RestListLayout::OneRegion => Some(env_value_region(heap)),
+            RestListLayout::PerCell => None,
+        };
         let mut list = Value::EMPTY_LIST;
         for arg in args.iter().rev() {
-            let cons_region = env_value_region(heap);
+            let cons_region = list_region.unwrap_or_else(|| env_value_region(heap));
             let traits = crate::primitives::traitregistry::default_traits_for(heap, HeapTag::Pair);
             let obj = HeapObject::Pair(Pair {
                 first: *arg,
@@ -36,12 +51,14 @@ impl VM {
                 traits,
             });
             // `alloc_in_region` → `alloc_obj` increfs every cross-region ref in
-            // the object: the prior head (this cons's `rest`) and any heap
-            // `first`. Both are balanced by the free-time cascade.
+            // the object: the prior head (this cons's `rest`) when it lies in
+            // another region, and any heap `first`. Each is balanced by the
+            // free-time cascade.
             let new_cons = heap.alloc_in_region(obj, cons_region);
             // Drop the minting ref on the prior head now that `new_cons` pins it
-            // via `rest`. Guarded on a genuine cross-region edge (the first
-            // cons's `rest` is EMPTY_LIST — no region).
+            // via `rest`. Guarded on a genuine cross-region edge: the first
+            // cons's `rest` is EMPTY_LIST, with no region, and under one region
+            // the prior head shares this cons's.
             if let Some(prior) = crate::value::arena::region_of(heap, list) {
                 if prior != cons_region {
                     heap.decref_region(prior);
@@ -67,9 +84,10 @@ impl VM {
     /// The occurrence counts come from ONE pass over `all_args`, so the whole
     /// step is linear in the argument count. Counting per rest arg instead —
     /// rescanning `all_args` for each — is quadratic, and every comparison is a
-    /// `region_of` page-header walk, so a large `(apply f xs)` in tail position
-    /// pays it in full (`tests/impl/apply-tail-linear.lisp`,
-    /// docs/regions/performance.md).
+    /// `region_of` page-header walk, so a tail call that writes out thousands of
+    /// arguments pays it in full (`tests/impl/apply-tail-linear.lisp`,
+    /// docs/regions/performance.md). A spliced call never reaches here: it
+    /// moves nothing (docs/impl/region/mechanism.md).
     ///
     /// Counting first and releasing second gives the same answers as
     /// interleaving them. A release here can only FREE regions (its own and
@@ -235,3 +253,6 @@ impl VM {
         Ok(crate::value::build::struct_from(heap, map, region))
     }
 }
+
+#[cfg(test)]
+mod tests;

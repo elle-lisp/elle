@@ -1,6 +1,6 @@
 # Testing
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-06 -->
 
 The two test suites, what each one claims, the builds that run them, and how a
 run is read.
@@ -30,8 +30,8 @@ specification is [docs/test-runner.md](test-runner.md), with
 |---------|--------------|
 | `make smoke-lang` | The language suite |
 | `make smoke-impl` | The implementation suite on the rig, then both suites under each rig profile |
-| `make smoke` | Both suites, the doctests, the embedding demo, and the surface gate |
-| `make test` | `make qa`, then `make smoke`, then the Rust unit and integration tests |
+| `make smoke` | `make qa`, then both suites, the doctests, the embedding demo, and the surface gate |
+| `make test` | `make smoke`, then the Rust unit and integration tests |
 | `elle test tests/lang/*.lisp` | Run those files in-process; print a summary; gate on exit code |
 | `elle-rig tests/impl/NAME.lisp` | Run one implementation test with its sidecar |
 | `elle test --summary` | Re-print the last run's summary (no re-run) |
@@ -53,7 +53,9 @@ test heap · objects +3 · regions +2 · pages +610 · region-frees +598 · adop
 ```
 
 The commit line names the code the tally describes. A run outside a
-repository prints the run number alone. The `runner heap` and `test heap`
+repository prints the run number alone. A run under `elle-rig test` ends the
+line with its build, `· build jit-uring-linux-x86_64`, the build its readings
+were judged as ([docs/ratchet.md](ratchet.md)). The `runner heap` and `test heap`
 blocks are the run's account of what each file cost, on every gauge
 ([docs/test-gauges.md](test-gauges.md)).
 
@@ -111,11 +113,12 @@ execution.
 ### A file as its own process
 
 `elle test --isolate 'FLAGS'` runs each path as `elle FLAGS PATH`, one child per
-path, recorded on the `process` tier. `--host PROGRAM` runs the child under
-another program instead of this `elle`, which is how the implementation suite
-runs on the rig. The implementation suite runs this way: each file then
-starts, runs as a whole program and exits, which is the only shape that covers
-program teardown, and a fault in one file kills one child rather than the run.
+path, recorded on the `process` tier. The child is the runner's own executable,
+so `elle-rig test --isolate ''` runs each path on the rig, which is how the
+implementation suite runs. Each file then starts, runs as a whole program and
+exits, which is the only shape that covers program teardown, and a fault in
+one file kills one child rather than the run. `--host PROGRAM` runs each child
+under another program instead.
 
 A child that dies on a signal is a `fail` naming the signal and the run
 continues; an exit code is a `fail` naming the code; a child over its budget
@@ -124,20 +127,23 @@ way ([docs/test-runner.md](test-runner.md)).
 
 ```sh
 elle test --isolate '' tests/lang/closures.lisp
-elle test --host target/release/elle-rig --isolate '' tests/impl/oracle.lisp
+target/release/elle-rig test --isolate '' tests/impl/oracle.lisp
 ```
 
-An isolated child also carries the **measurement channel**: a dashboard that
-reports a verdict through it — [oracle.lisp](../tests/impl/oracle.lisp) and
-[plumb.lisp](../tests/impl/plumb.lisp) do, through
-[estimator.lisp](../tests/impl/lib/estimator.lisp) — lands one `measurement`
-row per verdict, so a leak rate's history across commits is a query rather than
-scrollback ([docs/test-store.md](test-store.md)). Run the same file directly
-and it prints its dashboard and records nothing.
+A file that measures something prints one `measure` line per reading
+([docs/ratchet.md](ratchet.md)). Under `elle-rig test` the runner reads those
+lines out of every captured stdout — a form on each tier, an isolated child —
+judges each against the rows the rig's build holds in the file's ledger, and
+lands one `measurement` row per reading. So a leak rate's history across
+commits is a query rather than scrollback ([docs/test-store.md](test-store.md)).
+A run under `elle test` has no build, and records and judges none of them. Run
+the same file directly and it prints the same lines and judges nothing.
 
-That is how the Makefile runs the two dashboards. They belong to the
-implementation suite, so every pass over that suite runs each one as an
-isolated child on the rig, under the wide budget that `WIDE_FAMILIES` names.
+That is how the two dashboards, [oracle.lisp](../tests/impl/oracle.lisp) and
+[plumb.lisp](../tests/impl/plumb.lisp), land their rates. Every file a ledger
+names runs in-process under `elle-rig test`, in a pass of its own beside the
+isolated passes, under the wide budget that `WIDE_FAMILIES` names
+([docs/test-runner.md](test-runner.md) says why the rest stays isolated).
 
 ### Statuses
 
@@ -377,9 +383,10 @@ see the other, which is why the claim is stated once more over the finished emis
 
 ## The Rust suite
 
-`make test` runs `make qa` first — `cargo fmt --check`, clippy,
-`make crosscheck`, rustdoc — then the corpus, then `cargo test --lib` and the
-integration tests. For what kind of Rust test to write and where, see [tests/AGENTS.md](../tests/AGENTS.md) and
+`make test` runs `make smoke`, which starts with `make qa` — `cargo fmt
+--check`, the generated indexes, clippy, `make crosscheck`, rustdoc — then
+runs the corpus. `make test` then runs `cargo test --lib` and the integration
+tests. For what kind of Rust test to write and where, see [tests/AGENTS.md](../tests/AGENTS.md) and
 [docs/analysis/testing.md](analysis/testing.md). (`elle test --rust`, which folds
 the cargo suite into the same DB, is specced but not yet implemented.)
 
@@ -410,6 +417,7 @@ name needs no table and no formatting at all — use
 - [docs/test-store.md](test-store.md) — where a run is stored, what it records, and the schema.
 - [docs/test-cli.md](test-cli.md) — why the runner exists, its command line, and what is still design.
 - [docs/test-vision.md](test-vision.md) — the plan that folds every test product into `elle test`.
+- [docs/ratchet.md](ratchet.md) — the design that puts every pinned measurement in one ledger `elle test` judges.
 - [tests/AGENTS.md](../tests/AGENTS.md) — Rust test categories, helpers, fixtures.
 - [docs/analysis/testing.md](analysis/testing.md) — the decision tree.
 - [docs/threads.md](threads.md) — worker threads, `os/spawn`, the scheduler the runner ships into workers.

@@ -2009,6 +2009,32 @@
                 (fiber/resume waiter fiber)
                 (handle-fiber-after-resume waiter)))))))
 
+    (defn leave-waits [fiber]
+      "Take `fiber` out of the park queue, the join waiter list and the
+       select set it waits in. A fiber that waits in none stays as it was.
+
+       `complete-fiber` calls it because a finished fiber waits for
+       nothing. Left in a park queue it takes a wake permit from a live
+       waiter — `(ev/futex-wake key 1)` would grant its one permit to a
+       fiber that can never use it — and a key, list or set it holds keeps
+       `step` from ever reporting :done. `handle-abort` calls it before it
+       raises, because the raise ends the wait while the target may run on
+       into a `defer` that waits again. Left in the old wait, the target is
+       resumed by that wait's wake in the middle of the new one. See
+       docs/scheduler.md § An abort ends the wait.
+
+       `fiber-park` and `fiber-join` name the one queue and the one list to
+       search; a select set is keyed by the waiting fiber itself."
+      (let [key (get fiber-park fiber)]
+        (when (not (nil? key))
+          (del fiber-park fiber)
+          (leave-queue park-queues key fiber)))
+      (let [target (get fiber-join fiber)]
+        (when (not (nil? target))
+          (del fiber-join fiber)
+          (leave-queue waiters target fiber)))
+      (del select-sets fiber))
+
     (defn complete-fiber [fiber status]
       "Handle fiber completion: wake join and select waiters."  # Record completion
       (put completed fiber status)
@@ -2031,25 +2057,8 @@
           (del fiber-io fiber)
           (del pending id)
           (io/cancel backend id)))
-      # Leave the park queue. A terminated fiber that stays queued takes
-      # a wake permit from a live waiter — `(ev/futex-wake key 1)` would
-      # grant its one permit to a fiber that can never use it — and its
-      # key keeps `step` from ever reporting :done.
-      (let [key (get fiber-park fiber)]
-        (when (not (nil? key))
-          (del fiber-park fiber)
-          (leave-queue park-queues key fiber)))
-      # Leave the join waiter list and the select set. `fiber/abort`
-      # injects an error this fiber's own `protect` may catch, so it can
-      # reach :dead while the fiber it waited on still runs. Left where
-      # it was, it is resumed when that fiber finishes, and the resume
-      # raises out of the event loop. `fiber-join` names the one list to
-      # search; a select set is keyed by the waiting fiber itself.
-      (let [target (get fiber-join fiber)]
-        (when (not (nil? target))
-          (del fiber-join fiber)
-          (leave-queue waiters target fiber)))
-      (del select-sets fiber)  # Wake join waiters with [ok? value] pair
+      (leave-waits fiber)
+      # Wake join waiters with [ok? value] pair
       (let [ws (get waiters fiber)]
         (when (not (nil? ws))
           # Take each waiter off the live list rather than walking a copy
@@ -2145,7 +2154,11 @@
           (when (not (nil? id))
             (io/cancel backend id)
             (del pending id)
-            (del fiber-io target)))  # Graceful abort (runs defer/protect)
+            (del fiber-io target)))
+        # The raise below ends whatever wait the target is in, and its
+        # defer/protect may wait again, so it leaves the old wait first.
+        (leave-waits target)
+        # Graceful abort (runs defer/protect)
         (fiber/abort target {:error :aborted})  # Route the aborted fiber through completion
         (handle-fiber-after-resume target))  # Resume caller with nil
       (fiber/resume caller nil)

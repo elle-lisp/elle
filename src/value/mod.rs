@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-10-06
 // docs/impl/values.md
 //! Value representation and tagged-union architecture
 //!
@@ -58,7 +58,8 @@ pub use capturemask::CaptureMask;
 
 // Export closure and fiber types
 pub use closure::{
-    Closure, ClosureTemplate, TemplateProto, TemplateRef, VarargTag, WasmClosureMeta,
+    Closure, ClosureTemplate, RestListLayout, TemplateProto, TemplateRef, VarargTag,
+    WasmClosureMeta,
 };
 pub use code::Code;
 pub use fiber::{

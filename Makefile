@@ -166,9 +166,9 @@ semver-check: elle  ## Verify every versioned library surface against its commit
 # ── Test ────────────────────────────────────────────────────────────
 
 # Approximate runtimes (for guidance — vary by machine):
-#   make smoke    ~30min release: both suites, doctests, embedding, the surface gate
-#   make qa       ~2min: the PR gate's QA job (rustfmt, workspace clippy, crosscheck, rustdoc)
-#   make test     qa + smoke + the Rust unit, integration and rig tests
+#   make smoke    ~30min release: qa, both suites, doctests, embedding, the surface gate
+#   make qa       ~2min: the PR gate's QA job (rustfmt, indexes, clippy, crosscheck, rustdoc)
+#   make test     smoke + the Rust unit, integration and rig tests
 #   cargo test    ~60min full suite (unit + integration + property)
 #
 # `make test` exists to predict the PR gate, so it runs what the gate runs. A
@@ -191,6 +191,23 @@ semver-check: elle  ## Verify every versioned library surface against its commit
 
 LANG_FILES := $(sort $(wildcard tests/lang/*.lisp))
 IMPL_FILES := $(sort $(wildcard tests/impl/*.lisp))
+
+# The producers, the files a ledger's `(producer "…")` header names, run
+# in-process on the rig in a pass of their own, and the isolated passes run the
+# rest (docs/test-runner.md). Read off the ledgers, so the ledger directory
+# stays the one list. The runner's own producer, `elle test`, is no file.
+PRODUCER_FILES      := $(sort $(shell sed -n 's/^(producer "\(.*\.lisp\)")$$/\1/p' tests/ledger/*.lisp))
+ISOLATED_IMPL_FILES := $(filter-out $(PRODUCER_FILES),$(IMPL_FILES))
+
+# The charge pass reads what each file's second run in-process costs the
+# runner's heap (docs/test-gauges.md). It runs the language suite and the
+# implementation files with no sidecar, since a sidecar names a mode an
+# in-process run cannot give. It leaves out the producers, which have their
+# own pass, and config.lisp, which asserts that a program cannot change the JIT
+# policy the in-process runner sets.
+CHARGE_SKIP       := tests/impl/config.lisp
+SIDECAR_FREE_IMPL := $(foreach f,$(IMPL_FILES),$(if $(wildcard $(f:.lisp=.toml)),,$(f)))
+CHARGE_FILES      := $(filter-out $(PRODUCER_FILES) $(CHARGE_SKIP),$(LANG_FILES) $(SIDECAR_FREE_IMPL))
 
 # The runner's own acceptance tests drive `elle test` themselves and read the
 # store the pass records into, so they ride the implementation suite's first
@@ -282,11 +299,12 @@ DEAL_CORPUS := LC_ALL=C awk 'BEGIN { for (i = 0; i < 256; i++) ord[sprintf("%c",
 # One suite pass: the files, dealt into batches, `$(JOBS)` runner processes side
 # by side. A language pass runs its files inside the runner
 # (docs/test-runner.md). A pass whose runner flags carry `--isolate FLAGS` runs
-# each file as its own child — `elle FLAGS PATH`, or `PROGRAM FLAGS PATH` under
-# `--host` — so it starts, runs as a whole program and exits, and a fault kills
-# one child rather than the run. Every verdict lands in the session DB, the
-# runner's default in the state directory (docs/testing.md). Concurrent runners
-# share it: a connection waits on a busy database rather than raising.
+# each file as its own child — the runner itself, as `RUNNER FLAGS PATH`, or
+# `PROGRAM FLAGS PATH` under `--host` — so it starts, runs as a whole program
+# and exits, and a fault kills one child rather than the run. Every verdict
+# lands in the session DB, the runner's default in the state directory
+# (docs/testing.md). Concurrent runners share it: a connection waits on a busy
+# database rather than raising.
 #
 # `xargs` runs every batch, and a batch that fails a file (exit 1–125) or dies
 # on a signal drives a non-zero exit, so the gate fails loud. Every recipe
@@ -298,11 +316,16 @@ DEAL_CORPUS := LC_ALL=C awk 'BEGIN { for (i = 0; i < 256; i++) ord[sprintf("%c",
 #
 # The runner is the build the target runs its suites on: `elle`, or a variant's
 # own binary where its target sets `SUITE_ELLE`. A target-specific `ELLE` would
-# lose to an `ELLE=` on the command line, which is what every CI job passes.
+# lose to an `ELLE=` on the command line, which is what every CI job passes. A
+# pass that names a rig as its third argument runs as that rig's `test`
+# instead, so the run has the rig's build and its readings are judged
+# (docs/ratchet.md). `SUITE_ELLE` reads the argument because it expands inside
+# the `$(call)`.
 #
-# $(1) the files   $(2) the runner's flags, such as `--host PROGRAM --isolate
-# 'FLAGS'`. No argument may contain a comma: `$(call)` splits on them.
-SUITE_ELLE = $(ELLE)
+# $(1) the files   $(2) the runner's flags, such as `--isolate 'FLAGS'`
+# $(3) the rig the pass runs on, or nothing for the target's own build. No
+# argument may contain a comma: `$(call)` splits on them.
+SUITE_ELLE = $(or $(3),$(ELLE))
 
 define RUN_SUITE
 	@printf '%s\n' $(1) | $(DEAL_CORPUS) | xargs -P $(JOBS) -n $(CORPUS_BATCH) $(SUITE_ELLE) test $(2) $(WIDE_FLAGS) || { echo "FAILED: elle test — a batch failed or was killed; query the session DB (docs/testing.md)"; exit 1; }
@@ -312,7 +335,7 @@ endef
 # each expansion's line, so a `foreach` over profiles makes one pass each.
 define RUN_LANG_PROFILE
 	@echo "=== the language suite, under $(1) ==="
-	$(call RUN_SUITE,$(LANG_FILES),--host $(ELLE_RIG) --isolate '--profile $(1)')
+	$(call RUN_SUITE,$(LANG_FILES),--isolate '--profile $(1)',$(ELLE_RIG))
 
 endef
 
@@ -320,11 +343,15 @@ smoke-lang: elle  ## The language suite on this build
 	@echo "=== the language suite ==="
 	$(call RUN_SUITE,$(LANG_FILES),)
 
-smoke-impl: elle elle-rig  ## The implementation suite on the rig, then both suites under each rig profile
+smoke-impl: elle elle-rig  ## The implementation suite on the rig, the producers, each file's charge, then both suites under each rig profile
 	@echo "=== the implementation suite, on the rig ==="
-	$(call RUN_SUITE,$(IMPL_FILES) $(RUNNER_ACCEPTANCE),--host $(ELLE_RIG) --isolate '')
+	$(call RUN_SUITE,$(ISOLATED_IMPL_FILES) $(RUNNER_ACCEPTANCE),--isolate '',$(ELLE_RIG))
 	@echo "=== both suites, every function compiled on its first call ==="
-	$(call RUN_SUITE,$(LANG_FILES) $(IMPL_FILES),--host $(ELLE_RIG) --isolate '--profile $(EAGER_PROFILE)')
+	$(call RUN_SUITE,$(LANG_FILES) $(ISOLATED_IMPL_FILES),--isolate '--profile $(EAGER_PROFILE)',$(ELLE_RIG))
+	@echo "=== the producers, in-process on the rig ==="
+	$(call RUN_SUITE,$(PRODUCER_FILES),,$(ELLE_RIG))
+	@echo "=== each file's charge on the runner's heap, in-process on the rig ==="
+	$(call RUN_SUITE,$(CHARGE_FILES),--charge,$(ELLE_RIG))
 	$(foreach profile,$(IMPL_PROFILES),$(call RUN_LANG_PROFILE,$(profile)))
 
 # The language suite booted from an image instead of from core.lisp,
@@ -389,7 +416,9 @@ smoke-pool: elle-pool  ## Both suites on the thread-pool I/O backend (what every
 	@echo "=== the language suite, thread-pool I/O ==="
 	$(call RUN_SUITE,$(LANG_FILES),)
 	@echo "=== the implementation suite, on the thread-pool build's rig ==="
-	$(call RUN_SUITE,$(IMPL_FILES),--host $(ELLE_RIG) --isolate '')
+	$(call RUN_SUITE,$(ISOLATED_IMPL_FILES),--isolate '',$(ELLE_RIG))
+	@echo "=== the producers, in-process on the thread-pool build's rig ==="
+	$(call RUN_SUITE,$(PRODUCER_FILES),,$(ELLE_RIG))
 
 elle-mlir:  ## Build elle-mlir and elle-rig-mlir, the MLIR build (for smoke-mlir)
 	@echo "=== build elle and its rig with MLIR ==="
@@ -397,12 +426,14 @@ elle-mlir:  ## Build elle-mlir and elle-rig-mlir, the MLIR build (for smoke-mlir
 
 # The MLIR build's rig is the one rig that carries the MLIR tier, so the
 # implementation suite's MLIR files run there.
-smoke-mlir: SUITE_ELLE = $(ELLE_MLIR)
+smoke-mlir: SUITE_ELLE = $(or $(3),$(ELLE_MLIR))
 smoke-mlir: elle-mlir  ## Both suites on the MLIR build
 	@echo "=== the language suite, MLIR build ==="
 	$(call RUN_SUITE,$(LANG_FILES),)
 	@echo "=== the implementation suite, on the MLIR build's rig ==="
-	$(call RUN_SUITE,$(IMPL_FILES),--host $(ELLE_RIG_MLIR) --isolate '')
+	$(call RUN_SUITE,$(ISOLATED_IMPL_FILES),--isolate '',$(ELLE_RIG_MLIR))
+	@echo "=== the producers, in-process on the MLIR build's rig ==="
+	$(call RUN_SUITE,$(PRODUCER_FILES),,$(ELLE_RIG_MLIR))
 
 # The no-features binary is copied beside the build, and the default build then
 # rebuilt in its place, so the runner is always a build that has FFI.
@@ -439,7 +470,7 @@ check-wasm: elle-wasm  ## Build the WASM backend and boot one module through it
 # files run. Both suites then run on the rig with each file compiled whole to
 # one module.
 smoke-wasm: JOBS = $(WASM_JOBS)
-smoke-wasm: SUITE_ELLE = $(ELLE_WASM)
+smoke-wasm: SUITE_ELLE = $(or $(3),$(ELLE_WASM))
 smoke-wasm: elle-wasm  ## Both suites on the WASM build
 	@echo "=== the language suite, WASM build ==="
 	$(call RUN_SUITE,$(LANG_FILES),)
@@ -514,9 +545,19 @@ embedding: elle  ## Build + run embedding demos (Rust + C hosts)
 	LD_LIBRARY_PATH=$(EMBED_TARGET_DIR) demos/embedding/chost
 
 
-# What a contributor runs before a push and what the merge queue runs: both
-# suites on this build, the documents, the embedding demo and the surface gate.
-smoke: smoke-lang smoke-impl doctest embedding semver-check  ## Both suites, the doctests, the embedding demo and the surface gate
+# What a contributor runs before a push and what the merge queue runs: `qa`,
+# then both suites on this build, the documents, the embedding demo and the
+# surface gate. `qa` takes about two minutes and the passes about thirty, so a
+# formatting or clippy failure stops the gate before the suites start.
+#
+# The passes run in a sub-make that starts only once `qa` has finished, whatever
+# `-j` says; as prerequisites beside `qa`, `make -j` would start them together.
+# A platform's Smoke job runs each pass as a step of its own, and no `qa`
+# (docs/analysis/ci.md).
+SMOKE_PASSES := smoke-lang smoke-impl doctest embedding semver-check
+
+smoke: qa  ## qa, then both suites, the doctests, the embedding demo and the surface gate
+	@$(MAKE) --no-print-directory $(SMOKE_PASSES)
 	@echo "=== all smoke tests passed ==="
 
 # CI documents private items too, and most of this crate is private — without
@@ -530,16 +571,14 @@ smoke: smoke-lang smoke-impl doctest embedding semver-check  ## Both suites, the
 #
 # `--all-features` builds the MLIR tier, which finds LLVM 22 through
 # `MLIR_SYS_220_PREFIX` in the environment (docs/impl/mlir.md).
-qa: audit crosscheck  ## The PR gate's QA job, locally (~2min, no smoke): rustfmt, workspace clippy, rustdoc, doctests
+qa: audit agents-check crosscheck  ## The PR gate's QA job, locally (~2min, no smoke): rustfmt, indexes, clippy, rustdoc, doctests
 	cargo fmt --check
 	cargo clippy --workspace --all-targets --all-features -- -D warnings
 	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --document-private-items
 	cargo test --workspace --doc
 
 
-# `qa` goes first: it takes about two minutes and the suites about thirty, so a
-# formatting or clippy failure stops the gate before the suites start.
-test: qa smoke  ## QA (fmt/clippy/crosscheck/rustdoc), then smoke, then the Rust unit, integration and rig tests
+test: smoke  ## smoke (qa first), then the Rust unit, integration and rig tests
 	cargo test --workspace --lib --all-features
 	cargo test --test '*' -- --skip property
 	cargo test -p elle-rig

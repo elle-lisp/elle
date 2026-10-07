@@ -1,10 +1,10 @@
-// audited: 2026-09-21
+// audited: 2026-10-05
 //! What a primitive carries beyond its call behavior: the `Doc` a lookup
 //! shows, and the `PrimitiveMeta` maps the pipeline threads.
 //!
 //! src/primitives/AGENTS.md
 
-use crate::primitives::def::{RegionEffect, RetType};
+use crate::primitives::def::{PrimitiveDef, RegionEffect, RetType};
 use crate::signals::Signal;
 use crate::value::types::Arity;
 use crate::value::{SymbolId, Value};
@@ -25,6 +25,20 @@ pub struct Doc {
 }
 
 impl Doc {
+    /// The doc a primitive's definition carries, as `doc` shows it.
+    pub fn of(def: &PrimitiveDef) -> Doc {
+        Doc {
+            name: def.name,
+            doc: def.doc,
+            params: def.params,
+            arity: def.arity,
+            signal: def.signal,
+            category: def.category,
+            example: def.example,
+            aliases: def.aliases,
+        }
+    }
+
     /// Format as a human-readable doc string for REPL display.
     pub fn format(&self) -> String {
         let mut out = String::new();
@@ -120,6 +134,18 @@ impl PrimitiveMeta {
             embeds: HashMap::new(),
             moves_out: HashMap::new(),
         }
+    }
+
+    /// Enter `def` under `name`, one of its spellings: the primitive value and
+    /// every fact the pipeline reads about it.
+    pub fn insert_def(&mut self, name: SymbolId, def: &'static PrimitiveDef) {
+        self.signals.insert(name, def.signal);
+        self.arities.insert(name, def.arity);
+        self.functions.insert(name, Value::native_fn(def));
+        self.effects.insert(name, def.effect);
+        self.ret_types.insert(name, def.ret);
+        self.embeds.insert(name, def.embeds);
+        self.moves_out.insert(name, def.moves_out);
     }
 }
 

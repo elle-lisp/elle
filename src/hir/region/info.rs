@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-06
 //! `RegionInfo`: what region inference produces for a compilation unit — the
 //! per-allocation and per-scope assignments, and the lowerer's cuts.
 //!
@@ -303,6 +303,12 @@ pub struct RegionInfo {
     /// where the callee resolves to a lambda this compilation can see; every
     /// consumer takes its conservative branch when a call is absent.
     pub tail_callee_facts: HashMap<HirId, TailCalleeFacts>,
+    /// The variadic lambdas whose `&` rest list no cell of can outlive its head,
+    /// so the list takes one region. Every other lambda builds one region per
+    /// cell. Read through [`RegionInfo::rest_list_layout`].
+    ///
+    /// docs/impl/region/restlist.md
+    pub one_region_rest_lists: FxHashSet<HirId>,
     /// Ownership forest, STORE half: store-site HirId → the interior
     /// containment edges `(child, parent)` of an Owned subtree. The lowerer
     /// emits `AdoptRegion(parent, child)` there in place of the edge's
@@ -374,6 +380,7 @@ impl RegionInfo {
             frame_held_regions: FxHashSet::default(),
             value_routed_regions: FxHashSet::default(),
             tail_callee_facts: HashMap::new(),
+            one_region_rest_lists: FxHashSet::default(),
             live_regions: FxHashSet::default(),
             cross_region_refs: Vec::new(),
             region_data: HashMap::new(),

@@ -1,14 +1,16 @@
-// audited: 2026-09-16
-//! The queries over [`RegionInfo`]: what a binding holds, what an operand
-//! hands a call, and where the merge forest sends a region.
+// audited: 2026-10-06
+//! The queries over [`RegionInfo`]: what a binding holds, what an operand hands a
+//! call, where a region merges, and each rest-list layout.
 //!
 //! docs/impl/region/merging.md
 //! docs/impl/region/relocate.md
+//! docs/impl/region/restlist.md
 
 use super::super::Region;
 use super::RegionInfo;
 use crate::hir::binding::Binding;
 use crate::hir::expr::{Hir, HirId, HirKind};
+use crate::value::RestListLayout;
 use rustc_hash::FxHashSet;
 
 impl RegionInfo {
@@ -151,5 +153,17 @@ impl RegionInfo {
     /// docs/impl/region/mechanism.md
     pub fn is_merge_self_edge(&self, source: Region, target: Region) -> bool {
         self.merged_root(source) == self.merged_root(target)
+    }
+
+    /// How the `&` rest list of the lambda at `lambda` is built: in one region
+    /// when the gate admitted it, one region per cell otherwise.
+    ///
+    /// docs/impl/region/restlist.md
+    pub fn rest_list_layout(&self, lambda: HirId) -> RestListLayout {
+        if self.one_region_rest_lists.contains(&lambda) {
+            RestListLayout::OneRegion
+        } else {
+            RestListLayout::PerCell
+        }
     }
 }

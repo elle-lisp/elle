@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-30
+(elle/epoch 14)
+# audited: 2026-10-05
 ## elle test — the session store: where a run is kept, the schema it is kept
 ## in, what a run row says about the code it ran against, and the CAS.
 ## docs/test-store.md
@@ -48,7 +48,7 @@
   [["git_commit" "TEXT"] ["git_dirty" "INTEGER"] ["tree_hash" "TEXT"]
    ["worktree" "TEXT"] ["boot_fingerprint" "INTEGER"] ["elle_version" "TEXT"]
    ["build_profile" "TEXT"] ["host" "TEXT"] ["argv" "TEXT"] ["run_key" "TEXT"]
-   ["pid" "INTEGER"]])
+   ["pid" "INTEGER"] ["build" "TEXT"]])
 
 (defn ensure-code-columns [conn cols]
   (if (empty? cols)
@@ -59,7 +59,7 @@
 
 (defn ensure-schema [conn]
   (sqlite:exec conn
-               "CREATE TABLE IF NOT EXISTS run (id INTEGER PRIMARY KEY, started_at TEXT DEFAULT (datetime('now')), finished_at TEXT, run_key TEXT, tiers TEXT, selection TEXT, n_selected INTEGER, git_commit TEXT, git_dirty INTEGER, tree_hash TEXT, worktree TEXT, boot_fingerprint INTEGER, elle_version TEXT, build_profile TEXT, host TEXT, argv TEXT, pid INTEGER, n_pass INTEGER DEFAULT 0, n_fail INTEGER DEFAULT 0, n_skip INTEGER DEFAULT 0, n_diverge INTEGER DEFAULT 0, n_timeout INTEGER DEFAULT 0)")
+               "CREATE TABLE IF NOT EXISTS run (id INTEGER PRIMARY KEY, started_at TEXT DEFAULT (datetime('now')), finished_at TEXT, run_key TEXT, tiers TEXT, selection TEXT, n_selected INTEGER, git_commit TEXT, git_dirty INTEGER, tree_hash TEXT, worktree TEXT, boot_fingerprint INTEGER, elle_version TEXT, build_profile TEXT, host TEXT, argv TEXT, pid INTEGER, build TEXT, n_pass INTEGER DEFAULT 0, n_fail INTEGER DEFAULT 0, n_skip INTEGER DEFAULT 0, n_diverge INTEGER DEFAULT 0, n_timeout INTEGER DEFAULT 0)")
   (sqlite:exec conn
                "CREATE TABLE IF NOT EXISTS form (hash TEXT PRIMARY KEY, origin TEXT, session TEXT, file TEXT, form_index INTEGER, line INTEGER, col INTEGER, label TEXT, src TEXT, caps TEXT, touches TEXT, signal TEXT)")
   (sqlite:exec conn
@@ -67,7 +67,7 @@
   (sqlite:exec conn
                "CREATE TABLE IF NOT EXISTS asset (result_id INTEGER, kind TEXT, hash TEXT, size INTEGER, codec TEXT)")
   (sqlite:exec conn
-               "CREATE TABLE IF NOT EXISTS measurement (run_id INTEGER, result_id INTEGER, subject TEXT, axis TEXT, value REAL, unit TEXT, verdict TEXT)")
+               "CREATE TABLE IF NOT EXISTS measurement (run_id INTEGER, result_id INTEGER, subject TEXT, axis TEXT, value REAL, half REAL, unit TEXT, bound REAL, kind TEXT, verdict TEXT)")
   (sqlite:exec conn
                "CREATE TABLE IF NOT EXISTS gauge (id INTEGER PRIMARY KEY, run_id INTEGER, file TEXT, heap TEXT, kind TEXT, delta INTEGER, reading INTEGER)")
   (sqlite:exec conn
@@ -91,6 +91,11 @@
   # A gauge row recorded before the heap column existed was the runner's, and
   # reads NULL there (docs/test-gauges.md).
   (ensure-column conn "gauge" "heap" "TEXT")
+  # A reading recorded before it carried its interval and the row it met keeps
+  # NULL for each (docs/test-store.md § Measurements).
+  (ensure-column conn "measurement" "half" "REAL")
+  (ensure-column conn "measurement" "bound" "REAL")
+  (ensure-column conn "measurement" "kind" "TEXT")
   # What makes a run the same run in two stores, so an import of one artifact
   # lands it once (docs/test-store.md § The run key). SQLite holds every NULL
   # distinct under a unique index, so a run recorded before the key existed
@@ -137,9 +142,10 @@
 
 # The code state and the machine this run ran on. Outside a repository the git
 # fields are nil, which lands as SQL NULL: the run happened, and nothing names
-# the code it ran against. The host and the build are facts about the box and
-# the binary, so they are recorded either way, and so is the pid: with the
-# host, it is what tells a run still in flight from a killed one (view.lisp).
+# the code it ran against. The host is a fact about the box, so it is recorded
+# either way, and so is the pid: with the host, it is what tells a run still in
+# flight from a killed one (view.lisp). The build is the runner's own, and nil
+# outside the rig (main.lisp).
 #
 # The boot fingerprint is the binary itself, hashed (docs/test-store.md § The
 # boot fingerprint): a commit says which sources a run was meant to test, and
@@ -154,7 +160,7 @@
             :worktree (capture-cmd "git rev-parse --show-toplevel 2>/dev/null")
             :boot (elle/boot-fingerprint) :host host :version (elle/version)
             :profile (elle/build-profile) :argv argv :key (run-key host argv)
-            :pid (sys/pid))))
+            :pid (sys/pid) :build run-build)))
 
 # What names this run in any store that holds it (docs/test-store.md § The run
 # key). The machine, the process and the instant are what separate two runs
@@ -189,29 +195,9 @@
         (port/close p)))
     [addr size "zstd"]))
 
-# --dump capture is OMITTED for now (docs/test-runner.md § CAS asset capture
-# status note): the per-file (compile/dumps …) pass is the single largest
-# contributor to the corpus region leak that OOMs `make smoke` (~28k regions/
-# file), and the dumps are not byte-deterministic across compiles (absolute
-# @-HirIds from a process-global counter), so they would not even CAS-dedup.
-# Until that leak is root-caused and fixed, capture nothing: no compile/dumps
-# call, no dump asset rows, no CAS dump files. Re-enabling is reverting this to
-# the compile/dumps body below. stdout/stderr capture is a separate path
-# (capture-stdio, on the per-form execution) and is unaffected.
-#
-# The original (re-enable here once the leak is fixed):
-#   (let [out (protect (compile/dumps src name))]
-#     (if (get out 0)
-#       (let [d (get out 1)]
-#         (filter (fn [x] (not (= x nil)))
-#                 (map (fn [k]
-#                        (let [text (get d k)]
-#                          (if (and (not (= text nil)) (> (length text) 0))
-#                            (concat [(string k)] (cas-put text))
-#                            nil)))
-#                      [:ast :fhir :defuse :regions :hir :lir :cfg :dfa :jit
-#                       :escape])))
-#       [])))
+# --dump capture is off (docs/test-runner.md § CAS asset capture): no
+# compile/dumps call, no dump asset rows, no CAS dump files. stdout/stderr
+# capture is a separate path, capture-stdio, on the per-form execution.
 (defn capture-dumps [src name]
   [])
 
@@ -227,51 +213,6 @@
     (begin
       (insert-asset conn result-id (first dumps))
       (insert-assets conn result-id (rest dumps)))))
-
-# ── the measurement channel (docs/test-store.md § Measurements) ───────
-# A dashboard reports each verdict as one JSON object per line, appended to the
-# file ELLE_TEST_MEASUREMENTS names. The runner names one file per isolated
-# child and reads it back when the child exits, so a rate becomes a row a query
-# can read across commits instead of prose that scrolled past.
-#
-# The child process is what makes the variable safe to set: the environment is
-# process-global, so a per-form value would race between workers sharing one.
-(def measurement-var "ELLE_TEST_MEASUREMENTS")
-
-(defn measurement-sink [run-id h]
-  (string scratch-dir "/" run-id "_" h ".measurements"))
-
-# The child's environment: this process's, plus the sink. `:env` REPLACES the
-# environment rather than adding to it, so the whole of ours has to go through
-# — a child with no PATH, HOME or TMPDIR is a different test.
-(defn measurement-env [sink]
-  (put (sys/env) measurement-var sink))
-
-# Insert one reported verdict. A record with no subject is not a measurement,
-# so it is dropped rather than stored as a row of nulls nothing can join.
-(defn insert-measurement [conn run-id result-id rec]
-  (if (get rec :subject)
-    (sqlite:exec conn
-                 "INSERT INTO measurement (run_id, result_id, subject, axis, value, unit, verdict) VALUES (?1,?2,?3,?4,?5,?6,?7)"
-                 [run-id result-id (get rec :subject) (get rec :axis)
-                  (get rec :value) (get rec :unit) (get rec :verdict)])
-    nil))
-
-# Read the channel a child wrote and record every verdict against its result.
-# A file that is not there is the ordinary case — most files are not dashboards
-# — and a line that will not parse is skipped rather than failing the run: the
-# child's own status is the verdict, and a malformed record must not turn a
-# measured run into a failed one. The sink is deleted either way; the rows are
-# the durable copy.
-(defn record-measurements [conn run-id result-id sink]
-  (let [[ok? text] (protect (slurp sink))]
-    (when ok?
-      (each line in (string/split text "\n")
-        (when (> (length (string/trim line)) 0)
-          (let [[parsed? rec] (protect (json/parse line :keys :keyword))]
-            (when parsed? (insert-measurement conn run-id result-id rec)))))
-      (protect (file/delete sink))))
-  nil)
 
 # ── the heap gauges (docs/test-gauges.md) ──────────────────────────
 # Every gauge the runner reads, as [kind reader]. Each primitive is Immediate,

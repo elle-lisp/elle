@@ -1,6 +1,6 @@
 # The region memory model
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-09-30 -->
 
 The mission of the region system, the map of its documents, the settled
 invariants, and the leak classes that name the open frontier.
@@ -331,10 +331,10 @@ would forfeit the no-GC thesis; the design makes the shape near-unreachable
 and names the boundary.
 
 **Genuine growth is not a leak.** A module-level sink that genuinely retains
-every prior reads open correctly — the oracle's discriminator probes are this
-by design, and "fixing" one breaks the gauge. A block-local accumulator is
-different: it frees at the block's return, so a probe that reads it as growth
-is measuring an over-keep.
+every prior reads as growth correctly — the ratchet's live-growth rows are
+this by design ([ratchet](../ratchet.md)), and "fixing" one breaks the gauge.
+A block-local accumulator is different: it frees at the block's return, so a
+probe that reads it as growth is measuring an over-keep.
 
 ## The soundness axis — guardfree over-frees
 
@@ -375,12 +375,14 @@ beside a live-growth discriminator that proves the gauge is not dead; and
 `--trace=guardfree` under the full stdlib for UAF. A fix is proven by measured
 slope → 0 plus guardfree-clean.
 
-[The oracle](../../tests/impl/oracle.lisp) is the single leak-state dashboard: representative
-shapes per class, an adaptive sequential rate estimator that catches
-sub-integer leaks, and shrink-only pins. `oracle: ok` is a ratchet, not a
-certificate — it asserts no leak got worse and no closed class regressed,
-never that leaks are gone. An undeclared open probe fails a completeness gate,
-so the split cannot drift. How to run all three gauges is
+[The oracle](../../tests/impl/oracle.lisp) is the leak-state dashboard:
+representative shapes per class, driven on the ratchet's estimator, which
+catches sub-integer leaks, with every rate pinned in
+[its ledger](../../tests/ledger/oracle.lisp) ([ratchet](../ratchet.md)).
+`oracle: ok` is a ratchet, not a certificate — it asserts no rate moved and no
+closed class regressed, never that leaks are gone. A pin is two-sided, a probe
+with no row fails as `unledgered` and a row with no probe as `missing`, so the
+coverage cannot drift. How to run all three gauges is
 [assessment.md](assessment.md).
 
 ## Critical files

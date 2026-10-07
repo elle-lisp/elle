@@ -1,6 +1,6 @@
 # The audit queue
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-05 -->
 
 Every file carries the day it last met the documentation policy, and the queue
 names what to read next by what a stale file costs.
@@ -73,6 +73,7 @@ all, which is the correct answer for a file whose staleness costs nothing.
 | `scripts/audit --all` | every file, costliest first |
 | `scripts/audit --staged` | fail when a staged file carries no stamp for today |
 | `scripts/audit --policy` | every file stamped before the policy's own stamp |
+| `scripts/audit --counts` | the unstamped files and the files stamped before the policy, as two counts |
 | `scripts/audit --root DIR` | treat DIR as the repository root |
 
 `make audit` runs the first form, and `make qa` runs `make audit` before its
@@ -101,6 +102,12 @@ is the quantity that actually matters and which nothing measures directly.
 
 Sources a reader edits, and the documents they cite. Generated trees carry
 none, and neither does a vendored dependency.
+
+The walk lists the files git tracks when the root is the top of a work tree,
+and every file under the root otherwise. A file git does not track is nobody's
+to audit: a hand-off note or a scratch file would sit in the queue, and the
+counts would differ between two checkouts of one commit. A fixture tree that is
+no repository still has every file walked.
 
 A directory below the root that carries its own `COPYRIGHT` or `LICENSE` file
 is vendored, and nothing under it is queued. The licence is the signal because
@@ -159,6 +166,24 @@ A policy change therefore returns most of the tree to the queue at once. That
 is why the queue is an order and not a work list to finish: the cost ranking
 brings back the files where a stale rule is read most often, and leaves the
 rest at the bottom.
+
+## The counts are on the ratchet
+
+`scripts/audit --counts` prints two lines, `unstamped N` and `before-policy N`.
+The first counts the files with no stamp, and the second the files whose stamp
+is older than the policy's. No file is in both.
+[tests/ratchet/audit.lisp](../../tests/ratchet/audit.lisp) reads each count,
+and [its ledger](../../tests/ledger/audit.lisp) pins each one
+([the ratchet](../ratchet.md)).
+
+A pin is two-sided. A commit that stamps a file in either count lowers that
+count, and the producer pass then fails on a `stale` pin. Re-pin it in the same
+pull request with `elle-rig test --repin tests/ratchet/audit.lisp`, so the
+ledger's diff shows how far the change moved the queue.
+
+A change to the policy restamps it, and every file stamped before that day
+joins the second count. That reading is a `regression`, which `--repin`
+refuses. Edit the pin by hand in the change that moved the rule.
 
 ## A stamp is a claim the build can falsify
 

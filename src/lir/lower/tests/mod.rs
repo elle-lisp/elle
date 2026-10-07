@@ -1,3 +1,8 @@
+// audited: 2026-10-06
+//! The lowerer unit tests: shared fixtures that lower a source fragment, and one submodule per subject.
+//!
+//! docs/impl/lir.md
+
 use super::*;
 use crate::syntax::Span;
 
@@ -28,14 +33,14 @@ fn make_lowerer_with(
     use crate::hir::testkit::{HirFixture, STUBS_RETURNING_ARGS};
     use crate::symbol::SymbolTable;
 
-    let mut symbols = SymbolTable::new();
-    // Leaked so the `Lowerer<'static>` this returns can borrow it: the tests
-    // keep the lowerer past any scope the arena could live in.
+    // Both leaked so the `Lowerer<'static>` this returns can borrow them: the
+    // tests keep the lowerer past any scope they could live in. The symbol
+    // table spells the name a `def`- or `letrec`-bound lambda carries.
+    let symbols = Box::leak(Box::new(SymbolTable::new()));
     let arena = Box::leak(Box::new(crate::hir::BindingArena::new()));
-    let built =
-        HirFixture::new()
-            .stubs(STUBS_RETURNING_ARGS)
-            .build_into(source, arena, &mut symbols);
+    let built = HirFixture::new()
+        .stubs(STUBS_RETURNING_ARGS)
+        .build_into(source, arena, symbols);
 
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(&built.meta);
     let mut region_info =
@@ -44,7 +49,8 @@ fn make_lowerer_with(
     let lowerer = Lowerer::new(arena)
         .with_primitive_classification(pc)
         .with_primitive_values(built.primitive_values)
-        .with_region_info(region_info);
+        .with_region_info(region_info)
+        .with_symbols(symbols);
     (lowerer, built.hir)
 }
 
@@ -232,3 +238,4 @@ mod basics;
 mod coalesce;
 mod merge;
 mod release;
+mod restlist;

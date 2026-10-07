@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-10-05
 //! The keyword vocabulary: every spelling the Rust runtime mints from a fixed
 //! string.
 //!

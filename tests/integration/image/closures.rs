@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-10-06
 // A closure and its code object cross the body; the header hydrates without
 // its blueprint.
 // docs/impl/image/sealing.md
@@ -13,12 +13,13 @@ use elle::image::Sections;
 use elle::pipeline::eval_all;
 use elle::signals::Signal;
 use elle::value::heap::deref;
-use elle::value::{Arity, CaptureMask};
+use elle::value::{Arity, CaptureMask, RestListLayout};
 use elle::SourceLoc;
 
 /// A blueprint exercising every payload field a data closure carries: real
 /// locations with two interned files, both release tables, a merge set, the
-/// capture masks, a `&named` key set, and a mixed constant pool.
+/// capture masks, a `&named` key set, the rest-list layout, and a mixed
+/// constant pool.
 fn full_proto(heap: &mut FiberHeap, region: RuntimeRegion) -> (TemplateProto, Value) {
     let shared = alloc_str(heap, region, "shared payload");
     let insert = Value::native_fn(
@@ -47,6 +48,7 @@ fn full_proto(heap: &mut FiberHeap, region: RuntimeRegion) -> (TemplateProto, Va
     proto.name = Some("image-closure".to_string());
     proto.doc = Some("crosses the body".to_string());
     proto.vararg_kind = VarargKind::StrictStruct(vec!["alpha".to_string(), "beta".to_string()]);
+    proto.rest_list_layout = RestListLayout::OneRegion;
     proto.region_table = vec![
         StaticRegion::new(2).expect("slot 2 is a slot"),
         StaticRegion::new(4).expect("slot 4 is a slot"),
@@ -112,6 +114,7 @@ fn a_closures_code_object_round_trips_field_by_field() {
     );
     assert!(t.strict_keys().contains("alpha") && t.strict_keys().contains("beta"));
     assert!(!t.strict_keys().contains("gamma"));
+    assert_eq!(t.rest_list_layout(), RestListLayout::OneRegion);
 
     let constants = t.constants();
     assert_eq!(constants[0], Value::int(9));
@@ -282,7 +285,7 @@ fn an_env_capture_cell_refuses_the_dump() {
 // ── Determinism and hygiene ─────────────────────────────────────────
 
 // § Test plan, "Closures": a dumped closure writes one file across two dumps.
-// The payload is the widest record the dumper assembles — a struct of twelve
+// The payload is the widest record the dumper assembles — a struct of thirteen
 // slice headers and a `repr(Rust)` arity — so its construction temporaries
 // are exactly where residue would come from.
 #[test]
@@ -397,5 +400,9 @@ fn a_compiled_closure_answers_a_call_after_hydration() {
         let (vm, symbols, cctx) = rt2.parts();
         eval_all("(hydrated-f 2)", symbols, vm, cctx, "<image-closures>").expect("call")
     };
-    assert_eq!(result.as_int(), Some(42), "the hydrated closure answered wrong");
+    assert_eq!(
+        result.as_int(),
+        Some(42),
+        "the hydrated closure answered wrong"
+    );
 }

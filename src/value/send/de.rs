@@ -1,6 +1,8 @@
-// audited: 2026-09-19
+// audited: 2026-10-06
 //! Deserializing a `SendBundle`: every received value is rebuilt on the
 //! receiving heap, in the call's region.
+//!
+//! docs/threads.md
 
 use super::*;
 
@@ -96,31 +98,41 @@ impl<'a, 'h> DeserContext<'a, 'h> {
 /// reconstructed template's `child_protos` so the worker's `MakeClosure`
 /// resolves by index.
 pub(in crate::value::send) fn template_from_sendable(
-    sc: SendableClosure,
+    mut sc: SendableClosure,
     ctx: &mut DeserContext<'_, '_>,
 ) -> std::rc::Rc<crate::value::TemplateProto> {
     use std::rc::Rc;
-    let constants: Vec<Value> = sc
-        .constants
+    let constants: Vec<Value> = std::mem::take(&mut sc.constants)
         .into_iter()
         .map(|cv| into_value_inner(cv, ctx))
         .collect();
-    let lir_value_pool: Vec<Value> = sc
-        .lir_value_pool
+    let lir_value_pool: Vec<Value> = std::mem::take(&mut sc.lir_value_pool)
         .into_iter()
         .map(|cv| into_value_inner(cv, ctx))
         .collect();
-    let lir_function = sc.lir_function.map(|mut lir| {
+    let lir_function = sc.lir_function.take().map(|mut lir| {
         patch_lir_closure_refs(&mut lir, ctx);
         patch_lir_value_refs(&mut lir, &lir_value_pool);
         Rc::new(lir)
     });
-    let child_protos: Vec<Rc<crate::value::TemplateProto>> = sc
-        .child_protos
+    let child_protos: Vec<Rc<crate::value::TemplateProto>> = std::mem::take(&mut sc.child_protos)
         .into_iter()
         .map(|p| template_from_sendable(p, ctx))
         .collect();
-    Rc::new(crate::value::TemplateProto {
+    Rc::new(blueprint(sc, constants, lir_function, child_protos))
+}
+
+/// The blueprint a received code object describes: every field of `sc` a
+/// `TemplateProto` holds, around the parts the caller rebuilt on this heap.
+/// The caller has taken those parts out of `sc`, along with the instance
+/// fields, which a blueprint does not hold.
+fn blueprint(
+    sc: SendableClosure,
+    constants: Vec<Value>,
+    lir_function: Option<std::rc::Rc<crate::lir::LirFunction>>,
+    child_protos: Vec<std::rc::Rc<crate::value::TemplateProto>>,
+) -> crate::value::TemplateProto {
+    crate::value::TemplateProto {
         num_locals: sc.num_locals,
         num_captures: sc.num_captures,
         num_params: sc.num_params,
@@ -131,13 +143,14 @@ pub(in crate::value::send) fn template_from_sendable(
         lir_function,
         doc: sc.doc,
         vararg_kind: sc.vararg_kind,
+        rest_list_layout: sc.rest_list_layout,
         name: sc.name,
         child_protos,
         merged_slots: sc.merged_slots.into_iter().collect(),
         frame_release_slots: sc.frame_release_slots,
         frame_release_regions: sc.frame_release_regions,
         ..crate::value::TemplateProto::new(sc.bytecode, sc.arity, constants)
-    })
+    }
 }
 
 /// The recursive deserialization worker: one arm per `SendValue` variant,
@@ -356,30 +369,25 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) ->
             // NotStarted — fall through to reconstruct
 
             ctx.states[idx] = ReconState::InProgress;
-            let sc = ctx.closures[idx]
+            let mut sc = ctx.closures[idx]
                 .take()
                 .expect("bug: closure already taken from DeserContext");
 
             // Reconstruct constants (no closures expected in constants,
             // but thread the context for completeness).
-            let constants: Vec<Value> = sc
-                .constants
+            let constants: Vec<Value> = std::mem::take(&mut sc.constants)
                 .into_iter()
                 .map(|sv| into_value_inner(sv, ctx))
                 .collect();
 
             // Reconstruct env (may encounter InProgress Refs → NIL placeholders).
-            let env: Vec<Value> = sc
-                .env
+            let env: Vec<Value> = std::mem::take(&mut sc.env)
                 .into_iter()
                 .map(|sv| into_value_inner(sv, ctx))
                 .collect();
 
-            let doc = sc.doc;
-
             // Rebuild the compound-value pool lifted out of the LIR on send.
-            let lir_value_pool: Vec<Value> = sc
-                .lir_value_pool
+            let lir_value_pool: Vec<Value> = std::mem::take(&mut sc.lir_value_pool)
                 .into_iter()
                 .map(|sv| into_value_inner(sv, ctx))
                 .collect();
@@ -387,7 +395,7 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) ->
             // Patch the LIR placeholders back to ValueConst: ClosureRef entries
             // (forcing referenced closures to reconstruct) and ValueRef entries
             // (from the pool above). Both invert convert_lir_for_send.
-            let lir_function = sc.lir_function.map(|mut lir| {
+            let lir_function = sc.lir_function.take().map(|mut lir| {
                 patch_lir_closure_refs(&mut lir, ctx);
                 patch_lir_value_refs(&mut lir, &lir_value_pool);
                 Rc::new(lir)
@@ -395,30 +403,13 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) ->
 
             // Reconstruct the nested-lambda blueprints so this template's
             // `MakeClosure`s resolve by index in the worker.
-            let child_protos: Vec<Rc<TemplateProto>> = sc
-                .child_protos
+            let child_protos: Vec<Rc<TemplateProto>> = std::mem::take(&mut sc.child_protos)
                 .into_iter()
                 .map(|p| template_from_sendable(p, ctx))
                 .collect();
 
-            let proto = Rc::new(TemplateProto {
-                num_locals: sc.num_locals,
-                num_captures: sc.num_captures,
-                num_params: sc.num_params,
-                signal: sc.signal,
-                capture_params_mask: sc.capture_params_mask,
-                capture_locals_mask: sc.capture_locals_mask,
-                location_map: sc.location_map,
-                lir_function,
-                doc,
-                vararg_kind: sc.vararg_kind,
-                name: sc.name,
-                child_protos,
-                merged_slots: sc.merged_slots.into_iter().collect(),
-                frame_release_slots: sc.frame_release_slots,
-                frame_release_regions: sc.frame_release_regions,
-                ..TemplateProto::new(sc.bytecode, sc.arity, constants)
-            });
+            let squelch_mask = sc.squelch_mask;
+            let proto = Rc::new(blueprint(sc, constants, lir_function, child_protos));
 
             // The receiving side materializes the header into the closure's own
             // region, as `MakeClosure` does — a received closure is an ordinary
@@ -428,7 +419,7 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) ->
             let val = ctx.ctx.closure(Closure::new(
                 crate::value::TemplateRef::region(template),
                 env_slice,
-                sc.squelch_mask,
+                squelch_mask,
             ));
             ctx.states[idx] = ReconState::Done(val);
             val

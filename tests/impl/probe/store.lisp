@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 13)
+# audited: 2026-09-30
 # The physical-id dimension no other gauge shows, and the remove/rebind half of the mutable-store funnel.
 #
 # docs/impl/region/diagnostics.md
@@ -23,32 +23,26 @@
 # `id-borrowed-index` are results borrowed out of an argument; `id-fresh-result`
 # is the materializing control, whose id comes back by the ordinary teardown.
 #
-# These are CLOSED controls (undeclared, like `rest-array-copy`), so a regression
-# to open trips the completeness gate loudly. Read them against the id
-# discriminator in probe/gauge.lisp: an id gauge that cannot move reads 0 for
-# all five.
+# These are controls at 0. The instrument proves the id gauge live ahead of the
+# first of them, because an id gauge that cannot move reads 0 for all five.
 (def id-hold [1 2 3])
 (println "── folded suite: physical-id recycling ──")
-(pin (measure-core "id-const-compare" (stmt-run (fn [] (< 1 2))) ids-gauge 100 6
-                   60 0.4 0.5) 0)
-(pin (measure-core "id-immediate-result" (stmt-run (fn [] (length id-hold)))
-                   ids-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "id-borrowed-index" (stmt-run (fn [] (get id-hold 0)))
-                   ids-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "id-borrowed-element" (stmt-run (fn [] (first (pair 1 2))))
-                   ids-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "id-fresh-result" (stmt-run (fn [] (pair 1 2))) ids-gauge 100
-                   6 60 0.4 0.5) 0)
+(r:drive "id-const-compare" (r:stmt-run (fn [] (< 1 2))) :on [r:ids])
+(r:drive "id-immediate-result" (r:stmt-run (fn [] (length id-hold))) :on [r:ids])
+(r:drive "id-borrowed-index" (r:stmt-run (fn [] (get id-hold 0))) :on [r:ids])
+(r:drive "id-borrowed-element" (r:stmt-run (fn [] (first (pair 1 2))))
+         :on [r:ids])
+(r:drive "id-fresh-result" (r:stmt-run (fn [] (pair 1 2))) :on [r:ids])
 
 # ── The mutable-store funnel — remove/rebind half ─────────────────────
-# The store half (push/put/add) is pinned in probe/direct.lisp and
-# probe/container.lisp (push-churn/struct-put/set-array/…); these pin the REMOVE and
+# The store half (push/put/add) is read in probe/direct.lisp and
+# probe/container.lisp (push-churn/struct-put/set-array/…); these read the REMOVE and
 # REBIND half of the same seam (the outgoing edge table of
 # docs/impl/region/ownership.md; src/value/arena/mutate.rs). The funnel SEAM is
 # complete-by-construction — every remove co-locates its RC decref with the outgoing
 # un-record, the raw accessors are private (an uncounted store is a compile error), and
 # a debug equivalence oracle asserts the recorded table matches a content scan at every
-# free. These pins read the seam THROUGH the surface that reaches it, and split cleanly:
+# free. These rows read the seam THROUGH the surface that reaches it, and split cleanly:
 #
 #   `%pop` — the remove funnel balances (rate 0): a box store+rebind and
 #   `%pop`'s `moves_out` native each reclaim their cross-region member, so `raw-pop` is
@@ -76,11 +70,10 @@
 #   (docs/impl/region/mechanism.md) — so a second, unbalanced retain there reads here as a
 #   whole stranded container plus the member it holds.
 (println "── folded suite: mutable-store funnel (remove/rebind half) ──")
-(pin (measure-core "box-rebind"
-                   (stmt-run (fn []
-                               (let [b (box (list 1 2))]
-                                 (rebox b (list 3 4))))) count-gauge 100 6 60
-                   0.4 0.5) 0)
+(r:drive "box-rebind"
+         (r:stmt-run (fn []
+                       (let [b (box (list 1 2))]
+                         (rebox b (list 3 4))))))
 # The stdlib `add` `(match (type-of coll) …)` dispatch
 # wrapper reclaims its owned @set container AND its stored heap member (rate 0): the
 # `:@set` arm's `%add-set-mut` returns the container pass-through, and the wrapper's
@@ -89,20 +82,19 @@
 # cascading the stored list through the outgoing edge table. A CLOSED control beside
 # the reclaiming raw funnel `set-add-slot-source`; it opens if the container
 # compensation regresses.
-(pin (measure-core "set-add"
-                   (stmt-run (fn []
-                               (let [s @||]
-                                 (add s (list 1 2))))) count-gauge 100 6 60 0.4
-                   0.5) 0)
-(pin (measure-core "raw-pop"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (let [a @[]]
-                         (%array-push a (%pair 1 2))
-                         (%pop a))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(r:drive "set-add"
+         (r:stmt-run (fn []
+                       (let [s @||]
+                         (add s (list 1 2))))))
+(r:drive "raw-pop"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (let [a @[]]
+               (%array-push a (%pair 1 2))
+               (%pop a))
+             (assign j (%add j 1)))))
 # The stdlib `pop` REMOVE-of-ELEMENT wrapper reclaims (rate 0). Its `:@array`/
 # `:@string`/`:@bytes` arms route to the monomorphic moves-out funnels
 # `%pop`/`%pop-string`/`%pop-bytes`; the container compensation frees the wrapper's
@@ -110,33 +102,33 @@
 # it returns the ELEMENT, not the container), and the moved-out @array element's
 # redundant tail ReturnValue retain is suppressed (`moves_out_release_sites`). The
 # two together reclaim both the container and the element.
-(pin (measure-core "pop-wrapper"
-                   (stmt-run (fn []
-                               (let [a @[]]
-                                 (push a (list 1 2))
-                                 (pop a)))) count-gauge 100 6 60 0.4 0.5) 0)
+(r:drive "pop-wrapper"
+         (r:stmt-run (fn []
+                       (let [a @[]]
+                         (push a (list 1 2))
+                         (pop a)))))
 # The stdlib `del` REMOVE wrapper reclaims (rate 0), the remove-half peer of the
 # store wrappers: its `:@struct`/`:@set` arms route to the `-mut` remove funnels
 # (`%del-struct-mut`/`%del-set-mut`) that return the container pass-through, and the
 # wrapper's container compensation frees the stranded owned-param reference — a
 # CLOSED control beside the reclaiming raw funnel `put-slot-source`.
-(pin (measure-core "del-wrapper"
-                   (stmt-run (fn []
-                               (let [m @{}]
-                                 (put m :k (list 1 2))
-                                 (del m :k)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "set-del-wrapper"
-                   (stmt-run (fn []
-                               (let [s @||]
-                                 (add s 7)
-                                 (del s 7)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "raw-del"
-                   (stmt-run (fn []
-                               (let [m @{}]
-                                 (%put m :k (%pair 1 2))
-                                 (%del m :k)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "raw-del-immediate"
-                   (stmt-run (fn []
-                               (let [m @{}]
-                                 (%put m :k 7)
-                                 (%del m :k)))) count-gauge 100 6 60 0.4 0.5) 0)
+(r:drive "del-wrapper"
+         (r:stmt-run (fn []
+                       (let [m @{}]
+                         (put m :k (list 1 2))
+                         (del m :k)))))
+(r:drive "set-del-wrapper"
+         (r:stmt-run (fn []
+                       (let [s @||]
+                         (add s 7)
+                         (del s 7)))))
+(r:drive "raw-del"
+         (r:stmt-run (fn []
+                       (let [m @{}]
+                         (%put m :k (%pair 1 2))
+                         (%del m :k)))))
+(r:drive "raw-del-immediate"
+         (r:stmt-run (fn []
+                       (let [m @{}]
+                         (%put m :k 7)
+                         (%del m :k)))))

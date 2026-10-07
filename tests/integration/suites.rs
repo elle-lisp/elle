@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 // The default build's suite targets: which files each pass runs, on which
 // program, under which flags.
 //
@@ -11,7 +11,8 @@
 // verdict per file, and still gates green, so the recipe is checked here.
 
 use crate::common::{
-    assert_plain_language_pass, impl_files, lang_files, make_expand, makefile, passes, Pass,
+    assert_plain_language_pass, assert_producer_pass, assert_rig_runs, charge_files,
+    isolated_impl_files, lang_files, make_expand, passes, Pass, CHARGE_SKIP,
 };
 use std::collections::BTreeSet;
 
@@ -33,17 +34,20 @@ fn smoke_lang_runs_every_language_file_with_no_flag() {
 }
 
 // The implementation suite runs on the rig, so each file's sidecar sets its
-// mode. The runner's acceptance tests ride the same pass: they drive `elle
-// test` themselves, and they need the store the pass records into.
+// mode, and the runner is the rig itself, so the run has the rig's build and
+// its readings are judged (docs/ratchet.md). The runner's acceptance tests
+// ride the same pass: they drive `elle test` themselves, and they need the
+// store the pass records into.
 //
 // The counter-factual: run the implementation suite under `elle`, and every
 // sidecar goes unread. The guardfree files run with the oracle disarmed and
-// pass.
+// pass. Run it under `elle test --host elle-rig`, and the run has no build, so
+// every reading goes unrecorded and every ledger row unjudged.
 #[test]
 fn smoke_impl_runs_the_implementation_suite_on_the_rig() {
     let passes = passes("smoke-impl", &[]);
     let base = &passes[0];
-    let mut want = impl_files();
+    let mut want = isolated_impl_files();
     want.extend(ACCEPTANCE.map(str::to_string));
     assert_eq!(
         base.files, want,
@@ -55,11 +59,7 @@ fn smoke_impl_runs_the_implementation_suite_on_the_rig() {
         Some(""),
         "each sidecar alone sets its file's mode"
     );
-    assert_eq!(
-        base.host(),
-        Some(make_expand("ELLE_RIG").as_str()),
-        "the implementation suite runs on the rig"
-    );
+    assert_rig_runs(base, "ELLE_RIG", "the implementation suite");
 }
 
 // The eager profile runs both suites with every function compiled on its first
@@ -73,13 +73,50 @@ fn smoke_impl_runs_both_suites_under_the_eager_profile() {
         .filter(|p| p.isolate() == Some(format!("--profile {EAGER}").as_str()))
         .collect();
     assert_eq!(eager.len(), 1, "one pass runs the eager profile");
-    let want: BTreeSet<String> = lang_files().union(&impl_files()).cloned().collect();
+    let want: BTreeSet<String> = lang_files()
+        .union(&isolated_impl_files())
+        .cloned()
+        .collect();
     assert_eq!(eager[0].files, want, "the eager profile runs both suites");
+    assert_rig_runs(eager[0], "ELLE_RIG", "the eager profile, a rig setting,");
+}
+
+// The producers run in-process on the rig, in a pass of their own, so each
+// reading comes from both JIT policies (docs/test-runner.md).
+//
+// The counter-factual: an isolated producer runs once, under whatever its
+// child's policy is, so a reading that moves under the eager JIT is read only
+// in a second pass, and a producer that runs in both kinds of pass is read
+// twice under one policy.
+#[test]
+fn smoke_impl_runs_the_producers_in_process_in_a_pass_of_their_own() {
+    assert_producer_pass("smoke-impl", &passes("smoke-impl", &[]), "ELLE_RIG");
+}
+
+// Each file's charge on the runner's heap is read in a pass of its own, in
+// process on the rig, over the language suite and the implementation files
+// with no sidecar (docs/test-gauges.md).
+//
+// The counter-factual: an isolated pass charges the runner a spawn, so its
+// charge says nothing about the file; and a file the pass drops keeps its
+// rows in the ledger with nobody reading them and no `missing` to say so.
+#[test]
+fn smoke_impl_reads_each_files_charge_in_a_pass_of_its_own() {
+    let passes = passes("smoke-impl", &[]);
+    let charge: Vec<&Pass> = passes.iter().filter(|p| p.charge()).collect();
     assert_eq!(
-        eager[0].host(),
-        Some(make_expand("ELLE_RIG").as_str()),
-        "a profile is a rig setting"
+        charge.len(),
+        1,
+        "one pass of `make smoke-impl` reads the charge"
     );
+    assert_eq!(
+        charge[0].files,
+        charge_files(),
+        "the charge pass runs the language suite and the sidecar-free \
+         implementation files, less the producers and {CHARGE_SKIP}"
+    );
+    assert_eq!(charge[0].isolate(), None, "and runs them in-process");
+    assert_rig_runs(charge[0], "ELLE_RIG", "the charge pass");
 }
 
 // `IMPL_PROFILES` names further profiles for the language suite. The macOS job
@@ -98,7 +135,7 @@ fn a_named_profile_runs_the_language_suite_on_the_rig() {
         lang_files(),
         "a named profile runs the language suite"
     );
-    assert_eq!(scrub[0].host(), Some(make_expand("ELLE_RIG").as_str()));
+    assert_rig_runs(scrub[0], "ELLE_RIG", "a named profile");
 }
 
 // A profile a pass names and nothing holds reads as no file at all: the rig
@@ -134,20 +171,13 @@ fn smoke_boot_image_runs_the_language_suite_from_the_image() {
 }
 
 // `make smoke` is what the merge queue runs, and what a contributor runs
-// before a push. It carries both suites.
+// before a push. `SMOKE_PASSES` names what it runs after `qa`, and the dry run
+// shows it runs both suites' passes. The counter-factual: a `SMOKE_PASSES`
+// that `smoke` never hands to make reads right here and runs nothing.
 #[test]
 fn smoke_runs_both_suites() {
-    let text = makefile();
-    let line = text
-        .lines()
-        .find(|l| l.starts_with("smoke:"))
-        .expect("the Makefile defines `smoke`");
-    let deps: Vec<&str> = line
-        .split_once(':')
-        .map(|(_, rest)| rest.split('#').next().unwrap_or(""))
-        .unwrap_or("")
-        .split_whitespace()
-        .collect();
+    let named = make_expand("SMOKE_PASSES");
+    let named: Vec<&str> = named.split_whitespace().collect();
     for want in [
         "smoke-lang",
         "smoke-impl",
@@ -156,8 +186,21 @@ fn smoke_runs_both_suites() {
         "semver-check",
     ] {
         assert!(
-            deps.contains(&want),
-            "`make smoke` does not run {want}: {line}"
+            named.contains(&want),
+            "`make smoke` does not run {want}: SMOKE_PASSES is {named:?}"
         );
+    }
+    let smoke: BTreeSet<String> = passes("smoke", &[])
+        .into_iter()
+        .map(|p| p.command)
+        .collect();
+    for target in ["smoke-lang", "smoke-impl"] {
+        for pass in passes(target, &[]) {
+            assert!(
+                smoke.contains(&pass.command),
+                "`make smoke` does not run this pass of `make {target}`:\n  {}",
+                pass.command
+            );
+        }
     }
 }

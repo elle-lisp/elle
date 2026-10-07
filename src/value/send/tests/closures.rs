@@ -1,5 +1,5 @@
-// audited: 2026-09-29
-//! A closure crosses the send boundary with its LIR, its closure-valued constants, and its frame release tables.
+// audited: 2026-10-06
+//! A closure crosses the send boundary with its LIR, closure-valued constants, frame release tables and rest-list layout.
 //!
 //! docs/threads.md
 
@@ -201,5 +201,59 @@ fn closure_round_trips_preserving_frame_release_tables() {
              template_from_sendable, not send_closure — its tables must cross too"
         );
         assert_eq!(&child.frame_release_regions[..], &[23u32]);
+    });
+}
+
+// ── the rest-list layout crosses the boundary ────────────────────────
+
+#[test]
+fn closure_round_trips_preserving_its_rest_list_layout() {
+    // The layout is the gate's verdict on the closure's own body
+    // (docs/impl/region/restlist.md). A worker that reconstructs it at the
+    // default runs correctly and claims a page per rest argument, so only the
+    // field itself shows the loss. The child blueprint crosses by the template
+    // path the stdlib cache also takes.
+    use crate::value::RestListLayout;
+    crate::value::arena::with_test_region(|| {
+        let heap_ptr = crate::value::arena::leaked_test_heap();
+        let child = Rc::new(TemplateProto {
+            num_params: 1,
+            rest_list_layout: RestListLayout::OneRegion,
+            ..TemplateProto::new(Vec::new(), Arity::AtLeast(0), Vec::new())
+        });
+        let template = TemplateProto {
+            num_locals: 1,
+            num_params: 1,
+            rest_list_layout: RestListLayout::OneRegion,
+            child_protos: vec![child],
+            ..TemplateProto::new(Vec::new(), Arity::AtLeast(0), Vec::new())
+        };
+        let val = crate::value::heap::alloc(
+            unsafe { &mut *heap_ptr },
+            HeapObject::Closure {
+                closure: Closure::new(
+                    crate::value::closure::test_template(unsafe { &mut *heap_ptr }, template),
+                    crate::value::region_slice::RegionSlice::empty(),
+                    SignalBits::EMPTY,
+                ),
+                traits: Value::NIL,
+            },
+        );
+
+        let bundle = SendBundle::from_value(val, unsafe { &*heap_ptr }, None)
+            .expect("a plain closure is sendable");
+        let restored = into_value_in_region(|ctx| bundle.into_value(ctx, None));
+
+        let closure = restored.as_closure().expect("restored value is a closure");
+        assert_eq!(
+            closure.template.rest_list_layout(),
+            RestListLayout::OneRegion,
+            "the closure's own layout crosses by send_closure"
+        );
+        assert_eq!(
+            closure.template.child_protos()[0].rest_list_layout,
+            RestListLayout::OneRegion,
+            "a nested-lambda blueprint's layout crosses by the template path"
+        );
     });
 }

@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! A lowered function — its blocks, registers and constants — with the
 //! metadata the emitter records for the JIT and the region system.
 //!
@@ -57,6 +57,10 @@ pub struct LirFunction {
     /// How varargs are collected: List (pair chain) or Struct (immutable struct).
     /// Only meaningful when arity is AtLeast.
     pub vararg_kind: crate::hir::VarargKind,
+    /// How a `&` rest list is built: the region analysis' verdict on this
+    /// lambda (docs/impl/region/restlist.md), written by the lowerer and read
+    /// by the JIT prologue and the blueprint.
+    pub rest_list_layout: crate::value::RestListLayout,
     /// Total number of parameter slots (required + optional + rest if present).
     /// Used by VM populate_env to know how many fixed slots to fill.
     pub num_params: usize,
@@ -161,6 +165,7 @@ impl LirFunction {
             doc: None,
             origin: None,
             vararg_kind: crate::hir::VarargKind::List,
+            rest_list_layout: crate::value::RestListLayout::PerCell,
             num_params,
             num_local_params: 0,
             yield_points: Vec::new(),

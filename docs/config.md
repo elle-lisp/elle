@@ -1,6 +1,6 @@
 # Runtime Configuration (`vm/config`)
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-04 -->
 
 What a build decides, what the `elle` command line sets, and what a running
 program reads and changes through `vm/config`.
@@ -34,6 +34,9 @@ backend. A user who wants the interpreter alone builds without the `jit`
 feature. Two programs can switch a tier off or make it eager: the rig, for one
 implementation test ([rig](../rig/overview.md)), and `elle test`
 ([test-runner](test-runner.md)). A user program cannot.
+
+No primitive of a user build names the build; the rig's `(elle/build)` does
+([rig](../rig/overview.md)).
 
 ## CLI flags
 

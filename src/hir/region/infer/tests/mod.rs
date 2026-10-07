@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-10-06
 //! The region-inference unit tests, one module per subject the solver decides.
 //!
 //! docs/impl/region/diagnostics.md
@@ -44,4 +44,5 @@ mod owned;
 mod patterns;
 mod realalloc;
 mod reassign;
+mod restlist;
 mod seeds;

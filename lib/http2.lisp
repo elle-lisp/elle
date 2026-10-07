@@ -1,6 +1,7 @@
-(elle/epoch 13)
-# audited: 2026-09-28
+(elle/epoch 14)
+# audited: 2026-10-06
 ## lib/http2.lisp — HTTP/2 client and server for Elle
+## lib/http2.md
 ##
 ## Plain h2c (cleartext):
 ##   (def http2 ((import "std/http2")))
@@ -92,7 +93,7 @@
   (defn client-handshake [sess]
     "Send client connection preface and initial SETTINGS."
     (sess:transport:write C:client-preface)
-    (let [[ftype flags sid payload] (frame:make-settings-frame session:default-settings)]
+    (let [[ftype flags sid payload] (frame:make-settings-frame (session:advertised-settings sess))]
       (frame:write-frame sess:transport ftype flags sid payload))
     (let [delta (- session:initial-window 65535)]
       (when (> delta 0)
@@ -112,14 +113,19 @@
 
   ## ── Client: connect ────────────────────────────────────────────────────
 
-  (defn h2-connect [url &named transport host]
-    "Open an HTTP/2 session."
-    (let [sess (if transport
-                 (session:make-session transport (or host "localhost") false)
-                 (let* [parsed (parse-url url)
-                        {:transport t :tls-conn tc} (open-transport parsed)]
-                   (session:make-session t parsed:host false
-                   :scheme parsed:scheme)))]
+  (defn h2-connect [url &named transport host max-frame-size]
+    "Open an HTTP/2 session.
+     `max-frame-size` is the SETTINGS_MAX_FRAME_SIZE the session advertises
+     and the largest frame it reads: 256 KiB when nil, and an h2-error
+     before any connection outside 16384..16777215."
+    (let* [frame-limit (session:checked-max-frame-size max-frame-size)
+           sess (if transport
+                  (session:make-session transport (or host "localhost") false
+                                        :max-frame-size frame-limit)
+                  (let* [parsed (parse-url url)
+                         {:transport t :tls-conn tc} (open-transport parsed)]
+                    (session:make-session t parsed:host false
+                    :scheme parsed:scheme :max-frame-size frame-limit)))]
       (client-handshake sess)
       (put sess :writer-fiber (ev/spawn (fn [] (session:writer-loop sess))))
       (put sess
@@ -196,6 +202,13 @@
            @done false]
       (while (not done)
         (let [msg (s:data-queue:take)]
+          # A take on a closed, empty queue answers nil: h2-close closes
+          # every stream's queue on its way out.
+          (when (nil? msg)
+            (error {:error :h2-error
+                    :reason :connection-closed
+                    :stream-id sid
+                    :message "session closed while the request waited"}))
           (match msg:type
             :headers
               (begin

@@ -1,8 +1,9 @@
-// audited: 2026-09-29
-//! The rig's entry point: answer a subcommand, or read the sidecar and the profile and run the program through `elle::program`.
+// audited: 2026-10-05
+//! The rig's entry point: answer a subcommand, or read the sidecar and the profile, build the runtime, and run the program on it.
 //!
 //! rig/overview.md
 
+mod build;
 mod settings;
 
 use settings::Settings;
@@ -62,8 +63,17 @@ fn program_file(remaining: &[String]) -> Option<&str> {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    // elle's subcommands answer here as they do under `elle`, before any rig
-    // flag is read, so a program that runs its own executable runs unchanged.
+    // The test runner runs on a runtime the rig builds, so the run has the
+    // rig's build (docs/ratchet.md).
+    if args.first().map(String::as_str) == Some("test") {
+        let test = elle::program::Test::prepare(args[1..].to_vec());
+        let mut rt = elle::runtime::Runtime::new();
+        build::register(&mut rt);
+        std::process::exit(test.drive(&mut rt));
+    }
+    // elle's other subcommands answer here as they do under `elle`, before any
+    // rig flag is read, so a program that runs its own executable runs
+    // unchanged.
     if let Some(code) = elle::program::subcommand(&args) {
         std::process::exit(code);
     }
@@ -73,6 +83,7 @@ fn main() {
     if config.help {
         println!("Usage: elle-rig [--profile PATH] [--print-config] [elle flags] [file] [args...]");
         println!("See rig/overview.md; every flag `elle --help` lists applies here too.");
+        println!("(elle/build) answers the key of the build this rig is.");
         return;
     }
     if config.version {
@@ -100,7 +111,14 @@ fn main() {
         return;
     }
     settings.install(&mut config);
-    std::process::exit(elle::program::run(config, remaining));
+    let program = elle::program::Program::prepare(config, remaining)
+        .unwrap_or_else(|code| std::process::exit(code));
+    if program.is_repl() {
+        refuse("no program: name a file, an -e expression, or - for stdin; the rig has no REPL");
+    }
+    let mut rt = elle::program::runtime();
+    build::register(&mut rt);
+    std::process::exit(program.drive(&mut rt));
 }
 
 /// Refuse the run: name why on stderr, run nothing, and exit 2.

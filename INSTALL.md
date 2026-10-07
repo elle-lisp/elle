@@ -1,6 +1,6 @@
 # Installing Elle
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-06 -->
 
 What to install, how to build Elle and its plugins, and how to run the tests.
 
@@ -138,14 +138,18 @@ plugins.
 | Command | Runtime | What it does |
 |---------|---------|-------------|
 | `cargo test -p elle --lib` | ~1.5 min | Rust unit tests |
-| `make smoke` | ~30 min, release | The language suite, the implementation suite on the rig, the doctests and the embedding demos |
-| `make test` | smoke + ~5 min | QA, smoke, and the Rust unit and integration tests |
+| `make smoke` | ~30 min, release | QA, then the language suite, the implementation suite on the rig, the doctests, the embedding demos and the surface gate |
+| `make test` | smoke + ~5 min | Smoke, then the Rust unit and integration tests |
 
 Give the suites the release binaries; the debug default takes hours:
 
 ```sh
 make smoke ELLE=./target/release/elle ELLE_RIG=./target/release/elle-rig CARGO_PROFILE=--release
 ```
+
+`make smoke` starts with `make qa`, whose clippy and rustdoc steps build every
+feature. Install LLVM 22 and set the three variables under "Optional: MLIR
+backend" before you run either target.
 
 [CONTRIBUTING.md](CONTRIBUTING.md) holds the full table.
 

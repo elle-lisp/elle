@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 13)
+# audited: 2026-09-30
 # Tail-call rotation, letrec-local recursive closures, a returned self-recursive closure's region, and the scheduler round trip.
 #
 # docs/impl/region/diagnostics.md
@@ -8,7 +8,7 @@
 # call with arg b performs b allocations via tail recursion. Tail-call rotation
 # (not while-scope) is the mechanism that must reclaim them — so it gets its own
 # driver. n varies the input so a body cannot constant-fold. All four recur fns
-# are passed as fn-values into measure-core, so no visible call site can prove
+# are passed as fn-values into the estimator, so no visible call site can prove
 # `n` and call-site param joins do not fire; a local diverging guard proves each
 # %sub operand instead (docs/intrinsics.md). Contrast lcl-self below, which is
 # called directly and needs no guard. The guard never fires on the driver's int
@@ -42,9 +42,9 @@
       {:parity :even}
       (odd-recur (%sub n 1)))))
 (println "── folded suite: tail-call rotation ──")
-(pin (measure-core "recur-struct" struct-recur count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "recur-string" string-recur count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "recur-mutual" even-recur count-gauge 100 6 60 0.4 0.5) 0)
+(r:drive "recur-struct" struct-recur)
+(r:drive "recur-string" string-recur)
+(r:drive "recur-mutual" even-recur)
 
 # ── Letrec-local recursive closures — self (cell-free) vs mutual (cycle) ──
 # A `letrec`-bound recursive closure NESTED in a function body — the UNIVERSAL shape:
@@ -58,7 +58,7 @@
 # a self-call), RC-identical to a top-level recursive `defn` (docs/impl/selfrec.md). The
 # per-call closure region is stranded past the recursive `TailCall` and reclaimed by the
 # tail-call deferred release (lir/lower/control/call.rs `tail_callee_defers_release`).
-# The HOF pins above (map/reduce/zip/…) ride this same cell-free mechanism — their `go`
+# The HOF rows above (map/reduce/zip/…) ride this same cell-free mechanism — their `go`
 # helpers.
 #
 # MUTUAL recursion (`recur-local-mutual`) is reclaimed (rate 0): `ev`/`od` each capture
@@ -76,8 +76,8 @@
            od (fn [m] (if (%lt m 1) :odd (ev (%sub m 1))))]
     (ev n)))
 (println "── folded suite: letrec-local recursive closures ──")
-(pin (measure "recur-local-self" (fn [j] (lcl-self 3)) 100 6 60 0.4 0.5) 0)
-(pin (measure "recur-local-mutual" (fn [j] (lcl-mutual 3)) 100 6 60 0.4 0.5) 0)
+(r:rate "recur-local-self" (fn [j] (lcl-self 3)))
+(r:rate "recur-local-mutual" (fn [j] (lcl-mutual 3)))
 
 # NON-member body tail — the same ev/od cycle, but the letrec BODY ends in a tail call
 # to a NON-member. `(ev n)` above is a tail call to a MEMBER (its stranded binding-scope
@@ -100,10 +100,8 @@
   (letrec [ev (fn [m] (if (%lt m 1) 0 (od (%sub m 1))))
            od (fn [m] (if (%lt m 1) 1 (ev (%sub m 1))))]
     (+ (ev n) 0)))
-(pin (measure "recur-local-mutual-native" (fn [j] (lcl-mutual-native 3)) 100 6
-              60 0.4 0.5) 0)
-(pin (measure "recur-local-mutual-op" (fn [j] (lcl-mutual-op 3)) 100 6 60 0.4
-              0.5) 0)
+(r:rate "recur-local-mutual-native" (fn [j] (lcl-mutual-native 3)))
+(r:rate "recur-local-mutual-op" (fn [j] (lcl-mutual-op 3)))
 
 # RETURNED closure cycle — the return-funded merge admission (rate 0). The same ev/od SCC
 # as `recur-local-mutual` above, one base case apart: it returns the MEMBER `ev` instead
@@ -128,8 +126,7 @@
                 (when (%not (%int? m)) (error :m))
                 (if (%lt m 1) ev (ev (%sub m 1))))]
     (ev n)))
-(pin (measure "recur-local-mutual-ret" (fn [j] (lcl-mutual-ret 3)) 100 6 60 0.4
-              0.5) 0)
+(r:rate "recur-local-mutual-ret" (fn [j] (lcl-mutual-ret 3)))
 
 # The same returned ev/od cycle, one body-tail apart: it tail-calls a NON-member
 # (`lcl-ident`) rather than the member `ev`. Which channel carries the arena's release
@@ -139,9 +136,8 @@
 # keeps the frame and falls through to the binding-scope drop the lowerer emits at the
 # `Letrec` node — after the mint the tail call itself emits at the call site. Both are
 # after the mint, so the merge admits the return facet here too (rate 0). Refusing it
-# held this cycle's four regions — two closures, two forward cells — per call. Undeclared,
-# like `rest-array-copy`: a regression to open must trip the completeness gate as an F4
-# defect rather than be absorbed under the root.
+# held this cycle's four regions — two closures, two forward cells — per call. A control
+# at 0.
 (defn lcl-ident [x]
   x)
 (defn lcl-mutual-ret-foreign [n]
@@ -152,13 +148,12 @@
                 (when (%not (%int? m)) (error :m))
                 (if (%lt m 1) ev (ev (%sub m 1))))]
     (lcl-ident (ev n))))
-(pin (measure "recur-local-mutual-ret-foreign"
-              (fn [j] (lcl-mutual-ret-foreign 3)) 100 6 60 0.4 0.5) 0)
+(r:rate "recur-local-mutual-ret-foreign" (fn [j] (lcl-mutual-ret-foreign 3)))
 
 # The third admitted body shape: a bare member VALUE tail, no tail call at all. The
 # letrec is this frame's tail, so functionalization puts the frame's `Return` INSIDE the
-# letrec body and it mints there, ahead of the binding-scope drop. A closed control,
-# undeclared for the same reason as `recur-local-mutual-ret-foreign` above.
+# letrec body and it mints there, ahead of the binding-scope drop. A control at 0,
+# like `recur-local-mutual-ret-foreign` above.
 (defn lcl-mutual-ret-value [n]
   (letrec [ev (fn [m]
                 (when (%not (%int? m)) (error :m))
@@ -167,8 +162,7 @@
                 (when (%not (%int? m)) (error :m))
                 (if (%lt m 1) ev (ev (%sub m 1))))]
     ev))
-(pin (measure "recur-local-mutual-ret-value" (fn [j] (lcl-mutual-ret-value 3))
-              100 6 60 0.4 0.5) 0)
+(r:rate "recur-local-mutual-ret-value" (fn [j] (lcl-mutual-ret-value 3)))
 
 # The fourth body shape: the identical returned ev/od cycle, one BINDING out of tail
 # position. The letrec's value is bound to `c` and handed on by a later statement, so the
@@ -194,8 +188,7 @@
             ev)]
     (lcl-ident n)
     c))
-(pin (measure "recur-local-mutual-ret-bound" (fn [j] (lcl-mutual-ret-bound 3))
-              100 6 60 0.4 0.5) 0)
+(r:rate "recur-local-mutual-ret-bound" (fn [j] (lcl-mutual-ret-bound 3)))
 
 # The FACTORY — the everyday shape the whole family serves: mutually recursive local
 # helpers over shared state, handed back in one struct. The letrec body's tail is a
@@ -207,9 +200,7 @@
 # single, and the members the returned struct keeps are a cross-region reference into
 # the arena, RC-counted exactly as a foreign capture is (docs/impl/region/letrec.md).
 # Refusing it held five regions per call: the cycle's two closures and two forward
-# cells, plus the `t` the leaked cycle pinned. A CLOSED control, undeclared like
-# `rest-array-copy`, so a regression to open trips the completeness gate as an F4
-# defect rather than being absorbed under the root.
+# cells, plus the `t` the leaked cycle pinned. A control at 0.
 (defn lcl-mutual-factory [n]
   # Both members leave in the struct (a value use), which disables call-site param
   # joins, so a local diverging guard proves the %lt/%sub operands.
@@ -222,8 +213,7 @@
                   (put t m true)
                   (ev (%sub m 1)))]
       {:a ev :b od})))
-(pin (measure "recur-local-mutual-factory" (fn [j] (lcl-mutual-factory 3)) 100 6
-              60 0.4 0.5) 0)
+(r:rate "recur-local-mutual-factory" (fn [j] (lcl-mutual-factory 3)))
 
 # The same cycle written the way a body writes it: two local `defn`s rather than a
 # `letrec`. A sibling reads each name before its initializer has run, so each is
@@ -239,8 +229,7 @@
     (when (%not (%int? m)) (error :m))
     (if (%lt m 1) :odd (dv (%sub m 1))))
   (dv n))
-(pin (measure "recur-local-defn-mutual" (fn [j] (lcl-defn-mutual 3)) 100 6 60
-              0.4 0.5) 0)
+(r:rate "recur-local-defn-mutual" (fn [j] (lcl-defn-mutual 3)))
 
 # The closure-as-module factory built from such a run: a constructor that defines
 # mutually recursive helpers over its own mutable state and hands back a struct of
@@ -272,11 +261,10 @@
       (fa (%sub m 1)))
     (let [s {:a fa :b fb}]
       s)))
-(pin (measure "defn-module-factory" (fn [j] ((get (defn-module-factory) :a) 2))
-              100 6 60 0.4 0.5) 0)
+(r:rate "defn-module-factory" (fn [j] ((get (defn-module-factory) :a) 2)))
 
 # ── Retained-closure reclamation (a RETURNED self-recursive closure's region) ──
-# `recur-local-self` above pins the LEAK rate of a self-recursive closure used as a
+# `recur-local-self` above reads the LEAK rate of a self-recursive closure used as a
 # LOOP (0 — cell-free, reclaimed per call). These two RETAIN each returned closure in
 # a block-local @keep, so the question becomes whether the closure's own region
 # reclaims when @keep is freed at the block's return.
@@ -321,17 +309,13 @@
     (while (%lt j b)
       (push keep (mk))
       (assign j (%add j 1)))))
-(pin (measure-core "recur-local-self-mint"
-                   (retain-block (fn [] (lcl-self-ret 3))) count-gauge 100 6 60
-                   0.4 0.5) 0)
-(pin (measure-core "recur-local-foreign-mint"
-                   (retain-block (fn [] (lcl-foreign-ret 3))) count-gauge 100 6
-                   60 0.4 0.5) 0)
+(r:drive "recur-local-self-mint" (retain-block (fn [] (lcl-self-ret 3))))
+(r:drive "recur-local-foreign-mint" (retain-block (fn [] (lcl-foreign-ret 3))))
 
 # ── The same strand, handed across the FIBER frontier ──────────────────
-# `recur-local-self-yield` and `recur-local-self-send` are CLOSED controls
-# (undeclared, like `rest-array-copy`) for the fiber half of the stranded-self
-# deferred release. Each hands its cell-free self-recursive closure across a fiber
+# `recur-local-self-yield` and `recur-local-self-send` are controls at 0 for
+# the fiber half of the stranded-self deferred release. Each hands its
+# cell-free self-recursive closure across a fiber
 # frontier — emitted to the resumer, or sent over a channel — and then tail-calls it,
 # so the scope-end `DecrefRegion` is dead past that `TailCall` and the deferral is the
 # region's only channel. The crossing is no reason to withhold it: the emit's park
@@ -359,17 +343,17 @@
                 (if (%lt m 1) :done (go (%sub m 1))))]
     (chan/send lcl-snd go)
     (go n)))
-(pin (measure "recur-local-self-yield"
-              (fn [j]
-                # Two resumes per op: the first runs to the yield, the second runs the
-                # recursion, whose normal completion is where the deferral fires.
-                (let [f (fiber/new (fn [] (lcl-self-yield 3)) |:yield|)]
-                  (fiber/resume f)
-                  (fiber/resume f))) 100 6 60 0.4 0.5) 0)
-(pin (measure "recur-local-self-send"
-              (fn [j]
-                (lcl-self-send 3)
-                (get (chan/recv lcl-rcv) 1)) 100 6 60 0.4 0.5) 0)
+(r:rate "recur-local-self-yield"
+        (fn [j]
+          # Two resumes per op: the first runs to the yield, the second runs the
+          # recursion, whose normal completion is where the deferral fires.
+          (let [f (fiber/new (fn [] (lcl-self-yield 3)) |:yield|)]
+            (fiber/resume f)
+            (fiber/resume f))))
+(r:rate "recur-local-self-send"
+        (fn [j]
+          (lcl-self-send 3)
+          (get (chan/recv lcl-rcv) 1)))
 
 # ── The scheduler frontier — a spawned fiber's round trip ─────────────
 # `ev/spawn` + `ev/join` is the shape every structured-concurrency program
@@ -391,5 +375,4 @@
 # a delivered join retires the completion records that would otherwise hold
 # every fiber a program ever spawned (docs/scheduler.md,
 # pinned by tests/impl/sched-completion-records.lisp).
-(pin (measure "spawn-join" (fn [j] (ev/join (ev/spawn (fn [] 7)))) 100 6 60 0.4
-              0.5) 0)
+(r:rate "spawn-join" (fn [j] (ev/join (ev/spawn (fn [] 7)))))

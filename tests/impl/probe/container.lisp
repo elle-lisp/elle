@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-21
+(elle/epoch 13)
+# audited: 2026-09-30
 # Persistent fn-local containers, the loop-carried accumulator a function returns, the element a walk stores, and the captured accumulator a builder fills.
 #
 # docs/impl/region/diagnostics.md
@@ -19,101 +19,101 @@
 # syntactic arm body"). Its kernel CAPTURES `k` deliberately — a capture declines
 # loop fusion, so the real stdlib `map` runs and there is a per-op scratch to
 # measure; a fusable kernel has none, which is what the dissolution controls
-# (`map-while`) measure. A CLOSED control now, undeclared like `rest-array-copy`.
+# (`map-while`) measure. A control at 0.
 # `struct-outer` is the fn-local reassign-1-slot control: a loop-carried cell whose
 # content is re-minted every iteration, bounded by the overwrite + demise pair (F5).
 # `string-outer`/`append-outer` are CLOSED controls for the same close
 # `stdlib-concat` gauges: each iteration's `concat`/`append` returns `push-all`'s
 # accumulator parameter, and the branch-arm window anchors its release where every
 # arm reaches it. Their rate was always flat per-iter, never accumulator growth, so
-# a regression to open is a per-call strand and must trip the completeness gate.
+# a rise here is a per-call strand.
 (println "── folded suite: persistent containers ──")
-(pin (measure-core "put-overwrite"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @s @{:key 0})
-                     (def @j 0)
-                     (while (%lt j b)
-                       (put s :key (string "v" j))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "set-array"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @a @[(string "i")])
-                     (def @j 0)
-                     (while (%lt j b)
-                       (put a 0 (string "v" j))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "put-struct"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @s @{:data nil})
-                     (def @j 0)
-                     (while (%lt j b)
-                       (put s :data {:iter j})
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "roster"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @tr @{:pnl 0 :trades 0 :label ""})
-                     (def @j 0)
-                     (while (%lt j b)
-                       (put tr :pnl (%add j 100))
-                       (put tr :trades (%add j 1))
-                       (put tr :label (string "t-" j))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "put-outer"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @s @{:x 0})
-                     (def @j 0)
-                     (while (%lt j b)
-                       (put s :x (string "v" j))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "push-outer"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @acc @[])
-                     (def @j 0)
-                     (while (%lt j b)
-                       (push acc {:x j})
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "push-accum"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @acc @[])
-                     (def @j 0)
-                     (def k 1)
-                     (while (%lt j b)
-                       (push acc
-                             (map (fn [x]
-                                    (numeric!)
-                                    (%add x k)) [1 2 3]))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "struct-outer"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @last nil)
-                     (def @j 0)
-                     (while (%lt j b)
-                       (assign last {:x j})
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "string-outer"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @s "")
-                     (def @j 0)
-                     (while (%lt j b)
-                       (assign s (concat s "x"))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "append-outer"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @acc [])
-                     (def @j 0)
-                     (while (%lt j b)
-                       (assign acc (append acc [j]))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(r:drive "put-overwrite"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @s @{:key 0})
+           (def @j 0)
+           (while (%lt j b)
+             (put s :key (string "v" j))
+             (assign j (%add j 1)))))
+(r:drive "set-array"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @a @[(string "i")])
+           (def @j 0)
+           (while (%lt j b)
+             (put a 0 (string "v" j))
+             (assign j (%add j 1)))))
+(r:drive "put-struct"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @s @{:data nil})
+           (def @j 0)
+           (while (%lt j b)
+             (put s :data {:iter j})
+             (assign j (%add j 1)))))
+(r:drive "roster"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @tr @{:pnl 0 :trades 0 :label ""})
+           (def @j 0)
+           (while (%lt j b)
+             (put tr :pnl (%add j 100))
+             (put tr :trades (%add j 1))
+             (put tr :label (string "t-" j))
+             (assign j (%add j 1)))))
+(r:drive "put-outer"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @s @{:x 0})
+           (def @j 0)
+           (while (%lt j b)
+             (put s :x (string "v" j))
+             (assign j (%add j 1)))))
+(r:drive "push-outer"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @acc @[])
+           (def @j 0)
+           (while (%lt j b)
+             (push acc {:x j})
+             (assign j (%add j 1)))))
+(r:drive "push-accum"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @acc @[])
+           (def @j 0)
+           (def k 1)
+           (while (%lt j b)
+             (push acc
+                   (map (fn [x]
+                          (numeric!)
+                          (%add x k)) [1 2 3]))
+             (assign j (%add j 1)))))
+(r:drive "struct-outer"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @last nil)
+           (def @j 0)
+           (while (%lt j b)
+             (assign last {:x j})
+             (assign j (%add j 1)))))
+(r:drive "string-outer"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @s "")
+           (def @j 0)
+           (while (%lt j b)
+             (assign s (concat s "x"))
+             (assign j (%add j 1)))))
+(r:drive "append-outer"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @acc [])
+           (def @j 0)
+           (while (%lt j b)
+             (assign acc (append acc [j]))
+             (assign j (%add j 1)))))
 
 # ── The loop-carried accumulator a function RETURNS ───────────────────
 # `loop-acc-return` builds a list by reassigning a local across a `while` and
@@ -145,10 +145,8 @@
     (if (%lt i n) (recur-acc-return-step (%add i 1) n (pair i acc)) acc)))
 (defn recur-acc-return-shape [n]
   (recur-acc-return-step 0 n ()))
-(pin (measure "loop-acc-return" (fn [j] (length (loop-acc-return-shape 4))) 100
-              6 60 0.4 0.5) 0)
-(pin (measure "recur-acc-return" (fn [j] (length (recur-acc-return-shape 4)))
-              100 6 60 0.4 0.5) 0)
+(r:rate "loop-acc-return" (fn [j] (length (loop-acc-return-shape 4))))
+(r:rate "recur-acc-return" (fn [j] (length (recur-acc-return-shape 4))))
 
 # ── The walk's element, stored through a name of the walk's own ────────
 # `loop-acc-return` above accumulates a value its own body allocated. A walk
@@ -164,11 +162,9 @@
 # `Return`'s mint, and only the discarded one leaves the content drop with
 # nothing but the cell's scope node to place it — the collection type picks the
 # `each` arm, so the latest store sits inside an arm the walk need not take
-# (§ "Where the content drop lands"). CLOSED controls, undeclared like
-# `rest-array-copy`: the elements live in the call-result region of a `Fresh`
-# native, so a regression strands the whole collection — one region and two
-# objects per entry — and must trip the completeness gate rather than be absorbed
-# under a root.
+# (§ "Where the content drop lands"). Controls at 0: the elements live in the
+# call-result region of a `Fresh` native, so a regression strands the whole
+# collection — one region and two objects per entry.
 (def @feeder-table @{:a 1 :b 2 :c 3})
 (defn walk-feeder-return-shape []
   (def @u nil)
@@ -180,10 +176,8 @@
   (each p in (pairs feeder-table)
     (assign u p))
   nil)
-(pin (measure "walk-feeder-return" (fn [j] (length (walk-feeder-return-shape)))
-              100 6 60 0.4 0.5) 0)
-(pin (measure "walk-feeder-discard" (fn [j] (walk-feeder-discard-shape)) 100 6
-              60 0.4 0.5) 0)
+(r:rate "walk-feeder-return" (fn [j] (length (walk-feeder-return-shape))))
+(r:rate "walk-feeder-discard" (fn [j] (walk-feeder-discard-shape)))
 
 # ── The captured mutable accumulator — the shape a builder is WRITTEN in ──
 # Every container probe above drives its accumulator from a bare `while` in the
@@ -196,48 +190,47 @@
 # leak-free when its author threads the accumulator through parameters instead.
 # `thread-acc-param` is that parameter-threaded alternative, kept beside them as
 # the discriminator: were the captured forms to regress, this one would stay at 0
-# and the difference would be exactly the cost of the rewrite. Closed controls,
-# undeclared like `rest-array-copy`, so a regression trips the completeness gate
-# rather than being absorbed under a root. The payload is a heap string per push,
-# so a stranded accumulator shows as element growth and not merely one region.
+# and the difference would be exactly the cost of the rewrite. Controls at 0. The
+# payload is a heap string per push, so a stranded accumulator shows as element
+# growth and not merely one region.
 (def thread-acc-driver
   (fn [out i n]
     (when (%lt i n)
       (push out (string "e" i))
       (thread-acc-driver out (%add i 1) n))))
-(pin (measure-core "capture-acc-letrec"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (let [out @[]]
-                         (letrec [go (fn [i]
-                                       (when (%lt i 4)
-                                         (push out (string "e" i))
-                                         (go (%add i 1))))]
-                           (go 0))
-                         (length out))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "capture-acc-while"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (let [out @[]
-                             fill (fn [n]
-                                    (def @i 0)
-                                    (while (%lt i n)
-                                      (push out (string "e" i))
-                                      (assign i (%add i 1))))]
-                         (fill 4)
-                         (length out))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
-(pin (measure-core "thread-acc-param"
-                   (fn [b]
-                     (when (%not (%int? b)) (error :block-not-int))
-                     (def @j 0)
-                     (while (%lt j b)
-                       (let [out @[]]
-                         (thread-acc-driver out 0 4)
-                         (length out))
-                       (assign j (%add j 1)))) count-gauge 100 6 60 0.4 0.5) 0)
+(r:drive "capture-acc-letrec"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (let [out @[]]
+               (letrec [go (fn [i]
+                             (when (%lt i 4)
+                               (push out (string "e" i))
+                               (go (%add i 1))))]
+                 (go 0))
+               (length out))
+             (assign j (%add j 1)))))
+(r:drive "capture-acc-while"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (let [out @[]
+                   fill (fn [n]
+                          (def @i 0)
+                          (while (%lt i n)
+                            (push out (string "e" i))
+                            (assign i (%add i 1))))]
+               (fill 4)
+               (length out))
+             (assign j (%add j 1)))))
+(r:drive "thread-acc-param"
+         (fn [b]
+           (when (%not (%int? b)) (error :block-not-int))
+           (def @j 0)
+           (while (%lt j b)
+             (let [out @[]]
+               (thread-acc-driver out 0 4)
+               (length out))
+             (assign j (%add j 1)))))

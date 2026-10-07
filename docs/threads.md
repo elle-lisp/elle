@@ -1,6 +1,6 @@
 # Threads
 
-<!-- audited: 2026-09-30 -->
+<!-- audited: 2026-10-06 -->
 
 OS threads for CPU-bound work. For I/O-bound concurrency, prefer
 `ev/spawn` / `ev/join` (see [concurrency.md](concurrency.md)).
@@ -14,7 +14,7 @@ OS threads for CPU-bound work. For I/O-bound concurrency, prefer
 ```
 
 `sys/spawn` **deep-copies** the closure and all captured values into the
-new thread as a `SendBundle`. The threads share nothing — mutations on one
+new thread as a `SendBundle`. The threads share no value — mutations on one
 side are invisible to the other. A value that cannot be serialized (a fiber,
 an open file or socket port) makes the spawn fail with a `:thread-error`. The
 thread's result comes back the same way: it is serialized into a shared slot
@@ -25,6 +25,15 @@ and reconstructed in the joining thread's heap.
 (let [[ok? err] (protect (sys/spawn (fn [] a-fiber)))]
   (assert (not ok?) "a fiber cannot cross to another thread")
   (assert (= (get err :error) :thread-error) "the spawn says why"))
+```
+
+The signal registry is not a value, and the threads share it. It belongs to
+the process, so a signal that a worker declares is registered in every thread:
+
+```lisp
+(sys/join (sys/spawn (fn [] (eval '(signal :from-a-worker)) nil)))
+(assert (get (signals) :from-a-worker)
+        "the spawning thread sees the signal the worker declared")
 ```
 
 A worker does inherit one thing: the spawning fiber's withheld
@@ -154,8 +163,8 @@ signals a completion channel, waking any parked joiner exactly once;
   — which `protect` catches as `[false {:error :timeout ...}]`. The worker is
   **not** cancelled: there is no safe way to kill a running OS thread, so
   a timed-out worker is abandoned (it runs to completion on its own and
-  its result is discarded). Each worker has its own VM and shares nothing,
-  so an abandoned worker cannot corrupt the joiner.
+  its result is discarded). Each worker has its own VM and shares no value,
+  so an abandoned worker cannot corrupt the joiner's values.
 - A worker that vanishes without producing a result (an unwinding panic
   in the thread) surfaces as `{:error :thread-error ...}`.
 

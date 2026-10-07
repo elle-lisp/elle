@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-10-06
 //! Building a `Lowerer`: the constructor and the `with_*` builders that hand
 //! it the front end's analysis products before `lower` runs.
 //!
@@ -87,8 +87,9 @@ impl<'a> Lowerer<'a> {
         self
     }
 
-    /// Give lowering the instance's display memo, so an `undefined variable`
-    /// error names the variable the user wrote.
+    /// Give lowering the instance's display memo. An `undefined variable`
+    /// error names the variable the user wrote, and a lambda that `def` or
+    /// `letrec` binds carries its binder's name on its `LirFunction`.
     pub fn with_symbols(mut self, symbols: &'a crate::symbol::SymbolTable) -> Self {
         self.symbols = Some(symbols);
         self

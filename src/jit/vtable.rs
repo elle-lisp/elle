@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-10-06
 // docs/impl/jit.md
 //! `RuntimeHelpers`: one pre-declared Cranelift `FuncId` per `extern "C"`
 //! runtime helper, so a translator emits a call without re-declaring.
@@ -94,9 +94,9 @@ pub(crate) struct RuntimeHelpers {
     /// env path; mirrors the interpreter's `env_value_region`). See
     /// `dispatch::elle_jit_make_capture_owned`.
     pub(crate) make_capture_owned: FuncId,
-    /// Variadic rest list with per-cons fresh regions (JIT-prologue env path;
-    /// mirrors the interpreter's `args_to_list`). See
-    /// `dispatch::elle_jit_collect_rest_list`.
+    /// Variadic rest list in regions of its own, one per cons or one for the
+    /// list as the function's layout says (JIT-prologue env path; calls the
+    /// interpreter's `args_to_list`). See `dispatch::elle_jit_collect_rest_list`.
     pub(crate) collect_rest_list: FuncId,
     pub(crate) load_capture_cell: FuncId,
     pub(crate) load_capture: FuncId,

@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-30
+(elle/epoch 14)
+# audited: 2026-10-05
 ## elle test — merging another store's runs into this one: the key that makes
 ## an import repeatable, the rows that follow a run, and the bytes copied by
 ## address.
@@ -16,8 +16,8 @@
 (def run-columns
   ["run_key" "started_at" "finished_at" "tiers" "selection" "n_selected"
    "git_commit" "git_dirty" "tree_hash" "worktree" "boot_fingerprint"
-   "elle_version" "build_profile" "host" "argv" "pid" "n_pass" "n_fail" "n_skip"
-   "n_diverge" "n_timeout"])
+   "elle_version" "build_profile" "host" "argv" "pid" "build" "n_pass" "n_fail"
+   "n_skip" "n_diverge" "n_timeout"])
 
 (def form-columns
   ["hash" "origin" "session" "file" "form_index" "line" "col" "label" "src"
@@ -30,7 +30,8 @@
 (def asset-columns ["result_id" "kind" "hash" "size" "codec"])
 
 (def measurement-columns
-  ["run_id" "result_id" "subject" "axis" "value" "unit" "verdict"])
+  ["run_id" "result_id" "subject" "axis" "value" "half" "unit" "bound" "kind"
+   "verdict"])
 
 (def gauge-columns ["run_id" "file" "heap" "kind" "delta" "reading"])
 

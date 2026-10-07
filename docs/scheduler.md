@@ -1,6 +1,6 @@
 # Scheduler
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-06 -->
 
 The async scheduler is the only supported execution backend, and user code runs inside it automatically.
 
@@ -90,11 +90,10 @@ Three invariants govern both lists:
 
 - **Only live fibers wait.** A fiber that reaches `:dead` or `:error`
   leaves the waiter list and the select set it sits in, on the rule that
-  takes it out of a park queue. A joiner reaches `:dead` with its wait
-  still recorded whenever `fiber/abort` injects an error its own
-  `protect` catches. Left on the list, it is resumed once the fiber it
-  joined finishes, and that resume raises `fiber/resume: cannot resume
-  completed fiber` out of the event loop.
+  takes it out of a park queue. Left on the list, it is resumed once the
+  fiber it joined finishes, and that resume raises `fiber/resume: cannot
+  resume completed fiber` out of the event loop. `ev/abort` takes a
+  waiter out sooner, at the abort itself, as the next section states.
 - **A list with no waiter left is gone.** An empty waiter list still
   counts as a join the loop is holding, so the loop never reports
   `:done`, exactly as an empty park key would keep it running.
@@ -116,6 +115,26 @@ program reaches this through — a deadline around a protected join, where
 timer, so one such call puts fibers in both lists.
 [abort-wait-lists.lisp](../tests/impl/abort-wait-lists.lisp) pins them,
 and reads the counts back through `ev/report`'s `:joins` and `:selects`.
+
+## An abort ends the wait
+
+`ev/abort` takes its target out of the park queue, the waiter list and
+the select set it waits in, then raises the error. It does not wait for
+the target to finish. The raise lands inside the wait, so the target
+stops waiting at that moment, whatever it does next.
+
+What it does next can be a new wait. A `defer` or `protect` in the
+target runs while the error unwinds, and its handler can sleep, read a
+port or join another fiber. Left in its old queue, the target is resumed
+by the old wait's wake in the middle of the new wait. The new wait
+returns the wake's payload, and the operation it submitted stays paired
+with the target. When that operation completes after the target has
+finished, the scheduler re-records the target's failure without the mark
+the abort gave it, and the program crashes on an error somebody already
+observed.
+
+[abort-unwind-waits.lisp](../tests/lang/abort-unwind-waits.lisp) pins the
+rule for each of the three waits.
 
 ## Completion delivery
 

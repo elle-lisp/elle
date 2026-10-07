@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 14)
+# audited: 2026-10-06
 ## elle test — the command line, the store it opens, and the run it drives.
 ## docs/test-cli.md
 ##
@@ -33,6 +33,8 @@
     "--import" [:import :value]
     "--query" [:query :value]
     "--summary" [:summary :flag]
+    "--repin" [:repin :flag]
+    "--charge" [:charge :flag]
     "-e" [:eval :append]
     "--promote" [:promote :pair]})
 
@@ -90,6 +92,8 @@
                 :import nil
                 :query nil
                 :summary false
+                :repin false
+                :charge false
                 :paths []}))
 
 # `--isolate FLAGS` runs each path as its own child, `elle FLAGS PATH`, for a
@@ -115,6 +119,23 @@
 (if (and isolate-flags (not (empty? (get opts :eval))))
   (begin
     (eprintln "elle test: --isolate runs a path in its own process, and -e has no file to give one")
+    (os/exit 2))
+  nil)
+
+# The charge is what a file's second run cost this process's heap
+# (docs/test-gauges.md). An isolated child leaves the runner nothing but the
+# spawn to charge, and an ad-hoc form has no file to name the reading.
+(def charging (get opts :charge))
+
+(if (and charging isolate-flags)
+  (begin
+    (eprintln "elle test: --charge reads the runner's own heap, and --isolate runs each path in a child")
+    (os/exit 2))
+  nil)
+
+(if (and charging (not (empty? (get opts :eval))))
+  (begin
+    (eprintln "elle test: --charge names each reading by its file, and -e has no file")
     (os/exit 2))
   nil)
 
@@ -210,25 +231,77 @@
 
 (warn-if-truncated conn)
 
+# The run's build is the runner's own: the key the rig's `elle/build` answers,
+# read through `eval` because a user build has no such primitive and the
+# runner compiles under both. Every child of --isolate is this executable, so
+# the key holds for them; a child under --host is another program, and the
+# run has no build (docs/ratchet.md § The runner).
+(def run-build
+  (if host-program
+    nil
+    (let [[ok? key] (protect (eval '(elle/build)))]
+      (if ok? key nil))))
+
+# Every ledger under tests/ledger in the working directory, as the run's build
+# sees it, keyed by producer; loaded once, because a run reads a ledger and
+# only --repin writes one. A run with no build loads none.
+(def ledgers
+  (if (and run-build (file/exists? "tests/ledger"))
+    (ledger:load-dir "tests/ledger" run-build)
+    @{}))
+
+# The build an adopted row names: none on the reference build, whose rows
+# carry no :build, and the run's build anywhere else, so a reading never pins
+# another build (docs/ratchet.md § The runner).
+(def adopting-build (if (= run-build ledger:reference-build) nil run-build))
+
+(when (and (get opts :repin) (nil? run-build)) (refuse-repin-without-build))
+
 # n_selected, the code state and the pid land at insert (everything else about
 # the row is written at completion), so an unfinished run's row still says how
 # much work was planned, which commit, worktree and machine it was planned on,
 # and which process to ask whether it is still working.
 (def ident (run-identity))
 (sqlite:exec conn
-             "INSERT INTO run (tiers, n_selected, git_commit, git_dirty, tree_hash, worktree, boot_fingerprint, elle_version, build_profile, host, argv, run_key, pid) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)"
+             "INSERT INTO run (tiers, n_selected, git_commit, git_dirty, tree_hash, worktree, boot_fingerprint, elle_version, build_profile, host, argv, run_key, pid, build) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)"
              [(if isolate-flags "process" (tiers-str active-tiers))
               (+ (length (get opts :paths)) (length (get opts :eval)))
               (get ident :commit) (get ident :dirty) (get ident :tree)
               (get ident :worktree) (get ident :boot) (get ident :version)
               (get ident :profile) (get ident :host) (get ident :argv)
-              (get ident :key) (get ident :pid)])
+              (get ident :key) (get ident :pid) (get ident :build)])
 (def run-id (last-rowid conn))
 
 # What the runner's own heap reads before the first file. Every later reading
 # is taken at a file boundary and charged to the file that boundary closes
 # (docs/test-gauges.md).
 (def gauge-prev (gauge-baseline))
+
+(defn charge-skips-from? [statuses i n]
+  "Whether every one of STATUSES from index I to N is a skip."
+  (or (= i n)
+      (and (= (get statuses i) :skip) (charge-skips-from? statuses (+ i 1) n))))
+
+(defn charge-skipped-every-tier? [statuses]
+  "Whether a file's STATUSES say it skipped on every tier. An index walk, so
+   the answer allocates nothing inside a charge's window."
+  (let [n (length statuses)]
+    (and (> n 0) (charge-skips-from? statuses 0 n))))
+
+# Run FILE in-process a second time, and record what that run left live on the
+# runner's heap. The window opens after the first run's rows are written and
+# closes once the second run's are, so it holds the second run alone. A run
+# that skipped on every tier records nothing (docs/test-gauges.md). Its
+# statuses are read down to a boolean before the window closes, so the list
+# is not live at the reading.
+(defn charge-file [conn run-id file]
+  (let [before (gauge-baseline)
+        skipped (charge-skipped-every-tier? (parameterize ((*form-budget-ms* (budget-for file)))
+          (process-file conn run-id file)))
+        after (gauge-baseline)]
+    (unless skipped
+      (record-charge conn run-id file
+                     (- (get after "objects") (get before "objects"))))))
 
 # Run every file/eval for its side effect: each writes its result rows to the DB.
 # We do NOT aggregate the returned status lists in memory — for a large corpus
@@ -240,6 +313,7 @@
     (if isolate-flags
       (process-file-isolated conn run-id f isolate-flags)
       (process-file conn run-id f)))
+  (when charging (charge-file conn run-id f))
   (gauge-mark conn run-id gauge-prev f)
   (test-gauge-mark conn run-id f))
 (each e in (get opts :eval)
@@ -252,6 +326,7 @@
 (def nskip (count-status conn run-id :skip))
 (def ndiverge (count-status conn run-id :diverge))
 (def ntimeout (count-status conn run-id :timeout))
+(def nbad-readings (count-gating-readings conn run-id))
 
 # Counters and finished_at land in ONE statement: the completion stamp. A run
 # row without it was killed mid-flight and reads as truncated everywhere
@@ -262,7 +337,14 @@
 # Always render the run: the tally, plus every problem row with its reason — so
 # you read results here, not by hand-writing SQLite (use --query to drill in).
 (print-summary conn run-id)
+# `--repin` moves the ledgers after the run is recorded, so the rows keep the
+# verdicts the run earned against the ledger as it was (docs/test-cli.md).
+(when (get opts :repin) (repin-ledgers))
 (sqlite:close conn)
-# Gate exit: zero iff no form failed, no tier diverged, and nothing timed out.
-# A skip is fine; a timeout (a test that never finished) gates non-zero.
-(os/exit (if (or (> nfail 0) (> ndiverge 0) (> ntimeout 0)) 1 0))
+# Gate exit: zero iff no form failed, no tier diverged, nothing timed out, and
+# every judged reading is ok. A skip is fine; a timeout (a test that never
+# finished) gates non-zero, and so does a reading past its bound
+# (docs/ratchet.md § The judge).
+(os/exit (if (or (> nfail 0) (> ndiverge 0) (> ntimeout 0) (> nbad-readings 0))
+           1
+           0))

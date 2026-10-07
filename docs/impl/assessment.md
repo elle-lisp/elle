@@ -1,6 +1,6 @@
 # The region roadmap
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-09-30 -->
 
 The region system's plan of work: the state gauges, the fix-selection
 discipline, the measured dead ends, and the open work in order.
@@ -22,6 +22,7 @@ constraint that would otherwise be re-violated.
 cargo build -p elle && cargo build --release -p elle
 cargo build -p elle-rig
 ./target/debug/elle-rig tests/impl/oracle.lisp                # leaks: the dashboard + ratchet
+./target/debug/elle-rig tests/impl/plumb.lisp                 # leaks: the io dashboard
 make smoke-impl ELLE=./target/release/elle ELLE_RIG=./target/release/elle-rig CARGO_PROFILE=--release  # soundness: the guardfree UAF pins
 make smoke-lang ELLE=./target/release/elle CARGO_PROFILE=--release  # semantics: the language suite
 ```
@@ -30,12 +31,15 @@ make smoke-lang ELLE=./target/release/elle CARGO_PROFILE=--release  # semantics:
 CI, which take hours rather than about thirty minutes — pass `ELLE`,
 `ELLE_RIG` and `CARGO_PROFILE` as above.
 
-- **The oracle** prints the split — `open defects: N across M roots;
-  by-design: K` — and a completeness gate fails the run if any open probe is
-  undeclared, so the split cannot silently drift. `oracle: ok` is a ratchet,
-  not a certificate: every pin is the current measured rate, shrink-only, so a
-  green exit asserts no leak got worse and no closed class regressed — never
-  that leaks are gone.
+- **The dashboards** print one reading per probe and judge each against
+  their ledgers, [tests/ledger/oracle.lisp](../../tests/ledger/oracle.lisp)
+  and [tests/ledger/plumb.lisp](../../tests/ledger/plumb.lisp)
+  ([ratchet](../ratchet.md)). A row is the last accepted rate and is
+  two-sided: a reading past it either way fails, a probe with no row fails as
+  `unledgered`, and a row with no probe fails as `missing`, so coverage
+  cannot silently drift. The burndown is the ledgers' `:class :defect` rows.
+  `oracle: ok` is a ratchet, not a certificate: a green exit asserts that no
+  rate moved and no closed class regressed — never that leaks are gone.
 - **Guardfree** is the soundness axis, orthogonal to the leak burndown.
   `--trace=guardfree` under the full stdlib is the only trustworthy UAF
   oracle — plain-VM green is not evidence, and neither is a tight leak rate.
@@ -51,35 +55,34 @@ CI, which take hours rather than about thirty minutes — pass `ELLE`,
   exit); use `elle test --summary` or the run DB.
 
 Every task lands documentation → failing counterfactual test → code. A leak
-fix is proven by measured slope → 0 plus guardfree-clean, with its pins
-lowered — or its probe block deleted — in the same change.
+fix is proven by measured slope → 0 plus guardfree-clean, with its rows moved
+by `elle test --repin` — or its probe and row deleted — in the same change.
 
 ### The resting state
 
-**Every declared probe is closed.** Both dashboards — [oracle.lisp](../../tests/impl/oracle.lisp)
-and the io [plumb.lisp](../../tests/impl/plumb.lisp) — read zero open defects, so the ledgers' own burndown is
-empty and every probe in them is a closed control: regression insurance for a
-settled mechanism, not work. That is not "leaks are gone": the ratchet
-asserts nothing regressed, over the shapes somebody wrote a probe for. The
-open work is what has no probe, and it is read from § "The open work", never
-from the dashboards. A new fix under any root needs a new probe rather than a
-re-pin.
+**Every declared probe is closed.** Neither dashboard's ledger holds a
+`:class :defect` row, so the burndown is empty and every probe in
+[oracle.lisp](../../tests/impl/oracle.lisp) and the io
+[plumb.lisp](../../tests/impl/plumb.lisp) is a control pinned at 0:
+regression insurance for a settled mechanism, not work. That is not "leaks
+are gone": the ratchet asserts nothing regressed, over the shapes somebody
+wrote a probe for. The open work is what has no probe, and it is read from
+§ "The open work", never from the dashboards. A new fix under any root needs
+a new probe rather than a re-pin.
 
-The by-design probes must **stay** open — a "fix" that closes one has broken
-the gauge: the four live-growth discriminators (object, id, region, and byte
-dimensions — each proves its gauge is not dead, so a discriminator reading
-closed voids every closed verdict of that run), and the sub-integer estimator
-self-test. A block-local accumulator is not genuine growth — it frees at the
+The growth rows must **stay** growing — a "fix" that flattens one has broken
+the gauge: the instrument's live-growth row per gauge (object, id, region,
+and byte dimensions — each a floor that voids every reading on its axis when
+it fails), and the oracle's sub-integer estimator self-test, a growth floor
+of its own. A block-local accumulator is not genuine growth — it frees at the
 block's return; only a module-level sink is.
 
 **The h2 per-request rate reads zero.**
-[h2-stress-scoped.lisp](../../tests/impl/h2-stress-scoped.lisp) holds the ceiling,
-shrink-only, at two request counts; the merge-inherits-its-entry and
-break-relocation mechanisms keep it there
-([region/replicate.md](region/replicate.md)). The subject stays live even at
-zero, and without a dashboard probe: it is where the last measured defects on
-this mechanism came from, and its own gauge-live sink is what says a green
-ceiling is the loop reclaiming rather than the gauge dying.
+[h2-stress-scoped.lisp](../../tests/impl/h2-stress-scoped.lisp) pins it at
+two request counts; the merge-inherits-its-entry and break-relocation
+mechanisms keep it there ([region/replicate.md](region/replicate.md)). The
+subject stays live even at zero, and without a dashboard probe: it is where
+the last measured defects on this mechanism came from.
 
 **Direct gauges live outside the dashboards**, all of the ledger's own kind:
 [region-error-unwind.lisp](../../tests/impl/region-error-unwind.lisp) (the error exit's release tables),

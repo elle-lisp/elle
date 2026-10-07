@@ -1,0 +1,2 @@
+# Compiles on the VM thread, so jit? answers as soon as the threshold is crossed.
+trace = ["syncjit"]

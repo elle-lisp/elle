@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 14)
+# audited: 2026-10-05
 ## elle test — reading a run back: the tally, the problem list, the warning
 ## about a predecessor that never finished, and raw SQL.
 ## docs/test-store.md
@@ -44,7 +44,7 @@
 # commit column answers to `sha` here.
 (defn run-meta [conn run-id]
   (get (sqlite:query conn
-                     "SELECT (finished_at IS NULL) AS trunc, n_selected AS sel, git_commit AS sha, git_dirty AS dirty, worktree AS worktree, host AS host, pid AS pid FROM run WHERE id = ?1"
+                     "SELECT (finished_at IS NULL) AS trunc, n_selected AS sel, git_commit AS sha, git_dirty AS dirty, worktree AS worktree, host AS host, pid AS pid, build AS build FROM run WHERE id = ?1"
                      [run-id]) 0))
 
 # An unfinished row is a run still in flight when its process is still alive:
@@ -75,6 +75,12 @@
       (string " · commit " short (if (= (get meta :dirty) 1) " (dirty)" ""))
       "")))
 
+# The build the run's readings were judged as, which a run has only under the
+# rig (docs/ratchet.md); a run with none says nothing here.
+(defn build-note [meta]
+  (let [b (get meta :build)]
+    (if b (string " · build " b) "")))
+
 # One session DB serves every checkout on the box, so a warning about an
 # unfinished run has to say whose run it found.
 (defn worktree-note [meta]
@@ -85,24 +91,54 @@
   (let [w (get meta :worktree)]
     (string " (pid " (get meta :pid) (if w (string ", worktree " w) "") ")")))
 
-# ── the measurements a run recorded (docs/test-store.md) ──
-# A tally by verdict, then a line for each reading that is neither `closed` nor
-# `growth`. Those two are the expected answers — a reclaimed shape and a
-# declared growth probe — so listing them would bury the readings a reader acts
-# on under a few hundred that say nothing happened. The rest is a query.
-(defn measurement-tally [conn run-id]
-  (sqlite:query conn
-                "SELECT verdict AS verdict, count(*) AS n FROM measurement WHERE run_id = ?1 GROUP BY verdict ORDER BY verdict"
-                [run-id]))
+# ── the readings a run recorded (docs/test-store.md § Measurements) ──
+# A tally by verdict, then a line for each reading that is neither `ok` nor
+# unjudged. Those two are the expected answers — a reading within its bound,
+# and one with no row of the run's build yet — so listing them would bury the
+# readings a reader acts on under a few hundred that say nothing happened. The
+# rest is a query.
 
-(defn render-tally [rows]
-  (if (empty? rows)
-    ""
-    (let [r (first rows)
-          one (string (get r :n) " " (get r :verdict))]
-      (if (empty? (rest rows))
-        one
-        (string one " · " (render-tally (rest rows)))))))
+# The order the tally reads in: the expected answer first, then the gating
+# verdicts as the judge names them, then the readings nothing judged.
+(def verdict-order
+  ["ok" "regression" "stale" "unledgered" "missing" "void" "unjudged"])
+
+(defn measurement-tally [conn run-id]
+  "Verdict → count for the run, with a NULL verdict under `unjudged`."
+  (let [@t @{}]
+    (each r in (sqlite:query conn
+                             "SELECT verdict AS verdict, count(*) AS n FROM measurement WHERE run_id = ?1 GROUP BY verdict"
+                             [run-id])
+      (put t
+           (let [v (get r :verdict)]
+             (if v v "unjudged")) (get r :n)))
+    t))
+
+(defn render-tally [t]
+  (string/join (map (fn [v] (string (get t v) " " v))
+                    (filter (fn [v] (get t v)) verdict-order)) " · "))
+
+# The listing's order is the tally's: `ORDER BY` a CASE over `verdict-order`,
+# so every regression is read before the first stale row.
+(defn verdict-rank-sql []
+  (string "CASE m.verdict "
+          (string/join (map (fn [i]
+                              (string "WHEN '" (get verdict-order i) "' THEN " i))
+                            (->list (range (length verdict-order)))) " ") " END"))
+
+# One reading's line: the verdict, the file and the tier, the subject and the
+# axis, then the reading with its half-width and unit, then the bound it met.
+# A missing row has no reading, so it ends at the axis.
+(defn render-measurement [m]
+  (string (get m :verdict) "  " (get m :file) "  [" (get m :tier) "]  "
+          (get m :subject) "  " (get m :axis)
+          (if (= (get m :value) nil)
+            ""
+            (let [k (get m :kind)]
+              (string "  " (get m :value) " ±" (get m :half) " " (get m :unit)
+                      "  "
+                      (ledger:describe-bound (if k (keyword k) nil)
+                      (get m :bound)))))))
 
 (defn print-measurements [conn run-id]
   (let [tally (measurement-tally conn run-id)
@@ -110,19 +146,27 @@
                                       "SELECT count(*) AS c FROM measurement WHERE run_id = ?1"
                                       [run-id]) 0) :c)]
     (when (> total 0)
-      (eprintln total " measurement" (if (= total 1) "" "s") " · "
+      (eprintln total " reading" (if (= total 1) "" "s") " · "
                 (render-tally tally))
       (each m in (sqlite:query conn
-                               (string "SELECT f.file AS file, m.subject AS subject, "
-                                       "m.axis AS axis, m.value AS value, m.unit AS unit, "
+                               (string "SELECT f.file AS file, r.tier AS tier, "
+                                       "m.subject AS subject, m.axis AS axis, "
+                                       "m.value AS value, m.half AS half, "
+                                       "m.unit AS unit, m.bound AS bound, m.kind AS kind, "
                                        "m.verdict AS verdict FROM measurement m "
                                        "JOIN result r ON r.id = m.result_id "
                                        "JOIN form f ON f.hash = r.form_hash "
                                        "WHERE m.run_id = ?1 "
-                                       "AND m.verdict NOT IN ('closed', 'growth') "
-                                       "ORDER BY m.verdict, m.subject") [run-id])
-        (eprintln "  " (get m :verdict) "  " (get m :file) "  " (get m :subject)
-                  "  " (get m :axis) "  " (get m :value) " " (get m :unit)))))
+                                       "AND m.verdict IS NOT NULL AND m.verdict != 'ok' "
+                                       "ORDER BY " (verdict-rank-sql)
+                                       ", f.file, r.tier, m.subject") [run-id])
+        (eprintln "  " (render-measurement m))))
+    # A run with no build left its readings unrecorded, so a green run that
+    # took some must not read as a passed gate (docs/ratchet.md).
+    (when (and (= total 0) (> unrecorded-readings 0))
+      (eprintln unrecorded-readings " reading"
+                (if (= unrecorded-readings 1) "" "s")
+                " · no build, so none recorded or judged: run under elle-rig test")))
   nil)
 
 # ── what the run cost each heap (docs/test-gauges.md) ─────────────────
@@ -222,7 +266,8 @@
                     done " of " sel
                     " selected files; the tally below is partial, not green")))
       nil)
-    (eprintln "elle test · run " run-id " of " nruns (commit-note meta))
+    (eprintln "elle test · run " run-id " of " nruns (commit-note meta)
+              (build-note meta))
     (eprintln np " pass · " ns " skip · " nf " fail · " nd " diverge · " nt
               " timeout")
     (if (> bad 0)

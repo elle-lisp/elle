@@ -1,6 +1,7 @@
-(elle/epoch 13)
-# audited: 2026-09-28
+(elle/epoch 14)
+# audited: 2026-10-06
 ## lib/http2/server.lisp — HTTP/2 server connection handler
+## lib/http2/overview.md
 ##
 ## Loaded via:
 ##   (def server ((import "std/http2/server")
@@ -114,7 +115,7 @@
                   :reason :protocol-error
                   :message "expected SETTINGS as first client frame"}))
         (session:apply-remote-settings sess f:payload))  # Send our SETTINGS + ACK + connection WINDOW_UPDATE
-      (let [[ftype flags sid payload] (frame:make-settings-frame session:default-settings)]
+      (let [[ftype flags sid payload] (frame:make-settings-frame (session:advertised-settings sess))]
         (frame:write-frame transport ftype flags sid payload))
       (let [[ftype flags sid payload] (frame:make-settings-ack)]
         (frame:write-frame transport ftype flags sid payload))
@@ -137,8 +138,12 @@
 
   ## ── h2-serve ───────────────────────────────────────────────────────────
 
-  (defn h2-serve [listener handler &named tls-config on-error]
-    "Serve HTTP/2 connections. Runs forever."
+  (defn h2-serve [listener handler &named tls-config on-error max-frame-size]
+    "Serve HTTP/2 connections. Runs forever.
+     `max-frame-size` is the SETTINGS_MAX_FRAME_SIZE each connection
+     advertises and the largest frame it reads: 256 KiB when nil, and an
+     h2-error before the first accept outside 16384..16777215."
+    (def frame-limit (session:checked-max-frame-size max-frame-size))
     (forever
       (let* [tcp-port (tcp/accept listener)
              t (if tls-config
@@ -149,7 +154,7 @@
                              :message "TLS serving requires :tls plugin"}))
                    (transport:tls (tls:accept listener tls-config)))
                  (transport:tcp tcp-port))
-             sess (session:make-session t "" true)]
+             sess (session:make-session t "" true :max-frame-size frame-limit)]
         (ev/spawn (fn []
                     (let [[ok? err] (protect (server-connection t handler sess
                           :on-error on-error))]
@@ -296,8 +301,12 @@
                                      C:err-internal-error))
                             (when on-error (on-error err)))))))))))
 
-  (defn h2-serve-streaming [listener handler &named tls-config on-error]
-    "Serve HTTP/2 connections with streaming handler. Runs forever."
+  (defn
+    h2-serve-streaming
+    [listener handler &named tls-config on-error max-frame-size]
+    "Serve HTTP/2 connections with streaming handler. Runs forever.
+     `max-frame-size` is as for h2-serve."
+    (def frame-limit (session:checked-max-frame-size max-frame-size))
     (forever
       (let* [tcp-port (tcp/accept listener)
              t (if tls-config
@@ -308,7 +317,7 @@
                              :message "TLS serving requires :tls plugin"}))
                    (transport:tls (tls:accept listener tls-config)))
                  (transport:tcp tcp-port))
-             sess (session:make-session t "" true)]
+             sess (session:make-session t "" true :max-frame-size frame-limit)]
         (ev/spawn (fn []
                     (let [[ok? err] (protect (server-connection t handler sess
                           :on-error on-error

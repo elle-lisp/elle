@@ -1,6 +1,6 @@
 # One test system
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-09-30 -->
 
 The plan that folds every test product into `elle test`, keeps the results,
 and states what a run may skip.
@@ -15,9 +15,8 @@ Five products test this repository today:
 - [oracle.lisp](../tests/impl/oracle.lisp) and
   [plumb.lisp](../tests/impl/plumb.lisp) measure leak rates. They are
   implementation tests, so they run on the rig with the rest of the
-  implementation suite. Each verdict they report through the measurement
-  channel lands in the session DB ([test-store](test-store.md)), so a rate's
-  history is a query.
+  implementation suite. Each reading they print lands in the session DB
+  ([test-store](test-store.md)), so a rate's history is a query.
 - [escape-golden.lisp](../tests/impl/escape-golden.lisp) pins escape snapshots.
 - The Rust suite runs under `cargo test`, outside the session DB.
 - CI builds several implementations, and each runs the language suite
@@ -71,7 +70,7 @@ macOS each released page scrubbed. A sidecar lives outside the source, so the
 file keeps its meaning under a plain `elle-rig FILE`.
 
 A completeness gate remains to build: it fails when a declared profile records
-no verdicts, the same shape as the oracle's `@dual-read` table.
+no verdicts, the same shape as the ledger's `missing` row.
 
 ### Budgets come from history
 
@@ -136,12 +135,13 @@ profiles.
 
 ### Measurements join results
 
-The dashboards keep their instruments — the estimator, the discriminators, the
-by-design set — and report each verdict through a structured channel the runner
-records into a `measurement` table: subject, axis, value, unit, verdict
-([test-store](test-store.md)). Rate history across commits is a query. The
-coverage question in elle-lisp/elle#1144 then becomes a gated table of
-(subject, axis) rows, checked once in the runner for every dashboard.
+A producer prints one line per reading, and the runner records it into a
+`measurement` table: subject, axis, value, half-width, unit, and the verdict
+the ledger row gave it ([test-store](test-store.md)). Rate history across
+commits is a query. The coverage question in elle-lisp/elle#1144 is the
+ledger: a committed table of (subject, axis) rows per producer, judged once
+in the runner for every producer, where a row nobody read is `missing`
+([ratchet](ratchet.md)).
 
 The runner's own growth is in, on a table of its own: it samples the arena
 gauges between files and charges each file what it cost
@@ -163,7 +163,9 @@ CI habit of reading failures out of logs.
    matrix and `elle_scripts.rs` are gone.
 3. Derived budgets.
 4. The coverage gate (elle-lisp/elle#1144), then the runtime-structure gauges
-   (elle-lisp/elle#1143, elle-lisp/elle#1135). The measurement channel is in.
+   (elle-lisp/elle#1143, elle-lisp/elle#1135). The reading line, the
+   ledger's `missing` gate and the dashboards' ledgers are in; the residue
+   tests move next.
 5. Content-keyed results; ordering signals. The boot fingerprint and the
    per-form effect profile are in.
 6. Provable form slicing; parity rows (elle-lisp/elle#1142); golden

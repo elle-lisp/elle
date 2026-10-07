@@ -1,4 +1,4 @@
-// audited: 2026-10-04
+// audited: 2026-10-05
 // Registers every integration test file, which is what makes one run.
 //
 // tests/AGENTS.md
@@ -211,6 +211,9 @@ mod audit {
 mod audit_report {
     include!("audit_report.rs");
 }
+mod audit_counts {
+    include!("audit_counts.rs");
+}
 mod prose {
     include!("prose.rs");
 }
@@ -270,6 +273,12 @@ mod pre_commit {
 }
 mod toolchains {
     include!("toolchains.rs");
+}
+mod ratchet {
+    include!("ratchet.rs");
+}
+mod ledgers {
+    include!("ledgers.rs");
 }
 
 // `allocator.rs` is absent from the list above and does not compile. It calls
