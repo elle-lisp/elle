@@ -3,7 +3,7 @@
 # The runner's ledger, part 1 of 2: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/impl/abort-wait-lists.lisp" :objects 809]
-["tests/impl/apply-tail-linear.lisp" :objects 229]
+["tests/impl/apply-tail-linear.lisp" :objects 245]
 ["tests/impl/arena-count.lisp" :objects 182]
 ["tests/impl/arena-reclaim-counters.lisp" :objects 357]
 ["tests/impl/arena.lisp" :objects 1271]
