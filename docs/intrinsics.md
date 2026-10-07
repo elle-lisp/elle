@@ -1,6 +1,6 @@
 # Intrinsics
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-06 -->
 
 Intrinsics are silent bytecode operations prefixed with `%`. A `%`-intrinsic
 in **call position** is a compile-time type-checked request for the fast
@@ -270,8 +270,8 @@ errors the body could raise.
 ```lisp
 (defn plus [a b] (+ a b))
 (assert (= (string (+ -0.0 -0.0)) "-0.0") "the dissolved +")
-(assert (= (string (apply plus [-0.0 -0.0])) "-0.0")
-        "the wrapper call: plus is used as a value, so nothing proves a or b")
+(assert (= (string (plus ;[-0.0 -0.0])) "-0.0")
+        "a spliced call is not grafted, so nothing proves a or b")
 ```
 
 A comparison dissolves to its op only over two numbers. `%eq` also compares

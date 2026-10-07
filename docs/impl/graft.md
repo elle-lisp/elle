@@ -1,6 +1,6 @@
 # Grafting a call
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-10-06 -->
 
 A call into another unit's function becomes that function's body, and the proven types delete every branch its operands cannot take.
 
@@ -135,9 +135,10 @@ types from the calls this unit makes to it ([type inference](typeinfer.md)).
 Grafting a call removes it from the tree, so the graft records what the call
 would have contributed. For each parameter it notes the operand it bound: the
 caller's binding when the operand was a `Var` nothing writes, the literal's type
-when it was an immediate literal, or the fresh local the `let` bound. The ascent joins those records into the parameter's type
-exactly as it joins a call site's operand. So a definition every caller passes
-ints to still proves `%mul x x`, even when no call to it is left:
+when it was an immediate literal, or the fresh local the `let` bound. The ascent
+joins those records into the parameter's type exactly as it joins a call site's
+operand. So a definition every caller passes ints to still proves `%mul x x`,
+even when no call to it is left:
 
 ```lisp
 (assert (compiles? "(defn f [x] (%mul x x)) (f 3)")
@@ -152,9 +153,9 @@ immediate literal, or a `Var` naming a binding nothing writes, replaces the
 parameter directly in the body. Such a binding holds one value for the whole
 body. The test is that nothing writes it, not that it is immutable, because a
 `match` pattern's variable is never marked immutable. Every other operand is
-bound by a `let` to a fresh local first. The direct replacement matters for the fold: a guard in the
-grafted body then tests the caller's own binding, and its fact narrows that
-binding.
+bound by a `let` to a fresh local first. The direct replacement matters for the
+fold: a guard in the grafted body then tests the caller's own binding, and its
+fact narrows that binding.
 
 A parameter a `(numeric!)` declaration floors is always bound by a `let`. The
 floor is a fact about the parameter's binding, and the `let` carries that
@@ -368,10 +369,16 @@ optional value through the rest list.
   `break` leaves, which proves nothing after it.
 - `compiler::stdlib_cache::tests::fragment` — a stdlib restored from the disk
   cache grafts as a compiled one does.
-- [the graft corpus test](../../tests/impl/graft.lisp) — every arity and every
-  raise a grafted call keeps, on every tier.
+- [the graft corpus test](../../tests/impl/graft.lisp) — a branch no value
+  reaches goes without the binding the rest of the program reads, a deletion
+  narrows a join, and a guard narrows through the wrappers it is written with.
 - [the wrapper corpus test](../../tests/impl/wrapper-lowering.lisp) — each
-  wrapper computes one value dissolved, grafted and called, over ints, floats,
-  both zeros, NaN, infinities and the overflow edge.
+  wrapper over two proven numbers leaves no `Emit` in the disassembly, and over
+  unproven operands it keeps its guards.
+- [the operators test](../../tests/lang/operators.lisp), a language test —
+  each wrapper answers at every arity and raises what it raises. It answers
+  alike over literal operands, over operands a function receives, and called
+  as a value, over ints, floats, both zeros, NaN, infinities and the overflow
+  edge.
 - [the typed int ops](../../tests/impl/typed-int-ops.lisp) — the
   wrapper-spelled `fib` emits `AddInt` and `SubInt`.
