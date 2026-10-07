@@ -1,9 +1,9 @@
-// audited: 2026-09-19
+// audited: 2026-10-06
 //! What a fiber that can never run again strands: the releases its parked frames
 //! still owe, and the retain its parked signal took.
 //!
 //! docs/impl/region/park.md
-//! docs/impl/region/mechanism.md
+//! docs/impl/region/unwind.md
 
 use super::{Fiber, SignalBits, SuspendedFrame};
 use crate::value::Value;
@@ -27,8 +27,7 @@ pub struct ParkedDues {
     /// [`Self::nodes`] because the two are freed differently: a node's members are
     /// gathered under the fiber node before its subtree drop, while a deferred
     /// region is `Counted` throughout and takes the plain decref its emitting
-    /// instruction never ran (docs/impl/region/owner.md § "A deferred tail-call
-    /// release has the node's life").
+    /// instruction never ran (docs/impl/region/owner.md).
     pub deferred: Vec<crate::hir::region::RuntimeRegion>,
     /// The values each `BytecodeFrame` owes a release for — read out of its saved
     /// locals at the slots its own `Code::frame_release_slots` names. A frame
@@ -94,10 +93,10 @@ impl ParkedDues {
 pub struct ParkedState {
     /// What the parked frames owed.
     pub dues: ParkedDues,
-    /// The parked NON-TERMINAL signal (a yielded value, a yielding io request, a
-    /// capability-denial payload) — its park took exactly one escape retain
-    /// (`EmitEscape` / `SuspendEscape`) whose symmetric release lives on the
-    /// resume path the fiber will never take.
+    /// The parked signal whose payload this discharge owes one release, taken
+    /// out of the slot: a NON-TERMINAL signal (a yielded value, a yielding io
+    /// request, a capability-denial payload), whose release lives on the resume
+    /// path the fiber will never take.
     ///
     /// `None` when the parked signal is TERMINAL. A terminal signal keeps its
     /// slot for `fiber/value`, and the one retain pinning it — the park retain
@@ -106,6 +105,11 @@ pub struct ParkedState {
     /// terminal signal reaches the slot by paths that take no escape retain at
     /// all (a native error's `set_error`, a bare `Return`). What a terminal EMIT
     /// owes is settled through [`Self::protect`] instead.
+    ///
+    /// The one terminal exception is a denial of `:error`, a payload the runtime
+    /// built and parked under `SIG_ERROR`. It is reported here, copied rather
+    /// than taken: the slot keeps it for the free-time scan, and this discharge
+    /// releases the reference its allocation left (docs/impl/region/park.md).
     pub signal: Option<(SignalBits, Value)>,
     /// The value the fiber's signal carries, if any — the payload a discharge
     /// must leave standing. A consumer skips a [`ParkedDues::owed`] entry living
@@ -139,6 +143,20 @@ impl Fiber {
         let signal = match self.signal {
             Some((bits, _)) if owns_signal && !crate::vm::fiber::is_terminal_signal(bits) => {
                 self.signal.take()
+            }
+            // A denial of `:error` parks a payload the runtime built under a
+            // terminal bit. The slot keeps it as the fiber's result, whose park
+            // retain the free-time signal scan releases, and the reference its
+            // allocation left is still this discharge's (the ledger's bodyless
+            // record names it).
+            Some((_, payload))
+                if owns_signal
+                    && self
+                        .delivery
+                        .take_bodyless()
+                        .is_some_and(|record| record.bit_identical(payload)) =>
+            {
+                self.signal
             }
             _ => None,
         };

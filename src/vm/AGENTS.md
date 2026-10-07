@@ -270,9 +270,11 @@ rules on what is preserved, what is overwritten, and how to add a caller.
 
 When a fiber suspends, or stops on an error:
 
-1. **Emit instruction** (`handle_emit`): captures innermost frame as a
-   `SuspendedFrame` with the code object, env (Rc clone), IP (after the emit),
-   and operand stack. Stored in `fiber.suspended`.
+1. **Emit instruction** (`handle_emit`): a suspending emit captures the
+   innermost frame as a `SuspendedFrame` with the code object, env (Rc
+   clone), IP (after the emit), and operand stack. Stored in
+   `fiber.suspended`. An emit of a bit the fiber withholds raises nothing: it
+   parks the same frame on a capability denial (`VM::emit_blocked`).
 2. **Suspending primitive** (`handle_primitive_signal`, call position): parks
    its own frame the same way. A tail-position suspend, a fuel pause and an
    error park no frame of their own: the code they return to parks it

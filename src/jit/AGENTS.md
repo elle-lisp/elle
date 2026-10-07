@@ -257,7 +257,9 @@ The signal system and JIT side-exit mechanism enable fibers and JIT to coexist:
   2. Rebuilds the frame's env and stack from the spill buffer
   3. Builds a `SuspendedFrame` with the bytecode resume IP, for any signal but
      a halt
-  4. Sets `fiber.signal` to the emit's signal and value, and `fiber.suspended`
+  4. Sets `fiber.signal` to the emit's signal and value, and `fiber.suspended`.
+     An emit of a bit the fiber withholds sets the capability denial instead
+     (`VM::park_denied_emit`), and parks even for a halt
   5. Returns `YIELD_SENTINEL` to the JIT caller
 
   The JIT caller detects `YIELD_SENTINEL` and returns it to the interpreter,

@@ -130,6 +130,7 @@ WASM code calls the host for operations that need Rust heap access:
 | `rt_yield` | Save suspension frame for yield/yield-through |
 | `rt_get_resume_value` | Load the resume value after suspension |
 | `rt_load_saved_reg` | Restore a saved register during resume |
+| `rt_emit` | The capability gate on a literal emit: the value and signal it parks on |
 
 ### Closure calling convention
 
@@ -178,6 +179,13 @@ route through `rt_yield`, and both park, because an error unwinds nothing
 ([unwind.md](region/unwind.md)). `handle_wasm_result` reads the signal off
 the frame `rt_yield` pushed. An error nothing catches reaches the root
 driver, which drops the parked chain and reports the error.
+
+No host call path sees an `Emit`, so the terminator calls `rt_emit` before it
+parks. Where the driven fiber withholds a bit the emit names, `rt_emit`
+answers the denial payload and the blocked bits, and the frame parks on those
+([emit.md](../signals/emit.md)). `rt_yield` cannot ask the question itself,
+because every park site calls it, and a frame that parks behind a callee's
+denial carries that denial's withheld bits.
 
 ### Callee dispatch spectrum
 

@@ -315,6 +315,7 @@ impl WasmEmitter {
     ///  10: rt_yield `(tag, payload, resume_state, regs_ptr, num_regs, func_idx, signal_bits) -> ()`
     ///  11: rt_get_resume_value `() -> (tag, payload)`
     ///  12: rt_load_saved_reg `(index) -> (tag, payload)`
+    ///  13: rt_emit `(tag, payload, signal_bits) -> (tag, payload, signal_bits)`
     fn emit_types_and_imports(&self, module: &mut Module) {
         let mut types = TypeSection::new();
         // 0: entry function
@@ -403,6 +404,13 @@ impl WasmEmitter {
         types
             .ty()
             .function([ValType::I32], [ValType::I64, ValType::I64]);
+        // 13: rt_emit, the capability gate on a literal emit: the value and the
+        // signal the emit parks on, which are a denial's where the fiber
+        // withholds a bit the emit names
+        types.ty().function(
+            [ValType::I64, ValType::I64, ValType::I64],
+            [ValType::I64, ValType::I64, ValType::I64],
+        );
         module.section(&types);
 
         let mut imports = ImportSection::new();
@@ -417,6 +425,7 @@ impl WasmEmitter {
         imports.import("elle", "rt_yield", EntityType::Function(10));
         imports.import("elle", "rt_get_resume_value", EntityType::Function(11));
         imports.import("elle", "rt_load_saved_reg", EntityType::Function(12));
+        imports.import("elle", "rt_emit", EntityType::Function(13));
         module.section(&imports);
     }
 

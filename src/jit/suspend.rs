@@ -153,20 +153,28 @@ pub extern "C" fn elle_jit_yield(
         stack.push(unsafe { *spilled_values.add(i) });
     }
 
-    // Escape retain for the emitted value — the exact mirror of the
-    // interpreter's `Emit` handler (`handle_emit`, src/vm/dispatch.rs). The
-    // yielded value escapes into `fiber.signal`, where the resumer reads it via
-    // `fiber/value`. The compiler emits a `DecrefRegion` at the emit's
-    // decref_point (fired as this activation suspends and, on resume, continues
-    // past the yield); without this incref that decref drops the value's only
-    // reference while the resumer still holds it, freeing it out from under the
-    // read (tests/impl/region-jit-emit-escape-uaf.lisp). The symmetric release
-    // is the resume path's own pending decref, `release_discarded_signal` for a
-    // fiber that never runs again, or the free-path fiber discharge — all
-    // tier-agnostic (they act on `fiber.signal`), so they balance this retain
-    // exactly as they balance `handle_emit`'s. `region_of` no-ops an immediate.
     let sig = crate::value::fiber::SignalBits::new(signal_bits);
-    {
+    // An emit of a bit the fiber withholds raises nothing: the fiber parks on
+    // the denial, and the resume value answers the emit, as in `handle_emit`.
+    let blocked = crate::vm::VM::emit_blocked(vm.fiber.withheld, sig);
+    let denied = !blocked.is_empty();
+    let raised = if denied {
+        vm.park_denied_emit(sig, blocked, yielded);
+        false
+    } else {
+        // Escape retain for the emitted value — the exact mirror of the
+        // interpreter's `Emit` handler (`handle_emit`, src/vm/dispatch.rs). The
+        // yielded value escapes into `fiber.signal`, where the resumer reads it
+        // via `fiber/value`. The compiler emits a `DecrefRegion` at the emit's
+        // decref_point (fired as this activation suspends and, on resume,
+        // continues past the yield); without this incref that decref drops the
+        // value's only reference while the resumer still holds it, freeing it
+        // out from under the read (tests/impl/region-jit-emit-escape-uaf.lisp).
+        // The symmetric release is the resume path's own pending decref,
+        // `release_discarded_signal` for a fiber that never runs again, or the
+        // free-path fiber discharge — all tier-agnostic (they act on
+        // `fiber.signal`), so they balance this retain exactly as they balance
+        // `handle_emit`'s. `region_of` no-ops an immediate.
         let heap = unsafe { &mut *vm.heap_ptr };
         let yielded_region = crate::value::arena::region_of(heap, yielded);
         crate::value::arena::incref_for_escape(
@@ -174,29 +182,30 @@ pub extern "C" fn elle_jit_yield(
             yielded_region,
             crate::value::arena::EscapeSite::EmitEscape,
         );
-    }
-    // An ERROR emit's retain is the payload's whole delivery — record the mint,
-    // exactly as `handle_emit` does, so the parked frame's discharge reclaims
-    // the raise chain's own reference.
-    let raised = sig.intersects(crate::value::fiber::SIG_ERROR);
-    if raised {
-        vm.fiber.delivery.record_mint(yielded);
-    } else {
-        // …and every other emit records the PARK, so a `squelch`/`attune`
-        // boundary can release the delivery retain no reader will consume
-        // (docs/impl/region/park.md). The record follows the retain this helper
-        // took just above, which is what keeps the two balanced whatever the bits
-        // are.
-        vm.fiber.delivery.park_emit(sig, yielded);
-    }
-    vm.fiber.signal = Some((sig, yielded));
+        // An ERROR emit's retain is the payload's whole delivery — record the
+        // mint, exactly as `handle_emit` does, so the parked frame's discharge
+        // reclaims the raise chain's own reference.
+        let raised = sig.intersects(crate::value::fiber::SIG_ERROR);
+        if raised {
+            vm.fiber.delivery.record_mint(yielded);
+        } else {
+            // …and every other emit records the PARK, so a `squelch`/`attune`
+            // boundary can release the delivery retain no reader will consume
+            // (docs/impl/region/park.md). The record follows the retain this
+            // helper took just above, which is what keeps the two balanced
+            // whatever the bits are.
+            vm.fiber.delivery.park_emit(sig, yielded);
+        }
+        vm.fiber.signal = Some((sig, yielded));
+        raised
+    };
 
-    if !sig.intersects(crate::value::fiber::SIG_HALT) {
-        // Any signal but a halt parks: build a frame for later resumption. An
-        // error parks as a suspend does, because an error unwinds nothing
-        // (docs/impl/region/unwind.md), and this frame is the innermost, so it
-        // records its raise site; the emit's continuation funds its own release
-        // of the restart value.
+    if denied || !sig.intersects(crate::value::fiber::SIG_HALT) {
+        // A denial, and any signal but a halt, parks: build a frame for later
+        // resumption. An error parks as a suspend does, because an error
+        // unwinds nothing (docs/impl/region/unwind.md), and this frame is the
+        // innermost, so it records its raise site; the emit's continuation
+        // funds its own release of the restart value.
         if raised {
             vm.fiber
                 .delivery

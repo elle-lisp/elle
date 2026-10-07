@@ -116,6 +116,7 @@ WASM closure host-side via `handle_fiber_resume` (in resume.rs).
 | `rt_yield` | Save yielded value + live regs to WasmSuspensionFrame |
 | `rt_get_resume_value` | Return the resume value passed by scheduler |
 | `rt_load_saved_reg` | Load saved register by index from suspension frame |
+| `rt_emit` | The capability gate on a literal emit: the value and signal it parks on, a denial's where the fiber withholds a bit |
 | `rt_push_param` | Push dynamic parameter binding frame; raises on an operand that is not a parameter |
 | `rt_pop_param` | Pop dynamic parameter binding frame |
 
@@ -172,7 +173,9 @@ this tier denies a withheld primitive exactly as the interpreter and the JIT do.
 Each path then builds the native's ctx with `ElleHost::native_ctx`, which
 carries the driven fiber's withheld set, so a fiber or thread the native starts
 inherits it. `handle_fiber_resume` adds the resumer's set to the fiber it
-drives. See [wasm.md](../../docs/impl/wasm.md).
+drives. A literal emit reaches no host call path, so its `Emit` terminator
+calls `rt_emit`, which asks the same question of the bits the emit names. See
+[wasm.md](../../docs/impl/wasm.md).
 
 **Signal handling in `rt_call`.** Every host path that runs a native first settles
 its result (`ElleHost::settle_native_signal`): a `SIG_QUERY` (`vm/config`, the
@@ -213,7 +216,8 @@ through the constant pool (`rt_load_const`) instead of inlined as `i64.const`.
 Register allocation uses deterministic slot freeing order.
 
 This enables reliable module caching: `--cache=/path` hashes the
-WASM bytes and reuses pre-compiled modules on cache hit (~3ms vs ~400ms).
+WASM bytes and reuses a pre-compiled module on a cache hit, skipping the
+Wasmtime compile.
 
 ## Tiered compilation (lazy WASM)
 

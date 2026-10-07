@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-10-06
 // docs/impl/wasm.md
 //! The numbers the emitted module and the host agree on: import indices, the
 //! reserved slots of linear memory, and the data-operation codes.
@@ -19,9 +19,10 @@ pub(in crate::wasm) const FN_RT_PREPARE_TAIL_CALL: u32 = 7;
 pub(in crate::wasm) const FN_RT_YIELD: u32 = 8;
 pub(in crate::wasm) const FN_RT_GET_RESUME_VALUE: u32 = 9;
 pub(in crate::wasm) const FN_RT_LOAD_SAVED_REG: u32 = 10;
+pub(in crate::wasm) const FN_RT_EMIT: u32 = 11;
 
 // First non-imported function index
-pub(in crate::wasm) const FN_ENTRY: u32 = 11;
+pub(in crate::wasm) const FN_ENTRY: u32 = 12;
 
 // Linear memory layout
 pub(in crate::wasm) const ARGS_BASE: i32 = 256;

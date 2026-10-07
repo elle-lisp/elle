@@ -403,6 +403,20 @@ pub(super) fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>
         },
     )?;
 
+    // rt_emit — stub: an emit makes its closure one that may signal, which
+    // `standalone_emittable` refuses
+    linker.func_wrap(
+        "elle",
+        "rt_emit",
+        |_caller: Caller<'_, TieredHost>,
+         _tag: i64,
+         _payload: i64,
+         _signal_bits: i64|
+         -> (i64, i64, i64) {
+            panic!("rt_emit called in tiered mode — should not happen");
+        },
+    )?;
+
     Ok(linker)
 }
 

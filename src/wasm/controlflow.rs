@@ -163,12 +163,23 @@ impl WasmEmitter {
                             s
                         });
                     let spill_key = (block_idx, usize::MAX);
+                    // The gate answers the value and signal the emit parks on: a
+                    // denial's where the fiber withholds a bit the emit names. They
+                    // land in the park pair and the dispatch word, which the park
+                    // leaves behind, so `value` stays as the continuation reads it.
+                    f.instruction(&Instruction::LocalGet(self.tag_local(*value)));
+                    f.instruction(&Instruction::LocalGet(self.pay_local(*value)));
+                    f.instruction(&Instruction::I64Const(signal.raw() as i64));
+                    f.instruction(&Instruction::Call(FN_RT_EMIT));
+                    f.instruction(&Instruction::LocalSet(self.signal_local));
+                    f.instruction(&Instruction::LocalSet(self.park_pay_local));
+                    f.instruction(&Instruction::LocalSet(self.park_tag_local));
                     self.emit_park(
                         f,
-                        (self.tag_local(*value), self.pay_local(*value)),
+                        (self.park_tag_local, self.park_pay_local),
                         resume_state,
                         spill_key,
-                        &Instruction::I64Const(signal.raw() as i64),
+                        &Instruction::LocalGet(self.signal_local),
                     );
                 } else {
                     f.instruction(&Instruction::Unreachable);

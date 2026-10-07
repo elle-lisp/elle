@@ -1,10 +1,10 @@
-// audited: 2026-10-05
+// audited: 2026-10-06
 //! The bytecode dispatch match: one decoded instruction routed to its handler.
 //!
 //! docs/impl/vm.md
 //! docs/impl/bytecode.md
 //!
-//! Extracted from the inner execution loop so the loop root stays a thin
+//! Kept apart from the inner execution loop so the loop root stays a thin
 //! fuel/signal/decode harness. `dispatch_instruction` is the single arm of that
 //! harness. The opcodes whose whole effect is on the operand stack are handled
 //! in scalar.rs, and the arm that routes there names every one of them.
@@ -57,7 +57,7 @@ impl VM {
 
     // The arg list is the inner loop's live context (bytecode/const slices, the
     // Rc handles call/yield capture, the in/out `ip`), threaded in wholesale so
-    // the match stays a verbatim extraction of the old inline body.
+    // each arm reads it as the loop holds it.
     #[allow(clippy::too_many_arguments)]
     #[inline]
     pub(super) fn dispatch_instruction(
@@ -344,9 +344,9 @@ impl VM {
                 capture::handle_update_capture(self);
             }
 
-            // Emit — exit dispatch loop for all signals.
-            // SIG_ERROR: store error, no SuspendedFrame (error propagation).
-            // Other signals: create SuspendedFrame (cooperative suspension).
+            // Emit — exit dispatch loop for all signals. A suspending signal and
+            // a denied emit park the frame here; an error's frame is parked by
+            // the exit's driver (`park_raised`).
             Instruction::Emit => {
                 let signal_bits = self.read_signal_bits(bc, ip);
                 return Some(self.handle_emit(signal_bits, code, closure_env, *ip));

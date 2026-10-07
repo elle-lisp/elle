@@ -79,8 +79,8 @@ pub struct Delivery {
     minted: Option<Value>,
     /// The runtime-built payload parked in `Fiber::signal`, whose region the
     /// install that displaces it owes one decref: a capability denial's
-    /// `{:error :capability-denied …}` struct, or the `IoRequest` an io op
-    /// built. The body never names either, so no `decref_point` names its
+    /// `{:error :capability-denied …}` struct, a denied emit's, or the
+    /// `IoRequest` an io op built. The body never names either, so no `decref_point` names its
     /// region; the reference the allocation left is owed by whatever replaces
     /// the payload in the slot — a resume's delivery, or an abort's /
     /// refusal's injected error (docs/impl/region/park.md). Carried
@@ -98,7 +98,7 @@ pub struct Delivery {
     /// names (docs/impl/region/park.md).
     ///
     /// Written by the site that TAKES the retain — the two suspend arms, the two
-    /// denial arms, the `Emit` handler, and their JIT twins — so a record exists
+    /// denial arms, the `Emit` handler and its denial, and their JIT twins — so a record exists
     /// exactly where a retain does and names the value it was taken on. That is
     /// what the boundary cannot read out of `Fiber::signal`: two enforcement
     /// sites reach it through `invoke_closure_jit`, which restores the CALLER's
@@ -166,10 +166,15 @@ impl Delivery {
         self.park_bodyless(bits, payload);
     }
 
-    /// An `Emit` of a withheld bit parked a denial.
-    #[cfg(test)]
+    /// An `Emit` of a withheld bit parked a denial (`VM::park_denied_emit`). The
+    /// payload is a denial's struct, which no body reference stands on, so the
+    /// install that displaces it owes its region a decref. The park is an `Emit`
+    /// park, whose continuation funds its own release of the resume value, so
+    /// the resume owes no mint.
     pub(crate) fn park_emit_denial(&mut self, bits: SignalBits, payload: Value) {
-        self.park_denial(bits, payload);
+        self.assert_consumed();
+        self.bodyless = Some(payload);
+        self.record_park(bits, payload);
     }
 
     /// A yielding io op parked the `IoRequest` it built: a primitive park
