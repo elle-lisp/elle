@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-10-06
 //! Call and TailCall instruction handlers.
 //!
 //! Handles:
@@ -6,7 +6,8 @@
 //! - Closure calls: the environment is built here, then the callee goes to
 //!   `run_dispatch`, which runs it on the caller's dispatch loop
 //! - Tail call optimization
-//! - `call_closure`, the re-entry macro transformers and trait methods use
+//! - `call_closure`, the re-entry trait methods and an `include`'s
+//!   `import/resolve` use (a macro transformer runs through `expansion.rs`)
 //!
 //! Environment building (closure env population, parameter binding) lives in `env.rs`.
 //!
@@ -331,17 +332,17 @@ impl VM {
 
     /// Call a compiled closure `Value` with the given argument values.
     ///
-    /// Used by macro expansion to invoke cached transformer closures without
-    /// going through the full `eval_syntax` pipeline, and by trait-method
-    /// dispatch. Takes the closure as a `Value` (not a `&Closure`) so the entry
-    /// can hand the body its executing-closure register — a self-recursive
-    /// transformer or trait method resolves its self-reference to it.
+    /// Used by trait-method dispatch, and by an `include` to call the standard
+    /// library's `import/resolve`. Takes the closure as a `Value` (not a
+    /// `&Closure`) so the entry can hand the body its executing-closure
+    /// register — a self-recursive trait method resolves its self-reference
+    /// to it.
     ///
     /// Returns the closure's return value on success. Returns `Err` when the
     /// value is not a closure, on arity mismatch, error signal, or halt.
     ///
     /// Callers must not pass closures that may yield (signal includes
-    /// `SIG_YIELD`). Macro transformer closures are always silent.
+    /// `SIG_YIELD`).
     pub fn call_closure(&mut self, closure_val: Value, args: &[Value]) -> Result<Value, String> {
         let Some(closure) = closure_val.as_closure() else {
             return Err(format!(
@@ -388,10 +389,10 @@ impl VM {
                 .unwrap_or((crate::value::SIG_ERROR, Value::NIL));
             Err(self.format_error_with_location(err))
         } else {
-            // Unexpected suspending signal (yield from macro body — not supported).
+            // Unexpected suspending signal: a closure called here cannot yield.
             self.fiber.signal.take();
             Err(format!(
-                "Unexpected signal from macro transformer: {}",
+                "Unexpected signal from a closure call: {}",
                 crate::signals::registry::format_bits(bits)
             ))
         }

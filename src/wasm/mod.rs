@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! WASM backend: LIR → WASM emission and Wasmtime execution.
 //!
 //! docs/impl/wasm.md
@@ -220,7 +220,11 @@ fn compile_or_cache_module(
 ///
 /// Extracted from `eval_wasm_raw` so the exact spliced source is reachable from
 /// tests that need to inspect the compiled LIR.
-fn build_full_source(source: &str, source_name: &str) -> Result<(String, usize), String> {
+fn build_full_source(
+    source: &str,
+    source_name: &str,
+    cctx: &mut crate::pipeline::CompileCtx,
+) -> Result<(String, usize), String> {
     // Count stdlib forms so epoch migration skips them.
     let mut home = crate::syntax::SyntaxHeap::new();
     let mut stdlib_form_count = crate::reader::read_syntax_all(home.arena(), STDLIB, "<stdlib>")
@@ -229,7 +233,7 @@ fn build_full_source(source: &str, source_name: &str) -> Result<(String, usize),
     // Splice include/include-file directives in user source BEFORE
     // wrapping in ev/run. The directives are top-level in user code
     // but would become nested (invisible) after the ev/run wrapper.
-    let body_spliced = crate::pipeline::splice_includes(source, source_name)?;
+    let body_spliced = crate::pipeline::splice_includes(source, source_name, cctx)?;
     // Concatenate stdlib + user source wrapped in ev/run so the async
     // scheduler is active (needed for ev/spawn, fibers+I/O, TCP, etc.).
     // I/O inside fibers propagates SIG_IO to the scheduler; top-level
@@ -323,7 +327,7 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<S
     let full_source;
     let stdlib_form_count;
     let compile_source = if with_stdlib {
-        let (fs, count) = build_full_source(source, source_name)?;
+        let (fs, count) = build_full_source(source, source_name, &mut compile)?;
         full_source = fs;
         stdlib_form_count = count;
         full_source.as_str()

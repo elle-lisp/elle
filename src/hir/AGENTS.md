@@ -1,6 +1,6 @@
 # hir
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-10-06 -->
 
 High-level Intermediate Representation: the analyzed program, with bindings
 resolved, captures computed and signals inferred, and the passes over it.
@@ -40,6 +40,7 @@ Does NOT:
 | `BlockId` | Unique identifier for a block, used by `break` to target the correct block |
 | `Analyzer` | Transforms Syntax → HIR; takes `&mut BindingArena` |
 | `AnalysisResult` | HIR produced by the analyzer |
+| `LambdaDecl` | A lambda's declared ceiling and muffle bits, which the HIR keeps only as their result. `take_lambda_decls` hands them over, keyed by the lambda's `HirId` |
 | `HirLinter` | HIR-based linter producing Diagnostics (no constructor args) |
 | `extract_symbols_from_hir` | Builds SymbolIndex from HIR (3 args: hir, symbols, arena) |
 

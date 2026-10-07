@@ -1,3 +1,8 @@
+// audited: 2026-10-06
+//! Which bindings the escape analysis marks as leaving their activation: by return, by store, and through a container read.
+//!
+//! docs/impl/escape.md
+
 use super::*;
 
 #[test]
@@ -83,10 +88,8 @@ fn def_callee_arg_does_not_escape_through_call() {
 ///
 /// Uses `let`, not `letrec`: `let`-bound names are immutable, so the
 /// consumption guard (`tail_sources`'s `Call` arm) admits the descent. A `letrec`
-/// binding is not immutable — the solver does
-/// not inline it, and neither does this analysis — so the chain would not
-/// thread through one (confirmed: a letrec callee produces no binding
-/// under-mark in the solver).
+/// binding is not immutable — the solver does not inline it, and neither does
+/// this analysis — so the chain would not thread through one.
 #[test]
 fn arg_return_summary_chains_through_the_fixpoint() {
     let src = "(let [id (fn (x) x) \
@@ -312,7 +315,7 @@ fn store_escape_spec() {
 /// `Mixed`/`Unknown` seeds every argument here; the read-only trait dispatchers
 /// declare `Opaque` and seed nothing, which is their whole cost at one heap
 /// argument — the clique is over PAIRS of arguments and is empty either way
-/// (docs/impl/region/effects.md § `Opaque`; docs/impl/escape.md).
+/// (docs/impl/region/effects.md; docs/impl/escape.md).
 #[test]
 fn a_sequence_read_does_not_seed_the_store_facet() {
     for read in ["first", "second", "rest", "->array", "->list"] {
@@ -338,9 +341,9 @@ fn a_sequence_read_does_not_seed_the_store_facet() {
 /// argument to the `SIG_PROPAGATE` handler, which writes it into the propagating
 /// fiber's `child`/`child_value` pair. That pair is not enumerated by the free-time
 /// walk, so neither call creates a holder and neither argument is a store-facet
-/// seed (docs/impl/region/effects.md § `Opaque`, "The child-chain WIRING is
-/// `Opaque` too"). The counter-factual is `Mixed` on `fiber/propagate`, and this
-/// seed is the only thing that catches it: `Mixed` reads true on the result side
+/// seed: the child-chain wiring is `Opaque` too (docs/impl/region/effects.md).
+/// The counter-factual is `Mixed` on `fiber/propagate`, and this seed is the only
+/// thing that catches it: `Mixed` reads true on the result side
 /// (the SIG_PROPAGATE payload IS arg0) and the declaration oracle exempts a
 /// signal-carrying return, so no result check can. What it costs is `defer`'s
 /// success path, which names its fiber in the arm this call does not take.
@@ -354,16 +357,16 @@ fn a_fiber_graph_write_does_not_seed_the_store_facet() {
     }
 }
 
-/// `import` copies its specifier out to a Rust `String` to resolve it and stores
-/// no argument; what it re-enters the VM to produce makes only the RESULT
+/// `import/load-file` copies its path out to a Rust `String` to read the file and
+/// stores no argument; what it re-enters the VM to produce makes only the RESULT
 /// unbounded, which is `Opaque`'s half of the declaration and seeds nothing
-/// (docs/impl/region/effects.md § `Opaque`, the VM re-entry rule). The specifier
-/// is read through a binding so the call keeps its opaque projection — a literal
-/// spec is resolved and compiled at analysis time.
+/// (the VM re-entry rule, docs/impl/region/effects.md). The path is
+/// read through a binding so the call keeps its opaque projection — a literal
+/// path is compiled at analysis time.
 #[test]
-fn import_does_not_seed_the_store_facet() {
+fn import_load_file_does_not_seed_the_store_facet() {
     assert_binding_escape(
-        "(let [s \"std/nonexistent\"] (length (import s)))",
+        "(let [s \"nonexistent.lisp\"] (length (import/load-file s)))",
         &[("s", false, false)],
     );
 }

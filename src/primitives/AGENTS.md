@@ -1,6 +1,6 @@
 # primitives
 
-<!-- audited: 2026-09-30 -->
+<!-- audited: 2026-10-06 -->
 
 Built-in functions. Registered into the VM at startup.
 
@@ -85,7 +85,7 @@ its result.
 
 3. **Primitives reach the VM through `ctx`.** Operations that drive fiber
    execution return SIG_RESUME and let the VM dispatch loop handle it.
-   Primitives that read VM state (`sys/args`, `ffi/native`, `import-file`, etc.)
+   Primitives that read VM state (`sys/args`, `ffi/native`, `import/load-file`, etc.)
    reach it via `ctx.vm()`. Do not use `ctx.vm()` for I/O or interpreter
    re-entry that the dispatch loop owns.
 
@@ -134,7 +134,7 @@ name)` answers for either spelling.
 | [math.rs](math.rs) | `math/sqrt`, `math/sin`, `math/cos`, `math/tan`, `math/log`, `math/exp`, `math/pow`, `math/atan2`, `math/pi`, `math/e`, `math/inf`, `math/nan`, and the rest of the `math/*` family |
 | [memory.rs](memory.rs) | `ffi/size`, `ffi/align`, `ffi/malloc`, `ffi/free`, `ffi/read`, `ffi/write`, `ffi/string`, `ffi/struct`, `ffi/array`, `ptr/add`, `ptr/diff`, `ptr/to-int`, `ptr/from-int` |
 | [meta.rs](meta.rs) | `meta/gensym`, `meta/datum->syntax`, `meta/syntax->datum`, the `meta/syntax-*` predicates, `meta/origin`, `squelch`, `attune`, `git`, `fn/git?`, `disgit` |
-| [modules.rs](modules.rs) | `import` |
+| [modules.rs](modules.rs) | `import/load-file`, `import/load-plugin`, `import/load-syntax`. `import-file` is a special form and `import` a prelude macro ([modules](../../docs/modules.md)) |
 | [net.rs](net.rs) | `tcp/listen`, `tcp/accept`, `tcp/connect-ip`, `tcp/shutdown`, `udp/bind`, `udp/send-to`, `udp/recv-from`, `sys/resolve`, `sys/ip?` (`tcp/connect` is a stdlib wrapper over `tcp/connect-ip`) |
 | [package.rs](package.rs) | `elle/version`, `elle/epoch`, `elle/info` |
 | [parameters.rs](parameters.rs) | `parameter` |

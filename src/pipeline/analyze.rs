@@ -1,5 +1,7 @@
-// audited: 2026-09-21
+// audited: 2026-10-06
 //! Analysis pipeline: source -> HIR (no bytecode generation).
+//!
+//! docs/pipeline.md
 
 use super::AnalyzeResult;
 use super::CompileCtx;
@@ -9,8 +11,8 @@ use crate::symbol::SymbolTable;
 use crate::syntax::Span;
 use crate::vm::VM;
 
-/// Analyze source code without generating bytecode.
-/// Used by linter and LSP which need HIR but not bytecode.
+/// Analyze one form without generating bytecode. Tests use it; the linter and
+/// the LSP analyze whole files with `analyze_file`.
 pub fn analyze(
     source: &str,
     symbols: &mut SymbolTable,
@@ -46,20 +48,26 @@ fn analyze_in_arena(
         meta.signals.clone(),
         meta.arities.clone(),
     );
-    analyzer.set_compile_ctx(cctx);
     analyzer.bind_primitives(&meta);
     let analysis = analyzer.analyze(&expanded)?;
     let errors = analysis.errors;
+    let lambda_decls = analyzer.take_lambda_decls();
     drop(analyzer);
     let mut hir = analysis.hir;
     crate::hir::tailcall::mark_tail_calls(&mut hir);
-    Ok(AnalyzeResult { hir, arena, errors })
+    Ok(AnalyzeResult {
+        hir,
+        arena,
+        errors,
+        lambda_decls,
+    })
 }
 
 /// Analyze a file as a single synthetic letrec (no bytecode).
 ///
-/// Used by linter and LSP for file-level analysis. Primitives are
-/// pre-bound as immutable Global bindings.
+/// The LSP, the linter, `compile/analyze` and the signal solver read a file
+/// this way. Primitives are pre-bound as immutable Global bindings. The
+/// analysis compiles no other file, so a cycle of imports does not recurse.
 pub fn analyze_file(
     source: &str,
     symbols: &mut SymbolTable,
@@ -121,12 +129,17 @@ fn analyze_file_in_arena(
         meta.signals.clone(),
         meta.arities.clone(),
     );
-    analyzer.set_compile_ctx(cctx);
     analyzer.bind_primitives(&meta);
     let mut hir = analyzer.analyze_file_letrec(forms, span)?;
     let errors = analyzer.take_errors();
+    let lambda_decls = analyzer.take_lambda_decls();
     drop(analyzer);
 
     crate::hir::tailcall::mark_tail_calls(&mut hir);
-    Ok(AnalyzeResult { hir, arena, errors })
+    Ok(AnalyzeResult {
+        hir,
+        arena,
+        errors,
+        lambda_decls,
+    })
 }

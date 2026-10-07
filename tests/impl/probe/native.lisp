@@ -1,14 +1,15 @@
-(elle/epoch 12)
-# audited: 2026-09-08
+(elle/epoch 14)
+# audited: 2026-10-06
 # Native results produced by running compiled code, the byte gauge, and the value-survival pins no rate can make.
 #
 # docs/impl/region/diagnostics.md
+# docs/impl/region/clique.md
 # ── Thunk-run native results ──────────────────────────────────────────
 # A native can produce its result by running compiled code on the driving VM:
-# `import` runs the module body, and `arena/allocs` runs the measured thunk.
-# Such a result already carries its return mint. The dispatch pass-through
-# retain must not fund the caller a second time (`result_minted`,
-# docs/impl/region/effects.md § "Native region effects"). `arena/allocs`
+# `import/load-file`, which `import` expands to, runs the module body, and
+# `arena/allocs` runs the measured thunk. Such a result already carries its
+# return mint. The dispatch pass-through retain must not fund the caller a
+# second time (`result_minted`). `arena/allocs`
 # embeds its thunk's result in a fresh pair, so the boundary consumes the
 # mint after the pair's alloc-scan counts the embedding. Both probes are
 # CLOSED controls (undeclared, like `rest-array-copy`). Before the

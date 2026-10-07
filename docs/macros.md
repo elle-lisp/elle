@@ -1,6 +1,6 @@
 # Macros
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-10-06 -->
 
 Elle's macros run as ordinary Elle code at expansion time, and are hygienic by
 sets of scopes; `datum->syntax` breaks hygiene on purpose.
@@ -35,6 +35,27 @@ closures, recursion. The body usually builds its result with quasiquote.
 Two limits, both listed in [warts.md](warts.md): a macro cannot return an
 improper list such as `(pair 1 2)`, and a macro cannot be exported from a
 module.
+
+## What a macro body may spend
+
+A macro body runs while a compile waits for it, so the compile bounds it:
+
+- **Each call runs under a fuel budget** of its own
+  ([runtime.md](runtime.md)). A body that exhausts it fails the compile, and
+  the error names the macro.
+- **A body runs with the capabilities of the fiber whose code started the
+  compile.** A primitive that fiber withholds is denied, and the compile fails
+  naming the macro and the primitive
+  ([capabilities.md](signals/capabilities.md)).
+- **A macro defined at the REPL reaches later REPL lines only.** A file that a
+  line imports expands against the prelude, its own macros and the macros of
+  the files it includes.
+
+```lisp
+(let [[ok? err] (protect (eval '(begin (defmacro spin [] (forever nil)) (spin))))]
+  (assert (not ok?) "a macro that never returns fails the compile")
+  (assert (string/contains? (get err :message) "macro 'spin'") "naming the macro"))
+```
 
 ## Hygiene: sets of scopes
 

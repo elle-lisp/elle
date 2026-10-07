@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! The VM's execution entries: a blueprint, a code object at the root, and a
 //! program under the async scheduler. The module list sits above them.
 //!
@@ -17,6 +17,7 @@ pub mod dispatch;
 pub mod env;
 pub mod eval;
 pub mod execute;
+pub mod expansion;
 pub mod fiber;
 // Not pub: jit_entry only adds `impl VM` methods.
 #[cfg(feature = "jit")]

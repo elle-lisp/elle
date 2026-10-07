@@ -1,6 +1,6 @@
 # Authority
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-06 -->
 
 What holds authority in a running program, and where the runtime asks whether a
 fiber may spend it.
@@ -17,10 +17,10 @@ site asks it, and the primitive's declaration answers it.
 
 A second question follows: **may this fiber cause this effect?** The two differ
 whenever the effect's cost rides a value rather than the primitive's name. The
-runtime asks this second question at three call sites now, each reading the
-requirement from an argument: a request handed to `io/submit`, a native library
-named to `import`, and the bits a dynamic `emit` raises. This document states the
-rule they follow, and the crossings that still ask nothing.
+runtime asks this second question at two call sites now, each reading the
+requirement from an argument: a request handed to `io/submit`, and the bits a
+dynamic `emit` raises. This document states the rule they follow, and the
+crossings that still ask nothing.
 
 ## The unit is the fiber
 
@@ -77,19 +77,22 @@ The call-site check gates the primitive that **mints** authority, against what
 that primitive declares. It does not, by itself, gate authority a value carries,
 because the value says what the spend costs and the declaration does not. An
 `io-request` travels through a closure capture, a resume value, a channel, or a
-struct field like any other value, and a path or a keyword is plainer still.
+struct field like any other value, and a keyword is plainer still.
 
-Three primitives read the requirement from the value instead of the name:
+Two primitives read the requirement from the value instead of the name:
 
 - `io/submit` reads the operation its request carries — a spawn needs
   `|:io :exec|`, an open needs `|:io :fs|`, a plain read needs `|:io|`.
-- native `import` reads the path it is given — a shared library needs `:ffi`
-  for the foreign `elle_plugin_init` its load runs, a `.lisp` module needs none.
 - dynamic `emit` reads the bits its first argument names.
 
 Each tests the requirement against the fiber making the call, so a fiber cannot
 spend what it withholds however it obtained the value.
 [capabilities.md](capabilities.md) states the checks and the denial payload.
+
+A primitive that does one thing needs no such reading. Loading a shared library
+always runs its foreign `elle_plugin_init`, so `import/load-plugin` declares
+`:ffi`, and the name answers the question. A loader that chose between source
+and a library by its path would need the path read instead.
 
 Three edges still ask nothing, and each follows from the rule below rather than
 defeats it. `io/submit` tests the submitter, so a scheduler that submits on
@@ -108,17 +111,17 @@ what the runtime asks today.
 |---|---|---|
 | The scheduler | a request submitted to `io/submit` | the submitter's spend check |
 | A signal | a dynamic `emit`, or the literal `Emit` instruction | the dynamic form's spend check; nothing on the literal |
-| Native code | a primitive call, its requirement fixed or argument-derived | the call site's check, reading `import`'s `:ffi` off its path |
+| Native code | a primitive call, its requirement fixed or argument-derived | the call site's check, against the primitive's declaration |
 | A device | a fiber lowered and dispatched | nothing exists yet |
 | A child fiber or a thread | the withheld set itself | the transitive check |
 
 The child crossing works because the requirement travels with the thing that
 crosses: a fiber takes its creator's withheld set when it is made, and its
 resumer's at each resume. A child cannot argue its way past a denial, because it
-inherits the set rather than consulting one. The three argument-derived
+inherits the set rather than consulting one. The two argument-derived
 checks work the same way: the requirement is the value's own — the request's
-operation, the import's path, the emit's bits — so the crossing reads it off the
-value rather than trusting the primitive's declaration.
+operation, the emit's bits — so the crossing reads it off the value rather than
+trusting the primitive's declaration.
 
 ## The rule
 
@@ -135,13 +138,12 @@ because the requirement is the value's own — read where the value is spent. No
 plugin misstates it across the stable ABI, because the crossing reads what the
 value needs rather than what its author claimed.
 
-Three primitives are built to this rule through one seam. A primitive can declare
+Two primitives are built to this rule through one seam. A primitive can declare
 that its requirement depends on its arguments, and the capability gate reads it
 off the argument for every tier alike: `io/submit` derives its bits from the
-request's operation, `import` from the path's extension, dynamic `emit` from the
-bits its argument names. The gate is the same in each case; only the derivation
-is the primitive's own, so a fourth such primitive adds a derivation and changes
-no gate.
+request's operation, dynamic `emit` from the bits its argument names. The gate
+is the same in each case; only the derivation is the primitive's own, so a third
+such primitive adds a derivation and changes no gate.
 
 ## What the model makes possible
 

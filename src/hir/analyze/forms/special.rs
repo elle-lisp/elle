@@ -1,3 +1,10 @@
+// audited: 2026-10-06
+//! The forms `environment`, `parameterize` and `cond`, and the qualified
+//! symbol `a:b`, which reads a field through nested `get` calls.
+//!
+//! docs/impl/hir.md
+//! docs/modules.md
+
 use super::*;
 
 impl<'a> Analyzer<'a> {
@@ -192,9 +199,8 @@ impl<'a> Analyzer<'a> {
     /// Each subsequent segment becomes a keyword argument to `get`.
     /// All synthesized HIR nodes carry the original symbol's span.
     ///
-    /// The `get` binding always resolves to the global primitive,
-    /// matching the pattern used for array/struct literal
-    /// desugaring (see SyntaxKind::Array/ArrayMut/Struct/StructMut arms above).
+    /// The `get` binding always resolves to the global primitive, as a
+    /// collection literal's constructor does (`analyze_collection_literal`).
     pub(super) fn desugar_qualified_symbol(
         &mut self,
         name: &str,
@@ -226,16 +232,7 @@ impl<'a> Analyzer<'a> {
         for segment in &segments[1..] {
             let get_func = Hir::silent(HirKind::Var(get_binding), *span);
             let key = Hir::silent(HirKind::Keyword(segment.to_string()), *span);
-            // Use projected signal if the binding has a projection for this field.
-            let call_signal = if let HirKind::Var(binding) = &result.kind {
-                if let Some(proj) = self.projection_env.get(binding) {
-                    proj.get(*segment).copied().unwrap_or(result.signal)
-                } else {
-                    result.signal
-                }
-            } else {
-                result.signal
-            };
+            let call_signal = result.signal;
             result = Hir::new(
                 HirKind::Call {
                     func: Box::new(get_func),

@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 14)
+# audited: 2026-10-06
 # include and include-file splice a file's macros and definitions into the including file.
 # docs/modules.md
 #
@@ -14,9 +14,11 @@
 # function defined in included file is available
 (assert (= (triple 4) 12) "include-file: function from included file")
 
-# ── include with search-path resolution ──────────────────────────────────────
+# ── include resolves its spec with import/resolve ───────────────────────────
 
-(include "tests/lang/inclib")
+# A ../ spec names a file relative to this one, through the same rules import
+# follows. The counter-factual resolves it against the working directory, where
+# it names nothing.
+(include "../modules/incspec")
 
-# same macro available again (re-included via search path)
-(assert (= (double-it 7) 14) "include: macro via search path")
+(assert (= (quadruple-it 7) 28) "include: macro from a file a spec names")

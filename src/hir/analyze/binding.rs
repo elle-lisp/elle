@@ -1,4 +1,8 @@
-//! Binding forms: let, letrec, define, set
+// audited: 2026-10-06
+//! The binding forms `let`, `def`, `var` and `assign`, and the analysis state a
+//! binding's initializer leaves for it.
+//!
+//! docs/bindings.md
 
 use super::*;
 use crate::syntax::{Syntax, SyntaxKind};
@@ -372,14 +376,10 @@ impl<'a> Analyzer<'a> {
         ))
     }
 
-    /// Consume transient analysis state (import projection, squelch signal)
-    /// and apply them to a binding. Called after analyzing a binding's value
-    /// expression in `def`, `let`, `letrec`, and file-scope letrec.
+    /// Consume the transient analysis state (the squelch signal) and apply it
+    /// to a binding. Called after analyzing a binding's value expression in
+    /// `def`, `let`, `letrec`, and file-scope letrec.
     pub(crate) fn apply_transient_binding_state(&mut self, binding: Binding) {
-        // Import projection: the value was `((import "literal"))`
-        if let Some(proj) = self.last_import_projection.take() {
-            self.projection_env.insert(binding, proj);
-        }
         // Compile-time squelch: the value was `(squelch f mask)`
         if let Some(sig) = self.last_squelch_signal.take() {
             self.signal_env.insert(binding, sig);

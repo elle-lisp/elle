@@ -1,6 +1,6 @@
 # Standard Library
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-10-06 -->
 
 Elle's standard library has four layers: Rust primitives, core operators,
 prelude macros, and stdlib functions.
@@ -77,6 +77,7 @@ gate!       run a body, or raise :gated
 yield yield*    emit :yield
 apply       call with a spread argument list
 default     a default for a &named parameter left nil
+import      load a module by spec, through import/resolve
 ```
 
 `cond` and `match` are special forms, not macros.
@@ -89,6 +90,7 @@ Functions loaded after the prelude, among them:
 map filter sum product take drop
 sort-by sort-with
 compose partial identity
+import/resolve
 ```
 
 `sort`, `->array`, `->list`, `freeze`, `thaw` and `deep-freeze` are VM

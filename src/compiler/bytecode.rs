@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-10-06
 //! Compiled bytecode: the instruction bytes, the constant pool, and the
 //! emit/patch surface the emitter writes through.
 //!
@@ -27,11 +27,6 @@ pub struct Bytecode {
     /// correct signal metadata for fiber scheduling and shared allocator
     /// provisioning.
     pub signal: crate::signals::Signal,
-    /// Signal projection: maps keyword field names to the signals of exported
-    /// closures. Populated by `compute_signal_projection` during file-scope
-    /// compilation. When an importing file sees `module:field`, the analyzer
-    /// uses this projection instead of the conservative `Polymorphic` fallback.
-    pub signal_projection: Option<std::collections::HashMap<String, crate::signals::Signal>>,
     /// Blueprints for this code object's `MakeClosure` instructions. Each
     /// `MakeClosure` pushes its nested-lambda blueprint here and emits the index;
     /// the VM/JIT materialize a fresh region-allocated `HeapObject::ClosureTemplate`
@@ -68,7 +63,6 @@ impl Bytecode {
             constants: Vec::new(),
             location_map: LocationMap::new(),
             signal: crate::signals::Signal::silent(),
-            signal_projection: None,
             child_protos: Vec::new(),
             merged_slots: rustc_hash::FxHashSet::default(),
             frame_release_slots: Vec::new(),

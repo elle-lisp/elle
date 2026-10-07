@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 14)
+# audited: 2026-10-06
 # The drift report a sectioned golden fails with names the section, the line and the kind of drift.
 # docs/impl/escape.md
 #
@@ -14,7 +14,7 @@
 # "renders once when the texts match" is the property that keeps a clean run
 # at one render.
 
-(def snapdiff ((import-file "tests/modules/snapdiff.lisp")))
+(def snapdiff ((import-file "../modules/snapdiff.lisp")))
 
 (def headers ["[alpha]" "[beta]"])
 

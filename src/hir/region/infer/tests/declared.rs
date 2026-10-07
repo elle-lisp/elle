@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-10-06
 //! What each shipped primitive declares, held to what the solver then does —
 //! the real-primitive companions to the variant tests in effects.rs.
 //!
@@ -146,32 +146,45 @@ fn fiber_graph_natives_declare_opaque_and_git_keeps_the_hard_edge() {
 }
 
 #[test]
-fn import_declares_opaque_no_hard_edge() {
-    // `import` copies its specifier out to a Rust `String` to resolve it and stores
-    // no argument; the module value it hands back is produced by compiled code run
-    // on the driving VM, so the RESULT is unbounded and nothing else is — the VM
-    // re-entry rule's answer, `Opaque` (docs/impl/region/effects.md).
+fn the_loaders_declare_opaque_no_hard_edge() {
+    // Each loader copies its argument out to read or compile it and stores no
+    // argument. The module value it hands back is produced by compiled code run
+    // on the driving VM, or by a plugin's init, so the RESULT is unbounded and
+    // nothing else is — the VM re-entry rule's answer, `Opaque`
+    // (docs/impl/region/effects.md).
     // Single-heap-arg, so the clique is empty either way: `hard_edge_sites` and the
-    // store-facet seed (`import_does_not_seed_the_store_facet`) are what a `Mixed`
-    // declaration brings back. The result stays non-fresh — it lives in
-    // neither the call's own region nor the specifier's.
-    let (hir, arena, _symbols, info) = analyze_with_class("(import \"std/nonexistent\")");
-    let calls = find_calls_to_primitive(&hir, "import", &arena);
-    assert_eq!(calls.len(), 1, "expected one (import ...) call");
-    assert!(
-        !info.hard_edge_sites.contains(&calls[0]),
-        "import declares Opaque, so its call site must NOT be a hard-edge site"
-    );
-    let call_r = *info
-        .alloc_region
-        .get(&calls[0])
-        .expect("import call must have a call-result region");
-    assert!(
-        !info.fresh_result_regions.contains(&call_r),
-        "import's result is minted by the module's own compiled top level, not in \
-         the call's region, so r{} must not be a fresh result",
-        call_r.0
-    );
+    // store-facet seed (`import_load_file_does_not_seed_the_store_facet`) are what
+    // a `Mixed` declaration brings back. The result stays non-fresh — it lives in
+    // neither the call's own region nor its argument's.
+    for (prim, source) in [
+        (
+            "import/load-file",
+            "(import/load-file \"nonexistent.lisp\")",
+        ),
+        (
+            "import/load-plugin",
+            "(import/load-plugin \"nonexistent.so\")",
+        ),
+        ("import/load-syntax", "(import/load-syntax '(+ 1 2))"),
+    ] {
+        let (hir, arena, _symbols, info) = analyze_with_class(source);
+        let calls = find_calls_to_primitive(&hir, prim, &arena);
+        assert_eq!(calls.len(), 1, "expected one ({prim} ...) call");
+        assert!(
+            !info.hard_edge_sites.contains(&calls[0]),
+            "{prim} declares Opaque, so its call site must NOT be a hard-edge site"
+        );
+        let call_r = *info
+            .alloc_region
+            .get(&calls[0])
+            .expect("the load call must have a call-result region");
+        assert!(
+            !info.fresh_result_regions.contains(&call_r),
+            "the loaded module mints {prim}'s result outside the call's region, \
+             so r{} must not be a fresh result",
+            call_r.0
+        );
+    }
 }
 
 #[test]

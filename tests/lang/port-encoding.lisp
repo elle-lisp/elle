@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 14)
+# audited: 2026-10-06
 # A raw socket port reads bytes by default, and reads text when opened with :encoding :text.
 # docs/io.md
 #
@@ -104,7 +104,7 @@
 # Use a real Redis if available so we exercise the guard on the actual
 # (redis:with) path; otherwise skip — the guard is unit-tested via the
 # explicit (redis:require-binary-port) below.
-(def redis ((import-file "lib/redis.lisp")))
+(def redis ((import "std/redis")))
 
 (let [[ok? _] (protect (redis:with "127.0.0.1" 6379 (fn [] (redis:ping))))]
   (when ok?

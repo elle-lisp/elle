@@ -1,182 +1,79 @@
-// audited: 2026-09-29
-//! The import-file primitive: resolve a module spec, then run a .lisp module or
-//! load a native plugin, with circular-import detection.
+// audited: 2026-10-06
+//! The three module loaders, for Elle source, a shared library and one form.
+//!
+//! `import/load-file` runs Elle source, `import/load-plugin` loads a shared
+//! library, and `import/load-syntax` runs one form.
 //!
 //! docs/modules.md
 //! docs/impl/region/park.md
 
 use crate::primitives::def::RegionEffect;
 use crate::signals::Signal;
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_FFI, SIG_OK};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::Value;
-use std::path::{Path, PathBuf};
 
-/// Check whether a file path has a native shared library extension.
-fn is_native_library(path: &str) -> bool {
-    path.ends_with(".so") || path.ends_with(".dylib") || path.ends_with(".dll")
-}
+/// What a loader hands back: the signal bits and the value, as a primitive does.
+type Outcome = (SignalBits, Value);
 
-/// The capability bits an `import` call requires that depend on its argument.
+/// A loader's path argument as an absolute, normalized path.
 ///
-/// Loading a native shared library runs its `elle_plugin_init` — foreign code,
-/// the authority `:ffi` exists to withhold. So a spec that names a library,
-/// directly (`foo.so`) or through a `plugin/` prefix that resolves to one,
-/// requires `:ffi`. A `.lisp` module requires nothing here; `import` still
-/// declares `:fs` for the read. This is the `bits_from_args` hook the capability
-/// gate consults, the same seam `io/submit` uses for a different domain, so
-/// denying `:ffi` stops a fiber loading a cdylib. See docs/signals/authority.md.
-fn import_required_bits(args: &[Value]) -> SignalBits {
-    let Some(spec) = args.first().and_then(|v| v.with_string(|s| s.to_string())) else {
-        return SignalBits::EMPTY;
+/// A relative path resolves against the working directory, as `slurp` resolves
+/// one. The cycle check and the plugin cache key on this spelling, so two
+/// spellings of one file are one load. An absolute path also keeps `dlopen`
+/// from searching the library path for a bare name.
+fn path_arg(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    arg: Value,
+    name: &str,
+) -> Result<String, Outcome> {
+    let Some(path) = arg.with_string(|s| s.to_string()) else {
+        return Err((
+            SIG_ERROR,
+            ctx.error(
+                "type-error",
+                format!("{name}: expected string, got {}", arg.type_name()),
+            ),
+        ));
     };
-    if is_native_library(&spec) {
-        return SIG_FFI;
-    }
-    match resolve_import(&spec) {
-        Some(path) if is_native_library(&path) => SIG_FFI,
-        _ => SignalBits::EMPTY,
-    }
+    crate::path::absolute(&path).map_err(|e| {
+        crate::rich_error!(
+            ctx,
+            "io-error",
+            format!("{name}: {e}"),
+            path = ctx.string(path.as_str()),
+        )
+    })
 }
 
-/// Resolve the Elle project root.
-/// Checks `--home` config first, then walks up from the binary to find `Cargo.toml`.
-fn elle_root() -> Option<PathBuf> {
-    if let Some(home) = &crate::config::get().home {
-        let p = PathBuf::from(home);
-        if p.is_dir() {
-            return Some(p);
-        }
-    }
-    let exe = std::env::current_exe().ok()?;
-    let mut dir = exe.parent()?;
-    // Walk up until we find Cargo.toml
-    loop {
-        if dir.join("Cargo.toml").is_file() {
-            return Some(dir.to_path_buf());
-        }
-        dir = dir.parent()?;
-    }
+/// The driving VM, detached from `ctx`'s borrow so the `vm.*` calls and the
+/// `ctx.*` allocations — which use the disjoint heap — coexist. `ctx.vm()` is
+/// total, since a native always runs under a VM.
+fn driving_vm<'v>(ctx: &mut crate::primitives::ctx::NativeCtx<'_>) -> &'v mut crate::vm::VM {
+    let vm: *mut crate::vm::VM = ctx.vm();
+    unsafe { &mut *vm }
 }
 
-/// Resolve a module specifier to a concrete file path.
-pub(crate) fn resolve_import(spec: &str) -> Option<String> {
-    let as_path = Path::new(spec);
-
-    // Virtual prefix: std/X → <repo-root>/lib/X.lisp
-    if let Some(rest) = spec.strip_prefix("std/") {
-        if let Some(root) = elle_root() {
-            let path = root.join("lib").join(format!("{}.lisp", rest));
-            if path.is_file() {
-                return Some(path.to_string_lossy().into_owned());
-            }
-        }
-    }
-
-    // Virtual prefix: plugin/X → <repo-root>/target/<profile>/libelle_X.{so,dylib,dll}
-    // Prefer the same profile as the running binary, fallback to the other.
-    if let Some(rest) = spec.strip_prefix("plugin/") {
-        if let Some(root) = elle_root() {
-            let profiles: &[&str] = if cfg!(debug_assertions) {
-                &["debug", "release"]
-            } else {
-                &["release", "debug"]
-            };
-            let ext = std::env::consts::DLL_EXTENSION;
-            for profile in profiles {
-                let path = root
-                    .join("target")
-                    .join(profile)
-                    .join(format!("libelle_{}.{}", rest, ext));
-                if path.is_file() {
-                    return Some(path.to_string_lossy().into_owned());
-                }
-            }
-        }
-    }
-
-    // Fast path: already exists as a file (skip directories — no semantics for them)
-    if as_path.is_file() {
-        return Some(spec.to_string());
-    }
-
-    // Build list of directories to search
-    let mut search_dirs: Vec<PathBuf> = Vec::new();
-
-    // CWD
-    if let Ok(cwd) = std::env::current_dir() {
-        search_dirs.push(cwd);
-    }
-
-    // --path (colon-separated)
-    if let Some(elle_path) = &crate::config::get().path {
-        for entry in elle_path.split(':') {
-            let p = PathBuf::from(entry);
-            if p.is_dir() {
-                search_dirs.push(p);
-            }
-        }
-    }
-
-    // --home (default: directory of the elle binary)
-    let elle_home = crate::config::get()
-        .home
-        .as_ref()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::current_exe()
-                .ok()
-                .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-                .unwrap_or_default()
-        });
-    if elle_home.is_dir() {
-        search_dirs.push(elle_home);
-    }
-
-    // Derive the leaf name for plugin probing: "plugin/glob" → "glob"
-    let leaf = as_path.file_name().and_then(|n| n.to_str()).unwrap_or(spec);
-    let ext = std::env::consts::DLL_EXTENSION;
-
-    for dir in &search_dirs {
-        // Try <dir>/<spec>.lisp
-        let lisp = dir.join(format!("{}.lisp", spec));
-        if lisp.is_file() {
-            return Some(lisp.to_string_lossy().into_owned());
-        }
-
-        // Try <dir>/<spec> as-is (without extension, in case it exists in a search dir)
-        let bare = dir.join(spec);
-        if bare.is_file() {
-            return Some(bare.to_string_lossy().into_owned());
-        }
-
-        // Try <dir>/<spec_dir>/libelle_<leaf>.{so,dylib,dll}  (plugin convention)
-        let lib_name = format!("libelle_{}.{}", leaf, ext);
-        let plugin_in_dir = dir
-            .join(as_path.parent().unwrap_or(Path::new("")))
-            .join(&lib_name);
-        if plugin_in_dir.is_file() {
-            return Some(plugin_in_dir.to_string_lossy().into_owned());
-        }
-
-        // Try <dir>/libelle_<leaf>.{so,dylib,dll}  (flat layout)
-        let plugin_flat = dir.join(&lib_name);
-        if plugin_flat.is_file() {
-            return Some(plugin_flat.to_string_lossy().into_owned());
-        }
-    }
-
-    None
+/// Trace one load under `--trace=import`.
+fn trace_load(vm: &crate::vm::VM, name: &str, path: &str) {
+    crate::etrace!(
+        vm,
+        crate::config::trace_bits::IMPORT,
+        "import",
+        "{} {}",
+        name,
+        path
+    );
 }
 
-/// Mint the caller's owning reference for a plugin value `import` hands along.
+/// Mint the caller's owning reference for a plugin value the loader hands along.
 ///
-/// `import` declares [`result_minted`](crate::primitives::def::PrimitiveDef::result_minted),
-/// so `dispatch_native_call` takes no pass-through retain for it; on the
-/// `.lisp` path the module body's return mint is that reference, and on the
-/// plugin paths — which run no thunk — this retain is. It balances the
-/// caller's `DecrefValueRegion` exactly as the dispatch retain would have,
-/// leaving the plugin cache's own reference untouched.
+/// `import/load-plugin` declares
+/// [`result_minted`](crate::primitives::def::PrimitiveDef::result_minted), so
+/// `dispatch_native_call` takes no pass-through retain for it. The plugin path
+/// runs no thunk, so this retain is that reference. It balances the caller's
+/// `DecrefValueRegion` exactly as the dispatch retain would have, and leaves the
+/// plugin cache's own reference untouched.
 fn retain_plugin_result(vm: &mut crate::vm::VM, value: Value) {
     let heap = unsafe { &mut *vm.heap_ptr };
     let region = crate::value::arena::region_of(heap, value);
@@ -187,233 +84,257 @@ fn retain_plugin_result(vm: &mut crate::vm::VM, value: Value) {
     );
 }
 
-/// Import a module file
-pub(crate) fn prim_import_file(
+/// Run `load` under the circular-load mark for `key`.
+///
+/// The mark brackets the load: everything a load does is the one call below, so
+/// every way out of it — a compile error, a read failure, an error the module
+/// raised — reaches the single unmark after that call. A load that finds `key`
+/// already marked is a cycle, and the error names every file in it.
+fn with_load_mark(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    let spec = if let Some(s) = args[0].with_string(|s| s.to_string()) {
-        s
-    } else {
-        return type_error!(ctx, args[0], "import", "string");
-    };
+    name: &str,
+    key: &str,
+    load: impl FnOnce(&mut crate::primitives::ctx::NativeCtx<'_>) -> Outcome,
+) -> Outcome {
+    let vm = driving_vm(ctx);
+    if let Some(cycle) = vm.loading_cycle(key) {
+        return crate::rich_error!(
+            ctx,
+            "io-error",
+            format!("{name}: circular dependency: {cycle}"),
+            path = ctx.string(key),
+        );
+    }
+    vm.mark_module_loading(key.to_string());
+    let outcome = load(ctx);
+    driving_vm(ctx).unmark_module_loading(key);
+    outcome
+}
 
-    let path = match resolve_import(&spec) {
-        Some(p) => p,
-        None => {
-            return crate::rich_error!(
-                ctx,
-                "io-error",
-                format!("import: module '{}' not found", spec),
-                spec = ctx.string(spec.as_str()),
-            );
+/// Run a compiled module's top level on the driving VM and hand back its value.
+///
+/// The module's forms run as part of the current fiber's execution, as `eval`'s
+/// thunk does, so a top-level `protect` returns the `SIG_SWITCH` trampoline
+/// signal, which `run_thunk_to_completion` drains here. A module whose top level
+/// suspends is refused: the loader cannot hold a park of the fiber it runs on.
+fn run_module(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    name: &str,
+    origin: &str,
+    compiled: crate::pipeline::CompileResult,
+) -> Outcome {
+    let vm = driving_vm(ctx);
+    let code = crate::value::ClosureTemplate::for_proto(
+        vm.heap(),
+        &std::rc::Rc::new(compiled.bytecode.into_proto()),
+    )
+    .code();
+    let empty_env = std::rc::Rc::new(vec![]);
+    let depth = vm.fiber.param_depth();
+    match vm.run_thunk_to_completion(&code, &empty_env) {
+        SIG_OK => {
+            // The module value left its compiled top level through the return
+            // convention, so it already carries the one owed reference the
+            // caller's release consumes — the `result_minted` claim.
+            let (_, value) = vm.fiber.signal.take().unwrap_or((SIG_OK, Value::NIL));
+            (SIG_OK, value)
         }
-    };
-
-    // The driving VM loads the module: `execute_bytecode_saving_stack` runs the
-    // module's bytecode on it (preserving the caller's stack). Reached as a raw
-    // pointer so the `vm.*` calls and the `ctx.*` allocations below — which use the
-    // disjoint heap — coexist; `ctx.vm()` is total (a native always runs under a VM).
-    let vm_ptr: *mut crate::vm::VM = ctx.vm();
-
-    unsafe {
-        let vm = &mut *vm_ptr;
-
-        // Detect circular imports (module currently being loaded)
-        if vm.is_module_loading(&path) {
-            return crate::rich_error!(
+        SIG_ERROR => {
+            let (_, err) = vm.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
+            let msg = vm.format_error_with_location(err);
+            crate::rich_error!(
                 ctx,
-                "io-error",
-                format!("import: circular dependency detected for '{}'", path),
-                path = ctx.string(path.as_str()),
-            );
-        }
-
-        // Mark as loading for circular-import detection. The mark brackets the
-        // load: everything a load does is the one call below, so every way out of
-        // it — a compile error, a read failure, an error the module raised —
-        // reaches the single unmark after that call.
-        vm.mark_module_loading(path.clone());
-
-        let outcome = (|| -> (SignalBits, Value) {
-            // The caller's symbol table, reached through the driving VM (this
-            // instance's own table).
-            let symbols_ptr = vm.symbols_ptr;
-            if symbols_ptr.is_null() {
-                return (
-                    SIG_ERROR,
-                    ctx.error(
-                        "internal-error",
-                        "import: symbol table context not initialized".to_string(),
-                    ),
-                );
-            }
-
-            let symbols = &mut *symbols_ptr;
-
-            // Plugin loading for native shared libraries (.so, .dylib, .dll)
-            if is_native_library(&path) {
-                // Return cached value if already loaded (avoids re-registering primitives)
-                if let Some(&cached) = vm.loaded_plugins.get(&path) {
-                    // `import` declares `result_minted`, so the dispatch retain is
-                    // skipped; this call did not run a thunk to produce the cached
-                    // value, so mint the caller's reference here (the retain the
-                    // dispatch would have taken for a pass-through result).
-                    retain_plugin_result(vm, cached);
-                    return (SIG_OK, cached);
-                }
-                let result = match crate::plugin::load_plugin(&path, vm, symbols) {
-                    Ok(value) => {
-                        vm.loaded_plugins.insert(path.clone(), value);
-                        retain_plugin_result(vm, value);
-                        (SIG_OK, value)
-                    }
-                    Err(e) => crate::rich_error!(
-                        ctx,
-                        "io-error",
-                        format!("import: {}", e),
-                        path = ctx.string(path.as_str()),
-                    ),
-                };
-                return result;
-            }
-
-            // Elle source file loading — fall back to plugin loading on UTF-8 failure
-            let contents = match std::fs::read_to_string(&path) {
-                Ok(c) => c,
-                Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
-                    // File exists but isn't valid UTF-8 — try loading as a plugin
-                    let result = match crate::plugin::load_plugin(&path, vm, symbols) {
-                        Ok(value) => {
-                            vm.loaded_plugins.insert(path.clone(), value);
-                            retain_plugin_result(vm, value);
-                            (SIG_OK, value)
-                        }
-                        Err(plugin_err) => crate::rich_error!(
-                            ctx,
-                            "io-error",
-                            format!(
-                                "import: '{}' is not valid Elle source ({}), \
-                             and plugin loading also failed: {}",
-                                path, e, plugin_err
-                            ),
-                            path = ctx.string(path.as_str()),
-                        ),
-                    };
-                    return result;
-                }
-                Err(e) => {
-                    return crate::rich_error!(
-                        ctx,
-                        "io-error",
-                        format!("import: failed to read '{}': {}", path, e),
-                        path = ctx.string(path.as_str()),
-                    );
-                }
-            };
-
-            // Compile the module in this instance's compile context, reached through
-            // the executing VM. The borrow ends with the match.
-            let compiled = match vm.compile_ctx() {
-                Some(cctx) => crate::pipeline::compile_file(&contents, symbols, cctx, &path),
-                None => Err("import: compile context unavailable".to_string()),
-            };
-            let result = match compiled {
-                Ok(r) => r,
-                Err(e) => {
-                    return crate::rich_error!(
-                        ctx,
-                        "eval-error",
-                        format!("import: compilation error in {}: {}", path, e),
-                        path = ctx.string(path.as_str()),
-                    );
-                }
-            };
-
-            // Save/restore the caller's stack. import executes the
-            // module's bytecode on the same VM, which would overwrite the
-            // caller's local variable slots without this protection.
-            let code = crate::value::ClosureTemplate::for_proto(
-                vm.heap(),
-                &std::rc::Rc::new(result.bytecode.into_proto()),
+                "eval-error",
+                format!("{name}: runtime error in {origin}: {msg}"),
+                path = ctx.string(origin),
             )
-            .code();
-            let empty_env = std::rc::Rc::new(vec![]);
-
-            // Drive the module's top-level forms to completion, draining any
-            // nested fiber/resume SIG_SWITCH trampoline — a module's forms run as
-            // part of the CURRENT fiber's execution (like `eval`'s thunk), so a
-            // top-level `protect`/`fiber/resume` returns SIG_SWITCH that must be
-            // drained here rather than leaked out of the import boundary. Using the
-            // raw executor reported that internal signal as "unexpected".
-            let depth = vm.fiber.param_depth();
-            let bits = vm.run_thunk_to_completion(&code, &empty_env);
-
-            match bits {
-                SIG_OK => {
-                    let (_, value) = vm
-                        .fiber
-                        .signal
-                        .take()
-                        .unwrap_or((SIG_OK, crate::value::Value::NIL));
-                    // The module value left its compiled top level through the
-                    // return convention, so it already carries the one owed
-                    // reference the caller's release consumes — the
-                    // `result_minted` declaration's claim on this path. The plugin
-                    // paths above return a value no thunk minted, and take the
-                    // reference explicitly (`retain_plugin_result`).
-                    (SIG_OK, value)
-                }
-                SIG_ERROR => {
-                    let (_, err_value) = vm
-                        .fiber
-                        .signal
-                        .take()
-                        .unwrap_or((SIG_ERROR, crate::value::Value::NIL));
-                    let msg = vm.format_error_with_location(err_value);
-                    crate::rich_error!(
-                        ctx,
-                        "eval-error",
-                        format!("import: runtime error in {}: {}", path, msg),
-                        path = ctx.string(path.as_str()),
-                    )
-                }
-                bits => {
-                    // import cannot hold a park of the module it ran, so it
-                    // refuses it and raises at its own call.
-                    vm.refuse_hosted_park(bits, depth);
-                    crate::rich_error!(
-                        ctx,
-                        "eval-error",
-                        format!("import: unexpected signal {} in {}", bits, path),
-                        path = ctx.string(path.as_str()),
-                    )
-                }
-            }
-        })();
-        vm.unmark_module_loading(&path);
-        outcome
+        }
+        bits => {
+            vm.refuse_hosted_park(bits, depth);
+            crate::rich_error!(
+                ctx,
+                "eval-error",
+                format!("{name}: unexpected signal {bits} in {origin}"),
+                path = ctx.string(origin),
+            )
+        }
     }
 }
 
-// Declarative primitive definitions for module loading operations
+/// Compile with this instance's symbol table and compile context, reached
+/// through the driving VM, on behalf of the calling fiber: the compile's
+/// macros run without the capabilities that fiber withholds.
+fn compile_with(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    name: &str,
+    compile: impl FnOnce(
+        &mut crate::symbol::SymbolTable,
+        &mut crate::pipeline::CompileCtx,
+    ) -> Result<crate::pipeline::CompileResult, String>,
+) -> Result<crate::pipeline::CompileResult, String> {
+    let withheld = ctx.withheld();
+    let vm = driving_vm(ctx);
+    let symbols_ptr = vm.symbols_ptr;
+    if symbols_ptr.is_null() {
+        return Err(format!("{name}: symbol table context not initialized"));
+    }
+    match vm.compile_ctx() {
+        Some(cctx) => {
+            cctx.on_behalf_of(withheld, |cctx| compile(unsafe { &mut *symbols_ptr }, cctx))
+        }
+        None => Err(format!("{name}: compile context unavailable")),
+    }
+}
+
+/// `(import/load-file path)`: compile the Elle source at `path`, run it, and
+/// return its last expression.
+pub(crate) fn prim_load_file(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> Outcome {
+    const NAME: &str = "import/load-file";
+    let path = match path_arg(ctx, args[0], NAME) {
+        Ok(p) => p,
+        Err(outcome) => return outcome,
+    };
+    trace_load(driving_vm(ctx), NAME, &path);
+    with_load_mark(ctx, NAME, &path.clone(), |ctx| {
+        let source = match std::fs::read_to_string(&path) {
+            Ok(s) => s,
+            Err(e) => {
+                return crate::rich_error!(
+                    ctx,
+                    "io-error",
+                    format!("{NAME}: failed to read '{path}': {e}"),
+                    path = ctx.string(path.as_str()),
+                );
+            }
+        };
+        let compiled = compile_with(ctx, NAME, |symbols, cctx| {
+            crate::pipeline::compile_file(&source, symbols, cctx, &path)
+        });
+        match compiled {
+            Ok(compiled) => run_module(ctx, NAME, &path, compiled),
+            Err(e) => crate::rich_error!(
+                ctx,
+                "eval-error",
+                format!("{NAME}: compilation error in {path}: {e}"),
+                path = ctx.string(path.as_str()),
+            ),
+        }
+    })
+}
+
+/// `(import/load-plugin path)`: load the shared library at `path`, run its
+/// `elle_plugin_init`, and return the struct of primitives it built. A later
+/// call with the same path returns that struct and loads nothing.
+pub(crate) fn prim_load_plugin(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> Outcome {
+    const NAME: &str = "import/load-plugin";
+    let path = match path_arg(ctx, args[0], NAME) {
+        Ok(p) => p,
+        Err(outcome) => return outcome,
+    };
+    let vm = driving_vm(ctx);
+    if let Some(&cached) = vm.loaded_plugins.get(&path) {
+        // `result_minted`: this call ran no thunk to produce the cached value,
+        // so it mints the caller's reference here.
+        retain_plugin_result(vm, cached);
+        return (SIG_OK, cached);
+    }
+    trace_load(vm, NAME, &path);
+    let symbols_ptr = vm.symbols_ptr;
+    if symbols_ptr.is_null() {
+        return (
+            SIG_ERROR,
+            ctx.error(
+                "internal-error",
+                format!("{NAME}: symbol table context not initialized"),
+            ),
+        );
+    }
+    match crate::plugin::load_plugin(&path, vm, unsafe { &mut *symbols_ptr }) {
+        Ok(value) => {
+            vm.loaded_plugins.insert(path, value);
+            retain_plugin_result(vm, value);
+            (SIG_OK, value)
+        }
+        Err(e) => crate::rich_error!(
+            ctx,
+            "io-error",
+            format!("{NAME}: {e}"),
+            path = ctx.string(path.as_str()),
+        ),
+    }
+}
+
+/// `(import/load-syntax form)`: compile one form as a module, run it, and
+/// return its value. A syntax object keeps its own source locations; a plain
+/// datum has none.
+pub(crate) fn prim_load_syntax(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> Outcome {
+    const NAME: &str = "import/load-syntax";
+    const ORIGIN: &str = "<syntax>";
+    let form = args[0];
+    let compiled = compile_with(ctx, NAME, |symbols, cctx| {
+        crate::pipeline::compile_value(form, symbols, cctx, ORIGIN)
+    });
+    match compiled {
+        Ok(compiled) => run_module(ctx, NAME, ORIGIN, compiled),
+        Err(e) => (
+            SIG_ERROR,
+            ctx.error("eval-error", format!("{NAME}: compilation error: {e}")),
+        ),
+    }
+}
+
 primitive! {
-    // Resolves the specifier against the search paths and reads the file.
-    "import" => prim_import_file {
+    "import/load-file" => prim_load_file {
         signal: Signal::fs_errors(),
         arity: Arity::Exact(1),
-        doc: "Import a module by specifier. Resolves via search paths (CWD, --path, --home) with extension probing (.lisp, native plugins). Binary files that fail UTF-8 reading are automatically tried as plugins.",
-        params: &["spec"],
-        example: "(import \"std/http\")",
-        aliases: &["import-file", "module/import"],
-        // Opaque, not Mixed: the specifier is copied out to a Rust String to
-        // resolve it and never retained, so no argument is stored, while the
-        // result — a value the module's own compiled top level returned, or a
-        // plugin value an earlier call minted and cached — lives in neither this
-        // call's region nor the specifier's. The VM re-entry rule: unbounded
-        // result, no store (docs/impl/region/effects.md § Opaque).
+        doc: "Compile the Elle source file at PATH, run it, and return its last \
+              expression. A relative PATH resolves against the working directory, \
+              as slurp resolves one. Every call compiles and runs the file again. \
+              Code calls import-file or import, so that a relative path follows the \
+              file that wrote it.",
+        params: &["path"],
+        example: "(import/load-file \"tests/modules/test.lisp\")",
+        // Opaque, not Mixed: the path is copied out to a Rust String to read the
+        // file and never retained, so no argument is stored, while the result —
+        // a value the module's own compiled top level returned — lives in
+        // neither this call's region nor the path's. The VM re-entry rule:
+        // unbounded result, no store (docs/impl/region/effects.md).
         effect: RegionEffect::Opaque,
         result_minted: true,
-        bits_from_args: Some(import_required_bits),
+    }
+    "import/load-plugin" => prim_load_plugin {
+        signal: Signal::fs_ffi_errors(),
+        arity: Arity::Exact(1),
+        doc: "Load the shared library at PATH, run its elle_plugin_init, and \
+              return the struct of primitives the init builds. A later call with \
+              the same path returns that struct and loads nothing. Requires :ffi, \
+              because the init is foreign code.",
+        params: &["path"],
+        example: "(import/load-plugin \"target/release/libelle_regex.so\")",
+        // Opaque for the reason import/load-file is: the path is copied out,
+        // and the result is a value the plugin's init built and the cache holds.
+        effect: RegionEffect::Opaque,
+        result_minted: true,
+    }
+    "import/load-syntax" => prim_load_syntax {
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Compile one FORM as a module, run it, and return its value. A \
+              syntax object keeps its own source locations.",
+        params: &["form"],
+        example: "(import/load-syntax '(+ 1 2))",
+        // Opaque: the form is copied into the compile's own arena and never
+        // retained, and the result is what the module's top level returned.
+        effect: RegionEffect::Opaque,
+        result_minted: true,
     }
 }

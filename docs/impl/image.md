@@ -1,6 +1,6 @@
 # Images — regions hydrated at load
 
-<!-- audited: 2026-09-26 -->
+<!-- audited: 2026-10-06 -->
 
 Design for image-style persistence: one mechanism, and the two configurations
 it serves.
@@ -178,7 +178,8 @@ compile-side registries on `CompileCtx` that later user compiles read:
 
 - `FnInlineRegistry` — per-name HIR fragments of cross-unit-inlineable
   stdlib functions; user code inlines through it.
-- `DispatchWrapperRegistry` and the signal-projection memo.
+- `DispatchWrapperRegistry` — the container-dispatch wrappers stdlib defines;
+  a user call through one monomorphizes against it.
 
 An image boot that leaves these empty compiles user code *differently* from
 a source boot — silently worse code, and divergent artifacts for anything

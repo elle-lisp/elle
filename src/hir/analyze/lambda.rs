@@ -1,4 +1,8 @@
-//! Lambda analysis: (fn (params...) body...)
+// audited: 2026-10-05
+//! Lambda analysis: parameters, body, the inferred signal, and what the body declares about that signal.
+//!
+//! docs/impl/hir.md
+//! docs/signals/inference.md
 
 use super::*;
 use crate::hir::expr::ParamBound;
@@ -225,8 +229,8 @@ impl<'a> Analyzer<'a> {
             (None, body_items)
         };
 
-        // Analyze body — restrict forms within will populate
-        // current_param_bounds and current_declared_ceiling
+        // Analyze body — the silence, attune! and muffle forms in it fill
+        // current_param_bounds, current_declared_ceiling and current_muffle_bits
         let body = self.analyze_body(body_start, span)?;
 
         // If there are destructured parameters, wrap the body
@@ -348,8 +352,6 @@ impl<'a> Analyzer<'a> {
         self.current_numeric_assert = saved_numeric_assert;
         self.current_immutability_asserts = saved_immutability_asserts;
 
-        // No need to sync is_mutated — CaptureInfo reads from the shared Binding directly
-
         // Propagate captures from this lambda to the parent lambda
         for cap in &captures {
             let is_param = params.contains(&cap.binding);
@@ -377,8 +379,9 @@ impl<'a> Analyzer<'a> {
         // Where the lambda was written, for `(meta/origin f)`.
         let origin = Some(span);
 
-        // Lambda itself is pure, but captures the body's signal
-        Ok(Hir::new(
+        // Making the closure raises nothing, so the node is silent. The body's
+        // signal is the lambda's `inferred_signals`.
+        let hir = Hir::new(
             HirKind::Lambda {
                 params,
                 num_required,
@@ -395,6 +398,14 @@ impl<'a> Analyzer<'a> {
             },
             span,
             Signal::silent(),
-        ))
+        );
+        self.lambda_decls.insert(
+            hir.id,
+            LambdaDecl {
+                ceiling: declared_ceiling,
+                muffle: muffle_bits,
+            },
+        );
+        Ok(hir)
     }
 }

@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-10-06
 // The embedding surface from a host's side: register a primitive, run source,
 // read the value back, step the scheduler.
 //
@@ -49,7 +49,7 @@ fn test_custom_primitive_registration() {
     let sym_id = rt.symbols().intern("host/add-ten");
     let native = Value::native_fn(&HOST_ADD_TEN);
     let (cctx, heap) = rt.compile_and_heap();
-    cctx.register_repl_binding(
+    cctx.register_host_binding(
         heap,
         sym_id,
         native,
@@ -61,6 +61,66 @@ fn test_custom_primitive_registration() {
     let (vm, symbols, cctx) = rt.parts();
     let result = eval_all("(host/add-ten 32)", symbols, vm, cctx, "<test>").unwrap();
     assert_eq!(result.as_int().unwrap(), 42);
+}
+
+/// A host binding reaches every compile in the instance, the file a program
+/// imports included: that file compiles on the instance's context when the
+/// import runs, not on the program's.
+#[test]
+fn a_host_binding_reaches_a_file_a_program_imports() {
+    let mut rt = Runtime::new();
+    let sym_id = rt.symbols().intern("host/add-ten");
+    let native = Value::native_fn(&HOST_ADD_TEN);
+    let (cctx, heap) = rt.compile_and_heap();
+    cctx.register_host_binding(
+        heap,
+        sym_id,
+        native,
+        elle::value::arena::RootRef::Take,
+        Signal::silent(),
+        Some(Arity::Exact(1)),
+    );
+
+    let dir = tempfile::tempdir().expect("scratch dir");
+    let module = dir.path().join("m.lisp");
+    std::fs::write(&module, "(host/add-ten 32)\n").expect("write m.lisp");
+    let program = format!("(import-file \"{}\")", module.display());
+    let (vm, symbols, cctx) = rt.parts();
+    let result = eval_all(&program, symbols, vm, cctx, "<test>").expect("the import runs");
+    assert_eq!(result.as_int(), Some(42));
+}
+
+/// A REPL binding reaches a later REPL line and no other compile. The
+/// counter-factual registered it with the instance, so `compile_file` resolved
+/// it too.
+#[test]
+fn a_repl_binding_reaches_a_repl_line_and_no_file() {
+    let mut rt = Runtime::new();
+    let sym_id = rt.symbols().intern("repl-x");
+    let (cctx, heap) = rt.compile_and_heap();
+    cctx.register_repl_binding(
+        heap,
+        sym_id,
+        Value::int(5),
+        elle::value::arena::RootRef::Take,
+        Signal::silent(),
+        None,
+    );
+
+    let (vm, symbols, cctx) = rt.parts();
+    let (line, _) = elle::pipeline::compile_file_repl("(+ repl-x 1)", symbols, cctx, "<repl>")
+        .expect("a REPL line resolves the REPL binding");
+    let value = vm
+        .execute_scheduled(&line.bytecode, cctx)
+        .expect("the line runs");
+    assert_eq!(value.as_int(), Some(6));
+
+    let err = compile_file("(+ repl-x 1)", symbols, cctx, "<file>")
+        .expect_err("a file must not resolve the REPL binding");
+    assert!(
+        err.contains("undefined variable: repl-x"),
+        "the file fails on the unbound name: {err}"
+    );
 }
 
 // ── Scheduled execution with I/O ────────────────────────────────────
@@ -80,9 +140,7 @@ fn test_scheduled_execution() {
         "<test>",
     )
     .unwrap();
-    let value = vm
-        .execute_scheduled(&result.bytecode, cctx)
-        .unwrap();
+    let value = vm.execute_scheduled(&result.bytecode, cctx).unwrap();
     assert!(value.is_keyword());
 }
 
@@ -113,7 +171,7 @@ fn test_value_round_trip() {
     let sym_id = rt.symbols().intern("host/identity");
     let native = Value::native_fn(&IDENTITY);
     let (cctx, heap) = rt.compile_and_heap();
-    cctx.register_repl_binding(
+    cctx.register_host_binding(
         heap,
         sym_id,
         native,

@@ -4,7 +4,7 @@
        elle-nojit elle-pool elle-mlir elle-noffi elle-wasm check-wasm \
        doctest doctest-list myplugin plugins plugins-all \
        plugins-verify smoke-plugins mcp embedding semver-check \
-       fmt fmt-check audit agents agents-check
+       fmt fmt-check audit agents agents-check signal-solve
 
 .DEFAULT_GOAL := all
 
@@ -58,7 +58,7 @@ ELLE_RIG_MLIR ?= $(CARGO_OUT)/elle-rig-mlir
 # silently out of the format gate rather than failing it. The pin that every
 # Elle source in the tree stays reachable from this list is
 # tests/integration/paths.rs.
-LISP_FILES := $(shell find src/ lib/ tests/ demos/ tools/ docs/ -name '*.lisp' 2>/dev/null)
+LISP_FILES := $(shell find src/ lib/ tests/ demos/ tools/ docs/ examples/ -name '*.lisp' 2>/dev/null)
 
 all: elle docs  ## Build everything
 
@@ -513,6 +513,23 @@ embedding: elle  ## Build + run embedding demos (Rust + C hosts)
 	$(MAKE) -C demos/embedding chost TARGET_DIR=$(EMBED_TARGET_DIR)
 	LD_LIBRARY_PATH=$(EMBED_TARGET_DIR) demos/embedding/chost
 
+# The signal solver spike (docs/impl/solver.md): every fixture's `# expect`
+# lines, and the worklist and datafrog solving one model over all of lib/. A
+# fixture names each import by a path relative to itself, so the fixtures run
+# from the repository root. The spike exits non-zero on a failed expectation or
+# a disagreement.
+SIGNAL_SOLVE = $(CURDIR)/$(CARGO_OUT)/examples/signal_solve
+SOLVE_FIXTURES = examples/signal_solve/fixtures
+
+signal-solve:  ## The signal solver spike: its fixtures, and both engines over lib/
+	cargo build $(CARGO_PROFILE) --example signal_solve
+	$(SIGNAL_SOLVE) --expect $(SOLVE_FIXTURES)/parity.lisp
+	$(SIGNAL_SOLVE) --expect $(SOLVE_FIXTURES)/app.lisp
+	$(SIGNAL_SOLVE) --expect $(SOLVE_FIXTURES)/cyc_a.lisp
+	$(SIGNAL_SOLVE) --expect $(SOLVE_FIXTURES)/ceiling.lisp
+	$(SIGNAL_SOLVE) --expect --no-follow $(SOLVE_FIXTURES)/sep.lisp
+	$(SIGNAL_SOLVE) $$(find lib -name '*.lisp' | sort)
+
 
 # What a contributor runs before a push and what the merge queue runs: both
 # suites on this build, the documents, the embedding demo and the surface gate.
@@ -539,7 +556,7 @@ qa: audit crosscheck  ## The PR gate's QA job, locally (~2min, no smoke): rustfm
 
 # `qa` goes first: it takes about two minutes and the suites about thirty, so a
 # formatting or clippy failure stops the gate before the suites start.
-test: qa smoke  ## QA (fmt/clippy/crosscheck/rustdoc), then smoke, then the Rust unit, integration and rig tests
+test: qa smoke signal-solve  ## QA (fmt/clippy/crosscheck/rustdoc), then smoke, the solver spike, and the Rust unit, integration and rig tests
 	cargo test --workspace --lib --all-features
 	cargo test --test '*' -- --skip property
 	cargo test -p elle-rig

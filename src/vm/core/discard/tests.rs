@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! How a host that runs code on the current fiber ends a park of that code:
 //! refused, or handed on as its own call's park.
 //!
@@ -29,12 +29,12 @@ fn test_fixtures() -> (crate::value::Code, Rc<Vec<Value>>) {
 // -- a host that refuses a park ends it --
 
 /// A host that runs code on the current fiber and refuses a park of it
-/// (`eval`, `import`, `compile/run-on :jit`, the root driver) ends that park as
-/// a squelch boundary does: the frames it parked never run again, so they
-/// leave the fiber, and the park's funding goes with them. Counter-factual: a
-/// refusal that only clears the ledger leaves the refused frames parked. The
-/// host's error exit then parks no frame of the fiber's own, and a restart
-/// replays the refused code.
+/// (`eval`, the module loaders, `compile/run-on :jit`, the root driver) ends
+/// that park as a squelch boundary does: the frames it parked never run again,
+/// so they leave the fiber, and the park's funding goes with them.
+/// Counter-factual: a refusal that only clears the ledger leaves the refused
+/// frames parked. The host's error exit then parks no frame of the fiber's own,
+/// and a restart replays the refused code.
 #[test]
 fn a_refused_park_takes_its_frames_off_the_fiber() {
     with_test_region(|| {

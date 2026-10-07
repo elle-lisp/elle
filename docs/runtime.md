@@ -1,6 +1,6 @@
 # Runtime Signals
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-06 -->
 
 The runtime uses fiber signals for internal coordination. These are
 distinct from user-level error handling.
@@ -24,8 +24,9 @@ switch     13    VM-internal fiber switch trampoline; no keyword
 
 ## Fuel budgets
 
-Fuel limits instruction execution on a fiber. When fuel runs out,
-the fiber pauses with a `:fuel` signal.
+Fuel limits instruction execution on a fiber. The interpreter charges one unit
+for each call and each backward jump, and JIT-compiled code charges none of its
+own. When fuel runs out, the fiber pauses with a `:fuel` signal.
 
 ```lisp
 (def f (fiber/new (fn [] (while true (yield :tick))) |:fuel :yield|))
@@ -36,6 +37,14 @@ the fiber pauses with a `:fuel` signal.
 (fiber/resume f nil)       # resume execution
 (fiber/clear-fuel f)       # remove budget, unlimited execution
 ```
+
+### The expansion budget
+
+A macro transformer call, and each `begin-for-syntax` definition, runs under a
+budget of its own: 16,777,216 units, whatever the fiber's own fuel. What it
+spends is not charged to the fiber. An expansion cannot pause, so a transformer
+that exhausts the budget fails the compile, and the error names the macro
+([macros.md](macros.md)).
 
 ## SIG_QUERY
 

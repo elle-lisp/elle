@@ -1,15 +1,13 @@
-// audited: 2026-09-19
+// audited: 2026-10-06
 //! Cache the compiled standard library on disk, so a later process
 //! deserializes it instead of running the front end again.
 //! docs/impl/stdlib-cache.md
 
 use crate::compiler::Bytecode;
-use crate::signals::Signal;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Version tag: bump when the serialized layout changes in an incompatible way.
-const FORMAT_VERSION: u32 = 6;
+const FORMAT_VERSION: u32 = 7;
 
 /// Bytes of payload hash a cache file carries ahead of its `StoredBytecode`.
 const PAYLOAD_HASH_BYTES: usize = 8;
@@ -51,7 +49,6 @@ pub struct StoredBytecode {
     /// name hashes and cross unchanged; without this table they would still
     /// compare correctly but print as `#<symbol:hash>`.
     pub names: Vec<(u64, Box<str>)>,
-    pub signal_projection: Option<HashMap<String, Signal>>,
     /// Cross-unit dispatch-wrapper registry (stdlib `push`/`put`/`add`
     /// monomorphization), snapshotted because the disk cache skips the stdlib
     /// compile that would otherwise populate it.
@@ -275,7 +272,6 @@ pub fn store_bytecode(
         entry,
         intern_table: sent.intern_table,
         names: sent.names,
-        signal_projection: bytecode.signal_projection.clone(),
         dispatch_wrappers: stored_dispatch,
         fn_inline: stored_fn_inline,
     })
@@ -342,7 +338,6 @@ pub fn load_bytecode(
         constants: entry.constants,
         location_map: entry.location_map,
         signal: entry.signal,
-        signal_projection: stored.signal_projection,
         child_protos: entry.child_protos,
         merged_slots: entry.merged_slots,
         frame_release_slots: entry.frame_release_slots,

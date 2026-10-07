@@ -1,10 +1,18 @@
-//! Core form analysis: analyze_expr and control flow forms
+// audited: 2026-10-06
+//! The control-flow forms, and the quoted-datum, intrinsic and primitive helpers other forms share.
+//!
+//! The forms are `if`, `begin`, `block`, `break`, `while`, `and`, `or` and
+//! `eval`.
+//!
+//! docs/impl/hir.md
 
 use super::*;
 use crate::hir::expr::CallArg;
 use crate::syntax::{Syntax, SyntaxKind};
 
 pub(crate) mod expr;
+
+mod module;
 
 pub(crate) mod registry;
 
@@ -38,7 +46,7 @@ impl<'a> Analyzer<'a> {
     /// Used by collection literal desugaring (Array, ArrayMut, Struct, StructMut)
     /// and qualified symbol desugaring to find the primitive binding
     /// registered by `bind_primitives`. Falls back to a fresh binding
-    /// if the name isn't in scope (e.g., in tests without primitives).
+    /// if the name isn't in scope, as in a test without primitives.
     fn resolve_primitive(&mut self, name: &str) -> Binding {
         self.lookup(name, &[]).unwrap_or_else(|| {
             let sym = self.symbols.intern(name);

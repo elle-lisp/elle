@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! `vm/config` and `vm/config-set` over the VM's runtime configuration, and
 //! the `arena/allocs` measurement.
 //!
@@ -53,6 +53,9 @@ impl VM {
             "debug-bytecode",
             "unicode",
             "max-depth",
+            "home",
+            "path",
+            "plugin-suffix",
         ];
 
         if arg.is_nil() {
@@ -103,6 +106,12 @@ impl VM {
             "debug-bytecode" => Value::bool(rc.debug_bytecode),
             "unicode" => self.unicode_version_value(ctx),
             "max-depth" => Self::max_depth_value(rc.max_depth),
+            "home" => match &crate::config::get().home {
+                Some(home) => ctx.string(home),
+                None => Value::NIL,
+            },
+            "path" => Self::search_path_value(ctx),
+            "plugin-suffix" => ctx.string(std::env::consts::DLL_EXTENSION),
             _ => return None,
         })
     }
@@ -111,6 +120,21 @@ impl VM {
     /// integers, so the cap always fits.
     fn max_depth_value(max_depth: usize) -> Value {
         Value::int(i64::try_from(max_depth).unwrap_or(i64::MAX))
+    }
+
+    /// The `--path` entries as an array of strings, in order. An empty entry
+    /// names nothing, so it is dropped. `--path` and `ELLE_PATH` are set once
+    /// per process, so every VM answers the same array.
+    fn search_path_value(ctx: &mut crate::primitives::ctx::Alloc) -> Value {
+        let entries = crate::config::get()
+            .path
+            .as_deref()
+            .unwrap_or("")
+            .split(':')
+            .filter(|entry| !entry.is_empty())
+            .map(|entry| ctx.string(entry))
+            .collect();
+        ctx.array(entries)
     }
 
     /// The VM's Unicode generation as a `[major minor patch]` array.

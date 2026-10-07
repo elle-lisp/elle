@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-10-06
 //! The compilation pipeline's entry points: source text to bytecode, or to HIR
 //! for a reader that wants the analysis alone.
 //!
@@ -20,10 +20,11 @@ pub mod sources;
 // Re-export public API
 pub use analyze::{analyze, analyze_file};
 pub use bootstrap::install_core_exports;
-pub use cache::{BootExports, CompileCtx};
+pub use cache::{BootExports, CompileCtx, Layer};
 pub use compile::{
     compile, compile_barrier_module, compile_file, compile_file_repl, compile_file_to_fhir,
-    compile_file_to_lir, compile_whole_module, compile_whole_module_forms, splice_includes,
+    compile_file_to_lir, compile_value, compile_whole_module, compile_whole_module_forms,
+    splice_includes,
 };
 pub use eval::{eval, eval_all, eval_file, eval_syntax};
 
@@ -46,4 +47,6 @@ pub struct AnalyzeResult {
     pub arena: crate::hir::BindingArena,
     /// Accumulated non-fatal analysis errors
     pub errors: Vec<crate::error::LError>,
+    /// Each lambda's declared ceiling and muffle bits, keyed by its node.
+    pub lambda_decls: std::collections::HashMap<crate::hir::HirId, crate::hir::LambdaDecl>,
 }

@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! Primitive definition type for declarative registration.
 //!
 //! src/primitives/AGENTS.md
@@ -64,8 +64,8 @@ pub enum RetType {
 /// (docs/impl/region/effects.md).
 ///
 /// The region solver keys the opaque-call arg clique on this:
-/// `Immediate`/`Fresh`/`PassThrough` calls record no may-store edges
-/// between their heap arguments; `Stores` records
+/// `Immediate`/`Fresh`/`PassThrough`/`Funnel`/`Opaque` calls record no
+/// may-store edges between their heap arguments; `Stores` records
 /// directed edges from the listed arguments only; `Mixed` and `Unknown`
 /// (the default) keep the full mutual clique — the conservative worst case
 /// (over-keep, never mis-free). `Sends` and `Delivers` mark the listed args
@@ -253,16 +253,16 @@ pub struct PrimitiveDef {
     /// applying it would hand the caller two references against one release,
     /// stranding the result's region graph per call. Declared by the
     /// re-entrant natives whose result is produced by running compiled code on
-    /// the driving VM (`import`'s module body, the `compile/*-module` test
-    /// loaders' setup accumulator — each via `run_thunk_to_completion`): the
-    /// value leaves that code through the return convention, and its return
-    /// mint IS the caller's reference. A declarant must uphold the claim on
-    /// every normally-completing path — `import`'s plugin path returns a cached
-    /// value no thunk minted, so it takes an explicit
+    /// the driving VM (the module body `import/load-file` and
+    /// `import/load-syntax` run, the `compile/*-module` test loaders' setup
+    /// accumulator — each via `run_thunk_to_completion`): the value leaves that
+    /// code through the return convention, and its return mint IS the caller's
+    /// reference. A declarant must uphold the claim on every normally-completing
+    /// path — `import/load-plugin` runs no thunk, so it takes an explicit
     /// `EscapeSite::NativeCallResult` retain in the body. The `moves_out`
     /// sibling states the same "body already supplied the reference" fact for
     /// container removal; this flag states it for thunk-run production
-    /// (docs/impl/region/effects.md).
+    /// (docs/impl/region/clique.md).
     /// Consumed only at dispatch — no solver site reads it (a thunk-run result
     /// is a call result like any other on the compile side). False (the
     /// default) for every native whose result the dispatch retain must fund.

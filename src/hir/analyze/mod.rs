@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-10-06
 //! Syntax to HIR analysis
 //!
 //! docs/impl/hir.md
@@ -213,20 +213,11 @@ pub struct Analyzer<'a> {
     /// carries its own arity or none — never the primitive's.
     arity_env: HashMap<Binding, Arity>,
 
-    /// Signal projections for bindings initialized from imported modules.
-    /// Maps a binding to a keyword→signal projection so that qualified
-    /// access (`module:field`) uses the projected signal instead of the
-    /// conservative `Polymorphic` fallback.
-    projection_env: HashMap<Binding, HashMap<String, Signal>>,
     /// Compile-time squelch result signal. Set during call analysis when
     /// the analyzer detects `(squelch f mask)` and computes the resulting
     /// closure's signal statically. Consumed by binding analysis to seed
     /// the binding's signal_env entry.
     last_squelch_signal: Option<Signal>,
-    /// Import projection detected during call analysis. Set when the
-    /// analyzer sees `((import "literal"))` and the target file has a
-    /// projection. Consumed by binding analysis to populate projection_env.
-    last_import_projection: Option<HashMap<String, Signal>>,
     /// Tracks signal sources within the current lambda body for polymorphic inference
     current_signal_sources: SignalSources,
     /// Parameters of the current lambda being analyzed (for polymorphic inference)
@@ -251,8 +242,9 @@ pub struct Analyzer<'a> {
     /// Accumulated parameter bounds from silence forms in current lambda.
     /// Populated by `analyze_silence`, consumed by `analyze_lambda`.
     current_param_bounds: HashMap<Binding, Signal>,
-    /// Accumulated function-level constraint from silence forms in current lambda.
-    /// Populated by `analyze_silence`, consumed by `analyze_lambda`.
+    /// The function-level ceiling that `(silence)` or `(attune! …)` declared in
+    /// the current lambda. Populated by `analyze_silence` and
+    /// `analyze_attune_assert`, consumed by `analyze_lambda`.
     current_declared_ceiling: Option<Signal>,
     /// Accumulated muffle bits from muffle forms in current lambda.
     /// Populated by `analyze_muffle`, consumed by `analyze_lambda`.
@@ -265,9 +257,6 @@ pub struct Analyzer<'a> {
     current_silence_assert: bool,
     /// Set by `(numeric!)` assertion form. Consumed by `analyze_lambda`.
     current_numeric_assert: bool,
-    /// Signal projection computed by `analyze_file_letrec`. Retrieved by
-    /// the pipeline to store on `Bytecode.signal_projection`.
-    last_signal_projection: Option<HashMap<String, Signal>>,
     /// Set by `(immutable! x)` assertion form. Consumed by `analyze_lambda`.
     current_immutability_asserts: HashSet<Binding>,
     /// When true, bindings without `@` prefix are immutable.
@@ -284,14 +273,20 @@ pub struct Analyzer<'a> {
     /// registry persists across compiles, so the test runner recompiling a file
     /// once per tier would otherwise collide ("already registered").
     signals_declared: HashSet<String>,
-    /// The owning instance's compile context, for resolving `(import "literal")`
-    /// signal projections during analysis (`get_or_compile_projection`). Set by
-    /// the file frontend via [`set_compile_ctx`](Analyzer::set_compile_ctx); the
-    /// frontend owns the `CompileCtx`, outlives this analyzer, and never touches
-    /// it while analysis runs, so the reborrow is sound. `None` in pure-analysis
-    /// contexts (lint/LSP/tests), where imports fall back to the conservative
-    /// `Polymorphic` projection.
-    import_ctx: Option<*mut crate::pipeline::CompileCtx>,
+    /// Each lambda's declared ceiling and muffle bits, keyed by the lambda
+    /// node. The HIR keeps only the signal that results from applying them;
+    /// a reader that solves signals itself needs the declarations.
+    lambda_decls: HashMap<super::expr::HirId, LambdaDecl>,
+}
+
+/// What a lambda's body declared about its own signal.
+#[derive(Debug, Clone, Copy)]
+pub struct LambdaDecl {
+    /// `(silence)` or `(attune! spec)`: the signal the function claims.
+    pub ceiling: Option<Signal>,
+    /// `(muffle spec)`: bits removed from the inferred signal. Beside a
+    /// ceiling, these bits widen the ceiling instead.
+    pub muffle: crate::value::fiber::SignalBits,
 }
 
 mod scopes;
@@ -333,10 +328,7 @@ impl<'a> Analyzer<'a> {
             signal_env: HashMap::new(),
             primitive_signals,
             arity_env: HashMap::new(),
-
-            projection_env: HashMap::new(),
             last_squelch_signal: None,
-            last_import_projection: None,
             current_signal_sources: SignalSources::default(),
             current_lambda_params: Vec::new(),
             block_contexts: Vec::new(),
@@ -350,24 +342,15 @@ impl<'a> Analyzer<'a> {
             errors: Vec::new(),
             current_silence_assert: false,
             current_numeric_assert: false,
-            last_signal_projection: None,
             current_immutability_asserts: HashSet::new(),
             immutable_by_default: true,
             unicode_generation: crate::config::get().unicode_generation(),
             signals_declared: HashSet::new(),
-            import_ctx: None,
+            lambda_decls: HashMap::new(),
         };
         // Initialize with a global scope so top-level bindings can be registered
         analyzer.push_definition_scope();
         analyzer
-    }
-
-    /// Provide the owning instance's compile context so that `(import
-    /// "literal")` forms resolve their signal projection during analysis. Called
-    /// by the file frontend, which owns the `CompileCtx` for the analyzer's
-    /// whole lifetime. See the `import_ctx` field.
-    pub fn set_compile_ctx(&mut self, cctx: &mut crate::pipeline::CompileCtx) {
-        self.import_ctx = Some(cctx as *mut _);
     }
 
     /// Declare a user signal `(signal :kw)`. Rejects a duplicate declaration
@@ -438,9 +421,9 @@ impl<'a> Analyzer<'a> {
         std::mem::take(&mut self.errors)
     }
 
-    /// Take the signal projection computed by `analyze_file_letrec`.
-    pub fn take_signal_projection(&mut self) -> Option<HashMap<String, Signal>> {
-        self.last_signal_projection.take()
+    /// Take every lambda's declared ceiling and muffle bits.
+    pub fn take_lambda_decls(&mut self) -> HashMap<super::expr::HirId, LambdaDecl> {
+        std::mem::take(&mut self.lambda_decls)
     }
 
     /// Set whether bindings without `@` are immutable by default.

@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-10-06
 //! Syntax tree representation for Elle source code
 //!
 //! docs/impl/syntax.md
@@ -43,6 +43,12 @@ impl ScopeId {
     /// in the id itself lets the Analyzer apply the referential-transparency
     /// rule (`hir::analyze::scopes::lookup`) without threading expander state.
     const INTRO_BIT: u32 = 1 << 31;
+
+    /// The intro scope the analyzer stamps on a form it builds itself, such as
+    /// the load a computed `import-file` becomes. Its symbols then skip
+    /// use-site locals and resolve at top level, as a macro template's do. The
+    /// counter value is the last one, so no expansion mints it.
+    pub(crate) const COMPILER: ScopeId = ScopeId(Self::INTRO_BIT | (Self::INTRO_BIT - 1));
 
     /// Mint the intro-scope id for counter value `n`.
     pub(crate) fn intro(n: u32) -> ScopeId {

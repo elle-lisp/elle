@@ -1,6 +1,6 @@
 # CI and Triage
 
-<!-- audited: 2026-10-04 -->
+<!-- audited: 2026-10-05 -->
 
 CI structure, local workflow, and failure diagnosis.
 
@@ -17,7 +17,7 @@ set when the diff moves only the submodule pointer.
 | Detect Changes | ubuntu | Sets `source` from the changed paths | — |
 | QA | ubuntu | `cargo fmt`, clippy, the macOS cross-check, rustdoc | — |
 | Documentation Build | ubuntu | `make docs` and the Elle doc site, minus the publish | — |
-| Default Build Tests | ubuntu | `doctest`, `smoke-lang`, `smoke-impl` — the default build and its rig | — |
+| Default Build Tests | ubuntu | `doctest`, `smoke-lang`, `smoke-impl` — the default build and its rig; `signal-solve` — the signal solver spike ([solver](../impl/solver.md)) | — |
 | No-JIT Build Tests | ubuntu | `smoke-nojit` — the language suite on the interpreter alone | — |
 | Boot Image Tests | ubuntu | `smoke-boot-image` — the language suite booted from an image | — |
 | Rust Tests | ubuntu | Integration tests, then property tests | 16 |
@@ -396,6 +396,7 @@ make test
 | **Language suite fails** | A corpus job fails `smoke-lang` | A language test answers differently on that build. | Run `./target/release/elle tests/lang/failing.lisp` on the same build. Check the assertion message; a file that passes on one build and fails on another has found a defect in the build that fails. |
 | **Implementation suite fails** | `Default Build Tests` fails `smoke-impl` | An implementation test on the rig, or the language suite under a rig profile. | Run `./target/release/elle-rig tests/impl/failing.lisp`; the file's sidecar sets its mode. For a profile failure, pass the same `--profile`. |
 | **Boot from an image fails** | `Boot Image Tests` fails and every other corpus job passes | The corpus file answers differently under a hydrated boot, or the image no longer hydrates. | Run `make smoke-boot-image` locally. Read the hydration proof first: a target that fails there never reached the corpus. |
+| **Signal solver** | `Default Build Tests` fails `signal-solve` | A fixture's `# expect` line no longer holds, or the two engines solved different models. | Run `make signal-solve` locally. A disagreement names the engines; [solver.md](../impl/solver.md) states the rules both must solve. |
 | **Property tests fail** | `Rust Tests` fails with a shrunk counterexample | The shrunk output shows the *minimal* failing input. | Reproduce with the exact shrunk values as a unit test. Check `proptest-regressions/` files. |
 | **Integration tests fail** | `Rust Tests` fails | Tests use `eval_source()` which runs the full pipeline. | Read the assertion. Check whether the test expects `.unwrap()` (success) or `.is_err()` (error). |
 | **Clippy** | `QA` fails on the clippy step | Any Rust warning. CI runs with `-D warnings`. | Run `cargo clippy --workspace --all-targets -- -D warnings` locally. |

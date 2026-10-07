@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-10-06
 //! Call analysis: the compile-time arity check, and the signal each call raises
 //! across function boundaries.
 //!
@@ -103,35 +103,6 @@ impl<'a> Analyzer<'a> {
 
         signal = signal.combine(callee_signal);
 
-        // ── Import projection detection ────────────────────────────────
-        // Pattern: ((import "literal")) — the outer call's func is itself
-        // a Call to `import` with a literal string argument. If so, look up
-        // the target file's signal projection and stash it for the binding
-        // analysis to pick up via `last_import_projection`.
-        self.last_import_projection = None;
-        if let HirKind::Call {
-            func: inner_func,
-            args: inner_args,
-            ..
-        } = &func.kind
-        {
-            if self.is_import(inner_func) {
-                if let Some(first) = inner_args.first() {
-                    if let HirKind::String(spec) = &first.expr.kind {
-                        if let Some(resolved) = crate::primitives::modules::resolve_import(spec) {
-                            // Resolve via the owning instance's compile context
-                            // (set by the file frontend). Absent it — pure
-                            // analysis — the import keeps the conservative
-                            // `Polymorphic` projection.
-                            self.last_import_projection = self.import_ctx.and_then(|ptr| unsafe {
-                                (*ptr).get_or_compile_projection(&resolved, self.symbols)
-                            });
-                        }
-                    }
-                }
-            }
-        }
-
         // ── Compile-time squelch/attune detection ─────────────────────
         // Pattern: (squelch f :keyword) or (squelch f |:kw1 :kw2|)
         //          (attune :keyword f) or (attune |:kw1 :kw2| f)
@@ -231,11 +202,6 @@ impl<'a> Analyzer<'a> {
     /// Check if the callee is the `attune` primitive.
     fn is_attune(&self, func: &Hir) -> bool {
         self.is_primitive_named(func, "attune")
-    }
-
-    /// Check if the callee is the `import` primitive.
-    fn is_import(&self, func: &Hir) -> bool {
-        self.is_primitive_named(func, "import")
     }
 
     /// Check if a callee HIR node is a binding spelled `name` — one hash

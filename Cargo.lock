@@ -601,6 +601,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "datafrog"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0afaad2b26fa326569eb264b1363e8ae3357618c43982b3f285f0774ce76b69"
+
+[[package]]
 name = "debugid"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -660,6 +666,7 @@ dependencies = [
  "cranelift-native",
  "criterion",
  "crossbeam-channel",
+ "datafrog",
  "elle-plugin",
  "io-uring",
  "libc",
