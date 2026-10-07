@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-07
 //! Where a closure call meets the tiered WASM backend: the call count, the compile, and the dispatch.
 //!
 //! docs/impl/wasm.md
@@ -51,15 +51,17 @@ impl VM {
         // Need LIR to compile
         let lir = closure.template.lir()?;
 
-        // Try to compile
+        // Try to compile. The module, or the rejection, pins the closure's
+        // code region, so its key keeps naming this function.
         let heap_ptr = self.heap_ptr;
+        let pin = crate::value::CodePin::of(self.heap(), &closure.template);
         let wasm_tier = self.wasm_tier.as_mut().unwrap();
-        if wasm_tier.compile(bytecode_ptr, &lir, heap_ptr) {
+        if wasm_tier.compile(pin.clone(), &lir, heap_ptr) {
             return Some(self.run_wasm(bytecode_ptr, closure, args, self_val));
         }
 
         // Compilation rejected — record so we don't try again
-        self.wasm_rejections.insert(bytecode_ptr, ());
+        self.wasm_rejections.insert(pin.key(), pin);
         None
     }
 

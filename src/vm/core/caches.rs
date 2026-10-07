@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-07
 //! The VM's caches keyed by a code object's bytecode address, and the pins that keep each key's code region alive.
 //!
 //! docs/impl/jit.md
@@ -151,10 +151,10 @@ impl VM {
     }
 
     /// Drop every cache entry that pins a code region: the JIT cache, the
-    /// compiles in flight, the JIT rejections, the SPIR-V cache, and the MLIR
-    /// tier's engines and rejections. Teardown runs this before it releases
-    /// the process roots, so no pin holds a region past the sweep
-    /// (docs/impl/jit.md).
+    /// compiles in flight, the JIT rejections, the SPIR-V cache, the MLIR
+    /// tier's engines and rejections, and the WASM tier's modules and
+    /// rejections. Teardown runs this before it releases the process roots,
+    /// so no pin holds a region past the sweep (docs/impl/jit.md).
     pub fn clear_code_pins(&mut self) {
         #[cfg(feature = "jit")]
         {
@@ -166,6 +166,13 @@ impl VM {
         #[cfg(feature = "mlir")]
         if let Some(cache) = self.mlir_cache.as_mut() {
             cache.clear_pins();
+        }
+        #[cfg(feature = "wasm")]
+        {
+            if let Some(tier) = self.wasm_tier.as_mut() {
+                tier.clear_pins();
+            }
+            self.wasm_rejections.clear();
         }
     }
 

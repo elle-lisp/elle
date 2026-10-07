@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-07
 //! Lazy (tiered) WASM compilation.
 //!
 //! Compiles individual hot closures to WASM on demand. The bytecode VM
@@ -32,13 +32,16 @@ struct CompiledClosure {
     /// Byte offset where this closure's env stack begins — above its widest args
     /// region (`emit::env_stack_base_for_func`).
     env_stack_base: usize,
+    /// Holds the code region the module's key names, so the key keeps naming
+    /// this closure's function (docs/impl/jit.md).
+    _pin: crate::value::CodePin,
 }
 
 /// Manages lazy WASM compilation for the tiered execution model.
 ///
 /// Holds a Wasmtime `Engine` and `Linker` shared across all compiled
-/// closures. Each hot closure gets its own `Module` cached by bytecode
-/// pointer.
+/// closures. Each hot closure gets its own `Module`, cached by bytecode
+/// pointer and pinning that pointer's code region.
 pub struct WasmTier {
     engine: Engine,
     linker: Linker<TieredHost>,
@@ -105,14 +108,17 @@ impl WasmTier {
     }
 
     /// Try to compile a closure to WASM. Returns true if compilation succeeded.
-    /// `heap_ptr` is the driving instance's heap, on which the closure's
-    /// const-pool literals are built (held for the cached module's lifetime).
+    /// The module is cached under the bytecode address `pin` names, and holds
+    /// `pin`. `heap_ptr` is the driving instance's heap, on which the
+    /// closure's const-pool literals are built (held for the cached module's
+    /// lifetime).
     pub fn compile(
         &mut self,
-        bytecode_ptr: *const u8,
+        pin: crate::value::CodePin,
         lir_func: &LirView<'_>,
         heap_ptr: *mut crate::value::fiberheap::FiberHeap,
     ) -> bool {
+        let bytecode_ptr = pin.key();
         if self.modules.contains_key(&bytecode_ptr) {
             return true;
         }
@@ -142,6 +148,7 @@ impl WasmTier {
                         module,
                         const_pool: result.const_pool,
                         env_stack_base: result.env_stack_base,
+                        _pin: pin,
                     },
                 );
                 true
@@ -162,6 +169,12 @@ impl WasmTier {
     /// Check if a closure has been WASM-compiled.
     pub fn is_compiled(&self, bytecode_ptr: *const u8) -> bool {
         self.modules.contains_key(&bytecode_ptr)
+    }
+
+    /// Drop every compiled module and the pin it holds, keeping the engine and
+    /// the linker.
+    pub fn clear_pins(&mut self) {
+        self.modules.clear();
     }
 
     /// Call a WASM-compiled closure.

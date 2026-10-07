@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-07
 //! The `VM` struct — the per-instance state a running program reaches — and the
 //! accessors that reborrow the allocations it points at.
 //!
@@ -272,9 +272,10 @@ pub struct VM {
     /// compiled to per-closure WASM modules and dispatched through Wasmtime.
     #[cfg(feature = "wasm")]
     pub wasm_tier: Option<crate::wasm::lazy::WasmTier>,
-    /// Closures that failed WASM compilation (contain MakeClosure, TailCall, etc.)
+    /// Closures that failed WASM compilation (contain MakeClosure, TailCall,
+    /// etc.), each pinning its key's code region like `jit_rejections`.
     #[cfg(feature = "wasm")]
-    pub(crate) wasm_rejections: FxHashMap<*const u8, ()>,
+    pub(crate) wasm_rejections: FxHashMap<*const u8, CodePin>,
     /// Whether MLIR compilation is enabled (runtime gate).
     /// Set at construction from the MLIR policy the run starts with.
     #[cfg(feature = "mlir")]
