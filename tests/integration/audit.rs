@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 // The audit queue and its commit gate.
 //
 // docs/impl/audit.md
@@ -66,7 +66,12 @@ impl Tree {
     /// The commit gate's verdict on `rel`, as though it were staged.
     fn staged(&self, rel: &str) -> std::process::Output {
         Command::new(script())
-            .args(["--root", self.0.to_str().expect("utf-8 path"), "--staged", rel])
+            .args([
+                "--root",
+                self.0.to_str().expect("utf-8 path"),
+                "--staged",
+                rel,
+            ])
             .output()
             .expect("run scripts/audit")
     }
@@ -297,18 +302,18 @@ fn the_standard_library_is_exempt_from_the_queue_and_from_the_gate() {
 
 #[test]
 fn the_lir_instruction_enum_is_exempt_from_the_queue_and_from_the_gate() {
-    // The trap: src/lir/types/instr.rs is one enum past the 500-line reading
+    // The trap: src/lir/code/instr.rs is one enum past the 500-line reading
     // budget, and Rust gives no way to split an enum, so a stamp on it fails
     // prose.rs while no stamp on it fails the gate.
     //
-    // The counter-factual: exempt `src/lir/types/*` or `*.rs` and the files
+    // The counter-factual: exempt `src/lir/code/*` or `*.rs` and the files
     // beside it leave the queue with it. They each fit the budget and are read
     // whole like any other source.
     let t = Tree::new("lir-instr");
-    t.write("src/lir/types/instr.rs", &doc(None, 400))
-        .write("src/lir/types/func.rs", &doc(None, 400));
+    t.write("src/lir/code/instr.rs", &doc(None, 400))
+        .write("src/lir/code/view.rs", &doc(None, 400));
 
-    let out = t.staged("src/lir/types/instr.rs");
+    let out = t.staged("src/lir/code/instr.rs");
     let q = t.queue();
     assert!(
         out.status.success(),
@@ -316,11 +321,11 @@ fn the_lir_instruction_enum_is_exempt_from_the_queue_and_from_the_gate() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        !q.iter().any(|p| p.ends_with("types/instr.rs")),
+        !q.iter().any(|p| p.ends_with("code/instr.rs")),
         "a reader reaches one variant from a match arm, so the enum is not queued: {q:?}"
     );
     assert!(
-        q.iter().any(|p| p.ends_with("types/func.rs")),
+        q.iter().any(|p| p.ends_with("code/view.rs")),
         "the exemption is the one path; the files beside it stay queued: {q:?}"
     );
 }
@@ -349,7 +354,8 @@ fn a_licence_at_the_root_exempts_nothing() {
     // repository's own LICENSE empties the queue. That failure is silent —
     // the queue reports zero files and reads as a tree fully in policy.
     let t = Tree::new("root-licence");
-    t.write("LICENSE", "MIT\n").write("ours.md", &doc(None, 400));
+    t.write("LICENSE", "MIT\n")
+        .write("ours.md", &doc(None, 400));
 
     assert!(
         t.queue().iter().any(|p| p.ends_with("ours.md")),

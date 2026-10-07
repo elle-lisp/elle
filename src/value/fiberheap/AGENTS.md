@@ -1,6 +1,6 @@
 # fiberheap
 
-<!-- audited: 2026-09-30 -->
+<!-- audited: 2026-10-06 -->
 
 The per-VM heap: the physical region allocator
 ([model.md](../../../docs/impl/region/model.md)). One
@@ -11,7 +11,9 @@ heap and region explicitly through `arena`.
 
 - Own the `RegionStore`: physical region id → `RegionEntry` (pages + reclamation
   typestate + ownership children + outgoing edge table)
-- Allocate `HeapObject`s and `RegionSlice` data into specific regions
+- Allocate `HeapObject`s, `RegionSlice` data, and the unwritten room a slice
+  that grows claims ([src/lir/build/grow.rs](../../lir/build/grow.rs)), into
+  specific regions
 - Reclaim regions **two ways**
   ([ownership.md](../../../docs/impl/region/ownership.md)): by **RC** (`decref`
   → cascade — the `Counted` baseline) and by **subtree / set drop**

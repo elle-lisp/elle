@@ -313,7 +313,7 @@ with its doc comment. These are the ones a reader of lowered code meets most.
 
 | Instruction | What it does |
 |-------------|--------------|
-| `Const` | Load a `LirConst` immediate |
+| `Const` | Load a `ConstRef` immediate |
 | `ValueConst` | Load a compile-time `Value`: a primitive, or an immutable binding with a literal initializer |
 | `MaterializeConst` | Allocate a heap literal from its template into its own region |
 | `LoadLocal` / `StoreLocal` | Read or write a stack slot |
