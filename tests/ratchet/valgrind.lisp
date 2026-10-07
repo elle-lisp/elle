@@ -19,15 +19,25 @@
   ["--leak-check=full" "--show-leak-kinds=definite"
    "--errors-for-leak-kinds=definite"])
 
-# [subject rig-flags source]
+# Each program's subject on each path is spelled whole, so every row of the
+# ledger names a literal here (tests/integration/ledgers.rs).
 (def programs
-  [["boot and exit" [] "(+ 1 2)"]
-   ["a fiber yields and resumes" []
-    "(def f (fiber/new (fn [] (yield 1) 2) :yield)) (assert (= (resume f) 1) \"the fiber yields 1\") (assert (= (resume f) 2) \"and ends with 2\")"]
-   ["a file read through the I/O backend" []
-    "(assert (> (length (slurp \"Cargo.toml\")) 0) \"the file has bytes\")"]
-   ["a function the JIT compiles" ["--trace=syncjit"]
-    "(defn step [x] (+ x 1)) (def @acc 0) (repeat 100 (assign acc (step acc))) (assert (jit? step) \"the JIT compiled step\")"]])
+  [{:compiled "boot and exit, stdlib compiled"
+    :cached "boot and exit, stdlib cached"
+    :flags []
+    :source "(+ 1 2)"}
+   {:compiled "a fiber yields and resumes, stdlib compiled"
+    :cached "a fiber yields and resumes, stdlib cached"
+    :flags []
+    :source "(def f (fiber/new (fn [] (yield 1) 2) :yield)) (assert (= (resume f) 1) \"the fiber yields 1\") (assert (= (resume f) 2) \"and ends with 2\")"}
+   {:compiled "a file read through the I/O backend, stdlib compiled"
+    :cached "a file read through the I/O backend, stdlib cached"
+    :flags []
+    :source "(assert (> (length (slurp \"Cargo.toml\")) 0) \"the file has bytes\")"}
+   {:compiled "a function the JIT compiles, stdlib compiled"
+    :cached "a function the JIT compiles, stdlib cached"
+    :flags ["--trace=syncjit"]
+    :source "(defn step [x] (+ x 1)) (def @acc 0) (repeat 100 (assign acc (step acc))) (assert (jit? step) \"the JIT compiled step\")"}])
 
 (defn line-with [lines marker]
   "The first of LINES that holds MARKER, or nil."
@@ -78,13 +88,16 @@
             (string "the unmeasured run exits 0\n" (get warm :stderr))))
   (assert (not (empty? (file/ls (path/join dir "stdlib-cache"))))
           "the unmeasured run wrote the standard library to the cache")
-  # [path cache-flag]. `--cache=` with no directory turns caching off.
-  (def paths [["stdlib compiled" "--cache="] ["stdlib cached" cached]])
+  # [the key of a program's subject on the path, cache-flag]. `--cache=` with
+  # no directory turns caching off.
+  (def paths [[:compiled "--cache="] [:cached cached]])
   # Every run starts before any is read, so the producer costs about one run.
   (def @children @[])
   (each [path cache] in paths
-    (each [subject flags source] in programs
-      (push children [(string subject ", " path) (start cache flags source)])))
+    (each program in programs
+      (push children
+            [(get program path)
+             (start cache (get program :flags) (get program :source))])))
   (each [subject child] in children
     (let [report (string (port/read-all (get child :stderr)))
           code (subprocess/wait child)
