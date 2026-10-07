@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-10-06
 // src/hir/AGENTS.md
 // docs/impl/graft.md
 //! Which calls become their callee's body: a known, non-recursive function at
@@ -294,4 +294,50 @@ fn the_empty_sum_and_product_are_ints() {
     for src in ["(%bit-and (+) 1)", "(%bit-and (*) 1)"] {
         compile_booted(src).unwrap_or_else(|e| panic!("{src} must compile: {e}"));
     }
+}
+
+/// `src` compiled on a booted runtime whose compile context has the graft off,
+/// the seam an implementation test turns it off through (docs/impl/graft.md).
+fn compile_ungrafted(src: &str) -> Result<(Hir, BindingArena), String> {
+    let mut rt = crate::runtime::Runtime::new();
+    rt.compile().set_graft(crate::config::GraftPolicy::Off);
+    let (_vm, symbols, cctx) = rt.parts();
+    crate::pipeline::compile_file_to_fhir(src, symbols, cctx, "<test>")
+}
+
+/// Under `GraftPolicy::Off` every call stays a call: to a function the unit
+/// defines and to a stdlib wrapper. The counter-factual is the same source
+/// under the graft, where neither call is left.
+#[test]
+fn the_graft_off_keeps_every_call_a_call() {
+    let src = "(defn h [a b] (+ a b)) (h 1 2)";
+    let (hir, arena) = compile_ungrafted(src).unwrap_or_else(|e| panic!("{src} must compile: {e}"));
+    assert_eq!(
+        count_calls_to(&hir, &arena, "h"),
+        1,
+        "{src}: the call to h stays"
+    );
+    assert_eq!(
+        count_calls_to(&hir, &arena, "+"),
+        1,
+        "{src}: the call to + stays"
+    );
+    let (hir, arena) = compiled(src);
+    assert_eq!(
+        count_calls_to(&hir, &arena, "h") + count_calls_to(&hir, &arena, "+"),
+        0,
+        "{src}: under the graft both calls become their callee's body"
+    );
+}
+
+/// A call the setting keeps still proves its callee's parameters through the
+/// call-site join, so a definition every caller passes ints to compiles, and
+/// one caller passing a string refutes it.
+#[test]
+fn a_call_the_graft_off_keeps_still_proves_its_callee() {
+    let src = "(defn f [x] (%mul x x)) (f 3)";
+    compile_ungrafted(src).unwrap_or_else(|e| panic!("{src} must compile: {e}"));
+    let rejected = "(defn f [x] (%mul x x)) (f 3) (f \"s\")";
+    let err = compile_ungrafted(rejected).expect_err("a string caller refutes x");
+    assert!(err.contains("%mul"), "{rejected}: {err}");
 }

@@ -1,11 +1,11 @@
 (elle/epoch 14)
-# audited: 2026-09-30
+# audited: 2026-10-06
 # A non-tail recursion 10,000 deep completes, and can park, pause, raise and be
 # squelched at the bottom.
 #
 # Non-tail recursion waits in the fiber, not on the Rust stack
 # (docs/impl/vm.md). None of the recursive calls here is a
-# tail call. The file makes ten recursions at about 8 µs a call in the
+# tail call. The file makes eleven recursions at about 8 µs a call in the
 # interpreter, so this depth keeps it inside the per-file time budget.
 #
 # The compiled tier's hand-off to the interpreter on a low native stack is not
@@ -69,7 +69,15 @@
   (assert (= (fiber/status f) :dead) "the deep fiber finishes"))
 
 ## ── A fuel pause inside the recursion ──────────────────────────────────
-(let [f (fiber/new (fn [] (sum-to depth)) |:fuel|)]
+## The trap: `sum-to` grafts `=`, `+` and `-` to their ops (docs/impl/graft.md),
+## so under an active JIT policy it runs as native code, which charges no fuel.
+## A three-operand `+` stays a call whose walker the JIT refuses, so each level
+## of `sum-to-metered` pays fuel in the interpreter.
+(defn sum-to-metered [n]
+  (if (= n 0)
+    0
+    (+ n (sum-to-metered (- n 1)) 0)))
+(let [f (fiber/new (fn [] (sum-to-metered depth)) |:fuel|)]
   (fiber/set-fuel f 5000)
   (fiber/resume f nil)
   (assert (= (fiber/status f) :paused) "fuel runs out inside the recursion")

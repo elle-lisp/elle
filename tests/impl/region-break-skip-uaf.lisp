@@ -1,16 +1,17 @@
-(elle/epoch 12)
-# audited: 2026-09-23
+(elle/epoch 14)
+# audited: 2026-10-06
 # Soundness complement of region-break-skip.lisp: re-anchoring a release the
 # `break` jumps over must not free anything early.
 #
-# The close moves a release from inside a block's body to `last_use[block]`
-# (docs/impl/region/anchors.md § "A release the break jumps over is not a
-# release"). Moving a release LATER can only over-keep — but only while it still
-# names the same value when it runs. Three ways that fails, and all of them fault
-# here: the value-route reloads a slot a later store has repointed (freeing the
-# live occupant), a region reached across a nested loop is released once for many
-# allocations (freeing an iteration that is still live), and a region reached
-# across a nested lambda is released from the wrong frame entirely.
+# docs/impl/region/anchors.md
+#
+# The close moves a release from inside a block's body to `last_use[block]`.
+# Moving a release LATER can only over-keep — but only while it still
+# names the same value when it runs. It fails three ways, and each faults here.
+# The value route reloads a slot a later store has repointed, which frees the
+# live occupant. A region reached across a nested loop is released once for
+# many allocations, which frees an iteration that is still live. A region
+# reached across a nested lambda is released from the wrong frame.
 #
 # Every witness reads the subject's HEAP contents after the block, through a
 # chain long enough that an over-early free faults rather than reading stale but
@@ -101,7 +102,7 @@
     nil)
   (length cur))
 
-# ── controls: the same reads with no break — correct now (harness sanity) ─────
+# ── controls: the same reads with no break, which check the harness ─────────
 (defn c-plain (i)
   (let [r (block (let [x (string "d" i)]
                    x))]
@@ -135,14 +136,16 @@
 
 (assert (%gt k 0) "control: plain block result mis-read (harness broken)")
 
+# A block whose `break` carries nil yields nil or a number, which `%gt` cannot
+# prove (docs/impl/typeinfer.md), so the (d), (e) and (f) rows compare with `>`.
+
 (assert (%gt a 0)
-        "window value that is the block's fall-through result freed under the \
-         post-block read")
+        "window value that is the block's fall-through result freed under the \n         post-block read")
 (assert (%gt b 0) "window value freed after being stored into a container")
 (assert (%gt c 0) "window value freed under the caller's read of the return")
 (assert (> d 0) "window value freed under the closure that captured it")
-(assert (%gt e 0) "loop-body value freed under a later iteration's read")
-(assert (%gt f 0) "lambda-body value released from the enclosing frame")
+(assert (> e 0) "loop-body value freed under a later iteration's read")
+(assert (> f 0) "lambda-body value released from the enclosing frame")
 (assert (%gt g 0)
         "window value freed by the release the taken break used to skip")
 (assert (%gt h 0) "reassigned binding's live value freed through its slot")

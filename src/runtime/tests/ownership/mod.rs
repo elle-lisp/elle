@@ -51,8 +51,19 @@ pub(super) fn child_fiber(
 /// the measurement to region count; the trustworthy UAF oracle is full-stdlib
 /// `--trace=guardfree` (the elle corpus).
 pub(super) fn steady_region_growth(src: &str) -> i64 {
+    steady_region_growth_under(src, crate::config::GraftPolicy::On)
+}
+
+/// [`steady_region_growth`] with the graft off, for a shape whose subject is a
+/// call: each call `src` writes stays a call (docs/impl/graft.md).
+pub(super) fn steady_region_growth_ungrafted(src: &str) -> i64 {
+    steady_region_growth_under(src, crate::config::GraftPolicy::Off)
+}
+
+fn steady_region_growth_under(src: &str, graft: crate::config::GraftPolicy) -> i64 {
     use crate::pipeline::compile_file_repl;
     let mut rt = Runtime::without_stdlib();
+    rt.compile().set_graft(graft);
     let result = {
         let (_vm, symbols, cctx) = rt.parts();
         compile_file_repl(src, symbols, cctx, "<embed>")

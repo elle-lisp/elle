@@ -1,11 +1,11 @@
-// audited: 2026-09-23
-// src/hir/AGENTS.md
-// docs/impl/typeinfer.md
-//! What a call contributes to its callee's parameters when the operands do not
-//! line up with them one to one, and what a call to a name the program rebound
-//! proves.
+// audited: 2026-10-06
+//! What a call proves about its callee's parameters when operands and
+//! parameters do not line up, and when the program rebinds a name.
 //!
-//! Each case compiled before its fix and proved a type no value has. The fold
+//! src/hir/AGENTS.md
+//! docs/impl/typeinfer.md
+//!
+//! Under each wrong reading below, a case proves a type no value has. The fold
 //! deletes code on these types, so each wrong answer would pick a branch the
 //! program does not take.
 

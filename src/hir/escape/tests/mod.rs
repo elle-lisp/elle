@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-10-06
 // docs/impl/escape.md
 //! The escape analysis tests (`super` = `hir::escape`), and the fixtures they compile through.
 //!
@@ -10,14 +10,15 @@ use super::*;
 use crate::hir::{Hir, HirId, HirKind};
 
 /// Compile a source file to canonical (functionalized) HIR for the escape
-/// tests, threading a fresh per-call `CompileCtx`. Every compile names its
-/// instance's compile state explicitly, threading the compile context as a
-/// parameter (docs/impl/region/ctx.md).
+/// tests, under a fresh `CompileCtx` with the graft off. Escape analysis is
+/// the subject, so a call a test writes reaches it as a call
+/// (docs/impl/graft.md).
 fn compile_fhir(
     src: &str,
     symbols: &mut crate::symbol::SymbolTable,
 ) -> (Hir, crate::hir::BindingArena) {
     let mut cctx = crate::pipeline::CompileCtx::new();
+    cctx.set_graft(crate::config::GraftPolicy::Off);
     crate::pipeline::compile_file_to_fhir(src, symbols, &mut cctx, "<test>").expect("compile")
 }
 

@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-06
 //! Fusion tests, by what the chain is made of.
 //!
 //! The shared helpers live here; each submodule takes one shape of chain.
@@ -15,7 +15,21 @@ use crate::hir::expr::{Hir, HirKind};
 /// exports that no build-time table can spell (docs/impl/symbol.md). Hold it
 /// for as long as you want to read a callee's name.
 fn compile(src: &str) -> (Hir, BindingArena, crate::runtime::Runtime) {
+    compile_under(src, crate::config::GraftPolicy::On)
+}
+
+/// [`compile`] with the graft off, for a test whose subject is a call the source
+/// writes: it stays a call (docs/impl/graft.md).
+fn compile_ungrafted(src: &str) -> (Hir, BindingArena, crate::runtime::Runtime) {
+    compile_under(src, crate::config::GraftPolicy::Off)
+}
+
+fn compile_under(
+    src: &str,
+    graft: crate::config::GraftPolicy,
+) -> (Hir, BindingArena, crate::runtime::Runtime) {
     let mut rt = crate::runtime::Runtime::new();
+    rt.compile().set_graft(graft);
     let (hir, arena) = {
         let (_vm, symbols, cctx) = rt.parts();
         crate::pipeline::compile_file_to_fhir(src, symbols, cctx, "<test>").expect("compile")
@@ -86,12 +100,15 @@ fn count_ands(h: &Hir) -> usize {
     n
 }
 
-/// Does every path through `h` end in an `emit`?
+/// Does every path through `h` end in an `emit`? The ANF lift names an emit
+/// value, so a raise can stand as a `let` init: `(let [t (emit …)] t)`.
 fn raises(h: &Hir) -> bool {
     match &h.kind {
         HirKind::Emit { .. } => true,
         HirKind::Begin(xs) => xs.last().is_some_and(raises),
-        HirKind::Let { body, .. } => raises(body),
+        HirKind::Let { bindings, body } => {
+            bindings.iter().any(|(_, init)| raises(init)) || raises(body)
+        }
         _ => false,
     }
 }

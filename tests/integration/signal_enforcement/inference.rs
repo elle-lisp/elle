@@ -37,7 +37,7 @@ fn test_polymorphic_inference_single_param() {
 }
 
 #[test]
-fn test_polymorphic_inference_resolves_pure() {
+fn test_polymorphic_inference_resolves_errors() {
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(begin (def apply-fn (fn (f x) (f x))) (apply-fn length 42))",
@@ -83,11 +83,8 @@ fn test_polymorphic_inference_my_map() {
 }
 
 // A mutual cycle must converge to the same signal a self-recursive function
-// with the same body converges to. The seed is optimistic (`Signal::silent()`),
-// so a loop that stops before the cycle settles under-approximates — and an
-// under-approximated signal is the direction that costs a guarantee: a function
-// that can raise `:error` but reads as silent satisfies a `(silent!)` ceiling
-// and breaks its proof at run time instead. docs/pipeline.md states the rule.
+// with the same body converges to. The counter-factual: a loop that stops
+// before the cycle settles reports foo as silent, because the seed is silent.
 #[test]
 fn test_mutual_recursion_signal_converges() {
     let (mut symbols, mut vm) = setup();
@@ -107,8 +104,8 @@ fn test_mutual_recursion_signal_converges() {
         "mutually recursive foo/bar (bar calls `first`) must converge to errors"
     );
 
-    // Control: the self-recursive analogue already converges correctly. Kept in
-    // the same test so a fix that regresses self-recursion is caught too.
+    // Control: the self-recursive analogue converges to the same signal, so a
+    // change that breaks self-recursion fails here too.
     let selfrec = analyze(
         "(letrec [foo (fn (n) (if (%eq n 0) (first (list 1)) (foo (%sub n 1))))] (foo 3))",
         &mut symbols,
@@ -123,11 +120,9 @@ fn test_mutual_recursion_signal_converges() {
     );
 }
 
-/// Direction matters: the cycle must converge whichever order its members are
-/// written in. `test_mutual_recursion_signal_converges` calls the member that
-/// is *not* the one raising; this calls the raiser first, so a loop that
-/// happens to settle only because the last binding analyzed was the raising one
-/// still fails here.
+/// The cycle must converge whichever order its members are written in.
+/// `test_mutual_recursion_signal_converges` writes the raiser second; this
+/// writes it first, and enters the cycle at the other member.
 #[test]
 fn test_mutual_recursion_converges_from_either_entry() {
     let (mut symbols, mut vm) = setup();
@@ -204,7 +199,7 @@ fn test_polymorphic_inference_non_recursive_map() {
 }
 
 #[test]
-fn test_polymorphic_inference_direct_yield_prevents() {
+fn test_polymorphic_inference_keeps_a_direct_yield() {
     // A function that both calls a parameter AND yields directly:
     // inherent SIG_YIELD from (yield 99), polymorphic on param 0 and SIG_ERROR
     // from (f x).
@@ -272,7 +267,7 @@ fn test_polymorphic_inference_two_params() {
 }
 
 #[test]
-fn test_polymorphic_inference_two_params_resolves_pure() {
+fn test_polymorphic_inference_two_params_resolves_errors() {
     let (mut symbols, mut vm) = setup();
     let result = analyze_with_stdlib(
         "(begin (def apply-both (fn (f g x) (begin (f x) (g x)))) (apply-both length number? 5))",
@@ -289,7 +284,7 @@ fn test_polymorphic_inference_two_params_resolves_pure() {
 }
 
 #[test]
-fn test_polymorphic_inference_two_params_resolves_yields() {
+fn test_polymorphic_inference_two_params_resolves_yields_errors() {
     let (mut symbols, mut vm) = setup();
     let result = analyze_with_stdlib(        r#"(begin            (def gen (fn () (yield 1)))           (def apply-both (fn (f g x) (begin (f x) (g x))))            (apply-both gen number? 5))"#,        &mut symbols, &mut vm, "<test>")
     .unwrap();
@@ -352,7 +347,7 @@ fn test_polymorphic_inference_with_known_yielding_call() {
             } = &value.kind
             {
                 assert_eq!(
-                    *inferred_signals,
+                *inferred_signals,
                     Signal {
                         bits: SIG_YIELD.union(SIG_ERROR),
                         propagates: 1,

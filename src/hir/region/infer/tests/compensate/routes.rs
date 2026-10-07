@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-06
 //! Pins the per-arm compensation routes: `head` on a dead sibling arm, `tail` after a
 //! used arm's read, none on the arm that returns.
 //!
@@ -29,16 +29,19 @@ fn the_match_arm_that_uses_the_value_takes_no_head_compensation() {
 
 #[test]
 fn the_walk_base_case_releases_at_its_return() {
-    // `(if (= i 0) xs (go (- i 1) (%pair xs 1)))` — both arms use `xs`, so the
-    // recursive arm's later use takes the `decref_point` and the base case is left
-    // with a return mint and no release. The release belongs at the base case's
-    // `Return`, where the mint has already raised the count.
+    // `(if (%eq i 0) xs (begin (git xs) (go (%sub i 1) (%pair xs 1))))` — both
+    // arms use `xs`, so the recursive arm's later use takes the `decref_point` and
+    // the base case is left with a return mint and no release. The release belongs
+    // at the base case's `Return`, where the mint has already raised the count.
     //
-    // The recursive arm STORES `xs` into a fresh cons, so escape marks it beyond the
-    // return facet and the branch-arm window refuses it outright — which is what
-    // leaves this route the one that discharges the base case.
+    // The recursive arm also hands `xs` to `git`, a `Mixed` native that stores it
+    // uncounted, so escape marks it contained and the branch-arm window refuses it
+    // outright. That refusal leaves this route the one that discharges the base
+    // case. The fresh cons alone would not: it counts its hold on `xs`, so the
+    // window would take the release to the merge instead.
     let (hir, arena, _symbols, info) = analyze_with_class(
-        "(letrec [go (fn (i xs) (if (%eq i 0) xs (go (%sub i 1) (%pair xs 1))))] \
+        "(letrec [go (fn (i xs) (if (%eq i 0) xs \
+                   (begin (git xs) (go (%sub i 1) (%pair xs 1)))))] \
            (go 1 (list 1 2)))",
     );
     let (then_id, _else_id) = first_if_arms(&hir).expect("an If node");

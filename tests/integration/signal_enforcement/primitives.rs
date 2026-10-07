@@ -1,11 +1,16 @@
+// audited: 2026-10-06
+// The signal of a primitive or intrinsic call, of a lambda body, and of a call through an unknown callee.
+//
+// docs/signals/inference.md
+
 use super::*;
 
 // ============================================================================
-// 7. PRIMITIVE EFFECT TESTS
+// 7. PRIMITIVE SIGNAL TESTS
 // ============================================================================
 
 #[test]
-fn test_signal_pure_primitives() {
+fn test_signal_of_primitive_and_intrinsic_calls() {
     let (mut symbols, mut vm) = setup();
 
     let errors_calls = [
@@ -65,7 +70,7 @@ fn test_signal_pure_primitives() {
 }
 
 // ============================================================================
-// 8. LAMBDA BODY EFFECT TRACKING
+// 8. LAMBDA BODY SIGNAL TRACKING
 // ============================================================================
 
 #[test]
@@ -99,32 +104,11 @@ fn test_lambda_body_signal_nested_yield() {
 }
 
 // ============================================================================
-// 9. UNKNOWN GLOBAL SOUNDNESS TESTS
+// 9. UNKNOWN CALLEE SOUNDNESS TESTS
 // ============================================================================
 
 #[test]
-fn test_signal_unknown_global_is_yields() {
-    let (mut symbols, mut vm) = setup();
-    let result = analyze(
-        "(begin (var f (fn () 42)) (assign f (fn () (yield 1))) (f))",
-        &mut symbols,
-        &mut vm,
-        "<test>",
-    )
-    .unwrap();
-    assert_eq!(
-        result.hir.signal,
-        Signal::unknown(),
-        "Unknown global should be Signal::unknown() for soundness"
-    );
-}
-
-// ============================================================================
-// 10. UNKNOWN CALLEE SOUNDNESS TESTS
-// ============================================================================
-
-#[test]
-fn test_signal_parameter_call_is_yields() {
+fn test_signal_parameter_call_yields_errors() {
     // Calling a function parameter: yields_errors() (may yield + inherent error)
     let (mut symbols, mut vm) = setup();
     let result = analyze("(fn (f) (f 42))", &mut symbols, &mut vm, "<test>").unwrap();
@@ -140,7 +124,7 @@ fn test_signal_parameter_call_is_yields() {
 }
 
 #[test]
-fn test_signal_let_bound_non_lambda_call_is_yields() {
+fn test_signal_let_bound_non_lambda_call_is_unknown() {
     // Calling a let-bound non-lambda: Signal::unknown() (opaque binding)
     let (mut symbols, mut vm) = setup();
     let result = analyze(

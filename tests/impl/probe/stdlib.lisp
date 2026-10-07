@@ -1,5 +1,5 @@
 (elle/epoch 13)
-# audited: 2026-09-30
+# audited: 2026-10-06
 # The stdlib per-call classes: transform scratch, the zip tower, the native-tail store family, and the read/copy primitives.
 #
 # docs/impl/region/diagnostics.md
@@ -13,15 +13,8 @@
 # thunk b times as a discarded STATEMENT (non-tail), the while-loop shape a
 # per-call leak needs to surface.
 #
-# The discarded-tail-return helpers take an unused `&opt` parameter. The graft
-# refuses such a function, so each call stays a call whose tail returns a value
-# (docs/impl/graft.md).
-(defn ora-ret-first [xs &opt o]
-  (first xs))
-(defn ora-mk [x &opt o]
-  {:v x})
-(defn ora-ret-closure [x &opt o]
-  (ora-mk x))
+# The discarded-tail-return controls are a call's subject, so they run with the
+# graft off in region-discarded-tail-return.lisp, not here.
 
 (println "── folded suite: stdlib / native-tail / discarded-tail canaries ──")
 
@@ -146,11 +139,3 @@
 (r:drive "read-keys" (r:stmt-run (fn [] (keys {:a 1 :b 2}))) :on [r:regions])
 (r:drive "read-values" (r:stmt-run (fn [] (values {:a 1 :b 2}))) :on [r:regions])
 (r:drive "read-slice" (r:stmt-run (fn [] (slice [1 2 3 4] 1 3))) :on [r:regions])
-
-# Discarded tail-return: a function whose tail is a call (native pass-through
-# `first`, or a closure), invoked for effect with the result DISCARDED. The
-# fresh-value pass-through RECLAIMS (the move convention balances) — at 0 here;
-# a STDLIB-allocated (`concat`) result is the `stdlib-concat` row above.
-(r:drive "discard-passthrough"
-         (r:stmt-run (fn [] (ora-ret-first (list {:k 1})))))
-(r:drive "discard-closure" (r:stmt-run (fn [] (ora-ret-closure 1))))

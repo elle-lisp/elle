@@ -1,16 +1,18 @@
 // audited: 2026-10-06
-// docs/impl/region/mechanism.md
-//! A `TailCall` callee sees every local slot it has not written as NIL,
-//! exactly as a fresh activation does.
+//! A `TailCall` callee starts as a fresh activation does: unwritten locals read
+//! NIL, and no region slot is mapped.
 //!
-//! The compiler leans on that invariant: a branch-arm-bound ANF temp is
+//! docs/impl/region/rules.md
+//! docs/impl/region/merging.md
+//!
+//! The compiler leans on the first: a branch-arm-bound ANF temp is
 //! NIL-initialized only inside its own arm, yet its value-based release
 //! (`LoadLocal slot; DecrefValueRegion`) runs unconditionally at the binding
-//! scope's end — sound only if the untaken arm's slot reads NIL (the release
-//! no-ops). A tail call reuses the caller's operand stack, and the caller's
-//! locals at those indices are arbitrary live or already-released values: a
-//! stale read there turns the scope-end release into an over-free of a region
-//! the frame owns no reference to.
+//! scope's end. That is sound only if the untaken arm's slot reads NIL. A tail
+//! call reuses the caller's operand stack, and the caller's locals at those
+//! indices are arbitrary live or already-released values. A stale read there
+//! turns the scope-end release into an over-free of a region the frame owns no
+//! reference to.
 
 use super::*;
 
@@ -70,5 +72,76 @@ fn tail_call_frame_delivers_nil_locals() {
          a fresh activation's — got the caller's stale slot value instead \
          (tag={:#x})",
         result.tag,
+    );
+}
+
+/// The region-map pin: a caller maps region slot 5 by building a pair there,
+/// then tail-calls a callee whose own pair takes slot 5 as a merged slot. A
+/// merged slot reuses a mapped entry, so the callee must find the slot empty
+/// and mint its own region, exactly as a fresh activation does.
+///
+/// The counter-factual is the stale entry: the callee's pair lands in the
+/// caller's region beside the caller's pair, and nothing reads wrong until a
+/// release of one frees the other.
+#[test]
+fn tail_call_frame_delivers_an_empty_region_map() {
+    use crate::compiler::bytecode::{Bytecode, Instruction};
+    use crate::value::heap::HeapTag;
+
+    let mut vm = crate::vm::VM::new();
+    let heap_ptr = vm.heap_ptr;
+
+    // Callee: build `(nil . nil)` in merged slot 5 and return it.
+    let mut callee_bc = Bytecode::new();
+    callee_bc.emit(Instruction::Nil);
+    callee_bc.emit(Instruction::Nil);
+    callee_bc.emit(Instruction::Pair);
+    callee_bc.emit_u32(5);
+    callee_bc.emit(Instruction::Return);
+    let mut callee_proto = callee_bc.into_proto();
+    callee_proto.merged_slots.insert(5);
+    let heap = unsafe { &mut *heap_ptr };
+    let callee_region = heap.new_runtime_region();
+    let callee_proto = std::rc::Rc::new(callee_proto);
+    let callee_value = crate::vm::closure::materialize_closure_in_region(
+        heap,
+        crate::value::closure::ChildCode::Blueprint(&callee_proto),
+        &[],
+        callee_region,
+    );
+
+    // Caller: build a pair in slot 5, which maps the slot, then a zero-arg
+    // tail call. The pair's release would sit past the call, so none is run.
+    let mut bc = Bytecode::new();
+    let callee_idx = bc.add_constant(callee_value);
+    bc.emit(Instruction::Nil);
+    bc.emit(Instruction::Nil);
+    bc.emit(Instruction::Pair);
+    bc.emit_u32(5);
+    bc.emit(Instruction::Pop);
+    bc.emit(Instruction::LoadConst);
+    bc.emit_u16(callee_idx);
+    bc.emit(Instruction::TailCall);
+    bc.emit_u16(0); // arg count
+    bc.emit_u32(2); // static result-region slot (unused by a closure callee, must be nonzero)
+    bc.emit_byte(0); // defer_callee_release: off — the deferral is not under test
+    bc.emit_u32(0); // deferred_release_slot: none
+    bc.emit_byte(0); // borrowed_arg_slots: none — a zero-arg call borrows nothing
+    bc.emit(Instruction::Return);
+
+    let (handle, fiber_value) = child_fiber(unsafe { &mut *heap_ptr }, bc);
+    let (bits, result) = vm.do_fiber_resume(&handle, fiber_value);
+    assert!(bits.is_empty(), "the tail-called body completes normally");
+    let heap = unsafe { &*heap_ptr };
+    let region = crate::value::arena::region_of(heap, result).expect("the result is a heap pair");
+    let pairs = heap
+        .region_tags(region.get())
+        .into_iter()
+        .filter(|t| *t == HeapTag::Pair)
+        .count();
+    assert_eq!(
+        pairs, 1,
+        "the callee's merged pair must mint its own region, not share the \
+         region the caller mapped to the same slot"
     );
 }

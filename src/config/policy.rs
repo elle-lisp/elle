@@ -1,5 +1,5 @@
-// audited: 2026-09-29
-//! The compilation policies of the three optimizing tiers, and the one each build starts with.
+// audited: 2026-10-06
+//! The compilation policies of the three optimizing tiers and of the graft, and the one each build starts with.
 //!
 //! docs/config.md
 
@@ -125,4 +125,18 @@ impl MlirPolicy {
     pub fn reading(&self) -> Option<usize> {
         self.enabled().then(|| self.threshold())
     }
+}
+
+// ── Graft policy ─────────────────────────────────────────────────
+
+/// Whether a call to a known function becomes its body (docs/impl/graft.md).
+/// `Off` keeps every call a call in the units an instance compiles after its
+/// boot; only the rig and a Rust test set it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GraftPolicy {
+    /// Graft every call that qualifies.
+    #[default]
+    On,
+    /// Keep every call a call.
+    Off,
 }

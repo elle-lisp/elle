@@ -1,7 +1,7 @@
 // audited: 2026-10-06
 //! The region-inference unit tests, one module per subject the solver decides.
 //!
-//! docs/impl/region/diagnostics.md
+//! docs/impl/region/rules.md
 
 use super::*;
 use crate::hir::functionalize::functionalize;
@@ -13,12 +13,9 @@ use crate::symbol::SymbolTable;
 use crate::syntax::Expander;
 use crate::vm::VM;
 
-// Test bodies (and the ownership helpers in `support`) reference
-// `super::ownership::…`. Once a `#[test]` moves into a sibling submodule,
-// `super` names THIS module rather than the parent `crate::hir::region::infer`, so
-// re-export the sibling `ownership` module here to keep `super::ownership`
-// resolving from every submodule (the only `super::IDENT` reached from a test
-// body is `super::ownership`).
+// Test bodies and the helpers in `support` name `super::ownership`. Inside a
+// submodule `super` is this module, not `crate::hir::region::infer`, so this
+// re-export keeps that path resolving.
 use crate::hir::region::infer::ownership;
 
 mod helpers;
@@ -38,6 +35,7 @@ mod emit;
 mod escape;
 mod feeder;
 mod inline;
+mod letrec;
 mod looprc;
 mod merge;
 mod owned;

@@ -1,11 +1,6 @@
-// audited: 2026-09-23
+// audited: 2026-10-06
 // docs/impl/region/owner.md
 //! The transferred-returned-subtree cut: a producer's returned cycle, adopted by the activation that consumes it.
-//!
-//! A producer a test calls takes an unused `&opt` parameter, because the graft
-//! refuses such a function. A call to any other known function becomes its
-//! body, and the consumer site the cut keys on would be gone before region
-//! inference runs (docs/impl/graft.md).
 
 use super::*;
 
@@ -41,7 +36,7 @@ fn transfer_adopts_returned_cycle_to_consumer() {
     // containment is funnel-recovered and the interior adopt is keyed at the
     // funnel CALL site (the value-resolved adopt needs no store opcode).
     let (_, info) = analyze_full(
-        "(begin (let [mk (fn [&opt o] (let [a (@array) b (@array)] \
+        "(begin (let [mk (fn [] (let [a (@array) b (@array)] \
                   (begin (%array-push a b) (%array-push b a) a)))] \
                   (begin (mk) nil)) \
                 nil)",
@@ -128,32 +123,32 @@ fn transfer_adopt_refuses_unsafe_shapes() {
         // The read feeds a branch condition so it cannot be eliminated; the
         // `%type-of` match arm proves `r`'s container family for the `%get`
         // (prove-or-reject, typeinfer/contract.rs).
-        "(begin (let [mk (fn [&opt o] (let [a (@array) b (@array)] \
+        "(begin (let [mk (fn [] (let [a (@array) b (@array)] \
            (begin (%array-push a b) (%array-push b a) a)))] \
            (let [r (mk)] (match (%type-of r) :@array (if (%get r 0) 1 2) _ 2))) \
          nil)",
         // (a') the same read as a bare statement — the result-flow holder gate
         // must see the intrinsic read regardless of what consumes its value.
-        "(begin (let [mk (fn [&opt o] (let [a (@array) b (@array)] \
+        "(begin (let [mk (fn [] (let [a (@array) b (@array)] \
            (begin (%array-push a b) (%array-push b a) a)))] \
            (let [r (mk)] (begin (match (%type-of r) :@array (%get r 0) _ nil) nil))) \
          nil)",
         // (b) a RETURNED consumer: the site's result crosses the return
         // frontier (the tail call in `outer`), refusing every site of mk.
-        "(begin (let [mk (fn [&opt o] (let [a (@array) b (@array)] \
+        "(begin (let [mk (fn [] (let [a (@array) b (@array)] \
            (begin (%array-push a b) (%array-push b a) a)))] \
-           (let [outer (fn [&opt o] (mk))] (begin (outer) nil))) \
+           (let [outer (fn [] (mk))] (begin (outer) nil))) \
          nil)",
         // (c) an ESCAPING MEMBER: `b` is also stored into an outer container,
         // so the subtree is not externally unique.
         "(begin (let [keep (@array)] \
-           (let [mk (fn [&opt o] (let [a (@array) b (@array)] \
+           (let [mk (fn [] (let [a (@array) b (@array)] \
              (begin (%array-push a b) (%array-push b a) (%array-push keep b) a)))] \
              (begin (mk) nil))) \
          nil)",
         // (d) an ACYCLIC returned subtree: the RC cascade already reclaims it
         // promptly; adopting would only trade promptness away.
-        "(begin (let [mk (fn [&opt o] (let [a (@array) b (@array)] \
+        "(begin (let [mk (fn [] (let [a (@array) b (@array)] \
            (begin (%array-push a b) a)))] \
            (begin (mk) nil)) \
          nil)",

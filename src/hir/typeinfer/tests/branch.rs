@@ -1,8 +1,9 @@
-// audited: 2026-09-23
-// src/hir/AGENTS.md
-// docs/impl/typeinfer.md
-//! What a branch and a block leave behind: a write inside a narrowed branch
-//! outlives the branch, and a block's type joins the values its `break`s carry.
+// audited: 2026-10-06
+//! A write inside a narrowed branch outlives the branch, and a block's type
+//! joins the values its `break`s carry.
+//!
+//! src/hir/AGENTS.md
+//! docs/impl/typeinfer.md
 
 use super::{compile_booted, run_booted};
 use crate::value::Value;

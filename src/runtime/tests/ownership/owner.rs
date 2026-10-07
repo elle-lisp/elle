@@ -4,11 +4,10 @@
 //! docs/impl/region/owner.md
 //! docs/impl/region/adopt.md
 //!
-//! A test that needs a producer's result to cross a call gives the producer an
-//! unused `&opt` parameter. The graft refuses such a function, so the call
-//! stays a call and the transfer cut still has a call site to key on
+//! A test whose subject is a producer's result crossing a call compiles with
+//! the graft off, so the transfer cut has a call site to key on
 //! (docs/impl/graft.md). `region_ownership_reclaims_a_grafted_returned_cycle`
-//! covers the producer that grafts.
+//! covers the producer the graft replaces.
 
 use super::*;
 
@@ -125,13 +124,13 @@ fn region_ownership_parked_capture_back_edge_scc_reclaims_on_abandonment() {
 fn region_ownership_reclaims_returned_cycle_across_calls() {
     // A broken adopt or a doubled release trips a debug generation/decref assert,
     // so 50 panic-clean runs are the soundness half of the pin.
-    const SUBJECT: &str = "(def mk (fn [&opt o] (let [a (@array) b (@array)] \
+    const SUBJECT: &str = "(def mk (fn [] (let [a (@array) b (@array)] \
                      (begin (%array-push a b) (%array-push b a) a)))) \
                    (mk) \
                    (mk) \
                    nil";
     let leak = leak_discriminator();
-    let on = steady_region_growth(SUBJECT);
+    let on = steady_region_growth_ungrafted(SUBJECT);
     assert!(
         leak > 0,
         "gauge live: the refused-cycle discriminator must leak (per-run region growth \
@@ -145,7 +144,7 @@ fn region_ownership_reclaims_returned_cycle_across_calls() {
     );
 }
 
-/// The same producer with no `&opt` parameter, so each `(mk)` grafts: the cycle
+/// The same producer under the graft, so each `(mk)` becomes its body: the cycle
 /// is built inline in the consumer, and the value it hands out is the grafted
 /// body's `let`, not a call's result (docs/impl/graft.md). Grafting must not
 /// cost a program the reclamation the call had.
@@ -222,22 +221,22 @@ fn region_ownership_reclaims_fiber_terminal_cycle() {
 fn region_ownership_transfer_adopt_rides_parks_and_fiber_teardown() {
     // Drained to completion: two cycles adopted into the body's activation node, a yield
     // parking the node between them; the resumed body's completion frees node + members.
-    let complete = "(def mk (fn [&opt o] (let [a (@array) b (@array)] \
+    let complete = "(def mk (fn [] (let [a (@array) b (@array)] \
                       (begin (%array-push a b) (%array-push b a) a)))) \
                     (let [f (fiber/new (fn [] (begin (mk) (emit :yield 0) (mk) nil)) 2)] \
                       (begin (fiber/resume f) (fiber/resume f) nil)) \
                     nil";
-    let _ = steady_region_growth(complete);
+    let _ = steady_region_growth_ungrafted(complete);
 
     // Hard-killed mid-park: the first cycle is adopted, the body parks at the yield, and
     // `fiber/cancel` tears the fiber down — the kill must free the parked activation
     // node's members (the second cycle is never built) without double-freeing.
-    let cancel = "(def mk (fn [&opt o] (let [a (@array) b (@array)] \
+    let cancel = "(def mk (fn [] (let [a (@array) b (@array)] \
                     (begin (%array-push a b) (%array-push b a) a)))) \
                   (let [f (fiber/new (fn [] (begin (mk) (emit :yield 0) (mk) nil)) 2)] \
                     (begin (fiber/resume f) (fiber/cancel f :dead) nil)) \
                   nil";
-    let _ = steady_region_growth(cancel);
+    let _ = steady_region_growth_ungrafted(cancel);
 }
 
 /// VM≡JIT parity for the transfer cut: the producer's interior `AdoptRegion`
@@ -254,7 +253,8 @@ fn region_ownership_reclaims_returned_cycle_under_jit() {
     fn growth() -> (i64, bool) {
         let mut rt = Runtime::without_stdlib();
         rt.vm().runtime_config.jit = JitPolicy::Eager;
-        let src = "(def mk (fn [&opt o] (let [a (@array) b (@array)] \
+        rt.compile().set_graft(crate::config::GraftPolicy::Off);
+        let src = "(def mk (fn [] (let [a (@array) b (@array)] \
                      (begin (%array-push a b) (%array-push b a) a)))) \
                    ((fn [] (begin (mk) nil))) \
                    nil";

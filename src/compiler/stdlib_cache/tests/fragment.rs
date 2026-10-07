@@ -1,6 +1,6 @@
-// audited: 2026-09-23
-// A function the cache restores still carries the fragment of its own body, so a
-// later compile grafts it exactly as it grafts a function the stdlib compile made.
+// audited: 2026-10-06
+// A function the cache restores carries its body's fragment, so a later compile
+// grafts it as it grafts a compiled one.
 // docs/impl/stdlib-cache.md
 // docs/impl/graft.md
 

@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 14)
+# audited: 2026-10-06
 # A callee reached only from compiled code still becomes hot and compiles.
 # docs/impl/jit.md
 #
@@ -25,6 +25,10 @@
 #
 # In a build without the JIT `(vm/config :jit)` reads nil and nothing compiles,
 # so the assertions need a JIT.
+#
+# The second trap: a call to a function the compiler can see becomes the
+# function's body (docs/impl/graft.md), and a caller nothing calls never
+# compiles. The sidecar turns the graft off, so each `(hand-to …)` stays a call.
 
 (defn hand-to [f x]
   (begin
@@ -55,6 +59,6 @@
   (assert (jit? hand-to)
           "precondition: the caller must be JIT-compiled, else the callee is still reached through the interpreter and the assertion below is vacuous")
   (assert (jit? callee)
-          "a callee reached only from compiled code must still be promoted (docs/impl/jit.md, Function selection)"))
+          "a callee reached only from compiled code must still be promoted"))
 
 (println "ok: a compiled caller promotes its callee")

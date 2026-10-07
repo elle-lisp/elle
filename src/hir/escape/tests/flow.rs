@@ -1,11 +1,6 @@
-// audited: 2026-09-23
+// audited: 2026-10-06
 // docs/impl/escape.md
 //! What a return, a store, a capture and a call carry out of an activation.
-//!
-//! A helper function a test calls through takes an unused `&opt` parameter,
-//! because the graft refuses such a function. A call to any other known
-//! function becomes its body, and the call a test is about would be gone
-//! before escape analysis runs (docs/impl/graft.md).
 
 use super::*;
 
@@ -34,26 +29,26 @@ fn empty_info_reports_no_escapes() {
 fn interprocedural_return_escape() {
     // identity helper: the call returns arg 0, so `y` escapes f's tail via return.
     assert_binding_escape(
-        "(def f (fn (y) (let [id (fn (x &opt o) x)] (id y)))) (f 1)",
+        "(def f (fn (y) (let [id (fn (x) x)] (id y)))) (f 1)",
         &[("y", true, true), ("x", true, true)],
     );
     // projection helper: only arg 0 (`a`) is returned and escapes; `b`, passed
     // but not returned, does NOT escape through the call. (`q`, an unused param,
     // has no `Var` reference to assert on.)
     assert_binding_escape(
-        "(def f (fn (a b) (let [k (fn (p q &opt o) p)] (k a b)))) (f 1 2)",
+        "(def f (fn (a b) (let [k (fn (p q) p)] (k a b)))) (f 1 2)",
         &[("a", true, true), ("b", false, false), ("p", true, true)],
     );
     // nested calls to the same uncaptured helper: `tail_sources` descends
     // interprocedurally through both.
     assert_binding_escape(
-        "(def f (fn (y) (let [id (fn (x &opt o) x)] (id (id y))))) (f 1)",
+        "(def f (fn (y) (let [id (fn (x) x)] (id (id y))))) (f 1)",
         &[("y", true, true)],
     );
     // the call result is bound then returned: the binding-definition edge carries
     // the interprocedural source (`t` aliases the arg `y`).
     assert_binding_escape(
-        "(def f (fn (y) (let [id (fn (x &opt o) x)] (let [t (id y)] t)))) (f 1)",
+        "(def f (fn (y) (let [id (fn (x) x)] (let [t (id y)] t)))) (f 1)",
         &[("y", true, true), ("t", true, true)],
     );
 }
@@ -68,7 +63,7 @@ fn def_callee_arg_does_not_escape_through_call() {
     // `id` is a top-level def, not inlinable, so `y` does not escape via the
     // `(id y)` call. (Whether the inner `lambda` escapes is a separate facet; we
     // assert only about the argument binding here, by name.)
-    let src = "(def id (fn (x &opt o) x)) (def f (fn (y) (id y))) (f 1)";
+    let src = "(def id (fn (x) x)) (def f (fn (y) (id y))) (f 1)";
     let mut symbols = crate::symbol::SymbolTable::new();
     let (hir, arena) = compile_fhir(src, &mut symbols);
     let meta = crate::primitives::build_primitive_meta(&mut symbols);
@@ -98,10 +93,10 @@ fn def_callee_arg_does_not_escape_through_call() {
 /// under-mark in the solver).
 #[test]
 fn arg_return_summary_chains_through_the_fixpoint() {
-    let src = "(let [id (fn (x &opt o) x) \
-                         g (fn (z &opt o) (id z)) \
-                         k (fn (a b &opt o) b) \
-                         c (fn (w &opt o) 0)] \
+    let src = "(let [id (fn (x) x) \
+                         g (fn (z) (id z)) \
+                         k (fn (a b) b) \
+                         c (fn (w) 0)] \
                      (begin (id 1) (g 1) (k 1 2) (c 1)))";
     let mut symbols = crate::symbol::SymbolTable::new();
     let (hir, arena) = compile_fhir(src, &mut symbols);

@@ -1,25 +1,27 @@
+// audited: 2026-10-06
+//! Capture cells: when a scope mints one, what a cell contains, and where its release lands.
+//!
+//! docs/impl/region/cells.md
+//! docs/impl/region/adopt.md
+//!
+//! `frameheld` pins the frame-held projection of a forward cell.
+
 use super::*;
 
-// ── Begin/Letrec alloc_region only when MakeCaptureCell will be emitted ──
+mod frameheld;
+
+// ── A scope mints a cell region only where the lowerer emits MakeCaptureCell ──
 //
-// The Begin and Letrec walkers register an alloc_region so the lowerer's
-// `emit_alloc(MakeCaptureCell)` can find a region. But the lowerer's
-// `lower_begin`/`lower_letrec` only emit MakeCaptureCell when (a) there
-// is at least one reachable binding with `needs_capture()` true and (b)
-// the current lowering is NOT inside a lambda body (inside a lambda the
-// VM materializes cells via the closure-construction path). When neither
-// condition holds, no emit_alloc fires — and an unconditional alloc_here
-// produces a phantom region whose later DecrefRegion targets a region
-// the runtime never created. The lowerer's `emit_decref_region` guard
-// silently swallows the phantom in release builds, but the runtime
-// debug_assert in `regionstore.decref` catches it in debug.
+// The Begin and Letrec walkers mint one region per COMPILED capture cell, from
+// the same `compiled_forward_cell` predicate `lower_begin` and `lower_letrec`
+// read. A region minted where the lowerer emits no cell is a phantom: its
+// `DecrefRegion` names a region the runtime never created, and the debug_assert
+// in `regionstore.decref` catches it.
 //
-// Surfaced by hir::functionalize::tests::if_phi_merge_with_continuation_still_works:
-// the synthetic phi-merge let inserted by functionalize introduces a Begin
-// wrapper, and even the outer Letrec wrapping the test's top-level form
-// has no needs_capture binding when the test's `(var x 0)` isn't captured
-// by any lambda — so all three of (Letrec, outer Begin, inner Begin)
-// produce phantom regions.
+// The trap: functionalize's synthetic phi-merge let introduces a Begin
+// wrapper, and neither it nor the file-scope Letrec has a captured binding
+// when a `var` is never captured, so an unconditional mint makes a phantom
+// for each.
 
 #[test]
 fn begin_with_no_captured_binding_has_no_alloc_region() {
@@ -48,8 +50,8 @@ fn letrec_with_no_captured_binding_has_no_alloc_region() {
     // Same shape, but checking the Letrec — file-scope wrappers like
     // the synthetic `(letrec [__file_expr_0 ...] __file_expr_0)` that
     // `compile_file_to_fhir` inserts have no captured binding either.
-    // (Lowerer only emits MakeCaptureCell when a letrec binding's
-    // `needs_capture()` is true and we're not inside a lambda.)
+    // The lowerer emits MakeCaptureCell only for a letrec binding that takes
+    // a compiled forward cell (`compiled_forward_cell`).
     let (hir, arena, info) = pipeline("(do (var x 0) (if true (assign x 42) (assign x 99)) x)");
     fn check(h: &Hir, arena: &BindingArena, info: &RegionInfo) {
         if let HirKind::Letrec { bindings, .. } = &h.kind {
@@ -68,19 +70,18 @@ fn letrec_with_no_captured_binding_has_no_alloc_region() {
 }
 
 #[test]
-fn begin_with_captured_define_has_alloc_region() {
+fn begin_with_captured_define_has_cell_regions() {
     // Positive: when a Begin contains a Define for a binding that IS
     // captured by a nested lambda, the lowerer DOES emit MakeCaptureCell;
-    // the regions walker must register the Begin in alloc_region.
-    // Using `def @x` (mutable) + `(fn () x)` (captures x) makes
-    // `needs_capture()` true for x.
+    // the regions walker must mint a cell region for it under the Begin.
+    // `var x` (mutable) + `(fn () x)` (captures x) makes `needs_capture()`
+    // true for x.
     let (hir, _arena, info) = pipeline("(do (var x 0) (def f (fn () x)) (assign x 1) (f))");
     let begins = find_begins(&hir);
     assert!(!begins.is_empty(), "expected at least one Begin");
     // Per-cell regions live in `begin_cell_regions` (one region PER captured
-    // binding — a single shared alloc_region for all of a Begin's cells is
-    // the shared-slot capture-cell leak; see docs/impl/region/model.md, "one
-    // allocation execution per slot between drops").
+    // binding: one allocation execution per slot between drops,
+    // docs/impl/region/model.md).
     let any_cells = begins.iter().any(|id| {
         info.begin_cell_regions
             .get(id)
@@ -97,12 +98,11 @@ fn walk_records_cell_contains_content_for_compiled_letrec_cell() {
     // A local letrec forward-reference cell holds its closure by a compiled
     // `MakeCaptureCell` (`leaf`, captured by `drive` before its initializer runs). The
     // walk must record `cell ⊇ content` in `containment_edges`, keyed at the letrec's
-    // scope id, so external uniqueness sees the CELL as the container of the closure —
-    // the uncounted cell store is otherwise invisible to the scan.
+    // scope id, so external uniqueness sees the CELL as the container of the closure.
+    // The uncounted cell store is otherwise invisible to the scan.
     //
     // Counter-factual: with no such edge the content region is a free-standing top
-    // container the scan cannot bound through its cell (the invisible-containment hole
-    // this modeling closes; region/adopt.md § "The capture adopt").
+    // container the scan cannot bound through its cell.
     let src = "(defn build [n] \
                  (letrec [drive (fn [m] (numeric!) (if (%le m 0) 0 (begin (leaf m) (drive (%sub m 1))))) \
                           leaf (fn [m] m)] \
@@ -150,8 +150,7 @@ fn walk_records_no_cell_content_for_populate_env_route() {
     // An in-lambda captured MUTABLE local goes through the runtime `populate_env` env
     // cell (`StoreCapture`), not a compiled `MakeCaptureCell` — a phantom region the
     // runtime env owns. It mints NO `begin_cell_regions` entry, so the walk records NO
-    // `cell ⊇ content` edge for it; the env cell stays a borrow (region/adopt.md
-    // non-goal: only compiled cells get the edge).
+    // `cell ⊇ content` edge for it, and the env cell stays a borrow.
     let src = "(defn mk [] (let [@x (%pair 1 2)] (fn [] x)))";
     let (_hir, _arena, info) = pipeline(src);
     // No compiled cell is minted for the env-cell route.
@@ -175,18 +174,17 @@ fn walk_records_no_cell_content_for_populate_env_route() {
 
 #[test]
 fn capture_edge_points_at_cell_region_not_content() {
-    // §5b — the re-pointed capture edge. `drive` captures the letrec forward binding
+    // The re-pointed capture edge. `drive` captures the letrec forward binding
     // `leaf` before its initializer runs, so `leaf` is a compiled `MakeCaptureCell`. The
-    // capture records NO `cross_region_refs` edge (the RC double-count fix), so
-    // `capture_containment_edges` re-derives it — and it must point at the CELL region,
-    // not `leaf`'s content: paired with the walk's `cell ⊇ content` edge, external
-    // uniqueness then sees the true chain `closure ⊇ cell ⊇ content`
-    // (region/adopt.md § "The capture adopt"; the emit realizes it via `AdoptCellRegion`).
+    // capture records NO `cross_region_refs` edge, so `capture_containment_edges`
+    // re-derives it, and it must point at the CELL region, not `leaf`'s content.
+    // Paired with the walk's `cell ⊇ content` edge, external uniqueness then sees the
+    // true chain `closure ⊇ cell ⊇ content`, which the emit realizes with
+    // `AdoptCellRegion`.
     //
-    // Counter-factual: before the re-point, `capture_containment_edges` resolved a capture
-    // through `binding_source_regions[leaf]` — the CONTENT region — so the edge read
-    // `closure ⊇ content`, skipping the cell entirely and leaving the forest unable to
-    // bound the content through its cell (the invisible-containment hole).
+    // Counter-factual: resolving a capture through `binding_source_regions[leaf]` —
+    // the CONTENT region — reads the edge `closure ⊇ content`, skipping the cell
+    // entirely and leaving the forest unable to bound the content through its cell.
     let (_hir, _arena, info, edges) = capture_edges(
         "(defn build [n] \
            (letrec [drive (fn [m] (leaf m)) \
@@ -206,14 +204,14 @@ fn capture_edge_points_at_cell_region_not_content() {
         "shape must mint exactly one compiled cell (leaf's forward cell); got {cells:?}",
     );
     let (leaf_binding, cell_r) = cells[0];
-    // Its content region — the `(site, content, cell)` walk edge — is what the old
-    // capture edge wrongly pointed at.
+    // Its content region, read off the `(site, content, cell)` walk edge. No capture
+    // edge may point here.
     let content_r = info
         .containment_edges
         .iter()
         .find(|&&(_, _, cell)| cell == cell_r)
         .map(|&(_, content, _)| content)
-        .expect("the cell must carry a `cell ⊇ content` edge (§5a)");
+        .expect("the cell must carry a `cell ⊇ content` edge");
     // The re-point resolves the cell through `single_cell_region_of`, the same gate the
     // lowerer uses — so analysis and emit name the same cell.
     assert_eq!(
@@ -234,281 +232,12 @@ fn capture_edge_points_at_cell_region_not_content() {
          (the capturing closure is `drive`); edges={edges:?}",
         cell_r.0,
     );
-    // ...and NEVER at the content region (the pre-fix mis-pointing).
+    // ...and NEVER at the content region.
     assert!(
         !edges.iter().any(|&(_, src, _)| src == content_r),
         "no capture edge may point at leaf's CONTENT region r{} — that is the invisible- \
-         containment mis-pointing the re-point corrects; edges={edges:?}",
+         containment mis-pointing; edges={edges:?}",
         content_r.0,
-    );
-}
-
-// ── The forward cell's frame-held projection ──────────────────────────
-//
-// docs/impl/region/mechanism.md § "A compiled capture cell is frame-held exactly as
-// its binding is". The frame-exit relocation's count question is asked over the
-// frame's holder BINDINGS, and a binding names the closure region its forward cell
-// points at — never the cell's own. So without the projection below the cell region
-// has no holder at all, both admissions refuse it, and its binding-scope
-// `DecrefRegion` stays in the block a frame-replacing letrec-body tail call never
-// reaches — taking the closure the cell holds with it. These three pins read the
-// projection directly, on both halves and on the facet that must still refuse.
-
-/// Every compiled capture cell in `hir`, as (binding, cell region).
-fn compiled_cells(info: &RegionInfo) -> Vec<(Binding, Region)> {
-    info.begin_cell_regions
-        .values()
-        .flatten()
-        .copied()
-        .collect()
-}
-
-#[test]
-fn frame_held_names_a_sibling_captured_forward_cell() {
-    // The everyday non-cycle sibling capture: `go` calls `helper`, `helper` does not
-    // call back, so there is no SCC and no merge — `helper` simply keeps a forward
-    // cell for `go`'s benefit. Nothing here leaves the frame, so the cell must clear
-    // the SOLE-held half under `helper`'s own verdict: its holders are `helper`'s
-    // holders one indirection out (this frame's slot, plus the counted `closure ⊇
-    // cell` edge `go`'s env took).
-    //
-    // Neither member is recursive, which is what makes the projection load-bearing
-    // here: a SELF-recursive capturer's cell is claimed by the ownership forest's
-    // capture adopt instead (`capture_adopt_edges`, its own decref suppressed), so
-    // the relocation never has to reach it.
-    let (_hir, _arena, info) = pipeline(
-        "(defn h [n] \
-           (letrec [helper (fn [x] (when (%not (%int? x)) (error :x)) (%sub x 1)) \
-                    go (fn [m] (when (%not (%int? m)) (error :m)) (helper m))] \
-             (go n)))",
-    );
-    let cells = compiled_cells(&info);
-    assert_eq!(
-        cells.len(),
-        1,
-        "precondition: exactly one compiled cell — `helper`'s forward cell, kept \
-         because sibling `go` captures it; got {cells:?}",
-    );
-    let (helper, cell) = cells[0];
-    let content = info
-        .binding_source_regions
-        .get(&helper)
-        .cloned()
-        .unwrap_or_default();
-    for r in &content {
-        assert!(
-            info.frame_held_regions.contains(r),
-            "anchor: the binding's own closure region r{} is frame-held (nothing \
-             leaves the frame), so the cell's refusal cannot be blamed on the verdict; \
-             frame_held={:?}",
-            r.0,
-            info.frame_held_regions,
-        );
-    }
-    assert!(
-        info.frame_held_regions.contains(&cell),
-        "the forward cell r{} must be frame-held exactly as its binding {helper:?} is — \
-         no route reaches the cell that does not reach the binding; frame_held={:?}",
-        cell.0,
-        info.frame_held_regions,
-    );
-}
-
-#[test]
-fn frame_held_names_a_returned_capturers_forward_cell() {
-    // The RETURN face of the same projection. `go` is handed back, so escape's capture
-    // facet carries `helper` out with it — but by the return facet alone, which the
-    // admission allows: the callee reaches the cell through the counted `closure ⊇ cell`
-    // edge its env took, so the frame's release is not the last one standing. The cell
-    // must therefore carry its binding's verdict here too, or the relocation admits the
-    // closure and strands the cell that holds it — one region short of the cascade.
-    let (_hir, _arena, info) = pipeline(
-        "(defn h [n] \
-           (letrec [helper (fn [x] (when (%not (%int? x)) (error :x)) (%sub x 1)) \
-                    go (fn [m] (when (%not (%int? m)) (error :m)) \
-                         (if (%lt m 1) go (go (helper m))))] \
-             (go n)))",
-    );
-    let cells = compiled_cells(&info);
-    assert_eq!(
-        cells.len(),
-        1,
-        "precondition: exactly one compiled cell — `helper`'s forward cell; got {cells:?}",
-    );
-    let (helper, cell) = cells[0];
-    let content = info
-        .binding_source_regions
-        .get(&helper)
-        .cloned()
-        .unwrap_or_default();
-    for r in &content {
-        assert!(
-            info.frame_held_regions.contains(r),
-            "anchor: the binding's own closure region r{} leaves by the return facet \
-             and no other, so it is frame-held and the cell's verdict must match it; \
-             frame_held={:?}",
-            r.0,
-            info.frame_held_regions,
-        );
-    }
-    assert!(
-        info.frame_held_regions.contains(&cell),
-        "the forward cell r{} leaves by the RETURN facet and no other, exactly as its \
-         binding does, so it must be frame-held; frame_held={:?}",
-        cell.0,
-        info.frame_held_regions,
-    );
-}
-
-#[test]
-fn frame_held_names_a_yielded_capturers_forward_cell() {
-    // The FIBER face of the same projection. `go` is YIELDED, so escape's capture facet
-    // carries `helper` across the fiber frontier with it — a crossing the park counts a
-    // reference for (its `EmitEscape` retain going out, the resume value's own mint
-    // coming back), so it is not the uncounted borrow the admission guards against
-    // (docs/impl/region/mechanism.md § "A fiber crossing is a counted holder too").
-    // The cell must therefore carry its binding's verdict here as it does under the
-    // return facet; `frame_held_refuses_a_forward_cell_whose_binding_is_stored` below
-    // is the refusal that keeps the projection honest.
-    let mut symbols = SymbolTable::new();
-    let meta = crate::primitives::build_primitive_meta(&mut symbols);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
-    let (hir, arena) = compile_fhir(
-        "(fiber/new (fn () \
-           (letrec [helper (fn [x] (when (%not (%int? x)) (error :x)) (%sub x 1)) \
-                    go (fn [m] (when (%not (%int? m)) (error :m)) \
-                         (if (%lt m 1) :done (go (helper m))))] \
-             (begin (yield go) (go 3)))) \
-           |:yield|)",
-        &mut symbols,
-    );
-    let info = analyze_regions_with(&hir, &arena, pc.call_classification);
-    let cells = compiled_cells(&info);
-    assert_eq!(
-        cells.len(),
-        1,
-        "precondition: exactly one compiled cell — `helper`'s forward cell; got {cells:?}",
-    );
-    let (_helper, cell) = cells[0];
-    assert!(
-        info.frame_held_regions.contains(&cell),
-        "a forward cell r{} whose binding crosses the FIBER frontier must carry its \
-         binding's verdict — the crossing counts its own reference, so it is no \
-         uncounted second holder; frame_held={:?}",
-        cell.0,
-        info.frame_held_regions,
-    );
-}
-
-#[test]
-fn frame_held_refuses_a_forward_cell_whose_binding_is_stored() {
-    // The counterfactual: the projection carries the binding's verdict, so it must
-    // carry a REFUSAL too. `helper` is STORED into an aggregate, so escape marks it
-    // escaping by a CONTAINMENT facet — a holder no seam at the point counts. The cell
-    // must be refused there and its release must keep the baseline.
-    let mut symbols = SymbolTable::new();
-    let meta = crate::primitives::build_primitive_meta(&mut symbols);
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
-    let (hir, arena) = compile_fhir(
-        "(defn h [n] \
-           (letrec [helper (fn [x] (when (%not (%int? x)) (error :x)) (%sub x 1)) \
-                    go (fn [m] (when (%not (%int? m)) (error :m)) \
-                         (if (%lt m 1) :done (go (helper m))))] \
-             (begin (%pair helper nil) (go n))))",
-        &mut symbols,
-    );
-    let info = analyze_regions_with(&hir, &arena, pc.call_classification);
-    let cells = compiled_cells(&info);
-    assert_eq!(
-        cells.len(),
-        1,
-        "precondition: exactly one compiled cell — `helper`'s forward cell; got {cells:?}",
-    );
-    let (_helper, cell) = cells[0];
-    assert!(
-        !info.frame_held_regions.contains(&cell),
-        "a forward cell r{} whose binding is STORED must not clear the admission — the \
-         projection carries the binding's refusal as it carries its verdict; \
-         frame_held={:?}",
-        cell.0,
-        info.frame_held_regions,
-    );
-}
-
-/// Counter-factual for the destructure-binding-regions overwrite bug.
-///
-/// At top level, `(begin (def (a & r) (list 1 2 3)) (length r))` lowers
-/// to a letrec whose first init is the begin (which side-effects
-/// `binding_regions[r] = [list_region]` via the destructure) and whose
-/// subsequent inits include `r = nil` as the placeholder for the
-/// pattern binding. The letrec walk must UNION per-init contributions
-/// rather than overwrite: the `r = nil` init contributes no regions, so
-/// a blind insert would replace the destructure's `binding_regions[r]`
-/// with `[]`. That would leave the list's region's `decref_point` at the
-/// destructure's id (the post-pass that extends `decref_point` via
-/// binding uses skips `r` when its regions are empty). The runtime
-/// symptom (only with consumers that traverse the list via traits, like
-/// `(println r)`) is an arena::deref panic on a stale ptr — but the
-/// underlying analysis bug is independent of which consumer is used.
-///
-/// This test pins the analysis invariant directly: after region
-/// inference, every destructured binding's `binding_source_regions`
-/// must include the source value's region(s).
-#[test]
-fn letrec_init_does_not_overwrite_destructure_binding_regions() {
-    use crate::symbol::SymbolTable;
-    let mut symbols = SymbolTable::new();
-    // Multi-form source. The top-level compile-file-to-fhir letrec
-    // declares placeholder `r = nil` initializers for each pattern
-    // binding introduced by destructures across the whole file —
-    // those are the inits whose region contributions the letrec walk
-    // must union with (not overwrite) the destructure-assigned
-    // binding_regions[r].
-    let source =
-        "(begin (def (a & r) (list 1 2 3)) (length r)) (def (a b & r) (list 1 2)) (length r)";
-    let (hir, arena) = compile_fhir(source, &mut symbols);
-    let info = analyze_regions(&hir, &arena);
-    // Find the pattern binding `r` introduced by the destructure.
-    // The arena names it from the source symbol, so we look it up
-    // by name. The letrec also declares it; the destructure's
-    // pattern shares the same Binding id.
-    let r_binding = find_binding_by_name(&hir, "r", &arena).expect("expected binding `r`");
-    let r_regions = info
-        .binding_source_regions
-        .get(&r_binding)
-        .cloned()
-        .unwrap_or_default();
-    // Both `(list ...)` allocations feed `r` via destructure-rest
-    // at the same Binding id. The letrec walk unions per-init
-    // contributions so r tracks BOTH list regions. If the second
-    // init's walk overwrote the first's contribution, r would track
-    // only the latest list — so the FIRST list's region's
-    // decref_point would be left at its destructure id and
-    // `(length r)` inside the begin (which uses r while r still
-    // points into the first list) would read a freed page.
-    let list_calls = find_calls_to_primitive(&hir, "list", &arena);
-    assert_eq!(
-        list_calls.len(),
-        2,
-        "expected exactly two (list ...) calls in the test source"
-    );
-    let list_regions: Vec<_> = list_calls
-        .iter()
-        .filter_map(|id| info.alloc_region.get(id).copied())
-        .collect();
-    let r_covers: Vec<_> = list_regions
-        .iter()
-        .filter(|lr| r_regions.contains(lr))
-        .copied()
-        .collect();
-    assert_eq!(
-        r_covers.len(),
-        list_regions.len(),
-        "r's binding_source_regions={:?} must include EVERY list region the \
-             destructure could have bound it from; got list_regions={:?}, covered={:?}",
-        r_regions,
-        list_regions,
-        r_covers,
     );
 }
 
@@ -548,15 +277,13 @@ fn a_cell_release_lands_at_or_after_the_release_routed_through_it() {
     // A value release routed through an env cell READS the cell's page: it
     // loads the box raw and `result_region_of` unwraps it to the content. The
     // cell's own `DecrefCellRegion` FREES that page. So the cell's release must
-    // be placed at or after every such value release
-    // (docs/impl/region/cells.md § "A cell's release lands at or after every
-    // release routed through that cell").
+    // be placed at or after every such value release.
     //
     // The counter-factual this pins: both regions ride the binding's uses, so
-    // the binding-chain extension gives them the same point — but the VALUE
-    // region takes a second, later bound from its allocation site's last use
-    // (the `def` form's own value flows out to the enclosing `let`), which the
-    // phantom cell placeholder has no allocation site to receive. Without the
+    // the binding-chain extension gives them the same point. The VALUE region
+    // then takes a second, later bound from its allocation site's last use (the
+    // `def` form's own value flows out to the enclosing `let`). The phantom cell
+    // placeholder has no allocation site to receive that bound. Without the
     // clamp the cell dies at the capture and the value release then unwraps a
     // reclaimed page.
     let (hir, arena, _symbols) = crate::hir::testkit::HirFixture::new()

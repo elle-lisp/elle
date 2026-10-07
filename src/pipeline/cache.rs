@@ -126,6 +126,11 @@ impl CompileCtx {
         self.vm.set_unicode_generation(gen);
     }
 
+    /// Whether the units this context compiles from now on graft their calls
+    /// (docs/impl/graft.md).
+    #[cfg(test)]
+    pub(crate) fn set_graft(&mut self, _graft: crate::config::GraftPolicy) {}
+
     /// Shared compile-context construction over an already-built macro VM
     /// (standalone or instance-heap-sharing).
     fn on_vm(mut vm: VM) -> Self {

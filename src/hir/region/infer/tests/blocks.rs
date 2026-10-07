@@ -1,5 +1,5 @@
-// audited: 2026-09-23
-// docs/impl/region/mechanism.md
+// audited: 2026-10-06
+// docs/impl/region/anchors.md
 //! `block`/`break`: where a release the break jumps over is anchored, and where that window stops.
 //!
 //! A branch tests `u`, a parameter of a function nothing calls, and not a
@@ -7,8 +7,7 @@
 //! keeps only the branch it selects, so the `break` or the code after it would
 //! be gone. Nothing proves a parameter no call reaches. The block stays out of
 //! tail position, which `a_return_mint_in_the_body_does_not_refuse_the_window`
-//! covers. A helper takes an unused `&opt` parameter, because the graft refuses
-//! such a function and its call stays a call (docs/impl/graft.md).
+//! covers. The tests compile with the graft off, so a call stays a call.
 
 use super::*;
 
@@ -21,7 +20,7 @@ use super::*;
 // first point both the break path and the fall-through path reach) or later,
 // and its regions must flow out of the block so a binding naming the block's
 // value extends the release past its own uses.
-// See docs/impl/region/mechanism.md § "`break` transfers its value".
+// See docs/impl/region/anchors.md.
 
 /// The HirId of the first `Block` node in the tree, outermost-first.
 fn first_block(hir: &Hir) -> Option<HirId> {
@@ -150,8 +149,7 @@ fn break_value_region_outlives_a_later_read_of_the_block_result() {
 // (its releases run in another activation, against another frame's slots), and a
 // frame-replacing exit in the body (which leaves the anchor unreached on the
 // fall-through path).
-// See docs/impl/region/mechanism.md § "A release the break jumps over is not a
-// release".
+// See docs/impl/region/anchors.md.
 
 /// The HirId of the first `While`/`Loop` node, outermost-first.
 fn first_loop(hir: &Hir) -> Option<HirId> {
@@ -284,7 +282,7 @@ fn a_lambda_nested_in_the_block_keeps_its_own_activations_release() {
     let (hir, _arena, info) = pipeline(
         "(defn t [u] \
            (block (if (%int? u) (break 1) nil) \
-             (let [f (fn [&opt o] (let [x \"s\"] (%string? x)))] (f))) \
+             (let [f (fn [] (let [x \"s\"] (%string? x)))] (f))) \
            nil)",
     );
     let block = first_block(&hir).expect("a Block node");
@@ -309,7 +307,7 @@ fn a_frame_replacing_exit_in_the_body_refuses_the_window() {
     // path leaves through the callee instead of arriving at the exit label — a
     // release moved there would be dead on exactly the path that used to run it.
     let (hir, _arena, info) = pipeline(
-        "(defn g [n &opt o] n) \
+        "(defn g [n] n) \
          (defn h [n] (block (if (%int? n) (break 1) nil) \
                         (let [x \"s\"] (%string? x)) \
                         (g n)))",

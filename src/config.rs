@@ -67,7 +67,7 @@ pub fn init(config: Config) {
 }
 
 mod policy;
-pub use policy::{JitPolicy, MlirPolicy, WasmPolicy};
+pub use policy::{GraftPolicy, JitPolicy, MlirPolicy, WasmPolicy};
 
 mod keywords;
 pub use keywords::{dump_bits, trace_bits, DUMP_KEYWORDS, TRACE_KEYWORDS};

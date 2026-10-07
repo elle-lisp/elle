@@ -1,8 +1,8 @@
-(elle/epoch 12)
-# audited: 2026-09-16
-# A rest pattern's collection is built, not read out
-# (docs/impl/region/anchors.md § "A rest pattern's collection is built, not
-# read out").
+(elle/epoch 14)
+# audited: 2026-10-06
+# A rest pattern's collection is built, not read out, so its region takes a release.
+#
+# docs/impl/region/anchors.md
 #
 # Every other name a pattern binds is a projection of the scrutinee — an
 # uncounted read that owes no release. A rest name is the one that is not:
@@ -12,8 +12,8 @@
 # THE TRAP the (a)/(c)/(e) rows guard. The rate does not depend on the rest
 # name being READ. An unread name has no uses for the binding chain to extend a
 # release over, so the placeholder needs a base pin of its own — the destructure
-# node — or the shape that provokes the defect most often is the one the fix
-# misses.
+# node. Without it the most common shape, an unread rest name, is the one the
+# release misses.
 #
 # THE COUNTER-FACTUAL the controls catch. The rate is flat in the scrutinee's
 # length and the same for a pattern that binds the same names flatly, so an
@@ -34,6 +34,10 @@
 # binds none at all; keyed on a name, each would find none and strand. (v) is
 # the wildcard rest, where the cheaper answer applies and no build is emitted —
 # a row that reads the full rate there says the build came back.
+#
+# THE TRAP the sidecar dodges. A call to a function the compiler can see
+# becomes the function's body (docs/impl/graft.md), which removes the call the
+# (o), (p) and (u) rows are about. The sidecar turns the graft off.
 #
 # This file is the LEAK gauge — an `arena/region-count` delta over a fixed
 # window, BOUNDED for every subject. The soundness complement is
@@ -60,7 +64,7 @@
 
 # subjects ─────────────────────────────────────────────────────────────────────
 
-# (a) the issue's shape: an array rest whose name the body never reads. The
+# (a) an array rest whose name the body never reads. The
 # collection is built regardless, so nothing about the body can be what
 # releases it.
 (defn a-array-rest-unread []
@@ -84,7 +88,7 @@
     [x y & r] (length r)))
 
 # (e) a STRUCT rest builds a new struct of the keys the pattern did not name —
-# the same defect through `StructRest` rather than `ArrayMutSliceFrom`.
+# the same build through `StructRest` rather than `ArrayMutSliceFrom`.
 (defn e-struct-rest []
   (let [{:a x & r} rec]
     x))
@@ -154,7 +158,7 @@
 # (q) a NESTED rest sub-pattern. `& [p q]` builds a collection no single name
 # holds, and the names it binds project that collection rather than the
 # scrutinee, so the placeholder is keyed on the sub-pattern and unioned into
-# both of them (elle-lisp/elle#1127).
+# both of them.
 (defn q-nested-rest-unread []
   (let [[x & [p q]] arr]
     x))
@@ -269,7 +273,7 @@
 (def d-k (measure k-flat-pattern 20 window))
 (def d-l (measure l-list-rest 20 window))
 
-# (m) the issue's own shape, INLINE in the driving loop rather than inside a
+# (m) the (a) shape, INLINE in the driving loop rather than inside a
 # thunk the driver calls. A release hoisted to a loop node fires once per CALL
 # in the thunk form and reads zero there while the inline form reads the full
 # rate, so the subject is measured both ways.

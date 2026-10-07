@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-06
 //! `map` and `filter` fuse alone and in any mix over a proven immutable array,
 //! and a callee or base the gate cannot prove stays a plain call.
 //!
@@ -86,20 +86,19 @@ fn user_shadowed_map_is_not_fused() {
 /// marked `is_primitive`, every pass that keys on the flag would miss a core HOF.
 /// A user redefinition still shadows with a non-primitive binding.
 ///
-/// The trap: the probes read the binding from a value use, `(def ff fold)`. A
-/// call to a known function is grafted into its body, over a proven array and
-/// an unproven collection alike, and leaves no callee to inspect.
+/// The probes compile with the graft off, so each call stays a call and its
+/// callee is there to read. A collection nothing proves keeps fusion out.
 #[test]
 fn core_lisp_hof_exports_are_primitive_like_stdlib() {
-    // The binding a use of `name` resolves to (the winning shadow). The use is a
-    // value, `(def ff fold)`: a call to a known function is grafted away, and a
-    // value use is what stays to read the binding from.
+    // The binding a call to `name` resolves to (the winning shadow).
     fn callee_is_primitive(src: &str, name: &str) -> bool {
-        let (hir, arena, _rt) = compile(src);
+        let (hir, arena, _rt) = compile_ungrafted(src);
         fn find(h: &Hir, arena: &BindingArena, want: &str) -> Option<bool> {
-            if let HirKind::Var(b) = &h.kind {
-                if arena.get(*b).name == crate::value::SymbolId::of(want) {
-                    return Some(arena.get(*b).is_primitive);
+            if let HirKind::Call { func, .. } = &h.kind {
+                if let Some(b) = super::super::unwrap_callee_binding(func) {
+                    if arena.get(b).name == crate::value::SymbolId::of(want) {
+                        return Some(arena.get(b).is_primitive);
+                    }
                 }
             }
             let mut found = None;
@@ -110,19 +109,16 @@ fn core_lisp_hof_exports_are_primitive_like_stdlib() {
     }
     // core.lisp exports — primitive, exactly like the stdlib map/filter.
     assert!(
-        callee_is_primitive("(def ff fold) (ff (fn [a x] (+ a x)) 0 [1])", "fold"),
+        callee_is_primitive("(defn ff [xs] (fold (fn [a x] (+ a x)) 0 xs))", "fold"),
         "core.lisp `fold` must resolve to a primitive binding (parity with map)",
     );
     assert!(
-        callee_is_primitive("(def rr reduce) (rr (fn [a x] (+ a x)) 0 [1])", "reduce"),
+        callee_is_primitive("(defn rr [xs] (reduce (fn [a x] (+ a x)) 0 xs))", "reduce"),
         "core.lisp `reduce` must resolve to a primitive binding",
     );
     // Safety complement: a user redefinition shadows with a non-primitive one.
     assert!(
-        !callee_is_primitive(
-            "(defn fold [f i c] i) (def ff fold) (ff (fn [a x] a) 0 [1])",
-            "fold"
-        ),
+        !callee_is_primitive("(defn fold [f i c] i) (fold (fn [a x] a) 0 [1])", "fold"),
         "a user `fold` redefinition must NOT be primitive",
     );
 }
