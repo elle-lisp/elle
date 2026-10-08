@@ -1,4 +1,7 @@
-//! defmacro registration, macro? predicate, and conditional-body tests.
+// audited: 2026-10-07
+//! defmacro registration, the macro? predicate, and a macro body that branches.
+//!
+//! docs/macros.md
 
 use super::*;
 
@@ -57,15 +60,11 @@ fn test_macro_predicate_true() {
         let span = Span::new(0, 5, 1, 1);
 
         // Define a macro
-        let macro_def = MacroDef {
-            name: "my-macro".to_string(),
-            params: vec!["x".to_string()],
-            optional_params: vec![],
-            rest_param: None,
-            template: Syntax::symbol(&arena, "x", span),
-            cached_transformer: std::rc::Rc::new(RefCell::new(None)),
-        };
-        expander.define_macro(macro_def);
+        expander.define_macro(MacroDef::new(
+            "my-macro",
+            MacroParams::fixed(vec!["x".to_string()]),
+            Syntax::symbol(&arena, "x", span),
+        ));
 
         // (macro? my-macro) should return true
         let check = read_syntax(arena, "(macro? my-macro)", "<test>").unwrap();

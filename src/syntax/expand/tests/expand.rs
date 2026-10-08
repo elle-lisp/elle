@@ -1,4 +1,7 @@
-//! expand-macro primitive and transformer-cache behavior tests.
+// audited: 2026-10-07
+//! The expand-macro form, and how a macro's transformer cache fills and is reused.
+//!
+//! src/syntax/expand/AGENTS.md
 
 use super::*;
 
@@ -87,7 +90,7 @@ fn test_macro_cache_populated_after_first_call() {
         {
             let macro_def = expander.macros.get("double").unwrap();
             assert!(
-                macro_def.cached_transformer.borrow().is_none(),
+                macro_def.transformer().get().is_none(),
                 "cache should be empty before first invocation"
             );
         }
@@ -101,7 +104,7 @@ fn test_macro_cache_populated_after_first_call() {
         {
             let macro_def = expander.macros.get("double").unwrap();
             assert!(
-                macro_def.cached_transformer.borrow().is_some(),
+                macro_def.transformer().get().is_some(),
                 "cache should be populated after first invocation"
             );
         }
@@ -220,15 +223,11 @@ fn test_macro_arg_wrapping_does_not_leak() {
 
         // (defmacro idmac (x) x) — an identity template, so each expansion's only
         // per-call allocation is the `wrap_macro_arg_value` wrapper for the arg.
-        let macro_def = MacroDef {
-            name: "idmac".to_string(),
-            params: vec!["x".to_string()],
-            optional_params: vec![],
-            rest_param: None,
-            template: Syntax::symbol(&arena, "x", span),
-            cached_transformer: std::rc::Rc::new(RefCell::new(None)),
-        };
-        expander.define_macro(macro_def);
+        expander.define_macro(MacroDef::new(
+            "idmac",
+            MacroParams::fixed(vec!["x".to_string()]),
+            Syntax::symbol(&arena, "x", span),
+        ));
 
         // A macro call with a COMPOUND arg `(foo)` — wrap_macro_arg_value takes the
         // `_ => Value::syntax(...)` arm (an immediate arg would never allocate).

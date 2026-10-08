@@ -1,4 +1,7 @@
-//! Tests for macro expansion
+// audited: 2026-10-07
+//! Tests for macro expansion, over the expander, VM and arena `setup` builds.
+//!
+//! docs/macros.md
 
 use super::*;
 use crate::primitives::register_primitives;
@@ -6,7 +9,6 @@ use crate::reader::read_syntax;
 use crate::symbol::SymbolTable;
 use crate::syntax::{Span, Syntax, SyntaxArena, SyntaxKind};
 use crate::vm::VM;
-use std::cell::RefCell;
 
 mod defmacro;
 mod expand;
@@ -20,8 +22,8 @@ fn setup() -> (Expander, SymbolTable, VM, SyntaxArena) {
     let mut vm = VM::new();
     let _signals = register_primitives(&mut vm, &mut symbols);
     let arena = SyntaxArena::mint(vm.heap());
-    // Seed the expander's `eval_meta` with primitive metadata, mirroring
-    // `CompileCtx::new`. `eval_syntax` (macro transformer-body compilation)
+    // Seed the expander's `eval_meta` with primitive metadata, as a
+    // `CompileCtx` does for its own. `eval_syntax` (macro transformer-body compilation)
     // resolves primitives through `eval_meta`; a bare expander starts empty, so
     // a macro invocation would otherwise fail with "undefined variable" on the
     // first primitive in the transformer body.

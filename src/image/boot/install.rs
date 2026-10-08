@@ -1,17 +1,14 @@
-// audited: 2026-09-21
+// audited: 2026-10-07
 //! Read a hydrated boot image's macro table back into an expander.
 //!
 //! docs/impl/image/boot.md
 //!
-//! A macro entry is a struct, so reading one is four field lookups and a
+//! A macro entry is a struct, so reading one is five field lookups and a
 //! borrow of the tree it names. The tree stays where it is: the hydrated
 //! region is a process root, so it outlives every expansion that reads it.
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use crate::symbol::SymbolTable;
-use crate::syntax::{Expander, MacroDef};
+use crate::syntax::{Expander, MacroDef, MacroParams};
 use crate::value::fiberheap::FiberHeap;
 use crate::value::{TableKey, Value};
 
@@ -79,19 +76,16 @@ pub(super) fn macros(
 fn macro_def(heap: &mut FiberHeap, name: &str, entry: Value) -> Option<MacroDef> {
     let tree = field(entry, key::TEMPLATE)?;
     let template = *tree.as_syntax()?;
-    let transformer = field(entry, key::TRANSFORMER).filter(|v| !v.is_nil());
-    if let Some(v) = transformer {
+    let params = MacroParams::fixed(strings(entry, key::PARAMS))
+        .with_optional(strings(entry, key::OPTIONAL))
+        .with_rest(field_text(entry, key::REST));
+    let def = MacroDef::new(name, params, template);
+    if let Some(v) = field(entry, key::TRANSFORMER).filter(|v| !v.is_nil()) {
         let region = crate::value::arena::region_of(heap, v);
         crate::value::arena::incref_region(heap, region);
+        def.transformer().fill(v);
     }
-    Some(MacroDef {
-        name: name.to_string(),
-        params: strings(entry, key::PARAMS),
-        optional_params: strings(entry, key::OPTIONAL),
-        rest_param: field_text(entry, key::REST),
-        template,
-        cached_transformer: Rc::new(RefCell::new(transformer)),
-    })
+    Some(def)
 }
 
 /// A parameter list: the strings of the array the entry holds under `name`.

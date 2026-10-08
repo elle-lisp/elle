@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-07
 //! What a boot image carries that only this crate can see: transformer caches, the scope counter, and the stdlib's JIT tier.
 //!
 //! docs/impl/image/boot.md
@@ -44,7 +44,7 @@ fn macro_shape(rt: &mut Runtime) -> BTreeSet<(String, bool)> {
     rt.compile()
         .macros()
         .iter()
-        .map(|(name, def)| (name.clone(), def.cached_transformer.borrow().is_some()))
+        .map(|(name, def)| (name.clone(), def.transformer().get().is_some()))
         .collect()
 }
 

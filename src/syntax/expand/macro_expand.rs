@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-10-07
 //! Expands one macro call by running its transformer closure on the VM and
 //! deep-copying the result back to owned `Syntax`.
 //!
@@ -7,9 +7,9 @@
 //! docs/impl/region/model.md
 //!
 //! On first invocation, the macro body `(fn (params...) template)` is compiled
-//! and stored in `MacroDef.cached_transformer`. Subsequent invocations skip the
-//! full analyze/lower/emit pipeline and call the cached closure directly via
-//! `VM::call_closure`, passing arguments as `Value`s.
+//! and stored in the definition's `TransformerCell`. Subsequent invocations
+//! skip the full analyze/lower/emit pipeline and call the cached closure
+//! directly via `VM::call_closure`, passing arguments as `Value`s.
 //!
 //! Scope preservation: atom arguments (nil, bool, int, float, string, keyword)
 //! are passed as their direct `Value` equivalents — they don't participate in
@@ -25,14 +25,14 @@
 //! origin identifiers lose it, recovering their use-site scope sets exactly.
 //! A template binder therefore carries the intro scope while inbound
 //! identifiers do not, so under the subset resolution rule the binder cannot
-//! capture them (`tests/integration/macro_hygiene.rs`). `datum->syntax`
+//! capture them (tests/lang/hygiene.lisp). `datum->syntax`
 //! (scope_exempt) opts a node out of both operations — the deliberate-capture
 //! escape hatch.
 //!
-//! Arena management: two phases. Phase 1 (closure compilation) is NOT scoped —
-//! the cached transformer closure must survive every call, so it is allocated on
-//! the root FiberHeap via `alloc()` and reclaimed only at teardown
-//! (`release_cached_transformers`). The one-time compilation cost stays resident.
+//! Arena management: two phases. Phase 1 (closure compilation) runs outside any
+//! allocation scope, because the transformer must survive every call: the
+//! definition's transformer cell owns its region, and teardown releases it
+//! (`release_cached_transformers`).
 //! Phase 2 (closure call + result conversion) is a CLOSED ALLOCATION SCOPE
 //! (docs/impl/region/rules.md § "Macro expansion — a closed allocation scope"):
 //! a per-call mint log records every region the transformer mints, and after the
@@ -54,8 +54,7 @@ use crate::value::Value;
 use crate::vm::VM;
 
 /// Convert a macro argument Syntax node directly to a Value for passing
-/// to a cached closure call. Mirrors `wrap_macro_arg` but produces a
-/// `Value` instead of a `Syntax` node.
+/// to a cached closure call.
 ///
 /// Atoms become their direct Value equivalents. Symbols and compounds
 /// become `Value::syntax(arg)` to preserve scope sets through the
@@ -98,16 +97,11 @@ impl Expander {
     ///
     /// Cache hit: return the stored closure (cheap — `Value` is `Copy`). Cache
     /// miss: compile via `eval_syntax` and store into BOTH `macro_def`'s cell
-    /// (the within-call clone) and the authoritative `self.macros[name]` entry.
+    /// (the within-call clone) and the cell of the `self.macros[name]` entry.
     ///
-    /// The compiled closure lives in a solver-assigned region from the nested
-    /// compilation; that region is NEVER freed by dropping the `Value` (`Copy`,
-    /// no `Drop`). Whoever owns the surviving cache entry owns the region —
-    /// which is why prelude/core transformers are pre-compiled ONCE into the
-    /// persistent compilation-cache master (`precompile_transformers`) and
-    /// released at teardown (`release_cached_transformers`), instead of being
-    /// re-compiled into each per-compile `Expander` clone and orphaned when the
-    /// clone drops (the corpus-OOM per-compile leak).
+    /// The compiled closure lives in a region the nested compilation's solver
+    /// assigns. Dropping the `Value` releases nothing, because it is `Copy`, so
+    /// the cell owns that region's reference.
     /// NativeFn allocations inside the body (quasiquote `Value::syntax` wrappers,
     /// string literals) survive as that closure's bytecode constants, so they
     /// must share its region, not a transient one.
@@ -123,12 +117,12 @@ impl Expander {
         if let Some(v) = self
             .macros
             .get(&macro_def.name)
-            .and_then(|d| *d.cached_transformer.borrow())
+            .and_then(|d| d.transformer().get())
         {
-            *macro_def.cached_transformer.borrow_mut() = Some(v);
+            macro_def.transformer().fill(v);
             return Ok(v);
         }
-        if let Some(v) = *macro_def.cached_transformer.borrow() {
+        if let Some(v) = macro_def.transformer().get() {
             return Ok(v);
         }
 
@@ -137,18 +131,19 @@ impl Expander {
         // the working arena; only `template`, which came from the template
         // arena, outlives it.
         let arena = self.arena();
-        let mut param_items: Vec<Syntax> = macro_def
-            .params
+        let params = &macro_def.params;
+        let mut param_items: Vec<Syntax> = params
+            .required()
             .iter()
             .map(|p| Syntax::symbol(&arena, p, *span))
             .collect();
-        if !macro_def.optional_params.is_empty() {
+        if !params.optional().is_empty() {
             param_items.push(Syntax::symbol(&arena, "&opt", *span));
-            for p in &macro_def.optional_params {
+            for p in params.optional() {
                 param_items.push(Syntax::symbol(&arena, p, *span));
             }
         }
-        if let Some(ref rest_name) = macro_def.rest_param {
+        if let Some(rest_name) = params.rest() {
             param_items.push(Syntax::symbol(&arena, "&", *span));
             param_items.push(Syntax::symbol(&arena, rest_name, *span));
         }
@@ -170,9 +165,9 @@ impl Expander {
         // Store in the within-call clone AND write back to the authoritative
         // entry so subsequent expansions (this pipeline call, or — for the
         // master — every future compile) reuse it.
-        *macro_def.cached_transformer.borrow_mut() = Some(closure_val);
-        if let Some(original) = self.macros.get_mut(&macro_def.name) {
-            *original.cached_transformer.borrow_mut() = Some(closure_val);
+        macro_def.transformer().fill(closure_val);
+        if let Some(original) = self.macros.get(&macro_def.name) {
+            original.transformer().fill(closure_val);
         }
         Ok(closure_val)
     }
@@ -186,9 +181,9 @@ impl Expander {
         vm: &mut VM,
     ) -> Result<Syntax, String> {
         // Check arity: required params must be present, optional and rest are flexible
-        let min_args = macro_def.params.len();
-        let max_args = min_args + macro_def.optional_params.len();
-        if macro_def.rest_param.is_some() {
+        let min_args = macro_def.params.required().len();
+        let max_args = min_args + macro_def.params.optional().len();
+        if macro_def.params.rest().is_some() {
             if args.len() < min_args {
                 return Err(format!(
                     "Macro '{}' expects at least {} arguments, got {}",
@@ -261,8 +256,8 @@ impl Expander {
             ));
         }
 
-        let opt_start = macro_def.params.len();
-        let opt_end = opt_start + macro_def.optional_params.len();
+        let opt_start = macro_def.params.required().len();
+        let opt_end = opt_start + macro_def.params.optional().len();
         let opt_provided = args.len().min(opt_end);
 
         // Hygiene (sets of scopes): mint this expansion's intro scope and
@@ -302,12 +297,11 @@ impl Expander {
                     region,
                 )
             };
-            let mut arg_values: Vec<Value> =
-                args[..macro_def.params.len()].iter().map(stamp).collect();
+            let mut arg_values: Vec<Value> = args[..opt_start].iter().map(stamp).collect();
             for arg in &args[opt_start..opt_provided] {
                 arg_values.push(stamp(arg));
             }
-            if macro_def.rest_param.is_some() {
+            if macro_def.params.rest().is_some() {
                 for arg in &args[opt_end..] {
                     arg_values.push(stamp(arg));
                 }

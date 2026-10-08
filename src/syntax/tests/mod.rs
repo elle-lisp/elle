@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-10-07
 //! Tests for syntax nodes: construction, scopes, the printed form the reader
 //! reads back, and expansion.
 //!
@@ -331,14 +331,8 @@ fn test_expander_quote_not_expanded() {
 
 /// Build a `MacroDef` with no optional or rest parameters.
 fn macro_def(name: &str, params: &[&str], template: Syntax) -> MacroDef {
-    MacroDef {
-        name: name.to_string(),
-        params: params.iter().map(|p| p.to_string()).collect(),
-        optional_params: vec![],
-        rest_param: None,
-        template,
-        cached_transformer: std::rc::Rc::new(std::cell::RefCell::new(None)),
-    }
+    let params = params.iter().map(|p| p.to_string()).collect();
+    MacroDef::new(name, MacroParams::fixed(params), template)
 }
 
 #[test]
@@ -349,8 +343,8 @@ fn test_macro_definition_and_expansion() {
         let _signals = crate::primitives::register_primitives(&mut vm, &mut symbols);
         let (mut expander, a) = expander_on(&mut vm);
         // Seed `eval_meta` (primitive metadata) so compiling the macro's
-        // transformer body resolves primitives — what `CompileCtx::new` does.
-        // A bare `Expander::new()` starts with empty `eval_meta`.
+        // transformer body resolves primitives, as a `CompileCtx` does when
+        // it builds its expander. A bare expander starts with it empty.
         expander.set_eval_meta(crate::primitives::build_primitive_meta(&mut symbols));
         let span = Span::new(0, 5, 1, 1);
 

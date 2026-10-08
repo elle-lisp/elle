@@ -1,13 +1,10 @@
-// audited: 2026-09-21
+// audited: 2026-10-07
 //! Hygienic macro expansion: the macro table, the scope counter hygiene turns
 //! on, and the walk that rewrites a form until no macro heads it.
 //!
 //! docs/macros.md
 //! docs/impl/syntax.md
 //!
-//! A `MacroDef` is its parameter lists and its template tree; the compiled
-//! transformer beside them is a cache filled on first expansion, because a
-//! template literal's scopes are the ones its real expansion context gives it.
 //! Scope ids come off one counter, and an instance that installed a boot image
 //! raises that counter past every scope the image's templates carry.
 
@@ -16,45 +13,23 @@ mod compiletime;
 mod define;
 mod introspection;
 mod macro_expand;
+mod macrodef;
 mod quasiquote;
 mod syntaxcase;
 #[cfg(test)]
 mod tests;
 
+pub use macrodef::{MacroDef, MacroParams};
+
 use super::{ScopeId, Span, Syntax, SyntaxArena, SyntaxKind};
 use crate::primitives::def::PrimitiveMeta;
 use crate::symbol::SymbolTable;
 use crate::vm::VM;
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
 /// Maximum macro expansion depth before erroring (prevents infinite expansion)
 const MAX_MACRO_EXPANSION_DEPTH: usize = 200;
-
-/// Macro definition stored as Syntax
-#[derive(Debug, Clone)]
-pub struct MacroDef {
-    pub name: String,
-    pub params: Vec<String>,
-    /// Optional parameters (after `&opt`, before any `&` rest).
-    pub optional_params: Vec<String>,
-    pub rest_param: Option<String>,
-    pub template: Syntax,
-    /// Cached compiled transformer closure (compiled from `(fn (params...)
-    /// template)`), populated LAZILY on first expansion so its quoted-literal
-    /// hygiene captures the real expansion context (eager compilation at a
-    /// different point mis-scopes template literals — e.g. `each`'s `'in`).
-    ///
-    /// `Rc<RefCell<…>>` so the cell is SHARED across `Expander`/`MacroDef`
-    /// clones: every per-compile clone of the compilation-cache master aliases
-    /// the master's cell, so the first compile that expands the macro fills it
-    /// ONCE and every later compile reuses it. Without the share, each clone
-    /// re-compiled the transformer into a fresh region and orphaned it on clone
-    /// drop (`Value` is `Copy`, no decref) — the corpus-OOM per-compile leak. The
-    /// owning region is released at teardown by `release_cached_transformers`.
-    pub(crate) cached_transformer: std::rc::Rc<RefCell<Option<crate::value::Value>>>,
-}
 
 /// Hygienic macro expander
 pub struct Expander {
@@ -267,7 +242,7 @@ impl Expander {
     /// SAME `Rc` cell, are long gone).
     pub fn release_cached_transformers(&mut self, heap: &mut crate::value::fiberheap::FiberHeap) {
         for def in self.macros.values() {
-            if let Some(v) = def.cached_transformer.borrow_mut().take() {
+            if let Some(v) = def.transformer().take() {
                 let r = crate::value::arena::region_of(heap, v);
                 crate::value::arena::decref_region(heap, r);
             }

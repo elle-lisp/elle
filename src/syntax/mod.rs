@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-10-07
 //! Syntax tree representation for Elle source code
 //!
 //! docs/impl/syntax.md
@@ -27,7 +27,7 @@ mod node;
 mod span;
 
 pub use arena::{thread_arena, SyntaxArena, SyntaxHeap};
-pub use expand::{Expander, MacroDef};
+pub use expand::{Expander, MacroDef, MacroParams};
 pub use node::{SeqCtor, SynRef, Syntax, SyntaxKind, WrapCtor};
 pub use span::Span;
 
