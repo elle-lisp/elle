@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-07
 // src/pipeline/AGENTS.md
 //! `CompileCtx`: one instance's compile-time state.
 //!
@@ -393,16 +393,17 @@ impl CompileCtx {
         self.expander.set_eval_meta(eval_meta);
     }
 
-    /// Release the region reference each pre-compiled macro transformer holds.
-    /// Part of the process-teardown sweep: those transformer closure `Value`s
-    /// are `Copy`, so a plain drop would never decref them and they would survive
-    /// teardown as residue. The `CompileCtx` is this instance's sole holder, so
-    /// the decref is balanced. Run while the heap is still alive (before drop).
+    /// Release what this context holds on the heap from Rust, ahead of the
+    /// process-teardown sweep. Each macro transformer's cell would release on
+    /// its own when the context drops, which is after the sweep has counted the
+    /// residue. So the master expander empties its cells here, and the macro
+    /// VM drops the `eval` expander a macro body may have built.
     ///
     /// The macro VM's JIT and SPIR-V caches pin code regions from Rust, so they
     /// go here too (docs/impl/jit.md).
-    pub fn release(&mut self, heap: &mut crate::value::fiberheap::FiberHeap) {
-        self.expander.release_cached_transformers(heap);
+    pub fn release(&mut self) {
+        self.expander.release_cached_transformers();
+        self.vm.eval_expander = None;
         self.vm.clear_code_pins();
     }
 

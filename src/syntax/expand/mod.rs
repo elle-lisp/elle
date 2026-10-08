@@ -233,19 +233,13 @@ impl Expander {
         Ok(())
     }
 
-    /// Release the region reference each cached transformer holds, dropping the
-    /// cache entries to `None`. The transformer closures live in regions that a
-    /// plain `Drop` of the `Value` (it is `Copy`) would never decref, so without
-    /// this they survive teardown as residue. Called from `CompileCtx::release`
-    /// on the instance's master expander at teardown, when it is the last holder
-    /// of these shared transformer cells (per-compile clones, which share the
-    /// SAME `Rc` cell, are long gone).
-    pub fn release_cached_transformers(&mut self, heap: &mut crate::value::fiberheap::FiberHeap) {
+    /// Release the region reference each cached transformer holds, and leave
+    /// every cell empty. A cell releases on its own when its last clone drops,
+    /// but the instance's master expander drops after teardown has counted the
+    /// residue. `CompileCtx::release` calls this first, so the count sees none.
+    pub fn release_cached_transformers(&mut self) {
         for def in self.macros.values() {
-            if let Some(v) = def.transformer().take() {
-                let r = crate::value::arena::region_of(heap, v);
-                crate::value::arena::decref_region(heap, r);
-            }
+            def.transformer().release();
         }
     }
 

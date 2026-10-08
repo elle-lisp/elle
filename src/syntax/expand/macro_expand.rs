@@ -31,8 +31,8 @@
 //!
 //! Arena management: two phases. Phase 1 (closure compilation) runs outside any
 //! allocation scope, because the transformer must survive every call: the
-//! definition's transformer cell owns its region, and teardown releases it
-//! (`release_cached_transformers`).
+//! definition's transformer cell owns its region, and the last clone of the
+//! definition to drop releases it (src/syntax/expand/AGENTS.md).
 //! Phase 2 (closure call + result conversion) is a CLOSED ALLOCATION SCOPE
 //! (docs/impl/region/rules.md § "Macro expansion — a closed allocation scope"):
 //! a per-call mint log records every region the transformer mints, and after the
@@ -96,8 +96,10 @@ impl Expander {
     /// template)`, returning the closure `Value`.
     ///
     /// Cache hit: return the stored closure (cheap — `Value` is `Copy`). Cache
-    /// miss: compile via `eval_syntax` and store into BOTH `macro_def`'s cell
-    /// (the within-call clone) and the cell of the `self.macros[name]` entry.
+    /// miss: compile via `eval_syntax` and fill `macro_def`'s cell. Every clone
+    /// of the definition shares that cell, the table's entry among them. A
+    /// `defmacro` of the same name that ran during the compile made a new
+    /// definition, whose cell stays empty until its own first expansion.
     ///
     /// The compiled closure lives in a region the nested compilation's solver
     /// assigns. Dropping the `Value` releases nothing, because it is `Copy`, so
@@ -112,16 +114,6 @@ impl Expander {
         symbols: &mut SymbolTable,
         vm: &mut VM,
     ) -> Result<Value, String> {
-        // Prefer the authoritative map entry's cache (it may have been compiled
-        // by a nested expansion since `macro_def` was cloned) over the clone's.
-        if let Some(v) = self
-            .macros
-            .get(&macro_def.name)
-            .and_then(|d| d.transformer().get())
-        {
-            macro_def.transformer().fill(v);
-            return Ok(v);
-        }
         if let Some(v) = macro_def.transformer().get() {
             return Ok(v);
         }
@@ -162,13 +154,10 @@ impl Expander {
 
         let closure_val = crate::pipeline::eval_syntax(fn_expr, self, symbols, vm)?;
 
-        // Store in the within-call clone AND write back to the authoritative
-        // entry so subsequent expansions (this pipeline call, or — for the
-        // master — every future compile) reuse it.
-        macro_def.transformer().fill(closure_val);
-        if let Some(original) = self.macros.get(&macro_def.name) {
-            original.transformer().fill(closure_val);
-        }
+        // Safe: the closure was compiled and run on `vm`. A VM's heap is leaked
+        // for the process or owned by its instance, which drops it after every
+        // VM and expander it holds, so the heap outlives the cell.
+        unsafe { macro_def.transformer().fill(vm.heap_ptr, closure_val) };
         Ok(closure_val)
     }
 

@@ -40,10 +40,9 @@ pub(super) fn check_names(boot: &Boot, symbols: &SymbolTable) -> Result<(), Imag
 /// Define every macro the image carries on `expander`.
 ///
 /// Each filled transformer cell takes a reference to the region its closure
-/// lives in — the image's own — because the teardown that empties these cells
-/// releases one per cell (`Expander::release_cached_transformers`). Without the
-/// reference here that release would decref the whole boot graph once per
-/// macro.
+/// lives in — the image's own — because a cell releases one when it empties,
+/// at teardown or when its last definition drops. Without the reference here
+/// that release would decref the whole boot graph once per macro.
 pub(super) fn macros(
     heap: &mut FiberHeap,
     boot: &Boot,
@@ -83,7 +82,9 @@ fn macro_def(heap: &mut FiberHeap, name: &str, entry: Value) -> Option<MacroDef>
     if let Some(v) = field(entry, key::TRANSFORMER).filter(|v| !v.is_nil()) {
         let region = crate::value::arena::region_of(heap, v);
         crate::value::arena::incref_region(heap, region);
-        def.transformer().fill(v);
+        // Safe: the transformer is in the image's region on `heap`, and the
+        // instance this installs into owns that heap and drops it last.
+        unsafe { def.transformer().fill(heap, v) };
     }
     Some(def)
 }

@@ -5,6 +5,7 @@
 //! src/syntax/expand/AGENTS.md
 
 use super::Syntax;
+use crate::value::fiberheap::FiberHeap;
 use crate::value::Value;
 use std::cell::Cell;
 use std::rc::Rc;
@@ -92,23 +93,64 @@ impl MacroDef {
 /// ones its real expansion context gives it. It is shared by every clone of
 /// its definition, so the first compile that expands the macro fills it once
 /// and every later compile reuses it.
+///
+/// A filled cell owns one reference to the transformer's region, and the last
+/// clone to drop gives it back on the heap the transformer was compiled on.
 #[derive(Clone, Default)]
-pub(crate) struct TransformerCell(Rc<Cell<Option<Value>>>);
+pub(crate) struct TransformerCell(Rc<Slot>);
 
 impl TransformerCell {
     /// The compiled transformer, if an expansion has compiled it.
     pub(crate) fn get(&self) -> Option<Value> {
-        self.0.get()
+        self.0.filled.get().map(|f| f.value)
     }
 
-    /// Store the compiled transformer.
-    pub(crate) fn fill(&self, value: Value) {
-        self.0.set(Some(value));
+    /// Store a compiled transformer, and take over one reference to its region.
+    ///
+    /// # Safety
+    /// `value` must live on `heap`, and `heap` must outlive every clone of this
+    /// cell that still holds it.
+    pub(crate) unsafe fn fill(&self, heap: *mut FiberHeap, value: Value) {
+        debug_assert!(self.get().is_none(), "a transformer cell is filled once");
+        self.0.release();
+        self.0.filled.set(Some(Filled { value, heap }));
     }
 
-    /// Empty the cell, and answer what it held.
-    pub(crate) fn take(&self) -> Option<Value> {
-        self.0.take()
+    /// Give back the region reference, and leave the cell empty for every
+    /// clone that shares it.
+    pub(crate) fn release(&self) {
+        self.0.release();
+    }
+}
+
+/// What a filled cell holds: the closure, and the heap whose region it is in.
+#[derive(Clone, Copy)]
+struct Filled {
+    value: Value,
+    heap: *mut FiberHeap,
+}
+
+/// The storage every clone of one cell shares.
+#[derive(Default)]
+struct Slot {
+    filled: Cell<Option<Filled>>,
+}
+
+impl Slot {
+    fn release(&self) {
+        if let Some(Filled { value, heap }) = self.filled.take() {
+            // Safe: `fill`'s contract keeps the heap alive while a clone of
+            // the cell holds a transformer on it.
+            let heap = unsafe { &mut *heap };
+            let region = crate::value::arena::region_of(heap, value);
+            crate::value::arena::decref_region(heap, region);
+        }
+    }
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        self.release();
     }
 }
 
