@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-07
 //! Unit tests of a runtime's lifecycle, its root entry and the regions its programs own.
 //!
 //! src/runtime.rs
@@ -16,6 +16,7 @@ fn cons() -> HeapObject {
 
 mod heaps;
 mod lifecycle;
+mod macros;
 mod operandstack;
 mod ownership;
 mod rootentry;

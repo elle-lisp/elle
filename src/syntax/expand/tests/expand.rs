@@ -255,3 +255,31 @@ fn test_macro_arg_wrapping_does_not_leak() {
         );
     });
 }
+
+/// A `defmacro` of the same name that runs while a transformer compiles
+/// defines a new macro, and the next call expands through the new one.
+///
+/// The counter-factual is a first expansion that stores its transformer in
+/// whichever definition holds the name once the compile returns. The new
+/// definition then inherits the old transformer, `(foo 2)` expands to 1, and
+/// two cells own one reference to the old transformer's region.
+#[test]
+fn a_macro_redefined_while_its_transformer_compiles_expands_through_the_new_definition() {
+    crate::value::arena::with_test_region(|| {
+        let (mut expander, mut symbols, mut vm, arena) = setup();
+        let mut expand = |src: &str| {
+            let form = read_syntax(arena, src, "<test>").unwrap();
+            expander
+                .expand(form, &mut symbols, &mut vm)
+                .unwrap()
+                .to_string()
+        };
+        expand("(defmacro foo (x) (begin (defmacro foo (y) 2) 1))");
+        assert_eq!(expand("(foo 1)"), "1", "the first call runs the first body");
+        assert_eq!(
+            expand("(foo 2)"),
+            "2",
+            "the second call runs the definition the first one's compile made"
+        );
+    });
+}
