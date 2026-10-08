@@ -168,3 +168,40 @@ fn a_transformer_is_released_on_the_heap_it_was_compiled_on() {
         "the release reached the compile context's heap"
     );
 }
+
+// A transformer that runs `eval` compiles the inner macro's transformer while
+// the outer expansion's allocation scope is open, and that scope's reclaim
+// balances every reference a scan of the heap cannot explain. A cell's
+// reference is held from Rust. The nested `eval` builds an expander of its
+// own, which the outer one replaces on the VM, so the inner cell drops after
+// the reclaim has run.
+//
+// The trap is a reclaim that counts the cell's reference as scratch: it frees
+// the inner transformer, and the cell's release then decrefs a freed region.
+// A debug build stops on that over-free; a release build counts it.
+#[test]
+fn a_transformer_compiled_inside_another_expansion_is_released_once() {
+    let mut rt = Runtime::without_stdlib();
+    let over_frees = rt.heap().over_frees();
+    {
+        let (vm, symbols, cctx) = rt.parts();
+        let value = eval_all(
+            "(eval '(begin \
+               (defmacro outer [] \
+                 (begin (eval '(begin (defmacro inner [x] x) (inner 1))) 42)) \
+               (outer)))",
+            symbols,
+            vm,
+            cctx,
+            "<macros>",
+        )
+        .expect("runs");
+        assert_eq!(value.as_int(), Some(42));
+    }
+    assert_eq!(rt.heap().over_frees(), over_frees, "a release ran twice");
+    assert_eq!(
+        rt.teardown().live_regions,
+        0,
+        "a transformer compiled inside another expansion outlived teardown"
+    );
+}
