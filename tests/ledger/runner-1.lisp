@@ -191,7 +191,6 @@
 ["tests/impl/send-lir.lisp" :objects 327]
 ["tests/impl/snapdiff.lisp" :objects 733]
 ["tests/impl/spawn-config-region.lisp" :objects 138]
-["tests/impl/spawn-lir-closure-ref.lisp" :objects 28]
 ["tests/impl/squelch-tail-restart-leak.lisp" :objects 327]
 ["tests/impl/string-push-value.lisp" :objects 268]
 ["tests/impl/sync-keys.lisp" :objects 184]
