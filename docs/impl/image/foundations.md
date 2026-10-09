@@ -1,6 +1,6 @@
 # Foundations
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-10-06 -->
 
 Five representation fixes the image needs: each pays at runtime today, and each
 deletes image machinery.
@@ -12,7 +12,7 @@ the image first would mean shipping remap passes, re-sort passes, and the
 syntax and LIR codecs whose only purpose is to compensate for representations
 we intend to fix anyway.
 
-[image.md](../image.md) owns the design these four serve, and
+[image.md](../image.md) owns the design these five serve, and
 [plan.md](plan.md) records the order they landed in.
 
 ## Stable symbol identity — landed
@@ -56,26 +56,25 @@ blueprint into the instance region on every closure creation — 13 refcount
 bumps and two Rust-heap allocations apiece, in a `HeapObject` variant whose 288
 bytes set the size of every other variant.
 
-A code object is now three things
-([region/template.md](../region/template.md) owns the argument): a compile-time
-blueprint, a `CodePayload` holding every variable-length field inline in region
-pages, and a two-word region-resident header naming that payload. The payload
-is materialized once per blueprint and shared, so `MakeClosure` copies two
-words and takes one cross-region reference rather than copying a function's
-bytecode per iteration of a loop that builds a closure. Payoff for images: the
-payload is body data — bytecode, constants, name and doc as region strings,
-masks and release tables as inline slices, and source locations as a sorted
+A code object is now two things
+([region/template.md](../region/template.md) owns the argument): a
+`CodePayload` holding every field inline in region pages, and a one-word
+region-resident header naming that payload. The emitter writes a compile
+unit's payloads into one code region, so `MakeClosure` copies one word and
+takes one cross-region reference rather than copying a function's bytecode per
+iteration of a loop that builds a closure. Payoff for images: the payload is
+body data — bytecode, constants, name and doc as region strings, masks and
+release tables as inline slices, and source locations as a sorted
 `RegionSlice<LocEntry>` over an interned file table, replacing a
 `HashMap<usize, SourceLoc>` whose `String` file names could not be sealed at
 any price.
 
-The header keeps one `Rc` to its blueprint, for the four questions the payload
-cannot yet answer: the nested-lambda blueprints a `MakeClosure` indexes, the
+The header used to keep an `Rc` to a compile-time blueprint, for four questions
+the payload could not answer: the nested lambdas a `MakeClosure` indexes, the
 LIR the JIT promotes from, the defining syntax, and the SPIR-V cache. The
-syntax foundation removed one; the image milestone's own dump removed the
-second by making child templates body data; the third is the GPU cache the
-design drops. The LIR foundation below is the last of them, and it takes the
-`Rc` with it.
+syntax foundation removed one, the child table another, and the SPIR-V cache
+moved to the VM. The LIR foundation below answered the last from the payload
+and deleted the blueprint.
 
 ## Region-native syntax — landed
 
@@ -106,14 +105,14 @@ Hygiene scope ids minted by the expander remain process-local counters; the
 image records a scope watermark so a fresh expander mints above every scope
 baked into persisted syntax.
 
-## Region-native LIR — to land
+## Region-native LIR — landed
 
-The JIT compiles from `lir_function`: a Rust-heap `LirFunction` hanging off the
-blueprint every code object still carries. It is the last of the four questions
-that blueprint answers (§ "Region-native closure templates"), so it is what
-keeps `TemplateProto` alive — and `TemplateProto` is a second copy of the
-bytecode, the constants, the masks and the region tables the payload already
-holds region-natively.
+A code payload carries its function's LIR as region-native records, and the
+JIT, the other backends, `send`, introspection and the image all read it there
+([lir.md](../lir.md) § "The frozen form"). The emitter writes each payload into
+its compile unit's code region, so no compile-time blueprint holds a second
+copy. The lowerer builds the same records in a working region from the start
+([lir.md](../lir.md) § "The working form"), so no Rust-heap form of LIR is left.
 
 Four things the port buys. None is a compile-time number;
 [measurements.md](measurements.md) item 7 measured those, and they are real but
@@ -130,16 +129,52 @@ small.
 - **One portability rule.** Sealed region data crosses a worker, an image and a
   socket the way every other value does. The hand-written `Send` claim on
   `JitTask` becomes a property of the type instead of a comment.
-- **Allocation the project can see.** Building the boot sources' LIR costs
-  21,281 `malloc` calls, which no gauge the region system owns can see. As
-  region pages they answer to `--region-page-size`, `--page-pool-max`,
-  `arena/page-claims`, the leak suite, `--trace=scrub` and `--trace=guardfree`.
+- **Allocation the project can see.** Building the boot sources' LIR in a
+  Rust-heap working form cost 21,281 `malloc` calls, and no gauge the region
+  system owns could see one of them. Built in a working region, the LIR answers
+  to `--region-page-size`, `--page-pool-max`, `arena/page-claims`, the leak
+  suite, `--trace=scrub` and `--trace=guardfree`.
 
-Two things stay work rather than argument. The JIT worker runs on another
+Two things stayed work rather than argument. The JIT worker runs on another
 thread and a region belongs to one `RegionStore`, so a promotion still copies
 its function out — 8.7 ns an instruction against the Rust clone's 13.8 ns, but
-a copy either way. And the passes that rewrite LIR in place also resize it,
-which a fixed-extent slice turns into build-then-materialize. Syntax met that
-wall and answered it by copying as it stamps ([syntax.md](../syntax.md)); the
-better answer is a slice that grows in its own region, which no foundation has
-needed yet.
+a copy either way. And the lowerer splices into blocks it has already
+finished, which a fixed-extent slice cannot take. Syntax met that wall and
+answered it by copying as it stamps ([syntax.md](../syntax.md)). LIR answers it
+with a slice that grows in its own region, `RegionVec`, which
+[measurements.md](measurements.md) item 8 measured at parity before the
+lowerer moved onto it.
+
+### The shape
+
+The node [measurements.md](measurements.md) item 7 prototyped is the shape, and
+[lir.md](../lir.md) § "The frozen form" owns its details. An instruction is a
+48-byte `repr(C)` record with no implicit padding, and its variable-length
+operands sit in one pool per function, named by index. A function refers to its
+own parts by index everywhere, so only its top-level slices are pointers. An
+instruction page therefore carries no relocation slot and stays clean in an
+image. A reader decodes a record into a borrowed `InstrRef` with safe Rust over
+slices, so a corrupt index panics where it is read and the verifier need not
+fault in LIR pages to bound one.
+
+### Landing
+
+The port lands as a seam and then three stages, each green on its own:
+
+1. **One read form** — landed. Freezing turns a lowered function into the
+   records, and every reader except the lowerer reads them through `LirView`.
+   `send`'s LIR codec is deleted, because a frozen function carries its values
+   in a table that crosses through the ordinary value walk.
+2. **LIR in the payload** — landed. The code payload carries the records as
+   body data, so a closure hydrated from an image reaches the JIT. This is the
+   image's goal.
+3. **Retire `TemplateProto`** — landed. A code object is one payload slice in
+   its compile unit's code region, and the payload cache, the blueprint arm of
+   every header and the second copy of the bytecode are gone.
+4. **A region-native lowerer** — landed. The lowerer builds the records in a
+   working region, through slices that grow, and freezes each function as it
+   finishes. `LirInstr`, `LirFunction`, `BasicBlock`, `SpannedInstr`,
+   `LirModule` and `LirConst` are gone: `InstrRef` is the one instruction type,
+   built by the lowerer and decoded by every reader.
+
+[plan.md](plan.md) records the pins each stage lands with.

@@ -1,4 +1,4 @@
-// audited: 2026-09-20
+// audited: 2026-10-06
 //! Rust host demo — embeds Elle as a scripting engine, walking every step of
 //! the lifecycle a host owes.
 //!
@@ -74,7 +74,7 @@ fn main() {
         let (vm, symbols, cctx) = rt.parts();
         let compiled =
             compile_file(&source, symbols, cctx, "hello.lisp").expect("compilation failed");
-        vm.execute_scheduled(&compiled.bytecode, cctx)
+        vm.execute_scheduled(&compiled, cctx)
             .expect("execution failed")
     };
 

@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 // What a compiled call does with the signal a primitive raised, and with a
 // closure whose environment outlived its region.
 //
@@ -201,6 +201,12 @@ fn a_suspend_on_its_own_argument_records_nothing_to_release() {
 // panic is too — the two below run in both profiles because they assert that
 // the guard stays quiet, which a release build's no-op also does.
 
+/// An empty nullary code object on `heap`, for a closure whose body never runs.
+fn nullary(heap: &mut crate::value::fiberheap::FiberHeap) -> crate::value::TemplateRef {
+    crate::value::CodeBuilder::new(Vec::new(), crate::value::Arity::Exact(0), Vec::new())
+        .build(heap)
+}
+
 #[cfg(debug_assertions)]
 #[test]
 #[should_panic(expected = "stale region")]
@@ -214,10 +220,7 @@ fn env_backing_guard_panics_on_a_freed_env_region() {
             &[crate::value::Value::int(42)],
             region,
         );
-        let template = crate::value::closure::test_template(
-            heap,
-            crate::value::TemplateProto::new(Vec::new(), crate::value::Arity::Exact(0), Vec::new()),
-        );
+        let template = nullary(heap);
         let closure = crate::value::Closure::new(template, env, crate::value::SignalBits::EMPTY);
         heap.decref_region(region); // the env's backing region is freed
         debug_check_env_backing(heap, &closure);
@@ -235,10 +238,7 @@ fn env_backing_guard_accepts_a_live_env_region() {
             &[crate::value::Value::int(42)],
             region,
         );
-        let template = crate::value::closure::test_template(
-            heap,
-            crate::value::TemplateProto::new(Vec::new(), crate::value::Arity::Exact(0), Vec::new()),
-        );
+        let template = nullary(heap);
         let closure = crate::value::Closure::new(template, env, crate::value::SignalBits::EMPTY);
         debug_check_env_backing(heap, &closure);
         heap.decref_region(region);
@@ -250,10 +250,7 @@ fn env_backing_guard_ignores_an_empty_env() {
     crate::value::arena::with_test_region(|| {
         let vm = make_vm();
         let heap = unsafe { &mut *vm.heap_ptr };
-        let template = crate::value::closure::test_template(
-            heap,
-            crate::value::TemplateProto::new(Vec::new(), crate::value::Arity::Exact(0), Vec::new()),
-        );
+        let template = nullary(heap);
         let closure = crate::value::Closure::new(
             template,
             crate::value::region_slice::RegionSlice::empty(),

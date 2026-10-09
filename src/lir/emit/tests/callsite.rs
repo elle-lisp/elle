@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! The call sites a suspending function records: where a caller parks behind a
 //! callee that suspended, a tail call's included.
 //!
@@ -16,18 +16,18 @@ use crate::hir::region::StaticRegion;
 /// are pushed in that order and the call finds them on top. Without it the
 /// callee is pushed first, so the call copies it to the top and the original
 /// stays on the stack beneath.
-fn tail_call_func(signal: crate::signals::Signal, in_place: bool) -> LirFunction {
-    let operand = LirInstr::Const {
+fn tail_call_func(signal: crate::signals::Signal, in_place: bool) -> LirOwned {
+    let operand = InstrRef::Const {
         dst: Reg(0),
-        value: LirConst::Int(7),
+        value: ConstRef::Int(7),
     };
-    let callee = LirInstr::Const {
+    let callee = InstrRef::Const {
         dst: Reg(1),
-        value: LirConst::Nil,
+        value: ConstRef::Nil,
     };
-    let arg = LirInstr::Const {
+    let arg = InstrRef::Const {
         dst: Reg(2),
-        value: LirConst::Int(1),
+        value: ConstRef::Int(1),
     };
     let [first, second, third] = if in_place {
         [operand, arg, callee]
@@ -38,19 +38,19 @@ fn tail_call_func(signal: crate::signals::Signal, in_place: bool) -> LirFunction
         .signal(signal)
         .block(
             0,
-            vec![
+            &[
                 first,
                 second,
                 third,
-                LirInstr::TailCall {
+                InstrRef::TailCall {
                     dst: Reg(3),
                     func: Reg(1),
-                    args: vec![Reg(2)],
+                    args: &[Reg(2)],
                     arity_checked: false,
                     region: StaticRegion::new(1).unwrap(),
                     defer_callee_release: false,
                     deferred_release_slot: None,
-                    borrowed_arg_slots: vec![],
+                    borrowed_arg_slots: crate::lir::Slots::new(&[]),
                 },
             ],
             Terminator::Return(Reg(3)),
@@ -83,7 +83,7 @@ fn offset_after_tail_call(bytecode: &Bytecode) -> usize {
 #[test]
 fn a_suspending_functions_tail_call_records_a_call_site() {
     let func = tail_call_func(crate::signals::Signal::yields(), true);
-    let (bytecode, _, call_sites) = Emitter::new().emit(&func);
+    let (bytecode, _, call_sites) = emitter().emit(&func.view());
 
     assert_eq!(call_sites.len(), 1, "one tail call, one call site");
     assert_eq!(
@@ -102,7 +102,7 @@ fn a_suspending_functions_tail_call_records_a_call_site() {
 #[test]
 fn a_silent_functions_tail_call_records_no_call_site() {
     let func = tail_call_func(crate::signals::Signal::silent(), true);
-    let (_, _, call_sites) = Emitter::new().emit(&func);
+    let (_, _, call_sites) = emitter().emit(&func.view());
     assert!(call_sites.is_empty(), "got {call_sites:?}");
 }
 
@@ -113,7 +113,7 @@ fn a_silent_functions_tail_call_records_no_call_site() {
 #[test]
 fn a_tail_call_site_keeps_the_callee_copy_left_beneath_its_operands() {
     let func = tail_call_func(crate::signals::Signal::yields(), false);
-    let (bytecode, _, call_sites) = Emitter::new().emit(&func);
+    let (bytecode, _, call_sites) = emitter().emit(&func.view());
 
     let lines = disassemble_lines(&bytecode.instructions);
     assert!(

@@ -1,19 +1,21 @@
+// audited: 2026-10-06
+// docs/impl/mlir.md
 //! JIT execution of MLIR-lowered functions.
 //!
-//! Takes a GPU-eligible LirFunction, lowers it to MLIR, converts to
+//! Takes a GPU-eligible frozen function, lowers it to MLIR, converts to
 //! LLVM IR, and JIT-compiles it via the MLIR ExecutionEngine. The
 //! result is a callable function pointer with C calling convention.
 
-use crate::lir::LirFunction;
+use crate::lir::LirView;
 use melior::pass;
 
 use super::lower::{create_context, lower_to_module};
 
-/// JIT-compile a GPU-eligible LirFunction and call it with i64 arguments.
+/// JIT-compile a GPU-eligible frozen function and call it with i64 arguments.
 ///
 /// The function is lowered to MLIR (arith/func/cf), converted to LLVM
 /// dialect, then JIT-compiled. Arguments and return value are raw i64.
-pub fn mlir_call(lir: &LirFunction, args: &[i64]) -> Result<i64, String> {
+pub fn mlir_call(lir: &LirView<'_>, args: &[i64]) -> Result<i64, String> {
     let context = create_context();
     let (mut module, _) = lower_to_module(&context, lir, 0, 0, 0)?;
 
@@ -28,7 +30,7 @@ pub fn mlir_call(lir: &LirFunction, args: &[i64]) -> Result<i64, String> {
     // JIT compile
     let engine = melior::ExecutionEngine::new(&module, 2, &[], false, false);
 
-    let func_name = lir.name.as_deref().unwrap_or("gpu_kernel");
+    let func_name = lir.name().unwrap_or("gpu_kernel");
 
     // invoke_packed expects pointers to args and result
     let mut arg_values: Vec<i64> = args.to_vec();

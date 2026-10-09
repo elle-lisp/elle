@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-10-06
 // docs/impl/mlir.md
 //! A two-operation kernel, `a * b + a`, and the timings that say what each MLIR
 //! phase costs beside Cranelift's.
@@ -10,23 +10,23 @@
 use super::*;
 
 /// Build LIR: fn(a, b) { return a * b + a }
-fn make_mul_add() -> LirFunction {
+fn make_mul_add() -> LirOwned {
     LirFixture::new(Arity::Exact(2))
         .name("mul_add")
         .signal(Signal::errors())
         .block(
             0,
-            vec![
-                LirInstr::LoadCaptureRaw {
+            &[
+                InstrRef::LoadCaptureRaw {
                     dst: Reg(0),
                     index: 0,
                 },
-                LirInstr::LoadCaptureRaw {
+                InstrRef::LoadCaptureRaw {
                     dst: Reg(1),
                     index: 1,
                 },
-                LirInstr::binop(Reg(2), BinOp::Mul, Reg(0), Reg(1)),
-                LirInstr::binop(Reg(3), BinOp::Add, Reg(2), Reg(0)),
+                InstrRef::binop(Reg(2), BinOp::Mul, Reg(0), Reg(1)),
+                InstrRef::binop(Reg(3), BinOp::Add, Reg(2), Reg(0)),
             ],
             Terminator::Return(Reg(3)),
         )
@@ -36,14 +36,14 @@ fn make_mul_add() -> LirFunction {
 #[test]
 fn test_execute_mul_add() {
     // a * b + a = 3 * 7 + 3 = 24
-    let result = mlir_call(&make_mul_add(), &[3, 7]).expect("execution should succeed");
+    let result = mlir_call(&make_mul_add().view(), &[3, 7]).expect("execution should succeed");
     assert_eq!(result, 24);
 }
 
 #[test]
 fn test_spirv_mul_add() {
     let func = make_mul_add();
-    let spirv_bytes = lower_to_spirv(&func, 64).expect("SPIR-V lowering should succeed");
+    let spirv_bytes = lower_to_spirv(&func.view(), 64).expect("SPIR-V lowering should succeed");
     assert!(spirv_bytes.len() >= 20);
     assert_eq!(&spirv_bytes[0..4], &[0x03, 0x02, 0x23, 0x07]);
 }
@@ -62,7 +62,7 @@ fn bench_mlir() {
     let ctx_time = start.elapsed();
 
     let start = Instant::now();
-    let (mut module, _) = lower_to_module(&context, &func, 0, 0, 0).unwrap();
+    let (mut module, _) = lower_to_module(&context, &func.view(), 0, 0, 0).unwrap();
     let lower_time = start.elapsed();
 
     let start = Instant::now();
@@ -102,7 +102,7 @@ fn bench_mlir() {
     let cranelift_init = start.elapsed();
 
     let start = Instant::now();
-    let _jit_code = compiler.compile(&func, vec![]).unwrap();
+    let _jit_code = compiler.compile(&func.view()).unwrap();
     let cranelift_compile = start.elapsed();
 
     eprintln!();

@@ -1,4 +1,6 @@
-// `--dump=STAGE[,STAGE,...]` CLI surface tests.
+// audited: 2026-10-06
+// The `--dump=STAGE[,STAGE,...]` surface: each stage prints its banner and the markers its artifact is read by.
+// docs/config.md
 //
 // Each stage runs the compiler up to a well-defined point and prints
 // the artifact. The test verifies the banner is emitted and that the
@@ -158,13 +160,58 @@ fn all_stages_run_in_pipeline_order() {
     }
 }
 
+/// `--dump=bytecode` with the stdlib cache off, so every run compiles the
+/// standard library and mints its static region slots before the file's own.
+fn dump_bytecode(source: &str) -> (String, String, std::process::ExitStatus) {
+    let output = Command::new(elle())
+        .arg("--cache=")
+        .arg("--dump=bytecode")
+        .arg("-e")
+        .arg(source)
+        .output()
+        .expect("spawn elle");
+    (
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+        output.status,
+    )
+}
+
+/// The bytecode golden compares one recorded dump with a fresh one, so the
+/// dump must print one text for one file whatever the run. The counter-factual
+/// is a dump that iterates the emitter's location map or prints a constant's
+/// address: two runs disagree, and every golden check fails on noise.
+#[test]
+fn bytecode_dump_prints_one_text_across_two_runs() {
+    let src = "(defn sq [x] (* x x))
+               (def words '(alpha \"beta\" :gamma))
+               (defn adder [n] (fn [y] (+ y n (sq 2))))
+               (defn gen [] (fn [] (yield 1) (yield 2)))
+               ((adder 3) 4)";
+    let (first, err, status) = dump_bytecode(src);
+    assert!(status.success(), "elle --dump=bytecode failed:\n{err}");
+    assert!(
+        first.contains("── bytecode"),
+        "missing bytecode banner:\n{first}"
+    );
+    assert!(
+        first.contains("code object [0]"),
+        "a nested lambda prints as its own code object:\n{first}"
+    );
+    assert!(first.contains("constants:"), "missing constants:\n{first}");
+    let (second, _, _) = dump_bytecode(src);
+    assert_eq!(first, second, "two runs printed different bytecode dumps");
+}
+
 #[test]
 fn unknown_stage_is_rejected() {
     let (_, err, status) = dump("bogus", "(+ 1 2)");
     assert!(!status.success(), "expected non-zero exit for bogus stage");
     assert!(
         err.contains("--dump: unknown stage 'bogus'")
-            && err.contains("Valid: ast, hir, fhir, lir, jit, cfg, dfa, defuse, regions, escape, git"),
+            && err.contains(
+                "Valid: ast, hir, fhir, lir, jit, cfg, dfa, defuse, regions, escape, git, bytecode"
+            ),
         "expected helpful error listing valid stages, got:\n{}",
         err
     );

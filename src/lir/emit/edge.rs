@@ -1,4 +1,4 @@
-// audited: 2026-09-16
+// audited: 2026-10-06
 // src/lir/AGENTS.md
 //! How a block exits, and what each edge owes the operand stack.
 //!

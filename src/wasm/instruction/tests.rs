@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-10-06
 // src/wasm/AGENTS.md
 //! What the WASM emitter does with an operand proof.
 //!
@@ -7,25 +7,28 @@
 //! these compare the emitted module's size (docs/impl/lir.md).
 
 use crate::lir::testkit::LirFixture;
-use crate::lir::{BinOp, ClosureId, LirFunction, LirInstr, Reg, Terminator};
+use crate::lir::{BinOp, ClosureId, InstrRef, LirOwned, Reg, Terminator};
 use crate::signals::Signal;
 use crate::value::Arity;
 
+/// The constructor of an arithmetic instruction: claiming nothing, or the proof.
+type MakeOp = fn(Reg, BinOp, Reg, Reg) -> InstrRef<'static>;
+
 /// fn(a, b) -> a `op` b, standalone-emittable, with the operation built by
 /// `make_op`.
-fn arith_closure(op: BinOp, make_op: fn(Reg, BinOp, Reg, Reg) -> LirInstr) -> LirFunction {
+fn arith_closure(op: BinOp, make_op: MakeOp) -> LirOwned {
     LirFixture::new(Arity::Exact(2))
         .signal(Signal::silent())
         .closure_id(ClosureId(0))
         .num_params(2)
         .block(
             0,
-            vec![
-                LirInstr::LoadCapture {
+            &[
+                InstrRef::LoadCapture {
                     dst: Reg(0),
                     index: 0,
                 },
-                LirInstr::LoadCapture {
+                InstrRef::LoadCapture {
                     dst: Reg(1),
                     index: 1,
                 },
@@ -36,10 +39,10 @@ fn arith_closure(op: BinOp, make_op: fn(Reg, BinOp, Reg, Reg) -> LirInstr) -> Li
         .build()
 }
 
-fn emitted_len(op: BinOp, make_op: fn(Reg, BinOp, Reg, Reg) -> LirInstr) -> usize {
+fn emitted_len(op: BinOp, make_op: MakeOp) -> usize {
     let vm = crate::vm::VM::new();
     super::super::emit::emit_single_closure(
-        &arith_closure(op, make_op),
+        &arith_closure(op, make_op).view(),
         None,
         vm.heap_ptr,
         std::ptr::null_mut(),
@@ -58,8 +61,8 @@ fn a_proven_arithmetic_op_emits_no_float_guard() {
     // operands are parameters, which that walk cannot type — so only the proof
     // can shrink this module.
     for op in [BinOp::Add, BinOp::Sub, BinOp::Mul, BinOp::Div] {
-        let unproven = emitted_len(op, LirInstr::binop);
-        let proven = emitted_len(op, LirInstr::int_binop);
+        let unproven = emitted_len(op, InstrRef::binop);
+        let proven = emitted_len(op, InstrRef::int_binop);
         assert!(
             proven < unproven,
             "{op:?}: a proven op must emit less than an unproven one \

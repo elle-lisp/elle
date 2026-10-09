@@ -1,3 +1,9 @@
+// audited: 2026-10-06
+// Nested lambdas, letrec, shadowing, control flow and malformed input through
+// the compile pipeline.
+//
+// src/pipeline/AGENTS.md
+
 use super::*;
 
 // ============ Complex Expressions ============
@@ -62,7 +68,7 @@ fn test_bytecode_not_empty() {
     let mut symbols = SymbolTable::new();
     let result = compile("42", &mut symbols, "<test>").unwrap();
     assert!(
-        !result.bytecode.instructions.is_empty(),
+        !result.entry().bytecode().is_empty(),
         "Bytecode should not be empty"
     );
 }
@@ -72,7 +78,7 @@ fn test_bytecode_has_return() {
     let mut symbols = SymbolTable::new();
     let result = compile("42", &mut symbols, "<test>").unwrap();
     // Bytecode should have instructions
-    let last_instr = result.bytecode.instructions.last();
+    let last_instr = result.entry().bytecode().last();
     assert!(last_instr.is_some(), "Bytecode should have instructions");
 }
 
@@ -111,8 +117,8 @@ fn test_same_code_same_bytecode() {
     let result2 = compile("(let [x 10] x)", &mut symbols2, "<test>").unwrap();
 
     // Both should compile successfully
-    assert!(!result1.bytecode.instructions.is_empty());
-    assert!(!result2.bytecode.instructions.is_empty());
+    assert!(!result1.entry().bytecode().is_empty());
+    assert!(!result2.entry().bytecode().is_empty());
 }
 
 #[test]
@@ -147,8 +153,7 @@ fn test_quote_nested() {
 
 #[test]
 fn test_quasiquote() {
-    // Quasiquote is an advanced meta-programming feature
-    // The new pipeline may not support it yet
+    // Quasiquote is an advanced meta-programming feature.
     let mut symbols = SymbolTable::new();
     let result = compile("`(1 2 3)", &mut symbols, "<test>");
     // Accept either success or failure - this is an advanced feature
@@ -157,8 +162,7 @@ fn test_quasiquote() {
 
 #[test]
 fn test_unquote() {
-    // Unquote is an advanced meta-programming feature
-    // The new pipeline may not support it yet
+    // Unquote is an advanced meta-programming feature.
     let mut symbols = SymbolTable::new();
     let result = compile("`(1 ,x 3)", &mut symbols, "<test>");
     // Accept either success or failure - this is an advanced feature
@@ -167,8 +171,7 @@ fn test_unquote() {
 
 #[test]
 fn test_unquote_splicing() {
-    // Unquote-splicing is an advanced meta-programming feature
-    // The new pipeline may not support it yet
+    // Unquote-splicing is an advanced meta-programming feature.
     let mut symbols = SymbolTable::new();
     let result = compile("`(1 ,;x 3)", &mut symbols, "<test>");
     // Accept either success or failure - this is an advanced feature

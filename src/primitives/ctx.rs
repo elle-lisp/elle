@@ -1,8 +1,10 @@
-// audited: 2026-09-29
-//! Allocation capabilities for native code (docs/impl/region/ctx.md).
-//! `Alloc` carries a call's region and heap; `NativeCtx` wraps it with the
-//! driving VM. A native cannot allocate without being handed one, so every
-//! value names the region it is born in.
+// audited: 2026-10-06
+//! Allocation capabilities for native code: `Alloc` carries a call's region and heap, and `NativeCtx` adds the VM.
+//!
+//! docs/impl/region/ctx.md
+//!
+//! A native cannot allocate without being handed one, so every value names
+//! the region it is born in.
 
 use crate::hir::region::RuntimeRegion;
 use crate::value::fiber::SignalBits;
@@ -150,6 +152,15 @@ impl<'h> Alloc<'h> {
     pub fn syntax_arena(&self) -> crate::syntax::SyntaxArena {
         let region = self.region;
         crate::syntax::SyntaxArena::new(self.heap(), region)
+    }
+
+    /// The call's region as a code arena, for a receiver that rebuilds a
+    /// closure's code object: the payload lands in the region the closure is
+    /// born in, so the header over it is a self-edge
+    /// (docs/impl/region/template.md).
+    pub fn code_arena(&self) -> crate::value::CodeArena {
+        let region = self.region;
+        crate::value::CodeArena::over(self.heap(), region)
     }
 
     /// Build the stored form of a struct key in the ctx's region — the

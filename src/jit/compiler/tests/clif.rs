@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-10-06
 // docs/impl/jit.md
 //! What only the rendered Cranelift IR settles: a load's flags, an operation's
 //! tag test, a call's target, and the pop before every exit.
@@ -7,13 +7,13 @@ use super::*;
 
 /// fn() -> capture 0. With `num_captures = 1`, `LoadCapture` index 0 reads
 /// through the closure environment pointer rather than an argument variable.
-fn make_capture_read_lir() -> LirFunction {
+fn make_capture_read_lir() -> LirOwned {
     LirFixture::new(Arity::Exact(0))
         .signal(Signal::silent())
         .num_captures(1)
         .block(
             0,
-            vec![LirInstr::LoadCapture {
+            &[InstrRef::LoadCapture {
                 dst: Reg(0),
                 index: 0,
             }],
@@ -32,17 +32,17 @@ fn load_lines(clif: &[String]) -> Vec<&str> {
 
 /// fn(a, b) -> a `op` b, with the two arguments loaded from the argument array
 /// and the operation built by `make_op`.
-fn make_arith_lir(op: BinOp, make_op: fn(Reg, BinOp, Reg, Reg) -> LirInstr) -> LirFunction {
+fn make_arith_lir(op: BinOp, make_op: fn(Reg, BinOp, Reg, Reg) -> InstrRef<'static>) -> LirOwned {
     LirFixture::new(Arity::Exact(2))
         .signal(Signal::silent())
         .block(
             0,
-            vec![
-                LirInstr::LoadCapture {
+            &[
+                InstrRef::LoadCapture {
                     dst: Reg(0),
                     index: 0,
                 },
-                LirInstr::LoadCapture {
+                InstrRef::LoadCapture {
                     dst: Reg(1),
                     index: 1,
                 },
@@ -61,10 +61,10 @@ fn branch_lines(clif: &[String]) -> Vec<&str> {
         .collect()
 }
 
-fn arith_clif(op: BinOp, make_op: fn(Reg, BinOp, Reg, Reg) -> LirInstr) -> Vec<String> {
+fn arith_clif(op: BinOp, make_op: fn(Reg, BinOp, Reg, Reg) -> InstrRef<'static>) -> Vec<String> {
     JitCompiler::new()
         .expect("Failed to create compiler")
-        .clif_text(&make_arith_lir(op, make_op))
+        .clif_text(&make_arith_lir(op, make_op).view())
         .expect("Failed to translate")
 }
 
@@ -77,7 +77,7 @@ fn an_unproven_arithmetic_op_compiles_to_a_tag_check_diamond() {
     // the diamond would pass "a proven op has no branch" trivially, while
     // computing garbage for every float operand that reaches an unproven site.
     for op in [BinOp::Add, BinOp::Sub, BinOp::Mul] {
-        let clif = arith_clif(op, LirInstr::binop);
+        let clif = arith_clif(op, InstrRef::binop);
         assert!(
             !branch_lines(&clif).is_empty(),
             "{op:?}: an unproven op must test its operands' tags; got:\n{}",
@@ -92,7 +92,7 @@ fn an_unproven_arithmetic_op_compiles_to_a_tag_check_diamond() {
 #[test]
 fn a_proven_arithmetic_op_compiles_without_a_tag_check() {
     for op in [BinOp::Add, BinOp::Sub, BinOp::Mul] {
-        let clif = arith_clif(op, LirInstr::int_binop);
+        let clif = arith_clif(op, InstrRef::int_binop);
         let branches = branch_lines(&clif);
         assert!(
             branches.is_empty(),
@@ -116,20 +116,21 @@ fn a_proven_comparison_compiles_without_a_tag_check() {
                     .signal(Signal::silent())
                     .block(
                         0,
-                        vec![
-                            LirInstr::LoadCapture {
+                        &[
+                            InstrRef::LoadCapture {
                                 dst: Reg(0),
                                 index: 0,
                             },
-                            LirInstr::LoadCapture {
+                            InstrRef::LoadCapture {
                                 dst: Reg(1),
                                 index: 1,
                             },
-                            LirInstr::compare(Reg(2), op, Reg(0), Reg(1)),
+                            InstrRef::compare(Reg(2), op, Reg(0), Reg(1)),
                         ],
                         Terminator::Return(Reg(2)),
                     )
-                    .build(),
+                    .build()
+                    .view(),
             )
             .expect("Failed to translate");
         assert!(
@@ -144,20 +145,21 @@ fn a_proven_comparison_compiles_without_a_tag_check() {
                     .signal(Signal::silent())
                     .block(
                         0,
-                        vec![
-                            LirInstr::LoadCapture {
+                        &[
+                            InstrRef::LoadCapture {
                                 dst: Reg(0),
                                 index: 0,
                             },
-                            LirInstr::LoadCapture {
+                            InstrRef::LoadCapture {
                                 dst: Reg(1),
                                 index: 1,
                             },
-                            LirInstr::int_compare(Reg(2), op, Reg(0), Reg(1)),
+                            InstrRef::int_compare(Reg(2), op, Reg(0), Reg(1)),
                         ],
                         Terminator::Return(Reg(2)),
                     )
-                    .build(),
+                    .build()
+                    .view(),
             )
             .expect("Failed to translate");
         let branches = branch_lines(&proven);
@@ -174,7 +176,7 @@ fn a_proven_comparison_compiles_without_a_tag_check() {
 /// (docs/impl/jit.md).
 #[test]
 fn a_proven_division_keeps_its_zero_test() {
-    let clif = arith_clif(BinOp::Div, LirInstr::int_binop);
+    let clif = arith_clif(BinOp::Div, InstrRef::int_binop);
     assert_eq!(
         branch_lines(&clif).len(),
         1,
@@ -195,7 +197,7 @@ fn an_argument_load_carries_trusted_flags() {
     // unaligned-tolerant access on every parameter of every hot function.
     let compiler = JitCompiler::new().expect("Failed to create compiler");
     let clif = compiler
-        .clif_text(&make_simple_lir())
+        .clif_text(&make_simple_lir().view())
         .expect("Failed to translate");
     let loads = load_lines(&clif);
     assert!(
@@ -217,7 +219,7 @@ fn a_capture_load_carries_trusted_flags() {
     // different translator path than the argument array.
     let compiler = JitCompiler::new().expect("Failed to create compiler");
     let clif = compiler
-        .clif_text(&make_capture_read_lir())
+        .clif_text(&make_capture_read_lir().view())
         .expect("Failed to translate");
     let loads = load_lines(&clif);
     assert!(
@@ -236,7 +238,7 @@ fn a_capture_load_carries_trusted_flags() {
 /// fn(f) -> f(). A `Call` inside a function whose signal may suspend, which is
 /// what makes the translator emit all three exits: the post-call error check,
 /// the post-call yield check, and the normal return.
-fn make_suspending_call_lir() -> LirFunction {
+fn make_suspending_call_lir() -> LirOwned {
     use crate::hir::region::StaticRegion;
     use crate::lir::CallSiteInfo;
     LirFixture::new(Arity::Exact(1))
@@ -248,15 +250,15 @@ fn make_suspending_call_lir() -> LirFunction {
         }])
         .block(
             0,
-            vec![
-                LirInstr::LoadCapture {
+            &[
+                InstrRef::LoadCapture {
                     dst: Reg(0),
                     index: 0,
                 },
-                LirInstr::Call {
+                InstrRef::Call {
                     dst: Reg(1),
                     func: Reg(0),
-                    args: vec![],
+                    args: &[],
                     arity_checked: false,
                     region: StaticRegion::new(1).unwrap(),
                 },
@@ -313,23 +315,23 @@ fn call_target_before(clif: &[String], at: usize) -> Option<String> {
 /// one callee register whose target the translator knows while it translates,
 /// so this is the shape a direct call between compiled functions would reach
 /// first.
-fn make_self_call_lir() -> LirFunction {
+fn make_self_call_lir() -> LirOwned {
     use crate::hir::region::StaticRegion;
     LirFixture::new(Arity::Exact(1))
         .name("self-recursive")
         .signal(Signal::silent())
         .block(
             0,
-            vec![
-                LirInstr::LoadCapture {
+            &[
+                InstrRef::LoadCapture {
                     dst: Reg(0),
                     index: 0,
                 },
-                LirInstr::LoadSelf { dst: Reg(1) },
-                LirInstr::Call {
+                InstrRef::LoadSelf { dst: Reg(1) },
+                InstrRef::Call {
                     dst: Reg(2),
                     func: Reg(1),
-                    args: vec![Reg(0)],
+                    args: &[Reg(0)],
                     arity_checked: false,
                     region: StaticRegion::new(1).unwrap(),
                 },
@@ -377,7 +379,9 @@ fn a_self_recursive_call_goes_through_the_dispatch_helper() {
     let compiler = JitCompiler::new().expect("Failed to create compiler");
     let dispatch_id = compiler.helpers.call.as_u32();
     let lir = make_self_call_lir();
-    let clif = compiler.clif_text(&lir).expect("Failed to translate");
+    let clif = compiler
+        .clif_text(&lir.view())
+        .expect("Failed to translate");
 
     let refs = func_refs(&clif);
     let called: Vec<u32> = called_refs(&clif)
@@ -419,7 +423,7 @@ fn every_compiled_exit_pops_the_region_map() {
     let compiler = JitCompiler::new().expect("Failed to create compiler");
     let pop_id = compiler.helpers.pop_region_map.as_u32();
     let clif = compiler
-        .clif_text(&make_suspending_call_lir())
+        .clif_text(&make_suspending_call_lir().view())
         .expect("Failed to translate");
     let refs = func_refs(&clif);
 

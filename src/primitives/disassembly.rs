@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-10-06
 // docs/impl/jit.md
 //! The primitives that render a closure's compiled forms: bytecode, Cranelift
 //! IR, and the LIR control flow graph.
@@ -78,8 +78,8 @@ pub(crate) fn prim_disjit(
 ) -> (SignalBits, Value) {
     #[cfg(feature = "jit")]
     if let Some(closure) = args[0].as_closure() {
-        let lir = match closure.template.lir_function() {
-            Some(lir) => lir.clone(),
+        let lir = match closure.template.lir() {
+            Some(lir) => lir,
             None => return (SIG_OK, Value::NIL),
         };
         let compiler = match crate::jit::JitCompiler::new() {
@@ -114,7 +114,7 @@ fn flow_from_closure(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     closure: &crate::value::heap::Closure,
 ) -> (SignalBits, Value) {
-    let lir = match closure.template.lir_function() {
+    let lir = match closure.template.lir() {
         Some(lir) => lir,
         None => return (SIG_OK, Value::NIL),
     };
@@ -125,8 +125,8 @@ fn flow_from_closure(
     // :name
     fields.insert(
         TableKey::keyword("name"),
-        match &lir.name {
-            Some(n) => ctx.string(n.as_str()),
+        match lir.name() {
+            Some(n) => ctx.string(n),
             None => Value::NIL,
         },
     );
@@ -144,56 +144,58 @@ fn flow_from_closure(
     // :arity — use Display impl: "2", "1+", "2-4"
     fields.insert(
         TableKey::keyword("arity"),
-        ctx.string(format!("{}", lir.arity)),
+        ctx.string(format!("{}", lir.arity())),
     );
 
     // :regs
-    fields.insert(TableKey::keyword("regs"), Value::int(lir.num_regs as i64));
+    fields.insert(TableKey::keyword("regs"), Value::int(lir.num_regs() as i64));
 
     // :locals
     fields.insert(
         TableKey::keyword("locals"),
-        Value::int(lir.num_locals as i64),
+        Value::int(lir.num_locals() as i64),
     );
 
     // :entry
-    fields.insert(TableKey::keyword("entry"), Value::int(lir.entry.0 as i64));
+    fields.insert(TableKey::keyword("entry"), Value::int(lir.entry().0 as i64));
 
     // :blocks — array of block structs
     let blocks: Vec<Value> = lir
-        .blocks
-        .iter()
+        .blocks()
         .map(|block| {
             let mut block_fields = BTreeMap::new();
+            let terminator = block.terminator();
+            let term_span = block.terminator_span();
 
             // :label
-            block_fields.insert(TableKey::keyword("label"), Value::int(block.label.0 as i64));
+            block_fields.insert(
+                TableKey::keyword("label"),
+                Value::int(block.label().0 as i64),
+            );
 
             // :instrs — array of Debug-formatted instruction strings
             let instrs: Vec<Value> = block
-                .instructions
-                .iter()
-                .map(|si| ctx.string(format!("{:?}", si.instr)))
+                .instrs()
+                .map(|i| ctx.string(format!("{:?}", i)))
                 .collect();
             block_fields.insert(TableKey::keyword("instrs"), ctx.array(instrs));
 
             // :display — array of compact human-readable instruction strings
             let display: Vec<Value> = block
-                .instructions
-                .iter()
-                .map(|si| ctx.string(format!("{}", si.instr)))
+                .instrs()
+                .map(|i| ctx.string(format!("{}", i)))
                 .collect();
             block_fields.insert(TableKey::keyword("display"), ctx.array(display));
 
             // :spans — array of "line:col" strings (nil for synthetic spans)
             let spans: Vec<Value> = block
-                .instructions
-                .iter()
-                .map(|si| {
-                    if si.span.line == 0 {
+                .nodes()
+                .map(|n| {
+                    let span = n.span();
+                    if span.line == 0 {
                         Value::NIL
                     } else {
-                        ctx.string(format!("{}:{}", si.span.line, si.span.col))
+                        ctx.string(format!("{}:{}", span.line, span.col))
                     }
                 })
                 .collect();
@@ -201,14 +203,14 @@ fn flow_from_closure(
 
             // :annotated — display strings with span annotations for CFG rendering
             let annotated: Vec<Value> = block
-                .instructions
-                .iter()
-                .map(|si| {
-                    let base = format!("{}", si.instr);
-                    if si.span.line == 0 {
+                .nodes()
+                .map(|n| {
+                    let base = format!("{}", n.instr());
+                    let span = n.span();
+                    if span.line == 0 {
                         ctx.string(base)
                     } else {
-                        ctx.string(format!("{} @{}:{}", base, si.span.line, si.span.col))
+                        ctx.string(format!("{} @{}:{}", base, span.line, span.col))
                     }
                 })
                 .collect();
@@ -217,34 +219,31 @@ fn flow_from_closure(
             // :term — Debug-formatted terminator string
             block_fields.insert(
                 TableKey::keyword("term"),
-                ctx.string(format!("{:?}", block.terminator.terminator)),
+                ctx.string(format!("{:?}", terminator)),
             );
 
             // :term-display — compact terminator string
             block_fields.insert(
                 TableKey::keyword("term-display"),
-                ctx.string(format!("{}", block.terminator.terminator)),
+                ctx.string(format!("{}", terminator)),
             );
 
             // :term-span — "line:col" string for the terminator (nil for synthetic)
-            let term_span = if block.terminator.span.line == 0 {
+            let term_span = if term_span.line == 0 {
                 Value::NIL
             } else {
-                ctx.string(format!(
-                    "{}:{}",
-                    block.terminator.span.line, block.terminator.span.col
-                ))
+                ctx.string(format!("{}:{}", term_span.line, term_span.col))
             };
             block_fields.insert(TableKey::keyword("term-span"), term_span);
 
             // :term-kind — keyword identifying the terminator type
             block_fields.insert(
                 TableKey::keyword("term-kind"),
-                Value::keyword(terminator_kind(&block.terminator.terminator)),
+                Value::keyword(terminator_kind(&terminator)),
             );
 
             // :edges — array of successor label ints
-            let edges: Vec<Value> = match &block.terminator.terminator {
+            let edges: Vec<Value> = match terminator {
                 Terminator::Return(_) | Terminator::Unreachable => vec![],
                 Terminator::Jump(label) => vec![Value::int(label.0 as i64)],
                 Terminator::Branch {
@@ -289,7 +288,7 @@ fn flow_from_closure(
 ///   - :term — terminator string (Debug format)
 ///   - :term-display — compact terminator string (Display format)
 ///   - :term-span — "line:col" string for the terminator (nil for synthetic)
-///   - :term-kind — keyword: :return, :jump, :branch, :yield, or :unreachable
+///   - :term-kind — keyword: :return, :jump, :branch, :emit, or :unreachable
 ///   - :edges — array of successor label ints
 ///
 /// Returns nil if the closure has no LIR (e.g., native function or LIR discarded).

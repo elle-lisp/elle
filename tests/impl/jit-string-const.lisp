@@ -1,16 +1,14 @@
-(elle/epoch 12)
-## jit/string-const — a JIT-forced closure with a String constant must compile.
-##
-## RED counterfactual for the forced-tier JIT path. The adaptive JIT path
-## (jit_entry::submit_jit_task) pre-resolves every `LirConst::String` to a
-## `ValueConst` via `jit::worker::prepare_task` BEFORE the LIR reaches the JIT
-## translator — the translator has no handler for a raw `LirConst::String` and
-## hits `unreachable!` (src/jit/helpers.rs). The forced-tier path
-## (`compile/run-on :jit` → invoke_closure_jit) compiled the raw LIR directly
-## and skipped that pre-resolution, so any forced-JIT closure carrying a string
-## literal aborted the process — non-unwinding, so it bypassed the test runner's
-## fault barrier and killed the whole run. `compile/run-on :jit` force-compiles
-## regardless of the active JIT policy, so this exercises the path on every tier.
+(elle/epoch 14)
+# audited: 2026-10-06
+# A closure forced onto the JIT compiles and runs with a string literal in its body.
+# docs/impl/jit.md
+#
+# A string literal lowers to `MaterializeConst`, which the JIT translates by
+# calling `elle_jit_materialize_const`. `compile/run-on :jit` compiles the
+# closure's LIR directly, whatever the active JIT policy, so this file reaches
+# the translator on every tier. The trap: a translator that cannot place a
+# string aborts the process, which no fault barrier catches, so the whole run
+# dies rather than this file failing.
 
 # Gate on JIT availability: a build with no JIT tier compiled in
 # (--no-default-features, e.g. the aarch64 no-features job) rejects
@@ -27,11 +25,11 @@
 (assert (= "hello" (compile/run-on :jit (fn [] "hello")))
         "forced-JIT closure returns its string constant")
 
-## A string constant flowing through a larger expression (still a Const in LIR).
+## A string constant flowing through a larger expression.
 (assert (= "ab" (compile/run-on :jit (fn [] (concat "a" "b"))))
         "forced-JIT closure with string constants in a call")
 
-## A string constant chosen by control flow — both arms carry Const strings.
+## A string constant chosen by control flow, one in each arm.
 (assert (= "yes" (compile/run-on :jit (fn [x] (if x "yes" "no")) true))
         "forced-JIT closure returns a branch's string constant")
 

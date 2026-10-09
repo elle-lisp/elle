@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! Runtime eval instruction handler.
 //!
 //! Compiles and executes a datum (quoted value) at runtime.
@@ -73,8 +73,8 @@ fn eval_inner(
     symbols: &mut SymbolTable,
 ) -> LResult<Value> {
     // This eval is one compilation unit, so it gets one working syntax arena,
-    // released when the bytecode is built (docs/impl/syntax.md § "Where a node
-    // lives"). Every early return below goes through `finish`, which frees it.
+    // released once the form has run (docs/impl/syntax.md § "Where a node
+    // lives"). Every path out of `eval_in_arena` comes back here, which frees it.
     let heap_ptr = vm.heap_ptr;
     let arena = crate::syntax::SyntaxArena::mint(unsafe { &mut *heap_ptr });
     let out = eval_in_arena(vm, arena, expr_value, env_value, symbols);
@@ -207,6 +207,7 @@ fn eval_in_arena(
     let region_info =
         crate::hir::analyze_regions_with(&analysis.hir, &arena, pc.call_classification.clone());
     let mut lowerer = Lowerer::new(&arena)
+        .with_heap(unsafe { &mut *vm.heap_ptr })
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
         .with_region_info(region_info);
@@ -214,15 +215,17 @@ fn eval_in_arena(
         .lower(&analysis.hir)
         .map_err(|e| LError::generic(format!("eval: lowering failed: {}", e)))?;
 
-    // Emit
-    let mut emitter = Emitter::new();
+    // Emit into a code region on the heap that runs the form.
+    let code_arena = crate::value::CodeArena::mint(vm.heap());
+    let mut emitter = Emitter::new(code_arena);
     let (bytecode, _yield_points, _call_sites) = emitter.emit_module(&lir_module);
+    let unit = crate::value::CodeUnit::new(code_arena, bytecode);
 
-    // Execute. The blueprint carries the entry function's builder-idiom merge
-    // metadata with the rest of its payload, so the alloc dispatch mint-or-reuses
-    // merged slots (docs/impl/region/merging.md § Merging).
-    let code =
-        crate::value::ClosureTemplate::for_proto(vm.heap(), &Rc::new(bytecode.into_proto())).code();
+    // Execute. The entry payload carries the function's builder-idiom merge
+    // metadata, so the alloc dispatch mint-or-reuses merged slots
+    // (docs/impl/region/merging.md § Merging). The unit is held until the run
+    // ends, because the entry's `Code` takes no reference of its own.
+    let code = unit.entry().code();
     let empty_env = Rc::new(vec![]);
 
     // Drive the evaluated code, including any nested fiber/resume SIG_SWITCH

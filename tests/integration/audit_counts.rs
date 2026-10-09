@@ -1,5 +1,5 @@
-// audited: 2026-10-05
-// The audit queue's two counts, and the walk over the files git tracks.
+// audited: 2026-10-08
+// The audit queue's two counts, the walk over the files git tracks, and the processes it starts.
 //
 // docs/impl/audit.md
 //
@@ -118,5 +118,87 @@ fn a_tree_inside_another_repository_has_every_file_walked() {
         audit(&t.path().join("inner"), &["--counts"]),
         "unstamped 1\nbefore-policy 0\n",
         "a root below the top of a work tree walks every file under it"
+    );
+}
+
+/// The external commands the script could start. Each one found on `PATH` gets
+/// a shim in `bin` that appends its name to `log`, then runs the real command.
+const TOOLS: &[&str] = &[
+    "awk", "basename", "cat", "cut", "date", "dirname", "find", "git", "grep", "head", "sed",
+    "sort", "tr", "wc",
+];
+
+fn shim_tools(bin: &Path, log: &Path, path: &std::ffi::OsStr) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir_all(bin).expect("create shim dir");
+    for tool in TOOLS {
+        let Some(real) = std::env::split_paths(path)
+            .map(|dir| dir.join(tool))
+            .find(|p| p.is_file())
+        else {
+            continue;
+        };
+        let shim = bin.join(tool);
+        let body = format!(
+            "#!/bin/sh\nprintf '%s\\n' {tool} >> '{}'\nexec '{}' \"$@\"\n",
+            log.display(),
+            real.display()
+        );
+        std::fs::write(&shim, body).expect("write shim");
+        std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755))
+            .expect("make shim executable");
+    }
+}
+
+/// How many processes `scripts/audit --counts` starts over a tree of `files`
+/// documents, three directories down, half of them stamped.
+fn processes_for(files: usize) -> usize {
+    let t = ScratchDir::new("audit-forks");
+    let root = t.join("tree");
+    write(&root, "DOCUMENTATION.md", &doc(Some("2026-06-01")));
+    for i in 0..files {
+        let stamp = (i % 2 == 0).then_some("2026-06-02");
+        write(&root, &format!("a/b/c/doc{i}.md"), &doc(stamp));
+    }
+    let path = std::env::var_os("PATH").expect("PATH is set");
+    let bin = t.join("bin");
+    let log = t.join("log");
+    shim_tools(&bin, &log, &path);
+    let shimmed =
+        std::env::join_paths(std::iter::once(bin.clone()).chain(std::env::split_paths(&path)))
+            .expect("join PATH");
+
+    let out = Command::new(script())
+        .env("PATH", shimmed)
+        .args(["--root", root.to_str().expect("utf-8 path"), "--counts"])
+        .output()
+        .expect("run scripts/audit");
+    assert!(
+        out.status.success(),
+        "scripts/audit --counts failed:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        format!("unstamped {}\nbefore-policy 0\n", files / 2),
+        "the shims change no count"
+    );
+    std::fs::read_to_string(&log)
+        .map(|l| l.lines().count())
+        .unwrap_or(0)
+}
+
+#[test]
+fn the_counts_start_as_many_processes_over_forty_files_as_over_four() {
+    // The counter-factual: a walk that reads each stamp through a pipeline,
+    // and each directory through `dirname`, starts processes in proportion to
+    // the tree. Every count still comes out right, so only the process count
+    // shows it. The ratchet's producer runs this walk under a deadline, and on
+    // macOS each process start costs milliseconds.
+    let few = processes_for(4);
+    let many = processes_for(40);
+    assert_eq!(
+        few, many,
+        "--counts started {few} processes over 4 files and {many} over 40"
     );
 }

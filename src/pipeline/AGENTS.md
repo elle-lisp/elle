@@ -1,6 +1,6 @@
 # pipeline
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-06 -->
 
 Compilation entry points: source text to bytecode, or to HIR for a reader that wants the analysis alone.
 
@@ -15,7 +15,8 @@ Orchestrate the full compilation pipeline:
 - Expander: Syntax → expanded Syntax (macro expansion)
 - Analyzer: expanded Syntax → HIR (binding resolution, signal inference)
 - Lowerer: HIR → LIR (register allocation, basic blocks)
-- Emitter: LIR → Bytecode (instruction encoding)
+- Emitter: LIR → a `CodeUnit` (instruction encoding, each code object written
+  into the unit's code region)
 - VM: Bytecode → Value (the `eval` family only)
 
 Does NOT:
@@ -63,10 +64,10 @@ HIR (single Letrec node)
 Lowerer (HIR → LIR)
     │
     ▼
-Emitter (LIR → Bytecode)
+Emitter (LIR → Bytecode, each lambda's payload into the unit's code region)
     │
     ▼
-Bytecode
+CodeUnit (the entry's code object and the code region)
     │
     ▼
 VM (execution)
@@ -89,7 +90,7 @@ Files compile to a **single compilation unit**:
 5. **Lower and emit** — standard LIR → Bytecode pipeline
 
 Properties:
-- Single `CompileResult` per file
+- Single `CodeUnit` per file ([template.md](../../docs/impl/region/template.md))
 - All forms analyzed together (mutual recursion works via pre-binding)
 - Primitives are lexical bindings with compile-time immutability checks
 - File's last expression is the return value

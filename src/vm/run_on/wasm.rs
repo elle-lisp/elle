@@ -1,3 +1,5 @@
+// audited: 2026-10-07
+// docs/impl/wasm.md
 //! `compile/run-on :wasm` — force Wasmtime tiered execution (`--features wasm`).
 
 use super::rejected;
@@ -16,8 +18,8 @@ impl VM {
         closure: &crate::value::Closure,
         args: &[Value],
     ) -> (SignalBits, Value) {
-        let lir = match closure.template.lir_function() {
-            Some(l) => Rc::clone(l),
+        let lir = match closure.template.lir() {
+            Some(l) => l,
             None => return (SIG_ERROR, rejected(self, "wasm", "closure has no LIR")),
         };
 
@@ -49,10 +51,17 @@ impl VM {
             }
         }
 
-        // Force-compile if not already cached.
+        // Force-compile if not already cached. The module pins the closure's
+        // code region, so its key keeps naming this function.
         let heap_ptr = self.heap_ptr;
-        let tier = self.wasm_tier.as_mut().unwrap();
-        if !tier.is_compiled(bytecode_ptr) && !tier.compile(bytecode_ptr, &lir, heap_ptr) {
+        let compiled = self.wasm_tier.as_ref().unwrap().is_compiled(bytecode_ptr) || {
+            let pin = crate::value::CodePin::of(self.heap(), &closure.template);
+            self.wasm_tier
+                .as_mut()
+                .unwrap()
+                .compile(pin, &lir, heap_ptr)
+        };
+        if !compiled {
             // Remove the temporary tier before returning.
             if !had_tier {
                 self.wasm_tier = None;

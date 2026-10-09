@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! Wasmtime host state and primitive dispatch: everything the compiled module
 //! reaches across the boundary for.
 //!
@@ -11,7 +11,7 @@
 //! The host state (`ElleHost`) lives in the Wasmtime `Store` and holds the
 //! handle table heap objects are named by, the flattened primitive dispatch
 //! table, the parameter frames of dynamic bindings, each fiber's suspension
-//! frames, and the dual-compiled blueprint of every closure in the module.
+//! frames, and the module's dual-compiled code.
 //!
 //! Host functions are registered as Wasmtime imports under the "elle"
 //! namespace. `rt_call` is the one a compiled call reaches: it resolves the
@@ -30,13 +30,73 @@ mod io;
 
 pub use frames::WasmSuspensionFrame;
 
-/// A closure's dual-compiled blueprint, used by spawn for cross-thread
-/// execution. `rt_make_closure` builds a code object from it plus the shape the
-/// WASM call supplies, and the OS-thread VM worker runs that code object's
-/// bytecode. Everything the worker reads off the code object rides on this
-/// blueprint — the nested-lambda blueprints a `MakeClosure` indexes, and the
-/// tables an abandoned frame walks (src/wasm/tests/closure.rs).
-pub type ClosureBytecode = std::rc::Rc<crate::value::TemplateProto>;
+/// The module's dual-compiled code, used by spawn for cross-thread execution:
+/// a code unit whose region holds one payload per closure, and the header over
+/// each by table index.
+///
+/// `rt_make_closure` builds a closure's code object from that payload plus the
+/// shape the WASM call supplies, and the OS-thread VM worker runs that code
+/// object's bytecode. Everything the worker reads off the code object rides on
+/// the payload — the child table a `MakeClosure` indexes, and the tables an
+/// abandoned frame walks (src/wasm/tests/closure.rs).
+pub struct ModuleCode {
+    /// The unit holding the module's code region; `None` for a module that
+    /// carries no dual-compiled code.
+    unit: Option<crate::value::CodeUnit>,
+    /// The header over each closure's dual-compiled payload, by table index.
+    closures: Vec<crate::value::ClosureTemplate>,
+    /// The code object `rt_make_closure` built for each table index, written
+    /// once into the unit's region: the shape a call supplies is the lambda's
+    /// own, so every call at one index answers the same one.
+    built: Vec<Option<crate::value::ClosureTemplate>>,
+}
+
+impl ModuleCode {
+    /// A module's dual-compiled code: `unit`, and `closures`, the header over
+    /// each closure's payload by table index.
+    pub fn new(unit: crate::value::CodeUnit, closures: Vec<Value>) -> Self {
+        let closures: Vec<crate::value::ClosureTemplate> = closures
+            .into_iter()
+            .map(|h| (*crate::value::TemplateRef::region(h)).clone())
+            .collect();
+        ModuleCode {
+            unit: Some(unit),
+            built: vec![None; closures.len()],
+            closures,
+        }
+    }
+
+    /// No dual-compiled code: a standalone single-closure module's.
+    pub fn none() -> Self {
+        ModuleCode {
+            unit: None,
+            closures: Vec::new(),
+            built: Vec::new(),
+        }
+    }
+
+    /// The code object of the closure at `table_idx`, its code half off the
+    /// module's payload and its shape half off `meta`
+    /// (docs/impl/region/template.md). With no payload to copy it is written
+    /// into `fallback`, the region of the closure that names it.
+    pub fn code_object(
+        &mut self,
+        table_idx: usize,
+        meta: crate::value::WasmClosureMeta,
+        fallback: crate::value::CodeArena,
+    ) -> crate::value::ClosureTemplate {
+        if let Some(Some(code)) = self.built.get(table_idx) {
+            return code.clone();
+        }
+        let parts = crate::value::PayloadParts::wasm_closure(self.closures.get(table_idx), meta);
+        let Some(unit) = self.unit.as_ref().filter(|_| table_idx < self.built.len()) else {
+            return crate::value::ClosureTemplate::new(fallback.write(parts));
+        };
+        let code = crate::value::ClosureTemplate::new(unit.arena().write(parts));
+        self.built[table_idx] = Some(code.clone());
+        code
+    }
+}
 
 /// A pre-compiled standalone closure Module with its constant pool.
 #[derive(Clone)]
@@ -121,10 +181,10 @@ pub struct ElleHost {
     /// Mapping from const pool index → handle table index for heap values.
     /// Immediate values (tag < TAG_HEAP_START) have 0 here (unused).
     pub pool_to_handle: Vec<u64>,
-    /// The dual-compiled blueprint of each closure, indexed by table index.
-    /// Populated from `EmitResult` so `rt_make_closure` can give a WASM closure
-    /// a code object the bytecode VM can run after a spawn.
-    pub closure_bytecodes: Vec<ClosureBytecode>,
+    /// The module's dual-compiled code. Populated from `EmitResult` so
+    /// `rt_make_closure` can give a WASM closure a code object the bytecode VM
+    /// can run after a spawn.
+    pub closure_bytecodes: ModuleCode,
     /// Debug logging enabled (set once from the `wasm` trace keyword at
     /// construction).
     pub debug: bool,
@@ -157,7 +217,7 @@ impl ElleHost {
             pending_redrive: std::collections::HashMap::new(),
             resume_value: None,
             pool_to_handle: Vec::new(),
-            closure_bytecodes: Vec::new(),
+            closure_bytecodes: ModuleCode::none(),
             debug: crate::config::get().has_trace("wasm"),
             io_backend: None,
             precached_closures: Vec::new(),

@@ -1,8 +1,8 @@
-// audited: 2026-09-07
-// src/lir/lower/AGENTS.md
-// docs/intrinsics.md
-//! Lowering a `%`-intrinsic: arithmetic, comparison, conversion, pairs, bitwise,
-//! and the type predicates.
+// audited: 2026-10-06
+//! Lowering a `%`-intrinsic: arithmetic, comparison, conversion, pairs, bitwise, and the type predicates.
+//!
+//! src/lir/lower/AGENTS.md
+//! docs/intrinsics.md
 //!
 //! The match is a chain. This file lowers the operand registers once, then takes
 //! the ops above; `rest` takes the collection, freeze/thaw and remaining
@@ -51,7 +51,7 @@ impl<'a> Lowerer<'a> {
         match op {
             // Binary arithmetic
             IntrinsicOp::Add => {
-                self.emit(LirInstr::binop_proved(
+                self.emit(InstrRef::binop_proved(
                     dst,
                     BinOp::Add,
                     arg_regs[0],
@@ -61,14 +61,14 @@ impl<'a> Lowerer<'a> {
             }
             IntrinsicOp::Sub => {
                 if arg_regs.len() == 1 {
-                    self.emit(LirInstr::unary_proved(
+                    self.emit(InstrRef::unary_proved(
                         dst,
                         UnaryOp::Neg,
                         arg_regs[0],
                         proof,
                     ));
                 } else {
-                    self.emit(LirInstr::binop_proved(
+                    self.emit(InstrRef::binop_proved(
                         dst,
                         BinOp::Sub,
                         arg_regs[0],
@@ -78,7 +78,7 @@ impl<'a> Lowerer<'a> {
                 }
             }
             IntrinsicOp::Mul => {
-                self.emit(LirInstr::binop_proved(
+                self.emit(InstrRef::binop_proved(
                     dst,
                     BinOp::Mul,
                     arg_regs[0],
@@ -87,7 +87,7 @@ impl<'a> Lowerer<'a> {
                 ));
             }
             IntrinsicOp::Div => {
-                self.emit(LirInstr::binop_proved(
+                self.emit(InstrRef::binop_proved(
                     dst,
                     BinOp::Div,
                     arg_regs[0],
@@ -96,7 +96,7 @@ impl<'a> Lowerer<'a> {
                 ));
             }
             IntrinsicOp::Rem => {
-                self.emit(LirInstr::binop_proved(
+                self.emit(InstrRef::binop_proved(
                     dst,
                     BinOp::Rem,
                     arg_regs[0],
@@ -108,15 +108,14 @@ impl<'a> Lowerer<'a> {
                 // Floored modulus: ((a % b) + b) % b
                 // The stack-based emitter consumes registers on use, so spill b
                 // to a local slot and reload fresh copies for each operation.
-                let b_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                self.emit(LirInstr::StoreLocal {
+                let b_slot = self.fresh_local();
+                self.emit(InstrRef::StoreLocal {
                     slot: b_slot,
                     src: arg_regs[1],
                 });
                 // Step 1: t = a % b (uses original arg_regs, but b was consumed by StoreLocal)
                 let b1 = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
+                self.emit(InstrRef::LoadLocal {
                     dst: b1,
                     slot: b_slot,
                 });
@@ -125,7 +124,7 @@ impl<'a> Lowerer<'a> {
                 // its sum with the divisor, and that sum's remainder. Over
                 // anything else the proof is Unproven and no step claims one.
                 let t = self.fresh_reg();
-                self.emit(LirInstr::binop_proved(
+                self.emit(InstrRef::binop_proved(
                     t,
                     BinOp::Rem,
                     arg_regs[0],
@@ -134,23 +133,23 @@ impl<'a> Lowerer<'a> {
                 ));
                 // Step 2: t2 = t + b
                 let b2 = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
+                self.emit(InstrRef::LoadLocal {
                     dst: b2,
                     slot: b_slot,
                 });
                 let t2 = self.fresh_reg();
-                self.emit(LirInstr::binop_proved(t2, BinOp::Add, t, b2, proof));
+                self.emit(InstrRef::binop_proved(t2, BinOp::Add, t, b2, proof));
                 // Step 3: result = t2 % b
                 let b3 = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
+                self.emit(InstrRef::LoadLocal {
                     dst: b3,
                     slot: b_slot,
                 });
-                self.emit(LirInstr::binop_proved(dst, BinOp::Rem, t2, b3, proof));
+                self.emit(InstrRef::binop_proved(dst, BinOp::Rem, t2, b3, proof));
             }
             // Comparisons
             IntrinsicOp::Eq => {
-                self.emit(LirInstr::compare_proved(
+                self.emit(InstrRef::compare_proved(
                     dst,
                     CmpOp::Eq,
                     arg_regs[0],
@@ -159,7 +158,7 @@ impl<'a> Lowerer<'a> {
                 ));
             }
             IntrinsicOp::Lt => {
-                self.emit(LirInstr::compare_proved(
+                self.emit(InstrRef::compare_proved(
                     dst,
                     CmpOp::Lt,
                     arg_regs[0],
@@ -168,7 +167,7 @@ impl<'a> Lowerer<'a> {
                 ));
             }
             IntrinsicOp::Gt => {
-                self.emit(LirInstr::compare_proved(
+                self.emit(InstrRef::compare_proved(
                     dst,
                     CmpOp::Gt,
                     arg_regs[0],
@@ -177,7 +176,7 @@ impl<'a> Lowerer<'a> {
                 ));
             }
             IntrinsicOp::Le => {
-                self.emit(LirInstr::compare_proved(
+                self.emit(InstrRef::compare_proved(
                     dst,
                     CmpOp::Le,
                     arg_regs[0],
@@ -186,7 +185,7 @@ impl<'a> Lowerer<'a> {
                 ));
             }
             IntrinsicOp::Ge => {
-                self.emit(LirInstr::compare_proved(
+                self.emit(InstrRef::compare_proved(
                     dst,
                     CmpOp::Ge,
                     arg_regs[0],
@@ -198,18 +197,18 @@ impl<'a> Lowerer<'a> {
             IntrinsicOp::Not => {
                 // `%not` is truthiness negation, total on every value, and the
                 // JIT inlines it whatever the operand is.
-                self.emit(LirInstr::unary(dst, UnaryOp::Not, arg_regs[0]));
+                self.emit(InstrRef::unary(dst, UnaryOp::Not, arg_regs[0]));
             }
             // Conversion
             IntrinsicOp::Int => {
-                self.emit(LirInstr::Convert {
+                self.emit(InstrRef::Convert {
                     dst,
                     op: ConvOp::FloatToInt,
                     src: arg_regs[0],
                 });
             }
             IntrinsicOp::Float => {
-                self.emit(LirInstr::Convert {
+                self.emit(InstrRef::Convert {
                     dst,
                     op: ConvOp::IntToFloat,
                     src: arg_regs[0],
@@ -217,7 +216,7 @@ impl<'a> Lowerer<'a> {
             }
             // List operations
             IntrinsicOp::Pair => {
-                self.emit_alloc(|region| LirInstr::List {
+                self.emit_alloc(|region| InstrRef::List {
                     region,
                     dst,
                     head: arg_regs[0],
@@ -225,13 +224,13 @@ impl<'a> Lowerer<'a> {
                 });
             }
             IntrinsicOp::First => {
-                self.emit(LirInstr::First {
+                self.emit(InstrRef::First {
                     dst,
                     pair: arg_regs[0],
                 });
             }
             IntrinsicOp::Rest => {
-                self.emit(LirInstr::Rest {
+                self.emit(InstrRef::Rest {
                     dst,
                     pair: arg_regs[0],
                 });
@@ -239,7 +238,7 @@ impl<'a> Lowerer<'a> {
             // Bitwise. The contract already requires proven ints here, so these
             // carry the proof by construction.
             IntrinsicOp::BitAnd => {
-                self.emit(LirInstr::binop_proved(
+                self.emit(InstrRef::binop_proved(
                     dst,
                     BinOp::BitAnd,
                     arg_regs[0],
@@ -248,7 +247,7 @@ impl<'a> Lowerer<'a> {
                 ));
             }
             IntrinsicOp::BitOr => {
-                self.emit(LirInstr::binop_proved(
+                self.emit(InstrRef::binop_proved(
                     dst,
                     BinOp::BitOr,
                     arg_regs[0],
@@ -257,7 +256,7 @@ impl<'a> Lowerer<'a> {
                 ));
             }
             IntrinsicOp::BitXor => {
-                self.emit(LirInstr::binop_proved(
+                self.emit(InstrRef::binop_proved(
                     dst,
                     BinOp::BitXor,
                     arg_regs[0],
@@ -266,7 +265,7 @@ impl<'a> Lowerer<'a> {
                 ));
             }
             IntrinsicOp::Shl => {
-                self.emit(LirInstr::binop_proved(
+                self.emit(InstrRef::binop_proved(
                     dst,
                     BinOp::Shl,
                     arg_regs[0],
@@ -275,7 +274,7 @@ impl<'a> Lowerer<'a> {
                 ));
             }
             IntrinsicOp::Shr => {
-                self.emit(LirInstr::binop_proved(
+                self.emit(InstrRef::binop_proved(
                     dst,
                     BinOp::Shr,
                     arg_regs[0],
@@ -285,7 +284,7 @@ impl<'a> Lowerer<'a> {
             }
             // Bitwise NOT
             IntrinsicOp::BitNot => {
-                self.emit(LirInstr::unary_proved(
+                self.emit(InstrRef::unary_proved(
                     dst,
                     UnaryOp::BitNot,
                     arg_regs[0],
@@ -294,7 +293,7 @@ impl<'a> Lowerer<'a> {
             }
             // Not-equal comparison
             IntrinsicOp::Ne => {
-                self.emit(LirInstr::compare_proved(
+                self.emit(InstrRef::compare_proved(
                     dst,
                     CmpOp::Ne,
                     arg_regs[0],
@@ -304,37 +303,37 @@ impl<'a> Lowerer<'a> {
             }
             // Type predicates
             IntrinsicOp::IsNil => {
-                self.emit(LirInstr::IsNil {
+                self.emit(InstrRef::IsNil {
                     dst,
                     src: arg_regs[0],
                 });
             }
             IntrinsicOp::IsEmpty => {
-                self.emit(LirInstr::IsEmpty {
+                self.emit(InstrRef::IsEmpty {
                     dst,
                     src: arg_regs[0],
                 });
             }
             IntrinsicOp::IsBool => {
-                self.emit(LirInstr::IsBool {
+                self.emit(InstrRef::IsBool {
                     dst,
                     src: arg_regs[0],
                 });
             }
             IntrinsicOp::IsInt => {
-                self.emit(LirInstr::IsInt {
+                self.emit(InstrRef::IsInt {
                     dst,
                     src: arg_regs[0],
                 });
             }
             IntrinsicOp::IsFloat => {
-                self.emit(LirInstr::IsFloat {
+                self.emit(InstrRef::IsFloat {
                     dst,
                     src: arg_regs[0],
                 });
             }
             IntrinsicOp::IsString => {
-                self.emit(LirInstr::IsString {
+                self.emit(InstrRef::IsString {
                     dst,
                     src: arg_regs[0],
                 });

@@ -1,6 +1,6 @@
 # WASM Backend
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-06 -->
 
 The WASM backend compiles Elle programs to WebAssembly and runs them under
 Wasmtime, over the same front end the bytecode VM uses.
@@ -55,7 +55,9 @@ Two execution modes:
   rather than replacing it. A closure runs on the tier from its Nth call, so
   `--wasm=1` compiles it on the first; the tier counts the calls itself,
   because a `wasm` build has no JIT tier to share a count with. Currently
-  limited to leaf functions (no closures, tail calls, or yield).
+  limited to leaf functions (no closures, tail calls, or yield). The tier keys
+  each compiled module, and each closure it refused, by the closure's bytecode
+  address, so each entry pins that code region ([jit.md](jit.md)).
 
 ### Pipeline (full-module)
 
@@ -250,19 +252,19 @@ Yielding closures use a CPS-like scheme:
 `sys/spawn`/`sys/spawn-vm` deep-copy a closure to a fresh OS-thread **bytecode**
 VM and run it there — WASM functions are not callable off the main store. So the
 full-module emitter *dual-compiles*: alongside the WASM body it emits ordinary
-bytecode for every closure (`emit_module_closures`) and turns each into a
-blueprint, stored on the host as `closure_bytecodes`. When `rt_make_closure`
-builds a WASM closure value it builds the code object from that blueprint, so a
-spawned worker can run `template.code()` on the VM.
+bytecode for every closure (`emit_module_with_lambdas`), writing each closure's
+payload into a code unit of the module's own. The host holds that unit and the
+closures' headers as `closure_bytecodes`. When `rt_make_closure` builds a WASM
+closure value it builds the code object from that payload, so a spawned worker
+can run `template.code()` on the VM.
 
-The blueprint travels whole, through `TemplateProto::wasm_closure`
-([region/template.md](region/template.md)). Every field of it earns the trip. The
-nested-lambda blueprints are the loudest: a closure's bytecode `MakeClosure`
-instructions index `child_protos`, so a code object built without them leaves
-that list empty and the worker panics on its first `MakeClosure`
-([closure.rs](../../src/vm/closure.rs)). The two release tables are the quietest,
-and are what an abandoned frame on that worker walks. Pinned by
-`wasm::tests::closure`.
+The code half travels whole, through `PayloadParts::wasm_closure`
+([region/template.md](region/template.md)). Every field of it earns the trip.
+The child table is the loudest: a closure's bytecode `MakeClosure` instructions
+index it, so a code object built without it leaves the table empty and the
+worker panics on its first `MakeClosure` ([closure.rs](../../src/vm/closure.rs)).
+The two release tables are the quietest, and are what an abandoned frame on that
+worker walks. Pinned by `wasm::tests::closure`.
 
 ### Register allocation
 

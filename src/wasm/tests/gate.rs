@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-10-06
 // docs/impl/wasm.md
 //! What the standalone single-closure emission gate accepts and refuses.
 //!
@@ -13,26 +13,26 @@ use super::*;
 
 /// A closure whose block carries one tail call (callee register is arbitrary —
 /// the gate is structural, it never resolves the callee).
-fn tail_calling_closure() -> LirFunction {
+fn tail_calling_closure() -> LirOwned {
     LirFixture::new(Arity::Exact(1))
         .closure_id(ClosureId(0))
         .num_params(1)
         .block(
             0,
-            vec![
-                LirInstr::Const {
+            &[
+                InstrRef::Const {
                     dst: Reg(0),
-                    value: LirConst::Int(1),
+                    value: ConstRef::Int(1),
                 },
-                LirInstr::TailCall {
+                InstrRef::TailCall {
                     dst: Reg(1),
                     func: Reg(0),
-                    args: vec![],
+                    args: &[],
                     arity_checked: false,
                     region: static_region(2),
                     defer_callee_release: false,
                     deferred_release_slot: None,
-                    borrowed_arg_slots: Vec::new(),
+                    borrowed_arg_slots: crate::lir::Slots::new(&[]),
                 },
             ],
             Terminator::Return(Reg(1)),
@@ -42,16 +42,16 @@ fn tail_calling_closure() -> LirFunction {
 
 /// A closure that constructs a nested closure (`MakeClosure`), resolvable only
 /// with module context.
-fn nested_closure_closure() -> LirFunction {
+fn nested_closure_closure() -> LirOwned {
     LirFixture::new(Arity::Exact(1))
         .closure_id(ClosureId(1))
         .num_params(1)
         .block(
             0,
-            vec![LirInstr::MakeClosure {
+            &[InstrRef::MakeClosure {
                 dst: Reg(0),
                 closure_id: ClosureId(0),
-                captures: vec![],
+                captures: &[],
                 region: static_region(2),
             }],
             Terminator::Return(Reg(0)),
@@ -61,15 +61,15 @@ fn nested_closure_closure() -> LirFunction {
 
 /// A plain numeric closure — the positive control proving the gate is not
 /// over-broad.
-fn plain_closure() -> LirFunction {
+fn plain_closure() -> LirOwned {
     LirFixture::new(Arity::Exact(1))
         .closure_id(ClosureId(0))
         .num_params(1)
         .block(
             0,
-            vec![LirInstr::Const {
+            &[InstrRef::Const {
                 dst: Reg(0),
-                value: LirConst::Int(7),
+                value: ConstRef::Int(7),
             }],
             Terminator::Return(Reg(0)),
         )
@@ -80,7 +80,13 @@ fn plain_closure() -> LirFunction {
 fn standalone_emission_admits_plain_closures() {
     let vm = crate::vm::VM::new();
     assert!(
-        emit_single_closure(&plain_closure(), None, vm.heap_ptr, std::ptr::null_mut()).is_some(),
+        emit_single_closure(
+            &plain_closure().view(),
+            None,
+            vm.heap_ptr,
+            std::ptr::null_mut()
+        )
+        .is_some(),
         "a numeric closure with no stub-reaching shape must be standalone-emittable"
     );
 }
@@ -93,7 +99,7 @@ fn standalone_emission_refuses_suspending_closures() {
     let vm = crate::vm::VM::new();
     assert!(
         emit_single_closure(
-            &suspending_closure(1, 0),
+            &suspending_closure(1, 0).view(),
             None,
             vm.heap_ptr,
             std::ptr::null_mut()
@@ -111,7 +117,7 @@ fn standalone_emission_refuses_tail_calls() {
     let vm = crate::vm::VM::new();
     assert!(
         emit_single_closure(
-            &tail_calling_closure(),
+            &tail_calling_closure().view(),
             None,
             vm.heap_ptr,
             std::ptr::null_mut()
@@ -129,7 +135,7 @@ fn standalone_emission_refuses_module_less_make_closure() {
     let vm = crate::vm::VM::new();
     assert!(
         emit_single_closure(
-            &nested_closure_closure(),
+            &nested_closure_closure().view(),
             None,
             vm.heap_ptr,
             std::ptr::null_mut()
@@ -137,13 +143,13 @@ fn standalone_emission_refuses_module_less_make_closure() {
         .is_none(),
         "MakeClosure without module context has no ClosureId resolution"
     );
-    let module = LirModule {
+    let module = FrozenModule {
         entry: trivial_entry(),
         closures: vec![plain_closure(), nested_closure_closure()],
     };
     assert!(
         emit_single_closure(
-            &nested_closure_closure(),
+            &nested_closure_closure().view(),
             Some(&module),
             vm.heap_ptr,
             std::ptr::null_mut()

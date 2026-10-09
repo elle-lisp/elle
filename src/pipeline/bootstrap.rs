@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-10-06
 //! The core.lisp bootstrap: compile and run the core module before any
 //! compile context exists, and hand its exports to the one being built.
 //!
@@ -156,6 +156,7 @@ pub(super) fn compile_core(
         );
     }
     let mut lowerer = Lowerer::new(&arena)
+        .with_heap(unsafe { &mut *heap_ptr })
         .with_symbols(symbols)
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
@@ -164,12 +165,16 @@ pub(super) fn compile_core(
     let lir_module = lowerer
         .lower(&hir)
         .expect("core.lisp lowering must succeed");
+    // The lowerer borrows `symbols` until it drops, and the exports below
+    // intern into them.
+    drop(lowerer);
 
-    let mut emitter = Emitter::new();
+    let code = crate::value::CodeArena::mint(unsafe { &mut *heap_ptr });
+    let mut emitter = Emitter::new(code);
     let (bytecode, _yield_points, _call_sites) = emitter.emit_module(&lir_module);
 
     let closure_val = vm
-        .execute(&bytecode)
+        .execute(&crate::value::CodeUnit::new(code, bytecode))
         .expect("core.lisp execution must succeed");
 
     let closure = closure_val

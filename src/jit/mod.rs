@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-10-07
 // docs/impl/jit.md
 //! Cranelift JIT compilation of LIR functions, and the types every stage of it
 //! shares.
@@ -6,7 +6,7 @@
 //! ## Architecture
 //!
 //! ```text
-//! LirFunction -> JitCompiler -> Cranelift IR -> Native code -> JitCode
+//! LirView -> JitCompiler -> Cranelift IR -> Native code -> JitCode
 //! ```
 //!
 //! A polymorphic or yielding function compiles like any other — the runtime
@@ -106,7 +106,7 @@ impl JitCtx {
 
 /// The two deferral channels one `TailCall` carries to `elle_jit_tail_call`: the
 /// callee closure's own region, and the merged closure-cycle arena's static slot
-/// (see `LirInstr::TailCall`). A frame-replacing tail call strands both releases,
+/// (see `InstrRef::TailCall`). A frame-replacing tail call strands both releases,
 /// and the activation that runs the callee takes them over
 /// (docs/impl/region/relocate.md § "A channel built in compiled code hands its
 /// release forward").
@@ -131,7 +131,7 @@ impl TailDeferrals {
         arena_slot: 0,
     };
 
-    /// Read the pair off a `LirInstr::TailCall`'s own fields.
+    /// Read the pair off an `InstrRef::TailCall`'s own fields.
     pub(crate) fn of(
         defer_callee_release: bool,
         deferred_release_slot: Option<crate::hir::region::StaticRegion>,
@@ -175,25 +175,30 @@ impl std::error::Error for JitError {}
 /// One entry per closure template, deduplicated by bytecode pointer.
 #[derive(Debug, Clone)]
 pub struct JitRejectionInfo {
-    /// Function name (from `LirFunction.name`), if available.
+    /// Function name (from the frozen LIR's name), if available.
     pub name: Option<String>,
     /// Why the JIT rejected this closure.
     pub reason: JitError,
-    /// Pin for the code object whose bytecode this rejection is keyed by
-    /// (docs/impl/jit.md § "Cache identity"): while the entry lives, the
-    /// address cannot be reused by a different function, so the negative
-    /// cache can never wrongly block a new function from compiling.
-    _pin: Option<crate::value::ClosureTemplate>,
+    /// How many of this function's compiles came back rejected: 1 while the
+    /// negative cache holds, and more only if something re-submitted it.
+    pub attempts: usize,
+    /// Pin on the code region of the code object whose bytecode this
+    /// rejection is keyed by (docs/impl/jit.md § "Cache identity"): while the
+    /// entry lives, the address cannot be reused by a different function, so
+    /// the negative cache can never wrongly block a new function from
+    /// compiling, and the attempt count can never pass to one.
+    _pin: Option<crate::value::CodePin>,
 }
 
 impl JitRejectionInfo {
-    /// Build a rejection record pinning the code object it is keyed by. `pin`
-    /// is `None` only when the submission's pin was already lost (a worker
-    /// result with no matching pending entry).
-    pub fn new(reason: JitError, pin: Option<crate::value::ClosureTemplate>) -> Self {
+    /// Build the record of a first rejected compile, pinning the code region
+    /// it is keyed by. `pin` is `None` only when the submission's pin was
+    /// already lost (a worker result with no matching pending entry).
+    pub fn new(reason: JitError, pin: Option<crate::value::CodePin>) -> Self {
         JitRejectionInfo {
             name: None,
             reason,
+            attempts: 1,
             _pin: pin,
         }
     }

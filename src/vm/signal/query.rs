@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-07
 //! `SIG_QUERY` dispatch: the questions a primitive asks the running VM.
 //!
 //! docs/runtime.md
@@ -33,8 +33,8 @@ impl VM {
     ///   — read or set the runtime configuration (config.rs)
     /// - (:"mlir/compile-spirv" . closure-or-pair) — SPIR-V bytes for a
     ///   GPU-eligible closure (`mlir` builds only)
-    /// - (:"git" . closure-or-pair) — the closure, its SPIR-V cached on its
-    ///   template (`mlir` builds only)
+    /// - (:"git" . closure-or-pair) — the closure, its SPIR-V cached in the
+    ///   VM's SPIR-V cache (`mlir` builds only)
     /// - `compile/run-on`, `compile/barrier-module`, `compile/whole-module`,
     ///   `compile/whole-module-syntax`, `compile/dumps` — run or compile a
     ///   closure or module (modules.rs)
@@ -80,7 +80,7 @@ impl VM {
             "call-count" => {
                 if let Some(closure) = arg.as_closure() {
                     let ptr = closure.template.bytecode().as_ptr();
-                    (SIG_OK, Value::int(self.get_closure_call_count(ptr) as i64))
+                    (SIG_OK, Value::int(self.closure_call_count(ptr) as i64))
                 } else {
                     (SIG_OK, Value::int(0))
                 }
@@ -279,9 +279,7 @@ impl VM {
 
                 // Sort by call count ascending (coldest first, hottest last).
                 let mut entries: Vec<_> = self.jit_rejections.iter().collect();
-                entries.sort_by_key(|(ptr, _)| {
-                    self.closure_call_counts.get(ptr).copied().unwrap_or(0)
-                });
+                entries.sort_by_key(|(ptr, _)| self.closure_call_count(**ptr));
 
                 let structs: Vec<Value> = entries
                     .into_iter()
@@ -293,10 +291,12 @@ impl VM {
                             TableKey::keyword("reason"),
                             ctx.string(info.reason.to_string()),
                         );
-                        let calls = self.closure_call_counts.get(ptr).copied().unwrap_or(0);
+                        let calls = self.closure_call_count(*ptr);
                         fields.insert(TableKey::keyword("calls"), Value::int(calls as i64));
-                        let attempts = self.jit_compile_attempts.get(ptr).copied().unwrap_or(0);
-                        fields.insert(TableKey::keyword("attempts"), Value::int(attempts as i64));
+                        fields.insert(
+                            TableKey::keyword("attempts"),
+                            Value::int(info.attempts as i64),
+                        );
                         ctx.struct_from(fields)
                     })
                     .collect();
@@ -345,94 +345,15 @@ impl VM {
             "jit/peek" => (SIG_OK, Value::NIL),
             "vm/config" => self.dispatch_vm_config_read(ctx, arg),
             #[cfg(feature = "mlir")]
-            "mlir/compile-spirv" => {
-                // arg is (closure . workgroup-size)
-                let (closure_val, wg_size): (Value, u32) = match arg.as_pair() {
-                    Some(c) => (c.first, c.rest.as_int().unwrap_or(256) as u32),
-                    None => (arg, 256),
-                };
-
-                let closure = match closure_val.as_closure() {
-                    Some(c) => c,
-                    None => return type_error!(ctx, closure_val, "mlir/compile-spirv", "closure"),
-                };
-                let lir = match closure.template.lir_function() {
-                    Some(lir) => lir,
-                    None => {
-                        return (
-                            SIG_ERROR,
-                            ctx.error(
-                                "mlir-error",
-                                "mlir/compile-spirv: closure has no LIR".to_string(),
-                            ),
-                        )
-                    }
-                };
-                if !lir.is_gpu_eligible() {
-                    return (
-                        SIG_ERROR,
-                        ctx.error(
-                            "mlir-error",
-                            "mlir/compile-spirv: closure is not GPU-eligible".to_string(),
-                        ),
-                    );
-                }
-                let key = closure.template.bytecode().as_ptr();
-                let cache = self
-                    .mlir_cache
-                    .get_or_insert_with(crate::mlir::MlirCache::new);
-                match cache.compile_spirv(key, lir, wg_size) {
-                    Ok(bytes) => (SIG_OK, ctx.bytes(bytes.to_vec())),
-                    Err(e) => (
-                        SIG_ERROR,
-                        ctx.error("mlir-error", format!("mlir/compile-spirv: {}", e)),
-                    ),
-                }
-            }
+            "mlir/compile-spirv" => match self.query_spirv(ctx, "mlir/compile-spirv", arg) {
+                Ok((_, bytes)) => (SIG_OK, ctx.bytes(bytes)),
+                Err(raised) => raised,
+            },
             #[cfg(feature = "mlir")]
-            "git" => {
-                // arg is (closure . workgroup-size)
-                let (closure_val, wg_size): (Value, u32) = match arg.as_pair() {
-                    Some(c) => (c.first, c.rest.as_int().unwrap_or(256) as u32),
-                    None => (arg, 256),
-                };
-
-                let closure = match closure_val.as_closure() {
-                    Some(c) => c,
-                    None => return type_error!(ctx, closure_val, "git", "closure"),
-                };
-                // Already cached? Return early.
-                if closure.template.spirv_bytes().is_some() {
-                    return (SIG_OK, closure_val);
-                }
-                let lir = match closure.template.lir_function() {
-                    Some(lir) => lir,
-                    None => {
-                        return (
-                            SIG_ERROR,
-                            ctx.error("mlir-error", "git: closure has no LIR".to_string()),
-                        )
-                    }
-                };
-                if !lir.is_gpu_eligible() {
-                    return (
-                        SIG_ERROR,
-                        ctx.error("mlir-error", "git: closure is not GPU-eligible".to_string()),
-                    );
-                }
-                let key = closure.template.bytecode().as_ptr();
-                let cache = self
-                    .mlir_cache
-                    .get_or_insert_with(crate::mlir::MlirCache::new);
-                match cache.compile_spirv(key, lir, wg_size) {
-                    Ok(bytes) => {
-                        // Cache on the template (idempotent).
-                        closure.template.cache_spirv(bytes.to_vec());
-                        (SIG_OK, closure_val)
-                    }
-                    Err(e) => (SIG_ERROR, ctx.error("mlir-error", format!("git: {}", e))),
-                }
-            }
+            "git" => match self.query_spirv(ctx, "git", arg) {
+                Ok((closure_val, _)) => (SIG_OK, closure_val),
+                Err(raised) => raised,
+            },
             "compile/run-on" => self.dispatch_compile_run_on(ctx, arg),
             "compile/barrier-module" => self.dispatch_barrier_module(ctx, arg),
             "compile/whole-module" => self.dispatch_whole_module(ctx, arg),
@@ -448,5 +369,51 @@ impl VM {
                 ),
             ),
         }
+    }
+
+    /// The closure a `git` or `mlir/compile-spirv` query names, and its SPIR-V
+    /// at the workgroup size the query names: the kernel the VM caches, or one
+    /// compiled now and cached. `arg` is `(closure . size)`, or a bare closure
+    /// for the default size; `op` names the operation in an error.
+    #[cfg(feature = "mlir")]
+    fn query_spirv(
+        &mut self,
+        ctx: &mut crate::primitives::ctx::Alloc,
+        op: &str,
+        arg: Value,
+    ) -> Result<(Value, Vec<u8>), (SignalBits, Value)> {
+        use crate::vm::core::WorkgroupSize;
+        let (closure_val, size) = match arg.as_pair() {
+            Some(c) => match WorkgroupSize::of_value(c.rest, op) {
+                Ok(size) => (c.first, size),
+                Err((kind, msg)) => return Err((SIG_ERROR, ctx.error(kind, msg))),
+            },
+            None => (arg, WorkgroupSize::DEFAULT),
+        };
+        let Some(closure) = closure_val.as_closure() else {
+            let msg = format!("{op}: expected closure, got {}", closure_val.type_name());
+            return Err((SIG_ERROR, ctx.error("type-error", msg)));
+        };
+        if let Some(bytes) = self.spirv_for(&closure.template, size) {
+            return Ok((closure_val, bytes.to_vec()));
+        }
+        let mlir_error = |ctx: &mut crate::primitives::ctx::Alloc, msg: String| {
+            (SIG_ERROR, ctx.error("mlir-error", format!("{op}: {msg}")))
+        };
+        let Some(lir) = closure.template.lir() else {
+            return Err(mlir_error(ctx, "closure has no LIR".to_string()));
+        };
+        if !lir.is_gpu_eligible() {
+            return Err(mlir_error(ctx, "closure is not GPU-eligible".to_string()));
+        }
+        let bytes = self
+            .mlir_cache
+            .get_or_insert_with(crate::mlir::MlirCache::new)
+            .compile_spirv(&lir, size.get())
+            .map_err(|e| mlir_error(ctx, e))?;
+        // The VM's cache entry pins the closure's code region, so the key
+        // keeps naming this function (docs/impl/jit.md).
+        self.install_spirv(&closure.template, size, bytes.clone());
+        Ok((closure_val, bytes))
     }
 }

@@ -1,6 +1,6 @@
 # value
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-06 -->
 
 Runtime value representation using a tagged union.
 
@@ -19,12 +19,12 @@ Runtime value representation using a tagged union.
 | `repr/accessors.rs` | Value field access and type checking |
 | `repr/traits.rs` | `Display`, `Debug`, `Clone` implementations |
 | `types.rs` | `Arity`, `SymbolId`, `NativeFn`, `TableKey`, sorted-struct helpers |
-| `closure.rs` | `Closure` (template + env + squelch mask) and the `TemplateRef` seam; submodules `proto` (the compile-time `TemplateProto` blueprint), `payload` (`CodePayload`, the region-inline code data), `header` (`ClosureTemplate`), `cache` (the heap's payload cache). docs/impl/region/template.md owns the argument |
+| `closure.rs` | `Closure` (template + env + squelch mask) and the `TemplateRef` seam; submodules `payload` (`CodePayload`, the region-inline code data), `header` (`ClosureTemplate`), `arena` (`CodeArena` and the `PayloadParts` a payload is written from), `unit` (`CodeUnit` and `CodePin`, the Rust-held references to a code region). [template.md](../../docs/impl/region/template.md) owns the argument |
 | `fiber.rs` | `Fiber`, `FiberHandle`, `WeakFiberHandle`, `SuspendedFrame`, `FiberStatus`; re-exports `SignalBits` (from `fiber/signalbits.rs`) and the `SIG_*` constants (from `crate::signals`) |
-| `fiber/dues.rs` | `ActivationDues` — what one activation owes the region system when it ends: its owner node and the releases it took over from frame-replacing tail calls, carried as one record so a park moves both or neither (docs/impl/region/owner.md § "A deferred tail-call release has the node's life") |
+| `fiber/dues.rs` | `ActivationDues` — what one activation owes the region system when it ends: its owner node and the releases it took over from frame-replacing tail calls, carried as one record so a park moves both or neither ([owner.md](../../docs/impl/region/owner.md)) |
 | `fiber/delivery.rs` | `Delivery` — the delivery ledger: how the current park's delivery references are funded, with a method-only surface ([what a park retains](../../docs/impl/region/park.md)) |
 | `fiber/parked.rs` | `ParkedDues`, `ParkedState` and `Fiber::take_parked_state` — what a fiber that can never run again strands: the releases its parked frames still owe, and the retain its parked signal took ([what a park retains](../../docs/impl/region/park.md)) |
-| `error.rs` | `rich_error!` macro plus `error_val_in()`, `error_val_extra_in()`, `match_fail_error_in()`, and `format_error()` for region-coherent error structs (docs/impl/region/errors.md) |
+| `error.rs` | `rich_error!` macro plus `error_val_in()`, `error_val_extra_in()`, `match_fail_error_in()`, and `format_error()` for region-coherent error structs ([errors.md](../../docs/impl/region/errors.md)) |
 | `ffi.rs` | `LibHandle` for C interop |
 | `fiberheap/` | `FiberHeap` over a `RegionStore` (physical region allocator; each region owns its pages via a `PagePool`) plus a custom-allocator stack and object-limit tracking. Submodules: `regionstore`, `regionpool`, `pagepool`, `freelog`, `census`, `region`, `custom`, `dropsafety`. One heap per VM, shared by all of that VM's fibers. |
 | `arena.rs` | Heap-explicit allocation funnel over `FiberHeap`: every entry point takes `heap: &mut FiberHeap` — `alloc`, `alloc_in_region`, `deref`, `region_of`, region RC (`incref_region`/`decref_region`), and the tracked mutable-store funnels (`push_with_incref`, `struct_put_with_rebind`, `capture_store_with_rebind`, …). |
@@ -42,11 +42,11 @@ Runtime value representation using a tagged union.
 | `Fiber` | `fiber.rs` | Independent execution context with stack, paused callers, signal mask |
 | `FiberHandle` | `fiber/handle.rs` | Newtype over `Rc<RefCell<Option<Fiber>>>` — take/put semantics for VM fiber swap |
 | `WeakFiberHandle` | `fiber/handle.rs` | Weak reference for parent back-pointers (avoids Rc cycles) |
-| `FiberHeap` | `fiberheap/` | The VM's single heap over a `RegionStore` (region-based, RC-driven reclamation) plus a custom-allocator stack; reclamation is `FreeRegion(ρ)` when a region's RC reaches 0. Despite the name it is NOT per-fiber — all fibers share it and isolation is per-region (`value/fiber.rs`) |
+| `FiberHeap` | `fiberheap/` | The VM's single heap over a `RegionStore` (region-based, RC-driven reclamation) plus a custom-allocator stack; reclamation is `FreeRegion(ρ)` when a region's RC reaches 0. Despite the name it is NOT per-fiber — all fibers share it and isolation is per-region ([fiber.rs](fiber.rs)) |
 | `Parameter` | `heap.rs` | Dynamic parameter with id and default value, looked up at runtime |
 | `LSet` | `heap.rs` | Immutable set (`RegionSlice<Value>`, region-inline), no `RefCell` |
 | `LSetMut` | `heap.rs` | Mutable set (`Rc<RefCell<BTreeSet<Value>>>`) (type name `:@set`) |
-| `TableKey` | `types.rs` | Struct key. `Copy`; string and array keys hold a `Value`, so a key owns no Rust heap memory (docs/impl/values.md § "Struct keys") |
+| `TableKey` | `types.rs` | Struct key. `Copy`; string and array keys hold a `Value`, so a key owns no Rust heap memory ([values.md](../../docs/impl/values.md)) |
 | `SendKey` | `send/mod.rs` | The owning key form `SendValue`'s maps are keyed on — the only key type that crosses a thread or reaches serde |
 | `SuspendedFrame` | `fiber/frame.rs` | Bytecode/constants/env/IP/stack for resuming a suspended fiber |
 | `PausedCaller` | `fiber/caller.rs` | A caller activation waiting in `Fiber::callers` while its interpreted callee runs on the same dispatch loop (docs/impl/vm.md § "Non-tail calls") |
@@ -69,7 +69,8 @@ so that `fiber/parent` and `fiber/child` return identity-preserving values
 | `child` | `Option<FiberHandle>` | Strong pointer to child fiber |
 | `child_value` | `Option<Value>` | Cached Value for child |
 
-These are set during the swap protocol in `with_child_fiber` (`vm/fiber/child.rs`).
+These are set during the swap protocol in `with_child_fiber`
+([child.rs](../vm/fiber/child.rs)).
 
 ## Invariants
 
@@ -81,8 +82,8 @@ These are set during the swap protocol in `with_child_fiber` (`vm/fiber/child.rs
    (`as_array_mut` & co.) or copy-outs (`lbox_get`, `capture_cell_get`), and
    every store/remove goes through the tracked funnels in `arena.rs`
    (`push_with_incref`, `struct_put_with_rebind`,
-   `capture_store_with_rebind`, …) — docs/impl/region/rules.md Rule 5, mutable store:
-   an uncounted container store is a compile error. Membership-neutral
+   `capture_store_with_rebind`, …) — [rules.md](../../docs/impl/region/rules.md)
+   Rule 5, mutable store: an uncounted container store is a compile error. Membership-neutral
    mutation uses `with_array_mut_neutral`.
 
 1. **`Value` is `Copy`.** All 16 bytes (tag + payload). Heap data lives in regions.
@@ -90,8 +91,8 @@ These are set during the swap protocol in `with_child_fiber` (`vm/fiber/child.rs
 
 2. **`traits` field is always NIL or a struct.** The `with-traits`
    primitive validates that the trait table is a struct — either an immutable
-   `LStruct` or a mutable `LStructMut` (`src/primitives/traits.rs`
-   `prim_with_traits`). `NIL` means "no traits attached". No other type is valid.
+   `LStruct` or a mutable `LStructMut` (`prim_with_traits` in
+   [traits.rs](../primitives/traits.rs)). `NIL` means "no traits attached". No other type is valid.
 
 3. **`nil` ≠ empty list.** `Value::NIL` is falsy (absence). `Value::EMPTY_LIST`
      is truthy (empty list). Lists terminate with `EMPTY_LIST`, not `NIL`.
@@ -105,17 +106,17 @@ These are set during the swap protocol in `with_child_fiber` (`vm/fiber/child.rs
 
 5. **Per-function code lives on the code object, not on `Closure`.** A `Closure`
      is just a `TemplateRef` + captured env (`RegionSlice<Value>`) + a
-     `squelch_mask`. The code object is three things
-     (docs/impl/region/template.md): a compile-time `TemplateProto` blueprint,
-     a `CodePayload` holding every variable-length field inline in region pages
-     (bytecode, constants, the sorted location table over an interned file
-     table, the region tables, name and doc), and the two-word `ClosureTemplate`
-     header a closure references. One payload serves every header made from one
-     blueprint, so `MakeClosure` copies two words whatever the size of the
-     function's body. Accessors are methods (`template.bytecode()`,
-     `template.arity()`, …), not fields. The blueprint keeps `origin:
-     Option<Span>` — where the lambda was written, read by `(meta/origin f)` —
-     as 20 bytes of POD, not the lambda's syntax tree.
+     `squelch_mask`. The code object is two things
+     ([template.md](../../docs/impl/region/template.md)): a `CodePayload`
+     holding every field inline in its compile unit's code region (bytecode,
+     constants, the sorted location table over an interned file table, the
+     region tables, the child table, the LIR, name and doc), and the one-word
+     `ClosureTemplate` header a closure references. One payload serves every
+     header built over it, so `MakeClosure` copies one word whatever the size of
+     the function's body. Accessors are methods (`template.bytecode()`,
+     `template.arity()`, …), not fields. The payload keeps the origin span —
+     where the lambda was written, read by `(meta/origin f)` — as 20 bytes of
+     POD, not the lambda's syntax tree.
 
 6. **Thread transfer uses `SendValue`.** `SendValue` wraps values for safe
      transfer between threads, cloning `Rc` contents as needed. Trait tables
@@ -133,7 +134,7 @@ These are set during the swap protocol in `with_child_fiber` (`vm/fiber/child.rs
      `TableKey::intern_into` first, which copies a string or array payload into
      the destination region; a `Heap` key keeps aliasing, because its identity
      is the point. `SendKey` is the owning form for `send` and serde
-     (docs/impl/values.md § "Struct keys").
+     ([values.md](../../docs/impl/values.md)).
 
 ## Value encoding
 
@@ -148,8 +149,7 @@ The tagged union uses a `(tag: u64, payload: u64)` pair:
 Value round-trip during macro expansion. Created by `value::build::syntax`, accessed
 by `Value::as_syntax()`. The node is stored inline and `value::build::syntax`
 **copies** the whole tree into the value's own region, so the object is
-self-contained page bytes (docs/impl/syntax.md § "A syntax `Value` owns its
-tree"). `from_value()` copies the other way, into the caller's arena,
+self-contained page bytes ([syntax.md](../../docs/impl/syntax.md)). `from_value()` copies the other way, into the caller's arena,
 preserving scopes.
 
 **Note:** `Value` depends on `Syntax` (for `HeapObject::Syntax`) and

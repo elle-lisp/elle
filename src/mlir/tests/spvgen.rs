@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-10-06
 // docs/impl/spirv.md
 //! What the SPIR-V emitter makes of float arithmetic, and of a local slot whose
 //! id equals a register's.
@@ -6,22 +6,22 @@
 use super::*;
 
 /// Build LIR: fn(x) { return x + 1.5 }  (float constant + mixed promotion)
-fn make_float_add() -> LirFunction {
+fn make_float_add() -> LirOwned {
     LirFixture::new(Arity::Exact(1))
         .name("float_add")
         .signal(Signal::errors())
         .block(
             0,
-            vec![
-                LirInstr::LoadCaptureRaw {
+            &[
+                InstrRef::LoadCaptureRaw {
                     dst: Reg(0),
                     index: 0,
                 },
-                LirInstr::Const {
+                InstrRef::Const {
                     dst: Reg(1),
-                    value: LirConst::Float(1.5),
+                    value: ConstRef::Float(1.5),
                 },
-                LirInstr::binop(Reg(2), BinOp::Add, Reg(0), Reg(1)),
+                InstrRef::binop(Reg(2), BinOp::Add, Reg(0), Reg(1)),
             ],
             Terminator::Return(Reg(2)),
         )
@@ -31,32 +31,33 @@ fn make_float_add() -> LirFunction {
 #[test]
 fn test_spirv_float_add() {
     let func = make_float_add();
-    let spirv_bytes = lower_to_spirv(&func, 256).expect("float SPIR-V lowering should succeed");
+    let spirv_bytes =
+        lower_to_spirv(&func.view(), 256).expect("float SPIR-V lowering should succeed");
     assert!(spirv_bytes.len() >= 20);
     assert_eq!(&spirv_bytes[0..4], &[0x03, 0x02, 0x23, 0x07]);
 }
 
 /// Build LIR: fn(x) { return 2.0 * 3.0 }  (pure float arithmetic)
-fn make_float_mul() -> LirFunction {
+fn make_float_mul() -> LirOwned {
     LirFixture::new(Arity::Exact(1))
         .name("float_mul")
         .signal(Signal::errors())
         .block(
             0,
-            vec![
-                LirInstr::LoadCaptureRaw {
+            &[
+                InstrRef::LoadCaptureRaw {
                     dst: Reg(0),
                     index: 0,
                 },
-                LirInstr::Const {
+                InstrRef::Const {
                     dst: Reg(1),
-                    value: LirConst::Float(2.0),
+                    value: ConstRef::Float(2.0),
                 },
-                LirInstr::Const {
+                InstrRef::Const {
                     dst: Reg(2),
-                    value: LirConst::Float(3.0),
+                    value: ConstRef::Float(3.0),
                 },
-                LirInstr::binop(Reg(3), BinOp::Mul, Reg(1), Reg(2)),
+                InstrRef::binop(Reg(3), BinOp::Mul, Reg(1), Reg(2)),
             ],
             Terminator::Return(Reg(3)),
         )
@@ -67,7 +68,7 @@ fn make_float_mul() -> LirFunction {
 fn test_spirv_float_mul() {
     let func = make_float_mul();
     let spirv_bytes =
-        lower_to_spirv(&func, 256).expect("pure-float SPIR-V lowering should succeed");
+        lower_to_spirv(&func.view(), 256).expect("pure-float SPIR-V lowering should succeed");
     assert!(spirv_bytes.len() >= 20);
     assert_eq!(&spirv_bytes[0..4], &[0x03, 0x02, 0x23, 0x07]);
 }
@@ -86,31 +87,31 @@ fn test_spirv_float_mul() {
 ///
 /// Slot 0 shares its number with r0. Correct lowering adds the const-10 value
 /// to itself; a conflated map adds the const-20 value instead.
-fn make_storelocal_clobbers_reg() -> LirFunction {
+fn make_storelocal_clobbers_reg() -> LirOwned {
     LirFixture::new(Arity::Exact(0))
         .name("store_clobber")
         .signal(Signal::errors())
         .num_locals(1)
         .block(
             0,
-            vec![
+            &[
                 // r0 = 10  → SSA name %c0_0
-                LirInstr::Const {
+                InstrRef::Const {
                     dst: Reg(0),
-                    value: LirConst::Int(10),
+                    value: ConstRef::Int(10),
                 },
                 // r1 = 20  → SSA name %c0_1
-                LirInstr::Const {
+                InstrRef::Const {
                     dst: Reg(1),
-                    value: LirConst::Int(20),
+                    value: ConstRef::Int(20),
                 },
                 // s = r1   (slot 0 ← r1); must leave r0 alone
-                LirInstr::StoreLocal {
+                InstrRef::StoreLocal {
                     slot: 0,
                     src: Reg(1),
                 },
                 // r2 = r0 + r0
-                LirInstr::binop(Reg(2), BinOp::Add, Reg(0), Reg(0)),
+                InstrRef::binop(Reg(2), BinOp::Add, Reg(0), Reg(0)),
             ],
             Terminator::Return(Reg(2)),
         )
@@ -120,7 +121,7 @@ fn make_storelocal_clobbers_reg() -> LirFunction {
 #[test]
 fn test_spirv_storelocal_does_not_clobber_reg() {
     let func = make_storelocal_clobbers_reg();
-    let text = super::spirv::generate_gpu_module(&func, 256)
+    let text = super::spirv::generate_gpu_module(&func.view(), 256)
         .expect("single-block lowering should succeed");
     // r0 = const 10 is named %c0_0; r1 = const 20 is named %c0_1.
     // The add reads r0 twice, so it must reference %c0_0 — not the
@@ -141,7 +142,7 @@ fn test_spirv_storelocal_does_not_clobber_reg() {
 /// The same collision across an if-conversion: param `x` is r0, local `s` is
 /// slot 0, and the merge writes its result under the slot key. The trailing
 /// `s + x` must still read `%arg0`.
-fn make_if_merge_clobbers_param() -> LirFunction {
+fn make_if_merge_clobbers_param() -> LirOwned {
     LirFixture::new(Arity::Exact(1))
         .name("merge_clobber")
         .signal(Signal::errors())
@@ -149,20 +150,20 @@ fn make_if_merge_clobbers_param() -> LirFunction {
         // Block 0: load x → r0 (%arg0); s=0; cmp x>0; branch
         .block(
             0,
-            vec![
-                LirInstr::LoadCaptureRaw {
+            &[
+                InstrRef::LoadCaptureRaw {
                     dst: Reg(0),
                     index: 0,
                 },
-                LirInstr::Const {
+                InstrRef::Const {
                     dst: Reg(1),
-                    value: LirConst::Int(0),
+                    value: ConstRef::Int(0),
                 },
-                LirInstr::StoreLocal {
+                InstrRef::StoreLocal {
                     slot: 0,
                     src: Reg(1),
                 },
-                LirInstr::compare(Reg(2), CmpOp::Gt, Reg(0), Reg(1)),
+                InstrRef::compare(Reg(2), CmpOp::Gt, Reg(0), Reg(1)),
             ],
             Terminator::Branch {
                 cond: Reg(2),
@@ -173,12 +174,12 @@ fn make_if_merge_clobbers_param() -> LirFunction {
         // Block 1: then — s = 100; jump merge
         .block(
             1,
-            vec![
-                LirInstr::Const {
+            &[
+                InstrRef::Const {
                     dst: Reg(3),
-                    value: LirConst::Int(100),
+                    value: ConstRef::Int(100),
                 },
-                LirInstr::StoreLocal {
+                InstrRef::StoreLocal {
                     slot: 0,
                     src: Reg(3),
                 },
@@ -188,12 +189,12 @@ fn make_if_merge_clobbers_param() -> LirFunction {
         // Block 2: else — s = 200; jump merge
         .block(
             2,
-            vec![
-                LirInstr::Const {
+            &[
+                InstrRef::Const {
                     dst: Reg(4),
-                    value: LirConst::Int(200),
+                    value: ConstRef::Int(200),
                 },
-                LirInstr::StoreLocal {
+                InstrRef::StoreLocal {
                     slot: 0,
                     src: Reg(4),
                 },
@@ -203,12 +204,12 @@ fn make_if_merge_clobbers_param() -> LirFunction {
         // Block 3: merge — s' = load slot 0; return s' + x
         .block(
             3,
-            vec![
-                LirInstr::LoadLocal {
+            &[
+                InstrRef::LoadLocal {
                     dst: Reg(5),
                     slot: 0,
                 },
-                LirInstr::binop(Reg(6), BinOp::Add, Reg(5), Reg(0)),
+                InstrRef::binop(Reg(6), BinOp::Add, Reg(5), Reg(0)),
             ],
             Terminator::Return(Reg(6)),
         )
@@ -218,8 +219,8 @@ fn make_if_merge_clobbers_param() -> LirFunction {
 #[test]
 fn test_spirv_if_merge_does_not_clobber_param() {
     let func = make_if_merge_clobbers_param();
-    let text =
-        super::spirv::generate_gpu_module(&func, 256).expect("multi-block lowering should succeed");
+    let text = super::spirv::generate_gpu_module(&func.view(), 256)
+        .expect("multi-block lowering should succeed");
     assert!(
         text.contains(", %arg0 : i64"),
         "return s + x must read the param %arg0; the if-merge slot store \

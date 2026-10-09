@@ -1,5 +1,7 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! Region-and-heap-explicit value construction, one constructor per heap type.
+//!
+//! docs/impl/region/ctx.md
 //!
 //! The single source of `HeapObject` construction, shared by the `NativeCtx`
 //! capability (`ctx.*`, which passes its own `heap`/`region`) and the
@@ -160,17 +162,17 @@ pub(crate) fn closure(
     )
 }
 
-/// Materialize a code object's header for `proto` into `region` on `heap`. The
-/// shared payload comes from the heap's cache, so this allocates one object
-/// whatever the size of the function's bytecode
-/// (docs/impl/region/template.md).
+/// Allocate a header over `code`'s payload into `region` on `heap`. The
+/// payload stays where it is, so this allocates one object whatever the size
+/// of the function's body, and the alloc scan takes the header's counted
+/// reference to the code region (docs/impl/region/template.md).
 #[inline]
 pub(crate) fn template(
     heap: &mut FiberHeap,
-    proto: &Rc<crate::value::TemplateProto>,
+    code: &crate::value::ClosureTemplate,
     region: RuntimeRegion,
 ) -> Value {
-    crate::value::closure::materialize(heap, proto, region)
+    heap.alloc_in_region(HeapObject::ClosureTemplate(code.clone()), region)
 }
 
 /// Allocate a user box (`LBox`) into `region` on `heap`.

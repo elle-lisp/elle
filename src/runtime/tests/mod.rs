@@ -1,5 +1,7 @@
-// audited: 2026-09-28
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-10-07
+//! Unit tests of a runtime's lifecycle, its root entry and the regions its programs own.
+//!
+//! src/runtime.rs
 
 use super::*;
 use crate::value::arena::{alloc_in_fresh_region, region_rc, register_process_root_region};
@@ -12,8 +14,18 @@ fn cons() -> HeapObject {
     ))
 }
 
+#[cfg(feature = "jit")]
+mod attempts;
+mod heaps;
 mod lifecycle;
+mod macros;
+#[cfg(feature = "mlir")]
+mod mlir;
 mod operandstack;
 mod ownership;
 mod rootentry;
 mod selfrec;
+#[cfg(feature = "mlir")]
+mod spirv;
+#[cfg(feature = "wasm")]
+mod wasm;

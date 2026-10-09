@@ -1,35 +1,21 @@
-// audited: 2026-09-14
+// audited: 2026-10-06
 // The code objects a hydrated `MakeClosure` indexes: the payload's child
-// table, filled by the dumper because the blueprint cannot cross.
+// table, which crosses as headers in the body.
 // docs/impl/image/sealing.md
 // docs/impl/image/plan.md
-
-use std::rc::Rc;
 
 use super::*;
 use elle::image;
 use elle::pipeline::eval_all;
 use elle::runtime::Runtime;
-use elle::value::closure::{ChildCode, ClosureTemplate};
-use elle::value::fiber::SignalBits;
 use elle::value::heap::deref;
-use elle::value::{Arity, SendBundle, SendValue, TemplateProto};
+use elle::value::{Arity, SendBundle, SendValue};
 
-/// A blueprint whose one `MakeClosure` indexes `child`.
-fn parent_of(name: &str, child: TemplateProto) -> TemplateProto {
-    let mut proto = TemplateProto::new(vec![1], Arity::Exact(0), Vec::new());
-    proto.name = Some(name.to_string());
-    proto.child_protos = vec![Rc::new(child)];
-    proto
-}
-
-/// The child code object `t`'s `MakeClosure` at `idx` builds, which a
-/// hydrated header answers out of the body.
-fn child_header(t: &ClosureTemplate, idx: usize) -> ClosureTemplate {
-    match t.child(idx) {
-        ChildCode::Header(child) => child,
-        ChildCode::Blueprint(_) => panic!("a hydrated header answers with a blueprint"),
-    }
+/// A code object whose one `MakeClosure` indexes `child`.
+fn parent_of(name: &str, child: CodeBuilder) -> CodeBuilder {
+    CodeBuilder::new(vec![1], Arity::Exact(0), Vec::new())
+        .name(name)
+        .children(vec![child])
 }
 
 // § Test plan, "Children": the child's payload crosses field by field, and a
@@ -41,20 +27,13 @@ fn a_child_code_object_crosses_field_by_field() {
 
     let mut src = FiberHeap::new();
     let region = src.new_runtime_region();
-    let mut grandchild = TemplateProto::new(vec![3, 3], Arity::Exact(2), Vec::new());
-    grandchild.name = Some("grandchild".to_string());
-    let mut child = parent_of("nested-lambda", grandchild);
-    child.bytecode = vec![2, 2, 2];
-    child.arity = Arity::Exact(1);
-    child.constants = vec![Value::int(11)];
-    child.doc = Some("the lambda the parent builds".to_string());
-    let root = closure_in(
-        &mut src,
-        region,
-        &Rc::new(parent_of("parent-of-lambdas", child)),
-        &[],
-        SignalBits::EMPTY,
-    );
+    let grandchild = CodeBuilder::new(vec![3, 3], Arity::Exact(2), Vec::new()).name("grandchild");
+    let child = CodeBuilder::new(vec![2, 2, 2], Arity::Exact(1), vec![Value::int(11)])
+        .name("nested-lambda")
+        .doc("the lambda the parent builds")
+        .children(vec![grandchild]);
+    let code = parent_of("parent-of-lambdas", child).build(&mut src);
+    let root = closure_in(&mut src, region, &code, &[], SignalBits::EMPTY);
     image::dump(&mut src, &SymbolTable::new(), root, &path).expect("dump");
 
     let mut dst = FiberHeap::new();
@@ -62,14 +41,14 @@ fn a_child_code_object_crosses_field_by_field() {
     let t = &closure_of(hydrated.root).template;
     assert_eq!(t.num_children(), 1, "the parent lost its child table");
 
-    let child = child_header(t, 0);
+    let child = t.child(0);
     assert_eq!(child.bytecode(), &[2, 2, 2]);
     assert_eq!(child.arity(), Arity::Exact(1));
     assert_eq!(child.name(), Some("nested-lambda"));
     assert_eq!(child.doc(), Some("the lambda the parent builds"));
     assert_eq!(child.constants(), &[Value::int(11)]);
 
-    let grand = child_header(&child, 0);
+    let grand = child.child(0);
     assert_eq!(grand.bytecode(), &[3, 3]);
     assert_eq!(grand.arity(), Arity::Exact(2));
     assert_eq!(grand.name(), Some("grandchild"));
@@ -113,7 +92,7 @@ fn a_hydrated_closure_builds_its_nested_lambda() {
     }
 }
 
-// § Test plan, "Children": the instruction materializes a fresh header per
+// § Test plan, "Children": the instruction builds a fresh header per
 // creation. The counter-factual is handing out the image's own header, which
 // answers every call correctly and quietly moves the instance-to-template
 // edge across regions — only pointer identity sees the difference.
@@ -168,9 +147,9 @@ fn two_lambdas_from_one_hydrated_parent_are_two_headers_over_one_payload() {
 }
 
 // § Test plan, "Children": a hydrated closure sent to a worker carries its
-// children, which the worker rebuilds as the blueprints its own `MakeClosure`
-// indexes. Without them the worker's instruction indexes an empty table and
-// has nothing to build.
+// children, which the worker rebuilds into the child table its own
+// `MakeClosure` indexes. Without them the worker's instruction indexes an
+// empty table and has nothing to build.
 #[test]
 fn a_hydrated_closure_sends_its_children() {
     let dir = crate::common::ScratchDir::new("image-child-send");
@@ -178,15 +157,9 @@ fn a_hydrated_closure_sends_its_children() {
 
     let mut src = FiberHeap::new();
     let region = src.new_runtime_region();
-    let mut child = TemplateProto::new(vec![2, 2, 2], Arity::Exact(1), Vec::new());
-    child.name = Some("nested-lambda".to_string());
-    let root = closure_in(
-        &mut src,
-        region,
-        &Rc::new(parent_of("parent-of-lambdas", child)),
-        &[],
-        SignalBits::EMPTY,
-    );
+    let child = CodeBuilder::new(vec![2, 2, 2], Arity::Exact(1), Vec::new()).name("nested-lambda");
+    let code = parent_of("parent-of-lambdas", child).build(&mut src);
+    let root = closure_in(&mut src, region, &code, &[], SignalBits::EMPTY);
     image::dump(&mut src, &SymbolTable::new(), root, &path).expect("dump");
 
     let mut dst = FiberHeap::new();
@@ -196,7 +169,11 @@ fn a_hydrated_closure_sends_its_children() {
         panic!("a closure bundle roots at an interned closure");
     };
     let sent = &bundle.closures[idx];
-    assert_eq!(sent.child_protos.len(), 1, "the sent closure lost its child");
+    assert_eq!(
+        sent.child_protos.len(),
+        1,
+        "the sent closure lost its child"
+    );
     assert_eq!(sent.child_protos[0].bytecode, vec![2, 2, 2]);
     assert_eq!(sent.child_protos[0].name.as_deref(), Some("nested-lambda"));
 }
@@ -212,15 +189,10 @@ fn a_child_bearing_dump_is_byte_deterministic() {
 
     let mut src = FiberHeap::new();
     let region = src.new_runtime_region();
-    let mut child = TemplateProto::new(vec![2, 2, 2], Arity::Exact(1), vec![Value::int(11)]);
-    child.name = Some("nested-lambda".to_string());
-    let root = closure_in(
-        &mut src,
-        region,
-        &Rc::new(parent_of("parent-of-lambdas", child)),
-        &[],
-        SignalBits::EMPTY,
-    );
+    let child = CodeBuilder::new(vec![2, 2, 2], Arity::Exact(1), vec![Value::int(11)])
+        .name("nested-lambda");
+    let code = parent_of("parent-of-lambdas", child).build(&mut src);
+    let root = closure_in(&mut src, region, &code, &[], SignalBits::EMPTY);
     paint_stack(0xAA, 16);
     image::dump(&mut src, &SymbolTable::new(), root, &a).expect("dump a");
     paint_stack(0x55, 16);
@@ -242,15 +214,10 @@ fn a_wasm_child_refuses_the_dump() {
 
     let mut src = FiberHeap::new();
     let region = src.new_runtime_region();
-    let mut child = TemplateProto::new(vec![2], Arity::Exact(0), Vec::new());
-    child.name = Some("wasm-borne-child".to_string());
-    child.wasm_func_idx = Some(3);
-    let root = closure_in(
-        &mut src,
-        region,
-        &Rc::new(parent_of("parent-of-lambdas", child)),
-        &[],
-        SignalBits::EMPTY,
-    );
+    let child = CodeBuilder::new(vec![2], Arity::Exact(0), Vec::new())
+        .name("wasm-borne-child")
+        .wasm_func_idx(3);
+    let code = parent_of("parent-of-lambdas", child).build(&mut src);
+    let root = closure_in(&mut src, region, &code, &[], SignalBits::EMPTY);
     refused(&mut src, root, &path, "wasm-borne-child");
 }

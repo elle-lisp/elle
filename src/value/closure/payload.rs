@@ -3,8 +3,8 @@
 // docs/impl/image/sealing.md
 //! `CodePayload` — a code object's variable-length data, inline in region pages.
 //!
-//! One payload per compile-time blueprint, materialized once per heap and
-//! shared by every header built from that blueprint. Nothing here owns Rust
+//! One payload per lambda, written into its compile unit's code region at
+//! emission and shared by every header built over it. Nothing here owns Rust
 //! heap memory: the payload's bytes *are* the payload, which is what an image
 //! needs of body data.
 
@@ -108,10 +108,8 @@ pub struct CodePayload {
     /// The `&named` key set, empty unless `vararg` is `StrictStruct`.
     pub(crate) strict_keys: RegionSlice<RegionSlice<u8>>,
     /// The code objects this function's `MakeClosure` instructions index, in
-    /// instruction order, each a `HeapObject::ClosureTemplate`. Empty on a
-    /// materialized payload, because the header that owns it answers from its
-    /// blueprint; the image dumper fills it, because the blueprint is the
-    /// part that cannot cross (docs/impl/image/sealing.md).
+    /// instruction order, each a `HeapObject::ClosureTemplate` in the same
+    /// code region. The emitter fills it (docs/impl/region/template.md).
     pub(crate) children: RegionSlice<Value>,
     /// Where the source lambda was written, for `(meta/origin f)`. Meaningful
     /// only when `has_origin`, because a span of zeros is a real answer for
@@ -122,6 +120,11 @@ pub struct CodePayload {
     /// the file table (docs/impl/image/format.md).
     pub(crate) origin: Span,
     pub(crate) has_origin: bool,
+    /// The frozen function the JIT promotes this code object from, its sites
+    /// and its values (docs/impl/lir.md). Meaningful only when `has_lir`: an
+    /// entry thunk's code object and a WASM-built closure's have no LIR.
+    pub(crate) lir: crate::lir::LirBody,
+    pub(crate) has_lir: bool,
     pub(crate) arity: Arity,
     pub(crate) signal: Signal,
     pub(crate) capture_params_mask: u64,
@@ -241,7 +244,7 @@ impl<'a> MergedSlots<'a> {
 pub struct MaskRef<'a>(&'a [u64]);
 
 impl<'a> MaskRef<'a> {
-    pub(super) fn new(words: &'a [u64]) -> Self {
+    pub(crate) fn new(words: &'a [u64]) -> Self {
         MaskRef(words)
     }
 
@@ -284,9 +287,9 @@ impl<'a> StrKeys<'a> {
 }
 
 /// Read a region-inline byte slice as `str`. The bytes came from a `String` or
-/// `&str` at materialization, so they are UTF-8 by construction; a torn read
-/// would mean the payload region was freed under a live header, which the
-/// counted backing reference exists to prevent.
+/// `&str` when the payload was written, so they are UTF-8 by construction; a
+/// torn read would mean the code region was freed under a live header, which
+/// the header's counted reference exists to prevent.
 pub(super) fn str_of(slice: RegionSlice<u8>) -> &'static str {
     let bytes: &'static [u8] = unsafe { std::slice::from_raw_parts(slice.as_ptr(), slice.len()) };
     std::str::from_utf8(bytes).expect("a code payload's strings are UTF-8 by construction")
@@ -295,7 +298,7 @@ pub(super) fn str_of(slice: RegionSlice<u8>) -> &'static str {
 impl CodePayload {
     /// A payload carrying `constants` and nothing else, for the store-level
     /// tests that build heap objects straight into a `RegionStore` and so have
-    /// no `FiberHeap` to materialize a blueprint through.
+    /// no `FiberHeap` to write one through.
     #[cfg(test)]
     pub(crate) fn test_with_constants(constants: RegionSlice<Value>) -> Self {
         CodePayload {
@@ -314,6 +317,8 @@ impl CodePayload {
             children: RegionSlice::empty(),
             origin: Span::synthetic(),
             has_origin: false,
+            lir: crate::lir::LirBody::empty(),
+            has_lir: false,
             arity: Arity::Exact(0),
             signal: Signal::silent(),
             capture_params_mask: 0,
@@ -373,8 +378,7 @@ impl CodePayload {
         StrKeys::new(self.strict_keys.as_slice())
     }
 
-    /// The code objects a `MakeClosure` indexes, empty unless this payload
-    /// came out of an image (docs/impl/image/sealing.md).
+    /// The headers a `MakeClosure` indexes, in instruction order.
     pub fn children(&self) -> &[Value] {
         self.children.as_slice()
     }
@@ -419,5 +423,42 @@ impl CodePayload {
 
     pub fn rest_list_layout(&self) -> RestListLayout {
         self.rest_list
+    }
+
+    /// The frozen function this payload carries, or `None` for a code object
+    /// with no LIR. The body holds what LIR alone knows, and the view reads
+    /// every header field the two share off this payload (docs/impl/lir.md).
+    pub fn lir(&self) -> Option<crate::lir::LirView<'_>> {
+        self.has_lir.then(|| {
+            crate::lir::LirView::over_body(
+                &self.lir,
+                crate::lir::code::PayloadHeader {
+                    name: self.name(),
+                    doc: self.doc(),
+                    origin: self.origin(),
+                    arity: self.arity,
+                    signal: self.signal,
+                    num_locals: self.num_locals as u16,
+                    num_params: self.num_params,
+                    capture_params_mask: self.capture_params_mask,
+                    capture_locals: self.capture_locals.as_slice(),
+                    vararg: self.vararg,
+                    strict_keys: self.strict_keys(),
+                    rest_list_layout: self.rest_list,
+                    region_table: self.region_table.as_slice(),
+                    merged_slots: StaticRegion::slice_of(self.merged_slots.as_slice()),
+                    frame_release_slots: self.frame_release_slots.as_slice(),
+                    frame_release_regions: StaticRegion::slice_of(
+                        self.frame_release_regions.as_slice(),
+                    ),
+                },
+            )
+        })
+    }
+
+    /// Whether this payload carries LIR, without building a view.
+    #[inline]
+    pub fn has_lir(&self) -> bool {
+        self.has_lir
     }
 }

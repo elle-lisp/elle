@@ -1,20 +1,19 @@
-// Tests for error reporting with source locations
+// audited: 2026-10-06
+// A parse error names its file, line and column, and a root runtime error
+// names the form that raised it.
 //
-// Verifies that parse errors include file name, line number, and column
-// information, and that a runtime error reaching the root is printed with the
-// location of the form that raised it.
+// docs/impl/vm.md
 
 use elle::reader::{Lexer, OwnedToken, Reader};
 use elle::SymbolTable;
 
-// Local `compile` shim preserving the pre-CompileCtx arity. These location-map
-// tests are compile-only and stdlib-free, so a fresh `CompileCtx` per call
-// (primitives + core + prelude) reproduces the old bare-symbols path.
+// A local `compile`: the location tests are compile-only and stdlib-free, so a
+// fresh `CompileCtx` per call (primitives + core + prelude) is all they need.
 fn compile(
     source: &str,
     symbols: &mut SymbolTable,
     source_name: &str,
-) -> Result<elle::CompileResult, String> {
+) -> Result<elle::CodeUnit, String> {
     let mut cctx = elle::pipeline::CompileCtx::new();
     elle::pipeline::compile(source, symbols, &mut cctx, source_name)
 }
@@ -34,8 +33,7 @@ fn test_parse_error_includes_location() {
     }
 
     let mut reader = Reader::with_locations(tokens, locations);
-    let result =
-        elle::primitives::ctx::with_test_ctx(|ctx| reader.read(ctx, &mut symbols));
+    let result = elle::primitives::ctx::with_test_ctx(|ctx| reader.read(ctx, &mut symbols));
 
     assert!(result.is_err());
     let error = result.unwrap_err();
@@ -58,8 +56,7 @@ fn test_parse_error_column_tracking() {
     }
 
     let mut reader = Reader::with_locations(tokens, locations);
-    let result =
-        elle::primitives::ctx::with_test_ctx(|ctx| reader.read(ctx, &mut symbols));
+    let result = elle::primitives::ctx::with_test_ctx(|ctx| reader.read(ctx, &mut symbols));
 
     assert!(result.is_err());
     let error = result.unwrap_err();
@@ -82,8 +79,7 @@ fn test_unexpected_closing_paren_location() {
     }
 
     let mut reader = Reader::with_locations(tokens, locations);
-    let result =
-        elle::primitives::ctx::with_test_ctx(|ctx| reader.read(ctx, &mut symbols));
+    let result = elle::primitives::ctx::with_test_ctx(|ctx| reader.read(ctx, &mut symbols));
 
     assert!(result.is_err());
     let error = result.unwrap_err();
@@ -106,8 +102,7 @@ fn test_unterminated_array_location() {
     }
 
     let mut reader = Reader::with_locations(tokens, locations);
-    let result =
-        elle::primitives::ctx::with_test_ctx(|ctx| reader.read(ctx, &mut symbols));
+    let result = elle::primitives::ctx::with_test_ctx(|ctx| reader.read(ctx, &mut symbols));
 
     assert!(result.is_err());
     let error = result.unwrap_err();
@@ -130,8 +125,7 @@ fn test_unterminated_struct_location() {
     }
 
     let mut reader = Reader::with_locations(tokens, locations);
-    let result =
-        elle::primitives::ctx::with_test_ctx(|ctx| reader.read(ctx, &mut symbols));
+    let result = elle::primitives::ctx::with_test_ctx(|ctx| reader.read(ctx, &mut symbols));
 
     assert!(result.is_err());
     let error = result.unwrap_err();
@@ -153,8 +147,7 @@ fn test_list_sugar_error_location() {
     }
 
     let mut reader = Reader::with_locations(tokens, locations);
-    let result =
-        elle::primitives::ctx::with_test_ctx(|ctx| reader.read(ctx, &mut symbols));
+    let result = elle::primitives::ctx::with_test_ctx(|ctx| reader.read(ctx, &mut symbols));
 
     assert!(result.is_err());
     let error = result.unwrap_err();
@@ -186,7 +179,6 @@ fn test_sourceloc_unknown_check() {
 
 #[test]
 fn test_location_map_populated_for_simple_expression() {
-
     let mut symbols = SymbolTable::new();
     let source = "(%add 1 2)";
 
@@ -194,16 +186,15 @@ fn test_location_map_populated_for_simple_expression() {
     assert!(result.is_ok());
 
     let compiled = result.unwrap();
-    // The location map should have at least one entry
+    // The location table should have at least one entry
     assert!(
-        !compiled.bytecode.location_map.is_empty(),
-        "LocationMap should be populated for compiled code"
+        !compiled.entry().locations().is_empty(),
+        "the location table should be populated for compiled code"
     );
 }
 
 #[test]
 fn test_location_map_has_correct_line_numbers() {
-
     let mut symbols = SymbolTable::new();
     // Single expression with nested structure
     let source = "(if true\n  (%add 1 2)\n  (%sub 3 4))";
@@ -214,12 +205,12 @@ fn test_location_map_has_correct_line_numbers() {
     let compiled = result.unwrap();
     // Check that we have location entries
     assert!(
-        !compiled.bytecode.location_map.is_empty(),
-        "LocationMap should be populated"
+        !compiled.entry().locations().is_empty(),
+        "the location table should be populated"
     );
 
     // All entries should have line >= 1 (not synthetic)
-    for loc in compiled.bytecode.location_map.values() {
+    for (_, loc) in compiled.entry().locations().iter() {
         assert!(
             loc.line >= 1,
             "Line numbers should be >= 1, got {}",
@@ -464,7 +455,6 @@ fn an_uncaught_errors_value_is_reported_with_the_names_it_carries() {
 
 #[test]
 fn test_closure_has_location_map() {
-
     let mut symbols = SymbolTable::new();
     let source = "(fn (x) (numeric!) (%add x 1))";
 
@@ -472,20 +462,9 @@ fn test_closure_has_location_map() {
     assert!(result.is_ok());
 
     let compiled = result.unwrap();
-    // The main bytecode should have a location map
+    // The entry function has a location table
     assert!(
-        !compiled.bytecode.location_map.is_empty(),
-        "Main bytecode should have LocationMap"
+        !compiled.entry().locations().is_empty(),
+        "the entry function should have a location table"
     );
-
-    // Check that closures in constants also have location maps
-    for constant in &compiled.bytecode.constants {
-        if let Some(closure) = constant.as_closure() {
-            // Nested closures should have their own location maps
-            // The location_map field exists (verified by compilation)
-            // and may have entries for the closure's bytecode
-            let _ = closure.template.location_map().len(); // Access to verify field exists
-        }
-    }
 }
-

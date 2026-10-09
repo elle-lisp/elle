@@ -1,6 +1,6 @@
 # Bytecode
 
-<!-- audited: 2026-09-06 -->
+<!-- audited: 2026-10-06 -->
 
 The bytecode instruction set is a `repr(u8)` enum. Operands follow
 instructions inline in the bytecode stream.
@@ -34,7 +34,7 @@ AddInt, SubInt, MulInt, DivInt  integer-specialized arithmetic
 The integer-only forms read both operands as integers and never test a tag.
 The emitter picks one when the LIR instruction carries a proof that its
 operands are integers, and the polymorphic form otherwise
-(`src/lir/emit/instr/ops.rs`). The proof comes from the front end's
+([ops.rs](../../src/lir/emit/instr/ops.rs)). The proof comes from the front end's
 intrinsic operand contract; [impl/lir.md](lir.md) has the mechanism.
 
 Only these four specialize. A proven `Rem` still emits the polymorphic
@@ -98,6 +98,16 @@ DecrefRegion rid   decrement region rid; free pages when RC hits 0
 `DecrefRegion` is the only region-demise bytecode; there is no
 separate `FreeRegion`. See [regions](../regions.md) for the full model.
 
+## What a compile hands out
+
+`Bytecode` is the emitter's working buffer: the instruction bytes, the
+constant pool, the location map, the region tables, and the headers of the
+lambdas its `MakeClosure` instructions index. The emitter writes each finished
+buffer into a code payload in its compile unit's code region, and the pipeline
+hands out the unit, a `CodeUnit`, rather than the buffer
+([region/template.md](region/template.md)). A `MakeClosure` operand is an index
+into the payload's child table.
+
 ## Encoding
 
 Instructions are encoded as a byte stream. The opcode byte is followed
@@ -121,11 +131,11 @@ how a mask silently loses its high half.
 
 ## Files
 
-```text
-src/compiler/bytecode.rs              Bytecode struct, encoding, disassembly entry points
-src/compiler/bytecode/instruction.rs  Instruction enum and opcode decoding
-src/compiler/bytecode/disasm.rs       the disassembler
-```
+| File | Holds |
+|------|-------|
+| [bytecode.rs](../../src/compiler/bytecode.rs) | `Bytecode`, encoding, disassembly entry points |
+| [instruction.rs](../../src/compiler/bytecode/instruction.rs) | The `Instruction` enum and opcode decoding |
+| [disasm.rs](../../src/compiler/bytecode/disasm.rs) | The disassembler |
 
 ---
 

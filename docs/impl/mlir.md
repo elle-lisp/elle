@@ -1,5 +1,9 @@
 # MLIR Backend
 
+<!-- audited: 2026-10-06 -->
+
+A tier-2 path that compiles a hot numeric function through MLIR and LLVM, ahead of the Cranelift JIT.
+
 > **Feature-gated:** The MLIR backend requires `--features mlir` at build
 > time and a working LLVM 22 + MLIR install (the `melior` crate links to
 > them). It is disabled by default. If your MLIR install lives outside the
@@ -7,10 +11,10 @@
 > of `~/.cargo/config.toml`. That file is per-user, so the repository
 > carries no machine-specific paths.
 
-The MLIR backend is a tier-2 path that takes a hot, **GPU-eligible**
-`LirFunction`, lowers it through the MLIR `arith` / `func` / `cf` /
-`memref` dialects, converts to the LLVM dialect, and JIT-compiles via
-the MLIR `ExecutionEngine`. The result is a native function pointer
+The backend takes the frozen LIR of a hot, **GPU-eligible** function, read
+through a `LirView` ([lir.md](lir.md)). It lowers it through the MLIR `arith`
+/ `func` / `cf` / `memref` dialects, converts to the LLVM dialect, and compiles
+it with the MLIR `ExecutionEngine`. The result is a native function pointer
 called from the VM with C calling convention.
 
 It runs alongside the bytecode VM and the Cranelift JIT — not as a
@@ -21,13 +25,13 @@ for GPU dispatch (see [impl/spirv.md](spirv.md) and
 ## Pipeline
 
 ```text
-LirFunction → lower_to_module → MLIR (arith/func/cf/memref)
-            → PassManager(create_to_llvm) → LLVM dialect
-            → ExecutionEngine::new           → native code
-            → invoke_packed                  → i64 result
+LirView → lower_to_module → MLIR (arith/func/cf/memref)
+        → PassManager(create_to_llvm) → LLVM dialect
+        → ExecutionEngine::new           → native code
+        → invoke_packed                  → i64 result
 ```
 
-The eligibility check (`LirFunction::is_gpu_eligible`) is layered:
+The eligibility check (`LirView::is_gpu_eligible`) is layered:
 
 1. **Signal** — only `errors`-or-silent functions; no yield, I/O, FFI,
    or polymorphic.
@@ -35,7 +39,7 @@ The eligibility check (`LirFunction::is_gpu_eligible`) is layered:
    (`capture_params_mask == 0`, `capture_locals_mask == 0`).
    Immutable captures are allowed — they become extra parameters in
    the MLIR signature.
-3. **Instruction whitelist** — every `LirInstr` and `Terminator` must
+3. **Instruction whitelist** — every instruction and terminator must
    be GPU-safe (constants, `ValueConst` with numeric/bool/nil values,
    arithmetic, comparison, local slots, parameter/capture loads,
    `Jump` / `Branch` / `Return`).
@@ -84,18 +88,19 @@ low bit and read e.g. `2` as false.
 
 ## VM integration
 
-`VM::try_mlir_call` (in `src/vm/mlir_entry.rs`) is consulted on every
-closure call before the Cranelift JIT path. It:
+`VM::try_mlir_call` ([mlir_entry.rs](../../src/vm/mlir_entry.rs)) is
+consulted on every closure call that reaches the compiled tiers, after the WASM
+tier and before the Cranelift JIT. It:
 
 1. Skips non-`is_gpu_candidate` closures (cheap field check).
 2. Returns the cached engine result if available.
 3. Returns early if the closure is in the rejection set.
-4. Reads the closure call counter — only proceeds past
-   `jit_hotness_threshold`. The counter is owned by the JIT path,
-   which runs after MLIR; MLIR only reads.
+4. Reads the closure call counter, and proceeds only once it reaches the
+   MLIR threshold in the VM's runtime configuration. The counter is owned by
+   the JIT path, which runs after MLIR; MLIR only reads.
 5. Runs `is_mlir_cpu_eligible` (full instruction walk).
-6. Compiles via `MlirCache::compile`, caches by bytecode pointer,
-   and invokes.
+6. Compiles via `MlirCache::compile`, caches the engine under the closure's
+   bytecode with a pin on its code region, and invokes.
 
 **Captures** are extracted from `closure.env[0..num_captures]`,
 validated as numeric (int or float), unboxed to i64, and prepended
@@ -109,32 +114,40 @@ bitmask (bit i = 1 means param i is float) is passed to
 function entry for float params.
 
 The MLIR function signature is `[captures..., params...]`, all i64.
-Both bitmasks are part of the cache key
-`(bytecode_ptr, capture_types, param_types)`, so the same closure
-called with `(f 1)` vs `(f 1.0)` gets separate compiled code.
-Non-numeric args or captures fall through to bytecode.
+Both bitmasks are part of the cache key, an `MlirSig` beside the bytecode
+address, so the same closure called with `(f 1)` vs `(f 1.0)` gets separate
+compiled code. The two masks travel as one named pair, so a call site cannot
+swap them. Non-numeric args or captures fall through to bytecode.
 
 The result is reboxed based on the compiled function's return type:
 - `ScalarType::Int` → `Value::int(result)`
 - `ScalarType::Float` → `Value::float(f64::from_bits(result))`
 - `ScalarType::Bool` → `Value::bool(result != 0)`
 
-Failures are reported as a structured error
-(`error_val("mlir-error", ...)`) carried via `SIG_ERROR` — the
-rejection is also recorded so future calls don't retry.
+A compile failure joins the rejection set, so later calls do not retry it,
+and the call falls through to the next tier. A failure while the compiled code
+runs raises a structured `mlir-error`.
 
 ## MlirCache
 
 `MlirCache` owns:
 
 - A single `melior::Context` with all dialects registered (~4ms to
-  create — done once).
-- `engines: HashMap<(*const u8, u64, u64), (ExecutionEngine, String, ScalarType)>` —
-  keyed by (bytecode pointer, capture_types, param_types).
-- `spirv_cache: HashMap<*const u8, Vec<u8>>` — SPIR-V bytes from
-  `compile_spirv` (see [impl/spirv.md](spirv.md)).
-- `rejections: HashSet<(*const u8, u64, u64)>` — (pointer,
-  capture_types, param_types) triples known to fail.
+  create — done once). The SPIR-V compile borrows it too, and its bytes go
+  to the VM's SPIR-V cache ([impl/spirv.md](spirv.md)).
+- `engines` — the compiled functions, keyed by bytecode address and
+  `MlirSig`. Each entry holds the engine, the function name, the return type,
+  and a `CodePin`.
+- `rejections` — the same keys for compiles that failed, each with a
+  `CodePin`.
+
+Both tables key by bytecode address, so each entry pins the code region its
+key's payload lives in, as the JIT cache does ([jit.md](jit.md)). Without the
+pin, a freed code region lets another function land at the same address, and
+the cache would run the old function's engine on the new function's
+arguments. An entry takes its key from its pin and never takes one beside it.
+`VM::clear_code_pins` empties both tables before teardown releases the process
+roots, and keeps the context.
 
 The cache lives on the VM and is `unsafe impl Send + Sync` because
 the VM is single-threaded; the engine and context are never accessed
@@ -142,15 +155,15 @@ concurrently.
 
 ## Files
 
-```text
-src/mlir/mod.rs       Module entry, tests
-src/mlir/lower.rs     LIR → MLIR (arith/func/cf/memref)
-src/mlir/execute.rs   One-shot compile + invoke (mlir_call)
-src/mlir/cache.rs     MlirCache: shared context + engine cache
-src/mlir/spirv.rs     LIR → SPIR-V (see impl/spirv.md)
-src/vm/mlir_entry.rs  VM::try_mlir_call dispatch
-src/lir/types.rs      is_gpu_eligible / is_mlir_cpu_eligible / is_gpu_instruction
-```
+| File | Content |
+|------|---------|
+| [src/mlir/mod.rs](../../src/mlir/mod.rs) | Module entry |
+| [src/mlir/lower.rs](../../src/mlir/lower.rs) | LIR → MLIR (arith/func/cf/memref) |
+| [src/mlir/execute.rs](../../src/mlir/execute.rs) | One-shot compile + invoke (`mlir_call`) |
+| [src/mlir/cache.rs](../../src/mlir/cache.rs) | `MlirCache`: shared context + engine cache |
+| [src/mlir/spirv.rs](../../src/mlir/spirv.rs) | LIR → SPIR-V (see [impl/spirv.md](spirv.md)) |
+| [src/vm/mlir_entry.rs](../../src/vm/mlir_entry.rs) | `VM::try_mlir_call` dispatch |
+| [src/lir/code/gpu.rs](../../src/lir/code/gpu.rs) | `is_gpu_eligible` / `is_mlir_cpu_eligible` over a `LirView` |
 
 ## Primitives
 
@@ -158,7 +171,7 @@ src/lir/types.rs      is_gpu_eligible / is_mlir_cpu_eligible / is_gpu_instructio
 |------|--------|---------|
 | `fn/gpu-eligible?` | errors | True if the closure passes `is_gpu_eligible` |
 | `mlir/compile-spirv` | query+errors | Compile a closure to SPIR-V bytes (see [impl/spirv.md](spirv.md)) |
-| `git` / `fn/git?` / `disgit` | query+errors | Cache SPIR-V bytes on the closure template (see [impl/gpu.md](gpu.md)) |
+| `git` / `fn/git?` / `disgit` | query+errors | Cache SPIR-V bytes in the VM, by closure and workgroup size (see [impl/spirv.md](spirv.md)) |
 
 ## See also
 

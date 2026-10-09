@@ -1,6 +1,5 @@
-// audited: 2026-09-29
-//! The forms that jump: `while`, `loop`/`recur`, `break`, and the `cond` chain
-//! each level of which lowers to a two-armed branch.
+// audited: 2026-10-06
+//! The forms that jump: `while`, `loop`/`recur`, `break`, and the `cond` chain, each level a two-armed branch.
 //!
 //! docs/impl/lir.md
 //! docs/impl/region/replicate.md
@@ -30,7 +29,7 @@ impl<'a> Lowerer<'a> {
         self.finish_block();
 
         // Condition block
-        self.current_block = BasicBlock::new(cond_label);
+        self.open_block(cond_label);
         let cond_reg = self.lower_expr(cond)?;
         self.terminate(Terminator::Branch {
             cond: cond_reg,
@@ -39,7 +38,7 @@ impl<'a> Lowerer<'a> {
         });
         self.finish_block();
 
-        self.current_block = BasicBlock::new(body_label);
+        self.open_block(body_label);
 
         let _body_reg = self.lower_expr(body)?;
 
@@ -50,10 +49,10 @@ impl<'a> Lowerer<'a> {
         self.terminate(Terminator::Jump(cond_label));
         self.finish_block();
 
-        self.current_block = BasicBlock::new(done_label);
-        self.emit(LirInstr::Const {
+        self.open_block(done_label);
+        self.emit(InstrRef::Const {
             dst: result_reg,
-            value: LirConst::Nil,
+            value: ConstRef::Nil,
         });
         Ok(result_reg)
     }
@@ -88,7 +87,7 @@ impl<'a> Lowerer<'a> {
         self.finish_block();
 
         // Loop body
-        self.current_block = BasicBlock::new(loop_label);
+        self.open_block(loop_label);
 
         self.loop_lower_contexts.push(LoopLowerContext {
             loop_label,
@@ -101,9 +100,8 @@ impl<'a> Lowerer<'a> {
         self.loop_lower_contexts.pop();
 
         // If we reach here (no Recur), body_reg is the loop result.
-        let result_slot = self.current_func.num_locals;
-        self.current_func.num_locals += 1;
-        self.emit(LirInstr::StoreLocal {
+        let result_slot = self.fresh_local();
+        self.emit(InstrRef::StoreLocal {
             slot: result_slot,
             src: body_reg,
         });
@@ -112,8 +110,8 @@ impl<'a> Lowerer<'a> {
         self.finish_block();
 
         // Done block — load result from slot
-        self.current_block = BasicBlock::new(done_label);
-        self.emit(LirInstr::LoadLocal {
+        self.open_block(done_label);
+        self.emit(InstrRef::LoadLocal {
             dst: result_reg,
             slot: result_slot,
         });
@@ -145,7 +143,7 @@ impl<'a> Lowerer<'a> {
 
         // Store new values to loop binding slots.
         for (reg, &slot) in arg_regs.iter().zip(&binding_slots) {
-            self.emit(LirInstr::StoreLocal { slot, src: *reg });
+            self.emit(InstrRef::StoreLocal { slot, src: *reg });
         }
 
         // Per-iteration DecrefRegion is emitted by `lower_expr` at each
@@ -158,8 +156,8 @@ impl<'a> Lowerer<'a> {
 
         // Dead block after unconditional jump
         let dead_label = self.fresh_label();
-        self.current_block = BasicBlock::new(dead_label);
-        let nil_reg = self.emit_const(LirConst::Nil)?;
+        self.open_block(dead_label);
+        let nil_reg = self.emit_const(ConstRef::Nil)?;
         Ok(nil_reg)
     }
     pub(super) fn lower_break(&mut self, block_id: &BlockId, value: &Hir) -> Result<Reg, String> {
@@ -175,7 +173,7 @@ impl<'a> Lowerer<'a> {
 
         let value_reg = self.lower_expr(value)?;
 
-        self.emit(LirInstr::StoreLocal {
+        self.emit(InstrRef::StoreLocal {
             slot: target_result_slot,
             src: value_reg,
         });
@@ -212,13 +210,12 @@ impl<'a> Lowerer<'a> {
             return if let Some(else_expr) = else_branch {
                 self.lower_expr(else_expr)
             } else {
-                self.emit_const(LirConst::Nil)
+                self.emit_const(ConstRef::Nil)
             };
         }
 
         let result_reg = self.fresh_reg();
-        let cond_result_slot = self.current_func.num_locals;
-        self.current_func.num_locals += 1;
+        let cond_result_slot = self.fresh_local();
         let done_label = self.fresh_label();
 
         // Generate labels for each clause's body and the next test
@@ -259,9 +256,9 @@ impl<'a> Lowerer<'a> {
             self.finish_block();
 
             // Body block
-            self.current_block = BasicBlock::new(body_label);
+            self.open_block(body_label);
             let body_reg = self.lower_expr(body)?;
-            self.emit(LirInstr::StoreLocal {
+            self.emit(InstrRef::StoreLocal {
                 slot: cond_result_slot,
                 src: body_reg,
             });
@@ -271,21 +268,21 @@ impl<'a> Lowerer<'a> {
 
             // Start next test block (if not last clause)
             if i + 1 < clauses.len() {
-                self.current_block = BasicBlock::new(clause_labels[i + 1].1);
+                self.open_block(clause_labels[i + 1].1);
             }
         }
 
         // Else block
-        self.current_block = BasicBlock::new(else_label);
+        self.open_block(else_label);
         if let Some(else_expr) = else_branch {
             let else_reg = self.lower_expr(else_expr)?;
-            self.emit(LirInstr::StoreLocal {
+            self.emit(InstrRef::StoreLocal {
                 slot: cond_result_slot,
                 src: else_reg,
             });
         } else {
-            let nil_reg = self.emit_const(LirConst::Nil)?;
-            self.emit(LirInstr::StoreLocal {
+            let nil_reg = self.emit_const(ConstRef::Nil)?;
+            self.emit(InstrRef::StoreLocal {
                 slot: cond_result_slot,
                 src: nil_reg,
             });
@@ -295,9 +292,9 @@ impl<'a> Lowerer<'a> {
         self.finish_block();
 
         // Done block (continue here)
-        self.current_block = BasicBlock::new(done_label);
+        self.open_block(done_label);
         self.open_branch_merge(branch_hoists);
-        self.emit(LirInstr::LoadLocal {
+        self.emit(InstrRef::LoadLocal {
             dst: result_reg,
             slot: cond_result_slot,
         });

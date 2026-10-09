@@ -1,6 +1,8 @@
+// audited: 2026-10-06
+// docs/impl/wasm.md
 //! CFG emission: loop+br_table dispatch, block instructions, terminators.
 
-use crate::lir::{LirFunction, LirInstr, Terminator};
+use crate::lir::{InstrRef, LirView, Terminator};
 use crate::value::repr::*;
 use wasm_encoder::*;
 
@@ -12,8 +14,8 @@ impl WasmEmitter {
     /// Each LIR basic block becomes a case in a br_table. A `$state` local
     /// tracks which block to execute next. Return terminators break out of
     /// the loop. Jump and Branch terminators set `$state` and continue.
-    pub(super) fn emit_cfg(&mut self, f: &mut Function, func: &LirFunction) {
-        let num_blocks = func.blocks.len();
+    pub(super) fn emit_cfg(&mut self, f: &mut Function, func: &LirView<'_>) {
+        let num_blocks = func.block_count();
         if num_blocks == 0 {
             f.instruction(&Instruction::I64Const(TAG_NIL as i64));
             f.instruction(&Instruction::I64Const(0));
@@ -22,11 +24,11 @@ impl WasmEmitter {
         }
 
         if num_blocks == 1 && !self.may_suspend {
-            let block = &func.blocks[0];
-            for spanned in &block.instructions {
-                self.emit_instr(f, &spanned.instr);
+            let block = func.block(0);
+            for instr in block.instrs() {
+                self.emit_instr(f, &instr);
             }
-            self.emit_terminator_return(f, &block.terminator.terminator);
+            self.emit_terminator_return(f, &block.terminator());
             return;
         }
 
@@ -36,7 +38,7 @@ impl WasmEmitter {
         if self.may_suspend && !self.resume_states.is_empty() {
             self.emit_resume_prologue(f, state_local);
         } else {
-            let entry_idx = self.label_to_idx[&func.entry] as i64;
+            let entry_idx = self.label_to_idx[&func.entry()] as i64;
             f.instruction(&Instruction::I64Const(entry_idx));
             f.instruction(&Instruction::LocalSet(state_local));
         }
@@ -75,12 +77,12 @@ impl WasmEmitter {
             f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
 
             // Emit remaining instructions from the source block
-            let block = &func.blocks[src_block_idx];
-            for (rel_idx, spanned) in block.instructions[instr_offset..].iter().enumerate() {
+            let block = func.block(src_block_idx);
+            for (rel_idx, instr) in block.instrs().skip(instr_offset).enumerate() {
                 let abs_idx = instr_offset + rel_idx;
                 if self.may_suspend {
-                    match &spanned.instr {
-                        LirInstr::SuspendingCall {
+                    match &instr {
+                        InstrRef::SuspendingCall {
                             dst: call_dst,
                             func: fn_reg,
                             args,
@@ -101,7 +103,7 @@ impl WasmEmitter {
                             );
                             continue;
                         }
-                        LirInstr::CallArrayMut {
+                        InstrRef::CallArrayMut {
                             dst: call_dst,
                             func: fn_reg,
                             args,
@@ -125,12 +127,12 @@ impl WasmEmitter {
                         _ => {}
                     }
                 }
-                self.emit_instr(f, &spanned.instr);
+                self.emit_instr(f, &instr);
             }
 
             self.emit_block_terminator(
                 f,
-                &block.terminator.terminator,
+                &block.terminator(),
                 state_local,
                 (num_blocks + virt_idx) as u32,
                 Some(src_block_idx),
@@ -140,11 +142,11 @@ impl WasmEmitter {
         // Real blocks in reverse order
         for block_idx in (0..num_blocks).rev() {
             f.instruction(&Instruction::End);
-            let block = &func.blocks[block_idx];
+            let block = func.block(block_idx);
             self.emit_block_instructions(f, block_idx, func);
             self.emit_block_terminator(
                 f,
-                &block.terminator.terminator,
+                &block.terminator(),
                 state_local,
                 block_idx as u32,
                 Some(block_idx),
@@ -160,14 +162,14 @@ impl WasmEmitter {
         &mut self,
         f: &mut Function,
         block_idx: usize,
-        func: &LirFunction,
+        func: &LirView<'_>,
     ) {
         self.known_int.clear();
-        let block = &func.blocks[block_idx];
-        for (instr_idx, spanned) in block.instructions.iter().enumerate() {
+        let block = func.block(block_idx);
+        for (instr_idx, instr) in block.instrs().enumerate() {
             if self.may_suspend {
-                match &spanned.instr {
-                    LirInstr::SuspendingCall {
+                match &instr {
+                    InstrRef::SuspendingCall {
                         dst,
                         func: fn_reg,
                         args,
@@ -188,7 +190,7 @@ impl WasmEmitter {
                         );
                         continue;
                     }
-                    LirInstr::CallArrayMut {
+                    InstrRef::CallArrayMut {
                         dst,
                         func: fn_reg,
                         args,
@@ -212,7 +214,7 @@ impl WasmEmitter {
                     _ => {}
                 }
             }
-            self.emit_instr(f, &spanned.instr);
+            self.emit_instr(f, &instr);
         }
     }
 

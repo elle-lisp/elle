@@ -1,6 +1,6 @@
 # hir
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-10-06 -->
 
 High-level Intermediate Representation: the analyzed program, with bindings
 resolved, captures computed and signals inferred, and the passes over it.
@@ -72,12 +72,12 @@ Lowerer (&BindingArena) — read-only access to binding metadata
 
 ## Dependents
 
-- `lir/lower/` - consumes HIR, reads `arena.get(b).needs_capture()` via `&BindingArena`
-- `pipeline/` - orchestrates Syntax → HIR → LIR → Bytecode
-- `lint/cli.rs` - uses `HirLinter` for static analysis
-- `lsp/state.rs` - uses `extract_symbols_from_hir` and `HirLinter` for IDE features
-- `primitives/compile/query/analysis.rs` - uses `HirLinter` and `extract_symbols_from_hir` for `compile/analyze`
-- `vm/eval.rs` - runs the `Analyzer` for `eval`
+- [lir/lower](../lir/lower/AGENTS.md) - consumes HIR, reads `arena.get(b).needs_capture()` via `&BindingArena`
+- [pipeline](../pipeline/AGENTS.md) - orchestrates Syntax → HIR → LIR → Bytecode
+- [cli.rs](../lint/cli.rs) - uses `HirLinter` for static analysis
+- [state.rs](../lsp/state.rs) - uses `extract_symbols_from_hir` and `HirLinter` for IDE features
+- [analysis.rs](../primitives/compile/query/analysis.rs) - uses `HirLinter` and `extract_symbols_from_hir` for `compile/analyze`
+- [eval.rs](../vm/eval.rs) - runs the `Analyzer` for `eval`
 
 ## Invariants
 
@@ -156,8 +156,9 @@ Lowerer (&BindingArena) — read-only access to binding metadata
 15. **A docstring is a leading string literal.** `HirKind::Lambda` has a
     `doc: Option<Rc<str>>` field. The analyzer takes a leading string literal
     as the docstring only when the body has two or more forms. The lowerer
-    copies it to `LirFunction.doc`, then `TemplateProto.doc`, which
-    `ClosureTemplate::doc()` reads for `(doc name)` and LSP hover.
+    copies it to `LirHead::doc`, and the emitter writes it into the code
+    payload, where `ClosureTemplate::doc()` reads it for `(doc name)` and LSP
+    hover.
 
 16. **Signal bounds come from `silence`, anywhere in a function body.** Each
     form applies to the innermost enclosing function. `HirKind::Lambda`
@@ -176,9 +177,8 @@ Lowerer (&BindingArena) — read-only access to binding metadata
 18. **A lambda's source location is captured for `meta/origin`.**
     `HirKind::Lambda` has an `origin: Option<Span>` field, set in
     `analyze_lambda` from the form's span. The lowerer copies it to
-    `LirFunction.origin`, and `TemplateProto::nested_lambda` copies it to
-    `TemplateProto.origin`. `(meta/origin f)` reads it through
-    `ClosureTemplate::origin()`.
+    `LirHead::origin`, and the emitter writes it into the code payload.
+    `(meta/origin f)` reads it through `ClosureTemplate::origin()`.
 
 19. **Qualified symbols are desugared to nested `get` calls.**
     `a:b:c` in `SyntaxKind::Symbol` is desugared during analysis to

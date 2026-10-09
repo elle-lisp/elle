@@ -1,9 +1,10 @@
+// audited: 2026-10-06
+// docs/impl/mlir.md
 //! Per-terminator MLIR emission (return / jump / conditional branch).
 //!
 //! Emits the `func.return` or `cf` branch that ends each block, resolving LIR
-//! labels to the pre-built MLIR blocks. The op order matches the original
-//! single-function lowering; `Return` also folds the block's scalar type into
-//! `ctx.return_type`.
+//! labels to the pre-built MLIR blocks. `Return` also folds the block's scalar
+//! type into `ctx.return_type`.
 
 use super::*;
 
@@ -16,13 +17,13 @@ pub(super) fn lower_terminator<'c, 'a>(
     block: &'a Block<'c>,
     blocks: &'a [Block<'c>],
     label_to_idx: &HashMap<Label, usize>,
-    lir_block: &crate::lir::BasicBlock,
+    lir_block: &crate::lir::code::BlockRef<'_>,
 ) -> Result<(), String> {
     let context = ctx.context;
     let location = ctx.location;
     let i64_type = ctx.i64_type;
 
-    match &lir_block.terminator.terminator {
+    match &lir_block.terminator() {
         Terminator::Return(reg) => {
             let val = *ctx
                 .regs
@@ -102,7 +103,7 @@ pub(super) fn lower_terminator<'c, 'a>(
         _ => {
             return Err(format!(
                 "unsupported terminator: {:?}",
-                lir_block.terminator.terminator
+                lir_block.terminator()
             ))
         }
     }

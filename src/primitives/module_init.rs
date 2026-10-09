@@ -1,6 +1,6 @@
-// audited: 2026-09-21
-//! Loading the standard library into one runtime: obtain its bytecode, run
-//! it, and register what it exports.
+// audited: 2026-10-06
+//! Loading the standard library into one runtime: obtain its compiled unit,
+//! run it, and register what it exports.
 //!
 //! Every later compile resolves a stdlib name out of what is registered here.
 //!
@@ -46,11 +46,11 @@ pub fn init_stdlib(
     // Both arms mark `stdlib-compile`: the boot mark attributes the cost of
     // OBTAINING the compiled stdlib, so a run that loads it stays comparable
     // with a run that compiles it.
-    let (bytecode, source) =
+    let (unit, source) =
         match crate::compiler::stdlib_cache::try_load(STDLIB, cache, vm, symbols, cctx) {
-            Some(Ok(bc)) => {
+            Some(Ok(unit)) => {
                 crate::phase!(boot, "boot", t, "stdlib-compile (cache hit)");
-                (bc, StdlibSource::Cache)
+                (unit, StdlibSource::Cache)
             }
             absent_or_rejected => {
                 if let Some(Err(e)) = absent_or_rejected {
@@ -66,21 +66,14 @@ pub fn init_stdlib(
                 // Persist so the next process start skips the front end. A write
                 // failure is not fatal — the cache is a speedup, and a fresh
                 // compile is always the fallback.
-                crate::compiler::stdlib_cache::try_store(
-                    STDLIB,
-                    cache,
-                    &result.bytecode,
-                    vm,
-                    symbols,
-                    cctx,
-                );
+                crate::compiler::stdlib_cache::try_store(STDLIB, cache, &result, vm, symbols, cctx);
                 crate::phase!(boot, "boot", t, "stdlib-cache-store");
-                (result.bytecode, StdlibSource::Compiled)
+                (result, StdlibSource::Compiled)
             }
         };
     let t = std::time::Instant::now();
     // Execute stdlib — returns the last expression (a closure).
-    let closure_val = match vm.execute(&bytecode) {
+    let closure_val = match vm.execute(&unit) {
         Ok(v) => v,
         Err(e) => panic!("stdlib execution failed: {}", e),
     };

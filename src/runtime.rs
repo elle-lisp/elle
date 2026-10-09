@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-07
 //! The process runtime: one lifecycle for compile/evaluate, shared by every
 //! entry path (`elle foo.lisp`, the REPL, and the embedding API).
 //!
@@ -269,16 +269,20 @@ impl Runtime {
     pub fn teardown(&mut self) -> TeardownReport {
         self.torn_down = true;
 
-        // (1) Release the per-instance compile-time state's resident references:
-        //     the pre-compiled macro transformers hold region references their
-        //     `Copy` `Value`s would never decref. The `CompileCtx` itself (macro
-        //     VM, expander, meta) drops with this core; the region pages its
-        //     `Value`s alias are reclaimed by the RC sweep below.
-        // Reach the heap through the VM's `heap_ptr` (a `Copy` raw pointer, read
-        // out so it holds no borrow of `self.core`) so the `&mut CompileCtx`
-        // release borrow and the `&mut FiberHeap` it needs are disjoint.
+        // (1) Release the per-instance compile-time state's resident references.
+        //     A macro transformer's cell holds a region reference, and it gives
+        //     it back when its definition drops; the master expander and the
+        //     program VM's `eval` expander would drop after the count below, so
+        //     both release here. The `CompileCtx` itself (macro VM, expander,
+        //     meta) drops with this core; the region pages its `Value`s alias
+        //     are reclaimed by the RC sweep below.
         let heap_ptr = self.core.vm().heap_ptr;
-        self.core.compile().release(unsafe { &mut *heap_ptr });
+        self.core.compile().release();
+        self.core.vm().eval_expander = None;
+        // The program VM's caches pin the code regions their keys name, from
+        // Rust where the RC sweep cannot see them; drop the pins first, so no
+        // pin holds a region past the sweep (docs/impl/jit.md).
+        self.core.vm().clear_code_pins();
         // The default trait tables are `alloc_root`'d into this instance's root
         // region the RC sweep below releases; clear the heap's table so a later
         // read sees `NIL` instead of `Value`s pointing into the freed region.
@@ -288,6 +292,14 @@ impl Runtime {
         //     roots by RC and let the cascade reclaim everything reachable.
         let roots_released =
             crate::value::arena::teardown_process_root_regions(unsafe { &mut *heap_ptr });
+        // Every code unit and cache pin is a Rust handle on a code region; one
+        // still live here outlives the regions the sweep just released
+        // (docs/impl/region/template.md).
+        debug_assert_eq!(
+            unsafe { &*heap_ptr }.live_code_handles(),
+            0,
+            "a code unit or a cache pin is still live at teardown"
+        );
 
         // (3) Observe the result. Every region is mortal, so every surviving
         //     region is leaked residue.

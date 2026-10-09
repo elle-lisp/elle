@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-10-06
 //! What the file gets from the copied graph: page bytes, the four relocation
 //! streams, the object index, and the two watermarks.
 //!
@@ -9,14 +9,13 @@
 //! an object slot, a struct entry, a syntax node, a code payload — is
 //! assembled from probed extents into a zeroed buffer rather than copied
 //! (backing.rs holds the writers), so no construction temporary's padding
-//! reaches the artifact.
+//! reaches the artifact. payload.rs holds the half that walks a code payload
+//! and its LIR body, whose records copy whole with their named pads zeroed.
 
 use std::collections::{HashMap, HashSet};
 use std::mem::size_of;
 
-use crate::hir::region::StaticRegion;
 use crate::syntax::{ScopeId, Syntax, SyntaxKind};
-use crate::value::closure::{CodePayload, LocEntry};
 use crate::value::fiberheap::regionpool::{PageLayout, RegionPool};
 use crate::value::heap::HeapObject;
 use crate::value::region_slice::RegionSlice;
@@ -185,10 +184,8 @@ pub(super) fn emit(
             }
             // A header is one slot — its payload slice — and the payload
             // behind it is a record of its own, assembled from probed
-            // offsets like a node is. The blueprint field is not probed, so
-            // the canonical shell leaves it zero and it hydrates as absent.
-            // A later header naming the same payload records its own slot
-            // and nothing else.
+            // offsets like a node is. A later header naming the same payload
+            // records its own slot and nothing else.
             HeapObject::ClosureTemplate(t) => {
                 if let Some((rel, _)) = out.slice_backing(t.payload_slice(), at)? {
                     if payloads_walked.insert(rel) {
@@ -244,7 +241,12 @@ pub(super) fn emit(
 
 impl Emitted {
     /// Record a relocation from the slot at `slot_addr` to `target`.
-    fn slot(&mut self, slot_addr: usize, target: usize, at: &Placement) -> Result<(), ImageError> {
+    pub(super) fn slot(
+        &mut self,
+        slot_addr: usize,
+        target: usize,
+        at: &Placement,
+    ) -> Result<(), ImageError> {
         let entry = (at.offset(slot_addr)?, at.offset(target)?);
         self.relocs.push(entry);
         Ok(())
@@ -255,7 +257,7 @@ impl Emitted {
     /// nothing at all for a portable immediate. The slot is named by its own
     /// address, so the walk takes it from the live field rather than computing
     /// an offset from a probe.
-    fn value_slot(&mut self, v: &Value, at: &Placement) -> Result<(), ImageError> {
+    pub(super) fn value_slot(&mut self, v: &Value, at: &Placement) -> Result<(), ImageError> {
         let slot = &v.payload as *const u64 as usize;
         if let Some(p) = v.as_heap_ptr() {
             return self.slot(slot, p as usize, at);
@@ -292,7 +294,7 @@ impl Emitted {
     /// `repr(C)` `RegionSlice`) and answer where its backing goes in the
     /// image. An empty slice has a dangling constant pointer — no slot, no
     /// backing.
-    fn slice_backing<T: 'static>(
+    pub(super) fn slice_backing<T: 'static>(
         &mut self,
         s: &RegionSlice<T>,
         at: &Placement,
@@ -305,9 +307,9 @@ impl Emitted {
         Ok(Some((at.offset(backing)?, backing)))
     }
 
-    /// [`slice_backing`](Self::slice_backing) for the two variants whose
-    /// payload is a `Value` slice.
-    fn values_backing(
+    /// [`slice_backing`](Self::slice_backing) for a `Value` slice, whose bytes
+    /// copy as they stand and whose slots the caller records one by one.
+    pub(super) fn values_backing(
         &mut self,
         s: &RegionSlice<Value>,
         at: &Placement,
@@ -315,86 +317,6 @@ impl Emitted {
     ) -> Result<(), ImageError> {
         if let Some((rel, src)) = self.slice_backing(s, at)? {
             backings.push(Backing::raw::<Value>(rel, src, s.len()));
-        }
-        Ok(())
-    }
-
-    /// Record every relocation a code payload's inner fields need, and their
-    /// backing bytes. The payload struct itself is written canonically by its
-    /// [`Backing`]; this walks what the struct names.
-    fn payload(
-        &mut self,
-        p: &CodePayload,
-        at: &Placement,
-        backings: &mut Vec<Backing>,
-    ) -> Result<(), ImageError> {
-        // The payload's own span. A file id is an index into a process-wide
-        // interner, so the file travels by name and hydration writes the live
-        // id into this slot — the same treatment a node's span gets
-        // (docs/impl/image/format.md).
-        if let Some(name) = p.origin().and_then(|s| s.file()) {
-            let slot = p as *const CodePayload as usize + layout::file_slot_in_payload();
-            self.files.push((at.offset(slot)?, name.into()));
-        }
-        if let Some((rel, src)) = self.slice_backing(&p.bytecode, at)? {
-            backings.push(Backing::raw::<u8>(rel, src, p.bytecode.len()));
-        }
-        self.values_backing(&p.constants, at, backings)?;
-        for v in p.constants.iter() {
-            self.value_slot(v, at)?;
-        }
-        // A child is a header object of its own, so the walk above reaches it
-        // like any other live object and this records only the slot that
-        // names it (docs/impl/image/sealing.md).
-        self.values_backing(&p.children, at, backings)?;
-        for v in p.children.iter() {
-            self.value_slot(v, at)?;
-        }
-        if let Some((rel, src)) = self.slice_backing(&p.locations, at)? {
-            backings.push(Backing::raw::<LocEntry>(rel, src, p.locations.len()));
-        }
-        self.bytes_slices(&p.files, at, backings)?;
-        for (field, len) in [(&p.name, p.name.len()), (&p.doc, p.doc.len())] {
-            if let Some((rel, src)) = self.slice_backing(field, at)? {
-                backings.push(Backing::raw::<u8>(rel, src, len));
-            }
-        }
-        if let Some((rel, src)) = self.slice_backing(&p.region_table, at)? {
-            backings.push(Backing::raw::<StaticRegion>(rel, src, p.region_table.len()));
-        }
-        if let Some((rel, src)) = self.slice_backing(&p.merged_slots, at)? {
-            backings.push(Backing::raw::<u32>(rel, src, p.merged_slots.len()));
-        }
-        if let Some((rel, src)) = self.slice_backing(&p.frame_release_slots, at)? {
-            backings.push(Backing::raw::<u16>(rel, src, p.frame_release_slots.len()));
-        }
-        if let Some((rel, src)) = self.slice_backing(&p.frame_release_regions, at)? {
-            backings.push(Backing::raw::<u32>(rel, src, p.frame_release_regions.len()));
-        }
-        if let Some((rel, src)) = self.slice_backing(&p.capture_locals, at)? {
-            backings.push(Backing::raw::<u64>(rel, src, p.capture_locals.len()));
-        }
-        self.bytes_slices(&p.strict_keys, at, backings)
-    }
-
-    /// A slice of byte slices — a payload's file names or its `&named` keys.
-    /// The outer backing is slice headers the dumper assembles, because a
-    /// header has padding after its length; each inner slice's bytes and
-    /// `ptr` slot are recorded like a string's.
-    fn bytes_slices(
-        &mut self,
-        s: &RegionSlice<RegionSlice<u8>>,
-        at: &Placement,
-        backings: &mut Vec<Backing>,
-    ) -> Result<(), ImageError> {
-        let Some((rel, src)) = self.slice_backing(s, at)? else {
-            return Ok(());
-        };
-        backings.push(Backing::slice_headers(rel, src, s.len()));
-        for inner in s.iter() {
-            if let Some((inner_rel, inner_src)) = self.slice_backing(inner, at)? {
-                backings.push(Backing::raw::<u8>(inner_rel, inner_src, inner.len()));
-            }
         }
         Ok(())
     }

@@ -1,4 +1,4 @@
-// audited: 2026-09-22
+// audited: 2026-10-06
 //! Per-region storage with dual-ended page layout.
 //!
 //! docs/impl/region/model.md
@@ -151,7 +151,8 @@ pub(crate) struct RegionPool {
     /// Pointers to HeapObjects that need Drop (destructor tracking).
     dtors: Vec<*mut HeapObject>,
     /// Pointers to HeapObjects that hold Value refs but don't need Drop
-    /// (Pair, Parameter). Tracked for cascade decref on region free.
+    /// (Pair, Parameter, ClosureTemplate). Tracked for cascade decref on
+    /// region free.
     ref_objs: Vec<*mut HeapObject>,
     /// Next page size to claim (doubles each time — geometric growth).
     next_page_size: usize,

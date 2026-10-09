@@ -1,6 +1,6 @@
 # benches
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-06 -->
 
 Criterion and reporting benchmarks for the Elle compiler and VM.
 
@@ -11,7 +11,6 @@ Criterion and reporting benchmarks for the Elle compiler and VM.
 | [benchmarks.rs](benchmarks.rs) | Criterion | Wall-clock benchmarks: parsing, symbol interning, compilation, VM execution, end-to-end eval, macro expansion |
 | [memory.rs](memory.rs) | reporting | Heap allocations and bytes, total and net, while four programs compile and run: fib, n-queens, a list build, a closure loop |
 | [regionrc.rs](regionrc.rs) | reporting | Compile-time RC-coalescing win: value→slot mint reduction (transform 1) and merge-induced self-edges eliminated (transform 2), over the stdlib load and both Elle suites |
-| [lirshape](lirshape/main.rs) | reporting | Region-native LIR against the Rust-heap `LirFunction`: build, copy, walk, rewrite, teardown, allocator traffic and resident bytes, over the LIR of the three boot sources |
 
 ## Benchmark groups in benchmarks.rs
 
@@ -60,24 +59,6 @@ builder idiom seeds it.
 
 ```bash
 cargo bench --bench regionrc
-```
-
-## The lirshape bench — region-native LIR against the shipped form
-
-The bench encodes the LIR of core.lisp, prelude.lisp and stdlib.lisp into a
-region as a fixed-size POD node, then runs the same five operations over both
-forms and reports each side by side
-([measurements.md](../docs/impl/image/measurements.md) item 7 records what it
-answered). Reporting, like regionrc: it prints numbers and asserts only that
-the two forms carry the same instruction and operand counts.
-
-Six files: `main.rs` drives and reports, `node.rs` defines the node,
-`opcode.rs` gives each `LirInstr` variant its byte, `build.rs` encodes, `ops.rs`
-holds each measured operation written twice, and `size.rs` counts where each
-form's bytes go.
-
-```bash
-cargo bench --bench lirshape
 ```
 
 ## Running

@@ -1,4 +1,4 @@
-// audited: 2026-09-20
+// audited: 2026-10-06
 //! C-ABI embedding surface for Elle: an opaque `ElleCtx` over one `Runtime`,
 //! driven through the exported lifecycle functions.
 //!
@@ -104,7 +104,7 @@ pub unsafe extern "C" fn elle_eval(ctx: *mut c_void, src: *const u8, len: usize)
     let produced = {
         let (vm, symbols, cctx) = ctx.runtime.parts();
         match compile_file(source, symbols, cctx, "<embed>") {
-            Ok(compiled) => vm.execute_scheduled(&compiled.bytecode, cctx).ok(),
+            Ok(compiled) => vm.execute_scheduled(&compiled, cctx).ok(),
             Err(_) => None,
         }
     };
@@ -231,8 +231,8 @@ mod tests {
     // This is the coverage the constructor-seam test cannot give: it exercises the
     // C-ABI argument *order* agreed between `call_plugin` (host) and the primitive
     // (plugin). `first` returns `args[0]`; if `call_plugin` failed to pass `ctx`
-    // first (the pre-fix calling convention), `args` would land on `nargs` and the
-    // deref would read garbage rather than 42 — so the arg threading is pinned.
+    // first, `args` would land on `nargs` and the deref would read garbage rather
+    // than 42 — so the arg threading is pinned.
     unsafe extern "C" fn first(_ctx: *mut CallCtx, args: *const Value, nargs: usize) -> PrimResult {
         assert!(nargs >= 1, "first/2 dispatched with too few args");
         PrimResult {

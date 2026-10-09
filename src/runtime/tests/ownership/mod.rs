@@ -1,5 +1,9 @@
-//! Runtime tests for the ownership forest, split by cut family. Shared growth
-//! harness + discriminator live here; each submodule holds one family of pins.
+// audited: 2026-10-06
+//! Runtime tests for the ownership forest, one submodule per cut family, over the growth harnesses shared here.
+//!
+//! docs/impl/region/ownership.md
+//! docs/impl/region/owner.md
+
 use super::*;
 
 mod anode;
@@ -11,9 +15,6 @@ mod owner;
 mod selfrec;
 mod subtree;
 
-/// A closure over hand-emitted bytecode, for driving a fiber body no production
-/// lowering can build yet. The zero-arity template wraps the bytecode +
-/// constants exactly as a compiled thunk would.
 /// A child fiber over a body of hand-emitted bytecode, plus its heap value.
 ///
 /// The code object's header and the fiber value are built through one `Alloc`
@@ -26,7 +27,8 @@ pub(super) fn child_fiber(
 ) -> (crate::value::FiberHandle, crate::value::Value) {
     use std::rc::Rc;
     let ctx = crate::primitives::ctx::Alloc::new(heap);
-    let template = ctx.template(&Rc::new(bc.into_proto()));
+    let template =
+        crate::value::CodeBuilder::from_bytecode(bc).build_in(ctx.heap_mut(), ctx.test_region());
     let closure = Rc::new(crate::value::Closure::new(
         crate::value::TemplateRef::region(template),
         crate::value::region_slice::RegionSlice::empty(),
@@ -58,13 +60,13 @@ pub(super) fn steady_region_growth(src: &str) -> i64 {
     };
     {
         let (vm, _symbols, cctx) = rt.parts();
-        let v = vm.execute_scheduled(&result.bytecode, cctx).expect("runs");
+        let v = vm.execute_scheduled(&result, cctx).expect("runs");
         assert!(v.is_nil(), "the discarded-shape program returns nil");
     }
     let baseline = rt.heap().active_region_count() as i64;
     for _ in 0..50 {
         let (vm, _symbols, cctx) = rt.parts();
-        let v = vm.execute_scheduled(&result.bytecode, cctx).expect("runs");
+        let v = vm.execute_scheduled(&result, cctx).expect("runs");
         assert!(v.is_nil());
     }
     rt.heap().active_region_count() as i64 - baseline
@@ -108,7 +110,7 @@ pub(super) fn mid_run_growth(mut rt: Runtime, prelude: &str, body: &str, gauge: 
             .0
     };
     let (vm, _symbols, cctx) = rt.parts();
-    vm.execute_scheduled(&result.bytecode, cctx)
+    vm.execute_scheduled(&result, cctx)
         .expect("runs")
         .as_int()
         .expect("program returns the gauge delta as an int")

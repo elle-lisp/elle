@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! Region releases: what the lowerer emits at each region's `decref_point`, routed by the region's class.
 //!
 //! docs/impl/region/mechanism.md
@@ -208,9 +208,9 @@ impl<'a> Lowerer<'a> {
                     // release path can still be holding.
                     match value_slot {
                         super::ValueSlot::Local(slot) => {
-                            self.emit(LirInstr::LoadLocal { dst: val_reg, slot })
+                            self.emit(InstrRef::LoadLocal { dst: val_reg, slot })
                         }
-                        super::ValueSlot::Env(index) => self.emit(LirInstr::LoadCaptureRaw {
+                        super::ValueSlot::Env(index) => self.emit(InstrRef::LoadCaptureRaw {
                             dst: val_reg,
                             index,
                         }),
@@ -225,7 +225,7 @@ impl<'a> Lowerer<'a> {
                     // decref it replaces (one value consumed); the nil-stamp
                     // below still applies. Empty when no transfer subtree is present.
                     if self.region_info.transfer_adopt_regions.contains(&r) {
-                        self.emit(LirInstr::AdoptIntoActivation { child: val_reg });
+                        self.emit(InstrRef::AdoptIntoActivation { child: val_reg });
                         if crate::config::get().has_trace("rc") {
                             eprintln!(
                                 "[trace:rc:emit] transfer_adopt region={:?} local_slot={} span={}",
@@ -233,7 +233,7 @@ impl<'a> Lowerer<'a> {
                             );
                         }
                     } else {
-                        self.emit(LirInstr::DecrefValueRegion { src: val_reg });
+                        self.emit(InstrRef::DecrefValueRegion { src: val_reg });
                     }
                     // Clear the slot we just released. The decref_point is this
                     // value's last use, so the slot is never read again *for this
@@ -259,8 +259,8 @@ impl<'a> Lowerer<'a> {
                     // slot; an env cell is one per binding per activation and is
                     // never reused, so there is nothing for it to guard.
                     if let Some(slot) = value_slot.local() {
-                        if let Ok(nil_reg) = self.emit_const(crate::lir::LirConst::Nil) {
-                            self.emit(LirInstr::StoreLocal { slot, src: nil_reg });
+                        if let Ok(nil_reg) = self.emit_const(ConstRef::Nil) {
+                            self.emit(InstrRef::StoreLocal { slot, src: nil_reg });
                         }
                         // Record the route for the abandoned-frame walk
                         // (docs/impl/region/unwind.md). The slot IS the
@@ -312,18 +312,18 @@ impl<'a> Lowerer<'a> {
                     result_reg.filter(|_| self.region_info.alloc_region.get(&hir_id) == Some(&r))
                 {
                     let slot = self.scratch_slot();
-                    self.emit(LirInstr::StoreLocal { slot, src });
+                    self.emit(InstrRef::StoreLocal { slot, src });
                     let val_reg = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal { dst: val_reg, slot });
+                    self.emit(InstrRef::LoadLocal { dst: val_reg, slot });
                     // A discarded transfer-consumer site (`(mk)` as a
                     // statement): the release is replaced by the activation
                     // adopt, exactly as on the slot path above.
                     if self.region_info.transfer_adopt_regions.contains(&r) {
-                        self.emit(LirInstr::AdoptIntoActivation { child: val_reg });
+                        self.emit(InstrRef::AdoptIntoActivation { child: val_reg });
                     } else {
-                        self.emit(LirInstr::DecrefValueRegion { src: val_reg });
+                        self.emit(InstrRef::DecrefValueRegion { src: val_reg });
                     }
-                    self.emit(LirInstr::LoadLocal { dst: src, slot });
+                    self.emit(InstrRef::LoadLocal { dst: src, slot });
                     if crate::config::get().has_trace("rc") {
                         eprintln!(
                             "[trace:rc:emit] emit_decref_value_region region={:?} discarded_result reg={:?} hir_id={:?} span={}",
@@ -421,9 +421,10 @@ impl<'a> Lowerer<'a> {
         // frame is abandoned is a release that did not run. Only a slot this function
         // actually emits for is recorded, so the map's other entries — a caller's
         // leftovers past a frame-replacing tail call — stay out of the walk.
-        if !self.current_func.frame_release_regions.contains(&region_id) {
-            self.current_func.frame_release_regions.push(region_id);
+        let head = self.head();
+        if !head.frame_release_regions.contains(&region_id) {
+            head.frame_release_regions.push(region_id);
         }
-        self.emit(LirInstr::DecrefRegion { region_id });
+        self.emit(InstrRef::DecrefRegion { region_id });
     }
 }

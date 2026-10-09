@@ -1,14 +1,14 @@
-// audited: 2026-09-21
+// audited: 2026-10-06
 // src/pipeline/AGENTS.md
 //! Compilation pipeline: source -> bytecode.
 
 use super::CompileCtx;
-use super::CompileResult;
 use crate::hir::{classify_form, Analyzer, BindingArena, FileForm};
 use crate::lir::{Emitter, Lowerer};
 use crate::reader::{read_syntax, read_syntax_all_for};
 use crate::symbol::SymbolTable;
 use crate::syntax::{Span, Syntax, SyntaxArena, SyntaxKind};
+use crate::value::CodeUnit;
 use std::collections::HashSet;
 
 mod frontend;
@@ -56,7 +56,7 @@ pub fn compile(
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
     source_name: &str,
-) -> Result<CompileResult, String> {
+) -> Result<CodeUnit, String> {
     with_syntax_arena(cctx.heap_ptr(), |arena| {
         compile_inner(arena, source, symbols, cctx, source_name)
     })
@@ -68,7 +68,7 @@ fn compile_inner(
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
     source_name: &str,
-) -> Result<CompileResult, String> {
+) -> Result<CodeUnit, String> {
     // Ensure caller's SymbolTable has primitive names interned so that
     // SymbolIds match the compile context's PrimitiveMeta.
 
@@ -120,6 +120,7 @@ fn compile_inner(
         );
     }
     let mut lowerer = Lowerer::new(&arena)
+        .with_heap(unsafe { &mut *cctx.heap_ptr() })
         .with_symbols(symbols)
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
@@ -127,14 +128,16 @@ fn compile_inner(
         .with_type_info(types);
     let lir_module = lowerer.lower(&analysis.hir)?;
 
-    // Phase 5: Emit bytecode with symbol names for cross-thread portability
-    let mut emitter = Emitter::new();
+    // Phase 5: Emit bytecode into the unit's code region
+    let code = crate::value::CodeArena::mint(unsafe { &mut *cctx.heap_ptr() });
+    let mut emitter = Emitter::new(code);
     let (bytecode, _yield_points, _call_sites) = emitter.emit_module(&lir_module);
 
-    Ok(CompileResult { bytecode })
+    Ok(CodeUnit::new(code, bytecode))
 }
 
-/// Compile a file to LIR as a single synthetic letrec (for WASM backend).
+/// Compile a file to frozen LIR as a single synthetic letrec (for the WASM
+/// backend and the dumps).
 ///
 /// `epoch_skip` — number of leading forms to exclude from epoch migration
 /// (e.g. stdlib forms that are already in the current epoch). When 0,
@@ -145,12 +148,13 @@ pub fn compile_file_to_lir(
     cctx: &mut CompileCtx,
     source_name: &str,
     epoch_skip: usize,
-) -> Result<crate::lir::LirModule, String> {
+) -> Result<crate::lir::FrozenModule, String> {
     with_syntax_arena(cctx.heap_ptr(), |arena| {
         compile_file_to_lir_inner(arena, source, symbols, cctx, source_name, epoch_skip)
     })
 }
 
+/// Read, expand and analyze a file as one letrec, then lower it.
 fn compile_file_to_lir_inner(
     arena: SyntaxArena,
     source: &str,
@@ -158,7 +162,7 @@ fn compile_file_to_lir_inner(
     cctx: &mut CompileCtx,
     source_name: &str,
     epoch_skip: usize,
-) -> Result<crate::lir::LirModule, String> {
+) -> Result<crate::lir::FrozenModule, String> {
     let mut syntaxes = read_syntax_all_for(arena, source, source_name)?;
     crate::epoch::check_lexicon_agreement(&syntaxes, source, source_name)?;
 
@@ -257,6 +261,7 @@ fn compile_file_to_lir_inner(
         );
     }
     let mut lowerer = Lowerer::new(&arena)
+        .with_heap(unsafe { &mut *cctx.heap_ptr() })
         .with_symbols(symbols)
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
@@ -280,14 +285,14 @@ pub fn compile_file_to_fhir(
 }
 
 /// All top-level forms are analyzed together, enabling mutual recursion.
-/// Returns a single `CompileResult`. Primitives are pre-bound as immutable
+/// Returns one `CodeUnit`. Primitives are pre-bound as immutable
 /// Global bindings in an outer scope.
 pub fn compile_file(
     source: &str,
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
     source_name: &str,
-) -> Result<CompileResult, String> {
+) -> Result<CodeUnit, String> {
     compile_file_inner(source, symbols, cctx, source_name).map(|(result, _)| result)
 }
 
@@ -298,7 +303,7 @@ pub fn compile_file_repl(
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
     source_name: &str,
-) -> Result<(CompileResult, crate::syntax::Expander), String> {
+) -> Result<(CodeUnit, crate::syntax::Expander), String> {
     compile_file_inner(source, symbols, cctx, source_name)
 }
 
@@ -307,7 +312,7 @@ fn compile_file_inner(
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
     source_name: &str,
-) -> Result<(CompileResult, crate::syntax::Expander), String> {
+) -> Result<(CodeUnit, crate::syntax::Expander), String> {
     let ct = crate::trace::compile();
     let Frontend {
         hir,
@@ -332,6 +337,7 @@ fn compile_file_inner(
     }
     let t = std::time::Instant::now();
     let mut lowerer = Lowerer::new(&arena)
+        .with_heap(unsafe { &mut *cctx.heap_ptr() })
         .with_symbols(symbols)
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
@@ -343,14 +349,15 @@ fn compile_file_inner(
 
     // Emit bytecode
     let t = std::time::Instant::now();
-    let signal = lir_module.entry.signal;
-    let mut emitter = Emitter::new();
+    let signal = lir_module.entry.view().signal();
+    let code = crate::value::CodeArena::mint(unsafe { &mut *cctx.heap_ptr() });
+    let mut emitter = Emitter::new(code);
     let (mut bytecode, _, _) = emitter.emit_module(&lir_module);
     crate::phase!(ct, "compile", t, "{} emit", source_name);
     bytecode.signal = signal;
     bytecode.signal_projection = signal_projection;
 
-    Ok((CompileResult { bytecode }, expander))
+    Ok((CodeUnit::new(code, bytecode), expander))
 }
 
 /// Compile a file in the per-form fault-barrier test mode
@@ -371,7 +378,7 @@ pub fn compile_barrier_module(
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
     source_name: &str,
-) -> Result<CompileResult, String> {
+) -> Result<CodeUnit, String> {
     compile_module_with_transform(source, symbols, cctx, source_name, barrier_transform)
 }
 
@@ -385,7 +392,7 @@ fn compile_module_with_transform(
     cctx: &mut CompileCtx,
     source_name: &str,
     xform: impl FnOnce(&SyntaxArena, Vec<Syntax>, crate::syntax::ScopeId) -> Vec<Syntax>,
-) -> Result<CompileResult, String> {
+) -> Result<CodeUnit, String> {
     let frontend = compile_file_frontend_xform(source, symbols, cctx, source_name, xform)?;
     lower_test_frontend(frontend, symbols, cctx)
 }
@@ -400,7 +407,7 @@ fn compile_syntaxes_with_transform(
     cctx: &mut CompileCtx,
     source_name: &str,
     xform: impl FnOnce(&SyntaxArena, Vec<Syntax>, crate::syntax::ScopeId) -> Vec<Syntax>,
-) -> Result<CompileResult, String> {
+) -> Result<CodeUnit, String> {
     let frontend = compile_syntaxes_frontend_xform(syntaxes, symbols, cctx, source_name, xform)?;
     lower_test_frontend(frontend, symbols, cctx)
 }
@@ -411,7 +418,7 @@ fn lower_test_frontend(
     frontend: Frontend,
     symbols: &SymbolTable,
     cctx: &mut CompileCtx,
-) -> Result<CompileResult, String> {
+) -> Result<CodeUnit, String> {
     let Frontend {
         hir,
         arena,
@@ -425,6 +432,7 @@ fn lower_test_frontend(
     let region_info =
         crate::hir::analyze_regions_with(&hir, &arena, pc.call_classification.clone());
     let mut lowerer = Lowerer::new(&arena)
+        .with_heap(unsafe { &mut *cctx.heap_ptr() })
         .with_symbols(symbols)
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
@@ -432,11 +440,12 @@ fn lower_test_frontend(
         .with_type_info(types);
     let lir_module = lowerer.lower(&hir)?;
 
-    let signal = lir_module.entry.signal;
-    let mut emitter = Emitter::new();
+    let signal = lir_module.entry.view().signal();
+    let code = crate::value::CodeArena::mint(unsafe { &mut *cctx.heap_ptr() });
+    let mut emitter = Emitter::new(code);
     let (mut bytecode, _, _) = emitter.emit_module(&lir_module);
     bytecode.signal = signal;
     bytecode.signal_projection = signal_projection;
 
-    Ok(CompileResult { bytecode })
+    Ok(CodeUnit::new(code, bytecode))
 }

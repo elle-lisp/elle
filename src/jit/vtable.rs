@@ -108,12 +108,12 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) pop_param_frame: FuncId,
     pub(crate) call_array: FuncId,
     pub(crate) tail_call_array: FuncId,
-    #[allow(dead_code)] // infrastructure for future JIT MakeClosure support
-    pub(crate) make_closure: FuncId,
     pub(crate) jit_yield: FuncId,
     pub(crate) jit_yield_through_call: FuncId,
     pub(crate) has_signal: FuncId,
-    #[allow(dead_code)] // JIT region infrastructure — wired incrementally
+    // Declared, and called by no translation: these four, `rotate_pools`,
+    // `incref`, `decref` and `is_truthy`.
+    #[allow(dead_code)]
     pub(crate) region_enter: FuncId,
     #[allow(dead_code)]
     pub(crate) region_exit: FuncId,
@@ -151,7 +151,7 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) pop_region_map: FuncId,
     pub(crate) resolve_alloc_region: FuncId,
     /// The mint-or-reuse variant of `resolve_alloc_region`, selected at emit time
-    /// for a slot in `LirFunction.merged_slots` (builder-idiom merge;
+    /// for a slot in `LirView::merged_slots` (builder-idiom merge;
     /// docs/impl/region/merging.md § Merging).
     pub(crate) resolve_alloc_region_merged: FuncId,
     #[allow(dead_code)]
@@ -160,7 +160,7 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) incref: FuncId,
     #[allow(dead_code)]
     pub(crate) decref: FuncId,
-    // New intrinsic helpers
+    // Intrinsic helpers
     pub(crate) is_empty: FuncId,
     pub(crate) is_bool: FuncId,
     pub(crate) is_int: FuncId,

@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-10-06
 // src/jit/AGENTS.md
 //! What a `FunctionTranslator` reaches for: constants, fast paths, call shapes
 //! and register pairs.
@@ -12,7 +12,8 @@ use cranelift_codegen::ir::InstBuilder;
 use cranelift_frontend::FunctionBuilder;
 use cranelift_module::{FuncId, Module};
 
-use crate::lir::{BinOp, CmpOp, LirConst, OperandProof, UnaryOp};
+use crate::lir::code::ConstRef;
+use crate::lir::{BinOp, CmpOp, OperandProof, UnaryOp};
 use crate::value::repr::{
     TAG_EMPTY_LIST, TAG_FALSE, TAG_FLOAT, TAG_INT, TAG_KEYWORD, TAG_NIL, TAG_SYMBOL, TAG_TRUE,
 };
@@ -32,61 +33,50 @@ impl<'a> FunctionTranslator<'a> {
     pub(crate) fn translate_const(
         &self,
         builder: &mut FunctionBuilder,
-        value: &LirConst,
+        value: ConstRef,
     ) -> (cranelift_codegen::ir::Value, cranelift_codegen::ir::Value) {
         match value {
-            LirConst::Nil => {
+            ConstRef::Nil => {
                 let t = builder.ins().iconst(I64, TAG_NIL as i64);
                 let p = builder.ins().iconst(I64, 0);
                 (t, p)
             }
-            LirConst::EmptyList => {
+            ConstRef::EmptyList => {
                 let t = builder.ins().iconst(I64, TAG_EMPTY_LIST as i64);
                 let p = builder.ins().iconst(I64, 0);
                 (t, p)
             }
-            LirConst::Bool(true) => {
+            ConstRef::Bool(true) => {
                 let t = builder.ins().iconst(I64, TAG_TRUE as i64);
                 let p = builder.ins().iconst(I64, 0);
                 (t, p)
             }
-            LirConst::Bool(false) => {
+            ConstRef::Bool(false) => {
                 let t = builder.ins().iconst(I64, TAG_FALSE as i64);
                 let p = builder.ins().iconst(I64, 0);
                 (t, p)
             }
-            LirConst::Int(n) => {
+            ConstRef::Int(n) => {
                 let t = builder.ins().iconst(I64, TAG_INT as i64);
-                let p = builder.ins().iconst(I64, *n);
+                let p = builder.ins().iconst(I64, n);
                 (t, p)
             }
-            LirConst::Float(f) => {
+            ConstRef::Float(f) => {
                 let t = builder.ins().iconst(I64, TAG_FLOAT as i64);
                 // Store f64 bits in payload as i64 reinterpretation
-                let p = builder.ins().iconst(I64, f64::to_bits(*f) as i64);
+                let p = builder.ins().iconst(I64, f64::to_bits(f) as i64);
                 (t, p)
             }
-            LirConst::String(_) => {
-                // String constants are pre-resolved to ValueConst in prepare_task()
-                // before crossing the thread boundary to the JIT worker.
-                unreachable!("LirConst::String should be pre-resolved to ValueConst")
-            }
-            LirConst::Symbol(id) => {
-                let v = crate::value::Value::symbol(*id);
+            ConstRef::Symbol(id) => {
+                let v = crate::value::Value::symbol(id);
                 let t = builder.ins().iconst(I64, TAG_SYMBOL as i64);
                 let p = builder.ins().iconst(I64, v.payload as i64);
                 (t, p)
             }
-            LirConst::Keyword(hash) => {
+            ConstRef::Keyword(hash) => {
                 let t = builder.ins().iconst(I64, TAG_KEYWORD as i64);
-                let p = builder.ins().iconst(I64, *hash as i64);
+                let p = builder.ins().iconst(I64, hash as i64);
                 (t, p)
-            }
-            LirConst::ClosureRef(_) => {
-                panic!("bug: ClosureRef in JIT — should have been patched during reconstruction")
-            }
-            LirConst::ValueRef(_) => {
-                panic!("bug: ValueRef in JIT — should have been patched during reconstruction")
             }
         }
     }
@@ -296,7 +286,7 @@ impl<'a> FunctionTranslator<'a> {
     /// Call the elle_jit_tail_call helper.
     /// Signature: (func_tag, func_payload, args_ptr, nargs, vm, region_id,
     /// defer_callee, arena_slot) -> (tag, payload). The last two are the deferral
-    /// channels this `TailCall` carries; see `LirInstr::TailCall`.
+    /// channels this `TailCall` carries; see `InstrRef::TailCall`.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn call_helper_tail_call(
         &mut self,
@@ -365,7 +355,7 @@ impl<'a> FunctionTranslator<'a> {
         Ok((builder.inst_results(call)[0], builder.inst_results(call)[1]))
     }
 
-    /// Map a stack-relative local slot (from LirInstr::LoadLocal/StoreLocal)
+    /// Map a stack-relative local slot (from InstrRef::LoadLocal/StoreLocal)
     /// to a JIT variable index.
     ///
     /// The dual-address-space lowerer assigns stack-relative slots starting

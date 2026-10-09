@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-10-06
 // docs/impl/jit.md
 // The JIT integration corpus: hand-built LIR compiled to native code, run, and
 // held to the answer the interpreter gives.
@@ -8,20 +8,19 @@
 
 use elle::jit::{JitCompiler, JitError};
 use elle::lir::{
-    BasicBlock, BinOp, CmpOp, Label, LirConst, LirFunction, LirInstr, Reg, SpannedInstr,
-    SpannedTerminator, Terminator, UnaryOp,
+    BinOp, CmpOp, ConstRef, InstrRef, Label, LirBuilder, LirOwned, Reg, Terminator, UnaryOp,
 };
 use elle::signals::Signal;
 use elle::syntax::Span;
+use elle::value::fiberheap::FiberHeap;
 use elle::value::{Arity, Value};
 
-// Local `eval`/`compile` shims preserving the pre-CompileCtx arity. Every site
-// here registers primitives only (no stdlib) and never evaluates the `(eval …)`
-// or `(import …)` runtime special forms, so a fresh `CompileCtx` per call
-// (primitives + core + prelude) reproduces the old bare-symbols path exactly —
-// no compile state needs to persist across calls, and the VM never reaches the
-// cctx through its runtime pointer. The cctx is dropped after the call returns,
-// which is safe precisely because nothing retains a pointer into it.
+// Local `eval`/`compile` helpers. Every site here registers primitives only (no
+// stdlib) and never evaluates the `(eval …)` or `(import …)` runtime special
+// forms, so a fresh `CompileCtx` per call (primitives + core + prelude) is all
+// it needs — no compile state persists across calls, and the VM never reaches
+// the cctx through its runtime pointer. The cctx is dropped after the call
+// returns, which is safe precisely because nothing retains a pointer into it.
 fn eval(
     source: &str,
     symbols: &mut elle::symbol::SymbolTable,
@@ -39,7 +38,7 @@ fn compile(
     source: &str,
     symbols: &mut elle::symbol::SymbolTable,
     source_name: &str,
-) -> Result<elle::CompileResult, String> {
+) -> Result<elle::CodeUnit, String> {
     let mut cctx = elle::pipeline::CompileCtx::new();
     elle::pipeline::compile(source, symbols, &mut cctx, source_name)
 }
@@ -56,7 +55,12 @@ fn stdlib_cctx(
 ) -> elle::pipeline::CompileCtx {
     let mut cctx = elle::pipeline::CompileCtx::new();
     vm.set_symbols(symbols as *mut elle::symbol::SymbolTable);
-    elle::init_stdlib(vm, symbols, &mut cctx, &elle::compiler::stdlib_cache::StdlibCache::Off);
+    elle::init_stdlib(
+        vm,
+        symbols,
+        &mut cctx,
+        &elle::compiler::stdlib_cache::StdlibCache::Off,
+    );
     cctx
 }
 
@@ -78,7 +82,7 @@ fn compile_with_stdlib(
     source: &str,
     symbols: &mut elle::symbol::SymbolTable,
     source_name: &str,
-) -> Result<elle::CompileResult, String> {
+) -> Result<elle::CodeUnit, String> {
     let mut vm = elle::vm::VM::new();
     let _ = elle::register_primitives(&mut vm, symbols);
     let mut cctx = stdlib_cctx(symbols, &mut vm);
@@ -95,17 +99,64 @@ fn span() -> Span {
 
 /// Create a LoadCapture instruction to load an argument into a register.
 /// With num_captures=0, LoadCapture index N loads from args[N].
-fn load_arg(dst: Reg, arg_index: u16) -> SpannedInstr {
-    SpannedInstr::new(
-        LirInstr::LoadCapture {
-            dst,
-            index: arg_index,
-        },
-        span(),
+fn load_arg(dst: Reg, arg_index: u16) -> InstrRef<'static> {
+    InstrRef::LoadCapture {
+        dst,
+        index: arg_index,
+    }
+}
+
+/// One block of a hand-built function: its label, its instructions in order,
+/// and how it exits.
+type Block<'a> = (u32, &'a [InstrRef<'a>], Terminator);
+
+/// A function of `arity` over `num_regs` registers with `signal`, built block
+/// by block through a `LirBuilder` and frozen: the form the JIT reads. Label 0
+/// is the entry, and every span is synthetic.
+fn function(arity: Arity, num_regs: u32, signal: Signal, blocks: &[Block<'_>]) -> LirOwned {
+    let mut heap = FiberHeap::new();
+    let mut builder = LirBuilder::new(&mut heap);
+    builder.begin_function(arity);
+    builder.head().num_regs = num_regs;
+    builder.head().signal = signal;
+    for &(label, instrs, terminator) in blocks {
+        builder.open_block(Label(label));
+        for instr in instrs {
+            builder.emit(*instr, span());
+        }
+        builder.terminate(terminator, span());
+        builder.finish_block();
+    }
+    builder
+        .finish_function()
+        .expect("a hand-built function freezes")
+}
+
+/// fn(x, y) -> `op`, where `op` reads `Reg(0)` and `Reg(1)` and writes `Reg(2)`.
+fn binary(op: InstrRef<'_>) -> LirOwned {
+    function(
+        Arity::Exact(2),
+        3,
+        Signal::silent(),
+        &[(
+            0,
+            &[load_arg(Reg(0), 0), load_arg(Reg(1), 1), op],
+            Terminator::Return(Reg(2)),
+        )],
     )
 }
 
-fn compile_and_call(lir: &LirFunction, args: &[Value]) -> Result<Value, JitError> {
+/// fn(x) -> `op`, where `op` reads `Reg(0)` and writes `Reg(1)`.
+fn unary(op: InstrRef<'_>) -> LirOwned {
+    function(
+        Arity::Exact(1),
+        2,
+        Signal::silent(),
+        &[(0, &[load_arg(Reg(0), 0), op], Terminator::Return(Reg(1)))],
+    )
+}
+
+fn compile_and_call(lir: &LirOwned, args: &[Value]) -> Result<Value, JitError> {
     use elle::primitives::register_primitives;
     use elle::symbol::SymbolTable;
     use elle::vm::VM;
@@ -120,7 +171,7 @@ fn compile_and_call(lir: &LirFunction, args: &[Value]) -> Result<Value, JitError
     let _signals = register_primitives(&mut vm, &mut symbols);
 
     let compiler = JitCompiler::new()?;
-    let code = compiler.compile(lir, Vec::new())?;
+    let code = compiler.compile(&lir.view())?;
     // self_tag/self_payload = 0 since we're not testing self-tail-calls in these basic tests
     let result = unsafe {
         code.call(

@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! Dispatching a native call: the result region it mints, the pass-through
 //! retain it hands the caller, and the declaration oracle over both.
 //!
@@ -76,6 +76,8 @@ impl VM {
     ) -> (SignalBits, Value) {
         let mint = self.new_runtime_region_for_call_slot(region_id);
         let alloc_region = mint.region();
+        // The question a `SIG_QUERY` asked, once the dispatch has answered it.
+        let mut question = None;
         let (bits, value) = {
             // The native-call capability: this call's fresh result region, the
             // VM's heap, and the driving VM itself, so the primitive can reach
@@ -111,6 +113,7 @@ impl VM {
                 // Build the SIG_QUERY answer through THIS call's ctx, so it is
                 // born in `alloc_region` like any native result (the pass-through
                 // accounting below then treats it identically).
+                question = Some(value);
                 self.dispatch_query(&mut ctx, value)
             } else {
                 (bits, value)
@@ -219,6 +222,19 @@ impl VM {
                 value,
                 alloc_region,
             );
+        }
+        // A query's question is born in this call's region and read by the
+        // dispatch alone. A fresh answer shares the region, and the caller's
+        // release of the answer takes the question with it. An answer that
+        // lives elsewhere leaves the region's birth reference with no consumer,
+        // so it is released here (docs/impl/region/ctx.md).
+        if let Some(question) = question {
+            let heap = unsafe { &mut *self.heap_ptr };
+            let asked_here = crate::value::arena::region_of(heap, question) == Some(alloc_region);
+            let answered_here = crate::value::arena::region_of(heap, value) == Some(alloc_region);
+            if asked_here && !answered_here {
+                heap.decref_region(alloc_region);
+            }
         }
         // A primitive that returned an immediate or a borrowed value never
         // allocated into this call's region, so its id names nothing and goes

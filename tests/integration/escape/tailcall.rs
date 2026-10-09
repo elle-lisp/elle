@@ -1,3 +1,9 @@
+// audited: 2026-10-06
+// Tail calls and the regions around them: scope allocation answers correctly,
+// and a tail-recursive frame is reused rather than grown.
+//
+// docs/impl/region/relocate.md
+
 use super::*;
 
 // ── Correctness: tail-call scope allocation produces correct values ─
@@ -92,14 +98,14 @@ fn call_scoped_mutual_recursion_result_immediate() {
     "#;
     let mut symbols = SymbolTable::new();
     let compiled = compile(source, &mut symbols, "<test>").expect("compilation failed");
-    assert!(!compiled.bytecode.instructions.is_empty());
+    assert!(!compiled.entry().bytecode().is_empty());
 }
 
 #[test]
 fn correct_scope_callee_not_freed_before_tail_call() {
-    // Regression test: when the tail-call callee is a scope binding,
-    // scope allocation must NOT happen (the callee would be freed).
-    // This pattern compiles and runs: the scope callee survives the call.
+    // When the tail-call callee is a scope binding, scope allocation must NOT
+    // happen (the callee would be freed). This pattern compiles and runs: the
+    // scope callee survives the call.
     eval_source(
         "(assert (= ((fn (&keys opts)
                  (let [f (fn () opts)]
@@ -109,13 +115,10 @@ fn correct_scope_callee_not_freed_before_tail_call() {
     ); // assert returns true on success
 }
 
-// The per-function `rotation_safe` flag (and `LirFunction::rotation_safe`) was
-// retired in the s11 escape-analysis overhaul. Frame reuse for tail recursion is
-// now a consequence of region inference — a recursive scope that does not escape
-// mints no region — and there is no single field that re-expresses the old
-// boolean. The three tests below therefore assert the *user-visible* guarantees
-// that rotation safety used to provide, end-to-end (the migration path the
-// original FIXME spelled out). Each is counter-factually sharp: if frame reuse
+// Frame reuse for tail recursion is a consequence of region inference — a
+// recursive scope that does not escape mints no region — and no single field
+// records it. The three tests below therefore assert the user-visible
+// guarantee end to end. Each is counter-factually sharp: if frame reuse
 // regressed, the deep calls would overflow rather than return a value.
 
 #[test]
@@ -138,12 +141,9 @@ fn rotation_safe_for_pure_recursive_functions() {
 fn rotation_unsafe_for_push_in_body() {
     // Counterpart to the pure case: when the recursive body mutates a collection
     // that OUTLIVES the call (`acc`, bound outside the recursion), those
-    // allocations must NOT be scope-reclaimed across the tail call — the old
-    // "rotation-unsafe" condition. End-to-end, every escaping push must survive,
-    // so 2000 deep iterations leave exactly 2000 elements. (The original
-    // internal-state source `(push @[] 1)` is now a lowerer poison node — `push`
-    // needs a real place — so the property is exercised with a valid escaping
-    // accumulator instead.)
+    // allocations must NOT be scope-reclaimed across the tail call. End to end,
+    // every escaping push must survive, so 2000 deep iterations leave exactly
+    // 2000 elements.
     eval_source(
         "(defn build (n acc) (if (%le n 0) acc (begin (push acc n) (build (%sub n 1) acc)))) (let [a @[]] (build 2000 a) (length a))",
         |r| {

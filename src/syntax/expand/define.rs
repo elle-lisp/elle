@@ -1,7 +1,12 @@
+// audited: 2026-10-07
+//! `defmacro`: parse a definition's name and parameter lists, and register it.
+//!
+//! docs/macros.md
+
 use super::*;
 
 impl Expander {
-    /// Handle (defmacro name (params...) body) or (var-macro name (params...) body)
+    /// Handle `(defmacro name (params...) body)`, and its alias `define-macro`.
     pub(super) fn handle_defmacro(
         &mut self,
         items: &[Syntax],
@@ -80,17 +85,10 @@ impl Expander {
         // (docs/impl/syntax.md § "Where a node lives").
         let template = items[3].copy_into(&self.templates);
 
-        // Create and register the macro
-        let macro_def = MacroDef {
-            name: name.clone(),
-            params: fixed_params,
-            optional_params,
-            rest_param,
-            template,
-            cached_transformer: std::rc::Rc::new(RefCell::new(None)),
-        };
-
-        self.define_macro(macro_def);
+        let params = MacroParams::fixed(fixed_params)
+            .with_optional(optional_params)
+            .with_rest(rest_param);
+        self.define_macro(MacroDef::new(name, params, template));
 
         // Return nil - the macro definition itself doesn't produce code
         Ok(Syntax::new(SyntaxKind::Nil, *span))

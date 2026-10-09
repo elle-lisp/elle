@@ -1,4 +1,4 @@
-// audited: 2026-09-20
+// audited: 2026-10-06
 // What a runtime's teardown frees, and what two runtimes on one thread each
 // keep to themselves: the heap, the VM state, the compile context.
 //
@@ -83,9 +83,7 @@ fn two_instances_interleaved_defs_are_isolated() {
         let (result, _expander) =
             compile_file_repl(src, symbols, cctx, "<embed>").expect("def compiles");
         // A simple `(def x V)` returns V (the letrec body is the bound name).
-        let value = vm
-            .execute_scheduled(&result.bytecode, cctx)
-            .expect("def runs");
+        let value = vm.execute_scheduled(&result, cctx).expect("def runs");
         let sym_id = symbols.intern(name);
         cctx.register_repl_binding(
             unsafe { &mut *vm.heap_ptr },
@@ -101,7 +99,7 @@ fn two_instances_interleaved_defs_are_isolated() {
         let (vm, symbols, cctx) = rt.parts();
         let (result, _expander) =
             compile_file_repl(src, symbols, cctx, "<embed>").expect("read compiles");
-        vm.execute_scheduled(&result.bytecode, cctx)
+        vm.execute_scheduled(&result, cctx)
             .expect("read runs")
             .as_int()
             .expect("read yields an int")
@@ -140,7 +138,7 @@ fn two_instances_read_their_own_vm_args() {
         let (vm, symbols, cctx) = rt.parts();
         let (result, _expander) =
             compile_file_repl(src, symbols, cctx, "<embed>").expect("compiles");
-        vm.execute_scheduled(&result.bytecode, cctx)
+        vm.execute_scheduled(&result, cctx)
             .expect("runs")
             .with_string(|s| s.to_string())
     }
@@ -181,7 +179,7 @@ fn two_instances_agree_on_every_symbol_name() {
     fn to_string(rt: &mut Runtime, src: &str) -> Option<String> {
         let (vm, symbols, cctx) = rt.parts();
         let (result, _expander) = compile_file_repl(src, symbols, cctx, "<embed>").ok()?;
-        vm.execute_scheduled(&result.bytecode, cctx)
+        vm.execute_scheduled(&result, cctx)
             .ok()?
             .with_string(|s| s.to_string())
     }

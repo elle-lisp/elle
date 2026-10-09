@@ -1,4 +1,8 @@
-//! Expression lowering - the main `lower_expr` dispatch
+// audited: 2026-10-06
+//! Expression lowering: the `lower_expr` dispatch, and the retains and releases each node owes once it is lowered.
+//!
+//! src/lir/lower/AGENTS.md
+//! docs/impl/lir.md
 
 use super::*;
 
@@ -24,28 +28,21 @@ impl<'a> Lowerer<'a> {
         self.emit_branch_compensation(hir.id);
 
         let result = match &hir.kind {
-            HirKind::Nil => self.emit_const(LirConst::Nil),
-            HirKind::EmptyList => self.emit_const(LirConst::EmptyList),
-            HirKind::Bool(b) => self.emit_const(LirConst::Bool(*b)),
-            HirKind::Int(n) => self.emit_const(LirConst::Int(*n)),
-            HirKind::Float(f) => self.emit_const(LirConst::Float(*f)),
+            HirKind::Nil => self.emit_const(ConstRef::Nil),
+            HirKind::EmptyList => self.emit_const(ConstRef::EmptyList),
+            HirKind::Bool(b) => self.emit_const(ConstRef::Bool(*b)),
+            HirKind::Int(n) => self.emit_const(ConstRef::Int(*n)),
+            HirKind::Float(f) => self.emit_const(ConstRef::Float(*f)),
             HirKind::String(s) => {
                 // A string literal is an ordinary allocation (not a pool load):
                 // materialize it fresh into its OWN solver-assigned region. The
                 // region is resolved from `current_hir_id` (this String node),
                 // which the solver gave a region via `alloc_here`. `emit_alloc`
                 // stamps the region (arming its `DecrefRegion` at `decref_point`).
-                let dst = self.fresh_reg();
-                let template = crate::value::ConstTemplate::String(s.clone());
-                self.emit_alloc(|region| LirInstr::MaterializeConst {
-                    dst,
-                    template,
-                    region,
-                });
-                Ok(dst)
+                Ok(self.emit_materialize(&crate::value::ConstTemplate::String(s.clone())))
             }
             HirKind::Keyword(name) => {
-                self.emit_const(LirConst::Keyword(crate::value::keyword::keyword_hash(name)))
+                self.emit_const(ConstRef::Keyword(crate::value::keyword::keyword_hash(name)))
             }
 
             HirKind::Var(binding) => self.lower_var(binding, &hir.span),
@@ -119,14 +116,7 @@ impl<'a> Lowerer<'a> {
                 // § "Constants lower as ordinary allocations"). `emit_alloc` stamps the
                 // region (arming its `DecrefRegion` at `decref_point`), exactly
                 // like `HirKind::String`.
-                let dst = self.fresh_reg();
-                let template = template.clone();
-                self.emit_alloc(|region| LirInstr::MaterializeConst {
-                    dst,
-                    template,
-                    region,
-                });
-                Ok(dst)
+                Ok(self.emit_materialize(template))
             }
             HirKind::Cond {
                 clauses,

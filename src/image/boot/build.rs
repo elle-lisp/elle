@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-10-07
 //! Assemble a booted instance's boot state as one immutable struct, the root
 //! a boot image is dumped from.
 //!
@@ -69,14 +69,14 @@ fn macro_table(
     let mut entries: Vec<(&str, Value)> = Vec::with_capacity(names.len());
     for name in &names {
         let def = &cctx.macros()[name];
-        let params = strings(heap, &def.params, region);
-        let optional = strings(heap, &def.optional_params, region);
-        let rest = match &def.rest_param {
+        let params = strings(heap, def.params.required(), region);
+        let optional = strings(heap, def.params.optional(), region);
+        let rest = match def.params.rest() {
             Some(r) => build::string(heap, r, region),
             None => Value::NIL,
         };
         let template = build::syntax(heap, def.template, region);
-        let transformer = def.cached_transformer.borrow().unwrap_or(Value::NIL);
+        let transformer = def.transformer().get().unwrap_or(Value::NIL);
         let entry = structure(
             heap,
             symbols,

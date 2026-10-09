@@ -1,6 +1,6 @@
 # Images — regions hydrated at load
 
-<!-- audited: 2026-09-26 -->
+<!-- audited: 2026-10-06 -->
 
 Design for image-style persistence: one mechanism, and the two configurations
 it serves.
@@ -21,7 +21,7 @@ argument. Six companions carry the rest:
   gates a load.
 - [plan.md](image/plan.md) — the landing order, and the pins each milestone
   must land with.
-- [measurements.md](image/measurements.md) — the seven experiments that
+- [measurements.md](image/measurements.md) — the eight experiments that
   answered the design's open questions, with their numbers.
 
 This document states the design, not its progress. [plan.md](image/plan.md)
@@ -361,36 +361,34 @@ manifest's per-binding kind field makes the opt-in mode additive.
 
 ## JIT
 
-The JIT compiles from `lir_function`, which is Rust-heap LIR today and cannot
-live in the body as it stands. **The LIR becomes region-native and the body
-carries it** — the fifth foundation
-([image/foundations.md](image/foundations.md) argues it, and names the
-side-stream it deletes). A function's LIR then dumps in the dumper's own walk
-and arrives with the mapping, so an image's save and load gain no mechanism of
-their own, a code object stops holding a second Rust-heap copy of what its
-payload already has, and the allocator traffic of building it becomes region
-pages the project's own gauges can see. `jit_cache` keys on the bytecode
+The JIT compiles from the LIR a code payload carries: region-native records in
+the payload's own pages ([lir.md](lir.md) § "The frozen form"), which the fifth
+foundation put there ([image/foundations.md](image/foundations.md) argues it,
+and names the side-stream it deleted). A function's LIR therefore dumps in the
+dumper's own walk and arrives with the mapping, so an image's save and load
+need no mechanism of their own for it. `jit_cache` keys on the bytecode
 address, which is stable for the hydrated region's life. Machine code itself is
 never persisted: Cranelift output bakes absolute addresses and is not
 relocatable.
 
-A promotion still copies. The JIT worker runs on another thread, and a region
-belongs to one `RegionStore`, so the compiler gets a copy of its function
-either way — which is what `prepare_task` already does with the Rust-heap form.
+A promotion copies. The JIT worker runs on another thread, and a region belongs
+to one `RegionStore`, so `prepare_task` copies the function out of the payload
+into a `LirOwned` the task owns.
 
 Carrying the LIR is not optional for the boot configuration. An image boot
 whose stdlib cannot reach the JIT tier trades startup for steady-state
 throughput. That is a deal-breaker, and it violates the parity principle: the
-two boot modes must be indistinguishable to running code, tiers included. So
-the boot image's default waits on the foundation
-([image/plan.md](image/plan.md) orders them).
+two boot modes must be indistinguishable to running code, tiers included. A
+hydrated stdlib closure promotes exactly as a compiled one does, so the tier
+half of parity holds; the boot image's default waits on the compile half
+([image/boot.md](image/boot.md)).
 
-The cost of the change is measured and small: the region form is faster on
-every operation a `LirFunction` meets, by about a third of one percent of the
-compile it belongs to, and it holds less than half the memory
-([image/measurements.md](image/measurements.md) item 7). The case for it is
-never that number. It is that an image stops needing a mechanism of its own
-for one type.
+The cost of the change is measured and small: the region form was faster on
+every operation the Rust-heap form met, by about a third of one percent of the
+compile it belongs to, and it held less memory
+([image/measurements.md](image/measurements.md) items 7 and 8). The case for
+it is never that number. It is that an image stops needing a mechanism of its
+own for one type.
 
 ## Build integration
 

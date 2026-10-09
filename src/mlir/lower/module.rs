@@ -1,3 +1,7 @@
+// audited: 2026-10-06
+// docs/impl/mlir.md
+//! Lowering one frozen function into an MLIR module: its signature, its blocks and its local slots.
+
 use super::*;
 
 mod ctx;
@@ -6,7 +10,7 @@ mod term;
 
 use ctx::LowerCtx;
 
-/// Lower a GPU-eligible LirFunction into an MLIR module.
+/// Lower a GPU-eligible frozen function into an MLIR module.
 ///
 /// The module contains a single `func.func` with `llvm.emit_c_interface`
 /// so the execution engine can call it via C calling convention.
@@ -20,7 +24,7 @@ use ctx::LowerCtx;
 /// the same blocks in the same order as a single flat pass would.
 pub fn lower_to_module<'c>(
     context: &'c Context,
-    lir: &LirFunction,
+    lir: &LirView<'_>,
     num_captures: u16,
     capture_types: u64,
     param_types: u64,
@@ -33,12 +37,12 @@ pub fn lower_to_module<'c>(
 
     let i64_type: Type = IntegerType::new(context, 64).into();
     let f64_type: Type = Type::float64(context);
-    let num_params = lir.arity.fixed_params();
+    let num_params = lir.arity().fixed_params();
     let total_args = num_captures as usize + num_params;
 
     let mlir_param_types: Vec<Type> = (0..total_args).map(|_| i64_type).collect();
     let func_type = FunctionType::new(context, &mlir_param_types, &[i64_type]);
-    let func_name = lir.name.as_deref().unwrap_or("gpu_kernel");
+    let func_name = lir.name().unwrap_or("gpu_kernel");
 
     let region = Region::new();
 
@@ -46,7 +50,7 @@ pub fn lower_to_module<'c>(
     let mut label_to_idx: HashMap<Label, usize> = HashMap::new();
     let mut blocks: Vec<Block> = Vec::new();
 
-    for (i, lir_block) in lir.blocks.iter().enumerate() {
+    for (i, lir_block) in lir.blocks().enumerate() {
         let block = if i == 0 {
             Block::new(
                 &mlir_param_types
@@ -57,7 +61,7 @@ pub fn lower_to_module<'c>(
         } else {
             Block::new(&[])
         };
-        label_to_idx.insert(lir_block.label, i);
+        label_to_idx.insert(lir_block.label(), i);
         blocks.push(block);
     }
 
@@ -81,7 +85,7 @@ pub fn lower_to_module<'c>(
     // Allocate memref slots for locals in the entry block.
     // Local slots handle cross-block value passing (phi patterns).
     let scalar_memref = MemRefType::new(i64_type, &[], None, None);
-    let num_locals = lir.num_locals as u32;
+    let num_locals = lir.num_locals() as u32;
 
     if !blocks.is_empty() {
         let entry = &blocks[0];
@@ -136,14 +140,14 @@ pub fn lower_to_module<'c>(
     // Lower instructions and terminators, block by block. `entry` (block 0)
     // is passed for the LoadCapture fallback path.
     let entry_block = &blocks[0];
-    for (block_idx, lir_block) in lir.blocks.iter().enumerate() {
+    for (block_idx, lir_block) in lir.blocks().enumerate() {
         let block = &blocks[block_idx];
 
-        for si in &lir_block.instructions {
-            instr::lower_instr(&mut ctx, block, entry_block, si)?;
+        for instr in lir_block.instrs() {
+            instr::lower_instr(&mut ctx, block, entry_block, &instr)?;
         }
 
-        term::lower_terminator(&mut ctx, block, &blocks, &label_to_idx, lir_block)?;
+        term::lower_terminator(&mut ctx, block, &blocks, &label_to_idx, &lir_block)?;
     }
 
     let return_type = ctx.return_type;

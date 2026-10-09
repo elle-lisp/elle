@@ -1,20 +1,21 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 // docs/impl/jit.md
-//! How a call leaves compiled code: the self-tail-call loop, the dispatch
-//! helper that carries every other call, and a `MakeClosure`.
+//! How a call leaves compiled code: the self-tail-call loop, the helper that
+//! carries every other call, and the `MakeClosure` refusal.
 
 use super::*;
 
 impl<'a> FunctionTranslator<'a> {
     /// Call/TailCall/MakeClosure instructions (chain link from translate_instr).
+    /// A `MakeClosure` is refused as unsupported.
     pub(super) fn translate_instr_call(
         &mut self,
         builder: &mut FunctionBuilder,
-        instr: &LirInstr,
+        instr: &InstrRef<'_>,
         region_id_const: cranelift_codegen::ir::Value,
     ) -> Result<bool, JitError> {
         match instr {
-            LirInstr::Call {
+            InstrRef::Call {
                 dst, func, args, ..
             } => {
                 let (ft, fp) = self.use_var_pair(builder, func.0);
@@ -36,7 +37,7 @@ impl<'a> FunctionTranslator<'a> {
                     )?;
                     self.def_var_pair(builder, dst.0, rt, rp);
                     self.emit_exception_check_after_call(builder)?;
-                    if self.lir.signal.may_suspend() {
+                    if self.lir.signal().may_suspend() {
                         let idx = self.call_site_index;
                         self.call_site_index += 1;
                         self.emit_yield_check_after_call(builder, idx)?;
@@ -66,7 +67,7 @@ impl<'a> FunctionTranslator<'a> {
                     )?;
                     self.def_var_pair(builder, dst.0, rt, rp);
                     self.emit_exception_check_after_call(builder)?;
-                    if self.lir.signal.may_suspend() {
+                    if self.lir.signal().may_suspend() {
                         let idx = self.call_site_index;
                         self.call_site_index += 1;
                         self.emit_yield_check_after_call(builder, idx)?;
@@ -74,7 +75,7 @@ impl<'a> FunctionTranslator<'a> {
                 }
             }
 
-            LirInstr::TailCall {
+            InstrRef::TailCall {
                 dst,
                 func,
                 args,
@@ -96,7 +97,7 @@ impl<'a> FunctionTranslator<'a> {
                 // The emitter records one call site per tail call of a function
                 // that may suspend; take it before the self-call branch so the
                 // counts agree whichever path runs.
-                let park_site = if self.lir.signal.may_suspend() {
+                let park_site = if self.lir.signal().may_suspend() {
                     let idx = self.call_site_index;
                     self.call_site_index += 1;
                     Some(idx)
@@ -108,7 +109,7 @@ impl<'a> FunctionTranslator<'a> {
                 if let (Some((self_tag, self_payload)), Some(loop_header)) =
                     (self.self_tag_payload, self.loop_header)
                 {
-                    if args.len() == self.lir.num_params {
+                    if args.len() == self.lir.num_params() {
                         // Check if func == self (tag AND payload match)
                         let tag_eq = builder.ins().icmp(IntCC::Equal, ft, self_tag);
                         let pay_eq = builder.ins().icmp(IntCC::Equal, fp, self_payload);
@@ -183,84 +184,11 @@ impl<'a> FunctionTranslator<'a> {
                 return Ok(false);
             }
 
-            LirInstr::MakeClosure {
-                dst,
-                closure_id,
-                captures,
-                region,
-            } => {
-                // Look up the nested LirFunction by ClosureId from module context.
-                let func = self
-                    .module_closures
-                    .get(closure_id.0 as usize)
-                    .ok_or_else(|| {
-                        JitError::InvalidLir(format!(
-                            "MakeClosure: invalid ClosureId({})",
-                            closure_id.0
-                        ))
-                    })?
-                    .clone();
-
-                // Emit every closure of the module, then take this one's:
-                // a nested `MakeClosure` resolves its own child through the
-                // same pass, so the whole tree is compiled together.
-                let lir_module = crate::lir::LirModule {
-                    entry: func.clone(),
-                    closures: self.module_closures.clone(),
-                };
-                let compiled = crate::lir::Emitter::new()
-                    .emit_module_closures(&lir_module)
-                    .into_iter()
-                    .nth(closure_id.0 as usize)
-                    .expect("emit_module_closures is parallel to the module's closures");
-
-                // The nested lambda's template BLUEPRINT — plain data, owned by
-                // the JIT code object (`closure_protos`), NOT a heap `Value`.
-                // `elle_jit_make_closure` materializes a FRESH region-allocated
-                // `HeapObject::ClosureTemplate` from it per execution (a heap
-                // literal is an ordinary, reclaimable allocation).
-                let template =
-                    crate::value::TemplateProto::nested_lambda(&func, captures.len(), compiled);
-
-                // Bake a stable raw pointer to the blueprint. The `Rc`'s target
-                // address does not move with the vector, and the JIT code object
-                // owns this handle for as long as any code it compiled can run.
-                self.closure_protos.push(std::rc::Rc::new(template));
-                let proto = self.closure_protos.last().expect("just pushed");
-                let template_ptr = builder.ins().iconst(I64, std::rc::Rc::as_ptr(proto) as i64);
-
-                let (captures_ptr, count_val) = if captures.is_empty() {
-                    (builder.ins().iconst(I64, 0), builder.ins().iconst(I64, 0))
-                } else {
-                    let slot =
-                        builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
-                            cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
-                            (captures.len() * 16) as u32,
-                            0,
-                        ));
-                    for (i, cap_reg) in captures.iter().enumerate() {
-                        let (ct, cp) = self.use_var_pair(builder, cap_reg.0);
-                        store_value_slot(builder, slot, i as u32, ct, cp);
-                    }
-                    let ptr = builder.ins().stack_addr(I64, slot, 0);
-                    let cnt = builder.ins().iconst(I64, captures.len() as i64);
-                    (ptr, cnt)
-                };
-
-                let region_val = self.emit_resolve_alloc_region(builder, *region)?;
-                let vm = self.vm_ptr.ok_or_else(|| {
-                    JitError::InvalidLir("MakeClosure without vm pointer".to_string())
-                })?;
-                let func_ref = self
-                    .module
-                    .declare_func_in_func(self.helpers.make_closure, builder.func);
-                let call = builder.ins().call(
-                    func_ref,
-                    &[template_ptr, captures_ptr, count_val, region_val, vm],
-                );
-                let rt = builder.inst_results(call)[0];
-                let rp = builder.inst_results(call)[1];
-                self.def_var_pair(builder, dst.0, rt, rp);
+            // A closure's code object is a payload in its compile unit's code
+            // region, and the worker that compiles has no heap to write one
+            // into (docs/impl/jit.md).
+            InstrRef::MakeClosure { .. } => {
+                return Err(JitError::UnsupportedInstruction("MakeClosure".to_string()));
             }
             _ => return self.translate_instr_async(builder, instr, region_id_const),
         }

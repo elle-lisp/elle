@@ -314,10 +314,10 @@ plugin directory to a workspace member.
 
 ### The boot-image job
 
-`--boot-image=` is off by default, and stays off until the encoded-LIR
-side-stream and the two cross-unit registries land
-([boot.md](../impl/image/boot.md)). No other job boots from an image, so a
-change that breaks hydration passes every gate in the workflow.
+`--boot-image=` is off by default, and stays off until the two cross-unit
+compile registries land ([boot.md](../impl/image/boot.md)). No other job boots
+from an image, so a change that breaks hydration passes every gate in the
+workflow.
 
 `Boot Image Tests` runs `make smoke-boot-image`. The target stores an image,
 proves the next start hydrates it, and runs the corpus through that instance.

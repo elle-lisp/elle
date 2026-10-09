@@ -1,6 +1,8 @@
-// audited: 2026-09-08
-// ── A short-circuit operand is an arm ────────────────────────────
-//
+// audited: 2026-10-06
+//! A short-circuit operand is an arm: a release past the merge is replicated ahead of the last operand's tail call.
+//!
+//! docs/impl/region/replicate.md
+
 // `and` and `or` lower to a branch the source does not spell: each operand
 // stores its value into the result slot and every operand but the last branches
 // on it, so the done block is a merge reached through every operand's block. Only
@@ -20,40 +22,17 @@ use super::*;
 /// Reading by SLOT is what makes the pins specific: a block replicates the
 /// release of every region the merge releases, so "some release precedes the
 /// call" says nothing about which one.
-fn tail_call_block_release_slots(module: &crate::lir::LirModule) -> Option<(Vec<u16>, Vec<u16>)> {
-    let funcs = std::iter::once(&module.entry).chain(module.closures.iter());
-    for f in funcs {
-        for b in &f.blocks {
-            let Some(at) = b
-                .instructions
-                .iter()
-                .position(|i| matches!(i.instr, LirInstr::TailCall { .. }))
-            else {
-                continue;
-            };
-            let mut from_slot: rustc_hash::FxHashMap<Reg, u16> = rustc_hash::FxHashMap::default();
-            let (mut before, mut after) = (Vec::new(), Vec::new());
-            for (idx, i) in b.instructions.iter().enumerate() {
-                match &i.instr {
-                    LirInstr::LoadLocal { dst, slot } => {
-                        from_slot.insert(*dst, *slot);
-                    }
-                    LirInstr::DecrefValueRegion { src } => {
-                        if let Some(&slot) = from_slot.get(src) {
-                            if idx < at {
-                                before.push(slot);
-                            } else {
-                                after.push(slot);
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            return Some((before, after));
+fn tail_call_block_release_slots(module: &FrozenModule) -> Option<(Vec<u16>, Vec<u16>)> {
+    let (b, at) = first_tail_call_block(module)?;
+    let (mut before, mut after) = (Vec::new(), Vec::new());
+    for (idx, slot) in value_releases(b.instrs()) {
+        if idx < at {
+            before.push(slot);
+        } else {
+            after.push(slot);
         }
     }
-    None
+    Some((before, after))
 }
 
 #[test]

@@ -1,6 +1,8 @@
+// audited: 2026-10-06
+// docs/impl/mlir.md
 //! MLIR backend for Elle.
 //!
-//! Lowers GPU-eligible `LirFunction`s to MLIR using the melior crate,
+//! Lowers GPU-eligible frozen functions to MLIR using the melior crate,
 //! then compiles through the arith/func/cf dialects to LLVM IR and
 //! JIT-executes via the MLIR ExecutionEngine.
 
@@ -9,7 +11,7 @@ mod execute;
 mod lower;
 mod spirv;
 
-pub use cache::MlirCache;
+pub use cache::{MlirCache, MlirSig};
 pub use execute::mlir_call;
 pub use lower::{check_slot_types, lower_to_mlir, ScalarType};
 pub use spirv::lower_to_spirv;

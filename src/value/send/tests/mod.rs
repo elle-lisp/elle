@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! What crosses the send boundary intact: closures and their LIR, ports and parameters, symbols, and the mirrors.
 //!
 //! docs/threads.md
@@ -12,12 +12,11 @@
 
 use super::*;
 use crate::lir::testkit::LirFixture;
-use crate::lir::{LirConst, LirFunction, LirInstr, Reg, Terminator};
-use crate::value::closure::{Closure, TemplateProto};
+use crate::lir::{InstrRef, LirOwned, Reg, Terminator};
+use crate::value::closure::{Closure, CodeBuilder};
 use crate::value::fiber::SignalBits;
 use crate::value::heap::HeapObject;
 use crate::value::types::Arity;
-use std::rc::Rc;
 
 /// Reconstruct a bundle/value through a ctx over a fresh region on a leaked test
 /// heap, NOT releasing the region: the result must outlive the call (the test

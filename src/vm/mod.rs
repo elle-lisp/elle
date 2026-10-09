@@ -1,5 +1,5 @@
-// audited: 2026-09-29
-//! The VM's execution entries: a blueprint, a code object at the root, and a
+// audited: 2026-10-06
+//! The VM's execution entries: a compiled unit, a code object at the root, and a
 //! program under the async scheduler. The module list sits above them.
 //!
 //! docs/impl/vm.md
@@ -38,14 +38,21 @@ mod wasm_entry;
 pub use crate::value::fiber::CallFrame;
 pub use core::VM;
 
-use crate::compiler::bytecode::Bytecode;
 use crate::value::fiber::TailSquelch;
+use crate::value::CodeUnit;
 use crate::value::{Value, SIG_ERROR, SIG_HALT, SIG_SWITCH};
 use std::rc::Rc;
 
 impl VM {
-    pub fn execute(&mut self, bytecode: &Bytecode) -> Result<Value, String> {
-        self.execute_proto(&Rc::new(bytecode.clone().into_proto()), None)
+    /// Run a compiled unit's entry function at the root.
+    ///
+    /// A unit compiled on another heap runs from a copy on this VM's heap
+    /// (docs/impl/region/template.md § "A unit runs on the heap it was
+    /// compiled on"). The copy is held for the run, because the entry's `Code`
+    /// takes no reference of its own.
+    pub fn execute(&mut self, unit: &CodeUnit) -> Result<Value, String> {
+        let unit = unit.on_heap(self.heap());
+        self.execute_code(unit.entry().code(), None)
     }
 
     /// Mint a fresh `RuntimeRegion` from the activation's heap for a VM-produced
@@ -140,33 +147,17 @@ impl VM {
         false
     }
 
-    /// Execute a code-object blueprint with an optional closure environment.
-    ///
-    /// Translation boundary: internally uses SignalBits, externally returns
-    /// `Result<Value, String>`. A caller running a CLOSURE's body must use
-    /// `Self::execute_code` (crate-private) with `closure.template.code()`
-    /// instead: the executing-closure register's dispatch-entry invariant
-    /// compares the register's code object to the executing `Code` by payload
-    /// identity, and a fresh blueprint materializes a payload of its own.
-    pub fn execute_proto(
-        &mut self,
-        proto: &Rc<crate::value::TemplateProto>,
-        closure_env: Option<&Rc<Vec<Value>>>,
-    ) -> Result<Value, String> {
-        // The blueprint carries the function's region tables with the rest of
-        // its payload: the builder-idiom merge set the alloc dispatch
-        // mint-or-reuses (docs/impl/region/merging.md), and the two release
-        // tables an error exit walks (docs/impl/region/mechanism.md).
-        let code = crate::value::ClosureTemplate::for_proto(self.heap(), proto).code();
-        self.execute_code(code, closure_env)
-    }
-
     /// Execute a [`Code`](crate::value::Code) object at the root (with the
-    /// tail-call and `SIG_SWITCH` trampolines), sharing the caller's `Rc`s. The
-    /// entry for running a closure's body at the root — pass
-    /// `closure.template.code()` (preserving the template's bytecode `Rc`, which
-    /// the executing-closure register's dispatch-entry invariant compares by
-    /// identity) and hand the closure through `pending_entry_closure`.
+    /// tail-call and `SIG_SWITCH` trampolines). Translation boundary:
+    /// internally uses SignalBits, externally returns `Result<Value, String>`.
+    /// The entry for running a closure's body at the root — pass
+    /// `closure.template.code()` (the executing-closure register's
+    /// dispatch-entry invariant compares the register's code object to this
+    /// `Code` by payload identity) and hand the closure through
+    /// `pending_entry_closure`.
+    ///
+    /// The caller keeps the code's payload alive for the run: a `Code` takes no
+    /// reference of its own.
     pub(crate) fn execute_code(
         &mut self,
         code: crate::value::Code,
@@ -184,7 +175,7 @@ impl VM {
 
         // Install the executing-closure register for this body, bracketed
         // (save/restore) so a re-entrant driver — a native that loads a module
-        // via `execute_proto` mid-activation — restores the outer
+        // via `execute` mid-activation — restores the outer
         // activation's register on return, exactly as
         // `execute_bytecode_saving_stack` brackets a closure body. The register
         // arrives through the one-shot `pending_entry_closure`: an entrant that

@@ -1,8 +1,8 @@
-// audited: 2026-09-16
-// src/lir/lower/AGENTS.md
-// docs/impl/region/cells.md
-//! The `Destructure` node's entry point, the cell delegations, and the store
-//! each bound name takes.
+// audited: 2026-10-06
+//! The `Destructure` node's entry point, the cell delegations, and the store each bound name takes.
+//!
+//! src/lir/lower/AGENTS.md
+//! docs/impl/region/cells.md
 //!
 //! Kept together because they all sit on the functionalize/lowerer
 //! double-handling contract for capture cells (see `lower_make_cell`).
@@ -26,7 +26,7 @@ impl<'a> Lowerer<'a> {
         // (docs/impl/region/anchors.md).
         self.lower_destructure(pattern, value_reg, strict, &mut RestBuilds::new())?;
         // Destructure produces nil as its expression value
-        self.emit_const(LirConst::Nil)
+        self.emit_const(ConstRef::Nil)
     }
 
     /// Lower MakeCell — currently transparent (just lowers the inner value).
@@ -88,7 +88,7 @@ impl<'a> Lowerer<'a> {
 
         if self.in_lambda && needs_capture {
             self.upvalue_bindings.insert(binding);
-            self.emit(LirInstr::StoreCapture {
+            self.emit(InstrRef::StoreCapture {
                 index: slot,
                 src: value_reg,
             });
@@ -97,11 +97,11 @@ impl<'a> Lowerer<'a> {
         } else if needs_capture {
             // cell was already created in Begin pre-pass
             let cell_reg = self.fresh_reg();
-            self.emit(LirInstr::LoadLocal {
+            self.emit(InstrRef::LoadLocal {
                 dst: cell_reg,
                 slot,
             });
-            self.emit(LirInstr::StoreCaptureCell {
+            self.emit(InstrRef::StoreCaptureCell {
                 cell: cell_reg,
                 value: value_reg,
             });

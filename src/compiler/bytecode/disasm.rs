@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-10-06
 //! Bytecode disassembly: decode each instruction's operands into one line.
 //!
 //! docs/impl/bytecode.md
@@ -67,7 +67,7 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
             // release the callee closure's region at activation end), the
             // closure-cycle merged-arena adopt slot (u32, `0` = None), and the
             // borrowed-argument stash slots (a count byte then one u16 each).
-            // See `LirInstr::TailCall::{defer_callee_release,
+            // See `InstrRef::TailCall::{defer_callee_release,
             // deferred_release_slot, borrowed_arg_slots}`.
             Instruction::TailCall | Instruction::TailCallChecked if i + 11 < instructions.len() => {
                 let arg_count = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);

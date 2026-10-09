@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 // docs/impl/jit.md
 //! `FunctionTranslator`: the register-to-variable mapping every LIR instruction
 //! and terminator is lowered to Cranelift IR through.
@@ -13,7 +13,7 @@
 //! at their respective bases.
 //!
 //! This root holds the translator type and its register→variable mapping. The
-//! per-concern lowering lives in submodules: `instr` (per-`LirInstr` match),
+//! per-concern lowering lives in submodules: `instr` (per-`InstrRef` match),
 //! `terminator` (per-`Terminator` match + tail-call dispatch), `region`
 //! (prologue region-map/ctx plumbing), and `spill` (the shared spill slot).
 
@@ -27,7 +27,7 @@ use cranelift_jit::JITModule;
 use cranelift_module::Module;
 
 use crate::hir::region::StaticRegion;
-use crate::lir::{Label, LirInstr, Reg, Terminator};
+use crate::lir::{InstrRef, Label, Reg, Terminator};
 use crate::value::repr::{TAG_FALSE, TAG_NIL};
 
 use super::vtable::RuntimeHelpers;
@@ -43,7 +43,7 @@ mod terminator;
 pub(crate) struct FunctionTranslator<'a> {
     pub(crate) module: &'a mut JITModule,
     pub(crate) helpers: &'a RuntimeHelpers,
-    pub(crate) lir: &'a crate::lir::LirFunction,
+    pub(crate) lir: crate::lir::LirView<'a>,
     pub(crate) env_ptr: Option<cranelift_codegen::ir::Value>,
     pub(crate) vm_ptr: Option<cranelift_codegen::ir::Value>,
     /// Address of this activation's `JitCtx` capability bundle, built in the
@@ -76,14 +76,6 @@ pub(crate) struct FunctionTranslator<'a> {
     pub(crate) abandoned_slots_table: Option<cranelift_codegen::ir::StackSlot>,
     pub(crate) abandoned_regions_table: Option<cranelift_codegen::ir::StackSlot>,
     pub(crate) abandoned_locals_spill: Option<cranelift_codegen::ir::StackSlot>,
-    /// Nested-lambda template **blueprints** built during MakeClosure
-    /// translation. The native code holds a raw pointer to each (like
-    /// `templates` below), and `elle_jit_make_closure` materializes a FRESH
-    /// region-allocated `HeapObject::ClosureTemplate` from it per execution —
-    /// reclaimed by region RC, never pinned for the process lifetime.
-    /// `Box` gives each a stable heap address independent of this Vec's growth.
-    #[allow(clippy::vec_box)] // the Box stable-address is the point (see above)
-    pub(crate) closure_protos: Vec<std::rc::Rc<crate::value::TemplateProto>>,
     /// Immutable heap-literal templates baked by `MaterializeConst` (a string, or
     /// a quoted compound structure). The native code holds a raw pointer to each
     /// `ConstTemplate`, so they must outlive the JIT code; ownership is
@@ -91,9 +83,6 @@ pub(crate) struct FunctionTranslator<'a> {
     /// each template a stable heap address independent of this Vec's growth.
     #[allow(clippy::vec_box)] // the Box stable-address is the point (see above)
     pub(crate) templates: Vec<Box<crate::value::ConstTemplate>>,
-    /// Symbol name map for nested emitters (MakeClosure).
-    /// Module's closure list for MakeClosure → ClosureId lookup.
-    pub(crate) module_closures: Vec<crate::lir::LirFunction>,
     /// Whether this function's LIR carries an `AdoptIntoActivation` — computed
     /// once at construction so the `Return` path emits the dues release
     /// (`elle_jit_release_activation_dues`) only for a function that can
@@ -158,13 +147,9 @@ impl<'a> FunctionTranslator<'a> {
     pub(crate) fn new(
         module: &'a mut JITModule,
         helpers: &'a RuntimeHelpers,
-        lir: &'a crate::lir::LirFunction,
+        lir: crate::lir::LirView<'a>,
     ) -> Self {
-        let uses_activation_owner_node = lir.blocks.iter().any(|b| {
-            b.instructions
-                .iter()
-                .any(|si| matches!(si.instr, LirInstr::AdoptIntoActivation { .. }))
-        });
+        let uses_activation_owner_node = lir.has_op(crate::lir::code::Op::AdoptIntoActivation);
         FunctionTranslator {
             module,
             helpers,
@@ -182,9 +167,7 @@ impl<'a> FunctionTranslator<'a> {
             abandoned_slots_table: None,
             abandoned_regions_table: None,
             abandoned_locals_spill: None,
-            closure_protos: Vec::new(),
             templates: Vec::new(),
-            module_closures: Vec::new(),
             uses_activation_owner_node,
         }
     }

@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-10-06
 // docs/impl/region/mechanism.md
 //! A `TailCall` callee sees every local slot it has not written as NIL,
 //! exactly as a fresh activation does.
@@ -39,13 +39,9 @@ fn tail_call_frame_delivers_nil_locals() {
     // as a constant, exactly as compiled code reaches a callee through a slot.
     let heap = unsafe { &mut *heap_ptr };
     let callee_region = heap.new_runtime_region();
-    let callee_proto = std::rc::Rc::new(callee_bc.into_proto());
-    let callee_value = crate::vm::closure::materialize_closure_in_region(
-        heap,
-        crate::value::closure::ChildCode::Blueprint(&callee_proto),
-        &[],
-        callee_region,
-    );
+    let callee = crate::value::CodeBuilder::from_bytecode(callee_bc).build(heap);
+    let callee_value =
+        crate::vm::closure::materialize_closure_in_region(heap, &callee, &[], callee_region);
 
     // Caller: plant the marker in slot 3, then a zero-arg tail call.
     let mut bc = Bytecode::new();

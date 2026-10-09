@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! The interpreter's Call-position dispatch by callee kind: native, parameter,
 //! closure and collection, behind the capability gate.
 //!
@@ -14,10 +14,10 @@ impl VM {
     /// Dispatches native functions, parameters and collections, and enters a
     /// compiled closure. An interpreted closure gets its environment built here
     /// and goes to `run_dispatch` as a `PendingCall`.
-    #[allow(clippy::too_many_arguments)]
     ///
     /// When `checked` is true, the compiler verified arity at compile time
     /// and the runtime skips the arity check for primitives and closures.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn call_inner(
         &mut self,
         func: Value,
@@ -157,7 +157,7 @@ impl VM {
 
             // GPU capability check: if this closure has been GIT'd (has SPIR-V),
             // it requires GPU hardware. Check capability before dispatch.
-            if closure.template.spirv_bytes().is_some() {
+            if self.has_spirv(&closure.template) {
                 let gpu_bit = crate::signals::SIG_GPU;
                 let blocked = gpu_bit
                     .intersection(self.fiber.withheld)
@@ -189,7 +189,7 @@ impl VM {
             // Tiered WASM compilation and dispatch.
             // Checked before JIT because WASM is the preferred fast path when enabled.
             #[cfg(feature = "wasm")]
-            if compiled_room && closure.template.lir_function().is_some() {
+            if compiled_room && closure.template.has_lir() {
                 if let Some(bits) = self.try_wasm_call(closure, &args, func) {
                     self.fiber.call_depth -= 1;
                     self.fiber.call_stack.pop();
@@ -203,7 +203,7 @@ impl VM {
             #[cfg(feature = "mlir")]
             if compiled_room
                 && self.mlir_enabled
-                && closure.template.lir_function().is_some()
+                && closure.template.has_lir()
                 && self.try_mlir_call(closure, &args).is_some()
             {
                 self.fiber.call_depth -= 1;
@@ -211,11 +211,11 @@ impl VM {
                 return None;
             }
 
-            // JIT compilation and dispatch.
-            // Polymorphic closures are rejected by the JIT compiler itself.
-            // Skip profiling for primitives (no LIR means not JIT-compilable).
+            // JIT compilation and dispatch. A code object with no LIR — an entry
+            // thunk, a WASM-built closure — is never profiled, because no
+            // compiled tier can take it.
             #[cfg(feature = "jit")]
-            if compiled_room && closure.template.lir_function().is_some() {
+            if compiled_room && closure.template.has_lir() {
                 let param_depth = self.fiber.param_depth();
                 if let Some(bits) = self.try_jit_call(closure, &args, func, param_depth) {
                     self.fiber.call_depth -= 1;
@@ -329,9 +329,9 @@ impl VM {
         // Callable collections: struct, array, set. Routed through
         // `dispatch_collection_call` for the per-execution region + Rule-5
         // pass-through retain (so a co-located/stored element survives the
-        // collection's release under the consumer's borrow — the call-index UAF
-        // family). The caller's `DecrefValueRegion` at the `(arr i)` decref_point
-        // consumes that one owning reference, exactly as for a `get` result.
+        // collection's release under the consumer's borrow). The caller's
+        // `DecrefValueRegion` at the `(arr i)` decref_point consumes that one
+        // owning reference, exactly as for a `get` result.
         if let Some(result) = self.dispatch_collection_call(&func, &args, region_id) {
             match result {
                 Ok(value) => {

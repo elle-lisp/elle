@@ -1,4 +1,7 @@
+// audited: 2026-10-06
 //! Per-call serialization context threaded through `from_value_inner`.
+//!
+//! docs/threads.md
 //!
 //! The context is split out from the serialization logic itself so the big
 //! `match` over heap tags reads as pure "what does each tag serialize to",

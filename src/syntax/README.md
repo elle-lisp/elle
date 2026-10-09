@@ -1,91 +1,35 @@
 # Syntax
 
-The `Syntax` type represents parsed Elle code before analysis. Unlike `Value`
-(the runtime representation), `Syntax` preserves source locations and supports
-hygienic macro expansion.
+<!-- audited: 2026-10-07 -->
 
-## Syntax vs Value
+The syntax tree the reader builds, the expander rewrites, and the analyzer consumes.
+
+A `Syntax` node keeps what a runtime `Value` does not: a source span on every
+node, and a scope set on every identifier for macro hygiene. A node is `Copy`
+region data, so every constructor names the `SyntaxArena` it allocates in.
 
 | Aspect | Syntax | Value |
 |--------|--------|-------|
 | Purpose | Compilation | Runtime |
-| Symbols | Strings | Interned SymbolId |
-| Locations | Preserved | Lost |
-| Macros | Expandable | Already expanded |
+| Symbols | Names, interned at analysis | Interned `SymbolId` |
+| Locations | A `Span` on every node | None |
 
-## Structure
+## Macro expansion
 
-```rust
-pub struct Syntax {
-    pub kind: SyntaxKind,
-    pub span: Span,
-    pub scopes: Vec<ScopeId>,  // For hygiene
-}
-
-pub enum SyntaxKind {
-    Nil, Bool(bool), Int(i64), Float(f64),
-    Symbol(String), Keyword(String), String(String),
-    List(Vec<Syntax>), Array(Vec<Syntax>),
-    Quote(Box<Syntax>), Quasiquote(Box<Syntax>),
-    Unquote(Box<Syntax>), UnquoteSplicing(Box<Syntax>),
-}
-```
-
-## Macro Expansion
-
-The `Expander` transforms macro calls into their expanded forms:
+The `Expander` rewrites macro calls until no macro heads a form. It is built
+over the heap of the VM its transformers run on. A definition comes from a
+`defmacro` form, or from `MacroDef::new`:
 
 ```rust
-let mut expander = Expander::new();
-
-// Define a macro
-expander.define_macro(MacroDef {
-    name: "when".to_string(),
-    params: vec!["cond".to_string(), "body".to_string()],
-    rest_param: None,
-    template: /* `(if ,cond ,body nil) */,
-    cached_transformer: Rc::new(RefCell::new(None)),
-});
-
-// Expand code
-let expanded = expander.expand(syntax)?;
+let mut expander = Expander::on_vm(&mut vm);
+let params = MacroParams::fixed(vec!["test".to_string()]).with_rest(Some("body".to_string()));
+expander.define_macro(MacroDef::new("my-when", params, template));
+let expanded = expander.expand(syntax, &mut symbols, &mut vm)?;
 ```
 
-## Hygiene
+## See also
 
-Elle macros are hygienic - identifiers introduced by the macro won't
-accidentally capture identifiers from the call site.
-
-Each expansion adds a fresh `ScopeId` to introduced identifiers. Two
-identifiers only match if their scope sets are compatible (one is a
-subset of the other).
-
-Example:
-```lisp
-(defmacro inc (x) `(+ ,x 1))
-(let [+ -]  ; Shadow + with -
-  (inc 5))    ; Still uses +, not -, because macro's + has different scope
-```
-
-## Spans
-
-Every `Syntax` node carries a `Span` indicating its source location:
-
-```rust
-pub struct Span {
-    pub start: usize,   // Byte offset
-    pub end: usize,     // Byte offset
-    pub line: usize,    // 1-indexed
-    pub col: usize,     // 1-indexed
-    pub file: Option<String>,
-}
-```
-
-Use `span.merge(&other)` to combine spans (e.g., for a list spanning
-multiple lines).
-
-## See Also
-
-- [AGENTS.md](AGENTS.md) - technical reference for LLM agents
-- `src/reader/` - produces Syntax trees
-- `src/hir/` - consumes expanded Syntax
+- [AGENTS.md](AGENTS.md) — the types, the arenas and the invariants
+- [expand/AGENTS.md](expand/AGENTS.md) — macro expansion and hygiene
+- [docs/impl/syntax.md](../../docs/impl/syntax.md) — where a node lives, and how spans are packed
+- [docs/macros.md](../../docs/macros.md) — macros as a user writes them

@@ -1,4 +1,7 @@
-//! Ownership / dynamic-scope boundary lowering: `Return` and `Parameterize`.
+// audited: 2026-10-06
+//! Ownership and dynamic-scope boundary lowering: `Return` and `Parameterize`.
+//!
+//! src/lir/lower/AGENTS.md
 //!
 //! Grouped because both wrap a body evaluation in boundary bookkeeping —
 //! `lower_return` mints the caller's owning reference to the result region,
@@ -60,13 +63,13 @@ impl<'a> Lowerer<'a> {
                 // and the `Return`. Release builds omit it entirely, so the
                 // bytecode never carries it (C0 emit contract).
                 #[cfg(debug_assertions)]
-                self.emit(LirInstr::AssertRegionMatches {
+                self.emit(InstrRef::AssertRegionMatches {
                     region_id: slot,
                     src: reg,
                 });
-                self.emit(LirInstr::IncrefRegion { region_id: slot });
+                self.emit(InstrRef::IncrefRegion { region_id: slot });
             }
-            None => self.emit(LirInstr::IncrefValueRegion { src: reg }),
+            None => self.emit(InstrRef::IncrefValueRegion { src: reg }),
         }
         Ok(reg)
     }
@@ -76,34 +79,32 @@ impl<'a> Lowerer<'a> {
         bindings: &[(Hir, Hir)],
         body: &Hir,
     ) -> Result<Reg, String> {
-        // Lower all param/value pairs
-        let mut pairs = Vec::new();
+        // Lower all param/value pairs, flat: parameter, then value.
+        let mut pairs = Vec::with_capacity(bindings.len() * 2);
         for (param, value) in bindings {
-            let param_reg = self.lower_expr(param)?;
-            let value_reg = self.lower_expr(value)?;
-            pairs.push((param_reg, value_reg));
+            pairs.push(self.lower_expr(param)?);
+            pairs.push(self.lower_expr(value)?);
         }
 
         // Emit PushParamFrame
-        self.emit(LirInstr::PushParamFrame { pairs });
+        self.emit(InstrRef::PushParamFrame { pairs: &pairs });
 
         // Lower body
         let body_reg = self.lower_expr(body)?;
 
         // Store result in a local slot so PopParamFrame doesn't interfere
         let result_reg = self.fresh_reg();
-        let result_slot = self.current_func.num_locals;
-        self.current_func.num_locals += 1;
-        self.emit(LirInstr::StoreLocal {
+        let result_slot = self.fresh_local();
+        self.emit(InstrRef::StoreLocal {
             slot: result_slot,
             src: body_reg,
         });
 
         // Emit PopParamFrame
-        self.emit(LirInstr::PopParamFrame);
+        self.emit(InstrRef::PopParamFrame);
 
         // Reload result
-        self.emit(LirInstr::LoadLocal {
+        self.emit(InstrRef::LoadLocal {
             dst: result_reg,
             slot: result_slot,
         });

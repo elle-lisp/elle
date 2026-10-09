@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! A symbol or keyword that crosses the send boundary names the same thing on the receiving side.
 //!
 //! docs/impl/symbol.md
@@ -109,21 +109,35 @@ fn a_symbol_struct_key_names_the_same_symbol_on_both_sides() {
     });
 }
 
-// A `LirConst::Symbol` ships inside the live `LirFunction` with no name and no
-// rewrite, so the id the sender lowered is the id the worker re-emits into its
-// own constant pool.
+// A symbol constant ships inside the frozen LIR with no name and no rewrite, so
+// the id the sender lowered is the id the worker re-emits into its own constant
+// pool.
 #[test]
 fn a_lir_symbol_const_names_the_same_symbol_on_both_sides() {
-    use crate::lir::value_to_lir_const;
+    use crate::lir::code::ConstRef;
+    use crate::lir::InstrRef;
     use crate::symbol::SymbolTable;
 
     let mut sender = SymbolTable::new();
     let _ = sender.intern("send-aaa");
     let alpha = sender.intern("lir-alpha");
 
-    let shipped = match value_to_lir_const(Value::symbol(alpha)) {
-        Some(LirConst::Symbol(id)) => id,
-        other => panic!("a symbol lowers to LirConst::Symbol, got {:?}", other),
+    let lir = LirFixture::new(Arity::Exact(0))
+        .block(
+            0,
+            &[InstrRef::Const {
+                dst: Reg(0),
+                value: ConstRef::Symbol(alpha),
+            }],
+            Terminator::Return(Reg(0)),
+        )
+        .build();
+    let shipped = match lir.view().block(0).node(0).instr() {
+        InstrRef::Const {
+            value: ConstRef::Symbol(id),
+            ..
+        } => id,
+        other => panic!("a symbol freezes to a symbol constant, got {:?}", other),
     };
 
     let mut receiver = skewed_receiver();
@@ -176,7 +190,7 @@ fn a_keyword_names_the_same_keyword_on_both_sides() {
 
 // ── a LIR symbol constant crosses unchanged ─────────────────────────
 
-/// The JIT materializes a `LirConst::Symbol` straight into a `Value::symbol`,
+/// The JIT materializes a symbol constant straight into a `Value::symbol`,
 /// so the id that crosses the boundary must name the same symbol on the other
 /// side. It does, with no translation step: the id is the name's hash.
 ///
@@ -187,32 +201,33 @@ fn a_keyword_names_the_same_keyword_on_both_sides() {
 /// a symbol no source text spells.
 #[test]
 fn a_lir_symbol_constant_survives_serialization_as_the_name_hash() {
-    use crate::lir::{LirConst, LirInstr, Reg, Terminator};
+    use crate::lir::code::ConstRef;
+    use crate::lir::{InstrRef, LirCode, LirOwned, Reg, Terminator};
     use crate::value::SymbolId;
 
     let lir = LirFixture::new(Arity::Exact(0))
         .block(
             0,
-            vec![LirInstr::Const {
+            &[InstrRef::Const {
                 dst: Reg(0),
-                value: LirConst::Symbol(SymbolId::of("answerish")),
+                value: ConstRef::Symbol(SymbolId::of("answerish")),
             }],
             Terminator::Return(Reg(0)),
         )
         .build();
 
-    let bytes = bincode::serialize(&lir).expect("LIR serializes");
-    let back: crate::lir::LirFunction = bincode::deserialize(&bytes).expect("deserializes");
+    let bytes = bincode::serialize(lir.code()).expect("LIR serializes");
+    let back: LirCode = bincode::deserialize(&bytes).expect("deserializes");
+    let back = LirOwned::from_parts(back, Vec::new()).expect("the LIR loads no values");
 
     let mut ids = Vec::new();
-    for block in &back.blocks {
-        for si in &block.instructions {
-            let mut probe = si.instr.clone();
-            probe.for_each_const_mut(|c| {
-                if let LirConst::Symbol(sid) = c {
-                    ids.push(*sid);
-                }
-            });
+    for node in back.view().nodes() {
+        if let InstrRef::Const {
+            value: ConstRef::Symbol(sid),
+            ..
+        } = node.instr()
+        {
+            ids.push(sid);
         }
     }
     assert_eq!(

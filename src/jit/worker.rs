@@ -1,4 +1,4 @@
-// audited: 2026-10-01
+// audited: 2026-10-06
 // docs/impl/jit.md
 //! The background JIT worker: the thread Cranelift runs on, and the task and
 //! result that cross to it.
@@ -8,7 +8,7 @@
 //! next call picks the code up from the cache.
 
 use crate::jit::{JitCode, JitCompiler, JitError};
-use crate::lir::LirFunction;
+use crate::lir::{LirOwned, LirView};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -17,21 +17,16 @@ use std::sync::Arc;
 pub static JIT_COMPILE_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 pub static JIT_COMPILE_TASKS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-/// Compilation request sent to the background JIT thread.
+/// Compilation request sent to the background JIT thread. Plain data, so it is
+/// `Send` by its type: the frozen LIR is records in `Vec`s, and its values are
+/// two words each, which the JIT reads as i64 immediates and never
+/// dereferences.
 pub(crate) struct JitTask {
-    /// Cloned LIR with syntax/doc stripped. ValueConsts are left intact:
-    /// the JIT reads their tag/payload as i64 immediates, never
-    /// dereferencing heap pointers during compilation.
-    pub lir: LirFunction,
+    /// A copy of the function's frozen LIR.
+    pub lir: LirOwned,
     /// Cache key — the bytecode pointer address, cast to usize.
     pub bytecode_key: usize,
 }
-
-// Safety: LirFunction after stripping syntax (Rc<Syntax>) and doc
-// contains only owned data and Value (Copy, two u64 fields). The JIT
-// compiler reads Value tag/payload as i64 immediates and never
-// dereferences heap pointers during compilation.
-unsafe impl Send for JitTask {}
 
 /// Compilation result received from the background JIT thread.
 pub(crate) struct JitResult {
@@ -79,7 +74,7 @@ impl JitWorker {
                     let key = task.bytecode_key;
                     let t0 = std::time::Instant::now();
                     let result = match JitCompiler::new() {
-                        Ok(compiler) => compiler.compile(&task.lir, Vec::new()),
+                        Ok(compiler) => compiler.compile(&task.lir.view()),
                         Err(e) => Err(e),
                     };
                     JIT_COMPILE_NS.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
@@ -130,30 +125,23 @@ impl Drop for JitWorker {
     }
 }
 
-/// Prepare a `JitTask` from a LirFunction by cloning and stripping
-/// non-Send fields (syntax, doc).
+/// Prepare a `JitTask` from a frozen function by copying it out of whatever
+/// pages hold it, which the worker's thread cannot read (docs/impl/jit.md).
 ///
 /// `display_name` backfills a nameless LIR (the common case — lowering
 /// names few functions) from the closure template, so the compile records
 /// a readable entry in the code-address registry (docs/impl/jit.md).
 pub(crate) fn prepare_task(
-    lir: &LirFunction,
+    lir: &LirView<'_>,
     bytecode_key: usize,
     display_name: Option<&str>,
 ) -> JitTask {
-    let mut lir = lir.clone();
-    lir.doc = None;
-    if lir.name.is_none() {
-        lir.name = display_name.map(String::from);
+    let mut lir = lir.to_owned();
+    if lir.view().name().is_none() {
+        lir.set_name(display_name.map(String::from));
     }
     JitTask { lir, bytecode_key }
 }
-
-// A string literal lowers to `MaterializeConst` in every position (value:
-// `HirKind::String`; pattern: the materialize-compare-free in
-// `lir/lower/pattern/ctor.rs`), which the JIT translates via
-// `elle_jit_materialize_const` — so no raw `LirConst::String` reaches the
-// translator.
 
 #[cfg(test)]
 mod tests;

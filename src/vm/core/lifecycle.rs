@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-07
 //! Building a VM over a heap it owns or shares, and resetting one for reuse.
 //!
 //! docs/impl/vm.md
@@ -58,7 +58,7 @@ impl VM {
     /// stdlib closures (created on the macro/program VM) and the values user code
     /// builds at runtime all live in the same region store. Two embedded
     /// instances on one thread each own a distinct heap and pass it here, so
-    /// neither sees the other's regions (tls.md § Acceptance criterion).
+    /// neither sees the other's regions.
     pub fn new_with_heap(heap_ptr: *mut crate::value::fiberheap::FiberHeap) -> Self {
         Self::on_heap(heap_ptr)
     }
@@ -102,7 +102,7 @@ impl VM {
             ffi: FFISubsystem::new(),
             loading_modules: std::collections::HashSet::new(),
             loaded_plugins: HashMap::new(),
-            closure_call_counts: FxHashMap::default(),
+            closure_call_counts: CallCounts::default(),
             tail_call_env_cache: Vec::with_capacity(256),
             env_cache: Vec::with_capacity(256),
             pending_tail_call: None,
@@ -126,8 +126,7 @@ impl VM {
             jit_pending: FxHashMap::default(),
             #[cfg(feature = "jit")]
             jit_rejections: FxHashMap::default(),
-            #[cfg(feature = "jit")]
-            jit_compile_attempts: FxHashMap::default(),
+            spirv_cache: FxHashMap::default(),
             docs: HashMap::new(),
             eval_expander: None,
             user_args: Vec::new(),
@@ -149,13 +148,14 @@ impl VM {
 
     /// Reset the VM's fiber and transient state for reuse.
     ///
-    /// Preserves: docs, ffi, jit_cache, eval_expander, env_cache,
+    /// Preserves: docs, ffi, jit_cache, spirv_cache, eval_expander, env_cache,
     /// tail_call_env_cache, and the heap, which the VM points at but never owns.
-    /// Resets: fiber, call state, location map,
-    /// loaded modules, closure call counts.
+    /// Resets: the fiber, the pending call state, the error location, the active
+    /// tier, the closure call counts, the JIT rejections, and the set of modules
+    /// loading.
     pub fn reset_fiber(&mut self) {
         // The VM heap is persistent — don't clear it. Values from previous
-        // execute_proto calls remain valid.
+        // execute calls remain valid.
         self.fiber = Fiber::new(root_closure(self.heap()), SIG_OK);
         self.fiber.status = crate::value::FiberStatus::Alive;
         self.current_fiber_handle = None;
@@ -171,8 +171,6 @@ impl VM {
         self.closure_call_counts.clear();
         #[cfg(feature = "jit")]
         self.jit_rejections.clear();
-        #[cfg(feature = "jit")]
-        self.jit_compile_attempts.clear();
         self.loading_modules.clear();
     }
 }

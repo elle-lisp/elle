@@ -1,38 +1,39 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 // docs/impl/jit.md
 //! What the solo-compilation gate accepts and rejects, and what the compiled
 //! entry it produces records about itself.
 
 use super::*;
 use crate::lir::testkit::LirFixture;
-use crate::lir::{BinOp, LirInstr, Reg, Terminator};
+use crate::lir::{BinOp, InstrRef, Reg, Terminator};
 use crate::signals::Signal;
 use crate::value::Arity;
 
-mod blueprint;
 mod clif;
+mod makeclosure;
 mod regions;
 mod stores;
 
-fn make_simple_lir() -> LirFunction {
-    // Create a simple function that returns its first argument
-    // fn(x) -> x
-    // The LIR uses LoadCapture to access parameters.
-    // With num_captures=0, LoadCapture index 0 loads from args[0].
-    LirFixture::new(Arity::Exact(1))
-        .signal(Signal::silent())
-        .block(
-            0,
-            vec![LirInstr::LoadCapture {
-                dst: Reg(0),
-                index: 0,
-            }],
-            Terminator::Return(Reg(0)),
-        )
-        .build()
+/// fn(x) -> x, before it freezes, so a test can set one more field first.
+///
+/// The LIR uses LoadCapture to access parameters. With num_captures=0,
+/// LoadCapture index 0 loads from args[0].
+fn simple_fixture(arity: Arity) -> LirFixture {
+    LirFixture::new(arity).signal(Signal::silent()).block(
+        0,
+        &[InstrRef::LoadCapture {
+            dst: Reg(0),
+            index: 0,
+        }],
+        Terminator::Return(Reg(0)),
+    )
 }
 
-fn make_add_lir() -> LirFunction {
+fn make_simple_lir() -> LirOwned {
+    simple_fixture(Arity::Exact(1)).build()
+}
+
+fn make_add_lir() -> LirOwned {
     // Create a function that adds two arguments
     // fn(x, y) -> x + y
     // With num_captures=0, LoadCapture index 0 and 1 load from args[0] and args[1].
@@ -40,16 +41,16 @@ fn make_add_lir() -> LirFunction {
         .signal(Signal::silent())
         .block(
             0,
-            vec![
-                LirInstr::LoadCapture {
+            &[
+                InstrRef::LoadCapture {
                     dst: Reg(0),
                     index: 0,
                 },
-                LirInstr::LoadCapture {
+                InstrRef::LoadCapture {
                     dst: Reg(1),
                     index: 1,
                 },
-                LirInstr::binop(Reg(2), BinOp::Add, Reg(0), Reg(1)),
+                InstrRef::binop(Reg(2), BinOp::Add, Reg(0), Reg(1)),
             ],
             Terminator::Return(Reg(2)),
         )
@@ -60,9 +61,7 @@ fn make_add_lir() -> LirFunction {
 fn test_compile_identity() {
     let lir = make_simple_lir();
     let compiler = JitCompiler::new().expect("Failed to create compiler");
-    let code = compiler
-        .compile(&lir, Vec::new())
-        .expect("Failed to compile");
+    let code = compiler.compile(&lir.view()).expect("Failed to compile");
 
     // Call the compiled function with self_tag=0, self_payload=0 (no self-tail-call).
     // A real VM is required: every compiled function's prologue pushes an
@@ -87,9 +86,7 @@ fn test_compile_identity() {
 fn test_compile_add() {
     let lir = make_add_lir();
     let compiler = JitCompiler::new().expect("Failed to create compiler");
-    let code = compiler
-        .compile(&lir, Vec::new())
-        .expect("Failed to compile");
+    let code = compiler.compile(&lir.view()).expect("Failed to compile");
 
     // Call the compiled function with self_tag=0, self_payload=0
     let mut vm = crate::vm::VM::new();
@@ -110,11 +107,12 @@ fn test_compile_add() {
 
 #[test]
 fn test_accept_polymorphic() {
-    let mut lir = make_simple_lir();
-    lir.signal = Signal::polymorphic(0);
+    let lir = simple_fixture(Arity::Exact(1))
+        .signal(Signal::polymorphic(0))
+        .build();
 
     let compiler = JitCompiler::new().expect("Failed to create compiler");
-    let result = compiler.compile(&lir, Vec::new());
+    let result = compiler.compile(&lir.view());
     assert!(
         result.is_ok(),
         "JIT should accept polymorphic functions (runtime dispatch handles callables): {:?}",
@@ -124,12 +122,13 @@ fn test_accept_polymorphic() {
 
 #[test]
 fn test_accept_yielding() {
-    let mut lir = make_simple_lir();
-    lir.signal = Signal::yields();
+    let lir = simple_fixture(Arity::Exact(1))
+        .signal(Signal::yields())
+        .build();
 
     let compiler = JitCompiler::new().expect("Failed to create compiler");
     // Should compile (no Yield terminators in this simple LIR)
-    let result = compiler.compile(&lir, Vec::new());
+    let result = compiler.compile(&lir.view());
     assert!(result.is_ok());
 }
 
@@ -146,9 +145,9 @@ fn test_compile_yielding_function() {
         }])
         .block(
             0,
-            vec![LirInstr::Const {
+            &[InstrRef::Const {
                 dst: Reg(0),
-                value: crate::lir::LirConst::Int(42),
+                value: crate::lir::ConstRef::Int(42),
             }],
             Terminator::Emit {
                 signal: crate::value::fiber::SIG_YIELD,
@@ -158,13 +157,13 @@ fn test_compile_yielding_function() {
         )
         .block(
             1,
-            vec![LirInstr::LoadResumeValue { dst: Reg(1) }],
+            &[InstrRef::LoadResumeValue { dst: Reg(1) }],
             Terminator::Return(Reg(1)),
         )
         .build();
 
     let compiler = JitCompiler::new().expect("Failed to create compiler");
-    let result = compiler.compile(&func, Vec::new());
+    let result = compiler.compile(&func.view());
     assert!(
         result.is_ok(),
         "Yielding function should compile: {:?}",
@@ -175,12 +174,12 @@ fn test_compile_yielding_function() {
 
 #[test]
 fn test_reject_struct_variadic() {
-    let mut lir = make_simple_lir();
-    lir.arity = Arity::AtLeast(1);
-    lir.vararg_kind = crate::hir::VarargKind::Struct;
+    let lir = simple_fixture(Arity::AtLeast(1))
+        .vararg_kind(crate::hir::VarargKind::Struct)
+        .build();
 
     let compiler = JitCompiler::new().expect("Failed to create compiler");
-    let result = compiler.compile(&lir, Vec::new());
+    let result = compiler.compile(&lir.view());
     assert!(
         matches!(result, Err(JitError::UnsupportedInstruction(_))),
         "Struct variadic functions should be rejected: {:?}",
@@ -190,12 +189,14 @@ fn test_reject_struct_variadic() {
 
 #[test]
 fn test_reject_strict_struct_variadic() {
-    let mut lir = make_simple_lir();
-    lir.arity = Arity::AtLeast(1);
-    lir.vararg_kind = crate::hir::VarargKind::StrictStruct(vec!["key".to_string()]);
+    let lir = simple_fixture(Arity::AtLeast(1))
+        .vararg_kind(crate::hir::VarargKind::StrictStruct(
+            vec!["key".to_string()],
+        ))
+        .build();
 
     let compiler = JitCompiler::new().expect("Failed to create compiler");
-    let result = compiler.compile(&lir, Vec::new());
+    let result = compiler.compile(&lir.view());
     assert!(
         matches!(result, Err(JitError::UnsupportedInstruction(_))),
         "StrictStruct variadic functions should be rejected: {:?}",
@@ -207,13 +208,13 @@ fn test_reject_strict_struct_variadic() {
 fn test_compile_list_variadic() {
     // AtLeast(1) + VarargKind::List should now compile successfully.
     // fn(x & rest) -> x  (ignores rest, just returns first arg)
-    let mut lir = make_simple_lir();
-    lir.arity = Arity::AtLeast(1);
-    lir.vararg_kind = crate::hir::VarargKind::List;
-    lir.num_params = 2; // x + rest
+    let lir = simple_fixture(Arity::AtLeast(1))
+        .vararg_kind(crate::hir::VarargKind::List)
+        .num_params(2) // x + rest
+        .build();
 
     let compiler = JitCompiler::new().expect("Failed to create compiler");
-    let result = compiler.compile(&lir, Vec::new());
+    let result = compiler.compile(&lir.view());
     assert!(
         result.is_ok(),
         "List variadic functions should compile: {:?}",
@@ -223,12 +224,11 @@ fn test_compile_list_variadic() {
 
 #[test]
 fn compile_records_entry_in_code_address_registry() {
-    let mut lir = make_simple_lir();
-    lir.name = Some("registry-probe-solo".to_string());
+    let lir = simple_fixture(Arity::Exact(1))
+        .name("registry-probe-solo")
+        .build();
     let compiler = JitCompiler::new().expect("Failed to create compiler");
-    let code = compiler
-        .compile(&lir, Vec::new())
-        .expect("Failed to compile");
+    let code = compiler.compile(&lir.view()).expect("Failed to compile");
     let entry = code.fn_ptr() as usize;
     let name = crate::jit::registry::snapshot()
         .into_iter()

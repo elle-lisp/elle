@@ -1,9 +1,15 @@
+// audited: 2026-10-06
+//! The analyzer's unit tests, and the syntax builders they share.
+//!
+//! docs/impl/hir.md
+
 use super::*;
 use crate::syntax::ScopeId;
 use crate::syntax::{thread_arena, SeqCtor, Span, Syntax, SyntaxArena, SyntaxKind};
 
 mod basics;
 mod bindings;
+mod environment;
 
 fn make_span() -> Span {
     Span::new(0, 0, 1, 1)

@@ -1,11 +1,11 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 // docs/impl/jit.md
 //! `JitCompiler`: the Cranelift module a compile owns, and the two entry points
-//! that drive one `LirFunction` through it.
+//! that drive one frozen function through it.
 //!
 //! `compile` produces native code and the `JitCode` that keeps it alive;
-//! `clif_text` stops at the rendered Cranelift IR, for diagnostics. Both refuse
-//! the same two shapes, and the refusals are the whole of what admission asks.
+//! `clif_text` stops at the rendered Cranelift IR, for diagnostics. `compile`
+//! refuses two shapes, and the refusals are the whole of what admission asks.
 
 use std::collections::HashMap;
 
@@ -18,7 +18,10 @@ use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{Linkage, Module};
 
-use crate::lir::{Label, LirFunction};
+use crate::lir::code::Op;
+#[cfg(test)]
+use crate::lir::LirOwned;
+use crate::lir::{Label, LirView};
 use crate::value::Arity;
 
 use super::code::JitCode;
@@ -26,15 +29,12 @@ use super::translate::{finalize_function, load_value_slot, FunctionTranslator};
 use super::vtable::{self, RuntimeHelpers};
 use super::JitError;
 
-/// What translating one function yields, kept alive by its `JitCode`:
-/// closure-template `Value`s referenced by `MakeClosure`, and string-literal
-/// template byte buffers the native code's baked pointers point into.
-type TranslatedConsts = (
-    Vec<std::rc::Rc<crate::value::TemplateProto>>,
-    Vec<Box<crate::value::ConstTemplate>>,
-);
+/// What translating one function yields, kept alive by its `JitCode`: the
+/// heap-literal templates the native code's baked pointers point into.
+#[allow(clippy::vec_box)] // the Box stable-address is the point (see `JitCode`)
+type TranslatedConsts = Vec<Box<crate::value::ConstTemplate>>;
 
-/// JIT compiler that translates LirFunction to native code
+/// JIT compiler that translates frozen LIR to native code
 pub struct JitCompiler {
     module: JITModule,
     /// Runtime helper function IDs
@@ -95,12 +95,8 @@ impl JitCompiler {
         sig
     }
 
-    /// Compile a LirFunction to native code
-    pub fn compile(
-        mut self,
-        lir: &LirFunction,
-        module_closures: Vec<LirFunction>,
-    ) -> Result<JitCode, JitError> {
+    /// Compile a frozen function to native code.
+    pub fn compile(mut self, lir: &LirView<'_>) -> Result<JitCode, JitError> {
         // Polymorphic and yielding functions are supported via side-exit.
         // The runtime helper elle_jit_call handles arbitrary callables
         // (closures, arrays, structs), and emit_yield_check_after_call
@@ -110,8 +106,8 @@ impl JitCompiler {
         // for error reporting on invalid keyword arguments. The JIT entry
         // block has no fiber pointer, so these fall back to the interpreter.
         // VarargKind::List variadics are fully supported (pair loop in entry block).
-        if matches!(lir.arity, Arity::AtLeast(_))
-            && !matches!(lir.vararg_kind, crate::hir::VarargKind::List)
+        if matches!(lir.arity(), Arity::AtLeast(_))
+            && !matches!(lir.vararg_kind(), crate::hir::VarargKind::List)
         {
             return Err(JitError::UnsupportedInstruction(
                 "variadic function with struct/named varargs".to_string(),
@@ -119,22 +115,18 @@ impl JitCompiler {
         }
 
         // Functions containing MakeClosure fall back to the interpreter. The
-        // translator handles MakeClosure (module_closures lookup + bytecode
-        // emission), but emitting every module closure's bytecode per compile
-        // costs more than the compile saves at a threshold of 1.
-        for block in &lir.blocks {
-            for si in &block.instructions {
-                if matches!(si.instr, crate::lir::LirInstr::MakeClosure { .. }) {
-                    return Err(JitError::UnsupportedInstruction("MakeClosure".to_string()));
-                }
-            }
+        // translator has no lowering for one: a closure's code object is a
+        // payload in a code region, and the worker has no heap to write one
+        // into (docs/impl/jit.md). Refusing here skips the translation.
+        if lir.has_op(Op::MakeClosure) {
+            return Err(JitError::UnsupportedInstruction("MakeClosure".to_string()));
         }
 
         // Create function signature
         let sig = self.make_jit_signature();
 
         // Declare the function
-        let func_name = lir.name.as_deref().unwrap_or("jit_func");
+        let func_name = lir.name().unwrap_or("jit_func");
         let func_id = self
             .module
             .declare_function(func_name, Linkage::Local, &sig)
@@ -146,8 +138,7 @@ impl JitCompiler {
         ctx.func.name = UserFuncName::user(0, func_id.as_u32());
 
         // Translate LIR to Cranelift IR
-        let (closure_protos, templates) =
-            self.translate_function(lir, &mut ctx.func, module_closures)?;
+        let templates = self.translate_function(lir, &mut ctx.func)?;
 
         // Compile the function
         self.module
@@ -163,25 +154,23 @@ impl JitCompiler {
 
         // Convert yield point metadata from LIR to JIT format
         let yield_metas: Vec<super::dispatch::YieldPointMeta> = lir
-            .yield_points
-            .iter()
+            .yield_points()
             .map(|yp| super::dispatch::YieldPointMeta {
                 resume_ip: yp.resume_ip,
                 num_spilled: yp.stack_regs.len() as u16,
                 num_locals: yp.num_locals,
-                num_params: lir.num_params as u16,
+                num_params: lir.num_params() as u16,
             })
             .collect();
 
         // Convert call site metadata from LIR to JIT format
         let call_site_metas: Vec<super::dispatch::CallSiteMeta> = lir
-            .call_sites
-            .iter()
+            .call_sites()
             .map(|cs| super::dispatch::CallSiteMeta {
                 resume_ip: cs.resume_ip,
                 num_spilled: cs.stack_regs.len() as u16,
                 num_locals: cs.num_locals,
-                num_params: lir.num_params as u16,
+                num_params: lir.num_params() as u16,
             })
             .collect();
 
@@ -191,17 +180,16 @@ impl JitCompiler {
             self.module,
             yield_metas,
             call_site_metas,
-            closure_protos,
             templates,
         ))
     }
 
-    /// Build Cranelift IR for a LirFunction and return it as lines of text.
+    /// Build Cranelift IR for a frozen function and return it as lines of text.
     /// Does NOT compile to native code — this is for diagnostic display only.
-    pub fn clif_text(mut self, lir: &LirFunction) -> Result<Vec<String>, JitError> {
+    pub fn clif_text(mut self, lir: &LirView<'_>) -> Result<Vec<String>, JitError> {
         let sig = self.make_jit_signature();
 
-        let func_name = lir.name.as_deref().unwrap_or("jit_func");
+        let func_name = lir.name().unwrap_or("jit_func");
         let func_id = self
             .module
             .declare_function(func_name, Linkage::Local, &sig)
@@ -211,8 +199,8 @@ impl JitCompiler {
         ctx.func.signature = sig;
         ctx.func.name = UserFuncName::user(0, func_id.as_u32());
 
-        self.translate_function(lir, &mut ctx.func, Vec::new())?;
-        // closure_constants from clif_text are discarded — diagnostic only
+        // The constant templates are discarded: no native code points into them.
+        self.translate_function(lir, &mut ctx.func)?;
 
         let text = format!("{}", ctx.func);
         Ok(text.lines().map(String::from).collect())

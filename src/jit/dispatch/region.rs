@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-10-06
 //! The JIT's region helpers: each mirrors one arm of the interpreter's region dispatch in src/vm/dispatch/region.rs.
 //!
 //! docs/impl/region/mechanism.md
@@ -73,7 +73,7 @@ pub extern "C" fn elle_jit_resolve_alloc_region(vm: *mut (), slot: u32) -> u32 {
 /// Resolve a **merged** slot's per-execution physical region with mint-or-reuse —
 /// the builder-idiom merge runtime (docs/impl/region/merging.md). The
 /// emitter calls this instead of `elle_jit_resolve_alloc_region` for a slot it
-/// found in `LirFunction.merged_slots` at compile time, so the first member (the
+/// found in `LirView::merged_slots` at compile time, so the first member (the
 /// child) mints `R` and a later member (the parent) reuses it: both land in one
 /// region freed by the single `DecrefRegion`. Without this the JIT would mint fresh
 /// for every member and diverge from the interpreter's region count (the merge tree

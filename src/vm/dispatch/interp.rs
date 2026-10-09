@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-06
 //! The interpreter's inner loop: decode one opcode, route it, and check what
 //! the handler left on the fiber.
 //!
@@ -143,9 +143,9 @@ impl VM {
 
     /// Inner execution loop that handles all instructions.
     ///
-    /// Takes `Rc` references to bytecode and constants so that yield and
-    /// call handlers can capture them cheaply (Rc clone, not data copy).
-    /// Derefs to slices for individual instruction handlers.
+    /// Takes the `Code`, one payload slice, so that yield and call handlers
+    /// capture it by copying a word. Reads its bytecode and constants as slices
+    /// for the individual instruction handlers.
     ///
     /// Returns the `Exit`: the signal, the IP at exit, and where an error was
     /// raised.
@@ -165,9 +165,15 @@ impl VM {
         let mut ip = start_ip;
         let mut instr_ip = start_ip;
 
-        // The template-derived context fields. Aliased here so the instruction
-        // handlers below read the same names they always have; `code` bundles
-        // them (see crate::value::Code).
+        // A `Code` takes no reference to its payload, so an activation that
+        // outlives its code would read pages the heap has freed. Resolving the
+        // payload's region checks the page's generation stamp, and a stale one
+        // panics here, naming the region (docs/impl/region/template.md).
+        #[cfg(debug_assertions)]
+        self.heap().region_of_ptr(code.template().payload_backing());
+
+        // The code object's fields the instruction handlers read, taken once
+        // per activation (see crate::value::Code).
         let bc: &[u8] = code.bytecode();
         let consts: &[Value] = code.constants();
         let locations = code.locations();
@@ -188,8 +194,9 @@ impl VM {
 
         // The executing-closure register is a possibly-dead borrow here: an
         // activation can outlive its closure's heap value (the region solver
-        // frees the value at its last use; `code`/`env` live on as `Rc`s), and a
-        // parked frame restores the register long after that. So it must NOT be
+        // frees the value at its last use; the `env` lives on as an `Rc`, and
+        // the `code` names a payload some other holder keeps), and a parked
+        // frame restores the register long after that. So it must NOT be
         // dereferenced at dispatch entry. Its identity is verified where the
         // callee is live by construction — at the body-entry installs
         // (`debug_assert_entry_closure_matches`) — and `LoadSelf`, its reader,

@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 // docs/impl/jit.md
 //! Lowering the region-count, type-test, data-access and parameter-frame instructions.
 
@@ -9,10 +9,10 @@ impl<'a> FunctionTranslator<'a> {
     pub(super) fn translate_instr_predicates(
         &mut self,
         builder: &mut FunctionBuilder,
-        instr: &LirInstr,
+        instr: &InstrRef<'_>,
     ) -> Result<bool, JitError> {
         match instr {
-            LirInstr::IncrefRegion { region_id } => {
+            InstrRef::IncrefRegion { region_id } => {
                 // Resolve the static slot through THIS activation's region map
                 // (in the helper), not as a physical region id. Mirror of the
                 // interpreter's defensive `IncrefRegion` arm.
@@ -26,7 +26,7 @@ impl<'a> FunctionTranslator<'a> {
                 builder.ins().call(func_ref, &[vm, rid]);
             }
 
-            LirInstr::DecrefRegion { region_id } => {
+            InstrRef::DecrefRegion { region_id } => {
                 // Resolve+clear the static slot through the activation map (in the
                 // helper via `take_runtime_region_for_drop_slot`) and decref the
                 // physical region — never treat the slot id as a physical region.
@@ -40,7 +40,7 @@ impl<'a> FunctionTranslator<'a> {
                 builder.ins().call(func_ref, &[vm, rid]);
             }
 
-            LirInstr::DecrefValueRegion { src } => {
+            InstrRef::DecrefValueRegion { src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("DecrefValueRegion without vm pointer".to_string())
@@ -51,7 +51,7 @@ impl<'a> FunctionTranslator<'a> {
                 builder.ins().call(func_ref, &[st, sp, vm]);
             }
 
-            LirInstr::DecrefCellRegion { src } => {
+            InstrRef::DecrefCellRegion { src } => {
                 // Free the CELL's own region via `region_of` (NOT
                 // `result_region_of`): `elle_jit_decref_cell_region`, mirroring
                 // the interpreter's `DecrefCellRegion` arm. `DecrefValueRegion`
@@ -68,7 +68,7 @@ impl<'a> FunctionTranslator<'a> {
                 builder.ins().call(func_ref, &[st, sp, vm]);
             }
 
-            LirInstr::IncrefValueRegion { src } => {
+            InstrRef::IncrefValueRegion { src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("IncrefValueRegion without vm pointer".to_string())
@@ -79,7 +79,7 @@ impl<'a> FunctionTranslator<'a> {
                 builder.ins().call(func_ref, &[st, sp, vm]);
             }
 
-            LirInstr::AdoptRegion { parent, child } => {
+            InstrRef::AdoptRegion { parent, child } => {
                 // Link the child's region as Owned by the parent's region — the
                 // runtime `AdoptRegion` (docs/impl/region/ownership.md § "Adoption and
                 // subtree drop"). Value-resolved like `IncrefValueRegion`/
@@ -98,7 +98,7 @@ impl<'a> FunctionTranslator<'a> {
                 let _ = builder.inst_results(call);
             }
 
-            LirInstr::AdoptCellRegion { parent, child } => {
+            InstrRef::AdoptCellRegion { parent, child } => {
                 // Like `AdoptRegion`, but the helper resolves BOTH operands with
                 // `region_of` (NOT `result_region_of`) so a `CaptureCell` operand's
                 // OWN region is adopted (the cell↔closure containment —
@@ -116,7 +116,7 @@ impl<'a> FunctionTranslator<'a> {
                 let _ = builder.inst_results(call);
             }
 
-            LirInstr::AdoptIntoActivation { child } => {
+            InstrRef::AdoptIntoActivation { child } => {
                 // Adopt the child's region into the current activation's owner
                 // node — the runtime channel of the activation-ownership cuts
                 // (docs/impl/region/owner.md § "Owner nodes"). Value-resolved
@@ -134,7 +134,7 @@ impl<'a> FunctionTranslator<'a> {
                 let _ = builder.inst_results(call);
             }
 
-            LirInstr::FreeRegionGroup { members } => {
+            InstrRef::FreeRegionGroup { members } => {
                 // Free a co-owned region group as one unit — the runtime
                 // `FreeRegionGroup`. Spill each member value to a stack slot
                 // (16 bytes: tag, payload) and pass a pointer + count to the
@@ -173,13 +173,14 @@ impl<'a> FunctionTranslator<'a> {
             // instrument; the JIT translates it to nothing. Coalesced sites on
             // the optimizing tiers are covered by cross-tier divergence + the
             // escape golden (docs/impl/region/mechanism.md § "the equivalence oracle").
-            LirInstr::AssertRegionMatches { .. } => {}
+            InstrRef::AssertRegionMatches { .. } => {}
 
-            LirInstr::PushParamFrame { pairs } => {
+            InstrRef::PushParamFrame { pairs } => {
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("PushParamFrame without vm pointer".to_string())
                 })?;
-                let count = pairs.len();
+                // `pairs` is flat, parameter first: one spill slot per register.
+                let count = pairs.len() / 2;
                 if count == 0 {
                     let null_ptr = builder.ins().iconst(I64, 0);
                     let count_val = builder.ins().iconst(I64, 0);
@@ -196,11 +197,9 @@ impl<'a> FunctionTranslator<'a> {
                             (count * 2 * 16) as u32,
                             0,
                         ));
-                    for (i, (param_reg, val_reg)) in pairs.iter().enumerate() {
-                        let (pt, pp) = self.use_var_pair(builder, param_reg.0);
-                        let (vt, vp) = self.use_var_pair(builder, val_reg.0);
-                        store_value_slot(builder, slot, (2 * i) as u32, pt, pp);
-                        store_value_slot(builder, slot, (2 * i + 1) as u32, vt, vp);
+                    for (i, reg) in pairs.iter().enumerate() {
+                        let (t, p) = self.use_var_pair(builder, reg.0);
+                        store_value_slot(builder, slot, i as u32, t, p);
                     }
                     let pairs_ptr = builder.ins().stack_addr(I64, slot, 0);
                     let count_val = builder.ins().iconst(I64, count as i64);
@@ -213,28 +212,28 @@ impl<'a> FunctionTranslator<'a> {
                 self.emit_exception_check_after_call(builder)?;
             }
 
-            LirInstr::PopParamFrame => {
+            InstrRef::PopParamFrame => {
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("PopParamFrame without vm pointer".to_string())
                 })?;
                 self.call_helper_vm_only(builder, self.helpers.pop_param_frame, vm)?;
             }
 
-            LirInstr::IsSet { dst, src } => {
+            InstrRef::IsSet { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let (rt, rp) =
                     self.call_helper_value_unary(builder, self.helpers.is_set, st, sp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::IsSetMut { dst, src } => {
+            InstrRef::IsSetMut { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let (rt, rp) =
                     self.call_helper_value_unary(builder, self.helpers.is_set_mut, st, sp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::CheckSignalBound { src, allowed_bits } => {
+            InstrRef::CheckSignalBound { src, allowed_bits } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let allowed_val = builder.ins().iconst(I64, allowed_bits.raw() as i64);
                 let vm = self.vm_ptr.ok_or_else(|| {
@@ -249,73 +248,73 @@ impl<'a> FunctionTranslator<'a> {
             }
 
             // === New intrinsic type predicates ===
-            LirInstr::IsEmpty { dst, src } => {
+            InstrRef::IsEmpty { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let (rt, rp) =
                     self.call_helper_value_unary(builder, self.helpers.is_empty, st, sp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
-            LirInstr::IsBool { dst, src } => {
+            InstrRef::IsBool { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let (rt, rp) =
                     self.call_helper_value_unary(builder, self.helpers.is_bool, st, sp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
-            LirInstr::IsInt { dst, src } => {
+            InstrRef::IsInt { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let (rt, rp) =
                     self.call_helper_value_unary(builder, self.helpers.is_int, st, sp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
-            LirInstr::IsFloat { dst, src } => {
+            InstrRef::IsFloat { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let (rt, rp) =
                     self.call_helper_value_unary(builder, self.helpers.is_float, st, sp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
-            LirInstr::IsString { dst, src } => {
+            InstrRef::IsString { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let (rt, rp) =
                     self.call_helper_value_unary(builder, self.helpers.is_string, st, sp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
-            LirInstr::IsKeyword { dst, src } => {
+            InstrRef::IsKeyword { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let (rt, rp) =
                     self.call_helper_value_unary(builder, self.helpers.is_keyword, st, sp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
-            LirInstr::IsSymbolCheck { dst, src } => {
+            InstrRef::IsSymbolCheck { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let (rt, rp) =
                     self.call_helper_value_unary(builder, self.helpers.is_symbol_check, st, sp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
-            LirInstr::IsBytes { dst, src } => {
+            InstrRef::IsBytes { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let (rt, rp) =
                     self.call_helper_value_unary(builder, self.helpers.is_bytes, st, sp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
-            LirInstr::IsBox { dst, src } => {
+            InstrRef::IsBox { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let (rt, rp) =
                     self.call_helper_value_unary(builder, self.helpers.is_box, st, sp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
-            LirInstr::IsClosure { dst, src } => {
+            InstrRef::IsClosure { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let (rt, rp) =
                     self.call_helper_value_unary(builder, self.helpers.is_closure, st, sp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
-            LirInstr::IsFiber { dst, src } => {
+            InstrRef::IsFiber { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let (rt, rp) =
                     self.call_helper_value_unary(builder, self.helpers.is_fiber, st, sp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
-            LirInstr::TypeOf { dst, src } => {
+            InstrRef::TypeOf { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let (rt, rp) =
                     self.call_helper_value_unary(builder, self.helpers.type_of, st, sp)?;
@@ -323,7 +322,7 @@ impl<'a> FunctionTranslator<'a> {
             }
 
             // === Data access ===
-            LirInstr::Length { dst, src } => {
+            InstrRef::Length { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 // `%length` segments string arms under the VM's Unicode
                 // generation, reached through the threaded `JitCtx` (passed in
@@ -333,14 +332,14 @@ impl<'a> FunctionTranslator<'a> {
                     self.call_helper_value_vm(builder, self.helpers.length, st, sp, jit_ctx)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
-            LirInstr::Get { dst, obj, key } => {
+            InstrRef::Get { dst, obj, key } => {
                 let (ot, op) = self.use_var_pair(builder, obj.0);
                 let (kt, kp) = self.use_var_pair(builder, key.0);
                 let (rt, rp) =
                     self.call_helper_value_binary(builder, self.helpers.get, ot, op, kt, kp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
-            LirInstr::Put { dst, obj, key, val } => {
+            InstrRef::Put { dst, obj, key, val } => {
                 let (ot, op) = self.use_var_pair(builder, obj.0);
                 let (kt, kp) = self.use_var_pair(builder, key.0);
                 let (vt, vp) = self.use_var_pair(builder, val.0);
@@ -357,7 +356,7 @@ impl<'a> FunctionTranslator<'a> {
                 let rp = builder.inst_results(call)[1];
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
-            LirInstr::Del { dst, obj, key } => {
+            InstrRef::Del { dst, obj, key } => {
                 let (ot, op) = self.use_var_pair(builder, obj.0);
                 let (kt, kp) = self.use_var_pair(builder, key.0);
                 let jit_ctx = self.jit_ctx()?;
@@ -372,7 +371,7 @@ impl<'a> FunctionTranslator<'a> {
                 )?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
-            LirInstr::Has { dst, obj, key } => {
+            InstrRef::Has { dst, obj, key } => {
                 let (ot, op) = self.use_var_pair(builder, obj.0);
                 let (kt, kp) = self.use_var_pair(builder, key.0);
                 let jit_ctx = self.jit_ctx()?;
@@ -387,7 +386,7 @@ impl<'a> FunctionTranslator<'a> {
                 )?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
-            LirInstr::IntrPush { dst, array, value } => {
+            InstrRef::IntrPush { dst, array, value } => {
                 let (at, ap) = self.use_var_pair(builder, array.0);
                 let (vt, vp) = self.use_var_pair(builder, value.0);
                 let jit_ctx = self.jit_ctx()?;
@@ -402,7 +401,7 @@ impl<'a> FunctionTranslator<'a> {
                 )?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
-            LirInstr::IntrStringPush { dst, string, value } => {
+            InstrRef::IntrStringPush { dst, string, value } => {
                 let (st, sp) = self.use_var_pair(builder, string.0);
                 let (vt, vp) = self.use_var_pair(builder, value.0);
                 let jit_ctx = self.jit_ctx()?;
@@ -417,7 +416,7 @@ impl<'a> FunctionTranslator<'a> {
                 )?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
-            LirInstr::IntrBytesPush { dst, bytes, value } => {
+            InstrRef::IntrBytesPush { dst, bytes, value } => {
                 let (bt, bp) = self.use_var_pair(builder, bytes.0);
                 let (vt, vp) = self.use_var_pair(builder, value.0);
                 let jit_ctx = self.jit_ctx()?;
@@ -432,7 +431,7 @@ impl<'a> FunctionTranslator<'a> {
                 )?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
-            LirInstr::Pop { dst, src } => {
+            InstrRef::Pop { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 // `%pop` decrefs the popped value's region on the instance's own
                 // heap, reached through the threaded `JitCtx` (passed in the vm
@@ -451,7 +450,7 @@ impl<'a> FunctionTranslator<'a> {
             // to the helper so the fresh copy is born in that region. Mirrors the
             // interpreter's `runtime_region_for_alloc_slot` +
             // `handle_intr_freeze/thaw(region)`.
-            LirInstr::Freeze { dst, src, region } => {
+            InstrRef::Freeze { dst, src, region } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let region_val = self.emit_resolve_alloc_region(builder, *region)?;
                 let jit_ctx = self.jit_ctx()?;
@@ -463,7 +462,7 @@ impl<'a> FunctionTranslator<'a> {
                 let rp = builder.inst_results(call)[1];
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
-            LirInstr::Thaw { dst, src, region } => {
+            InstrRef::Thaw { dst, src, region } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let region_val = self.emit_resolve_alloc_region(builder, *region)?;
                 let jit_ctx = self.jit_ctx()?;
@@ -477,7 +476,7 @@ impl<'a> FunctionTranslator<'a> {
             }
 
             // === Identity ===
-            LirInstr::Identical { dst, lhs, rhs } => {
+            InstrRef::Identical { dst, lhs, rhs } => {
                 let (lt, lp) = self.use_var_pair(builder, lhs.0);
                 let (rt, rp) = self.use_var_pair(builder, rhs.0);
                 let (crt, crp) =

@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-10-06
 //! The verifier's second pass: every mapped object against the tag its index
 //! claims, and every extent it names against the image's bounds.
 //!
@@ -12,12 +12,11 @@
 
 use std::mem::{align_of, size_of};
 
-use crate::syntax::{ScopeId, Syntax, SyntaxKind};
-use crate::value::closure::{CodePayload, LocEntry};
+use crate::syntax::{Syntax, SyntaxKind};
+use crate::value::closure::CodePayload;
 use crate::value::fiberheap::regionpool::HEADER_SIZE;
 use crate::value::heap::{HeapObject, HeapTag};
 use crate::value::region_slice::RegionSlice;
-use crate::value::{TableKey, Value};
 
 use super::super::layout::{self, Probed};
 use super::super::ImageError;
@@ -52,19 +51,20 @@ pub(crate) fn objects(
 
         // SAFETY: the discriminant byte matches a probed variant, and every
         // probed variant tolerates arbitrary bit patterns in its fields
-        // (raw pointers, integers, floats, `Value` words). A header's
-        // blueprint word is the one exception a bit pattern could hurt —
-        // dropping a fabricated `Rc` — and the check below refuses it while
-        // it is still only a word being read.
+        // (raw pointers, integers, floats, `Value` words), none of them an
+        // owner a drop would follow.
         let obj = unsafe { &*((base + off) as *const HeapObject) };
         for extent in slice_extents(obj).into_iter().flatten() {
-            check_extent(base, pages, off, extent)?;
+            if !within(base, pages, extent) {
+                return Err(ImageError::Corrupt(format!(
+                    "the object at {off} names data outside the image"
+                )));
+            }
         }
 
-        // A header names exactly one payload, its blueprint hydrates as
-        // absent, its own slices are bounded through the shell the extent
-        // above just admitted, and its child table names headers
-        // (docs/impl/image/sealing.md).
+        // A header names exactly one payload, the payload's own slices are
+        // bounded through the shell the extent above just admitted, and its
+        // child table names headers (docs/impl/image/sealing.md).
         if let HeapObject::ClosureTemplate(t) = obj {
             let slice = t.payload_slice();
             if slice.len() != 1 {
@@ -78,48 +78,52 @@ pub(crate) fn objects(
                     "the header at {off} names a misaligned payload"
                 )));
             }
-            if t.proto().is_some() {
-                return Err(ImageError::Corrupt(format!(
-                    "the header at {off} carries a blueprint pointer, which no image writes"
-                )));
-            }
-            for extent in payload_extents(t.payload()).into_iter().flatten() {
-                check_extent(base, pages, off, extent)?;
-            }
-            for extent in payload_name_extents(t.payload()).into_iter().flatten() {
-                check_extent(base, pages, off, extent)?;
-            }
+            payload_within(base, pages, off, payload_extents(t.payload()))?;
+            payload_within(base, pages, off, payload_name_extents(t.payload()))?;
             children_are_headers(base, off, t.payload(), objects)?;
         }
     }
     Ok(())
 }
 
-/// One region-backed extent stays inside the mapped pages' inline-data span.
-fn check_extent(
+/// Whether one region-backed extent stays inside the mapped pages'
+/// inline-data span.
+fn within(base: usize, pages: &[MappedPage], (ptr, bytes): (usize, usize)) -> bool {
+    let Some(start) = ptr.checked_sub(base) else {
+        return false;
+    };
+    let Some(end) = start.checked_add(bytes) else {
+        return false;
+    };
+    let Ok(backing) = page_of(pages, start) else {
+        return false;
+    };
+    // Inline data bumps down from the end of the page, so a backing
+    // runs from the data cursor to the page's end and no further.
+    start >= backing.start + backing.entry.data_cursor as usize
+        && end <= backing.start + backing.entry.size as usize
+}
+
+/// A payload extent, named by the field that holds it. A payload names
+/// over twenty slices, so a refusal that says which one is the difference
+/// between a diagnosis and a search.
+type Named = (&'static str, Option<(usize, usize)>);
+
+/// Every named extent of the header at `off` stays inside the image.
+fn payload_within(
     base: usize,
     pages: &[MappedPage],
     off: usize,
-    (ptr, bytes): (usize, usize),
+    extents: Vec<Named>,
 ) -> Result<(), ImageError> {
-    let start = ptr
-        .checked_sub(base)
-        .filter(|_| ptr >= base)
-        .ok_or_else(|| extent_error(off))?;
-    let end = start.checked_add(bytes).ok_or_else(|| extent_error(off))?;
-    let backing = page_of(pages, start)?;
-    // Inline data bumps down from the end of the page, so a backing
-    // runs from the data cursor to the page's end and no further.
-    if start < backing.start + backing.entry.data_cursor as usize
-        || end > backing.start + backing.entry.size as usize
-    {
-        return Err(extent_error(off));
+    for (field, extent) in extents {
+        if extent.is_some_and(|e| !within(base, pages, e)) {
+            return Err(ImageError::Corrupt(format!(
+                "the header at {off} names {field} outside the image"
+            )));
+        }
     }
     Ok(())
-}
-
-fn extent_error(off: usize) -> ImageError {
-    ImageError::Corrupt(format!("the object at {off} names data outside the image"))
 }
 
 /// The page holding image offset `off`.
@@ -153,138 +157,64 @@ fn discriminant(base: usize, off: usize, tag: HeapTag) -> Result<(), ImageError>
 
 /// The region-backed extents an object names, in bytes. Most name one; a
 /// syntax object names two, because its root node rides in the shell and
-/// carries both a scope set and its kind's payload. An empty slice has a
-/// dangling constant pointer and no backing, so it names nothing.
+/// carries both a scope set and its kind's payload.
 fn slice_extents(obj: &HeapObject) -> [Option<(usize, usize)>; 2] {
-    // The unit is the element's size, not a `Value`'s: a struct's entries are
-    // (key, value) pairs, so the same length names a much longer extent.
-    let one = |ptr: *const u8, len: usize, unit: usize| {
-        (len != 0).then(|| (ptr as usize, len.saturating_mul(unit)))
-    };
     match obj {
-        HeapObject::LString { s, .. } => [one(s.as_ptr(), s.len(), 1), None],
-        HeapObject::LBytes { data, .. } => [one(data.as_ptr(), data.len(), 1), None],
-        HeapObject::LArray { elements, .. } => [
-            one(
-                elements.as_ptr() as *const u8,
-                elements.len(),
-                size_of::<Value>(),
-            ),
-            None,
-        ],
-        HeapObject::LSet { data, .. } => [
-            one(data.as_ptr() as *const u8, data.len(), size_of::<Value>()),
-            None,
-        ],
-        HeapObject::LStruct { data, .. } => [
-            one(
-                data.as_ptr() as *const u8,
-                data.len(),
-                size_of::<(TableKey, Value)>(),
-            ),
-            None,
-        ],
-        HeapObject::Syntax { syntax, .. } => [
-            one(
-                syntax.scopes.as_ptr() as *const u8,
-                syntax.scopes.len(),
-                size_of::<ScopeId>(),
-            ),
-            kind_extent(&syntax.kind, &one),
-        ],
-        HeapObject::Closure { closure, .. } => [
-            one(
-                closure.env.as_ptr() as *const u8,
-                closure.env.len(),
-                size_of::<Value>(),
-            ),
-            None,
-        ],
-        HeapObject::ClosureTemplate(t) => {
-            let slice = t.payload_slice();
-            [
-                one(
-                    slice.as_ptr() as *const u8,
-                    slice.len(),
-                    size_of::<CodePayload>(),
-                ),
-                None,
-            ]
-        }
+        HeapObject::LString { s, .. } => [extent(s), None],
+        HeapObject::LBytes { data, .. } => [extent(data), None],
+        HeapObject::LArray { elements, .. } => [extent(elements), None],
+        HeapObject::LSet { data, .. } => [extent(data), None],
+        HeapObject::LStruct { data, .. } => [extent(data), None],
+        HeapObject::Syntax { syntax, .. } => [extent(&syntax.scopes), kind_extent(&syntax.kind)],
+        HeapObject::Closure { closure, .. } => [extent(&closure.env), None],
+        HeapObject::ClosureTemplate(t) => [extent(t.payload_slice()), None],
         _ => [None, None],
     }
 }
 
-/// The extents a code payload names: one per non-empty slice field, plus one
-/// per file name and `&named` key behind the two nested slices. The caller
-/// has already bounded the payload struct itself, so reading it here is a
-/// read of admitted bytes.
-fn payload_extents(p: &CodePayload) -> Vec<Option<(usize, usize)>> {
-    let one = |ptr: *const u8, len: usize, unit: usize| {
-        (len != 0).then(|| (ptr as usize, len.saturating_mul(unit)))
-    };
+/// The extent a slice names, in bytes, or `None` for an empty slice, whose
+/// pointer is a dangling constant with no backing.
+fn extent<T>(s: &RegionSlice<T>) -> Option<(usize, usize)> {
+    (!s.is_empty()).then(|| (s.as_ptr() as usize, s.len().saturating_mul(size_of::<T>())))
+}
+
+/// The extents a code payload names: one per non-empty slice field, its LIR
+/// body's included. The caller has already bounded the payload struct itself,
+/// so reading it here is a read of admitted bytes.
+fn payload_extents(p: &CodePayload) -> Vec<Named> {
+    let lir = &p.lir;
     vec![
-        one(p.bytecode.as_ptr(), p.bytecode.len(), 1),
-        one(
-            p.constants.as_ptr() as *const u8,
-            p.constants.len(),
-            size_of::<Value>(),
-        ),
-        one(
-            p.locations.as_ptr() as *const u8,
-            p.locations.len(),
-            size_of::<LocEntry>(),
-        ),
-        one(
-            p.files.as_ptr() as *const u8,
-            p.files.len(),
-            size_of::<RegionSlice<u8>>(),
-        ),
-        one(p.name.as_ptr(), p.name.len(), 1),
-        one(p.doc.as_ptr(), p.doc.len(), 1),
-        one(
-            p.region_table.as_ptr() as *const u8,
-            p.region_table.len(),
-            size_of::<crate::hir::region::StaticRegion>(),
-        ),
-        one(
-            p.merged_slots.as_ptr() as *const u8,
-            p.merged_slots.len(),
-            size_of::<u32>(),
-        ),
-        one(
-            p.frame_release_slots.as_ptr() as *const u8,
-            p.frame_release_slots.len(),
-            size_of::<u16>(),
-        ),
-        one(
-            p.frame_release_regions.as_ptr() as *const u8,
-            p.frame_release_regions.len(),
-            size_of::<u32>(),
-        ),
-        one(
-            p.capture_locals.as_ptr() as *const u8,
-            p.capture_locals.len(),
-            size_of::<u64>(),
-        ),
-        one(
-            p.strict_keys.as_ptr() as *const u8,
-            p.strict_keys.len(),
-            size_of::<RegionSlice<u8>>(),
-        ),
-        one(
-            p.children.as_ptr() as *const u8,
-            p.children.len(),
-            size_of::<Value>(),
-        ),
+        ("bytecode", extent(&p.bytecode)),
+        ("constants", extent(&p.constants)),
+        ("locations", extent(&p.locations)),
+        ("files", extent(&p.files)),
+        ("name", extent(&p.name)),
+        ("doc", extent(&p.doc)),
+        ("region_table", extent(&p.region_table)),
+        ("merged_slots", extent(&p.merged_slots)),
+        ("frame_release_slots", extent(&p.frame_release_slots)),
+        ("frame_release_regions", extent(&p.frame_release_regions)),
+        ("capture_locals", extent(&p.capture_locals)),
+        ("strict_keys", extent(&p.strict_keys)),
+        ("children", extent(&p.children)),
+        ("lir.nodes", extent(&lir.nodes)),
+        ("lir.blocks", extent(&lir.blocks)),
+        ("lir.pool", extent(&lir.pool)),
+        ("lir.consts", extent(&lir.consts)),
+        ("lir.data", extent(&lir.data)),
+        ("lir.files", extent(&lir.files)),
+        ("lir.values", extent(&lir.values)),
+        ("lir.yield_points", extent(&lir.yield_points)),
+        ("lir.call_sites", extent(&lir.call_sites)),
+        ("lir.site_regs", extent(&lir.site_regs)),
     ]
 }
 
 /// Every child slot names an object the index calls a header.
 ///
 /// The one slot in the body whose target is read back as a header — its
-/// payload slice dereferenced, its blueprint word trusted — where every other
-/// slot's target is read as data. So a range check is not enough for this one
+/// payload slice dereferenced — where every other slot's target is read as
+/// data. So a range check is not enough for this one
 /// (docs/impl/image/sealing.md).
 fn children_are_headers(
     base: usize,
@@ -299,10 +229,7 @@ fn children_are_headers(
     };
     for child in p.children.iter() {
         let ptr = child.as_heap_ptr().ok_or_else(wrong)? as usize;
-        let at = ptr
-            .checked_sub(base)
-            .filter(|_| ptr >= base)
-            .ok_or_else(wrong)?;
+        let at = ptr.checked_sub(base).ok_or_else(wrong)?;
         // The index is written sorted by offset, so this is a binary search
         // over a table the first pass already bounded.
         let found = objects
@@ -315,32 +242,31 @@ fn children_are_headers(
     Ok(())
 }
 
-/// The byte extents behind a payload's two name slices. Read only after
+/// The byte extents behind a payload's three name tables. Read only after
 /// [`payload_extents`] passed: the headers these iterate live inside the
-/// `files` and `strict_keys` extents, and reading them earlier would chase a
-/// length nothing has bounded yet.
-fn payload_name_extents(p: &CodePayload) -> Vec<Option<(usize, usize)>> {
-    let one = |ptr: *const u8, len: usize| (len != 0).then_some((ptr as usize, len));
-    [&p.files, &p.strict_keys]
-        .into_iter()
-        .flat_map(|names| names.iter())
-        .map(|inner| one(inner.as_ptr(), inner.len()))
-        .collect()
+/// `files`, `strict_keys` and `lir.files` extents, and reading them earlier
+/// would chase a length nothing has bounded yet.
+fn payload_name_extents(p: &CodePayload) -> Vec<Named> {
+    [
+        ("an entry of files", &p.files),
+        ("an entry of strict_keys", &p.strict_keys),
+        ("an entry of lir.files", &p.lir.files),
+    ]
+    .into_iter()
+    .flat_map(|(field, names)| names.iter().map(move |inner| (field, extent(inner))))
+    .collect()
 }
 
 /// The extent a node's kind names: a region string's bytes, or its child
 /// nodes. A wrapping kind names one node, and an atom names nothing.
-fn kind_extent(
-    kind: &SyntaxKind,
-    one: &impl Fn(*const u8, usize, usize) -> Option<(usize, usize)>,
-) -> Option<(usize, usize)> {
+fn kind_extent(kind: &SyntaxKind) -> Option<(usize, usize)> {
     use SyntaxKind::*;
     match kind {
-        Symbol(s) | Keyword(s) | String(s) | StringMut(s) => one(s.as_ptr(), s.len(), 1),
+        Symbol(s) | Keyword(s) | String(s) | StringMut(s) => extent(&s.bytes()),
         List(n) | Array(n) | ArrayMut(n) | Struct(n) | StructMut(n) | Set(n) | SetMut(n)
-        | Bytes(n) | BytesMut(n) => one(n.as_ptr() as *const u8, n.len(), size_of::<Syntax>()),
+        | Bytes(n) | BytesMut(n) => extent(n),
         Quote(r) | Quasiquote(r) | Unquote(r) | UnquoteSplicing(r) | Splice(r)
-        | SyntaxLiteral(r) => one(r.as_ptr() as *const u8, 1, size_of::<Syntax>()),
+        | SyntaxLiteral(r) => Some((r.as_ptr() as usize, size_of::<Syntax>())),
         Nil | Bool(_) | Int(_) | Float(_) => None,
     }
 }

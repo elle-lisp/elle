@@ -1,10 +1,30 @@
-//! Access path loading for pattern matching.
+// audited: 2026-10-06
+//! Loading a value along a pattern's access path, and the constants a struct pattern's keys lower to.
 //!
-//! Computes how to destructure a value by following a chain of field
-//! accesses (car, cdr, array index, struct key) from the scrutinee root.
+//! docs/impl/lir.md
+//!
+//! An access path is a chain of field accesses (car, cdr, array index, struct
+//! key) from the scrutinee root.
 
 use super::*;
 use crate::hir::PatternKey;
+
+/// The immediate a struct pattern's key lowers to: a keyword's hash, or a
+/// symbol's id.
+pub(super) fn pattern_key_const(key: &PatternKey) -> ConstRef {
+    match key {
+        PatternKey::Keyword(k) => ConstRef::Keyword(crate::value::keyword::keyword_hash(k)),
+        PatternKey::Symbol(sid) => ConstRef::Symbol(*sid),
+    }
+}
+
+/// The records a `StructRest` carries as its excluded keys, one per key the
+/// pattern names.
+pub(super) fn excluded_keys<'k>(keys: impl IntoIterator<Item = &'k PatternKey>) -> Vec<ConstRec> {
+    keys.into_iter()
+        .map(|k| ConstRec::immediate(pattern_key_const(k)))
+        .collect()
+}
 
 impl<'a> Lowerer<'a> {
     /// Load a value by following an access path from the scrutinee.
@@ -20,7 +40,7 @@ impl<'a> Lowerer<'a> {
         match access {
             AccessPath::Root => {
                 let dst = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
+                self.emit(InstrRef::LoadLocal {
                     dst,
                     slot: scrutinee_slot,
                 });
@@ -29,19 +49,19 @@ impl<'a> Lowerer<'a> {
             AccessPath::First(inner) => {
                 let parent = self.load_access_path(inner, scrutinee_slot)?;
                 let dst = self.fresh_reg();
-                self.emit(LirInstr::First { dst, pair: parent });
+                self.emit(InstrRef::First { dst, pair: parent });
                 Ok(dst)
             }
             AccessPath::Rest(inner) => {
                 let parent = self.load_access_path(inner, scrutinee_slot)?;
                 let dst = self.fresh_reg();
-                self.emit(LirInstr::Rest { dst, pair: parent });
+                self.emit(InstrRef::Rest { dst, pair: parent });
                 Ok(dst)
             }
             AccessPath::Index(inner, idx) => {
                 let parent = self.load_access_path(inner, scrutinee_slot)?;
                 let dst = self.fresh_reg();
-                self.emit(LirInstr::ArrayMutRefDestructure {
+                self.emit(InstrRef::ArrayMutRefDestructure {
                     dst,
                     src: parent,
                     index: *idx as u16,
@@ -51,7 +71,7 @@ impl<'a> Lowerer<'a> {
             AccessPath::Slice(inner, start) => {
                 let parent = self.load_access_path(inner, scrutinee_slot)?;
                 let dst = self.fresh_reg();
-                self.emit(LirInstr::ArrayMutSliceFrom {
+                self.emit(InstrRef::ArrayMutSliceFrom {
                     dst,
                     src: parent,
                     index: *start as u16,
@@ -61,35 +81,21 @@ impl<'a> Lowerer<'a> {
             AccessPath::Key(inner, key) => {
                 let parent = self.load_access_path(inner, scrutinee_slot)?;
                 let dst = self.fresh_reg();
-                let lir_key = match key {
-                    PatternKey::Keyword(k) => {
-                        LirConst::Keyword(crate::value::keyword::keyword_hash(k))
-                    }
-                    PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
-                };
-                self.emit(LirInstr::StructGetOrNil {
+                self.emit(InstrRef::StructGetOrNil {
                     dst,
                     src: parent,
-                    key: lir_key,
+                    key: pattern_key_const(key),
                 });
                 Ok(dst)
             }
             AccessPath::StructRest(inner, exclude_keys) => {
                 let src_reg = self.load_access_path(inner, scrutinee_slot)?;
                 let rest_reg = self.fresh_reg();
-                let lir_exclude: Vec<LirConst> = exclude_keys
-                    .iter()
-                    .map(|k| match k {
-                        PatternKey::Keyword(s) => {
-                            LirConst::Keyword(crate::value::keyword::keyword_hash(s))
-                        }
-                        PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
-                    })
-                    .collect();
-                self.emit(LirInstr::StructRest {
+                let keys = excluded_keys(exclude_keys);
+                self.emit(InstrRef::StructRest {
                     dst: rest_reg,
                     src: src_reg,
-                    exclude_keys: lir_exclude,
+                    exclude_keys: ConstList::new(&keys),
                 });
                 Ok(rest_reg)
             }

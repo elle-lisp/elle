@@ -1,17 +1,14 @@
-// audited: 2026-09-21
+// audited: 2026-10-07
 //! Read a hydrated boot image's macro table back into an expander.
 //!
 //! docs/impl/image/boot.md
 //!
-//! A macro entry is a struct, so reading one is four field lookups and a
+//! A macro entry is a struct, so reading one is five field lookups and a
 //! borrow of the tree it names. The tree stays where it is: the hydrated
 //! region is a process root, so it outlives every expansion that reads it.
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use crate::symbol::SymbolTable;
-use crate::syntax::{Expander, MacroDef};
+use crate::syntax::{Expander, MacroDef, MacroParams};
 use crate::value::fiberheap::FiberHeap;
 use crate::value::{TableKey, Value};
 
@@ -43,10 +40,9 @@ pub(super) fn check_names(boot: &Boot, symbols: &SymbolTable) -> Result<(), Imag
 /// Define every macro the image carries on `expander`.
 ///
 /// Each filled transformer cell takes a reference to the region its closure
-/// lives in — the image's own — because the teardown that empties these cells
-/// releases one per cell (`Expander::release_cached_transformers`). Without the
-/// reference here that release would decref the whole boot graph once per
-/// macro.
+/// lives in — the image's own — because a cell releases one when it empties,
+/// at teardown or when its last definition drops. Without the reference here
+/// that release would decref the whole boot graph once per macro.
 pub(super) fn macros(
     heap: &mut FiberHeap,
     boot: &Boot,
@@ -79,19 +75,18 @@ pub(super) fn macros(
 fn macro_def(heap: &mut FiberHeap, name: &str, entry: Value) -> Option<MacroDef> {
     let tree = field(entry, key::TEMPLATE)?;
     let template = *tree.as_syntax()?;
-    let transformer = field(entry, key::TRANSFORMER).filter(|v| !v.is_nil());
-    if let Some(v) = transformer {
+    let params = MacroParams::fixed(strings(entry, key::PARAMS))
+        .with_optional(strings(entry, key::OPTIONAL))
+        .with_rest(field_text(entry, key::REST));
+    let def = MacroDef::new(name, params, template);
+    if let Some(v) = field(entry, key::TRANSFORMER).filter(|v| !v.is_nil()) {
         let region = crate::value::arena::region_of(heap, v);
         crate::value::arena::incref_region(heap, region);
+        // Safe: the transformer is in the image's region on `heap`, and the
+        // instance this installs into owns that heap and drops it last.
+        unsafe { def.transformer().fill(heap, v) };
     }
-    Some(MacroDef {
-        name: name.to_string(),
-        params: strings(entry, key::PARAMS),
-        optional_params: strings(entry, key::OPTIONAL),
-        rest_param: field_text(entry, key::REST),
-        template,
-        cached_transformer: Rc::new(RefCell::new(transformer)),
-    })
+    Some(def)
 }
 
 /// A parameter list: the strings of the array the entry holds under `name`.

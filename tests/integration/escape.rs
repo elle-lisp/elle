@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-10-06
 // Programs whose result depends on regions freeing scoped values on time and keeping escaping ones alive.
 // docs/regions.md
 //
@@ -18,7 +18,7 @@ fn compile(
     source: &str,
     symbols: &mut SymbolTable,
     source_name: &str,
-) -> Result<elle::CompileResult, String> {
+) -> Result<elle::CodeUnit, String> {
     let mut cctx = elle::pipeline::CompileCtx::new();
     elle::pipeline::compile(source, symbols, &mut cctx, source_name)
 }

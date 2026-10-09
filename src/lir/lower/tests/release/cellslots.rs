@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! A compiled capture cell gets a region slot of its own, and its init is released only after the store into it.
 //!
 //! docs/impl/region/cells.md
@@ -37,19 +37,17 @@ fn preallocated_capture_cells_get_distinct_regions_each_released() {
     // `DecrefRegion` (the Shared baseline) OR by adoption (an `AdoptCellRegion` links it
     // into a subtree) — never silently dropped, and never sharing a slot.
     fn collect(
-        func: &LirFunction,
+        func: &LirOwned,
         cells: &mut Vec<StaticRegion>,
         decrefs: &mut Vec<StaticRegion>,
         adopt_cells: &mut usize,
     ) {
-        for b in &func.blocks {
-            for i in &b.instructions {
-                match &i.instr {
-                    LirInstr::MakeCaptureCell { region, .. } => cells.push(*region),
-                    LirInstr::DecrefRegion { region_id } => decrefs.push(*region_id),
-                    LirInstr::AdoptCellRegion { .. } => *adopt_cells += 1,
-                    _ => {}
-                }
+        for i in flat_instrs(func) {
+            match i {
+                InstrRef::MakeCaptureCell { region, .. } => cells.push(region),
+                InstrRef::DecrefRegion { region_id } => decrefs.push(region_id),
+                InstrRef::AdoptCellRegion { .. } => *adopt_cells += 1,
+                _ => {}
             }
         }
     }
@@ -111,24 +109,24 @@ fn letrec_init_release_fires_after_cell_store() {
                   gg (fn (x) x)] \
            1)",
     );
-    fn check(func: &LirFunction) {
-        for b in &func.blocks {
+    fn check(func: &LirOwned) {
+        for b in func.view().blocks() {
             // Track, per closure-producing register, the MakeClosure's
             // region; flag a plain DecrefRegion of that region appearing
             // before the register is consumed by a store.
             let mut pending: Vec<(Reg, StaticRegion)> = Vec::new();
-            for (idx, i) in b.instructions.iter().enumerate() {
-                match &i.instr {
-                    LirInstr::MakeClosure { dst, region, .. } => {
-                        pending.push((*dst, *region));
+            for (idx, i) in b.instrs().enumerate() {
+                match i {
+                    InstrRef::MakeClosure { dst, region, .. } => {
+                        pending.push((dst, region));
                     }
-                    LirInstr::StoreCaptureCell { value, .. }
-                    | LirInstr::StoreLocal { src: value, .. } => {
-                        pending.retain(|(r, _)| r != value);
+                    InstrRef::StoreCaptureCell { value, .. }
+                    | InstrRef::StoreLocal { src: value, .. } => {
+                        pending.retain(|(r, _)| *r != value);
                     }
-                    LirInstr::DecrefRegion { region_id } => {
+                    InstrRef::DecrefRegion { region_id } => {
                         assert!(
-                            !pending.iter().any(|(_, reg)| reg == region_id),
+                            !pending.iter().any(|(_, reg)| *reg == region_id),
                             "DecrefRegion({region_id:?}) at instr {idx} fires between a \
                              MakeClosure into that region and the store that consumes \
                              the closure — the value is freed before the cell's \

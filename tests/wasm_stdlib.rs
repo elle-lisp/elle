@@ -1,4 +1,6 @@
-//! Test: can we compile and run stdlib.lisp through WASM?
+// audited: 2026-10-06
+// docs/impl/wasm.md
+//! The standard library through the WASM backend: lowered, emitted, validated and run.
 #![cfg(feature = "wasm")]
 
 const STDLIB: &str = include_str!("../src/stdlib.lisp");
@@ -17,7 +19,7 @@ fn compile_stdlib_to_bytecode() {
     let mut core = setup();
     let (_vm, symbols, cctx) = core.parts();
     match elle::pipeline::compile_file(STDLIB, symbols, cctx, "<stdlib>") {
-        Ok(r) => eprintln!("stdlib bytecode: {} bytes", r.bytecode.instructions.len()),
+        Ok(unit) => eprintln!("stdlib bytecode: {} bytes", unit.entry().bytecode().len()),
         Err(e) => panic!("stdlib bytecode compilation failed: {}", e),
     }
 }
@@ -30,9 +32,9 @@ fn compile_stdlib_to_lir() {
         Ok(lir) => {
             eprintln!(
                 "stdlib LIR: {} blocks, {} regs, {} locals",
-                lir.entry.blocks.len(),
-                lir.entry.num_regs,
-                lir.entry.num_locals
+                lir.entry.view().block_count(),
+                lir.entry.view().num_regs(),
+                lir.entry.view().num_locals()
             );
         }
         Err(e) => panic!("stdlib compilation to LIR failed: {}", e),
@@ -111,10 +113,9 @@ fn run_stdlib_on_wasm() {
         result.wasm_bytes.len(),
         result.const_pool.len(),
         lir.entry
-            .blocks
-            .iter()
-            .flat_map(|b| b.instructions.iter())
-            .filter(|i| matches!(i.instr, elle::lir::LirInstr::MakeClosure { .. }))
+            .view()
+            .nodes()
+            .filter(|n| n.op() == elle::lir::code::Op::MakeClosure)
             .count()
     );
 
@@ -123,10 +124,11 @@ fn run_stdlib_on_wasm() {
     match elle::wasm::store::compile_module(&engine, &result.wasm_bytes) {
         Ok(_) => eprintln!("WASM module compiled successfully"),
         Err(e) => {
-            // Dump WASM for inspection (/dev/shm — /tmp is off-limits here)
-            let mut f = std::fs::File::create("/dev/shm/stdlib_test.wasm").unwrap();
-            std::io::Write::write_all(&mut f, &result.wasm_bytes).unwrap();
-            eprintln!("Wrote WASM to /dev/shm/stdlib_test.wasm");
+            // Keep the module for inspection, under a name no other run shares.
+            let path =
+                std::env::temp_dir().join(format!("elle-stdlib-test-{}.wasm", std::process::id()));
+            std::fs::write(&path, &result.wasm_bytes).unwrap();
+            eprintln!("Wrote WASM to {}", path.display());
             panic!("WASM compilation failed:\n{:#}", e);
         }
     }

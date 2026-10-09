@@ -1,6 +1,5 @@
-// audited: 2026-09-05
-//! The order releases sharing one `decref_point` are emitted in: holder before
-//! holdee, so no release reads a page another already freed.
+// audited: 2026-10-06
+//! The order releases sharing one `decref_point` are emitted in: holder before holdee, so no release reads a freed page.
 //!
 //! docs/impl/region/rules.md
 //! docs/impl/region/adopt.md
@@ -250,27 +249,27 @@ impl<'a> Lowerer<'a> {
 /// across such a read (docs/impl/region/relocate.md). This states the property both exist to
 /// hold, over the finished emission where the two meet.
 #[cfg(debug_assertions)]
-pub(super) fn assert_cells_outlive_their_readers(module: &LirModule) {
+pub(super) fn assert_cells_outlive_their_readers(module: &FrozenModule) {
     for f in std::iter::once(&module.entry).chain(module.closures.iter()) {
-        for b in &f.blocks {
+        for b in f.view().blocks() {
             let mut from_index: HashMap<Reg, u16> = HashMap::new();
             let mut freed: HashMap<u16, usize> = HashMap::new();
-            for (idx, i) in b.instructions.iter().enumerate() {
-                match &i.instr {
-                    LirInstr::LoadCapture { dst, index }
-                    | LirInstr::LoadCaptureRaw { dst, index } => {
-                        from_index.insert(*dst, *index);
-                        if let Some(&at) = freed.get(index) {
+            for (idx, i) in b.instrs().enumerate() {
+                match i {
+                    InstrRef::LoadCapture { dst, index }
+                    | InstrRef::LoadCaptureRaw { dst, index } => {
+                        from_index.insert(dst, index);
+                        if let Some(&at) = freed.get(&index) {
                             panic!(
                                 "env cell {index} is read at instruction {idx} of block \
                                  {:?}, after the DecrefCellRegion at {at} freed the box \
                                  — the read lands on a reclaimed page",
-                                b.label
+                                b.label()
                             );
                         }
                     }
-                    LirInstr::DecrefCellRegion { src } => {
-                        if let Some(&index) = from_index.get(src) {
+                    InstrRef::DecrefCellRegion { src } => {
+                        if let Some(&index) = from_index.get(&src) {
                             freed.insert(index, idx);
                         }
                     }

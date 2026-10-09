@@ -1,6 +1,6 @@
 # Booting from an image
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-10-06 -->
 
 What the boot configuration carries, how `elle image dump-boot` writes it, and
 how a fresh instance starts from it.
@@ -185,18 +185,17 @@ Per-worker hydration is a milestone of its own ([plan.md](plan.md)).
 ## Why the cache is opt-in
 
 `--boot-image=DIR` turns the warm cache on, `--boot-image=on` uses the
-`--cache=` directory, and the default is off. Two pieces are still to land
-([plan.md](plan.md)) — one of them a foundation rather than a boot milestone —
-and each costs a hydrating instance something a source boot does not pay:
+`--cache=` directory, and the default is off. The two cross-unit compile
+registries are still to land ([plan.md](plan.md)). Without them, user code
+under an image boot compiles without cross-unit inlining and without stdlib
+dispatch monomorphization, which a source boot does not pay.
 
-- Until LIR is region-native, a hydrated closure carries no LIR, so no stdlib
-  function is ever promoted to the JIT tier
-  ([foundations.md](foundations.md) argues that fix).
-- Without the two cross-unit compile registries, user code compiles without
-  cross-unit inlining and without stdlib dispatch monomorphization.
+The tier half of parity has landed. A hydrated closure carries its LIR in its
+payload, so a hot stdlib function promotes to the JIT under either boot
+([sealing.md](sealing.md)).
 
 A default-on cache would trade steady-state throughput for startup, which
 [image.md](../image.md) rejects as a violation of parity: the two boot modes
 must be indistinguishable to running code, tiers included. The flag is what
 makes the mechanism usable and testable meanwhile, and the default flips when
-both land.
+the registries land.

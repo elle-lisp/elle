@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 // src/jit/AGENTS.md
 //! Translating one LIR instruction to Cranelift IR.
 //!
@@ -13,7 +13,7 @@ impl<'a> FunctionTranslator<'a> {
     pub(crate) fn translate_instr(
         &mut self,
         builder: &mut FunctionBuilder,
-        instr: &LirInstr,
+        instr: &InstrRef<'_>,
         _block_map: &HashMap<Label, cranelift_codegen::ir::Block>,
     ) -> Result<bool, JitError> {
         // The static region slot this instruction is stamped with, read from
@@ -24,18 +24,18 @@ impl<'a> FunctionTranslator<'a> {
             .ins()
             .iconst(I32, instr.region().map_or(0, |r| r.get()) as i64);
         match instr {
-            LirInstr::Const { dst, value } => {
-                let (tag, payload) = self.translate_const(builder, value);
+            InstrRef::Const { dst, value } => {
+                let (tag, payload) = self.translate_const(builder, *value);
                 self.def_var_pair(builder, dst.0, tag, payload);
             }
 
-            LirInstr::ValueConst { dst, value } => {
+            InstrRef::ValueConst { dst, value } => {
                 let tag = builder.ins().iconst(I64, value.tag as i64);
                 let payload = builder.ins().iconst(I64, value.payload as i64);
                 self.def_var_pair(builder, dst.0, tag, payload);
             }
 
-            LirInstr::MaterializeConst {
+            InstrRef::MaterializeConst {
                 dst,
                 template,
                 region,
@@ -48,7 +48,7 @@ impl<'a> FunctionTranslator<'a> {
                 // helper, exactly like List/MakeArrayMut. The helper recurses in
                 // Rust, so one call materializes the whole structure into the
                 // resolved region.
-                self.templates.push(Box::new(template.clone()));
+                self.templates.push(Box::new(template.decode()));
                 let tmpl = self.templates.last().expect("just pushed");
                 let ptr = builder
                     .ins()
@@ -68,19 +68,19 @@ impl<'a> FunctionTranslator<'a> {
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::LoadLocal { dst, slot } => {
+            InstrRef::LoadLocal { dst, slot } => {
                 let base = self.local_slot_to_var(*slot);
                 let (tag, payload) = self.use_var_pair(builder, base);
                 self.def_var_pair(builder, dst.0, tag, payload);
             }
 
-            LirInstr::StoreLocal { slot, src } => {
+            InstrRef::StoreLocal { slot, src } => {
                 let base = self.local_slot_to_var(*slot);
                 let (tag, payload) = self.use_var_pair(builder, src.0);
                 self.def_var_pair(builder, base, tag, payload);
             }
 
-            LirInstr::StoreLocalRefcounted { slot, src } => {
+            InstrRef::StoreLocalRefcounted { slot, src } => {
                 // Region RC owns reclamation, so this stores exactly as
                 // StoreLocal does — the variant adds nothing at this tier.
                 let base = self.local_slot_to_var(*slot);
@@ -88,9 +88,9 @@ impl<'a> FunctionTranslator<'a> {
                 self.def_var_pair(builder, base, tag, payload);
             }
 
-            LirInstr::LoadCapture { dst, index } => {
-                let num_captures = self.lir.num_captures;
-                let arity = self.lir.num_params as u16;
+            InstrRef::LoadCapture { dst, index } => {
+                let num_captures = self.lir.num_captures();
+                let arity = self.lir.num_params() as u16;
                 if *index < num_captures {
                     // Load from closure environment (captures)
                     let env_ptr = self.env_ptr.ok_or_else(|| {
@@ -110,7 +110,7 @@ impl<'a> FunctionTranslator<'a> {
                     let base = self.arg_var_base + param_index as u32;
                     let (tag, payload) = self.use_var_pair(builder, base);
                     if (param_index as u32) < 64
-                        && (self.lir.capture_params_mask & (1 << param_index)) != 0
+                        && (self.lir.capture_params_mask() & (1 << param_index)) != 0
                     {
                         let (rt, rp) = self.call_helper_value_unary(
                             builder,
@@ -124,10 +124,10 @@ impl<'a> FunctionTranslator<'a> {
                     }
                 } else {
                     let local_index = *index - num_captures - arity;
-                    let jit_slot = self.lir.num_local_params as u32 + local_index as u32;
+                    let jit_slot = self.lir.num_local_params() as u32 + local_index as u32;
                     let base = self.local_var_base + jit_slot;
                     let (tag, payload) = self.use_var_pair(builder, base);
-                    if self.lir.capture_locals_mask.is_set(local_index as usize) {
+                    if self.lir.capture_locals_mask().is_set(local_index as usize) {
                         let (rt, rp) = self.call_helper_value_unary(
                             builder,
                             self.helpers.load_capture_cell,
@@ -141,9 +141,9 @@ impl<'a> FunctionTranslator<'a> {
                 }
             }
 
-            LirInstr::LoadCaptureRaw { dst, index } => {
-                let num_captures = self.lir.num_captures;
-                let arity = self.lir.num_params as u16;
+            InstrRef::LoadCaptureRaw { dst, index } => {
+                let num_captures = self.lir.num_captures();
+                let arity = self.lir.num_params() as u16;
                 if *index < num_captures {
                     let env_ptr = self.env_ptr.ok_or_else(|| {
                         JitError::InvalidLir("LoadCaptureRaw without env pointer".to_string())
@@ -157,14 +157,14 @@ impl<'a> FunctionTranslator<'a> {
                     self.def_var_pair(builder, dst.0, tag, payload);
                 } else {
                     let local_index = *index - num_captures - arity;
-                    let jit_slot = self.lir.num_local_params as u32 + local_index as u32;
+                    let jit_slot = self.lir.num_local_params() as u32 + local_index as u32;
                     let base = self.local_var_base + jit_slot;
                     let (tag, payload) = self.use_var_pair(builder, base);
                     self.def_var_pair(builder, dst.0, tag, payload);
                 }
             }
 
-            LirInstr::LoadSelf { dst } => {
+            InstrRef::LoadSelf { dst } => {
                 // The executing closure is passed to every compiled body as the
                 // (self_tag, self_payload) parameter pair (`self_tag_payload`,
                 // also the self-tail-call target), so the value path reads it
@@ -175,7 +175,7 @@ impl<'a> FunctionTranslator<'a> {
                 self.def_var_pair(builder, dst.0, self_tag, self_payload);
             }
 
-            LirInstr::BinOp {
+            InstrRef::BinOp {
                 dst,
                 op,
                 lhs,
@@ -188,7 +188,7 @@ impl<'a> FunctionTranslator<'a> {
                 self.def_var_pair(builder, dst.0, rt2, rp2);
             }
 
-            LirInstr::UnaryOp {
+            InstrRef::UnaryOp {
                 dst,
                 op,
                 src,
@@ -199,7 +199,7 @@ impl<'a> FunctionTranslator<'a> {
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::Compare {
+            InstrRef::Compare {
                 dst,
                 op,
                 lhs,
@@ -212,7 +212,7 @@ impl<'a> FunctionTranslator<'a> {
                 self.def_var_pair(builder, dst.0, crt, crp);
             }
 
-            LirInstr::Convert { dst, op, src } => {
+            InstrRef::Convert { dst, op, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let func_id = match op {
                     crate::lir::ConvOp::IntToFloat => self.helpers.int_to_float,
@@ -226,21 +226,21 @@ impl<'a> FunctionTranslator<'a> {
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::IsNil { dst, src } => {
+            InstrRef::IsNil { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let (rt, rp) =
                     self.call_helper_value_unary(builder, self.helpers.is_nil, st, sp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::IsPair { dst, src } => {
+            InstrRef::IsPair { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let (rt, rp) =
                     self.call_helper_value_unary(builder, self.helpers.is_pair, st, sp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::List {
+            InstrRef::List {
                 dst,
                 head,
                 tail,
@@ -263,19 +263,19 @@ impl<'a> FunctionTranslator<'a> {
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::First { dst, pair } => {
+            InstrRef::First { dst, pair } => {
                 let (pt, pp) = self.use_var_pair(builder, pair.0);
                 let (rt, rp) = self.call_helper_value_unary(builder, self.helpers.first, pt, pp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::Rest { dst, pair } => {
+            InstrRef::Rest { dst, pair } => {
                 let (pt, pp) = self.use_var_pair(builder, pair.0);
                 let (rt, rp) = self.call_helper_value_unary(builder, self.helpers.rest, pt, pp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::MakeArrayMut {
+            InstrRef::MakeArrayMut {
                 dst,
                 elements,
                 region,
@@ -326,7 +326,7 @@ impl<'a> FunctionTranslator<'a> {
                 }
             }
 
-            LirInstr::MakeCaptureCell {
+            InstrRef::MakeCaptureCell {
                 dst,
                 value,
                 region,
@@ -351,14 +351,14 @@ impl<'a> FunctionTranslator<'a> {
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::LoadCaptureCell { dst, cell } => {
+            InstrRef::LoadCaptureCell { dst, cell } => {
                 let (ct, cp) = self.use_var_pair(builder, cell.0);
                 let (rt, rp) =
                     self.call_helper_value_unary(builder, self.helpers.load_capture_cell, ct, cp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::StoreCaptureCell { cell, value } => {
+            InstrRef::StoreCaptureCell { cell, value } => {
                 let (ct, cp) = self.use_var_pair(builder, cell.0);
                 let (vt, vp) = self.use_var_pair(builder, value.0);
                 let vm = self.vm_ptr.ok_or_else(|| {
@@ -371,9 +371,9 @@ impl<'a> FunctionTranslator<'a> {
                 let _ = builder.inst_results(call);
             }
 
-            LirInstr::StoreCapture { index, src } => {
-                let num_captures = self.lir.num_captures;
-                let arity = self.lir.num_params as u16;
+            InstrRef::StoreCapture { index, src } => {
+                let num_captures = self.lir.num_captures();
+                let arity = self.lir.num_params() as u16;
                 let (vt, vp) = self.use_var_pair(builder, src.0);
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("StoreCapture without vm pointer".to_string())
@@ -396,7 +396,7 @@ impl<'a> FunctionTranslator<'a> {
                     let param_index = *index - num_captures;
                     let base = self.arg_var_base + param_index as u32;
                     if (param_index as u32) < 64
-                        && (self.lir.capture_params_mask & (1 << param_index)) != 0
+                        && (self.lir.capture_params_mask() & (1 << param_index)) != 0
                     {
                         let (ct, cp) = self.use_var_pair(builder, base);
                         let func_ref = self
@@ -409,9 +409,9 @@ impl<'a> FunctionTranslator<'a> {
                     }
                 } else {
                     let local_index = *index - num_captures - arity;
-                    let jit_slot = self.lir.num_local_params as u32 + local_index as u32;
+                    let jit_slot = self.lir.num_local_params() as u32 + local_index as u32;
                     let base = self.local_var_base + jit_slot;
-                    if self.lir.capture_locals_mask.is_set(local_index as usize) {
+                    if self.lir.capture_locals_mask().is_set(local_index as usize) {
                         let (ct, cp) = self.use_var_pair(builder, base);
                         let func_ref = self
                             .module

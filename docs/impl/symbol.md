@@ -1,6 +1,6 @@
 # Symbols and keywords — identity is the name hash
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-06 -->
 
 A `SymbolId` is the 64-bit FNV-1a hash of the symbol's name. Nothing mints it
 and no table owns it: the same name yields the same id in every symbol table,
@@ -240,7 +240,7 @@ and a plugin's is not. So the ctx records it where the external is built, and
 | `Value` | `Value::symbol(SymbolId)`, `as_symbol() -> Option<SymbolId>`; `Value::keyword(&str)`, `keyword_hash() -> Option<u64>` |
 | Struct and set keys | `TableKey::Symbol(SymbolId)` and `TableKey::Keyword(u64)`, ordered by hash |
 | HIR bindings | `BindingInner::name`, `SymbolId::SYNTHETIC` for temporaries |
-| LIR constants | `LirConst::Symbol(SymbolId)`, `LirConst::Keyword(u64)` |
+| LIR constants | `ConstRef::Symbol(SymbolId)`, `ConstRef::Keyword(u64)` |
 | Bytecode | none directly — a symbol reaches bytecode as a constant-pool `Value` (a `u16` pool index) or inside a `ConstTemplate`, which encodes symbols by name |
 
 `Value::symbol` takes a `SymbolId`, not a bare `u64`, because a keyword hash is

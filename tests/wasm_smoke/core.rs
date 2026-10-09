@@ -1,6 +1,10 @@
+// audited: 2026-10-06
+// docs/impl/wasm.md
+// The full-module WASM backend on the core forms: arithmetic, control flow, calls, closures, recursion.
+
 use super::*;
 
-// --- Phase 0: arithmetic ---
+// --- arithmetic ---
 
 #[test]
 fn test_integer_literal() {
@@ -33,7 +37,7 @@ fn test_nil() {
     assert_eq!(eval("nil"), "nil");
 }
 
-// --- Phase 1: control flow ---
+// --- control flow ---
 
 #[test]
 fn test_if_true() {
@@ -75,7 +79,7 @@ fn test_nested_if() {
     assert_eq!(eval("(if true (if false 10 20) 30)"), "20");
 }
 
-// --- Phase 1: function calls (primitives) ---
+// --- function calls (primitives) ---
 
 #[test]
 fn test_call_length() {
@@ -104,7 +108,7 @@ fn test_call_empty() {
     assert_eq!(eval("(empty? (list 1))"), "false");
 }
 
-// --- Phase 1: data operations ---
+// --- data operations ---
 
 #[test]
 fn test_array_literal() {
@@ -122,7 +126,7 @@ fn test_struct_access() {
     assert_eq!(eval("(get {:x 1 :y 2} :x)"), "1");
 }
 
-// --- Phase 1: closures ---
+// --- closures ---
 
 #[test]
 fn test_lambda_call() {
@@ -159,7 +163,7 @@ fn test_cond() {
     );
 }
 
-// --- Phase 1: strings + error handling ---
+// --- strings + error handling ---
 
 #[test]
 fn test_string_literal() {
@@ -176,7 +180,7 @@ fn test_string_size() {
     assert_eq!(eval("(string/size-of \"hello\")"), "5");
 }
 
-// --- Phase 1: recursion ---
+// --- recursion ---
 
 #[test]
 fn test_recursive_factorial() {
@@ -293,33 +297,39 @@ fn test_dump_closure_let_lir() {
         0,
     )
     .unwrap();
+    let entry = lir.entry.view();
     eprintln!(
         "Entry: num_regs={} num_locals={} num_captures={} num_params={}",
-        lir.entry.num_regs, lir.entry.num_locals, lir.entry.num_captures, lir.entry.num_params
+        entry.num_regs(),
+        entry.num_locals(),
+        entry.num_captures(),
+        entry.num_params()
     );
-    for block in &lir.entry.blocks {
-        eprintln!("Block {:?}:", block.label);
-        for si in &block.instructions {
-            eprintln!("  {:?}", si.instr);
+    for block in entry.blocks() {
+        eprintln!("Block {:?}:", block.label());
+        for instr in block.instrs() {
+            eprintln!("  {:?}", instr);
         }
-        eprintln!("  term: {:?}", block.terminator);
+        eprintln!("  term: {:?}", block.terminator());
     }
     // Find nested closures
-    for block in &lir.entry.blocks {
-        for si in &block.instructions {
-            if let elle::lir::LirInstr::MakeClosure { closure_id, .. } = &si.instr {
-                let func = &lir.closures[closure_id.0 as usize];
-                eprintln!(
-                    "\nClosure {:?}: num_regs={} num_locals={} num_captures={} num_params={}",
-                    closure_id, func.num_regs, func.num_locals, func.num_captures, func.num_params
-                );
-                for b in &func.blocks {
-                    eprintln!("  Block {:?}:", b.label);
-                    for s in &b.instructions {
-                        eprintln!("    {:?}", s.instr);
-                    }
-                    eprintln!("    term: {:?}", b.terminator);
+    for instr in entry.nodes().map(|n| n.instr()) {
+        if let elle::lir::InstrRef::MakeClosure { closure_id, .. } = instr {
+            let func = lir.closures[closure_id.0 as usize].view();
+            eprintln!(
+                "\nClosure {:?}: num_regs={} num_locals={} num_captures={} num_params={}",
+                closure_id,
+                func.num_regs(),
+                func.num_locals(),
+                func.num_captures(),
+                func.num_params()
+            );
+            for b in func.blocks() {
+                eprintln!("  Block {:?}:", b.label());
+                for s in b.instrs() {
+                    eprintln!("    {:?}", s);
                 }
+                eprintln!("    term: {:?}", b.terminator());
             }
         }
     }
@@ -361,12 +371,6 @@ fn test_self_recursion_value_position() {
         "7"
     );
 }
-
-// Self-recursion across a yield (the suspend/resume self-carry: `rt_yield`
-// snapshots the self slot into the suspension frame, `resume_wasm_closure`
-// restores it) is exercised by `fibers.rs` once the full-module WASM fiber/yield
-// path itself runs — a plain non-self yielding generator currently traps through
-// `eval_wasm`, so a self+yield pin here would be blocked on that, not on N5.
 
 // --- Tail calls ---
 

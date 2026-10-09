@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! The coalescing predicate: which region mints a static slot can name, and which stay value-resolved.
 //!
 //! docs/impl/region/mechanism.md
@@ -454,19 +454,19 @@ fn coalescible_refuses_returned_captured_upvalue() {
 
 #[test]
 fn region_table_entries_are_static_regions_at_least_two() {
-    // A function's `region_table` is `Vec<StaticRegion>`, not a bare
-    // `Vec<u32>`. Every slot the lowerer mints into a table comes from
+    // A function's `region_table` is a slice of `StaticRegion`, not of bare
+    // `u32`. Every slot the lowerer mints into a table comes from
     // `new_static_region()` (≥ 2); ids 0 and 1 are reserved and never minted
-    // into a function's table. Asserting `&Vec<StaticRegion>` plus `.get() >= 2`
+    // into a function's table. Asserting `&[StaticRegion]` plus `.get() >= 2`
     // pins both the type and the value invariant.
     //
-    // Counterfactual: a bare `Vec<u32>` (a `RegionId` alias) would let neither
-    // the `&Vec<StaticRegion>` binding nor `.get()` on an entry compile, so the
+    // Counterfactual: a bare `u32` table (a `RegionId` alias) would let neither
+    // the `&[StaticRegion]` binding nor `.get()` on an entry compile, so the
     // type itself enforces this.
     let module = compile_to_lir("(fn () (let [x (string \"a\")] x))");
-    let mut tables: Vec<&Vec<StaticRegion>> = vec![&module.entry.region_table];
+    let mut tables: Vec<&[StaticRegion]> = vec![module.entry.view().region_table()];
     for c in &module.closures {
-        tables.push(&c.region_table);
+        tables.push(c.view().region_table());
     }
     let mut total = 0;
     for table in tables {

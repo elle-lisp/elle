@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! A self-recursive local function recurses as itself across a yield, a tail call, a hand-off as a value, and each entry boundary.
 //!
 //! docs/impl/selfrec.md
@@ -48,7 +48,7 @@ fn run_int(src: &str) -> i64 {
             .0
     };
     let (vm, _symbols, cctx) = rt.parts();
-    vm.execute_scheduled(&result.bytecode, cctx)
+    vm.execute_scheduled(&result, cctx)
         .expect("runs")
         .as_int()
         .expect("program returns its result as an int")

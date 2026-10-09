@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-10-06
 //! Compiled bytecode: the instruction bytes, the constant pool, and the
 //! emit/patch surface the emitter writes through.
 //!
@@ -32,32 +32,24 @@ pub struct Bytecode {
     /// compilation. When an importing file sees `module:field`, the analyzer
     /// uses this projection instead of the conservative `Polymorphic` fallback.
     pub signal_projection: Option<std::collections::HashMap<String, crate::signals::Signal>>,
-    /// Blueprints for this code object's `MakeClosure` instructions. Each
-    /// `MakeClosure` pushes its nested-lambda blueprint here and emits the index;
-    /// the VM/JIT materialize a fresh region-allocated `HeapObject::ClosureTemplate`
-    /// header per execution (a heap literal is an ordinary, reclaimable
-    /// allocation). Threaded into the executing `Code` so each header is
-    /// reclaimed by region RC, never pinned for the process lifetime.
-    pub child_protos: Vec<std::rc::Rc<crate::value::TemplateProto>>,
-    /// The static region slots this (top-level / entry) function's allocations
-    /// SHARE after a builder-idiom merge (docs/impl/region/merging.md § Merging),
-    /// carried from the entry `LirFunction.merged_slots` so the executing `Code`
-    /// can mint-or-reuse them. The per-lambda equivalent rides
-    /// the per-lambda blueprint's `merged_slots`; this is the entry-function path
-    /// (`Bytecode → Code`), which would otherwise read empty. Empty unless a merge
-    /// fired (a builder idiom seeded by a nested `%pair` literal), so inert when
-    /// no merge exists.
-    pub merged_slots: rustc_hash::FxHashSet<u32>,
-    /// The local slots this (top-level / entry) function's value-routed releases
-    /// read, carried from the entry `LirFunction.frame_release_slots` so the
-    /// executing `Code` can walk them at an error exit
+    /// The headers this code object's `MakeClosure` instructions index, in the
+    /// unit's code region. Each `MakeClosure` writes its lambda's payload,
+    /// pushes a header over it here, and emits the index; the instruction then
+    /// builds a fresh header over that payload per execution
+    /// (docs/impl/region/template.md).
+    pub children: Vec<Value>,
+    /// The static region slots this function's allocations SHARE after a
+    /// builder-idiom merge (docs/impl/region/merging.md § Merging), ascending,
+    /// so the executing `Code` can mint-or-reuse them. Empty unless a merge
+    /// fired (a builder idiom seeded by a nested `%pair` literal).
+    pub merged_slots: Vec<u32>,
+    /// The local slots this function's value-routed releases read, so an error
+    /// exit walks the releases its abandoned frame still owed
     /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
-    /// still owes"). The per-lambda equivalent rides
-    /// the per-lambda blueprint's `frame_release_slots`; this is the
-    /// entry-function path (`Bytecode → Code`), which would otherwise read empty.
+    /// still owes").
     pub frame_release_slots: Vec<u16>,
-    /// The `DecrefRegion` half of the same table, carried the same way — the
-    /// static region slots this entry function's slot-routed releases name.
+    /// The `DecrefRegion` half of the same table — the static region slots
+    /// this function's slot-routed releases name.
     pub frame_release_regions: Vec<u32>,
 }
 
@@ -69,34 +61,10 @@ impl Bytecode {
             location_map: LocationMap::new(),
             signal: crate::signals::Signal::silent(),
             signal_projection: None,
-            child_protos: Vec::new(),
-            merged_slots: rustc_hash::FxHashSet::default(),
+            children: Vec::new(),
+            merged_slots: Vec::new(),
             frame_release_slots: Vec::new(),
             frame_release_regions: Vec::new(),
-        }
-    }
-
-    /// This compiled unit as a code-object blueprint: the entry function's own
-    /// bytecode, constants, locations and region tables, plus the
-    /// nested-lambda blueprints its `MakeClosure` instructions index.
-    ///
-    /// The entry paths materialize this exactly as `MakeClosure` materializes a
-    /// nested blueprint, so a top-level or module body reaches its bytecode the
-    /// way every other code object does. Arity is nullary: a compiled unit is
-    /// entered with no arguments.
-    pub fn into_proto(self) -> crate::value::TemplateProto {
-        crate::value::TemplateProto {
-            signal: self.signal,
-            location_map: self.location_map,
-            child_protos: self.child_protos,
-            merged_slots: self.merged_slots,
-            frame_release_slots: self.frame_release_slots,
-            frame_release_regions: self.frame_release_regions,
-            ..crate::value::TemplateProto::new(
-                self.instructions,
-                crate::value::Arity::Exact(0),
-                self.constants,
-            )
         }
     }
 
@@ -240,28 +208,28 @@ pub fn format_bytecode_with_constants(instructions: &[u8], constants: &[crate::V
 }
 
 /// Pretty print a whole compiled unit: the entry bytecode plus every nested
-/// lambda's template (`child_protos`), recursively, each labeled by its
-/// `MakeClosure` const_idx path so a dump can be matched to the instruction
-/// that materializes it.
-pub fn format_bytecode_with_protos(bytecode: &Bytecode) -> String {
-    let mut output = format_bytecode_with_constants(&bytecode.instructions, &bytecode.constants);
-    for (i, proto) in bytecode.child_protos.iter().enumerate() {
-        format_proto(&mut output, &format!("{}", i), proto);
+/// lambda's code object, recursively, each labeled by its `MakeClosure` index
+/// path so a dump can be matched to the instruction that builds it.
+pub fn format_bytecode_with_protos(unit: &crate::value::CodeUnit) -> String {
+    let entry = unit.entry();
+    let mut output = format_bytecode_with_constants(entry.bytecode(), entry.constants());
+    for i in 0..entry.num_children() {
+        format_child(&mut output, &format!("{}", i), &entry.child(i));
     }
     output
 }
 
-fn format_proto(output: &mut String, path: &str, proto: &crate::value::TemplateProto) {
+fn format_child(output: &mut String, path: &str, code: &crate::value::ClosureTemplate) {
     output.push_str(&format!(
         "\n── proto [{}] {} (captures={}, params={}) ──\n",
         path,
-        proto.name.as_deref().unwrap_or("<anon>"),
-        proto.num_captures,
-        proto.num_params,
+        code.name().unwrap_or("<anon>"),
+        code.num_captures(),
+        code.num_params(),
     ));
-    output.push_str(&disassemble(&proto.bytecode));
-    for (i, child) in proto.child_protos.iter().enumerate() {
-        format_proto(output, &format!("{path}.{i}"), child);
+    output.push_str(&disassemble(code.bytecode()));
+    for i in 0..code.num_children() {
+        format_child(output, &format!("{path}.{i}"), &code.child(i));
     }
 }
 

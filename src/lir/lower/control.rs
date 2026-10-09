@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! Control flow lowering: the tail-argument ownership predicates, intrinsic
 //! specialization, `eval`, `emit`, and the call path. `and`/`or` and `match`
 //! lower in the submodules beside it.
@@ -28,7 +28,7 @@ impl<'a> Lowerer<'a> {
     /// - a **compile-time-constant heap value** (`immutable_values` — a stdlib
     ///   export closure like `+`/`inc`/`map`, a `begin-for-syntax` value). A
     ///   known-constant binding is deliberately never captured
-    ///   (hir/analyze/scopes.rs) and lowers to `LoadConst`, so the frame holds
+    ///   (hir/analyze/scopes.rs) and lowers to `ValueConst`, so the frame holds
     ///   NO reference at all — the owning references belong to the env that
     ///   seeded the constant. Pure-moving it drains that env's region rc by one
     ///   per call to a premature free; user-reachable as
@@ -234,7 +234,7 @@ impl<'a> Lowerer<'a> {
                 }
                 let src = self.lower_expr(args[0])?;
                 let dst = self.fresh_reg();
-                self.emit(LirInstr::Convert { dst, op, src });
+                self.emit(InstrRef::Convert { dst, op, src });
                 Ok(Some(dst))
             }
         }
@@ -244,7 +244,7 @@ impl<'a> Lowerer<'a> {
         let env_reg = self.lower_expr(env)?;
         let expr_reg = self.lower_expr(expr)?;
         let dst = self.fresh_reg();
-        self.emit(LirInstr::Eval {
+        self.emit(InstrRef::Eval {
             dst,
             expr: expr_reg,
             env: env_reg,
@@ -312,7 +312,7 @@ impl<'a> Lowerer<'a> {
         }
 
         let dst = self.fresh_reg();
-        self.emit(LirInstr::LoadResumeValue { dst });
+        self.emit(InstrRef::LoadResumeValue { dst });
         // The resume value crosses from the resumer uncounted — `resume_suspended`
         // pushes it onto this frame's stack and takes no reference for it. Mint the
         // reference this body holds it by, so a later park cannot leave the resumer's
@@ -323,7 +323,7 @@ impl<'a> Lowerer<'a> {
             .current_hir_id
             .is_some_and(|id| self.region_info.unfunded_resume_values.contains(&id))
         {
-            self.emit(LirInstr::IncrefValueRegion { src: dst });
+            self.emit(InstrRef::IncrefValueRegion { src: dst });
         }
 
         Ok(dst)
@@ -340,14 +340,13 @@ impl<'a> Lowerer<'a> {
     /// leaving `value_reg` live for the terminator; the round-trip through the slot
     /// restores the emitter's stack entry for it.
     fn retain_emit_payload(&mut self, value_reg: Reg) -> u16 {
-        self.emit(LirInstr::IncrefValueRegion { src: value_reg });
-        let slot = self.current_func.num_locals;
-        self.current_func.num_locals += 1;
-        self.emit(LirInstr::StoreLocal {
+        self.emit(InstrRef::IncrefValueRegion { src: value_reg });
+        let slot = self.fresh_local();
+        self.emit(InstrRef::StoreLocal {
             slot,
             src: value_reg,
         });
-        self.emit(LirInstr::LoadLocal {
+        self.emit(InstrRef::LoadLocal {
             dst: value_reg,
             slot,
         });

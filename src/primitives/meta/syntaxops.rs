@@ -1,3 +1,9 @@
+// audited: 2026-10-06
+//! The syntax-object accessors, squelch and attune, `meta/origin`, and the SPIR-V primitives git, fn/git? and disgit.
+//!
+//! docs/macros.md
+//! docs/impl/spirv.md
+
 use super::*;
 
 pub(crate) fn prim_syntax_to_list(
@@ -122,7 +128,8 @@ pub(crate) fn prim_syntax_e(
 /// intercepts signals matching the specification and converts them to `:error`.
 /// The second argument is resolved via `resolve_signal_bits` — it can be a
 /// keyword, set, array, list, or integer.
-/// The new closure shares the same bytecode and environment (Rc clones — cheap).
+/// The new closure shares the template and the environment, which it copies
+/// as two handles.
 ///
 /// Error cases:
 /// - Wrong arity: arity-error
@@ -155,13 +162,12 @@ pub(crate) fn prim_squelch(
         Err(err) => return err,
     };
 
-    // Create new closure with OR'd squelch mask (composable — Rc bumps are cheap,
-    // RegionSlice copy is a (ptr, len) pair).
-    let new_closure = Closure {
-        template: closure_rc.template,
-        env: closure_rc.env,
-        squelch_mask: closure_rc.squelch_mask.union(new_bits),
-    };
+    // The masks OR together, so squelches compose.
+    let new_closure = Closure::new(
+        closure_rc.template,
+        closure_rc.env,
+        closure_rc.squelch_mask.union(new_bits),
+    );
 
     (SIG_OK, ctx.closure(new_closure))
 }
@@ -206,20 +212,20 @@ pub(crate) fn prim_attune(
     // Suppress everything the user DIDN'T permit (within the user-producible set).
     let suppress_bits = crate::signals::CAP_MASK.subtract(permitted_bits);
 
-    let new_closure = Closure {
-        template: closure_rc.template,
-        env: closure_rc.env,
-        squelch_mask: closure_rc.squelch_mask.union(suppress_bits),
-    };
+    let new_closure = Closure::new(
+        closure_rc.template,
+        closure_rc.env,
+        closure_rc.squelch_mask.union(suppress_bits),
+    );
 
     (SIG_OK, ctx.closure(new_closure))
 }
 
 /// Return the source location of a closure as `{:file :line :col}`, or `nil`.
 ///
-/// `(meta/origin f)` extracts the span from the closure's stored syntax node.
-/// Returns `nil` if `f` is not a closure, the closure has no syntax, or the
-/// syntax span has no file.
+/// `(meta/origin f)` reads the defining span the closure's code payload
+/// carries. Returns `nil` if `f` is not a closure, the closure has no origin,
+/// or the span names no file.
 pub(crate) fn prim_meta_origin(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -244,13 +250,12 @@ pub(crate) fn prim_meta_origin(
     (SIG_OK, ctx.struct_from(fields))
 }
 
-/// Eagerly compile SPIR-V, cache on template, return the closure.
+/// Eagerly compile SPIR-V, cache it on the VM, return the closure.
 ///
-/// `(git f)` compiles the closure to SPIR-V and caches the bytes on the
-/// closure template's `spirv` OnceCell. Returns `f` (the template is now
-/// GIT'd — all closures sharing this template see the cached SPIR-V).
-///
-/// Optional second argument is workgroup size (default 256).
+/// `(git f [workgroup-size])` compiles the closure to SPIR-V and caches the
+/// bytes in the VM's SPIR-V cache under `f`'s bytecode and the workgroup size,
+/// 256 when none is given. Returns `f`; every closure over the same payload
+/// sees the cached SPIR-V.
 pub(crate) fn prim_git(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -265,9 +270,13 @@ pub(crate) fn prim_git(
     }
     #[cfg(feature = "mlir")]
     {
+        let size = match workgroup_arg(ctx, args, "git") {
+            Ok(size) => size,
+            Err(raised) => return raised,
+        };
         let closure = prim_arg!(ctx, args, 0, as_closure, "git", "closure");
         // Fast path: already cached
-        if closure.template.spirv_bytes().is_some() {
+        if ctx.vm().spirv_for(&closure.template, size).is_some() {
             return (SIG_OK, args[0]);
         }
         // Check GPU eligibility upfront
@@ -277,55 +286,79 @@ pub(crate) fn prim_git(
                 ctx.error("mlir-error", "git: closure is not GPU-eligible"),
             );
         }
-        if closure.template.lir_function().is_none() {
+        if !closure.template.has_lir() {
             return (
                 SIG_ERROR,
                 ctx.error("mlir-error", "git: closure has no LIR"),
             );
         }
-        let wg_size = if args.len() == 2 {
-            args[1].as_int().unwrap_or(256)
-        } else {
-            256
-        };
         // Delegate to VM via SIG_QUERY for MlirCache access.
         (SIG_QUERY, {
-            let inner = ctx.pair(args[0], Value::int(wg_size));
+            let inner = ctx.pair(args[0], Value::int(size.get() as i64));
             ctx.pair(Value::keyword("git"), inner)
         })
     }
 }
 
-/// `(fn/git? f)` — true if the closure has cached SPIR-V bytes.
-pub(crate) fn prim_fn_git(
-    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+/// The workgroup size a SPIR-V primitive's optional second argument names, or
+/// 256 when it is absent. A bad size raises as `who`'s own error, so a
+/// primitive validates it once, at its boundary (docs/impl/spirv.md).
+pub(crate) fn workgroup_arg(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
-) -> (SignalBits, Value) {
-    if let Some(closure) = args[0].as_closure() {
-        (
-            SIG_OK,
-            Value::bool(closure.template.spirv_bytes().is_some()),
-        )
-    } else {
-        (SIG_OK, Value::FALSE)
+    who: &str,
+) -> Result<crate::vm::core::WorkgroupSize, (SignalBits, Value)> {
+    match args.get(1) {
+        None => Ok(crate::vm::core::WorkgroupSize::DEFAULT),
+        Some(&v) => crate::vm::core::WorkgroupSize::of_value(v, who)
+            .map_err(|(kind, msg)| (SIG_ERROR, ctx.error(kind, msg))),
     }
 }
 
-/// `(disgit f)` — return cached SPIR-V bytes from a GIT'd closure.
+/// `(fn/git? f [workgroup-size])` — true if the VM caches SPIR-V for the
+/// closure at that size, 256 when none is given.
+pub(crate) fn prim_fn_git(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    let size = match workgroup_arg(ctx, args, "fn/git?") {
+        Ok(size) => size,
+        Err(raised) => return raised,
+    };
+    let cached = args[0]
+        .as_closure()
+        .is_some_and(|closure| ctx.vm().spirv_for(&closure.template, size).is_some());
+    (SIG_OK, Value::bool(cached))
+}
+
+/// `(disgit f [workgroup-size])` — the SPIR-V bytes the VM caches for the
+/// closure at that size, 256 when none is given.
 ///
-/// Errors if `f` is not a closure or has not been GIT'd.
+/// Errors if `f` is not a closure or nothing is cached at that size.
 pub(crate) fn prim_disgit(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
+    let size = match workgroup_arg(ctx, args, "disgit") {
+        Ok(size) => size,
+        Err(raised) => return raised,
+    };
     let closure = prim_arg!(ctx, args, 0, as_closure, "disgit", "closure");
-    match closure.template.spirv_bytes() {
-        Some(bytes) => (SIG_OK, ctx.bytes(bytes.clone())),
+    let cached = ctx
+        .vm()
+        .spirv_for(&closure.template, size)
+        .map(<[u8]>::to_vec);
+    match cached {
+        Some(bytes) => (SIG_OK, ctx.bytes(bytes)),
         None => (
             SIG_ERROR,
-            ctx.error("mlir-error", "disgit: closure has not been GIT'd"),
+            ctx.error(
+                "mlir-error",
+                format!(
+                    "disgit: no SPIR-V is cached for the closure at workgroup size {}",
+                    size.get()
+                ),
+            ),
         ),
     }
 }
-
-// Declarative primitive definitions for meta-programming operations.

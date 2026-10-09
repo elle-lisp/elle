@@ -1,7 +1,8 @@
-// audited: 2026-09-06
-// src/lir/lower/AGENTS.md
-// docs/match.md
-//! The constructor tests a decision-tree switch branches on.
+// audited: 2026-10-06
+//! The constructor tests a decision-tree switch branches on, and the literal comparison patterns share.
+//!
+//! src/lir/lower/AGENTS.md
+//! docs/match.md
 //!
 //! Each test answers one question about the scrutinee and leaves the answer in a
 //! register. Most are a single instruction; the array constructors need a type
@@ -17,44 +18,10 @@ impl<'a> Lowerer<'a> {
         ctor: &Constructor,
     ) -> Result<Reg, String> {
         match ctor {
-            Constructor::Literal(lit) => {
-                // A STRING literal compares by content but is a HEAP value, so —
-                // unlike the immediate literals below — it cannot be a pooled
-                // constant. Materialize it FRESH into a transient per-activation
-                // region, compare, then free that region immediately: a heap
-                // literal is an ordinary, reclaimable allocation
-                // (docs/impl/region/model.md), never a process-pinned constant.
-                // The string is dead the instant the comparison reads it, so the
-                // region's whole life is these three instructions.
-                if let PatternLiteral::String(s) = lit {
-                    let str_reg = self.fresh_reg();
-                    let region = self.fresh_managed_region();
-                    self.emit(LirInstr::MaterializeConst {
-                        dst: str_reg,
-                        template: crate::value::ConstTemplate::String(s.clone()),
-                        region,
-                    });
-                    let dst = self.fresh_reg();
-                    self.emit(LirInstr::compare(dst, CmpOp::Eq, value_reg, str_reg));
-                    self.emit(LirInstr::DecrefRegion { region_id: region });
-                    return Ok(dst);
-                }
-                let lit_reg = match lit {
-                    PatternLiteral::Bool(b) => self.emit_const(LirConst::Bool(*b))?,
-                    PatternLiteral::Int(n) => self.emit_const(LirConst::Int(*n))?,
-                    PatternLiteral::Float(f) => self.emit_const(LirConst::Float(*f))?,
-                    PatternLiteral::Keyword(k) => {
-                        self.emit_const(LirConst::Keyword(crate::value::keyword::keyword_hash(k)))?
-                    }
-                    PatternLiteral::String(_) => unreachable!("string handled above"),
-                };
-                let dst = self.fresh_reg();
-                self.emit(LirInstr::compare(dst, CmpOp::Eq, value_reg, lit_reg));
-                Ok(dst)
-            }
+            Constructor::Literal(lit) => self.emit_literal_eq(value_reg, lit),
             Constructor::Pair => {
                 let dst = self.fresh_reg();
-                self.emit(LirInstr::IsPair {
+                self.emit(InstrRef::IsPair {
                     dst,
                     src: value_reg,
                 });
@@ -62,7 +29,7 @@ impl<'a> Lowerer<'a> {
             }
             Constructor::Nil => {
                 let dst = self.fresh_reg();
-                self.emit(LirInstr::IsNil {
+                self.emit(InstrRef::IsNil {
                     dst,
                     src: value_reg,
                 });
@@ -70,12 +37,12 @@ impl<'a> Lowerer<'a> {
             }
             Constructor::EmptyList => {
                 let empty_reg = self.fresh_reg();
-                self.emit(LirInstr::ValueConst {
+                self.emit(InstrRef::ValueConst {
                     dst: empty_reg,
                     value: Value::EMPTY_LIST,
                 });
                 let dst = self.fresh_reg();
-                self.emit(LirInstr::compare(dst, CmpOp::Eq, value_reg, empty_reg));
+                self.emit(InstrRef::compare(dst, CmpOp::Eq, value_reg, empty_reg));
                 Ok(dst)
             }
             Constructor::Array(n) => self.emit_type_and_length_test(value_reg, *n, true, CmpOp::Eq),
@@ -90,7 +57,7 @@ impl<'a> Lowerer<'a> {
             }
             Constructor::Struct(_) => {
                 let dst = self.fresh_reg();
-                self.emit(LirInstr::IsStruct {
+                self.emit(InstrRef::IsStruct {
                     dst,
                     src: value_reg,
                 });
@@ -98,7 +65,7 @@ impl<'a> Lowerer<'a> {
             }
             Constructor::Table(_) => {
                 let dst = self.fresh_reg();
-                self.emit(LirInstr::IsStructMut {
+                self.emit(InstrRef::IsStructMut {
                     dst,
                     src: value_reg,
                 });
@@ -106,7 +73,7 @@ impl<'a> Lowerer<'a> {
             }
             Constructor::Set => {
                 let dst = self.fresh_reg();
-                self.emit(LirInstr::IsSet {
+                self.emit(InstrRef::IsSet {
                     dst,
                     src: value_reg,
                 });
@@ -114,13 +81,51 @@ impl<'a> Lowerer<'a> {
             }
             Constructor::SetMut => {
                 let dst = self.fresh_reg();
-                self.emit(LirInstr::IsSetMut {
+                self.emit(InstrRef::IsSetMut {
                     dst,
                     src: value_reg,
                 });
                 Ok(dst)
             }
         }
+    }
+
+    /// Emit a comparison of `value_reg` with a pattern literal, returning a
+    /// register holding the boolean result.
+    ///
+    /// A STRING literal compares by content but is a HEAP value, so — unlike
+    /// the immediates — it cannot be a pooled constant. It is materialized
+    /// fresh into a transient per-activation region, compared, and that region
+    /// freed at once: a heap literal is an ordinary, reclaimable allocation
+    /// (docs/impl/region/model.md), never a process-pinned constant. The string
+    /// is dead the instant the comparison reads it, so the region's whole life
+    /// is these three instructions.
+    pub(super) fn emit_literal_eq(
+        &mut self,
+        value_reg: Reg,
+        lit: &PatternLiteral,
+    ) -> Result<Reg, String> {
+        if let PatternLiteral::String(s) = lit {
+            let region = self.fresh_managed_region();
+            let str_reg =
+                self.emit_materialize_in(region, &crate::value::ConstTemplate::String(s.clone()));
+            let dst = self.fresh_reg();
+            self.emit(InstrRef::compare(dst, CmpOp::Eq, value_reg, str_reg));
+            self.emit(InstrRef::DecrefRegion { region_id: region });
+            return Ok(dst);
+        }
+        let lit_reg = match lit {
+            PatternLiteral::Bool(b) => self.emit_const(ConstRef::Bool(*b))?,
+            PatternLiteral::Int(n) => self.emit_const(ConstRef::Int(*n))?,
+            PatternLiteral::Float(f) => self.emit_const(ConstRef::Float(*f))?,
+            PatternLiteral::Keyword(k) => {
+                self.emit_const(ConstRef::Keyword(crate::value::keyword::keyword_hash(k)))?
+            }
+            PatternLiteral::String(_) => unreachable!("string handled above"),
+        };
+        let dst = self.fresh_reg();
+        self.emit(InstrRef::compare(dst, CmpOp::Eq, value_reg, lit_reg));
+        Ok(dst)
     }
 
     /// Emit a type check and a length check for an array constructor.
@@ -135,28 +140,27 @@ impl<'a> Lowerer<'a> {
         len_cmp: CmpOp,
     ) -> Result<Reg, String> {
         // Store value to temp slot so we can reload after block boundaries.
-        let val_slot = self.current_func.num_locals;
-        self.current_func.num_locals += 1;
-        self.emit(LirInstr::StoreLocal {
+        let val_slot = self.fresh_local();
+        self.emit(InstrRef::StoreLocal {
             slot: val_slot,
             src: value_reg,
         });
 
         // Reload for type check (auto-pop consumed value_reg)
         let reloaded_for_type = self.fresh_reg();
-        self.emit(LirInstr::LoadLocal {
+        self.emit(InstrRef::LoadLocal {
             dst: reloaded_for_type,
             slot: val_slot,
         });
 
         let type_check_reg = self.fresh_reg();
         if is_tuple {
-            self.emit(LirInstr::IsArray {
+            self.emit(InstrRef::IsArray {
                 dst: type_check_reg,
                 src: reloaded_for_type,
             });
         } else {
-            self.emit(LirInstr::IsArrayMut {
+            self.emit(InstrRef::IsArrayMut {
                 dst: type_check_reg,
                 src: reloaded_for_type,
             });
@@ -173,20 +177,20 @@ impl<'a> Lowerer<'a> {
         self.finish_block();
 
         // Length check block — reload value from temp slot
-        self.current_block = BasicBlock::new(len_check_label);
+        self.open_block(len_check_label);
         let reloaded = self.fresh_reg();
-        self.emit(LirInstr::LoadLocal {
+        self.emit(InstrRef::LoadLocal {
             dst: reloaded,
             slot: val_slot,
         });
         let len_reg = self.fresh_reg();
-        self.emit(LirInstr::ArrayMutLen {
+        self.emit(InstrRef::ArrayMutLen {
             dst: len_reg,
             src: reloaded,
         });
-        let expected_reg = self.emit_const(LirConst::Int(n as i64))?;
+        let expected_reg = self.emit_const(ConstRef::Int(n as i64))?;
         let len_ok = self.fresh_reg();
-        self.emit(LirInstr::compare(len_ok, len_cmp, len_reg, expected_reg));
+        self.emit(InstrRef::compare(len_ok, len_cmp, len_reg, expected_reg));
         self.terminate(Terminator::Branch {
             cond: len_ok,
             then_label: pass_label,
@@ -195,14 +199,13 @@ impl<'a> Lowerer<'a> {
         self.finish_block();
 
         // Use a local slot to merge the boolean result across blocks
-        let merge_slot = self.current_func.num_locals;
-        self.current_func.num_locals += 1;
+        let merge_slot = self.fresh_local();
 
         // Fail block: result = false
-        self.current_block = BasicBlock::new(fail_label);
-        let false_reg = self.emit_const(LirConst::Bool(false))?;
+        self.open_block(fail_label);
+        let false_reg = self.emit_const(ConstRef::Bool(false))?;
         let result_label = self.fresh_label();
-        self.emit(LirInstr::StoreLocal {
+        self.emit(InstrRef::StoreLocal {
             slot: merge_slot,
             src: false_reg,
         });
@@ -210,9 +213,9 @@ impl<'a> Lowerer<'a> {
         self.finish_block();
 
         // Pass block: result = true
-        self.current_block = BasicBlock::new(pass_label);
-        let true_reg = self.emit_const(LirConst::Bool(true))?;
-        self.emit(LirInstr::StoreLocal {
+        self.open_block(pass_label);
+        let true_reg = self.emit_const(ConstRef::Bool(true))?;
+        self.emit(InstrRef::StoreLocal {
             slot: merge_slot,
             src: true_reg,
         });
@@ -220,9 +223,9 @@ impl<'a> Lowerer<'a> {
         self.finish_block();
 
         // Result block: load the boolean
-        self.current_block = BasicBlock::new(result_label);
+        self.open_block(result_label);
         let dst = self.fresh_reg();
-        self.emit(LirInstr::LoadLocal {
+        self.emit(InstrRef::LoadLocal {
             dst,
             slot: merge_slot,
         });

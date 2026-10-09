@@ -1,4 +1,4 @@
-// audited: 2026-09-06
+// audited: 2026-10-06
 // docs/impl/bytecode.md
 //! Which arithmetic opcode the emitter picks, and what decides it.
 //!
@@ -18,20 +18,23 @@ const ARITHMETIC_OPCODES: [(BinOp, &str, &str); 4] = [
 
 /// `6 op 7` over two constants, built with `make_op`, disassembled to the
 /// sequence of opcode tokens it emitted.
-fn arithmetic_opcodes(op: BinOp, make_op: fn(Reg, BinOp, Reg, Reg) -> LirInstr) -> Vec<String> {
+fn arithmetic_opcodes(
+    op: BinOp,
+    make_op: fn(Reg, BinOp, Reg, Reg) -> InstrRef<'static>,
+) -> Vec<String> {
     use crate::compiler::bytecode::disassemble_lines;
 
     let func = LirFixture::new(Arity::Exact(0))
         .block(
             0,
-            vec![
-                LirInstr::Const {
+            &[
+                InstrRef::Const {
                     dst: Reg(0),
-                    value: LirConst::Int(6),
+                    value: ConstRef::Int(6),
                 },
-                LirInstr::Const {
+                InstrRef::Const {
                     dst: Reg(1),
-                    value: LirConst::Int(7),
+                    value: ConstRef::Int(7),
                 },
                 make_op(Reg(2), op, Reg(0), Reg(1)),
             ],
@@ -39,7 +42,7 @@ fn arithmetic_opcodes(op: BinOp, make_op: fn(Reg, BinOp, Reg, Reg) -> LirInstr) 
         )
         .build();
 
-    let (bytecode, _, _) = Emitter::new().emit(&func);
+    let (bytecode, _, _) = emitter().emit(&func.view());
     // The trap: every integer opcode name contains its polymorphic one, so a
     // substring search for "Add" also matches an emitted "AddInt". Split the
     // token off and compare it whole.
@@ -58,7 +61,7 @@ fn arithmetic_binops_emit_the_polymorphic_bytecodes() {
     // its integer opcode still satisfies the positive test below, and float
     // operands would silently take integer wrapping arithmetic.
     for (op, polymorphic, integer) in ARITHMETIC_OPCODES {
-        let opcodes = arithmetic_opcodes(op, LirInstr::binop);
+        let opcodes = arithmetic_opcodes(op, InstrRef::binop);
         assert!(
             opcodes.iter().any(|name| name == polymorphic),
             "{polymorphic}: an unproven BinOp must emit the polymorphic opcode; got {opcodes:?}"
@@ -76,7 +79,7 @@ fn arithmetic_binops_emit_the_polymorphic_bytecodes() {
 #[test]
 fn arithmetic_binops_with_an_int_proof_emit_the_integer_bytecodes() {
     for (op, polymorphic, integer) in ARITHMETIC_OPCODES {
-        let opcodes = arithmetic_opcodes(op, LirInstr::int_binop);
+        let opcodes = arithmetic_opcodes(op, InstrRef::int_binop);
         assert!(
             opcodes.iter().any(|name| name == integer),
             "{integer}: a proven BinOp must emit the integer-only opcode; got {opcodes:?}"
@@ -102,8 +105,8 @@ fn a_proof_changes_nothing_for_an_operation_with_no_integer_opcode() {
         BinOp::Shr,
     ] {
         assert_eq!(
-            arithmetic_opcodes(op, LirInstr::int_binop),
-            arithmetic_opcodes(op, LirInstr::binop),
+            arithmetic_opcodes(op, InstrRef::int_binop),
+            arithmetic_opcodes(op, InstrRef::binop),
             "{op:?}: the proof must not change an operation the instruction set \
              does not specialize"
         );

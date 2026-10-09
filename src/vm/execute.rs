@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! Bytecode execution entry points, the tail-call trampoline, and the opening
 //! and closing of an activation.
 //!
@@ -52,7 +52,7 @@
 //! inline: to avoid growing the Rust stack per nesting level,
 //! `handle_fiber_resume_signal` suspends the *caller's* continuation and
 //! returns `SIG_SWITCH`, handing the child to a driving trampoline
-//! (`handle_sig_switch`). The top-level dispatch loop ([`VM::execute_proto`])
+//! (`handle_sig_switch`). The top-level dispatch loop (`VM::execute_code`)
 //! is that trampoline at the root; a re-entrant boundary that runs a thunk on
 //! the current fiber must be one too. If it is not, the `SIG_SWITCH` unwinds
 //! straight out of `execute_bytecode_saving_stack` and the thunk's continuation
@@ -103,19 +103,19 @@ pub(crate) use exit::{ExecResult, Exit};
 
 impl VM {
     /// Debug-only: the executing-closure register handed to a body entry must
-    /// name that body — its template bytecode must be the very `Rc` the entered
-    /// `Code` carries. Called ONLY where the closure is live by construction
-    /// (the entrant just took `code` from it), never on a restored/parked
-    /// register — a parked register is a possibly-dead borrow (the region
-    /// solver frees a closure value at its last use while its activation's
-    /// `code`/`env` live on as `Rc`s), so dereferencing it is unsound.
+    /// name that body — its template's bytecode must be the very bytes the
+    /// entered `Code` names. Called ONLY where the closure is live by
+    /// construction (the entrant just took `code` from it), never on a
+    /// restored/parked register — a parked register is a possibly-dead borrow
+    /// (the region solver frees a closure value at its last use while its
+    /// activation runs on), so dereferencing it is unsound.
     #[cfg(debug_assertions)]
     pub(crate) fn debug_assert_entry_closure_matches(entering: Value, code: &crate::value::Code) {
         if let Some(cl) = entering.as_closure() {
-            // Identity is the payload's backing address: every header from one
-            // blueprint shares it (docs/impl/region/template.md), so two code
-            // objects for the same function compare equal however each was
-            // built, and two different functions never do.
+            // Identity is the payload's bytecode address: every header over one
+            // payload shares it (docs/impl/region/template.md), so two headers
+            // for the same function compare equal however each was built, and
+            // two different functions never do.
             debug_assert!(
                 std::ptr::eq(cl.template.bytecode().as_ptr(), code.bytecode().as_ptr()),
                 "executing-closure register mismatch at body entry: the entrant handed \
@@ -428,7 +428,7 @@ impl VM {
     /// `arena/allocs`, the test-setup module loader).
     ///
     /// It wraps [`Self::execute_bytecode_saving_stack`] with the same
-    /// `SIG_SWITCH`-draining loop the root dispatch ([`VM::execute_proto`])
+    /// `SIG_SWITCH`-draining loop the root dispatch ([`VM::execute_code`])
     /// runs, so a `fiber/resume` inside the thunk completes inside the caller's
     /// scope. The module doc's SIG_SWITCH section says why that matters.
     ///

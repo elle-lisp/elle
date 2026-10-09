@@ -1,3 +1,8 @@
+// audited: 2026-10-06
+//! The special forms that desugar in the analyzer: `environment`, `parameterize`, `cond`, and qualified symbols.
+//!
+//! docs/impl/hir.md
+
 use super::*;
 
 impl<'a> Analyzer<'a> {
@@ -31,7 +36,12 @@ impl<'a> Analyzer<'a> {
         let mut pairs: Vec<(SymbolId, Binding)> = Vec::new();
 
         for scope in self.scopes.iter().rev() {
-            for (&sym, candidates) in &scope.bindings {
+            // The binding map's order is its hasher's, which differs between
+            // compiles; the struct's argument order is bytecode, so it follows
+            // the symbol ids instead.
+            let mut in_scope: Vec<_> = scope.bindings.iter().collect();
+            in_scope.sort_unstable_by_key(|(sym, _)| **sym);
+            for (&sym, candidates) in in_scope {
                 if seen.contains(&sym) {
                     continue;
                 }
@@ -194,7 +204,8 @@ impl<'a> Analyzer<'a> {
     ///
     /// The `get` binding always resolves to the global primitive,
     /// matching the pattern used for array/struct literal
-    /// desugaring (see SyntaxKind::Array/ArrayMut/Struct/StructMut arms above).
+    /// desugaring (the SyntaxKind::Array/ArrayMut/Struct/StructMut arms in
+    /// forms/expr.rs).
     pub(super) fn desugar_qualified_symbol(
         &mut self,
         name: &str,

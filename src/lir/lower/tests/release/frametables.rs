@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! That the abandoned-frame release tables name exactly the routes the emitter wrote, and nothing it declined.
 //!
 //! docs/impl/region/unwind.md
@@ -8,17 +8,17 @@ use super::*;
 /// Every `(slot, DecrefValueRegion)` pair a function emits: the slot a
 /// `LoadLocal` fed straight into the release. The "unbound call result" route
 /// releases off a register no `LoadLocal` produced and is deliberately absent.
-fn emitted_value_route_slots(func: &LirFunction) -> Vec<u16> {
+fn emitted_value_route_slots(func: &LirOwned) -> Vec<u16> {
     let mut out = Vec::new();
-    for block in &func.blocks {
-        let instrs: Vec<&LirInstr> = block.instructions.iter().map(|i| &i.instr).collect();
+    for block in func.view().blocks() {
+        let instrs: Vec<InstrRef<'_>> = block.instrs().collect();
         for (i, instr) in instrs.iter().enumerate() {
-            let LirInstr::DecrefValueRegion { src } = instr else {
+            let InstrRef::DecrefValueRegion { src } = instr else {
                 continue;
             };
-            if let Some(LirInstr::LoadLocal { dst, slot }) = i.checked_sub(1).map(|p| instrs[p]) {
-                if dst == src {
-                    out.push(*slot);
+            if let Some(InstrRef::LoadLocal { dst, slot }) = i.checked_sub(1).map(|p| instrs[p]) {
+                if dst == *src {
+                    out.push(slot);
                 }
             }
         }
@@ -29,13 +29,11 @@ fn emitted_value_route_slots(func: &LirFunction) -> Vec<u16> {
 }
 
 /// Every static region slot a function's `DecrefRegion`s name.
-fn emitted_slot_route_regions(func: &LirFunction) -> Vec<u32> {
-    let mut out: Vec<u32> = func
-        .blocks
-        .iter()
-        .flat_map(|b| b.instructions.iter())
-        .filter_map(|i| match &i.instr {
-            LirInstr::DecrefRegion { region_id } => Some(region_id.get()),
+fn emitted_slot_route_regions(func: &LirOwned) -> Vec<u32> {
+    let mut out: Vec<u32> = flat_instrs(func)
+        .into_iter()
+        .filter_map(|i| match i {
+            InstrRef::DecrefRegion { region_id } => Some(region_id.get()),
             _ => None,
         })
         .collect();
@@ -47,14 +45,12 @@ fn emitted_slot_route_regions(func: &LirFunction) -> Vec<u32> {
 /// Every splice args-array slot a function's call instructions carry. Their
 /// release is the runtime's rather than an emitted `DecrefRegion`, so the frame
 /// still owes it while the array exists and the call has not run.
-fn splice_args_regions(func: &LirFunction) -> Vec<u32> {
-    let mut out: Vec<u32> = func
-        .blocks
-        .iter()
-        .flat_map(|b| b.instructions.iter())
-        .filter_map(|i| match &i.instr {
-            LirInstr::CallArrayMut { args_region, .. }
-            | LirInstr::TailCallArrayMut { args_region, .. } => Some(args_region.get()),
+fn splice_args_regions(func: &LirOwned) -> Vec<u32> {
+    let mut out: Vec<u32> = flat_instrs(func)
+        .into_iter()
+        .filter_map(|i| match i {
+            InstrRef::CallArrayMut { args_region, .. }
+            | InstrRef::TailCallArrayMut { args_region, .. } => Some(args_region.get()),
             _ => None,
         })
         .collect();
@@ -72,14 +68,19 @@ fn frame_release_tables_name_exactly_the_routes_emitted() {
     // cell box, a transfer adopt) and release a reference nobody owes.
     let module = compile_to_lir("(let [x (string \"a\") y (string \"b\")] (g x y))");
     for func in std::iter::once(&module.entry).chain(module.closures.iter()) {
-        let mut recorded = func.frame_release_slots.clone();
+        let mut recorded = func.view().frame_release_slots().to_vec();
         recorded.sort_unstable();
         assert_eq!(
             recorded,
             emitted_value_route_slots(func),
             "frame_release_slots must be exactly the slots a value route loaded from",
         );
-        let mut regions: Vec<u32> = func.frame_release_regions.iter().map(|r| r.get()).collect();
+        let mut regions: Vec<u32> = func
+            .view()
+            .frame_release_regions()
+            .iter()
+            .map(|r| r.get())
+            .collect();
         regions.sort_unstable();
         assert_eq!(
             regions,
@@ -102,7 +103,12 @@ fn a_splice_args_array_is_owed_by_the_frame_until_the_call_takes_it() {
         .chain(module.closures.iter())
         .find(|f| !splice_args_regions(f).is_empty())
         .expect("a function lowering a spliced call");
-    let mut regions: Vec<u32> = func.frame_release_regions.iter().map(|r| r.get()).collect();
+    let mut regions: Vec<u32> = func
+        .view()
+        .frame_release_regions()
+        .iter()
+        .map(|r| r.get())
+        .collect();
     regions.sort_unstable();
     for slot in splice_args_regions(func) {
         assert!(
@@ -130,25 +136,22 @@ fn a_spliced_call_allocates_its_args_array_outside_the_call_region() {
         .chain(module.closures.iter())
         .find(|f| !splice_args_regions(f).is_empty())
         .expect("a function lowering a spliced call");
-    let array_slots: Vec<u32> = func
-        .blocks
-        .iter()
-        .flat_map(|b| b.instructions.iter())
-        .filter_map(|i| match &i.instr {
-            LirInstr::MakeArrayMut { region, .. } => Some(region.get()),
+    let array_slots: Vec<u32> = flat_instrs(func)
+        .into_iter()
+        .filter_map(|i| match i {
+            InstrRef::MakeArrayMut { region, .. } => Some(region.get()),
             _ => None,
         })
         .collect();
-    let call_slots: Vec<u32> =
-        func.blocks
-            .iter()
-            .flat_map(|b| b.instructions.iter())
-            .filter_map(|i| match &i.instr {
-                LirInstr::CallArrayMut { region, .. }
-                | LirInstr::TailCallArrayMut { region, .. } => Some(region.get()),
-                _ => None,
-            })
-            .collect();
+    let call_slots: Vec<u32> = flat_instrs(func)
+        .into_iter()
+        .filter_map(|i| match i {
+            InstrRef::CallArrayMut { region, .. } | InstrRef::TailCallArrayMut { region, .. } => {
+                Some(region.get())
+            }
+            _ => None,
+        })
+        .collect();
     assert!(!array_slots.is_empty(), "the splice path builds an @array");
     for slot in &array_slots {
         assert!(
@@ -176,7 +179,7 @@ fn a_reassigned_binding_records_no_value_route() {
         "the shape must carry a release for the skip to be about",
     );
     for func in std::iter::once(&module.entry).chain(module.closures.iter()) {
-        let mut recorded = func.frame_release_slots.clone();
+        let mut recorded = func.view().frame_release_slots().to_vec();
         recorded.sort_unstable();
         assert_eq!(
             recorded,

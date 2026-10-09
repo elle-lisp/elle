@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-10-06
 //! Introspection primitives: what a closure is, `doc`, `vm/query`, the signal registry, and `keyword`.
 //!
 //! docs/functions.md
@@ -53,7 +53,7 @@ pub(crate) fn prim_gpu_eligible(
     args: &[Value],
 ) -> (SignalBits, Value) {
     if let Some(closure) = args[0].as_closure() {
-        let eligible = match &closure.template.lir_function() {
+        let eligible = match closure.template.lir() {
             Some(lir) => lir.is_gpu_eligible(),
             None => closure.template.is_gpu_candidate(),
         };
@@ -229,23 +229,6 @@ pub(crate) fn prim_keyword(
     }
 }
 
-/// (lir/closure-value-const-count) — number of closure-valued `ValueConst`
-/// instructions converted to `ClosureRef` by the LIR cross-thread
-/// serializer during this process's lifetime.
-///
-/// tests/impl/spawn-lir-closure-ref.lisp reads it to assert the conversion
-/// runs on a real spawn. See `LirFunction::convert_value_consts_for_send`
-/// (src/lir/types/func.rs).
-pub(crate) fn prim_closure_value_const_count(
-    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    _args: &[Value],
-) -> (SignalBits, Value) {
-    (
-        SIG_OK,
-        Value::int(crate::lir::closure_value_const_count() as i64),
-    )
-}
-
 /// (jit/rejections) — list closures rejected from JIT compilation with reasons
 ///
 /// Returns a list of structs, each with :name, :reason, :calls and :attempts keys.
@@ -279,7 +262,7 @@ pub(crate) fn prim_compile_spirv(
         );
     }
     let closure = prim_arg!(ctx, args, 0, as_closure, "mlir/compile-spirv", "closure");
-    let lir = match closure.template.lir_function() {
+    let lir = match closure.template.lir() {
         Some(lir) => lir,
         None => {
             return (
@@ -300,14 +283,13 @@ pub(crate) fn prim_compile_spirv(
             ),
         );
     }
-    let workgroup_size = if args.len() == 2 {
-        args[1].as_int().unwrap_or(256) as u32
-    } else {
-        256
+    let size = match crate::primitives::meta::workgroup_arg(ctx, args, "mlir/compile-spirv") {
+        Ok(size) => size,
+        Err(raised) => return raised,
     };
-    // Use SIG_QUERY to access the VM's MlirCache for shared context
-    // and SPIR-V caching. The VM handles the query in dispatch_query.
-    let payload = ctx.pair(args[0], Value::int(workgroup_size as i64));
+    // Use SIG_QUERY to reach the VM's SPIR-V cache and the MlirCache's shared
+    // context. The VM handles the query in dispatch_query.
+    let payload = ctx.pair(args[0], Value::int(size.get() as i64));
     (
         SIG_QUERY,
         ctx.pair(Value::keyword("mlir/compile-spirv"), payload),
@@ -445,12 +427,6 @@ primitive! {
         example: "(jit/rejections)",
         effect: RegionEffect::Fresh,
     }
-    "lir/closure-value-const-count" => prim_closure_value_const_count {
-        doc: "Number of closure-valued ValueConst instructions converted to ClosureRef by the LIR cross-thread serializer. A test reads it to assert the conversion runs on a real spawn.",
-        category: "meta",
-        example: "(lir/closure-value-const-count)",
-        effect: RegionEffect::Immediate,
-    }
     "keyword" => prim_keyword {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
@@ -469,7 +445,8 @@ primitive!(
         "mlir/compile-spirv" => prim_compile_spirv {
             signal: Signal::query_errors(),
             arity: Arity::Range(1, 2),
-            doc: "Compile a GPU-eligible closure to SPIR-V bytes.",
+            doc: "Compile a GPU-eligible closure to SPIR-V bytes at the workgroup size \
+                  (default 256), and cache them in the VM as git does.",
             params: &["closure", "workgroup-size"],
             category: "mlir",
             example: "(mlir/compile-spirv (fn [a b] (+ a b)))",

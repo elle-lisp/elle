@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-07
 //! The `VM` struct — the per-instance state a running program reaches — and the
 //! accessors that reborrow the allocations it points at.
 //!
@@ -10,41 +10,20 @@ use crate::hir::region::{MappedRegion, RuntimeRegion, StaticRegion};
 use crate::primitives::def::Doc;
 use crate::reader::SourceLoc;
 use crate::value::{
-    BytecodeFrame, Closure, Fiber, FiberHandle, SignalBits, SuspendedFrame, Value, SIG_ERROR,
-    SIG_FUEL, SIG_HALT, SIG_OK, SIG_SWITCH,
+    BytecodeFrame, Closure, CodePin, Fiber, FiberHandle, SignalBits, SuspendedFrame, Value,
+    SIG_ERROR, SIG_FUEL, SIG_HALT, SIG_OK, SIG_SWITCH,
 };
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 use std::rc::Rc;
-// `jit_cache` is the only `Arc` holder in this module.
-#[cfg(feature = "jit")]
-use std::sync::Arc;
 
 #[cfg(feature = "jit")]
-use crate::jit::{JitCode, JitRejectionInfo};
-
-/// A `jit_cache` entry: the compiled code plus the pin that keeps the keyed
-/// bytecode alive (docs/impl/jit.md). The pin makes the
-/// raw-address key sound: bytecode lives in a code object's payload, and the
-/// pinned code object holds that payload's region, so the address cannot be
-/// reused by a different function while this entry lives.
-#[cfg(feature = "jit")]
-pub struct JitCacheEntry {
-    _pin: crate::value::ClosureTemplate,
-    pub code: Arc<JitCode>,
-}
+use crate::jit::JitRejectionInfo;
 
 #[cfg(feature = "jit")]
-impl JitCacheEntry {
-    /// Build an entry pinning `template` — the code object the entry's cache
-    /// key was derived from.
-    pub fn new(template: crate::value::ClosureTemplate, code: Arc<JitCode>) -> Self {
-        JitCacheEntry {
-            _pin: template,
-            code,
-        }
-    }
-}
+pub use caches::JitCacheEntry;
+pub use caches::{SpirvEntry, WorkgroupSize};
+pub use counts::CallCounts;
 
 pub(crate) struct TailCallInfo {
     pub code: crate::value::Code,
@@ -151,7 +130,9 @@ pub struct VM {
     /// Plugins already loaded (path → return value). Prevents double-loading
     /// which would re-register primitives and leak library handles.
     pub loaded_plugins: HashMap<String, Value>,
-    pub closure_call_counts: FxHashMap<*const u8, usize>,
+    /// Call counts by bytecode address; a freed function's count reads as
+    /// zero ([`CallCounts`]).
+    pub closure_call_counts: CallCounts,
     pub tail_call_env_cache: Vec<Value>,
     pub env_cache: Vec<Value>,
     pub(crate) pending_tail_call: Option<TailCallInfo>,
@@ -161,7 +142,7 @@ pub struct VM {
     pub(crate) pending_fiber_resume: Option<PendingFiberResume>,
     /// One-shot "the closure whose body is about to run", set immediately before
     /// entering a body via `execute_bytecode_saving_stack` or the raw
-    /// `execute_proto`, which take it (resetting to `NIL`) and install it as
+    /// `execute_code`, which take it (resetting to `NIL`) and install it as
     /// `fiber.current_closure` for that activation. **Every entrant that runs a
     /// closure body through a re-entry must set it** — the JIT helpers'
     /// interpreter fallback and tail-call resolution, the forced-tier entries,
@@ -223,7 +204,7 @@ pub struct VM {
     /// closure, where the call stack is still empty.
     pub(crate) arena_site: Option<(SourceLoc, Option<&'static str>)>,
     /// Reason carried by the most recent uncaught `:gated` error to propagate
-    /// out of `execute_proto`. A loud `(gate! …)` whose condition is unmet
+    /// out of `execute_code`. A loud `(gate! …)` whose condition is unmet
     /// raises `{:error :gated :reason …}`; when that escapes to the top level
     /// uncaught, it is an intentional SKIP, not a failure. The top-level driver
     /// (`run_source`) reads this to exit 0 with a notice instead of erroring.
@@ -253,26 +234,27 @@ pub struct VM {
     #[cfg(feature = "jit")]
     pub(crate) jit_worker: Option<crate::jit::worker::JitWorker>,
     /// Compilations in flight on the worker, keyed by bytecode address. The
-    /// value pins the keyed allocation from submission until the result
+    /// value pins the keyed code region from submission until the result
     /// installs (docs/impl/jit.md); the pin then moves
     /// into `jit_cache` or `jit_rejections`.
     #[cfg(feature = "jit")]
-    pub(crate) jit_pending: FxHashMap<usize, crate::value::ClosureTemplate>,
+    pub(crate) jit_pending: FxHashMap<usize, CodePin>,
     /// Documentation for all named forms (primitives, special forms, macros).
     /// Keyed by name string for direct lookup via `doc` and `vm/primitive-meta`.
     pub docs: HashMap<String, Doc>,
     /// JIT rejection log: bytecode pointer → rejection info.
     /// Records first rejection per closure template. Used by
     /// `(jit/rejections)` primitive and `--dump=stats`.
+    /// Each entry counts the function's rejected compiles, which the
+    /// negative-cache invariant (docs/impl/jit.md) holds at 1 whatever the call
+    /// count; a regression shows up as an unbounded `:attempts`.
     #[cfg(feature = "jit")]
     pub jit_rejections: FxHashMap<*const u8, JitRejectionInfo>,
-    /// Per-template count of background JIT compilations submitted.
-    /// Incremented on every `submit_jit_task`. The negative-cache
-    /// invariant (see docs/impl/jit.md) holds this at 1 for a rejected
-    /// function regardless of call count; a regression shows up here as
-    /// an unbounded `:attempts` in `(jit/rejections)`.
-    #[cfg(feature = "jit")]
-    pub jit_compile_attempts: FxHashMap<*const u8, usize>,
+    /// The SPIR-V `git` and `mlir/compile-spirv` compiled: one entry per code
+    /// object, keyed and pinned like `jit_cache`, holding a kernel per
+    /// workgroup size. Write through [`VM::install_spirv`]; read through
+    /// [`VM::spirv_for`] and [`VM::has_spirv`].
+    pub spirv_cache: FxHashMap<*const u8, SpirvEntry>,
     /// Cached Expander for runtime `eval`. Avoids re-loading the prelude
     /// on every eval call. Taken out during eval, put back after.
     pub eval_expander: Option<crate::syntax::Expander>,
@@ -289,9 +271,10 @@ pub struct VM {
     /// compiled to per-closure WASM modules and dispatched through Wasmtime.
     #[cfg(feature = "wasm")]
     pub wasm_tier: Option<crate::wasm::lazy::WasmTier>,
-    /// Closures that failed WASM compilation (contain MakeClosure, TailCall, etc.)
+    /// Closures that failed WASM compilation (contain MakeClosure, TailCall,
+    /// etc.), each pinning its key's code region like `jit_rejections`.
     #[cfg(feature = "wasm")]
-    pub(crate) wasm_rejections: FxHashMap<*const u8, ()>,
+    pub(crate) wasm_rejections: FxHashMap<*const u8, CodePin>,
     /// Whether MLIR compilation is enabled (runtime gate).
     /// Set at construction from the MLIR policy the run starts with.
     #[cfg(feature = "mlir")]
@@ -302,6 +285,8 @@ pub struct VM {
     pub(crate) mlir_cache: Option<crate::mlir::MlirCache>,
 }
 
+mod caches;
+mod counts;
 mod decode;
 mod discard;
 mod format;
@@ -392,23 +377,6 @@ impl VM {
         self.gated_exit_reason.take()
     }
 
-    /// Record a closure call and return whether it is hot: called at least the
-    /// JIT threshold's number of times (ten by default; `(vm/config-set :jit N)`
-    /// sets it).
-    pub fn record_closure_call(&mut self, bytecode_ptr: *const u8) -> bool {
-        let count = self.closure_call_counts.entry(bytecode_ptr).or_insert(0);
-        *count += 1;
-        *count >= self.runtime_config.jit.threshold()
-    }
-
-    /// Get call count for a closure
-    pub fn get_closure_call_count(&self, bytecode_ptr: *const u8) -> usize {
-        self.closure_call_counts
-            .get(&bytecode_ptr)
-            .copied()
-            .unwrap_or(0)
-    }
-
     /// Check if a module is currently being loaded (circular dependency).
     pub fn is_module_loading(&self, module_path: &str) -> bool {
         self.loading_modules.contains(module_path)
@@ -442,20 +410,21 @@ impl VM {
     }
 
     /// Push a synthetic trace frame for `name`, whose call site is at `ip` in a
-    /// code object carrying `location_map`. Both code objects are built here
-    /// from blueprints, so a trace test exercises the same path a real call
+    /// code object carrying `location_map`. Both code objects are real payloads
+    /// on this VM's heap, so a trace test exercises the same path a real call
     /// takes.
     #[cfg(test)]
     fn push_call_frame(&mut self, name: &str, ip: usize, location_map: crate::error::LocationMap) {
-        let mut callee =
-            crate::value::TemplateProto::new(Vec::new(), crate::value::Arity::Exact(0), Vec::new());
-        callee.name = Some(name.to_string());
-        let mut caller =
-            crate::value::TemplateProto::new(Vec::new(), crate::value::Arity::Exact(0), Vec::new());
-        caller.location_map = location_map;
+        use crate::value::{Arity, CodeBuilder};
         let heap = self.heap();
-        let callee = crate::value::ClosureTemplate::for_proto(heap, &Rc::new(callee)).code();
-        let caller = crate::value::ClosureTemplate::for_proto(heap, &Rc::new(caller)).code();
+        let callee = CodeBuilder::new(Vec::new(), Arity::Exact(0), Vec::new())
+            .name(name)
+            .build(heap)
+            .code();
+        let caller = CodeBuilder::new(Vec::new(), Arity::Exact(0), Vec::new())
+            .location_map(location_map)
+            .build(heap)
+            .code();
 
         let frame_base = self.fiber.stack.len();
         self.fiber.call_depth += 1;

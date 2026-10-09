@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! What a 1-slot container's binder emits for the init it stores.
 //!
 //! docs/impl/region/bindings.md
@@ -34,7 +34,7 @@ impl<'a> Lowerer<'a> {
     /// (the file-letrec binder).
     pub(in crate::lir::lower) fn emit_counted_cell_read_retain(&mut self, hir_id: HirId, src: Reg) {
         if self.region_info.counted_cell_read_sites.contains(&hir_id) {
-            self.emit(LirInstr::IncrefValueRegion { src });
+            self.emit(InstrRef::IncrefValueRegion { src });
         }
     }
 
@@ -53,7 +53,7 @@ impl<'a> Lowerer<'a> {
     /// tests/impl/region-cell-aliased-init.lisp.
     pub(in crate::lir::lower) fn emit_counted_cell_init_retain(&mut self, hir_id: HirId, src: Reg) {
         if self.region_info.counted_cell_init_sites.contains(&hir_id) {
-            self.emit(LirInstr::IncrefValueRegion { src });
+            self.emit(InstrRef::IncrefValueRegion { src });
         }
     }
     /// Store a captured binding's init value into the nil-valued
@@ -102,11 +102,11 @@ impl<'a> Lowerer<'a> {
         reassigned: bool,
     ) {
         let cell_reg = self.fresh_reg();
-        self.emit(LirInstr::LoadLocal {
+        self.emit(InstrRef::LoadLocal {
             dst: cell_reg,
             slot,
         });
-        self.emit(LirInstr::StoreCaptureCell {
+        self.emit(InstrRef::StoreCaptureCell {
             cell: cell_reg,
             value: value_reg,
         });
@@ -124,13 +124,13 @@ impl<'a> Lowerer<'a> {
             match coalesced {
                 Some(region_id) => {
                     #[cfg(debug_assertions)]
-                    self.emit(LirInstr::AssertRegionMatches {
+                    self.emit(InstrRef::AssertRegionMatches {
                         region_id,
                         src: value_reg,
                     });
-                    self.emit(LirInstr::DecrefRegion { region_id });
+                    self.emit(InstrRef::DecrefRegion { region_id });
                 }
-                None => self.emit(LirInstr::DecrefValueRegion { src: value_reg }),
+                None => self.emit(InstrRef::DecrefValueRegion { src: value_reg }),
             }
         }
     }
@@ -153,7 +153,7 @@ impl<'a> Lowerer<'a> {
             .cell_content_adopt_bindings
             .contains(&binding)
         {
-            self.emit(LirInstr::AdoptCellRegion {
+            self.emit(InstrRef::AdoptCellRegion {
                 parent: cell_reg,
                 child: value_reg,
             });

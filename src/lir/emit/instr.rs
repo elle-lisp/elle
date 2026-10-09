@@ -1,26 +1,26 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 // docs/impl/bytecode.md
-//! The emitter's instruction dispatch: what each `LirInstr` writes into the
+//! The emitter's instruction dispatch: what each frozen instruction writes into the
 //! bytecode, and what it does to the simulated operand stack.
 
 use super::*;
 
 impl Emitter {
-    pub(super) fn emit_instr(&mut self, instr: &LirInstr, func: &LirFunction) {
+    pub(super) fn emit_instr(&mut self, instr: &InstrRef<'_>, func: &LirView<'_>) {
         match instr {
-            LirInstr::Const { dst, value } => {
-                self.emit_const(value, func);
+            InstrRef::Const { dst, value } => {
+                self.emit_const(*value);
                 self.push_reg(*dst);
             }
 
-            LirInstr::ValueConst { dst, value } => {
+            InstrRef::ValueConst { dst, value } => {
                 let const_idx = self.bytecode.add_constant(*value);
                 self.bytecode.emit(Instruction::LoadConst);
                 self.bytecode.emit_u16(const_idx);
                 self.push_reg(*dst);
             }
 
-            LirInstr::MaterializeConst {
+            InstrRef::MaterializeConst {
                 dst,
                 template,
                 region,
@@ -31,25 +31,25 @@ impl Emitter {
                 // pre-baked pool Value. The VM resolves the slot and
                 // materializes a FRESH structure into that per-activation region.
                 // A u32 byte-length prefix lets the disassembler skip the template
-                // without decoding it.
+                // without decoding it. The frozen form holds the template as
+                // `ConstTemplate::encode` wrote it, so the bytes copy through.
                 self.bytecode.emit(Instruction::MaterializeConst);
                 self.bytecode.emit_u32(region.get());
-                let mut buf = Vec::new();
-                template.encode(&mut buf);
-                self.bytecode.emit_u32(buf.len() as u32);
-                for &b in &buf {
+                let bytes = template.bytes();
+                self.bytecode.emit_u32(bytes.len() as u32);
+                for &b in bytes {
                     self.bytecode.emit_byte(b);
                 }
                 self.push_reg(*dst);
             }
 
-            LirInstr::LoadLocal { dst, slot } => {
+            InstrRef::LoadLocal { dst, slot } => {
                 self.bytecode.emit(Instruction::LoadLocal);
                 self.bytecode.emit_u16(*slot);
                 self.push_reg(*dst);
             }
 
-            LirInstr::StoreLocal { slot, src } => {
+            InstrRef::StoreLocal { slot, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::StoreLocal);
                 self.bytecode.emit_u16(*slot);
@@ -60,7 +60,7 @@ impl Emitter {
                 self.pop();
             }
 
-            LirInstr::StoreLocalRefcounted { slot, src } => {
+            InstrRef::StoreLocalRefcounted { slot, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::StoreLocal);
                 self.bytecode.emit_u16(*slot);
@@ -68,7 +68,7 @@ impl Emitter {
                 self.pop();
             }
 
-            LirInstr::LoadCapture { dst, index } => {
+            InstrRef::LoadCapture { dst, index } => {
                 if let Some(stack_slot) = Self::non_cell_local_slot(*index, func) {
                     // Non-cell locally-defined variable: use stack
                     self.bytecode.emit(Instruction::LoadLocal);
@@ -81,7 +81,7 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::LoadCaptureRaw { dst, index } => {
+            InstrRef::LoadCaptureRaw { dst, index } => {
                 // Load without unwrapping cells - used for forwarding captures
                 self.bytecode.emit(Instruction::LoadUpvalueRaw);
                 self.bytecode.emit_byte(0); // depth (currently unused)
@@ -89,14 +89,14 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::LoadSelf { dst } => {
+            InstrRef::LoadSelf { dst } => {
                 // Pushes the executing closure from a runtime register — no
                 // operand, no capture slot.
                 self.bytecode.emit(Instruction::LoadSelf);
                 self.push_reg(*dst);
             }
 
-            LirInstr::StoreCapture { index, src } => {
+            InstrRef::StoreCapture { index, src } => {
                 self.ensure_on_top(*src);
                 if let Some(stack_slot) = Self::non_cell_local_slot(*index, func) {
                     // Non-cell locally-defined variable: use stack
@@ -113,7 +113,7 @@ impl Emitter {
                 self.pop();
             }
 
-            LirInstr::MakeClosure {
+            InstrRef::MakeClosure {
                 dst,
                 closure_id,
                 captures,
@@ -134,44 +134,19 @@ impl Emitter {
 
                 if !all_in_place {
                     // Captures not in place - need to arrange them
-                    for cap in captures {
+                    for cap in captures.iter() {
                         self.ensure_on_top(*cap);
                     }
                 }
 
-                // Look up the pre-compiled closure by ClosureId.
-                // In emit_module mode, closures are pre-compiled.
-                // In standalone emit mode (tests), this panics — callers
-                // must use emit_module for code with MakeClosure.
-                let compiled = self
-                    .compiled_closures
-                    .as_ref()
-                    .expect("MakeClosure without compiled_closures context")
-                    .get(closure_id.0 as usize)
-                    .expect("MakeClosure: invalid ClosureId")
-                    .clone();
-
-                // Look up the LirFunction from the module for metadata.
-                // We need the LirFunction for the ClosureTemplate (arity,
-                // signal, lbox masks, etc). The compiled_closures Vec is
-                // parallel to the module's closures Vec.
-                let func = &self
-                    .closure_lir_funcs
-                    .as_ref()
-                    .expect("MakeClosure without closure_lir_funcs context")
-                    [closure_id.0 as usize];
-
-                // The nested lambda's TEMPLATE BLUEPRINT — plain compile-time
-                // data, NOT a heap `Value` (a heap literal is an ordinary,
-                // reclaimable allocation; closure templates are no exception).
-                let template =
-                    crate::value::TemplateProto::nested_lambda(func, captures.len(), compiled);
-
-                // Register the blueprint in THIS code object's child_protos and
-                // emit its index; the VM/JIT materialize a fresh region-allocated
-                // template from it per execution.
-                let proto_idx = self.bytecode.child_protos.len() as u16;
-                self.bytecode.child_protos.push(Rc::new(template));
+                // The nested lambda's code object, written into the unit's
+                // code region the first time a `MakeClosure` names it, and its
+                // header registered in THIS code object's child table. The
+                // instruction builds a fresh header over the payload per
+                // execution (docs/impl/region/template.md).
+                let header = self.lambda_header(*closure_id, captures.len());
+                let proto_idx = self.bytecode.children.len() as u16;
+                self.bytecode.children.push(header);
 
                 // Emit MakeClosure instruction (region operand emitted first so the region is in place before the alloc)
                 self.bytecode.emit(Instruction::MakeClosure);
@@ -180,20 +155,20 @@ impl Emitter {
                 self.bytecode.emit_u16(captures.len() as u16);
 
                 // Pop captures, push closure
-                for _ in captures {
+                for _ in captures.iter() {
                     self.pop();
                 }
                 self.push_reg(*dst);
             }
 
-            LirInstr::Call {
+            InstrRef::Call {
                 dst,
                 func,
                 args,
                 arity_checked,
                 region,
             }
-            | LirInstr::SuspendingCall {
+            | InstrRef::SuspendingCall {
                 dst,
                 func,
                 args,
@@ -222,7 +197,7 @@ impl Emitter {
 
                 if !all_in_place {
                     // Values are not in place, need to duplicate them to the top
-                    for arg in args {
+                    for arg in args.iter() {
                         self.ensure_on_top(*arg);
                     }
                     self.ensure_on_top(*func);
@@ -239,7 +214,7 @@ impl Emitter {
 
                 // Pop func and args from simulated stack
                 self.pop(); // func
-                for _ in args {
+                for _ in args.iter() {
                     self.pop();
                 }
 
@@ -259,7 +234,7 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::TailCall {
+            InstrRef::TailCall {
                 func,
                 args,
                 arity_checked,
@@ -269,7 +244,7 @@ impl Emitter {
                 borrowed_arg_slots,
                 // The stack-based VM leaves a normally-completing native's
                 // result on the operand stack for `Return` to pop; `dst` is a
-                // JIT-only binding (see `LirInstr::TailCall`).
+                // JIT-only binding (see `InstrRef::TailCall`).
                 dst: _,
             } => {
                 // Check if values are already in the correct positions at the top of the stack
@@ -291,7 +266,7 @@ impl Emitter {
                 }
 
                 if !all_in_place {
-                    for arg in args {
+                    for arg in args.iter() {
                         self.ensure_on_top(*arg);
                     }
                     self.ensure_on_top(*func);
@@ -305,7 +280,7 @@ impl Emitter {
                 self.bytecode.emit_u32(region.get());
                 // Adopt-callee flag: 1 ⇒ the runtime releases the callee closure's
                 // region when the new activation completes (the dead-past-TailCall
-                // decref). See `LirInstr::TailCall::defer_callee_release`.
+                // decref). See `InstrRef::TailCall::defer_callee_release`.
                 self.bytecode
                     .emit_byte(if *defer_callee_release { 1 } else { 0 });
                 // Closure-cycle merged-arena adopt slot (u32; `0` = None, since a
@@ -313,7 +288,7 @@ impl Emitter {
                 // closure at runtime the new activation adopts THIS slot's region;
                 // a native callee never consumes it (the live scope-exit
                 // `DecrefRegion` frees the arena). See
-                // `LirInstr::TailCall::deferred_release_slot`.
+                // `InstrRef::TailCall::deferred_release_slot`.
                 self.bytecode
                     .emit_u32(deferred_release_slot.map_or(0, |s| s.get()));
                 // The borrowed-argument stash slots, so a signal exit can
@@ -326,7 +301,7 @@ impl Emitter {
                 // the over-keep the abandoned block always had.
                 let n = borrowed_arg_slots.len().min(u8::MAX as usize);
                 self.bytecode.emit_byte(n as u8);
-                for &slot in &borrowed_arg_slots[..n] {
+                for slot in borrowed_arg_slots.iter().take(n) {
                     self.bytecode.emit_u16(slot);
                 }
                 // A callee that suspends parks this frame at the ip past the
@@ -343,7 +318,7 @@ impl Emitter {
                 }
             }
 
-            LirInstr::List {
+            InstrRef::List {
                 dst,
                 head,
                 tail,
@@ -360,18 +335,18 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::MakeArrayMut {
+            InstrRef::MakeArrayMut {
                 dst,
                 elements,
                 region,
             } => {
-                for elem in elements {
+                for elem in elements.iter() {
                     self.ensure_on_top(*elem);
                 }
                 self.bytecode.emit(Instruction::MakeArrayMut);
                 self.bytecode.emit_u32(region.get());
                 self.bytecode.emit_byte(elements.len() as u8);
-                for _ in elements {
+                for _ in elements.iter() {
                     self.pop();
                 }
                 self.push_reg(*dst);

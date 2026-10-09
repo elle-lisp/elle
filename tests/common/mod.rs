@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-10-06
 //! Shared test helpers: the evals, the cached evals property tests use, and a scratch directory.
 //!
 //! tests/AGENTS.md
@@ -94,7 +94,7 @@ pub fn eval_source_unscheduled<R>(input: &str, f: impl FnOnce(Result<Value, Stri
         let (vm, symbols, cctx) = rt.parts();
         compile_file(input, symbols, cctx, "<test>")
             .map_err(|e| e.to_string())
-            .and_then(|r| vm.execute(&r.bytecode).map_err(|e| e.to_string()))
+            .and_then(|unit| vm.execute(&unit).map_err(|e| e.to_string()))
     };
     f(result)
 }

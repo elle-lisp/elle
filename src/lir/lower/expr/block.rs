@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-10-06
 //! `If` and `Block` lowering — the branch/labeled-block result-slot pattern.
 //!
 //! docs/impl/region/replicate.md
@@ -21,8 +21,7 @@ impl<'a> Lowerer<'a> {
 
         // Allocate result slot (same pattern as lower_cond)
         let result_reg = self.fresh_reg();
-        let result_slot = self.current_func.num_locals;
-        self.current_func.num_locals += 1;
+        let result_slot = self.fresh_local();
 
         let then_label = self.fresh_label();
         let else_label = self.fresh_label();
@@ -48,9 +47,9 @@ impl<'a> Lowerer<'a> {
         self.finish_block();
 
         // Then block: store result to slot, jump to merge
-        self.current_block = BasicBlock::new(then_label);
+        self.open_block(then_label);
         let then_reg = self.lower_expr(then_branch)?;
-        self.emit(LirInstr::StoreLocal {
+        self.emit(InstrRef::StoreLocal {
             slot: result_slot,
             src: then_reg,
         });
@@ -59,9 +58,9 @@ impl<'a> Lowerer<'a> {
         self.finish_block();
 
         // Else block: store result to slot, jump to merge
-        self.current_block = BasicBlock::new(else_label);
+        self.open_block(else_label);
         let else_reg = self.lower_expr(else_branch)?;
-        self.emit(LirInstr::StoreLocal {
+        self.emit(InstrRef::StoreLocal {
             slot: result_slot,
             src: else_reg,
         });
@@ -70,9 +69,9 @@ impl<'a> Lowerer<'a> {
         self.finish_block();
 
         // Merge block: load result from slot
-        self.current_block = BasicBlock::new(merge_label);
+        self.open_block(merge_label);
         self.open_branch_merge(branch_hoists);
-        self.emit(LirInstr::LoadLocal {
+        self.emit(InstrRef::LoadLocal {
             dst: result_reg,
             slot: result_slot,
         });
@@ -86,8 +85,7 @@ impl<'a> Lowerer<'a> {
     /// after this function returns (hence after the exit label).
     pub(super) fn lower_block(&mut self, block_id: &BlockId, body: &[Hir]) -> Result<Reg, String> {
         let result_reg = self.fresh_reg();
-        let block_result_slot = self.current_func.num_locals;
-        self.current_func.num_locals += 1;
+        let block_result_slot = self.fresh_local();
         let exit_label = self.fresh_label();
 
         self.block_lower_contexts.push(BlockLowerContext {
@@ -99,8 +97,8 @@ impl<'a> Lowerer<'a> {
 
         // Lower body
         if body.is_empty() {
-            let nil_reg = self.emit_const(LirConst::Nil)?;
-            self.emit(LirInstr::StoreLocal {
+            let nil_reg = self.emit_const(ConstRef::Nil)?;
+            self.emit(InstrRef::StoreLocal {
                 slot: block_result_slot,
                 src: nil_reg,
             });
@@ -110,7 +108,7 @@ impl<'a> Lowerer<'a> {
                 self.discard(last_reg);
                 last_reg = self.lower_expr(expr)?;
             }
-            self.emit(LirInstr::StoreLocal {
+            self.emit(InstrRef::StoreLocal {
                 slot: block_result_slot,
                 src: last_reg,
             });
@@ -129,7 +127,7 @@ impl<'a> Lowerer<'a> {
         // Normal exit: jump to the exit label
         self.terminate(Terminator::Jump(exit_label));
         self.start_new_block(exit_label);
-        self.emit(LirInstr::LoadLocal {
+        self.emit(InstrRef::LoadLocal {
             dst: result_reg,
             slot: block_result_slot,
         });

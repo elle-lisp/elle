@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! Heap-allocated value types for the tagged-union value system.
 //!
 //! docs/impl/values.md
@@ -156,9 +156,9 @@ pub enum HeapTag {
 /// in the tagged-union Value. Objects are allocated on the heap and accessed
 /// via pointer.
 ///
-/// 19 user-facing variants carry a `traits: Value` field (initialized to
-/// `Value::NIL`). The infrastructure variants (Float, LibHandle, FFISignature,
-/// FFIType, ClosureTemplate) do not carry traits. Native-fns are NOT here — they
+/// Every variant but the five infrastructure ones (Float, LibHandle,
+/// FFISignature, FFIType, ClosureTemplate) carries a `traits: Value` field,
+/// initialized to `Value::NIL`. Native-fns are NOT here — they
 /// are immediates (`Value{TAG_NATIVE_FN, prim_id}`), no heap cell.
 pub enum HeapObject {
     /// Immutable string. Bytes stored inline in the arena.
@@ -319,14 +319,14 @@ pub enum HeapObject {
         traits: Value,
     },
 
-    /// A region-allocated code object **header**. Materialized per execution by
-    /// `MakeClosure` from a compile-time blueprint, into the same region as the
-    /// closure instance that references it (docs/impl/region/model.md
-    /// § "Constants lower as ordinary allocations" — closure templates are no
-    /// exception). Reclaimed by region RC. Its payload — bytecode, constants,
-    /// locations, region tables — is shared by every header the same blueprint
-    /// makes and lives in a payload region of the heap's own
-    /// (docs/impl/region/template.md).
+    /// A region-allocated code object **header**: one slice naming its
+    /// payload. `MakeClosure` allocates one per closure creation, into the same
+    /// region as the closure instance that references it
+    /// (docs/impl/region/model.md § "Constants lower as ordinary allocations"
+    /// — closure templates are no exception). Reclaimed by region RC. Its
+    /// payload — bytecode, constants, locations, region tables, LIR — is
+    /// shared by every header over it and lives in its compile unit's code
+    /// region (docs/impl/region/template.md).
     /// Never user-visible: it carries no `traits` and is never compared,
     /// hashed, or serialized as a user value.
     ClosureTemplate(crate::value::closure::ClosureTemplate),
@@ -411,8 +411,7 @@ impl Clone for ExternalObject {
 
 mod objimpl;
 
-// Re-export arena types and functions so existing `use crate::value::heap::{...}`
-// import sites continue working after the arena code moved to `arena.rs`.
+// The arena functions, re-exported where a heap-object caller looks for them.
 pub use super::arena::{alloc, alloc_root, deref, drop_heap};
 
 #[cfg(test)]

@@ -1,15 +1,16 @@
 # SPIR-V Backend
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-10-06 -->
 
 Two paths turn Elle into SPIR-V compute kernels for Vulkan: the MLIR compiler path, and a hand-written emitter in pure Elle.
 
 The bytes either path produces are fed to the vulkan plugin's `shader`
 primitive (see [impl/gpu.md](gpu.md)):
 
-- **`src/mlir/spirv.rs`** — automatic, compiler-generated. Wraps a
-  GPU-eligible `LirFunction` in a `gpu.module`, runs MLIR's standard SPIR-V
-  conversion passes, and serializes the result with `mlir-translate`. It needs
+- **[src/mlir/spirv.rs](../../src/mlir/spirv.rs)** — automatic,
+  compiler-generated. Wraps a GPU-eligible function's frozen LIR, read through
+  its `LirView`, in a `gpu.module`. It runs MLIR's standard SPIR-V conversion
+  passes and serializes the result with `mlir-translate`. It needs
   `--features mlir`. Used by `mlir/compile-spirv`, `git` and `gpu:map`.
 - **[lib/spirv.lisp](../../lib/spirv.lisp)** — hand-written DSL. A pure-Elle
   SPIR-V bytecode emitter for crafting compute shaders directly, with no MLIR.
@@ -21,7 +22,7 @@ plugin.
 ## Compiler-generated path
 
 ```text
-LirFunction → generate_gpu_module      (textual MLIR)
+LirView → generate_gpu_module          (textual MLIR)
             → Module::parse            (typed MLIR)
             → PassManager
                 gpu.module:
@@ -113,27 +114,37 @@ workgroup size argument on the compiler path.
 
 ## Caching
 
-The MLIR `MlirCache` carries a `spirv_cache: HashMap<*const u8, Vec<u8>>`
-keyed by the closure's bytecode pointer. The key does not include the
-workgroup size:
+One cache holds SPIR-V: the VM's `spirv_cache`
+([src/vm/core/caches.rs](../../src/vm/core/caches.rs)). It holds one entry per
+code object, keyed by the closure's bytecode, and the entry holds a kernel per
+workgroup size, because the size is written into the kernel's entry point.
+`mlir/compile-spirv` and `git` both look there first and fill it on a miss, so
+a repeated call at one size is a lookup. The call path asks the same entry
+whether any kernel is cached, which is what makes a GIT'd closure need the
+`:gpu` capability.
 
-- `mlir/compile-spirv` always re-uses the cache (and the shared MLIR
-  context) — repeated calls for the same closure are O(1).
-- `(git f)` additionally stores the bytes inside the closure's
-  `template.spirv: OnceCell<Vec<u8>>`, so subsequent calls skip the
-  cache lookup entirely. `(fn/git? f)` predicates on this cell;
-  `(disgit f)` returns the cached bytes.
+Each entry pins the code region of the closure's code object, so its key keeps
+naming the same function. [jit.md](jit.md) owns that argument, under cache
+identity. `MlirCache` holds no SPIR-V of its own: it lends its MLIR context to
+the compile, and the bytes go to the VM's cache.
 
-`gpu:map` consults `(fn/git? f)` first and falls back to
-`mlir/compile-spirv` — letting users pre-compile hot kernels with
-`(git f)` and amortize the SPIR-V build.
+`(fn/git? f)` asks whether the cache holds a kernel for the closure, and
+`(disgit f)` returns its bytes. Both take the workgroup size as an optional
+second argument, 256 by default, as `git` and `mlir/compile-spirv` do. A
+workgroup size is a positive integer that fits in 32 bits. Any other integer is
+a `:value-error`, and a value that is not an integer is a `:type-error`.
+
+`gpu:map` asks `(fn/git? f wg-size)` first and falls back to
+`(mlir/compile-spirv f wg-size)`, so a kernel pre-compiled with `(git f)` serves
+every later call at the same size.
 
 ## Files
 
 | File | Content |
 |------|---------|
 | [src/mlir/spirv.rs](../../src/mlir/spirv.rs) | Compiler path: LIR → MLIR `gpu.module` → SPIR-V bytes |
-| [src/mlir/cache.rs](../../src/mlir/cache.rs) | `compile_spirv` and `get_spirv` on `MlirCache` |
+| [src/mlir/cache.rs](../../src/mlir/cache.rs) | `MlirCache::compile_spirv`, which lowers through the shared MLIR context |
+| [src/vm/core/caches.rs](../../src/vm/core/caches.rs) | The VM's SPIR-V cache: one pinned entry per code object, a kernel per workgroup size |
 | [src/vm/signal/query.rs](../../src/vm/signal/query.rs) | The handlers for `mlir/compile-spirv` and `git` |
 | [src/primitives/introspection.rs](../../src/primitives/introspection.rs) | Primitive definitions: `mlir/compile-spirv`, `fn/gpu-eligible?` |
 | [src/primitives/meta.rs](../../src/primitives/meta.rs) | Primitive definitions: `git`, `fn/git?`, `disgit` |
@@ -146,23 +157,29 @@ the `plugins` submodule.
 
 | Name | Signal | Returns |
 |------|--------|---------|
-| `mlir/compile-spirv` | query+errors | the SPIR-V `bytes` of a GPU-eligible closure; only in an MLIR build |
-| `git` | query+errors+gpu | the closure, with its SPIR-V cached on the template; only in an MLIR build |
-| `fn/git?` | silent | whether the closure's template holds SPIR-V; false for a non-closure |
-| `disgit` | errors | the cached SPIR-V `bytes`; an error if the closure was never GIT'd |
+| `mlir/compile-spirv` | query+errors | the SPIR-V `bytes` of a GPU-eligible closure at a workgroup size, cached in the VM; only in an MLIR build |
+| `git` | query+errors+gpu | the closure, with its SPIR-V at a workgroup size cached in the VM; only in an MLIR build |
+| `fn/git?` | errors | whether the VM caches SPIR-V for the closure at a workgroup size; false for a non-closure |
+| `disgit` | errors | the SPIR-V `bytes` cached at a workgroup size; an error if nothing is cached at that size |
 
 ```lisp
 (def plain (fn [x] x))
 (assert (not (fn/git? plain)))
+(assert (not (fn/git? plain 64)))
 (assert (not (fn/git? 1)))
-(def [dis-ok? dis-err] (protect (disgit plain)))
+(def [dis-ok? dis-err] (protect (disgit plain 64)))
 (assert (not dis-ok?))
 (assert (= (get dis-err :error) :mlir-error))
+(def [size-ok? size-err] (protect (fn/git? plain 0)))
+(assert (not size-ok?))
+(assert (= (get size-err :error) :value-error))
+(def [kind-ok? kind-err] (protect (disgit plain :wide)))
+(assert (= (get kind-err :error) :type-error))
 ```
 
 ## See also
 
-- [impl/mlir.md](mlir.md) — the LIR → MLIR lowering shared with the CPU path
+- [impl/mlir.md](mlir.md) — the LIR → MLIR lowering shared with the CPU path,
+  and the eligibility predicate
 - [impl/gpu.md](gpu.md) — Vulkan dispatch consuming SPIR-V bytes
-- [impl/lir.md](lir.md) — the eligibility predicate and instruction whitelist
 - [lib/spirv.lisp](../../lib/spirv.lisp) — the DSL's source

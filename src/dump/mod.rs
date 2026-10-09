@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! In-process rendering of the compiler's `--dump` artifacts.
 //!
 //! docs/test-runner.md
@@ -19,10 +19,12 @@
 //! So the markers tests/integration/dump_cli.rs reads (`block0:`, `←`, `→`,
 //! `capture_params_mask=`, `eligible=`, …) are the ones the runner captures.
 
+mod bytecode;
 mod escape;
+pub use bytecode::bytecode_unit;
 pub use escape::escape_module;
 
-use crate::lir::LirModule;
+use crate::lir::{FrozenModule, LirView};
 use crate::pipeline::CompileCtx;
 use crate::symbol::SymbolTable;
 use std::collections::BTreeMap;
@@ -132,27 +134,33 @@ pub fn render_ast(contents: &str, source_name: &str) -> Result<String, String> {
     Ok(s)
 }
 
+/// Each function of a frozen module with its tag: `entry`, then
+/// `closure[i]` in `ClosureId` order.
+fn tagged(module: &FrozenModule) -> impl Iterator<Item = (String, LirView<'_>)> {
+    std::iter::once(("entry".to_string(), module.entry.view())).chain(
+        module
+            .closures
+            .iter()
+            .enumerate()
+            .map(|(i, f)| (format!("closure[{}]", i), f.view())),
+    )
+}
+
 /// HIR overview — per function: a header line and, where known, the source span
-/// it was written at (the closure tag is `closure[i-1]` across the
-/// `once(entry).chain(closures)` enumeration).
-pub fn hir_module(module: &LirModule) -> String {
+/// it was written at.
+pub fn hir_module(module: &FrozenModule) -> String {
     let mut s = String::new();
-    for (i, f) in std::iter::once(&module.entry)
-        .chain(module.closures.iter())
-        .enumerate()
-    {
-        let tag = if i == 0 {
-            "entry".to_string()
-        } else {
-            format!("closure[{}]", i - 1)
-        };
-        let name = f.name.as_deref().unwrap_or("<anon>");
+    for (tag, f) in tagged(module) {
+        let name = f.name().unwrap_or("<anon>");
         let _ = writeln!(
             s,
             "; {} {} (arity={}, signal={:?})",
-            tag, name, f.arity, f.signal
+            tag,
+            name,
+            f.arity(),
+            f.signal()
         );
-        if let Some(origin) = &f.origin {
+        if let Some(origin) = f.origin() {
             let _ = writeln!(s, "; at {}", origin);
         }
     }
@@ -160,49 +168,52 @@ pub fn hir_module(module: &LirModule) -> String {
 }
 
 /// LIR — blocks, instructions, and terminators per function.
-pub fn lir_module(module: &LirModule) -> String {
+pub fn lir_module(module: &FrozenModule) -> String {
     let mut s = String::new();
-    lir_function(&mut s, "entry", &module.entry);
-    for (i, f) in module.closures.iter().enumerate() {
-        lir_function(&mut s, &format!("closure[{}]", i), f);
+    for (tag, f) in tagged(module) {
+        lir_function(&mut s, &tag, &f);
     }
     s
 }
 
-fn lir_function(s: &mut String, tag: &str, f: &crate::lir::LirFunction) {
-    let name = f.name.as_deref().unwrap_or("<anon>");
+fn lir_function(s: &mut String, tag: &str, f: &LirView<'_>) {
+    let name = f.name().unwrap_or("<anon>");
     let _ = writeln!(
         s,
         "; {} {} (arity={}, signal={:?}, regs={}, locals={})",
-        tag, name, f.arity, f.signal, f.num_regs, f.num_locals
+        tag,
+        name,
+        f.arity(),
+        f.signal(),
+        f.num_regs(),
+        f.num_locals()
     );
-    for block in &f.blocks {
-        let _ = writeln!(s, "  {}:", block.label);
-        for si in &block.instructions {
-            let _ = writeln!(s, "    {}", si.instr);
+    for block in f.blocks() {
+        let _ = writeln!(s, "  {}:", block.label());
+        for instr in block.instrs() {
+            let _ = writeln!(s, "    {}", instr);
         }
-        let _ = writeln!(s, "    -> {:?}", block.terminator.terminator);
+        let _ = writeln!(s, "    -> {:?}", block.terminator());
     }
     let _ = writeln!(s);
 }
 
 /// CFG — block successor edges per function.
-pub fn cfg_module(module: &LirModule) -> String {
+pub fn cfg_module(module: &FrozenModule) -> String {
     let mut s = String::new();
-    cfg_function(&mut s, "entry", &module.entry);
-    for (i, f) in module.closures.iter().enumerate() {
-        cfg_function(&mut s, &format!("closure[{}]", i), f);
+    for (tag, f) in tagged(module) {
+        cfg_function(&mut s, &tag, &f);
     }
     s
 }
 
-fn cfg_function(s: &mut String, tag: &str, f: &crate::lir::LirFunction) {
+fn cfg_function(s: &mut String, tag: &str, f: &LirView<'_>) {
     use crate::lir::Terminator;
-    let name = f.name.as_deref().unwrap_or("<anon>");
+    let name = f.name().unwrap_or("<anon>");
     let _ = writeln!(s, "; {} {}", tag, name);
-    let _ = writeln!(s, "  entry: {}", f.entry);
-    for block in &f.blocks {
-        let succs: Vec<String> = match &block.terminator.terminator {
+    let _ = writeln!(s, "  entry: {}", f.entry());
+    for block in f.blocks() {
+        let succs: Vec<String> = match block.terminator() {
             Terminator::Jump(l) => vec![l.to_string()],
             Terminator::Branch {
                 then_label,
@@ -212,51 +223,46 @@ fn cfg_function(s: &mut String, tag: &str, f: &crate::lir::LirFunction) {
             Terminator::Emit { resume_label, .. } => vec![resume_label.to_string()],
             Terminator::Return(_) | Terminator::Unreachable => vec![],
         };
-        let _ = writeln!(s, "  {} → [{}]", block.label, succs.join(", "));
+        let _ = writeln!(s, "  {} → [{}]", block.label(), succs.join(", "));
     }
     let _ = writeln!(s);
 }
 
-/// DFA — per-function signal + capture-mask summary (`dfa_function` emits
+/// DFA — per-function signal + capture-mask summary (`dfa_module` emits
 /// `signal=` / `capture_params_mask=` / `capture_locals_mask=`).
-pub fn dfa_module(module: &LirModule) -> String {
+pub fn dfa_module(module: &FrozenModule) -> String {
     let mut s = String::new();
-    dfa_function(&mut s, "entry", &module.entry);
-    for (i, f) in module.closures.iter().enumerate() {
-        dfa_function(&mut s, &format!("closure[{}]", i), f);
+    for (tag, f) in tagged(module) {
+        let name = f.name().unwrap_or("<anon>");
+        let _ = writeln!(
+            s,
+            "; {} {}: signal={:?} \
+             capture_params_mask=0x{:x} capture_locals_mask=0x{:x}",
+            tag,
+            name,
+            f.signal(),
+            f.capture_params_mask(),
+            crate::value::CaptureMask::from_words(f.capture_locals_mask().words().to_vec()),
+        );
     }
     s
 }
 
-fn dfa_function(s: &mut String, tag: &str, f: &crate::lir::LirFunction) {
-    let name = f.name.as_deref().unwrap_or("<anon>");
-    let _ = writeln!(
-        s,
-        "; {} {}: signal={:?} \
-         capture_params_mask=0x{:x} capture_locals_mask=0x{:x}",
-        tag, name, f.signal, f.capture_params_mask, f.capture_locals_mask,
-    );
-}
-
 /// JIT — per-function eligibility (a polymorphic `propagates` mask is
 /// ineligible).
-pub fn jit_module(module: &LirModule) -> String {
+pub fn jit_module(module: &FrozenModule) -> String {
     let mut s = String::new();
-    let mut report = |tag: &str, f: &crate::lir::LirFunction| {
-        let eligible = f.signal.propagates == 0;
+    for (tag, f) in tagged(module) {
+        let signal = f.signal();
         let _ = writeln!(
             s,
             "; {} {}: signal={{bits={:?}, propagates=0b{:b}}} eligible={}",
             tag,
-            f.name.as_deref().unwrap_or("<anon>"),
-            f.signal.bits,
-            f.signal.propagates,
-            eligible,
+            f.name().unwrap_or("<anon>"),
+            signal.bits,
+            signal.propagates,
+            signal.propagates == 0,
         );
-    };
-    report("entry", &module.entry);
-    for (i, f) in module.closures.iter().enumerate() {
-        report(&format!("closure[{}]", i), f);
     }
     s
 }

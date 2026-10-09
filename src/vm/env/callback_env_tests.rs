@@ -1,3 +1,9 @@
+// audited: 2026-10-06
+//! The env a closure is entered with from a callback or a call: captures, then
+//! params, then locals, each heap value in a region of its own.
+//!
+//! docs/impl/region/rules.md
+
 use super::*;
 use crate::hir::region::RuntimeRegion;
 use crate::value::arena::region_of;
@@ -26,26 +32,20 @@ fn closure(
     capture_locals_mask: u64,
     env: crate::value::region_slice::RegionSlice<Value>,
 ) -> Rc<Closure> {
-    let proto = crate::value::TemplateProto {
-        num_locals,
-        num_params,
-        num_captures: env.len(),
-        capture_params_mask,
-        capture_locals_mask: crate::value::CaptureMask::from_u64(capture_locals_mask),
-        ..crate::value::TemplateProto::new(Vec::new(), arity, Vec::new())
-    };
-    Rc::new(Closure::new(
-        crate::value::closure::test_template(heap, proto),
-        env,
-        SignalBits::EMPTY,
-    ))
+    let code = crate::value::CodeBuilder::new(Vec::new(), arity, Vec::new())
+        .num_locals(num_locals)
+        .num_params(num_params)
+        .num_captures(env.len())
+        .capture_params_mask(capture_params_mask)
+        .capture_locals_mask(crate::value::CaptureMask::from_u64(capture_locals_mask));
+    Rc::new(Closure::new(code.build(heap), env, SignalBits::EMPTY))
 }
 
 fn empty_env() -> crate::value::region_slice::RegionSlice<Value> {
     crate::value::region_slice::RegionSlice::empty()
 }
 
-// ── Behavioral guards (relocated from src/ffi/callback.rs) ──────────
+// ── Behavioral guards ───────────────────────────────────────────────
 
 #[test]
 fn exact_arity_env_has_params() {

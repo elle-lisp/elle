@@ -1,6 +1,6 @@
 # VM
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-06 -->
 
 The VM is a stack-machine interpreter that executes bytecode.
 
@@ -238,7 +238,7 @@ itself.
 It is an **uncounted borrow** — a pure runtime register, not a heap object — and
 it is the identity a self-reference resolves to. An activation can outlive its
 closure's heap value (the region solver frees the value at its last use while
-the body's `code`/`env` live on as `Rc`s), so the register may hold a dead value
+the body's environment lives on as an `Rc`), so the register may hold a dead value
 for a body that never reads it. It is guaranteed live exactly where it is read:
 `LoadSelf` occurs only in a self-recursive body, whose closure region outlives
 the recursion (the tail-call deferred release releases it on the recursion's completion —
@@ -275,8 +275,8 @@ It is per-activation and threaded across every control-flow boundary, mirroring
 
 A `#[cfg(debug_assertions)]` invariant at each **body-entry install**
 (`VM::debug_assert_entry_closure_matches`) checks that the closure being handed
-in is the body being entered — its template bytecode is the very `Rc` the
-entered `Code` carries. It runs only where the closure is live by construction
+in is the body being entered — its template names the very payload the entered
+`Code` names. It runs only where the closure is live by construction
 (the entrant just took `code` from it): the one-shot consumes and the tail-call
 installs. It is deliberately NOT checked at dispatch entry or on a restored
 parked frame — a parked register is a possibly-dead borrow, and dereferencing
@@ -309,16 +309,16 @@ translator lacks — and any call made while the native stack is low.
 
 ## Files
 
-```text
-src/vm/core.rs              VM struct and accessors
-src/vm/execute.rs           entry points and the tail-call trampoline
-src/vm/execute/nested.rs    run_dispatch: paused callers and their returns
-src/vm/native_stack.rs      what is left of the thread's stack
-src/vm/dispatch/interp.rs   the dispatch loop
-src/vm/call/inner.rs        Call-position dispatch by callee kind
-src/vm/core/resume.rs       replaying a suspended frame chain
-src/value/fiber.rs          the Fiber and its frame types
-```
+| File | Holds |
+|------|-------|
+| [core.rs](../../src/vm/core.rs) | The `VM` struct and its accessors |
+| [execute.rs](../../src/vm/execute.rs) | The entry points and the tail-call trampoline |
+| [nested.rs](../../src/vm/execute/nested.rs) | `run_dispatch`: paused callers and their returns |
+| [native_stack.rs](../../src/vm/native_stack.rs) | What is left of the thread's stack |
+| [interp.rs](../../src/vm/dispatch/interp.rs) | The dispatch loop |
+| [inner.rs](../../src/vm/call/inner.rs) | Call-position dispatch by callee kind |
+| [resume.rs](../../src/vm/core/resume.rs) | Replaying a suspended frame chain |
+| [fiber.rs](../../src/value/fiber.rs) | The `Fiber` and its frame types |
 
 ---
 

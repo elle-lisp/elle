@@ -1,6 +1,6 @@
 # src
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-06 -->
 
 Core interpreter and compiler crate. Implements the full Elle pipeline from source to bytecode execution.
 
@@ -61,6 +61,8 @@ Provide the complete Elle implementation:
 | `wasm` | WASM backend: LIR to WebAssembly, run under Wasmtime |
 | `mlir` | MLIR backend |
 | `test` | The `elle test` runner, written in Elle |
+| `semver` | `elle semver`: the version bump a library's surface change requires ([semver.md](../docs/semver.md)) |
+| `trace` | The `--trace` channels, and the phase marks `--trace=boot` and `--trace=compile` print |
 
 ## Compilation pipeline
 
@@ -68,7 +70,7 @@ Provide the complete Elle implementation:
 Source → Reader → Syntax → Expander → Syntax → Analyzer → HIR → Lowerer → LIR → Emitter → Bytecode → VM
 ```
 
-Source locations flow through the entire pipeline: Syntax spans → HIR spans → LIR `SpannedInstr` → `LocationMap` in bytecode. Error messages include file:line:col information.
+Source locations flow through the entire pipeline: Syntax spans → HIR spans → the span on each LIR node → `LocationMap` in bytecode. Error messages include file:line:col information.
 
 ## Where to start
 

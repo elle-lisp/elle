@@ -1,6 +1,6 @@
 # The region memory model
 
-<!-- audited: 2026-09-30 -->
+<!-- audited: 2026-10-06 -->
 
 The mission of the region system, the map of its documents, the settled
 invariants, and the leak classes that name the open frontier.
@@ -157,7 +157,7 @@ in order. It uses this document's leak-class names and never redefines them.
   the third leg), and [selfrec.md](selfrec.md) (why a self-recursive closure is
   cell-free).
 - [region/template.md](region/template.md) — code objects: a closure
-  template's blueprint, payload, and header.
+  template's payload and header, and the code region a compile unit owns.
 
 ## The mechanism in brief
 
@@ -406,7 +406,7 @@ coverage cannot drift. How to run all three gauges is
   [binding.rs](../../src/lir/lower/binding.rs),
   [lambda.rs](../../src/lir/lower/lambda.rs),
   [control/call.rs](../../src/lir/lower/control/call.rs);
-  [src/lir/types/instr.rs](../../src/lir/types/instr.rs);
+  [src/lir/code/instr.rs](../../src/lir/code/instr.rs);
   [src/compiler/bytecode.rs](../../src/compiler/bytecode.rs).
 - **Runtime:** [src/vm/core/region.rs](../../src/vm/core/region.rs);
   [regionstore.rs](../../src/value/fiberheap/regionstore.rs) and

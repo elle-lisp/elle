@@ -1,4 +1,14 @@
+// audited: 2026-10-06
+//! The tail of `%`-intrinsic lowering: the remaining type checks, collection access, freeze and thaw, and identity.
+//!
+//! src/lir/lower/AGENTS.md
+//! docs/intrinsics.md
+
 use super::*;
+
+/// A type check of `src` into `dst`, one of the pair a two-variant predicate
+/// reads.
+type Check = fn(Reg, Reg) -> InstrRef<'static>;
 
 impl<'a> Lowerer<'a> {
     /// Type-check, collection, freeze/thaw, and misc intrinsics (chain tail
@@ -12,242 +22,81 @@ impl<'a> Lowerer<'a> {
         use crate::hir::IntrinsicOp;
         match op {
             IntrinsicOp::IsKeyword => {
-                self.emit(LirInstr::IsKeyword {
+                self.emit(InstrRef::IsKeyword {
                     dst,
                     src: arg_regs[0],
                 });
             }
             IntrinsicOp::IsSymbol => {
-                self.emit(LirInstr::IsSymbolCheck {
+                self.emit(InstrRef::IsSymbolCheck {
                     dst,
                     src: arg_regs[0],
                 });
             }
             IntrinsicOp::IsPair => {
-                self.emit(LirInstr::IsPair {
+                self.emit(InstrRef::IsPair {
                     dst,
                     src: arg_regs[0],
                 });
             }
-            IntrinsicOp::IsArray => {
-                // %array? checks both immutable and mutable arrays.
-                // Spill the source to a local so both checks can read it
-                // (the stack-based emitter consumes the value on first use).
-                let src_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                self.emit(LirInstr::StoreLocal {
-                    slot: src_slot,
-                    src: arg_regs[0],
-                });
-                let src1 = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
-                    dst: src1,
-                    slot: src_slot,
-                });
-                let imm = self.fresh_reg();
-                self.emit(LirInstr::IsArray {
-                    dst: imm,
-                    src: src1,
-                });
-                let result_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                let then_label = self.fresh_label();
-                let else_label = self.fresh_label();
-                let merge_label = self.fresh_label();
-                self.terminate(Terminator::Branch {
-                    cond: imm,
-                    then_label,
-                    else_label,
-                });
-                self.finish_block();
-                self.current_block = BasicBlock::new(then_label);
-                let true_reg = self.emit_const(LirConst::Bool(true))?;
-                self.emit(LirInstr::StoreLocal {
-                    slot: result_slot,
-                    src: true_reg,
-                });
-                self.terminate(Terminator::Jump(merge_label));
-                self.finish_block();
-                self.current_block = BasicBlock::new(else_label);
-                let src2 = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
-                    dst: src2,
-                    slot: src_slot,
-                });
-                let mut_r = self.fresh_reg();
-                self.emit(LirInstr::IsArrayMut {
-                    dst: mut_r,
-                    src: src2,
-                });
-                self.emit(LirInstr::StoreLocal {
-                    slot: result_slot,
-                    src: mut_r,
-                });
-                self.terminate(Terminator::Jump(merge_label));
-                self.finish_block();
-                self.current_block = BasicBlock::new(merge_label);
-                self.emit(LirInstr::LoadLocal {
-                    dst,
-                    slot: result_slot,
-                });
-            }
-            IntrinsicOp::IsStruct => {
-                let src_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                self.emit(LirInstr::StoreLocal {
-                    slot: src_slot,
-                    src: arg_regs[0],
-                });
-                let src1 = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
-                    dst: src1,
-                    slot: src_slot,
-                });
-                let imm = self.fresh_reg();
-                self.emit(LirInstr::IsStruct {
-                    dst: imm,
-                    src: src1,
-                });
-                let result_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                let then_label = self.fresh_label();
-                let else_label = self.fresh_label();
-                let merge_label = self.fresh_label();
-                self.terminate(Terminator::Branch {
-                    cond: imm,
-                    then_label,
-                    else_label,
-                });
-                self.finish_block();
-                self.current_block = BasicBlock::new(then_label);
-                let true_reg = self.emit_const(LirConst::Bool(true))?;
-                self.emit(LirInstr::StoreLocal {
-                    slot: result_slot,
-                    src: true_reg,
-                });
-                self.terminate(Terminator::Jump(merge_label));
-                self.finish_block();
-                self.current_block = BasicBlock::new(else_label);
-                let src2 = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
-                    dst: src2,
-                    slot: src_slot,
-                });
-                let mut_r = self.fresh_reg();
-                self.emit(LirInstr::IsStructMut {
-                    dst: mut_r,
-                    src: src2,
-                });
-                self.emit(LirInstr::StoreLocal {
-                    slot: result_slot,
-                    src: mut_r,
-                });
-                self.terminate(Terminator::Jump(merge_label));
-                self.finish_block();
-                self.current_block = BasicBlock::new(merge_label);
-                self.emit(LirInstr::LoadLocal {
-                    dst,
-                    slot: result_slot,
-                });
-            }
-            IntrinsicOp::IsSet => {
-                let src_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                self.emit(LirInstr::StoreLocal {
-                    slot: src_slot,
-                    src: arg_regs[0],
-                });
-                let src1 = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
-                    dst: src1,
-                    slot: src_slot,
-                });
-                let imm = self.fresh_reg();
-                self.emit(LirInstr::IsSet {
-                    dst: imm,
-                    src: src1,
-                });
-                let result_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                let then_label = self.fresh_label();
-                let else_label = self.fresh_label();
-                let merge_label = self.fresh_label();
-                self.terminate(Terminator::Branch {
-                    cond: imm,
-                    then_label,
-                    else_label,
-                });
-                self.finish_block();
-                self.current_block = BasicBlock::new(then_label);
-                let true_reg = self.emit_const(LirConst::Bool(true))?;
-                self.emit(LirInstr::StoreLocal {
-                    slot: result_slot,
-                    src: true_reg,
-                });
-                self.terminate(Terminator::Jump(merge_label));
-                self.finish_block();
-                self.current_block = BasicBlock::new(else_label);
-                let src2 = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
-                    dst: src2,
-                    slot: src_slot,
-                });
-                let mut_r = self.fresh_reg();
-                self.emit(LirInstr::IsSetMut {
-                    dst: mut_r,
-                    src: src2,
-                });
-                self.emit(LirInstr::StoreLocal {
-                    slot: result_slot,
-                    src: mut_r,
-                });
-                self.terminate(Terminator::Jump(merge_label));
-                self.finish_block();
-                self.current_block = BasicBlock::new(merge_label);
-                self.emit(LirInstr::LoadLocal {
-                    dst,
-                    slot: result_slot,
-                });
-            }
+            // Each of these checks the immutable and the mutable variant.
+            IntrinsicOp::IsArray => self.lower_either_check(
+                arg_regs[0],
+                dst,
+                |dst, src| InstrRef::IsArray { dst, src },
+                |dst, src| InstrRef::IsArrayMut { dst, src },
+            )?,
+            IntrinsicOp::IsStruct => self.lower_either_check(
+                arg_regs[0],
+                dst,
+                |dst, src| InstrRef::IsStruct { dst, src },
+                |dst, src| InstrRef::IsStructMut { dst, src },
+            )?,
+            IntrinsicOp::IsSet => self.lower_either_check(
+                arg_regs[0],
+                dst,
+                |dst, src| InstrRef::IsSet { dst, src },
+                |dst, src| InstrRef::IsSetMut { dst, src },
+            )?,
             IntrinsicOp::IsBytes => {
-                self.emit(LirInstr::IsBytes {
+                self.emit(InstrRef::IsBytes {
                     dst,
                     src: arg_regs[0],
                 });
             }
             IntrinsicOp::IsBox => {
-                self.emit(LirInstr::IsBox {
+                self.emit(InstrRef::IsBox {
                     dst,
                     src: arg_regs[0],
                 });
             }
             IntrinsicOp::IsClosure => {
-                self.emit(LirInstr::IsClosure {
+                self.emit(InstrRef::IsClosure {
                     dst,
                     src: arg_regs[0],
                 });
             }
             IntrinsicOp::IsFiber => {
-                self.emit(LirInstr::IsFiber {
+                self.emit(InstrRef::IsFiber {
                     dst,
                     src: arg_regs[0],
                 });
             }
             IntrinsicOp::TypeOf => {
-                self.emit(LirInstr::TypeOf {
+                self.emit(InstrRef::TypeOf {
                     dst,
                     src: arg_regs[0],
                 });
             }
             // Data access
             IntrinsicOp::Length => {
-                self.emit(LirInstr::Length {
+                self.emit(InstrRef::Length {
                     dst,
                     src: arg_regs[0],
                 });
             }
             IntrinsicOp::Get => {
-                self.emit(LirInstr::Get {
+                self.emit(InstrRef::Get {
                     dst,
                     obj: arg_regs[0],
                     key: arg_regs[1],
@@ -261,7 +110,7 @@ impl<'a> Lowerer<'a> {
             | IntrinsicOp::PutArray
             | IntrinsicOp::PutStructMut
             | IntrinsicOp::PutArrayMut => {
-                self.emit(LirInstr::Put {
+                self.emit(InstrRef::Put {
                     dst,
                     obj: arg_regs[0],
                     key: arg_regs[1],
@@ -269,14 +118,14 @@ impl<'a> Lowerer<'a> {
                 });
             }
             IntrinsicOp::Del => {
-                self.emit(LirInstr::Del {
+                self.emit(InstrRef::Del {
                     dst,
                     obj: arg_regs[0],
                     key: arg_regs[1],
                 });
             }
             IntrinsicOp::Has => {
-                self.emit(LirInstr::Has {
+                self.emit(InstrRef::Has {
                     dst,
                     obj: arg_regs[0],
                     key: arg_regs[1],
@@ -290,42 +139,42 @@ impl<'a> Lowerer<'a> {
             // lowering — no new VM/jit/wasm/mlir opcode needed for the
             // region/type win.
             IntrinsicOp::Push | IntrinsicOp::PushArray | IntrinsicOp::PushArrayMut => {
-                self.emit(LirInstr::IntrPush {
+                self.emit(InstrRef::IntrPush {
                     dst,
                     array: arg_regs[0],
                     value: arg_regs[1],
                 });
             }
             IntrinsicOp::StringPush => {
-                self.emit(LirInstr::IntrStringPush {
+                self.emit(InstrRef::IntrStringPush {
                     dst,
                     string: arg_regs[0],
                     value: arg_regs[1],
                 });
             }
             IntrinsicOp::BytesPush => {
-                self.emit(LirInstr::IntrBytesPush {
+                self.emit(InstrRef::IntrBytesPush {
                     dst,
                     bytes: arg_regs[0],
                     value: arg_regs[1],
                 });
             }
             IntrinsicOp::Pop => {
-                self.emit(LirInstr::Pop {
+                self.emit(InstrRef::Pop {
                     dst,
                     src: arg_regs[0],
                 });
             }
             // Mutability
             IntrinsicOp::Freeze => {
-                self.emit_alloc(|region| LirInstr::Freeze {
+                self.emit_alloc(|region| InstrRef::Freeze {
                     region,
                     dst,
                     src: arg_regs[0],
                 });
             }
             IntrinsicOp::Thaw => {
-                self.emit_alloc(|region| LirInstr::Thaw {
+                self.emit_alloc(|region| InstrRef::Thaw {
                     region,
                     dst,
                     src: arg_regs[0],
@@ -333,7 +182,7 @@ impl<'a> Lowerer<'a> {
             }
             // Identity
             IntrinsicOp::Identical => {
-                self.emit(LirInstr::Identical {
+                self.emit(InstrRef::Identical {
                     dst,
                     lhs: arg_regs[0],
                     rhs: arg_regs[1],
@@ -342,5 +191,66 @@ impl<'a> Lowerer<'a> {
             _ => unreachable!("lower_intrinsic_rest: intrinsic handled in lower_intrinsic"),
         }
         Ok(dst)
+    }
+
+    /// `dst` is true when `src` passes `immutable` or, failing that, `mutable`.
+    ///
+    /// The source is spilled to a local so both checks can read it: the
+    /// stack-based emitter consumes a value on its first use. The second check
+    /// runs on the branch where the first failed.
+    fn lower_either_check(
+        &mut self,
+        src: Reg,
+        dst: Reg,
+        immutable: Check,
+        mutable: Check,
+    ) -> Result<(), String> {
+        let src_slot = self.fresh_local();
+        self.emit(InstrRef::StoreLocal {
+            slot: src_slot,
+            src,
+        });
+        let src1 = self.fresh_reg();
+        self.emit(InstrRef::LoadLocal {
+            dst: src1,
+            slot: src_slot,
+        });
+        let imm = self.fresh_reg();
+        self.emit(immutable(imm, src1));
+        let result_slot = self.fresh_local();
+        let then_label = self.fresh_label();
+        let else_label = self.fresh_label();
+        let merge_label = self.fresh_label();
+        self.terminate(Terminator::Branch {
+            cond: imm,
+            then_label,
+            else_label,
+        });
+        self.start_new_block(then_label);
+        let true_reg = self.emit_const(ConstRef::Bool(true))?;
+        self.emit(InstrRef::StoreLocal {
+            slot: result_slot,
+            src: true_reg,
+        });
+        self.terminate(Terminator::Jump(merge_label));
+        self.start_new_block(else_label);
+        let src2 = self.fresh_reg();
+        self.emit(InstrRef::LoadLocal {
+            dst: src2,
+            slot: src_slot,
+        });
+        let mut_r = self.fresh_reg();
+        self.emit(mutable(mut_r, src2));
+        self.emit(InstrRef::StoreLocal {
+            slot: result_slot,
+            src: mut_r,
+        });
+        self.terminate(Terminator::Jump(merge_label));
+        self.start_new_block(merge_label);
+        self.emit(InstrRef::LoadLocal {
+            dst,
+            slot: result_slot,
+        });
+        Ok(())
     }
 }

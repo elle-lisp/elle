@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-10-06
 // The embedding surface from a host's side: register a primitive, run source,
 // read the value back, step the scheduler.
 //
@@ -80,9 +80,7 @@ fn test_scheduled_execution() {
         "<test>",
     )
     .unwrap();
-    let value = vm
-        .execute_scheduled(&result.bytecode, cctx)
-        .unwrap();
+    let value = vm.execute_scheduled(&result, cctx).unwrap();
     assert!(value.is_keyword());
 }
 

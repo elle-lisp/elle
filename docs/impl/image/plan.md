@@ -1,6 +1,6 @@
 # Landing order and test plan
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-10-06 -->
 
 What lands in which order, and the pins each milestone must land with.
 
@@ -31,13 +31,25 @@ code, and each deletes image machinery
    design would otherwise have needed, the `Box<Syntax>` inside
    `HeapObject::Syntax`, and the retained lambda tree on every closure
    template.
-5. **lir** — to land. The region-native `LirFunction`
-   ([foundations.md](foundations.md) argues it); deletes the encoded-LIR
+5. **lir** — landed. Region-native LIR
+   ([foundations.md](foundations.md) argues it); deleted the encoded-LIR
    side-stream this design would otherwise have needed, `send`'s LIR codec,
-   and `TemplateProto` — the last Rust-heap owner on a code object. It lands
-   after boot rather than before it, because the measurement that sized it
-   ([measurements.md](measurements.md) item 7) needed a boot configuration to
-   point at.
+   `TemplateProto` — the last Rust-heap owner on a code object — and the
+   Rust-heap working form. It landed after boot rather than before it, because
+   the measurement that sized it ([measurements.md](measurements.md) item 7)
+   needed a boot configuration to point at. It landed in four steps, each green
+   on its own:
+   - **lir-view** — landed. Freezing, and one read form: every reader except
+     the lowerer reads a frozen function through `LirView`. Deleted `send`'s
+     LIR codec.
+   - **lir-payload** — landed. The code payload carries the frozen function, so
+     a hydrated closure reaches the JIT.
+   - **lir-retire** — landed. `TemplateProto` and the payload cache are gone;
+     the emitter writes each compile unit's payloads into a code region the
+     unit owns, and a code object is one payload slice.
+   - **lir-lower** — landed. The lowerer builds the records in a working
+     region and freezes each function as it finishes; `InstrRef` is the one
+     instruction type, and the Rust-heap working form is gone.
 
 Then the image milestones:
 
@@ -77,16 +89,18 @@ Then the image milestones:
      and the corpus under image boot is the gate;
    - the warm cache — `--boot-image=`, the digest-keyed file, the atomic store
      and the prune. Opt-in rather than default: a hydrating instance still
-     loses the JIT tier and cross-unit inlining, and [boot.md](boot.md) argues
-     the default waits on both.
+     loses cross-unit inlining, and [boot.md](boot.md) argues the default
+     waits on it;
+   - the tier half of the parity gate — the **lir** foundation carries a
+     function's LIR in the payload, so a hot stdlib function reaches the JIT
+     under an image boot as under a source boot.
 
    Still to land: the embedded blob, per-worker hydration for `sys/spawn`,
    compiler-state persistence, the hydrated-region interval table, and the
-   parity gate (bytecode *and* tier). The tier half waits on the **lir**
-   foundation, which carries a function's LIR in the body rather than beside
-   it. The interval table keeps `region_of_ptr` off the probe ladder
-   ([image.md](../image.md) § "Pointer resolution must not regress"); the
-   regression it prevents needs a region the size of stdlib to show.
+   bytecode half of the parity gate. The interval table keeps `region_of_ptr`
+   off the probe ladder ([image.md](../image.md) § "Pointer resolution must not
+   regress"); the regression it prevents needs a region the size of stdlib to
+   show.
 8. **environment** — `image/save` and `image/load`, manifest deltas over
    boot, mutable side-stream.
 
@@ -95,19 +109,59 @@ Then the image milestones:
 - Foundations: existing corpus plus targeted unit tests pinning the new
   layouts, the no-clone `MakeClosure`, stable symbol ordering across two
   tables, and syntax round-trips through `send`.
-- LIR: every corpus file emits byte-identical bytecode through the ported
-  lowerer and emitter, which is the foundation's acceptance gate — a
+- LIR: every corpus file and the standard library emit byte-identical
+  bytecode through each step, which is the foundation's acceptance gate — a
   representation change that moves one instruction is a defect, and the golden
-  is what the binary emits today. A promotion copies its function out of the
-  region, and the copy answers after that region is freed; the counter-factual
-  is handing the worker a slice into live pages, which is correct until the
-  free lands. Freeing a code object's region frees its LIR, and the leak suite
-  stays green with no carve-out. A pass that grows an instruction list answers
-  as the `Vec` pass did. A closure sent to a worker carries its LIR as region
-  data, and the worker's JIT re-emits from it. `TemplateProto` is gone, and a
-  code object answers every question from its payload — the counter-factual is
-  a blueprint kept "just for the JIT", which passes every other test here and
-  keeps the second copy of the bytecode alive.
+  is what the binary emitted before the step. `make bytecode-golden` records
+  it under `target/` and `make bytecode-golden-check` compares, and
+  `--dump=bytecode` writing one text across two runs is what lets a golden
+  exist at all. Each step adds its own pins:
+  - **lir-view**: every opcode round-trips through freeze and the view, field
+    by field, from a list the compiler checks against `Op`. Each record's size
+    is the sum of its fields — the counter-factual is implicit padding, which
+    would carry stray bytes into a dump. A third use lands in the pool, a tail
+    call keeps its deferred-release slot and its borrowed-argument slots, and a
+    string constant is refused by name, until **lir-lower** removed the
+    constant. `JitTask` is `Send` by type, with no
+    hand-written claim. A closure whose LIR loads a stdlib closure and a list
+    as `ValueConst`s crosses to a worker with its LIR and both values, and the
+    worker's JIT compiles it.
+  - **lir-payload**: a materialized header's payload answers the blueprint's
+    function, instruction for instruction and field for field, for every
+    lambda the standard library compiles. A header hydrated from an image
+    answers its LIR too, and under `--boot-image` a hot stdlib function
+    compiles on the JIT as it does under source boot. A promotion copies its
+    function out of the region, and the copy answers after that region is
+    freed and its pages reused; the counter-factual is handing the worker a
+    slice into live pages, which is correct until the free lands. Freeing a
+    code object's region frees its LIR, the payload's pages grow by the LIR
+    it carries, and the leak suite stays green with no carve-out. Two dumps of
+    a graph whose closures carry LIR write one file, whatever the pad bytes of
+    its records held. The verifier refuses an LIR slice whose extent leaves the
+    image, naming the field. A hydrated closure sent to a worker carries its
+    LIR, and the stdlib-cache reload keeps it.
+  - **lir-retire**: `TemplateProto` is gone, and a code object answers every
+    question from its payload — the counter-factual is a blueprint kept "just
+    for the JIT", which passes every other test here and keeps the second copy
+    of the bytecode alive. A header is the size of one payload slice, a live
+    closure's payload child table is filled, and a dropped unit's code region
+    is released once its last header is freed. A JIT cache entry and an
+    in-flight compile each pin the region their key's payload lives in, and a
+    second `(git f)` hits the SPIR-V cache on the VM. A unit compiled on one
+    heap runs from a copy on the executing heap. The dumper copies a live
+    closure's children out of its payload, and the verifier refuses a header
+    four ways.
+  - **lir-lower**: a `RegionVec` answers as a `Vec` does over random sequences
+    of pushes, truncations and insertions, checked against a `Vec::splice`
+    model, through growth into fresh extents and across pages; every extent it
+    claims lies in its own region. Lowering claims pages from the heap the
+    lowerer names, and returns with no region left behind, on a lowering that
+    fails as on one that succeeds; the counter-factual is a lowerer that keeps
+    its working form on the Rust heap, which claims no page at all. Every
+    opcode round-trips through `LirBuilder::emit` and the view, field by field,
+    from the list the compiler checks against `Op`. A string literal pattern
+    under a guard that may suspend compiles and matches, because no constant
+    holds a string; the counter-factual is the freeze that refused one.
 - Round-trip: dump a data graph, hydrate in a fresh runtime, assert
   structural equality — and a counter-factual load with a corrupted
   fingerprint falls back cleanly.
@@ -132,12 +186,11 @@ Then the image milestones:
   region and no mapping behind. The four are a relocation slot outside the
   image, a relocation slot that is not 8-byte aligned, a `RegionSlice` whose
   extent leaves the image, and a page cursor that disagrees with the object
-  index. A closure header is refused the same way five ways. A nonzero
-  blueprint word is the first — the one bit pattern teardown could hurt on, a
-  fabricated `Rc`. The other four are a header naming zero payloads, a payload
-  landing misaligned, a payload field whose extent leaves the image, and a
-  child slot naming an object the index does not call a header. The child slot
-  is the one slot whose target is read back as a header rather than as data.
+  index. A closure header is refused the same way four ways: a header naming
+  zero payloads, a payload landing misaligned, a payload field whose extent
+  leaves the image, and a child slot naming an object the index does not call
+  a header. The child slot is the one slot whose target is read back as a
+  header rather than as data.
 - Hygiene: hydrate, run, exit — the live region count returns to baseline
   and the leak suite stays green with no image-specific carve-out. Free the
   hydrated region explicitly under `--trace=guardfree` and assert the
@@ -156,11 +209,11 @@ Then the image milestones:
   answers a call with the same result — through a REPL binding, so the call
   goes through the ordinary dispatch path. The payload survives field by
   field: bytecode, constants (a heap constant included), arity, signal,
-  name, doc, and the capture masks. Two headers materialized from one
-  blueprint hydrate naming one payload copy — the counter-factual is a
-  per-header deep copy, which round-trips equal and silently doubles every
-  payload. A hydrated header has no blueprint, so the JIT is never entered.
-  `meta/origin` still answers, because the defining span is the payload's:
+  name, doc, and the capture masks. Two headers over one payload hydrate
+  naming one payload copy — the counter-factual is a per-header deep copy,
+  which round-trips equal and silently doubles every payload. A hydrated header
+  answers its LIR, because the LIR is the payload's. `meta/origin` still
+  answers, because the defining span is the payload's:
   a hydrated closure reports the line, the column and the file it was
   written at. The file table decides the file — rename the spelling there
   and the origin follows it. A lambda with no origin still answers nil,
@@ -183,7 +236,7 @@ Then the image milestones:
   regions. A child a WASM module built refuses the dump like any other WASM
   closure, and a parent with a child writes one file across two dumps. A
   hydrated closure sent to a worker carries its children, which the worker
-  rebuilds as the blueprints its own `MakeClosure` indexes.
+  rebuilds into the child table its own `MakeClosure` indexes.
 - Traits: a value carrying its instance's default traitset hydrates carrying
   the *hydrating* instance's table for that tag, and a user traitset hydrates
   out of the body with its methods intact. The counter-factual is the identity

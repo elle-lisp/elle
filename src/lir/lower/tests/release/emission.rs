@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! That a release is emitted at all, and at the `decref_point` the walk chose.
 //!
 //! docs/impl/region/rules.md
@@ -93,18 +93,13 @@ fn named_param_release_follows_destructure_field_reads() {
     let module = compile_to_lir("(fn [&named frame] 42)");
     let mut checked = false;
     for func in std::iter::once(&module.entry).chain(module.closures.iter()) {
-        let instrs: Vec<&LirInstr> = func
-            .blocks
-            .iter()
-            .flat_map(|b| b.instructions.iter())
-            .map(|si| &si.instr)
-            .collect();
+        let instrs = flat_instrs(func);
         let last_get = instrs
             .iter()
-            .rposition(|i| matches!(i, LirInstr::StructGetOrNil { .. }));
+            .rposition(|i| matches!(i, InstrRef::StructGetOrNil { .. }));
         let first_decref = instrs
             .iter()
-            .position(|i| matches!(i, LirInstr::DecrefValueRegion { .. }));
+            .position(|i| matches!(i, InstrRef::DecrefValueRegion { .. }));
         if let (Some(get), Some(dec)) = (last_get, first_decref) {
             checked = true;
             assert!(

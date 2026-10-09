@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! The Elle library: the compiler pipeline, the VM and its runtime, and the entry points an embedder or a binary drives.
 //!
 //! docs/embedding.md
@@ -129,11 +129,11 @@ pub use lint::{
 };
 pub use pipeline::{
     analyze, analyze_file, compile, compile_file, eval, eval_all, eval_file, AnalyzeResult,
-    CompileResult,
 };
 pub use primitives::{init_stdlib, register_primitives};
 pub use reader::{read_str, Lexer, Reader};
 pub use symbol::SymbolTable;
 pub use symbols::{SymbolDef, SymbolIndex, SymbolKind};
+pub use value::CodeUnit;
 pub use value::Value;
 pub use vm::VM;

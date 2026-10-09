@@ -1,7 +1,8 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! Meta-programming primitives: gensym, the syntax-object operations, squelch and attune, meta/origin, and git.
 //!
 //! docs/macros.md
+//! docs/impl/spirv.md
 //!
 //! `tests/lang/prim-meta.lisp`, `tests/lang/syntax-predicates.lisp` and
 //! `tests/lang/macros.lisp` pin them.
@@ -402,32 +403,34 @@ primitive! {
     "git" => prim_git {
         signal: Signal::of(SIG_QUERY.union(SIG_ERROR).union(SIG_GPU)),
         arity: Arity::Range(1, 2),
-        doc: "Eagerly compile a GPU-eligible closure to SPIR-V and cache on its template. \
-              Returns the closure. All closures sharing the same template see the cached SPIR-V. \
-              Optional second argument is workgroup size (default 256).",
+        doc: "Eagerly compile a GPU-eligible closure to SPIR-V and cache it in the VM, \
+              by the closure's code and the workgroup size. Returns the closure. Every \
+              closure over the same code sees the cached SPIR-V. Optional second argument \
+              is the workgroup size, a positive integer (default 256).",
         params: &["f", "workgroup-size"],
         category: "fn",
         example: "(git (fn [a b] (+ a b)))",
         // Mixed: the SIG_QUERY return hands the closure to the VM's handler, which
-        // caches the compiled SPIR-V on that closure's TEMPLATE — a retention that
-        // outlives the call, is shared by every closure over the template, and is
-        // recorded by no seam. Real, uncounted store (docs/impl/region/effects.md).
+        // answers with that closure itself. The VM's SPIR-V cache holds the
+        // closure's code region through a counted `CodePin` (docs/impl/jit.md).
         effect: RegionEffect::Mixed,
     }
     "fn/git?" => prim_fn_git {
-        arity: Arity::Exact(1),
-        doc: "Returns true if the closure has cached SPIR-V bytes (has been GIT'd).",
-        params: &["f"],
+        signal: Signal::errors(),
+        arity: Arity::Range(1, 2),
+        doc: "Returns true if the VM caches SPIR-V for the closure at the workgroup size \
+              (default 256). False for a non-closure.",
+        params: &["f", "workgroup-size"],
         category: "fn",
         example: "(fn/git? (fn [a b] (+ a b)))",
         effect: RegionEffect::Immediate,
     }
     "disgit" => prim_disgit {
         signal: Signal::errors(),
-        arity: Arity::Exact(1),
-        doc: "Return the cached SPIR-V bytes from a GIT'd closure. \
-              Errors if the closure has not been GIT'd.",
-        params: &["f"],
+        arity: Arity::Range(1, 2),
+        doc: "Return the SPIR-V bytes the VM caches for a closure at the workgroup size \
+              (default 256). Errors if nothing is cached at that size.",
+        params: &["f", "workgroup-size"],
         category: "fn",
         example: "(disgit (git (fn [a b] (+ a b))))",
         aliases: &["fn/disgit"],

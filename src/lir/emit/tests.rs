@@ -1,7 +1,7 @@
 // audited: 2026-10-06
 // docs/impl/bytecode.md
 //! What the bytecode emitter writes: control flow, yield points, the
-//! coalescing oracle, and a nested lambda's blueprint. What an edge owes the
+//! coalescing oracle, and a nested lambda's payload. What an edge owes the
 //! operand stack is `depth`'s subject, and where a call parks is `callsite`'s.
 
 use super::*;
@@ -10,37 +10,55 @@ mod callsite;
 mod depth;
 mod opcodes;
 use crate::lir::testkit::LirFixture;
-use crate::value::Arity;
+use crate::value::{Arity, CodeArena};
+
+/// An emitter over a code region of a heap the test leaks, for the tests that
+/// read what the emitter wrote and run none of it.
+pub(super) fn emitter() -> Emitter {
+    Emitter::new(CodeArena::mint(unsafe {
+        &mut *crate::value::arena::leaked_test_heap()
+    }))
+}
+
+/// Emit `func` alone into a code region of `vm`'s heap and run it there.
+pub(super) fn run_on(
+    vm: &mut crate::vm::VM,
+    func: &LirOwned,
+) -> Result<crate::value::Value, String> {
+    let code = CodeArena::mint(vm.heap());
+    let (bytecode, _, _) = Emitter::new(code).emit(&func.view());
+    vm.execute(&crate::value::CodeUnit::new(code, bytecode))
+}
 
 #[test]
 fn test_emit_simple() {
-    let mut emitter = Emitter::new();
+    let mut emitter = emitter();
 
     let func = LirFixture::new(Arity::Exact(0))
         .block(
             0,
-            vec![LirInstr::Const {
+            &[InstrRef::Const {
                 dst: Reg(0),
-                value: LirConst::Int(42),
+                value: ConstRef::Int(42),
             }],
             Terminator::Return(Reg(0)),
         )
         .build();
 
-    let (bytecode, _, _) = emitter.emit(&func);
+    let (bytecode, _, _) = emitter.emit(&func.view());
     assert!(!bytecode.instructions.is_empty());
 }
 
 #[test]
 fn test_emit_branch() {
-    let mut emitter = Emitter::new();
+    let mut emitter = emitter();
 
     let func = LirFixture::new(Arity::Exact(0))
         .block(
             0,
-            vec![LirInstr::Const {
+            &[InstrRef::Const {
                 dst: Reg(0),
-                value: LirConst::Bool(true),
+                value: ConstRef::Bool(true),
             }],
             Terminator::Branch {
                 cond: Reg(0),
@@ -50,23 +68,23 @@ fn test_emit_branch() {
         )
         .block(
             1,
-            vec![LirInstr::Const {
+            &[InstrRef::Const {
                 dst: Reg(1),
-                value: LirConst::Int(1),
+                value: ConstRef::Int(1),
             }],
             Terminator::Return(Reg(1)),
         )
         .block(
             2,
-            vec![LirInstr::Const {
+            &[InstrRef::Const {
                 dst: Reg(2),
-                value: LirConst::Int(2),
+                value: ConstRef::Int(2),
             }],
             Terminator::Return(Reg(2)),
         )
         .build();
 
-    let (bytecode, _, _) = emitter.emit(&func);
+    let (bytecode, _, _) = emitter.emit(&func.view());
     assert!(!bytecode.instructions.is_empty());
     // Should have Jump instructions for control flow
     assert!(bytecode
@@ -77,16 +95,16 @@ fn test_emit_branch() {
 
 #[test]
 fn test_yield_point_info_collected() {
-    let mut emitter = Emitter::new();
+    let mut emitter = emitter();
 
     // fn() { yield 42; resume_value }
     let func = LirFixture::new(Arity::Exact(0))
         .signal(crate::signals::Signal::yields())
         .block(
             0,
-            vec![LirInstr::Const {
+            &[InstrRef::Const {
                 dst: Reg(0),
-                value: LirConst::Int(42),
+                value: ConstRef::Int(42),
             }],
             Terminator::Emit {
                 signal: crate::value::fiber::SIG_YIELD,
@@ -96,12 +114,12 @@ fn test_yield_point_info_collected() {
         )
         .block(
             1,
-            vec![LirInstr::LoadResumeValue { dst: Reg(1) }],
+            &[InstrRef::LoadResumeValue { dst: Reg(1) }],
             Terminator::Return(Reg(1)),
         )
         .build();
 
-    let (bytecode, yield_points, _call_sites) = emitter.emit(&func);
+    let (bytecode, yield_points, _call_sites) = emitter.emit(&func.view());
     assert!(!bytecode.instructions.is_empty());
     assert_eq!(yield_points.len(), 1);
     assert!(yield_points[0].resume_ip > 0);
@@ -118,14 +136,14 @@ fn test_yield_point_info_collected() {
 // value actually lives in — turning a mis-coalesce (a UAF in waiting) into a
 // deterministic panic at the exact instruction. These pins prove the net both
 // *bites* (wrong slot → panic) and is *precise* (right slot → silent), built
-// from the spec in `LirInstr::AssertRegionMatches`, not from emission output.
+// from the spec in `InstrRef::AssertRegionMatches`, not from emission output.
 
 /// A one-block function that allocates a fresh pair in `alloc_slot`, then runs
 /// the oracle against `assert_slot` on that pair, then returns it. When the two
 /// slots match, the oracle's resolve equals `region_of(pair)`; when they differ,
 /// `assert_slot` is unmapped (never allocated this activation) and resolves to
 /// `None`, which the pair's real region contradicts.
-fn oracle_probe_func(alloc_slot: u32, assert_slot: u32) -> LirFunction {
+fn oracle_probe_func(alloc_slot: u32, assert_slot: u32) -> LirOwned {
     use crate::hir::region::StaticRegion;
     let s_alloc = StaticRegion::new(alloc_slot).expect("alloc slot nonzero");
     let s_assert = StaticRegion::new(assert_slot).expect("assert slot nonzero");
@@ -133,26 +151,26 @@ fn oracle_probe_func(alloc_slot: u32, assert_slot: u32) -> LirFunction {
     LirFixture::new(Arity::Exact(0))
         .block(
             0,
-            vec![
+            &[
                 // r0 ← nil (pair head), r1 ← () (pair tail).
-                LirInstr::Const {
+                InstrRef::Const {
                     dst: Reg(0),
-                    value: LirConst::Nil,
+                    value: ConstRef::Nil,
                 },
-                LirInstr::Const {
+                InstrRef::Const {
                     dst: Reg(1),
-                    value: LirConst::EmptyList,
+                    value: ConstRef::EmptyList,
                 },
                 // r2 ← pair(r0, r1), born in `s_alloc` (records slot→phys in the
                 // activation map).
-                LirInstr::List {
+                InstrRef::List {
                     dst: Reg(2),
                     head: Reg(0),
                     tail: Reg(1),
                     region: s_alloc,
                 },
                 // The oracle: assert `s_assert` names r2's physical region.
-                LirInstr::AssertRegionMatches {
+                InstrRef::AssertRegionMatches {
                     region_id: s_assert,
                     src: Reg(2),
                 },
@@ -170,10 +188,8 @@ fn assert_region_matches_passes_on_correct_slot() {
     // false-positive on a genuinely coincident slot, which is every coalesced
     // site.)
     let func = oracle_probe_func(1, 1);
-    let mut emitter = Emitter::new();
-    let (bytecode, _, _) = emitter.emit(&func);
     let mut vm = crate::vm::VM::new();
-    let result = vm.execute(&bytecode);
+    let result = run_on(&mut vm, &func);
     assert!(
         result.is_ok(),
         "the coalescing oracle must stay silent when the slot names the value's \
@@ -195,10 +211,8 @@ fn assert_region_matches_panics_on_wrong_slot() {
     // handler's check reduced to a no-op, this returns normally, so the
     // assertion is what catches the mis-coalesce.
     let func = oracle_probe_func(1, 2);
-    let mut emitter = Emitter::new();
-    let (bytecode, _, _) = emitter.emit(&func);
     let mut vm = crate::vm::VM::new();
-    let _ = vm.execute(&bytecode);
+    let _ = run_on(&mut vm, &func);
 }
 
 #[cfg(feature = "jit")]
@@ -230,9 +244,9 @@ fn emit_terminator_carries_a_user_signal_bit_whole() {
         .signal(crate::signals::Signal::of(signal))
         .block(
             0,
-            vec![LirInstr::Const {
+            &[InstrRef::Const {
                 dst: Reg(0),
-                value: LirConst::Int(42),
+                value: ConstRef::Int(42),
             }],
             Terminator::Emit {
                 signal,
@@ -242,12 +256,12 @@ fn emit_terminator_carries_a_user_signal_bit_whole() {
         )
         .block(
             1,
-            vec![LirInstr::LoadResumeValue { dst: Reg(1) }],
+            &[InstrRef::LoadResumeValue { dst: Reg(1) }],
             Terminator::Return(Reg(1)),
         )
         .build();
 
-    let (bytecode, _, _) = Emitter::new().emit(&func);
+    let (bytecode, _, _) = emitter().emit(&func.view());
     let lines = disassemble_lines(&bytecode.instructions);
     let emit_line = lines
         .iter()
@@ -259,121 +273,126 @@ fn emit_terminator_carries_a_user_signal_bit_whole() {
     );
 }
 
-/// A nested lambda's blueprint carries both halves of the abandoned-frame
-/// release table, so a closure the emitted `MakeClosure` materializes reaches
-/// an error exit with the releases it still owes (docs/impl/region/template.md
-/// § "One constructor builds a nested lambda's blueprint").
+/// A nested lambda's payload carries both halves of the abandoned-frame
+/// release table, so a closure the emitted `MakeClosure` builds reaches an
+/// error exit with the releases it still owes (docs/impl/region/template.md
+/// § "One constructor builds a nested lambda's payload").
 #[test]
-fn a_nested_lambdas_blueprint_carries_the_frame_release_tables() {
-    // Counter-factual: leaving both tables to the empty value
-    // `TemplateProto::new` supplies fails nothing that runs. The closure built
-    // from such a blueprint carries real bytecode and returns the right
-    // answers; what it loses is one error exit's walk, which strands every
-    // region the abandoned frame still owed.
+fn a_nested_lambdas_payload_carries_the_frame_release_tables() {
+    // Counter-factual: a payload built with both tables empty fails nothing
+    // that runs. The closure built over it carries real bytecode and returns
+    // the right answers; what it loses is one error exit's walk, which
+    // strands every region the abandoned frame still owed.
     use crate::hir::region::StaticRegion;
     use crate::lir::ClosureId;
 
-    let mut nested = LirFixture::new(Arity::Exact(0))
+    let nested = LirFixture::new(Arity::Exact(0))
         .name("nested")
+        .head(|h| {
+            h.frame_release_slots = vec![3, 7];
+            h.frame_release_regions = vec![
+                StaticRegion::new(11).unwrap(),
+                StaticRegion::new(13).unwrap(),
+            ];
+        })
         .block(
             0,
-            vec![LirInstr::Const {
+            &[InstrRef::Const {
                 dst: Reg(0),
-                value: LirConst::Nil,
+                value: ConstRef::Nil,
             }],
             Terminator::Return(Reg(0)),
         )
         .build();
-    nested.frame_release_slots = vec![3, 7];
-    nested.frame_release_regions = vec![
-        StaticRegion::new(11).unwrap(),
-        StaticRegion::new(13).unwrap(),
-    ];
 
     let outer = LirFixture::new(Arity::Exact(0))
         .block(
             0,
-            vec![LirInstr::MakeClosure {
+            &[InstrRef::MakeClosure {
                 dst: Reg(0),
                 closure_id: ClosureId(0),
-                captures: vec![],
+                captures: &[],
                 region: StaticRegion::new(2).unwrap(),
             }],
             Terminator::Return(Reg(0)),
         )
         .build();
 
-    let module = LirModule {
+    let module = FrozenModule {
         entry: outer,
         closures: vec![nested],
     };
-    let (bytecode, _, _) = Emitter::new().emit_module(&module);
+    let code = CodeArena::mint(unsafe { &mut *crate::value::arena::leaked_test_heap() });
+    let (bytecode, _, _) = Emitter::new(code).emit_module(&module);
+    let unit = crate::value::CodeUnit::new(code, bytecode);
     assert_eq!(
-        bytecode.child_protos.len(),
+        unit.entry().num_children(),
         1,
-        "one MakeClosure registers one blueprint"
+        "one MakeClosure registers one child"
+    );
+    let child = unit.entry().child(0);
+    assert_eq!(
+        child.frame_release_slots(),
+        &[3u16, 7],
+        "the value route's slots reach the payload",
     );
     assert_eq!(
-        bytecode.child_protos[0].frame_release_slots,
-        vec![3u16, 7],
-        "the value route's slots reach the blueprint",
-    );
-    assert_eq!(
-        bytecode.child_protos[0].frame_release_regions,
-        vec![11u32, 13],
-        "the slot route's regions reach the blueprint",
+        child.frame_release_regions(),
+        &[11u32, 13],
+        "the slot route's regions reach the payload",
     );
 }
 
-/// A nested lambda's blueprint carries the rest-list layout the gate wrote onto
-/// its `LirFunction`, so a closure the emitted `MakeClosure` materializes builds
-/// its rest list the way the analysis proved it may
-/// (docs/impl/region/restlist.md).
+/// A nested lambda's payload carries the rest-list layout the gate wrote onto
+/// its `LirHead`, so a closure the emitted `MakeClosure` builds builds its rest
+/// list the way the analysis proved it may (docs/impl/region/restlist.md).
 #[test]
-fn a_nested_lambdas_blueprint_carries_its_rest_list_layout() {
-    // Counter-factual: a blueprint left at the layout `TemplateProto::new`
-    // supplies runs correctly and claims a page per rest argument, which no
-    // answer the closure returns can show.
+fn a_nested_lambdas_payload_carries_its_rest_list_layout() {
+    // Counter-factual: a payload left at the default layout runs correctly and
+    // claims a page per rest argument, which no answer the closure returns can
+    // show.
     use crate::hir::region::StaticRegion;
     use crate::lir::ClosureId;
     use crate::value::RestListLayout;
 
-    let mut nested = LirFixture::new(Arity::AtLeast(0))
+    let nested = LirFixture::new(Arity::AtLeast(0))
         .name("nested")
         .num_params(1)
         .num_locals(1)
+        .head(|h| h.rest_list_layout = RestListLayout::OneRegion)
         .block(
             0,
-            vec![LirInstr::Const {
+            &[InstrRef::Const {
                 dst: Reg(0),
-                value: LirConst::Nil,
+                value: ConstRef::Nil,
             }],
             Terminator::Return(Reg(0)),
         )
         .build();
-    nested.rest_list_layout = RestListLayout::OneRegion;
 
     let outer = LirFixture::new(Arity::Exact(0))
         .block(
             0,
-            vec![LirInstr::MakeClosure {
+            &[InstrRef::MakeClosure {
                 dst: Reg(0),
                 closure_id: ClosureId(0),
-                captures: vec![],
+                captures: &[],
                 region: StaticRegion::new(2).unwrap(),
             }],
             Terminator::Return(Reg(0)),
         )
         .build();
 
-    let module = LirModule {
+    let module = FrozenModule {
         entry: outer,
         closures: vec![nested],
     };
-    let (bytecode, _, _) = Emitter::new().emit_module(&module);
+    let code = CodeArena::mint(unsafe { &mut *crate::value::arena::leaked_test_heap() });
+    let (bytecode, _, _) = Emitter::new(code).emit_module(&module);
+    let unit = crate::value::CodeUnit::new(code, bytecode);
     assert_eq!(
-        bytecode.child_protos[0].rest_list_layout,
+        unit.entry().child(0).rest_list_layout(),
         RestListLayout::OneRegion,
-        "the gate's verdict reaches the blueprint"
+        "the gate's verdict reaches the payload"
     );
 }

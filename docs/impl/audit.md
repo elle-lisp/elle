@@ -1,6 +1,6 @@
 # The audit queue
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-08 -->
 
 Every file carries the day it last met the documentation policy, and the queue
 names what to read next by what a stale file costs.
@@ -120,7 +120,7 @@ the thing that gets audited. An `AGENTS.md` is exempt when it carries the
 marker [the generator](agents-index.md) writes, and queued when it does not.
 
 [The Makefile](../../Makefile), [the standard library](../../src/stdlib.lisp)
-and [the LIR instruction enum](../../src/lir/types/instr.rs) are exempt, and
+and [the LIR instruction enum](../../src/lir/code/instr.rs) are exempt, and
 they are the only repository files exempted by name. Everything else in the
 queue is read whole by somebody: a document off an index, a source file off a
 call site. Nobody reads these three that way:
@@ -175,6 +175,13 @@ is older than the policy's. No file is in both.
 [tests/ratchet/audit.lisp](../../tests/ratchet/audit.lisp) reads each count,
 and [its ledger](../../tests/ledger/audit.lisp) pins each one
 ([the ratchet](../ratchet.md)).
+
+The walk starts the same number of processes however many files the tree
+holds. The producer runs under the runner's per-file deadline, once per JIT
+policy and both at once, and starting a process costs milliseconds on macOS. A
+walk that started a pipeline per file took most of a minute over 2,600 files on
+a macOS runner. So the eligibility test and the stamp read use shell builtins
+alone.
 
 A pin is two-sided. A commit that stamps a file in either count lowers that
 count, and the producer pass then fails on a `stale` pin. Re-pin it in the same

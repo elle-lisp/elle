@@ -1,4 +1,7 @@
-//! expand-macro primitive and transformer-cache behavior tests.
+// audited: 2026-10-07
+//! The expand-macro form, and how a macro's transformer cache fills and is reused.
+//!
+//! src/syntax/expand/AGENTS.md
 
 use super::*;
 
@@ -87,7 +90,7 @@ fn test_macro_cache_populated_after_first_call() {
         {
             let macro_def = expander.macros.get("double").unwrap();
             assert!(
-                macro_def.cached_transformer.borrow().is_none(),
+                macro_def.transformer().get().is_none(),
                 "cache should be empty before first invocation"
             );
         }
@@ -101,7 +104,7 @@ fn test_macro_cache_populated_after_first_call() {
         {
             let macro_def = expander.macros.get("double").unwrap();
             assert!(
-                macro_def.cached_transformer.borrow().is_some(),
+                macro_def.transformer().get().is_some(),
                 "cache should be populated after first invocation"
             );
         }
@@ -220,15 +223,11 @@ fn test_macro_arg_wrapping_does_not_leak() {
 
         // (defmacro idmac (x) x) — an identity template, so each expansion's only
         // per-call allocation is the `wrap_macro_arg_value` wrapper for the arg.
-        let macro_def = MacroDef {
-            name: "idmac".to_string(),
-            params: vec!["x".to_string()],
-            optional_params: vec![],
-            rest_param: None,
-            template: Syntax::symbol(&arena, "x", span),
-            cached_transformer: std::rc::Rc::new(RefCell::new(None)),
-        };
-        expander.define_macro(macro_def);
+        expander.define_macro(MacroDef::new(
+            "idmac",
+            MacroParams::fixed(vec!["x".to_string()]),
+            Syntax::symbol(&arena, "x", span),
+        ));
 
         // A macro call with a COMPOUND arg `(foo)` — wrap_macro_arg_value takes the
         // `_ => Value::syntax(...)` arm (an immediate arg would never allocate).
@@ -253,6 +252,34 @@ fn test_macro_arg_wrapping_does_not_leak() {
             delta < n / 4,
             "macro-arg wrapping leaks: {n} expansions grew the live heap by {delta} \
              (a bounded, transient-region wrapping would stay flat)"
+        );
+    });
+}
+
+/// A `defmacro` of the same name that runs while a transformer compiles
+/// defines a new macro, and the next call expands through the new one.
+///
+/// The counter-factual is a first expansion that stores its transformer in
+/// whichever definition holds the name once the compile returns. The new
+/// definition then inherits the old transformer, `(foo 2)` expands to 1, and
+/// two cells own one reference to the old transformer's region.
+#[test]
+fn a_macro_redefined_while_its_transformer_compiles_expands_through_the_new_definition() {
+    crate::value::arena::with_test_region(|| {
+        let (mut expander, mut symbols, mut vm, arena) = setup();
+        let mut expand = |src: &str| {
+            let form = read_syntax(arena, src, "<test>").unwrap();
+            expander
+                .expand(form, &mut symbols, &mut vm)
+                .unwrap()
+                .to_string()
+        };
+        expand("(defmacro foo (x) (begin (defmacro foo (y) 2) 1))");
+        assert_eq!(expand("(foo 1)"), "1", "the first call runs the first body");
+        assert_eq!(
+            expand("(foo 2)"),
+            "2",
+            "the second call runs the definition the first one's compile made"
         );
     });
 }

@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# audited: 2026-10-06
+# Records or checks the bytecode golden: every corpus file's and the standard library's `--dump=bytecode`.
+# docs/config.md
+# docs/impl/image/plan.md
+#
+# The golden is what one binary's emitter wrote. A representation change that
+# must not move one instruction records with the binary before it, and checks
+# with the binary after it. The stdlib cache is off for every run, so each run
+# compiles the standard library and mints its static region slots before the
+# file's own, and two runs number them alike.
+set -euo pipefail
+
+usage() {
+    cat <<'EOF'
+scripts/bytecode-golden — record or compare the bytecode golden
+
+usage:
+  scripts/bytecode-golden record ELLE DIR [JOBS]   write one dump per file into DIR
+  scripts/bytecode-golden check  ELLE DIR [JOBS]   compare ELLE's dumps with DIR
+
+The files are tests/lang/*.lisp, tests/impl/*.lisp and src/stdlib.lisp. Each
+record holds the dump's stdout, then its stderr and exit status, so a file that
+fails to compile records its error and still has to fail the same way.
+EOF
+}
+
+[ $# -ge 3 ] || { usage >&2; exit 2; }
+mode="$1"
+elle="$2"
+dir="$3"
+jobs="${4:-8}"
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+cd "$root"
+
+[ -x "$elle" ] || { echo "bytecode-golden: no executable at $elle" >&2; exit 2; }
+
+# One dump: the file's path names its record, with every `/` spelled `__`.
+dump_one() {
+    local elle="$1" out="$2" file="$3"
+    local name="${file//\//__}"
+    local rec="$out/$name.txt"
+    local status=0
+    "$elle" --cache= --dump=bytecode "$file" >"$rec.stdout" 2>"$rec.stderr" || status=$?
+    {
+        cat "$rec.stdout"
+        echo ";; ── stderr"
+        cat "$rec.stderr"
+        echo ";; ── exit $status"
+    } >"$rec"
+    rm -f "$rec.stdout" "$rec.stderr"
+}
+export -f dump_one
+
+# The dumps of every file, into `out`.
+dump_all() {
+    local out="$1"
+    rm -rf "$out"
+    mkdir -p "$out"
+    {
+        ls tests/lang/*.lisp tests/impl/*.lisp
+        echo src/stdlib.lisp
+    } | xargs -P "$jobs" -I{} bash -c 'dump_one "$@"' _ "$elle" "$out" {}
+}
+
+case "$mode" in
+    record)
+        dump_all "$dir"
+        echo "bytecode-golden: recorded $(ls "$dir" | wc -l) dumps in $dir"
+        ;;
+    check)
+        [ -d "$dir" ] || { echo "bytecode-golden: no record at $dir; run record first" >&2; exit 2; }
+        fresh="$dir.check"
+        dump_all "$fresh"
+        if diff -rq "$dir" "$fresh" >"$fresh.diff" 2>&1; then
+            echo "bytecode-golden: $(ls "$fresh" | wc -l) dumps identical to $dir"
+            rm -rf "$fresh" "$fresh.diff"
+        else
+            echo "bytecode-golden: dumps differ from $dir:" >&2
+            cat "$fresh.diff" >&2
+            echo "bytecode-golden: the fresh dumps are in $fresh" >&2
+            exit 1
+        fi
+        ;;
+    *)
+        usage >&2
+        exit 2
+        ;;
+esac

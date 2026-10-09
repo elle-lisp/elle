@@ -1,3 +1,5 @@
+// audited: 2026-10-06
+// docs/impl/wasm.md
 //! Liveness analysis for the WASM emitter's CPS spill optimization.
 //!
 //! Computes which physical register slots are live at each suspend point
@@ -5,8 +7,8 @@
 //! reduces code size from O(total_regs * suspend_points) to
 //! O(live_regs * suspend_points).
 
-use crate::lir::{for_each_def, for_each_terminator_use, for_each_use};
-use crate::lir::{Label, LirFunction, LirInstr, Reg, Terminator};
+use crate::lir::for_each_terminator_use;
+use crate::lir::{InstrRef, Label, LirView, Reg, Terminator};
 use std::collections::{HashMap, HashSet};
 
 /// Per-suspend-point live set, keyed by `(block_idx, instr_idx)`.
@@ -29,22 +31,22 @@ pub type SpillLiveMap = HashMap<(usize, usize), HashSet<u32>>;
 /// spills exactly the live set, keeping spill/restore code linear in the live
 /// state rather than in `suspend_points × total_slots`.
 pub fn compute_spill_liveness(
-    func: &LirFunction,
+    func: &LirView<'_>,
     label_to_idx: &HashMap<Label, usize>,
     reg_to_slot: &HashMap<Reg, u32>,
     num_phys_slots: u32,
     num_stack_locals: u32,
 ) -> SpillLiveMap {
-    let n = func.blocks.len();
+    let blocks: Vec<_> = func.blocks().collect();
+    let n = blocks.len();
     if n == 0 {
         return HashMap::new();
     }
 
     // Build successors map from terminators.
-    let successors: Vec<Vec<usize>> = func
-        .blocks
+    let successors: Vec<Vec<usize>> = blocks
         .iter()
-        .map(|block| match &block.terminator.terminator {
+        .map(|block| match &block.terminator() {
             Terminator::Jump(target) => {
                 vec![label_to_idx.get(target).copied().unwrap_or(0)]
             }
@@ -73,14 +75,14 @@ pub fn compute_spill_liveness(
     let mut gen: Vec<HashSet<u32>> = vec![HashSet::new(); n];
     let mut kill: Vec<HashSet<u32>> = vec![HashSet::new(); n];
 
-    for (bi, block) in func.blocks.iter().enumerate() {
+    for (bi, block) in blocks.iter().enumerate() {
         // Walk instructions in reverse to compute gen (upward-exposed uses)
         // and kill (defs that reach the block boundary).
         let mut block_gen = HashSet::new();
         let mut block_kill = HashSet::new();
 
         // Terminator uses
-        for_each_terminator_use(&block.terminator.terminator, |reg| {
+        for_each_terminator_use(&block.terminator(), |reg| {
             if let Some(&slot) = reg_to_slot.get(&reg) {
                 if slot < num_phys_slots && !block_kill.contains(&slot) {
                     block_gen.insert(slot);
@@ -89,9 +91,9 @@ pub fn compute_spill_liveness(
         });
 
         // Instructions in reverse
-        for si in block.instructions.iter().rev() {
+        for node in block.nodes().rev() {
             // Defs kill before uses gen (reverse order)
-            for_each_def(&si.instr, |reg| {
+            node.def().into_iter().for_each(|reg| {
                 if let Some(&slot) = reg_to_slot.get(&reg) {
                     if slot < num_phys_slots {
                         block_gen.remove(&slot);
@@ -99,7 +101,7 @@ pub fn compute_spill_liveness(
                     }
                 }
             });
-            for_each_use(&si.instr, |reg| {
+            node.uses().iter().copied().for_each(|reg| {
                 if let Some(&slot) = reg_to_slot.get(&reg) {
                     if slot < num_phys_slots && !block_kill.contains(&slot) {
                         block_gen.insert(slot);
@@ -115,11 +117,11 @@ pub fn compute_spill_liveness(
         // LoadLocal reads; StoreLocal overwrites; StoreLocalRefcounted reads the
         // old value (to decref it) *then* overwrites — so it both uses and defs.
         let mut local_defined = std::collections::HashSet::new();
-        for si in block.instructions.iter() {
-            let (use_slot, def_slot) = match &si.instr {
-                LirInstr::LoadLocal { slot, .. } => (Some(*slot), None),
-                LirInstr::StoreLocal { slot, .. } => (None, Some(*slot)),
-                LirInstr::StoreLocalRefcounted { slot, .. } => (Some(*slot), Some(*slot)),
+        for node in block.nodes() {
+            let (use_slot, def_slot) = match node.instr() {
+                InstrRef::LoadLocal { slot, .. } => (Some(slot), None),
+                InstrRef::StoreLocal { slot, .. } => (None, Some(slot)),
+                InstrRef::StoreLocalRefcounted { slot, .. } => (Some(slot), Some(slot)),
                 _ => (None, None),
             };
             if let Some(slot) = use_slot {
@@ -183,18 +185,18 @@ pub fn compute_spill_liveness(
     // to the end of the block, collecting uses and subtracting defs.
     let mut result = SpillLiveMap::new();
 
-    for (bi, block) in func.blocks.iter().enumerate() {
+    for (bi, block) in blocks.iter().enumerate() {
         // Check for Emit terminator
-        if matches!(&block.terminator.terminator, Terminator::Emit { .. }) {
+        if matches!(block.terminator(), Terminator::Emit { .. }) {
             // Live at yield = live_out of this block
             result.insert((bi, usize::MAX), live_out[bi].clone());
         }
 
         // Check for suspending calls
-        for (ii, si) in block.instructions.iter().enumerate() {
+        for (ii, node) in block.nodes().enumerate() {
             let is_suspend = matches!(
-                &si.instr,
-                LirInstr::SuspendingCall { .. } | LirInstr::CallArrayMut { .. }
+                node.instr(),
+                InstrRef::SuspendingCall { .. } | InstrRef::CallArrayMut { .. }
             );
             if !is_suspend {
                 continue;
@@ -206,7 +208,7 @@ pub fn compute_spill_liveness(
             let mut live = live_out[bi].clone();
 
             // Apply terminator uses
-            for_each_terminator_use(&block.terminator.terminator, |reg| {
+            for_each_terminator_use(&block.terminator(), |reg| {
                 if let Some(&slot) = reg_to_slot.get(&reg) {
                     if slot < num_phys_slots {
                         live.insert(slot);
@@ -215,15 +217,15 @@ pub fn compute_spill_liveness(
             });
 
             // Walk instructions from end backward to ii+1
-            for si2 in block.instructions[ii + 1..].iter().rev() {
-                for_each_def(&si2.instr, |reg| {
+            for si2 in block.nodes().skip(ii + 1).rev() {
+                si2.def().into_iter().for_each(|reg| {
                     if let Some(&slot) = reg_to_slot.get(&reg) {
                         if slot < num_phys_slots {
                             live.remove(&slot);
                         }
                     }
                 });
-                for_each_use(&si2.instr, |reg| {
+                si2.uses().iter().copied().for_each(|reg| {
                     if let Some(&slot) = reg_to_slot.get(&reg) {
                         if slot < num_phys_slots {
                             live.insert(slot);
@@ -234,9 +236,9 @@ pub fn compute_spill_liveness(
 
             // Also include the dst of this call itself — it's live after
             // the call (the resume will write it, and subsequent code uses it).
-            match &si.instr {
-                LirInstr::SuspendingCall { dst, .. } | LirInstr::CallArrayMut { dst, .. } => {
-                    if let Some(&slot) = reg_to_slot.get(dst) {
+            match node.instr() {
+                InstrRef::SuspendingCall { dst, .. } | InstrRef::CallArrayMut { dst, .. } => {
+                    if let Some(&slot) = reg_to_slot.get(&dst) {
                         if slot < num_phys_slots {
                             live.insert(slot);
                         }

@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-07
 //! What `elle` and the rig share: the run path of one `Runtime`, from a file, `-e`, stdin or the REPL, and the subcommands.
 //!
 //! docs/config.md
@@ -203,10 +203,6 @@ impl Program {
         if stats {
             #[cfg(feature = "jit")]
             print_jit_stats(rt.vm());
-            let cvc = crate::lir::closure_value_const_count();
-            if cvc > 0 {
-                eprintln!("[stats] closure-valued ValueConsts serialized: {}", cvc);
-            }
         }
 
         // Graceful exit on every path: run the principled teardown sweep
@@ -314,13 +310,10 @@ pub fn run_source(
     };
 
     if crate::config::get().has_trace("bytecode") {
-        eprintln!(
-            "{}",
-            crate::compiler::format_bytecode_with_protos(&result.bytecode)
-        );
+        eprintln!("{}", crate::compiler::format_bytecode_with_protos(&result));
     }
 
-    match vm.execute_scheduled(&result.bytecode, cctx) {
+    match vm.execute_scheduled(&result, cctx) {
         Ok(value) => {
             // The run hands its last form's value over with one owning
             // reference, and nothing here reads the value again: script mode is
@@ -377,11 +370,11 @@ fn print_jit_stats(vm: &mut VM) {
     if rejected > 0 {
         // Sort by call count ascending
         let mut entries: Vec<_> = vm.jit_rejections.iter().collect();
-        entries.sort_by_key(|(ptr, _)| vm.closure_call_counts.get(ptr).copied().unwrap_or(0));
+        entries.sort_by_key(|(ptr, _)| vm.closure_call_count(**ptr));
 
         for (ptr, info) in &entries {
             let name = info.name.as_deref().unwrap_or("<anon>");
-            let calls = vm.closure_call_counts.get(ptr).copied().unwrap_or(0);
+            let calls = vm.closure_call_count(**ptr);
             eprintln!("    {:<24} {}  [called {}x]", name, info.reason, calls);
         }
     }

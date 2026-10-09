@@ -1,3 +1,8 @@
+// audited: 2026-10-06
+//! Criterion wall-clock benchmarks: parsing, interning, compilation, VM execution, end to end, and macro expansion.
+//!
+//! benches/AGENTS.md
+
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use elle::pipeline::{compile, eval, eval_all};
 use elle::runtime::RuntimeCore;
@@ -147,7 +152,7 @@ fn bench_vm_execution(c: &mut Criterion) {
         let mut core = setup();
         let (vm, symbols, cctx) = core.parts();
         let result = compile("(+ 1 2 3 4 5)", symbols, cctx, "<benchmark>").unwrap();
-        b.iter(|| black_box(vm.execute(&result.bytecode).unwrap()));
+        b.iter(|| black_box(vm.execute(&result).unwrap()));
     });
 
     // Mixed int/float arithmetic
@@ -155,7 +160,7 @@ fn bench_vm_execution(c: &mut Criterion) {
         let mut core = setup();
         let (vm, symbols, cctx) = core.parts();
         let result = compile("(+ 1 2.5 3)", symbols, cctx, "<benchmark>").unwrap();
-        b.iter(|| black_box(vm.execute(&result.bytecode).unwrap()));
+        b.iter(|| black_box(vm.execute(&result).unwrap()));
     });
 
     // Comparisons
@@ -163,7 +168,7 @@ fn bench_vm_execution(c: &mut Criterion) {
         let mut core = setup();
         let (vm, symbols, cctx) = core.parts();
         let result = compile("(< 5 10)", symbols, cctx, "<benchmark>").unwrap();
-        b.iter(|| black_box(vm.execute(&result.bytecode).unwrap()));
+        b.iter(|| black_box(vm.execute(&result).unwrap()));
     });
 
     // List construction
@@ -177,7 +182,7 @@ fn bench_vm_execution(c: &mut Criterion) {
             "<benchmark>",
         )
         .unwrap();
-        b.iter(|| black_box(vm.execute(&result.bytecode).unwrap()));
+        b.iter(|| black_box(vm.execute(&result).unwrap()));
     });
 
     // List access
@@ -185,7 +190,7 @@ fn bench_vm_execution(c: &mut Criterion) {
         let mut core = setup();
         let (vm, symbols, cctx) = core.parts();
         let result = compile("(first (list 1 2 3))", symbols, cctx, "<benchmark>").unwrap();
-        b.iter(|| black_box(vm.execute(&result.bytecode).unwrap()));
+        b.iter(|| black_box(vm.execute(&result).unwrap()));
     });
 
     group.finish();
@@ -200,7 +205,7 @@ fn bench_conditionals(c: &mut Criterion) {
         let mut core = setup();
         let (vm, symbols, cctx) = core.parts();
         let result = compile("(if (> 5 3) 100 200)", symbols, cctx, "<benchmark>").unwrap();
-        b.iter(|| black_box(vm.execute(&result.bytecode).unwrap()));
+        b.iter(|| black_box(vm.execute(&result).unwrap()));
     });
 
     // Nested if
@@ -214,7 +219,7 @@ fn bench_conditionals(c: &mut Criterion) {
             "<benchmark>",
         )
         .unwrap();
-        b.iter(|| black_box(vm.execute(&result.bytecode).unwrap()));
+        b.iter(|| black_box(vm.execute(&result).unwrap()));
     });
 
     group.finish();
@@ -282,7 +287,7 @@ fn bench_scalability(c: &mut Criterion) {
                 );
                 let result = compile(&expr_str, symbols, cctx, "<benchmark>").unwrap();
 
-                b.iter(|| black_box(vm.execute(&result.bytecode).unwrap()));
+                b.iter(|| black_box(vm.execute(&result).unwrap()));
             },
         );
 
@@ -303,7 +308,7 @@ fn bench_scalability(c: &mut Criterion) {
                 );
                 let result = compile(&expr_str, symbols, cctx, "<benchmark>").unwrap();
 
-                b.iter(|| black_box(vm.execute(&result.bytecode).unwrap()));
+                b.iter(|| black_box(vm.execute(&result).unwrap()));
             },
         );
     }
@@ -343,7 +348,7 @@ fn bench_memory_operations(c: &mut Criterion) {
 // is built, in the unmeasured batch setup; under the explicit-`CompileCtx`
 // design each eval threads its own compile context, so there is nothing to
 // reload per eval.) The caching
-// benefit (issue #562) shows up within a single `eval_all` when the same macro
+// benefit shows up within a single `eval_all` when the same macro
 // is invoked many times: the first call compiles the transformer closure;
 // subsequent calls reuse it via VM::call_closure.
 fn bench_macro_expansion(c: &mut Criterion) {

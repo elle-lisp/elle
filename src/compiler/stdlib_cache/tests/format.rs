@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-10-06
 // What the serialized form carries across, and the one thing a restored
 // template loses.
 // docs/impl/stdlib-cache.md
@@ -9,25 +9,24 @@ use crate::primitives::module_init::StdlibSource;
 use crate::runtime::Runtime;
 
 /// Compile a snippet through the full pipeline, then assert that
-/// store→load round-trips to an equivalent `Bytecode` (equal instructions
-/// and constants, closures rebuilt, LIR preserved).
+/// store→load round-trips to an equivalent code unit (equal entry bytecode and
+/// constants, closures rebuilt, every nested lambda's LIR preserved).
 #[test]
 fn bytecode_roundtrip_preserves_lir_and_closures() {
     let dir = tempfile::tempdir().expect("tempdir");
     // Its own directory: this test writes a cache and must not read, write,
     // or be read by whatever else the suite is running beside it.
     let mut rt = Runtime::with_stdlib_cache(StdlibCache::Dir(dir.path().to_path_buf()));
-    let (result, loaded) = {
+    let (unit, loaded) = {
         let (vm, symbols, cctx) = rt.parts();
         let src = r#"
 (defn helper [x] (+ x 1))
 (+ (helper 1) (helper 2))
 "#;
-        let result = compile_file(src, symbols, cctx, "<test>").expect("compiles");
-        let bc = &result.bytecode;
-        assert!(!bc.instructions.is_empty());
+        let unit = compile_file(src, symbols, cctx, "<test>").expect("compiles");
+        assert!(!unit.entry().bytecode().is_empty());
 
-        let stored = store_bytecode(bc, vm, symbols, cctx).expect("stores");
+        let stored = store_bytecode(&unit, vm, symbols, cctx).expect("stores");
         let stored_names = stored.names.len();
         let bytes = bincode::serialize(&stored).expect("serializes");
         let decoded: StoredBytecode = bincode::deserialize(&bytes).expect("deserializes");
@@ -38,45 +37,48 @@ fn bytecode_roundtrip_preserves_lir_and_closures() {
              symbol prints as #<symbol:hash>"
         );
         let loaded = load_bytecode(decoded, vm, symbols, cctx).expect("loads");
-        assert_eq!(loaded.instructions, bc.instructions, "instructions equal");
-        assert_eq!(loaded.signal, bc.signal);
-        assert_eq!(loaded.child_protos.len(), bc.child_protos.len());
+        let (a, b) = (unit.entry(), loaded.entry());
+        assert_eq!(b.bytecode(), a.bytecode(), "instructions equal");
+        assert_eq!(b.signal(), a.signal());
+        assert_eq!(b.num_children(), a.num_children());
         // The constant pool is byte-identical on the scalar prefix; closure
         // constants are NEW heap instances after reload (pointer-equal
         // comparison would spuriously fail), so compare scalar kinds/counts.
         assert_eq!(
-            bc.constants.len(),
-            loaded.constants.len(),
+            a.constants().len(),
+            b.constants().len(),
             "same number of constants"
         );
-        for (a, b) in bc.constants.iter().zip(&loaded.constants) {
-            assert_eq!(a.is_closure(), b.is_closure(), "closure-ness preserved");
-            assert_eq!(a.is_heap(), b.is_heap(), "heap-ness preserved");
+        for (x, y) in a.constants().iter().zip(b.constants()) {
+            assert_eq!(x.is_closure(), y.is_closure(), "closure-ness preserved");
+            assert_eq!(x.is_heap(), y.is_heap(), "heap-ness preserved");
         }
-        // LIR must survive (JIT depends on it) and closures must be rebuilt.
-        for (orig, reloaded) in bc.child_protos.iter().zip(&loaded.child_protos) {
+        // LIR must survive (the JIT depends on it): every nested lambda the
+        // reloaded unit carries runs the instructions the compiled one does.
+        let ops = |v: &crate::lir::LirView<'_>| v.nodes().map(|n| n.op()).collect::<Vec<_>>();
+        for i in 0..a.num_children() {
+            let (orig, reloaded) = (a.child(i), b.child(i));
+            let orig = orig.lir().expect("a nested lambda has LIR");
+            let reloaded = reloaded.lir().expect("the reloaded lambda carries LIR");
             assert_eq!(
-                orig.lir_function.is_some(),
-                reloaded.lir_function.is_some(),
-                "LIR presence preserved"
+                ops(&orig),
+                ops(&reloaded),
+                "the reloaded LIR runs different instructions"
             );
         }
-        let _ = vm;
-        (result.bytecode, loaded)
+        (unit, loaded)
     };
-    // Both bytecodes must execute to the same result.
-    let run = |bc: &crate::compiler::Bytecode| -> i64 {
+    // Both units must execute to the same result.
+    let mut run = |unit: &crate::value::CodeUnit| -> i64 {
         let (vm, _symbols, cctx) = rt.parts();
-        vm.execute_scheduled(bc, cctx)
+        vm.execute_scheduled(unit, cctx)
             .expect("runs")
             .as_int()
             .expect("result is an int")
     };
-    let mut run = run;
-    let r_orig = run(&result);
+    let r_orig = run(&unit);
     let r_loaded = run(&loaded);
-    assert_eq!(r_orig, r_loaded, "original and reloaded bytecode agree");
-    eprintln!("roundtrip ok: {r_orig} == {r_loaded}");
+    assert_eq!(r_orig, r_loaded, "original and reloaded units agree");
 }
 /// The registry a cache hit restores must be the registry the stdlib
 /// compile recorded. It drives an HIR rewrite in every later compile, so a
@@ -169,8 +171,8 @@ fn a_cache_hit_inlines_the_stdlib_bodies_a_stdlib_compile_inlines() {
         let len = compile_file_repl(SRC, symbols, cctx, "<parity>")
             .expect("compiles")
             .0
-            .bytecode
-            .instructions
+            .entry()
+            .bytecode()
             .len();
         (calls, len)
     }
@@ -203,9 +205,44 @@ fn a_cache_hit_inlines_the_stdlib_bodies_a_stdlib_compile_inlines() {
     );
 }
 
-/// `ClosureTemplate.origin` does not cross the cache — a restore rebuilds
-/// templates from cached bytecode, not from the LIR the emitter set it on
-/// — and `(meta/origin f)`, its only reader, reports a closure's source
+/// A cache hit's stdlib closures reach the JIT as a compiled stdlib's do: the
+/// restored templates carry their LIR into the payload every reader reads.
+/// The counter-factual is a hit whose closures run interpreted forever, which
+/// answers every call correctly and is visible only here and in a profile.
+#[test]
+fn a_cached_stdlib_closure_carries_its_lir() {
+    fn map_has_lir(rt: &mut Runtime) -> bool {
+        let (vm, symbols, cctx) = rt.parts();
+        let map = crate::pipeline::eval_all("map", symbols, vm, cctx, "<lir>").expect("map");
+        map.as_closure()
+            .expect("map is a closure")
+            .template
+            .lir()
+            .is_some()
+    }
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cache = StdlibCache::Dir(dir.path().to_path_buf());
+
+    let mut compiled = Runtime::with_stdlib_cache(cache.clone());
+    assert_eq!(compiled.stdlib_source(), StdlibSource::Compiled);
+    assert!(
+        map_has_lir(&mut compiled),
+        "a compiled stdlib's map has LIR"
+    );
+    drop(compiled);
+
+    let mut hit = Runtime::with_stdlib_cache(cache);
+    assert_eq!(hit.stdlib_source(), StdlibSource::Cache);
+    assert!(
+        map_has_lir(&mut hit),
+        "a cache hit's map lost its LIR, so it never reaches the JIT"
+    );
+}
+
+/// A payload's origin does not cross the cache — a restore rebuilds code
+/// objects from the stored form, which carries no field for it — and
+/// `(meta/origin f)`, its only reader, reports a closure's source
 /// location from it. So a stdlib closure has an origin on the compiled
 /// path and none on the cached one. Nothing in the tree depends on that;
 /// it is pinned here rather than left to be rediscovered as a surprise.
@@ -219,7 +256,7 @@ fn a_cached_stdlib_closure_has_no_origin_but_user_code_keeps_its_own() {
         use crate::pipeline::compile_file_repl;
         let (vm, symbols, cctx) = rt.parts();
         let result = compile_file_repl(src, symbols, cctx, "<origin>").expect("compiles");
-        vm.execute_scheduled(&result.0.bytecode, cctx)
+        vm.execute_scheduled(&result.0, cctx)
             .expect("runs")
             .is_nil()
     }

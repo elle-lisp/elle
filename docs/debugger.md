@@ -1,6 +1,6 @@
 # Debugger
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-06 -->
 
 A design for a debugger that pauses a program, shows its state as structured
 values, and resumes it.
@@ -237,7 +237,7 @@ before its implementation.
 
 | Phase | Contents | Status |
 |-------|----------|--------|
-| 1 | name plumbing (HIR → `LirFunction.name` → the template name), `local_names` with three-shape places and parameter entries, the `Bytecode` local count, `fiber/frames`, `fiber/trace`, `fiber/disasm`, `Fresh` region rule, disasm exhaustiveness | name plumbing built; the rest not started |
+| 1 | name plumbing (HIR → `LirHead::name` → the template name), `local_names` with three-shape places and parameter entries, the `Bytecode` local count, `fiber/frames`, `fiber/trace`, `fiber/disasm`, `Fresh` region rule, disasm exhaustiveness | name plumbing built; the rest not started |
 | 2 | `debug/break`, attached flag, hygiene exemptions (`:debug` joins `SIG_PAUSE`; silence; silence bounds), denial semantics, JIT side-exit inspectability | not started |
 | 3 | fiber debug + skip-once fields, owning-key breakpoint table, `debug/break-at`, composed-bit pauses, per-instruction fuel, always-park re-execute frames, tier gate, error-path frame preservation | not started |
 | 4 | `lib/debug.lisp` driver, snapshot/outcome schemas | not started |

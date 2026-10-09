@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! Per-instance heap ownership.
 //!
 //! docs/impl/region/model.md
@@ -94,10 +94,14 @@ pub struct FiberHeap {
     /// Regions held on behalf of this instance — resident roots the teardown
     /// sweep releases by RC (decref once) so their graph can be reclaimed.
     process_roots: Vec<RuntimeRegion>,
-    /// This instance's materialized code payloads, one per compile-time blueprint
-    /// (docs/impl/region/template.md). The cache holds each payload region's owning
-    /// reference and releases it when the last blueprint packed into it dies.
-    pub(crate) template_payloads: crate::value::closure::cache::TemplatePayloads,
+    /// The code regions a Rust handle holds — a `CodeUnit` or a `CodePin` —
+    /// each with the number of handles (docs/impl/region/template.md). A pass
+    /// that finds a region's holders by scanning heap contents cannot see these,
+    /// so it takes this map's keys as its exclusion set.
+    code_holds: rustc_hash::FxHashMap<RuntimeRegion, usize>,
+    /// This instance's placeholder code object, a header in the root region,
+    /// written on first use.
+    placeholder: Option<Value>,
     /// This instance's authoritative trace bitfield (`--trace=` / runtime
     /// `(vm/config-set :trace …)`). The VM's `RuntimeConfig` and the region
     /// pool's `PAGES` gate each hold a clone of this one cell, so a diagnostic
@@ -125,7 +129,8 @@ impl FiberHeap {
             default_traits: Vec::new(),
             root_region: None,
             process_roots: Vec::new(),
-            template_payloads: Default::default(),
+            code_holds: Default::default(),
+            placeholder: None,
             trace,
         }
     }
@@ -196,6 +201,52 @@ impl FiberHeap {
     /// Drain and return this instance's process roots (teardown releases each).
     pub fn take_process_roots(&mut self) -> Vec<RuntimeRegion> {
         std::mem::take(&mut self.process_roots)
+    }
+
+    /// Take one counted reference to the code region `region` for a Rust
+    /// handle, and record the handle (docs/impl/region/template.md).
+    /// `funded` says the caller already holds the reference — a unit taking
+    /// the one its region was born with — so only the record moves.
+    pub(crate) fn hold_code(&mut self, region: RuntimeRegion, funded: bool) {
+        if !funded {
+            self.incref_region(region);
+        }
+        *self.code_holds.entry(region).or_insert(0) += 1;
+    }
+
+    /// Give back one Rust handle's reference to the code region `region`.
+    pub(crate) fn release_code(&mut self, region: RuntimeRegion) {
+        let count = self
+            .code_holds
+            .get_mut(&region)
+            .expect("a released code handle was recorded when it was taken");
+        *count -= 1;
+        if *count == 0 {
+            self.code_holds.remove(&region);
+        }
+        self.decref_region(region);
+    }
+
+    /// Every code region a Rust handle holds: the regions a scan of heap
+    /// contents cannot find the holders of.
+    pub(crate) fn code_hold_regions(&self) -> Vec<RuntimeRegion> {
+        self.code_holds.keys().copied().collect()
+    }
+
+    /// How many Rust handles to code regions are live.
+    pub fn live_code_handles(&self) -> usize {
+        self.code_holds.values().sum()
+    }
+
+    /// This instance's placeholder code object, if written yet.
+    pub(crate) fn placeholder_slot(&self) -> Option<Value> {
+        self.placeholder
+    }
+
+    /// Record the placeholder code object once it is written, or forget it
+    /// when the root region it lives in is released.
+    pub(crate) fn set_placeholder(&mut self, header: Option<Value>) {
+        self.placeholder = header;
     }
 
     /// Object count (used by arena primitives and object limiting).

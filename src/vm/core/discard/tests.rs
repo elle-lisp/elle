@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! How a host that runs code on the current fiber ends a park of that code:
 //! refused, or handed on as its own call's park.
 //!
@@ -13,15 +13,9 @@ use std::rc::Rc;
 /// Minimal fixtures for `handle_primitive_signal`: (code, env).
 fn test_fixtures() -> (crate::value::Code, Rc<Vec<Value>>) {
     (
-        crate::value::ClosureTemplate::for_proto(
-            unsafe { &mut *crate::value::arena::leaked_test_heap() },
-            &Rc::new(crate::value::TemplateProto::new(
-                Vec::new(),
-                crate::value::Arity::Exact(0),
-                Vec::new(),
-            )),
-        )
-        .code(),
+        crate::value::CodeBuilder::new(Vec::new(), crate::value::Arity::Exact(0), Vec::new())
+            .build(unsafe { &mut *crate::value::arena::leaked_test_heap() })
+            .code(),
         Rc::new(vec![]),
     )
 }

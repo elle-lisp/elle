@@ -1,4 +1,4 @@
-// audited: 2026-09-20
+// audited: 2026-10-06
 //! Running one prompt form: compile it, execute it, print what it answered,
 //! and register what it bound.
 //!
@@ -97,7 +97,7 @@ fn eval_form(
         // return value IS the bound value.
         let (result, expander) = compile_file_repl(&form.source, symbols, cctx, "<repl>")?;
         cctx.register_repl_macros(expander.macros());
-        let value = vm.execute_scheduled(&result.bytecode, cctx)?;
+        let value = vm.execute_scheduled(&result, cctx)?;
 
         if let Some(binding) = form.bindings.first() {
             let sym_id = symbols.intern(&binding.name);
@@ -124,7 +124,7 @@ fn eval_form(
 
         let (result, expander) = compile_file_repl(&combined, symbols, cctx, "<repl>")?;
         cctx.register_repl_macros(expander.macros());
-        let tuple_val = vm.execute_scheduled(&result.bytecode, cctx)?;
+        let tuple_val = vm.execute_scheduled(&result, cctx)?;
 
         // Register each leaf binding from the tuple.
         if let Some(items) = tuple_val.as_array() {

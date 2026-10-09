@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-07
 //! MLIR tier-2 compilation entry point.
 //!
 //! docs/impl/mlir.md
@@ -52,19 +52,23 @@ impl VM {
             }
         }
 
+        let sig = crate::mlir::MlirSig {
+            captures: capture_types,
+            params: param_types,
+        };
         let cache = self
             .mlir_cache
             .get_or_insert_with(crate::mlir::MlirCache::new);
-        if cache.contains(bytecode_ptr, capture_types, param_types) {
-            return self.run_mlir_cached(closure, bytecode_ptr, args, capture_types, param_types);
+        if cache.contains(bytecode_ptr, sig) {
+            return self.run_mlir_cached(closure, bytecode_ptr, args, sig);
         }
-        if cache.is_rejected(bytecode_ptr, capture_types, param_types) {
+        if cache.is_rejected(bytecode_ptr, sig) {
             return None;
         }
 
         // Check hotness without incrementing — the counter is owned
         // by try_jit_call which runs after us. We just read it.
-        let count = self.get_closure_call_count(bytecode_ptr);
+        let count = self.closure_call_count(bytecode_ptr);
         if count < self.runtime_config.mlir.threshold() {
             return None;
         }
@@ -72,14 +76,16 @@ impl VM {
         // Full LIR instruction walk (only for hot functions).
         // Use the stricter MLIR-CPU eligibility check: the return register
         // must round-trip through i64 correctly.
-        let lir = closure.template.lir_function()?;
+        let lir = closure.template.lir()?;
         if !lir.is_mlir_cpu_eligible() {
             return None;
         }
 
-        // Compile via MLIR
+        // Compile via MLIR. The entry, compiled or rejected, pins the
+        // closure's code region, so its key keeps naming this function.
+        let pin = crate::value::CodePin::of(self.heap(), &closure.template);
         let cache = self.mlir_cache.as_mut().unwrap();
-        match cache.compile(bytecode_ptr, lir, num_captures, capture_types, param_types) {
+        match cache.compile(pin.clone(), &lir, num_captures, sig) {
             Ok(_name) => {
                 if crate::config::get().has_trace("jit") {
                     eprintln!(
@@ -87,14 +93,11 @@ impl VM {
                         closure.template.name().unwrap_or("<anon>")
                     );
                 }
-                self.run_mlir_cached(closure, bytecode_ptr, args, capture_types, param_types)
+                self.run_mlir_cached(closure, bytecode_ptr, args, sig)
             }
             Err(e) => {
                 // Cache rejection so we don't retry on every call
-                self.mlir_cache
-                    .as_mut()
-                    .unwrap()
-                    .reject(bytecode_ptr, capture_types, param_types);
+                self.mlir_cache.as_mut().unwrap().reject(pin, sig);
                 if crate::config::get().has_trace("jit") {
                     eprintln!(
                         "[mlir] failed {}: {}",
@@ -119,8 +122,7 @@ impl VM {
         closure: &crate::value::Closure,
         bytecode_ptr: *const u8,
         args: &[Value],
-        capture_types: u64,
-        param_types: u64,
+        sig: crate::mlir::MlirSig,
     ) -> Option<()> {
         let num_captures = closure.template.num_captures();
 
@@ -130,7 +132,7 @@ impl VM {
         // Captures first
         for i in 0..num_captures {
             let v = closure.env[i];
-            if capture_types & (1u64 << i) != 0 {
+            if sig.captures & (1u64 << i) != 0 {
                 i64_args.push(v.as_float()?.to_bits() as i64);
             } else {
                 i64_args.push(v.as_int()?);
@@ -139,7 +141,7 @@ impl VM {
 
         // Then params
         for (i, v) in args.iter().enumerate() {
-            if param_types & (1u64 << i) != 0 {
+            if sig.params & (1u64 << i) != 0 {
                 i64_args.push(v.as_float()?.to_bits() as i64);
             } else {
                 i64_args.push(v.as_int()?);
@@ -147,10 +149,10 @@ impl VM {
         }
 
         let cache = self.mlir_cache.as_ref().unwrap();
-        match cache.call(bytecode_ptr, &i64_args, capture_types, param_types) {
+        match cache.call(bytecode_ptr, &i64_args, sig) {
             Some(Ok(result)) => {
                 // Rebox based on the compiled function's return type.
-                let val = match cache.return_type(bytecode_ptr, capture_types, param_types) {
+                let val = match cache.return_type(bytecode_ptr, sig) {
                     Some(crate::mlir::ScalarType::Float) => {
                         Value::float(f64::from_bits(result as u64))
                     }

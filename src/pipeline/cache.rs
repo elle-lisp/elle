@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-07
 // src/pipeline/AGENTS.md
 //! `CompileCtx`: one instance's compile-time state.
 //!
@@ -74,14 +74,14 @@ pub struct CompileCtx {
     /// Container-dispatch wrappers collected across every compile in this
     /// instance, keyed by name. Populated when `stdlib.lisp` compiles (its
     /// `push`/`put`), consumed by every later unit so a user→stdlib wrapper call
-    /// monomorphizes as an intra-unit one does (the F1b close, `monomorphize.rs`).
+    /// monomorphizes as an intra-unit one does (`monomorphize.rs`).
     /// Compile-time-only state: it drives an HIR rewrite and never reaches the VM.
     dispatch_wrappers: DispatchWrapperRegistry,
     /// Cross-unit-inlineable function templates collected across every compile in
     /// this instance, keyed by name. Populated when `stdlib.lisp` compiles (its
     /// `inc`/`dec`/… bodies), consumed by every later unit so a user→stdlib
-    /// `(map inc xs)` inlines the stdlib body as a same-unit named fn would (the
-    /// dissolution leg across the compile-unit boundary, `fuse.rs`). Like
+    /// `(map inc xs)` inlines the stdlib body as a same-unit named fn would
+    /// (`fuse.rs`). Like
     /// `dispatch_wrappers`, compile-time-only state that never reaches the VM.
     fn_inline: FnInlineRegistry,
     /// The core and stdlib export aggregates this instance booted with.
@@ -99,8 +99,7 @@ impl CompileCtx {
     /// Build a compile context whose macro-expansion VM shares an
     /// externally-owned heap (`RuntimeCore`'s). core.lisp's exports are runtime
     /// closures created here on the macro VM; sharing the instance heap is what
-    /// lets the program VM resolve and call them without a cross-heap reference
-    /// (tls.md § the ownership flip).
+    /// lets the program VM resolve and call them without a cross-heap reference.
     pub fn new_with_heap(heap_ptr: *mut crate::value::fiberheap::FiberHeap) -> Self {
         Self::on_vm(VM::new_with_heap(heap_ptr))
     }
@@ -394,13 +393,18 @@ impl CompileCtx {
         self.expander.set_eval_meta(eval_meta);
     }
 
-    /// Release the region reference each pre-compiled macro transformer holds.
-    /// Part of the process-teardown sweep: those transformer closure `Value`s
-    /// are `Copy`, so a plain drop would never decref them and they would survive
-    /// teardown as residue. The `CompileCtx` is this instance's sole holder, so
-    /// the decref is balanced. Run while the heap is still alive (before drop).
-    pub fn release(&mut self, heap: &mut crate::value::fiberheap::FiberHeap) {
-        self.expander.release_cached_transformers(heap);
+    /// Release what this context holds on the heap from Rust, ahead of the
+    /// process-teardown sweep. Each macro transformer's cell would release on
+    /// its own when the context drops, which is after the sweep has counted the
+    /// residue. So the master expander empties its cells here, and the macro
+    /// VM drops the `eval` expander a macro body may have built.
+    ///
+    /// The macro VM's JIT and SPIR-V caches pin code regions from Rust, so they
+    /// go here too (docs/impl/jit.md).
+    pub fn release(&mut self) {
+        self.expander.release_cached_transformers();
+        self.vm.eval_expander = None;
+        self.vm.clear_code_pins();
     }
 
     /// Look up or compute the signal projection for an imported file.
@@ -429,7 +433,7 @@ impl CompileCtx {
         // the probe is often the first expansion on that path too.
         let projection = super::compile::compile_file(&source, symbols, self, resolved_path)
             .ok()
-            .and_then(|result| result.bytecode.signal_projection);
+            .and_then(|unit| unit.signal_projection().cloned());
 
         self.projections
             .insert(resolved_path.to_string(), projection.clone());

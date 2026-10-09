@@ -1,15 +1,15 @@
-// audited: 2026-09-16
-// src/lir/lower/AGENTS.md
-// docs/match.md
-//! Lowering a compiled decision tree to blocks: bindings, guards, arm bodies,
-//! and the switch that chooses between them.
+// audited: 2026-10-06
+//! Lowering a compiled decision tree to blocks: bindings, guards, arm bodies, and the switch that chooses between them.
+//!
+//! src/lir/lower/AGENTS.md
+//! docs/match.md
 //!
 //! `ctor` holds the constructor tests a switch branches on; `matching`, `seq`
 //! and `keyed` lower a pattern directly, for the binding forms that have no tree.
 
 use super::*;
 use crate::hir::decision::{AccessPath, Constructor, DecisionTree};
-use crate::hir::{HirPattern, PatternKey, PatternLiteral};
+use crate::hir::{HirPattern, PatternLiteral};
 
 mod ctor;
 mod keyed;
@@ -111,13 +111,12 @@ impl<'a> Lowerer<'a> {
         let Some(region) = region else {
             return value;
         };
-        let slot = self.current_func.num_locals;
-        self.current_func.num_locals += 1;
-        self.emit(LirInstr::StoreLocal { slot, src: value });
+        let slot = self.fresh_local();
+        self.emit(InstrRef::StoreLocal { slot, src: value });
         self.region_to_slot
             .insert(region, super::ValueSlot::Local(slot));
         let dst = self.fresh_reg();
-        self.emit(LirInstr::LoadLocal { dst, slot });
+        self.emit(InstrRef::LoadLocal { dst, slot });
         dst
     }
 
@@ -147,13 +146,13 @@ impl<'a> Lowerer<'a> {
         done_label: Label,
     ) -> Result<(), String> {
         let scrut = self.fresh_reg();
-        self.emit(LirInstr::LoadLocal {
+        self.emit(InstrRef::LoadLocal {
             dst: scrut,
             slot: scrutinee_slot,
         });
         let dst = self.fresh_reg();
-        self.emit(LirInstr::MatchFail { dst, src: scrut });
-        self.emit(LirInstr::StoreLocal {
+        self.emit(InstrRef::MatchFail { dst, src: scrut });
+        self.emit(InstrRef::StoreLocal {
             slot: result_slot,
             src: dst,
         });
@@ -212,12 +211,12 @@ impl<'a> Lowerer<'a> {
                     let needs_capture = self.arena.get(*binding).needs_capture();
                     if self.in_lambda && needs_capture {
                         self.upvalue_bindings.insert(*binding);
-                        self.emit(LirInstr::StoreCapture {
+                        self.emit(InstrRef::StoreCapture {
                             index: slot,
                             src: val_reg,
                         });
                     } else {
-                        self.emit(LirInstr::StoreLocal { slot, src: val_reg });
+                        self.emit(InstrRef::StoreLocal { slot, src: val_reg });
                     }
                 }
 
@@ -238,12 +237,12 @@ impl<'a> Lowerer<'a> {
                 lowered_arms.insert(*arm_index, body_label);
                 self.terminate(Terminator::Jump(body_label));
                 self.finish_block();
-                self.current_block = BasicBlock::new(body_label);
+                self.open_block(body_label);
 
                 // Lower body
                 let body = &arms[*arm_index].2;
                 let body_reg = self.lower_expr(body)?;
-                self.emit(LirInstr::StoreLocal {
+                self.emit(InstrRef::StoreLocal {
                     slot: result_slot,
                     src: body_reg,
                 });
@@ -284,12 +283,12 @@ impl<'a> Lowerer<'a> {
                     let needs_capture = self.arena.get(*binding).needs_capture();
                     if self.in_lambda && needs_capture {
                         self.upvalue_bindings.insert(*binding);
-                        self.emit(LirInstr::StoreCapture {
+                        self.emit(InstrRef::StoreCapture {
                             index: slot,
                             src: val_reg,
                         });
                     } else {
-                        self.emit(LirInstr::StoreLocal { slot, src: val_reg });
+                        self.emit(InstrRef::StoreLocal { slot, src: val_reg });
                     }
                 }
                 // Evaluate guard
@@ -309,10 +308,10 @@ impl<'a> Lowerer<'a> {
                 self.finish_block();
 
                 // Guard passed: lower body
-                self.current_block = BasicBlock::new(pass_label);
+                self.open_block(pass_label);
                 let body = &arms[*arm_index].2;
                 let body_reg = self.lower_expr(body)?;
-                self.emit(LirInstr::StoreLocal {
+                self.emit(InstrRef::StoreLocal {
                     slot: result_slot,
                     src: body_reg,
                 });
@@ -321,7 +320,7 @@ impl<'a> Lowerer<'a> {
                 self.finish_block();
 
                 // Guard failed: continue with otherwise
-                self.current_block = BasicBlock::new(fail_label);
+                self.open_block(fail_label);
                 self.lower_decision_tree(
                     otherwise,
                     arms,
@@ -341,9 +340,8 @@ impl<'a> Lowerer<'a> {
                 // slot and is reloaded via LoadLocal for each constructor
                 // test.
                 let value_reg = self.load_access_path(access, scrutinee_slot)?;
-                let temp_slot = self.current_func.num_locals;
-                self.current_func.num_locals += 1;
-                self.emit(LirInstr::StoreLocal {
+                let temp_slot = self.fresh_local();
+                self.emit(InstrRef::StoreLocal {
                     slot: temp_slot,
                     src: value_reg,
                 });
@@ -361,7 +359,7 @@ impl<'a> Lowerer<'a> {
 
                     // Reload value for this test
                     let reloaded = self.fresh_reg();
-                    self.emit(LirInstr::LoadLocal {
+                    self.emit(InstrRef::LoadLocal {
                         dst: reloaded,
                         slot: temp_slot,
                     });
@@ -376,7 +374,7 @@ impl<'a> Lowerer<'a> {
                     self.finish_block();
 
                     // Match block: recurse into subtree
-                    self.current_block = BasicBlock::new(match_label);
+                    self.open_block(match_label);
                     self.lower_decision_tree(
                         subtree,
                         arms,
@@ -388,12 +386,12 @@ impl<'a> Lowerer<'a> {
 
                     // Start next test block (if not the last case)
                     if i + 1 < cases.len() {
-                        self.current_block = BasicBlock::new(next_label);
+                        self.open_block(next_label);
                     }
                 }
 
                 // Default block
-                self.current_block = BasicBlock::new(default_label);
+                self.open_block(default_label);
                 if let Some(def) = default {
                     self.lower_decision_tree(
                         def,

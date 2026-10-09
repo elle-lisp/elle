@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-06
 //! The `escape` dump kind: an id-normalized snapshot of the escape facts and the region
 //! instructions they drive.
 //!
@@ -57,7 +57,7 @@ use std::fmt::Write;
 
 use crate::hir::region::{Region, RegionInfo, StaticRegion};
 use crate::hir::{Binding, BindingArena, CaptureKind, EscapeInfo, Hir, HirId, HirKind};
-use crate::lir::{LirFunction, LirInstr, LirModule};
+use crate::lir::{FrozenModule, InstrRef, LirView};
 
 /// Render the normalized escape snapshot for a compiled module.
 pub fn escape_module(
@@ -65,7 +65,7 @@ pub fn escape_module(
     arena: &BindingArena,
     escape: &EscapeInfo,
     ri: &RegionInfo,
-    module: &LirModule,
+    module: &FrozenModule,
     symbols: Option<&crate::symbol::SymbolTable>,
 ) -> String {
     // The return frontier — escape's authoritative return verdict projected onto
@@ -220,7 +220,7 @@ pub fn escape_module(
     render_func_region_instrs(
         &mut s,
         "entry",
-        &module.entry,
+        &module.entry.view(),
         &mut lir_region_norm,
         &mut next_s,
     );
@@ -228,7 +228,7 @@ pub fn escape_module(
         render_func_region_instrs(
             &mut s,
             &format!("closure[{i}]"),
-            f,
+            &f.view(),
             &mut lir_region_norm,
             &mut next_s,
         );
@@ -242,11 +242,11 @@ pub fn escape_module(
 fn render_func_region_instrs(
     s: &mut String,
     tag: &str,
-    f: &LirFunction,
+    f: &LirView<'_>,
     sn: &mut HashMap<StaticRegion, usize>,
     next_s: &mut usize,
 ) {
-    let name = f.name.as_deref().unwrap_or("<anon>");
+    let name = f.name().unwrap_or("<anon>");
     let _ = writeln!(s, "  ; {tag} {name}");
     let sreg = |r: StaticRegion, m: &mut HashMap<StaticRegion, usize>, n: &mut usize| -> String {
         let k = *m.entry(r).or_insert_with(|| {
@@ -256,28 +256,28 @@ fn render_func_region_instrs(
         });
         format!("s{k}")
     };
-    for block in &f.blocks {
-        for si in &block.instructions {
-            let line = match &si.instr {
-                LirInstr::IncrefRegion { region_id } => {
-                    format!("IncrefRegion {}", sreg(*region_id, sn, next_s))
+    for block in f.blocks() {
+        for instr in block.instrs() {
+            let line = match instr {
+                InstrRef::IncrefRegion { region_id } => {
+                    format!("IncrefRegion {}", sreg(region_id, sn, next_s))
                 }
-                LirInstr::DecrefRegion { region_id } => {
-                    format!("DecrefRegion {}", sreg(*region_id, sn, next_s))
+                InstrRef::DecrefRegion { region_id } => {
+                    format!("DecrefRegion {}", sreg(region_id, sn, next_s))
                 }
-                LirInstr::IncrefValueRegion { src } => format!("IncrefValueRegion v{}", src.0),
-                LirInstr::DecrefValueRegion { src } => format!("DecrefValueRegion v{}", src.0),
-                LirInstr::DecrefCellRegion { src } => format!("DecrefCellRegion v{}", src.0),
-                LirInstr::TailCall {
+                InstrRef::IncrefValueRegion { src } => format!("IncrefValueRegion v{}", src.0),
+                InstrRef::DecrefValueRegion { src } => format!("DecrefValueRegion v{}", src.0),
+                InstrRef::DecrefCellRegion { src } => format!("DecrefCellRegion v{}", src.0),
+                InstrRef::TailCall {
                     defer_callee_release,
                     ..
                 } => {
                     format!("TailCall defer_callee_release={defer_callee_release}")
                 }
-                LirInstr::TailCallArrayMut { .. } => "TailCallArrayMut".to_string(),
+                InstrRef::TailCallArrayMut { .. } => "TailCallArrayMut".to_string(),
                 _ => continue,
             };
-            let _ = writeln!(s, "    {}: {}", block.label, line);
+            let _ = writeln!(s, "    {}: {}", block.label(), line);
         }
     }
 }

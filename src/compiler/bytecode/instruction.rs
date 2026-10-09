@@ -1,3 +1,8 @@
+// audited: 2026-10-06
+//! The bytecode instruction set: one opcode byte per instruction, and the decode that rejects a byte with none.
+//!
+//! docs/impl/bytecode.md
+
 /// Bytecode instruction set
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -114,7 +119,7 @@ pub enum Instruction {
     True,
     False,
 
-    /// Wrap value in a capture cell for shared mutable access (Phase 4)
+    /// Wrap value in a capture cell for shared mutable access.
     /// Pops value from stack, wraps it in a capture cell, pushes the cell
     MakeCapture,
 
@@ -225,7 +230,7 @@ pub enum Instruction {
     /// Convert float → int (truncation). Pops value, pushes int. Identity on ints.
     FloatToInt,
 
-    // === New intrinsic opcodes ===
+    // === Intrinsic opcodes ===
     /// Not-equal comparison
     Ne,
     /// Bitwise complement
@@ -350,7 +355,7 @@ pub enum Instruction {
     /// panics if the slot's physical region differs from `region_of(value)`. In
     /// release builds it reads the slot operand and does nothing; the lowerer
     /// emits it only under `debug_assertions`, so release bytecode never carries
-    /// it. See `LirInstr::AssertRegionMatches`.
+    /// it. See `InstrRef::AssertRegionMatches`.
     AssertRegionMatches,
 
     /// Free a co-owned region group as one unit (the `FreeRegionGroup` LIR
@@ -367,7 +372,7 @@ pub enum Instruction {
     /// The value path for a self-reference: the runtime holds the executing
     /// closure in a per-activation register (`Fiber::current_closure`), and this
     /// reads it directly — a value-position `loop`/`go` resolves to the closure
-    /// itself with no capture-slot operand. See `LirInstr::LoadSelf`.
+    /// itself with no capture-slot operand. See `InstrRef::LoadSelf`.
     LoadSelf,
 
     /// Adopt the region of the value on top of the operand stack into the

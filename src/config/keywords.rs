@@ -1,4 +1,4 @@
-// audited: 2026-09-07
+// audited: 2026-10-06
 //! Trace and dump keyword tables and their bit encodings.
 
 // ── Trace keywords ────────────────────────────────────────────────
@@ -63,6 +63,7 @@ pub const TRACE_KEYWORDS: &[&str] = &[
 /// requested stage, prints the artifact, and exits without executing.
 pub const DUMP_KEYWORDS: &[&str] = &[
     "ast", "hir", "fhir", "lir", "jit", "cfg", "dfa", "defuse", "regions", "escape", "git",
+    "bytecode",
 ];
 
 pub mod dump_bits {
@@ -77,7 +78,8 @@ pub mod dump_bits {
     pub const DEFUSE: u32 = 1 << 8;
     pub const REGIONS: u32 = 1 << 9;
     pub const ESCAPE: u32 = 1 << 10;
-    pub const ALL: u32 = (1 << 11) - 1;
+    pub const BYTECODE: u32 = 1 << 11;
+    pub const ALL: u32 = (1 << 12) - 1;
 
     /// Convert a keyword name to its bit. Returns 0 for unknown keywords.
     pub fn from_name(name: &str) -> u32 {
@@ -93,6 +95,7 @@ pub mod dump_bits {
             "defuse" => DEFUSE,
             "regions" => REGIONS,
             "escape" => ESCAPE,
+            "bytecode" => BYTECODE,
             _ => 0,
         }
     }

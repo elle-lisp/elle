@@ -1,3 +1,5 @@
+// audited: 2026-10-06
+// docs/impl/mlir.md
 //! `compile/run-on :mlir-cpu` — force MLIR/LLVM CPU tier-2 execution
 //! (`--features mlir`).
 
@@ -9,8 +11,8 @@ impl VM {
     /// Run a closure via the MLIR/LLVM CPU tier-2 backend.
     ///
     /// Requires `--features mlir`. The closure must satisfy the
-    /// `is_mlir_cpu_eligible` predicate (no captures, exact arity, only
-    /// arithmetic/comparison/local instructions). Arguments may be
+    /// `is_mlir_cpu_eligible` predicate (exact arity, no capture cells, only
+    /// arithmetic, comparison and local instructions). Arguments may be
     /// integers or floats — floats are bitcast f64→i64 by the caller
     /// and i64→f64 at MLIR function entry.
     pub fn invoke_closure_mlir_cpu(
@@ -19,8 +21,8 @@ impl VM {
         closure: &crate::value::Closure,
         args: &[Value],
     ) -> (SignalBits, Value) {
-        let lir = match closure.template.lir_function() {
-            Some(l) => std::rc::Rc::clone(l),
+        let lir = match closure.template.lir() {
+            Some(l) => l,
             None => return (SIG_ERROR, rejected(self, "mlir-cpu", "closure has no LIR")),
         };
 
@@ -88,15 +90,21 @@ impl VM {
         }
 
         let bytecode_ptr = closure.template.bytecode().as_ptr();
-        let cache = self
-            .mlir_cache
-            .get_or_insert_with(crate::mlir::MlirCache::new);
+        let sig = crate::mlir::MlirSig {
+            captures: capture_types,
+            params: param_types,
+        };
 
-        // Ensure compiled for this (capture_types, param_types) signature.
-        if !cache.contains(bytecode_ptr, capture_types, param_types) {
-            if let Err(e) =
-                cache.compile(bytecode_ptr, &lir, num_captures, capture_types, param_types)
-            {
+        // Ensure compiled for this signature. The entry pins the closure's
+        // code region, so its key keeps naming this function.
+        let compiled = self
+            .mlir_cache
+            .get_or_insert_with(crate::mlir::MlirCache::new)
+            .contains(bytecode_ptr, sig);
+        if !compiled {
+            let pin = crate::value::CodePin::of(self.heap(), &closure.template);
+            let cache = self.mlir_cache.as_mut().unwrap();
+            if let Err(e) = cache.compile(pin, &lir, num_captures, sig) {
                 return (
                     SIG_ERROR,
                     rejected(self, "mlir-cpu", format!("MLIR compilation failed: {}", e)),
@@ -106,10 +114,10 @@ impl VM {
 
         // Reborrow as immutable for call.
         let cache = self.mlir_cache.as_ref().unwrap();
-        match cache.call(bytecode_ptr, &int_args, capture_types, param_types) {
+        match cache.call(bytecode_ptr, &int_args, sig) {
             Some(Ok(result)) => {
                 // Rebox based on the compiled function's return type.
-                let val = match cache.return_type(bytecode_ptr, capture_types, param_types) {
+                let val = match cache.return_type(bytecode_ptr, sig) {
                     Some(crate::mlir::ScalarType::Float) => {
                         Value::float(f64::from_bits(result as u64))
                     }

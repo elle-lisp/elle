@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! Terminator translation and the generic tail-call result branch.
 //!
 //! docs/impl/jit.md
@@ -197,13 +197,13 @@ impl<'a> FunctionTranslator<'a> {
                 // point: elle_jit_yield indexes JitCode.yield_points with this
                 // same index, so a missing entry means the counters diverged
                 // and the side-exit would resume at another point's ip.
-                let stack_regs = match self.lir.yield_points.get(yield_index as usize) {
-                    Some(yp) => yp.stack_regs.as_slice(),
+                let stack_regs = match self.lir.yield_point(yield_index as usize) {
+                    Some(yp) => yp.stack_regs,
                     None => {
                         return Err(JitError::InvalidLir(format!(
                             "yield point {} has no emitter-recorded metadata ({} recorded)",
                             yield_index,
-                            self.lir.yield_points.len()
+                            self.lir.yield_points().len()
                         )))
                     }
                 };

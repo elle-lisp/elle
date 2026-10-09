@@ -1,10 +1,10 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! LIR → WASM emission: the module's shape, the emitter's state, and what
 //! drives one function body after another.
 //!
 //! docs/impl/wasm.md
 //!
-//! Converts a `LirFunction` into WASM module bytes using `wasm-encoder`.
+//! Converts frozen LIR into WASM module bytes using `wasm-encoder`.
 //! Each LIR register maps to two WASM locals (tag: i64, payload: i64).
 //! Immediate values (int, float, nil, bool) are constructed in WASM.
 //! Heap operations go through host function calls.
@@ -13,7 +13,8 @@
 //! agree on, and `functions` — the module sections and the two function-body
 //! entry points.
 
-use crate::lir::{ClosureId, Label, LirFunction, LirInstr, Reg, Terminator};
+use crate::lir::code::Op;
+use crate::lir::{ClosureId, FrozenModule, InstrRef, Label, LirOwned, LirView, Reg, Terminator};
 use crate::value::Value;
 use std::collections::HashMap;
 use wasm_encoder::*;
@@ -29,9 +30,9 @@ pub struct EmitResult {
     /// into its handle table before execution, and `rt_load_const(i)`
     /// returns the i-th constant.
     pub const_pool: Vec<Value>,
-    /// Bytecode for each closure, indexed by table index.
-    /// Used by spawn to execute WASM closures in new threads.
-    pub closure_bytecodes: Vec<super::host::ClosureBytecode>,
+    /// The module's dual-compiled bytecode, one payload per closure by table
+    /// index. Used by spawn to execute WASM closures in new threads.
+    pub closure_bytecodes: super::host::ModuleCode,
     /// Byte offset in linear memory where this module's env stack must begin.
     /// Sized above the module's widest args region so no call's args clobber a
     /// live closure env (see `env_stack_base`). The host initializes
@@ -52,22 +53,23 @@ pub struct EmitResult {
 /// variable-length marshaling site. The fixed-arity ops (`emit_data_op1`/`2`,
 /// `emit_call_array`, …) marshal at most a handful of slots, far under the
 /// default 240-slot window, so they contribute 0 here.
-fn instr_args_slots(instr: &LirInstr) -> usize {
+fn instr_args_slots(instr: &InstrRef<'_>) -> usize {
     match instr {
         // Args written one 16-byte slot each (`emit_call` / the closure-tail path).
-        LirInstr::Call { args, .. }
-        | LirInstr::SuspendingCall { args, .. }
-        | LirInstr::TailCall { args, .. } => args.len(),
+        InstrRef::Call { args, .. }
+        | InstrRef::SuspendingCall { args, .. }
+        | InstrRef::TailCall { args, .. } => args.len(),
         // Elements written one slot each (`emit_data_op_n`, OP_MAKE_ARRAY).
-        LirInstr::MakeArrayMut { elements, .. } => elements.len(),
+        InstrRef::MakeArrayMut { elements, .. } => elements.len(),
         // Captures, then 8 fixed meta slots plus the locals-mask words. The margin
         // covers the mask words (one per 64 captured locals) without a nested
         // closure lookup here.
-        LirInstr::MakeClosure { captures, .. } => captures.len() + 72,
+        InstrRef::MakeClosure { captures, .. } => captures.len() + 72,
         // `src` slot plus one per excluded key (`OP_STRUCT_REST`).
-        LirInstr::StructRest { exclude_keys, .. } => 1 + exclude_keys.len(),
-        // Each pair is written with a 32-byte stride (two 16-byte slots).
-        LirInstr::PushParamFrame { pairs } => pairs.len() * 2,
+        InstrRef::StructRest { exclude_keys, .. } => 1 + exclude_keys.len(),
+        // Each pair is written with a 32-byte stride (two 16-byte slots), one
+        // slot per register of the flat list.
+        InstrRef::PushParamFrame { pairs } => pairs.len(),
         _ => 0,
     }
 }
@@ -76,12 +78,11 @@ fn instr_args_slots(instr: &LirInstr) -> usize {
 /// region any of its functions marshals (see `instr_args_slots`). Floored at the
 /// default `ENV_STACK_BASE` and page-aligned above the args region so a live
 /// closure env never overlaps a call's args.
-pub(super) fn env_stack_base(module: &crate::lir::LirModule) -> usize {
+pub(super) fn env_stack_base(module: &FrozenModule) -> usize {
     let max_slots = std::iter::once(&module.entry)
         .chain(module.closures.iter())
-        .flat_map(|func| func.blocks.iter())
-        .flat_map(|block| block.instructions.iter())
-        .map(|si| instr_args_slots(&si.instr))
+        .flat_map(|func| func.view().nodes())
+        .map(|node| instr_args_slots(&node.instr()))
         .max()
         .unwrap_or(0);
     env_stack_base_for_slots(max_slots)
@@ -90,12 +91,10 @@ pub(super) fn env_stack_base(module: &crate::lir::LirModule) -> usize {
 /// Env-stack base for a single function's widest args region — the tiered
 /// per-closure path (`emit_single_closure_module`), which compiles one function
 /// with no nested closures.
-pub(super) fn env_stack_base_for_func(func: &LirFunction) -> usize {
+pub(super) fn env_stack_base_for_func(func: &LirView<'_>) -> usize {
     let max_slots = func
-        .blocks
-        .iter()
-        .flat_map(|block| block.instructions.iter())
-        .map(|si| instr_args_slots(&si.instr))
+        .nodes()
+        .map(|node| instr_args_slots(&node.instr()))
         .max()
         .unwrap_or(0);
     env_stack_base_for_slots(max_slots)
@@ -111,12 +110,12 @@ fn env_stack_base_for_slots(max_slots: usize) -> usize {
         .max(super::host::ENV_STACK_BASE)
 }
 
-/// Emit a WASM module from an LirModule.
+/// Emit a WASM module from a frozen module.
 ///
 /// Closures in `stubbed` are emitted as minimal stubs (they have
 /// pre-compiled standalone Modules and are dispatched via rt_call).
 pub fn emit_module(
-    module: &crate::lir::LirModule,
+    module: &FrozenModule,
     stubbed: std::collections::HashSet<ClosureId>,
     heap_ptr: *mut crate::value::fiberheap::FiberHeap,
     symbols: *mut crate::symbol::SymbolTable,
@@ -144,15 +143,15 @@ pub fn emit_module(
 /// - `MakeClosure` without module context — no `ClosureId` resolution.
 ///
 /// Pinned by `wasm::tests::gate::standalone_emission_refuses_*`.
-fn standalone_emittable(func: &LirFunction, has_module_context: bool) -> bool {
-    func.blocks.iter().all(|b| {
-        b.instructions.iter().all(|si| match &si.instr {
-            LirInstr::TailCall { .. }
-            | LirInstr::TailCallArrayMut { .. }
-            | LirInstr::SuspendingCall { .. } => false,
-            LirInstr::MakeClosure { .. } => has_module_context,
+fn standalone_emittable(func: &LirView<'_>, has_module_context: bool) -> bool {
+    func.blocks().all(|b| {
+        b.instrs().all(|i| match i {
+            InstrRef::TailCall { .. }
+            | InstrRef::TailCallArrayMut { .. }
+            | InstrRef::SuspendingCall { .. } => false,
+            InstrRef::MakeClosure { .. } => has_module_context,
             _ => true,
-        }) && !matches!(b.terminator.terminator, Terminator::Emit { .. })
+        }) && !matches!(b.terminator(), Terminator::Emit { .. })
     })
 }
 
@@ -165,8 +164,8 @@ fn standalone_emittable(func: &LirFunction, has_module_context: bool) -> bool {
 /// (`standalone_emittable` above); the tiered caller falls back to the
 /// bytecode VM, the precache caller to full-module dispatch.
 pub fn emit_single_closure(
-    func: &LirFunction,
-    module: Option<&crate::lir::LirModule>,
+    func: &LirView<'_>,
+    module: Option<&FrozenModule>,
     heap_ptr: *mut crate::value::fiberheap::FiberHeap,
     symbols: *mut crate::symbol::SymbolTable,
 ) -> Option<EmitResult> {
@@ -233,7 +232,7 @@ pub(super) struct WasmEmitter {
     pub current_num_captures: u16,
     pub known_int: std::collections::HashSet<Reg>,
     /// Module's closure list for MakeClosure metadata lookup.
-    pub module_closures: Option<Vec<LirFunction>>,
+    pub module_closures: Option<Vec<LirOwned>>,
     /// Closures to emit as stubs (pre-compiled as standalone Modules).
     pub stubbed_closures: std::collections::HashSet<ClosureId>,
     /// Per-suspend-point live register sets for sparse spilling.

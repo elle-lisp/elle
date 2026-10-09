@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! A cell-free self-recursive closure's per-call region comes back, whatever tail its body ends in.
 //!
 //! docs/impl/selfrec.md
@@ -127,7 +127,7 @@ fn self_recursive_loop_reclaims_per_call_no_stdlib() {
     };
     let (vm, _symbols, cctx) = rt.parts();
     let delta = vm
-        .execute_scheduled(&res.bytecode, cctx)
+        .execute_scheduled(&res, cctx)
         .expect("runs")
         .as_int()
         .expect("program returns the region-count delta as an int");
@@ -180,7 +180,7 @@ fn self_recursive_loop_under_a_branch_tail_reclaims_per_call() {
     };
     let (vm, _symbols, cctx) = rt.parts();
     let delta = vm
-        .execute_scheduled(&res.bytecode, cctx)
+        .execute_scheduled(&res, cctx)
         .expect("runs")
         .as_int()
         .expect("program returns the region-count delta as an int");

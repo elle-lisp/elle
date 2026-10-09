@@ -1,4 +1,4 @@
-// audited: 2026-09-20
+// audited: 2026-10-06
 //! Holding a prompt form whose references do not resolve yet, and retrying it
 //! once later lines arrive.
 //!
@@ -120,7 +120,7 @@ fn try_resolve_single(
         return false;
     };
     cctx.register_repl_macros(expander.macros());
-    let Ok(value) = vm.execute_scheduled(&result.bytecode, cctx) else {
+    let Ok(value) = vm.execute_scheduled(&result, cctx) else {
         return false;
     };
     let sym_id = symbols.intern(&form.name);
@@ -164,7 +164,7 @@ fn try_batch_resolve(
         return false;
     };
     cctx.register_repl_macros(expander.macros());
-    let Ok(tuple_val) = vm.execute_scheduled(&result.bytecode, cctx) else {
+    let Ok(tuple_val) = vm.execute_scheduled(&result, cctx) else {
         return false;
     };
 

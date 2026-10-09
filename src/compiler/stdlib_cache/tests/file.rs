@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-10-06
 // The file on disk: which key names it, which directory holds it, and what a
 // store owes a process that is reading the file it replaces.
 // docs/impl/stdlib-cache.md
@@ -60,8 +60,7 @@ fn second_runtime_on_a_shared_cache_dir_loads_stdlib_from_it() {
         let (vm, symbols, cctx) = rt.parts();
         let src = "(map (fn [x] (* x 2)) (quote (1 2 3)))";
         let result = compile_file_repl(src, symbols, cctx, "<probe>").expect("probe compiles");
-        vm.execute_scheduled(&result.0.bytecode, cctx)
-            .expect("probe runs")
+        vm.execute_scheduled(&result.0, cctx).expect("probe runs")
     };
     let _ = probe(&mut a);
     let _ = probe(&mut b);
@@ -92,8 +91,7 @@ fn a_spawned_worker_caches_where_its_parent_was_told_to() {
     let (vm, symbols, cctx) = rt.parts();
     let result = compile_file_repl("(sys/join (sys/spawn (fn [] 1)))", symbols, cctx, "<spawn>")
         .expect("spawn form compiles");
-    vm.execute_scheduled(&result.0.bytecode, cctx)
-        .expect("spawn runs");
+    vm.execute_scheduled(&result.0, cctx).expect("spawn runs");
 
     assert_eq!(
         entries(dir.path()),

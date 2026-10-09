@@ -1,6 +1,5 @@
-// audited: 2026-09-19
-//! Lowering a tail call: the frame-replacing `TailCall`, the relocation point
-//! it opens, and what its native fall-through still owes.
+// audited: 2026-10-06
+//! Lowering a tail call: the frame-replacing `TailCall`, the relocation point it opens, and what its native fall-through owes.
 //!
 //! docs/impl/region/relocate.md
 //! docs/impl/region/rules.md
@@ -62,7 +61,7 @@ impl<'a> Lowerer<'a> {
         // expression's value so the enclosing tail position's `Return`
         // names it. On the native-completion path the JIT binds it to
         // the native's result and runs the post-`TailCall` releases
-        // (see `LirInstr::TailCall`); the interpreter leaves the result
+        // (see `InstrRef::TailCall`); the interpreter leaves the result
         // on the stack and ignores it.
         let dst = self.fresh_reg();
         let defer_callee_release = self.tail_callee_defers_release(func);
@@ -83,11 +82,12 @@ impl<'a> Lowerer<'a> {
         // The values the call is about to consume, in the registers that
         // hold them — what the relocation point below must not release.
         let operands: Vec<Reg> = arg_regs.iter().copied().chain([func_reg]).collect();
-        self.emit_alloc(|region| LirInstr::TailCall {
+        let stash: Vec<u32> = borrowed_arg_slots.iter().map(|&s| s as u32).collect();
+        self.emit_alloc(|region| InstrRef::TailCall {
             region,
             dst,
             func: func_reg,
-            args: arg_regs,
+            args: &arg_regs,
             arity_checked,
             defer_callee_release,
             deferred_release_slot,
@@ -97,7 +97,7 @@ impl<'a> Lowerer<'a> {
             // can consume them itself
             // (docs/impl/region/mechanism.md § "What the fall-through
             // owes, a signal exit owes too").
-            borrowed_arg_slots: borrowed_arg_slots.clone(),
+            borrowed_arg_slots: Slots::new(&stash),
         });
         // From here the block runs only on the NATIVE fall-through: a
         // native pushes no bytecode frame and the dispatch loop continues
@@ -186,7 +186,7 @@ impl<'a> Lowerer<'a> {
          block on the native fall-through"
         );
         if !container_released_here && !moves_out_here && !self.return_mint_covers_here() {
-            self.emit(LirInstr::IncrefValueRegion { src: dst });
+            self.emit(InstrRef::IncrefValueRegion { src: dst });
         }
         // Consume each borrowed-arg retain on the native-completion
         // fall-through: a native callee borrows its args (no owned-param
@@ -200,8 +200,8 @@ impl<'a> Lowerer<'a> {
         // push-pop-neutral around it.
         for &slot in &borrowed_arg_slots {
             let v = self.fresh_reg();
-            self.emit(LirInstr::LoadLocal { dst: v, slot });
-            self.emit(LirInstr::DecrefValueRegion { src: v });
+            self.emit(InstrRef::LoadLocal { dst: v, slot });
+            self.emit(InstrRef::DecrefValueRegion { src: v });
         }
         Ok(dst)
     }

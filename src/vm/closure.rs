@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-10-06
 // docs/impl/region/template.md
 // docs/impl/image/sealing.md
 //! What `MakeClosure` builds: a closure instance and the fresh header it
@@ -7,48 +7,36 @@
 use super::core::VM;
 use crate::hir::region::{RuntimeRegion, StaticRegion};
 use crate::value::arena;
-use crate::value::closure::{materialize, ChildCode, TemplateRef};
+use crate::value::closure::{ClosureTemplate, TemplateRef};
 use crate::value::fiber::SignalBits;
 use crate::value::heap::{Closure, HeapObject};
 use crate::value::Value;
 
-/// Materialize a closure instance for `MakeClosure`, into `region_id`.
+/// Build a closure instance for `MakeClosure`, into `region_id`.
 ///
-/// `child` is the code object the instruction indexes, from whichever side of
-/// the enclosing header answers (docs/impl/image/sealing.md). We materialize a
-/// FRESH `HeapObject::ClosureTemplate` header
-/// into the SAME region as the instance (co-region → the instance→template edge
-/// is a self-edge, no cross-region RC), build the captured env inline, and
-/// allocate the instance referencing the header. The header is therefore an
-/// ordinary region allocation reclaimed by region RC when the instance's region
-/// frees (a heap literal is an ordinary, reclaimable allocation; closure
-/// templates are no exception).
+/// `child` is the code object the instruction indexes, out of the enclosing
+/// payload's child table. We allocate a FRESH `HeapObject::ClosureTemplate`
+/// header into the SAME region as the instance (co-region → the
+/// instance→template edge is a self-edge, no cross-region RC), build the
+/// captured env inline, and allocate the instance referencing the header. The
+/// header is therefore an ordinary region allocation reclaimed by region RC
+/// when the instance's region frees (a heap literal is an ordinary,
+/// reclaimable allocation; closure templates are no exception).
 ///
 /// The header's *payload* — bytecode, constants, location table, region tables
-/// — is not copied here. It is materialized once per blueprint into a payload
-/// region of the heap's own and shared by every header
+/// — is not copied here. It lives in its compile unit's code region (or an
+/// image's), and the fresh header takes one counted reference to that region
 /// (docs/impl/region/template.md), so a closure built in a loop costs one
 /// header allocation per iteration rather than a copy of its function's code.
-/// A hydrated child's payload is already in the image's pages, so the fresh
-/// header takes a counted reference to that region and copies nothing either.
-/// Allocates through the VM's heap (`vm.heap_ptr`/`vm.heap()`), shared by the
-/// interpreter and the JIT `MakeClosure` helper.
 pub(crate) fn materialize_closure_in_region(
     heap: &mut crate::value::fiberheap::FiberHeap,
-    child: ChildCode<'_>,
+    child: &ClosureTemplate,
     captures: &[Value],
     region_id: RuntimeRegion,
 ) -> Value {
-    // Materialize the header into the instance's region first, so the
-    // instance's alloc-scan sees a live template Value (self-edge, filtered).
-    let template_val = match child {
-        ChildCode::Blueprint(blueprint) => materialize(heap, blueprint, region_id),
-        ChildCode::Header(child) => arena::alloc_in_region(
-            heap,
-            HeapObject::ClosureTemplate(child.without_blueprint()),
-            region_id,
-        ),
-    };
+    // Allocate the header into the instance's region first, so the instance's
+    // alloc-scan sees a live template Value (self-edge, filtered).
+    let template_val = crate::value::build::template(heap, child, region_id);
     let env = arena::alloc_region_slice_in_region::<Value>(heap, captures, region_id);
     let closure = Closure::new(TemplateRef::region(template_val), env, SignalBits::EMPTY);
     arena::alloc_in_region(
@@ -92,11 +80,9 @@ pub(crate) fn handle_make_closure(
     let region_id =
         vm.runtime_region_for_alloc_slot_maybe_merged(static_region, code.merged_slots());
 
-    // `materialize_closure_in_region` allocates through the VM's heap
-    // (`vm.heap_ptr`/`vm.heap()`), shared by interpreter and JIT.
     let val = materialize_closure_in_region(
         unsafe { &mut *vm.heap_ptr },
-        code.child(idx),
+        &code.child(idx),
         &captured,
         region_id,
     );

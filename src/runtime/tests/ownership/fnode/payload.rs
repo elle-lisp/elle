@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-10-06
 //! That a park's payload region is worth exactly one retain, at every stage and on every route into the fiber.
 //!
 //! docs/impl/region/park.md
@@ -34,13 +34,9 @@ fn a_returned_payload_region_is_reclaimed() {
 /// free-time cross-ref scan releases the park retain, so the escape retain owes
 /// a release of its own.
 ///
-/// **This test fails.** One region survives per halted fiber, so the count is
-/// the cycle count rather than zero. `Fiber::take_parked_state` reports a
-/// parked signal's region only when the signal is non-terminal, which is what
-/// leaves the escape retain outstanding here; reporting it regardless of the
-/// bits measures correct in isolation but over-frees the corpus, so the escape
-/// retain is already being consumed somewhere along the terminal teardown.
-/// The `SIG_OK` discriminator above stays green either way.
+/// The counter-factual is an escape retain nobody consumes: one region
+/// survives per halted fiber, so the count is the cycle count rather than
+/// zero. The `SIG_OK` discriminator above stays green either way.
 #[test]
 fn an_emitted_terminal_payload_region_is_reclaimed() {
     assert_eq!(
@@ -235,11 +231,9 @@ fn a_primitive_park_delivery_is_worth_one_retain() {
         let (handle, fiber_value) = child_fiber(unsafe { &mut *heap_ptr }, body);
         let mut parked = Bytecode::new();
         parked.emit(Instruction::Return);
-        let code = crate::value::ClosureTemplate::for_proto(
-            unsafe { &mut *heap_ptr },
-            &Rc::new(parked.into_proto()),
-        )
-        .code();
+        let code = crate::value::CodeBuilder::from_bytecode(parked)
+            .build(unsafe { &mut *heap_ptr })
+            .code();
         let frame = BytecodeFrame::suspend(
             code,
             Rc::new(vec![]),

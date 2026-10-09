@@ -1,6 +1,7 @@
 // audited: 2026-10-06
 //! Closure construction: capture collection, `MakeClosure`, the capture adopts, and the lambda's rest-list layout.
 //!
+//! src/lir/lower/AGENTS.md
 //! docs/impl/region/adopt.md
 //! docs/impl/region/restlist.md
 //!
@@ -10,13 +11,11 @@
 
 use crate::hir::{CaptureInfo, ParamBound};
 use crate::lir::lower::*;
-use crate::value::Arity;
 
 impl<'a> Lowerer<'a> {
     /// Lower a lambda expression (creates closure with captures).
     ///
-    /// `pub(in crate::lir::lower)` so that `lower_expr`, in that module, can
-    /// call it.
+    /// Visible to `crate::lir::lower`, where its caller `lower_expr` lives.
     #[allow(clippy::too_many_arguments)]
     pub(in crate::lir::lower) fn lower_lambda_expr(
         &mut self,
@@ -58,9 +57,9 @@ impl<'a> Lowerer<'a> {
                 // its cell for that sibling, reached through the binding's own slot,
                 // not this self-slot.)
                 CaptureKind::Recursive { .. } => {
-                    self.emit(LirInstr::Const {
+                    self.emit(InstrRef::Const {
                         dst: reg,
-                        value: LirConst::Nil,
+                        value: ConstRef::Nil,
                     });
                     capture_regs.push(reg);
                 }
@@ -74,19 +73,19 @@ impl<'a> Lowerer<'a> {
                             // In a lambda, captures and params are accessed via LoadCapture
                             // Use LoadCaptureRaw for bindings that need cells to preserve the cell
                             if binding_needs_capture {
-                                self.emit(LirInstr::LoadCaptureRaw {
+                                self.emit(InstrRef::LoadCaptureRaw {
                                     dst: reg,
                                     index: slot,
                                 });
                             } else {
-                                self.emit(LirInstr::LoadCapture {
+                                self.emit(InstrRef::LoadCapture {
                                     dst: reg,
                                     index: slot,
                                 });
                             }
                         } else {
                             // Local variables (including those defined inside lambda) use LoadLocal
-                            self.emit(LirInstr::LoadLocal { dst: reg, slot });
+                            self.emit(InstrRef::LoadLocal { dst: reg, slot });
                         }
                     } else {
                         // Binding not found in current context - this shouldn't happen
@@ -104,14 +103,14 @@ impl<'a> Lowerer<'a> {
                         // We're in a nested lambda - load from parent's captures
                         // Use LoadCaptureRaw for bindings that need cells to preserve the cell
                         if binding_needs_capture {
-                            self.emit(LirInstr::LoadCaptureRaw { dst: reg, index });
+                            self.emit(InstrRef::LoadCaptureRaw { dst: reg, index });
                         } else {
-                            self.emit(LirInstr::LoadCapture { dst: reg, index });
+                            self.emit(InstrRef::LoadCapture { dst: reg, index });
                         }
                     } else {
                         // We're in the main function - this shouldn't happen
                         // (main function doesn't have captures to forward)
-                        self.emit(LirInstr::LoadLocal {
+                        self.emit(InstrRef::LoadLocal {
                             dst: reg,
                             slot: index,
                         });
@@ -138,14 +137,23 @@ impl<'a> Lowerer<'a> {
         // the body. This gives pre-order numbering: parent IDs are lower
         // than children's. Matches collect_nested_functions traversal order.
         let closure_id = ClosureId(self.closures.len() as u32);
-        self.closures.push(LirFunction::new(Arity::Exact(0))); // placeholder
+        self.closures.push(None);
+
+        // The gate's verdict on how this lambda builds its rest list
+        // (docs/impl/region/restlist.md); a lambda it never judged keeps one
+        // region per cell.
+        let rest_list_layout = lambda_id.map_or(crate::value::RestListLayout::PerCell, |id| {
+            self.region_info.rest_list_layout(id)
+        });
 
         // Lower the lambda body — children get higher IDs
-        let mut nested_lir = self.lower_lambda_body(
+        let nested = self.lower_lambda_body(
+            closure_id,
             params,
             num_required,
             rest_param,
             vararg_kind,
+            rest_list_layout,
             captures,
             body,
             num_locals,
@@ -154,26 +162,23 @@ impl<'a> Lowerer<'a> {
             doc,
             origin,
         )?;
-        nested_lir.closure_id = Some(closure_id);
-        if let Some(lambda_id) = lambda_id {
-            nested_lir.rest_list_layout = self.region_info.rest_list_layout(lambda_id);
-        }
 
-        // Check numeric! assertion after lowering
-        if assert_numeric && !nested_lir.is_gpu_eligible() {
+        // Check numeric! assertion after lowering. Eligibility is a question
+        // the frozen form answers.
+        if assert_numeric && !nested.view().is_gpu_eligible() {
             return Err("numeric! assertion failed: function is not GPU-eligible".to_string());
         }
 
         // Fill the reserved slot
-        self.closures[closure_id.0 as usize] = nested_lir;
+        self.closures[closure_id.0 as usize] = Some(nested);
 
         // Create closure referencing it by ID
         let dst = self.fresh_reg();
-        self.emit_alloc(|region| LirInstr::MakeClosure {
+        self.emit_alloc(|region| InstrRef::MakeClosure {
             region,
             dst,
             closure_id,
-            captures: capture_regs,
+            captures: &capture_regs,
         });
 
         // Closure-capture region accounting, two modes per capture:
@@ -192,11 +197,9 @@ impl<'a> Lowerer<'a> {
         //   baseline incref of the binding's scope region. For a genuinely-Shared member it is
         //   balanced by the cascade decref when the closure region frees. For a NON-owner
         //   capture of a member that some OTHER closure adopted (an interior member captured
-        //   by two closures of one Owned subtree — only reachable once a future cut claims
-        //   such webs), the incref is instead inert: the member is RC-frozen, so this
-        //   closure's free-time cascade decref no-ops and the OWNER's subtree drop reclaims
-        //   the member regardless of its RC. `capture_adopt_edges` is empty without the flag,
-        //   so this is the unchanged baseline path.
+        //   by two closures of one Owned subtree), the incref is instead inert: the member is
+        //   RC-frozen, so this closure's free-time cascade decref no-ops and the OWNER's
+        //   subtree drop reclaims the member regardless of its RC.
         if let Some(hir_id) = self.current_hir_id {
             if let Some(&closure_region) = self.region_info.alloc_region.get(&hir_id) {
                 let adopt_edges = self
@@ -292,7 +295,7 @@ impl<'a> Lowerer<'a> {
                     if let Some(&cap_region) = self.region_info.binding_region.get(&cap.binding) {
                         if cap_region != closure_region {
                             let region_id = self.static_slot(cap_region);
-                            self.emit(LirInstr::IncrefRegion { region_id });
+                            self.emit(InstrRef::IncrefRegion { region_id });
                         }
                     }
                 }
@@ -324,28 +327,28 @@ impl<'a> Lowerer<'a> {
                     // the caller binds next, and the capture registers were already consumed
                     // by `MakeClosure`.
                     let scratch = self.scratch_slot();
-                    self.emit(LirInstr::StoreLocal {
+                    self.emit(InstrRef::StoreLocal {
                         slot: scratch,
                         src: dst,
                     });
                     for (reload, is_cell) in adopt_loads {
                         let preg = self.fresh_reg();
-                        self.emit(LirInstr::LoadLocal {
+                        self.emit(InstrRef::LoadLocal {
                             dst: preg,
                             slot: scratch,
                         });
                         let creg = self.fresh_reg();
                         let trace_load = match reload {
                             AdoptReload::Slot(slot) => {
-                                self.emit(LirInstr::LoadLocal { dst: creg, slot });
+                                self.emit(InstrRef::LoadLocal { dst: creg, slot });
                                 ("slot", slot)
                             }
                             AdoptReload::Env { index, raw: false } => {
-                                self.emit(LirInstr::LoadCapture { dst: creg, index });
+                                self.emit(InstrRef::LoadCapture { dst: creg, index });
                                 ("env", index)
                             }
                             AdoptReload::Env { index, raw: true } => {
-                                self.emit(LirInstr::LoadCaptureRaw { dst: creg, index });
+                                self.emit(InstrRef::LoadCaptureRaw { dst: creg, index });
                                 ("env-raw", index)
                             }
                         };
@@ -354,12 +357,12 @@ impl<'a> Lowerer<'a> {
                         // the reload gives the raw cell); a by-value capture adopts the
                         // value's region via `AdoptRegion`.
                         if is_cell {
-                            self.emit(LirInstr::AdoptCellRegion {
+                            self.emit(InstrRef::AdoptCellRegion {
                                 parent: preg,
                                 child: creg,
                             });
                         } else {
-                            self.emit(LirInstr::AdoptRegion {
+                            self.emit(InstrRef::AdoptRegion {
                                 parent: preg,
                                 child: creg,
                             });
@@ -378,7 +381,7 @@ impl<'a> Lowerer<'a> {
                             );
                         }
                     }
-                    self.emit(LirInstr::LoadLocal { dst, slot: scratch });
+                    self.emit(InstrRef::LoadLocal { dst, slot: scratch });
                 }
             }
         }

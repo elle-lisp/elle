@@ -1,4 +1,4 @@
-// audited: 2026-09-10
+// audited: 2026-10-06
 // docs/impl/region/owner.md
 // docs/impl/region/relocate.md
 //! VM≡JIT parity for the ownership forest: what each cut still reclaims when the
@@ -26,10 +26,9 @@ use super::*;
 /// so hotness accumulates onto the cached compile.
 ///
 /// Returns `(per_run_region_delta, jit_compiled)`. `jit_compiled` guards against a
-/// vacuous reading: before the translate arms land, the lambda's `AdoptRegion`/
-/// `FreeRegionGroup` hits `unreachable!` in the background worker, which dies
-/// before it can cache anything, so `jit_cache` stays empty and `jit_compiled` is
-/// false even though the interpreter fallback still reclaims.
+/// vacuous reading: a lambda the worker fails to compile leaves `jit_cache` empty,
+/// and the interpreter fallback then reclaims on its own, so the delta alone says
+/// nothing about the compiled tier.
 #[cfg(feature = "jit")]
 pub(super) fn jit_region_growth(body: &str) -> (i64, bool) {
     use crate::config::JitPolicy;
@@ -49,7 +48,7 @@ pub(super) fn jit_region_growth(body: &str) -> (i64, bool) {
     {
         let (vm, _symbols, cctx) = rt.parts();
         let v = vm
-            .execute_scheduled(&prog.bytecode, cctx)
+            .execute_scheduled(&prog, cctx)
             .expect("runs (submits the JIT task)");
         assert!(v.is_nil(), "the discarded-shape lambda returns nil");
     }
@@ -59,13 +58,13 @@ pub(super) fn jit_region_growth(body: &str) -> (i64, bool) {
     // Warmup (the lambda body now dispatches to cached native code), then measure.
     {
         let (vm, _symbols, cctx) = rt.parts();
-        let v = vm.execute_scheduled(&prog.bytecode, cctx).expect("runs");
+        let v = vm.execute_scheduled(&prog, cctx).expect("runs");
         assert!(v.is_nil());
     }
     let baseline = rt.heap().active_region_count() as i64;
     for _ in 0..50 {
         let (vm, _symbols, cctx) = rt.parts();
-        let v = vm.execute_scheduled(&prog.bytecode, cctx).expect("runs");
+        let v = vm.execute_scheduled(&prog, cctx).expect("runs");
         assert!(v.is_nil());
     }
     let delta = rt.heap().active_region_count() as i64 - baseline;
@@ -110,12 +109,12 @@ fn jit_mid_run_growth(prelude: &str, body: &str, gauge: &str) -> (i64, bool) {
     };
     {
         let (vm, _symbols, cctx) = rt.parts();
-        vm.execute_scheduled(&prog.bytecode, cctx)
+        vm.execute_scheduled(&prog, cctx)
             .expect("runs (submits the JIT tasks)");
     }
     rt.vm().drain_jit_pending();
     let (vm, _symbols, cctx) = rt.parts();
-    let pair = vm.execute_scheduled(&prog.bytecode, cctx).expect("runs");
+    let pair = vm.execute_scheduled(&prog, cctx).expect("runs");
     let (delta, caller_bytecode) = {
         let slots = pair.as_array().expect("the program returns [delta caller]");
         (
@@ -215,9 +214,8 @@ fn region_ownership_adopt_subtree_drop_under_jit() {
 /// cannot collect the a↔b cycle (region/rules.md Rule 8), so flag-OFF it leaks
 /// under the JIT exactly as on the VM; under the flag the cut adopts a and b by
 /// root, whose JIT subtree drop reclaims the cycle. The bounded-vs-leaking
-/// counterfactual proves the cut (not the shape) reclaims it, AND — because before
-/// the translate arms land `f` cannot JIT-compile — `jit_compiled` proves the JIT
-/// path actually ran.
+/// counterfactual proves the cut (not the shape) reclaims it, and `jit_compiled`
+/// proves the JIT path actually ran.
 #[cfg(feature = "jit")]
 #[test]
 fn region_ownership_reclaims_interior_cycle_subtree_under_jit() {

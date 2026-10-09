@@ -1,10 +1,10 @@
-// audited: 2026-09-13
+// audited: 2026-10-06
 // docs/impl/jit.md
 //! `JitCode`: a compiled function's entry pointer, plus everything the native
 //! code holds a raw pointer into and therefore must outlive it.
 //!
 //! The Cranelift module comes first — freeing it frees the code — and the
-//! side-exit metadata, closure blueprints and constant templates follow.
+//! side-exit metadata and constant templates follow.
 
 use std::sync::Arc;
 
@@ -51,14 +51,6 @@ pub struct JitCode {
     /// Read by `elle_jit_yield_through_call` runtime helper.
     #[allow(dead_code)]
     pub(crate) call_sites: Vec<super::dispatch::CallSiteMeta>,
-    /// Nested-lambda template **blueprints** referenced by MakeClosure
-    /// instructions. The native code bakes a raw pointer to each, so each must
-    /// outlive the JIT code and keep a stable address (hence `Box`). This is
-    /// template *data* (the code object's blueprints), not a region value —
-    /// `elle_jit_make_closure` re-materializes a fresh region-allocated template
-    /// per execution.
-    #[allow(dead_code, clippy::vec_box)]
-    pub(crate) closure_protos: Vec<std::rc::Rc<crate::value::TemplateProto>>,
     /// Immutable heap-literal templates baked by `MaterializeConst` (a string, or
     /// a quoted compound structure). The native code holds a raw pointer to each
     /// `ConstTemplate`, so they must live as long as the JIT code itself (this
@@ -87,20 +79,18 @@ impl JitCode {
             _module: Arc::new(ModuleHolder::new(module)),
             yield_points: Vec::new(),
             call_sites: Vec::new(),
-            closure_protos: Vec::new(),
             templates: Vec::new(),
         }
     }
 
-    /// Create a new JitCode with yield point, call site metadata, closure
-    /// template blueprints, and string-literal templates.
+    /// Create a new JitCode with yield point and call site metadata, and the
+    /// heap-literal templates its native code points into.
     #[allow(clippy::vec_box)] // stable per-element address for baked JIT pointers
     pub(crate) fn new_with_metadata(
         fn_ptr: *const u8,
         module: cranelift_jit::JITModule,
         yield_points: Vec<super::dispatch::YieldPointMeta>,
         call_sites: Vec<super::dispatch::CallSiteMeta>,
-        closure_protos: Vec<std::rc::Rc<crate::value::TemplateProto>>,
         templates: Vec<Box<crate::value::ConstTemplate>>,
     ) -> Self {
         JitCode {
@@ -108,7 +98,6 @@ impl JitCode {
             _module: Arc::new(ModuleHolder::new(module)),
             yield_points,
             call_sites,
-            closure_protos,
             templates,
         }
     }
@@ -170,7 +159,6 @@ impl JitCode {
             _module: Arc::new(ModuleHolder::new(module)),
             yield_points,
             call_sites: Vec::new(),
-            closure_protos: Vec::new(),
             templates: Vec::new(),
         }
     }

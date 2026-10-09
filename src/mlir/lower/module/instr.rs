@@ -1,10 +1,9 @@
-// audited: 2026-09-06
+// audited: 2026-10-06
 // docs/impl/mlir.md
 //! Per-instruction MLIR emission for the GPU-eligible LIR subset.
 //!
-//! One arm per supported `LirInstr`, appending arith/memref ops to the current
-//! block. Register/type bookkeeping lives in [`LowerCtx`]; the emitted op order
-//! is identical to the original single-function lowering.
+//! One arm per supported `InstrRef`, appending arith/memref ops to the current
+//! block. Register and type bookkeeping lives in [`LowerCtx`].
 
 use super::*;
 
@@ -16,15 +15,15 @@ pub(super) fn lower_instr<'c, 'a>(
     ctx: &mut LowerCtx<'c, 'a>,
     block: &'a Block<'c>,
     entry_block: &'a Block<'c>,
-    si: &crate::lir::SpannedInstr,
+    instr: &InstrRef<'_>,
 ) -> Result<(), String> {
     let context = ctx.context;
     let location = ctx.location;
     let i64_type = ctx.i64_type;
     let f64_type = ctx.f64_type;
 
-    match &si.instr {
-        LirInstr::LoadCaptureRaw { dst, index } | LirInstr::LoadCapture { dst, index } => {
+    match instr {
+        InstrRef::LoadCaptureRaw { dst, index } | InstrRef::LoadCapture { dst, index } => {
             // Env layout: [captures..., params...].
             // MLIR arguments mirror this layout, so index maps directly
             // to the MLIR block argument index.
@@ -43,8 +42,8 @@ pub(super) fn lower_instr<'c, 'a>(
                 }
             }
         }
-        LirInstr::Const { dst, value } => match value {
-            LirConst::Float(f) => {
+        InstrRef::Const { dst, value } => match value {
+            ConstRef::Float(f) => {
                 let op = arith::constant(
                     context,
                     FloatAttribute::new(context, f64_type, *f).into(),
@@ -56,9 +55,9 @@ pub(super) fn lower_instr<'c, 'a>(
             }
             _ => {
                 let (n, scalar_type) = match value {
-                    LirConst::Int(n) => (*n, ScalarType::Int),
-                    LirConst::Bool(b) => (i64::from(*b), ScalarType::Bool),
-                    LirConst::Nil => (0i64, ScalarType::Int),
+                    ConstRef::Int(n) => (*n, ScalarType::Int),
+                    ConstRef::Bool(b) => (i64::from(*b), ScalarType::Bool),
+                    ConstRef::Nil => (0i64, ScalarType::Int),
                     _ => return Err(format!("unsupported constant: {:?}", value)),
                 };
                 let op =
@@ -68,7 +67,7 @@ pub(super) fn lower_instr<'c, 'a>(
                 ctx.types.insert(*dst, scalar_type);
             }
         },
-        LirInstr::BinOp {
+        InstrRef::BinOp {
             dst,
             op,
             lhs,
@@ -149,7 +148,7 @@ pub(super) fn lower_instr<'c, 'a>(
             ctx.regs.insert(*dst, op_ref.result(0).unwrap().into());
             ctx.types.insert(*dst, result_type);
         }
-        LirInstr::Compare {
+        InstrRef::Compare {
             dst,
             op,
             lhs,
@@ -214,7 +213,7 @@ pub(super) fn lower_instr<'c, 'a>(
             ctx.regs.insert(*dst, ext_ref.result(0).unwrap().into());
             ctx.types.insert(*dst, ScalarType::Bool);
         }
-        LirInstr::UnaryOp {
+        InstrRef::UnaryOp {
             dst,
             op,
             src,
@@ -300,7 +299,7 @@ pub(super) fn lower_instr<'c, 'a>(
             ctx.regs.insert(*dst, result);
             ctx.types.insert(*dst, result_type);
         }
-        LirInstr::StoreLocal { slot, src } => {
+        InstrRef::StoreLocal { slot, src } => {
             let val = *ctx
                 .regs
                 .get(src)
@@ -320,7 +319,7 @@ pub(super) fn lower_instr<'c, 'a>(
             block.append_operation(memref::store(store_val, slot_ptr, &[], location));
             ctx.slot_types.insert(SlotId::new(*slot as u32), src_type);
         }
-        LirInstr::LoadLocal { dst, slot } => {
+        InstrRef::LoadLocal { dst, slot } => {
             let slot_ptr = *ctx
                 .local_slots
                 .get(&SlotId::new(*slot as u32))
@@ -342,7 +341,7 @@ pub(super) fn lower_instr<'c, 'a>(
             ctx.regs.insert(*dst, result);
             ctx.types.insert(*dst, slot_ty);
         }
-        LirInstr::Convert { dst, op, src } => {
+        InstrRef::Convert { dst, op, src } => {
             let sv = *ctx
                 .regs
                 .get(src)
@@ -372,8 +371,8 @@ pub(super) fn lower_instr<'c, 'a>(
         // Value-targeted region refcounts: no-ops on unboxed
         // scalars (the eligibility whitelist admits nothing that
         // could hold a heap value).
-        LirInstr::IncrefValueRegion { .. } | LirInstr::DecrefValueRegion { .. } => {}
-        _ => return Err(format!("unsupported instruction: {:?}", si.instr)),
+        InstrRef::IncrefValueRegion { .. } | InstrRef::DecrefValueRegion { .. } => {}
+        _ => return Err(format!("unsupported instruction: {:?}", instr)),
     }
     Ok(())
 }

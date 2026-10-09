@@ -1,4 +1,4 @@
-// audited: 2026-09-15
+// audited: 2026-10-06
 //! The relocation points that say which paths a release still has to cover.
 //! A frame-replacing tail call opens one and a `break` opens one; a branch merge
 //! inherits them.
@@ -63,8 +63,8 @@ pub(crate) enum HoistBlock {
     /// The block the lowerer is filling. Its label validates the point — a
     /// stale one names an instruction list this block no longer is.
     Current(Label),
-    /// A branch arm already pushed onto `LirFunction::blocks`, by index. Blocks
-    /// are only ever appended, so the index stays valid for the function's life.
+    /// A branch arm the builder has already finished, by index. Blocks are only
+    /// ever appended, so the index stays valid for the function's life.
     Finished(usize),
 }
 
@@ -108,8 +108,8 @@ impl<'a> Lowerer<'a> {
     /// for the rest of the function. A point naming some *other* block cannot be
     /// spliced into from here and is dropped rather than carried stale.
     pub(super) fn seal_arm_hoists(&mut self) {
-        let index = self.current_func.blocks.len();
-        let label = self.current_block.label;
+        let index = self.built().finished_len();
+        let label = self.built().open_label();
         let sealed = self
             .tail_exit_hoist
             .drain(..)
@@ -139,7 +139,7 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Open the relocation point a frame-replacing tail call leaves behind. The
-    /// `TailCall` was just emitted as the last instruction of `current_block`,
+    /// `TailCall` was just emitted as the last instruction of the open block,
     /// so every release the lowerer emits after it runs on the native
     /// fall-through alone.
     ///
@@ -160,21 +160,7 @@ impl<'a> Lowerer<'a> {
         // operand to a synthetic binding whose region the syntax walk below does
         // not connect back to this call — but the load that put it on the stack
         // is right here either way.
-        let mut operand_locals = rustc_hash::FxHashSet::default();
-        let mut operand_captures = rustc_hash::FxHashSet::default();
-        for i in &self.current_block.instructions {
-            match &i.instr {
-                LirInstr::LoadLocal { dst, slot } if operands.contains(dst) => {
-                    operand_locals.insert(*slot);
-                }
-                LirInstr::LoadCapture { dst, index } | LirInstr::LoadCaptureRaw { dst, index }
-                    if operands.contains(dst) =>
-                {
-                    operand_captures.insert(*index);
-                }
-                _ => {}
-            }
-        }
+        let (operand_locals, operand_captures) = self.loaded_from(|r| operands.contains(&r));
         let mut exempt = rustc_hash::FxHashSet::default();
         if let Some(&r) = self.region_info.alloc_region.get(&call_id) {
             exempt.insert(self.region_info.merged_root(r));
@@ -207,13 +193,38 @@ impl<'a> Lowerer<'a> {
         // replicate can only over-keep.
         self.tail_exit_hoist.clear();
         self.tail_exit_hoist.push(super::TailExitHoist {
-            at: self.current_block.instructions.len() - 1,
-            block: super::HoistBlock::Current(self.current_block.label),
+            at: self.built().open_len() - 1,
+            block: super::HoistBlock::Current(self.built().open_label()),
             operand_locals,
             operand_captures,
             exempt,
             left_block: None,
         });
+    }
+
+    /// The local slots and capture indices the open block's loads into
+    /// registers `wanted` selects read from — what an operand now on the stack
+    /// was loaded from, read off the emitted instructions.
+    fn loaded_from(
+        &self,
+        wanted: impl Fn(Reg) -> bool,
+    ) -> (rustc_hash::FxHashSet<u16>, rustc_hash::FxHashSet<u16>) {
+        let mut locals = rustc_hash::FxHashSet::default();
+        let mut captures = rustc_hash::FxHashSet::default();
+        for i in self.built().open_instrs(0) {
+            match i {
+                InstrRef::LoadLocal { dst, slot } if wanted(dst) => {
+                    locals.insert(slot);
+                }
+                InstrRef::LoadCapture { dst, index } | InstrRef::LoadCaptureRaw { dst, index }
+                    if wanted(dst) =>
+                {
+                    captures.insert(index);
+                }
+                _ => {}
+            }
+        }
+        (locals, captures)
     }
 
     /// Open the relocation point a `break` leaves at the end of the block it is
@@ -230,26 +241,12 @@ impl<'a> Lowerer<'a> {
     ///
     /// docs/impl/region/replicate.md
     pub(super) fn open_break_exit_hoist(&mut self, block_id: BlockId, value: &Hir, value_reg: Reg) {
-        let mut operand_locals = rustc_hash::FxHashSet::default();
-        let mut operand_captures = rustc_hash::FxHashSet::default();
-        for i in &self.current_block.instructions {
-            match &i.instr {
-                LirInstr::LoadLocal { dst, slot } if *dst == value_reg => {
-                    operand_locals.insert(*slot);
-                }
-                LirInstr::LoadCapture { dst, index } | LirInstr::LoadCaptureRaw { dst, index }
-                    if *dst == value_reg =>
-                {
-                    operand_captures.insert(*index);
-                }
-                _ => {}
-            }
-        }
+        let (operand_locals, operand_captures) = self.loaded_from(|r| r == value_reg);
         let mut exempt = rustc_hash::FxHashSet::default();
         self.collect_operand_regions(value, &mut exempt);
         self.tail_exit_hoist.push(super::TailExitHoist {
-            at: self.current_block.instructions.len(),
-            block: super::HoistBlock::Finished(self.current_func.blocks.len()),
+            at: self.built().open_len(),
+            block: super::HoistBlock::Finished(self.built().finished_len()),
             operand_locals,
             operand_captures,
             exempt,

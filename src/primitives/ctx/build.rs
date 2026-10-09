@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! The ergonomic `ctx.*` allocation surface: one constructor per heap type,
 //! each born on the ctx's heap in the ctx's own region.
 //! docs/impl/region/ctx.md
@@ -57,8 +57,8 @@ ctx_ctors! {
     );
     /// Allocate a closure into the call's region.
     closure (c: crate::value::heap::Closure);
-    /// Materialize a code object's header into the call's region.
-    template (proto: &std::rc::Rc<crate::value::TemplateProto>);
+    /// Allocate a header over a code object's payload into the call's region.
+    template (code: &crate::value::ClosureTemplate);
     /// Allocate a user box (`LBox`) into the call's region.
     lbox (value: Value);
     /// Allocate a compiler capture cell into the call's region.

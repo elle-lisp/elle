@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! The WASM backend's tests, one file per subject, over the LIR fixtures and
 //! evaluation helpers they share.
 //!
@@ -6,7 +6,7 @@
 
 use super::emit::{emit_module, emit_single_closure};
 use crate::lir::testkit::LirFixture;
-use crate::lir::{ClosureId, Label, LirConst, LirFunction, LirInstr, LirModule, Reg, Terminator};
+use crate::lir::{ClosureId, ConstRef, FrozenModule, InstrRef, Label, LirOwned, Reg, Terminator};
 use crate::signals::{Signal, SIG_YIELD};
 use crate::value::Arity;
 
@@ -26,13 +26,13 @@ mod toplevel;
 
 /// A trivial non-suspending entry that just returns nil, so the module has a
 /// valid entry function alongside the closure under test.
-fn trivial_entry() -> LirFunction {
+fn trivial_entry() -> LirOwned {
     LirFixture::new(Arity::Exact(0))
         .block(
             0,
-            vec![LirInstr::Const {
+            &[InstrRef::Const {
                 dst: Reg(0),
-                value: LirConst::Nil,
+                value: ConstRef::Nil,
             }],
             Terminator::Return(Reg(0)),
         )
@@ -45,7 +45,7 @@ fn trivial_entry() -> LirFunction {
 /// throughout. Because the locals are dead, a live-aware emitter spills none of
 /// them; a slot-count-blind emitter spills and restores all of them at every
 /// one of the `n_yields` points.
-fn suspending_closure(n_yields: u32, n_locals: u16) -> LirFunction {
+fn suspending_closure(n_yields: u32, n_locals: u16) -> LirOwned {
     let mut f = LirFixture::new(Arity::Exact(1))
         .closure_id(ClosureId(0))
         .num_locals(n_locals)
@@ -54,9 +54,9 @@ fn suspending_closure(n_yields: u32, n_locals: u16) -> LirFunction {
         // Block 0 defines the carried value, then yields to block 1.
         .block(
             0,
-            vec![LirInstr::Const {
+            &[InstrRef::Const {
                 dst: Reg(0),
-                value: LirConst::Int(1),
+                value: ConstRef::Int(1),
             }],
             Terminator::Emit {
                 signal: SIG_YIELD,
@@ -68,7 +68,7 @@ fn suspending_closure(n_yields: u32, n_locals: u16) -> LirFunction {
     for i in 1..n_yields {
         f = f.block(
             i,
-            vec![],
+            &[],
             Terminator::Emit {
                 signal: SIG_YIELD,
                 value: Reg(0),
@@ -77,14 +77,13 @@ fn suspending_closure(n_yields: u32, n_locals: u16) -> LirFunction {
         );
     }
     // Final block returns the carried value.
-    f.block(n_yields, vec![], Terminator::Return(Reg(0)))
-        .build()
+    f.block(n_yields, &[], Terminator::Return(Reg(0))).build()
 }
 
 /// Emit a module whose single closure is `func`, returning the module bytes.
-fn emit_bytes(func: LirFunction) -> Vec<u8> {
+fn emit_bytes(func: LirOwned) -> Vec<u8> {
     let vm = crate::vm::VM::new();
-    let module = LirModule {
+    let module = FrozenModule {
         entry: trivial_entry(),
         closures: vec![func],
     };

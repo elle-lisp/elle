@@ -1,6 +1,6 @@
-// audited: 2026-09-06
+// audited: 2026-10-06
 // docs/impl/mlir.md
-//! Lower GPU-eligible LirFunction to MLIR.
+//! Lower a GPU-eligible frozen function to MLIR.
 //!
 //! Produces an MLIR module using the arith, func, cf, and memref dialects.
 //! Only handles the GPU-safe instruction subset — no heap allocation,
@@ -9,9 +9,8 @@
 //! Local slots use `memref.alloca` for correct cross-block semantics
 //! (StoreLocal in one block, LoadLocal in another).
 
-use crate::lir::{
-    BinOp, CmpOp, ConvOp, Label, LirConst, LirFunction, LirInstr, Reg, Terminator, UnaryOp,
-};
+use crate::lir::code::ConstRef;
+use crate::lir::{BinOp, CmpOp, ConvOp, InstrRef, Label, LirView, Reg, Terminator, UnaryOp};
 use melior::dialect::arith::{CmpfPredicate, CmpiPredicate};
 use melior::dialect::{arith, cf, func, memref, DialectRegistry};
 use melior::ir::attribute::{FloatAttribute, IntegerAttribute, StringAttribute, TypeAttribute};
@@ -92,7 +91,7 @@ pub fn create_context() -> Context {
 /// Called before `lower_to_module` to avoid partially constructing MLIR
 /// ops before discovering the error.
 pub fn check_slot_types(
-    lir: &LirFunction,
+    lir: &LirView<'_>,
     num_captures: u16,
     capture_types: u64,
     param_types: u64,
@@ -107,7 +106,7 @@ pub fn check_slot_types(
     let mut slot_types: HashMap<SlotId, ScalarType> = HashMap::new();
     // Simple type inference: track register types from constants and ops.
     let mut reg_types: HashMap<Reg, ScalarType> = HashMap::new();
-    let num_params = lir.arity.fixed_params();
+    let num_params = lir.arity().fixed_params();
 
     // Argument (capture/param) scalar types, indexed in env-layout order
     // [captures..., params...]. EnvIndex keeps this keyspace distinct from
@@ -131,10 +130,10 @@ pub fn check_slot_types(
         );
     }
 
-    for (block_idx, block) in lir.blocks.iter().enumerate() {
-        for si in &block.instructions {
-            match &si.instr {
-                LirInstr::LoadCaptureRaw { dst, index } | LirInstr::LoadCapture { dst, index } => {
+    for (block_idx, block) in lir.blocks().enumerate() {
+        for instr in block.instrs() {
+            match &instr {
+                InstrRef::LoadCaptureRaw { dst, index } | InstrRef::LoadCapture { dst, index } => {
                     // Env layout [captures..., params...]; types seeded above.
                     let t = env_types
                         .get(&EnvIndex::new(*index as u32))
@@ -142,15 +141,15 @@ pub fn check_slot_types(
                         .unwrap_or(ScalarType::Int);
                     reg_types.insert(*dst, t);
                 }
-                LirInstr::Const { dst, value } => {
+                InstrRef::Const { dst, value } => {
                     let t = match value {
-                        LirConst::Float(_) => ScalarType::Float,
-                        LirConst::Bool(_) => ScalarType::Bool,
+                        ConstRef::Float(_) => ScalarType::Float,
+                        ConstRef::Bool(_) => ScalarType::Bool,
                         _ => ScalarType::Int,
                     };
                     reg_types.insert(*dst, t);
                 }
-                LirInstr::BinOp {
+                InstrRef::BinOp {
                     dst,
                     lhs,
                     rhs,
@@ -175,10 +174,10 @@ pub fn check_slot_types(
                     };
                     reg_types.insert(*dst, t);
                 }
-                LirInstr::Compare { dst, .. } => {
+                InstrRef::Compare { dst, .. } => {
                     reg_types.insert(*dst, ScalarType::Bool);
                 }
-                LirInstr::UnaryOp {
+                InstrRef::UnaryOp {
                     dst,
                     op,
                     src,
@@ -192,14 +191,14 @@ pub fn check_slot_types(
                     };
                     reg_types.insert(*dst, t);
                 }
-                LirInstr::Convert { dst, op, .. } => {
+                InstrRef::Convert { dst, op, .. } => {
                     let t = match op {
                         crate::lir::ConvOp::IntToFloat => ScalarType::Float,
                         crate::lir::ConvOp::FloatToInt => ScalarType::Int,
                     };
                     reg_types.insert(*dst, t);
                 }
-                LirInstr::StoreLocal { slot, src } => {
+                InstrRef::StoreLocal { slot, src } => {
                     let src_type = reg_types.get(src).copied().unwrap_or(ScalarType::Int);
                     let slot_id = SlotId::new(*slot as u32);
                     if let Some((prev_type, prev_block)) = slot_block_types.get(&slot_id) {
@@ -215,7 +214,7 @@ pub fn check_slot_types(
                     slot_block_types.insert(slot_id, (src_type, block_idx));
                     slot_types.insert(slot_id, src_type);
                 }
-                LirInstr::LoadLocal { dst, slot } => {
+                InstrRef::LoadLocal { dst, slot } => {
                     let t = slot_types
                         .get(&SlotId::new(*slot as u32))
                         .copied()
@@ -229,8 +228,8 @@ pub fn check_slot_types(
     Ok(())
 }
 
-/// Lower a GPU-eligible LirFunction to MLIR text (for debugging/testing).
-pub fn lower_to_mlir(lir: &LirFunction) -> Result<String, String> {
+/// Lower a GPU-eligible frozen function to MLIR text (for debugging/testing).
+pub fn lower_to_mlir(lir: &LirView<'_>) -> Result<String, String> {
     let context = create_context();
     let (module, _) = lower_to_module(&context, lir, 0, 0, 0)?;
     Ok(module.as_operation().to_string())

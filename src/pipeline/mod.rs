@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-10-06
 //! The compilation pipeline's entry points: source text to bytecode, or to HIR
 //! for a reader that wants the analysis alone.
 //!
@@ -26,12 +26,6 @@ pub use compile::{
     compile_file_to_lir, compile_whole_module, compile_whole_module_forms, splice_includes,
 };
 pub use eval::{eval, eval_all, eval_file, eval_syntax};
-
-/// Compilation result
-#[derive(Debug)]
-pub struct CompileResult {
-    pub bytecode: crate::compiler::Bytecode,
-}
 
 /// Analysis-only result (no bytecode generation)
 /// Used by linter and LSP which need HIR but not bytecode

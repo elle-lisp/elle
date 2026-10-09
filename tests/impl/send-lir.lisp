@@ -1,16 +1,16 @@
-(elle/epoch 13)
-# audited: 2026-09-28
-# Regression: a closure whose LIR embeds a COMPOUND constant (a quoted list,
-# struct, …) must keep its LIR across an os/spawn boundary, so the optimizing
-# tiers can still run it in the worker thread.
+(elle/epoch 14)
+# audited: 2026-10-06
+# A closure shipped to a worker keeps its LIR, so the worker's JIT compiles it.
+# docs/threads.md
 #
-# Before the fix, os/spawn's serializer (src/value/send.rs) dropped the whole
-# LIR whenever convert_value_consts_for_send hit an unsendable compound
-# ValueConst — e.g. the (quote (= …)) the `assert` macro bakes into its failure
-# payload. compile/run-on :jit then reported "closure has no LIR" (:ineligible).
-# The fix lifts such operands into a sendable `lir_value_pool` (LirConst::ValueRef)
-# and patches them back to ValueConst on receipt. See docs/test-runner.md
-# § Tiers and the agent-first runner's cross-tier execution.
+# A worker rebuilds a closure from its bundle, and the LIR has to arrive with
+# it. A sender that dropped the LIR would leave the closure running correctly on
+# the interpreter, so each case below forces the worker onto :jit, where a
+# closure with no LIR is rejected (:ineligible) rather than answered.
+#
+# The cases cover what the LIR carries: a quoted compound, a call into the
+# standard library (a stdlib function is a closure the LIR loads as a
+# `ValueConst`), a scalar, and a thunk over captured upvalues.
 
 # Probe whether the :jit tier is compiled into this build (force-compile a
 # trivial closure in a worker). A build with no JIT rejects with :error
@@ -30,28 +30,35 @@
 # Ship an ALREADY-BUILT closure (one that captures upvalues) to a worker and run
 # it on :jit there. The fault-barrier compile mode hands the runner thunks that
 # capture the file's shared bindings, so the send must preserve captured upvalues
-# (including captured closures) alongside the quoted-compound LIR.
+# (including captured closures) alongside the LIR.
 (defn ship-to-jit [thunk]
   (os/join (os/spawn-vm (fn [] (protect (compile/run-on :jit thunk))))))
 
 (when (jit-available?)
   # The assert macro embeds (quote (= (+ 1 1) 2)) — a compound — in its payload.
-  # Its LIR must survive the send so :jit can run it.
   (let [r (run-on-jit-in-worker (quote (assert (= (+ 1 1) 2) "lir survives send")))]
     (assert (get r 0)
             (string "assert closure must run on :jit after send (LIR kept), got "
                     r))
     (assert (= (get r 1) true) "the passing assert returns true on :jit"))
 
-  # A closure returning a bare quoted list: the list is a compound ValueConst;
-  # it must round-trip by value through the pool and come back intact.
+  # A closure returning a bare quoted list: the list must come back intact.
   (let [r (run-on-jit-in-worker (quote (quote (a b c))))]
     (assert (get r 0)
             (string "quoted-list closure must run on :jit after send, got " r))
     (assert (= (length (get r 1)) 3)
             "the quoted list survives with all 3 elements"))
 
-  # Sanity: the same path with no compound constant already worked — guard it too.
+  # A call into the standard library: `inc` is a stdlib closure, which the LIR
+  # loads as a `ValueConst`. The light worker has no stdlib of its own, so the
+  # closure it calls is the one that crossed in the bundle.
+  (let [r (ship-to-jit (fn [] (inc 41)))]
+    (assert (get r 0)
+            (string "a closure calling stdlib must run on :jit after send, got "
+                    r))
+    (assert (= (get r 1) 42) "the stdlib call answers on :jit"))
+
+  # The same path with no compound constant.
   (let [r (run-on-jit-in-worker (quote (+ 40 2)))]
     (assert (get r 0) "scalar closure runs on :jit after send")
     (assert (= (get r 1) 42) "scalar closure returns 42 on :jit"))

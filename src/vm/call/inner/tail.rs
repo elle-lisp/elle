@@ -1,5 +1,5 @@
 // audited: 2026-10-06
-//! VM::tail_call_inner — shared TailCall/TailCallArrayMut dispatch.
+//! `VM::tail_call_inner`: the TailCall and TailCallArrayMut dispatch both handlers share.
 //!
 //! docs/impl/vm.md
 
@@ -352,7 +352,7 @@ impl VM {
             // replaced; the deferred release supplies that dead drop at the
             // recursion's completion. (A native callee never reaches here — it
             // keeps the frame and runs the live scope-exit drop.) See
-            // `LirInstr::TailCall::deferred_release_slot`.
+            // `InstrRef::TailCall::deferred_release_slot`.
             //
             // The two channels are INDEPENDENT, not alternatives. A non-member
             // callee that is itself a per-call local closure strands its own

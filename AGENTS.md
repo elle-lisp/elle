@@ -47,8 +47,8 @@ Source → Reader → Syntax → Expander → Syntax → Analyzer → HIR → Lo
 ```
 
 This is the only compilation pipeline. Source locations flow through the entire
-pipeline: Syntax spans → HIR spans → LIR `SpannedInstr` → `LocationMap` in
-bytecode. Error messages include file:line:col information.
+pipeline: Syntax spans → HIR spans → the span on each LIR node →
+`LocationMap` in bytecode. Error messages include file:line:col information.
 
 ### Key modules
 
@@ -57,8 +57,8 @@ bytecode. Error messages include file:line:col information.
 - **`syntax`** — Syntax types, macro expansion
 - **`hir`** — Binding resolution, capture analysis, signal inference, linting,
   symbol extraction, docstring extraction
-- **`lir`** — SSA form with virtual registers, basic blocks, `SpannedInstr`
-  for source tracking
+- **`lir`** — SSA form with virtual registers and basic blocks, built in a
+  working region and frozen into plain records, each node carrying its span
 - **`compiler`** — Bytecode instruction definitions, debug formatting
 - **`pipeline`** — Compilation entry points
   (see [`src/pipeline/AGENTS.md`](src/pipeline/AGENTS.md))
@@ -183,7 +183,7 @@ Capability enforcement: [`docs/signals/capabilities.md`](docs/signals/capabiliti
 | `tests/` | The language suite (`tests/lang/`), the implementation suite (`tests/impl/`), and the Rust unit, integration and property tests |
 | `rig/` | The rig: `elle-rig`, the executable the implementation suite runs on |
 | `bins/` | The WASM and MLIR builds as binaries of their own, each with its rig ([bins/overview.md](bins/overview.md)) |
-| `benches/` | Criterion benchmarks and the `lirshape` harness |
+| `benches/` | Criterion and reporting benchmarks |
 | `docs/` | Design documents and guides |
 | `demos/` | Demo applications (conway, docgen, mandelbrot, etc.) |
 | `plugins/` | Dynamically-loaded plugin crates (cdylib) |

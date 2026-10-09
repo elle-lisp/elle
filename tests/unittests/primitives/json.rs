@@ -1,6 +1,11 @@
+// audited: 2026-10-06
+// The JSON primitives: what parses, what it parses to, what serializes, and
+// what refuses.
+//
+// docs/io.md
+
 use super::*;
 
-// JSON Parsing and Serialization Tests
 #[test]
 fn test_json_parse_null() {
     let (_vm, mut symbols, meta) = setup();
@@ -386,18 +391,8 @@ fn test_json_serialize_errors() {
     let h = elle::primitives::ctx::TestHeap::new();
 
     let closure = h.ctx().closure(Closure {
-        template: {
-            let region = h.heap().new_runtime_region();
-            elle::value::TemplateRef::region(elle::value::closure::materialize(
-                h.heap(),
-                &std::rc::Rc::new(elle::value::TemplateProto::new(
-                    vec![],
-                    elle::value::Arity::Exact(0),
-                    Vec::new(),
-                )),
-                region,
-            ))
-        },
+        template: elle::value::CodeBuilder::new(vec![], elle::value::Arity::Exact(0), Vec::new())
+            .build(h.heap()),
         env: elle::value::region_slice::RegionSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     });

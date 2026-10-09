@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! The module sections, and the two function bodies an emitter produces: the entry and a closure.
 //!
 //! docs/impl/wasm.md
@@ -6,10 +6,7 @@
 use super::*;
 
 impl WasmEmitter {
-    pub(super) fn emit_module_from_lir(
-        &mut self,
-        lir_module: &crate::lir::LirModule,
-    ) -> EmitResult {
+    pub(super) fn emit_module_from_lir(&mut self, lir_module: &FrozenModule) -> EmitResult {
         let num_closures = lir_module.closures.len() as u32;
 
         self.closure_id_to_table_idx.clear();
@@ -96,11 +93,11 @@ impl WasmEmitter {
                 stub.instruction(&Instruction::End);
                 closure_bodies.push(stub);
             } else {
-                let closure_body = self.emit_closure_function(closure_func);
+                let closure_body = self.emit_closure_function(&closure_func.view());
                 closure_bodies.push(closure_body);
             }
         }
-        let entry_body = self.emit_function(&lir_module.entry);
+        let entry_body = self.emit_function(&lir_module.entry.view());
         let mut code = CodeSection::new();
         code.function(&entry_body);
         for closure_body in &closure_bodies {
@@ -108,20 +105,17 @@ impl WasmEmitter {
         }
         module.section(&code);
 
-        // Dual-compile bytecode for spawn.
-        // Use emit_module which handles MakeClosure → ClosureId resolution.
-        let mut bc_emitter = crate::lir::Emitter::new();
-        let bc_compiled = bc_emitter.emit_module_closures(lir_module);
-        let mut closure_bytecodes = Vec::with_capacity(bc_compiled.len());
-        for (bytecode, _, _) in bc_compiled {
-            // The blueprint carries child_protos: the bytecode's MakeClosure
-            // instructions index that list, so a spawned worker building a code
-            // object from this needs it (rt_make_closure,
-            // src/wasm/linker/create/closure.rs). Without it the code object's
-            // child list is empty, and the worker panics on its first
-            // MakeClosure (`wasm::tests::closure`).
-            closure_bytecodes.push(std::rc::Rc::new(bytecode.into_proto()));
-        }
+        // Dual-compile bytecode for spawn, into a code unit of the module's own
+        // on the driving instance's heap. Each closure's payload carries its
+        // child table: the bytecode's MakeClosure instructions index it, so a
+        // spawned worker building a code object from this needs it
+        // (rt_make_closure, src/wasm/linker/create/closure.rs). Without it the
+        // worker panics on its first MakeClosure (`wasm::tests::closure`).
+        let code = crate::value::CodeArena::mint(unsafe { &mut *self.heap_ptr });
+        let ((entry, _, _), lambdas) =
+            crate::lir::Emitter::new(code).emit_module_with_lambdas(lir_module);
+        let closure_bytecodes =
+            super::super::host::ModuleCode::new(crate::value::CodeUnit::new(code, entry), lambdas);
 
         EmitResult {
             wasm_bytes: module.finish(),
@@ -130,7 +124,7 @@ impl WasmEmitter {
             env_stack_base: super::env_stack_base(lir_module),
         }
     }
-    pub(super) fn emit_single_closure_module(&mut self, func: &LirFunction) -> EmitResult {
+    pub(super) fn emit_single_closure_module(&mut self, func: &LirView<'_>) -> EmitResult {
         let mut module = Module::new();
         self.emit_types_and_imports(&mut module);
 
@@ -181,18 +175,18 @@ impl WasmEmitter {
         EmitResult {
             wasm_bytes: module.finish(),
             const_pool: std::mem::take(&mut self.const_pool),
-            closure_bytecodes: Vec::new(),
+            closure_bytecodes: super::super::host::ModuleCode::none(),
             env_stack_base: super::env_stack_base_for_func(func),
         }
     }
     /// Emit the entry function body.
-    pub(super) fn emit_function(&mut self, func: &LirFunction) -> Function {
+    pub(super) fn emit_function(&mut self, func: &LirView<'_>) -> Function {
         self.label_to_idx.clear();
-        for (idx, block) in func.blocks.iter().enumerate() {
-            self.label_to_idx.insert(block.label, idx);
+        for (idx, block) in func.blocks().enumerate() {
+            self.label_to_idx.insert(block.label(), idx);
         }
 
-        let alloc = super::super::regalloc::allocate(func, func.num_locals as u32);
+        let alloc = super::super::regalloc::allocate(func, func.num_locals() as u32);
         let n = alloc.max_slots;
         self.reg_to_slot = alloc.reg_to_slot;
         self.num_regs = n;
@@ -232,24 +226,23 @@ impl WasmEmitter {
         f
     }
     /// Emit a closure function body.
-    pub(super) fn emit_closure_function(&mut self, func: &LirFunction) -> Function {
-        let split_func;
-        let func = if func.signal.may_suspend() {
-            // ClosureId is Copy and survives block splitting/cloning
-            // — no pointer remapping needed.
-            let split_blocks = Self::split_blocks_at_suspending_calls(&func.blocks);
-            split_func = LirFunction {
-                blocks: split_blocks,
-                ..func.clone()
-            };
-            &split_func
+    pub(super) fn emit_closure_function(&mut self, func: &LirView<'_>) -> Function {
+        // A suspending closure ends a block after each suspending call, so its
+        // CPS resume blocks start at a block boundary rather than copying the
+        // rest of the block once per call.
+        let split;
+        let split_view;
+        let func = if func.signal().may_suspend() {
+            split = func.split_after(|op| matches!(op, Op::SuspendingCall | Op::CallArrayMut));
+            split_view = split.view();
+            &split_view
         } else {
             func
         };
 
         self.label_to_idx.clear();
-        for (idx, block) in func.blocks.iter().enumerate() {
-            self.label_to_idx.insert(block.label, idx);
+        for (idx, block) in func.blocks().enumerate() {
+            self.label_to_idx.insert(block.label(), idx);
         }
 
         // Reset the suspend/resume scratch that `emit_cfg` consumes. Closures are
@@ -274,7 +267,9 @@ impl WasmEmitter {
         if crate::config::get().has_trace("wasm") {
             eprintln!(
                 "[emit] closure {:?}: {} virtual regs → {} slots",
-                func.name, func.num_regs, n
+                func.name(),
+                func.num_regs(),
+                n
             );
         }
         self.reg_to_slot = alloc.reg_to_slot;
@@ -282,9 +277,9 @@ impl WasmEmitter {
         self.local_offset = 4;
         self.is_closure = true;
         self.ctx_local = 3;
-        self.num_stack_locals = func.num_locals as u32;
-        self.may_suspend = func.signal.may_suspend();
-        self.current_num_captures = func.num_captures;
+        self.num_stack_locals = func.num_locals() as u32;
+        self.may_suspend = func.signal().may_suspend();
+        self.current_num_captures = func.num_captures();
 
         let m = self.num_stack_locals;
         self.signal_local = 4 + 2 * n + 2 * m;
@@ -314,14 +309,18 @@ impl WasmEmitter {
             if crate::config::get().has_trace("wasm") {
                 eprintln!(
                     "[emit] suspending closure: name={:?} regs={} locals={} captures={} params={}",
-                    func.name, func.num_regs, func.num_locals, func.num_captures, func.num_params
+                    func.name(),
+                    func.num_regs(),
+                    func.num_locals(),
+                    func.num_captures(),
+                    func.num_params()
                 );
-                for block in &func.blocks {
-                    eprintln!("[emit]   Block {:?}:", block.label);
-                    for si in &block.instructions {
-                        eprintln!("[emit]     {:?}", si.instr);
+                for block in func.blocks() {
+                    eprintln!("[emit]   Block {:?}:", block.label());
+                    for instr in block.instrs() {
+                        eprintln!("[emit]     {:?}", instr);
                     }
-                    eprintln!("[emit]     term: {:?}", block.terminator.terminator);
+                    eprintln!("[emit]     term: {:?}", block.terminator());
                 }
             }
 

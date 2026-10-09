@@ -1,3 +1,9 @@
+// audited: 2026-10-06
+//! Lowering's basic shapes, the ownership forest's adopts, `LoadSelf`, and the compiled forward cells a binder mints.
+//!
+//! docs/impl/lir.md
+//! docs/impl/region/ownership.md
+
 use super::*;
 
 // ── Basic lowering smoke tests ───────────────────────────────────
@@ -5,16 +11,16 @@ use super::*;
 #[test]
 fn test_lower_int() {
     let arena = crate::hir::BindingArena::new();
-    let mut lowerer = Lowerer::new(&arena);
+    let mut lowerer = Lowerer::new(&arena).with_heap(test_heap());
     let hir = Hir::silent(HirKind::Int(42), make_span());
     let func = lowerer.lower(&hir).unwrap();
-    assert!(!func.entry.blocks.is_empty());
+    assert!(func.entry.view().block_count() > 0);
 }
 
 #[test]
 fn test_lower_if() {
     let arena = crate::hir::BindingArena::new();
-    let mut lowerer = Lowerer::new(&arena);
+    let mut lowerer = Lowerer::new(&arena).with_heap(test_heap());
     let hir = Hir::silent(
         HirKind::If {
             cond: Box::new(Hir::silent(HirKind::Bool(true), make_span())),
@@ -25,10 +31,10 @@ fn test_lower_if() {
     );
     let func = lowerer.lower(&hir).unwrap();
     // If now creates multiple blocks: entry, then, else, merge
-    assert_eq!(func.entry.blocks.len(), 4);
+    assert_eq!(func.entry.view().block_count(), 4);
     // Entry block should have a Branch terminator
     assert!(matches!(
-        func.entry.blocks[0].terminator.terminator,
+        func.entry.view().block(0).terminator(),
         Terminator::Branch { .. }
     ));
 }
@@ -36,7 +42,7 @@ fn test_lower_if() {
 #[test]
 fn test_lower_begin() {
     let arena = crate::hir::BindingArena::new();
-    let mut lowerer = Lowerer::new(&arena);
+    let mut lowerer = Lowerer::new(&arena).with_heap(test_heap());
     let hir = Hir::silent(
         HirKind::Begin(vec![
             Hir::silent(HirKind::Int(1), make_span()),
@@ -45,7 +51,7 @@ fn test_lower_begin() {
         make_span(),
     );
     let func = lowerer.lower(&hir).unwrap();
-    assert!(!func.entry.blocks.is_empty());
+    assert!(func.entry.view().block_count() > 0);
 }
 
 // ── Ownership forest: AdoptRegion emission (docs/impl/region/ownership.md
@@ -227,9 +233,9 @@ fn capture_adopt_reloads_upvalue_via_load_capture() {
         let instrs = flat_instrs(f);
         instrs.windows(2).any(|w| {
             matches!(
-                *w[0],
-                LirInstr::LoadCapture { .. } | LirInstr::LoadCaptureRaw { .. }
-            ) && matches!(*w[1], LirInstr::AdoptRegion { .. })
+                w[0],
+                InstrRef::LoadCapture { .. } | InstrRef::LoadCaptureRaw { .. }
+            ) && matches!(w[1], InstrRef::AdoptRegion { .. })
         })
     });
     assert!(
@@ -299,7 +305,7 @@ fn a_letrec_registers_every_compiled_forward_cell_it_mints() {
     );
     let module = lowerer.lower(&hir).expect("lower");
     let cells = func_count(&module.entry, |i| {
-        matches!(i, LirInstr::MakeCaptureCell { .. })
+        matches!(i, InstrRef::MakeCaptureCell { .. })
     });
     assert_eq!(
         cells, 2,

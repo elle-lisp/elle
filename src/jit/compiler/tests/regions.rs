@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-10-06
 // docs/impl/region/owner.md
 //! What a compiled activation reclaims when it completes normally.
 
@@ -6,20 +6,20 @@ use super::*;
 
 /// fn(x) -> nil, adopting x's region into the current activation's owner node.
 /// The compiled body: load arg 0, `AdoptIntoActivation`, return nil.
-fn make_adopt_into_activation_lir() -> LirFunction {
+fn make_adopt_into_activation_lir() -> LirOwned {
     LirFixture::new(Arity::Exact(1))
         .signal(Signal::silent())
         .block(
             0,
-            vec![
-                LirInstr::LoadCapture {
+            &[
+                InstrRef::LoadCapture {
                     dst: Reg(0),
                     index: 0,
                 },
-                LirInstr::AdoptIntoActivation { child: Reg(0) },
-                LirInstr::Const {
+                InstrRef::AdoptIntoActivation { child: Reg(0) },
+                InstrRef::Const {
                     dst: Reg(1),
-                    value: crate::lir::LirConst::Nil,
+                    value: crate::lir::ConstRef::Nil,
                 },
             ],
             Terminator::Return(Reg(1)),
@@ -44,9 +44,7 @@ fn adopt_into_activation_frees_member_at_compiled_return() {
 
     let lir = make_adopt_into_activation_lir();
     let compiler = JitCompiler::new().expect("Failed to create compiler");
-    let code = compiler
-        .compile(&lir, Vec::new())
-        .expect("Failed to compile");
+    let code = compiler.compile(&lir.view()).expect("Failed to compile");
 
     let mut vm = crate::vm::VM::new();
     let heap_ptr = vm.heap_ptr;

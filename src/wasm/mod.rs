@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! WASM backend: LIR → WASM emission and Wasmtime execution.
 //!
 //! docs/impl/wasm.md
@@ -346,17 +346,17 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<S
     if crate::config::get().wasm_lir {
         eprintln!(
             "[lir] entry: regs={} locals={} blocks={} closures={}",
-            lir_module.entry.num_regs,
-            lir_module.entry.num_locals,
-            lir_module.entry.blocks.len(),
+            lir_module.entry.view().num_regs(),
+            lir_module.entry.view().num_locals(),
+            lir_module.entry.view().block_count(),
             lir_module.closures.len(),
         );
-        for block in &lir_module.entry.blocks {
-            eprintln!("[lir]   {:?}:", block.label);
-            for si in &block.instructions {
-                eprintln!("[lir]     {:?}", si.instr);
+        for block in lir_module.entry.view().blocks() {
+            eprintln!("[lir]   {:?}:", block.label());
+            for instr in block.instrs() {
+                eprintln!("[lir]     {:?}", instr);
             }
-            eprintln!("[lir]     term: {:?}", block.terminator.terminator);
+            eprintln!("[lir]     term: {:?}", block.terminator());
         }
     }
 
@@ -380,13 +380,19 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<S
     let mut precached: Vec<Option<host::PrecachedClosure>> = vec![None; lir_module.closures.len()];
     let mut stubbed = std::collections::HashSet::new();
 
-    let any_may_suspend = lir_module.closures.iter().any(|c| c.signal.may_suspend());
+    let any_may_suspend = lir_module
+        .closures
+        .iter()
+        .any(|c| c.view().signal().may_suspend());
     if crate::config::get().cache.is_some() && !any_may_suspend {
         let mut all_ok = true;
         for (i, closure_func) in lir_module.closures.iter().enumerate() {
-            if let Some(standalone) =
-                emit::emit_single_closure(closure_func, Some(&lir_module), vm.heap_ptr, sym_ptr)
-            {
+            if let Some(standalone) = emit::emit_single_closure(
+                &closure_func.view(),
+                Some(&lir_module),
+                vm.heap_ptr,
+                sym_ptr,
+            ) {
                 if let Ok(module) = compile_or_cache_module(&engine, &standalone.wasm_bytes) {
                     precached[i] = Some(host::PrecachedClosure {
                         module,

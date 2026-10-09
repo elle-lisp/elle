@@ -1,4 +1,4 @@
-// audited: 2026-09-13
+// audited: 2026-10-06
 // docs/impl/jit.md
 //! One `builder.symbol` line per `elle_jit_*` helper: the address the JIT
 //! linker resolves each name to.
@@ -193,10 +193,6 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
         "elle_jit_tail_call_array",
         dispatch::elle_jit_tail_call_array as *const u8,
     );
-    builder.symbol(
-        "elle_jit_make_closure",
-        dispatch::elle_jit_make_closure as *const u8,
-    );
     builder.symbol("elle_jit_yield", dispatch::elle_jit_yield as *const u8);
     builder.symbol(
         "elle_jit_yield_through_call",
@@ -288,7 +284,7 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
     );
     builder.symbol("elle_jit_incref", dispatch::elle_jit_incref as *const u8);
     builder.symbol("elle_jit_decref", dispatch::elle_jit_decref as *const u8);
-    // New intrinsic helpers
+    // Intrinsic helpers
     builder.symbol("elle_jit_is_empty", runtime::elle_jit_is_empty as *const u8);
     builder.symbol("elle_jit_is_bool", runtime::elle_jit_is_bool as *const u8);
     builder.symbol("elle_jit_is_int", runtime::elle_jit_is_int as *const u8);

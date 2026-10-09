@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-10-06
 //! The dumper: a compacting copy of a sealed data graph into a scratch
 //! region, written out as an image file.
 //!
@@ -9,9 +9,10 @@
 //! sections hold, and writes the result out under a temporary name. copy.rs
 //! owns the walk and the set of values it accepts, code.rs the half of it that
 //! copies a code object, and crossing.rs the two fields that may name a
-//! process-owned resource; emit.rs owns the page bytes and the streams that
-//! point into them; backing.rs owns the writers that put a slice's bytes into
-//! their place.
+//! process-owned resource. emit.rs owns the page bytes and the streams that
+//! point into them, and payload.rs the part of that pass that walks a code
+//! payload and its LIR body. backing.rs owns the writers that put a slice's
+//! bytes into their place.
 //!
 //! Determinism is engineered: the copy visits children in order, no map is
 //! ever iterated, and every table is sorted before it is written. Two dumps
@@ -22,6 +23,7 @@ mod code;
 mod copy;
 mod crossing;
 mod emit;
+mod payload;
 
 #[cfg(test)]
 mod tests;
