@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-06
+# audited: 2026-10-11
 # ── emit special form tests ───────────────────────────────────────────
 #
 # (emit <signal> <value>) is a special form when the first argument is
@@ -39,6 +39,31 @@
       (assert (not (= bits 0)) "emit set: non-zero signal bits")
       (assert (= (bit/and bits 2) 2) "emit set: :yield bit present")
       (assert (= (bit/and bits 512) 512) "emit set: :io bit present"))))
+
+# Inside quoted data the set literal becomes the list (set :yield :io), and
+# emit reads it as the set it spells (#1331), so the compiler knows the bits.
+# Counter-factual: emit took a set only from source text, so the quoted list
+# fell back to a call to fiber/emit, whose bits the compiler cannot know.
+(let [[ok? emitter] (protect (eval '(fn [v] (emit |:yield :io| v))))]
+  (assert ok? "a quoted emit set compiles")
+  (assert (= |:yield :io| (get (get (fn/signature emitter) :signals) :bits))
+          "quoted emit set: the compiler knows its bits")
+  (let [f (fiber/new (fn [] (emitter :data)) |:yield :io|)]
+    (assert (= (fiber/resume f) :data) "quoted emit set: value received")
+    (assert (= (bit/and (fiber/bits f) 514) 514)
+            "quoted emit set: :yield and :io bits present")))
+
+# Where a binding shadows set, (set :io) calls that binding, so emit raises
+# what it returns. Counter-factual: emit read any list headed by set as the
+# set it spells, and raised :io.
+(let [[ok? shadowed] (protect (eval '(fn [v]
+                                       (let [set (fn [& ks] :yield)]
+                                         (emit (set :io) v)))))]
+  (assert ok? "an emit under a shadowed set compiles")
+  (let [f (fiber/new (fn [] (shadowed :data)) |:yield :io|)]
+    (assert (= (fiber/resume f) :data) "shadowed set: value received")
+    (assert (= (bit/and (fiber/bits f) 514) 2)
+            "shadowed set: the binding chose :yield")))
 
 # ── yield is a macro over emit ───────────────────────────────────────
 

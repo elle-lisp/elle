@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-05
+# audited: 2026-10-11
 # attune: positive signal permit (dual of squelch)
 
 # ── Permitted signals pass through ────────────────────────────────
@@ -84,6 +84,23 @@
   (protect (compile/whole-module "(defn f [] (attune! :nosuch) 1)" "<attune>")))
 (assert (not bad-ok?) "attune! names no signal")
 (println "attune!-bad-spec: ok")
+
+# ── A ceiling built as data ───────────────────────────────────────
+# Inside quoted data a set literal becomes the list (set :yield :io), and
+# attune! reads it as the set it spells (#1331). The ceiling then admits a
+# body that yields and refuses one that raises. Counter-factual: attune!
+# took a set only from source text, so the quoted ceiling did not compile.
+(def [quoted-ok? _]
+  (protect (eval '(fn []
+                    (attune! |:yield :io|)
+                    (yield 1)))))
+(assert quoted-ok? "a quoted ceiling admits a body that fits it")
+(def [excess-ok? _]
+  (protect (eval '(fn [x]
+                    (attune! |:yield :io|)
+                    (+ x 1)))))
+(assert (not excess-ok?) "and refuses a body that raises")
+(println "attune!-quoted-spec: ok")
 
 # ── squelch takes its spec first, as attune does ──────────────────
 # Counter-factual: squelch took the closure first, so the two runtime
