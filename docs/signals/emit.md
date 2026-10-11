@@ -35,9 +35,14 @@ handed to `eval` compiles as written:
 
 ```lisp
 (def quoted-emit (eval '(fn [v] (emit |:yield :io| v))))
+(assert (= |:yield :io| (get (get (fn/signature quoted-emit) :signals) :bits)))
 (let [f (fiber/new (fn [] (quoted-emit :data)) |:yield :io|)]
   (assert (= (fiber/resume f) :data)))
 ```
+
+The list must name the `set` primitive. Where a binding shadows `set`, the
+list is a call to that binding, and `emit` takes its result at run time, as
+for any computed signal (see "Dynamic emit" below).
 
 A literal keyword the registry does not know is a compile error:
 
