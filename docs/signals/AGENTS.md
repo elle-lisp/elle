@@ -14,6 +14,7 @@ Up: [..](../AGENTS.md)
 - [index.md](index.md) — **Signals** Elle's unified signal and capability system.
 - [inference.md](inference.md) — **Signal Inference** How the compiler infers each function's signal, and the forms that bound, narrow or check it.
 - [jit.md](jit.md) — **Signals and JIT** A function's signal decides nothing about whether the JIT compiles it.
+- [mediation.md](mediation.md) — **Mediation** What a parent does with a denial it catches: perform the call for the child, refuse it, or leave it to the scheduler that refuses it.
 - [primitives.md](primitives.md) — **Fiber Primitives** User-facing fiber operations and patterns.
 - [protocol.md](protocol.md) — **Signal Protocol** How a signal is encoded, carried, caught and reported: the bits, the payload, propagation, I/O requests and the registry.
 - [questions.md](questions.md) — **Signal Questions** What the signal design has not settled, and what it has.
