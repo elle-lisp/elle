@@ -1,6 +1,6 @@
 # primitives
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-11 -->
 
 Built-in functions. Registered into the VM at startup.
 
@@ -252,6 +252,10 @@ and the one boundary that checks it: [subprocess/](subprocess/AGENTS.md).
 
 **Bounds:** every yielding network primitive takes `:timeout` and `:deadline`
 ([I/O deadlines](../../docs/io/timeout.md)).
+
+**Capability:** every primitive here carries `:net` but `sys/ip?`, which only
+reads a string. `unix/listen` and `unix/connect` also carry `:fs`, for the path
+they resolve ([capabilities.md](../../docs/signals/capabilities.md)).
 
 ## Keyword Argument Helper
 

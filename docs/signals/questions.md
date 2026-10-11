@@ -1,6 +1,6 @@
 # Signal Questions
 
-<!-- audited: 2026-09-21 -->
+<!-- audited: 2026-10-11 -->
 
 What the signal design has not settled, and what it has.
 
@@ -8,7 +8,7 @@ What the signal design has not settled, and what it has.
 
 ### Signal bit allocation
 
-64 bits (SignalBits is u64): bits 0–17 built-in, bits 18–31
+64 bits (SignalBits is u64): bits 0–18 built-in, bits 19–31
 runtime-reserved, bits 32–63 user-defined (up to 32 user signals).
 
 ### Interaction with the type system

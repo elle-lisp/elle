@@ -1,6 +1,6 @@
 # Authority
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-11 -->
 
 What holds authority in a running program, and where the runtime asks whether a
 fiber may spend it.
@@ -80,7 +80,8 @@ struct field like any other value, and a path or a keyword is plainer still.
 Three primitives read the requirement from the value instead of the name:
 
 - `io/submit` reads the operation its request carries — a spawn needs
-  `|:io :exec|`, an open needs `|:io :fs|`, a plain read needs `|:io|`.
+  `|:io :exec|`, an open needs `|:io :fs|`, a connect needs `|:io :net|`, a
+  plain read needs `|:io|`.
 - native `import` reads the path it is given — a shared library needs `:ffi`
   for the foreign `elle_plugin_init` its load runs, a `.lisp` module needs none.
 - `emit` reads the bits it names: the dynamic form from its first argument, the

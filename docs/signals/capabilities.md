@@ -1,6 +1,6 @@
 # Capability enforcement
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-11 -->
 
 Capabilities flow down. A fiber's parent decides what the fiber is
 permitted to do. Operations the fiber can't perform become signals the
@@ -96,6 +96,7 @@ scheduler, and a fiber denied `:yield` cannot yield but can still read. See
 | `:gpu` | 15 | Blocks `git`, which compiles a closure to SPIR-V, and calls to a closure it compiled | no |
 | `:os-signal` | 16 | Blocks POSIX signal send/raise | no |
 | `:fs` | 17 | Blocks filesystem access | no |
+| `:net` | 18 | Blocks sockets and name resolution | no |
 
 VM-internal signals (resume, propagate, query, terminal, fuel, switch,
 wait) cannot be denied.
@@ -131,6 +132,35 @@ path, decided by reading the implementation and not the name. `path/join`,
 it. `path/exists?`, `path/canonicalize`, and `path/cwd` reach the
 filesystem and do.
 
+## Network authority is `:net`, not `:io`
+
+`:net` is the bit that means "opens a socket or asks a name server". Every
+socket primitive carries it: the `tcp/`, `udp/` and `unix/` primitives, and
+`sys/resolve`. `sys/ip?` only reads a string, so it carries nothing.
+
+Denying `:io` closes the network too, because a primitive that waits on a peer
+reaches the scheduler. It also closes stdout, pipes and `ev/sleep`. Deny `:net`
+to close the network alone:
+
+```lisp
+(let [f (fiber/new (fn [] (tcp/listen "127.0.0.1" 0)) |:net :error| :deny |:net|)]
+  (assert (= (get (fiber/resume f) :denied) |:net|)))
+
+(let [f (fiber/new (fn [] (ev/sleep 0) (port/flush (port/stdout)) :done)
+                   |:error| :deny |:net|)]
+  (assert (= (fiber/resume f) :done) "timers and stdout stay open"))
+```
+
+A socket primitive carries every bit its implementation needs, so any one
+denial blocks it. One that waits on a peer also carries `:io`. `unix/listen`
+and `unix/connect` resolve a filesystem path, so they also carry `:fs`, and
+`unix/connect` carries `|:fs :net :io|`.
+
+A port a fiber already holds needs no `:net`. `port/read` and `port/write`
+carry `:io` alone on a socket, as they carry no `:fs` on a file. The denial
+gates the primitive that opens a connection, so a parent that hands a child a
+connected port grants it that connection.
+
 ## What happens on denial
 
 When a fiber calls a primitive whose declared signal bits overlap
@@ -163,7 +193,9 @@ fiber, so a fiber cannot spend what it withholds however it obtained the value.
 Three primitives work this way, each in its own domain:
 
 - `io/submit` spends the operation its request argument carries. A spawn request
-  needs `|:io :exec|`, an open needs `|:io :fs|`, a plain read needs `|:io|`.
+  needs `|:io :exec|` and an open needs `|:io :fs|`. A socket operation needs
+  `|:io :net|`: a connect, an accept, a datagram, a shutdown or a name lookup.
+  A connect to a Unix socket adds `:fs`, and a plain read needs `|:io|`.
 - native `import` runs a shared library's `elle_plugin_init`, which is foreign
   code, so a `.so`/`.dylib`/`.dll` spec needs `:ffi`. A `.lisp` module needs only
   the `:fs` that `import` already declares.
@@ -203,11 +235,11 @@ capability space that is NOT withheld:
 
 ```lisp
 (fiber/caps)
-# => |:debug :error :exec :ffi :fs :gpu :halt :io :os-signal :yield|
+# => |:debug :error :exec :ffi :fs :gpu :halt :io :net :os-signal :yield|
 
 (let [f (fiber/new (fn [] 42) |:error| :deny |:fs :ffi|)]
   (fiber/caps f))
-# => |:debug :error :exec :gpu :halt :io :os-signal :yield|
+# => |:debug :error :exec :gpu :halt :io :net :os-signal :yield|
 ```
 
 ## Reading a body against its mask and deny set
@@ -248,7 +280,7 @@ A child inherits both restrictions plus any `:deny` of its own:
                |:error|
                :deny |:fs|)]
   (fiber/resume outer))
-# => |:debug :error :exec :gpu :halt :io :os-signal :yield|
+# => |:debug :error :exec :gpu :halt :io :net :os-signal :yield|
 # (missing :fs from parent, missing :ffi from own deny)
 ```
 
@@ -414,7 +446,8 @@ payload in the fiber that joins it:
 ```
 
 A spawned fiber's mask names the bits a denial raises, `:ffi`, `:exec`, `:gpu`,
-`:os-signal` and `:fs`, as well as the bits the scheduler's own protocol uses.
+`:os-signal`, `:fs` and `:net`, as well as the bits the scheduler's own protocol
+uses.
 A mediator above the scheduler therefore never sees a spawned fiber's denial.
 The process scheduler does the same for a process and for each fiber a process
 spawns, and `process:spawn` creates the new process's fiber in the fiber that

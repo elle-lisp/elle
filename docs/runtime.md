@@ -1,6 +1,6 @@
 # Runtime Signals
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-11 -->
 
 The runtime uses fiber signals for internal coordination. These are
 distinct from user-level error handling.
@@ -8,7 +8,7 @@ distinct from user-level error handling.
 ## Runtime signals and capability bits
 
 [protocol.md](signals/protocol.md) owns bits 0 to 10 and the user-defined
-range. This document owns bits 11 to 17.
+range. This document owns bits 11 to 18.
 
 ```text
 Signal     Bit   Purpose
@@ -20,6 +20,7 @@ switch     13    VM-internal fiber switch trampoline; no keyword
 :gpu       15    GPU hardware dispatch capability
 :os-signal 16    POSIX signal send/raise capability
 :fs        17    Filesystem access capability
+:net       18    Network access capability
 ```
 
 ## Fuel budgets

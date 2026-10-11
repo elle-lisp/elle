@@ -1,6 +1,6 @@
 # signals
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-11 -->
 
 Signal system for tracking which signals a function may emit. Includes the global signal registry for mapping signal keywords to bit positions.
 
@@ -8,7 +8,7 @@ Signal system for tracking which signals a function may emit. Includes the globa
 
 1. Define the `Signal` type and provide signal inference for the emit/fiber system.
    `emit` is a special form when the first argument is a literal keyword or keyword set.
-   `yield` is a prelude macro (prelude.lisp) that expands to `(emit :yield val)`.
+   `yield` is a macro in [prelude.lisp](../prelude.lisp) that expands to `(emit :yield val)`.
 2. Maintain the global signal registry mapping signal keywords to bit positions
 3. Track which signals a function might emit (error, yield, debug, ffi, io, halt, user-defined)
 4. Track which parameter indices propagate their callee's signals
@@ -27,7 +27,7 @@ Signal system for tracking which signals a function may emit. Includes the globa
 | `Signal::yields_errors()` | May yield and error |
 | `Signal::ffi()` | Calls foreign code (SIG_FFI) |
 | `Signal::ffi_errors()` | FFI + may error |
-| `Signal::halts()` | May halt (SIG_HALT) |
+| `Signal::halts()` | May halt and error (SIG_HALT, SIG_ERROR) |
 | `Signal::polymorphic(n)` | Signal depends on parameter n |
 | `Signal::polymorphic_errors(n)` | Polymorphic + may error |
 | `squelched_bits(bits, mask)` | The bits a `squelch` or `attune` boundary carrying `mask` converts into a violation when `bits` leave it; every such site on every tier asks it. A signal that carries `:error`, `:halt` or the pause bit `:fuel` passes whole |
@@ -78,17 +78,19 @@ The global signal registry maps signal keywords to bit positions. It is a proces
 | `:gpu` | 15 | GPU hardware dispatch |
 | `:os-signal` | 16 | POSIX signal send/raise |
 | `:fs` | 17 | Filesystem access |
+| `:net` | 18 | Network access: sockets and name resolution |
 
-Bits 3, 5, 6, 7, 10, and 13 are VM-internal and are not registered.
+Bits 3, 5, 7, 10 and 13 are VM-internal and bit 6 is unused; none of them is
+registered.
 
-`:exec`, `:gpu`, `:os-signal`, and `:fs` do no dispatch work. They exist so
-a fiber mask can withhold the authority, which is what `VM::call_inner`
-tests against `def.signal.bits`. Every bit is deniable; only some also
-route the call somewhere.
+`:exec`, `:gpu`, `:os-signal`, `:fs` and `:net` do no dispatch work. They
+exist so a fiber mask can withhold the authority, which is what
+`VM::call_inner` tests against `def.signal.bits`. Every bit is deniable; only
+some also route the call somewhere.
 
 ### User-Defined Signals
 
-User signals are allocated bits 32–63 (up to 32 user signals per process). Bits 18–31 are reserved for future runtime signals. The registry is append-only — once a keyword is registered, its bit position is fixed for the lifetime of the process. Declaring a keyword that is already a user signal answers its bit, in one compile and across compiles, so every declaration of a keyword names one signal.
+User signals are allocated bits 32–63 (up to 32 user signals per process). Bits 19–31 are reserved for future runtime signals. The registry is append-only — once a keyword is registered, its bit position is fixed for the lifetime of the process. Declaring a keyword that is already a user signal answers its bit, in one compile and across compiles, so every declaration of a keyword names one signal.
 
 ### Registry Interface
 
@@ -103,7 +105,7 @@ User signals are allocated bits 32–63 (up to 32 user signals per process). Bit
 
 Every lambda has a signal-related field:
 
-1. **`inferred_signals: Signal`** (always present, never Optional) — The minimum guaranteed set of signals the lambda may produce, accumulated from:
+1. **`inferred_signals: Signal`** (always present, never Optional) — The signals a call to the lambda may produce, accumulated from:
     - Direct signal emissions in the body
     - Signals of internal calls to statically-known functions
     - Signals contributed by bounded parameters (their bound's bits are included)
@@ -135,35 +137,37 @@ When analyzing a call:
 
 ### Limitations
 
-- Signals are tracked within a single compilation unit
-- Cross-unit signal tracking is not implemented
+- A call through `module:field` reads as unknown, although the importing file
+  records the module's projection ([inference.md](../../docs/signals/inference.md))
 - `assign` invalidates signal tracking for the mutated binding
-- Mutual recursion in `letrec` may have incomplete signal information
 
 ## I/O Signals
 
-Every primitive that reaches the scheduler declares
-`Signal::io_yields_errors()`, which is `SIG_IO | SIG_ERROR`: the stream
-primitives (`port/read-line`, `port/read`, `port/read-all`, `port/write`,
-`port/flush`), the network primitives (`tcp/accept`, `tcp/connect-ip`,
-`tcp/shutdown`, `udp/send-to`, `udp/recv-from`, `unix/accept`,
-`unix/connect`, `unix/shutdown`) and `ev/sleep`. `SIG_YIELD` is absent on
-purpose: the request suspends its fiber because every signal does, and a
-request carrying `:yield` would be caught by every generator mask on its way
-to the scheduler. The `IO_ROUND_TRIP` constant in [mod.rs](mod.rs) is the one
-definition.
+Every primitive that reaches the scheduler declares `SIG_IO | SIG_ERROR`, the
+`IO_ROUND_TRIP` constant in [mod.rs](mod.rs): the stream primitives
+(`port/read-line`, `port/read`, `port/read-all`, `port/write`, `port/flush`),
+the network primitives and `ev/sleep`. `Signal::io_yields_errors()` is that
+signal alone. A primitive that also needs a capability adds its bit: a network
+primitive adds `SIG_NET`, through `Signal::net_io_yields_errors()`, and
+`unix/connect` adds `SIG_FS` as well. `SIG_YIELD` is absent on purpose: the
+request suspends its fiber because every signal does, and a request carrying
+`:yield` would be caught by every generator mask on its way to the scheduler.
+
+Every socket primitive carries `SIG_NET`, the ones that bind and do not wait
+included: `tcp/listen` and `udp/bind` declare `Signal::net_errors()`, and
+`unix/listen` adds `SIG_FS` to it ([capabilities.md](../../docs/signals/capabilities.md)).
 
 ## Dependents
 
 Used across the pipeline and the runtime:
-- `hir/analyze/call.rs` — infers signals during analysis, resolves polymorphic via `propagates` bitmask
-- `hir/expr.rs` — `Hir` carries a `Signal`
-- `lir/emit/` — emits signal metadata on closures
-- `value/closure.rs` — a code object's payload stores its `Signal`
-- `pipeline/` — builds primitive signals map, passes to Analyzer
-- `jit/` — compiles a function whatever its signal; its call helpers check every boundary through `VM::enforce_boundary`
-- `vm/call/` — a closure's squelch mask at every call, and `breaks_proof` when the callee is silent
-- `primitives/stream.rs`, `primitives/net.rs` — the scheduler round trip, `Signal::io_yields_errors()`
+- [call.rs](../hir/analyze/call.rs) — infers signals during analysis, resolves polymorphic via `propagates` bitmask
+- [expr.rs](../hir/expr.rs) — `Hir` carries a `Signal`
+- [the emitter](../lir/emit/mod.rs) — emits signal metadata on closures
+- [closure.rs](../value/closure.rs) — a code object's payload stores its `Signal`
+- [pipeline](../pipeline/AGENTS.md) — builds primitive signals map, passes to Analyzer
+- [jit](../jit/AGENTS.md) — compiles a function whatever its signal; its call helpers check every boundary through `VM::enforce_boundary`
+- [call.rs](../vm/call.rs) — a closure's squelch mask at every call, and `breaks_proof` when the callee is silent
+- [stream.rs](../primitives/stream.rs) and [net.rs](../primitives/net.rs) — the scheduler round trip, with `SIG_NET` added in net.rs
 
 ## Invariants
 

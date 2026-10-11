@@ -1,6 +1,6 @@
 # Signal Protocol
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-11 -->
 
 How a signal is encoded, carried, caught and reported: the bits, the payload, propagation, I/O requests and the registry.
 
@@ -12,7 +12,7 @@ the forms that bound it (`attune!`, `silent!`, `bound`, `squelch`, `attune`).
 
 Signal types are bit positions in a 64-bit bitfield (`SignalBits` wraps a
 `u64`). The lower 32 bits are reserved for the runtime; the upper 32 bits are
-available for user-defined signals. The runtime allocates bits 0 to 17:
+available for user-defined signals. The runtime allocates bits 0 to 18:
 
 | Bit | Name | Value | Meaning |
 |-----|------|-------|---------|
@@ -28,8 +28,8 @@ available for user-defined signals. The runtime allocates bits 0 to 17:
 | 8 | halt | 256 | Graceful VM termination |
 | 9 | io | 512 | I/O request to scheduler |
 | 10 | terminal | 1024 | Uncatchable — passes through mask checks |
-| 11–17 | runtime | — | Runtime signals and capability bits ([runtime.md](../runtime.md)) |
-| 18–31 | reserved | — | Future runtime signals |
+| 11–18 | runtime | — | Runtime signals and capability bits ([runtime.md](../runtime.md)) |
+| 19–31 | reserved | — | Future runtime signals |
 | 32–63 | user | — | User-defined signal types |
 
 `abort`, the VM-internal graceful fiber termination, has no bit of its own. It
@@ -145,7 +145,8 @@ the whole condition, so `:yield` gets no report of its own.
 I/O signals use the `:io` bit (bit 9). Every port, socket and file primitive
 that reaches the scheduler carries `:io` and `:error`, the signal
 `Signal::io_yields_errors()` names. One that also needs a capability adds its
-bit: `port/open` adds `:fs`, and a subprocess primitive adds `:exec`.
+bit: `port/open` adds `:fs`, a socket primitive adds `:net`, and a subprocess
+primitive adds `:exec`.
 `may_io()` asks whether a signal includes `:io`.
 
 ### Stream Primitives and I/O Requests
@@ -189,7 +190,7 @@ mask does not name, so it travels out to the scheduler. Pinned by
 ## Signal Registry
 
 The signal registry maps signal keywords to bit positions. Built-in signals
-occupy bits 0–17; bits 18–31 are runtime-reserved; user-defined signals use
+occupy bits 0–18; bits 19–31 are runtime-reserved; user-defined signals use
 bits 32–63.
 
 ### Built-in Signals
@@ -208,6 +209,7 @@ bits 32–63.
 | `:gpu` | 15 | GPU dispatch capability |
 | `:os-signal` | 16 | POSIX signal send and raise capability |
 | `:fs` | 17 | Filesystem capability |
+| `:net` | 18 | Network capability |
 
 Bits 3, 5, 7, 10 and 13 are VM-internal and carry no keyword: resume,
 propagate, query, terminal and the fiber-switch trampoline. Bit 6 is unused.
@@ -215,6 +217,7 @@ propagate, query, terminal and the fiber-switch trampoline. Bit 6 is unused.
 
 ```lisp
 (assert (= (get (signals) :fs) 17) "the registry names the filesystem bit")
+(assert (= (get (signals) :net) 18) "and the network bit")
 ```
 
 ### User-Defined Signals
