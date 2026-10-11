@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-11
 //! Special forms: the signal declarations, the assertions, emit, and match.
 //!
 //! docs/signals/inference.md
@@ -127,9 +127,10 @@ impl<'a> Analyzer<'a> {
     /// `(emit <signal> <value>)` — general signal emission.
     ///
     /// The first argument must be a compile-time constant: a literal keyword
-    /// (`:yield`, `:error`, `:io`, etc.) or a literal set of keywords
-    /// (`|:yield :io|`). The analyzer extracts the signal bits at compile
-    /// time and records them in the HIR node.
+    /// (`:yield`, `:error`, `:io`, etc.), a literal set of keywords
+    /// (`|:yield :io|`), or that set quoted (`is_static_emit_spec`). The
+    /// analyzer extracts the signal bits at compile time and records them in
+    /// the HIR node.
     pub(crate) fn analyze_emit(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
         if items.len() < 2 || items.len() > 3 {
             return Err(format!(
@@ -212,6 +213,39 @@ impl<'a> Analyzer<'a> {
                 form,
                 syntax.kind_label()
             )),
+        }
+    }
+
+    /// Whether `emit` can resolve `syntax` at compile time: a keyword, a set
+    /// literal, or the list a quoted set literal becomes. The list must call
+    /// the `set` primitive with keywords alone. A binding that shadows `set`
+    /// builds whatever it builds, and an element the list computes is known
+    /// only at run time, so either leaves the emit dynamic
+    /// (docs/signals/emit.md).
+    pub(crate) fn is_static_emit_spec(&mut self, syntax: &Syntax) -> bool {
+        match &syntax.kind {
+            SyntaxKind::Keyword(_) | SyntaxKind::Set(_) => true,
+            SyntaxKind::List(items) => {
+                let Some((head, elements)) = items.split_first() else {
+                    return false;
+                };
+                if head.as_symbol() != Some("set")
+                    || !elements
+                        .iter()
+                        .all(|e| matches!(e.kind, SyntaxKind::Keyword(_)))
+                {
+                    return false;
+                }
+                // Resolve `set` as the call would (forms/expr.rs, the symbol arm).
+                let binding = self
+                    .lookup("set", head.scopes.as_slice())
+                    .or_else(|| self.lookup("set", &[]));
+                binding.is_some_and(|b| {
+                    let inner = self.arena.get(b);
+                    inner.is_primitive && inner.name == crate::value::SymbolId::of("set")
+                })
+            }
+            _ => false,
         }
     }
 

@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-11
 //! Expression dispatch: literals, variables, the collection literals, and the
 //! turn to a special form or a call.
 //!
@@ -266,11 +266,7 @@ impl<'a> Analyzer<'a> {
                     match name.as_str() {
                         "emit"
                             if (items.len() == 2 || items.len() == 3)
-                                && matches!(
-                                    items[1].kind,
-                                    crate::syntax::SyntaxKind::Keyword(_)
-                                        | crate::syntax::SyntaxKind::Set(_)
-                                ) =>
+                                && self.is_static_emit_spec(&items[1]) =>
                         {
                             return self.analyze_emit(items, span);
                         }

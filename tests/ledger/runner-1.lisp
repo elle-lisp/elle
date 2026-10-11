@@ -210,7 +210,7 @@
 ["tests/lang/arithmetic.lisp" :objects 1060]
 ["tests/lang/array-keys.lisp" :objects 358]
 ["tests/lang/async-error-propagation.lisp" :objects 416]
-["tests/lang/attune.lisp" :objects 452]
+["tests/lang/attune.lisp" :objects 520]
 ["tests/lang/binding-duplicate-def.lisp" :objects 218]
 ["tests/lang/binding-use-before-init.lisp" :objects 170]
 ["tests/lang/blocks.lisp" :objects 1062]

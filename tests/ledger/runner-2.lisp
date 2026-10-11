@@ -5,7 +5,7 @@
 ["tests/lang/each.lisp" :objects 1012]
 ["tests/lang/embedding.lisp" :objects 345]
 ["tests/lang/emit-user-signal.lisp" :objects 404]
-["tests/lang/emit.lisp" :objects 582]
+["tests/lang/emit.lisp" :objects 740]
 ["tests/lang/epoch6.lisp" :objects 97]
 ["tests/lang/equality-composition.lisp" :objects 412]
 ["tests/lang/error-macro.lisp" :objects 77]

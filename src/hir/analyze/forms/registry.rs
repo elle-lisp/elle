@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-11
 //! The special-form registry: the single source of truth for the names the
 //! analyzer treats as special forms.
 //!
@@ -421,7 +421,7 @@ pub(crate) const SPECIAL_FORMS: &[SpecialForm] = &[
     SpecialForm {
         name: "emit",
         handler: None,
-        doc: "Emit a signal with a value. The fiber suspends; the parent decides what happens next. Recognized as a special form only with a keyword or signal-set argument.",
+        doc: "Emit a signal with a value. The fiber suspends; the parent decides what happens next. Recognized as a special form only with a keyword, a set literal of keywords, or that set quoted; any other signal argument is a call to fiber/emit.",
         params: &[":signal", "value?"],
         arity: Arity::Range(1, 2),
         signal: Signal::yields(),
