@@ -78,8 +78,6 @@
                  (assert (not (path/exists? target))
                          "and nothing reaches the disk")))
 
-# The process fiber's mask must name every bit a denial can carry, or the
-# denial passes the scheduler instead of being refused.
 (assert (refused? (from-sandbox |:net| process:spawn
                                 (fn [] (protect (tcp/listen "127.0.0.1" 0))))
                   "tcp/listen" :net)
@@ -125,23 +123,36 @@
 
 # ── A process system started inside a sandbox ─────────────────────────
 
-# Every process and sub-fiber here is created inside the sandbox, so the
-# scheduler refuses the denial itself. The sandbox's :error-only mask means a
-# denial that escaped the scheduler instead would end this file at the root.
+# Every process here is created inside the sandbox, so its own scheduler refuses
+# the denial. The process fiber's mask must name each bit a denial can carry.
+# The sandbox's mask catches the denied bit, so a denial that passed the
+# process scheduler stops the sandbox there, and it never finishes.
+#
+# The trap: with a sandbox masked |:error| alone, a denial that passed the
+# process scheduler still reaches the async scheduler, whose ev/spawn mask
+# names the bit and refuses it at the same call site, so the case passes.
+(defn sandboxed-system [deny thunk]
+  "Run thunk as the one process of a system started in a sandbox denied
+   `deny` and masked to catch it. Answer what the process answered."
+  (let [out @[]
+        sandbox (fiber/new (fn [] (process:start (fn [] (push out (thunk)))))
+                           (union |:error| deny) :deny deny)]
+    (fiber/resume sandbox)
+    (assert (= (fiber/status sandbox) :dead)
+            "the sandboxed process system finishes")
+    (get out 0)))
+
 (with-temp-dir dir
-               (let [target (path/join dir "inner")
-                     out @[]
-                     sandbox (fiber/new (fn []
-                                          (process:start (fn []
-                                            (push out
-                                            (protect (file/write target "x"))))))
-                                        |:error| :deny |:fs|)]
-                 (fiber/resume sandbox)
-                 (assert (= (fiber/status sandbox) :dead)
-                         "the sandboxed process system finishes")
-                 (assert (refused? (get out 0) "file/write" :fs)
+               (let [target (path/join dir "inner")]
+                 (assert (refused? (sandboxed-system |:fs|
+                                   (fn [] (protect (file/write target "x"))))
+                                   "file/write" :fs)
                          "a process in a sandboxed system is refused by its own scheduler")
                  (assert (not (path/exists? target))
                          "and nothing reaches the disk")))
+
+(assert (refused? (sandboxed-system |:net|
+                                    (fn [] (protect (tcp/listen "127.0.0.1" 0))))
+                  "tcp/listen" :net) "and so is its listen, denied :net")
 
 (println "caps-process: OK")
