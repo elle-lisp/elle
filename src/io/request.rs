@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-10-11
 //! IoRequest — typed I/O request descriptors.
 //!
 //! Stream primitives build IoRequest values and yield them via SIG_IO.
@@ -223,30 +223,35 @@ impl IoOp {
     ///
     /// Every async operation reaches the scheduler, so each carries `SIG_IO`.
     /// An operation that also exercises a gated authority adds its bit: a
-    /// subprocess spawn or wait adds `SIG_EXEC`, and opening a path adds
-    /// `SIG_FS`. This is the same requirement a legal mint already raises
-    /// (`subprocess/exec` raises `|:io :exec|`); the derivation lets the spend
-    /// gate at `io/submit` test a request whatever route it arrived by, without
-    /// trusting a declaration on the submission primitive.
+    /// subprocess spawn or wait adds `SIG_EXEC`, opening a path adds `SIG_FS`,
+    /// and a socket operation adds `SIG_NET`. This is the same requirement the
+    /// primitive that mints the request declares; the derivation lets the
+    /// spend gate at `io/submit` test a request whatever route it arrived by,
+    /// without trusting a declaration on the submission primitive.
     ///
     /// `IoOp::Task` wraps an arbitrary closure whose effects are not derivable,
     /// so it is deny-by-default: it declares every gated bit. It is unreachable
     /// today (no primitive mints one), so this costs nothing until one does.
     pub fn required_bits(&self) -> crate::value::fiber::SignalBits {
-        use crate::signals::{SIG_EXEC, SIG_FS, SIG_GPU, SIG_IO, SIG_OS_SIGNAL};
+        use crate::signals::{SIG_EXEC, SIG_FS, SIG_GPU, SIG_IO, SIG_NET, SIG_OS_SIGNAL};
         let base = SIG_IO;
         match self {
             IoOp::Spawn(_) | IoOp::ProcessWait => base.union(SIG_EXEC),
             IoOp::Open { .. } => base.union(SIG_FS),
+            IoOp::Connect {
+                addr: ConnectAddr::Unix { .. },
+            } => base.union(SIG_NET).union(SIG_FS),
+            IoOp::Connect { .. } | IoOp::Resolve { .. } => base.union(SIG_NET),
+            IoOp::Port(op) if op.is_socket_op() => base.union(SIG_NET),
             IoOp::Task(_) => base
                 .union(SIG_EXEC)
                 .union(SIG_FS)
                 .union(SIG_GPU)
-                .union(SIG_OS_SIGNAL),
-            // Port ops, Connect, Sleep, PollFd, Seek, Tell, Resolve, WatchNext,
-            // SigNext, Close, ChanSelectPark: scheduler round trip only. A
-            // network bit, when one exists, attaches to Connect/SendTo/RecvFrom
-            // here.
+                .union(SIG_OS_SIGNAL)
+                .union(SIG_NET),
+            // A stream op on a port the fiber holds, Sleep, PollFd, Seek,
+            // Tell, WatchNext, SigNext, Close, ChanSelectPark: scheduler round
+            // trip only.
             _ => base,
         }
     }
@@ -259,6 +264,19 @@ impl From<PortOp> for IoOp {
 }
 
 impl PortOp {
+    /// Whether this operation opens or names a network peer: an accept, a
+    /// datagram sent or received, or a shutdown. A read or a write spends a
+    /// connection the fiber already holds, as it does on any other port.
+    pub(crate) fn is_socket_op(&self) -> bool {
+        matches!(
+            self,
+            PortOp::Accept { .. }
+                | PortOp::SendTo { .. }
+                | PortOp::RecvFrom { .. }
+                | PortOp::Shutdown { .. }
+        )
+    }
+
     /// The heap value this operation names besides its port: the buffer a
     /// read fills, the payload a write sends, the port an accept fills, or the
     /// struct a `recv-from` stamps. `Value::NIL` for an operation that names

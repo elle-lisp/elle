@@ -1,13 +1,13 @@
-// audited: 2026-10-05
+// audited: 2026-10-11
 //! Signal registry for mapping signal keywords to bit positions.
 //!
 //! The registry maintains a global mapping of signal keywords (`:error`,
 //! `:yield`, etc.) to their corresponding bit positions. Built-in signals
-//! occupy bits 0-17, bits 18-31 are runtime-reserved, and user-defined signals
+//! occupy bits 0-18, bits 19-31 are runtime-reserved, and user-defined signals
 //! are allocated from bits 32-63.
 
 use super::{
-    SIG_DEBUG, SIG_ERROR, SIG_EXEC, SIG_FFI, SIG_FS, SIG_FUEL, SIG_GPU, SIG_HALT, SIG_IO,
+    SIG_DEBUG, SIG_ERROR, SIG_EXEC, SIG_FFI, SIG_FS, SIG_FUEL, SIG_GPU, SIG_HALT, SIG_IO, SIG_NET,
     SIG_OS_SIGNAL, SIG_WAIT, SIG_YIELD,
 };
 use crate::value::fiber::SignalBits;
@@ -22,7 +22,7 @@ pub struct SignalEntry {
 
 /// Global registry mapping signal keywords to bit positions.
 ///
-/// Built-in signals are pre-registered at their fixed bits, 0 to 17 (the table in
+/// Built-in signals are pre-registered at their fixed bits, 0 to 18 (the table in
 /// docs/signals/protocol.md). Bits 3, 5, 7, 10 and 13 are VM-internal and bit 6 is
 /// unused; none of them is registered.
 ///
@@ -58,6 +58,7 @@ impl SignalRegistry {
     /// - `:gpu` at bit 15
     /// - `:os-signal` at bit 16
     /// - `:fs` at bit 17
+    /// - `:net` at bit 18
     pub fn with_builtins() -> Self {
         let mut registry = Self::new();
         // These unwraps are safe because we're registering unique built-in names
@@ -73,6 +74,7 @@ impl SignalRegistry {
         let _ = registry.register_builtin("gpu", SIG_GPU.trailing_zeros());
         let _ = registry.register_builtin("os-signal", SIG_OS_SIGNAL.trailing_zeros());
         let _ = registry.register_builtin("fs", SIG_FS.trailing_zeros());
+        let _ = registry.register_builtin("net", SIG_NET.trailing_zeros());
         registry
     }
 

@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-11
 # The process primitives: each one yields a command to the scheduler, so it runs only inside a process.
 # docs/processes.md
 
@@ -20,7 +20,7 @@
    capability denial raises, which the scheduler refuses
    (docs/process-scheduler.md)."
   (fiber/new closure
-             |:yield :error :fuel :io :exec :wait :ffi :gpu :os-signal :fs|))
+             |:yield :error :fuel :io :exec :wait :ffi :gpu :os-signal :fs :net|))
 (defn spawn [closure]
   (yield [:spawn (process-fiber closure)]))
 (defn spawn-link [closure]
