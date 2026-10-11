@@ -35,7 +35,7 @@
 ["tests/lang/flatlet.lisp" :objects 305]
 ["tests/lang/fn-signature.lisp" :objects 593]
 ["tests/lang/fuel-apply-fold.lisp" :objects 472]
-["tests/lang/fuel.lisp" :objects 965]
+["tests/lang/fuel.lisp" :objects 1090]
 ["tests/lang/functional.lisp" :objects 4062]
 ["tests/lang/genserver-down.lisp" :objects 745]
 ["tests/lang/genserver.lisp" :objects 920]

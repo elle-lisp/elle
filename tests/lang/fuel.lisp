@@ -1,12 +1,13 @@
 (elle/epoch 15)
-# audited: 2026-10-05
+# audited: 2026-10-11
 # A fiber's fuel budget pauses it at backward jumps and calls, and a refuel resumes it where it stopped.
 # docs/runtime.md
 #
 ## Covers: backward-jump exhaustion, call exhaustion,
 ## refuel-and-resume, unlimited fibers, zero fuel, signal masks, remaining-fuel
-## reads, clear-fuel, nested-fiber independence, and a silent function the
-## meter never pauses.
+## reads, clear-fuel, nested-fiber independence, a silent function the
+## meter never pauses, and a silent callee of a non-tail call, alone and
+## under the process scheduler.
 ##
 ## Every metered loop below uses generic arithmetic, which may raise, so none
 ## of them is silent. The interpreter charges no fuel while a silent function
@@ -259,3 +260,38 @@
   (assert (= (fiber/status f) :paused) "silent: the loop that may raise pauses")
   (fiber/clear-fuel f)
   (assert (= (fiber/resume f) 1000) "silent: and finishes once the meter lifts"))
+
+# ============================================================================
+# Scenario 14: A silent callee of a non-tail call runs to its end
+# ============================================================================
+#
+# A non-tail call leaves the caller's frame waiting on the callee's result.
+# The callee below is silent, and recurses by tail calls, which are charge
+# sites in a function that is not silent. The meter charges nothing inside
+# it, so the callee returns and the fiber finishes (#1281). The process
+# scheduler meters every process, so the same call finishes there too.
+# Counter-factual: the interpreter charged the callee's tail calls, so the
+# pause left a silent function, and the process aborted.
+
+(defn self-spin [i]
+  (if (%int? i)
+    (if (%lt i 100000) (self-spin (%add i 1)) i)
+    i))
+(assert (get (compile/signal (compile/analyze "(defn self-spin [i]
+  (if (%int? i) (if (%lt i 100000) (self-spin (%add i 1)) i) i))")
+                             :self-spin) :silent)
+        "non-tail: the callee is silent")
+
+(let [f (fiber/new (fn [] [(self-spin 0)]) |:fuel|)]
+  (fiber/set-fuel f 1000)
+  (fiber/resume f)
+  (assert (= (fiber/status f) :dead)
+          "non-tail: the meter never pauses the silent callee")
+  (assert (= (fiber/value f) [100000])
+          "non-tail: and the caller gets the callee's result"))
+
+(def process ((import "std/process")))
+(def @spun nil)
+(process:start (fn [] (assign spun [(self-spin 0)])) :fuel 500)
+(assert (= spun [100000])
+        "non-tail: a metered process finishes the silent callee")
