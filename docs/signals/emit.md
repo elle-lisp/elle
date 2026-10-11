@@ -1,6 +1,6 @@
 # emit
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-11 -->
 
 `emit` raises a signal from Elle code: a yield, an error, or a signal the program declares.
 
@@ -27,6 +27,16 @@ resolves its bits at compile time and emits the `Emit` instruction:
 (let [f (fiber/new (fn [] (emit |:yield :io| :both)) |:yield|)]
   (fiber/resume f)
   (assert (= (fiber/value f) :both)))      # a mask catches a set it overlaps
+```
+
+Inside quoted data, a set literal becomes the list `(set :yield :io)`.
+`emit` reads that list as the set it spells, so an `emit` built as data and
+handed to `eval` compiles as written:
+
+```lisp
+(def quoted-emit (eval '(fn [v] (emit |:yield :io| v))))
+(let [f (fiber/new (fn [] (quoted-emit :data)) |:yield :io|)]
+  (assert (= (fiber/resume f) :data)))
 ```
 
 A literal keyword the registry does not know is a compile error:

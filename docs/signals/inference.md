@@ -1,6 +1,6 @@
 # Signal Inference
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-11 -->
 
 How the compiler infers each function's signal, and the forms that bound,
 narrow or check it.
@@ -125,11 +125,16 @@ error.
 | `(immutable! x)` | Binding `x` is never assigned |
 
 `spec` is a signal keyword or a literal set of them. The empty set, `||`, is a
-spec.
+spec. Inside quoted data, a set literal becomes the list `(set :yield :io)`. A
+spec reads that list as the set it spells, so a form built as data and handed
+to `eval` compiles as written.
 
 ```lisp
 (assert (string/contains? (compile-error '(silent!))
                           "silent! must appear inside a function body"))
+
+(def [ok? _] (protect (eval '(fn [] (attune! |:yield :io|) (yield 1)))))
+(assert ok? "a quoted set is a spec")
 ```
 
 ### `(attune! spec)`
