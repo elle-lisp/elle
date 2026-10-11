@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! Runtime eval instruction handler.
 //!
 //! Compiles and executes a datum (quoted value) at runtime.
@@ -218,7 +218,7 @@ fn eval_in_arena(
     // Emit into a code region on the heap that runs the form.
     let code_arena = crate::value::CodeArena::mint(vm.heap());
     let mut emitter = Emitter::new(code_arena);
-    let (bytecode, _yield_points, _call_sites) = emitter.emit_module(&lir_module);
+    let bytecode = emitter.emit_module(&lir_module).bytecode;
     let unit = crate::value::CodeUnit::new(code_arena, bytecode);
 
     // Execute. The entry payload carries the function's builder-idiom merge

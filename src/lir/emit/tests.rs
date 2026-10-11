@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 // docs/impl/bytecode.md
 //! What the bytecode emitter writes: control flow, yield points, the
 //! coalescing oracle, and a nested lambda's payload. What an edge owes the
@@ -26,7 +26,7 @@ pub(super) fn run_on(
     func: &LirOwned,
 ) -> Result<crate::value::Value, String> {
     let code = CodeArena::mint(vm.heap());
-    let (bytecode, _, _) = Emitter::new(code).emit(&func.view());
+    let bytecode = Emitter::new(code).emit(&func.view()).bytecode;
     vm.execute(&crate::value::CodeUnit::new(code, bytecode))
 }
 
@@ -45,7 +45,7 @@ fn test_emit_simple() {
         )
         .build();
 
-    let (bytecode, _, _) = emitter.emit(&func.view());
+    let bytecode = emitter.emit(&func.view()).bytecode;
     assert!(!bytecode.instructions.is_empty());
 }
 
@@ -84,7 +84,7 @@ fn test_emit_branch() {
         )
         .build();
 
-    let (bytecode, _, _) = emitter.emit(&func.view());
+    let bytecode = emitter.emit(&func.view()).bytecode;
     assert!(!bytecode.instructions.is_empty());
     // Should have Jump instructions for control flow
     assert!(bytecode
@@ -119,7 +119,11 @@ fn test_yield_point_info_collected() {
         )
         .build();
 
-    let (bytecode, yield_points, _call_sites) = emitter.emit(&func.view());
+    let ClosureCompiled {
+        bytecode,
+        yield_points,
+        ..
+    } = emitter.emit(&func.view());
     assert!(!bytecode.instructions.is_empty());
     assert_eq!(yield_points.len(), 1);
     assert!(yield_points[0].resume_ip > 0);
@@ -261,7 +265,7 @@ fn emit_terminator_carries_a_user_signal_bit_whole() {
         )
         .build();
 
-    let (bytecode, _, _) = emitter().emit(&func.view());
+    let bytecode = emitter().emit(&func.view()).bytecode;
     let lines = disassemble_lines(&bytecode.instructions);
     let emit_line = lines
         .iter()
@@ -273,16 +277,15 @@ fn emit_terminator_carries_a_user_signal_bit_whole() {
     );
 }
 
-/// A nested lambda's payload carries both halves of the abandoned-frame
-/// release table, so a closure the emitted `MakeClosure` builds reaches an
-/// error exit with the releases it still owes (docs/impl/region/template.md
-/// § "One constructor builds a nested lambda's payload").
+/// A nested lambda's payload carries both release tables, so a discard of a
+/// parked frame of a closure the emitted `MakeClosure` builds runs the releases
+/// that frame still owes (docs/impl/region/template.md).
 #[test]
 fn a_nested_lambdas_payload_carries_the_frame_release_tables() {
     // Counter-factual: a payload built with both tables empty fails nothing
     // that runs. The closure built over it carries real bytecode and returns
-    // the right answers; what it loses is one error exit's walk, which
-    // strands every region the abandoned frame still owed.
+    // the right answers; what it loses is the walk a discard of its parked
+    // frame runs, which strands every region that frame still owed.
     use crate::hir::region::StaticRegion;
     use crate::lir::ClosureId;
 
@@ -323,7 +326,7 @@ fn a_nested_lambdas_payload_carries_the_frame_release_tables() {
         closures: vec![nested],
     };
     let code = CodeArena::mint(unsafe { &mut *crate::value::arena::leaked_test_heap() });
-    let (bytecode, _, _) = Emitter::new(code).emit_module(&module);
+    let bytecode = Emitter::new(code).emit_module(&module).bytecode;
     let unit = crate::value::CodeUnit::new(code, bytecode);
     assert_eq!(
         unit.entry().num_children(),
@@ -388,7 +391,7 @@ fn a_nested_lambdas_payload_carries_its_rest_list_layout() {
         closures: vec![nested],
     };
     let code = CodeArena::mint(unsafe { &mut *crate::value::arena::leaked_test_heap() });
-    let (bytecode, _, _) = Emitter::new(code).emit_module(&module);
+    let bytecode = Emitter::new(code).emit_module(&module).bytecode;
     let unit = crate::value::CodeUnit::new(code, bytecode);
     assert_eq!(
         unit.entry().child(0).rest_list_layout(),

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 // docs/impl/bytecode.md
 //! Converts register-based LIR to stack-based bytecode, simulating the operand
 //! stack to find where each register's value sits. `edge` emits the block
@@ -14,8 +14,15 @@ use crate::value::Value;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-/// Per-closure compilation result: bytecode, yield points, call sites.
-pub type ClosureCompiled = (Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>);
+/// What emitting one function produces: its bytecode, and the metadata only
+/// emission can record. `PayloadParts::lambda` writes the metadata into the
+/// code payload's LIR body, where the JIT reads it.
+#[derive(Debug, Clone, Default)]
+pub struct ClosureCompiled {
+    pub bytecode: Bytecode,
+    pub yield_points: Vec<YieldPointInfo>,
+    pub call_sites: Vec<CallSiteInfo>,
+}
 
 /// Emits bytecode from LIR
 pub struct Emitter {
@@ -163,9 +170,7 @@ impl Emitter {
         // Pre-allocate with placeholders. Entries are filled in reverse
         // order; the MakeClosure handler only accesses children (higher
         // indices), which are filled before their parents.
-        let mut compiled: Vec<ClosureCompiled> = (0..n)
-            .map(|_| (Bytecode::new(), Vec::new(), Vec::new()))
-            .collect();
+        let mut compiled = vec![ClosureCompiled::default(); n];
         for i in (0..n).rev() {
             self.compiled_closures = Some(compiled);
             let result = self.emit(&module.closures[i].view());
@@ -248,11 +253,11 @@ impl Emitter {
             "every ValueConst value is in the constant pool"
         );
 
-        (
-            std::mem::take(&mut self.bytecode),
-            std::mem::take(&mut self.yield_points),
-            std::mem::take(&mut self.call_sites),
-        )
+        ClosureCompiled {
+            bytecode: std::mem::take(&mut self.bytecode),
+            yield_points: std::mem::take(&mut self.yield_points),
+            call_sites: std::mem::take(&mut self.call_sites),
+        }
     }
 
     /// Record a park site at `resume_ip`, over the operands `stack_regs` below

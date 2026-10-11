@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! `CodeArena` and `PayloadParts`: one compile unit's code region, and the fields a payload is written into it from.
 //!
 //! docs/impl/region/template.md
@@ -176,8 +176,7 @@ impl PayloadParts {
     }
 
     /// A nested lambda: everything `lir` knows about itself, plus the bytecode
-    /// its own emission produced (docs/impl/region/template.md § "One
-    /// constructor builds a nested lambda's payload").
+    /// its own emission produced (docs/impl/region/template.md).
     ///
     /// `num_captures` comes from the instruction rather than from `lir`: what
     /// a lambda closes over is decided at the site that builds it.
@@ -186,7 +185,11 @@ impl PayloadParts {
         num_captures: usize,
         compiled: crate::lir::ClosureCompiled,
     ) -> Self {
-        let (bytecode, yield_points, call_sites) = compiled;
+        let crate::lir::ClosureCompiled {
+            bytecode,
+            yield_points,
+            call_sites,
+        } = compiled;
         // The LIR the JIT promotes this lambda from is the frozen function plus
         // the sites only emission can supply.
         let mut lir = lir.clone();
@@ -226,8 +229,7 @@ impl PayloadParts {
 
     /// A closure a compiled WASM module builds: the code half off `code`, the
     /// module's own payload for the closure, and the shape half off the call
-    /// (docs/impl/region/template.md § "The WASM backend copies the module's
-    /// own payload"). `None` is a module carrying no payload, whose code object
+    /// (docs/impl/region/template.md). `None` is a module carrying no payload, whose code object
     /// has no bytecode to run and takes its shape from `meta` alone.
     pub fn wasm_closure(code: Option<&ClosureTemplate>, meta: WasmClosureMeta) -> Self {
         let shape = |parts: PayloadParts| PayloadParts {

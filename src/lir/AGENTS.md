@@ -1,6 +1,6 @@
 # lir
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-12 -->
 
 The LIR's two forms, the registers each instruction reads and writes, and the emitter that turns LIR into stack bytecode.
 
@@ -67,7 +67,7 @@ The emitter, which reads the frozen form:
 
 | Type | Purpose |
 |------|---------|
-| `Emitter` | LIR → `ClosureCompiled`, that is `(Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>)`, writing each nested lambda's payload into the `CodeArena` it was built over ([emit/mod.rs](emit/mod.rs)). `emit_module_with_lambdas` also answers the header over every closure's payload, for the WASM backend's dual compile |
+| `Emitter` | LIR → `ClosureCompiled`: the bytecode, and the yield points and call sites emission records, writing each nested lambda's payload into the `CodeArena` it was built over ([emit/mod.rs](emit/mod.rs)). `emit_module_with_lambdas` also answers the header over every closure's payload, for the WASM backend's dual compile |
 | `YieldPointInfo` | What emission records at a yield point: resume IP, live registers, local count |
 | `CallSiteInfo` | What emission records at a park site, a call or an instruction that may raise: resume IP, live registers, local count, and whether a resume delivers a value |
 | `testkit::LirFixture` | Builds a frozen function by hand, for tests (`#[cfg(test)]`) |
@@ -176,7 +176,7 @@ Emitter, reading each function through a LirView
         raise, in a function that may signal
     │
     ▼
-ClosureCompiled = (Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>)
+ClosureCompiled { bytecode, yield_points, call_sites }
     │
     ▼
 PayloadParts::lambda, at the MakeClosure that builds the lambda
