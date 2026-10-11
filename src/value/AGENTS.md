@@ -1,6 +1,6 @@
 # value
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-12 -->
 
 Runtime value representation using a tagged union.
 
@@ -14,47 +14,48 @@ Runtime value representation using a tagged union.
 
 | Module | Purpose |
 |--------|---------|
-| `repr/mod.rs` | Tagged-union `Value` type, tag encoding |
-| `repr/constructors.rs` | Value construction methods |
-| `repr/accessors.rs` | Value field access and type checking |
-| `repr/traits.rs` | `Display`, `Debug`, `Clone` implementations |
-| `types.rs` | `Arity`, `SymbolId`, `NativeFn`, `TableKey`, sorted-struct helpers |
-| `closure.rs` | `Closure` (template + env + squelch mask) and the `TemplateRef` seam; submodules `payload` (`CodePayload`, the region-inline code data), `header` (`ClosureTemplate`), `arena` (`CodeArena` and the `PayloadParts` a payload is written from), `unit` (`CodeUnit` and `CodePin`, the Rust-held references to a code region). [template.md](../../docs/impl/region/template.md) owns the argument |
-| `fiber.rs` | `Fiber`, `FiberHandle`, `WeakFiberHandle`, `SuspendedFrame`, `FiberStatus`; re-exports `SignalBits` (from `fiber/signalbits.rs`) and the `SIG_*` constants (from `crate::signals`) |
-| `fiber/dues.rs` | `ActivationDues` — what one activation owes the region system when it ends: its owner node and the releases it took over from frame-replacing tail calls, carried as one record so a park moves both or neither ([owner.md](../../docs/impl/region/owner.md)) |
-| `fiber/delivery.rs` | `Delivery` — the delivery ledger: how the current park's delivery references are funded, with a method-only surface ([what a park retains](../../docs/impl/region/park.md)) |
-| `fiber/parked.rs` | `ParkedDues`, `ParkedState` and `Fiber::take_parked_state` — what a fiber that can never run again strands: the releases its parked frames still owe, and the retain its parked signal took ([what a park retains](../../docs/impl/region/park.md)) |
-| `error.rs` | `rich_error!` macro plus `error_val_in()`, `error_val_extra_in()`, `match_fail_error_in()`, and `format_error()` for region-coherent error structs ([errors.md](../../docs/impl/region/errors.md)) |
-| `ffi.rs` | `LibHandle` for C interop |
-| `fiberheap/` | `FiberHeap` over a `RegionStore` (physical region allocator; each region owns its pages via a `PagePool`) plus a custom-allocator stack and object-limit tracking. Submodules: `regionstore`, `regionpool`, `pagepool`, `freelog`, `census`, `region`, `custom`, `dropsafety`. One heap per VM, shared by all of that VM's fibers. |
-| `arena.rs` | Heap-explicit allocation funnel over `FiberHeap`: every entry point takes `heap: &mut FiberHeap` — `alloc`, `alloc_in_region`, `deref`, `region_of`, region RC (`incref_region`/`decref_region`), and the tracked mutable-store funnels (`push_with_incref`, `struct_put_with_rebind`, `capture_store_with_rebind`, …). |
-| `heap.rs` | `HeapObject` enum, `HeapTag`, `Pair`, `ThreadHandle`, `LSet`, `LSetMut` (re-exports `Closure`, `Arity`, `NativeFn`, `TableKey`) |
-| `send/` | `SendValue`/`SendBundle` wrappers for thread-safe transfer |
-| `display.rs` | `Display` implementation for values |
-| `keyword.rs` | Keyword identity (name hash) and the static keyword vocabulary for display |
+| [repr/mod.rs](repr/mod.rs) | Tagged-union `Value` type, tag encoding |
+| [repr/constructors.rs](repr/constructors.rs) | Value construction methods |
+| [repr/accessors.rs](repr/accessors.rs) | Value field access and type checking |
+| [repr/traits.rs](repr/traits.rs) | `Display`, `Debug`, `Clone` implementations |
+| [types.rs](types.rs) | `Arity`, `SymbolId`, `NativeFn`, `TableKey`, sorted-struct helpers |
+| [closure.rs](closure.rs) | `Closure` (template + env + squelch mask) and the `TemplateRef` seam; submodules `payload` (`CodePayload`, the region-inline code data), `header` (`ClosureTemplate`), `arena` (`CodeArena` and the `PayloadParts` a payload is written from), `unit` (`CodeUnit` and `CodePin`, the Rust-held references to a code region). [template.md](../../docs/impl/region/template.md) owns the argument |
+| [fiber.rs](fiber.rs) | `Fiber`, `FiberHandle`, `WeakFiberHandle`, `SuspendedFrame`, `FiberStatus`; re-exports `SignalBits` (from [fiber/signalbits.rs](fiber/signalbits.rs)) and the `SIG_*` constants (from `crate::signals`) |
+| [fiber/dues.rs](fiber/dues.rs) | `ActivationDues` — what one activation owes the region system when it ends: its owner node and the releases it took over from frame-replacing tail calls, carried as one record so a park moves both or neither ([owner.md](../../docs/impl/region/owner.md)) |
+| [fiber/delivery.rs](fiber/delivery.rs) | `Delivery` — the delivery ledger: how the current park's delivery references are funded, with a method-only surface ([what a park retains](../../docs/impl/region/park.md)) |
+| [fiber/parked.rs](fiber/parked.rs) | `ParkedDues`, `ParkedState` and `Fiber::take_parked_state` — what a fiber that can never run again strands: the releases its parked frames still owe, and the retain its parked signal took ([what a park retains](../../docs/impl/region/park.md)) |
+| [error.rs](error.rs) | `rich_error!` macro plus `error_val_in()`, `error_val_extra_in()`, `match_fail_error_in()`, and `format_error()` for region-coherent error structs ([errors.md](../../docs/impl/region/errors.md)) |
+| [ffi.rs](ffi.rs) | `LibHandle` for C interop |
+| [fiberheap/](fiberheap/mod.rs) | `FiberHeap` over a `RegionStore` (physical region allocator; each region owns its pages via a `PagePool`) plus a custom-allocator stack and object-limit tracking. Submodules: `regionstore`, `regionpool`, `pagepool`, `freelog`, `census`, `region`, `custom`, `dropsafety`. One heap per VM, shared by all of that VM's fibers. |
+| [arena.rs](arena.rs) | Heap-explicit allocation funnel over `FiberHeap`: every entry point takes `heap: &mut FiberHeap` — `alloc`, `alloc_in_region`, `deref`, `region_of`, region RC (`incref_region`/`decref_region`), and the tracked mutable-store funnels (`push_with_incref`, `struct_put_with_rebind`, `capture_store_with_rebind`, …). |
+| [heap.rs](heap.rs) | `HeapObject` enum, `HeapTag`, `Pair`, `ThreadHandle`, `LSet`, `LSetMut` (re-exports `Closure`, `Arity`, `NativeFn`, `TableKey`) |
+| [send/](send/mod.rs) | `SendValue`/`SendBundle` wrappers for thread-safe transfer |
+| [display.rs](display.rs) | `Display` implementation for values |
+| [keyword.rs](keyword.rs) | Keyword identity (name hash) and the static keyword vocabulary for display |
 
 ## Key types
 
 | Type | Location | Purpose |
 |------|----------|---------|
-| `Value` | `repr/mod.rs` | 16-byte tagged-union value (Copy) |
-| `Closure` | `closure.rs` | `TemplateRef` + env (`RegionSlice<Value>`) + `squelch_mask`. Per-function code lives on the region-resident `ClosureTemplate` behind that seam. |
-| `Fiber` | `fiber.rs` | Independent execution context with stack, paused callers, signal mask |
-| `FiberHandle` | `fiber/handle.rs` | Newtype over `Rc<RefCell<Option<Fiber>>>` — take/put semantics for VM fiber swap |
-| `WeakFiberHandle` | `fiber/handle.rs` | Weak reference for parent back-pointers (avoids Rc cycles) |
-| `FiberHeap` | `fiberheap/` | The VM's single heap over a `RegionStore` (region-based, RC-driven reclamation) plus a custom-allocator stack; reclamation is `FreeRegion(ρ)` when a region's RC reaches 0. Despite the name it is NOT per-fiber — all fibers share it and isolation is per-region ([fiber.rs](fiber.rs)) |
-| `Parameter` | `heap.rs` | Dynamic parameter with id and default value, looked up at runtime |
-| `LSet` | `heap.rs` | Immutable set (`RegionSlice<Value>`, region-inline), no `RefCell` |
-| `LSetMut` | `heap.rs` | Mutable set (`Rc<RefCell<BTreeSet<Value>>>`) (type name `:@set`) |
-| `TableKey` | `types.rs` | Struct key. `Copy`; string and array keys hold a `Value`, so a key owns no Rust heap memory ([values.md](../../docs/impl/values.md)) |
-| `SendKey` | `send/mod.rs` | The owning key form `SendValue`'s maps are keyed on — the only key type that crosses a thread or reaches serde |
-| `SuspendedFrame` | `fiber/frame.rs` | Bytecode/constants/env/IP/stack for resuming a suspended fiber |
-| `PausedCaller` | `fiber/caller.rs` | A caller activation waiting in `Fiber::callers` while its interpreted callee runs on the same dispatch loop (docs/impl/vm.md § "Non-tail calls") |
-| `FiberStatus` | `fiber/status.rs` | Fiber lifecycle: New, Alive, Paused, Dead, Error |
-| `SignalBits` | `fiber/signalbits.rs` | Newtype over `u64` (re-exported from `fiber.rs`). The `SIG_*` constants are defined in `crate::signals`: SIG_OK(0), SIG_ERROR(1<<0), SIG_YIELD(1<<1), SIG_DEBUG(1<<2), SIG_RESUME(1<<3), SIG_FFI(1<<4), SIG_PROPAGATE(1<<5), SIG_HALT(1<<8) (among others) |
-| `Arity` | `types.rs` | Function arity (Exact, AtLeast, Range) |
-| `SymbolId` | `types.rs` | Symbol identity: the FNV-1a hash of the name |
-| `SendValue` | `send/` | Thread-safe value wrapper |
+| `Value` | [repr/mod.rs](repr/mod.rs) | 16-byte tagged-union value (Copy) |
+| `Closure` | [closure.rs](closure.rs) | `TemplateRef` + env (`RegionSlice<Value>`) + `squelch_mask`. Per-function code lives on the region-resident `ClosureTemplate` behind that seam. |
+| `Fiber` | [fiber.rs](fiber.rs) | Independent execution context with stack, paused callers, signal mask |
+| `FiberHandle` | [fiber/handle.rs](fiber/handle.rs) | Newtype over `Rc<RefCell<Option<Fiber>>>` — take/put semantics for VM fiber swap |
+| `WeakFiberHandle` | [fiber/handle.rs](fiber/handle.rs) | Weak reference for parent back-pointers (avoids Rc cycles) |
+| `FiberHeap` | [fiberheap/](fiberheap/mod.rs) | The VM's single heap over a `RegionStore` (region-based, RC-driven reclamation) plus a custom-allocator stack; reclamation is `FreeRegion(ρ)` when a region's RC reaches 0. Despite the name it is NOT per-fiber — all fibers share it and isolation is per-region ([fiber.rs](fiber.rs)) |
+| `Parameter` | [heap.rs](heap.rs) | Dynamic parameter with id and default value, looked up at runtime |
+| `LSet` | [heap.rs](heap.rs) | Immutable set (`RegionSlice<Value>`, region-inline), no `RefCell` |
+| `LSetMut` | [heap.rs](heap.rs) | Mutable set (`Rc<RefCell<BTreeSet<Value>>>`) (type name `:@set`) |
+| `TableKey` | [types.rs](types.rs) | Struct key. `Copy`; string and array keys hold a `Value`, so a key owns no Rust heap memory ([values.md](../../docs/impl/values.md)) |
+| `SendKey` | [send/mod.rs](send/mod.rs) | The owning key form `SendValue`'s maps are keyed on — the only key type that crosses a thread or reaches serde |
+| `SuspendedFrame` | [fiber/frame.rs](fiber/frame.rs) | Bytecode/constants/env/IP/stack for resuming a suspended fiber |
+| `PausedCaller` | [fiber/caller.rs](fiber/caller.rs) | A caller activation waiting in `Fiber::callers` while its interpreted callee runs on the same dispatch loop ([vm.md](../../docs/impl/vm.md)) |
+| `FiberStatus` | [fiber/status.rs](fiber/status.rs) | Fiber lifecycle: New, Alive, Paused, Dead, Error |
+| `Fuel` | [fiber/fuel.rs](fiber/fuel.rs) | A fiber's instruction budget, and the charge a charging instruction takes from it ([runtime.md](../../docs/runtime.md)) |
+| `SignalBits` | [fiber/signalbits.rs](fiber/signalbits.rs) | Newtype over `u64` (re-exported from [fiber.rs](fiber.rs)). The `SIG_*` constants are defined in `crate::signals`: SIG_OK(0), SIG_ERROR(1<<0), SIG_YIELD(1<<1), SIG_DEBUG(1<<2), SIG_RESUME(1<<3), SIG_FFI(1<<4), SIG_PROPAGATE(1<<5), SIG_HALT(1<<8) (among others) |
+| `Arity` | [types.rs](types.rs) | Function arity (Exact, AtLeast, Range) |
+| `SymbolId` | [types.rs](types.rs) | Symbol identity: the FNV-1a hash of the name |
+| `SendValue` | [send/](send/mod.rs) | Thread-safe value wrapper |
 
 ### Fiber fields for parent/child chain
 
@@ -77,10 +78,10 @@ These are set during the swap protocol in `with_child_fiber`
 0. **The mutable-store seam.** The raw `RefCell` accessors for the
    `Value`-bearing mutable containers (`as_array_mut_raw`,
    `as_struct_mut_raw`, `as_set_mut_raw`, `as_lbox_raw`,
-   `as_capture_cell_raw` — conversions.rs) are `pub(in crate::value)`.
+   `as_capture_cell_raw` — [conversions.rs](repr/accessors/conversions.rs)) are `pub(in crate::value)`.
    Outside `value/`, reads go through the borrow-only `ReadCell` accessors
    (`as_array_mut` & co.) or copy-outs (`lbox_get`, `capture_cell_get`), and
-   every store/remove goes through the tracked funnels in `arena.rs`
+   every store/remove goes through the tracked funnels in [arena.rs](arena.rs)
    (`push_with_incref`, `struct_put_with_rebind`,
    `capture_store_with_rebind`, …) — [rules.md](../../docs/impl/region/rules.md)
    Rule 5, mutable store: an uncounted container store is a compile error. Membership-neutral
@@ -166,7 +167,7 @@ There is no `Binding` heap variant. Compile-time binding metadata lives in
 
 There is no `NativeFn` heap variant. Native functions are **immediate** values
 (`TAG_NATIVE_FN`, payload = `prim_id`) — no heap cell. The `NativeFn` *type*
-in `types.rs` is `&'static PrimitiveDef`, the static primitive definition the
+in [types.rs](types.rs) is `&'static PrimitiveDef`, the static primitive definition the
 `prim_id` resolves to.
 
 ### Set types
@@ -239,7 +240,7 @@ immediates, not heap objects, so they are not in this list.)
 
 Trait tables are **serialized** on `SendBundle::from_value` via a recursive
 `from_value_inner` call, the same as any other `Value` field. Trait tables
-are immutable structs whose values may be closures; closures survive
+are structs whose values may be closures; closures survive
 cross-thread transfer intact via the intern table in `SendBundle`. The
 receiving thread reconstructs the trait table in `into_value_inner` and
 stores the result in the new `traits` field of the heap object.

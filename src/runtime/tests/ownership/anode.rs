@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! The interpreter's activation owner node: freed at completion, carried across parks and fuel pauses.
 //!
 //! docs/impl/region/owner.md
@@ -78,13 +78,13 @@ fn activation_owner_node_frees_adopted_member_on_normal_completion() {
 }
 
 /// The activation owner node SURVIVES a yield→resume park
-/// (docs/impl/region/owner.md). The hand-emitted body (no production
-/// lowering emits `AdoptIntoActivation`) adopts a fresh-region member into
-/// the activation's node, yields, and — once resumed — completes normally. The
-/// park must carry the node (the member stays Owned, RC frozen, while the fiber
-/// is parked — it must NOT be freed mid-park), and the RESUMED body's normal
-/// completion must free node + member: generation bump, bounded region count
-/// over 50 activations. The counterfactual is the park itself: a suspend that drops the
+/// (docs/impl/region/owner.md). The hand-emitted body adopts a fresh-region
+/// member into the activation's node, yields, and — once resumed — completes
+/// normally. The park must carry the node (the member stays Owned, RC frozen,
+/// while the fiber is parked — it must NOT be freed mid-park), and the RESUMED
+/// body's normal completion must
+/// free node + member: generation bump, bounded region count over 50
+/// activations. The counterfactual is the park itself: a suspend that drops the
 /// node slot strands the Owned member — nothing ever reclaims it, the
 /// generation never bumps, and the count grows by 2 per activation.
 #[test]
@@ -277,7 +277,7 @@ fn activation_owner_node_rides_exec_result_across_fuel_pause() {
         let unit = body_unit(heap_ptr, bc);
         let code = unit.entry().code();
 
-        vm.fiber.fuel = Some(0);
+        vm.fiber.fuel = crate::value::fiber::Fuel::budget(0).expect("a budget of 0");
         let result = vm.execute_bytecode_saving_stack(&code, &Rc::new(vec![]));
         assert!(
             result.bits.intersects(crate::value::SIG_FUEL),
@@ -306,7 +306,7 @@ fn activation_owner_node_rides_exec_result_across_fuel_pause() {
             result.current_closure,
             vm.heap(),
         );
-        vm.fiber.fuel = None;
+        vm.fiber.fuel = crate::value::fiber::Fuel::unmetered();
         let bits = vm.resume_suspended(
             vec![SuspendedFrame::Bytecode(frame)],
             crate::value::Value::NIL,
