@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-11
 # A fiber `ev/spawn` creates keeps its spawner's denial, and the scheduler refuses its denied calls.
 # docs/signals/capabilities.md
 #
@@ -102,6 +102,9 @@
 (assert (refused? (spawned |:os-signal|
                            (fn [] (protect (os/sig-send (sys/pid) :sigchld))))
                   "os/sig-send" :os-signal) "a denied signal send is refused")
+
+(assert (refused? (spawned |:net| (fn [] (protect (tcp/listen "127.0.0.1" 0))))
+                  "tcp/listen" :net) "a denied listen is refused")
 
 # The gate reads a native library's extension, so no library need exist. The
 # payload names the canonical primitive, `import`, which `import-file` aliases.

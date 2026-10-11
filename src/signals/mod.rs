@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-11
 //! Signal type for tracking which signals a function may emit.
 //!
 //! docs/signals/protocol.md
@@ -55,13 +55,14 @@ use crate::value::fiber::SignalBits;
 //   Bit  15:    GPU
 //   Bit  16:    OsSignal — POSIX signal send/raise capability (see below)
 //   Bit  17:    Fs — filesystem capability (see below)
+//   Bit  18:    Net — network capability (see below)
 //
 // "Capability bit" says only that the bit selects no I/O backend: `SIG_IO` is
 // what routes a request to the scheduler, and `:exec` rides alongside it rather
 // than replacing it. It does NOT mean the bit is inert in a fiber mask. A mask
 // catches a signal on any shared bit, so `|:exec|` catches a subprocess request
 // exactly as `|:io|` does — see `SignalBits::covers` and #895.
-//   Bits 18-31: Runtime-reserved (future runtime signals)
+//   Bits 19-31: Runtime-reserved (future runtime signals)
 //   Bits 32-63: User-defined signal types
 
 pub const SIG_OK: SignalBits = SignalBits::EMPTY; // no bits set = normal return
@@ -83,6 +84,7 @@ pub const SIG_WAIT: SignalBits = SignalBits::new(1 << 14); // structured concurr
 pub const SIG_GPU: SignalBits = SignalBits::new(1 << 15); // GPU hardware dispatch (capability bit)
 pub const SIG_OS_SIGNAL: SignalBits = SignalBits::new(1 << 16); // POSIX signal send/raise (capability bit)
 pub const SIG_FS: SignalBits = SignalBits::new(1 << 17); // filesystem access (capability bit, not dispatch)
+pub const SIG_NET: SignalBits = SignalBits::new(1 << 18); // sockets and name resolution (capability bit, not dispatch)
 
 /// The scheduler round trip: the dispatch bit that routes a request to the
 /// I/O backend, and the error it may come back with. Every async primitive
@@ -156,7 +158,7 @@ pub fn breaks_proof(bits: SignalBits) -> bool {
 /// Capability mask: all signals that user code can produce.
 ///
 /// Defined as the complement of VM-internal bits within the 64-bit signal
-/// space (bits 0-17 built-in, bits 18-31 runtime-reserved,
+/// space (bits 0-18 built-in, bits 19-31 runtime-reserved,
 /// bits 32-63 user-defined). Used for capability enforcement (which
 /// operations a fiber can be denied) and for static analysis (what an
 /// unknown callee might emit).
