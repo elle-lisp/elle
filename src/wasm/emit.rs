@@ -13,8 +13,7 @@
 //! agree on, and `functions` — the module sections and the two function-body
 //! entry points.
 
-use crate::lir::code::Op;
-use crate::lir::{ClosureId, FrozenModule, InstrRef, Label, LirOwned, LirView, Reg, Terminator};
+use crate::lir::{ClosureId, FrozenModule, InstrRef, Label, LirOwned, LirView, Reg};
 use crate::value::Value;
 use std::collections::HashMap;
 use wasm_encoder::*;
@@ -75,29 +74,31 @@ fn instr_args_slots(instr: &InstrRef<'_>) -> usize {
 }
 
 /// Byte offset where `module`'s env stack must begin, given the widest args
-/// region any of its functions marshals (see `instr_args_slots`). Floored at the
-/// default `ENV_STACK_BASE` and page-aligned above the args region so a live
-/// closure env never overlaps a call's args.
-pub(super) fn env_stack_base(module: &FrozenModule) -> usize {
+/// region any of its functions marshals (see `instr_args_slots`) and the widest
+/// spill a parking function writes at `ARGS_BASE` (`spill_slots`, the most
+/// registers and local slots one function saves). Floored at the default
+/// `ENV_STACK_BASE` and page-aligned above both, so a live closure env never
+/// overlaps a call's args or a park's spill.
+pub(super) fn env_stack_base(module: &FrozenModule, spill_slots: usize) -> usize {
     let max_slots = std::iter::once(&module.entry)
         .chain(module.closures.iter())
         .flat_map(|func| func.view().nodes())
         .map(|node| instr_args_slots(&node.instr()))
         .max()
         .unwrap_or(0);
-    env_stack_base_for_slots(max_slots)
+    env_stack_base_for_slots(max_slots.max(spill_slots))
 }
 
-/// Env-stack base for a single function's widest args region — the tiered
-/// per-closure path (`emit_single_closure_module`), which compiles one function
-/// with no nested closures.
-pub(super) fn env_stack_base_for_func(func: &LirView<'_>) -> usize {
+/// Env-stack base for a single function's widest args region and its spill —
+/// the tiered per-closure path (`emit_single_closure_module`), which compiles
+/// one function with no nested closures.
+pub(super) fn env_stack_base_for_func(func: &LirView<'_>, spill_slots: usize) -> usize {
     let max_slots = func
         .nodes()
         .map(|node| instr_args_slots(&node.instr()))
         .max()
         .unwrap_or(0);
-    env_stack_base_for_slots(max_slots)
+    env_stack_base_for_slots(max_slots.max(spill_slots))
 }
 
 fn env_stack_base_for_slots(max_slots: usize) -> usize {
@@ -134,25 +135,23 @@ pub fn emit_module(
 /// refused here rather than detonated at runtime
 /// (src/wasm/AGENTS.md):
 ///
+/// - a function that may signal — an emit, a suspending call, and an error a
+///   call or host operation raises all park through `rt_yield`, so only a
+///   function whose inferred signal is silent is admitted;
 /// - `TailCall`/`TailCallArrayMut` — `return_call_indirect` needs callee
 ///   funcref-table indices and `rt_prepare_tail_call`;
-/// - `SuspendingCall` and `Emit` terminators — every signal emission, yield
-///   and `(error …)` alike, routes through `rt_yield`'s suspension-frame
-///   machinery (a host-call error is unaffected: it returns via the status
-///   word);
 /// - `MakeClosure` without module context — no `ClosureId` resolution.
 ///
 /// Pinned by `wasm::tests::gate::standalone_emission_refuses_*`.
 fn standalone_emittable(func: &LirView<'_>, has_module_context: bool) -> bool {
-    func.blocks().all(|b| {
-        b.instrs().all(|i| match i {
-            InstrRef::TailCall { .. }
-            | InstrRef::TailCallArrayMut { .. }
-            | InstrRef::SuspendingCall { .. } => false,
-            InstrRef::MakeClosure { .. } => has_module_context,
-            _ => true,
-        }) && !matches!(b.terminator(), Terminator::Emit { .. })
-    })
+    !func.signal().may_suspend()
+        && func.blocks().all(|b| {
+            b.instrs().all(|i| match i {
+                InstrRef::TailCall { .. } | InstrRef::TailCallArrayMut { .. } => false,
+                InstrRef::MakeClosure { .. } => has_module_context,
+                _ => true,
+            })
+        })
 }
 
 /// Emit a standalone WASM module for a single closure (at table index 0).
@@ -190,19 +189,19 @@ pub fn emit_single_closure(
     Some(emitter.emit_single_closure_module(func))
 }
 
-/// Info about a resume state, used to generate the resume prologue.
+/// A resume state, for the resume prologue. The state's ID, passed as `ctx`,
+/// is one past its index in `WasmEmitter::resume_states`.
 pub(super) struct ResumeStateInfo {
-    /// Resume state ID (1-based, passed as ctx).
-    #[allow(dead_code)]
-    pub state_id: u32,
-    /// Block index to jump to after restoring registers.
-    pub target_block_idx: i32,
+    /// The case the resume enters after it restores the saved slots.
+    pub target: super::layout::Case,
 }
 
-/// Info about a call-site continuation (virtual resume block).
+/// A park site's continuation, which its resume entry runs
+/// (`layout::Case::Resume`).
 pub(super) struct CallSiteContinuation {
-    /// The call's destination register.
-    pub dst: Reg,
+    /// The register a restart delivers into, or `None` where the site
+    /// produces no value (`suspend::ParkSite`).
+    pub dst: Option<Reg>,
     /// Index of the original LIR block containing the call.
     pub source_block_idx: usize,
     /// Index of the first instruction AFTER the call in the source block.
@@ -223,6 +222,13 @@ pub(super) struct WasmEmitter {
     pub next_resume_state: u32,
     pub resume_tag_local: u32,
     pub resume_pay_local: u32,
+    /// The park pair: what a host operation with no result register hands
+    /// back, `rt_push_param`'s error payload, and the value its park carries.
+    pub park_tag_local: u32,
+    pub park_pay_local: u32,
+    /// What the instruction being emitted does with a signal its host
+    /// operation returns (`suspend::SignalExit`).
+    pub signal_exit: super::suspend::SignalExit,
     pub resume_states: Vec<ResumeStateInfo>,
     pub call_continuations: Vec<CallSiteContinuation>,
     pub current_table_idx: u32,
@@ -235,7 +241,10 @@ pub(super) struct WasmEmitter {
     pub module_closures: Option<Vec<LirOwned>>,
     /// Closures to emit as stubs (pre-compiled as standalone Modules).
     pub stubbed_closures: std::collections::HashSet<ClosureId>,
-    /// Per-suspend-point live register sets for sparse spilling.
+    /// The most registers and local slots one parking function emitted so far
+    /// saves: its spill covers that many 16-byte slots from `ARGS_BASE`.
+    pub max_spill_slots: u32,
+    /// The live slots at each place the function parks, for sparse spilling.
     pub spill_live_map: super::liveness::SpillLiveMap,
     /// The driving instance's heap, on which compile-time const-pool Values
     /// (string / compound literals baked into the module) are built. The module
@@ -270,6 +279,9 @@ impl WasmEmitter {
             next_resume_state: 1,
             resume_tag_local: 0,
             resume_pay_local: 0,
+            park_tag_local: 0,
+            park_pay_local: 0,
+            signal_exit: super::suspend::SignalExit::Return,
             resume_states: Vec::new(),
             call_continuations: Vec::new(),
             yield_state_map: HashMap::new(),
@@ -280,6 +292,7 @@ impl WasmEmitter {
             known_int: std::collections::HashSet::new(),
             module_closures: None,
             stubbed_closures: std::collections::HashSet::new(),
+            max_spill_slots: 0,
             spill_live_map: HashMap::new(),
             heap_ptr,
             symbols: std::ptr::null_mut(),
@@ -296,7 +309,7 @@ impl WasmEmitter {
     ///   4: rt_data_op `(op, args_ptr, nargs) -> (tag, payload, signal)`
     ///   5: closure `(env_ptr, args_ptr, nargs, ctx) -> (tag, payload, status)`
     ///   6: rt_make_closure `(table_idx, captures_ptr, metadata_ptr) -> (tag, payload)`
-    ///   7: rt_push_param `(args_ptr, npairs) -> ()`
+    ///   7: rt_push_param `(args_ptr, npairs) -> (tag, payload, signal)`
     ///   8: rt_pop_param `() -> ()`
     ///   9: rt_prepare_tail_call `(func_tag, func_payload, args_ptr, nargs, env_ptr) -> (env_ptr, table_idx, is_wasm, tag, payload, signal)`
     ///  10: rt_yield `(tag, payload, resume_state, regs_ptr, num_regs, func_idx, signal_bits) -> ()`
@@ -315,8 +328,8 @@ impl WasmEmitter {
         );
         // 2: rt_call. The fourth result is `suspended`: whether the caller must
         // park. It is a separate word from `signal` because which signals park
-        // is the interpreter's rule (`signals::dispatch::is_suspending`), not a
-        // bit the emitter can test (docs/impl/wasm.md).
+        // is the interpreter's rule (`signals::dispatch::parks`), not a bit the
+        // emitter can test (docs/impl/wasm.md).
         types.ty().function(
             [
                 ValType::I64,
@@ -346,8 +359,11 @@ impl WasmEmitter {
             [ValType::I32, ValType::I32, ValType::I32],
             [ValType::I64, ValType::I64],
         );
-        // 7: rt_push_param
-        types.ty().function([ValType::I32, ValType::I32], []);
+        // 7: rt_push_param, which raises on an operand that is not a parameter
+        types.ty().function(
+            [ValType::I32, ValType::I32],
+            [ValType::I64, ValType::I64, ValType::I64],
+        );
         // 8: rt_pop_param
         types.ty().function([], []);
         // 9: rt_prepare_tail_call
@@ -418,7 +434,8 @@ impl WasmEmitter {
     ///
     /// Declared immediately after `signal_local` in every function variant
     /// (`emit_function` / `emit_closure_function`), so the two words that
-    /// describe one call sit together. The tail-call scratch follows it.
+    /// describe one call sit together. In a closure the tail-call scratch
+    /// follows it, and in the entry the park pair does.
     pub(in crate::wasm) fn suspended_local(&self) -> u32 {
         self.signal_local + 1
     }

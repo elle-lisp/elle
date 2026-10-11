@@ -230,8 +230,8 @@ impl Emitter {
         // payload reads them off its frozen function. Empty unless a merge fired.
         // Freezing records both these and the release tables ascending.
         self.bytecode.merged_slots = func.merged_slots().iter().map(|s| s.get()).collect();
-        // Likewise the value-route release table, so the entry function's error
-        // exit walks the releases its abandoned frame still owed.
+        // Likewise the two release tables, so a discard of the entry function's
+        // parked frame runs the releases it still owed.
         self.bytecode.frame_release_slots = func.frame_release_slots().to_vec();
         self.bytecode.frame_release_regions = func
             .frame_release_regions()
@@ -253,6 +253,25 @@ impl Emitter {
             std::mem::take(&mut self.yield_points),
             std::mem::take(&mut self.call_sites),
         )
+    }
+
+    /// Record a park site at `resume_ip`, over the operands `stack_regs` below
+    /// it, in a function that may suspend. `push_resume_value` says whether a
+    /// resume delivers into the site's result.
+    fn record_call_site(
+        &mut self,
+        resume_ip: usize,
+        stack_regs: Vec<Reg>,
+        push_resume_value: bool,
+    ) {
+        if self.current_func_may_suspend {
+            self.call_sites.push(CallSiteInfo {
+                resume_ip,
+                stack_regs,
+                num_locals: self.current_func_num_locals,
+                push_resume_value,
+            });
+        }
     }
 
     /// Emit one basic block: its instructions in order, then its terminator.
@@ -299,7 +318,18 @@ impl Emitter {
         for node in block.nodes() {
             // Record source location before emitting the instruction
             self.bytecode.record_location(&node.span());
-            self.emit_instr(&node.instr(), func);
+            let instr = node.instr();
+            self.emit_instr(&instr, func);
+            // An instruction that may raise is a park site: its operands are
+            // popped, and the result it never produced is not yet pushed.
+            if instr.may_raise() {
+                let delivers = instr.raise_delivers();
+                let mut stack_regs = self.stack.clone();
+                if delivers {
+                    stack_regs.pop();
+                }
+                self.record_call_site(self.bytecode.current_pos(), stack_regs, delivers);
+            }
         }
 
         // Record source location for the terminator

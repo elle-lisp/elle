@@ -365,6 +365,7 @@ impl VM {
         // Execute the closure bytecode, saving/restoring the caller's stack.
         // The one-shot hands the body its executing-closure register.
         self.pending_entry_closure = closure_val;
+        let depth = self.fiber.param_depth();
         let result = self.execute_bytecode_saving_stack(&closure.template.code(), &new_env);
 
         let bits = result.bits;
@@ -379,6 +380,9 @@ impl VM {
                 Err(self.format_error_with_location(value))
             }
         } else if bits.intersects(crate::value::SIG_ERROR) {
+            // The error parked the closure's chain, which this host cannot
+            // hold.
+            self.discard_hosted_error(bits, depth);
             let (_, err) = self
                 .fiber
                 .signal
@@ -386,8 +390,9 @@ impl VM {
                 .unwrap_or((crate::value::SIG_ERROR, Value::NIL));
             Err(self.format_error_with_location(err))
         } else {
-            // Unexpected suspending signal (yield from macro body — not supported).
-            self.fiber.signal.take();
+            // Unexpected suspending signal (yield from macro body — not
+            // supported). This host cannot hold the park, so it refuses it.
+            self.refuse_hosted_park(bits, depth);
             Err(format!(
                 "Unexpected signal from macro transformer: {}",
                 crate::signals::registry::format_bits(bits)

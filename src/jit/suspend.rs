@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! Yield side-exit helpers for JIT-compiled code.
 //!
 //! docs/impl/jit.md
@@ -176,9 +176,10 @@ pub extern "C" fn elle_jit_yield(
         );
     }
     // An ERROR emit's retain is the payload's whole delivery — record the mint,
-    // exactly as `handle_emit` does, so the walk and the parked frame's
-    // discharge reclaim the raise chain's own reference.
-    if sig.intersects(crate::value::fiber::SIG_ERROR) {
+    // exactly as `handle_emit` does, so the parked frame's discharge reclaims
+    // the raise chain's own reference.
+    let raised = sig.intersects(crate::value::fiber::SIG_ERROR);
+    if raised {
         vm.fiber.delivery.record_mint(yielded);
     } else {
         // …and every other emit records the PARK, so a `squelch`/`attune`
@@ -190,9 +191,18 @@ pub extern "C" fn elle_jit_yield(
     }
     vm.fiber.signal = Some((sig, yielded));
 
-    if !sig.intersects(crate::value::fiber::SIG_ERROR) {
-        // Suspension: build a frame for later resumption. The compiled
-        // prologue pushed THIS activation's region-remap frame
+    if !sig.intersects(crate::value::fiber::SIG_HALT) {
+        // Any signal but a halt parks: build a frame for later resumption. An
+        // error parks as a suspend does, because an error unwinds nothing
+        // (docs/impl/region/unwind.md), and this frame is the innermost, so it
+        // records its raise site; the emit's continuation funds its own release
+        // of the restart value.
+        if raised {
+            vm.fiber
+                .delivery
+                .park_error(crate::value::fiber::RaiseSite::Emit, yielded);
+        }
+        // The compiled prologue pushed THIS activation's region-remap frame
         // (`elle_jit_push_region_map`), and the side-exit's pop runs after
         // this helper, so `last()` is this activation's map — captured here so
         // post-resume allocs/decrefs (re-entering via the interpreter) resolve
@@ -234,11 +244,15 @@ pub extern "C" fn elle_jit_yield(
     YIELD_SENTINEL
 }
 
-/// JIT yield-through-call: append a caller frame to fiber.suspended.
+/// JIT park at a site: append this frame to fiber.suspended.
 ///
-/// Called from JIT code when a callee yields (detected by post-call
-/// signal check). Builds a caller SuspendedFrame and appends it to
-/// the existing suspended frame chain.
+/// Called from JIT code when the check after a call or an instruction that
+/// may raise finds a pending signal. Builds this frame's SuspendedFrame and
+/// appends it to the chain the callee parked, an error included. A halt
+/// builds no frame. Where nothing parked yet, this frame is the innermost of
+/// an error's chain, and it records the raise site in the delivery ledger:
+/// `Call` where a restart delivers into the site's result, `NoResult` where
+/// the instruction produces none (docs/impl/vm.md).
 ///
 /// Parameters:
 ///   spilled_values: *const Value (16 bytes each)
@@ -260,6 +274,13 @@ pub extern "C" fn elle_jit_yield_through_call(
     closure_payload: u64,
 ) -> JitValue {
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
+    let (sig, payload) = vm
+        .fiber
+        .signal
+        .expect("VM bug: elle_jit_yield_through_call reached with no pending signal");
+    if sig.intersects(crate::value::fiber::SIG_HALT) {
+        return YIELD_SENTINEL;
+    }
     let closure_val = Value {
         tag: closure_tag,
         payload: closure_payload,
@@ -279,6 +300,7 @@ pub extern "C" fn elle_jit_yield_through_call(
     let num_params = call_meta.num_params as usize;
     let num_locals = call_meta.num_locals as usize;
     let num_operands = call_meta.num_spilled as usize;
+    let push_resume_value = call_meta.push_resume_value;
 
     // Spill buffer layout: [params(num_params), locals(num_locals), operands(num_spilled)]
     //
@@ -332,15 +354,24 @@ pub extern "C" fn elle_jit_yield_through_call(
         &stack,
     );
     // MOVE what the caller's activation owes into its park — this compiled activation
-    // unwinds with the callee's suspending signal (see elle_jit_yield).
+    // leaves with the signal (see elle_jit_yield).
     let activation_dues = vm.take_activation_dues();
+    // The innermost frame of an error's chain records its raise site.
+    if sig.intersects(crate::value::fiber::SIG_ERROR) && vm.fiber.suspended.is_none() {
+        let site = if push_resume_value {
+            crate::value::fiber::RaiseSite::Call
+        } else {
+            crate::value::fiber::RaiseSite::NoResult
+        };
+        vm.fiber.delivery.park_error(site, payload);
+    }
     // The caller body's own closure (see elle_jit_yield) — park it for the resume.
     let caller_frame = SuspendedFrame::Bytecode(BytecodeFrame::suspend(
         code,
         env,
         resume_ip,
         stack,
-        true,
+        push_resume_value,
         activation_region_map,
         activation_dues,
         closure_val,
@@ -358,9 +389,8 @@ pub extern "C" fn elle_jit_yield_through_call(
 /// Check if any non-OK signal is pending on the VM.
 /// Returns TRUE if set, FALSE otherwise.
 ///
-/// This extends `elle_jit_has_exception` to also detect suspending signals
-/// (SIG_YIELD, SIG_SWITCH, user-defined). Used after Call instructions in
-/// yielding functions.
+/// The one check after a call or an instruction that may raise: an error, a
+/// halt, and every suspending signal (SIG_YIELD, SIG_SWITCH, user-defined).
 ///
 /// Checks `!is_empty()` rather than matching specific signal bits, because
 /// I/O primitives return compound signals like `SIG_YIELD | SIG_IO` and

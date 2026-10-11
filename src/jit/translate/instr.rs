@@ -8,9 +8,30 @@
 use super::*;
 
 impl<'a> FunctionTranslator<'a> {
-    /// Translate a single LIR instruction.
-    /// Returns true if the instruction emitted a terminator (e.g., TailCall).
+    /// Translate a single LIR instruction, then park the frame at it where a
+    /// signal can leave the frame there: after a call, and after an instruction
+    /// that may raise. The emitter records a site for exactly these, in the same
+    /// order, so the two counts agree. A tail call parks on its own branches.
+    /// Returns true if the instruction emitted a terminator.
     pub(crate) fn translate_instr(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        instr: &InstrRef<'_>,
+        block_map: &HashMap<Label, cranelift_codegen::ir::Block>,
+    ) -> Result<bool, JitError> {
+        let terminated = self.translate_instr_body(builder, instr, block_map)?;
+        let call_site = matches!(
+            instr,
+            InstrRef::Call { .. } | InstrRef::SuspendingCall { .. } | InstrRef::CallArrayMut { .. }
+        );
+        if !terminated && (call_site || instr.may_raise()) {
+            self.emit_signal_check(builder)?;
+        }
+        Ok(terminated)
+    }
+
+    /// Translate one instruction's own operation.
+    fn translate_instr_body(
         &mut self,
         builder: &mut FunctionBuilder,
         instr: &InstrRef<'_>,

@@ -10,15 +10,9 @@ mod abandoned;
 mod dues;
 mod natives;
 
-// Gated where `VM`'s own re-export is, and for the reason given there: the
-// compiled entry is the only reader that names the type.
-#[cfg(feature = "jit")]
-pub(crate) use abandoned::FrameLocals;
-
 impl VM {
     /// Record where a just-minted region came from, for `--trace=arena`
-    /// (docs/impl/region/diagnostics.md § "Naming the code that minted a
-    /// region"). `arena/dump` prints it beside the region's tags, so a region a
+    /// (docs/impl/region/diagnostics.md). `arena/dump` prints it beside the region's tags, so a region a
     /// residue window reports as retained names the Elle code that made it.
     ///
     /// The site is the running function and the place it was called from — the
@@ -115,7 +109,7 @@ impl VM {
         phys
     }
     /// Resolve a static region slot for an allocation, honoring builder-idiom
-    /// **merging** (docs/impl/region/merging.md § Merging).
+    /// **merging** (docs/impl/region/merging.md).
     ///
     /// For a slot NOT in `merged_slots` this is exactly
     /// [`Self::runtime_region_for_alloc_slot`] — mint a fresh physical region
@@ -152,7 +146,7 @@ impl VM {
     /// `runtime_region_for_alloc_slot_maybe_merged`. The single `DecrefRegion` at the
     /// merged root's `decref_point` clears the slot each loop iteration
     /// (`take_runtime_region_for_drop_slot`), preserving per-iteration uniqueness.
-    /// (docs/impl/region/merging.md § Merging, mint-or-reuse.)
+    /// (docs/impl/region/merging.md.)
     #[inline]
     pub(crate) fn runtime_region_for_merged_alloc_slot(
         &mut self,
@@ -171,7 +165,7 @@ impl VM {
     /// Resolve a static slot to the physical region it currently maps to in this
     /// activation, WITHOUT minting or clearing — the read a closure-cycle
     /// merged-arena tail-call deferred release needs (`TailCall::deferred_release_slot`,
-    /// docs/impl/region/letrec.md § The letrec closure-cycle merge).
+    /// docs/impl/region/letrec.md).
     ///
     /// Unlike [`Self::take_runtime_region_for_drop_slot`] this leaves the mapping
     /// in place: the arena is handed to the completing activation's
@@ -206,8 +200,7 @@ impl VM {
     }
     /// Claim a spliced call's args array — the array the calling convention built
     /// for this call and no binding of the program names
-    /// (docs/impl/region/mechanism.md § "A spliced call's arguments come out of
-    /// an array the convention owns").
+    /// (docs/impl/region/mechanism.md).
     ///
     /// The claim is split from the free ([`Self::release_splice_args`]) because
     /// the two answer to different moments. Taking the slot must happen BEFORE the

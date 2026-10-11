@@ -1,5 +1,8 @@
+// audited: 2026-10-06
 //! Fiber suspend/resume host functions:
 //! `rt_yield`, `rt_get_resume_value`, `rt_load_saved_reg`.
+//!
+//! docs/impl/wasm.md
 
 use wasmtime::*;
 
@@ -46,7 +49,8 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
             // stamp it so resume re-drives the child before running the frame.
             let fiber_id = host.current_fiber_id();
             let redrive_child = host.pending_redrive.remove(&fiber_id);
-            host.push_suspension_frame(crate::wasm::host::WasmSuspensionFrame {
+            host.push_parked(crate::wasm::host::ParkedFrame::Wasm(
+                crate::wasm::host::WasmSuspensionFrame {
                 wasm_func_idx: func_idx as u32,
                 resume_state: resume_state as u32,
                 saved_regs,
@@ -56,7 +60,7 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                 self_tag,
                 self_payload,
                 redrive_child,
-            });
+            }));
         },
     )?;
 

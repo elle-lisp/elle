@@ -11,7 +11,7 @@ impl VM {
     /// Handle `(compile/barrier-module source name)` — compile the file in the
     /// per-form fault-barrier test mode and execute its setup module, returning
     /// the `[index thunk]` accumulator. See `compile_barrier_module` and
-    /// docs/test-runner.md § Mechanism.
+    /// docs/test-runner.md.
     ///
     /// Mirrors `eval`'s re-entrant execution: the module bytecode runs on this
     /// VM via `run_thunk_to_completion` (preserving the caller's stack), so
@@ -259,10 +259,10 @@ impl VM {
         prim: &str,
     ) -> (SignalBits, Value) {
         // The entry carries the module body's builder-idiom merge metadata
-        // (mint-or-reuse; docs/impl/region/merging.md § Merging) with the rest of
-        // its payload. Empty unless a merge fired. The unit runs on this VM's
-        // heap and is held until the run ends, because the entry's `Code`
-        // takes no reference of its own.
+        // (mint-or-reuse; docs/impl/region/merging.md) with the rest of its
+        // payload. Empty unless a merge fired. The unit runs on this VM's heap
+        // and is held until the run ends, because the entry's `Code` takes no
+        // reference of its own.
         let unit = unit.on_heap(self.heap());
         let code = unit.entry().code();
         let empty_env = Rc::new(vec![]);
@@ -282,7 +282,10 @@ impl VM {
                 // this answer.
                 (SIG_OK, v)
             }
-            SIG_ERROR => {
+            b if b.intersects(SIG_ERROR) && !b.intersects(crate::value::SIG_HALT) => {
+                // The error parked the module's chain, which the setup run
+                // cannot hold; the error leaves as the run's own.
+                self.discard_hosted_error(b, depth);
                 let (_, e) = self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
                 (SIG_ERROR, e)
             }
@@ -301,8 +304,8 @@ impl VM {
         }
     }
     /// `(compile/dumps source name)` — compile a module once and return its
-    /// `--dump` artifacts as a struct `{:kind string}` (docs/test-runner.md
-    /// § CAS asset capture). Mirrors `dispatch_barrier_module`'s symbol-table
+    /// `--dump` artifacts as a struct `{:kind string}` (docs/test-runner.md).
+    /// Mirrors `dispatch_barrier_module`'s symbol-table
     /// acquisition; the rendering itself lives in `crate::dump` (the single
     /// source of truth shared with `elle --dump`). Each stage is independently
     /// fallible — a kind that doesn't compile is simply absent from the struct,

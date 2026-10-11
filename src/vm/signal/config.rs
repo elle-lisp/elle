@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! `vm/config` and `vm/config-set` over the VM's runtime configuration, and
 //! the `arena/allocs` measurement.
 //!
@@ -343,13 +343,16 @@ impl VM {
         // Hand the thunk its executing-closure register via the one-shot — the
         // measured-thunk entry runs a closure body like any other entrant.
         self.pending_entry_closure = thunk;
+        let depth = self.fiber.param_depth();
         let bits = self.run_thunk_to_completion(&closure.template.code(), &thunk_env);
 
         if !bits.is_empty() {
             // Propagate the error/signal — fiber.signal is already set by inner
             // execution. A suspend-class park leaves as a value, abandoned with
-            // its host.
+            // its host. An error's parked chain ends here, and the error leaves
+            // as this call's own.
             self.abandon_hosted_park(bits);
+            self.discard_hosted_error(bits, depth);
             let (sig, val) = self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
             return (sig, val);
         }

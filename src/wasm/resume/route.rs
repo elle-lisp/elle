@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! What a fiber's OWN mask decides about the outcome its body produced, and the
 //! bookkeeping that installing the resulting signal owes.
 //!
@@ -134,14 +134,11 @@ pub(super) fn route_emit(
     CallOutcome::value(tag, payload)
 }
 
-/// Route an ERROR that propagated up into this fiber's body from a resumed child
-/// (the child's uncaught error re-raised through this fiber's `fiber/resume`
-/// call) through this fiber's OWN mask. A `SIG_ERROR` this mask covers is CAUGHT:
-/// the fiber pauses holding it and the value flows back as a normal result
-/// (signal 0), so the resumer continues — the WASM analogue of the VM
-/// trampoline's caught arm. Anything else propagates: the fiber goes `:error`,
-/// and `bits` is re-returned to unwind further.
-pub(super) fn route_error(
+/// Route a HALT that left this fiber's body: the one signal that leaves without
+/// parking, since an error parks like a suspend (`signals::dispatch::parks`).
+/// The fiber goes `:error` holding it, and `bits` is re-returned so the halt
+/// leaves the resumer too.
+pub(super) fn route_halt(
     caller: &mut Caller<'_, ElleHost>,
     fiber_handle: &crate::value::FiberHandle,
     fiber_value: Value,
@@ -150,28 +147,13 @@ pub(super) fn route_error(
     bits: crate::value::SignalBits,
     value: Value,
 ) -> CallOutcome {
-    let caught =
-        bits.intersects(crate::value::SIG_ERROR) && fiber_handle.with(|f| f.mask).covers(bits);
-    if caught {
-        install_signal(
-            caller,
-            fiber_handle,
-            fiber_value,
-            crate::value::FiberStatus::Paused,
-            bits,
-            value,
-        );
-        CallOutcome::value(tag, payload)
-    } else {
-        install_signal(
-            caller,
-            fiber_handle,
-            fiber_value,
-            crate::value::FiberStatus::Error,
-            bits,
-            value,
-        );
-        // The unwind signal re-returned to the caller IS this fiber's bits.
-        CallOutcome::signalled(tag, payload, bits)
-    }
+    install_signal(
+        caller,
+        fiber_handle,
+        fiber_value,
+        crate::value::FiberStatus::Error,
+        bits,
+        value,
+    );
+    CallOutcome::signalled(tag, payload, bits)
 }

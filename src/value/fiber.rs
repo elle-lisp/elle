@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-06
 //! Fiber types for the Elle runtime.
 //!
 //! A fiber is an independent execution context: it owns its operand stack,
@@ -334,6 +334,15 @@ impl Fiber {
     #[inline]
     pub fn unwind_params(&mut self, depth: ParamDepth) {
         self.param_frames.truncate(depth.0);
+    }
+
+    /// Take the `parameterize` frames pushed above `depth` by code that parked
+    /// somewhere other than this fiber: the WASM tier holds a bytecode
+    /// callee's chain on the fiber it drives.
+    #[cfg(feature = "wasm")]
+    pub fn take_params_above(&mut self, depth: ParamDepth) -> Vec<Vec<(u32, Value)>> {
+        self.param_frames
+            .split_off(depth.0.min(self.param_frames.len()))
     }
 
     /// Set an error signal on this fiber, the error value born in the

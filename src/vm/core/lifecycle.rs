@@ -110,7 +110,6 @@ impl VM {
             pending_tail_deferrals: Vec::new(),
             pending_fiber_resume: None,
             pending_entry_closure: crate::value::Value::NIL,
-            pending_error_park: false,
             trampoline_parent_override: None,
             error_loc: None,
             root_exit_depth: 0,
@@ -164,7 +163,6 @@ impl VM {
         self.pending_call = None;
         self.pending_tail_deferrals.clear();
         self.pending_entry_closure = crate::value::Value::NIL;
-        self.pending_error_park = false;
         self.pending_fiber_resume = None;
         self.error_loc = None;
         self.active_tier = "bytecode";

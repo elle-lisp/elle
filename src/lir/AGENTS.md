@@ -61,7 +61,7 @@ The frozen form, which every other reader reads ([code/](code/mod.rs)):
 | `LirOwned` | A `LirCode` plus the `Value`s its `ValueConst` instructions load |
 | `LirBody` | The same records in region pages, as a code payload's `lir` field ([code/body.rs](code/body.rs)) |
 | `LirView` | The read API over either home: blocks, instructions, terminators, header, tables, sites |
-| `SiteRef` | A yield point or a call site: resume IP, live registers, local count |
+| `SiteRef` | A yield point or a call site: resume IP, live registers, local count, and whether a resume delivers a value |
 
 The emitter, which reads the frozen form:
 
@@ -69,7 +69,7 @@ The emitter, which reads the frozen form:
 |------|---------|
 | `Emitter` | LIR → `ClosureCompiled`, that is `(Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>)`, writing each nested lambda's payload into the `CodeArena` it was built over ([emit/mod.rs](emit/mod.rs)). `emit_module_with_lambdas` also answers the header over every closure's payload, for the WASM backend's dual compile |
 | `YieldPointInfo` | What emission records at a yield point: resume IP, live registers, local count |
-| `CallSiteInfo` | What emission records at a call site, for yield-through-call |
+| `CallSiteInfo` | What emission records at a park site, a call or an instruction that may raise: resume IP, live registers, local count, and whether a resume delivers a value |
 | `testkit::LirFixture` | Builds a frozen function by hand, for tests (`#[cfg(test)]`) |
 
 `ConstRef::Nil` and `ConstRef::EmptyList` are distinct constants. Nil is falsy
@@ -172,7 +172,8 @@ Emitter, reading each function through a LirView
     ├─► emit instruction bytes, then patch jump offsets
     ├─► build the LocationMap from the node spans
     ├─► collect YieldPointInfo at each Emit terminator
-    └─► collect CallSiteInfo at each call, in a function that may suspend
+    └─► collect CallSiteInfo at each call and each instruction that may
+        raise, in a function that may signal
     │
     ▼
 ClosureCompiled = (Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>)
@@ -213,13 +214,15 @@ break that, because labels are allocated in creation order.
 
 4. **Yield and call-site metadata come from emission.** The emitter records a
    `YieldPointInfo` at each `Terminator::Emit` and a `CallSiteInfo` at each
-   call and each `TailCall`. `PayloadParts::lambda` hands both to the code
-   payload's LIR body beside the frozen records, and the JIT reads the
-   payload's.
+   call, each `TailCall`, and each instruction that may raise
+   (`Op::may_raise`, [code/raise.rs](code/raise.rs)).
+   `PayloadParts::lambda` hands both to the code payload's LIR body beside the
+   frozen records, and the JIT reads the payload's.
 
-5. **Call sites are recorded only where the function may suspend.**
+5. **Call sites are recorded only where the function may signal.**
    `Emitter.current_func_may_suspend`, set from `signal.may_suspend()`, gates
-   the recording. A function that can never yield has no `call_sites`.
+   the recording. That method is true for any signal bit, an error included,
+   so only a silent function has no `call_sites`.
 
 6. **A block's first emitted predecessor fixes its operand depth.** Every
    other edge into that block must arrive at the same depth. See "Merge
@@ -241,14 +244,17 @@ The JIT spills the locals, then these registers, and calls the emit runtime
 helper.
 
 `CallSiteInfo`:
-- `resume_ip` — the bytecode offset after the call instruction, where the
-  interpreter resumes if the callee yields.
-- `stack_regs` — the registers on the operand stack after the callee and
-  arguments are popped and before the result is pushed.
+- `resume_ip` — the bytecode offset after the instruction, where the
+  interpreter resumes when a signal leaves the frame there.
+- `stack_regs` — the registers on the operand stack after the instruction's
+  operands are popped and before its result is pushed.
 - `num_locals` — the local slots below them.
+- `push_resume_value` — whether a resume delivers into the instruction's
+  result. An instruction with no result (`InstrRef::raise_delivers`) takes
+  none.
 
-That is the interpreter's stack when a yield propagates through a call. The JIT
-builds the caller's `SuspendedFrame` from it when a callee yields.
+That is the interpreter's stack when a signal leaves the frame at the site, a
+yield or an error. The JIT builds the frame's `SuspendedFrame` from it.
 
 A `TailCall` records a call site too. Its `resume_ip` is where the block after
 the tail call starts, the block a native callee falls through to when it

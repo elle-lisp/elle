@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! Primary call-dispatch host functions: `call_primitive` and `rt_call`.
 //!
 //! docs/impl/wasm.md
@@ -35,7 +35,7 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
     //   -> (tag: i64, payload: i64, signal: i64, suspended: i64)
     //
     // `suspended` is the word emitted code branches on. It is computed here, once,
-    // by `signals::dispatch::is_suspending` — never inferred from a bit of
+    // by `signals::dispatch::parks` — never inferred from a bit of
     // `signal` (docs/impl/wasm.md).
     linker.func_wrap(
         "elle",

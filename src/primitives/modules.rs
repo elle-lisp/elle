@@ -363,7 +363,10 @@ pub(crate) fn prim_import_file(
                     // reference explicitly (`retain_plugin_result`).
                     (SIG_OK, value)
                 }
-                SIG_ERROR => {
+                b if b.intersects(SIG_ERROR) && !b.intersects(crate::value::SIG_HALT) => {
+                    // The error parked the module's chain, which import cannot
+                    // hold, so it ends here before import raises at its own call.
+                    vm.discard_hosted_error(bits, depth);
                     let (_, err_value) = vm
                         .fiber
                         .signal
@@ -410,7 +413,7 @@ primitive! {
         // result — a value the module's own compiled top level returned, or a
         // plugin value an earlier call minted and cached — lives in neither this
         // call's region nor the specifier's. The VM re-entry rule: unbounded
-        // result, no store (docs/impl/region/effects.md § Opaque).
+        // result, no store (docs/impl/region/effects.md).
         effect: RegionEffect::Opaque,
         result_minted: true,
         bits_from_args: Some(import_required_bits),

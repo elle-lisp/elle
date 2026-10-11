@@ -220,16 +220,10 @@ impl Emitter {
 
                 // Record call site metadata AFTER popping func/args, BEFORE
                 // pushing result. This matches the interpreter's stack state
-                // when yield propagates through a call: the Call instruction
-                // has consumed its operands, the callee yielded, and the
-                // interpreter saves the remaining stack.
-                if self.current_func_may_suspend {
-                    self.call_sites.push(CallSiteInfo {
-                        resume_ip: call_resume_ip,
-                        stack_regs: self.stack.clone(),
-                        num_locals: self.current_func_num_locals,
-                    });
-                }
+                // when a signal leaves the frame at a call: the Call
+                // instruction has consumed its operands, the callee parked or
+                // raised, and the interpreter saves the remaining stack.
+                self.record_call_site(call_resume_ip, self.stack.clone(), true);
 
                 self.push_reg(*dst);
             }
@@ -293,8 +287,7 @@ impl Emitter {
                     .emit_u32(deferred_release_slot.map_or(0, |s| s.get()));
                 // The borrowed-argument stash slots, so a signal exit can
                 // consume the retains the fall-through block below would have
-                // (docs/impl/region/mechanism.md § "What the fall-through owes,
-                // a signal exit owes too"). A count byte then one u16 slot each,
+                // (docs/impl/region/mechanism.md). A count byte then one u16 slot each,
                 // so a call with no borrowed argument — the overwhelming
                 // majority — costs exactly the zero byte. Truncated at 255: a
                 // longer argument list than any real call has, whose tail keeps
@@ -308,14 +301,12 @@ impl Emitter {
                 // call, where the fall-through block starts. The simulation
                 // keeps func and args on the stack, so the site's operands are
                 // the prefix below them.
-                if self.current_func_may_suspend {
-                    let below = self.stack.len() - total_values;
-                    self.call_sites.push(CallSiteInfo {
-                        resume_ip: self.bytecode.current_pos(),
-                        stack_regs: self.stack[..below].to_vec(),
-                        num_locals: self.current_func_num_locals,
-                    });
-                }
+                let below = self.stack.len() - total_values;
+                self.record_call_site(
+                    self.bytecode.current_pos(),
+                    self.stack[..below].to_vec(),
+                    true,
+                );
             }
 
             InstrRef::List {

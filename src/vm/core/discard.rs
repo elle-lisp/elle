@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-06
 //! Abandoning suspended work: a call boundary, a host's refusal, and the
 //! chokepoint that runs what the discarded frames still owed.
 //!
@@ -131,9 +131,10 @@ impl VM {
     /// park's delivery retain nor the install that releases a runtime-built
     /// payload, so both are owed here (docs/impl/region/park.md).
     ///
-    /// `payload` is the value the exit leaves with — a boundary's own error, or
-    /// `nil` for a refusing host, which builds its error afterwards — whose
-    /// region no release here may take, on the same
+    /// `payload` is the value the exit leaves with — a boundary's own error,
+    /// the error a host ends ([`Self::discard_hosted_error`]), or `nil` for a
+    /// refusing host, which builds its error afterwards — whose region no
+    /// release here may take, on the same
     /// reading the abandoned-frame walk makes (docs/impl/region/mechanism.md).
     /// `parked` is the signal whose park this ends, named by the site that
     /// ends it (see `boundary_violation`).
@@ -204,6 +205,40 @@ impl VM {
         // The host's error is built after this, in a fresh region of its own, so
         // no value leaving this exit needs the walk's payload exemption.
         self.discard_suspended_frames(Value::NIL, parked, depth);
+    }
+
+    /// A host that runs code on the current fiber ends the chain an error in
+    /// that code parked. An error parks every frame from the raise to the hosted
+    /// body (docs/impl/region/unwind.md), and the host cannot hold the park: it
+    /// raises at its own call, or reports. So the chain ends through
+    /// [`Self::discard_suspended_frames`], which runs what each frame owed.
+    ///
+    /// The payload stays standing, because it leaves with the host's error or
+    /// is read for the host's report, and a raise's mint of it stays recorded
+    /// for the frames it passes next. `depth` is the parameter depth at the
+    /// host's entry. A no-op for anything but an error.
+    pub(crate) fn discard_hosted_error(&mut self, bits: SignalBits, depth: ParamDepth) {
+        let payload = self.fiber.signal.map_or(Value::NIL, |(_, v)| v);
+        self.discard_held_error(bits, payload, depth);
+    }
+
+    /// [`Self::discard_hosted_error`] for a host that holds the error's `payload`
+    /// itself: `invoke_closure_jit` restores the caller's signal before it asks.
+    pub(crate) fn discard_held_error(
+        &mut self,
+        bits: SignalBits,
+        payload: Value,
+        depth: ParamDepth,
+    ) {
+        use crate::value::SIG_HALT;
+        if !bits.intersects(SIG_ERROR) || bits.intersects(SIG_HALT) {
+            return;
+        }
+        let minted = self.fiber.delivery.mint_names(payload);
+        self.discard_suspended_frames(payload, None, depth);
+        if minted {
+            self.fiber.delivery.record_mint(payload);
+        }
     }
 
     /// A host that runs a thunk on the current fiber hands the thunk's

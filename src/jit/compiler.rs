@@ -99,9 +99,9 @@ impl JitCompiler {
     pub fn compile(mut self, lir: &LirView<'_>) -> Result<JitCode, JitError> {
         // Polymorphic and yielding functions are supported via side-exit.
         // The runtime helper elle_jit_call handles arbitrary callables
-        // (closures, arrays, structs), and emit_yield_check_after_call
-        // builds a yield-through-call frame if the callee suspends. What the
-        // JIT refuses is two shapes, and `--dump=jit` reports the same answer.
+        // (closures, arrays, structs), and the check after each site
+        // (`emit_signal_check`) parks the frame when a signal leaves there. What
+        // the JIT refuses is two shapes, and `--dump=jit` reports the same answer.
         if let Some(reason) = lir.jit_refusal() {
             return Err(JitError::UnsupportedInstruction(reason.to_string()));
         }
@@ -155,6 +155,7 @@ impl JitCompiler {
                 num_spilled: cs.stack_regs.len() as u16,
                 num_locals: cs.num_locals,
                 num_params: lir.num_params() as u16,
+                push_resume_value: cs.push_resume_value,
             })
             .collect();
 

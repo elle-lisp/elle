@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-06
 //! `compile/run-on :bytecode` — force pure interpreter execution.
 //!
 //! docs/impl/differential.md
@@ -70,6 +70,9 @@ impl VM {
         // A suspend-class signal leaves this forced-tier entry as a value; the
         // park it names is abandoned with its host (`abandon_hosted_park`).
         self.abandon_hosted_park(bits);
+        // An error parked the closure's chain, which this entry cannot hold;
+        // the error leaves as the entry's own.
+        self.discard_hosted_error(bits, depth);
 
         // An error, or the suspension handed on: the slot holds the result.
         if let Some((sig_bits, val)) = self.fiber.signal.take() {

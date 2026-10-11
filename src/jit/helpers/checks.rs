@@ -1,11 +1,11 @@
 // audited: 2026-10-06
 // src/jit/AGENTS.md
-// docs/impl/region/mechanism.md
-//! The two checks a compiled call site runs on the way back.
+// docs/impl/region/unwind.md
+//! The check a compiled frame runs where a signal can leave it, and the park it makes there.
 //!
-//! A callee that raised abandons this activation; a callee that suspended parks
-//! it. Each check is a branch and an exit block spliced in after the call, so
-//! the caller continues only on the normal return.
+//! A call, or an instruction that may raise, is followed by one check. A signal
+//! that reaches it parks the frame at the site, a halt included in the check
+//! but given no frame, so the code after the site runs only on a clean return.
 
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::types::I64;
@@ -19,75 +19,61 @@ use super::super::translate::FunctionTranslator;
 use super::super::JitError;
 
 impl FunctionTranslator<'_> {
-    /// Emit exception check after a call instruction.
+    /// Emit the check after a site a signal can leave this frame at: a call, or
+    /// an instruction that may raise (`Op::may_raise`).
     ///
-    /// The callee raised, so this activation is abandoned where it stands: it
-    /// runs the releases it still owed, pops its region-remap frame, and returns
-    /// (TAG_NIL, 0) for the caller's own check to find
-    /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
-    /// still owes").
-    pub(crate) fn emit_exception_check_after_call(
+    /// In a function that may signal, the site is the next one the emitter
+    /// recorded, and any pending signal parks the frame there: the helper parks
+    /// it as a bytecode frame at the site's resume ip behind whatever the callee
+    /// parked, an error included, and builds no frame for a halt
+    /// (docs/impl/region/unwind.md). A silent function records no site. The only
+    /// signal that reaches it is a halt or the terminal error a broken proof
+    /// raises, and it returns on either (docs/signals/jit.md).
+    pub(crate) fn emit_signal_check(
         &mut self,
         builder: &mut FunctionBuilder,
     ) -> Result<(), JitError> {
-        let vm = self.vm_ptr.ok_or_else(|| {
-            JitError::InvalidLir("emit_exception_check without vm pointer".to_string())
-        })?;
-
-        // Call has_exception(vm) -> (tag, payload)
-        let (has_exc_tag, _) = self.call_helper_vm_only(builder, self.helpers.has_exception, vm)?;
-
-        // TAG_TRUE = 3, TAG_FALSE = 4, TAG_NIL = 2 — check if tag == TAG_TRUE
-        let tag_true = builder.ins().iconst(I64, TAG_TRUE as i64);
-        let is_true = builder.ins().icmp(IntCC::Equal, has_exc_tag, tag_true);
-
-        let exc_block = builder.create_block();
-        let cont_block = builder.create_block();
-        builder.ins().brif(is_true, exc_block, &[], cont_block, &[]);
-
-        builder.switch_to_block(exc_block);
-        builder.seal_block(exc_block);
-        let nil_tag = builder.ins().iconst(I64, TAG_NIL as i64);
-        let zero = builder.ins().iconst(I64, 0);
-        self.emit_abandoned_error_return(builder, nil_tag, zero)?;
-
-        builder.switch_to_block(cont_block);
-        builder.seal_block(cont_block);
-
-        Ok(())
+        let site = if self.lir.signal().may_suspend() {
+            let idx = self.call_site_index;
+            self.call_site_index += 1;
+            Some(idx)
+        } else {
+            None
+        };
+        self.emit_signal_check_at(builder, site)
     }
 
-    /// Emit yield check after a call instruction for yielding functions.
-    ///
-    /// The callee suspended, so this activation suspends with it: the helper
-    /// parks the frame — reading this activation's region map, still on top —
-    /// and the exit then pops that map like every other one
-    /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
-    /// still owes"). Nothing is released here: the frame resumes, and the
-    /// releases it still owes are the resumed body's to run.
-    pub(crate) fn emit_yield_check_after_call(
+    /// [`Self::emit_signal_check`] at a site already taken: `Some` parks the
+    /// frame there, and `None` returns. A tail call takes its site once and
+    /// checks on two branches.
+    pub(crate) fn emit_signal_check_at(
         &mut self,
         builder: &mut FunctionBuilder,
-        call_site_idx: u32,
+        site: Option<u32>,
     ) -> Result<(), JitError> {
-        let vm = self.vm_ptr.ok_or_else(|| {
-            JitError::InvalidLir("emit_yield_check without vm pointer".to_string())
-        })?;
+        let vm = self
+            .vm_ptr
+            .ok_or_else(|| JitError::InvalidLir("signal check without vm pointer".to_string()))?;
 
-        // Check if any signal is pending
         let (has_sig_tag, _) = self.call_helper_vm_only(builder, self.helpers.has_signal, vm)?;
         let tag_true = builder.ins().iconst(I64, TAG_TRUE as i64);
         let is_true = builder.ins().icmp(IntCC::Equal, has_sig_tag, tag_true);
 
-        let yield_block = builder.create_block();
+        let exit_block = builder.create_block();
         let cont_block = builder.create_block();
         builder
             .ins()
-            .brif(is_true, yield_block, &[], cont_block, &[]);
+            .brif(is_true, exit_block, &[], cont_block, &[]);
 
-        builder.switch_to_block(yield_block);
-        builder.seal_block(yield_block);
-        self.emit_park_at_call_site(builder, call_site_idx)?;
+        builder.switch_to_block(exit_block);
+        builder.seal_block(exit_block);
+        if let Some(idx) = site {
+            self.emit_park_at_call_site(builder, idx)?;
+        } else {
+            let nil_tag = builder.ins().iconst(I64, TAG_NIL as i64);
+            let zero = builder.ins().iconst(I64, 0);
+            self.emit_pop_then_return(builder, nil_tag, zero)?;
+        }
 
         builder.switch_to_block(cont_block);
         builder.seal_block(cont_block);
@@ -98,7 +84,7 @@ impl FunctionTranslator<'_> {
     /// Park this frame at an emitter-recorded call site and return the park's
     /// result.
     ///
-    /// The builder must sit on a block that only a suspended callee reaches.
+    /// The builder must sit on a block that only a pending signal reaches.
     /// The block ends here: the exit pops this activation's region map after
     /// the helper has cloned it into the parked frame.
     pub(crate) fn emit_park_at_call_site(

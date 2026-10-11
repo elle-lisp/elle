@@ -220,13 +220,10 @@ impl VM {
                 if let Some(bits) = self.try_jit_call(closure, &args, func, param_depth) {
                     self.fiber.call_depth -= 1;
                     self.fiber.call_stack.pop();
-                    // A compiled callee's frames are abandoned by its raise,
-                    // and the `parameterize` frames they pushed with them.
-                    self.drop_abandoned_param_frames(param_depth);
                     match bits {
-                        Some(sig) if !sig.intersects(SIG_ERROR) && !sig.intersects(SIG_HALT) => {
-                            // JIT function suspended — any bits except SIG_ERROR/SIG_HALT
-                            // cause the caller frame to be appended for resumption.
+                        Some(sig) if !sig.intersects(SIG_HALT) => {
+                            // The compiled callee parked: any bits but a halt, an
+                            // error included, append the caller frame for resumption.
                             // fiber.signal and fiber.suspended are set by the JIT yield
                             // helpers. Build the interpreter-level caller frame.
                             // Use unwrap_or_default() so this works whether the JIT callee

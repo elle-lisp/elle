@@ -1,8 +1,8 @@
-// audited: 2026-10-04
+// audited: 2026-10-06
 // Every committed lockfile holds one Cranelift, one regalloc2 and a wasmtime
 // past its advisory, and each variant's holds the root's.
 //
-// docs/impl/wasm.md
+// docs/impl/cranelift.md
 // bins/overview.md
 //
 // These read each `Cargo.lock` directly. A duplicated crate is invisible to
@@ -120,8 +120,7 @@ fn wasmtime_resolves_at_or_above_the_advisory_floor() {
     // audit job sees it. This test fails on the developer's machine first.
     // `cargo audit` reads the root's Cargo.lock alone, so for a variant's
     // lockfile — elle-wasm is the binary that links wasmtime — nothing else
-    // sees it at all. See docs/impl/wasm.md § "One Cranelift in the dependency
-    // graph".
+    // sees it at all (docs/impl/cranelift.md).
     let (major, minor, patch) = WASMTIME_FLOOR;
     for path in LOCKFILES {
         let versions = locked_versions(path);

@@ -373,7 +373,7 @@ impl WasmEmitter {
                 // The executing closure lives in the reserved `SELF_SLOT` in linear
                 // memory (tag at `SELF_SLOT`, payload at `SELF_SLOT + 8`), written by
                 // the host at every closure entry and carried across suspend/resume
-                // (src/wasm/store/call.rs, src/wasm/linker/create.rs). Read it into
+                // (`store::write_self_slot`, src/wasm/store.rs). Read it into
                 // `dst` — the value path materializes the closure; a call-position
                 // self-reference calls it (re-entering the same code+env).
                 f.instruction(&Instruction::I32Const(SELF_SLOT));
@@ -407,6 +407,9 @@ impl WasmEmitter {
                 f.instruction(&Instruction::I32Const(ARGS_BASE));
                 f.instruction(&Instruction::I32Const((pairs.len() / 2) as i32));
                 f.instruction(&Instruction::Call(FN_RT_PUSH_PARAM));
+                // A non-parameter raises. The instruction has no result
+                // register, so what the raise hands back goes to the park pair.
+                self.store_signalled(f, (self.park_tag_local, self.park_pay_local));
             }
             InstrRef::PopParamFrame => {
                 f.instruction(&Instruction::Call(FN_RT_POP_PARAM));

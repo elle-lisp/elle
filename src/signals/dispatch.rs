@@ -105,7 +105,7 @@ pub fn is_suspending(bits: SignalBits) -> bool {
 /// WASM tier when it reports a call's outcome.
 #[inline]
 pub fn parks(bits: SignalBits) -> bool {
-    is_suspending(bits)
+    bits.intersects(SIG_ERROR) || is_suspending(bits)
 }
 
 #[cfg(test)]

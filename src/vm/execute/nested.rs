@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-06
 //! Interpreted non-tail calls on one dispatch loop: a caller pauses in the
 //! fiber while its callee runs, and resumes when the callee ends.
 //!
@@ -72,7 +72,6 @@ impl VM {
                 .callers
                 .pop()
                 .expect("VM bug: a callee returns into a paused caller");
-            self.drop_abandoned_param_frames(caller.param_depth);
             self.fiber.stack.clear();
             self.fiber.stack.extend(caller.stack);
             self.fiber.current_closure = caller.closure;
@@ -119,12 +118,6 @@ impl VM {
             param_depth: self.fiber.param_depth(),
             closure: self.fiber.current_closure,
         });
-        // `do_fiber_first_resume` sets this for the fiber body alone, and the
-        // body's entry took it, so no callee is a parked error frame.
-        debug_assert!(
-            !self.pending_error_park,
-            "VM bug: a nested callee was handed the fiber body's error park"
-        );
         #[cfg(debug_assertions)]
         Self::debug_assert_entry_closure_matches(call.closure, &call.code);
         self.fiber.current_closure = call.closure;
@@ -142,13 +135,11 @@ impl VM {
     }
 
     /// End a callee's activation whose dispatch loop exited at `exit`,
-    /// answering how it ended and the call that entered it. A callee is always
-    /// abandoned by an error, so the walk runs.
+    /// answering how it ended and the call that entered it.
     fn leave_callee(&mut self, callee: Activation, exit: Exit) -> (ExecResult, CallSite) {
         #[cfg(debug_assertions)]
         let entry_depth = callee.entry_depth;
-        let mut result =
-            self.end_activation(callee.code, callee.env, exit, callee.tail_boundary, true);
+        let mut result = self.end_activation(callee.code, callee.env, exit, callee.tail_boundary);
         self.close_activation(
             &mut result,
             #[cfg(debug_assertions)]
@@ -162,9 +153,9 @@ impl VM {
     /// `depth` is the parameter depth at the call.
     ///
     /// `None`: the result is on the caller's stack and the caller continues.
-    /// `Some(bits)`: the caller leaves by `bits` too. A suspend has parked the
-    /// caller behind the callee; an error or halt keeps the trace frame for
-    /// the stack trace.
+    /// `Some(bits)`: the caller leaves by `bits` too. A suspend or an error has
+    /// parked the caller behind the callee, and an error or halt keeps the trace
+    /// frame for the stack trace.
     fn complete_call(
         &mut self,
         code: &crate::value::Code,
@@ -172,10 +163,18 @@ impl VM {
         resume_ip: usize,
         site: CallSite,
         depth: ParamDepth,
-        result: ExecResult,
+        mut result: ExecResult,
     ) -> Option<SignalBits> {
         self.fiber.call_depth -= 1;
         let bits = result.bits;
+        let raised = bits.intersects(SIG_ERROR) && !bits.intersects(SIG_HALT);
+
+        // An error parks the callee that raised it, as a suspend parked it
+        // before returning here, so a boundary that refuses the signal below
+        // discards the callee's frame with the rest of the chain.
+        if raised {
+            self.park_raised(&mut result);
+        }
 
         // The callee's boundary may refuse its signal: a broken proof, or a
         // signal its squelch names. `enforce_boundary` discards the suspended
@@ -183,9 +182,9 @@ impl VM {
         //
         // A fiber body is exempt: it runs outside any call, so its first resume
         // crosses no boundary.
-        if let Some(raised) = self.enforce_boundary(bits, &site.boundary, depth) {
+        if let Some(refusal) = self.enforce_boundary(bits, &site.boundary, depth) {
             self.fiber.call_stack.pop();
-            return Some(raised);
+            return Some(refusal);
         }
         if bits.is_empty() {
             let (_, value) = self.fiber.signal.take().unwrap();
@@ -193,15 +192,15 @@ impl VM {
             self.fiber.call_stack.pop();
             return None;
         }
-        if bits.intersects(SIG_ERROR) || bits.intersects(SIG_HALT) {
-            // The call frame is preserved on error for stack traces.
+        if bits.intersects(SIG_HALT) {
+            // The call frame is preserved for the stack trace.
             return Some(bits);
         }
 
-        // A suspending signal — any bits except SIG_ERROR/SIG_HALT — parks the
-        // caller behind the callee for resumption. The caller frame is built
-        // whether or not the callee populated fiber.suspended: a callee that
-        // tail-called a native yielding primitive creates no SuspendedFrame
+        // Every other signal parks the caller behind the callee for resumption,
+        // an error included (docs/impl/region/unwind.md). The caller frame is
+        // built whether or not the callee populated fiber.suspended: a callee
+        // that tail-called a native yielding primitive creates no SuspendedFrame
         // (TCO), so fiber.suspended may be None here.
         let (_, value) = self.fiber.signal.take().unwrap();
         let caller_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
@@ -249,8 +248,10 @@ impl VM {
         let mut frames = self.fiber.suspended.take().unwrap_or_default();
         // Preserve a non-yield-suspended (e.g. SIG_FUEL) callee's inner frame —
         // it lives in result.stack, not fiber.suspended (see
-        // park_suspended_callee_frame).
-        self.park_suspended_callee_frame(&mut frames, bits, result);
+        // park_suspended_callee_frame). An error parked it above.
+        if !raised {
+            self.park_suspended_callee_frame(&mut frames, bits, result);
+        }
         if self
             .runtime_config
             .has_trace_bit(crate::config::trace_bits::FIBER)
@@ -267,7 +268,10 @@ impl VM {
         frames.push(caller_frame);
         self.fiber.signal = Some((bits, value));
         self.fiber.suspended = Some(frames);
-        self.fiber.call_stack.pop();
+        // An error keeps the trace frame for the stack trace.
+        if !raised {
+            self.fiber.call_stack.pop();
+        }
         Some(bits)
     }
 }

@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! Fiber resume chain: drive suspended WASM closures through yield-resume cycles.
 //!
 //! docs/impl/wasm.md
@@ -30,13 +30,16 @@ use crate::wasm::outcome::CallOutcome;
 
 mod route;
 
-use route::{install_signal, route_emit, route_error};
+use route::{install_signal, route_emit, route_halt};
 
 /// Resume outcome from drive_resume_chain.
 enum ResumeOutcome {
+    /// Every frame completed, with this value.
     Dead(Value),
+    /// A frame parked again, an error included.
     Yielded(i64, i64, u64),
-    Error(i64, i64, u64),
+    /// A frame halted.
+    Halted(i64, i64, u64),
 }
 
 /// Outcome of re-driving a parked child fiber (a `protect`/`defer`/`with` body
@@ -45,11 +48,11 @@ enum RedriveOutcome {
     /// The child completed (or caught its own error): its result value flows to
     /// the frame that awaited it.
     Completed(Value),
-    /// The child suspended again on another uncaught wait/io: propagate the
-    /// signal so the scheduler drives it, and re-drive the child again next time.
+    /// The child parked again, on another uncaught wait/io or an error its mask
+    /// does not cover: propagate the signal, and re-drive the child next time.
     Suspended(i64, i64, u64),
-    /// The child raised an error its mask does not cover: propagate the error.
-    Errored(i64, i64, u64),
+    /// The child halted: propagate the halt.
+    Halted(i64, i64, u64),
 }
 
 /// Re-drive a parked child fiber with the value the scheduler delivered.
@@ -75,7 +78,7 @@ fn redrive_child(
     if out.suspended {
         RedriveOutcome::Suspended(out.tag, out.payload, out.signal.raw())
     } else if !out.signal.is_empty() {
-        RedriveOutcome::Errored(out.tag, out.payload, out.signal.raw())
+        RedriveOutcome::Halted(out.tag, out.payload, out.signal.raw())
     } else {
         RedriveOutcome::Completed(caller.data().wasm_to_value(out.tag, out.payload))
     }
@@ -84,8 +87,8 @@ fn redrive_child(
 /// Drive the resume chain to completion or next yield.
 ///
 /// Repeatedly resumes suspension frames (innermost first) until either:
-/// - A frame yields again → Yielded
-/// - A frame errors → Error
+/// - A frame parks again, on a yield or an error → Yielded
+/// - A frame halts → Halted
 /// - All frames are consumed → Dead
 ///
 /// When a resumed frame yields again (instead of completing), any
@@ -114,7 +117,7 @@ fn drive_resume_chain(caller: &mut Caller<'_, ElleHost>, initial_value: Value) -
                     result_val = v;
                 }
                 RedriveOutcome::Suspended(t, p, s) => return ResumeOutcome::Yielded(t, p, s),
-                RedriveOutcome::Errored(t, p, s) => return ResumeOutcome::Error(t, p, s),
+                RedriveOutcome::Halted(t, p, s) => return ResumeOutcome::Halted(t, p, s),
             }
         }
         // Record frame count before resume. If the resumed frame
@@ -123,12 +126,12 @@ fn drive_resume_chain(caller: &mut Caller<'_, ElleHost>, initial_value: Value) -
         // rotate: move old outer frames behind the new ones so the
         // new inner chain is consumed first on the next resume.
         let frames_before = caller.data().suspension_frame_count();
-        match resume_wasm_closure(caller, result_val) {
+        match resume_front_frame(caller, result_val) {
             Some(out) => {
                 if out.suspended {
                     // Did `rt_yield` push new frames, or did a tail-position io
                     // ride out through the epilogue with no frame at all? Ask the
-                    // deque, not the signal word: `resume_wasm_closure` popped one
+                    // deque, not the signal word: `resume_front_frame` popped one
                     // frame, so any count above `frames_before - 1` is new.
                     let remaining_old = frames_before.saturating_sub(1);
                     if caller.data().suspension_frame_count() > remaining_old {
@@ -136,14 +139,14 @@ fn drive_resume_chain(caller: &mut Caller<'_, ElleHost>, initial_value: Value) -
                         // 0..remaining_old and the new ones after them. Rotate the
                         // old ones behind so the new inner chain resumes first.
                         for _ in 0..remaining_old {
-                            if let Some(frame) = caller.data_mut().pop_suspension_frame() {
-                                caller.data_mut().push_suspension_frame(frame);
+                            if let Some(frame) = caller.data_mut().pop_parked() {
+                                caller.data_mut().push_parked(frame);
                             }
                         }
                     }
                     return ResumeOutcome::Yielded(out.tag, out.payload, out.signal.raw());
                 } else if !out.signal.is_empty() {
-                    return ResumeOutcome::Error(out.tag, out.payload, out.signal.raw());
+                    return ResumeOutcome::Halted(out.tag, out.payload, out.signal.raw());
                 }
                 result_val = caller.data().wasm_to_value(out.tag, out.payload);
             }
@@ -152,6 +155,16 @@ fn drive_resume_chain(caller: &mut Caller<'_, ElleHost>, initial_value: Value) -
             }
         }
     }
+}
+
+/// Resume the front frame of the current fiber's chain with `value`: a bytecode
+/// callee's chain on the VM, or a compiled closure's frame. `None` when the
+/// chain is empty.
+fn resume_front_frame(caller: &mut Caller<'_, ElleHost>, value: Value) -> Option<CallOutcome> {
+    if let Some(out) = super::linker::resume_bytecode_park(caller, value) {
+        return Some(out);
+    }
+    resume_wasm_closure(caller, value)
 }
 
 /// When `fiber/resume` returns SIG_PROPAGATE, re-raise the named child fiber's
@@ -262,6 +275,8 @@ pub(super) fn handle_fiber_resume(
     match status {
         FiberStatus::New => {
             fiber_handle.with_mut(|f| f.status = FiberStatus::Alive);
+            // A dead fiber that never resumed may have parked under this id.
+            caller.data_mut().discard_parked(fiber_id, Value::NIL);
 
             let args = if resume_value.is_nil() {
                 vec![]
@@ -304,15 +319,15 @@ pub(super) fn handle_fiber_resume(
                 caller.data_mut().fiber_id_stack.pop();
                 ret
             } else if !out.signal.is_empty() {
-                let err_val = caller.data().wasm_to_value(tag, payload);
-                let ret = route_error(
+                let halt_val = caller.data().wasm_to_value(tag, payload);
+                let ret = route_halt(
                     caller,
                     &fiber_handle,
                     fiber_value,
                     tag,
                     payload,
                     out.signal,
-                    err_val,
+                    halt_val,
                 );
                 caller.data_mut().fiber_id_stack.pop();
                 ret
@@ -354,16 +369,16 @@ pub(super) fn handle_fiber_resume(
                         yielded,
                     )
                 }
-                ResumeOutcome::Error(t, p, s) => {
-                    let err_val = caller.data().wasm_to_value(t, p);
-                    route_error(
+                ResumeOutcome::Halted(t, p, s) => {
+                    let halt_val = caller.data().wasm_to_value(t, p);
+                    route_halt(
                         caller,
                         &fiber_handle,
                         fiber_value,
                         t,
                         p,
                         SignalBits::new(s),
-                        err_val,
+                        halt_val,
                     )
                 }
                 ResumeOutcome::Dead(result_val) => {

@@ -140,7 +140,7 @@ pub fn for_each_terminator_use(term: &Terminator, mut f: impl FnMut(Reg)) {
 /// resume in the interpreter.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct YieldPointInfo {
-    /// Bytecode IP to resume at (the instruction after the Yield opcode).
+    /// Bytecode IP to resume at (the instruction after the Emit opcode).
     /// This is the IP stored in the SuspendedFrame so the interpreter
     /// can resume from the correct point.
     pub resume_ip: usize,
@@ -155,20 +155,20 @@ pub struct YieldPointInfo {
     pub num_locals: u16,
 }
 
-/// Metadata about a call site, collected during bytecode emission.
-/// The JIT reads this to know the bytecode IP at each call instruction,
-/// which is needed to build SuspendedFrames for yield-through-call.
+/// Metadata about a park site — a call, or an instruction that may raise —
+/// collected during bytecode emission. The JIT reads it to build the
+/// SuspendedFrame a compiled frame parks as when a signal leaves it there.
 ///
 /// Only populated for functions where `signal.may_suspend()`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CallSiteInfo {
-    /// Bytecode IP after the Call instruction and its operands.
+    /// Bytecode IP after the instruction and its operands.
     /// This is the IP the interpreter would store in SuspendedFrame.ip
-    /// when yield propagates through this call.
+    /// when a signal leaves the frame at this site.
     pub resume_ip: usize,
-    /// Registers on the operand stack at the call site, after popping
-    /// func and args but before pushing the result. This matches the
-    /// interpreter's stack state when yield propagates through a call
+    /// Registers on the operand stack at the site, after popping the
+    /// instruction's operands but before pushing its result. This matches the
+    /// interpreter's stack state when a signal leaves the frame there
     /// (`complete_call` parks it with `self.fiber.stack.drain(..).collect()`).
     pub stack_regs: Vec<Reg>,
     /// Number of local variable slots (params + locally-defined).
@@ -176,4 +176,7 @@ pub struct CallSiteInfo {
     /// The JIT must spill local values first, then operand stack registers,
     /// so the SuspendedFrame stack matches the interpreter's layout.
     pub num_locals: u16,
+    /// Whether a resume delivers its value into the site's result. False for an
+    /// instruction that produces no value (`InstrRef::raise_delivers`).
+    pub push_resume_value: bool,
 }

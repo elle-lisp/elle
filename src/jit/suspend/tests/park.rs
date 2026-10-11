@@ -1,7 +1,10 @@
-//! The JIT yield side-exits PARK the activation's owner node
-//! (docs/impl/region/owner.md § "Owner nodes" — "A park moves the node into
-//! the suspended frame"), the compiled-tier twin of the interpreter's
-//! `handle_emit` take. Each test runs exactly the helper sequence compiled
+// audited: 2026-10-06
+//! The JIT side-exits park the activation's owner node, so the resumed activation's completion frees it.
+//!
+//! docs/impl/region/owner.md
+//!
+//! This is the compiled-tier twin of the interpreter's `handle_emit` take.
+//! Each test runs exactly the helper sequence compiled
 //! code emits — the prologue's region-map push, an `AdoptIntoActivation` that
 //! lazily mints the node, the suspend helper, the side-exit's region-map pop —
 //! then resumes through the interpreter (the template bytecode is a bare
@@ -120,6 +123,7 @@ fn jit_yield_through_call_parks_owner_node_for_resume_completion() {
                 num_spilled: 0,
                 num_locals: 0,
                 num_params: 0,
+                push_resume_value: true,
             },
         ])),
     );
@@ -134,7 +138,8 @@ fn jit_yield_through_call_parks_owner_node_for_resume_completion() {
 
         // A callee suspended (its own park already in fiber.suspended in the
         // real flow — absent here, the helper starts the chain); the JIT
-        // caller appends its continuation frame and unwinds.
+        // caller appends its continuation frame and returns.
+        vm.fiber.signal = Some((SIG_YIELD, Value::NIL));
         let r = elle_jit_yield_through_call(
             std::ptr::null(),
             0,

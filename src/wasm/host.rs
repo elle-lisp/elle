@@ -5,12 +5,12 @@
 //! docs/impl/wasm.md
 //!
 //! Two parts that are not dispatch live beside it: `host/frames.rs`, each
-//! fiber's suspension frames, and `host/io.rs`, what a top-level primitive's
+//! fiber's parked frames, and `host/io.rs`, what a top-level primitive's
 //! I/O does when no scheduler is there to take it.
 //!
 //! The host state (`ElleHost`) lives in the Wasmtime `Store` and holds the
 //! handle table heap objects are named by, the flattened primitive dispatch
-//! table, the parameter frames of dynamic bindings, each fiber's suspension
+//! table, the parameter frames of dynamic bindings, each fiber's parked
 //! frames, and the module's dual-compiled code.
 //!
 //! Host functions are registered as Wasmtime imports under the "elle"
@@ -28,7 +28,7 @@ use super::handle::HandleTable;
 mod frames;
 mod io;
 
-pub use frames::WasmSuspensionFrame;
+pub use frames::{BytecodePark, ParkedFrame, WasmSuspensionFrame};
 
 /// The module's dual-compiled code, used by spawn for cross-thread execution:
 /// a code unit whose region holds one payload per closure, and the header over
@@ -110,8 +110,8 @@ pub struct PrecachedClosure {
 }
 
 /// Default base address for the env stack in linear memory, used when a module's
-/// widest args region fits under it. A wider module raises it per
-/// `emit::env_stack_base`. Each `call_wasm_closure` allocates a region starting
+/// widest args region and widest spill fit under it. A wider module raises it
+/// per `emit::env_stack_base`. Each `call_wasm_closure` allocates a region starting
 /// from the store's `env_stack_ptr`.
 pub const ENV_STACK_BASE: usize = 4096;
 
@@ -155,7 +155,7 @@ pub struct ElleHost {
     /// of (parameter_id, value) pairs. PushParamFrame pushes a new
     /// frame; PopParamFrame pops.
     pub param_frames: Vec<Vec<(u32, Value)>>,
-    /// Per-fiber suspension frames. Keyed by fiber ID (FiberHandle pointer
+    /// Per-fiber parked frames. Keyed by fiber ID (FiberHandle pointer
     /// address). Each fiber's frames are independent — nested fiber
     /// resumes don't interfere with the parent fiber's frames.
     ///
@@ -163,7 +163,7 @@ pub struct ElleHost {
     /// and consumed from the front (innermost first during resume). This avoids
     /// the need for reversal.
     pub suspension_frames:
-        std::collections::HashMap<usize, std::collections::VecDeque<WasmSuspensionFrame>>,
+        std::collections::HashMap<usize, std::collections::VecDeque<ParkedFrame>>,
     /// Stack of active fiber IDs. Pushed when entering handle_fiber_resume,
     /// popped on exit. rt_yield and rt_load_saved_reg use the top entry
     /// to find the correct fiber's frame list.

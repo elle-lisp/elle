@@ -29,8 +29,10 @@ function calls.
 ### Control flow: loop + br_table
 
 Multi-block functions use a state machine: `loop { block*N { br_table } }`.
-Each LIR basic block is a case. Jump/Branch set state and `br` to loop.
-Return uses WASM `return`. Single-block functions skip the loop.
+Each LIR basic block, and each park site's resume entry, is a case. A
+Jump/Branch to a later case is a plain `br`; one to an earlier case sets the
+state and goes round the loop. Return uses WASM `return`. Single-block
+functions skip the loop.
 
 ### Closures and tail calls
 
@@ -64,12 +66,12 @@ Int-to-float promotion for mixed operands. Bitwise ops remain integer-only.
 `handle_wasm_result` reads signal from memory after WASM call returns.
 Signals propagate through WASM↔host boundaries.
 
-For a call that parks — any signal but a halt, an error included — in a
-function that may signal, `emit_call_suspending` checks the suspended word
-BEFORE the general early-return path, spills caller state, and returns
-suspended. A host operation that raises parks its caller the same way. Virtual resume blocks (CPS continuations
-for mid-block call sites) use the same suspending-aware emission so that
-yield-through-call works correctly after resume.
+In a function that may signal, every call and every instruction that may
+raise is a park site (`suspend::ParkSite`). A call that parks — any signal
+but a halt, an error included — makes the site check the suspended word
+before the early-return path, spill the live slots, and return suspended. A
+host operation that raises parks its caller the same way. Each site's resume
+entry is a case of the dispatch loop (`layout::Layout`).
 
 `rt_call` intercepts SIG_RESUME from fiber/resume and executes the fiber's
 WASM closure host-side via `handle_fiber_resume` (in resume.rs).
@@ -82,15 +84,17 @@ WASM closure host-side via `handle_fiber_resume` (in resume.rs).
 | [emit/abi.rs](emit/abi.rs) | The numbers the module and the host agree on: imports, memory slots, data-op codes. |
 | [emit/functions.rs](emit/functions.rs) | Module sections, and the entry / closure function bodies. |
 | [instruction.rs](instruction.rs) | LIR instruction → WASM instruction translation. |
-| [controlflow.rs](controlflow.rs) | CFG emission: loop + br_table dispatch, terminators. |
-| [suspend.rs](suspend.rs) | CPS spill/restore and block splitting at suspending calls. |
-| [liveness.rs](liveness.rs) | Which register slots are live at each suspend point. |
+| [controlflow.rs](controlflow.rs) | CFG emission: the dispatch loop, the instructions of each case, the terminators. |
+| [layout.rs](layout.rs) | The order of the dispatch loop's cases, and the branch that reaches each one. |
+| [suspend.rs](suspend.rs) | Park sites, the park itself, spill and restore, and block splitting. |
+| [liveness.rs](liveness.rs) | Which register and local slots are live at each park site. |
 | [outcome.rs](outcome.rs) | `CallOutcome`: what a call reports back to emitted code. |
 | [handle.rs](handle.rs) | `HandleTable`: maps u64 handles to `Rc<HeapObject>`. |
 | [host.rs](host.rs) | `ElleHost` state (handle table + primitives) and primitive dispatch. |
-| [host/frames.rs](host/frames.rs) | The suspension frames a WASM closure saves when it yields, kept per fiber in the host. |
+| [host/frames.rs](host/frames.rs) | The frames a fiber parks on this tier, kept per fiber in the host: a compiled closure's saved state, and a bytecode callee's parked chain. |
 | [host/io.rs](host/io.rs) | Top-level I/O with no scheduler to take it: the backend a request reaches, and the completion it reads its answer out of. |
 | [linker.rs](linker.rs) | Host function registration (`create_linker`); `linker/` holds the registrations and the data-op dispatch. |
+| [linker/bytecode.rs](linker/bytecode.rs) | The bridge to a closure the module never compiled: run it on the host VM, and park and resume the chain it parks. |
 | [resume.rs](resume.rs) | Fiber resume chain (`drive_resume_chain`, `handle_fiber_resume`). |
 | [resume/route.rs](resume/route.rs) | What a fiber's own mask makes of its body's outcome: caught, parked, or propagated. |
 | [store.rs](store.rs) | Engine/Store creation, `call_wasm_closure`, `resume_wasm_closure`, `run_module`. |
@@ -112,7 +116,7 @@ WASM closure host-side via `handle_fiber_resume` (in resume.rs).
 | `rt_yield` | Save yielded value + live regs to WasmSuspensionFrame |
 | `rt_get_resume_value` | Return the resume value passed by scheduler |
 | `rt_load_saved_reg` | Load saved register by index from suspension frame |
-| `rt_push_param` | Push dynamic parameter binding frame |
+| `rt_push_param` | Push dynamic parameter binding frame; raises on an operand that is not a parameter |
 | `rt_pop_param` | Pop dynamic parameter binding frame |
 
 ## Linear memory layout
@@ -120,8 +124,8 @@ WASM closure host-side via `handle_fiber_resume` (in resume.rs).
 | Region | Offset | Purpose |
 |--------|--------|---------|
 | Signal word | 0..8 (SIGNAL_SLOT) | Signal bits from last host call |
-| Args buffer | 256 (ARGS_BASE) | Call args + data op args |
-| Env stack | 4096+ (ENV_STACK_BASE) | Closure envs for `call_wasm_closure` |
+| Args buffer | 256 (ARGS_BASE) | Call args, data op args, and a park's spill |
+| Env stack | 4096+ (ENV_STACK_BASE), above the widest args region and the widest spill | Closure envs for `call_wasm_closure` |
 
 The env region uses a **stack allocator** (`ElleHost::env_stack_ptr`). Each
 `call_wasm_closure` bumps the pointer forward by the env size; on return it
@@ -130,9 +134,11 @@ environments. Memory is grown automatically if the stack exceeds one page.
 
 ## Suspension frames and resume chain
 
-Per-fiber suspension frames are stored in a `VecDeque` keyed by fiber ID.
-Frames are pushed to the back (innermost first during yield-through-call)
-and consumed from the front (innermost first during resume).
+Per-fiber parked frames are stored in a `VecDeque` keyed by fiber ID. A frame
+is a `ParkedFrame`: a compiled closure's `WasmSuspensionFrame`, or the
+`BytecodePark` chain a bytecode callee left. Frames are pushed to the back
+(innermost first during yield-through-call) and consumed from the front
+(innermost first during resume).
 
 **Resume protocol (`resume_wasm_closure`):**
 1. Peek the front frame (innermost) — `rt_load_saved_reg` reads from it
@@ -183,12 +189,11 @@ and PROPAGATE handoffs.
 Yielding functions become re-entrant via compile-time state machine:
 - Closures return `(tag: i64, payload: i64, status: i32)`: status=0 normal, >0 suspended
 - `ctx` parameter (param 3) carries resume state on re-entry (0 = initial)
-- Yield spills all registers + local slots to ARGS_BASE, calls `rt_yield`, returns suspended
-- Resume prologue: if ctx!=0, dispatch via br_table to restore block, load saved regs
-- Yield-through-call: after a call or host operation that may signal, check the suspended word, spill+return
-- Virtual resume blocks handle mid-block resume (instructions after the call + terminator)
-- Both real blocks and virtual resume blocks use `emit_call_suspending` for SuspendingCall
-- Host snapshots env, manages `WasmSuspensionFrame` deque, drives resume chain
+- A park spills the registers and local slots live after its site to ARGS_BASE, calls `rt_yield`, returns suspended
+- Resume prologue: if ctx!=0, load every saved slot once, then select the state's case through the dispatch loop
+- After a call or host operation that may signal, check the suspended word, spill and return
+- Each park site's resume entry delivers the restart value and falls through into the block after the site
+- Host snapshots env, manages the parked-frame deque, drives resume chain
 
 ## WASM local layout
 

@@ -1,7 +1,10 @@
+// audited: 2026-10-06
 //! FFI callback trampolines.
 //!
+//! docs/ffi.md
+//!
 //! Allows passing Elle closures as C function pointers to C APIs
-//! (e.g., qsort comparators, signal handlers, iteration callbacks).
+//! (for example qsort comparators, signal handlers, iteration callbacks).
 //!
 //! # Architecture
 //!
@@ -143,6 +146,7 @@ unsafe extern "C" fn trampoline_callback(
     // Hand the callee its executing-closure register via the one-shot — the
     // C-invoked trampoline is an entry into a closure body like any other.
     vm.pending_entry_closure = userdata.closure_value;
+    let depth = vm.fiber.param_depth();
     let exec = vm.execute_bytecode_saving_stack(&closure.template.code(), &new_env_rc);
     vm.fiber.call_depth -= 1;
 
@@ -155,13 +159,17 @@ unsafe extern "C" fn trampoline_callback(
                 vm.ffi_mut().set_callback_error(e);
             }
         }
-        SIG_ERROR => {
+        bits if bits.intersects(SIG_ERROR) && !bits.intersects(crate::value::fiber::SIG_HALT) => {
+            // The error parked the closure's chain, which C cannot resume.
+            vm.discard_hosted_error(bits, depth);
             let (_, err_value) = vm.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
             vm.ffi_mut().set_callback_error(err_value);
             zero_result(result, &sig.ret);
         }
         _ => {
-            // Yield or other signal inside a callback is not supported.
+            // Yield or other signal inside a callback is not supported, and C
+            // cannot hold the park, so the callback refuses it.
+            vm.refuse_hosted_park(exec.bits, depth);
             let err_region = vm.heap().new_runtime_region();
             let err = crate::value::error_val_in(
                 vm.heap(),

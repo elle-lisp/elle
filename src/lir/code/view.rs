@@ -445,6 +445,9 @@ pub struct SiteRef<'a> {
     pub num_locals: u16,
     /// The registers on the operand stack, bottom to top.
     pub stack_regs: &'a [Reg],
+    /// Whether a resume delivers its value into the site's result. False for
+    /// an instruction that produces no value.
+    pub push_resume_value: bool,
 }
 
 impl<'a> SiteRef<'a> {
@@ -454,6 +457,7 @@ impl<'a> SiteRef<'a> {
             resume_ip: rec.resume_ip as usize,
             num_locals: rec.num_locals,
             stack_regs: &regs[at..at + rec.n_regs as usize],
+            push_resume_value: rec.delivers != 0,
         }
     }
 }

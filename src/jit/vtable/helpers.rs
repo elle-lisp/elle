@@ -64,8 +64,7 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
     // frame-replacing tail call strands — `defer_callee` (0/1, the callee closure's
     // own region) and `arena_slot` (0 for none, else the merged closure-cycle
     // arena's static slot). Both reach the helper because a compiled caller cannot
-    // record them on its own dues (docs/impl/region/relocate.md § "A channel built
-    // in compiled code hands its release forward").
+    // record them on its own dues (docs/impl/region/relocate.md).
     let tail_call_sig = make_sig(
         module,
         &[I64, I64, I64, I64, I64, I32, I32, I32],
@@ -91,8 +90,7 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
     let push_param_sig = make_sig(module, &[I64, I64, I64], &[I64, I64]);
     // call_array: (func_tag, func_payload, arr_tag, arr_payload, vm, region_id,
     // args_region) -> (tag, payload). `args_region` is the args array's own slot,
-    // which the helper takes to reclaim the array (docs/impl/region/mechanism.md
-    // § "A spliced call's arguments come out of an array the convention owns").
+    // which the helper takes to reclaim the array (docs/impl/region/mechanism.md).
     let call_array_sig = make_sig(module, &[I64, I64, I64, I64, I64, I32, I32], &[I64, I64]);
     // cons: (car_tag, car_pay, cdr_tag, cdr_pay, region, vm) -> (tag, payload).
     // The trailing vm pointer names the heap the cons cell is born on.
@@ -201,7 +199,6 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         store_capture: declare(module, "elle_jit_store_capture", &store_capture_sig)?,
         call: declare(module, "elle_jit_call", &call_sig)?,
         tail_call: declare(module, "elle_jit_tail_call", &tail_call_sig)?,
-        has_exception: declare(module, "elle_jit_has_exception", &vm_only)?,
         pop_param_frame: declare(module, "elle_jit_pop_param_frame", &vm_only)?,
         call_array: declare(module, "elle_jit_call_array", &call_array_sig)?,
         tail_call_array: declare(module, "elle_jit_tail_call_array", &call_array_sig)?,
@@ -268,15 +265,6 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
             "elle_jit_release_activation_dues",
             &make_sig(module, &[I64], &[]),
         )?,
-        // release_abandoned_frame: (vm, slots_ptr, num_slots, regions_ptr,
-        // num_regions, locals_ptr, num_locals) -> () — the two release tables
-        // the prologue materialized, plus the frame's locals spilled in slot
-        // order for the value route.
-        release_abandoned_frame: declare(
-            module,
-            "elle_jit_release_abandoned_frame",
-            &make_sig(module, &[I64, I64, I64, I64, I64, I64, I64], &[]),
-        )?,
         // free_region_group: (members_ptr, count, vm) -> () — the members are
         // spilled to a stack slot as Value pairs, exactly like push_param_frame.
         free_region_group: declare(
@@ -318,8 +306,7 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         // get/pop allocate nothing through a PrimFn and read no VM state, so they
         // take no `JitCtx`. The rest run `PrimFn` bodies and resolve their VM from
         // the threaded `JitCtx` (trailing I64), keeping the VM dependency explicit
-        // (docs/impl/region/ctx.md "JIT intrinsic helpers reach the VM through a
-        // JitCtx").
+        // (docs/impl/region/ctx.md).
         get: declare(module, "elle_jit_get", &value_binary)?,
         put: declare(module, "elle_jit_put", &put_ctx_sig)?,
         del: declare(module, "elle_jit_del", &value_binary_vm)?,

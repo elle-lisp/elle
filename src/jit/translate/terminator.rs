@@ -9,30 +9,28 @@
 //! `TailCall` in `instr::calls` relies on.
 
 use super::*;
-use crate::value::repr::TAG_TRUE;
 
 impl<'a> FunctionTranslator<'a> {
     /// Branch on a generic (helper-dispatched) tail call's runtime result so
     /// the JIT mirrors the interpreter's `tail_call_inner` (src/vm/call/inner/tail.rs):
     ///
-    /// - `TAIL_CALL_SENTINEL` (callee was a closure → the trampoline runs it) or
-    ///   a pending error: pop the region map and return the value. The
-    ///   post-`TailCall` owned-arg releases do NOT run — for a closure that is
-    ///   the ownership MOVE (the owned-param callee releases the moved args),
-    ///   and on error the frame unwinds.
-    /// - `YIELD_SENTINEL` (a suspending callee side-exited): in a function that
-    ///   may suspend (`park_site` is its call site) with no error pending, the
-    ///   frame parks at the ip past the tail call, so the resume runs the
-    ///   post-`TailCall` block the interpreter's park replays. Otherwise it
-    ///   returns the value like the sentinel above.
-    /// - any other value: the callee was a NATIVE (or a parameter/collection)
-    ///   that completed normally. Bind `dst` and fall through so the caller
-    ///   keeps translating the post-`TailCall` block — the compiler's own
-    ///   per-arg `DecrefValueRegion`/`DecrefRegion`s that release each moved
-    ///   native arg. The interpreter reaches the same block by NOT replacing the
-    ///   frame for a normally-completing native; a tier that returns at the call
-    ///   instead strands every moved arg (tests/impl/region-native-tail-move.lisp;
-    ///   docs/impl/region/rules.md Rule 8).
+    /// - `TAIL_CALL_SENTINEL` (callee was a closure → the trampoline runs it):
+    ///   pop the region map and return the value. The post-`TailCall` owned-arg
+    ///   releases do NOT run — that is the ownership MOVE (the owned-param
+    ///   callee releases the moved args).
+    /// - `YIELD_SENTINEL` (the callee parked, on a suspend or an error): in a
+    ///   function that may signal (`park_site` is its call site) the frame parks
+    ///   at the ip past the tail call, so the resume runs the post-`TailCall`
+    ///   block the interpreter's park replays. Otherwise it returns the value
+    ///   like the sentinel above.
+    /// - any other value: the callee was a NATIVE (or a parameter/collection).
+    ///   Bind `dst`; a raise parks at the same site, and a normal completion falls
+    ///   through so the caller keeps translating the post-`TailCall` block — the
+    ///   compiler's own per-arg `DecrefValueRegion`/`DecrefRegion`s that release
+    ///   each moved native arg. The interpreter reaches the same block by NOT
+    ///   replacing the frame for a normally-completing native; a tier that
+    ///   returns at the call instead strands every moved arg
+    ///   (tests/impl/region-native-tail-move.lisp; docs/impl/region/rules.md Rule 8).
     ///
     /// On return the builder is positioned on the continue (fall-through)
     /// block, with `dst` defined.
@@ -62,41 +60,21 @@ impl<'a> FunctionTranslator<'a> {
             .ins()
             .brif(is_sentinel, return_block, &[], cont_block, &[]);
 
-        // Closure-trampoline / yield side-exit: return the value unchanged,
-        // except that a suspending callee's yield parks this frame.
+        // Closure-trampoline / park side-exit: return the value unchanged,
+        // except that a callee's park parks this frame behind it.
         builder.switch_to_block(return_block);
         builder.seal_block(return_block);
         match park_site {
             None => self.emit_pop_then_return(builder, rt, rp)?,
             Some(site) => {
-                let vm = self.vm_ptr.ok_or_else(|| {
-                    JitError::InvalidLir("tail call park without vm pointer".to_string())
-                })?;
                 let plain_block = builder.create_block();
-                let check_block = builder.create_block();
-                builder
-                    .ins()
-                    .brif(is_yield, check_block, &[], plain_block, &[]);
-
-                builder.switch_to_block(plain_block);
-                builder.seal_block(plain_block);
-                self.emit_pop_then_return(builder, rt, rp)?;
-
-                // An error left with the sentinel parks nothing: it unwinds.
-                builder.switch_to_block(check_block);
-                builder.seal_block(check_block);
-                let (exc_tag, _) =
-                    self.call_helper_vm_only(builder, self.helpers.has_exception, vm)?;
-                let tag_true = builder.ins().iconst(I64, TAG_TRUE as i64);
-                let has_error = builder.ins().icmp(IntCC::Equal, exc_tag, tag_true);
-                let error_block = builder.create_block();
                 let park_block = builder.create_block();
                 builder
                     .ins()
-                    .brif(has_error, error_block, &[], park_block, &[]);
+                    .brif(is_yield, park_block, &[], plain_block, &[]);
 
-                builder.switch_to_block(error_block);
-                builder.seal_block(error_block);
+                builder.switch_to_block(plain_block);
+                builder.seal_block(plain_block);
                 self.emit_pop_then_return(builder, rt, rp)?;
 
                 builder.switch_to_block(park_block);
@@ -105,14 +83,12 @@ impl<'a> FunctionTranslator<'a> {
             }
         }
 
-        // Native (or param/collection) completed normally: bind dst, propagate
-        // any pending error, then fall through into the post-`TailCall` block.
-        // `emit_exception_check_after_call` returns nil if the native set an
-        // error signal and leaves the builder on its own continue block.
+        // Native (or param/collection) answered: bind dst, park on any pending
+        // signal, then fall through into the post-`TailCall` block.
         builder.switch_to_block(cont_block);
         builder.seal_block(cont_block);
         self.def_var_pair(builder, dst.0, rt, rp);
-        self.emit_exception_check_after_call(builder)?;
+        self.emit_signal_check_at(builder, park_site)?;
         Ok(())
     }
 
@@ -231,21 +207,10 @@ impl<'a> FunctionTranslator<'a> {
                 );
                 let rt = builder.inst_results(call)[0];
                 let rp = builder.inst_results(call)[1];
-                // An ERROR emit parks no frame — nothing resumes to run the rest
-                // of these instructions — so this activation is abandoned and
-                // runs the releases it still owed. The signal is a compile-time
-                // constant, so a suspending emit skips the walk's spill entirely
-                // rather than paying for a call that would decline it.
-                //
-                // The walk goes AFTER `elle_jit_yield`, which installs the
-                // payload and records its mint, so it reads both. The pop goes
-                // after them both: the suspend helper has already cloned the live
-                // activation map into the resume frame.
-                if signal.intersects(crate::value::fiber::SIG_ERROR) {
-                    self.emit_abandoned_error_return(builder, rt, rp)?;
-                } else {
-                    self.emit_pop_then_return(builder, rt, rp)?;
-                }
+                // The helper parked the frame for any signal but a halt, an
+                // error included, and cloned the live activation map into it,
+                // so the pop goes after it.
+                self.emit_pop_then_return(builder, rt, rp)?;
             }
 
             Terminator::Unreachable => {

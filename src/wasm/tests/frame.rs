@@ -1,13 +1,14 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! What a running closure's env and local slots must survive.
 //!
 //! docs/impl/wasm.md
 //!
 //! A closure's env and its local slots are linear memory the emitter addresses
 //! by offset, and a value in either can be overwritten by something the
-//! emission did elsewhere — a wide call's args region, or a region release's
-//! nil-stamp. Each shape below returns a wrong answer, rather than failing, when
-//! its invariant breaks.
+//! emission did elsewhere — a wide call's args region, a park's spill, or a
+//! region release's nil-stamp. When its invariant breaks, each shape below
+//! returns a wrong answer or fails later on the overwritten value, never at the
+//! write.
 
 use super::*;
 
@@ -32,6 +33,54 @@ fn wasm_full_wide_call_from_closure_preserves_env() {
         "1249",
         "a 500-arg struct call from inside `f` must not clobber f's env — the \
          env stack must begin above the module's widest args region"
+    );
+}
+
+#[test]
+fn wasm_full_wide_park_preserves_env() {
+    // A frame that parks spills its saved registers and local slots to
+    // `ARGS_BASE`, one 16-byte slot per saved slot, for `rt_yield` to copy out.
+    // `wide` holds 1000 values live across its yield, so its spill runs 16 KB
+    // past a fixed 4096-byte env base and over the envs of the closures still
+    // running below it: `outer`'s param `k` and the scheduler's own captures. The env
+    // stack begins above the widest spill as it does above the widest call.
+    // The values are body definitions, and the sum is a balanced tree of
+    // two-operand adds, so no wide call raises the base. Every add is `%add`
+    // over integer literals, which compiles inline: a call would be a park
+    // site, and a function of 1000 sites with 1000 live values is past what
+    // Wasmtime compiles in a test's time. A debug build's compiler still
+    // recurses past a test thread's stack on 1000 definitions, so the program
+    // runs on a thread of its own.
+    fn sum(lo: usize, hi: usize) -> String {
+        if hi - lo == 1 {
+            return format!("a{lo}");
+        }
+        let mid = (lo + hi) / 2;
+        format!("(%add {} {})", sum(lo, mid), sum(mid, hi))
+    }
+    let n = 1000;
+    let defs: String = (0..n)
+        .map(|i| format!("(def a{i} (%add 1 {i})) "))
+        .collect();
+    let sum = sum(0, n);
+    let src = format!(
+        "(defn wide [] {defs}(yield :parked) {sum})\n\
+         (defn outer [k] \
+           (let [f (fiber/new (fn [] (wide)) |:yield|)] \
+             (fiber/resume f) \
+             (+ k (fiber/resume f))))\n\
+         (outer 7)"
+    );
+    let shown = std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || eval_with_stdlib(&src))
+        .expect("spawn")
+        .join()
+        .expect("the program runs");
+    assert_eq!(
+        shown, "500507",
+        "a park that spills 1000 live slots must not clobber a live env — the env \
+         stack must begin above the module's widest spill"
     );
 }
 

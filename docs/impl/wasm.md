@@ -143,10 +143,9 @@ Closure WASM type: `(env_ptr: i32, args_ptr: i32, nargs: i32, ctx: i32) -> (tag:
 
 A compiled function reports on **two channels, and both must be read**.
 `status` says whether the function parked. The `SignalBits` it raised
-go to `SIGNAL_SLOT`, the 8 bytes at the base of linear memory. Neither
-word implies the other: a function can park carrying `:io` or `:error`
-(`status > 0`, signal on the frame), halt (`status = 0`, signal set), or
-return a value (both clear).
+go to `SIGNAL_SLOT`, the 8 bytes at the base of linear memory. A function
+can park carrying `:io` or `:error` (`status > 0`, signal on the frame), halt
+(`status = 0`, signal set), or return a value (both clear).
 
 Tail calls use `return_call_indirect` (WASM tail-call proposal) via
 `rt_prepare_tail_call`, which resolves the target and builds the
@@ -237,18 +236,36 @@ struct whichever tier ran its body. Pinned by
 
 ### Suspension and resume
 
-Yielding closures use a CPS-like scheme:
+A function that may signal parks at every place a signal can leave it: each
+`Emit`, each call, and each instruction that may raise (`Op::may_raise`).
+An error parks like a yield, so a call to a callee that only raises is a park
+site too.
 
-1. In a function that may signal, the emitter assigns a resume state ID
-   to each emit and to each call or host operation that may signal.
-2. On yield: live registers are spilled to linear memory, then
-   `rt_yield` saves them as a `WasmSuspensionFrame` on the host.
-3. On resume: `ctx` parameter is non-zero. The resume prologue
-   dispatches on `ctx` via `br_table`, restores saved registers,
-   and jumps to the continuation block.
-4. For yield-through-call (a callee or a host operation parks under its
-   caller), the caller's frame is saved too, forming a chain.
-   `drive_resume_chain` ([resume.rs](../../src/wasm/resume.rs)) walks the chain.
+1. The emitter splits each block after every park site, and gives each site a
+   resume state ID and a resume entry: a case of the dispatch loop that
+   delivers the restart value into the site's result.
+2. On a park, the site spills the registers and local slots live after it
+   to `ARGS_BASE`, and `rt_yield` saves them as a `WasmSuspensionFrame` on
+   the host. The env stack begins above the widest such spill, as it does
+   above the widest call's args.
+3. On resume, the `ctx` parameter is non-zero. The resume prologue restores
+   every saved slot once, then selects the state's case through the dispatch
+   loop.
+4. When a callee or a host operation parks, its caller's frame is saved too,
+   forming a chain. `drive_resume_chain`
+   ([resume.rs](../../src/wasm/resume.rs)) walks the chain.
+
+The dispatch loop orders its cases so that each resume entry sits between the
+block that ends at its site and the block after it
+([layout.rs](../../src/wasm/layout.rs)). A forward edge is a plain `br`, and
+only a branch back goes round the loop, because Wasmtime merges every value
+the loop carries once for each edge into the loop header.
+
+A resume entry still costs Wasmtime one merge per value live across its site.
+A module with a park site at every call therefore compiles several times
+slower than one that parks only at suspending calls. A function with hundreds
+of calls and hundreds of values live across them spills past the WASM
+per-function size limit, and the module fails to parse.
 
 ### Cross-thread spawn (dual-compiled bytecode)
 
@@ -319,59 +336,11 @@ production workload, so a figure in this document ages with nothing to fail.
 3. **Separate stdlib compilation**: compile stdlib as a separate WASM
    module, cached independently. Link user code against it.
 
-### Debug builds optimize dependencies
+### The Cranelift underneath
 
-A **debug** build applies
-
-```toml
-[profile.dev.package."*"]
-opt-level = 3
-```
-
-so every dependency — `cranelift-codegen`/`cranelift-frontend`/`regalloc2`
-included — compiles optimized while `elle` itself stays at `opt-level = 0` with
-full debug assertions. Without the override those crates build at `opt-level =
-0`, where Cranelift's hot SSA-construction and bitset ops are un-inlined
-call-per-op (profiled: `cranelift_bitset` / `SSABuilder` self-time dominates)
-and one stdlib module costs seconds of wasmtime compile where the override
-costs a fraction of one. (`--cache=<dir>` amortizes either way.)
-
-`cranelift-codegen` is shared between the WASM path (via `wasmtime`) and the
-**Cranelift JIT** (`cranelift-jit`), so optimizing it also speeds up JIT
-compilation. The generated JIT *code* is unchanged: the JIT pins its own output
-at `opt_level = "speed"` ([compiler.rs](../../src/jit/compiler.rs)) independent
-of how `cranelift-codegen` was itself built, so the tier is behavior-identical
-across the override — only compile *latency* moves. A faster background compile
-does shift *when* a hot function crosses from the interpreter to JIT
-mid-execution, so two crossover invariants are each pinned by a test that fails
-if the shift mishandles the boundary: a fuel-suspended callee's frame survives
-the JIT tier ([fuel-jit-preempt.lisp](../../tests/impl/fuel-jit-preempt.lisp)),
-and a value emitted from JIT-compiled code is retained as it escapes into
-`fiber.signal`, where the resumer reads it
-([region-jit-emit-escape-uaf.lisp](../../tests/impl/region-jit-emit-escape-uaf.lisp)).
-
-### One Cranelift in the dependency graph
-
-That sharing holds only while `wasmtime` and the JIT's `cranelift-*` crates
-resolve to the same `cranelift-codegen`. Cargo picks one version per
-semver-incompatible requirement, so a JIT held a minor line behind the
-Cranelift `wasmtime` carries puts two complete copies of the code generator
-into a `--features wasm` build. The copies do not stay independent either:
-they share the one `regalloc2` the union of their requirements allows, so the
-JIT every default build runs gets its register allocator chosen by the WASM
-tier's pin.
-
-The two pins therefore move together. `wasmtime 49` carries Cranelift 0.136,
-and `Cargo.toml` pins `cranelift-codegen`, `-frontend`, `-module`, `-jit`, and
-`-native` at 0.136 to match. Raising `wasmtime` means raising the JIT's
-Cranelift in the same change, which is a code change and not only a manifest
-one. Each Cranelift line has changed a builder call the translator makes
-([impl/jit.md](jit.md)).
-`integration::deps` ([deps.rs](../../tests/integration/deps.rs)) reads
-`Cargo.lock` and fails if the graph ever holds two versions of
-`cranelift-codegen` or `regalloc2`. It also fails if `wasmtime` resolves below
-the release that fixed its newest published advisory. When `cargo audit` names
-a newer fix, raise that floor in the same change as the pin.
+Wasmtime compiles through the same Cranelift the JIT uses. A debug build
+compiles it optimized, and its version moves with the JIT's
+([cranelift.md](cranelift.md)).
 
 ## Full-module coverage and its two teardown/lowering invariants
 

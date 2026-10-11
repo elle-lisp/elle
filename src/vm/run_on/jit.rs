@@ -79,9 +79,6 @@ impl VM {
 
         // Capture any signal the JIT set (errors, halts, yields).
         let post_signal = self.fiber.signal.take();
-        if post_signal.is_some_and(|(bits, _)| bits.intersects(SIG_ERROR)) {
-            self.fiber.unwind_params(depth);
-        }
 
         // Decode the return value — handle tail calls before restoring
         // the caller's stack, since the trampoline needs the VM state.
@@ -124,6 +121,9 @@ impl VM {
                     return (crate::value::SIG_HALT, val);
                 } else if eb.intersects(SIG_ERROR) {
                     if let Some((bits, val)) = tail_signal {
+                        // The error parked the tail callee's chain, which this
+                        // host cannot hold; the error leaves as its own.
+                        self.discard_held_error(bits, val, depth);
                         return (bits, val);
                     }
                     return (
@@ -167,6 +167,9 @@ impl VM {
                 {
                     return refused;
                 }
+                // An error parked the compiled chain, which this host cannot
+                // hold; the error leaves as its own.
+                self.discard_held_error(bits, val, depth);
                 return (bits, val);
             }
         }

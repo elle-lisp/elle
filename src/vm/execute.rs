@@ -16,8 +16,6 @@
 //! - **Operand stack**: saved before inner execution, restored after. The
 //!   inner execution sees an empty stack. The outer stack is invisible to it.
 //! - **Executing-closure register**: saved, and restored on the way out.
-//! - **Parameter frames**, on an error that abandons the body: the frames the
-//!   body pushed and never popped are dropped (`drop_abandoned_param_frames`).
 //!
 //! ### What it does NOT preserve
 //!
@@ -32,6 +30,16 @@
 //!
 //! Each re-entry nests on the Rust stack, so it halts with `:stack-overflow`
 //! rather than enter while less than `native_stack::REENTRY_RESERVE` is left.
+//!
+//! ### An error from inner execution
+//!
+//! An error parks every frame from the raise to the body, the body's own frame
+//! included (`VM::park_raised`), so the chain sits in `fiber.suspended` when
+//! `execute_bytecode_saving_stack` returns, and the `parameterize` frames the
+//! body pushed stay in force. A caller that resumes the body's frames keeps the
+//! park: a fiber's first resume, and a compiled or WASM caller that parks behind
+//! its callee. Every other host ends it through `VM::discard_hosted_error`
+//! before it raises or reports.
 //!
 //! ### A suspend from inner execution
 //!
@@ -78,7 +86,8 @@
 //!
 //! 1. Read `fiber.signal` immediately after return to get the result.
 //! 2. Check `exec_result.bits` for `SIG_ERROR` and `SIG_HALT` before using
-//!    the result.
+//!    the result. On an error, end the parked chain through
+//!    `VM::discard_hosted_error`, unless your caller resumes it.
 //! 3. If the closure may suspend, end its park as the section above
 //!    describes: refuse it through `VM::refuse_hosted_park`, or hand it on as
 //!    your own call's park through `VM::abandon_hosted_park`.
@@ -90,7 +99,7 @@
 //!    so the `SIG_SWITCH` trampoline is driven inside your scope — see the
 //!    SIG_SWITCH section above.
 
-use crate::value::fiber::{ParamDepth, RaiseSite, TailBoundary};
+use crate::value::fiber::{RaiseSite, TailBoundary};
 use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT};
 use std::rc::Rc;
 
@@ -98,6 +107,7 @@ use super::core::VM;
 
 mod exit;
 mod nested;
+mod park;
 
 pub(crate) use exit::{ExecResult, Exit};
 
@@ -157,22 +167,16 @@ impl VM {
     ///
     /// On a signal: the boundary the activation's tail calls accumulated may
     /// refuse it and end the activation with an error
-    /// ([`Self::end_refused_activation`]), an error
-    /// runs the abandoned-frame walk when `walk_abandoned` says the frame is
-    /// abandoned, and the operand stack leaves in the result. On a clean
-    /// return: the activation discharges what it owes.
-    ///
-    /// `walk_abandoned` — run the releases this activation still owes when it leaves by
-    /// an **error** (docs/impl/region/mechanism.md). False where the frame is not
-    /// abandoned: a fiber body whose entrant parks it for the restarts system, and the
-    /// resume entry, whose frame the caller manages and may re-park.
+    /// ([`Self::end_refused_activation`]), and otherwise the operand stack
+    /// leaves in the result for the code that parks the frame. An error
+    /// abandons nothing, so no release runs here (docs/impl/region/unwind.md).
+    /// On a clean return: the activation discharges what it owes.
     fn end_activation(
         &mut self,
         code: crate::value::Code,
         env: Rc<Vec<Value>>,
         exit: Exit,
         tail_boundary: TailBoundary,
-        walk_abandoned: bool,
     ) -> ExecResult {
         if exit.bits.is_empty() {
             // Normal completion: discharge what this activation owes — the
@@ -190,19 +194,6 @@ impl VM {
             self.enforce_boundary(exit.bits, &tail_boundary.boundary, tail_boundary.depth)
         {
             return self.end_refused_activation(code, env, bits, exit.ip, parked);
-        }
-        let bits = exit.bits;
-        // The frame's locals are still on the stack, and an error leaves
-        // through the signal machinery without running the rest of its
-        // instructions — so the releases among them run here, before the
-        // locals travel out in the result. The releases this activation took
-        // over from a frame-replacing tail call are owed on the same question
-        // and have no table to be read off, their emitting instruction having
-        // died with the replaced frame (docs/impl/region/owner.md).
-        if walk_abandoned && bits.intersects(SIG_ERROR) {
-            let payload = self.fiber.signal.map(|(_, v)| v).unwrap_or(Value::NIL);
-            self.release_abandoned_frame(&code, payload);
-            self.release_abandoned_deferred();
         }
         let stack = std::mem::take(&mut self.fiber.stack).into_vec();
         ExecResult::ended(exit, code, env, stack, self.fiber.current_closure)
@@ -228,25 +219,6 @@ impl VM {
         self.fiber.stack.clear();
         let exit = Exit::raised(bits, ip, RaiseSite::TailRefused);
         ExecResult::ended(exit, code, env, vec![], self.fiber.current_closure)
-    }
-
-    /// Drop the `parameterize` frames a call pushed above `depth` and left
-    /// behind by raising. The error abandoned the activations that pushed
-    /// them, so no scope-end `PopParamFrame` will run for them, and the caller
-    /// — or a restart of it — runs on with its own bindings
-    /// (docs/signals/primitives.md). A no-op unless
-    /// the fiber's signal is an error. Called where a caller learns its callee
-    /// raised: a nested interpreted callee (`run_dispatch`), a compiled one
-    /// (`call_inner`), and a re-entered body the error abandons
-    /// (`execute_bytecode_saving_stack`).
-    pub(crate) fn drop_abandoned_param_frames(&mut self, depth: ParamDepth) {
-        if self
-            .fiber
-            .signal
-            .is_some_and(|(bits, _)| bits.intersects(SIG_ERROR))
-        {
-            self.fiber.unwind_params(depth);
-        }
     }
 
     /// Open a fresh activation: a region-remap frame, so the body's static
@@ -311,13 +283,11 @@ impl VM {
     /// The tail-call trampoline shared by `execute_bytecode_from_ip` and
     /// `execute_bytecode_saving_stack`: run the activation from `start_ip`,
     /// replace its body at each tail call, and close it out when it ends.
-    /// `walk_abandoned` is `end_activation`'s.
     fn trampoline_loop(
         &mut self,
         code: &crate::value::Code,
         closure_env: &Rc<Vec<Value>>,
         start_ip: usize,
-        walk_abandoned: bool,
     ) -> ExecResult {
         let mut current_code = code.clone();
         let mut current_env = closure_env.clone();
@@ -334,13 +304,7 @@ impl VM {
                     continue;
                 }
             }
-            break self.end_activation(
-                current_code,
-                current_env,
-                exit,
-                tail_boundary,
-                walk_abandoned,
-            );
+            break self.end_activation(current_code, current_env, exit, tail_boundary);
         }
     }
 
@@ -352,14 +316,13 @@ impl VM {
         closure_env: &Rc<Vec<Value>>,
         start_ip: usize,
     ) -> ExecResult {
-        // The caller (`replay_suspended`) owns this frame and may re-park it, so
-        // its error exit is not an abandonment the walk may act on.
-        self.trampoline_loop(code, closure_env, start_ip, false)
+        self.trampoline_loop(code, closure_env, start_ip)
     }
 
     /// Run a body from IP 0 on the current fiber as a fresh activation,
     /// answering how it ended. The result value is stored in
-    /// `self.fiber.signal`.
+    /// `self.fiber.signal`. On an error the body's chain is parked in
+    /// `fiber.suspended`, for the caller to keep or discard (module doc).
     ///
     /// Saves/restores the caller's stack around execution.
     /// Handles pending tail calls in a loop.
@@ -381,11 +344,6 @@ impl VM {
         #[cfg(debug_assertions)]
         Self::debug_assert_entry_closure_matches(entering, code);
         self.fiber.current_closure = entering;
-        // Whether THIS activation's frame is parked on an error exit is the
-        // entrant's to say, and only `do_fiber_first_resume` says yes; taking the
-        // one-shot here leaves every body this one calls answering no
-        // (docs/impl/region/mechanism.md).
-        let parks_error_frame = std::mem::take(&mut self.pending_error_park);
         let param_depth = self.fiber.param_depth();
         #[cfg(debug_assertions)]
         let entry_depth = self.fiber.activation_region_maps.len();
@@ -402,20 +360,17 @@ impl VM {
                 closure_env.clone(),
                 Exit::at(SIG_HALT, 0),
                 TailBoundary::none(param_depth),
-                !parks_error_frame,
             )
         } else {
-            self.trampoline_loop(code, closure_env, 0, !parks_error_frame)
+            self.trampoline_loop(code, closure_env, 0)
         };
         self.close_activation(
             &mut result,
             #[cfg(debug_assertions)]
             entry_depth,
         );
-        // A body parked for a restart keeps its bindings; one the error
-        // abandons leaves them behind.
-        if !parks_error_frame {
-            self.drop_abandoned_param_frames(param_depth);
+        if result.bits.intersects(SIG_ERROR) && !result.bits.intersects(SIG_HALT) {
+            self.park_raised(&mut result);
         }
         // Restore the caller's executing-closure register. On a suspending exit the
         // callee's value is already in `result.current_closure`; on normal return
@@ -448,7 +403,27 @@ impl VM {
         code: &crate::value::Code,
         closure_env: &Rc<Vec<Value>>,
     ) -> SignalBits {
-        let mut bits = self.execute_bytecode_saving_stack(code, closure_env).bits;
+        let bits = self.execute_bytecode_saving_stack(code, closure_env).bits;
+        self.drive_switches(bits)
+    }
+
+    /// Resume a parked chain on the CURRENT fiber, driving the fiber-resume
+    /// trampoline as [`Self::run_thunk_to_completion`] does. The WASM tier
+    /// resumes a bytecode callee's chain this way, on the VM's fiber where the
+    /// chain parked. The result value is left in `self.fiber.signal`.
+    #[cfg(feature = "wasm")]
+    pub(crate) fn resume_to_completion(
+        &mut self,
+        frames: Vec<crate::value::SuspendedFrame>,
+        resume_value: Value,
+    ) -> SignalBits {
+        let bits = self.resume_suspended(frames, resume_value);
+        self.drive_switches(bits)
+    }
+
+    /// Drive the `SIG_SWITCH` trampoline until the code it runs leaves by
+    /// another signal.
+    fn drive_switches(&mut self, mut bits: SignalBits) -> SignalBits {
         while bits == crate::value::SIG_SWITCH {
             bits = self.handle_sig_switch();
         }

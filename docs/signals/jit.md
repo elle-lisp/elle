@@ -29,8 +29,9 @@ interpreter, because an error parks the frames it passes as a yield does.
 
 The emitter records resume metadata for the calls of a function that is not
 silent, and for each instruction in it that may raise. An error-only function
-counts as not silent here. A silent function can receive nothing but a halt,
-so it checks for that alone.
+counts as not silent here. A silent function records no site: the only
+signals that can reach it are a halt and the terminal error a broken proof
+raises, and it returns to its caller on either.
 
 ## Yielding from compiled code
 

@@ -76,7 +76,7 @@ fn two_dumps_write_one_file_whatever_the_lir_pads_hold() {
             (*(rec as *const _ as *mut ConstRec)).pad = [0xA5; 7];
         }
         for rec in yields.iter().chain(calls) {
-            (*(rec as *const _ as *mut SiteRec)).pad = 0xA5A5;
+            (*(rec as *const _ as *mut SiteRec)).pad = 0xA5;
         }
     }
 

@@ -59,7 +59,7 @@ pub(crate) const BLOCK_PAD: (usize, usize) = (offset_of!(BlockRec, pad), 3);
 /// A constant record's pad.
 pub(crate) const CONST_PAD: (usize, usize) = (offset_of!(ConstRec, pad), 7);
 /// A site record's pad.
-pub(crate) const SITE_PAD: (usize, usize) = (offset_of!(SiteRec, pad), 2);
+pub(crate) const SITE_PAD: (usize, usize) = (offset_of!(SiteRec, pad), 1);
 
 /// Copy `at`..`at + len` of `b`'s bytes into the same span of `dst`.
 fn raw(b: &LirBody, dst: &mut [u8], at: usize, len: usize) {
@@ -120,6 +120,6 @@ pub(crate) fn fingerprint_component() -> String {
         fields!(Node; start, end, line, col, file, dst, region, aux, uses, extra, n_uses, op, flags),
         fields!(BlockRec; label, first, len, term_a, term_b, term_c, start, end, line, col, file, term_op, pad),
         fields!(ConstRec; kind, pad, bits),
-        fields!(SiteRec; resume_ip, num_locals, pad, regs, n_regs),
+        fields!(SiteRec; resume_ip, num_locals, delivers, pad, regs, n_regs),
     )
 }

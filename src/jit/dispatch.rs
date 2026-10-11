@@ -1,4 +1,4 @@
-// audited: 2026-10-04
+// audited: 2026-10-06
 //! Runtime dispatch helpers for JIT-compiled code: array mutation, parameter
 //! frames, the signal bound, and re-exports.
 //!
@@ -139,6 +139,11 @@ pub extern "C" fn elle_jit_array_extend(
 /// Push a dynamic parameter frame.
 /// pairs_ptr: *const Value (16 bytes each), alternating [param, value, param, value, ...]
 /// Returns NIL on success or NIL with signal set on error.
+///
+/// A non-parameter raises and pushes an empty frame, exactly as the
+/// interpreter's `PushParamFrame` does: a restart continues into the body,
+/// whose scope-end `PopParamFrame` pops that empty frame and not the one
+/// below it.
 #[no_mangle]
 pub extern "C" fn elle_jit_push_param_frame(
     pairs_ptr: *const Value,
@@ -160,6 +165,7 @@ pub extern "C" fn elle_jit_push_param_frame(
                 "type-error",
                 format!("parameterize: {} is not a parameter", param.type_name()),
             );
+            vm.fiber.param_frames.push(Vec::new());
             return JitValue::nil();
         }
     }

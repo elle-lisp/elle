@@ -242,6 +242,10 @@ impl VM {
                 }
                 break Err(self.format_error_with_location(value));
             } else if bits.intersects(SIG_ERROR) {
+                // The error parked its chain, which the root driver cannot
+                // hold: nothing restarts a program's uncaught error.
+                self.reclaim_root_dues(&current_code);
+                self.discard_hosted_error(bits, depth);
                 let (_, err_value) = self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
                 // Remember whether this uncaught error is a loud gate (:gated):
                 // the top-level driver treats that as a skip, not a failure.
@@ -259,6 +263,7 @@ impl VM {
                 // The keywords are what the author of
                 // the emitting call can act on; the mask alone is not. The
                 // root driver cannot hold the park, so it refuses it.
+                self.reclaim_root_dues(&current_code);
                 self.refuse_hosted_park(bits, depth);
                 break Err(format!(
                     "Unhandled signal {} outside fiber context",
@@ -280,6 +285,35 @@ impl VM {
         self.fiber.stack = saved_stack;
         self.fiber.current_closure = saved_closure;
         result
+    }
+
+    /// Hand the dues a park of the root body moved into its frame back to the
+    /// activation the root driver runs in, before the park is discarded.
+    ///
+    /// The root body opens no activation of its own: it runs on the base slot,
+    /// or on its caller's when the driver is re-entered. So the park that
+    /// `complete_call` built for it carries that activation's dues, and a
+    /// discard would release what the root's completion, or the re-entering
+    /// caller's, still owes (docs/impl/region/owner.md). The root body is the
+    /// chain's outermost frame, running `code`.
+    fn reclaim_root_dues(&mut self, code: &crate::value::Code) {
+        let Some(crate::value::SuspendedFrame::Bytecode(root)) = self
+            .fiber
+            .suspended
+            .as_mut()
+            .and_then(|frames| frames.last_mut())
+        else {
+            return;
+        };
+        if !std::ptr::eq(root.code.bytecode().as_ptr(), code.bytecode().as_ptr()) {
+            return;
+        }
+        let dues = std::mem::take(&mut root.activation_dues);
+        debug_assert!(
+            self.activation_dues().is_empty(),
+            "VM bug: the root body parked without taking its activation's dues"
+        );
+        *self.activation_dues() = dues;
     }
 }
 
