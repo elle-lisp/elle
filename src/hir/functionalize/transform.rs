@@ -1,4 +1,4 @@
-// audited: 2026-10-04
+// audited: 2026-10-05
 //! The functionalize walk: one arm per HIR kind, renaming through the SSA map
 //! and inserting cell operations.
 //!
@@ -72,7 +72,6 @@ impl<'a> FnCtx<'a> {
                 num_locals,
                 inferred_signals,
                 param_bounds,
-                muffle,
                 doc,
                 origin,
                 assert_numeric,
@@ -105,7 +104,6 @@ impl<'a> FnCtx<'a> {
                         num_locals: *num_locals,
                         inferred_signals: *inferred_signals,
                         param_bounds: param_bounds.clone(),
-                        muffle: *muffle,
                         doc: doc.clone(),
                         origin: *origin,
                         assert_numeric: *assert_numeric,

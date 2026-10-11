@@ -1,4 +1,4 @@
-// audited: 2026-10-04
+// audited: 2026-10-05
 //! The HIR node — its kind, the span and signal it carries, and the identity
 //! every analysis side table keys on.
 //!
@@ -152,20 +152,14 @@ pub enum HirKind {
         /// The inferred signal of CALLING this lambda.
         /// This may differ from body.signal for higher-order functions:
         /// - body.signal is the raw signal of the body expression
-        /// - inferred_signals may be Polymorphic(i) if the Yields comes solely
-        ///   from calling parameter i
-        /// - When `silence` bounds are present, bounded parameter calls contribute
-        ///   their bound's bits directly (not polymorphic).
+        /// - a call to parameter i puts i in `inferred_signals.propagates`
+        /// - a parameter `(bound p spec)` bounds contributes `spec` when
+        ///   called, not the argument's signal.
         inferred_signals: Signal,
-        /// Declared signal bounds for parameters (from `(silence param)`).
-        /// Only parameters with explicit bounds appear here.
-        /// These bounds feed into inferred_signals computation and into runtime checking
-        /// (`CheckSignalBound` for silence).
+        /// The bounds `(bound p spec)` declares, one per bounded parameter.
+        /// They feed `inferred_signals`, and the lowerer emits a
+        /// `CheckSignalBound` at entry for each.
         param_bounds: Vec<ParamBound>,
-        /// The signals `(muffle spec)` declared: the squelch mask every closure
-        /// made from this lambda enforces at its boundary. `inferred_signals`
-        /// is already the signal after the muffle.
-        muffle: crate::value::fiber::SignalBits,
         /// Optional docstring extracted from the lambda body. Plain compile-time
         /// string data (`Rc<str>`), NOT a heap `Value`. It rides the closure
         /// template (held alive by RC with it) and is materialized as a fresh
@@ -174,8 +168,7 @@ pub enum HirKind {
         doc: Option<std::rc::Rc<str>>,
         /// Where this lambda was written, for `(meta/origin f)`. A span, not
         /// the lambda's syntax tree: `meta/origin` reads a file, a line, and a
-        /// column, and nothing reads the tree (docs/impl/syntax.md § "Where a
-        /// lambda's source location lives").
+        /// column, and nothing reads the tree (docs/impl/syntax.md).
         #[serde(skip)]
         origin: Option<crate::syntax::Span>,
         /// True if the function body contains `(numeric!)` assertion.
@@ -284,8 +277,8 @@ pub enum HirKind {
     /// Quote of COMPOUND DATA (`'(a b c)`, `'[1 2]`, nested structures): stores
     /// the immutable structure as a `ConstTemplate` — plain compile-time data,
     /// not a pre-baked pinned `Value`. `MaterializeConst` builds a fresh value
-    /// from it into the literal's own region each execution (docs/impl/region/model.md
-    /// § "Constants lower as ordinary allocations").
+    /// from it into the literal's own region each execution
+    /// (docs/impl/region/model.md).
     QuoteConst(crate::value::ConstTemplate),
 
     // === Destructuring ===

@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-10-05
 //! Tests for the epoch rule tables, the collectors that read them, and the
 //! lexicon's respelling of a token.
 //!
@@ -77,7 +77,9 @@ fn test_removals_epoch_2() {
     assert!(removals.contains_key("coro/>iterator"));
     assert!(removals.contains_key("coroutine->iterator"));
     assert!(removals.contains_key("coroutine-next"));
-    assert_eq!(removals.len(), 4);
+    // epoch 15: muffle
+    assert!(removals.contains_key("muffle"));
+    assert_eq!(removals.len(), 5);
 }
 
 #[test]

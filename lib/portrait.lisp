@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-22
+(elle/epoch 15)
+# audited: 2026-10-05
 ## lib/portrait.lisp — semantic portraits from compile/analyze
 ##
 ## Builds structured descriptions of functions and modules from analysis
@@ -158,7 +158,8 @@
                                 " A malicious closure could do"
                                 " arbitrary I/O, yield indefinitely,"
                                 " or crash the caller."
-                                " Consider (silence param)" " or a fuel budget.")})))
+                                " Consider (bound param ||)"
+                                " or a fuel budget.")})))
 
     # 4. All-tail-call chain
     (when (and (not (empty? callees))

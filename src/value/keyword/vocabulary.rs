@@ -167,7 +167,7 @@ pub(crate) static VOCABULARY: &[&str] = &[
     "feature-disabled",
     // Signal names the registry pre-registers. A signal a program declares at
     // run time cannot be listed here; it is learned where the registry is read
-    // (docs/impl/symbol.md § "The display memo").
+    // (docs/impl/symbol.md).
     "debug",
     "exec",
     "fs",
@@ -226,6 +226,7 @@ pub(crate) static VOCABULARY: &[&str] = &[
     "timed-out",
     "exited",
     "signal-violation",
+    "broken-proof",
     "use-after-free",
     "wasm-error",
     // Type names (`type-of` and type errors mint `Value::keyword(type_name())`)

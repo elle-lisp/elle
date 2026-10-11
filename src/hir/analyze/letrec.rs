@@ -1,5 +1,7 @@
-// audited: 2026-10-04
+// audited: 2026-10-05
 //! The `letrec` binding form analyzer.
+//!
+//! docs/bindings.md
 
 use super::*;
 use crate::syntax::{Syntax, SyntaxKind};
@@ -127,7 +129,7 @@ impl<'a> Analyzer<'a> {
         //
         // Seed signal_env for all pre-bound simple bindings with Silent.
         // Without this, forward-referenced letrec siblings default to
-        // Signal::yields() (the unknown-binding fallback in
+        // `Signal::unknown()` (the unknown-callee fallback in
         // get_raw_callee_signal), causing spurious SuspendingCall
         // instructions. This matches analyze_file_letrec's optimistic
         // seeding strategy.
@@ -204,8 +206,8 @@ impl<'a> Analyzer<'a> {
         // sibling is the one carrying the signal, and the seed is the bottom of
         // the lattice — the early lambda therefore comes out too LOW. Too low is
         // the direction that costs a guarantee: a function that reaches `:error`
-        // through the cycle reads as silent, satisfies a compile-time
-        // `(silence)`, and aborts at runtime instead of failing to compile.
+        // through the cycle reads as silent, satisfies a `(silent!)` ceiling,
+        // and breaks its proof at run time instead of failing to compile.
         //
         // Re-analyze the lambdas against the signals now recorded, and repeat
         // until an iteration changes nothing. Each pass can only move a signal
@@ -216,7 +218,7 @@ impl<'a> Analyzer<'a> {
         // binding and fresh pattern leaves every time it runs, so replaying one
         // would add duplicate bindings rather than refine a signal.
         //
-        // See docs/pipeline.md § The fixpoint loop.
+        // See docs/pipeline.md.
         if !lambda_entries.is_empty() {
             // Re-analysis walks the same lambda bodies again and re-reports
             // whatever they raise. Keep the errors from this pass aside and

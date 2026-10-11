@@ -97,6 +97,15 @@ impl Default for SignalSources {
     }
 }
 
+/// One parameter bound as a caller sees it: the argument position it checks,
+/// the parameter it binds, and the signals the argument may emit.
+#[derive(Debug, Clone, Copy)]
+struct ParamBoundAt {
+    position: usize,
+    param: Binding,
+    allowed: crate::value::fiber::SignalBits,
+}
+
 /// A binding with its scope set for hygienic resolution.
 #[derive(Debug, Clone)]
 struct ScopedBinding {
@@ -126,11 +135,11 @@ struct Scope {
     ///
     /// The key is the id, not the spelling, because resolution is an identity
     /// question: the id is the name's hash, so it answers without a display
-    /// memo (docs/impl/symbol.md § "Reading a name, and not reading one"). A
-    /// name-keyed map would make binding resolution depend on whichever memo
-    /// happened to have learned the spelling — and `bind_primitives` receives
-    /// the primitives as ids from the compile context, whose spellings this
-    /// analyzer's memo may never have learned.
+    /// memo (docs/impl/symbol.md). A name-keyed map would make binding
+    /// resolution depend on whichever memo happened to have learned the
+    /// spelling — and `bind_primitives` receives the primitives as ids from
+    /// the compile context, whose spellings this analyzer's memo may never
+    /// have learned.
     bindings: HashMap<SymbolId, Vec<ScopedBinding>>,
     /// Is this a function scope (creates new capture boundary)
     is_function: bool,
@@ -217,6 +226,11 @@ pub struct Analyzer<'a> {
     /// `&named`. A call to one checks its keyword arguments at the call, so
     /// the call carries `:error` (docs/signals/inference.md, "What raises").
     keyword_collectors: HashSet<Binding>,
+    /// The parameter bounds of each binding initialized with a lambda that
+    /// declares one: the parameter's position, its binding and the bound. A
+    /// call checks an argument whose signal it knows against them
+    /// (docs/signals/inference.md).
+    bound_env: HashMap<Binding, Vec<ParamBoundAt>>,
 
     /// Signal projections for bindings initialized from imported modules.
     /// Maps a binding to a keyword→signal projection so that qualified
@@ -224,9 +238,9 @@ pub struct Analyzer<'a> {
     /// conservative `Polymorphic` fallback.
     projection_env: HashMap<Binding, HashMap<String, Signal>>,
     /// Compile-time squelch result signal. Set during call analysis when
-    /// the analyzer detects `(squelch f mask)` and computes the resulting
-    /// closure's signal statically. Consumed by binding analysis to seed
-    /// the binding's signal_env entry.
+    /// the analyzer meets `(squelch spec f)` or `(attune spec f)` with a
+    /// literal spec, and computes the resulting closure's signal statically.
+    /// Consumed by binding analysis to seed the binding's signal_env entry.
     last_squelch_signal: Option<Signal>,
     /// Import projection detected during call analysis. Set when the
     /// analyzer sees `((import "literal"))` and the target file has a
@@ -253,21 +267,17 @@ pub struct Analyzer<'a> {
     /// `immutable_values` map from this, so a primitive reference emits
     /// `LoadConst` and needs no slot.
     primitive_values: HashMap<Binding, Value>,
-    /// Accumulated parameter bounds from silence forms in current lambda.
-    /// Populated by `analyze_silence`, consumed by `analyze_lambda`.
+    /// The parameter bounds `(bound p spec)` declares in the current lambda.
+    /// Populated by `analyze_bound`, consumed by `analyze_lambda`.
     current_param_bounds: HashMap<Binding, Signal>,
-    /// Accumulated function-level constraint from silence forms in current lambda.
-    /// Populated by `analyze_silence`, consumed by `analyze_lambda`.
+    /// The ceiling `(attune! spec)` and `(silent!)` declare in the current
+    /// lambda, the intersection when there are several. Populated by
+    /// `declare_ceiling`, checked by `analyze_lambda`.
     current_declared_ceiling: Option<Signal>,
-    /// Accumulated muffle bits from muffle forms in current lambda.
-    /// Populated by `analyze_muffle`, consumed by `analyze_lambda`.
-    current_muffle_bits: crate::value::fiber::SignalBits,
     /// Accumulated non-fatal errors. Recoverable error sites (undefined var,
     /// signal mismatch) push here and return `Ok(Hir::error(span))` to
     /// continue analysis. The pipeline checks this after analysis.
     errors: Vec<LError>,
-    /// Set by `(silence!)` assertion form. Consumed by `analyze_lambda`.
-    current_silence_assert: bool,
     /// Set by `(numeric!)` assertion form. Consumed by `analyze_lambda`.
     current_numeric_assert: bool,
     /// Signal projection computed by `analyze_file_letrec`. Retrieved by
@@ -333,6 +343,7 @@ impl<'a> Analyzer<'a> {
             primitive_signals,
             arity_env: HashMap::new(),
             keyword_collectors: HashSet::new(),
+            bound_env: HashMap::new(),
 
             projection_env: HashMap::new(),
             last_squelch_signal: None,
@@ -346,9 +357,7 @@ impl<'a> Analyzer<'a> {
             primitive_values: HashMap::new(),
             current_param_bounds: HashMap::new(),
             current_declared_ceiling: None,
-            current_muffle_bits: crate::value::fiber::SignalBits::EMPTY,
             errors: Vec::new(),
-            current_silence_assert: false,
             current_numeric_assert: false,
             last_signal_projection: None,
             current_immutability_asserts: HashSet::new(),

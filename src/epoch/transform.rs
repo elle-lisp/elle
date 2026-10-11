@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-10-05
 //! Syntax tree migration transformer: every rule in an epoch range, applied in one walk.
 //!
 //! docs/epochs.md
@@ -261,23 +261,28 @@ pub(super) fn rewrite_node(
         }
     }
 
-    // Check for Replace match on list forms before the main match.
-    // We extract the head symbol and do the lookup before mutating,
-    // to satisfy the borrow checker.
+    // Check for Replace match on list forms before the main match. A symbol
+    // may carry one rule per arity, so the lookup matches both.
     if let SyntaxKind::List(items) = &syntax.kind {
         if let Some(head_sym) = items.first().and_then(|s| s.as_symbol()) {
-            if let Some(&(_, arity, template)) = replaces.iter().find(|(s, _, _)| *s == head_sym) {
-                if items.len() - 1 == arity {
-                    let args: Vec<Syntax> = items[1..].to_vec();
-                    let span = syntax.span;
-                    let replacement = instantiate_template(arena, template, &args, &span)?;
-                    syntax.kind = replacement.kind;
-                    count += 1;
-                    // Recurse into the replacement so renames and nested
-                    // replacements still apply.
-                    count += rewrite_node(arena, syntax, rules)?;
-                    return Ok(count);
+            let arity = items.len() - 1;
+            if let Some(&(_, _, template)) = replaces
+                .iter()
+                .find(|(s, a, _)| *s == head_sym && *a == arity)
+            {
+                let args: Vec<Syntax> = items[1..].to_vec();
+                let span = syntax.span;
+                let replacement = instantiate_template(arena, template, &args, &span)?;
+                syntax.kind = replacement.kind;
+                count += 1;
+                // The replacement is rewritten once. Its elements are walked,
+                // so renames and nested replacements still apply, but the node
+                // itself is not matched again: a template that keeps its head,
+                // as `(squelch $2 $1)` does, would match forever.
+                for item in syntax.children_mut() {
+                    count += rewrite_node(arena, item, rules)?;
                 }
+                return Ok(count);
             }
         }
     }

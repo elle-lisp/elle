@@ -42,6 +42,12 @@ impl<'a> Analyzer<'a> {
             }
         }
 
+        // A bound is checked here wherever the argument's signal is known;
+        // the callee's entry check covers every other argument.
+        if !has_splice {
+            self.check_bounds_at_call(&func, &args, span)?;
+        }
+
         // What the call checks at run time, and raises on: the count when no
         // arity checked it above, which a splice or an unknown callee leaves
         // open, the spliced value's shape, and the keyword arguments when the
@@ -144,26 +150,7 @@ impl<'a> Analyzer<'a> {
             }
         }
 
-        // ── Compile-time squelch/attune detection ─────────────────────
-        // Pattern: (squelch f :keyword) or (squelch f |:kw1 :kw2|)
-        //          (attune :keyword f) or (attune |:kw1 :kw2| f)
-        // Compute the resulting closure's signal statically and stash it
-        // for binding analysis to seed the binding's signal_env entry.
-        self.last_squelch_signal = None;
-        if self.is_squelch(&func) && args.len() == 2 {
-            let target_signal = self.resolve_arg_signal(&args[0].expr);
-            if let Some(mask) = self.resolve_squelch_mask(&args[1].expr) {
-                self.last_squelch_signal = Some(target_signal.squelch(mask));
-            }
-        } else if self.is_attune(&func) && args.len() == 2 {
-            // attune is mask-first: (attune |:yield| closure)
-            let target_signal = self.resolve_arg_signal(&args[1].expr);
-            if let Some(permitted) = self.resolve_squelch_mask(&args[0].expr) {
-                // attune permits only these bits; suppress everything else.
-                let suppress = crate::signals::CAP_MASK.subtract(permitted);
-                self.last_squelch_signal = Some(target_signal.squelch(suppress));
-            }
-        }
+        self.record_squelch_signal(&func, &args);
 
         Ok(Hir::new(
             HirKind::Call {
@@ -235,25 +222,14 @@ impl<'a> Analyzer<'a> {
         self.is_primitive_named(func, "emit")
     }
 
-    /// Check if the callee is the `squelch` primitive.
-    fn is_squelch(&self, func: &Hir) -> bool {
-        self.is_primitive_named(func, "squelch")
-    }
-
-    /// Check if the callee is the `attune` primitive.
-    fn is_attune(&self, func: &Hir) -> bool {
-        self.is_primitive_named(func, "attune")
-    }
-
     /// Check if the callee is the `import` primitive.
     fn is_import(&self, func: &Hir) -> bool {
         self.is_primitive_named(func, "import")
     }
 
     /// Check if a callee HIR node is a binding spelled `name` — one hash
-    /// compare, no memo (docs/impl/symbol.md § "Reading a name, and not
-    /// reading one"). It reads the name alone, so a user binding of the same
-    /// spelling answers true as well.
+    /// compare, no memo (docs/impl/symbol.md). It reads the name alone, so a
+    /// user binding of the same spelling answers true as well.
     fn is_primitive_named(&self, func: &Hir, name: &str) -> bool {
         if let HirKind::Var(binding) = &func.kind {
             self.arena.get(*binding).name == crate::value::SymbolId::of(name)
@@ -438,7 +414,7 @@ impl<'a> Analyzer<'a> {
         }
 
         // Build polymorphic propagation from parameter calls.
-        // Silence-bounded parameters contribute their bound's bits
+        // Bounded parameters contribute their bound's bits
         // to inherent (not polymorphic).
         let mut propagates: u32 = 0;
         let mut bound_bits = crate::value::fiber::SignalBits::EMPTY;
@@ -455,43 +431,7 @@ impl<'a> Analyzer<'a> {
             propagates,
         }
     }
-
-    /// Resolve a compile-time squelch mask from a keyword or set literal.
-    ///
-    /// Returns `Some(mask)` for:
-    /// - `:keyword` → single signal bit
-    /// - `|:kw1 :kw2|` → union of signal bits (set literal in HIR)
-    ///
-    /// Returns `None` for dynamic values.
-    fn resolve_squelch_mask(&self, arg: &Hir) -> Option<crate::value::fiber::SignalBits> {
-        use crate::value::fiber::SignalBits;
-        match &arg.kind {
-            HirKind::Keyword(kw) => {
-                let reg = crate::signals::registry::global_registry().lock().unwrap();
-                reg.lookup(kw).map(SignalBits::from_bit)
-            }
-            // Set literal: Call to the `set` primitive with keyword args
-            HirKind::Call { func, args, .. } => {
-                if let HirKind::Var(binding) = &func.kind {
-                    let name = self.symbols.name(self.arena.get(*binding).name)?;
-                    if name != "set" {
-                        return None;
-                    }
-                    let reg = crate::signals::registry::global_registry().lock().unwrap();
-                    let mut mask = SignalBits::EMPTY;
-                    for call_arg in args {
-                        if let HirKind::Keyword(kw) = &call_arg.expr.kind {
-                            mask = mask.union(SignalBits::from_bit(reg.lookup(kw)?));
-                        } else {
-                            return None;
-                        }
-                    }
-                    Some(mask)
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        }
-    }
 }
+
+mod bound;
+mod squelch;

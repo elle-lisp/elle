@@ -1,6 +1,7 @@
 // audited: 2026-10-06
 //! Cache the compiled standard library on disk, so a later process
 //! deserializes it instead of running the front end again.
+//!
 //! docs/impl/stdlib-cache.md
 
 use crate::signals::Signal;

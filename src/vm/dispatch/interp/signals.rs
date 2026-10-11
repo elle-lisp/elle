@@ -1,5 +1,5 @@
-// audited: 2026-10-04
-//! `CheckSignalBound` opcode body: the entry check of a `(silence p)` bound,
+// audited: 2026-10-05
+//! `CheckSignalBound` opcode body: the entry check of a `(bound p spec)` bound,
 //! shared with the JIT through `signals::bound`.
 //!
 //! docs/impl/vm.md

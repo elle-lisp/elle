@@ -90,7 +90,7 @@
 //!    so the `SIG_SWITCH` trampoline is driven inside your scope — see the
 //!    SIG_SWITCH section above.
 
-use crate::value::fiber::{ParamDepth, RaiseSite, TailSquelch};
+use crate::value::fiber::{ParamDepth, RaiseSite, TailBoundary};
 use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT};
 use std::rc::Rc;
 
@@ -129,7 +129,7 @@ impl VM {
 
     /// Replace the running activation's body with a pending tail call's callee,
     /// answering the callee's code and environment. The caller adds the tail
-    /// call's squelch mask to the activation's [`TailSquelch`].
+    /// call's boundary to the activation's [`TailBoundary`].
     fn replace_by_tail_call(
         &mut self,
         tail: crate::vm::core::TailCallInfo,
@@ -155,8 +155,9 @@ impl VM {
     /// Close out an activation whose dispatch loop exited at `exit`, answering
     /// its `ExecResult`.
     ///
-    /// On a signal: a squelch the activation's tail calls accumulated ends the
-    /// activation with an error ([`Self::end_refused_activation`]), an error
+    /// On a signal: the boundary the activation's tail calls accumulated may
+    /// refuse it and end the activation with an error
+    /// ([`Self::end_refused_activation`]), an error
     /// runs the abandoned-frame walk when `walk_abandoned` says the frame is
     /// abandoned, and the operand stack leaves in the result. On a clean
     /// return: the activation discharges what it owes.
@@ -170,7 +171,7 @@ impl VM {
         code: crate::value::Code,
         env: Rc<Vec<Value>>,
         exit: Exit,
-        tail_squelch: TailSquelch,
+        tail_boundary: TailBoundary,
         walk_abandoned: bool,
     ) -> ExecResult {
         if exit.bits.is_empty() {
@@ -185,8 +186,10 @@ impl VM {
             return ExecResult::ended(exit, code, env, vec![], self.fiber.current_closure);
         }
         let parked = self.fiber.suspended.is_some();
-        if self.enforce_squelch(exit.bits, tail_squelch.mask, tail_squelch.depth) {
-            return self.end_refused_activation(code, env, exit.ip, parked);
+        if let Some(bits) =
+            self.enforce_boundary(exit.bits, &tail_boundary.boundary, tail_boundary.depth)
+        {
+            return self.end_refused_activation(code, env, bits, exit.ip, parked);
         }
         let bits = exit.bits;
         // The frame's locals are still on the stack, and an error leaves
@@ -205,15 +208,15 @@ impl VM {
         ExecResult::ended(exit, code, env, stack, self.fiber.current_closure)
     }
 
-    /// Close out an activation whose tail call a squelch boundary refused at
-    /// `ip`, with an error at [`RaiseSite::TailRefused`]. `parked` says whether
-    /// the refused code parked the activation's frame
-    /// (docs/impl/region/unwind.md § "A squelch boundary abandons frames the
-    /// same way, so it runs the same walk").
+    /// Close out an activation whose tail call a boundary refused at `ip`, with
+    /// the error `bits` the boundary raised, at [`RaiseSite::TailRefused`].
+    /// `parked` says whether the refused code parked the activation's frame
+    /// (docs/impl/region/unwind.md).
     fn end_refused_activation(
         &mut self,
         code: crate::value::Code,
         env: Rc<Vec<Value>>,
+        bits: SignalBits,
         ip: usize,
         parked: bool,
     ) -> ExecResult {
@@ -223,7 +226,7 @@ impl VM {
         }
         self.release_activation_dues();
         self.fiber.stack.clear();
-        let exit = Exit::raised(SIG_ERROR, ip, RaiseSite::TailRefused);
+        let exit = Exit::raised(bits, ip, RaiseSite::TailRefused);
         ExecResult::ended(exit, code, env, vec![], self.fiber.current_closure)
     }
 
@@ -231,7 +234,7 @@ impl VM {
     /// behind by raising. The error abandoned the activations that pushed
     /// them, so no scope-end `PopParamFrame` will run for them, and the caller
     /// — or a restart of it — runs on with its own bindings
-    /// (docs/signals/primitives.md § "Where a restart lands"). A no-op unless
+    /// (docs/signals/primitives.md). A no-op unless
     /// the fiber's signal is an error. Called where a caller learns its callee
     /// raised: a nested interpreted callee (`run_dispatch`), a compiled one
     /// (`call_inner`), and a re-entered body the error abandons
@@ -319,13 +322,13 @@ impl VM {
         let mut current_code = code.clone();
         let mut current_env = closure_env.clone();
         let mut current_ip = start_ip;
-        let mut tail_squelch = TailSquelch::none(self.fiber.param_depth());
+        let mut tail_boundary = TailBoundary::none(self.fiber.param_depth());
 
         loop {
             let exit = self.run_dispatch(&current_code, &current_env, current_ip);
             if exit.bits.is_empty() {
-                if let Some(tail) = self.pending_tail_call.take() {
-                    tail_squelch.add(tail.squelch_mask, self.fiber.param_depth());
+                if let Some(mut tail) = self.pending_tail_call.take() {
+                    tail_boundary.add(std::mem::take(&mut tail.boundary), self.fiber.param_depth());
                     (current_code, current_env) = self.replace_by_tail_call(tail);
                     current_ip = 0;
                     continue;
@@ -335,7 +338,7 @@ impl VM {
                 current_code,
                 current_env,
                 exit,
-                tail_squelch,
+                tail_boundary,
                 walk_abandoned,
             );
         }
@@ -398,7 +401,7 @@ impl VM {
                 code.clone(),
                 closure_env.clone(),
                 Exit::at(SIG_HALT, 0),
-                TailSquelch::none(param_depth),
+                TailBoundary::none(param_depth),
                 !parks_error_frame,
             )
         } else {

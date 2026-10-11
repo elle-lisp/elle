@@ -2,6 +2,8 @@
 //! The special-form registry: the single source of truth for the names the
 //! analyzer treats as special forms.
 //!
+//! docs/impl/hir.md
+//!
 //! Adding a special form means adding ONE entry here. Consumers:
 //! - `forms/expr.rs` dispatches through [`handler_for`]; forms whose
 //!   recognition is conditional (`emit`'s keyword guard, `doc`'s
@@ -113,17 +115,14 @@ fn sf_environment(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir,
 fn sf_parameterize(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
     a.analyze_parameterize(items, span)
 }
-fn sf_silence(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
-    a.analyze_silence(items, span)
-}
-fn sf_muffle(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
-    a.analyze_muffle(items, span)
+fn sf_bound(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
+    a.analyze_bound(items, span)
 }
 fn sf_attune_assert(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
     a.analyze_attune_assert(items, span)
 }
-fn sf_silence_assert(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
-    a.analyze_silence_assert(items, span)
+fn sf_silent(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
+    a.analyze_silent(items, span)
 }
 fn sf_numeric_assert(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
     a.analyze_numeric_assert(items, span)
@@ -347,27 +346,18 @@ pub(crate) const SPECIAL_FORMS: &[SpecialForm] = &[
         ..SpecialForm::DEFAULT
     },
     SpecialForm {
-        name: "silence",
-        handler: Some(sf_silence),
-        doc: "Declare, inside a function body, that the function emits no signal at all, :error included; a body that may signal is a compile error. With a parameter name, bound that parameter instead: the value passed for it must be silent, checked at function entry against a closure's inferred signal or a native's declared one. The check may raise, so the function carries :error.",
-        params: &["param?"],
-        arity: Arity::Range(0, 1),
-        example: "(defn pick [b x y] (silence) (if b x y))\n(defn apply-silent [f x] (silence f) (f x))",
-        ..SpecialForm::DEFAULT
-    },
-    SpecialForm {
-        name: "muffle",
-        handler: Some(sf_muffle),
-        doc: "Declare, inside a function body, signals the function's boundary converts to a :signal-violation error, as squelch does for a closure. The inferred signal loses them and gains :error; a (silence) or attune! ceiling is checked after the muffle. :error and :halt pass every boundary and cannot be muffled.",
-        params: &[":signal or |signals|"],
-        arity: Arity::Exact(1),
-        example: "(defn f [] (attune! :error) (muffle :yield) (yield 1) 2)",
+        name: "bound",
+        handler: Some(sf_bound),
+        doc: "Declare, inside a function body, that the value passed for a parameter emits at most the given signals; || asks for a silent value. A call to the parameter contributes those signals, not the argument's. The compiler checks an argument whose signal it knows at the call, and a violation does not compile; the function checks every other at entry, and that check may raise, so the function carries :error.",
+        params: &["param", ":signal or |signals|"],
+        arity: Arity::Exact(2),
+        example: "(defn apply-silent [f x] (bound f ||) (f x))",
         ..SpecialForm::DEFAULT
     },
     SpecialForm {
         name: "attune!",
         handler: Some(sf_attune_assert),
-        doc: "Declare, inside a function body, the most the function may emit: a body whose inferred signal exceeds the given signals is a compile error. The check leaves the function's signal as inferred.",
+        doc: "Declare, inside a function body, the most the function may emit: a body whose inferred signal exceeds the given signals is a compile error. The check leaves the function's signal as inferred, and a body that declares several ceilings must fit each.",
         params: &[":signal or |signals|"],
         arity: Arity::Exact(1),
         example: "(defn add [x y] (attune! :error) (+ x y))",
@@ -375,8 +365,8 @@ pub(crate) const SPECIAL_FORMS: &[SpecialForm] = &[
     },
     SpecialForm {
         name: "silent!",
-        handler: Some(sf_silence_assert),
-        doc: "Assert, inside a function body, that the function's inferred signal is empty, before any ceiling or muffle applies; otherwise a compile error.",
+        handler: Some(sf_silent),
+        doc: "Declare, inside a function body, the empty ceiling: (attune! ||) by its own name. A body that may emit any signal, :error included, or that passes on a parameter's signal, is a compile error.",
         params: &[],
         arity: Arity::Exact(0),
         example: "(defn pick [b x y] (silent!) (if b x y))",

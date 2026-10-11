@@ -1,4 +1,4 @@
-// audited: 2026-10-04
+// audited: 2026-10-05
 //! What the analyzer records about a lambda for its callers, and how a form
 //! that can raise reports itself.
 //!
@@ -71,8 +71,9 @@ impl<'a> Analyzer<'a> {
     }
 
     /// Record what a binding's analyzed initializer established, when it is a
-    /// lambda: its inferred signal, its arity, and whether it collects keyword
-    /// arguments. Answers whether it was a lambda.
+    /// lambda: its inferred signal, its arity, whether it collects keyword
+    /// arguments, and the bounds its parameters carry. Answers whether it was
+    /// a lambda.
     pub(crate) fn record_lambda_facts(&mut self, binding: Binding, value: &Hir) -> bool {
         let HirKind::Lambda {
             params,
@@ -80,12 +81,19 @@ impl<'a> Analyzer<'a> {
             rest_param,
             vararg_kind,
             inferred_signals,
+            param_bounds,
             ..
         } = &value.kind
         else {
             return false;
         };
         self.signal_env.insert(binding, *inferred_signals);
+        let bounds = Self::bounds_by_position(params, param_bounds);
+        if bounds.is_empty() {
+            self.bound_env.remove(&binding);
+        } else {
+            self.bound_env.insert(binding, bounds);
+        }
         let arity = Arity::for_lambda(rest_param.is_some(), *num_required, params.len());
         self.arity_env.insert(binding, arity);
         if rest_param.is_some() && collects_keywords(vararg_kind) {
@@ -94,6 +102,26 @@ impl<'a> Analyzer<'a> {
             self.keyword_collectors.remove(&binding);
         }
         true
+    }
+
+    /// Each bound in `bounds` with the position of the parameter it bounds,
+    /// in parameter order.
+    pub(super) fn bounds_by_position(
+        params: &[Binding],
+        bounds: &[crate::hir::ParamBound],
+    ) -> Vec<ParamBoundAt> {
+        params
+            .iter()
+            .enumerate()
+            .filter_map(|(position, param)| {
+                let bound = bounds.iter().find(|b| b.binding == *param)?;
+                Some(ParamBoundAt {
+                    position,
+                    param: *param,
+                    allowed: bound.signal.bits,
+                })
+            })
+            .collect()
     }
 
     /// Whether a parameter list collects keyword arguments, `&keys` or

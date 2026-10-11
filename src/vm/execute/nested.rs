@@ -1,11 +1,11 @@
-// audited: 2026-10-04
+// audited: 2026-10-05
 //! Interpreted non-tail calls on one dispatch loop: a caller pauses in the
 //! fiber while its callee runs, and resumes when the callee ends.
 //!
 //! docs/impl/vm.md
 
 use super::{ExecResult, Exit};
-use crate::value::fiber::{Activation, CallSite, ParamDepth, PausedCaller, TailSquelch};
+use crate::value::fiber::{Activation, CallSite, ParamDepth, PausedCaller, TailBoundary};
 use crate::value::{BytecodeFrame, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT};
 use crate::vm::core::{PendingCall, VM};
 use std::rc::Rc;
@@ -18,7 +18,7 @@ impl VM {
     /// which the activation it was entered with leaves, the calls that
     /// activation made having completed in between. A caller waits
     /// in `fiber.callers` while its callee runs, so the Rust stack stays flat
-    /// however deep the calls go (docs/impl/vm.md § "Non-tail calls").
+    /// however deep the calls go (docs/impl/vm.md).
     pub(in crate::vm) fn run_dispatch(
         &mut self,
         code: &crate::value::Code,
@@ -56,18 +56,17 @@ impl VM {
                 return exit;
             };
             if bits.is_empty() {
-                if let Some(tail) = self.pending_tail_call.take() {
+                if let Some(mut tail) = self.pending_tail_call.take() {
                     callee
-                        .tail_squelch
-                        .add(tail.squelch_mask, self.fiber.param_depth());
+                        .tail_boundary
+                        .add(std::mem::take(&mut tail.boundary), self.fiber.param_depth());
                     (callee.code, callee.env) = self.replace_by_tail_call(tail);
                     exit = self.execute_bytecode_inner_impl(&callee.code, &callee.env, 0);
                     running = Some(callee);
                     continue;
                 }
             }
-            let site = callee.call;
-            let result = self.leave_callee(callee, exit);
+            let (result, site) = self.leave_callee(callee, exit);
             let caller = self
                 .fiber
                 .callers
@@ -135,26 +134,27 @@ impl VM {
         Activation {
             code: call.code,
             env: call.env,
-            tail_squelch: TailSquelch::none(self.fiber.param_depth()),
+            tail_boundary: TailBoundary::none(self.fiber.param_depth()),
             call: call.site,
             #[cfg(debug_assertions)]
             entry_depth,
         }
     }
 
-    /// End a callee's activation whose dispatch loop exited at `exit`. A
-    /// callee is always abandoned by an error, so the walk runs.
-    fn leave_callee(&mut self, callee: Activation, exit: Exit) -> ExecResult {
+    /// End a callee's activation whose dispatch loop exited at `exit`,
+    /// answering how it ended and the call that entered it. A callee is always
+    /// abandoned by an error, so the walk runs.
+    fn leave_callee(&mut self, callee: Activation, exit: Exit) -> (ExecResult, CallSite) {
         #[cfg(debug_assertions)]
         let entry_depth = callee.entry_depth;
         let mut result =
-            self.end_activation(callee.code, callee.env, exit, callee.tail_squelch, true);
+            self.end_activation(callee.code, callee.env, exit, callee.tail_boundary, true);
         self.close_activation(
             &mut result,
             #[cfg(debug_assertions)]
             entry_depth,
         );
-        result
+        (result, callee.call)
     }
 
     /// Complete a non-tail closure call whose callee ended with `result`, in
@@ -177,17 +177,15 @@ impl VM {
         self.fiber.call_depth -= 1;
         let bits = result.bits;
 
-        // Boundary enforcement: a suspending signal the callee's boundary mask
-        // names — its squelch, its muffle, or anything at all when its signal
-        // is silent — becomes a signal-violation error. SIG_ERROR (already an
-        // error) and SIG_HALT (terminal) pass. `enforce_squelch` discards the
-        // suspended frames: the call is converted to an error, not suspended.
+        // The callee's boundary may refuse its signal: a broken proof, or a
+        // signal its squelch names. `enforce_boundary` discards the suspended
+        // frames, so the call leaves by the refusal's error, not suspended.
         //
         // A fiber body is exempt: it runs outside any call, so its first resume
-        // enforces no squelch.
-        if self.enforce_squelch(bits, site.squelch_mask, depth) {
+        // crosses no boundary.
+        if let Some(raised) = self.enforce_boundary(bits, &site.boundary, depth) {
             self.fiber.call_stack.pop();
-            return Some(SIG_ERROR);
+            return Some(raised);
         }
         if bits.is_empty() {
             let (_, value) = self.fiber.signal.take().unwrap();
@@ -231,8 +229,7 @@ impl VM {
             .cloned()
             .unwrap_or_default();
         // MOVE what the caller's activation owes into its park — this activation
-        // leaves with the suspending signal (docs/impl/region/owner.md § "Owner
-        // nodes").
+        // leaves with the suspending signal (docs/impl/region/owner.md).
         let caller_dues = self.take_activation_dues();
         // The caller's register is restored, so park the caller's value here; the
         // callee's value rode out in `result.current_closure`.

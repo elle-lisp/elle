@@ -1,4 +1,4 @@
-// audited: 2026-10-04
+// audited: 2026-10-05
 //! A-normal form (ANF) lift: each value a frame releases through a slot gets a
 //! binding naming that slot.
 //!
@@ -198,7 +198,6 @@ impl<'a> AnfCtx<'a> {
                 num_locals,
                 inferred_signals,
                 param_bounds,
-                muffle,
                 doc,
                 origin,
                 assert_numeric,
@@ -212,7 +211,6 @@ impl<'a> AnfCtx<'a> {
                 num_locals: *num_locals,
                 inferred_signals: *inferred_signals,
                 param_bounds: param_bounds.clone(),
-                muffle: *muffle,
                 doc: doc.clone(),
                 origin: *origin,
                 assert_numeric: *assert_numeric,

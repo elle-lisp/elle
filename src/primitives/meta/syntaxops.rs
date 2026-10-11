@@ -1,8 +1,9 @@
 // audited: 2026-10-06
-//! The syntax-object accessors, squelch and attune, `meta/origin`, and the SPIR-V primitives git, fn/git? and disgit.
+//! The syntax-object accessors, the `squelch` and `attune` boundaries, `meta/origin`, and the SPIR-V primitives git, fn/git? and disgit.
 //!
 //! docs/macros.md
 //! docs/impl/spirv.md
+//! docs/signals/inference.md
 
 use super::*;
 
@@ -122,103 +123,79 @@ pub(crate) fn prim_syntax_e(
     }
 }
 
-/// Transform a closure by applying a squelch mask.
+/// `(squelch spec f)`: a new closure over `f`'s code and environment whose
+/// boundary turns the signals in `spec` into a `:signal-violation` error.
 ///
-/// `(squelch closure signals)` returns a new closure that, when called,
-/// intercepts signals matching the specification and converts them to `:error`.
-/// The second argument is resolved via `resolve_signal_bits` — it can be a
-/// keyword, set, array, list, or integer.
-/// The new closure shares the template and the environment, which it copies
-/// as two handles.
-///
-/// Error cases:
-/// - Wrong arity: arity-error
-/// - First arg not a closure: type-error
-/// - Invalid signal spec: type-error or signal-error
+/// `spec` comes first, as it does for `attune`, and resolves through
+/// `resolve_signal_bits`: a keyword, set, array, list, or integer. The masks of
+/// nested squelches join, so a squelch of a squelched closure blocks both. The
+/// closure is checked first, so a call with its arguments swapped names it.
 pub(crate) fn prim_squelch(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    // Validate first argument is a closure.
-    let closure_rc = match args[0].as_closure() {
-        Some(c) => c,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "squelch: first argument must be a closure, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            );
-        }
+    let closure = match closure_argument(&args[1], "squelch", ctx) {
+        Ok(c) => c,
+        Err(err) => return err,
     };
-
-    // Resolve signal bits from second argument (keyword, set, array, list, or integer).
-    let new_bits = match crate::primitives::fibers::resolve_signal_bits(&args[1], "squelch", ctx) {
+    let blocked = match crate::primitives::fibers::resolve_signal_bits(&args[0], "squelch", ctx) {
         Ok(bits) => bits,
         Err(err) => return err,
     };
-
-    // The masks OR together, so squelches compose.
-    let new_closure = Closure::new(
-        closure_rc.template,
-        closure_rc.env,
-        closure_rc.squelch_mask.union(new_bits),
+    let wrapped = Closure::new(
+        closure.template,
+        closure.env,
+        closure.squelch_mask.union(blocked),
     );
-
-    (SIG_OK, ctx.closure(new_closure))
+    (SIG_OK, ctx.closure(wrapped))
 }
 
-/// Transform a closure by applying a permit mask (inverse of squelch).
-///
-/// `(attune |:yield :error| closure)` returns a new closure that permits ONLY
-/// the specified signals — everything else is intercepted and converted to
-/// `:error`. This is the positive dual of `squelch`: squelch says "block
-/// these", attune says "allow only these."
-///
-/// Argument order is mask-first: the signal spec declares intent, the closure
-/// follows. This reads as "attune to yield+error: this function."
+/// `(attune spec f)`: a new closure over `f`'s code and environment whose
+/// boundary lets through only the signals in `spec`, and turns every other
+/// signal a program can raise into a `:signal-violation` error. It is
+/// `(squelch (complement spec) f)`.
 pub(crate) fn prim_attune(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    // First argument: signal spec (keyword, set, array, list, or integer)
-    let permitted_bits =
-        match crate::primitives::fibers::resolve_signal_bits(&args[0], "attune", ctx) {
-            Ok(bits) => bits,
-            Err(err) => return err,
-        };
-
-    // Second argument: closure to wrap
-    let closure_rc = match args[1].as_closure() {
-        Some(c) => c,
-        None => {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "attune: second argument must be a closure, got {}",
-                        args[1].type_name()
-                    ),
-                ),
-            );
-        }
+    let closure = match closure_argument(&args[1], "attune", ctx) {
+        Ok(c) => c,
+        Err(err) => return err,
     };
-
-    // Suppress everything the user DIDN'T permit (within the user-producible set).
-    let suppress_bits = crate::signals::CAP_MASK.subtract(permitted_bits);
-
-    let new_closure = Closure::new(
-        closure_rc.template,
-        closure_rc.env,
-        closure_rc.squelch_mask.union(suppress_bits),
+    let permitted = match crate::primitives::fibers::resolve_signal_bits(&args[0], "attune", ctx) {
+        Ok(bits) => bits,
+        Err(err) => return err,
+    };
+    let wrapped = Closure::new(
+        closure.template,
+        closure.env,
+        closure
+            .squelch_mask
+            .union(crate::signals::CAP_MASK.subtract(permitted)),
     );
+    (SIG_OK, ctx.closure(wrapped))
+}
 
-    (SIG_OK, ctx.closure(new_closure))
+/// The closure `squelch` or `attune`, named `prim`, takes second, or the
+/// type error for any other value.
+fn closure_argument<'v>(
+    value: &'v Value,
+    prim: &str,
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+) -> Result<&'v Closure, (SignalBits, Value)> {
+    value.as_closure().ok_or_else(|| {
+        (
+            SIG_ERROR,
+            ctx.error(
+                "type-error",
+                format!(
+                    "{}: second argument must be a closure, got {}",
+                    prim,
+                    value.type_name()
+                ),
+            ),
+        )
+    })
 }
 
 /// Return the source location of a closure as `{:file :line :col}`, or `nil`.

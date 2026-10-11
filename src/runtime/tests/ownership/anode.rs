@@ -18,7 +18,7 @@ fn body_unit(
 }
 
 /// End-to-end exercise of the ACTIVATION OWNER NODE on the interpreter
-/// (docs/impl/region/owner.md § "Owner nodes — an activation as a forest root").
+/// (docs/impl/region/owner.md).
 /// The body is hand-emitted bytecode — isolating the runtime node mechanism
 /// from the compiler's adopt siting (the production emitters are the
 /// capture-back-edge and transfer cuts): load a fresh-region member from the
@@ -78,14 +78,13 @@ fn activation_owner_node_frees_adopted_member_on_normal_completion() {
 }
 
 /// The activation owner node SURVIVES a yield→resume park
-/// (docs/impl/region/owner.md § "Owner nodes" — "A park moves the node into the
-/// suspended frame"). The hand-emitted body (no production lowering emits
-/// `AdoptIntoActivation`) adopts a fresh-region member into the activation's
-/// node, yields, and — once resumed — completes normally. The park must carry
-/// the node (the member stays Owned, RC frozen, while the fiber is parked — it
-/// must NOT be freed mid-park), and the RESUMED body's normal completion must
-/// free node + member: generation bump, bounded region count over 50
-/// activations. The counterfactual is the park itself: a suspend that drops the
+/// (docs/impl/region/owner.md). The hand-emitted body (no production
+/// lowering emits `AdoptIntoActivation`) adopts a fresh-region member into
+/// the activation's node, yields, and — once resumed — completes normally. The
+/// park must carry the node (the member stays Owned, RC frozen, while the fiber
+/// is parked — it must NOT be freed mid-park), and the RESUMED body's normal
+/// completion must free node + member: generation bump, bounded region count
+/// over 50 activations. The counterfactual is the park itself: a suspend that drops the
 /// node slot strands the Owned member — nothing ever reclaims it, the
 /// generation never bumps, and the count grows by 2 per activation.
 #[test]
@@ -228,7 +227,7 @@ fn activation_owner_node_survives_repeated_parks() {
 
 /// The node rides `ExecResult::activation_dues` when the park is built by
 /// the CALLER of the already-unwound activation — the fuel-pause channel
-/// (docs/impl/region/owner.md § "Owner nodes"). A fuel pause (unlike a yield)
+/// (docs/impl/region/owner.md). A fuel pause (unlike a yield)
 /// creates no suspended frame inside the dispatch loop: the activation unwinds
 /// through `execute_bytecode_saving_stack`, which must move the node into the
 /// `ExecResult` beside the region map, and the caller builds the park from that
@@ -270,6 +269,11 @@ fn activation_owner_node_rides_exec_result_across_fuel_pause() {
         bc.emit(Instruction::Return);
         bc.emit(Instruction::Jump);
         bc.emit_i32(-7);
+        // The trap: a hand-built code object records a silent signal, and the
+        // interpreter charges no fuel inside a silent function
+        // (docs/signals/inference.md), so the body would never pause. It
+        // claims the signal a meter can pause.
+        bc.signal = crate::signals::Signal::errors();
         let unit = body_unit(heap_ptr, bc);
         let code = unit.entry().code();
 

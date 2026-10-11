@@ -37,7 +37,8 @@ pub(crate) struct TailCallInfo {
     /// value (a native/parameter tail target sets no pending tail call, so this is
     /// always a real closure in practice).
     pub closure: Value,
-    pub squelch_mask: SignalBits,
+    /// The boundary the callee's signal crosses when the activation ends.
+    pub boundary: crate::value::closure::Boundary,
 }
 
 /// A non-tail call to an interpreted closure, handed from `call_inner` to

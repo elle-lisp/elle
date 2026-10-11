@@ -8,7 +8,7 @@ use crate::pipeline::compile_file;
 use crate::vm::core::WorkgroupSize;
 
 /// A GPU-eligible function, defined.
-const GPU_ADD: &str = "(defn gpu-add [a b] (silence) (muffle :error) (numeric!) (%add a b))";
+const GPU_ADD: &str = "(defn gpu-add [a b] (silent!) (numeric!) (%add a b))";
 
 /// Run `GPU_ADD` and then `body` on `rt`, and answer the program's value. The
 /// unit is dropped before this returns.

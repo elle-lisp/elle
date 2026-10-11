@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-10-05
 // The edit collectors behind `elle rewrite`: one per migration rule kind, each
 // turning a rule into byte-span edits over the source text.
 // docs/epochs.md
@@ -150,89 +150,6 @@ pub(super) fn try_match_unwrap<'a>(
     })
 }
 
-/// Lex source and collect edits for forms matching replace rules.
-/// Works at the token level using byte offsets from the lexer.
-pub(crate) fn collect_replace_edits(
-    src: SourceText<'_>,
-    replaces: &[(&str, usize, &str)],
-) -> Result<Vec<Edit>, String> {
-    let tokens = src.code_tokens()?;
-
-    let mut edits = Vec::new();
-    let mut i = 0;
-    while i < tokens.len() {
-        if let Some(edit) = try_match_replace(src.text, &tokens, i, replaces) {
-            // Skip past the matched form
-            i = skip_balanced_form(&tokens, i);
-            edits.push(edit);
-        } else {
-            i += 1;
-        }
-    }
-    Ok(edits)
-}
-
-/// Try to match a replace rule at token position `i`.
-/// Expects `tokens[i]` to be `LeftParen` followed by a matching symbol.
-pub(super) fn try_match_replace<'a>(
-    source: &str,
-    tokens: &[(Token<'a>, usize, usize)],
-    i: usize,
-    replaces: &[(&str, usize, &str)],
-) -> Option<Edit> {
-    // Must start with LeftParen
-    if !matches!(tokens.get(i), Some((Token::LeftParen, _, _))) {
-        return None;
-    }
-    // Next token must be a symbol matching a replace rule
-    let head_sym = match tokens.get(i + 1) {
-        Some((Token::Symbol(s), _, _)) => *s,
-        _ => return None,
-    };
-    let (_, arity, template) = replaces.iter().find(|(s, _, _)| *s == head_sym)?;
-
-    // Collect argument byte ranges by walking balanced tokens
-    let mut args: Vec<(usize, usize)> = Vec::new(); // (start_byte, end_byte) per arg
-    let mut pos = i + 2; // skip LeftParen and head symbol
-    while pos < tokens.len() {
-        match &tokens[pos].0 {
-            Token::RightParen => break,
-            _ => {
-                let arg_start = tokens[pos].1;
-                let arg_end_pos = skip_one_form(tokens, pos);
-                if arg_end_pos == 0 || arg_end_pos > tokens.len() {
-                    return None; // malformed
-                }
-                let last = arg_end_pos - 1;
-                let arg_end = tokens[last].1 + tokens[last].2;
-                args.push((arg_start, arg_end));
-                pos = arg_end_pos;
-            }
-        }
-    }
-
-    if pos >= tokens.len() || args.len() != *arity {
-        return None;
-    }
-
-    // Form spans from LeftParen to RightParen (inclusive)
-    let form_start = tokens[i].1;
-    let form_end = tokens[pos].1 + tokens[pos].2; // byte after )
-
-    // Build replacement by interpolating source text of args into template
-    let mut result = template.to_string();
-    for (j, (start, end)) in args.iter().enumerate().rev() {
-        let placeholder = format!("${}", j + 1);
-        result = result.replace(&placeholder, &source[*start..*end]);
-    }
-
-    Some(Edit {
-        byte_offset: form_start,
-        byte_len: form_end - form_start,
-        replacement: result,
-    })
-}
-
 /// Collect edits that spell every named reader shorthand out as its form:
 /// `;x` becomes `(splice x)` (docs/impl/lexicon.md).
 ///
@@ -361,9 +278,11 @@ pub(super) fn skip_pipe_form(tokens: &[(Token<'_>, usize, usize)], start: usize)
 }
 
 mod flatten;
+mod replace;
 pub(crate) use flatten::{
     collect_bracket_edits, collect_flatten_clause_edits, collect_flatten_edits,
 };
+pub(crate) use replace::collect_replace_edits;
 
 /// Collect the edits that rewrite each millisecond duration a call named in
 /// `millis` gave as a `:timeout` in seconds (docs/epochs.md).

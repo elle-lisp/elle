@@ -1,7 +1,8 @@
-// audited: 2026-09-19
-// docs/impl/vm.md
-// docs/impl/bytecode.md
+// audited: 2026-10-05
 //! The bytecode dispatch match: one decoded instruction routed to its handler.
+//!
+//! docs/impl/vm.md
+//! docs/impl/bytecode.md
 //!
 //! Extracted from the inner execution loop so the loop root stays a thin
 //! fuel/signal/decode harness. `dispatch_instruction` is the single arm of that
@@ -24,15 +25,27 @@
 use super::*;
 
 impl VM {
-    /// Charge one unit of fuel for a branch/call opcode. Returns `Some(exit)`
-    /// when fuel is exhausted — the caller must propagate it out of the dispatch
-    /// loop — and `None` after decrementing. `resume_ip` must be the opcode start
-    /// (`instr_ip`), so a fuel-yielded fiber re-runs the whole opcode on resume.
-    /// When fuel is `None` (the common, unmetered case) the `if let` is skipped —
-    /// a not-taken branch, negligible overhead on the hot path.
+    /// Charge one unit of fuel for a branch/call opcode of `code`. Returns
+    /// `Some(exit)` when fuel is exhausted — the caller must propagate it out
+    /// of the dispatch loop — and `None` after decrementing. `resume_ip` must
+    /// be the opcode start (`instr_ip`), so a fuel-yielded fiber re-runs the
+    /// whole opcode on resume. When fuel is `None` (the common, unmetered case)
+    /// the `if let` is skipped — a not-taken branch, negligible overhead on the
+    /// hot path.
+    ///
+    /// A silent function is charged nothing: it is a proof that nothing stops
+    /// the fiber while it runs (docs/signals/inference.md). Its signal is read
+    /// only on a metered fiber.
     #[inline]
-    fn charge_fuel(&mut self, resume_ip: usize) -> Option<(SignalBits, usize)> {
+    fn charge_fuel(
+        &mut self,
+        code: &crate::value::Code,
+        resume_ip: usize,
+    ) -> Option<(SignalBits, usize)> {
         if let Some(ref mut fuel) = self.fiber.fuel {
+            if code.template().signal().is_silent() {
+                return None;
+            }
             if *fuel == 0 {
                 self.fiber.signal = Some((SIG_FUEL, Value::NIL));
                 return Some((SIG_FUEL, resume_ip));
@@ -100,7 +113,7 @@ impl VM {
                 // charging fuel before the jump.
                 let offset = i32::from_be_bytes([bc[*ip], bc[*ip + 1], bc[*ip + 2], bc[*ip + 3]]);
                 if offset < 0 {
-                    if let Some(exit) = self.charge_fuel(instr_ip) {
+                    if let Some(exit) = self.charge_fuel(code, instr_ip) {
                         return Some(exit);
                     }
                 }
@@ -120,7 +133,7 @@ impl VM {
 
             // Call instructions charge fuel before invoking the callee.
             Instruction::Call => {
-                if let Some(exit) = self.charge_fuel(instr_ip) {
+                if let Some(exit) = self.charge_fuel(code, instr_ip) {
                     return Some(exit);
                 }
                 if let Some(bits) = self.handle_call(code, closure_env, ip, instr_ip, false) {
@@ -128,7 +141,7 @@ impl VM {
                 }
             }
             Instruction::CallChecked => {
-                if let Some(exit) = self.charge_fuel(instr_ip) {
+                if let Some(exit) = self.charge_fuel(code, instr_ip) {
                     return Some(exit);
                 }
                 if let Some(bits) = self.handle_call(code, closure_env, ip, instr_ip, true) {
@@ -136,7 +149,7 @@ impl VM {
                 }
             }
             Instruction::TailCall => {
-                if let Some(exit) = self.charge_fuel(instr_ip) {
+                if let Some(exit) = self.charge_fuel(code, instr_ip) {
                     return Some(exit);
                 }
                 if let Some(bits) = self.handle_tail_call(ip, bc, false) {
@@ -144,7 +157,7 @@ impl VM {
                 }
             }
             Instruction::TailCallChecked => {
-                if let Some(exit) = self.charge_fuel(instr_ip) {
+                if let Some(exit) = self.charge_fuel(code, instr_ip) {
                     return Some(exit);
                 }
                 if let Some(bits) = self.handle_tail_call(ip, bc, true) {
@@ -350,7 +363,7 @@ impl VM {
                 data::handle_array_push(self);
             }
             Instruction::CallArrayMut => {
-                if let Some(exit) = self.charge_fuel(instr_ip) {
+                if let Some(exit) = self.charge_fuel(code, instr_ip) {
                     return Some(exit);
                 }
                 if let Some(bits) = self.handle_call_array(code, closure_env, ip, instr_ip, false) {
@@ -358,7 +371,7 @@ impl VM {
                 }
             }
             Instruction::TailCallArrayMut => {
-                if let Some(exit) = self.charge_fuel(instr_ip) {
+                if let Some(exit) = self.charge_fuel(code, instr_ip) {
                     return Some(exit);
                 }
                 if let Some(bits) = self.handle_tail_call_array(ip, bc, false) {

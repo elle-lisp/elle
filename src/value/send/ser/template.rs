@@ -1,7 +1,8 @@
 // audited: 2026-10-06
-// docs/threads.md
-// docs/impl/region/template.md
 //! Serializing a code object a `MakeClosure` indexes into a `SendableClosure`.
+//!
+//! docs/threads.md
+//! docs/impl/region/template.md
 //!
 //! Kept apart from the instance path in `from_value_inner`: such a code object
 //! has no heap identity to intern, so its serialization is a straight
@@ -90,7 +91,6 @@ pub(in crate::value::send) fn code_fields(
         rest_list_layout: t.rest_list_layout(),
         name: t.name().map(str::to_string),
         squelch_mask,
-        muffle: t.muffle(),
         env,
         lir: None,
         lir_values: Vec::new(),

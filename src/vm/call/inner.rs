@@ -181,7 +181,7 @@ impl VM {
 
             // A compiled callee runs as a native call nested on the Rust stack.
             // While that stack is low, the callee runs here instead, on fiber
-            // frames (docs/impl/vm.md § "What still uses the Rust stack").
+            // frames (docs/impl/vm.md).
             #[cfg(any(feature = "jit", feature = "wasm", feature = "mlir"))]
             let compiled_room =
                 !crate::vm::native_stack::below(crate::vm::native_stack::COMPILED_CALL_RESERVE);
@@ -247,7 +247,7 @@ impl VM {
                                 // `activation_region_maps.last()`) is the caller's.
                                 // MOVE what the caller's activation owes into its park — this
                                 // activation unwinds with the suspending signal
-                                // (docs/impl/region/owner.md § "Owner nodes").
+                                // (docs/impl/region/owner.md).
                                 let caller_dues = self.take_activation_dues();
                                 // The JIT callee suspended without entering an
                                 // interpreter activation, so `current_closure` is
@@ -308,7 +308,7 @@ impl VM {
             // Hand the callee to the dispatch loop's driver, which pauses this
             // caller in the fiber and runs the callee on the same loop; the
             // callee's closure value becomes its executing-closure register
-            // (docs/impl/vm.md § "Non-tail calls"). What completing the call
+            // (docs/impl/vm.md). What completing the call
             // needs to know about the callee is read here, while `func` is
             // certainly live.
             self.pending_call = Some(crate::vm::core::PendingCall {
@@ -317,7 +317,7 @@ impl VM {
                 closure: func,
                 call_ip: instr_ip,
                 site: crate::value::fiber::CallSite {
-                    squelch_mask: closure.boundary_mask(),
+                    boundary: crate::value::closure::Boundary::of(closure),
                 },
             });
             return Some(SIG_OK);

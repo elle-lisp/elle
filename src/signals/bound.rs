@@ -1,5 +1,5 @@
 // audited: 2026-10-05
-//! The entry check of a `(silence p)` bound, asked by the interpreter's
+//! The entry check of a `(bound p spec)` bound, asked by the interpreter's
 //! `CheckSignalBound` and the JIT's prologue alike.
 //!
 //! docs/signals/inference.md
@@ -26,7 +26,7 @@ pub fn violation(value: Value, allowed: SignalBits) -> Option<String> {
     };
     if signal.is_polymorphic() {
         return Some(format!(
-            "restrict: {} passes on the signal of its arguments but parameter is restricted to {}",
+            "bound: {} passes on the signal of its arguments but parameter is bounded to {}",
             what,
             registry::format_bits(allowed)
         ));
@@ -37,7 +37,7 @@ pub fn violation(value: Value, allowed: SignalBits) -> Option<String> {
         return None;
     }
     Some(format!(
-        "restrict: {} may emit {} but parameter is restricted to {}",
+        "bound: {} may emit {} but parameter is bounded to {}",
         what,
         registry::format_bits(excess),
         registry::format_bits(allowed)

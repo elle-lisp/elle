@@ -1,8 +1,10 @@
-// audited: 2026-10-04
-// docs/impl/jit.md
-// docs/impl/region/owner.md
+// audited: 2026-10-05
 //! The helpers a compiled call site enters: dispatch by callee kind, and the
 //! tail-call and parameter-frame steps around it.
+//!
+//! docs/impl/jit.md
+//! docs/impl/region/owner.md
+//! docs/signals/inference.md
 
 use super::*;
 
@@ -89,21 +91,20 @@ pub extern "C" fn elle_jit_call(
             return JitValue::nil();
         }
 
-        let boundary_mask = closure.boundary_mask();
+        let mut boundary = crate::value::closure::Boundary::of(closure);
 
         // JIT-to-JIT fast path: check if callee has JIT code.
         //
         // The bare lookup comes first so a hit stays one hash probe. Only the
         // miss counts the call and submits a hot callee, which is what keeps a
         // function called from nowhere but compiled code reaching the JIT at
-        // all (docs/impl/jit.md § "Function selection"). The counter and the
+        // all (docs/impl/jit.md). The counter and the
         // worker poll are worth their cost exactly where the alternative is an
         // interpreter frame, which is the arm below.
         //
         // A compiled callee nests a native frame under this one. While the
         // native stack is low, the callee takes the interpreter arm instead,
-        // whose calls wait on fiber frames (docs/impl/jit.md § "How a call
-        // leaves compiled code").
+        // whose calls wait on fiber frames (docs/impl/jit.md).
         let bytecode_ptr = closure.template.bytecode().as_ptr();
         let compiled =
             if crate::vm::native_stack::below(crate::vm::native_stack::COMPILED_CALL_RESERVE) {
@@ -154,29 +155,19 @@ pub extern "C" fn elle_jit_call(
 
             vm.fiber.call_depth -= 1;
 
-            // Check for exception (error or halt) — use contains for compound signals
-            if vm
-                .fiber
-                .signal
-                .as_ref()
-                .is_some_and(|(b, _)| b.intersects(SIG_ERROR) || b.intersects(SIG_HALT))
-            {
-                return JitValue::nil();
-            }
-
-            // Check for suspending signal from callee (SIG_YIELD, SIG_SWITCH, user-defined)
+            // The callee's signal crosses its boundary: an error or a halt
+            // leaves as itself unless it breaks the callee's proof, and a
+            // suspending signal side-exits unless the boundary refuses it.
+            // `enforce_boundary` is the discard chokepoint — it runs what each
+            // parked frame owed before handing back its error
+            // (docs/impl/region/owner.md).
             if let Some((sig, _)) = vm.fiber.signal {
-                if !sig.is_empty() && !sig.intersects(SIG_ERROR) && !sig.intersects(SIG_HALT) {
-                    // Boundary enforcement on the JIT-to-JIT path, through the
-                    // predicate the interpreter's `enforce_squelch` asks.
-                    let squelched = crate::signals::squelched_bits(sig, boundary_mask);
-                    if !squelched.is_empty() {
-                        // `squelch_violation` is the discard chokepoint — it runs
-                        // what each parked frame owed before handing back the error
-                        // (docs/impl/region/owner.md § "A discard runs what the
-                        // abandoned frames owed").
-                        let err = vm.squelch_violation(squelched, vm.fiber.signal, depth);
-                        vm.fiber.signal = Some((SIG_ERROR, err));
+                if sig.intersects(SIG_ERROR) || sig.intersects(SIG_HALT) {
+                    vm.enforce_boundary(sig, &boundary, depth);
+                    return JitValue::nil();
+                }
+                if !sig.is_empty() {
+                    if vm.enforce_boundary(sig, &boundary, depth).is_some() {
                         return JitValue::nil();
                     }
                     return YIELD_SENTINEL;
@@ -187,10 +178,19 @@ pub extern "C" fn elle_jit_call(
             // hand it its executing-closure register via the one-shot, exactly as
             // the interpreter's `trampoline_loop` installs `tail.closure` on a
             // frame replacement — a self-reference in that body resolves to it.
+            // Its signal crosses its own boundary and the callee's, and the
+            // callee's proof comes first.
             if result == TAIL_CALL_SENTINEL {
                 if let Some(tail) = vm.pending_tail_call.take() {
+                    boundary.add(tail.boundary);
                     vm.pending_entry_closure = tail.closure;
                     let exec_result = vm.execute_bytecode_saving_stack(&tail.code, &tail.env);
+                    if vm
+                        .enforce_boundary(exec_result.bits, &boundary, depth)
+                        .is_some()
+                    {
+                        return JitValue::nil();
+                    }
                     // Park the tail callee's inner frame on a fuel/signal suspend
                     // so resume re-enters it (interp_exec_result_to_jit_value); a
                     // tail-recursive interpreter callee (e.g. `fold`) otherwise
@@ -214,7 +214,6 @@ pub extern "C" fn elle_jit_call(
             .map(|i| unsafe { *args_ptr.add(i) })
             .collect();
 
-        let boundary_mask = closure.boundary_mask();
         // Non-tail call: the callee owns each non-captured fixed param and
         // releases it value-based at its `decref_point`. `build_closure_env`
         // (own_params=true) hands the callee one `CallArgument` owning reference
@@ -238,21 +237,15 @@ pub extern "C" fn elle_jit_call(
         let result = vm.execute_bytecode_saving_stack(&closure.template.code(), &new_env);
         vm.fiber.call_depth -= 1;
 
-        // Boundary enforcement: a suspending signal the closure's boundary mask
-        // names becomes a signal-violation.
-        let bits = result.bits;
-        let squelched = crate::signals::squelched_bits(bits, boundary_mask);
-        if !squelched.is_empty() {
-            // The squelch discard chokepoint (see the JIT-to-JIT arm above).
-            let err = vm.squelch_violation(squelched, vm.fiber.signal, depth);
-            vm.fiber.signal = Some((SIG_ERROR, err));
+        // The callee's signal crosses its boundary (see the JIT-to-JIT arm
+        // above).
+        if vm.enforce_boundary(result.bits, &boundary, depth).is_some() {
             return JitValue::nil();
         }
 
         // Route through the shared converter, which parks the callee's inner
         // frame on a non-yield suspend (SIG_FUEL) so resume re-enters it — see
-        // interp_exec_result_to_jit_value. `bits` above already drove the squelch
-        // check; the converter re-reads it from `result`.
+        // interp_exec_result_to_jit_value.
         interp_exec_result_to_jit_value(vm, result)
     } else if let Some(result) = {
         // Collection-as-function call-index, routed through the shared

@@ -8,8 +8,7 @@ use super::*;
 impl VM {
     /// Resolve this tail call's borrowed-argument retains to physical regions
     /// and CONSUME the local each one is stashed in, without releasing anything
-    /// yet (docs/impl/region/signalexit.md § "What the fall-through owes, a
-    /// signal exit owes too").
+    /// yet (docs/impl/region/signalexit.md).
     ///
     /// Stamping the local `nil` is what makes the release count once: a frame
     /// that leaves by a signal can still be REPLAYED — a suspending signal parks
@@ -28,10 +27,10 @@ impl VM {
     /// `spare` is the value a SUSPENDING exit parks, and it is left standing: that
     /// exit's continuation is parked at the post-`TailCall` ip, so the release the
     /// retain answers to still runs on the resume, and the retain is the one
-    /// reference the park owes the body for what it yields (park.md § "A fiber
-    /// body owns one reference of every value it yields"). Its slot keeps its
-    /// value, so the replay releases it rather than no-opping on a stamp. `None`
-    /// everywhere else, where nothing reaches the block again.
+    /// reference the park owes the body for what it yields
+    /// (docs/impl/region/park.md). Its slot keeps its value, so the replay
+    /// releases it rather than no-opping on a stamp. `None` everywhere else,
+    /// where nothing reaches the block again.
     fn take_borrowed_arg_retains(
         &mut self,
         slots: &[u16],
@@ -95,9 +94,8 @@ impl VM {
     /// the retain here instead — except at a SUSPEND, which parks the
     /// continuation at the post-`TailCall` ip, so the block does run on resume and
     /// the retain naming the parked payload is the reference that park owes the
-    /// body (docs/impl/region/signalexit.md § "What the fall-through owes, a signal
-    /// exit owes too"). A terminal `:error` consumes them like any other exit and
-    /// mints the payload's delivery instead
+    /// body (docs/impl/region/signalexit.md). A terminal `:error` consumes them
+    /// like any other exit and mints the payload's delivery instead
     /// ([`Self::mint_raised_argument_delivery`]).
     ///
     /// `spliced_args` says the arguments came out of an args array the calling
@@ -107,8 +105,7 @@ impl VM {
     /// one reference per parameter of its own (`own_params`), exactly as a
     /// call-position callee does. The caller reclaims the array once this returns,
     /// and the cascade balances against those mints
-    /// (docs/impl/region/mechanism.md § "A spliced call's arguments come out of an
-    /// array the convention owns").
+    /// (docs/impl/region/mechanism.md).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn tail_call_inner(
         &mut self,
@@ -233,8 +230,7 @@ impl VM {
             // mask ABSORBS the child's outcome the request is answered here, so
             // the value is the call's result and the frame never left — it takes
             // the fall-through, exactly as a native that completed normally does
-            // (docs/impl/region/signalexit.md § "A carrier that comes back with a
-            // result never left the frame"). The post-`TailCall` block then runs
+            // (docs/impl/region/signalexit.md). The post-`TailCall` block then runs
             // the releases it holds for this call: one per owned argument, plus
             // the result's own, plus the return mint. Handing the value out
             // through `fiber.signal` instead reaches none of them, and no other
@@ -333,8 +329,7 @@ impl VM {
             // still in place, and the frame's own error exit releases the callee
             // through its release table. A deferral recorded ahead of that
             // refusal releases it a second time where the activation ends
-            // (docs/impl/region/owner.md § "A deferred tail-call release has the
-            // node's life").
+            // (docs/impl/region/owner.md).
             //
             // Recorded on the activation's own dues slot rather than carried on
             // the `TailCallInfo`, because the obligation outlives whoever
@@ -360,9 +355,8 @@ impl VM {
             // belongs to a reference the frame separately owns: dropping one for
             // the other strands that reference, and where the callee captures a
             // merge member its own counted edge pins the arena too, so the arena
-            // channel alone reclaims nothing (docs/impl/region/letrec.md § "The
-            // arena channel and the callee channel are independent"). They never
-            // name the same region — a merge MEMBER callee is absent from
+            // channel alone reclaims nothing (docs/impl/region/letrec.md). They
+            // never name the same region — a merge MEMBER callee is absent from
             // `cycle_tail_release`, and `tail_callee_defers_release` refuses every
             // `closure_cycle_members` region.
             let arena =
@@ -379,7 +373,7 @@ impl VM {
                 code: closure.template.code(),
                 env: new_env_rc,
                 closure: func,
-                squelch_mask: closure.boundary_mask(),
+                boundary: crate::value::closure::Boundary::of(closure),
             });
 
             self.fiber.signal = Some((SIG_OK, Value::NIL));

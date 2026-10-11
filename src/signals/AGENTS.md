@@ -106,7 +106,7 @@ Every lambda has a signal-related field:
     - Direct signal emissions in the body
     - Signals of internal calls to statically-known functions
     - Signals contributed by bounded parameters (their bound's bits are included)
-    - An unbounded parameter that is called contributes its position to `propagates`, not a bit
+    - An unbounded parameter that is called contributes its position to `propagates`, and `:error`, since the call's argument count goes unchecked
     - `:error` from every construct that checks something at run time ([docs/signals/inference.md](../../docs/signals/inference.md), "What raises")
 
 A ceiling is a separate concept. `(attune! spec)` declares `spec`, and `(silent!)` declares the empty ceiling `||`; the compiler checks `inferred_signals` against it, and an excess is a compile error. The ceiling never replaces `inferred_signals`, so a caller sees what the body does.
@@ -160,7 +160,7 @@ Used across the pipeline and the runtime:
 - `lir/emit/` — emits signal metadata on closures
 - `value/closure.rs` — a code object's payload stores its `Signal`
 - `pipeline/` — builds primitive signals map, passes to Analyzer
-- `jit/` — compiles a function whatever its signal; its call helpers ask `squelched_bits` at every boundary
+- `jit/` — compiles a function whatever its signal; its call helpers check every boundary through `VM::enforce_boundary`
 - `vm/call/` — a closure's squelch mask at every call, and `breaks_proof` when the callee is silent
 - `primitives/stream.rs`, `primitives/net.rs` — the scheduler round trip, `Signal::io_yields_errors()`
 

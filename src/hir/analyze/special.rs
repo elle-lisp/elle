@@ -1,5 +1,7 @@
 // audited: 2026-10-05
-//! Special forms: yield, match, silence
+//! Special forms: the signal declarations, the assertions, emit, and match.
+//!
+//! docs/signals/inference.md
 
 use super::*;
 use crate::syntax::{Syntax, SyntaxKind};
@@ -7,66 +9,41 @@ use crate::syntax::{Syntax, SyntaxKind};
 mod pattern;
 
 impl<'a> Analyzer<'a> {
-    /// Analyze a `(silence ...)` form.
+    /// Analyze a `(bound param spec)` form.
     ///
-    /// silence is a declaration, not an expression. It must appear inside
-    /// a lambda body. It accumulates into `current_param_bounds` and
-    /// `current_declared_ceiling`, which `analyze_lambda` reads after
-    /// analyzing the body.
-    ///
-    /// Forms:
-    /// - `(silence)` — function-level ceiling = silent
-    /// - `(silence param)` — parameter bound = silent
-    ///
-    /// Signal keywords are not accepted. Use `(squelch ...)` instead.
-    pub(crate) fn analyze_silence(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
+    /// bound is a declaration, not an expression. It must appear inside a
+    /// lambda body, and it records into `current_param_bounds`, which
+    /// `analyze_lambda` reads after analyzing the body. `spec` is a signal
+    /// keyword or a literal set of them, `||` included.
+    pub(crate) fn analyze_bound(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
         if self.fn_depth == 0 {
             return Err(format!(
-                "{}: silence must appear inside a function body",
+                "{}: bound must appear inside a function body",
                 span
             ));
         }
-
-        let args = &items[1..];
-        if args.is_empty() {
-            // (silence) — function-level ceiling = silent
-            self.current_declared_ceiling = Some(Signal::silent());
-            return Ok(Hir::silent(HirKind::Nil, span));
+        if items.len() != 3 {
+            return Err(format!(
+                "{}: bound requires a parameter name and a signal spec",
+                span
+            ));
         }
-
-        match &args[0].kind {
-            SyntaxKind::Keyword(_) => {
-                // (silence :kw ...) — signal keywords are rejected here
-                return Err(format!(
-                    "{}: silence takes no signal keywords — use (squelch ...) instead",
-                    span
-                ));
-            }
-            SyntaxKind::Symbol(param_name) => {
-                // (silence param) — parameter-level bound = silent
-                let binding =
-                    self.find_current_param_binding(param_name, &args[0].span, "silence")?;
-
-                // No keywords allowed after the parameter name
-                if !args[1..].is_empty() {
-                    return Err(format!(
-                        "{}: silence takes no signal keywords — use (squelch ...) instead",
-                        span
-                    ));
-                }
-
-                // Last wins for duplicate parameter bounds
-                self.current_param_bounds.insert(binding, Signal::silent());
-            }
-            _ => {
-                return Err(format!(
-                    "{}: silence: expected parameter name, got {}",
-                    args[0].span,
-                    args[0].kind_label()
-                ));
-            }
+        let Some(param_name) = items[1].as_symbol() else {
+            return Err(format!(
+                "{}: bound: expected parameter name, got {}",
+                items[1].span,
+                items[1].kind_label()
+            ));
+        };
+        let binding = self.find_current_param_binding(param_name, &items[1].span, "bound")?;
+        if self.current_param_bounds.contains_key(&binding) {
+            return Err(format!(
+                "{}: bound: parameter {} is already bounded",
+                span, param_name
+            ));
         }
-
+        let bits = self.resolve_static_signal("bound", &items[2])?;
+        self.current_param_bounds.insert(binding, Signal::of(bits));
         Ok(Hir::silent(HirKind::Nil, span))
     }
 
@@ -92,12 +69,12 @@ impl<'a> Analyzer<'a> {
     ///
     /// attune! is a compile-time declaration. It records a ceiling that
     /// `analyze_lambda` checks the inferred signal against; the function's
-    /// signal stays the inferred one. Generalizes `(silence)`, which is the
-    /// ceiling with no signals permitted.
+    /// signal stays the inferred one. A body that declares several ceilings
+    /// must fit each, so they intersect.
     ///
     /// Forms:
     /// - `(attune! :keyword)` — ceiling = single signal
-    /// - `(attune! |:kw1 :kw2|)` — ceiling = set of signals
+    /// - `(attune! |:kw1 :kw2|)` — ceiling = set of signals, `||` included
     pub(crate) fn analyze_attune_assert(
         &mut self,
         items: &[Syntax],
@@ -119,55 +96,32 @@ impl<'a> Analyzer<'a> {
         }
 
         let bits = self.resolve_static_signal("attune!", &args[0])?;
-        self.current_declared_ceiling = Some(Signal {
-            bits,
-            propagates: 0,
-        });
-
+        self.declare_ceiling(bits);
         Ok(Hir::silent(HirKind::Nil, span))
     }
 
-    /// Analyze a `(muffle signal-spec)` form.
-    ///
-    /// muffle is a declaration, not an expression. It must appear inside a
-    /// lambda body. It accumulates the bits `analyze_lambda` squelches the
-    /// function over: the inferred signal loses them and gains `:error`, and
-    /// every closure made from the lambda enforces them at its boundary.
-    ///
-    /// `:error` and `:halt` pass every boundary, so a spec naming either is
-    /// rejected here rather than silently kept.
-    ///
-    /// Forms:
-    /// - `(muffle :keyword)` — squelch a single signal
-    /// - `(muffle |:kw1 :kw2|)` — squelch a set of signals
-    pub(crate) fn analyze_muffle(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
+    /// `(silent!)` — the empty ceiling, `(attune! ||)` by another name.
+    pub(crate) fn analyze_silent(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
         if self.fn_depth == 0 {
             return Err(format!(
-                "{}: muffle must appear inside a function body",
+                "{}: silent! must appear inside a function body",
                 span
             ));
         }
-
-        let args = &items[1..];
-        if args.len() != 1 {
-            return Err(format!(
-                "{}: muffle requires exactly one argument (signal keyword or set)",
-                span
-            ));
+        if items.len() != 1 {
+            return Err(format!("{}: silent! takes no arguments", span));
         }
-
-        let bits = self.resolve_static_signal("muffle", &args[0])?;
-        let escapes = bits.intersection(crate::signals::SIG_ERROR.union(crate::signals::SIG_HALT));
-        if !escapes.is_empty() {
-            return Err(format!(
-                "{}: muffle: {} passes every boundary and cannot be muffled",
-                span,
-                crate::signals::registry::format_bits(escapes)
-            ));
-        }
-        self.current_muffle_bits |= bits;
-
+        self.declare_ceiling(crate::value::fiber::SignalBits::EMPTY);
         Ok(Hir::silent(HirKind::Nil, span))
+    }
+
+    /// Narrow the current lambda's ceiling to `bits`.
+    fn declare_ceiling(&mut self, bits: crate::value::fiber::SignalBits) {
+        let bits = match self.current_declared_ceiling {
+            Some(ceiling) => ceiling.bits.intersection(bits),
+            None => bits,
+        };
+        self.current_declared_ceiling = Some(Signal::of(bits));
     }
 
     /// `(emit <signal> <value>)` — general signal emission.
@@ -216,6 +170,8 @@ impl<'a> Analyzer<'a> {
     /// Accepts:
     /// - A literal keyword: `:yield` → SIG_YIELD
     /// - A literal set of keywords: `|:yield :io|` → SIG_YIELD | SIG_IO
+    /// - The same set as `(set :yield :io)`, the shape a quoted set literal
+    ///   takes, so a form built as data and handed to `eval` reads the same
     ///
     /// Rejects non-literal arguments at compile time. `form` is the form the
     /// spec belongs to, and every message names it.
@@ -231,20 +187,24 @@ impl<'a> Analyzer<'a> {
             crate::signals::registry::with_registry(|r| r.to_signal_bits(name))
                 .ok_or_else(|| format!("{}: {}: unknown signal keyword :{}", span, form, name))
         };
+        let union = |elements: &[Syntax]| {
+            let mut bits = SignalBits::EMPTY;
+            for elem in elements {
+                let SyntaxKind::Keyword(name) = &elem.kind else {
+                    return Err(format!(
+                        "{}: {}: set elements must be keywords",
+                        elem.span, form
+                    ));
+                };
+                bits |= resolve(name, &elem.span)?;
+            }
+            Ok(bits)
+        };
         match &syntax.kind {
             SyntaxKind::Keyword(name) => resolve(name, &syntax.span),
-            SyntaxKind::Set(elements) => {
-                let mut bits = SignalBits::EMPTY;
-                for elem in elements {
-                    let SyntaxKind::Keyword(name) = &elem.kind else {
-                        return Err(format!(
-                            "{}: {}: set elements must be keywords",
-                            elem.span, form
-                        ));
-                    };
-                    bits |= resolve(name, &elem.span)?;
-                }
-                Ok(bits)
+            SyntaxKind::Set(elements) => union(elements),
+            SyntaxKind::List(items) if items.first().and_then(Syntax::as_symbol) == Some("set") => {
+                union(&items[1..])
             }
             _ => Err(format!(
                 "{}: {}: expected a signal keyword or keyword set, got {}",
@@ -341,25 +301,6 @@ impl<'a> Analyzer<'a> {
     }
 
     // === Compile-time assertion forms (! suffix) ===
-
-    /// `(silent!)` — assert that the current function is silent (no signals).
-    pub(crate) fn analyze_silence_assert(
-        &mut self,
-        items: &[Syntax],
-        span: Span,
-    ) -> Result<Hir, String> {
-        if self.fn_depth == 0 {
-            return Err(format!(
-                "{}: silent! must appear inside a function body",
-                span
-            ));
-        }
-        if items.len() != 1 {
-            return Err(format!("{}: silent! takes no arguments", span));
-        }
-        self.current_silence_assert = true;
-        Ok(Hir::silent(HirKind::Nil, span))
-    }
 
     /// `(numeric!)` — assert that the current function is GPU-eligible
     /// (all parameters are numeric, enabling type check elision).

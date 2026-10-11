@@ -1,4 +1,4 @@
-// audited: 2026-10-04
+// audited: 2026-10-05
 //! `compile/run-on :bytecode` — force pure interpreter execution.
 //!
 //! docs/impl/differential.md
@@ -9,7 +9,7 @@ use crate::vm::core::VM;
 
 impl VM {
     /// Run a closure under bytecode interpretation, with the JIT policy off
-    /// for the run (docs/impl/differential.md § "Primitive").
+    /// for the run (docs/impl/differential.md).
     pub fn invoke_closure_bytecode(
         &mut self,
         closure_val: Value,
@@ -32,7 +32,7 @@ impl VM {
         let saved_jit = self.runtime_config.jit.clone();
         self.runtime_config.jit = crate::config::JitPolicy::Off;
 
-        let squelch_mask = closure.boundary_mask();
+        let boundary = crate::value::closure::Boundary::of(closure);
 
         // Hand the target its executing-closure register via the one-shot — a
         // forced-tier entry runs a closure body like any other entrant.
@@ -63,7 +63,7 @@ impl VM {
             return (crate::value::SIG_HALT, val);
         }
 
-        if self.enforce_squelch(bits, squelch_mask, depth) {
+        if self.enforce_boundary(bits, &boundary, depth).is_some() {
             return self.fiber.signal.take().unwrap();
         }
 

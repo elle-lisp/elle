@@ -123,9 +123,9 @@ pub const SIG_PAUSE: SignalBits = SIG_FUEL;
 /// when a closure carrying `mask` produces `bits`. An empty result means the
 /// signal crosses the boundary untouched.
 ///
-/// This is the one predicate behind every enforcement site — the interpreter's
-/// `VM::enforce_squelch` and the JIT's call, tail-call, and sentinel paths —
-/// so the exemptions cannot drift apart between tiers.
+/// One method asks it, `VM::boundary_violation`, which every tier's call,
+/// tail-call and sentinel paths reach, so the exemptions cannot drift apart
+/// between tiers.
 ///
 /// Three classes never violate a boundary:
 ///
@@ -145,11 +145,12 @@ pub fn squelched_bits(bits: SignalBits, mask: SignalBits) -> SignalBits {
 }
 
 /// Whether `bits` leaving a silent function break its proof
-/// (docs/signals/inference.md). A stub until the boundary asks it.
+/// (docs/signals/inference.md). Any signal does, `:error` and a pause
+/// included, except a halt, which is a resource fault, and a signal already
+/// carrying `:terminal`, which is an inner broken proof on its way out.
 #[inline]
 pub fn breaks_proof(bits: SignalBits) -> bool {
-    let _ = bits;
-    false
+    !bits.is_empty() && !bits.intersects(SIG_HALT.union(SIG_TERMINAL))
 }
 
 /// Capability mask: all signals that user code can produce.
@@ -405,6 +406,13 @@ impl Signal {
 // Each predicate asks a specific question about capabilities.
 
 impl Signal {
+    /// Is this function inferred silent: it emits nothing and passes on no
+    /// parameter's signal? A silent function is a proof that nothing stops
+    /// the fiber while it runs (docs/signals/inference.md).
+    pub const fn is_silent(&self) -> bool {
+        self.bits.is_empty() && self.propagates == 0
+    }
+
     /// Can this function suspend execution?
     /// Any signal emission is a fiber transfer — a potential suspension
     /// point. Polymorphic signals may also suspend (depends on the

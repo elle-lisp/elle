@@ -98,13 +98,6 @@ impl ClosureTemplate {
         self.payload().signal()
     }
 
-    /// The squelch mask the body's `(muffle spec)` declared, which every
-    /// closure of this code object enforces at its boundary.
-    #[inline]
-    pub fn muffle(&self) -> crate::value::fiber::SignalBits {
-        self.payload().muffle()
-    }
-
     #[inline]
     pub fn num_locals(&self) -> usize {
         self.payload().num_locals()
@@ -270,7 +263,7 @@ impl ClosureTemplate {
     /// smallest-offset source location, else `<anon>`. Lowering names almost
     /// nothing, so the location is the label that actually identifies a
     /// function to a reader — the JIT code-address registry records it
-    /// (docs/impl/jit.md § "The code-address registry"). The location table is
+    /// (docs/impl/jit.md). The location table is
     /// ascending, so the smallest offset is its first entry.
     pub fn display_label(&self) -> String {
         if let Some(name) = self.name() {

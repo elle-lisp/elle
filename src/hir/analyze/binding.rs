@@ -1,5 +1,7 @@
-// audited: 2026-10-04
-//! Binding forms: let, letrec, define, set
+// audited: 2026-10-05
+//! Binding forms: `let`, `def` and `var`, and `assign`.
+//!
+//! docs/bindings.md
 
 use super::*;
 use crate::syntax::{Syntax, SyntaxKind};
@@ -279,6 +281,7 @@ impl<'a> Analyzer<'a> {
         // The binding's signal and arity are now uncertain
         self.signal_env.remove(&target);
         self.arity_env.remove(&target);
+        self.bound_env.remove(&target);
 
         let value = self.analyze_expr(&items[2])?;
         let signal = value.signal;
@@ -301,7 +304,8 @@ impl<'a> Analyzer<'a> {
         if let Some(proj) = self.last_import_projection.take() {
             self.projection_env.insert(binding, proj);
         }
-        // Compile-time squelch: the value was `(squelch f mask)`
+        // Compile-time squelch: the value was `(squelch spec f)` or
+        // `(attune spec f)` with a literal spec
         if let Some(sig) = self.last_squelch_signal.take() {
             self.signal_env.insert(binding, sig);
         }

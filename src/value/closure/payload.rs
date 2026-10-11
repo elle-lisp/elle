@@ -1,7 +1,8 @@
 // audited: 2026-10-06
-// docs/impl/region/template.md
-// docs/impl/image/sealing.md
 //! `CodePayload` — a code object's variable-length data, inline in region pages.
+//!
+//! docs/impl/region/template.md
+//! docs/impl/image/sealing.md
 //!
 //! One payload per lambda, written into its compile unit's code region at
 //! emission and shared by every header built over it. Nothing here owns Rust
@@ -12,7 +13,6 @@ use crate::hir::region::StaticRegion;
 use crate::reader::SourceLoc;
 use crate::signals::Signal;
 use crate::syntax::Span;
-use crate::value::fiber::SignalBits;
 use crate::value::region_slice::RegionSlice;
 use crate::value::types::Arity;
 use crate::value::Value;
@@ -128,10 +128,6 @@ pub struct CodePayload {
     pub(crate) has_lir: bool,
     pub(crate) arity: Arity,
     pub(crate) signal: Signal,
-    /// The squelch mask every closure of this code object enforces at its
-    /// boundary, from the body's `(muffle spec)`; `signal` is the signal
-    /// after it.
-    pub(crate) muffle: SignalBits,
     pub(crate) capture_params_mask: u64,
     pub(crate) num_locals: u32,
     pub(crate) num_captures: u32,
@@ -212,7 +208,7 @@ impl<'a> LocationTable<'a> {
     }
 }
 
-/// A payload's builder-idiom merge set (docs/impl/region/merging.md § Merging).
+/// A payload's builder-idiom merge set (docs/impl/region/merging.md).
 /// Empty unless a merge fired, so the common case is a length check.
 #[derive(Clone, Copy, Debug)]
 pub struct MergedSlots<'a>(&'a [u32]);
@@ -326,7 +322,6 @@ impl CodePayload {
             has_lir: false,
             arity: Arity::Exact(0),
             signal: Signal::silent(),
-            muffle: SignalBits::EMPTY,
             capture_params_mask: 0,
             num_locals: 0,
             num_captures: 0,
@@ -403,10 +398,6 @@ impl CodePayload {
         self.signal
     }
 
-    pub fn muffle(&self) -> SignalBits {
-        self.muffle
-    }
-
     pub fn capture_params_mask(&self) -> u64 {
         self.capture_params_mask
     }
@@ -448,7 +439,6 @@ impl CodePayload {
                     origin: self.origin(),
                     arity: self.arity,
                     signal: self.signal,
-                    muffle: self.muffle,
                     num_locals: self.num_locals as u16,
                     num_params: self.num_params,
                     capture_params_mask: self.capture_params_mask,

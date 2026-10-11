@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-05
 //! Fiber types for the Elle runtime.
 //!
 //! A fiber is an independent execution context: it owns its operand stack,
@@ -18,7 +18,7 @@ mod caller;
 mod frame;
 mod handle;
 mod status;
-pub use caller::{Activation, CallSite, ParamDepth, PausedCaller, TailSquelch};
+pub use caller::{Activation, CallSite, ParamDepth, PausedCaller, TailBoundary};
 pub use frame::*;
 pub use handle::*;
 pub use status::*;
@@ -56,7 +56,7 @@ pub struct Fiber {
     /// The caller activations waiting for an interpreted callee, innermost
     /// last. A non-tail call pauses its caller here and runs the callee on the
     /// same dispatch loop, so call depth costs memory rather than native stack
-    /// (docs/impl/vm.md § "Non-tail calls"). Empty whenever the fiber is
+    /// (docs/impl/vm.md). Empty whenever the fiber is
     /// parked: a suspend moves every paused caller into `suspended`.
     pub callers: Vec<PausedCaller>,
     /// Current status
@@ -96,8 +96,7 @@ pub struct Fiber {
     /// first-resume fallback). The seed retains each heap entry's region and
     /// records a `fiber → value` content edge; the Fiber content-scan arm
     /// visits the baseline exactly when this is set, so the fiber's free
-    /// cascade is the symmetric release (docs/impl/region/park.md § "A
-    /// child's inherited parameter baseline is a counted holder"). The
+    /// cascade is the symmetric release (docs/impl/region/park.md). The
     /// fiber's own later `parameterize` frames are not covered — their values
     /// belong to the parked activation.
     pub param_baseline_seeded: bool,
@@ -108,8 +107,7 @@ pub struct Fiber {
     /// lets the resume and `resolve_parameter` checks PROVE it (debug
     /// builds), turning a missing or displaced retain into a panic at the
     /// borrow instead of a stale read. Populated only under
-    /// `debug_assertions`; empty otherwise (docs/impl/region/generations.md
-    /// § "Uncounted-borrow check").
+    /// `debug_assertions`; empty otherwise (docs/impl/region/generations.md).
     pub param_borrows: Vec<(u32, crate::hir::region::RuntimeRegion, u32)>,
     /// Signal value from this fiber. Canonical location for both
     /// signal payloads and normal return values.
@@ -123,8 +121,7 @@ pub struct Fiber {
     /// moves the live record (`VM::error_loc`) here rather than discarding it;
     /// `fiber/propagate` reads it back when it re-raises this fiber's parked
     /// signal, which is how the location survives the `defer` and scheduler
-    /// catch-then-re-raise chains (docs/impl/vm.md § "Where a reported error's
-    /// location comes from").
+    /// catch-then-re-raise chains (docs/impl/vm.md).
     ///
     /// The payload is carried so the reader can tell that the location still
     /// describes the error being re-raised — representation identity, as in
@@ -143,8 +140,7 @@ pub struct Fiber {
     /// funded — the raise-minted payload, the bodyless (denial) payload, and
     /// whether the resume value owes a mint. Written where a park is built,
     /// consumed where the park ends, through a method-only surface
-    /// ([`Delivery`]; docs/impl/region/park.md § "A park names its funding in
-    /// the delivery ledger").
+    /// ([`Delivery`]; docs/impl/region/park.md).
     pub delivery: Delivery,
     /// Suspended execution frames. Set when the fiber suspends or stops on an
     /// error; consumed when it resumes.
@@ -171,19 +167,17 @@ pub struct Fiber {
     /// `pop_activation_region_map`, which keep the two stacks in lockstep). An
     /// entry holds what the activation owes the region system when it ends: its
     /// pages-less owner-node region — the forest root `AdoptIntoActivation`
-    /// adopts members into (docs/impl/region/owner.md § "Owner nodes — an
-    /// activation as a forest root") — and the releases it took over from
-    /// frame-replacing tail calls. Discharged at the activation's normal
+    /// adopts members into (docs/impl/region/owner.md) — and the releases it
+    /// took over from frame-replacing tail calls. Discharged at the activation's normal
     /// completion (`VM::release_activation_dues`); a suspend MOVES the whole
     /// record into the parked frame ([`BytecodeFrame::activation_dues`]) and the
     /// resume restores it, so both reach that completion across any number of
-    /// parks (docs/impl/region/owner.md § "A deferred tail-call release has the
-    /// node's life").
+    /// parks (docs/impl/region/owner.md).
     pub activation_dues: Vec<ActivationDues>,
 
     /// The FIBER's own owner node — the pages-less forest root for a region whose
     /// owner is the fiber itself, outliving every single activation
-    /// (docs/impl/region/owner.md § "Owner nodes" — "The fiber owner node").
+    /// (docs/impl/region/owner.md).
     /// Fiber state, so it rides parks and fiber swaps structurally — nothing
     /// moves it, unlike the per-activation slots above. Minted lazily; `None`
     /// for a fiber that owns nothing. Freed only at the fiber's terminal
@@ -214,9 +208,10 @@ pub struct Fiber {
     /// Call stack for stack traces (name + ip + frame_base)
     pub call_stack: Vec<CallFrame>,
     /// Instruction budget. `None` = unlimited (default). `Some(n)` = `n` units
-    /// remaining. Decremented at backward jumps and call instructions. When it
-    /// reaches zero the VM emits `SIG_FUEL`, pausing the fiber. Refuel via
-    /// `fiber/set-fuel` then call `fiber/resume` to continue.
+    /// remaining. Decremented at backward jumps and call instructions outside a
+    /// silent function. When it reaches zero the VM emits `SIG_FUEL`, pausing
+    /// the fiber. Refuel via `fiber/set-fuel` then call `fiber/resume` to
+    /// continue.
     pub fuel: Option<u32>,
     /// Withheld capabilities. Bits set here prevent the fiber from silently
     /// performing the corresponding operations. When a primitive's signal bits

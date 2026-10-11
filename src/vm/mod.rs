@@ -38,7 +38,7 @@ mod wasm_entry;
 pub use crate::value::fiber::CallFrame;
 pub use core::VM;
 
-use crate::value::fiber::TailSquelch;
+use crate::value::fiber::TailBoundary;
 use crate::value::CodeUnit;
 use crate::value::{Value, SIG_ERROR, SIG_HALT, SIG_SWITCH};
 use std::rc::Rc;
@@ -166,7 +166,7 @@ impl VM {
         self.error_loc = None;
         // The body addresses its locals from stack position 0, so it runs on a
         // stack of its own and the one found here goes back at the end
-        // (docs/impl/vm.md § "Every body starts on an empty operand stack").
+        // (docs/impl/vm.md).
         let saved_stack = std::mem::take(&mut self.fiber.stack);
 
         let empty_env = Rc::new(vec![]);
@@ -206,11 +206,11 @@ impl VM {
         // Initial execution with tail-call loop: a top-level tail call replaces
         // the body in place.
         let mut bits;
-        let mut tail_squelch = TailSquelch::none(depth);
+        let mut tail_boundary = TailBoundary::none(depth);
         loop {
             bits = self.run_dispatch(&current_code, &current_env, 0).bits;
             if let Some(tail) = self.pending_tail_call.take() {
-                tail_squelch.add(tail.squelch_mask, self.fiber.param_depth());
+                tail_boundary.add(tail.boundary, self.fiber.param_depth());
                 // A top-level tail call re-enters the frame as the callee closure.
                 #[cfg(debug_assertions)]
                 Self::debug_assert_entry_closure_matches(tail.closure, &tail.code);
@@ -218,8 +218,10 @@ impl VM {
                 current_code = tail.code;
                 current_env = tail.env;
             } else {
-                if self.enforce_squelch(bits, tail_squelch.mask, tail_squelch.depth) {
-                    bits = SIG_ERROR;
+                if let Some(raised) =
+                    self.enforce_boundary(bits, &tail_boundary.boundary, tail_boundary.depth)
+                {
+                    bits = raised;
                 }
                 break;
             }
