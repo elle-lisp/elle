@@ -15,10 +15,11 @@
 // These tests cover the halves the job cannot check for itself: that every
 // plugin is inside the workspace the job compiles, that the list of artifacts
 // it demands still describes the submodule, and that the demand actually fails
-// when an artifact is absent. The last two tests hold the same for
-// `SUITE_PLUGINS`, the plugins every suite job builds.
+// when an artifact is absent. The last three tests hold the same for
+// `SUITE_PLUGINS`, the plugins every suite job builds, and check that every
+// suite job builds them before its first suite step.
 
-use crate::common::{make_expand, suite};
+use crate::common::{job_steps, make_expand, runs_target, suite, workflow_files, workflow_jobs};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
@@ -361,5 +362,77 @@ fn the_suite_plugin_assertion_fails_on_a_missing_plugin() {
     assert!(
         ok,
         "`suite-plugins-verify` failed over an artifact that exists:\n{output}"
+    );
+}
+
+/// The make targets that run the language suite or the documents, in any
+/// workflow: each build's suite target, the boot-image pass, `make smoke`,
+/// which runs both, and `make doctest`.
+const SUITE_OR_DOCTEST: &[&str] = &[
+    "smoke",
+    "smoke-lang",
+    "smoke-nojit",
+    "smoke-pool",
+    "smoke-mlir",
+    "smoke-noffi",
+    "smoke-boot-image",
+    "doctest",
+];
+
+/// A step's command lines: every line but its `name:`, which spells the
+/// command it labels.
+fn command_lines(step: &str) -> String {
+    step.lines()
+        .filter(|line| {
+            !line
+                .trim_start()
+                .trim_start_matches("- ")
+                .starts_with("name:")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+// A language-suite file that imports a plugin gates itself when the import
+// fails, and a document gates a plugin example the same way, so a job that
+// never built the plugin skips them and stays green. The plugins live in the
+// `plugins/` submodule, which a job has to check out before it can build
+// them. The argument is in docs/analysis/ci.md.
+//
+// The counter-factual: this was every suite job before the step existed, and
+// the loopback test in websocket.lisp ran nowhere. Drop the step from one job,
+// and that build skips every plugin test with nothing going red.
+#[test]
+fn every_suite_job_builds_the_suite_plugins_before_its_first_suite_step() {
+    let mut checked: Vec<String> = Vec::new();
+    for (file, text) in workflow_files() {
+        for (name, body) in workflow_jobs(&text) {
+            let steps: Vec<String> = job_steps(&body).iter().map(|s| command_lines(s)).collect();
+            let Some(first) = steps
+                .iter()
+                .position(|s| SUITE_OR_DOCTEST.iter().any(|t| runs_target(s, t)))
+            else {
+                continue;
+            };
+            let checkout = steps
+                .iter()
+                .position(|s| s.contains("git submodule update --init plugins"));
+            let build = steps.iter().position(|s| runs_target(s, "suite-plugins"));
+            assert!(
+                matches!((checkout, build), (Some(c), Some(b)) if c < b && b < first),
+                "job `{name}` in {file} runs the language suite or the doctests \
+                 without first checking out the plugins submodule and running \
+                 `make suite-plugins`, so its plugin tests skip: checkout at \
+                 step {checkout:?}, build at step {build:?}, first suite step {first}"
+            );
+            checked.push(format!("{file}:{name}"));
+        }
+    }
+    // A parse that matched nothing would assert nothing. Eight pull-request
+    // jobs and the merge queue run the suite or the doctests.
+    assert!(
+        checked.len() > 6,
+        "found only {checked:?} as suite jobs; the parse is broken, not the \
+         workflows"
     );
 }
