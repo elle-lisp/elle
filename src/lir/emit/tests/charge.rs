@@ -1,6 +1,6 @@
 // audited: 2026-10-12
-//! The charge sites a function records: one at each instruction where the
-//! interpreter charges fuel, with the operand stack the interpreter has there.
+//! A function that may signal records a charge site where the interpreter
+//! charges fuel, with the operand stack the interpreter has there.
 //!
 //! src/lir/AGENTS.md
 //! docs/impl/jit.md
@@ -9,8 +9,8 @@ use super::*;
 use crate::hir::region::StaticRegion;
 use crate::signals::Signal;
 
-/// A signal that may signal, so the function records its charge sites. Any
-/// signal bit does, an error included (src/lir/AGENTS.md).
+/// A signal under which the function records its charge sites. Any signal
+/// bit gives that, an error included (src/lir/AGENTS.md).
 fn may_signal() -> Signal {
     Signal::errors()
 }
@@ -26,10 +26,10 @@ fn region(n: u32) -> StaticRegion {
     StaticRegion::new(n).unwrap()
 }
 
-/// One block, with `signal`: an operand left on the stack below the call, then `call`, which
-/// reads `Reg(1)` as its callee and `Reg(2)` as its argument or argument array,
-/// then a return of `Reg(3)`. The constants are pushed in the order `call`
-/// reads them, so it finds them on top and copies nothing.
+/// One block, with `signal`: an operand left on the stack below the call, then
+/// `call`, which reads `Reg(1)` as its callee and `Reg(2)` as its argument or
+/// argument array, then a return of `Reg(3)`. The constants are pushed in the
+/// order `call` reads them, so it finds them on top and copies nothing.
 fn call_func(signal: Signal, callee_below_args: bool, call: InstrRef<'_>) -> LirOwned {
     let callee = InstrRef::Const {
         dst: Reg(1),

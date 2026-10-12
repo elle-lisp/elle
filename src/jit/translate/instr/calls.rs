@@ -1,8 +1,7 @@
 // audited: 2026-10-12
 // docs/impl/jit.md
-//! How a call leaves compiled code: the fuel charge before it, the
-//! self-tail-call loop, the helper that carries every other call, and the
-//! `MakeClosure` refusal.
+//! How a call leaves compiled code: its fuel charge, the self-tail-call loop,
+//! the helper for every other call, and the `MakeClosure` refusal.
 
 use super::*;
 

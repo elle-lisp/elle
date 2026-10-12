@@ -1,7 +1,7 @@
 // audited: 2026-10-12
 //! A budget holds any count a program can write, counts down one unit per
-//! charge, and refuses the charge once spent; a silent function's spend never
-//! refuses; no budget never runs out.
+//! charge, and refuses the charge once spent. A silent function's spend never
+//! refuses, and an unmetered fiber never runs out.
 //!
 //! docs/runtime.md
 

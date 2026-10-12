@@ -1,10 +1,10 @@
 // audited: 2026-10-12
 // docs/impl/jit.md
 // docs/signals/inference.md
-//! The inline fuel charge: one unit taken from the fiber's budget at each
-//! charge site, and the pause that parks the frame when the budget is spent.
+//! The inline fuel charge, which takes one unit from the fiber's budget at
+//! each charge site and parks the frame when the budget is spent.
 //!
-//! The emitter recorded the sites of a function that may signal in the order
+//! The emitter records the sites of a function that may signal in the order
 //! the translator meets them, so one counter indexes the view's charge sites
 //! here and `JitCode.charge_sites` in `elle_jit_fuel_pause`. Code the compiled
 //! function never runs still counts its sites, so the counters stay in step. A
@@ -23,9 +23,9 @@ impl<'a> FunctionTranslator<'a> {
             .is_some_and(|&at| at <= self.current_block)
     }
 
-    /// Whether this function records call sites and charge sites: any signal
-    /// bit makes it may suspend, an error included, so only a silent function
-    /// records none.
+    /// Whether this function records call sites and charge sites. Any signal
+    /// bit, an error included, means the function may suspend, so only a
+    /// silent function records none.
     fn records_sites(&self) -> bool {
         self.lir.signal().may_suspend()
     }
