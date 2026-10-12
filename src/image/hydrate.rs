@@ -1,4 +1,4 @@
-// audited: 2026-09-11
+// audited: 2026-10-12
 //! The hydrator: map an image's pages privately, relocate them, and install
 //! them as a freshly minted counted region.
 //!
@@ -177,6 +177,7 @@ pub fn hydrate(
             region,
             scope_watermark: header.scope_watermark as u32,
             param_watermark,
+            static_region_watermark: 0,
         });
     }
 
@@ -343,6 +344,7 @@ pub fn hydrate(
         region,
         scope_watermark: header.scope_watermark as u32,
         param_watermark,
+        static_region_watermark: 0,
     })
 }
 

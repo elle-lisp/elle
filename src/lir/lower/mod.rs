@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! HIR to LIR lowering: the `Lowerer` and the state one function's lowering
 //! carries. The passes themselves live in the sibling modules named below.
 //!
@@ -36,6 +36,8 @@ use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 
 pub use naming::new_static_region;
+#[allow(unused_imports)]
+pub(crate) use naming::static_region_counter;
 pub(crate) use naming::ValueSlot;
 // The walk it names is a debug-only net, so the import is gated with it — an
 // unconditional `use` of a `cfg`-gated item fails the release build alone.
@@ -138,7 +140,6 @@ pub struct Lowerer<'a> {
     loop_lower_contexts: Vec<LoopLowerContext>,
     /// Stack of active block contexts for `break` lowering
     block_lower_contexts: Vec<BlockLowerContext>,
-    /// Current nesting depth of active allocation regions.
     /// Pending `DecrefRegion` region slots to emit before tail calls.
     pending_free_regions: Vec<StaticRegion>,
     /// Scratch slot for discarding unused intermediate values.

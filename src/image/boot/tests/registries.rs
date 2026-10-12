@@ -113,9 +113,10 @@ fn an_image_boot_restores_both_compile_registries() {
 // whether or not the map fused. The call that fusion removes is the one to
 // `map`.
 //
-// Two boots never emit byte-identical bytecode for one form, because operands
-// carry ids from a process-global mint counter that a source boot advances and
-// an image boot does not. So the claim is asserted in the rewritten HIR.
+// The two boots here share one process, and so one static-region counter, so
+// their bytecode for one form differs in every slot even when both fuse. The
+// claim is therefore asserted in the rewritten HIR; `make bytecode-parity`
+// compares bytecode, with each boot in a process of its own.
 #[test]
 fn a_user_map_over_a_stdlib_function_fuses_under_either_boot() {
     const CASES: [&str; 2] = [
