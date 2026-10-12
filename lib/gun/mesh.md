@@ -1,6 +1,6 @@
 # mesh
 
-<!-- audited: 2026-10-11 -->
+<!-- audited: 2026-10-12 -->
 
 The peer protocol of std/gun: the messages, how a peer merges and forwards them, reads that ask the peers, acks, and deferral.
 
@@ -112,6 +112,11 @@ and resync keep the soul current.
 A soul is **pending** from the start of its fetch to its end, and **fetched**
 after that. A second fiber that reads a pending soul waits for the first fetch
 to end. With no peer connected, a fetch ends at once.
+
+A fetch that skipped a peer leaves its souls unfetched when it ends, so the
+next read asks every peer. Only the fetch that a get from a peer starts skips
+one, the asker. Without this rule, the get that a resync sends would mark the
+asker's own souls fetched on the side that never asked the asker for them.
 
 A **get** from a peer runs in a fiber of its own, so a slow get does not hold
 up the puts behind it. For each soul it names that this database has neither
