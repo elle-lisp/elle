@@ -1,6 +1,7 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 // docs/impl/jit.md
-//! The shared spill slot: one stack slot that every yield and call site reuses.
+//! The shared spill slot: one stack slot that every yield, call and charge site
+//! reuses.
 //!
 //! The prologue sizes the slot once to the worst-case save requirement. A
 //! side-exit saves live locals and operands into it. Both methods stay
@@ -14,19 +15,14 @@ impl<'a> FunctionTranslator<'a> {
     pub(crate) fn allocate_shared_spill_slot(&mut self, builder: &mut FunctionBuilder) {
         let num_locals = self.lir.num_locals() as usize;
 
-        let max_yield_operands = self
+        let max_operands = self
             .lir
             .yield_points()
-            .map(|yp| yp.stack_regs.len())
+            .chain(self.lir.call_sites())
+            .chain(self.lir.charge_sites())
+            .map(|site| site.stack_regs.len())
             .max()
             .unwrap_or(0);
-        let max_call_operands = self
-            .lir
-            .call_sites()
-            .map(|cs| cs.stack_regs.len())
-            .max()
-            .unwrap_or(0);
-        let max_operands = std::cmp::max(max_yield_operands, max_call_operands);
         // Spill saves: arity params (arg_vars) + num_locals locals (local_var_base)
         // + operand stack entries.
         let arity = self.lir.num_params();

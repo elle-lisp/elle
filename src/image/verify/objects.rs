@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! The verifier's second pass: every mapped object against the tag its index
 //! claims, and every extent it names against the image's bounds.
 //!
@@ -206,6 +206,7 @@ fn payload_extents(p: &CodePayload) -> Vec<Named> {
         ("lir.values", extent(&lir.values)),
         ("lir.yield_points", extent(&lir.yield_points)),
         ("lir.call_sites", extent(&lir.call_sites)),
+        ("lir.charge_sites", extent(&lir.charge_sites)),
         ("lir.site_regs", extent(&lir.site_regs)),
     ]
 }

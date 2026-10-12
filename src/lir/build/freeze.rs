@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! Freezing a finished function: its blocks' nodes into one table, its tables into exact-size `Vec`s, its header across.
 //!
 //! docs/impl/lir.md
@@ -41,6 +41,7 @@ pub(super) fn freeze(work: &mut Work) -> Result<LirOwned, String> {
         files: tables.files.as_slice().to_vec(),
         yield_points: Vec::new(),
         call_sites: Vec::new(),
+        charge_sites: Vec::new(),
         site_regs: Vec::new(),
         closure_id: head.closure_id.map(|c| c.0),
         name: head.name.take(),

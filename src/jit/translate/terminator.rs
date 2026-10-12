@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! Terminator translation and the generic tail-call result branch.
 //!
 //! docs/impl/jit.md
@@ -123,6 +123,9 @@ impl<'a> FunctionTranslator<'a> {
                 let target = block_map.get(label).ok_or_else(|| {
                     JitError::InvalidLir(format!("Unknown jump target: {:?}", label))
                 })?;
+                if self.is_back_edge(*label) {
+                    self.emit_charge(builder)?;
+                }
                 builder.ins().jump(*target, &[]);
             }
 
@@ -147,17 +150,35 @@ impl<'a> FunctionTranslator<'a> {
                 let is_nil = builder.ins().icmp(IntCC::Equal, cond_tag, tag_nil);
                 let is_false = builder.ins().icmp(IntCC::Equal, cond_tag, tag_false);
                 let is_falsy = builder.ins().bor(is_nil, is_false);
-                // brif on is_falsy goes to else, otherwise then
-                builder
-                    .ins()
-                    .brif(is_falsy, *else_block, &[], *then_block, &[]);
+                // brif on is_falsy goes to else, otherwise then. The bytecode
+                // reaches `then` through a `Jump`, which charges fuel when it
+                // runs backward, so that edge passes through the charge.
+                if self.is_back_edge(*then_label) {
+                    let charge_block = builder.create_block();
+                    builder
+                        .ins()
+                        .brif(is_falsy, *else_block, &[], charge_block, &[]);
+                    builder.switch_to_block(charge_block);
+                    builder.seal_block(charge_block);
+                    self.emit_charge(builder)?;
+                    builder.ins().jump(*then_block, &[]);
+                } else {
+                    builder
+                        .ins()
+                        .brif(is_falsy, *else_block, &[], *then_block, &[]);
+                }
             }
 
             Terminator::Emit {
                 signal,
                 value,
-                resume_label: _,
+                resume_label,
             } => {
+                // The bytecode's `Jump` to the resume block runs in the
+                // interpreter after the resume, never here.
+                if self.is_back_edge(*resume_label) {
+                    self.skip_charge_site()?;
+                }
                 let (yt, yp) = self.use_var_pair(builder, value.0);
                 let vm = self
                     .vm_ptr

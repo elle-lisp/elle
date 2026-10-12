@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! Fiber types for the Elle runtime.
 //!
 //! A fiber is an independent execution context: it owns its operand stack,
@@ -34,6 +34,9 @@ pub use parked::{ParkedDues, ParkedState};
 
 mod signalbits;
 pub use signalbits::SignalBits;
+
+mod fuel;
+pub use fuel::Fuel;
 
 // Signal constants are defined in `crate::signals`, their owner, and
 // re-exported here beside the fiber that carries them.
@@ -207,12 +210,11 @@ pub struct Fiber {
     pub call_depth: usize,
     /// Call stack for stack traces (name + ip + frame_base)
     pub call_stack: Vec<CallFrame>,
-    /// Instruction budget. `None` = unlimited (default). `Some(n)` = `n` units
-    /// remaining. Decremented at backward jumps and call instructions outside a
-    /// silent function. When it reaches zero the VM emits `SIG_FUEL`, pausing
-    /// the fiber. Refuel via `fiber/set-fuel` then call `fiber/resume` to
-    /// continue.
-    pub fuel: Option<u32>,
+    /// Instruction budget, unmetered by default. Charged at backward jumps and
+    /// call instructions outside a silent function. A charge that finds it
+    /// spent emits `SIG_FUEL`, pausing the fiber. Refuel via `fiber/set-fuel`
+    /// then call `fiber/resume` to continue.
+    pub fuel: Fuel,
     /// Withheld capabilities. Bits set here prevent the fiber from silently
     /// performing the corresponding operations. When a primitive's signal bits
     /// overlap with `withheld & CAP_MASK`, the primitive is blocked and a
@@ -274,7 +276,7 @@ impl Fiber {
             current_closure: Value::NIL,
             call_depth: 0,
             call_stack: Vec::new(),
-            fuel: None,
+            fuel: Fuel::unmetered(),
             withheld: SignalBits::EMPTY,
             native_iter: None,
         }
@@ -314,7 +316,7 @@ impl Fiber {
             current_closure: Value::NIL,
             call_depth: 0,
             call_stack: Vec::new(),
-            fuel: None,
+            fuel: Fuel::unmetered(),
             withheld: SignalBits::EMPTY,
             native_iter: Some(NativeIter {
                 elements,

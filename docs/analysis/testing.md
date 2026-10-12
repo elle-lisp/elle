@@ -1,6 +1,6 @@
 # Testing Strategy
 
-<!-- audited: 2026-10-04 -->
+<!-- audited: 2026-10-12 -->
 
 Which *kind* of test to write, and where it belongs.
 
@@ -17,7 +17,7 @@ Which *kind* of test to write, and where it belongs.
 
 | Step | What | Purpose |
 |------|------|---------|
-| 1 | `make qa` | rustfmt, clippy, the macOS and Android cross-checks, rustdoc, and the Rust doctests |
+| 1 | `make qa` | The prose checks, rustfmt, clippy, the macOS and Android cross-checks, rustdoc, and the Rust doctests |
 | 2 | `make smoke` | The language suite, the implementation suite on the rig, the doctests, the embedding demo and the surface gate |
 | 3 | `cargo test --workspace --lib --all-features` | The unit tests, inline beside the code they test |
 | 4 | `cargo test --test '*' -- --skip property` | The integration tests and the standalone test binaries |
@@ -189,6 +189,10 @@ and cannot see from the assertion.
 
 A test that merely runs slowly does not qualify. The cost is a whole extra
 link of the crate per file, so the reason must be the shared process itself.
+
+One file has a binary of its own for a different reason.
+[prose.rs](../../tests/prose.rs) is the first step of QA, and QA must not wait
+for the shared binary to compile ([ci](ci.md)).
 
 ### An inline test that needs a process runs its body in a fresh one
 

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 // docs/impl/jit.md
 //! The prologue: what a compiled function does with its six parameters before
 //! the first LIR block runs.
@@ -230,8 +230,6 @@ impl JitCompiler {
             } else {
                 translator.def_var_pair(&mut builder, rest_var_idx, rest_tag, rest_payload);
             }
-
-            // NOTE: cons_loop_head is NOT sealed here — sealed by seal_all_blocks() below.
         } else {
             // --- Non-variadic entry: load args directly (16 bytes each) ---
             let required = lir.arity().fixed_params() as u32;
@@ -319,10 +317,13 @@ impl JitCompiler {
             translator.init_locally_defined_vars(&mut builder, num_locally_defined)?;
         }
 
-        // Allocate shared spill slot for emit/call sites (if any).
-        // Check yield_points (emit terminators) and call_sites directly,
-        // not may_suspend() — emit can emit any signal, not just :yield.
-        if lir.yield_points().len() != 0 || lir.call_sites().len() != 0 {
+        // Allocate the shared spill slot for the emit, call and charge sites,
+        // if there are any. Check the sites directly, not may_suspend(): emit
+        // can emit any signal, not just :yield.
+        if lir.yield_points().len() != 0
+            || lir.call_sites().len() != 0
+            || lir.charge_sites().len() != 0
+        {
             translator.allocate_shared_spill_slot(&mut builder);
         }
 
@@ -336,13 +337,18 @@ impl JitCompiler {
         translator.loop_header = Some(loop_header);
 
         // Translate LIR blocks
-        for bb in lir.blocks() {
+        for (position, bb) in lir.blocks().enumerate() {
             let cl_block = block_map[&bb.label()];
             builder.switch_to_block(cl_block);
+            translator.current_block = position;
 
             let mut block_terminated = false;
-            for node in bb.nodes() {
+            for (i, node) in bb.nodes().enumerate() {
                 if translator.translate_instr(&mut builder, &node.instr(), &block_map)? {
+                    translator.skip_unreached_sites(
+                        bb.nodes().skip(i + 1).map(|n| n.instr()),
+                        &bb.terminator(),
+                    )?;
                     block_terminated = true;
                     break;
                 }
@@ -353,28 +359,35 @@ impl JitCompiler {
             }
         }
 
-        // Metadata/translation agreement: the yield helpers index
-        // `JitCode.yield_points` / `JitCode.call_sites` by the translator's
-        // running counters, and the emitter recorded those lists in its own
-        // walk over the same blocks. A count mismatch means some side-exit
-        // would read ANOTHER site's resume_ip and stack shape — a silently
-        // corrupted resume. Reject the compile; the interpreter tier is
-        // always correct.
-        if translator.yield_point_index as usize != lir.yield_points().len() {
-            return Err(JitError::InvalidLir(format!(
-                "yield-point count mismatch: translated {}, emitter recorded {}",
+        // Metadata/translation agreement: the side-exit helpers index
+        // `JitCode.yield_points`, `JitCode.call_sites` and
+        // `JitCode.charge_sites` by the translator's running counters, and the
+        // emitter recorded those lists in its own walk over the same blocks. A
+        // count mismatch means some side-exit would read ANOTHER site's ip and
+        // stack shape — a silently corrupted resume. Reject the compile; the
+        // interpreter tier is always correct.
+        for (what, translated, recorded) in [
+            (
+                "yield-point",
                 translator.yield_point_index,
-                lir.yield_points().len()
-            )));
-        }
-        if lir.signal().may_suspend()
-            && translator.call_site_index as usize != lir.call_sites().len()
-        {
-            return Err(JitError::InvalidLir(format!(
-                "call-site count mismatch: translated {}, emitter recorded {}",
+                lir.yield_points().len(),
+            ),
+            (
+                "call-site",
                 translator.call_site_index,
-                lir.call_sites().len()
-            )));
+                lir.call_sites().len(),
+            ),
+            (
+                "charge-site",
+                translator.charge_site_index,
+                lir.charge_sites().len(),
+            ),
+        ] {
+            if translated as usize != recorded {
+                return Err(JitError::InvalidLir(format!(
+                    "{what} count mismatch: translated {translated}, emitter recorded {recorded}"
+                )));
+            }
         }
 
         builder.seal_all_blocks();

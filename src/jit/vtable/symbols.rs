@@ -1,10 +1,10 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 // docs/impl/jit.md
 //! One `builder.symbol` line per `elle_jit_*` helper: the address the JIT
 //! linker resolves each name to.
 //!
-//! Split from the vtable root because this list and the `RuntimeHelpers`
-//! struct beside it grow independently — a name here, a `FuncId` there.
+//! A new helper adds one line here, one `FuncId` to `RuntimeHelpers`, and one
+//! declaration in `helpers`.
 
 use cranelift_jit::JITBuilder;
 
@@ -193,6 +193,10 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
     builder.symbol(
         "elle_jit_yield_through_call",
         dispatch::elle_jit_yield_through_call as *const u8,
+    );
+    builder.symbol(
+        "elle_jit_fuel_pause",
+        dispatch::elle_jit_fuel_pause as *const u8,
     );
     builder.symbol(
         "elle_jit_has_signal",

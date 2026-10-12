@@ -1,6 +1,6 @@
 # Debugger: how a fiber comes to pause
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-12 -->
 
 Breakpoints compiled into a program or armed in a running one, and stepping by
 fuel.
@@ -24,11 +24,11 @@ capability denial instead.
 
 Dynamic breakpoints pause code that was compiled without any
 instrumentation. The VM holds a table keyed by bytecode identity
-whose entry *owns* an `Rc` clone of the bytecode plus the set of
-armed offsets. The owning clone pins the allocation, so the key
-cannot be freed and reissued to unrelated code while a breakpoint is
-armed. The JIT cache keys the same pointer without an owner and never
-evicts; the table must not copy that shape.
+whose entry pins the code region the bytecode lives in, beside the set
+of armed offsets. The pin keeps the region alive, so the key cannot be
+freed and reissued to unrelated code while a breakpoint is armed. The
+JIT cache keys the same pointer and pins the same way
+([jit.md](../impl/jit.md)).
 
 | Primitive | Signature | Purpose |
 |-----------|-----------|---------|
@@ -39,8 +39,8 @@ evicts; the table must not copy that shape.
 `location_map` entry names it — a scan, since the table is sorted by offset
 and not by line.
 Resolution covers only the given closure's own code; the driver walks
-`child_protos` when the caller wants a whole definition. A line that
-exists only in macro-generated code has no entries; the returned ip
+the code object's child table when the caller wants a whole definition. A
+line that exists only in macro-generated code has no entries; the returned ip
 array is empty and the driver reports it.
 
 **The check.** When a fiber's debug flag is set, the dispatch loop
@@ -53,11 +53,12 @@ is not the anchor. On a hit, the VM emits `:debug|:fuel` with a `nil`
 payload and exits the loop at the *unexecuted* opcode's ip.
 
 **Pause protocol.** The composed bits are the protocol. The three
-park sites that can park a re-execute pause compute
+interpreter park sites that can park a re-execute pause compute
 `push_resume_value = !bits.intersects(SIG_FUEL)`
 ([src/vm/fiber/resume.rs](../../src/vm/fiber/resume.rs), [src/vm/core/resume.rs](../../src/vm/core/resume.rs),
-[src/vm/call/inner/park.rs](../../src/vm/call/inner/park.rs)); the other suspend sites park emit/yield
-frames and hardcode the push. The `:fuel` bit therefore selects
+[src/vm/call/inner/park.rs](../../src/vm/call/inner/park.rs)). Compiled code parks
+its own fuel pause and never pushes ([jit.md](../impl/jit.md)); the other
+suspend sites park emit/yield frames and hardcode the push. The `:fuel` bit therefore selects
 re-execute semantics — the paused instruction has not run and runs on resume —
 with no edits to those sites. The `:debug` bit routes the pause to
 the debugger and distinguishes a breakpoint from a plain step pause
@@ -102,12 +103,15 @@ synthesizes the outcome.
 
 Today fuel is charged at seven interpreter sites: backward `Jump`,
 the four call opcodes, and the two array-call opcodes
-([src/vm/dispatch/interp/opcodes.rs](../../src/vm/dispatch/interp/opcodes.rs)). None charges while a silent
-function runs, conditional jumps never
-charge, and no native tier charges at all. When a fiber's debug flag
-is set, the loop charges fuel on **every** instruction outside a silent
-function, at the same
-loop-top site as the breakpoint check. Instruction-granular stepping
+([src/vm/dispatch/interp/opcodes.rs](../../src/vm/dispatch/interp/opcodes.rs)). Conditional jumps never
+charge. The JIT charges at the same instructions
+([jit.md](../impl/jit.md)), and the WASM and MLIR tiers charge nothing. A
+silent function spends fuel at these sites and never pauses at one
+([inference.md](../signals/inference.md)), so a step cannot stop inside one.
+Step mode would need every compiled tier to charge per instruction too, or to
+leave a stepped fiber in the interpreter. When a fiber's debug flag is set,
+the loop charges fuel on **every** instruction, at the same loop-top site as
+the breakpoint check, and pauses only outside a silent function. Instruction-granular stepping
 is then `(fiber/set-fuel f n)`, an existing primitive, followed by
 `(fiber/resume f nil)`, which runs exactly `n` instructions and pauses
 with `:fuel`.

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! A payload carries its function's LIR: the function freezing produced, in
 //! its compile unit's code region, gone when that region goes.
 //! docs/impl/region/template.md
@@ -22,7 +22,7 @@ fn frozen_and_emitted(rt: &mut Runtime, src: &str, file: &str) -> (FrozenModule,
             .expect("the source freezes")
     };
     let code = CodeArena::mint(rt.heap());
-    let (bytecode, _, _) = Emitter::new(code).emit_module(&module);
+    let bytecode = Emitter::new(code).emit_module(&module).bytecode;
     (module, CodeUnit::new(code, bytecode))
 }
 
@@ -32,7 +32,7 @@ fn frozen_and_emitted(rt: &mut Runtime, src: &str, file: &str) -> (FrozenModule,
 fn lambdas(unit: &CodeUnit) -> Vec<crate::lir::LirOwned> {
     fn walk(t: &ClosureTemplate, out: &mut Vec<crate::lir::LirOwned>) {
         let mut owned = t.lir().expect("a nested lambda carries LIR").to_owned();
-        owned.set_sites(&[], &[]);
+        owned.set_sites(&[], &[], &[]);
         out.push(owned);
         for i in 0..t.num_children() {
             walk(&t.child(i), out);

@@ -1,5 +1,5 @@
-// audited: 2026-10-06
-//! Yield side-exit helpers for JIT-compiled code.
+// audited: 2026-10-12
+//! Side-exit helpers for JIT-compiled code: a yield, a park at a site, and a fuel pause.
 //!
 //! docs/impl/jit.md
 //! docs/impl/region/park.md
@@ -9,7 +9,7 @@ use crate::jit::value::JitValue;
 use crate::value::{BytecodeFrame, SuspendedFrame, Value};
 
 // =============================================================================
-// Yield Side-Exit Helpers
+// Side-Exit Helpers
 // =============================================================================
 
 /// `--trace=park`: log a JIT side-exit park with its frame shape. The resume
@@ -81,9 +81,111 @@ fn check_parked_frame(
 ) {
 }
 
+/// The spill counts a side-exit's metadata records: the buffer holds
+/// `[params(num_params), locals(num_locals), operands(num_operands)]`.
+struct SpillCounts {
+    num_params: usize,
+    num_locals: usize,
+    num_operands: usize,
+}
+
+/// Rebuild the interpreter's view of a compiled frame from the closure's
+/// captures and the spill buffer.
+///
+/// The interpreter expects:
+///   env = [captures, params]         ← LoadUpvalue reads from here
+///   stack = [locals, operands]       ← LoadLocal reads from here
+///
+/// LBox cells are first-class values in JIT registers (no auto-unwrap),
+/// so spilled cells are the original objects — no re-wrapping needed.
+///
+/// `spilled_values` must point to `num_params + num_locals + num_operands`
+/// contiguous `Value`s, or be null when that sum is 0.
+fn rebuild_frame(
+    closure: &crate::value::Closure,
+    spilled_values: *const Value,
+    counts: SpillCounts,
+) -> (std::rc::Rc<Vec<Value>>, Vec<Value>) {
+    let SpillCounts {
+        num_params,
+        num_locals,
+        num_operands,
+    } = counts;
+    let mut env = Vec::with_capacity(closure.env.len() + num_params);
+    env.extend(closure.env.iter().copied());
+    for i in 0..num_params {
+        env.push(unsafe { *spilled_values.add(i) });
+    }
+    let mut stack = Vec::with_capacity(num_locals + num_operands);
+    for i in num_params..(num_params + num_locals + num_operands) {
+        stack.push(unsafe { *spilled_values.add(i) });
+    }
+    (std::rc::Rc::new(env), stack)
+}
+
+/// Where a side-exit parks its frame, and what it names in the park trace.
+struct ParkSite {
+    helper: &'static str,
+    index: u64,
+    resume_ip: usize,
+    push_resume_value: bool,
+}
+
+/// Park the executing compiled activation as an interpreter frame.
+///
+/// The compiled prologue pushed THIS activation's region-remap frame
+/// (`elle_jit_push_region_map`), and the side-exit's pop runs after the
+/// helper, so `last()` is this activation's map — captured here so
+/// post-resume allocs/decrefs (re-entering via the interpreter) resolve in the
+/// same frame the pre-park allocations did. A suspended callee has already
+/// popped its own. What the activation owes MOVES into the frame (its slot is
+/// likewise still on top), so it rides the park to the resumed body's
+/// completion — the compiled twin of the interpreter park
+/// (docs/impl/region/owner.md). The body's own closure is parked so a
+/// self-edge resolved after resume names the right closure.
+fn park_activation(
+    vm: &mut crate::vm::VM,
+    closure_val: Value,
+    site: ParkSite,
+    env: std::rc::Rc<Vec<Value>>,
+    stack: Vec<Value>,
+) -> SuspendedFrame {
+    let closure = closure_val
+        .as_closure()
+        .expect("VM bug: a side-exit parks a non-closure");
+    let activation_region_map = vm
+        .fiber
+        .activation_region_maps
+        .last()
+        .cloned()
+        .unwrap_or_default();
+    trace_park(
+        site.helper,
+        closure,
+        site.index,
+        site.resume_ip,
+        &env,
+        &stack,
+    );
+    check_parked_frame(site.helper, closure, site.resume_ip, &env, &stack);
+    let code = closure.template.code();
+    let activation_dues = vm.take_activation_dues();
+    SuspendedFrame::Bytecode(BytecodeFrame::suspend(
+        code,
+        env,
+        site.resume_ip,
+        stack,
+        site.push_resume_value,
+        activation_region_map,
+        activation_dues,
+        closure_val,
+        vm.heap(),
+    ))
+}
+
 /// JIT yield side-exit: build a SuspendedFrame and set fiber.signal.
 ///
-/// Called from JIT code when a Yield terminator is reached.
+/// Called from JIT code when an `Emit` terminator is reached.
 ///
 /// Parameters:
 ///   yielded_tag/yielded_payload: the value being yielded
@@ -128,30 +230,16 @@ pub extern "C" fn elle_jit_yield(
         .jit_code_for(bytecode_ptr)
         .expect("VM bug: elle_jit_yield called but no JitCode in cache");
     let yield_meta = &jit_code.yield_points[yield_index as usize];
-    let num_params = yield_meta.num_params as usize;
-    let num_locals = yield_meta.num_locals as usize;
-    let num_operands = yield_meta.num_spilled as usize;
-
-    // Spill buffer layout: [params(num_params), locals(num_locals), operands(num_spilled)]
-    //
-    // The interpreter expects:
-    //   env = [captures, params]         ← LoadUpvalue reads from here
-    //   stack = [locals, operands]       ← LoadLocal reads from here
-    //
-    // LBox cells are first-class values in JIT registers (no auto-unwrap),
-    // so spilled cells are the original objects — no re-wrapping needed.
-    let num_captures = closure.env.len();
-    let mut env = Vec::with_capacity(num_captures + num_params);
-    env.extend(closure.env.iter().copied());
-    for i in 0..num_params {
-        env.push(unsafe { *spilled_values.add(i) });
-    }
-    let env = std::rc::Rc::new(env);
-
-    let mut stack = Vec::with_capacity(num_locals + num_operands);
-    for i in num_params..(num_params + num_locals + num_operands) {
-        stack.push(unsafe { *spilled_values.add(i) });
-    }
+    let (env, stack) = rebuild_frame(
+        closure,
+        spilled_values,
+        SpillCounts {
+            num_params: yield_meta.num_params as usize,
+            num_locals: yield_meta.num_locals as usize,
+            num_operands: yield_meta.num_spilled as usize,
+        },
+    );
+    let resume_ip = yield_meta.resume_ip;
 
     let sig = crate::value::fiber::SignalBits::new(signal_bits);
     // An emit of a bit the fiber withholds raises nothing: the fiber parks on
@@ -217,42 +305,13 @@ pub extern "C" fn elle_jit_yield(
                 .delivery
                 .park_error(crate::value::fiber::RaiseSite::Emit, yielded);
         }
-        // The compiled prologue pushed THIS activation's region-remap frame
-        // (`elle_jit_push_region_map`), and the side-exit's pop runs after
-        // this helper, so `last()` is this activation's map — captured here so
-        // post-resume allocs/decrefs (re-entering via the interpreter) resolve
-        // in the same frame the pre-yield allocations did.
-        let activation_region_map = vm
-            .fiber
-            .activation_region_maps
-            .last()
-            .cloned()
-            .unwrap_or_default();
-        // Extract `code`/`resume_ip` into locals first: this ends the closure and
-        // jit-cache borrows so the `&mut self` VM accessors below are free to run.
-        let code = closure.template.code();
-        let resume_ip = yield_meta.resume_ip;
-        trace_park("jit-yield", closure, yield_index, resume_ip, &env, &stack);
-        check_parked_frame("elle_jit_yield", closure, resume_ip, &env, &stack);
-        // MOVE what the activation owes into the frame (its slot is
-        // likewise still on top) so it rides the park to the resumed body's
-        // completion — the compiled twin of the interpreter yield park
-        // (docs/impl/region/owner.md).
-        let activation_dues = vm.take_activation_dues();
-        // The yielding body's own closure — park it so a self-edge resolved after
-        // resume (re-entering via the interpreter) names the right closure. The JIT
-        // already threads it here for self-tail-call detection.
-        let frame = SuspendedFrame::Bytecode(BytecodeFrame::suspend(
-            code,
-            env,
+        let site = ParkSite {
+            helper: "jit-yield",
+            index: yield_index,
             resume_ip,
-            stack,
-            true,
-            activation_region_map,
-            activation_dues,
-            closure_val,
-            vm.heap(),
-        ));
+            push_resume_value: true,
+        };
+        let frame = park_activation(vm, closure_val, site, env, stack);
         vm.fiber.suspended = Some(vec![frame]);
     }
 
@@ -311,92 +370,104 @@ pub extern "C" fn elle_jit_yield_through_call(
         .jit_code_for(bytecode_ptr)
         .expect("VM bug: elle_jit_yield_through_call called but no JitCode in cache");
     let call_meta = &jit_code.call_sites[call_site_index as usize];
-
-    let num_params = call_meta.num_params as usize;
-    let num_locals = call_meta.num_locals as usize;
-    let num_operands = call_meta.num_spilled as usize;
-    let push_resume_value = call_meta.push_resume_value;
-
-    // Spill buffer layout: [params(num_params), locals(num_locals), operands(num_spilled)]
-    //
-    // The interpreter expects:
-    //   env = [captures, params]         ← LoadUpvalue reads from here
-    //   stack = [locals, operands]       ← LoadLocal reads from here
-    //
-    // LBox cells are first-class values in JIT registers (no auto-unwrap),
-    // so spilled cells are the original objects — no re-wrapping needed.
-    let num_captures = closure.env.len();
-    let mut env = Vec::with_capacity(num_captures + num_params);
-    env.extend(closure.env.iter().copied());
-    for i in 0..num_params {
-        env.push(unsafe { *spilled_values.add(i) });
-    }
-    let env = std::rc::Rc::new(env);
-
-    let mut stack = Vec::with_capacity(num_locals + num_operands);
-    for i in num_params..(num_params + num_locals + num_operands) {
-        stack.push(unsafe { *spilled_values.add(i) });
-    }
-
-    // JIT caller frame: on resume, the callee's return value flows as
-    // current_value and must be pushed as the Call instruction's result. The
-    // suspended callee already popped its own region-map frame, so `last()` is
-    // THIS caller's map (pushed by its compiled prologue) — captured for the
-    // interpreter resume (see elle_jit_yield).
-    let activation_region_map = vm
-        .fiber
-        .activation_region_maps
-        .last()
-        .cloned()
-        .unwrap_or_default();
-    // Extract `code`/`resume_ip` into locals first: this ends the closure and
-    // jit-cache borrows so the `&mut self` VM accessors below are free to run.
-    let code = closure.template.code();
-    let resume_ip = call_meta.resume_ip;
-    trace_park(
-        "jit-yield-through-call",
+    let (env, stack) = rebuild_frame(
         closure,
-        call_site_index,
-        resume_ip,
-        &env,
-        &stack,
+        spilled_values,
+        SpillCounts {
+            num_params: call_meta.num_params as usize,
+            num_locals: call_meta.num_locals as usize,
+            num_operands: call_meta.num_spilled as usize,
+        },
     );
-    check_parked_frame(
-        "elle_jit_yield_through_call",
-        closure,
-        resume_ip,
-        &env,
-        &stack,
-    );
-    // MOVE what the caller's activation owes into its park — this compiled activation
-    // leaves with the signal (see elle_jit_yield).
-    let activation_dues = vm.take_activation_dues();
+    // On resume, the callee's return value flows as current_value and is
+    // pushed as the site's result, unless the site's instruction produces none.
+    let site = ParkSite {
+        helper: "jit-yield-through-call",
+        index: call_site_index,
+        resume_ip: call_meta.resume_ip,
+        push_resume_value: call_meta.push_resume_value,
+    };
+
     // The innermost frame of an error's chain records its raise site.
     if sig.intersects(crate::value::fiber::SIG_ERROR) && vm.fiber.suspended.is_none() {
-        let site = if push_resume_value {
+        let raise_site = if site.push_resume_value {
             crate::value::fiber::RaiseSite::Call
         } else {
             crate::value::fiber::RaiseSite::NoResult
         };
-        vm.fiber.delivery.park_error(site, payload);
+        vm.fiber.delivery.park_error(raise_site, payload);
     }
-    // The caller body's own closure (see elle_jit_yield) — park it for the resume.
-    let caller_frame = SuspendedFrame::Bytecode(BytecodeFrame::suspend(
-        code,
-        env,
-        resume_ip,
-        stack,
-        push_resume_value,
-        activation_region_map,
-        activation_dues,
-        closure_val,
-        vm.heap(),
-    ));
+    let caller_frame = park_activation(vm, closure_val, site, env, stack);
 
     // Append caller frame to the existing suspended chain.
     let mut frames = vm.fiber.suspended.take().unwrap_or_default();
     frames.push(caller_frame);
     vm.fiber.suspended = Some(frames);
+
+    YIELD_SENTINEL
+}
+
+/// JIT fuel pause: park this frame at a charge site whose budget ran out.
+///
+/// Called from JIT code when the inline charge finds the fiber's budget at
+/// zero. Builds the frame at the charging instruction's bytecode offset, with
+/// no resume value, so the interpreter runs that instruction again. The frame
+/// starts the suspended chain, as the frame of a yield does, and each compiled
+/// caller parks behind it on the way out.
+///
+/// Parameters:
+///   spilled_values: *const Value (16 bytes each)
+///   charge_site_index: index into JitCode.charge_sites
+///   vm: *mut () as u64
+///   closure_tag/closure_payload: the closure being executed
+///
+/// Returns YIELD_SENTINEL.
+///
+/// # Safety
+/// `spilled_values` must point to `num_spilled` contiguous `Value`s
+/// (or be null when num_spilled is 0).
+#[no_mangle]
+pub extern "C" fn elle_jit_fuel_pause(
+    spilled_values: *const Value,
+    charge_site_index: u64,
+    vm: u64, // *mut () as u64
+    closure_tag: u64,
+    closure_payload: u64,
+) -> JitValue {
+    let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
+    let closure_val = Value {
+        tag: closure_tag,
+        payload: closure_payload,
+    };
+
+    let closure = closure_val
+        .as_closure()
+        .expect("VM bug: elle_jit_fuel_pause called with non-closure");
+
+    let bytecode_ptr = closure.template.bytecode().as_ptr();
+    let jit_code = vm
+        .jit_code_for(bytecode_ptr)
+        .expect("VM bug: elle_jit_fuel_pause called but no JitCode in cache");
+    let charge_meta = &jit_code.charge_sites[charge_site_index as usize];
+    let (env, stack) = rebuild_frame(
+        closure,
+        spilled_values,
+        SpillCounts {
+            num_params: charge_meta.num_params as usize,
+            num_locals: charge_meta.num_locals as usize,
+            num_operands: charge_meta.num_spilled as usize,
+        },
+    );
+
+    let site = ParkSite {
+        helper: "jit-fuel-pause",
+        index: charge_site_index,
+        resume_ip: charge_meta.ip,
+        push_resume_value: false,
+    };
+    let frame = park_activation(vm, closure_val, site, env, stack);
+    vm.fiber.signal = Some((crate::value::fiber::SIG_FUEL, Value::NIL));
+    vm.fiber.suspended = Some(vec![frame]);
 
     YIELD_SENTINEL
 }

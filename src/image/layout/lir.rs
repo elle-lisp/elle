@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! The LIR half of the layout probe: where a body keeps each field, where its records keep their pads, and the body's writer.
 //!
 //! docs/impl/image/format.md
@@ -21,7 +21,7 @@ use crate::value::region_slice::RegionSlice;
 /// Where a body keeps each field: the slice headers by name, and the tail.
 pub(crate) struct LirOffsets {
     /// `(name, offset)` per `RegionSlice` field, in declaration order.
-    pub slices: [(&'static str, usize); 10],
+    pub slices: [(&'static str, usize); 11],
     pub closure_id: usize,
     pub entry: usize,
     pub num_regs: usize,
@@ -43,6 +43,7 @@ pub(crate) fn lir_offsets() -> &'static LirOffsets {
             ("values", offset_of!(LirBody, values)),
             ("yield_points", offset_of!(LirBody, yield_points)),
             ("call_sites", offset_of!(LirBody, call_sites)),
+            ("charge_sites", offset_of!(LirBody, charge_sites)),
             ("site_regs", offset_of!(LirBody, site_regs)),
         ],
         closure_id: offset_of!(LirBody, closure_id),

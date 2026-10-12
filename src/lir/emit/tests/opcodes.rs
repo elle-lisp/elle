@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 // docs/impl/bytecode.md
 //! Which arithmetic opcode the emitter picks, and what decides it.
 //!
@@ -42,7 +42,7 @@ fn arithmetic_opcodes(
         )
         .build();
 
-    let (bytecode, _, _) = emitter().emit(&func.view());
+    let bytecode = emitter().emit(&func.view()).bytecode;
     // The trap: every integer opcode name contains its polymorphic one, so a
     // substring search for "Add" also matches an emitted "AddInt". Split the
     // token off and compare it whole.

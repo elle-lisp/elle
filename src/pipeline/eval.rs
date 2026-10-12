@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 // src/pipeline/AGENTS.md
 //! Evaluation pipeline: source -> value.
 
@@ -74,7 +74,7 @@ pub fn eval_syntax(
     // heap (docs/impl/region/template.md).
     let code = crate::value::CodeArena::mint(vm.heap());
     let mut emitter = Emitter::new(code);
-    let (bytecode, _yield_points, _call_sites) = emitter.emit_module(&lir_module);
+    let bytecode = emitter.emit_module(&lir_module).bytecode;
 
     vm.execute(&crate::value::CodeUnit::new(code, bytecode))
         .map_err(|e| e.to_string())
@@ -157,7 +157,7 @@ fn eval_in_arena(
     // so its code lands on `vm`'s heap (docs/impl/region/template.md).
     let code = crate::value::CodeArena::mint(vm.heap());
     let mut emitter = Emitter::new(code);
-    let (bytecode, _yield_points, _call_sites) = emitter.emit_module(&lir_module);
+    let bytecode = emitter.emit_module(&lir_module).bytecode;
 
     vm.execute(&crate::value::CodeUnit::new(code, bytecode))
         .map_err(|e| e.to_string())

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! The code-payload half of emit: the relocation slots and backing bytes a payload names, its LIR body's included.
 //!
 //! docs/impl/image.md
@@ -82,6 +82,7 @@ impl Emitted {
         }
         self.records::<SiteRec>(&b.yield_points, layout::SITE_PAD, at, backings)?;
         self.records::<SiteRec>(&b.call_sites, layout::SITE_PAD, at, backings)?;
+        self.records::<SiteRec>(&b.charge_sites, layout::SITE_PAD, at, backings)?;
         self.raw::<Reg>(&b.site_regs, at, backings)
     }
 

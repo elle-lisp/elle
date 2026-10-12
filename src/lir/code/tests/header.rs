@@ -1,10 +1,10 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! A frozen function keeps its header, its blocks in order, its terminators and spans, and its sites.
 //!
 //! docs/impl/lir.md
 
 use super::*;
-use crate::lir::{CallSiteInfo, Label, LirBuilder, YieldPointInfo};
+use crate::lir::{CallSiteInfo, ChargeSiteInfo, Label, LirBuilder, YieldPointInfo};
 use crate::signals::Signal;
 use crate::syntax::Span;
 use crate::value::fiberheap::FiberHeap;
@@ -144,7 +144,7 @@ fn spans_keep_their_files() {
 }
 
 /// The sites emission finds arrive after the function froze, and read back as
-/// they were recorded.
+/// they were recorded, each table apart from the others.
 #[test]
 fn sites_set_after_freezing_read_back() {
     let mut owned = frozen(&[]);
@@ -168,6 +168,11 @@ fn sites_set_after_freezing_read_back() {
                 push_resume_value: true,
             },
         ],
+        &[ChargeSiteInfo {
+            ip: 5,
+            stack_regs: vec![r(6), r(2)],
+            num_locals: 4,
+        }],
     );
     let view = owned.view();
     let yp = view.yield_point(0).expect("one yield point");
@@ -185,6 +190,14 @@ fn sites_set_after_freezing_read_back() {
     );
     assert_eq!(view.call_site(1).unwrap().stack_regs, &[r(5)]);
     assert!(view.yield_point(1).is_none());
+    assert_eq!(view.charge_sites().len(), 1, "one charge site");
+    let cs = view.charge_site(0).expect("one charge site");
+    assert_eq!(
+        (cs.resume_ip, cs.num_locals, cs.stack_regs),
+        (5, 4, &[r(6), r(2)][..]),
+        "a charge site's ip is where the pause resumes",
+    );
+    assert!(view.charge_site(1).is_none());
 }
 
 /// The plain-data half serializes and reloads — the stdlib cache and `send`

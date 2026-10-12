@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 // src/pipeline/AGENTS.md
 //! Compilation pipeline: source -> bytecode.
 
@@ -16,8 +16,8 @@ mod transforms;
 pub use transforms::*;
 
 // The shared front end lives in `frontend`; these are the entry points the
-// per-backend lowering wrappers below reach for. `Frontend`/`FrontendResult`
-// name the tuple those wrappers destructure.
+// per-backend lowering wrappers below reach for. `Frontend` names the fields
+// those wrappers destructure.
 use frontend::{
     compile_file_frontend, compile_file_frontend_xform, compile_syntaxes_frontend_xform, Frontend,
 };
@@ -36,7 +36,7 @@ use frontend::{
 /// the expanded tree are born in it. Nothing that outlives the unit points
 /// into it — macro templates are copied to the template arena when they are
 /// defined, and a syntax `Value` owns its own copy
-/// (docs/impl/syntax.md § "Where a node lives").
+/// (docs/impl/syntax.md).
 fn with_syntax_arena<R>(
     heap: *mut crate::value::fiberheap::FiberHeap,
     f: impl FnOnce(SyntaxArena) -> R,
@@ -131,7 +131,7 @@ fn compile_inner(
     // Phase 5: Emit bytecode into the unit's code region
     let code = crate::value::CodeArena::mint(unsafe { &mut *cctx.heap_ptr() });
     let mut emitter = Emitter::new(code);
-    let (bytecode, _yield_points, _call_sites) = emitter.emit_module(&lir_module);
+    let bytecode = emitter.emit_module(&lir_module).bytecode;
 
     Ok(CodeUnit::new(code, bytecode))
 }
@@ -352,7 +352,7 @@ fn compile_file_inner(
     let signal = lir_module.entry.view().signal();
     let code = crate::value::CodeArena::mint(unsafe { &mut *cctx.heap_ptr() });
     let mut emitter = Emitter::new(code);
-    let (mut bytecode, _, _) = emitter.emit_module(&lir_module);
+    let mut bytecode = emitter.emit_module(&lir_module).bytecode;
     crate::phase!(ct, "compile", t, "{} emit", source_name);
     bytecode.signal = signal;
     bytecode.signal_projection = signal_projection;
@@ -361,7 +361,7 @@ fn compile_file_inner(
 }
 
 /// Compile a file in the per-form fault-barrier test mode
-/// (docs/test-runner.md § Mechanism).
+/// (docs/test-runner.md).
 ///
 /// The file is compiled ONCE through the whole-module `analyze_file_letrec`
 /// path (so binding resolution, capture analysis, signal inference, and epoch
@@ -443,7 +443,7 @@ fn lower_test_frontend(
     let signal = lir_module.entry.view().signal();
     let code = crate::value::CodeArena::mint(unsafe { &mut *cctx.heap_ptr() });
     let mut emitter = Emitter::new(code);
-    let (mut bytecode, _, _) = emitter.emit_module(&lir_module);
+    let mut bytecode = emitter.emit_module(&lir_module).bytecode;
     bytecode.signal = signal;
     bytecode.signal_projection = signal_projection;
 

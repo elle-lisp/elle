@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 // docs/impl/jit.md
 //! What the solo-compilation gate accepts and rejects, and what the compiled
 //! entry it produces records about itself.
@@ -10,6 +10,7 @@ use crate::signals::Signal;
 use crate::value::Arity;
 
 mod clif;
+mod exits;
 mod makeclosure;
 mod regions;
 mod stores;

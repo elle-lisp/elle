@@ -1,6 +1,6 @@
 # Tests
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-12 -->
 
 Where each kind of test lives, the helpers they share, and how to add one.
 
@@ -39,6 +39,10 @@ re-exec, or a fault that would take every other test down with it
 (`worker_heap.rs`, `region_process_teardown.rs`, `wasm_smoke.rs`, …). See
 [docs/analysis/testing.md](../docs/analysis/testing.md) § "Process-global state
 needs its own binary" for when to reach for one.
+
+[prose.rs](prose.rs) has a binary of its own for another reason. QA runs it
+before anything else, so it must not wait for the shared binary to compile
+([CI](../docs/analysis/ci.md)).
 
 Outside `tests/`, many `src/` files carry an inline `#[cfg(test)]` module
 beside the code it tests.
@@ -168,6 +172,7 @@ count. Pick `N` by the cost of one case:
 |---------|---------|-------------|
 | `cargo test -p elle --lib` | ~1.5 min | The inline unit tests |
 | `cargo test --test lib integration::NAME` | seconds to minutes | One integration file |
+| `make prose` | seconds once built | The prose checks over every stamped file, the first step of QA |
 | `cargo test --test '*'` | ~10 min | Every integration test and standalone binary |
 | `make smoke` | ~30 min, release | `make qa`, then both Elle suites, the doctests, the embedding demo, and the surface gate |
 | `make test` | smoke + ~5 min | What the PR gate runs, locally |

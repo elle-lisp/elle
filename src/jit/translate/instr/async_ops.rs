@@ -1,11 +1,12 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 // docs/impl/jit.md
-//! Lowering the destructure, type-test, struct, suspending-call and array-mut instructions.
+//! Lowering the destructure, type-test, struct and array-mut instructions, the
+//! spliced calls among them.
 
 use super::*;
 
 impl<'a> FunctionTranslator<'a> {
-    /// Destructure, eval, suspending-call, and array-mut instructions (chain link).
+    /// Destructure, eval, and array-mut instructions (chain link).
     pub(super) fn translate_instr_async(
         &mut self,
         builder: &mut FunctionBuilder,
@@ -213,57 +214,6 @@ impl<'a> FunctionTranslator<'a> {
                 return Err(JitError::UnsupportedInstruction("Eval".to_string()));
             }
 
-            InstrRef::SuspendingCall {
-                dst, func, args, ..
-            } => {
-                // SuspendingCall: the callee may yield. Handled identically
-                // to Call, and followed by the same signal check
-                // (`translate_instr`). LBox cells are first-class values in
-                // registers (no auto-unwrap), so a park spills them correctly.
-                let (ft, fp) = self.use_var_pair(builder, func.0);
-                let vm = self.vm_ptr.ok_or_else(|| {
-                    JitError::InvalidLir("SuspendingCall without vm pointer".to_string())
-                })?;
-
-                if args.is_empty() {
-                    let null_ptr = builder.ins().iconst(I64, 0);
-                    let nargs = builder.ins().iconst(I64, 0);
-                    let (rt, rp) = self.call_helper_call(
-                        builder,
-                        ft,
-                        fp,
-                        null_ptr,
-                        nargs,
-                        vm,
-                        region_id_const,
-                    )?;
-                    self.def_var_pair(builder, dst.0, rt, rp);
-                } else {
-                    let slot =
-                        builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
-                            cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
-                            (args.len() * 16) as u32,
-                            0,
-                        ));
-                    for (i, arg_reg) in args.iter().enumerate() {
-                        let (at, ap) = self.use_var_pair(builder, arg_reg.0);
-                        store_value_slot(builder, slot, i as u32, at, ap);
-                    }
-                    let args_addr = builder.ins().stack_addr(I64, slot, 0);
-                    let nargs = builder.ins().iconst(I64, args.len() as i64);
-                    let (rt, rp) = self.call_helper_call(
-                        builder,
-                        ft,
-                        fp,
-                        args_addr,
-                        nargs,
-                        vm,
-                        region_id_const,
-                    )?;
-                    self.def_var_pair(builder, dst.0, rt, rp);
-                }
-            }
-
             InstrRef::ArrayMutExtend { dst, array, source } => {
                 let (at, ap) = self.use_var_pair(builder, array.0);
                 let (srt, srp) = self.use_var_pair(builder, source.0);
@@ -307,6 +257,7 @@ impl<'a> FunctionTranslator<'a> {
                 args_region,
                 ..
             } => {
+                self.emit_charge(builder)?;
                 let (ft, fp) = self.use_var_pair(builder, func.0);
                 let (art, arp) = self.use_var_pair(builder, args.0);
                 let vm = self.vm_ptr.ok_or_else(|| {
@@ -335,6 +286,7 @@ impl<'a> FunctionTranslator<'a> {
                 args_region,
                 ..
             } => {
+                self.emit_charge(builder)?;
                 let (ft, fp) = self.use_var_pair(builder, func.0);
                 let (art, arp) = self.use_var_pair(builder, args.0);
                 let vm = self.vm_ptr.ok_or_else(|| {

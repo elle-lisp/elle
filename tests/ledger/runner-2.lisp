@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-11
+# audited: 2026-10-12
 # The runner's ledger, part 2 of 2: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/lang/each.lisp" :objects 1012]
@@ -35,7 +35,7 @@
 ["tests/lang/flatlet.lisp" :objects 305]
 ["tests/lang/fn-signature.lisp" :objects 593]
 ["tests/lang/fuel-apply-fold.lisp" :objects 472]
-["tests/lang/fuel.lisp" :objects 1090]
+["tests/lang/fuel.lisp" :objects 1188]
 ["tests/lang/functional.lisp" :objects 4062]
 ["tests/lang/genserver-down.lisp" :objects 745]
 ["tests/lang/genserver.lisp" :objects 920]
@@ -277,3 +277,4 @@
 ["tests/lang/when-unless.lisp" :objects 102]
 ["tests/lang/zmq.lisp" :objects 510]
 ["tests/impl/region-query-payload-leak.lisp" :objects 112]
+["tests/impl/fuel-budget.lisp" :objects 316]

@@ -1,7 +1,7 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 // docs/impl/jit.md
 //! What only the rendered Cranelift IR settles: a load's flags, an operation's
-//! tag test, a call's target, and the pop before every exit.
+//! tag test, and a call's target.
 
 use super::*;
 
@@ -235,43 +235,9 @@ fn a_capture_load_carries_trusted_flags() {
     }
 }
 
-/// fn(f) -> f(). A `Call` inside a function whose signal may suspend, which is
-/// what makes the translator emit both exits: the park after the call's signal
-/// check, and the normal return.
-fn make_suspending_call_lir() -> LirOwned {
-    use crate::hir::region::StaticRegion;
-    use crate::lir::CallSiteInfo;
-    LirFixture::new(Arity::Exact(1))
-        .signal(Signal::yields())
-        .call_sites(vec![CallSiteInfo {
-            resume_ip: 0,
-            stack_regs: vec![],
-            num_locals: 0,
-            push_resume_value: true,
-        }])
-        .block(
-            0,
-            &[
-                InstrRef::LoadCapture {
-                    dst: Reg(0),
-                    index: 0,
-                },
-                InstrRef::Call {
-                    dst: Reg(1),
-                    func: Reg(0),
-                    args: &[],
-                    arity_checked: false,
-                    region: StaticRegion::new(1).unwrap(),
-                },
-            ],
-            Terminator::Return(Reg(1)),
-        )
-        .build()
-}
-
 /// `fnN` → the module function id it names, read off a rendered function's
 /// preamble lines (`fn3 = u0:87 sig3`, optionally `colocated`).
-fn func_refs(clif: &[String]) -> HashMap<String, u32> {
+pub(super) fn func_refs(clif: &[String]) -> HashMap<String, u32> {
     let mut refs = HashMap::new();
     for line in clif {
         let line = line.trim();
@@ -296,7 +262,7 @@ fn func_refs(clif: &[String]) -> HashMap<String, u32> {
 
 /// The `fnN` of the call instruction nearest above `at`, searching back only
 /// within `at`'s own block.
-fn call_target_before(clif: &[String], at: usize) -> Option<String> {
+pub(super) fn call_target_before(clif: &[String], at: usize) -> Option<String> {
     for line in clif[..at].iter().rev() {
         let line = line.trim();
         if line.starts_with("block") {
@@ -339,6 +305,7 @@ fn make_self_call_lir() -> LirOwned {
             ],
             Terminator::Return(Reg(2)),
         )
+        .emitted_sites()
         .build()
 }
 
@@ -355,7 +322,7 @@ fn own_func_id(clif: &[String]) -> u32 {
 }
 
 /// Every `fnN` a rendered function calls, in emission order.
-fn called_refs(clif: &[String]) -> Vec<String> {
+pub(super) fn called_refs(clif: &[String]) -> Vec<String> {
     clif.iter()
         .filter_map(|line| {
             let pos = line.find("call ")?;
@@ -401,60 +368,4 @@ fn a_self_recursive_call_goes_through_the_dispatch_helper() {
          no compiled function does; got {called:?} in:\n{}",
         clif.join("\n")
     );
-}
-
-/// Every `return` a compiled function emits is preceded by the call that pops
-/// this activation's region-remap frame, so the prologue's push is balanced on
-/// every path out (docs/impl/region/unwind.md).
-#[test]
-fn every_compiled_exit_pops_the_region_map() {
-    // Trap: a missing pop is invisible to the compiled function itself. It
-    // returns the right value; what it leaves behind is a map frame that
-    // `last()` then names for the INTERPRETER activation above it, which parks
-    // and releases against a frame that was never its own — and the remap stack
-    // never shrinks back.
-    //
-    // Counter-factual: an exit that returns straight from the park helper.
-    // Every corpus test that suspends through a compiled frame passes its own
-    // assertions, and only the balance check in `execute_bytecode_saving_stack`
-    // says anything at all: in a debug build, once the enclosing activation
-    // returns.
-    let compiler = JitCompiler::new().expect("Failed to create compiler");
-    let pop_id = compiler.helpers.pop_region_map.as_u32();
-    let clif = compiler
-        .clif_text(&make_suspending_call_lir().view())
-        .expect("Failed to translate");
-    let refs = func_refs(&clif);
-
-    let returns: Vec<usize> = clif
-        .iter()
-        .enumerate()
-        .filter(|(_, line)| line.trim().starts_with("return"))
-        .map(|(i, _)| i)
-        .collect();
-    // One per exit: the signal check's park, and the terminator's.
-    assert_eq!(
-        returns.len(),
-        2,
-        "a suspending function's Call has two exits; got:\n{}",
-        clif.join("\n")
-    );
-
-    for i in returns {
-        let target = call_target_before(&clif, i).unwrap_or_else(|| {
-            panic!(
-                "`{}` is not preceded by any call in its block:\n{}",
-                clif[i].trim(),
-                clif.join("\n")
-            )
-        });
-        assert_eq!(
-            refs.get(&target).copied(),
-            Some(pop_id),
-            "`{}` is preceded by `{target}`, not by the region-map pop \
-             (u0:{pop_id}) — this exit leaks its activation's remap frame:\n{}",
-            clif[i].trim(),
-            clif.join("\n")
-        );
-    }
 }

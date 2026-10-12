@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! The module sections, and the two function bodies an emitter produces: the entry and a closure.
 //!
 //! docs/impl/wasm.md
@@ -112,10 +112,12 @@ impl WasmEmitter {
         // (rt_make_closure, src/wasm/linker/create/closure.rs). Without it the
         // worker panics on its first MakeClosure (`wasm::tests::closure`).
         let code = crate::value::CodeArena::mint(unsafe { &mut *self.heap_ptr });
-        let ((entry, _, _), lambdas) =
+        let (compiled, lambdas) =
             crate::lir::Emitter::new(code).emit_module_with_lambdas(lir_module);
-        let closure_bytecodes =
-            super::super::host::ModuleCode::new(crate::value::CodeUnit::new(code, entry), lambdas);
+        let closure_bytecodes = super::super::host::ModuleCode::new(
+            crate::value::CodeUnit::new(code, compiled.bytecode),
+            lambdas,
+        );
 
         EmitResult {
             wasm_bytes: module.finish(),

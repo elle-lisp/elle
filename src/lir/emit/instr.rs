@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 // docs/impl/bytecode.md
 //! The emitter's instruction dispatch: what each frozen instruction writes into the
 //! bytecode, and what it does to the simulated operand stack.
@@ -203,6 +203,7 @@ impl Emitter {
                     self.ensure_on_top(*func);
                 }
 
+                self.record_charge_site();
                 if *arity_checked {
                     self.bytecode.emit(Instruction::CallChecked);
                 } else {
@@ -265,6 +266,7 @@ impl Emitter {
                     }
                     self.ensure_on_top(*func);
                 }
+                self.record_charge_site();
                 if *arity_checked {
                     self.bytecode.emit(Instruction::TailCallChecked);
                 } else {
@@ -287,11 +289,12 @@ impl Emitter {
                     .emit_u32(deferred_release_slot.map_or(0, |s| s.get()));
                 // The borrowed-argument stash slots, so a signal exit can
                 // consume the retains the fall-through block below would have
-                // (docs/impl/region/mechanism.md). A count byte then one u16 slot each,
-                // so a call with no borrowed argument — the overwhelming
-                // majority — costs exactly the zero byte. Truncated at 255: a
-                // longer argument list than any real call has, whose tail keeps
-                // the over-keep the abandoned block always had.
+                // (docs/impl/region/signalexit.md). A count byte then one u16
+                // slot each, so a call with no borrowed argument — the
+                // overwhelming majority — costs exactly the zero byte.
+                // Truncated at 255: a longer argument list than any real call
+                // has, whose tail keeps the over-keep the abandoned block
+                // always had.
                 let n = borrowed_arg_slots.len().min(u8::MAX as usize);
                 self.bytecode.emit_byte(n as u8);
                 for slot in borrowed_arg_slots.iter().take(n) {

@@ -1,6 +1,6 @@
 # Signal Inference
 
-<!-- audited: 2026-10-11 -->
+<!-- audited: 2026-10-12 -->
 
 How the compiler infers each function's signal, and the forms that bound,
 narrow or check it.
@@ -388,11 +388,16 @@ A function whose inferred signal is empty is a proof that nothing stops the
 fiber while it runs. Backends depend on that proof. The MLIR and SPIR-V tiers
 compile a silent function to code with no signal path at all, and the JIT
 records no resume point inside one ([jit.md](jit.md)). Every tier therefore
-keeps the same two rules.
+keeps two rules: a meter never stops the fiber inside a silent function, and a
+signal that leaves one is a broken proof.
 
-The interpreter charges no fuel while a silent function runs, as no native
-tier does. A meter therefore pauses a fiber at a charge site outside the
-silent function, never inside it.
+A silent function spends fuel and never pauses. Each charge site inside it
+takes one unit while the budget holds one, and takes nothing once the budget
+is spent. The pause comes at the next charge site outside the silent
+function, which finds the budget spent. So a fiber pays for the work a silent
+function does, and a meter never stops the fiber inside one. The interpreter
+and the JIT charge a silent function this way. The MLIR, SPIR-V and WASM
+tiers charge nothing in the code they compile.
 
 ```lisp
 (defn spin [n] (numeric!) (def @i 0) (while (%lt i n) (assign i (%add i 1))) i)
@@ -404,6 +409,22 @@ silent function, never inside it.
 (fiber/resume metered)
 (assert (= :dead (fiber/status metered)) "the meter never paused the silent loop")
 (assert (= 1000 (fiber/value metered)))
+(assert (= 0 (fiber/fuel metered)) "and the loop spent the budget")
+```
+
+A call through a mutable binding is a charge site the compiler cannot remove,
+and a function that makes one is not silent. Here it is the first charge site
+after the silent loop, so it finds the budget spent and pauses the fiber.
+
+```lisp
+(def @after identity)
+(def outside (fiber/new (fn [] (after (spin 1000))) |:fuel|))
+(fiber/set-fuel outside 5)
+(fiber/resume outside)
+(assert (= :paused (fiber/status outside)) "the call after the loop pauses")
+(fiber/set-fuel outside 5)
+(fiber/resume outside)
+(assert (= 1000 (fiber/value outside)))
 ```
 
 A signal that leaves a silent function is a broken proof: a defect in the

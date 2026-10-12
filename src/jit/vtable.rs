@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 // docs/impl/jit.md
 //! `RuntimeHelpers`: one pre-declared Cranelift `FuncId` per `extern "C"`
 //! runtime helper, so a translator emits a call without re-declaring.
@@ -18,7 +18,7 @@
 //!   value_binary: (atag, apay, btag, bpay) -> (tag, payload) = 4 params, 2 returns
 //!   value_unary_vm: (tag, payload, vm) -> (tag, payload)     = 3 params, 2 returns
 //!   value_binary_vm: (atag, apay, btag, bpay, vm) -> (tag, payload) = 5 params, 2 returns
-//!   call: (ftag, fpay, args_ptr, nargs, vm) -> (tag, payload) = 5 params, 2 returns
+//!   call: (ftag, fpay, args_ptr, nargs, vm, region) -> (tag, payload) = 6 params, 2 returns
 
 use cranelift_module::FuncId;
 
@@ -29,8 +29,9 @@ pub(crate) use symbols::register_symbols;
 
 /// Pre-declared runtime helper function IDs.
 ///
-/// Each field maps to a `#[no_mangle] extern "C"` function in `runtime.rs`
-/// or `dispatch.rs` / `data.rs` / `suspend.rs`. The IDs are declared in the
+/// Each field maps to a `#[no_mangle] extern "C"` function in `runtime.rs`,
+/// or in `dispatch.rs` and the `calls`, `data` and `suspend` modules it
+/// re-exports. The IDs are declared in the
 /// JITModule at construction time so that `FunctionTranslator` can reference
 /// them without re-declaring on every function compilation.
 pub(crate) struct RuntimeHelpers {
@@ -109,6 +110,8 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) tail_call_array: FuncId,
     pub(crate) jit_yield: FuncId,
     pub(crate) jit_yield_through_call: FuncId,
+    /// Park the frame at a charge site whose fuel ran out (docs/impl/jit.md).
+    pub(crate) fuel_pause: FuncId,
     pub(crate) has_signal: FuncId,
     // Declared, and called by no translation: these four, `rotate_pools`,
     // `incref`, `decref` and `is_truthy`.

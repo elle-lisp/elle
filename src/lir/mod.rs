@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 // docs/impl/lir.md
 //! Low-level Intermediate Representation: SSA form with basic blocks and
 //! virtual registers, close to the target but architecture-independent.
@@ -27,6 +27,6 @@ pub use display::terminator_kind;
 pub use emit::{ClosureCompiled, Emitter};
 pub use lower::Lowerer;
 pub use types::{
-    for_each_terminator_use, BinOp, CallSiteInfo, ClosureId, CmpOp, ConvOp, Label, OperandProof,
-    Reg, Terminator, UnaryOp, YieldPointInfo,
+    for_each_terminator_use, BinOp, CallSiteInfo, ChargeSiteInfo, ClosureId, CmpOp, ConvOp, Label,
+    OperandProof, Reg, Terminator, UnaryOp, YieldPointInfo,
 };

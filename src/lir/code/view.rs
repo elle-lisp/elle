@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! `LirView`: the one read API over a frozen function — its blocks, nodes, terminators, header, tables and sites.
 //!
 //! src/lir/AGENTS.md
@@ -56,6 +56,7 @@ pub struct LirView<'a> {
     blocks: &'a [BlockRec],
     yield_points: &'a [SiteRec],
     call_sites: &'a [SiteRec],
+    charge_sites: &'a [SiteRec],
     site_regs: &'a [Reg],
     head: Head<'a>,
 }
@@ -75,6 +76,7 @@ impl<'a> LirView<'a> {
             blocks: &code.blocks,
             yield_points: &code.yield_points,
             call_sites: &code.call_sites,
+            charge_sites: &code.charge_sites,
             site_regs: &code.site_regs,
             head: Head::of_code(code),
         }
@@ -95,6 +97,7 @@ impl<'a> LirView<'a> {
             blocks: body.blocks.as_slice(),
             yield_points: body.yield_points.as_slice(),
             call_sites: body.call_sites.as_slice(),
+            charge_sites: body.charge_sites.as_slice(),
             site_regs: body.site_regs.as_slice(),
             head: Head::of_body(body, payload),
         }
@@ -245,6 +248,19 @@ impl<'a> LirView<'a> {
             .map(|s| SiteRef::of(s, self.site_regs))
     }
 
+    /// The fuel charge sites. A charge site's `resume_ip` is the charging
+    /// instruction itself, which the interpreter runs again on resume.
+    pub fn charge_sites(&self) -> impl ExactSizeIterator<Item = SiteRef<'a>> + 'a {
+        let regs = self.site_regs;
+        self.charge_sites.iter().map(move |s| SiteRef::of(s, regs))
+    }
+
+    pub fn charge_site(&self, i: usize) -> Option<SiteRef<'a>> {
+        self.charge_sites
+            .get(i)
+            .map(|s| SiteRef::of(s, self.site_regs))
+    }
+
     /// Whether any instruction is a `op`.
     pub fn has_op(&self, op: Op) -> bool {
         self.parts.nodes.iter().any(|n| n.op == op as u8)
@@ -279,9 +295,10 @@ impl<'a> LirView<'a> {
         self.parts.consts
     }
 
-    /// The yield-point records, then the call-site records.
-    pub(crate) fn site_records(&self) -> [&'a [SiteRec]; 2] {
-        [self.yield_points, self.call_sites]
+    /// The yield-point records, the call-site records, then the charge-site
+    /// records.
+    pub(crate) fn site_records(&self) -> [&'a [SiteRec]; 3] {
+        [self.yield_points, self.call_sites, self.charge_sites]
     }
 
     pub(crate) fn site_regs(&self) -> &'a [Reg] {
@@ -303,6 +320,7 @@ impl<'a> LirView<'a> {
             n_values: p.values.len() as u32,
             yield_points: self.yield_points.to_vec(),
             call_sites: self.call_sites.to_vec(),
+            charge_sites: self.charge_sites.to_vec(),
             site_regs: self.site_regs.to_vec(),
             closure_id: self.head.closure_id,
             name: self.name().map(str::to_string),
@@ -436,7 +454,7 @@ impl<'a> NodeRef<'a> {
     }
 }
 
-/// A yield point or a call site.
+/// A yield point, a call site or a fuel charge site.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SiteRef<'a> {
     /// The bytecode offset the interpreter resumes at.
@@ -446,7 +464,7 @@ pub struct SiteRef<'a> {
     /// The registers on the operand stack, bottom to top.
     pub stack_regs: &'a [Reg],
     /// Whether a resume delivers its value into the site's result. False for
-    /// an instruction that produces no value.
+    /// an instruction that produces no value, and for a charge site.
     pub push_resume_value: bool,
 }
 

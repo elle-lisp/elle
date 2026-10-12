@@ -1,12 +1,14 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 // src/lir/AGENTS.md
 //! How a block exits, and what each edge owes the operand stack.
 //!
 //! A block inherits its stack simulation from the first predecessor that
 //! reaches it, so that predecessor fixes the block's operand depth and every
-//! later edge must arrive at the same depth (src/lir/AGENTS.md § "Merge operand
-//! depth"). `Terminator::Jump` is the only exit that trims to meet the rule,
-//! and the trim it takes depends on which way the edge runs.
+//! later edge must arrive at the same depth (src/lir/AGENTS.md).
+//! `Terminator::Jump` is the only exit that trims to meet the rule, and the
+//! trim it takes depends on which way the edge runs. A jump to a block already
+//! emitted runs backward, and the interpreter charges fuel there, so it records
+//! a charge site.
 
 use super::*;
 
@@ -37,8 +39,7 @@ impl Emitter {
             Terminator::Jump(label) => {
                 // Every edge into a block must leave the depth that block was
                 // fixed at, and a jump is the only exit that can trim to it.
-                // The trim differs by direction (src/lir/AGENTS.md § "Merge
-                // operand depth").
+                // The trim differs by direction (src/lir/AGENTS.md).
                 match self.block_entry_depth.get(label).copied() {
                     // A BACK edge: the target is already emitted, so its
                     // simulation names only cells below `floor` and reads
@@ -73,10 +74,7 @@ impl Emitter {
                         .or_insert_with(|| (self.stack.clone(), self.reg_to_stack.clone()));
                 }
 
-                self.bytecode.emit(Instruction::Jump);
-                let pos = self.bytecode.current_pos();
-                self.bytecode.emit_i32(0); // placeholder
-                self.pending_jumps.push((pos, *label));
+                self.emit_jump(*label);
             }
 
             Terminator::Branch {
@@ -90,9 +88,8 @@ impl Emitter {
                 self.pop();
 
                 // Save stack state for both branches, but only if they haven't
-                // been processed yet. This handles the case where blocks are
-                // sorted by label and a target block might be processed before
-                // the branch that jumps to it.
+                // been emitted yet. A target emitted before this block, such as
+                // a loop header, keeps the state it was emitted with.
                 if !self.label_offsets.contains_key(then_label) {
                     self.yield_stack_state
                         .insert(*then_label, (self.stack.clone(), self.reg_to_stack.clone()));
@@ -108,11 +105,9 @@ impl Emitter {
                 self.bytecode.emit_i32(0); // placeholder
                 self.pending_jumps.push((else_pos, *else_label));
 
-                // Fall through or jump to then_label
-                self.bytecode.emit(Instruction::Jump);
-                let then_pos = self.bytecode.current_pos();
-                self.bytecode.emit_i32(0); // placeholder
-                self.pending_jumps.push((then_pos, *then_label));
+                // Fall through or jump to then_label, which runs backward when
+                // then_label is a loop header emitted before this block.
+                self.emit_jump(*then_label);
             }
 
             Terminator::Emit {
@@ -142,10 +137,7 @@ impl Emitter {
                     (self.stack.clone(), self.reg_to_stack.clone()),
                 );
 
-                self.bytecode.emit(Instruction::Jump);
-                let pos = self.bytecode.current_pos();
-                self.bytecode.emit_i32(0); // placeholder
-                self.pending_jumps.push((pos, *resume_label));
+                self.emit_jump(*resume_label);
             }
 
             Terminator::Unreachable => {

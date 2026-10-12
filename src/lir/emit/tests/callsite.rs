@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! The call sites a suspending function records: where a caller parks behind a
 //! callee that suspended, a tail call's included.
 //!
@@ -83,7 +83,11 @@ fn offset_after_tail_call(bytecode: &Bytecode) -> usize {
 #[test]
 fn a_suspending_functions_tail_call_records_a_call_site() {
     let func = tail_call_func(crate::signals::Signal::yields(), true);
-    let (bytecode, _, call_sites) = emitter().emit(&func.view());
+    let ClosureCompiled {
+        bytecode,
+        call_sites,
+        ..
+    } = emitter().emit(&func.view());
 
     assert_eq!(call_sites.len(), 1, "one tail call, one call site");
     assert_eq!(
@@ -102,7 +106,7 @@ fn a_suspending_functions_tail_call_records_a_call_site() {
 #[test]
 fn a_silent_functions_tail_call_records_no_call_site() {
     let func = tail_call_func(crate::signals::Signal::silent(), true);
-    let (_, _, call_sites) = emitter().emit(&func.view());
+    let call_sites = emitter().emit(&func.view()).call_sites;
     assert!(call_sites.is_empty(), "got {call_sites:?}");
 }
 
@@ -113,7 +117,11 @@ fn a_silent_functions_tail_call_records_no_call_site() {
 #[test]
 fn a_tail_call_site_keeps_the_callee_copy_left_beneath_its_operands() {
     let func = tail_call_func(crate::signals::Signal::yields(), false);
-    let (bytecode, _, call_sites) = emitter().emit(&func.view());
+    let ClosureCompiled {
+        bytecode,
+        call_sites,
+        ..
+    } = emitter().emit(&func.view());
 
     let lines = disassemble_lines(&bytecode.instructions);
     assert!(

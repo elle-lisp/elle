@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! The bytecode dispatch match: one decoded instruction routed to its handler.
 //!
 //! docs/impl/vm.md
@@ -27,14 +27,13 @@ use super::*;
 impl VM {
     /// Charge one unit of fuel for a branch/call opcode of `code`. Returns
     /// `Some(exit)` when fuel is exhausted — the caller must propagate it out
-    /// of the dispatch loop — and `None` after decrementing. `resume_ip` must
-    /// be the opcode start (`instr_ip`), so a fuel-yielded fiber re-runs the
-    /// whole opcode on resume. When fuel is `None` (the common, unmetered case)
-    /// the `if let` is skipped — a not-taken branch, negligible overhead on the
-    /// hot path.
+    /// of the dispatch loop — and `None` after charging. `resume_ip` must be
+    /// the opcode start (`instr_ip`), so a fuel-yielded fiber re-runs the whole
+    /// opcode on resume.
     ///
-    /// A silent function is charged nothing: it is a proof that nothing stops
-    /// the fiber while it runs (docs/signals/inference.md). Its signal is read
+    /// A silent function spends fuel and never pauses: it is a proof that
+    /// nothing stops the fiber while it runs, so the pause comes at the next
+    /// charge site outside it (docs/signals/inference.md). Its signal is read
     /// only on a metered fiber.
     #[inline]
     fn charge_fuel(
@@ -42,17 +41,15 @@ impl VM {
         code: &crate::value::Code,
         resume_ip: usize,
     ) -> Option<(SignalBits, usize)> {
-        if let Some(ref mut fuel) = self.fiber.fuel {
-            if code.template().signal().is_silent() {
-                return None;
-            }
-            if *fuel == 0 {
-                self.fiber.signal = Some((SIG_FUEL, Value::NIL));
-                return Some((SIG_FUEL, resume_ip));
-            }
-            *fuel -= 1;
+        if self.fiber.fuel.is_metered() && code.template().signal().is_silent() {
+            self.fiber.fuel.spend();
+            return None;
         }
-        None
+        if self.fiber.fuel.charge() {
+            return None;
+        }
+        self.fiber.signal = Some((SIG_FUEL, Value::NIL));
+        Some((SIG_FUEL, resume_ip))
     }
 
     // The arg list is the inner loop's live context (bytecode/const slices, the

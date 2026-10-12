@@ -1,6 +1,6 @@
 # Runtime Configuration (`vm/config`)
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-12 -->
 
 What a build decides, what the `elle` command line sets, and what a running
 program reads and changes through `vm/config`.
@@ -161,9 +161,9 @@ it.
 
 `--dump=bytecode` prints what the emitter wrote for the file: every code object
 the file builds, nested lambdas included, with its instructions, constants,
-source locations, region tables and yield and call sites. Two runs over one
-file print one text, so a recorded dump is a golden. `make bytecode-golden`
-records it for the corpus and the standard library, and
+source locations, region tables, and yield, call and charge sites. Two runs
+over one file print one text, so a recorded dump is a golden.
+`make bytecode-golden` records it for the corpus and the standard library, and
 `make bytecode-golden-check` compares the current binary against the record.
 
 ### WASM policy

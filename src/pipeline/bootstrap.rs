@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! The core.lisp bootstrap: compile and run the core module before any
 //! compile context exists, and hand its exports to the one being built.
 //!
@@ -171,7 +171,7 @@ pub(super) fn compile_core(
 
     let code = crate::value::CodeArena::mint(unsafe { &mut *heap_ptr });
     let mut emitter = Emitter::new(code);
-    let (bytecode, _yield_points, _call_sites) = emitter.emit_module(&lir_module);
+    let bytecode = emitter.emit_module(&lir_module).bytecode;
 
     let closure_val = vm
         .execute(&crate::value::CodeUnit::new(code, bytecode))

@@ -1,13 +1,14 @@
 # CI and Triage
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-12 -->
 
 CI structure, local workflow, and failure diagnosis.
 
 ## CI structure
 
-[pr.yml](../../.github/workflows/pr.yml) runs on every pull request. `Detect
-Changes` reads the diff and sets `source`, which gates every job below it except
+[pr.yml](../../.github/workflows/pr.yml) runs on every pull request. `QA` runs
+first, on every pull request, and every other job waits for it to pass. `Detect
+Changes` reads the diff and sets `source`, which gates every job after QA except
 two. `Documentation Build` runs on a Markdown-only PR too, because a renamed
 heading breaks the site generator. `Plugin Tests` reads `plugins`, which is also
 set when the diff moves only the submodule pointer.
@@ -15,7 +16,7 @@ set when the diff moves only the submodule pointer.
 | Job | Runner | What | Proptest cases |
 |-----|--------|------|----------------|
 | Detect Changes | ubuntu | Sets `source` from the changed paths | — |
-| QA | ubuntu | `cargo fmt`, clippy, the macOS cross-check, rustdoc | — |
+| QA | ubuntu | The prose checks, then `cargo fmt`, clippy, the macOS cross-check, rustdoc | — |
 | Documentation Build | ubuntu | `make docs` and the Elle doc site, minus the publish | — |
 | Default Build Tests | ubuntu | `doctest`, `smoke-lang`, `smoke-impl` — the default build and its rig | — |
 | No-JIT Build Tests | ubuntu | `smoke-nojit` — the language suite on the interpreter alone | — |
@@ -40,6 +41,24 @@ sees. Its toolchain therefore carries what the `QA` job's does: rustfmt,
 clippy, both cross-check targets and LLVM 22. The weekly schedule
 ([weekly.yml](../../.github/workflows/weekly.yml)) runs the whole workspace
 suite on beta and nightly at 128 cases, plus a dependency audit.
+
+### QA runs first, and every other job waits for it
+
+QA fails in minutes, and the suites and the Rust tests take up to an hour. So
+no other job starts until QA passes, and a change that fails QA costs one short
+job instead of the whole matrix.
+
+The prose checks run first inside QA. [prose.rs](../../tests/prose.rs) holds
+every stamped file to the parts of [the policy](../../DOCUMENTATION.md) a
+machine can decide. Before this rule, an over-long call-out failed all three
+Rust Tests jobs, 20 to 47 minutes in, after QA had passed. The checks have a
+binary of their own, so QA does not wait for the shared test binary to compile.
+`make prose` runs them, and `make qa` runs `make prose` before anything else.
+
+QA runs on every pull request, with no `source` gate. A Markdown-only change
+can break a call-out or a link, and those are what the prose checks read.
+[qa_gate.rs](../../tests/integration/qa_gate.rs) is the standing check that QA
+runs first, runs always, and gates every other job.
 
 ### Each build is an implementation
 
@@ -362,9 +381,11 @@ standing check that every job recording a run uploads its store.
 `All Checks Passed` is the only status check branch protection requires
 ([BRANCH_PROTECTION.md](../../.github/BRANCH_PROTECTION.md)). A new job that
 is missing from that job's `needs` list runs, reports, and cannot block a
-merge. Add the job to `needs` and give it a check step.
-[workflows.rs](../../tests/integration/workflows.rs) fails when either is
-missing.
+merge. Add the job to `needs` and give it a check step. Name `qa` in the new
+job's own `needs`, so it waits for QA like every other job.
+[workflows.rs](../../tests/integration/workflows.rs) fails when either of the
+first two is missing, and [qa_gate.rs](../../tests/integration/qa_gate.rs) when
+the third is.
 
 
 ## Local development workflow
@@ -373,6 +394,9 @@ missing.
 ```bash
 # The fast inner loop
 cargo test -p elle --lib
+
+# The prose checks, the first step of QA
+make prose
 
 # The QA job, locally
 make qa
@@ -402,6 +426,7 @@ make test
 | **Boot from an image fails** | `Boot Image Tests` fails and every other corpus job passes | The corpus file answers differently under a hydrated boot, or the image no longer hydrates. | Run `make smoke-boot-image` locally. Read the hydration proof first: a target that fails there never reached the corpus. |
 | **Property tests fail** | `Rust Tests` fails with a shrunk counterexample | The shrunk output shows the *minimal* failing input. | Reproduce with the exact shrunk values as a unit test. Check `proptest-regressions/` files. |
 | **Integration tests fail** | `Rust Tests` fails | Tests use `eval_source()` which runs the full pipeline. | Read the assertion. Check whether the test expects `.unwrap()` (success) or `.is_err()` (error). |
+| **Prose** | `QA` fails on `make prose` | A stamped file breaks a rule a machine can check: a call-out over 140 characters, a broken link, a bare filename, banned wording, or a file past 500 lines. | Run `make prose` and repair the file the message names ([DOCUMENTATION.md](../../DOCUMENTATION.md)). |
 | **Clippy** | `QA` fails on the clippy step | Any Rust warning. CI runs with `-D warnings`. | Run `cargo clippy --workspace --all-targets -- -D warnings` locally. |
 | **Formatting** | `QA` fails on `cargo fmt --check` | Unformatted Rust code. | Run `cargo fmt`. |
 | **Rustdoc** | `QA` fails on the `cargo doc` step | Broken intra-doc links or malformed doc comments. CI documents private items, so a link into a `pub(crate)` item counts. A `#[cfg(test)]` item is absent from a doc build — gate it `#[cfg(any(test, doc))]` if the docs link to it. | Run `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items` locally. |

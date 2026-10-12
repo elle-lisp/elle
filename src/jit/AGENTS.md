@@ -1,6 +1,6 @@
 # jit
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-12 -->
 
 JIT compilation for Elle using Cranelift.
 
@@ -10,8 +10,8 @@ Compile a function's frozen LIR, read through a `LirView`
 ([lir.md](../../docs/impl/lir.md)), to native code for the host, x86_64 or
 AArch64. A function's signal decides nothing about admission (see
 [signals/AGENTS.md](../signals/AGENTS.md) for signal definitions); what it
-decides is the code around a call. A yield, an error, and a callee's park all
-leave by side-exit: JIT code calls a runtime helper that builds a
+decides is the code around a call. A yield, an error, a callee's park and a
+fuel pause all leave by side-exit: JIT code calls a runtime helper that builds a
 `SuspendedFrame` and returns `YIELD_SENTINEL` to the interpreter.
 
 ## Architecture
@@ -32,12 +32,13 @@ interpreter continues running the function while Cranelift compiles it. Each VM
 owns its worker, and dropping the worker discards the tasks still in its queue
 ([jit.md](../../docs/impl/jit.md)).
 
-The worker thread allocates no Elle values: string constants arrive
-pre-resolved as `ValueConst`, and symbols/keywords are immediates, so
-`translate_const` builds only Cranelift immediates and needs no heap. The
-runtime data helpers (`elle_jit_pair`/`_make_array`/`_make_capture`) that *do*
-allocate run later on the calling thread and reach the driving instance's heap
-through the VM pointer threaded into each call.
+The worker thread allocates no Elle values. Symbols and keywords are
+immediates, and a string literal arrives as a `MaterializeConst`, whose
+template is plain data, so `translate_const` builds only Cranelift immediates
+and needs no heap. The runtime data helpers
+(`elle_jit_pair`/`_make_array`/`_materialize_const`) that *do* allocate run
+later on the calling thread and reach the driving instance's heap through the
+VM pointer threaded into each call.
 
 `VM::profile_jit_candidate` is the one place a call is counted and a hot
 function is submitted. Both tiers reach it: the interpreter through
@@ -68,7 +69,8 @@ execution). Combine with `--trace=jit` to log each synchronous install.
 | `JitCode` | Wrapper for native function pointer + module lifetime + yield metadata |
 | `JitError` | Compilation errors |
 | `YieldPointMeta` | Metadata for a yield point: resume IP and the spill counts |
-| `CallSiteMeta` | Metadata for a call site, the same shape, for a caller parked behind a suspended callee |
+| `CallSiteMeta` | Metadata for a park site, the same shape, for a frame parked at a call or an instruction that raised |
+| `ChargeSiteMeta` | Metadata for a fuel charge site, the same shape, for a frame parked where its fuel ran out |
 | `YIELD_SENTINEL` | Sentinel value indicating JIT function yielded (side-exited) |
 | `JitWorker` | Background compilation thread; allocates no Elle values, so it carries no heap |
 | `JitTask` | Compilation request (a copy of the frozen LIR + cache key) |
@@ -100,7 +102,7 @@ variables and jumps to the loop header instead of calling
 **Return values:**
 - Normal return: tagged-union `Value`
 - Tail call: `TAIL_CALL_SENTINEL` (0xDEAD_BEEF_DEAD_BEEFu64)
-- Yield: `YIELD_SENTINEL` (0xDEAD_CAFE_DEAD_CAFEu64) — `fiber.signal` and `fiber.suspended` are set by the yield helper
+- Yield or pause: `YIELD_SENTINEL` (0xDEAD_CAFE_DEAD_CAFEu64) — `fiber.signal` and `fiber.suspended` are set by the side-exit helper
 
 ## Supported Instructions
 
@@ -123,11 +125,13 @@ Unsupported (returns JitError::UnsupportedInstruction):
 - `MakeClosure` — the translator has no lowering for it: a closure's code
   object is a payload in a code region, and the worker has no heap to build one
   in ([jit.md](../../docs/impl/jit.md))
+- `Eval` — runs the compiler at run time
 - Variadic functions with `Struct`/`StrictStruct` varargs — need fiber for keyword error reporting
 
 Supported in yielding functions (via side-exit):
 - `LoadResumeValue` — emitted as dead code (unreachable in JIT, resume goes through interpreter)
 - `Emit` — emitted as side-exit, for an error as for a yield: spill registers, call `elle_jit_yield`, return `YIELD_SENTINEL`
+
 ## Runtime Helpers
 
 All operations go through `extern "C"` runtime helpers for safety.
@@ -156,7 +160,7 @@ houses:
 ### calls.rs and calls/callops (function call dispatch)
 
 - **Sentinels**: `TAIL_CALL_SENTINEL`, `YIELD_SENTINEL`
-- **Metadata types**: `YieldPointMeta`, `CallSiteMeta`
+- **Metadata types**: `YieldPointMeta`, `CallSiteMeta`, `ChargeSiteMeta`
 - **Signal check**: `elle_jit_has_signal`
 - **Function calls**: `elle_jit_call`, `elle_jit_tail_call`, `elle_jit_call_array`, `elle_jit_tail_call_array`
 - **Misc call helpers**: `elle_jit_pop_param_frame`
@@ -200,41 +204,11 @@ Key implementation details:
 
 ## Inline Integer Fast Paths
 
-For each arithmetic (`BinOp`) and comparison (`Compare`) operation, the JIT
-emits a diamond-shaped CFG that checks if both operands are integers and
-performs the operation inline, falling back to the extern runtime helper for
-non-integer operands:
-
-```
-current_block:
-    tag check: both operands have TAG_INT?
-    brif -> fast_block / slow_block
-
-fast_block:
-    extract payloads, native op, re-tag result
-    jump -> merge_block(fast_result)
-
-slow_block:
-    call extern helper (e.g., elle_jit_add)
-    jump -> merge_block(slow_result)
-
-merge_block(phi):
-    result = phi
-```
-
-Special cases:
-- **Div/Rem**: An extra `int_check_block` checks for zero divisor after the
-  tag check. If divisor is zero, falls to `slow_block` (two predecessors).
-- **Eq/Ne**: Use tag+payload equality (both have the same
-  TAG_INT tag, so direct comparison is correct for integers).
-- **Ordered comparisons** (Lt/Le/Gt/Ge) and **shifts** (Shl/Shr): Use the
-  full i64 payload directly for the native operation.
-- **Not** (unary): Fully inlined with no slow path. The truthiness check
-  (compare tag against the falsy tags) works for all types — only nil and
-  false have falsy tags. Returns `TAG_TRUE` or `TAG_FALSE` directly.
-- **Neg/BitNot** (unary): Same diamond pattern as binary ops but with a
-  single-operand tag check (`icmp eq` against `TAG_INT`). Neg negates the
-  i64 payload, re-tags. BitNot inverts the payload bits, re-tags.
+Each arithmetic, comparison and unary operation compiles to the tag-check
+diamond in [fastpath.rs](fastpath.rs): the native integer instruction when the
+operands are integers, the runtime helper otherwise.
+[jit.md](../../docs/impl/jit.md) owns the diamond's shape, its special cases,
+and the operand proof that removes it.
 
 ## Fiber Integration and Yield Side-Exit
 
@@ -242,13 +216,12 @@ The signal system and JIT side-exit mechanism enable fibers and JIT to coexist:
 
 - **Fiber primitives that cannot suspend**: `fiber/new`, `fiber/status`,
   `fiber/value`, `fiber/bits` and `fiber/mask` have `Signal::errors()`. They
-  return `SIG_OK` or `SIG_ERROR`, and a call to one carries no yield check.
+  return `SIG_OK` or `SIG_ERROR`.
 
 - **Suspending fiber primitives**: `fiber/resume` and `emit` carry `SIG_YIELD`,
   so `may_suspend()` is true and every closure calling them inherits it. Such a
-  closure compiles like any other; what the signal decides is that the call
-  site carries a yield check, and that the function's yield points reach the
-  interpreter through the side-exit below.
+  closure compiles like any other, and its yield points reach the interpreter
+  through the side-exit below.
 
 - **Yield side-exit**: When a JIT-compiled function reaches an `Emit`
   terminator, it spills its locals and operands and calls `elle_jit_yield` (a
@@ -271,6 +244,13 @@ The signal system and JIT side-exit mechanism enable fibers and JIT to coexist:
   `SuspendedFrame` and append it to the suspended frame chain. A tail call
   whose callee yields or raises does the same at the tail call's call site. A
   halt builds no frame.
+
+- **Fuel pause**: compiled code charges fuel inline at each charge site. In a
+  function that may signal, a charge that finds the budget spent spills the
+  frame and calls `elle_jit_fuel_pause`, which parks the frame at the charging
+  instruction's bytecode offset, takes no resume value, and returns
+  `YIELD_SENTINEL`. A silent function's charge never pauses
+  ([jit.md](../../docs/impl/jit.md)).
 
 - **Primitive signals**: `jit_handle_primitive_signal` classifies a
   primitive's signal as the interpreter does. A suspending signal parks the
@@ -319,8 +299,8 @@ error included, and returns on a halt. No errors are silently swallowed.
    `Struct`/`StrictStruct` variadic and a function containing `MakeClosure`.
 
 2. **Yield metadata is populated during emission.** `Emitter::emit()` returns
-   `(Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>)`.
-   `PayloadParts::lambda` writes both into the site tables of the code
+   a `ClosureCompiled`: the bytecode and the metadata emission recorded.
+   `PayloadParts::lambda` writes the metadata into the site tables of the code
    payload's LIR body. The JIT reads them as `SiteRef`s to generate side-exit
    code.
 
@@ -360,10 +340,10 @@ error included, and returns on a halt. No errors are silently swallowed.
     dispatch pass `*const Value` pointers directly. If Value's representation
     changes (see [value/repr/AGENTS.md](../value/repr/AGENTS.md)), these casts break.
 
-12. **Yield helpers set fiber.signal and fiber.suspended.** `elle_jit_yield`
-     and `elle_jit_yield_through_call` are responsible for building the
-     `SuspendedFrame` and setting `fiber.signal` and `fiber.suspended`. The
-     JIT caller must not modify these fields.
+12. **Side-exit helpers set fiber.signal and fiber.suspended.** `elle_jit_yield`,
+     `elle_jit_yield_through_call` and `elle_jit_fuel_pause` are responsible
+     for building the `SuspendedFrame` and setting `fiber.signal` and
+     `fiber.suspended`. The JIT caller must not modify these fields.
 
 13. **Variadic functions with `VarargKind::List` are JIT-supported.** The JIT
      entry block calls `elle_jit_collect_rest_list`, which builds the rest-arg
@@ -390,23 +370,22 @@ spaces:
 This separation means LoadLocal/StoreLocal never touch the env pointer and
 LoadCapture/StoreCapture never use stack-relative slots.
 
-## LBox Optimization for Locally-Defined Variables
+## Capture Cells for Locally-Defined Variables
 
-The JIT uses the LIR's `capture_locals_mask` to avoid unnecessary `CaptureCell`
-heap allocations. In the VM interpreter, every locally-defined variable inside
-a lambda gets a `CaptureCell(NIL)` at function entry (because `StoreUpvalue`
-requires lbox indirection to write through `Rc<Vec<Value>>`). In JIT code,
-locally-defined variables are Cranelift variables (CPU registers/stack), so
-lbox wrapping is only needed when `binding.needs_capture()` is true (captured by
-nested closure or mutated via `set!`).
+A locally-defined variable gets a `CaptureCell` only where the LIR's
+`capture_locals_mask` names it, which is where a nested closure captures it
+(`Binding::needs_capture`). Both tiers mint the same cells: the interpreter's
+`populate_env` and the translator's `init_locally_defined_vars`, each cell in a
+region of its own. Every other local is a Cranelift variable.
 
-The optimization applies to three code paths in the translator:
+The mask decides three paths in the translator:
 
-1. **`init_locally_defined_vars`**: Only calls `elle_jit_make_capture` when the
-   bit is set in `capture_locals_mask`; others get NIL directly.
-2. **`LoadCapture` for locals**: Skips `load_capture_cell` unwrapping when bit not set.
-3. **`StoreCapture` for locals**: Skips `store_capture_cell` when bit not set, uses
-   `def_var` directly.
+1. **`init_locally_defined_vars`**: calls `make_capture_owned` when the bit is
+   set; the other locals start as nil.
+2. **`LoadCapture` for locals**: unwraps through `load_capture_cell` only when
+   the bit is set.
+3. **`StoreCapture` for locals**: writes through `store_capture_cell` only when
+   the bit is set, and otherwise defines the variable directly.
 
 ## Yield Side-Exit Implementation Details
 
@@ -425,7 +404,7 @@ run of them belongs in the rebuilt frame.
 ### Yield Point Recording
 
 The emitter records each yield point's resume IP and live operand stack
-([lir/AGENTS.md](../lir/AGENTS.md) § "Yield and call-site metadata"), and the
+([lir/AGENTS.md](../lir/AGENTS.md)), and the
 JIT derives a `YieldPointMeta` from each as invariant 3 says.
 
 ### Call Site Recording
@@ -448,14 +427,26 @@ the releases after it ([park.md](../../docs/impl/region/park.md)). The
 translator counts the sites in the emitter's order, and a count mismatch
 rejects the compile.
 
+### Charge Site Recording
+
+In a function where `signal.may_suspend()`, each instruction that charges
+fuel records a `ChargeSiteInfo`: the offset where the instruction starts, and
+the operand stack there, with a call's arguments and callee still on it
+([lir/AGENTS.md](../lir/AGENTS.md)). The translator counts the sites in the
+same order, emits the inline charge at each, and spills that stack when the
+charge finds the budget spent. `compile` turns the list into
+`JitCode.charge_sites`, which `elle_jit_fuel_pause` reads; a count mismatch
+rejects the compile. A silent function records no charge site, and its
+charges never pause.
+
 ### Environment Reconstruction on Side-Exit
 
-When building a `SuspendedFrame` for interpreter resumption, the JIT yield
-helpers (`elle_jit_yield`, `elle_jit_yield_through_call`) reconstruct the
-interpreter frame from the closure's captures and the spill buffer. The
-spill buffer layout is `[params(num_params), locals(num_locals),
-operands(num_spilled)]`, with all three counts from the yield-point /
-call-site metadata:
+When building a `SuspendedFrame` for interpreter resumption, the side-exit
+helpers (`elle_jit_yield`, `elle_jit_yield_through_call`,
+`elle_jit_fuel_pause`) reconstruct the interpreter frame from the closure's
+captures and the spill buffer. The spill buffer layout is
+`[params(num_params), locals(num_locals), operands(num_spilled)]`, with all
+three counts from the yield-point, call-site or charge-site metadata:
 
 ```
 env   = [closure.env[0], ..., closure.env[n-1], param_0, ..., param_{p-1}]
@@ -472,12 +463,7 @@ local (`populate_env` pads with nil / CaptureCell). The asymmetry is
 benign because celled locals require `MakeClosure`, which the JIT
 rejects.
 
-## Roadmap
-
-- JIT-native signal handling (setjmp/longjmp or Cranelift exception tables)
-- Benchmarks and profiling
-
-### Reclamation
+## Reclamation
 
 Regions reclaim: a region frees at `FreeRegion(ρ)` when its RC reaches 0.
 The JIT emits the same `IncrefValueRegion` / `DecrefValueRegion` /

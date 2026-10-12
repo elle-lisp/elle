@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! Fiber lifecycle primitives.
 //!
 //! docs/impl/region/park.md
@@ -319,7 +319,7 @@ primitive! {
     "fiber/set-fuel" => prim_fiber_set_fuel {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
-        doc: "Set the instruction budget on a fiber. n is a non-negative integer.",
+        doc: "Set the instruction budget on a fiber. n is any non-negative integer.",
         params: &["fiber", "n"],
         category: "fiber",
         example: "(fiber/set-fuel f 10000)",
@@ -328,7 +328,7 @@ primitive! {
     "fiber/fuel" => prim_fiber_fuel {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
-        doc: "Read remaining fuel. Returns integer or nil if unlimited.",
+        doc: "Read the remaining budget. Returns an integer, or nil if the fiber has no budget.",
         params: &["fiber"],
         category: "fiber",
         example: "(fiber/fuel f)",

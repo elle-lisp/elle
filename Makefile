@@ -4,7 +4,7 @@
        elle-nojit elle-pool elle-mlir elle-noffi elle-wasm check-wasm \
        doctest doctest-list myplugin plugins plugins-all \
        plugins-verify smoke-plugins mcp embedding semver-check \
-       fmt fmt-check audit agents agents-check \
+       fmt fmt-check audit agents agents-check prose \
        bytecode-golden bytecode-golden-check
 
 .DEFAULT_GOAL := all
@@ -147,6 +147,9 @@ agents:  ## Write each directory's AGENTS.md from its documents' call-outs
 agents-check:  ## Fail when a committed AGENTS.md is stale
 	@./scripts/agents --check
 
+prose:  ## Hold every stamped file to the checkable parts of DOCUMENTATION.md
+	cargo test --test prose
+
 # ── Format ─────────────────────────────────────────────────────────
 
 fmt: elle  ## Format all Elle source in-place
@@ -168,7 +171,7 @@ semver-check: elle  ## Verify every versioned library surface against its commit
 
 # Approximate runtimes (for guidance — vary by machine):
 #   make smoke    ~30min release: qa, both suites, doctests, embedding, the surface gate
-#   make qa       ~2min: the PR gate's QA job (rustfmt, indexes, clippy, crosscheck, rustdoc)
+#   make qa       ~2min: the PR gate's QA job (prose, rustfmt, indexes, clippy, crosscheck, rustdoc)
 #   make test     smoke + the Rust unit, integration and rig tests
 #   cargo test    ~60min full suite (unit + integration + property)
 #
@@ -583,7 +586,10 @@ smoke: qa  ## qa, then both suites, the doctests, the embedding demo and the sur
 #
 # `--all-features` builds the MLIR tier, which finds LLVM 22 through
 # `MLIR_SYS_220_PREFIX` in the environment (docs/impl/mlir.md).
-qa: audit agents-check crosscheck  ## The PR gate's QA job, locally (~2min, no smoke): rustfmt, indexes, clippy, rustdoc, doctests
+#
+# `prose` comes first: it fails most often and reports in seconds, and the QA
+# job runs it before anything else (docs/analysis/ci.md).
+qa: prose audit agents-check crosscheck  ## The PR gate's QA job, locally (~2min, no smoke): prose, rustfmt, indexes, clippy, rustdoc, doctests
 	cargo fmt --check
 	cargo clippy --workspace --all-targets --all-features -- -D warnings
 	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --document-private-items

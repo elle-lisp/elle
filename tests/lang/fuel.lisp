@@ -1,17 +1,17 @@
 (elle/epoch 15)
-# audited: 2026-10-11
+# audited: 2026-10-12
 # A fiber's fuel budget pauses it at backward jumps and calls, and a refuel resumes it where it stopped.
 # docs/runtime.md
 #
 ## Covers: backward-jump exhaustion, call exhaustion,
 ## refuel-and-resume, unlimited fibers, zero fuel, signal masks, remaining-fuel
 ## reads, clear-fuel, nested-fiber independence, a silent function the
-## meter never pauses, and a silent callee of a non-tail call, alone and
-## under the process scheduler.
+## meter never pauses, a silent callee of a non-tail call, alone and under the
+## process scheduler, and the pause that comes after a silent function.
 ##
 ## Every metered loop below uses generic arithmetic, which may raise, so none
-## of them is silent. The interpreter charges no fuel while a silent function
-## runs (scenario 13).
+## of them is silent. A silent function spends fuel and never pauses
+## (scenarios 13 to 15).
 
 # ============================================================================
 # Scenario 1: Backward jump exhausts fuel
@@ -229,10 +229,10 @@
 # ============================================================================
 #
 # A silent function is a proof that nothing stops the fiber, and the native
-# tiers run one with no way to park it, so the interpreter charges no fuel
-# while one runs (docs/signals/inference.md). Counter-factual: the interpreter
-# charged the silent loop's backward jumps, and the meter paused the fiber
-# inside it.
+# tiers run one with no way to park it, so its charges spend fuel and never
+# pause (docs/signals/inference.md). Counter-factual: a charge that paused
+# inside the silent loop, or a loop that charged nothing and left the budget
+# where the body's call put it.
 
 (defn silent-spin [n]
   (numeric!)
@@ -247,7 +247,8 @@
   (fiber/set-fuel f 5)
   (fiber/resume f)
   (assert (= (fiber/status f) :dead) "silent: the meter never pauses the loop")
-  (assert (= (fiber/value f) 1000) "silent: and the loop runs to its end"))
+  (assert (= (fiber/value f) 1000) "silent: and the loop runs to its end")
+  (assert (= (fiber/fuel f) 0) "silent: and the loop spent the budget"))
 
 # The same loop with generic arithmetic may raise, so it is metered.
 (defn noisy-spin [n]
@@ -267,11 +268,10 @@
 #
 # A non-tail call leaves the caller's frame waiting on the callee's result.
 # The callee below is silent, and recurses by tail calls, which are charge
-# sites in a function that is not silent. The meter charges nothing inside
-# it, so the callee returns and the fiber finishes (#1281). The process
-# scheduler meters every process, so the same call finishes there too.
-# Counter-factual: the interpreter charged the callee's tail calls, so the
-# pause left a silent function, and the process aborted.
+# sites. Its charges spend fuel and never pause it, so the callee returns and
+# the fiber finishes (#1281). The process scheduler meters every process, so
+# the same call finishes there too. Counter-factual: a charge in the callee
+# that paused, so the pause left a silent function, and the process aborted.
 
 (defn self-spin [i]
   (if (%int? i)
@@ -288,10 +288,33 @@
   (assert (= (fiber/status f) :dead)
           "non-tail: the meter never pauses the silent callee")
   (assert (= (fiber/value f) [100000])
-          "non-tail: and the caller gets the callee's result"))
+          "non-tail: and the caller gets the callee's result")
+  (assert (= (fiber/fuel f) 0) "non-tail: and the callee spent the budget"))
 
 (def process ((import "std/process")))
 (def @spun nil)
 (process:start (fn [] (assign spun [(self-spin 0)])) :fuel 500)
 (assert (= spun [100000])
         "non-tail: a metered process finishes the silent callee")
+
+# ============================================================================
+# Scenario 15: The pause comes at the first charge site after a silent call
+# ============================================================================
+#
+# A call through a mutable binding is a charge site nothing can remove, and a
+# body that makes one is not silent. The silent loop spends the budget the
+# body's first call left, so the call after it finds the budget spent and
+# pauses the fiber there (docs/signals/inference.md). Counter-factual: a silent
+# loop that charged nothing left that budget standing, and the fiber finished
+# without a pause.
+
+(def @after identity)
+(let [f (fiber/new (fn [] (after (silent-spin 1000))) |:fuel :error|)]
+  (fiber/set-fuel f 5)
+  (fiber/resume f)
+  (assert (= (fiber/status f) :paused) "after: the call after the loop pauses")
+  (assert (= (fiber/fuel f) 0) "after: the loop spent the budget")
+  (fiber/set-fuel f 5)
+  (fiber/resume f)
+  (assert (= (fiber/status f) :dead) "after: the refueled fiber finishes")
+  (assert (= (fiber/value f) 1000) "after: with the loop's value"))
