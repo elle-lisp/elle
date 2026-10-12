@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! The dumper: a compacting copy of a sealed data graph into a scratch
 //! region, written out as an image file.
 //!
@@ -214,6 +214,9 @@ fn dump_into(
         prims_len: prim_table.len() as u64,
         scope_watermark: emitted.scope_watermark as u64,
         param_watermark: emitted.param_watermark as u64,
+        // The process's counter, not the body's highest slot: a source boot
+        // compiles user code from here (docs/impl/image/format.md).
+        static_region_watermark: crate::lir::lower::static_region_counter() as u64,
         fingerprint: format::fingerprint(),
     };
 
