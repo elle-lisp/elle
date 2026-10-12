@@ -1,5 +1,5 @@
 (elle/epoch 14)
-# audited: 2026-10-11
+# audited: 2026-10-12
 ## Souls, the in-memory nodes, the merge that answers a diff, and the flattening of a nested struct.
 ## lib/gun.md
 ## lib/gun/overview.md
@@ -7,7 +7,7 @@
 ## Loaded via:
 ##   (def graph ((import "std/gun/graph") :state state :value value :ham ham))
 ##
-## Exports: {:root-soul :child-soul :key-of :make-graph :node :field :merge
+## Exports: {:root-soul :child-soul :key-of :make-graph :node :field :merge :due
 ##           :node-value? :flatten}
 ##
 ## A node's fields are a struct of key to [state value]. A graph maps each
@@ -87,6 +87,15 @@
             (put n key f))))
       (freeze accepted)))
 
+  (defn due [fields now]
+    "Split fields into [due later]: later holds each field whose state is
+     after now, and due holds the rest. A merge of due meets no :future."
+    (let [now-fields @{}
+          later-fields @{}]
+      (each [key f] in fields
+        (put (if (state:before? now (get f 0)) later-fields now-fields) key f))
+      [(freeze now-fields) (freeze later-fields)]))
+
   ## ── Flattening ───────────────────────────────────────────────────────
 
   (defn node-value? [v]
@@ -131,5 +140,6 @@
    :node node
    :field field
    :merge merge-node
+   :due due
    :node-value? node-value?
    :flatten flatten})

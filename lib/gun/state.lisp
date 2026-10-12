@@ -1,5 +1,5 @@
 (elle/epoch 14)
-# audited: 2026-10-11
+# audited: 2026-10-12
 ## The hybrid logical clock that stamps each write, and the only comparison of two states.
 ## lib/gun.md
 ## lib/gun/overview.md
@@ -59,9 +59,13 @@
      :tick answers a state after every state it answered before and after
      every state :observe saw. :now answers the latest state a write may
      carry: the end of the current millisecond, or the latest state observed
-     when that is later."
+     when that is later. :due-in answers the seconds until a state is no
+     longer after :now, by the wall clock :now-ms reads, and 0 when it is due."
     (default now-ms wall-ms)
     (def @last nil)
+    (defn now []
+      (let [end (- (pack (+ (now-ms) 1) 0) 1)]
+        (if (before? end last) last end)))
     {:tick (fn []
              (let [wall (pack (now-ms) 0)
                    next (if (before? last wall) wall (+ last 1))]
@@ -70,9 +74,11 @@
      :observe (fn [s]
                 (when (before? last s) (assign last s))
                 nil)
-     :now (fn []
-            (let [end (- (pack (+ (now-ms) 1) 0) 1)]
-              (if (before? end last) last end)))})
+     :now now
+     :due-in (fn [s]
+               (if (before? (now) s)
+                 (/ (- (first (unpack s)) (now-ms)) 1000.0)
+                 0))})
 
   {:make-clock make-clock
    :pack pack
