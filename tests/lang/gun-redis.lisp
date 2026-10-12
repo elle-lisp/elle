@@ -84,10 +84,12 @@
 
 # ── Interleaved writers ─────────────────────────────────────────────────────
 
-# Two fibers write one field through one database. Each write yields on its
-# Redis round trips, so the fibers interleave. A store that took a field's
-# writes out of state order would keep a value older than the one in memory,
-# and a fresh database would read the older one.
+# Two fibers write one field through one database, and each write yields on
+# its Redis round trips. Afterwards the store must hold what memory holds.
+# This reads the end state only, and a later write repairs an earlier one
+# that landed out of order, so it passes with the lock removed. The ordering
+# itself is pinned in tests/lang/gun.lisp, with a store whose first write
+# sleeps.
 (defn interleaved []
   (let [db (open-db)
         field (gun:get (gun:get db "race") "v")
