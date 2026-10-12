@@ -38,6 +38,8 @@ This table lists the modules with a guide here, and their neighbours.
 | [redis.lisp](redis.lisp) | Redis client (RESP2) over TCP | [redis.md](redis.md) |
 | [redis/](redis/AGENTS.md) | Redis submodules: resp, connection, keyspace, collections, zset, server | [redis/overview.md](redis/overview.md) |
 | [framing.lisp](framing.lisp) | Lines, delimited records and exact counts over any byte source | [framing.md](framing.md) |
+| [gun.lisp](gun.lisp) | Graph database in the shape of GUN: HAM merge, memory and Redis stores | [gun.md](gun.md) |
+| [gun/](gun/AGENTS.md) | gun submodules: state, value, ham, graph, store | [gun/overview.md](gun/overview.md) |
 | [dns.lisp](dns.lisp) | DNS client (RFC 1035) | |
 | [dns/wire.lisp](dns/wire.lisp) | The DNS wire codec: names, queries, responses | |
 | [aws.lisp](aws.lisp) | AWS client: SigV4 signing, HTTPS, service dispatch | [aws/](aws/AGENTS.md) |
