@@ -243,14 +243,13 @@ The two boot modes must be indistinguishable to running code, tiers included
 closure carries its LIR in its payload, so a hot stdlib function promotes to
 the JIT under either boot ([sealing.md](sealing.md)). The compile half holds
 too: user code compiles to the same bytecode under either boot, and
-`make bytecode-parity` proves it over the corpus (§ The gate).
+`make bytecode-parity` proves it over the corpus (§ The gate). A reference
+count on a hydrated stdlib value does not walk the probe ladder: the store's
+interval table resolves the pointer with a range check
+([image.md](../image.md)).
 
-Two things keep the default off ([plan.md](plan.md)):
-
-- Pointer resolution has no interval table yet. Every reference count on a
-  hydrated stdlib value walks the probe ladder and scans the page list of a
-  region the size of stdlib ([image.md](../image.md)).
-- The warm cache keys on the source digest alone, so a new build hydrates an
-  older build's image ([issue 1361](https://github.com/elle-lisp/elle/issues/1361)).
+One thing keeps the default off ([plan.md](plan.md)). The warm cache keys on
+the source digest alone, so a new build hydrates an older build's image
+([issue 1361](https://github.com/elle-lisp/elle/issues/1361)).
 
 The flag is what makes the mechanism usable and testable meanwhile.
