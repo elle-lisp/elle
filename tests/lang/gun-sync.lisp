@@ -73,8 +73,11 @@
                      (fn [v] (push seen [v (wall-ms)])))
         t0 (wall-ms)]
     (gun:put (gun:get (gun:get a "future") "v") "ahead" :ack 5)
-    (eventually "the future write lands on B"
-                (fn [] (= (gun:once (gun:get (gun:get b "future") "v")) "ahead")))
+    # The trap: the merge lands before the subscription is called, and the
+    # forward between them yields. Waiting on once instead of on seen reads
+    # the value in that gap, and stops the subscription before it is called.
+    (eventually "B's subscription sees the future write"
+                (fn [] (= (length seen) 2)))
     (stop)
     (let [[v at] (get seen 1)]
       (assert (= v "ahead") "B's subscription saw the write")
