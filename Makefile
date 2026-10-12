@@ -531,7 +531,7 @@ myplugin:  ## Build the plugin the literate documents load
 # `plugin/X` resolves, and the assertion after the build is what reports one
 # that did not build. tests/integration/plugins.rs pins the list against the
 # suite's imports.
-SUITE_PLUGINS   := hash random
+SUITE_PLUGINS   := hash random crypto
 SUITE_PLUGIN_SO  = $(foreach p,$(SUITE_PLUGINS),$(CARGO_OUT)/libelle_$(p).$(if $(filter Darwin,$(HOST_OS)),dylib,so))
 
 suite-plugins:  ## Build the plugins the language suite loads (needs the plugins submodule)
