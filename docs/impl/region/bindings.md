@@ -170,8 +170,8 @@ hold the region"; a synthetic ANF producer temp or a write-only statement
 wrapper is not an alias) is asked of:
 
 - **the module-scope cell's every region** — that cell ADOPTS the producer's
-  reference for the init and every stored value alike, so a second name would
-  read a value the next overwrite frees. Its regions must also be **not
+  reference for the init and every stored fresh allocation, so a second name
+  would read a value the next overwrite frees. Its regions must also be **not
   returned**: a return transfers the same reference to the caller, whose
   value-based release consumes it — two static owners of one reference is a
   double-free.
