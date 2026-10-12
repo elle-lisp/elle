@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-10-12
 // The boot configuration end to end: an image dumped from a booted instance,
 // and a fresh instance that answers out of it.
 // docs/impl/image/boot.md
@@ -228,6 +228,39 @@ fn two_dumps_of_one_boot_state_write_one_file() {
     assert_eq!(ba.len(), bb.len(), "two boot dumps differ in length");
     let diff = (0..ba.len()).filter(|&i| ba[i] != bb[i]).count();
     assert_eq!(diff, 0, "two boot dumps differ at {diff} offsets");
+}
+
+// § Test plan, "Compile parity": a boot image's static-region watermark is
+// the mark its boot left, so a compile between two boot dumps changes neither
+// file. The program below defines nothing, so it adds no entry to the compile
+// registries and no macro, and the boot state the two dumps read is one state.
+//
+// The counter-factual is the live counter. The compile mints slots for its
+// closure and its array, so a dump that read the counter as it ran would write
+// a second file differing at the watermark alone.
+#[test]
+fn a_compile_between_two_boot_dumps_changes_neither_file() {
+    let dir = crate::common::ScratchDir::new("image-boot-mark");
+    let a = dir.join("a.image");
+    let b = dir.join("b.image");
+
+    let mut rt = Runtime::with_stdlib_cache(StdlibCache::Off);
+    rt.dump_boot_image(&a).expect("dump a");
+    let answer = eval(
+        &mut rt,
+        "(let [g (fn [x] (+ x 1))] (length (map g [1 2 3])))",
+    );
+    assert_eq!(
+        answer.as_int(),
+        Some(3),
+        "the compile between the dumps failed"
+    );
+    rt.dump_boot_image(&b).expect("dump b");
+
+    assert!(
+        std::fs::read(&a).expect("read a") == std::fs::read(&b).expect("read b"),
+        "a compile between two boot dumps changed the file"
+    );
 }
 
 // The signal-bit refusal is in `tests/image_boot_signal.rs`, a binary of its

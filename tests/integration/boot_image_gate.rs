@@ -1,6 +1,6 @@
 // audited: 2026-10-12
-// The boot-image gate: the flag `elle test` honours, the target that runs the
-// language suite from an image, and the bytecode parity it checks first.
+// The boot-image gate: the runner's flag, the target that runs the language
+// suite from an image, and the bytecode parity it checks first.
 //
 // docs/impl/image/boot.md
 // docs/analysis/ci.md
