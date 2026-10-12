@@ -1,4 +1,4 @@
-// audited: 2026-09-22
+// audited: 2026-10-11
 //! A chain of forwarding loop parameters hands one reference along, so its links are admitted or declined whole.
 //!
 //! docs/impl/region/bindings.md
@@ -47,12 +47,12 @@ fn reassign_gate_keeps_loop_carried_cell_forwarded_from_a_cell() {
         .get(&down)
         .expect("the downstream link must take the container model");
     assert!(
-        up_cell.forwards_content,
+        !up_cell.drops_content(),
         "the upstream link hands its content drop to the link it forwards into \
          — emitting one here would release the forwarded reference twice"
     );
     assert!(
-        !down_cell.forwards_content,
+        down_cell.drops_content(),
         "the last link of the chain keeps the content drop: nothing forwards on \
          from it, so its final content has no other release"
     );
@@ -164,11 +164,11 @@ fn reassign_gate_counts_a_forwarding_chain_whose_last_link_is_returned() {
         .get(&links[1])
         .expect("the returned last link takes the container model");
     assert!(
-        up.forwards_content,
+        !up.drops_content(),
         "the upstream link hands its content drop to the link it forwards into"
     );
     assert!(
-        !down.forwards_content,
+        down.drops_content(),
         "the returned last link keeps the content drop — the release of the \
          chain's one reference, which the `Return` mint has already replaced for \
          the caller"

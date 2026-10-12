@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-11
 //! A returned fn-local cell takes the same model an unreturned one takes, because the
 //! Return's mint is a reference of its own.
 //!
@@ -128,7 +128,7 @@ fn reassign_gate_counts_a_returned_loop_accumulator() {
     let (hir, info) = returned_loop_accumulator();
     let (acc, cell) = returned_accumulator_cell(&hir, &info);
     assert!(
-        !cell.forwards_content,
+        cell.drops_content(),
         "nothing forwards on from the returned link, so it keeps the content \
          drop — the release of the cell's own reference, which the `Return` mint \
          has already replaced for the caller"

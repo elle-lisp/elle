@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-11
 //! Whether a static slot can name a value's region, or the emission has to read the region off the value.
 //!
 //! docs/impl/region/mechanism.md
@@ -53,8 +53,8 @@ impl<'a> Lowerer<'a> {
     /// a captured upvalue), a reassign-suppressed region
     /// (`suppressed_decref_regions`), a reassigned 1-slot-container value region
     /// (`mutated_binding_value_regions`, which also catches a returned `Var`
-    /// aliasing a store target — docs/impl/escape.md), or a value a fn-local
-    /// 1-slot container holds (`cell_stored_regions`).
+    /// aliasing a store target — docs/impl/escape.md), or a value a
+    /// 1-slot container of either scope holds (`cell_stored_regions`).
     ///
     /// That last class is a runtime fact even though its allocation site names a
     /// static slot: the container re-mints its content at every store and each

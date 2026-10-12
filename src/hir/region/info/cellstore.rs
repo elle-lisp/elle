@@ -86,49 +86,62 @@ impl CellStores {
     }
 }
 
-/// A fn-local reassigned mutable that took the 1-slot-container gate. The cell
-/// holds exactly ONE counted reference to its current content, released through
-/// two channels: drop-on-overwrite at each store for the displaced prior, and
-/// the content drop at `demise` for the final value.
+/// A reassigned mutable that took the 1-slot-container gate with a COUNTED
+/// store. The cell holds exactly ONE counted reference to its current content,
+/// released through two channels: drop-on-overwrite at each store for the
+/// displaced prior, and the content drop at `demise` for the final value. A
+/// fn-local cell keeps that drop; a forwarding link hands its final content to
+/// the next link, and a module-scope cell leaves it to the file-letrec frame
+/// teardown. Every cell carries the store-site pin and the binding-chain
+/// hold-back, whichever way its final content goes.
 pub struct CellContainer {
     /// The stores into the cell, each with the regions of the value it took.
     pub stores: CellStores,
     /// The node whose exit is the cell's scope demise — the enclosing scope
     /// node, so a loop-carried cell drops once after the loop and a cell bound
-    /// inside a loop body drops once per iteration. Read only when the cell
-    /// keeps its content drop (`forwards_content` false).
+    /// inside a loop body drops once per iteration. The content drop lands here
+    /// only when [`Self::drops_content`] holds; the placement passes compute it
+    /// for every cell, and the uncounted-read and return extensions read it as
+    /// the point past which the cell no longer protects a borrow.
     pub demise: HirId,
-    /// The cell's final content is FORWARDED into the next cell of a
-    /// functionalized loop chain, which takes the one reference over. This cell
-    /// then emits no content drop, keeping only drop-on-overwrite and the
-    /// store-site pin.
-    pub forwards_content: bool,
+    /// Whether the cell emits a content drop for its final content at `demise`.
+    drops_content: bool,
 }
 
 impl CellContainer {
     /// Whether the cell emits a content drop for its final content. A
-    /// forwarding link hands that content to the next link instead.
+    /// forwarding link hands that content to the next link instead, and a
+    /// module-scope cell leaves it to the file-letrec frame teardown.
     pub fn drops_content(&self) -> bool {
-        !self.forwards_content
+        self.drops_content
     }
 
-    /// A cell that keeps both channels: drop-on-overwrite for each displaced
-    /// prior, and the content drop at `demise` for the final one.
+    /// A fn-local cell that keeps both channels: drop-on-overwrite for each
+    /// displaced prior, and the content drop at `demise` for the final one.
     pub fn new(stores: CellStores, demise: HirId) -> Self {
         Self {
             stores,
             demise,
-            forwards_content: false,
+            drops_content: true,
         }
     }
 
     /// A cell whose final content is handed to the next link of a forwarding
     /// chain, so the content drop belongs to that link and not to this one.
-    /// `demise` still rides along because the placement passes compute it for
-    /// every container; nothing reads it here.
     pub fn forwarding(stores: CellStores, demise: HirId) -> Self {
         Self {
-            forwards_content: true,
+            drops_content: false,
+            ..Self::new(stores, demise)
+        }
+    }
+
+    /// A module-scope cell that counts a call result's store. Its final content
+    /// is the file-letrec frame teardown's, so it emits no content drop; the
+    /// container is recorded for the store-site pin and the binding-chain
+    /// hold-back alone.
+    pub fn module_scope(stores: CellStores, demise: HirId) -> Self {
+        Self {
+            drops_content: false,
             ..Self::new(stores, demise)
         }
     }

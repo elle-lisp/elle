@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-11
 //! `RegionInfo`: what region inference produces for a compilation unit — the
 //! per-allocation and per-scope assignments, and the lowerer's cuts.
 //!
@@ -222,10 +222,11 @@ pub struct RegionInfo {
     ///
     /// docs/impl/region/bindings.md
     pub drop_on_overwrite_sites: FxHashSet<HirId>,
-    /// The MODULE-SCOPE subset of `drop_on_overwrite_sites`, where the cell
-    /// adopts the producer's reference rather than taking a counted one. The
-    /// lowerer emits no incref-on-store at these sites. Fn-local sites are
-    /// absent: their cell needs a reference of its own.
+    /// The subset of `drop_on_overwrite_sites` where the cell adopts the
+    /// producer's reference rather than taking a counted one: a module-scope
+    /// cell's stores of a fresh allocation. The lowerer emits no incref-on-store
+    /// at these sites. A fn-local site, and a module-scope store of a call
+    /// result, are absent: those cells take a reference of their own.
     ///
     /// docs/impl/region/bindings.md
     pub donated_overwrite_sites: FxHashSet<HirId>,
@@ -242,15 +243,20 @@ pub struct RegionInfo {
     ///
     /// docs/impl/region/bindings.md
     pub reassigned_local_bindings: FxHashSet<Binding>,
-    /// The fn-local reassigned mutables that took the 1-slot-container gate.
-    /// The module-scope half is absent, its final content being freed by the
-    /// file-letrec teardown.
+    /// The reassigned mutables that took the 1-slot-container gate with a
+    /// COUNTED store: every admitted fn-local cell, and a module-scope cell
+    /// that stores a call result. The entry carries the store-site pin and the
+    /// binding-chain hold-back; whether it also carries a content drop is
+    /// `CellContainer::drops_content`. A module-scope cell that donates every
+    /// store is absent.
     ///
     /// docs/impl/region/bindings.md
     pub cell_containers: HashMap<Binding, CellContainer>,
-    /// Every region a fn-local 1-slot container stores. Such a value's region
-    /// is a RUNTIME fact even where its allocation site names a static slot, so
-    /// a later mint must read the region off the value.
+    /// Every region a 1-slot container in `cell_containers` stores. Such a
+    /// value's region is a RUNTIME fact even where its allocation site names a
+    /// static slot, so a later mint must read the region off the value; and
+    /// the lowerer's mutated-slot backstop exempts it, its route being the
+    /// producer's own slot.
     ///
     /// docs/impl/region/bindings.md
     pub cell_stored_regions: FxHashSet<Region>,

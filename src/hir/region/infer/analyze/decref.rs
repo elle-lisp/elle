@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-11
 //! `decref_point` population: the ordered passes that decide, for each region,
 //! the program point its release is emitted at.
 //!
@@ -119,8 +119,8 @@ pub(super) fn populate_decref_points(
         }
     }
 
-    // Where each fn-local 1-slot container's content drop lands
-    // (docs/impl/region/bindings.md).
+    // Where each 1-slot container's content drop lands, and the point every
+    // container stops protecting a borrow (docs/impl/region/bindings.md).
     place_content_drops(
         info,
         &CellPlacement {
@@ -209,7 +209,7 @@ pub(super) fn populate_decref_points(
         }
         if let Some(lu) = max_use {
             for &r in regions {
-                // A fn-local 1-slot container's stored values do NOT ride a CELL
+                // A 1-slot container's stored values do NOT ride a CELL
                 // binding's uses: such a binding names the slot, not any one
                 // value, so extending here would put one release at the cell's
                 // last use — which, in a loop that re-mints the content every
@@ -302,7 +302,7 @@ pub(super) fn populate_decref_points(
     // (`counted_read_aliases`, docs/impl/region/adopt.md). A moves-out REMOVE is excluded
     // from both: it extracts its element instead of borrowing it.
     //
-    // A value stored into a fn-local 1-slot container has a SECOND protector the
+    // A value stored into a 1-slot container has a SECOND protector the
     // extension does not need to duplicate: the producer's claim is discharged at
     // the store, and from there the cell's own counted reference is what keeps
     // the value — and any borrow out of it — alive. Where the cell drops that
@@ -326,7 +326,7 @@ pub(super) fn populate_decref_points(
         );
     }
 
-    // Pin each value stored into a fn-local 1-slot container to its STORE site.
+    // Pin each value stored into a 1-slot container to its STORE site.
     // The store is a consuming node in the same sense a `Return` is: it takes a
     // counted reference of its own, so the producer's claim is discharged there
     // and nowhere later. The pin has to be explicit rather than left to the
@@ -350,7 +350,7 @@ pub(super) fn populate_decref_points(
     // region is the callee's phantom scope (guard-suppressed) and this
     // is inert.
     //
-    // A value a fn-local 1-slot container holds is exempt on the same terms an
+    // A value a 1-slot container holds is exempt on the same terms an
     // uncounted read of one is, and against the same `cell_drop_point`: the
     // producer's claim is discharged at the store, and from there the CELL's
     // counted reference is what carries the value — across the `Return` too,

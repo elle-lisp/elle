@@ -1,4 +1,4 @@
-// audited: 2026-09-22
+// audited: 2026-10-11
 //! Where a cell's release lands: the env cell's box, and the node a 1-slot
 //! container's content drop must cover.
 //!
@@ -24,8 +24,11 @@ pub(super) struct CellPlacement<'a> {
     pub(super) binder_init_sites: &'a HashMap<Binding, Option<HirId>>,
 }
 
-/// Give every fn-local 1-slot container the point its content drop is emitted at
-/// (docs/impl/region/bindings.md § "Where the content drop lands").
+/// Give every 1-slot container the point its content drop is emitted at
+/// (docs/impl/region/bindings.md § "Where the content drop lands"). A cell that
+/// emits no content drop — a forwarding link, a module-scope cell — gets the
+/// same point, which the uncounted-read and return extensions read as where the
+/// cell stops protecting a borrow.
 ///
 /// The cell's own reference to its current content dies at its last access — the
 /// latest of its reads and of the node COVERING its writes — and the point is

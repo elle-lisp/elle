@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-11
 //! The non-scoped mutating binding forms: `define` (a local `def`) and `set` (`lower_assign`).
 //!
 //! docs/impl/region/bindings.md
@@ -197,35 +197,23 @@ impl<'a> Lowerer<'a> {
                 .current_hir_id
                 .is_some_and(|id| self.region_info.drop_on_overwrite_sites.contains(&id))
             {
-                // A reassigned, sole-held, top-level (file-letrec) mutable is a
-                // 1-slot mutable container (docs/impl/region/bindings.md). The cell
-                // owns its current content: increment the NEW value's region (the
-                // cell now holds a reference — the root pin), and decrement the
-                // displaced OLD value's region (the cell no longer holds it; its
-                // demise is HERE, at the overwrite, where the slot still points at
-                // it). The new value's own producer-temp decref still fires at its
-                // last use, dropping the alloc reference and leaving exactly the
-                // cell's reference — so each value's region reaches 0 precisely
-                // when the cell stops holding it: at the next overwrite, or, for
-                // the final (never-overwritten) value, at the file-letrec frame's
-                // teardown. No static last-use decref is placed against the cell —
-                // a cell has no single value-lifetime to name. The init-region
-                // decref (which would mis-target the slot's CURRENT value) is
-                // suppressed by `analyze_regions_with`; the init value is released
-                // by the first overwrite's old-decref below.
+                // A reassigned mutable that took the 1-slot-container gate
+                // (docs/impl/region/bindings.md). The cell owns its current
+                // content: the displaced OLD value's demise is HERE, at the
+                // overwrite, where the slot still points at it. No static
+                // last-use decref is placed against the cell — a cell has no
+                // single value-lifetime to name.
                 let old_reg = self.fresh_reg();
                 self.emit(InstrRef::LoadLocal { dst: old_reg, slot });
                 // Pin the new content as the cell's reference — UNLESS the cell
-                // already owns the producer's reference outright. A MODULE-SCOPE
-                // 1-slot container's value regions have their ordinary decref
-                // suppressed (`analyze_regions_with`), donating the producer's single
-                // reference to the cell; the drop-on-overwrite below is that
-                // reference's sole release, so an incref-on-store here would be
-                // unbalanced (born + store − overwrite = +1), holding every
-                // displaced prior to frame teardown (docs/impl/region/bindings.md).
-                // These sites are marked `donated_overwrite_sites`. A FN-LOCAL container instead
-                // KEEPS the assign-value decref (its scope-exit demise), so it must
-                // take its own counted reference here, balanced by drop-on-overwrite.
+                // owns the producer's reference outright. A DONATED store
+                // (`donated_overwrite_sites`: a module-scope cell taking a fresh
+                // allocation) has the value's ordinary decref suppressed, so the
+                // drop-on-overwrite below is that reference's sole release and an
+                // incref here would be unbalanced. A COUNTED store (every fn-local
+                // store, and a module-scope cell taking a call result) keeps the
+                // value's producer release, so the cell takes a reference of its
+                // own here, balanced by drop-on-overwrite.
                 let donated = self
                     .current_hir_id
                     .is_some_and(|id| self.region_info.donated_overwrite_sites.contains(&id));
