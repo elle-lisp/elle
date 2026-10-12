@@ -2,6 +2,7 @@
 # audited: 2026-10-12
 # std/gun's peer messages: each kind round-trips as JSON, a link stays a link, and a bad message is refused.
 # lib/gun/mesh.md
+# lib/gun/sea.md
 
 (def state ((import "std/gun/state")))
 (def value ((import "std/gun/value")))
@@ -36,6 +37,28 @@
 (assert (= (wire:encode (wire:nack "m1" :boom))
            "{\"ack\":\"m1\",\"err\":\"boom\"}")
         "a failed put acks err with the reason's name")
+
+# A field in a user space carries its signature as a third element, in hex.
+(let [sig-hex (string/repeat "ab" 64)
+      sig (value:decode (string "x:" sig-hex))
+      m (wire:put "m1" {"~s" {"k" [7 "x" sig]}})]
+  (assert (= (wire:encode m)
+             (string "{\"id\":\"m1\",\"put\":{\"~s\":{\"k\":[7,\"s:x\",\""
+                     sig-hex "\"]}}}"))
+          "a signed field travels as [state encoding signature]")
+  (assert (= (wire:decode (wire:encode m)) m) "a signed field round-trips")
+  (assert (bytes? (get (get (get (get (wire:decode (wire:encode m)) :graph) "~s")
+                            "k") 2)) "its signature arrives as bytes"))
+
+(each sig in [(string/repeat "AB" 64) (string/repeat "ab" 63) "" "zz"]
+  (fails-with :bad-message (fn []
+                             (wire:decode (string "{\"id\":\"m\",\"put\":{\"s\":{\"k\":[1,\"i:1\",\""
+                             sig "\"]}}}")))))
+(fails-with :bad-message (fn []
+                           (wire:decode "{\"id\":\"m\",\"put\":{\"s\":{\"k\":[1,\"i:1\",7]}}}")))
+(fails-with :bad-message (fn []
+                           (wire:decode (string "{\"id\":\"m\",\"put\":{\"s\":{\"k\":[1,\"i:1\",\""
+                                        (string/repeat "ab" 64) "\",1]}}}"))))
 
 (each text in ["not json" "[1,2]" "{\"what\":1}" "{\"put\":{}}"
                "{\"id\":\"m\",\"put\":{\"s\":{\"k\":[1,\"q:zz\"]}}}"

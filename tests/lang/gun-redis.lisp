@@ -1,24 +1,28 @@
 (elle/epoch 14)
 # audited: 2026-10-12
-# std/gun on the Redis store: the hash layout, persistence, interleaved writers, and two peers.
+# std/gun on the Redis store: the hash layout, signed fields, persistence, interleaved writers, and two peers.
 # lib/gun.md
 #
-# Requires a live Redis on 127.0.0.1:6379, and the hash and random plugins for
-# the peers. Every key this file writes starts with test:gun:<pid>:, and the
-# file deletes only those keys, so two runs and the other Redis tests can share
-# one server.
+# Requires a live Redis on 127.0.0.1:6379, the hash and random plugins for
+# the peers, and the crypto plugin for the signed fields. Every key this file
+# writes starts with test:gun:<pid>:, and the file deletes only those keys, so
+# two runs and the other Redis tests can share one server.
 
 (let [[h-ok? _] (protect (import "plugin/hash"))
-      [r-ok? _] (protect (import "plugin/random"))]
-  (unless (and h-ok? r-ok?)
+      [r-ok? _] (protect (import "plugin/random"))
+      [c-ok? _] (protect (import "plugin/crypto"))]
+  (unless (and h-ok? r-ok? c-ok?)
     (error (struct :error :gated
-                   :reason "plugin/hash or plugin/random not available"))))
+                   :reason "plugin/hash, plugin/random or plugin/crypto not available"))))
 
 (def redis ((import "std/redis")))
+(def crypto (import "plugin/crypto"))
 (def ws
   ((import "std/websocket") :hash (import "plugin/hash")
                             :random (import "plugin/random")))
-(def gun ((import "std/gun") :redis redis :websocket ws))
+(def gun
+  ((import "std/gun") :redis redis :websocket ws :crypto crypto
+                      :random (import "plugin/random")))
 (def state ((import "std/gun/state")))
 (def value ((import "std/gun/value")))
 (def stores ((import "std/gun/store") :state state :value value :redis redis))
@@ -85,6 +89,46 @@
     (assert (= (get (get (stored "users/alice") "name") 1) "n:")
             "a tombstone is stored")))
 
+# ── Signed fields ───────────────────────────────────────────────────────────
+
+# A field in a user space stores its signature in hex between the state and
+# the encoding. The encoding here holds spaces, so a parser that split the
+# text at its last space, or that took the hex for part of the encoding,
+# reads a different value.
+(defn signed-layout []
+  (let [seed (let [b (@bytes)]
+               (each _ in (range 32)
+                 (push b 3))
+               (freeze b))
+        pair (gun:pair seed)
+        root (string "~" pair:pub)
+        errs @[]
+        db (gun:open :store (gun:redis-store :prefix prefix)
+                     :on-error (fn [err] (push errs err)))]
+    (gun:put (gun:get (gun:user db pair) "motto") "a b: c")
+    (let [text (get (redis:hgetall (string prefix ":" root)) "motto")
+          parts (string/split text " ")
+          [st-text sig-hex] parts
+          st (state:parse st-text)
+          enc (slice text (+ (length st-text) 1 (length sig-hex) 1))]
+      (assert (= (length sig-hex) 128) "the second part is the signature in hex")
+      (assert (= enc "s:a b: c") "the encoding follows it, spaces and all")
+      (assert (crypto:ed25519-verify (value:decode (string "x:" pair:pub))
+                                     (json/serialize ["gun/sea/sign" root
+                                     "motto" st enc])
+                                     (value:decode (string "x:" sig-hex)))
+              "the stored signature verifies"))
+    (let [again (gun:open :store (gun:redis-store :prefix prefix)
+                          :on-error (fn [err] (push errs err)))]
+      (assert (= (gun:once (gun:get (gun:get again root) "motto")) "a b: c")
+              "a second database loads the signed field")
+      (assert (empty? errs) (string "no field failed admission: " errs)))
+    (let [s (stores:redis-store :prefix prefix)
+          sig (value:decode (string "x:" (string/repeat "cd" 64)))]
+      (s:write "~signed" {"k" [5 "x y" sig] "u" [5 "plain"]})
+      (assert (= (s:read "~signed") {"k" [5 "x y" sig] "u" [5 "plain"]})
+              "the store reads back a signed and an unsigned field"))))
+
 # ── Persistence ─────────────────────────────────────────────────────────────
 
 (defn persistence []
@@ -148,6 +192,7 @@
                 (clear-test-keys)
                 (store-round-trip)
                 (layout)
+                (signed-layout)
                 (persistence)
                 (interleaved)
                 (mesh))))
