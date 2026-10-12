@@ -297,3 +297,5 @@
 ["tests/impl/framing-view.lisp" :objects 324]
 ["tests/lang/framing-records.lisp" :objects 1121]
 ["tests/lang/redis-resp.lisp" :objects 143]
+["tests/lang/gun.lisp" :objects 2890]
+["tests/lang/gun-redis.lisp" :objects 661]
