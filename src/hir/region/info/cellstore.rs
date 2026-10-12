@@ -1,4 +1,4 @@
-// audited: 2026-09-15
+// audited: 2026-10-11
 //! The stores into a reassigned binding, and the 1-slot container the solver
 //! models one as.
 //!
@@ -106,6 +106,12 @@ pub struct CellContainer {
 }
 
 impl CellContainer {
+    /// Whether the cell emits a content drop for its final content. A
+    /// forwarding link hands that content to the next link instead.
+    pub fn drops_content(&self) -> bool {
+        !self.forwards_content
+    }
+
     /// A cell that keeps both channels: drop-on-overwrite for each displaced
     /// prior, and the content drop at `demise` for the final one.
     pub fn new(stores: CellStores, demise: HirId) -> Self {

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-11
 //! Owner-node cuts end to end: the capture-back-edge cycle, the transferred returned cycle, and their parks.
 //!
 //! docs/impl/region/owner.md
@@ -362,85 +362,4 @@ fn upvalue_capture_family_runs_sound() {
     // 50 panic-clean runs — an over-admission double-free would detonate the
     // debug one-owner/generation asserts here.
     let _ = steady_region_growth(FAMILY);
-}
-
-/// A TOP-LEVEL (file-letrec) mutable reassigned in a loop must
-/// not accumulate its overwritten PRIOR values until frame teardown (the over-keep
-/// blocker; docs/impl/region/bindings.md "Reassigned mutable bindings are 1-slot
-/// containers"). Each prior is
-/// dead the instant the next `assign` displaces it; holding it to program exit is
-/// unbounded RSS growth in a long-running loop (the production blocker).
-///
-/// The 1-slot container model (docs/impl/region/bindings.md) suppresses the
-/// module-scope value's ordinary decref and lets the cell ADOPT that producer
-/// reference — so the drop-on-overwrite is its sole release and the lowerer must
-/// emit NO incref-on-store (`donated_overwrite_sites`). The bug an unbalanced
-/// incref-on-store reintroduces: `born + store − overwrite = +1` per displaced
-/// prior, every value the cell ever held standing until program exit.
-///
-/// Oracle: per-iteration live-region growth via
-/// `arena/region-count`, sampled mid-run BY THE PROGRAM (after 50 and after 250
-/// reassigns) and returned as the raw region-count delta — not emitted RC, and not
-/// a post-run host probe (which also counts scheduler/teardown state). A prompt
-/// prior-release keeps the delta near zero (each prior's region recycles at its
-/// overwrite); the over-keep grows it by ~1 per added iteration (~200).
-///
-/// The self-referential accumulator `(assign acc (%pair n acc))` is the built-in
-/// discriminator: there every prior IS live (chained into the next pair), so its
-/// delta legitimately grows by ~200. It proves the measurement actually detects
-/// per-iteration region growth — so a near-zero delta for the non-self-ref shape is
-/// a real reclamation, not a dead gauge.
-#[test]
-fn reassign_toplevel_prior_release_is_bounded() {
-    use crate::pipeline::compile_file_repl;
-
-    // Run an Elle program that reassigns a top-level `@acc` 50 then 250 times,
-    // sampling `arena/region-count` mid-run at each point, and return the raw
-    // count delta (c250 − c50) the program computes.
-    fn region_growth(assign_form: &str) -> i64 {
-        let mut rt = Runtime::new();
-        let src = format!(
-            "(def @acc nil) (var n 0) \
-             (while (%lt n 50) {assign_form} (assign n (%add n 1))) \
-             (def c50 (arena/region-count)) \
-             (while (%lt n 250) {assign_form} (assign n (%add n 1))) \
-             (def c250 (arena/region-count)) \
-             (- c250 c50)"
-        );
-        let result = {
-            let (_vm, symbols, cctx) = rt.parts();
-            compile_file_repl(&src, symbols, cctx, "<embed>")
-                .expect("compiles")
-                .0
-        };
-        let (vm, _symbols, cctx) = rt.parts();
-        vm.execute_scheduled(&result, cctx)
-            .expect("runs")
-            .as_int()
-            .expect("program returns the region-count delta as an int")
-    }
-
-    // Fresh `(%pair n n)` each iteration: the prior is genuinely dead once the next
-    // `assign` displaces it, so a prompt drop-on-overwrite keeps the region count
-    // flat across the extra 200 iterations.
-    let dead_prior_growth = region_growth("(assign acc (%pair n n))");
-    // The discriminator: `(%pair n acc)` chains every prior into the next pair, so
-    // they are all live — the region count legitimately grows ~1 per iteration.
-    let live_chain_growth = region_growth("(assign acc (%pair n acc))");
-
-    assert!(
-        live_chain_growth > 150,
-        "precondition: the self-referential accumulator legitimately retains every \
-         prior (the chain is live), so region growth over 200 iterations must be \
-         large (~200) — got {live_chain_growth}; if small, the measurement is not \
-         seeing per-iteration region growth and the assertion below is vacuous",
-    );
-    assert!(
-        dead_prior_growth < 50,
-        "a top-level mutable reassigned to a fresh (dead) value in a loop must \
-         release each displaced prior at its overwrite, not hold it to frame \
-         teardown — region growth over 200 iterations must be \
-         near zero, got {dead_prior_growth} (~200 means every prior is over-kept \
-         until program exit, the unbalanced incref-on-store)",
-    );
 }

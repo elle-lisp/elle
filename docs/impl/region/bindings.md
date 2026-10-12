@@ -45,9 +45,9 @@ agree with which of the value's ordinary decrefs are suppressed:
   producer's release beside the counted store leaves the cell's reference with
   no balancing release: +1 per store, one region per trip of a loop
   (`runtime::tests::reassign_toplevel_call_result_prior_release_is_bounded`).
-  The guardfree pins are
-  [region-reassign-callresult-store.lisp](../../../tests/impl/region-reassign-callresult-store.lisp)
-  and [region-hof-tail-return-uaf.lisp](../../../tests/impl/region-hof-tail-return-uaf.lisp).
+  The pins are [region-reassign-callresult-store.lisp](../../../tests/impl/region-reassign-callresult-store.lisp),
+  [region-hof-tail-return-uaf.lisp](../../../tests/impl/region-hof-tail-return-uaf.lisp), and the measured
+  shape, [region-toplevel-reassign-loop.lisp](../../../tests/impl/region-toplevel-reassign-loop.lisp).
 - **Fn-local (the cell takes a COUNTED reference).** A fn-local cell's scope
   *exits*, so its final content has no teardown to fall back on and the cell
   needs a release of its own — which means a reference of its own. The compiler

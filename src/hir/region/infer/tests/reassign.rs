@@ -1,4 +1,4 @@
-// audited: 2026-09-22
+// audited: 2026-10-11
 //! The mutable-reassign 1-slot-container gate, one file per question it decides.
 //!
 //! docs/impl/region/bindings.md
@@ -28,6 +28,7 @@ mod gate;
 mod pins;
 mod reads;
 mod returned;
+mod toplevel;
 
 /// The heap-carrying reassigned binding of a shape and its assign sites. Every
 /// loop-carried-cell shape below also reassigns an immediate loop counter, whose
