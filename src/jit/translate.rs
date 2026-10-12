@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 // docs/impl/jit.md
 //! `FunctionTranslator`: the register-to-variable mapping every LIR instruction
 //! and terminator is lowered to Cranelift IR through.
@@ -15,7 +15,8 @@
 //! This root holds the translator type and its register→variable mapping. The
 //! per-concern lowering lives in submodules: `instr` (per-`InstrRef` match),
 //! `terminator` (per-`Terminator` match + tail-call dispatch), `region`
-//! (prologue region-map/ctx plumbing), and `spill` (the shared spill slot).
+//! (prologue region-map/ctx plumbing), `spill` (the shared spill slot), and
+//! `fuel` (the inline charge at each charge site).
 
 use std::collections::HashMap;
 
@@ -34,6 +35,7 @@ use super::vtable::RuntimeHelpers;
 use super::JitError;
 use super::TailDeferrals;
 
+mod fuel;
 mod instr;
 mod region;
 mod spill;
@@ -65,7 +67,16 @@ pub(crate) struct FunctionTranslator<'a> {
     pub(crate) yield_point_index: u32,
     /// Counter for call site indices
     pub(crate) call_site_index: u32,
-    /// Shared stack slot for spilling locals + operands at yield/call sites.
+    /// Counter for fuel charge site indices
+    pub(crate) charge_site_index: u32,
+    /// Each LIR block's position in the view, the order the emitter wrote them
+    /// in. A jump to a block at or before the current one runs backward in the
+    /// bytecode, so the interpreter charges fuel there.
+    pub(crate) block_position: HashMap<Label, usize>,
+    /// The position of the block being translated.
+    pub(crate) current_block: usize,
+    /// Shared stack slot for spilling locals + operands at yield, call and
+    /// charge sites.
     pub(crate) shared_spill_slot: Option<cranelift_codegen::ir::StackSlot>,
     /// Immutable heap-literal templates baked by `MaterializeConst` (a string, or
     /// a quoted compound structure). The native code holds a raw pointer to each
@@ -82,15 +93,16 @@ pub(crate) struct FunctionTranslator<'a> {
     /// The node is the whole of what a COMPILED activation can owe. A tail call
     /// this function makes strands releases too, but they belong to the activation
     /// that runs the callee rather than to this one, and `jit_tail_call_inner`
-    /// hands them straight there (docs/impl/region/relocate.md). So a function with no
-    /// `AdoptIntoActivation` reaches its `Return` owing nothing.
+    /// hands them straight there (docs/impl/region/relocate.md). So a function
+    /// with no `AdoptIntoActivation` reaches its `Return` owing nothing.
     pub(crate) uses_activation_owner_node: bool,
 }
 
 /// Load the `index`-th `Value` of a runtime-owned array of `Value`s — an
 /// argument array, or a closure environment — as its (tag, payload) halves.
 ///
-/// This is the JIT's only site for memory flags; see docs/impl/jit.md.
+/// This and the fuel charge are the JIT's sites for memory flags
+/// (docs/impl/jit.md).
 pub(crate) fn load_value_slot(
     builder: &mut FunctionBuilder,
     base: cranelift_codegen::ir::Value,
@@ -152,6 +164,13 @@ impl<'a> FunctionTranslator<'a> {
             loop_header: None,
             yield_point_index: 0,
             call_site_index: 0,
+            charge_site_index: 0,
+            block_position: lir
+                .blocks()
+                .enumerate()
+                .map(|(i, b)| (b.label(), i))
+                .collect(),
+            current_block: 0,
             shared_spill_slot: None,
             templates: Vec::new(),
             uses_activation_owner_node,

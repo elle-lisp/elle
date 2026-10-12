@@ -111,7 +111,6 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) jit_yield: FuncId,
     pub(crate) jit_yield_through_call: FuncId,
     /// Park the frame at a charge site whose fuel ran out (docs/impl/jit.md).
-    #[allow(dead_code)]
     pub(crate) fuel_pause: FuncId,
     pub(crate) has_signal: FuncId,
     // Declared, and called by no translation: these four, `rotate_pools`,

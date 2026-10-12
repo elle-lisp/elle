@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! A closure's LIR in the body: the bytes the dumper writes for it, and the
 //! extents the verifier refuses.
 //!
@@ -55,7 +55,7 @@ fn two_dumps_write_one_file_whatever_the_lir_pads_hold() {
         .expect("a compiled lambda's payload carries LIR");
     let blocks = view.block_records();
     let consts = view.const_records();
-    let [yields, calls] = view.site_records();
+    let [yields, calls, charges] = view.site_records();
     assert!(
         !blocks.is_empty() && !consts.is_empty() && !yields.is_empty(),
         "the lambda must carry blocks, constants and a yield point, or the \
@@ -75,7 +75,7 @@ fn two_dumps_write_one_file_whatever_the_lir_pads_hold() {
         for rec in consts {
             (*(rec as *const _ as *mut ConstRec)).pad = [0xA5; 7];
         }
-        for rec in yields.iter().chain(calls) {
+        for rec in yields.iter().chain(calls).chain(charges) {
             (*(rec as *const _ as *mut SiteRec)).pad = 0xA5;
         }
     }

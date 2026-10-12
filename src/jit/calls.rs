@@ -13,6 +13,7 @@
 
 use crate::jit::value::{JitValue, TAIL_CALL_SENTINEL_JV, YIELD_SENTINEL_JV};
 use crate::jit::TailDeferrals;
+use crate::lir::code::SiteRef;
 use crate::signals::dispatch::{classify, SignalAction};
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_HALT};
 use crate::value::Value;
@@ -28,16 +29,16 @@ pub use callops::*;
 /// Its tag, `0xDEAD_BEEF_DEAD_BEEF`, is no valid Value tag.
 pub const TAIL_CALL_SENTINEL: JitValue = TAIL_CALL_SENTINEL_JV;
 
-/// Sentinel `JitValue` indicating a JIT function yielded (side-exited).
-/// The caller checks for this after a JIT call and propagates the yield.
-/// fiber.signal and fiber.suspended are already set by the JIT yield helper.
+/// Sentinel `JitValue` indicating a JIT function side-exited: it yielded,
+/// parked behind a callee, or paused when its fuel ran out. The caller checks
+/// for this after a JIT call and propagates the signal. The side-exit helper
+/// already set fiber.signal and fiber.suspended.
 pub const YIELD_SENTINEL: JitValue = YIELD_SENTINEL_JV;
 
 /// Metadata for a single yield point in JIT-compiled code.
 /// Stored in `JitCode.yield_points`, indexed by yield point index.
 /// Read by `elle_jit_yield` runtime helper.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub(crate) struct YieldPointMeta {
     /// Bytecode IP to resume at (matches the interpreter's SuspendedFrame.ip)
     pub resume_ip: usize,
@@ -53,7 +54,6 @@ pub(crate) struct YieldPointMeta {
 /// instruction that may raise. Stored in `JitCode.call_sites`, indexed by call
 /// site index. Read by `elle_jit_yield_through_call` runtime helper.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub(crate) struct CallSiteMeta {
     /// Bytecode IP to resume at (matches the interpreter's SuspendedFrame.ip)
     pub resume_ip: usize,
@@ -72,7 +72,6 @@ pub(crate) struct CallSiteMeta {
 /// Stored in `JitCode.charge_sites`, indexed by charge site index.
 /// Read by `elle_jit_fuel_pause` runtime helper.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub(crate) struct ChargeSiteMeta {
     /// Bytecode IP of the charging instruction, which the resume runs again.
     pub ip: usize,
@@ -82,6 +81,44 @@ pub(crate) struct ChargeSiteMeta {
     pub num_locals: u16,
     /// Number of function parameters (spilled from arg_var_base).
     pub num_params: u16,
+}
+
+impl YieldPointMeta {
+    /// The metadata for `site` in a function of `num_params` parameters.
+    pub(crate) fn of(site: SiteRef<'_>, num_params: usize) -> Self {
+        YieldPointMeta {
+            resume_ip: site.resume_ip,
+            num_spilled: site.stack_regs.len() as u16,
+            num_locals: site.num_locals,
+            num_params: num_params as u16,
+        }
+    }
+}
+
+impl CallSiteMeta {
+    /// The metadata for `site` in a function of `num_params` parameters.
+    pub(crate) fn of(site: SiteRef<'_>, num_params: usize) -> Self {
+        CallSiteMeta {
+            resume_ip: site.resume_ip,
+            num_spilled: site.stack_regs.len() as u16,
+            num_locals: site.num_locals,
+            num_params: num_params as u16,
+            push_resume_value: site.push_resume_value,
+        }
+    }
+}
+
+impl ChargeSiteMeta {
+    /// The metadata for `site` in a function of `num_params` parameters. A
+    /// charge site's resume address is the charging instruction itself.
+    pub(crate) fn of(site: SiteRef<'_>, num_params: usize) -> Self {
+        ChargeSiteMeta {
+            ip: site.resume_ip,
+            num_spilled: site.stack_regs.len() as u16,
+            num_locals: site.num_locals,
+            num_params: num_params as u16,
+        }
+    }
 }
 
 // =============================================================================

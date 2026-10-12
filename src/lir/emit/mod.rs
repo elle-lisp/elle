@@ -50,11 +50,14 @@ pub struct Emitter {
     yield_points: Vec<YieldPointInfo>,
     /// Call site metadata collected during emission.
     call_sites: Vec<CallSiteInfo>,
-    /// Whether the current function may suspend (gates call site recording).
+    /// Fuel charge site metadata collected during emission.
+    charge_sites: Vec<ChargeSiteInfo>,
+    /// Whether the current function may suspend (gates call site and charge
+    /// site recording).
     current_func_may_suspend: bool,
     /// Number of local variable slots in the current function.
-    /// Recorded in yield points and call sites so the JIT can spill
-    /// local values into the SuspendedFrame stack.
+    /// Recorded in yield points, call sites and charge sites so the JIT can
+    /// spill local values into the SuspendedFrame stack.
     current_func_num_locals: u16,
     /// Pre-compiled closure bytecodes for `emit_module`. Indexed by `ClosureId`.
     /// `None` when emitting a standalone function (tests, nested emit).
@@ -85,6 +88,7 @@ impl Emitter {
             block_entry_depth: HashMap::new(),
             yield_points: Vec::new(),
             call_sites: Vec::new(),
+            charge_sites: Vec::new(),
             current_func_may_suspend: false,
             current_func_num_locals: 0,
             compiled_closures: None,
@@ -193,6 +197,7 @@ impl Emitter {
         self.block_entry_depth.clear();
         self.yield_points.clear();
         self.call_sites.clear();
+        self.charge_sites.clear();
         self.current_func_may_suspend = func.signal().may_suspend();
         self.current_func_num_locals = func.num_locals();
 
@@ -258,7 +263,7 @@ impl Emitter {
             bytecode: std::mem::take(&mut self.bytecode),
             yield_points: std::mem::take(&mut self.yield_points),
             call_sites: std::mem::take(&mut self.call_sites),
-            charge_sites: Vec::new(),
+            charge_sites: std::mem::take(&mut self.charge_sites),
         }
     }
 
@@ -279,6 +284,34 @@ impl Emitter {
                 push_resume_value,
             });
         }
+    }
+
+    /// Record a charge site at the next opcode, which must be one the
+    /// interpreter charges fuel at, in a function that may suspend. The
+    /// simulated stack is the one that opcode starts with, a call's callee and
+    /// arguments included. A silent function records none: its charges never
+    /// pause (docs/impl/jit.md).
+    fn record_charge_site(&mut self) {
+        if self.current_func_may_suspend {
+            self.charge_sites.push(ChargeSiteInfo {
+                ip: self.bytecode.current_pos(),
+                stack_regs: self.stack.clone(),
+                num_locals: self.current_func_num_locals,
+            });
+        }
+    }
+
+    /// Emit a `Jump` to `label`. A jump to a block already emitted runs
+    /// backward, and the interpreter charges fuel there, so it records a
+    /// charge site with the stack as it stands.
+    fn emit_jump(&mut self, label: Label) {
+        if self.label_offsets.contains_key(&label) {
+            self.record_charge_site();
+        }
+        self.bytecode.emit(Instruction::Jump);
+        let pos = self.bytecode.current_pos();
+        self.bytecode.emit_i32(0); // placeholder
+        self.pending_jumps.push((pos, label));
     }
 
     /// Emit one basic block: its instructions in order, then its terminator.

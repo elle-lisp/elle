@@ -39,21 +39,18 @@ pub struct JitCode {
     fn_ptr: *const u8,
     /// Keep the module alive so the code isn't freed
     _module: Arc<ModuleHolder>,
-    /// Yield point metadata for side-exit support.
+    /// Yield point metadata for side-exit support, one per `Emit` terminator.
     /// Indexed by yield point index (u32 immediate in JIT code).
-    /// Empty for non-yielding functions.
     /// Read by `elle_jit_yield` runtime helper.
-    #[allow(dead_code)]
     pub(crate) yield_points: Vec<super::dispatch::YieldPointMeta>,
     /// Park site metadata for yield-through-call support.
     /// Indexed by call site index (u32 immediate in JIT code).
     /// Empty for a silent function.
     /// Read by `elle_jit_yield_through_call` runtime helper.
-    #[allow(dead_code)]
     pub(crate) call_sites: Vec<super::dispatch::CallSiteMeta>,
     /// Fuel charge site metadata, indexed by charge site index (u32 immediate
-    /// in JIT code). Read by `elle_jit_fuel_pause` runtime helper.
-    #[allow(dead_code)]
+    /// in JIT code). Empty for a silent function. Read by `elle_jit_fuel_pause`
+    /// runtime helper.
     pub(crate) charge_sites: Vec<super::dispatch::ChargeSiteMeta>,
     /// Immutable heap-literal templates baked by `MaterializeConst` (a string, or
     /// a quoted compound structure). The native code holds a raw pointer to each
@@ -75,27 +72,15 @@ unsafe impl Send for JitCode {}
 unsafe impl Sync for JitCode {}
 
 impl JitCode {
-    /// Create a new JitCode from a function pointer and module
-    #[allow(dead_code)]
-    pub(crate) fn new(fn_ptr: *const u8, module: cranelift_jit::JITModule) -> Self {
-        JitCode {
-            fn_ptr,
-            _module: Arc::new(ModuleHolder::new(module)),
-            yield_points: Vec::new(),
-            call_sites: Vec::new(),
-            charge_sites: Vec::new(),
-            templates: Vec::new(),
-        }
-    }
-
-    /// Create a new JitCode with yield point and call site metadata, and the
-    /// heap-literal templates its native code points into.
+    /// Create a JitCode from its entry point and module, with the side-exit
+    /// metadata and the heap-literal templates the native code reads.
     #[allow(clippy::vec_box)] // stable per-element address for baked JIT pointers
     pub(crate) fn new_with_metadata(
         fn_ptr: *const u8,
         module: cranelift_jit::JITModule,
         yield_points: Vec<super::dispatch::YieldPointMeta>,
         call_sites: Vec<super::dispatch::CallSiteMeta>,
+        charge_sites: Vec<super::dispatch::ChargeSiteMeta>,
         templates: Vec<Box<crate::value::ConstTemplate>>,
     ) -> Self {
         JitCode {
@@ -103,7 +88,7 @@ impl JitCode {
             _module: Arc::new(ModuleHolder::new(module)),
             yield_points,
             call_sites,
-            charge_sites: Vec::new(),
+            charge_sites,
             templates,
         }
     }
@@ -160,14 +145,14 @@ impl JitCode {
             .unwrap();
         let builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
         let module = JITModule::new(builder);
-        JitCode {
-            fn_ptr: std::ptr::null(),
-            _module: Arc::new(ModuleHolder::new(module)),
+        Self::new_with_metadata(
+            std::ptr::null(),
+            module,
             yield_points,
-            call_sites: Vec::new(),
-            charge_sites: Vec::new(),
-            templates: Vec::new(),
-        }
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
     }
 
     /// Create a JitCode with call sites but no real compiled code.

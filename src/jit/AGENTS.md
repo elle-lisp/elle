@@ -10,8 +10,8 @@ Compile a function's frozen LIR, read through a `LirView`
 ([lir.md](../../docs/impl/lir.md)), to native code for the host, x86_64 or
 AArch64. A function's signal decides nothing about admission (see
 [signals/AGENTS.md](../signals/AGENTS.md) for signal definitions); what it
-decides is the code around a call. A yield, an error, and a callee's park all
-leave by side-exit: JIT code calls a runtime helper that builds a
+decides is the code around a call. A yield, an error, a callee's park and a
+fuel pause all leave by side-exit: JIT code calls a runtime helper that builds a
 `SuspendedFrame` and returns `YIELD_SENTINEL` to the interpreter.
 
 ## Architecture

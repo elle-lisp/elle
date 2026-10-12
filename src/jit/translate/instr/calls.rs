@@ -1,7 +1,8 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 // docs/impl/jit.md
-//! How a call leaves compiled code: the self-tail-call loop, the helper that
-//! carries every other call, and the `MakeClosure` refusal.
+//! How a call leaves compiled code: the fuel charge before it, the
+//! self-tail-call loop, the helper that carries every other call, and the
+//! `MakeClosure` refusal.
 
 use super::*;
 
@@ -17,25 +18,18 @@ impl<'a> FunctionTranslator<'a> {
         match instr {
             InstrRef::Call {
                 dst, func, args, ..
+            }
+            | InstrRef::SuspendingCall {
+                dst, func, args, ..
             } => {
+                self.emit_charge(builder)?;
                 let (ft, fp) = self.use_var_pair(builder, func.0);
                 let vm = self
                     .vm_ptr
                     .ok_or_else(|| JitError::InvalidLir("Call without vm pointer".to_string()))?;
 
-                if args.is_empty() {
-                    let null_ptr = builder.ins().iconst(I64, 0);
-                    let nargs = builder.ins().iconst(I64, 0);
-                    let (rt, rp) = self.call_helper_call(
-                        builder,
-                        ft,
-                        fp,
-                        null_ptr,
-                        nargs,
-                        vm,
-                        region_id_const,
-                    )?;
-                    self.def_var_pair(builder, dst.0, rt, rp);
+                let (args_addr, nargs) = if args.is_empty() {
+                    (builder.ins().iconst(I64, 0), builder.ins().iconst(I64, 0))
                 } else {
                     // Spill args to stack (16 bytes each)
                     let slot =
@@ -48,19 +42,14 @@ impl<'a> FunctionTranslator<'a> {
                         let (at, ap) = self.use_var_pair(builder, arg_reg.0);
                         store_value_slot(builder, slot, i as u32, at, ap);
                     }
-                    let args_addr = builder.ins().stack_addr(I64, slot, 0);
-                    let nargs = builder.ins().iconst(I64, args.len() as i64);
-                    let (rt, rp) = self.call_helper_call(
-                        builder,
-                        ft,
-                        fp,
-                        args_addr,
-                        nargs,
-                        vm,
-                        region_id_const,
-                    )?;
-                    self.def_var_pair(builder, dst.0, rt, rp);
-                }
+                    (
+                        builder.ins().stack_addr(I64, slot, 0),
+                        builder.ins().iconst(I64, args.len() as i64),
+                    )
+                };
+                let (rt, rp) =
+                    self.call_helper_call(builder, ft, fp, args_addr, nargs, vm, region_id_const)?;
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
 
             InstrRef::TailCall {
@@ -81,9 +70,12 @@ impl<'a> FunctionTranslator<'a> {
                 // (docs/impl/region/relocate.md).
                 let defer = TailDeferrals::of(*defer_callee_release, *deferred_release_slot);
 
-                // The emitter records one call site per tail call of a function
-                // that may suspend; take it before the self-call branch so the
-                // counts agree whichever path runs.
+                // The emitter records one charge site and one call site per
+                // tail call of a function that may suspend. Take both before
+                // the self-call branch, so each is counted once whichever path
+                // runs, and the native loop a self call becomes charges once
+                // per trip.
+                self.emit_charge(builder)?;
                 let park_site = if self.lir.signal().may_suspend() {
                     let idx = self.call_site_index;
                     self.call_site_index += 1;

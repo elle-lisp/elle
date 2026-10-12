@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 // docs/impl/jit.md
 //! `JitCompiler`: the Cranelift module a compile owns, and the two entry points
 //! that drive one frozen function through it.
@@ -136,27 +136,20 @@ impl JitCompiler {
         let fn_ptr = self.module.get_finalized_function(func_id);
         super::registry::record(fn_ptr as usize, func_name);
 
-        // Convert yield point metadata from LIR to JIT format
-        let yield_metas: Vec<super::dispatch::YieldPointMeta> = lir
+        // The side-exit metadata, from the sites emission recorded.
+        use super::dispatch::{CallSiteMeta, ChargeSiteMeta, YieldPointMeta};
+        let num_params = lir.num_params();
+        let yield_metas = lir
             .yield_points()
-            .map(|yp| super::dispatch::YieldPointMeta {
-                resume_ip: yp.resume_ip,
-                num_spilled: yp.stack_regs.len() as u16,
-                num_locals: yp.num_locals,
-                num_params: lir.num_params() as u16,
-            })
+            .map(|s| YieldPointMeta::of(s, num_params))
             .collect();
-
-        // Convert call site metadata from LIR to JIT format
-        let call_site_metas: Vec<super::dispatch::CallSiteMeta> = lir
+        let call_site_metas = lir
             .call_sites()
-            .map(|cs| super::dispatch::CallSiteMeta {
-                resume_ip: cs.resume_ip,
-                num_spilled: cs.stack_regs.len() as u16,
-                num_locals: cs.num_locals,
-                num_params: lir.num_params() as u16,
-                push_resume_value: cs.push_resume_value,
-            })
+            .map(|s| CallSiteMeta::of(s, num_params))
+            .collect();
+        let charge_site_metas = lir
+            .charge_sites()
+            .map(|s| ChargeSiteMeta::of(s, num_params))
             .collect();
 
         // Wrap in JitCode (module is moved to keep code alive)
@@ -165,6 +158,7 @@ impl JitCompiler {
             self.module,
             yield_metas,
             call_site_metas,
+            charge_site_metas,
             templates,
         ))
     }

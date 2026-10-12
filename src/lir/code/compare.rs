@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! Where two frozen functions first disagree, read through their views alone.
 //!
 //! docs/impl/lir.md
@@ -57,6 +57,9 @@ impl<'a> LirView<'a> {
         }
         if !self.call_sites().eq(other.call_sites()) {
             return Some("call_sites".to_string());
+        }
+        if !self.charge_sites().eq(other.charge_sites()) {
+            return Some("charge_sites".to_string());
         }
         if self.block_count() != other.block_count() {
             return Some(format!(

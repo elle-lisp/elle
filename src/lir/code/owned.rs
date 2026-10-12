@@ -34,6 +34,7 @@ pub struct LirCode {
     pub(crate) n_values: u32,
     pub(crate) yield_points: Vec<SiteRec>,
     pub(crate) call_sites: Vec<SiteRec>,
+    pub(crate) charge_sites: Vec<SiteRec>,
     pub(crate) site_regs: Vec<Reg>,
     pub(crate) closure_id: Option<u32>,
     pub(crate) name: Option<String>,
@@ -103,7 +104,7 @@ impl LirOwned {
         &mut self,
         yield_points: &[YieldPointInfo],
         call_sites: &[CallSiteInfo],
-        _charge_sites: &[ChargeSiteInfo],
+        charge_sites: &[ChargeSiteInfo],
     ) {
         let code = &mut self.code;
         code.site_regs.clear();
@@ -128,6 +129,20 @@ impl LirOwned {
                     c.num_locals,
                     &c.stack_regs,
                     c.push_resume_value,
+                )
+            })
+            .collect();
+        // A pause at a charge site resumes at the charging instruction itself,
+        // and takes no resume value.
+        code.charge_sites = charge_sites
+            .iter()
+            .map(|c| {
+                site(
+                    &mut code.site_regs,
+                    c.ip,
+                    c.num_locals,
+                    &c.stack_regs,
+                    false,
                 )
             })
             .collect();

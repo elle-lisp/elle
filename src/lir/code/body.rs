@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! `LirBody`: a frozen function's records in region pages, as the `lir` field of a code payload.
 //!
 //! docs/impl/lir.md
@@ -37,6 +37,7 @@ pub struct LirBody {
     pub(crate) values: RegionSlice<Value>,
     pub(crate) yield_points: RegionSlice<SiteRec>,
     pub(crate) call_sites: RegionSlice<SiteRec>,
+    pub(crate) charge_sites: RegionSlice<SiteRec>,
     pub(crate) site_regs: RegionSlice<Reg>,
     /// Meaningful only when `has_closure_id`, so every byte of the field is
     /// written and none is an enum's uninitialized payload.
@@ -63,6 +64,7 @@ impl LirBody {
             values: RegionSlice::empty(),
             yield_points: RegionSlice::empty(),
             call_sites: RegionSlice::empty(),
+            charge_sites: RegionSlice::empty(),
             site_regs: RegionSlice::empty(),
             closure_id: 0,
             entry: 0,
@@ -93,6 +95,7 @@ impl LirBody {
             values: heap.alloc_region_slice_in_region(lir.values(), region),
             yield_points: heap.alloc_region_slice_in_region(sites[0], region),
             call_sites: heap.alloc_region_slice_in_region(sites[1], region),
+            charge_sites: heap.alloc_region_slice_in_region(sites[2], region),
             site_regs: heap.alloc_region_slice_in_region(lir.site_regs(), region),
             closure_id: lir.closure_id().map_or(0, |c| c.0),
             entry: lir.entry().0,

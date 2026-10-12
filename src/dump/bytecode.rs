@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! `--dump=bytecode`: what the emitter wrote for a file, one code object at a time, in a text two runs agree on.
 //!
 //! docs/config.md
@@ -50,25 +50,28 @@ fn child(s: &mut String, path: &str, p: &ClosureTemplate, symbols: Option<&Symbo
     tables(s, p);
     body(s, p, symbols);
     if let Some(lir) = p.lir() {
-        for yp in lir.yield_points() {
-            let regs: Vec<u32> = yp.stack_regs.iter().map(|r| r.0).collect();
-            let _ = writeln!(
-                s,
-                "  yield_point ip={} locals={} regs={regs:?}",
-                yp.resume_ip, yp.num_locals
-            );
-        }
-        for cs in lir.call_sites() {
-            let regs: Vec<u32> = cs.stack_regs.iter().map(|r| r.0).collect();
-            let _ = writeln!(
-                s,
-                "  call_site ip={} locals={} regs={regs:?}",
-                cs.resume_ip, cs.num_locals
-            );
-        }
+        sites(s, "yield_point", lir.yield_points());
+        sites(s, "call_site", lir.call_sites());
+        sites(s, "charge_site", lir.charge_sites());
     }
     for i in 0..p.num_children() {
         child(s, &format!("{path}.{i}"), &p.child(i), symbols);
+    }
+}
+
+/// One line per site of one kind, in the order emission recorded them.
+fn sites<'a>(
+    s: &mut String,
+    kind: &str,
+    sites: impl Iterator<Item = crate::lir::code::SiteRef<'a>>,
+) {
+    for site in sites {
+        let regs: Vec<u32> = site.stack_regs.iter().map(|r| r.0).collect();
+        let _ = writeln!(
+            s,
+            "  {kind} ip={} locals={} regs={regs:?}",
+            site.resume_ip, site.num_locals
+        );
     }
 }
 

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 // src/lir/AGENTS.md
 //! Emitting the operator, region-refcount and parameter-frame instructions.
 //!
@@ -258,6 +258,7 @@ impl Emitter {
             } => {
                 // Stack: [func, args_array] → [result]
                 self.ensure_binary_on_top(*func, *args);
+                self.record_charge_site();
                 self.bytecode.emit(Instruction::CallArrayMut);
                 self.bytecode.emit_u32(region.get());
                 self.bytecode.emit_u32(args_region.get());
@@ -278,6 +279,7 @@ impl Emitter {
             } => {
                 // Stack: [func, args_array] → (tail call, no push)
                 self.ensure_binary_on_top(*func, *args);
+                self.record_charge_site();
                 self.bytecode.emit(Instruction::TailCallArrayMut);
                 self.bytecode.emit_u32(region.get());
                 self.bytecode.emit_u32(args_region.get());

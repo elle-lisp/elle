@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! The plain records a frozen function is made of: nodes, blocks, constants and sites.
 //!
 //! docs/impl/lir.md
@@ -110,15 +110,16 @@ impl ConstRec {
     }
 }
 
-/// A yield point or a call site: where the interpreter resumes, and the
-/// registers live on the operand stack there.
+/// A yield point, a call site or a fuel charge site: where the interpreter
+/// resumes, and the registers live on the operand stack there.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub struct SiteRec {
     pub(crate) resume_ip: u32,
     pub(crate) num_locals: u16,
-    /// One when a resume delivers its value into the site's result, zero for
-    /// a call site at an instruction that produces no value. A yield point
+    /// One when a resume delivers its value into the site's result. Zero for
+    /// a call site at an instruction that produces no value, and for a charge
+    /// site, whose resume runs the charging instruction again. A yield point
     /// always delivers.
     pub(crate) delivers: u8,
     pub(crate) pad: u8,

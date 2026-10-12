@@ -31,8 +31,9 @@ impl VM {
     /// the opcode start (`instr_ip`), so a fuel-yielded fiber re-runs the whole
     /// opcode on resume.
     ///
-    /// A silent function is charged nothing: it is a proof that nothing stops
-    /// the fiber while it runs (docs/signals/inference.md). Its signal is read
+    /// A silent function spends fuel and never pauses: it is a proof that
+    /// nothing stops the fiber while it runs, so the pause comes at the next
+    /// charge site outside it (docs/signals/inference.md). Its signal is read
     /// only on a metered fiber.
     #[inline]
     fn charge_fuel(
@@ -41,6 +42,7 @@ impl VM {
         resume_ip: usize,
     ) -> Option<(SignalBits, usize)> {
         if self.fiber.fuel.is_metered() && code.template().signal().is_silent() {
+            self.fiber.fuel.spend();
             return None;
         }
         if self.fiber.fuel.charge() {

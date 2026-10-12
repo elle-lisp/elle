@@ -37,10 +37,11 @@ table minted it, so a handle cached across functions would index a table where
 the same slot holds different flags, or nothing at all.
 
 `load_value_slot` ([translate.rs](../../src/jit/translate.rs)) is where the JIT
-names those flags.
+names those flags for a `Value`.
 It emits both halves of a `Value` — tag at `+0`, payload at `+8` — so the
 16-byte stride is written once, from `size_of`/`offset_of` rather than as a
-literal.
+literal. The fuel charge ([fuel.rs](../../src/jit/translate/fuel.rs)) names
+them for the one other word compiled code reads, the fiber's budget.
 
 ## Stores into stack slots
 
