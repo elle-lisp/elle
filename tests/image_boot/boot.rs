@@ -232,8 +232,13 @@ fn two_dumps_of_one_boot_state_write_one_file() {
 
 // § Test plan, "Compile parity": a boot image's static-region watermark is
 // the mark its boot left, so a compile between two boot dumps changes neither
-// file. The program below defines nothing, so it adds no entry to the compile
-// registries and no macro, and the boot state the two dumps read is one state.
+// file. The program below names no function and defines no macro, so the
+// boot state the two dumps read is one state.
+//
+// The trap is the inline registry: it records every function a unit binds to
+// a name, a `let`-bound lambda included, and the next boot dump carries it.
+// A program that binds one changes the `:compiler` bytes, and the two files
+// differ for a reason that has nothing to do with the watermark.
 //
 // The counter-factual is the live counter. The compile mints slots for its
 // closure and its array, so a dump that read the counter as it ran would write
@@ -246,10 +251,7 @@ fn a_compile_between_two_boot_dumps_changes_neither_file() {
 
     let mut rt = Runtime::with_stdlib_cache(StdlibCache::Off);
     rt.dump_boot_image(&a).expect("dump a");
-    let answer = eval(
-        &mut rt,
-        "(let [g (fn [x] (+ x 1))] (length (map g [1 2 3])))",
-    );
+    let answer = eval(&mut rt, "(length (map (fn [x] (+ x 1)) [1 2 3]))");
     assert_eq!(
         answer.as_int(),
         Some(3),
