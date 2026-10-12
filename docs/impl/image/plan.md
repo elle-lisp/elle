@@ -99,7 +99,11 @@ Then the image milestones:
      fragment as bytes ([region/template.md](../region/template.md)), so a
      hydrated closure grafts as a compiled one does
      ([graft.md](../graft.md)) and a user file compiles to the same
-     instruction stream under both boots.
+     instruction stream under both boots;
+   - the bytecode half of the parity gate — the header records the dumping
+     process's static-region counter and hydration raises the counter to it,
+     so `make bytecode-parity` finds every corpus file compiling to one
+     bytecode under either boot ([boot.md](boot.md)).
 
    Still to land: the embedded blob, per-worker hydration for `sys/spawn`,
    and the hydrated-region interval table. The interval table keeps
@@ -293,10 +297,21 @@ Then the image milestones:
   payload carries. The comparison reads each code object's opcodes and length
   rather than its bytes. A static region id in an operand comes from a
   process-wide mint ([the region model](../region/model.md)), which a stdlib
-  compile advances and a hydration does not, so the two boots' operands
-  differ in one process while their instructions agree.
+  compile advances, so two boots in one process differ in their operands while
+  their instructions agree.
   `a_call_to_a_stdlib_function_grafts_under_either_boot` and
   `the_two_boots_emit_one_bytecode_for_a_user_file` pin the two.
+- Bytecode parity: every corpus file and the standard library write one
+  `--dump=bytecode` under an image boot and under a source boot, each in a
+  process of its own (`make bytecode-parity`, which `make smoke-boot-image`
+  runs first). The target refuses to compare until the image start prints its
+  `image-hydrate` mark. A fixture that fuses a `map` and reads a qualified key
+  holds the same in the Rust suite. The counter-factual is a hydration that
+  leaves the static-region counter alone: every program compiles, fuses and
+  runs as before, and every slot in its bytecode moves. The header's watermark
+  is the dumping process's counter, so a body that holds no code still records
+  it; the counter-factual there is a watermark taken from the body's own
+  highest slot.
 - Tier parity: a hot stdlib function reaches the JIT under image boot
   exactly as under source boot — the hydrated payload's own LIR feeds
   `submit_jit_task` and the compiled result executes.

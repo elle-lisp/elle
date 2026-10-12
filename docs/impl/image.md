@@ -25,9 +25,9 @@ argument. Six companions carry the rest:
   answered the design's open questions, with their numbers.
 
 This document states the design, not its progress. [plan.md](image/plan.md)
-records what has landed: the warm-cache boot and the body fragment have, and
-the embedded blob, per-worker hydration, the hydrated-region interval table and
-the environment configuration have not.
+records what has landed: the warm-cache boot, the body fragment and the
+bytecode parity gate have, and the embedded blob, per-worker hydration, the
+hydrated-region interval table and the environment configuration have not.
 
 ## The problem
 
@@ -385,8 +385,8 @@ whose stdlib cannot reach the JIT tier trades startup for steady-state
 throughput. That is a deal-breaker, and it violates the parity principle: the
 two boot modes must be indistinguishable to running code, tiers included. A
 hydrated stdlib closure promotes exactly as a compiled one does, so the tier
-half of parity holds; the boot image's default waits on the compile half
-([image/boot.md](image/boot.md)).
+half of parity holds, as the compile half does ([image/boot.md](image/boot.md)
+owns the gate that proves it).
 
 The cost of the change is measured and small: the region form was faster on
 every operation the Rust-heap form met, by about a third of one percent of the

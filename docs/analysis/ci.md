@@ -20,7 +20,7 @@ set when the diff moves only the submodule pointer.
 | Documentation Build | ubuntu | `make docs` and the Elle doc site, minus the publish | — |
 | Default Build Tests | ubuntu | `doctest`, then each suite pass of the default build and its rig, one step each | — |
 | No-JIT Build Tests | ubuntu | `smoke-nojit` — the language suite on the interpreter alone | — |
-| Boot Image Tests | ubuntu | `smoke-boot-image` — the language suite booted from an image | — |
+| Boot Image Tests | ubuntu | `smoke-boot-image` — bytecode parity between the two boots, then the language suite booted from an image | — |
 | Rust Tests | ubuntu | Integration tests, the rig's tests, then property tests, under the `ci` profile | 16 |
 | Thread-Pool I/O Tests | ubuntu | `smoke-pool`, `smoke-pool-impl`, `smoke-pool-producers` — both suites on a build without `uring` and its rig | — |
 | MLIR Tests | ubuntu | `doctest`, `smoke-mlir`, `smoke-mlir-impl`, `smoke-mlir-producers` — the language suite on the MLIR build, the implementation suite on its rig | — |
@@ -368,13 +368,15 @@ plugin directory to a workspace member.
 
 ### The boot-image job
 
-`--boot-image=` is off by default, and stays off until a `sys/spawn` worker
-hydrates its own stdlib ([boot.md](../impl/image/boot.md)). No other job
-boots from an image, so a change that breaks hydration passes every gate in the
-workflow.
+`--boot-image=` is off by default, for the reasons
+[boot.md](../impl/image/boot.md) gives. No other job boots from an image, so a
+change that breaks hydration passes every gate in the workflow.
 
-`Boot Image Tests` runs `make smoke-boot-image`. The target stores an image,
-proves the next start hydrates it, and runs the corpus through that instance.
+`Boot Image Tests` runs `make smoke-boot-image`. The target first runs `make
+bytecode-parity`, which compiles every corpus file under a source boot and
+under an image boot and fails on any difference in the bytecode. It then stores
+an image, proves the next start hydrates it, and runs the corpus through that
+instance.
 It sets `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS` for the reason the two backend
 jobs do: a hydrated region is a region, and the region checks are compiled out
 of a release build without the flag.
@@ -458,7 +460,7 @@ make test
 | **Documentation site** | `Documentation Build` fails on `./target/release/elle demos/docgen/generate.lisp` | Using `nil?` to check end-of-list. Lists terminate with `EMPTY_LIST`, not `NIL`. | Use `empty?` for list termination checks. Check [generate.lisp](../../demos/docgen/generate.lisp) and [lib](../../demos/docgen/lib). |
 | **Language suite fails** | A corpus job fails `smoke-lang` | A language test answers differently on that build. | Run `./target/release/elle tests/lang/failing.lisp` on the same build. Check the assertion message; a file that passes on one build and fails on another has found a defect in the build that fails. |
 | **Implementation suite fails** | `Default Build Tests` fails `smoke-impl` or `smoke-eager` | An implementation test on the rig, or a suite file under the eager profile. | Run `./target/release/elle-rig tests/impl/failing.lisp`; the file's sidecar sets its mode. For a profile failure, pass the same `--profile`. |
-| **Boot from an image fails** | `Boot Image Tests` fails and every other corpus job passes | The corpus file answers differently under a hydrated boot, or the image no longer hydrates. | Run `make smoke-boot-image` locally. Read the hydration proof first: a target that fails there never reached the corpus. |
+| **Boot from an image fails** | `Boot Image Tests` fails and every other corpus job passes | A corpus file compiles to other bytecode or answers differently under a hydrated boot, or the image no longer hydrates. | Run `make smoke-boot-image` locally. A parity failure names the files that differ and keeps both dumps of each under `target/bytecode-parity`; diff a pair. Otherwise read the hydration proof first: a target that fails there never reached the corpus. |
 | **Property tests fail** | `Rust Tests` fails with a shrunk counterexample | The shrunk output shows the *minimal* failing input. | Reproduce with the exact shrunk values as a unit test. Check the files under `tests/proptest-regressions/`. |
 | **Integration tests fail** | `Rust Tests` fails | Tests use `eval_source()` which runs the full pipeline. | Read the assertion. Check whether the test expects `.unwrap()` (success) or `.is_err()` (error). |
 | **Prose** | `QA` fails on `make prose` | A stamped file breaks a rule a machine can check: a call-out over 140 characters, a broken link, a bare filename, or banned wording. | Run `make prose` and repair the file the message names ([DOCUMENTATION.md](../../DOCUMENTATION.md)). |

@@ -110,7 +110,7 @@ A boot image hydrates into the instance being built, before its compile context
 exists, and installs into the same structures a source boot writes:
 
 1. Hydrate the image into this instance's heap, replaying the name table into
-   its display memo and raising its parameter counter
+   its display memo and raising its parameter and static-region counters
    ([the image design](../image.md)).
 2. Check the digest against this binary's sources, and fall back to a source
    boot when it differs.
@@ -172,10 +172,25 @@ hydrates what it stored, and then runs the corpus with every `elle test` batch
 pointed at that directory. A pull request gets the same run from the `Boot
 Image Tests` job ([CI](../../analysis/ci.md)).
 
+The target runs `make bytecode-parity` first, the compile half of the parity
+[image.md](../image.md) demands. It writes every corpus file's
+`--dump=bytecode` once under a source boot and once under an image boot, and
+fails on any difference. Each dump runs in a process of its own, because the
+static-region counter is process-global: a second boot in one process starts
+where the first left it.
+
+Two things make the dumps agree. Each stdlib closure carries its body
+fragment in its payload ([graft.md](../graft.md)), and the image's header
+carries the static-region watermark ([format.md](format.md)). The warm cache
+stores as soon as the boot ends, and `elle image dump-boot` dumps as soon as it
+does, so the watermark is the counter a source boot hands its first user
+compile.
+
 The proof is a `--trace=boot` start that has to print an `image-hydrate` mark.
 Without it the target reports on a source boot: a binary that ignored
 `--boot-image=` would pass it, and so would an image every start refuses and
-replaces.
+replaces. The parity target asks for the same mark, or it would compare two
+source boots.
 
 The runner instance is the one that hydrates, so every corpus file is read,
 expanded and compiled against the image's macros and exports. A file's forms
@@ -191,13 +206,19 @@ Per-worker hydration is a milestone of its own ([the landing plan](plan.md)).
 Both halves of parity have landed. A hydrated closure carries its LIR in its
 payload, so a hot stdlib function promotes to the JIT under either boot
 ([sealing.md](sealing.md)). It carries the body fragment a graft reads in the
-same payload, so a call to a library function grafts under either boot and a
-user file compiles to the same instruction stream under both
-([graft.md](../graft.md)).
+same payload, so a call to a library function grafts under either boot
+([graft.md](../graft.md)). User code compiles to the same bytecode under either
+boot, and `make bytecode-parity` proves it over the corpus (§ The gate).
 
-One piece is still to land ([plan.md](plan.md)): per-worker hydration. A
-`sys/spawn` worker builds its own instance and boots its stdlib from source,
-whatever the spawning instance booted from, so a program that spawns workers
-pays a stdlib compile per worker under an image boot as under a source boot.
-The flag is what makes the mechanism usable and testable meanwhile, and the
-default flips when a worker hydrates its own mapping.
+Three things keep the default off ([plan.md](plan.md)):
+
+- A `sys/spawn` worker builds its own instance and boots its stdlib from
+  source, whatever the spawning instance booted from. A program that spawns
+  workers pays a stdlib compile per worker under either boot.
+- Pointer resolution has no interval table yet. Every reference count on a
+  hydrated stdlib value walks the probe ladder and scans the page list of a
+  region the size of stdlib ([image.md](../image.md)).
+- The warm cache keys on the source digest alone, so a new build hydrates an
+  older build's image ([issue 1361](https://github.com/elle-lisp/elle/issues/1361)).
+
+The flag is what makes the mechanism usable and testable meanwhile.
