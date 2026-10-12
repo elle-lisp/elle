@@ -1,5 +1,5 @@
 (elle/epoch 14)
-# audited: 2026-10-11
+# audited: 2026-10-12
 # std/gun on the memory store: states, values, the HAM verdict, souls, merges and the chain API.
 # lib/gun.md
 #
@@ -59,6 +59,16 @@
   (c:observe (state:pack 9000 3))
   (assert (= (c:now) (state:pack 9000 3))
           "now never runs behind an observed state"))
+
+(let [c (frozen-clock 1000)]
+  (assert (= (c:due-in (state:pack 1000 9)) 0)
+          "a state of this millisecond is due")
+  (assert (= (c:due-in (state:pack 900 0)) 0) "a past state is due")
+  (assert (= (c:due-in (state:pack 1250 0)) 0.25)
+          "a later state is due when the wall clock reaches its millisecond")
+  (c:observe (state:pack 3000 0))
+  (assert (= (c:due-in (state:pack 2000 0)) 0)
+          "a state no later than an observed one is due"))
 
 (assert (= (state:unpack (state:pack 1791766440908 65535)) [1791766440908 65535])
         "pack and unpack round-trip")
@@ -185,6 +195,12 @@
   (fails-with :future-state (fn [] (graph:merge g "s" {"k" [11 "z"]} 10)))
   (assert (= (graph:node g "s") {"k" [5 "a"] "j" [6 2]})
           "a future write changes nothing"))
+
+(let [[due later] (graph:due {"a" [5 "x"] "b" [11 "y"] "c" [10 "z"]} 10)]
+  (assert (= due {"a" [5 "x"] "c" [10 "z"]})
+          "due holds each field not after now")
+  (assert (= later {"b" [11 "y"]}) "later holds each field after now"))
+(assert (= (graph:due {} 10) [{} {}]) "no fields split into nothing")
 
 # Two replicas that apply the same writes in opposite orders must hold the
 # same node. Arrival order deciding the winner fails this.
