@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-20
 //! Image persistence: an image is the page bytes of one compacted region plus
 //! a relocation table, and hydration maps those pages privately.
 //!
@@ -50,9 +50,9 @@ pub struct Hydrated {
     /// holds no parameter. Hydration has already raised this process's counter
     /// past it — the field is what a caller reads to see that it did.
     pub param_watermark: u32,
-    /// The static-region counter of the process that dumped the image, which
-    /// hydration has already raised this process's counter to
-    /// (docs/impl/image/format.md).
+    /// The static-region counter where a boot image's boot ended, which
+    /// hydration has already raised this process's counter to; zero for any
+    /// other image (docs/impl/image/format.md).
     pub static_region_watermark: u32,
 }
 

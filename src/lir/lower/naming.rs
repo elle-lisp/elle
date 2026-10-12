@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-20
 //! How a release names what it frees: the address space a value slot belongs
 //! to, and the process-global counter that mints a static region id.
 //!
@@ -36,8 +36,8 @@ pub(crate) fn static_region_counter() -> u32 {
 /// Raise the counter so that no later [`new_static_region`] answers below
 /// `watermark`, and never lower it.
 ///
-/// A hydrated image records the counter of the process that dumped it, and
-/// raising this one to it is what lets an image boot hand user code the slots
+/// A boot image records the counter where its boot ended, and raising this
+/// one to it is what lets an image boot hand user code the slots
 /// a source boot would (docs/impl/image/format.md).
 pub(crate) fn raise_static_regions_to(watermark: u32) {
     NEXT_STATIC_REGION.fetch_max(watermark, Ordering::Relaxed);

@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-10-20
 //! The boot configuration: dump a booted instance's exports and macros as one
 //! image, and install one into a fresh instance.
 //!
@@ -223,9 +223,10 @@ impl Boot {
 /// Dump `cctx`'s boot state to `path`, atomically.
 ///
 /// The graph is the two export structs and the macro table, under a digest of
-/// the sources they came from. The aggregate is assembled in a scratch region
-/// dropped either way: it names values the instance owns and takes no
-/// reference to them, exactly as the dumper's own scratch does.
+/// the sources they came from. The header carries the static-region mark the
+/// boot left. The aggregate is assembled in a scratch region dropped either
+/// way: it names values the instance owns and takes no reference to them,
+/// exactly as the dumper's own scratch does.
 pub(crate) fn dump(
     heap: &mut FiberHeap,
     symbols: &mut SymbolTable,
@@ -233,8 +234,9 @@ pub(crate) fn dump(
     path: &Path,
 ) -> Result<(), ImageError> {
     let scratch = heap.new_runtime_region();
-    let result = build::root(heap, symbols, cctx, scratch)
-        .and_then(|root| super::dump(heap, symbols, root, path));
+    let result = build::root(heap, symbols, cctx, scratch).and_then(|root| {
+        super::dump::dump_marked(heap, symbols, root, path, cctx.static_region_mark())
+    });
     heap.decref_region_if_present(scratch);
     result
 }

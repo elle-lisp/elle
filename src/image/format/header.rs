@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-20
 //! The header block: what an image records about itself before its first
 //! mapped byte, and how it is read back.
 //!
@@ -52,9 +52,8 @@ pub(crate) struct Header {
     /// holds no parameter. Hydration raises the process counter past it, so
     /// the ids a fresh instance mints cannot repeat the image's.
     pub param_watermark: u64,
-    /// The dumping process's static-region counter, which hydration raises
-    /// the process counter to. The counter rather than the body's highest
-    /// slot, so an image boot compiles user code as a source boot does
+    /// The static-region counter where a boot image's boot ended, which
+    /// hydration raises the process counter to; zero for any other image
     /// (docs/impl/image/format.md).
     pub static_region_watermark: u64,
     pub fingerprint: String,
