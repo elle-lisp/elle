@@ -6,7 +6,7 @@ Up: [..](../AGENTS.md)
 
 ## Documents
 
-- [gun.md](gun.md) — **gun** A graph database in the shape of GUN: nodes merged field by field by HAM, on a memory or Redis store, joined to peers by WebSocket.
+- [gun.md](gun.md) — **gun** A graph database in the shape of GUN: HAM merges on a memory or Redis store, WebSocket peers, signed user spaces and encryption.
 - [http.md](http.md) — **http** HTTP/1.1 client and server over TCP in pure Elle, with HTTPS and compression as opt-in module arguments.
 - [http2.md](http2.md) — **http2** HTTP/2 client and server (RFC 9113 + RFC 7541), over TLS with ALPN or as cleartext h2c.
 - [irc.md](irc.md) — **irc** IRCv3 client with capability negotiation, SASL PLAIN and message tags, over plain TCP or TLS.
@@ -22,7 +22,7 @@ Up: [..](../AGENTS.md)
 - [dns/](dns/AGENTS.md) — (empty)
 - [git/](git/AGENTS.md) — (empty)
 - [gtk4/](gtk4/AGENTS.md) — (empty)
-- [gun/](gun/AGENTS.md) — The submodules behind [gun.lisp](../gun.lisp): states, values, fields, HAM, the graph, the stores, the core and the peer mesh.
+- [gun/](gun/AGENTS.md) — The submodules behind [gun.lisp](../gun.lisp): states, values, fields, HAM, the graph, stores, SEA, the core and the mesh.
 - [http/](http/AGENTS.md) — The submodules behind [http.lisp](../http.lisp): URLs, transports, the wire format, chunked bodies and server-sent events.
 - [http2/](http2/AGENTS.md) — The submodules behind [http2.lisp](../http2.lisp): HPACK, the frame codec, stream state, the session loops and the server.
 - [process/](process/AGENTS.md) — The submodules behind [process.lisp](../process.lisp): the scheduler in four parts, the primitives, and one file per behavior.

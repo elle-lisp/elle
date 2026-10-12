@@ -1,6 +1,6 @@
 # Libraries
 
-<!-- audited: 2026-10-11 -->
+<!-- audited: 2026-10-12 -->
 
 Elle ships with libraries in `lib/`. All follow the closure-as-module
 pattern and are imported via `(import "std/<name>")`.
@@ -76,7 +76,7 @@ pattern and are imported via `(import "std/<name>")`.
 | compress | `((import "std/compress"))` | Gzip, zlib, deflate, zstd (FFI to libz + libzstd) |
 | git | `((import "std/git"))` | Git repository operations (FFI to libgit2) |
 | glob | `((import "std/glob"))` | Filesystem glob pattern matching |
-| gun | `((import "std/gun"))` | Graph database in the shape of GUN: per-field HAM merge on a memory or Redis store, with a WebSocket peer mesh. See [gun.md](../lib/gun.md) |
+| gun | `((import "std/gun"))` | Graph database in the shape of GUN: per-field HAM merge on a memory or Redis store, with a WebSocket peer mesh, signed user spaces and encryption. See [gun.md](../lib/gun.md) |
 | semver | `((import "std/semver"))` | Semantic version parsing and comparison |
 | semver/arbitrate | `((import "std/semver/arbitrate"))` | Old-test arbitration of compat claims |
 | semver/diff | `((import "std/semver/diff"))` | Surface diffs, bump floors, claim verdicts. See [semver.md](semver.md) |
