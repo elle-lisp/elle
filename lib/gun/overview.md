@@ -1,8 +1,8 @@
 # gun
 
-<!-- audited: 2026-10-11 -->
+<!-- audited: 2026-10-12 -->
 
-The submodules behind [gun.lisp](../gun.lisp): states, values, HAM, the graph, the stores, the core and the peer mesh.
+The submodules behind [gun.lisp](../gun.lisp): states, values, fields, HAM, the graph, the stores, the core and the peer mesh.
 
 [gun.md](../gun.md) holds what a caller of the module sees, and
 [mesh.md](mesh.md) holds the peer protocol. This file holds how the module
@@ -13,6 +13,7 @@ function's arguments.
 |------|---------|
 | [state.lisp](state.lisp) | The hybrid logical clock, and the only comparison of two states |
 | [value.lisp](value.lisp) | What a value may be, links, and the encoding that stores and orders values |
+| [field.lisp](field.lisp) | A field of a node: its state and its value. Every other file builds and reads a field through it |
 | [ham.lisp](ham.lisp) | The HAM verdict on one incoming field against the current one |
 | [graph.lisp](graph.lisp) | Souls, the in-memory nodes, the merge that answers a diff, and the flattening of a nested struct |
 | [store.lisp](store.lisp) | The memory store and the Redis store, behind one interface |
@@ -22,7 +23,9 @@ function's arguments.
 | [mesh.lisp](mesh.lisp) | The rules of [mesh.md](mesh.md): fetch, forward, acks, deferral and resync |
 
 A submodule takes the submodules it needs as arguments, so loading one by hand
-follows the order [gun.lisp](../gun.lisp) uses:
+follows the order [gun.lisp](../gun.lisp) uses. The exception is
+`std/gun/field`, which takes no argument and which each submodule imports
+for itself:
 
 ```lisp
 (def state ((import "std/gun/state")))

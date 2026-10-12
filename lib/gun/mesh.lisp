@@ -18,6 +18,7 @@
 
   (def sync ((import "std/sync")))
   (def uuid ((import "std/uuid")))
+  (def field ((import "std/gun/field")))
 
   (defn gun-error [reason message &named peer-id peer-reason]
     (error {:error :gun-error
@@ -143,8 +144,8 @@
     (let [clock c:clock
           @soonest nil]
       (each [_ fields] in later
-        (each [_ [st _]] in fields
-          (let [d (clock:due-in st)]
+        (each [_ f] in fields
+          (let [d (clock:due-in (field:state f))]
             (when (or (nil? soonest) (< d soonest)) (assign soonest d)))))
       soonest))
 

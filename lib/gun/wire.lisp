@@ -10,10 +10,12 @@
 ## Exports: {:hi :put :get :answer :ack :nack :encode :decode}
 ##
 ## A message is a struct with a :kind. A graph in a message maps each soul to
-## its fields, a struct of key to [state value]; on the wire each value
-## travels in its value:encode form, which keeps a link a link.
+## its fields, a struct of key to field; on the wire each value travels in
+## its value:encode form, which keeps a link a link.
 
 (fn [&named value graph]
+
+  (def field ((import "std/gun/field")))
 
   ## ── Building ─────────────────────────────────────────────────────────
 
@@ -48,8 +50,8 @@
     (let [out @{}]
       (each [soul fields] in g
         (let [node @{}]
-          (each [key [st v]] in fields
-            (put node key [st (value:encode v)]))
+          (each [key f] in fields
+            (put node key [(field:state f) (value:encode (field:value f))]))
           (put out soul (freeze node))))
       (freeze out)))
 
@@ -89,7 +91,9 @@
       (unless (and (integer? st) (>= st 0))
         (bad "a state is not an integer of zero or more" text))
       (unless (= (type-of enc) :string) (bad "an encoding is not a string" text))
-      [st (checked "a value does not decode" text (fn [] (value:decode enc)))]))
+      (field:make st
+                  (checked "a value does not decode" text
+                           (fn [] (value:decode enc))))))
 
   (defn json->graph [g text]
     (unless (struct? g) (bad "a graph is not an object" text))

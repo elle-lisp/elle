@@ -1,5 +1,5 @@
 (elle/epoch 14)
-# audited: 2026-10-11
+# audited: 2026-10-12
 ## The memory store and the Redis store, behind one interface of :read and :write.
 ## lib/gun.md
 ## lib/gun/overview.md
@@ -11,11 +11,12 @@
 ##
 ## Exports: {:memory-store :redis-store}
 ##
-## :read takes a soul and answers its fields, a struct of key to
-## [state value], or nil. :write takes a soul and fields, and replaces the
-## fields it names.
+## :read takes a soul and answers its fields, a struct of key to field, or
+## nil. :write takes a soul and fields, and replaces the fields it names.
 
 (fn [&named state value redis]
+
+  (def field ((import "std/gun/field")))
 
   (defn make-store [read write]
     "A store from its two functions."
@@ -38,20 +39,20 @@
 
   ## ── Redis ────────────────────────────────────────────────────────────
 
-  (defn field->text [[st v]]
-    "The Redis text of a field: the state, a space, and the encoding."
-    (string (state:format st) " " (value:encode v)))
+  (defn field->text [f]
+    "The Redis text of field f: the state, a space, and the encoding."
+    (string (state:format (field:state f)) " " (value:encode (field:value f))))
 
   (defn text->field [text]
-    "The [state value] that field->text wrote as text."
+    "The field that field->text wrote as text."
     (let [space (string/find text " ")]
       (when (nil? space)
         (error {:error :gun-error
                 :reason :bad-encoding
                 :encoding text
                 :message (string "not a stored field: " text)}))
-      [(state:parse (slice text 0 space))
-       (value:decode (slice text (+ space 1)))]))
+      (field:make (state:parse (slice text 0 space))
+                  (value:decode (slice text (+ space 1))))))
 
   (defn redis-store [&named @prefix]
     "A store that keeps each node in the Redis hash <prefix>:<soul>, through
