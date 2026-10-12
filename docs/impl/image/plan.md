@@ -96,9 +96,9 @@ Then the image milestones:
    - compiler-state persistence — the inline and dispatch-wrapper registries
      cross as one bytes field of the root ([boot.md](boot.md)), so an image
      boot inlines and monomorphizes user code as a source boot does;
-   - the bytecode half of the parity gate — the header records the dumping
-     process's static-region counter and hydration raises the counter to it,
-     so `make bytecode-parity` finds every corpus file compiling to one
+   - the bytecode half of the parity gate — a boot image records the
+     static-region counter where its boot ended, and hydration raises the
+     counter to it, so `make bytecode-parity` finds every corpus file compiling to one
      bytecode under either boot ([boot.md](boot.md)).
 
    Still to land: the embedded blob, per-worker hydration for `sys/spawn`, and
@@ -303,9 +303,10 @@ Then the image milestones:
   and reads a qualified key holds the same in the Rust suite. The
   counter-factual is a hydration that leaves the static-region counter alone:
   every program compiles, fuses and runs as before, and every slot in its
-  bytecode moves. The header's watermark is the dumping process's counter, so a
-  body that holds no code still records it; the counter-factual there is a
-  watermark taken from the body's own highest slot.
+  bytecode moves. A boot image's watermark is the mark its boot left, so two
+  boot dumps with a compile between them still write one file; the
+  counter-factual is the live counter, which that compile moves. An image of
+  any other graph records zero.
 - Tier parity: a hot stdlib function reaches the JIT under image boot
   exactly as under source boot — the hydrated payload's own LIR feeds
   `submit_jit_task` and the compiled result executes.
