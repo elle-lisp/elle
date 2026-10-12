@@ -1,6 +1,6 @@
 # The audit queue
 
-<!-- audited: 2026-10-08 -->
+<!-- audited: 2026-10-12 -->
 
 Every file carries the day it last met the documentation policy, and the queue
 names what to read next by what a stale file costs.
@@ -139,8 +139,8 @@ travels.
 Leaving any of them queued also deadlocks it. The gate demands today's stamp on
 a staged file, and the policy forbids a stamp over a standing violation. All
 three files are past the 500-line cap. So every change to one of them fails the
-gate, and stamping it fails the budget check in `tests/integration/prose.rs`
-instead. The enum cannot be split without nesting variants into a sub-enum,
+gate, and stamping it fails the budget check in
+[the prose checks](../../tests/prose.rs) instead. The enum cannot be split without nesting variants into a sub-enum,
 which rewrites every match over it ([src/lir/AGENTS.md](../../src/lir/AGENTS.md)).
 
 The exemption names the standard library's path, never its extension. Every
@@ -195,7 +195,8 @@ refuses. Edit the pin by hand in the change that moved the rule.
 ## A stamp is a claim the build can falsify
 
 The stamp attests to three things a machine cannot decide. Everything else in
-the policy is checkable, and `tests/integration/prose.rs` checks it.
+the policy is checkable, and [the prose checks](../../tests/prose.rs) check it.
+QA runs them before anything else ([CI](../analysis/ci.md)).
 
 Those checks run **only against files that carry a stamp**. An unstamped file
 has claimed nothing and is exempt; a stamped one has claimed to meet the
