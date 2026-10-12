@@ -1,4 +1,8 @@
-// The gate that keeps the `plugins/` submodule compiling against this tree.
+// audited: 2026-10-12
+// The gate that keeps the `plugins/` submodule compiling, and the build of the
+// plugins that the language suite loads.
+//
+// docs/analysis/ci.md
 //
 // The submodule is a separate cargo workspace whose crates take `elle-plugin`
 // by path, so a changed `elle_api!` declaration moves the SDK and the plugin
@@ -11,8 +15,11 @@
 // These tests cover the halves the job cannot check for itself: that every
 // plugin is inside the workspace the job compiles, that the list of artifacts
 // it demands still describes the submodule, and that the demand actually fails
-// when an artifact is absent.
+// when an artifact is absent. The last two tests hold the same for
+// `SUITE_PLUGINS`, the plugins every suite job builds.
 
+use crate::common::{make_expand, suite};
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -48,7 +55,9 @@ const NOT_PORTABLE: &[&str] = &["polars", "arrow", "vulkan", "egui", "wayland"];
 /// holds no crate.
 fn package_name(dir: &str) -> Option<String> {
     let text = fs::read_to_string(repo_root().join("plugins").join(dir).join("Cargo.toml")).ok()?;
-    let line = text.lines().find(|l| l.trim_start().starts_with("name = "))?;
+    let line = text
+        .lines()
+        .find(|l| l.trim_start().starts_with("name = "))?;
     Some(line.split('"').nth(1)?.to_string())
 }
 
@@ -173,9 +182,7 @@ fn the_demanded_artifacts_describe_the_submodule() {
         let stem = artifact
             .strip_prefix("target/release/libelle_")
             .and_then(|s| s.strip_suffix(".so"))
-            .unwrap_or_else(|| {
-                panic!("`{artifact}` is not a `target/release/libelle_*.so` path")
-            });
+            .unwrap_or_else(|| panic!("`{artifact}` is not a `target/release/libelle_*.so` path"));
 
         // Cargo names a cdylib after the package, with `-` as `_`, unless the
         // crate overrides it with `[lib] name`. The directory is the package
@@ -258,5 +265,101 @@ fn the_artifact_assertion_rejects_an_empty_set() {
         !ok,
         "`plugins-verify` passed while demanding no artifacts at all, which is \
          what a missing `plugins/` checkout looks like:\n{output}"
+    );
+}
+
+/// The `X` of every `(import "plugin/X")` in a language-suite file.
+fn plugins_the_language_suite_imports() -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    for path in suite("tests/lang") {
+        let text = fs::read_to_string(repo_root().join(&path))
+            .unwrap_or_else(|e| panic!("read {path}: {e}"));
+        for rest in text.split("(import \"plugin/").skip(1) {
+            if let Some((name, _)) = rest.split_once('"') {
+                out.insert(name.to_string());
+            }
+        }
+    }
+    out
+}
+
+// A language-suite file that imports a plugin gates itself when the import
+// fails, and the suite jobs build only what `SUITE_PLUGINS` names. A plugin
+// missing from that list is built by no suite job, so its file skips on every
+// build and the run stays green. A name the suite no longer imports costs every
+// suite job a build for nothing. docs/analysis/ci.md owns the argument.
+//
+// The counter-factual: this was the state of websocket.lisp, whose loopback
+// test ran in no suite job because no suite job built `plugin/hash`.
+#[test]
+fn every_plugin_the_language_suite_imports_is_a_suite_plugin() {
+    let imported = plugins_the_language_suite_imports();
+    assert!(
+        imported.contains("hash"),
+        "the read of the language suite's plugin imports found only \
+         {imported:?}; websocket.lisp imports plugin/hash, so the read is broken"
+    );
+    let built: BTreeSet<String> = make_expand("SUITE_PLUGINS")
+        .split_whitespace()
+        .map(str::to_string)
+        .collect();
+
+    let unbuilt: Vec<&String> = imported.difference(&built).collect();
+    assert!(
+        unbuilt.is_empty(),
+        "language-suite files import these plugins, which `SUITE_PLUGINS` does \
+         not name, so no suite job builds them and their files skip on every \
+         build: {unbuilt:?}"
+    );
+    let unused: Vec<&String> = built.difference(&imported).collect();
+    assert!(
+        unused.is_empty(),
+        "`SUITE_PLUGINS` names these plugins, which no language-suite file \
+         imports, so every suite job builds them for nothing: {unused:?}"
+    );
+
+    if repo_root().join("plugins/Cargo.toml").exists() {
+        for name in &built {
+            assert_eq!(
+                package_name(name).as_deref(),
+                Some(format!("elle-{name}").as_str()),
+                "`SUITE_PLUGINS` names `{name}`, which is not the package \
+                 plugins/{name}/Cargo.toml declares"
+            );
+        }
+    }
+}
+
+// The suite plugins get the artifact assertion `plugins-verify` gives the
+// portable set, for the same reason: a suite file that cannot import its
+// plugin skips, so the build step is the only thing that can report a plugin
+// that did not build. The assertion must fail on a missing artifact and on an
+// empty list, and pass over a file that exists.
+#[test]
+fn the_suite_plugin_assertion_fails_on_a_missing_plugin() {
+    let (ok, output) = run_make(
+        "suite-plugins-verify",
+        &["SUITE_PLUGIN_SO=target/release/libelle_never_built.so"],
+    );
+    assert!(
+        !ok,
+        "`suite-plugins-verify` passed with an artifact that does not \
+         exist:\n{output}"
+    );
+    assert!(
+        output.contains("libelle_never_built.so"),
+        "the failure does not name the missing artifact:\n{output}"
+    );
+
+    let (ok, output) = run_make("suite-plugins-verify", &["SUITE_PLUGIN_SO="]);
+    assert!(
+        !ok,
+        "`suite-plugins-verify` passed while demanding no artifacts:\n{output}"
+    );
+
+    let (ok, output) = run_make("suite-plugins-verify", &["SUITE_PLUGIN_SO=Makefile"]);
+    assert!(
+        ok,
+        "`suite-plugins-verify` failed over an artifact that exists:\n{output}"
     );
 }
