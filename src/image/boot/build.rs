@@ -1,4 +1,4 @@
-// audited: 2026-10-07
+// audited: 2026-10-12
 //! Assemble a booted instance's boot state as one immutable struct, the root
 //! a boot image is dumped from.
 //!
@@ -20,8 +20,8 @@ use crate::value::{build, TableKey, Value};
 use super::super::ImageError;
 use super::{key, sources_digest};
 
-/// The boot root struct: the source digest, the two export structs, and the
-/// macro table.
+/// The boot root struct: the source digest, the two export structs, the macro
+/// table, and the encoded compile registries.
 pub(super) fn root(
     heap: &mut FiberHeap,
     symbols: &mut SymbolTable,
@@ -41,6 +41,7 @@ pub(super) fn root(
     }
     let digest = build::string(heap, sources_digest(), region);
     let macros = macro_table(heap, symbols, cctx, region);
+    let compiler = super::compiler::value(heap, symbols, cctx, region);
     Ok(structure(
         heap,
         symbols,
@@ -49,6 +50,7 @@ pub(super) fn root(
             (key::CORE, exports.core),
             (key::STDLIB, exports.stdlib),
             (key::MACROS, macros),
+            (key::COMPILER, compiler),
         ],
         region,
     ))

@@ -1,6 +1,6 @@
 // audited: 2026-10-12
-//! The boot configuration: dump a booted instance's exports and macros as one
-//! image, and install one into a fresh instance.
+//! The boot configuration: dump a booted instance's exports, macros and
+//! compile registries as one image, and install one into a fresh instance.
 //!
 //! docs/impl/image/boot.md
 //!
@@ -11,7 +11,6 @@
 
 mod build;
 mod cache;
-#[allow(dead_code)]
 mod compiler;
 mod install;
 #[cfg(test)]
@@ -20,12 +19,14 @@ mod tests;
 use std::path::{Path, PathBuf};
 
 use crate::hir::region::RuntimeRegion;
+use crate::pipeline::CompileCtx;
 use crate::symbol::SymbolTable;
 use crate::syntax::Expander;
 use crate::value::fiberheap::FiberHeap;
 use crate::value::{TableKey, Value};
 
 use super::ImageError;
+use compiler::Registries;
 
 pub(crate) use cache::store;
 
@@ -36,6 +37,7 @@ mod key {
     pub(super) const CORE: &str = "core";
     pub(super) const STDLIB: &str = "stdlib";
     pub(super) const MACROS: &str = "macros";
+    pub(super) const COMPILER: &str = "compiler";
     pub(super) const PARAMS: &str = "params";
     pub(super) const OPTIONAL: &str = "optional";
     pub(super) const REST: &str = "rest";
@@ -90,7 +92,7 @@ pub fn sources_digest() -> String {
 /// A hydrated boot image, installed as a process root and ready for a fresh
 /// instance to read its pieces out of.
 ///
-/// The three fields are read out of the root struct once, here, rather than on
+/// The value fields are read out of the root struct once, here, rather than on
 /// every question: a borrow of the macro table is then the `Boot`'s, which is
 /// the region's lifetime rather than a temporary's.
 #[derive(Debug)]
@@ -103,6 +105,9 @@ pub struct Boot {
     stdlib: Value,
     /// The macro table: each macro's name to its entry struct.
     macros: Value,
+    /// The compile registries `:compiler` decoded to, until the install moves
+    /// them into a compile context.
+    registries: Option<Registries>,
     /// The region the pages were mapped into, kept for the free a refused
     /// install owes.
     region: RuntimeRegion,
@@ -137,6 +142,15 @@ impl Boot {
     ) {
         install::macros(heap, self, expander, symbols);
         expander.raise_scope_counter(self.scope_watermark);
+    }
+
+    /// Move the compile registries the image carries into `cctx`, replacing
+    /// its own (docs/impl/image/boot.md). They move rather than copy, so a
+    /// second call finds nothing and leaves `cctx` alone.
+    pub(crate) fn install_registries(&mut self, cctx: &mut CompileCtx, symbols: &mut SymbolTable) {
+        if let Some(registries) = self.registries.take() {
+            registries.restore(cctx, symbols);
+        }
     }
 }
 
@@ -175,16 +189,18 @@ pub fn hydrate_path(
 ) -> Result<Boot, ImageError> {
     let hydrated = super::hydrate_path(heap, symbols, path)?;
     let nil_field = |name| field(hydrated.root, name).unwrap_or(Value::NIL);
-    let boot = Boot {
+    let mut boot = Boot {
         root: hydrated.root,
         core: nil_field(key::CORE),
         stdlib: nil_field(key::STDLIB),
         macros: nil_field(key::MACROS),
+        registries: None,
         region: hydrated.region,
         scope_watermark: hydrated.scope_watermark,
     };
     match boot.check(symbols) {
-        Ok(()) => {
+        Ok(registries) => {
+            boot.registries = Some(registries);
             crate::value::arena::register_process_root_region(heap, boot.region);
             Ok(boot)
         }
@@ -199,8 +215,9 @@ pub fn hydrate_path(
 
 impl Boot {
     /// Whether this image describes the sources this binary carries, and holds
-    /// the four fields an install reads.
-    fn check(&self, symbols: &SymbolTable) -> Result<(), ImageError> {
+    /// the five fields an install reads. Answers the compile registries, which
+    /// decoding `:compiler` is the only way to check.
+    fn check(&self, symbols: &SymbolTable) -> Result<Registries, ImageError> {
         let corrupt = |what: &str| Err(ImageError::Corrupt(what.into()));
         let Some(found) = field_text(self.root, key::SOURCES) else {
             return corrupt("a boot image whose root carries no source digest");
@@ -218,14 +235,16 @@ impl Boot {
         if self.macros.as_struct().is_none() {
             return corrupt("a boot image whose macro table is not a struct");
         }
-        install::check_names(self, symbols)
+        install::check_names(self, symbols)?;
+        compiler::read(self.root)
     }
 }
 
 /// Dump `cctx`'s boot state to `path`, atomically.
 ///
-/// The graph is the two export structs and the macro table, under a digest of
-/// the sources they came from. The aggregate is assembled in a scratch region
+/// The graph is the two export structs, the macro table and the encoded
+/// compile registries, under a digest of the sources they came from. The
+/// aggregate is assembled in a scratch region
 /// dropped either way: it names values the instance owns and takes no
 /// reference to them, exactly as the dumper's own scratch does.
 pub(crate) fn dump(

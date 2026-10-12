@@ -1,8 +1,9 @@
-// audited: 2026-09-28
+// audited: 2026-10-12
 //! The dispatch-wrapper registry: each unit's wrappers by name, so a later unit's call to one monomorphizes too.
 //!
 //! docs/impl/dissolution.md
 //! docs/impl/stdlib-cache.md
+//! docs/impl/image/boot.md
 
 use super::*;
 
@@ -69,39 +70,40 @@ impl DispatchWrapperRegistry {
                 .collect(),
         });
     }
-    /// Snapshot this registry for the stdlib disk cache. SymbolIds are
-    /// per-process; names travel instead, re-interned on load. `TyId` is a
+    /// Snapshot this registry for the stdlib disk cache and the boot image,
+    /// in name order. Names travel and are re-interned on load. `TyId` is a
     /// well-known `TypeInterner` constant (stable across processes).
+    ///
+    /// The order is the name's, not the map's: a `HashMap` seeds its iteration
+    /// order per process, and one registry must encode one way in every one.
     pub(crate) fn to_stored(&self, symbols: &crate::symbol::SymbolTable) -> StoredDispatchRegistry {
-        StoredDispatchRegistry {
-            by_name: self
-                .by_name
-                .iter()
-                .map(|(name, rw)| {
-                    (
-                        symbols.name(*name).unwrap_or("").to_string(),
-                        StoredRegWrapper {
-                            arity: rw.arity,
-                            arms: rw
-                                .arms
-                                .iter()
-                                .map(|a| StoredRegArm {
-                                    ty: a.ty.0,
-                                    native_name: symbols
-                                        .name(a.native_name)
-                                        .unwrap_or("")
-                                        .to_string(),
-                                    skip: a.skip,
-                                })
-                                .collect(),
-                        },
-                    )
-                })
-                .collect(),
-        }
+        let mut by_name: Vec<(String, StoredRegWrapper)> = self
+            .by_name
+            .iter()
+            .map(|(name, rw)| {
+                (
+                    symbols.name(*name).unwrap_or("").to_string(),
+                    StoredRegWrapper {
+                        arity: rw.arity,
+                        arms: rw
+                            .arms
+                            .iter()
+                            .map(|a| StoredRegArm {
+                                ty: a.ty.0,
+                                native_name: symbols.name(a.native_name).unwrap_or("").to_string(),
+                                skip: a.skip,
+                            })
+                            .collect(),
+                    },
+                )
+            })
+            .collect();
+        by_name.sort_by(|a, b| a.0.cmp(&b.0));
+        StoredDispatchRegistry { by_name }
     }
     /// Restore a registry snapshot into this one (used by the stdlib disk
-    /// cache load path; re-interns names in the loading process's table).
+    /// cache load and the boot image install; re-interns names in the loading
+    /// process's table).
     pub(crate) fn restore(
         &mut self,
         stored: StoredDispatchRegistry,
@@ -129,7 +131,7 @@ impl DispatchWrapperRegistry {
 }
 
 /// Serializable snapshot of [`DispatchWrapperRegistry`] for the stdlib disk
-/// cache. Names (not per-process `SymbolId`s) travel; re-interned on load.
+/// cache and the boot image. Names travel; re-interned on load.
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 pub(crate) struct StoredDispatchRegistry {
     pub(crate) by_name: Vec<(String, StoredRegWrapper)>,

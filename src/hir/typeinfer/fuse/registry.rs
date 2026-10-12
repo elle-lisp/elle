@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-12
 //! The per-instance registry that carries an inlineable function body from the
 //! unit that defines it to every later unit.
 //!
@@ -21,8 +21,9 @@ use super::*;
 /// pattern mirrors `monomorphize::DispatchWrapperRegistry`.
 ///
 /// A `FnFragment` is closed over its own bindings, so the registry is plain data:
-/// it snapshots to the stdlib disk cache and restores whole, and a cache hit
-/// inlines the set a stdlib compile records rather than a subset of it.
+/// it snapshots to the stdlib disk cache and the boot image and restores whole,
+/// and a cache hit or an image boot inlines the set a stdlib compile records
+/// rather than a subset of it.
 #[derive(Default)]
 pub struct FnInlineRegistry {
     pub(crate) by_name: FxHashMap<SymbolId, FnFragment>,
@@ -36,21 +37,26 @@ impl FnInlineRegistry {
         self.by_name.entry(name).or_insert(f);
     }
 
-    /// Snapshot the registry for the stdlib disk cache. Ids are name hashes and
-    /// cross unchanged (docs/impl/symbol.md); the spellings ride alongside so
-    /// the loading instance can re-intern them into its own display memo.
+    /// Snapshot the registry for the stdlib disk cache and the boot image, in
+    /// name order. Ids are name hashes and cross unchanged
+    /// (docs/impl/symbol.md); the spellings ride alongside so the loading
+    /// instance can re-intern them into its own display memo.
+    ///
+    /// The order is the name's, not the map's, so one registry encodes one way
+    /// whatever order its entries were recorded in.
     pub(crate) fn to_stored(&self, symbols: &crate::symbol::SymbolTable) -> StoredFnInlineRegistry {
-        StoredFnInlineRegistry {
-            by_name: self
-                .by_name
-                .iter()
-                .map(|(name, f)| (symbols.name(*name).unwrap_or("").to_string(), f.clone()))
-                .collect(),
-        }
+        let mut by_name: Vec<(String, FnFragment)> = self
+            .by_name
+            .iter()
+            .map(|(name, f)| (symbols.name(*name).unwrap_or("").to_string(), f.clone()))
+            .collect();
+        by_name.sort_by(|a, b| a.0.cmp(&b.0));
+        StoredFnInlineRegistry { by_name }
     }
 
-    /// Restore a snapshot into this registry (stdlib disk cache load path);
-    /// re-interns names in the loading process's table.
+    /// Restore a snapshot into this registry (the stdlib disk cache load and
+    /// the boot image install); re-interns names in the loading process's
+    /// table.
     pub(crate) fn restore(
         &mut self,
         stored: StoredFnInlineRegistry,
@@ -162,7 +168,8 @@ impl<'a> FnResolver<'a> {
     }
 }
 
-/// Serializable snapshot of [`FnInlineRegistry`] for the stdlib disk cache.
+/// Serializable snapshot of [`FnInlineRegistry`] for the stdlib disk cache and
+/// the boot image.
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 pub(crate) struct StoredFnInlineRegistry {
     pub(crate) by_name: Vec<(String, FnFragment)>,

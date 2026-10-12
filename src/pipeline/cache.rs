@@ -1,4 +1,4 @@
-// audited: 2026-10-07
+// audited: 2026-10-12
 // src/pipeline/AGENTS.md
 //! `CompileCtx`: one instance's compile-time state.
 //!
@@ -73,13 +73,15 @@ pub struct CompileCtx {
     projections: HashMap<String, Option<HashMap<String, Signal>>>,
     /// Container-dispatch wrappers collected across every compile in this
     /// instance, keyed by name. Populated when `stdlib.lisp` compiles (its
-    /// `push`/`put`), consumed by every later unit so a user→stdlib wrapper call
+    /// `push`/`put`) or restored from a boot image, consumed by every later
+    /// unit so a user→stdlib wrapper call
     /// monomorphizes as an intra-unit one does (`monomorphize.rs`).
     /// Compile-time-only state: it drives an HIR rewrite and never reaches the VM.
     dispatch_wrappers: DispatchWrapperRegistry,
     /// Cross-unit-inlineable function templates collected across every compile in
     /// this instance, keyed by name. Populated when `stdlib.lisp` compiles (its
-    /// `inc`/`dec`/… bodies), consumed by every later unit so a user→stdlib
+    /// `inc`/`dec`/… bodies) or restored from a boot image, consumed by every
+    /// later unit so a user→stdlib
     /// `(map inc xs)` inlines the stdlib body as a same-unit named fn would
     /// (`fuse.rs`). Like
     /// `dispatch_wrappers`, compile-time-only state that never reaches the VM.
@@ -173,12 +175,12 @@ impl CompileCtx {
     ///
     /// The primitives still register on the macro VM, because a native-fn is a
     /// process-local id no image carries; everything else is installed from the
-    /// image. `symbols` is the instance's own table, which the hydration has
-    /// already taught the image's spellings — the throwaway table `on_vm` uses
-    /// would know none of them.
+    /// image, the compile registries included. `symbols` is the instance's own
+    /// table, which the hydration has already taught the image's spellings —
+    /// the throwaway table `on_vm` uses would know none of them.
     pub(crate) fn from_boot_image(
         heap_ptr: *mut crate::value::fiberheap::FiberHeap,
-        boot: &crate::image::boot::Boot,
+        boot: &mut crate::image::boot::Boot,
         symbols: &mut SymbolTable,
     ) -> Self {
         let trace = crate::trace::boot();
@@ -194,7 +196,7 @@ impl CompileCtx {
         boot.install_macros(unsafe { &mut *heap_ptr }, &mut expander, symbols);
         crate::phase!(trace, "boot", t, "image-core-and-macros");
         vm.set_symbols(std::ptr::null_mut());
-        CompileCtx {
+        let mut ctx = CompileCtx {
             vm,
             expander,
             meta,
@@ -205,7 +207,17 @@ impl CompileCtx {
                 core: boot.core_exports(),
                 ..BootExports::default()
             },
-        }
+        };
+        let t = std::time::Instant::now();
+        boot.install_registries(&mut ctx, symbols);
+        crate::phase!(trace, "boot", t, "image-registries");
+        ctx
+    }
+
+    /// The instance's two cross-unit compile registries, read-only — the pair
+    /// a boot dump snapshots (docs/impl/image/boot.md).
+    pub(crate) fn compile_registries(&self) -> (&DispatchWrapperRegistry, &FnInlineRegistry) {
+        (&self.dispatch_wrappers, &self.fn_inline)
     }
 
     /// The instance's two cross-unit compile registries, borrowed together (they

@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-10-12
 //! `RuntimeCore`: the per-instance owner bundle, and the boot that fills it.
 //!
 //! docs/impl/region/rules.md
@@ -132,9 +132,9 @@ impl RuntimeCore {
         // value name-resolution resolve in THIS instance's own table. Mirrors
         // `set_compile_ctx` below.
         vm.set_symbols(&mut *symbols as *mut SymbolTable);
-        let boot = hydrate_boot_image(&mut heap, &mut symbols, image);
+        let mut boot = hydrate_boot_image(&mut heap, &mut symbols, image);
         // The macro VM shares this instance's heap (see `bare`'s heap comment).
-        let mut compile = Box::new(match &boot {
+        let mut compile = Box::new(match &mut boot {
             Some(boot) => CompileCtx::from_boot_image(heap_ptr, boot, &mut symbols),
             None => CompileCtx::new_with_heap(heap_ptr),
         });
