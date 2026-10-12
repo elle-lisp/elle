@@ -115,7 +115,11 @@
                                       (core:apply-writes db
                                       (plan db chain:path v st link-of)))))
             id (mesh:broadcast db accepted ack)]
-        (core:notify db (fn [soul] (mesh:touch db soul)))
+        (let [[ok? err] (protect (core:notify db
+                                 (fn [soul] (mesh:touch db soul))))]
+          (unless ok?
+            (when ack (mesh:forget db id))
+            (error err)))
         (when ack (mesh:await-ack db id ack)))))
 
   (defn chain-put [chain v &named ack]

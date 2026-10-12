@@ -7,7 +7,8 @@
 ## Loaded via:
 ##   (def mesh ((import "std/gun/mesh") :core core :wire wire :peer peer))
 ##
-## Exports: {:fetch :touch :broadcast :await-ack :serve :connect :peers}
+## Exports: {:fetch :touch :broadcast :forget :await-ack :serve :connect
+##           :peers}
 ##
 ## A wait is a record of the peers a get or a put went to, and a latch that
 ## opens when every one answered or left (a get), or when the first one
@@ -224,6 +225,11 @@
             (send-to p msg))))
       id))
 
+  (defn forget [c id]
+    "Drop the wait for the put id, which nobody will await."
+    (del c:pending id)
+    nil)
+
   (defn await-ack [c id seconds]
     "Wait for the first ack of the put id. Raises :no-ack when none comes
      within seconds, and :peer-error when the first ack says the merge failed."
@@ -253,6 +259,7 @@
   {:fetch fetch
    :touch touch
    :broadcast broadcast
+   :forget forget
    :await-ack await-ack
    :serve serve
    :connect connect
