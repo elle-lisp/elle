@@ -1,6 +1,6 @@
 # The image file
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-20 -->
 
 The byte layout of an image, and the fingerprint that decides whether this
 binary may map it.
@@ -176,9 +176,12 @@ neither records zero for both.
 A static slot collides harmlessly, because a slot is a key within one function.
 Its watermark exists for parity: an image boot must emit the bytecode a source
 boot emits ([boot.md](boot.md)). A source boot compiles user code with the
-counter where the boot's own compiles left it. So the header records the
-dumping process's counter itself, not the highest slot the body holds. The
-counter is never lower, so the rule also clears every slot in the body.
+counter where the boot's own compiles left it, so a boot image records that
+mark rather than the highest slot its body holds. The mark is never lower, so
+it also clears every slot in the body. It is taken once, when the boot ends, so
+two dumps of one boot state write one file whatever compiles between them. An
+image of any other graph records zero, because no compile waits to start from
+its counter.
 
 Hydration raises the process's parameter counter and static-region counter to
 their watermarks, and answers with the scope watermark for the loader that owns

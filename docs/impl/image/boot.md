@@ -1,6 +1,6 @@
 # Booting from an image
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-20 -->
 
 What the boot configuration carries, how `elle image dump-boot` writes it, and
 how a fresh instance starts from it.
@@ -181,10 +181,10 @@ where the first left it.
 
 Two things make the dumps agree. Each stdlib closure carries its body
 fragment in its payload ([graft.md](../graft.md)), and the image's header
-carries the static-region watermark ([format.md](format.md)). The warm cache
-stores as soon as the boot ends, and `elle image dump-boot` dumps as soon as it
-does, so the watermark is the counter a source boot hands its first user
-compile.
+carries the static-region watermark ([format.md](format.md)). The compile
+context records the counter where the boot ends, as it installs the stdlib
+exports, and the boot dump writes that mark. So the watermark is the counter a
+source boot hands its first user compile, however late the dump runs.
 
 The proof is a `--trace=boot` start that has to print an `image-hydrate` mark.
 Without it the target reports on a source boot: a binary that ignored

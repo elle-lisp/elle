@@ -1,6 +1,6 @@
 # Landing order and test plan
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-20 -->
 
 What lands in which order, and the pins each milestone must land with.
 
@@ -100,10 +100,10 @@ Then the image milestones:
      hydrated closure grafts as a compiled one does
      ([graft.md](../graft.md)) and a user file compiles to the same
      instruction stream under both boots;
-   - the bytecode half of the parity gate — the header records the dumping
-     process's static-region counter and hydration raises the counter to it,
-     so `make bytecode-parity` finds every corpus file compiling to one
-     bytecode under either boot ([boot.md](boot.md)).
+   - the bytecode half of the parity gate — a boot image records the
+     static-region counter where its boot ended, and hydration raises the
+     counter to it, so `make bytecode-parity` finds every corpus file
+     compiling to one bytecode under either boot ([boot.md](boot.md)).
 
    Still to land: the embedded blob, per-worker hydration for `sys/spawn`,
    and the hydrated-region interval table. The interval table keeps
@@ -293,8 +293,8 @@ Then the image milestones:
   writes one.
 - Compile parity: a call to a stdlib function grafts under image boot as
   under source boot, and the same user file compiles to the same instruction
-  stream under both — the acceptance gate for the body fragment a hydrated
-  payload carries. The comparison reads each code object's opcodes and length
+  stream under both. This is the acceptance gate for the body fragment a
+  hydrated payload carries. The comparison reads each code object's opcodes and length
   rather than its bytes. A static region id in an operand comes from a
   process-wide mint ([the region model](../region/model.md)), which a stdlib
   compile advances, so two boots in one process differ in their operands while
@@ -308,10 +308,10 @@ Then the image milestones:
   `image-hydrate` mark. A fixture that fuses a `map` and reads a qualified key
   holds the same in the Rust suite. The counter-factual is a hydration that
   leaves the static-region counter alone: every program compiles, fuses and
-  runs as before, and every slot in its bytecode moves. The header's watermark
-  is the dumping process's counter, so a body that holds no code still records
-  it; the counter-factual there is a watermark taken from the body's own
-  highest slot.
+  runs as before, and every slot in its bytecode moves. A boot image's
+  watermark is the mark its boot left, so two boot dumps with a compile between
+  them still write one file; the counter-factual is the live counter, which
+  that compile moves. An image of any other graph records zero.
 - Tier parity: a hot stdlib function reaches the JIT under image boot
   exactly as under source boot — the hydrated payload's own LIR feeds
   `submit_jit_task` and the compiled result executes.
