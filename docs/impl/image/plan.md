@@ -95,11 +95,14 @@ Then the image milestones:
      under an image boot as under a source boot;
    - compiler-state persistence — the inline and dispatch-wrapper registries
      cross as one bytes field of the root ([boot.md](boot.md)), so an image
-     boot inlines and monomorphizes user code as a source boot does.
+     boot inlines and monomorphizes user code as a source boot does;
+   - the bytecode half of the parity gate — the header records the dumping
+     process's static-region counter and hydration raises the counter to it,
+     so `make bytecode-parity` finds every corpus file compiling to one
+     bytecode under either boot ([boot.md](boot.md)).
 
-   Still to land: the embedded blob, per-worker hydration for `sys/spawn`, the
-   hydrated-region interval table, and the bytecode half of the parity gate.
-   The interval table keeps `region_of_ptr`
+   Still to land: the embedded blob, per-worker hydration for `sys/spawn`, and
+   the hydrated-region interval table. The interval table keeps `region_of_ptr`
    off the probe ladder ([image.md](../image.md) § "Pointer resolution must not
    regress"); the regression it prevents needs a region the size of stdlib to
    show.
@@ -292,9 +295,17 @@ Then the image milestones:
   place. Two registries that hold one set of entries encode to one byte
   string, whatever order their hash maps iterate in. A `:compiler` field that
   does not decode refuses the image as corrupt.
-- Compile parity: compile the same user file under image boot and source
-  boot and assert byte-identical bytecode — the acceptance gate for the
-  persisted compiler state (inline fragments, dispatch wrappers).
+- Compile parity: every corpus file and the standard library write one
+  `--dump=bytecode` under an image boot and under a source boot, each in a
+  process of its own (`make bytecode-parity`, which `make smoke-boot-image`
+  runs first). The target refuses to compare until the image start prints its
+  `image-hydrate` mark. A fixture that fuses a `map`, monomorphizes a `push`
+  and reads a qualified key holds the same in the Rust suite. The
+  counter-factual is a hydration that leaves the static-region counter alone:
+  every program compiles, fuses and runs as before, and every slot in its
+  bytecode moves. The header's watermark is the dumping process's counter, so a
+  body that holds no code still records it; the counter-factual there is a
+  watermark taken from the body's own highest slot.
 - Tier parity: a hot stdlib function reaches the JIT under image boot
   exactly as under source boot — the hydrated payload's own LIR feeds
   `submit_jit_task` and the compiled result executes.

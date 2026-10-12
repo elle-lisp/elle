@@ -1,6 +1,6 @@
 # The image file
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-12 -->
 
 The byte layout of an image, and the fingerprint that decides whether this
 binary may map it.
@@ -23,7 +23,7 @@ One image is one file, or one blob embedded in a larger one:
 | name table | the spellings of the symbols and keywords in the body, one length-prefixed string each, sorted by name |
 | file table | the source-file names the body's spans point at, one length-prefixed string each, sorted by name — the file stream indexes it |
 | signal table | user-defined signal names in dump-time bit order |
-| watermarks | dump-time counters, carried in the header block: parameter id and hygiene scope id today, static-region mint and next signal bit with the milestones that need them |
+| watermarks | dump-time counters, carried in the header block: parameter id, hygiene scope id and static-region mint today, next signal bit with the milestone that needs it |
 | manifest | the bindings an image installs. It is body data, not a section: an export struct names each binding with a keyword key and each value answers its own signal, arity and doc ([boot.md](boot.md) owns the boot configuration's root struct). Dependency fingerprints are header fields, and an image with an empty dependency list records none |
 | side-stream | `SendValue`-encoded mutable bindings, present only where the dump policy permits mutables |
 
@@ -71,10 +71,9 @@ spelling and one per heap value its `ValueConst` instructions load. The pages
 that hold the records carry no slot at all, so they stay clean in a mapping.
 
 **Static region slots** baked into bytecode operands are opaque per-function
-keys; they collide harmlessly across functions. The loader bumps the global
-mint counter past the image watermark anyway, so uniqueness diagnostics stay
-truthful. Parameter ids, hygiene scopes, and signal bits get the same
-watermark treatment.
+keys, so a hydrated function keeps the slots it was compiled with, and no slot
+is relocated. The counter that mints them still moves at hydration, for the
+reason § "The watermarks bound what a fresh instance may mint" gives.
 
 ## The name table carries spellings, not hashes
 
@@ -161,18 +160,29 @@ edge into that region is counted like any other.
 
 ## The watermarks bound what a fresh instance may mint
 
-Two counters reach the body, and both are process-local. An expander mints
-hygiene scope ids from one; a process-wide counter mints parameter ids from
-zero. Each is compared for equality and nothing else, so an instance minting
-from its own start hands out ids the body already uses. Two unrelated scopes
-would then compare equal, and a new parameter would share `*stdin*`'s id.
+Three counters reach the body, and all three are process-local. An expander
+mints hygiene scope ids from one. A process-wide counter mints parameter ids
+from zero, and another mints static region slots, the region operands the
+lowerer writes into bytecode.
 
-The header therefore records one watermark per counter: one past the highest
-value the body carries. The scope watermark masks the intro bit off first,
-since intro scopes and ordinary ones come from the same counter. Hydration
-raises the process's parameter counter past its own watermark, and answers with
-the scope watermark for the loader that owns an expander. A body carrying
+A scope or a parameter id is compared for equality and nothing else, so an
+instance minting from its own start hands out ids the body already uses. Two
+unrelated scopes would then compare equal, and a new parameter would share
+`*stdin*`'s id. The header therefore records one past the highest value the
+body carries for each. The scope watermark masks the intro bit off first, since
+intro scopes and ordinary ones come from the same counter. A body carrying
 neither records zero for both.
+
+A static slot collides harmlessly, because a slot is a key within one function.
+Its watermark exists for parity: an image boot must emit the bytecode a source
+boot emits ([boot.md](boot.md)). A source boot compiles user code with the
+counter where the boot's own compiles left it. So the header records the
+dumping process's counter itself, not the highest slot the body holds. The
+counter is never lower, so the rule also clears every slot in the body.
+
+Hydration raises the process's parameter counter and static-region counter to
+their watermarks, and answers with the scope watermark for the loader that owns
+an expander.
 
 ## Fingerprint: regenerate, never migrate
 

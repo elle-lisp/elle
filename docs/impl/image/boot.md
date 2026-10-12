@@ -144,7 +144,7 @@ A boot image hydrates into the instance being built, before its compile context
 exists, and installs into the same structures a source boot writes:
 
 1. Hydrate the image into this instance's heap, replaying the name table into
-   its display memo and raising its parameter counter
+   its display memo and raising its parameter and static-region counters
    ([image.md](../image.md) § Hydration).
 2. Check the digest against this binary's sources, and decode `:compiler`.
    Fall back to a source boot when either fails.
@@ -207,10 +207,24 @@ hydrates what it stored, and then runs the corpus with every `elle test` batch
 pointed at that directory. A pull request gets the same run from the `Boot
 Image Tests` job ([ci.md](../../analysis/ci.md)).
 
+The target runs `make bytecode-parity` first, the compile half of the parity
+[image.md](../image.md) demands. It writes every corpus file's
+`--dump=bytecode` once under a source boot and once under an image boot, and
+fails on any difference. Each dump runs in a process of its own, because the
+static-region counter is process-global: a second boot in one process starts
+where the first left it.
+
+Two things make the dumps agree. The image carries the compile registries
+(§ "The compile registries cross as bytes"), and its header carries the
+static-region watermark ([format.md](format.md)). The warm cache stores as soon
+as the boot ends, and `elle image dump-boot` dumps as soon as it does, so the
+watermark is the counter a source boot hands its first user compile.
+
 The proof is a `--trace=boot` start that has to print an `image-hydrate` mark.
 Without it the target reports on a source boot: a binary that ignored
 `--boot-image=` would pass it, and so would an image every start refuses and
-replaces.
+replaces. The parity target asks for the same mark, or it would compare two
+source boots.
 
 The runner instance is the one that hydrates, so every corpus file is read,
 expanded and compiled against the image's macros and exports. A file's forms
@@ -226,12 +240,12 @@ Per-worker hydration is a milestone of its own ([plan.md](plan.md)).
 The two boot modes must be indistinguishable to running code, tiers included
 ([image.md](../image.md)). The tier half of that parity holds: a hydrated
 closure carries its LIR in its payload, so a hot stdlib function promotes to
-the JIT under either boot ([sealing.md](sealing.md)). The image carries the
-compile registries, so user code inlines and monomorphizes under either boot.
+the JIT under either boot ([sealing.md](sealing.md)). The compile half holds
+too: user code compiles to the same bytecode under either boot, and
+`make bytecode-parity` proves it over the corpus (§ The gate).
 
-Three things keep the default off ([plan.md](plan.md)):
+Two things keep the default off ([plan.md](plan.md)):
 
-- No gate proves that the two boots emit byte-identical user bytecode.
 - Pointer resolution has no interval table yet. Every reference count on a
   hydrated stdlib value walks the probe ladder and scans the page list of a
   region the size of stdlib ([image.md](../image.md)).
