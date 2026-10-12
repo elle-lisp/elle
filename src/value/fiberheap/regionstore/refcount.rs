@@ -310,21 +310,14 @@ impl RegionStore {
 
     /// Scan a HeapObject for cross-region Value refs and incref each.
     /// Called at allocation time to balance cascade decrefs at free time.
-    /// The callback is the OWNERSHIP predicate (`find_object_cross_refs`): the
-    /// resolved id must name a live region of THIS store that owns the pointer.
+    /// It resolves each pointer through `owning_region`, so the resolved id
+    /// must name a live region of THIS store that owns the pointer.
     /// A foreign-heap value (a compile-time-env constant, a parent-heap borrow)
     /// whose masked page-header bytes collide with a live local id is therefore
     /// never increfed or recorded, which keeps the table scan-symmetric.
     pub(super) fn incref_cross_region_refs(&mut self, obj: &HeapObject, own_id: u32) {
-        let page_size = self.pool.initial_page_size();
-        let valid_region = |rid: u32, ptr: *const ()| -> bool {
-            self.regions
-                .get(rid as usize)
-                .and_then(|s| s.as_ref())
-                .is_some_and(|e| e.pool.owns(ptr))
-        };
         let mut refs = Vec::new();
-        RegionPool::find_object_cross_refs(obj, own_id, page_size, &valid_region, &mut refs);
+        RegionPool::find_object_cross_refs(obj, own_id, &|p| self.owning_region(p), &mut refs);
         for rid in refs {
             // `find_object_cross_refs` filters `rid != 0`, so the wrap holds.
             if let Some(r) = RuntimeRegion::new(rid) {

@@ -93,12 +93,10 @@ pub(crate) unsafe fn write(base: *mut u8, region_id: u32, stamp: PageStamp, len:
 /// carries the [`PAGE_MAGIC`] and that alignment's log2. This handles
 /// variable-sized pages from geometric growth. The magic stops a smaller
 /// sub-alignment of a *large* page, whose masked base lands mid-page on object
-/// data, from reading as a false header. But the magic is only probabilistic.
-/// The authoritative resolver is `RegionStore::region_of_ptr`, which also
-/// requires the matched region to *own* the pointer. Callers that have the
-/// store (the RC-decision funnel) use that; this magic-only form serves the
-/// free-time cross-ref scan, where the `valid_region` filter screens the
-/// result.
+/// data, from reading as a false header. But the magic is only probabilistic,
+/// so a store screens this walk's answer by ownership.
+/// `RegionStore::region_of_ptr` and `RegionStore::owning_region` both require
+/// the matched region to *own* the pointer.
 ///
 /// # Safety
 /// `ptr` must point into a page allocated by a RegionPool with a valid
@@ -125,9 +123,8 @@ pub(crate) unsafe fn header_of_page_ptr(ptr: *const (), min_page_size: usize) ->
 /// real header for a page of exactly `size` bytes — its [`size_tag`] carries the
 /// [`PAGE_MAGIC`] and `log2(size)`. `None` when the bytes there are not such a
 /// header: a smaller sub-alignment of a larger page (mid-page object/inline data
-/// — the magic rejects it) or an unrelated page size. This is the single
-/// candidate-base test shared by [`header_of_page_ptr`]'s magic-only walk and
-/// `RegionStore::region_of_ptr`'s ownership-validated walk.
+/// — the magic rejects it) or an unrelated page size. The walk in
+/// [`header_of_page_ptr`] runs this test at each candidate base.
 ///
 /// # Safety
 /// Same contract as [`header_of_page_ptr`]: the masked base must be a readable
@@ -139,8 +136,8 @@ pub(crate) unsafe fn header_if_valid(addr: usize, size: usize) -> Option<(u32, P
 }
 
 /// Read just the region_id from the page header at a given pointer — the
-/// generation-blind probe for paths that must not generation-check (the
-/// free-time cascade scan; see docs/impl/region/generations.md).
+/// generation-blind probe behind `RegionStore::owning_region`, for paths that
+/// must not generation-check (docs/impl/region/generations.md).
 ///
 /// # Safety
 /// Same contract as [`header_of_page_ptr`].

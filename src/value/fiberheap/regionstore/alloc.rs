@@ -160,15 +160,8 @@ impl RegionStore {
     fn alloc_obj_raw(&mut self, id: u32, obj: HeapObject) -> Value {
         self.ensure_raw(id);
         if crate::config::get().has_trace("rc") {
-            let page_size = self.pool.initial_page_size();
-            let valid_region = |rid: u32, ptr: *const ()| -> bool {
-                self.regions
-                    .get(rid as usize)
-                    .and_then(|s| s.as_ref())
-                    .is_some_and(|e| e.pool.owns(ptr))
-            };
             let mut refs = Vec::new();
-            RegionPool::find_object_cross_refs(&obj, id, page_size, &valid_region, &mut refs);
+            RegionPool::find_object_cross_refs(&obj, id, &|p| self.owning_region(p), &mut refs);
             if !refs.is_empty() {
                 eprintln!(
                     "[trace:rc] alloc_obj({id}) xrefs={refs:?} tag={:?}",

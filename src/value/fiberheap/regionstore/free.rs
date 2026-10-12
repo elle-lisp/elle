@@ -17,7 +17,7 @@ impl RegionStore {
     /// frontier comes from each member's recorded `outgoing` edge table
     /// (docs/impl/region/ownership.md), so reclamation derefs **no** heap page. In
     /// debug builds an equivalence oracle also scans member contents
-    /// (`find_region_cross_refs` → `region_of_page_ptr`, which derefs each pointer's
+    /// (`find_region_cross_refs` → `owning_region`, which derefs each pointer's
     /// page) and asserts it matches the table. That scan must run while all member
     /// pages are still mapped, which the phase split guarantees:
     ///
@@ -27,7 +27,7 @@ impl RegionStore {
     ///    (docs/impl/region/ownership.md). Walking `owned_children` is Rust-side, so
     ///    collecting the subtree never derefs a heap page.
     /// 1. **Unindex** every still-dying member (take its entry out of `regions`, so
-    ///    `valid_region` reports it absent) while its pages stay mapped — the
+    ///    `owning_region` resolves its pages to no region) while its pages stay mapped — the
     ///    moved-out entry still owns them.
     /// 2. **Frontier** — walk every member's recorded `outgoing` table. A target still
     ///    indexed is a genuinely-**Shared** frontier ref to cascade. A target unindexed
@@ -181,8 +181,8 @@ impl RegionStore {
         }
         self.rescue_externally_referenced(&candidates, &mut dying);
         // Phase 1 — unindex every still-dying member, taking its entry out of
-        // `regions` (so `valid_region` reports it absent) while its pages stay
-        // mapped — the moved-out entry still owns them.
+        // `regions` (so `owning_region` resolves its pages to no region) while its
+        // pages stay mapped — the moved-out entry still owns them.
         let mut members: Vec<(RuntimeRegion, RegionEntry)> = Vec::new();
         for &(r, _) in &candidates {
             if !dying.contains(&r.get()) {
@@ -198,7 +198,7 @@ impl RegionStore {
         }
         // Phase 2 — build the cascade frontier from each member's RECORDED `outgoing`
         // edge table (docs/impl/region/ownership.md), NOT a content scan. A target
-        // unindexed in phase 1 (interior to the freed set) fails `valid_region` and
+        // unindexed in phase 1 (interior to the freed set) is no longer live, and
         // is dropped: reclaimed with the set, never cascaded. A target outside is a
         // genuinely-Shared frontier ref, pushed once per recorded reference. No phase
         // derefs a heap page to discover an edge.
@@ -207,16 +207,14 @@ impl RegionStore {
         // matches a one-time content scan of the same members. The scan derefs
         // target pages to classify them, so it runs here, while every member's pages
         // are still mapped. Any accounting drift then detonates at the free site.
-        #[cfg(debug_assertions)]
-        let page_size = self.pool.initial_page_size();
         let mut frontier: Vec<u32> = Vec::new();
         {
             // Recorded edges carry only region ids, so the frontier filter is
             // liveness (a member unindexed in phase 1 fails it — interior,
             // dropped). The oracle's content scan below re-derives edges from
-            // POINTERS, so its filter is the full OWNERSHIP predicate
-            // (`find_object_cross_refs`) — the same one the alloc funnel
-            // recorded with, keeping the two sides symmetric.
+            // POINTERS, so it resolves them by ownership (`owning_region`), the
+            // resolver the alloc funnel recorded with. That keeps the two sides
+            // symmetric.
             // A dying source's edges into live targets (rescued members included)
             // are retired from each target's `incoming` mirror right after the
             // frontier is built — the third maintenance site of the mirror
@@ -241,19 +239,10 @@ impl RegionStore {
             }
             #[cfg(debug_assertions)]
             {
-                let owning_region = |rid: u32, ptr: *const ()| -> bool {
-                    self.regions
-                        .get(rid as usize)
-                        .and_then(|s| s.as_ref())
-                        .is_some_and(|e| e.pool.owns(ptr))
-                };
+                let owner = |p| self.owning_region(p);
                 let mut scanned: Vec<u32> = Vec::new();
                 for (r, entry) in &members {
-                    scanned.extend(entry.pool.find_region_cross_refs(
-                        r.get(),
-                        page_size,
-                        &owning_region,
-                    ));
+                    scanned.extend(entry.pool.find_region_cross_refs(r.get(), &owner));
                 }
                 let mut recorded = frontier.clone();
                 recorded.sort_unstable();
@@ -279,7 +268,6 @@ impl RegionStore {
         // (executing) fiber is skipped — its region cannot be dying while it
         // runs.
         {
-            let page_size = self.pool.initial_page_size();
             let mut discharged: Vec<u32> = Vec::new();
             for (_, entry) in &members {
                 for obj in entry.pool.live_objects() {
@@ -307,28 +295,15 @@ impl RegionStore {
                         // would have dropped them. Resolved exactly as the parked
                         // signal below is, and skipping the payload's own region: that
                         // value leaves as the fiber's result.
-                        let protect = parked.protect.and_then(|v| {
-                            v.as_heap_ptr().map(|ptr| unsafe {
-                                crate::value::fiberheap::regionpool::region_of_page_ptr(
-                                    ptr, page_size,
-                                )
-                            })
-                        });
+                        let protect = parked
+                            .protect
+                            .and_then(|v| v.as_heap_ptr().map(|ptr| self.owning_region(ptr)));
                         for v in &parked.dues.owed {
                             let Some(ptr) = v.as_heap_ptr() else {
                                 continue;
                             };
-                            let rid = unsafe {
-                                crate::value::fiberheap::regionpool::region_of_page_ptr(
-                                    ptr, page_size,
-                                )
-                            };
-                            let owned_here = self
-                                .regions
-                                .get(rid as usize)
-                                .and_then(|s| s.as_ref())
-                                .is_some_and(|e| e.pool.owns(ptr));
-                            if rid > 1 && owned_here && protect != Some(rid) {
+                            let rid = self.owning_region(ptr);
+                            if rid > 1 && protect != Some(rid) {
                                 discharged.push(rid);
                             }
                         }
@@ -347,22 +322,12 @@ impl RegionStore {
                         // The parked non-terminal signal's park escape retain
                         // (EmitEscape / SuspendEscape), released at a resume
                         // that will never come. Resolve the value's region
-                        // exactly as the content scan does (page-header read +
-                        // ownership check); a foreign or immediate value
-                        // resolves to nothing.
+                        // exactly as the content scan does (`owning_region`); a
+                        // foreign or immediate value resolves to nothing.
                         if let Some((_, v)) = parked.signal {
                             if let Some(ptr) = v.as_heap_ptr() {
-                                let rid = unsafe {
-                                    crate::value::fiberheap::regionpool::region_of_page_ptr(
-                                        ptr, page_size,
-                                    )
-                                };
-                                let owned_here = self
-                                    .regions
-                                    .get(rid as usize)
-                                    .and_then(|s| s.as_ref())
-                                    .is_some_and(|e| e.pool.owns(ptr));
-                                if rid > 1 && owned_here {
+                                let rid = self.owning_region(ptr);
+                                if rid > 1 {
                                     discharged.push(rid);
                                 }
                             }

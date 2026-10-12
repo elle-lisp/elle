@@ -83,22 +83,21 @@ impl RegionStore {
         // scratch region's RC is explained by survivor edges plus the owner
         // references the transformer never released, and
         // `rc − internal_in_degree` is exactly the latter.
-        let page_size = self.pool.initial_page_size();
-        // Ownership-verified (`find_object_cross_refs`): a foreign pointer whose
+        // Resolved by ownership (`owning_region`): a foreign pointer whose
         // masked header bytes collide with a survivor id must not inflate that
         // survivor's in-degree.
-        let in_scope = |rid: u32, ptr: *const ()| -> bool {
-            surv_set.contains(&rid)
-                && self
-                    .regions
-                    .get(rid as usize)
-                    .and_then(|s| s.as_ref())
-                    .is_some_and(|e| e.pool.owns(ptr))
+        let in_scope = |ptr: *const ()| -> u32 {
+            let rid = self.owning_region(ptr);
+            if surv_set.contains(&rid) {
+                rid
+            } else {
+                0
+            }
         };
         let mut indeg: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
         for &(id, _gen) in &survivors {
             if let Some(e) = self.regions[id as usize].as_ref() {
-                for to in e.pool.find_region_cross_refs(id, page_size, &in_scope) {
+                for to in e.pool.find_region_cross_refs(id, &in_scope) {
                     *indeg.entry(to).or_insert(0) += 1;
                 }
             }

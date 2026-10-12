@@ -33,8 +33,8 @@ use crate::value::Value;
 mod header;
 
 #[cfg(test)]
-pub(crate) use header::header_of_page_ptr;
-pub(crate) use header::{header_if_valid, region_of_page_ptr, PageStamp, HEADER_SIZE};
+pub(crate) use header::header_if_valid;
+pub(crate) use header::{header_of_page_ptr, region_of_page_ptr, PageStamp, HEADER_SIZE};
 
 /// Upper bound on a region's geometrically-growing page size.
 ///
