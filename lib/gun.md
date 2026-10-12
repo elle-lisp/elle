@@ -1,6 +1,6 @@
 # gun
 
-<!-- audited: 2026-10-11 -->
+<!-- audited: 2026-10-12 -->
 
 A graph database in the shape of GUN: nodes merged field by field by HAM, on a memory or Redis store, joined to peers by WebSocket.
 
@@ -19,8 +19,9 @@ Called with no argument, the module has the memory store only and no mesh.
 `gun:redis-store` then raises
 `{:error :gun-error :reason :redis-not-configured}`, and `gun:serve` and
 `gun:connect` raise `:mesh-not-configured`. The Redis store needs the
-`std/redis` module as `:redis`, and the mesh needs the `std/websocket` module
-as `:websocket`:
+`std/redis` module as `:redis`. The mesh needs the `std/websocket` module as
+`:websocket`, built from the plugins that `(import "plugin/hash")` and
+`(import "plugin/random")` load:
 
 ```lisp
 (def gun ((import "std/gun")))
@@ -29,11 +30,14 @@ as `:websocket`:
   "The gun module, able to build a Redis store."
   ((import "std/gun") :redis ((import "std/redis"))))
 
-(defn gun-with-mesh []
+(defn gun-with-mesh [hash-plugin random-plugin]
   "The gun module, able to join peers."
   ((import "std/gun")
-   :websocket ((import "std/websocket") :hash (import "plugin/hash")
-                                        :random (import "plugin/random"))))
+   :websocket ((import "std/websocket") :hash hash-plugin
+                                        :random random-plugin)))
+
+(let [[ok? err] (protect (gun:connect (gun:open) "ws://127.0.0.1:1/gun"))]
+  (assert (= (get err :reason) :mesh-not-configured)))
 ```
 
 ## The data model
@@ -233,24 +237,26 @@ fibers spawned there, which inherit the binding:
 it in its own fiber. `gun:connect` dials a peer at a `ws://` URL. It returns
 when each side has registered the other, and answers a function that closes the
 connection. `gun:peers` answers the ids of the connected peers. A write on
-either side reaches the other:
+either side reaches the other, so given the module that `gun-with-mesh` builds,
+this function answers `{"text" "hello"}`:
 
 ```lisp
-(def mesh-gun (gun-with-mesh))
-(def listener (tcp/listen "127.0.0.1" 0))
-(def listen-port
-  (let [at (port/path listener)]
-    (parse-int (slice at (+ 1 (string/find at ":"))))))
-(def server (mesh-gun:open))
-(def client (mesh-gun:open))
-(def serving (ev/spawn (fn [] (mesh-gun:serve server listener))))
-(def hang-up (mesh-gun:connect client (string "ws://127.0.0.1:" listen-port "/gun")))
-(assert (= (length (mesh-gun:peers client)) 1))
-
-(mesh-gun:put (mesh-gun:get client "note") {:text "hello"} :ack 5)
-(assert (= (mesh-gun:once (mesh-gun:get server "note")) {"text" "hello"}))
-(hang-up)
-(port/close listener)
+(defn peers-example [mesh-gun]
+  "Join two databases over loopback, write on one, and read on the other."
+  (let [listener (tcp/listen "127.0.0.1" 0)
+        at (port/path listener)
+        url (string "ws://127.0.0.1:"
+                    (parse-int (slice at (+ 1 (string/find at ":")))) "/gun")
+        server (mesh-gun:open)
+        client (mesh-gun:open)]
+    (ev/spawn (fn [] (mesh-gun:serve server listener)))
+    (let [hang-up (mesh-gun:connect client url)]
+      (defer
+        (begin
+          (hang-up)
+          (port/close listener))
+        (mesh-gun:put (mesh-gun:get client "note") {:text "hello"} :ack 5)
+        (mesh-gun:once (mesh-gun:get server "note"))))))
 ```
 
 Every peer keeps every write it hears, and forwards what it accepted to its
