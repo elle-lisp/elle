@@ -89,27 +89,27 @@
         (when-let [n (graph:node core:graph soul)] (put out soul n)))
       (freeze out)))
 
-  (defn walk [core path reach]
-    "The value at path: the root's node, a field's value, or the node a link
-     reaches. Calls (reach soul) on each soul before it reads that node."
-    (let [keys (slice path 1)]
-      (block :walk
-        (def @soul (graph:root-soul (first path)))
-        (reach soul)
-        (def @i 0)
-        (while (< i (length keys))
-          (let [f (field-of core soul (get keys i))
-                v (when f (field:value f))
-                last? (= i (- (length keys) 1))]
-            (cond
-              (value:link? v)
-                (begin
-                  (assign soul (value:link-soul v))
-                  (reach soul))
-              last? (break :walk v)
-              (break :walk nil)))
-          (assign i (+ i 1)))
-        (node-value core soul))))
+  (defn walk [core start keys reach]
+    "The value that keys reach from the node start: that node, a field's
+     value, or the node a link reaches. Calls (reach soul) on each soul
+     before it reads that node."
+    (block :walk
+      (def @soul start)
+      (reach soul)
+      (def @i 0)
+      (while (< i (length keys))
+        (let [f (field-of core soul (get keys i))
+              v (when f (field:value f))
+              last? (= i (- (length keys) 1))]
+          (cond
+            (value:link? v)
+              (begin
+                (assign soul (value:link-soul v))
+                (reach soul))
+            last? (break :walk v)
+            (break :walk nil)))
+        (assign i (+ i 1)))
+      (node-value core soul)))
 
   ## ── Merging ──────────────────────────────────────────────────────────
 
@@ -160,12 +160,12 @@
 
   ## ── Subscriptions ────────────────────────────────────────────────────
 
-  (defn add-sub [core path f v]
-    "Watch path with f, whose last value was v. Answers the function that
-     ends the watch."
+  (defn add-sub [core start keys f v]
+    "Watch what keys reach from the node start with f, whose last value was
+     v. Answers the function that ends the watch."
     (let [id (unbox core:next-sub)]
       (rebox core:next-sub (+ id 1))
-      (put core:subs id {:path path :f f :last (box v)})
+      (put core:subs id {:start start :keys keys :f f :last (box v)})
       (fn []
         (del core:subs id)
         nil)))
@@ -175,7 +175,7 @@
      walking with reach. Raises the first error a subscription raises."
     (each [id sub] in (freeze core:subs)
       (when (get core:subs id)
-        (let [v (walk core sub:path reach)]
+        (let [v (walk core sub:start sub:keys reach)]
           (unless (identical? v (unbox sub:last))
             (rebox sub:last v)
             (sub:f v))))))
