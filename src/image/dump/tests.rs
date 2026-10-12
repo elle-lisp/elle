@@ -1,6 +1,6 @@
 // audited: 2026-10-12
-//! What a dump records that only this crate can see: a syntax tree's scope
-//! sets, the port behind a parameter's default, and the static-region counter.
+//! What a dump records that only this crate can see: scope sets, a parameter's
+//! port default, and the static-region watermark.
 //!
 //! docs/impl/image/sealing.md
 //! docs/impl/image/format.md
@@ -348,26 +348,18 @@ fn a_body_without_parameters_has_no_watermark() {
     assert_eq!(hydrated.param_watermark, 0);
 }
 
-// ── The static-region counter ────────────────────────────────────────
+// ── The static-region watermark ──────────────────────────────────────
 
-// A source boot compiles user code with the static-region counter where the
-// boot's own compiles left it, so an image boot that is to emit the same
-// bytecode has to start there too (docs/impl/image/format.md). Other tests
-// mint concurrently, so the pin is a bracket around the dump, not an equality.
+// Only a boot image records a static-region watermark: it is the mark the
+// boot left, which a source boot's first user compile starts from
+// (docs/impl/image/format.md). No compile waits on any other graph's counter,
+// so a plain dump records zero, and its hydration moves no counter.
 //
-// The counter-factual is a watermark taken from the body's highest slot, as
-// the scope and parameter watermarks are. This body is a pair, which holds no
-// code and so no slot: that rule records zero, below any value the counter
-// has ever held.
+// The counter-factual is the live counter, read as the dump runs. It answers
+// every parity question correctly, and it writes a different file each time
+// anything compiles between two dumps of one graph.
 #[test]
-fn the_static_region_watermark_is_the_dumping_process_counter() {
-    let before = crate::lir::lower::static_region_counter();
-    let (_dst, hydrated) = round_trip(one_pair, "static-watermark");
-    let after = crate::lir::lower::static_region_counter();
-    assert!(
-        (before..=after).contains(&hydrated.static_region_watermark),
-        "the watermark {} is not the dumping process's counter, which ran from \
-         {before} to {after} across the dump",
-        hydrated.static_region_watermark
-    );
+fn a_plain_dump_records_no_static_region_watermark() {
+    let (_dst, hydrated) = round_trip(one_pair, "no-static-watermark");
+    assert_eq!(hydrated.static_region_watermark, 0);
 }
