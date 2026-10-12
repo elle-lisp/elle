@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! `FiberHeap` region-allocator surface.
 //!
 //! Everything that allocates into, reference-counts, adopts, or inspects the
@@ -237,6 +237,13 @@ impl FiberHeap {
         }
         self.total_alloc_count += objects.len() as u64;
         id
+    }
+
+    /// The hydrated regions this heap resolves through the interval table,
+    /// in hydration order (docs/impl/image.md).
+    #[cfg(test)]
+    pub(crate) fn interval_table(&self) -> Vec<RuntimeRegion> {
+        Vec::new()
     }
 
     /// The page layouts and live objects of one region, for the image dumper

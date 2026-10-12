@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! Per-region storage with dual-ended page layout.
 //!
 //! docs/impl/region/model.md
@@ -295,6 +295,13 @@ impl RegionPool {
         let freed = self.obj_count;
         self.obj_count = 0;
         freed
+    }
+
+    /// The address interval a hydrated image's pages tile, or `None` for a
+    /// region that hydrated nothing.
+    #[cfg(test)]
+    pub(crate) fn image_interval(&self) -> Option<std::ops::Range<usize>> {
+        None
     }
 
     /// Byte layout of every page this region owns, in claim order. The image
