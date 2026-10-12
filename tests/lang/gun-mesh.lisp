@@ -88,18 +88,22 @@
   (let [m (ws:recv conn)]
     (unless (= m:type :close) (json/parse (string m:data)))))
 
-(defn raw-loop [conn heard answer-gets?]
-  "Record each message on conn. Answer each get with no nodes when answer-gets?."
+(defn raw-loop [conn heard answer-gets? &opt leave-on]
+  "Record each message on conn. Answer each get with no nodes when answer-gets?.
+   Return, which closes the connection, on the first message that holds the
+   key leave-on."
   (forever
     (let [msg (raw-recv conn)]
       (when (nil? msg) (break nil))
       (push heard msg)
+      (when (and leave-on (get msg leave-on)) (break nil))
       (when (and answer-gets? (get msg "get"))
         (raw-send conn {"ack" (get msg "id") "put" {}})))))
 
-(defn raw-server [answer-gets?]
+(defn raw-server [answer-gets? &named leave-on]
   "A peer by hand that serves: it answers hi, records what it hears, and
-   answers gets only when answer-gets?. It never acks a put."
+   answers gets only when answer-gets?. It never acks a put. With :leave-on,
+   it closes the connection on the first message that holds that key."
   (let [[listener url] (listen)
         heard @[]]
     (ev/spawn (fn []
@@ -107,7 +111,7 @@
                           (fn [conn]
                             (push heard (raw-recv conn))
                             (raw-send conn {"hi" "raw-server"})
-                            (raw-loop conn heard answer-gets?)))))
+                            (raw-loop conn heard answer-gets? leave-on)))))
     {:url url :heard heard :close (fn [] (port/close listener))}))
 
 (defn raw-client [url]
@@ -124,6 +128,14 @@
                 (ev/abort reader)
                 (let [t (get conn :transport)]
                   (protect (t:close))))})))
+
+(defn gets-of [heard soul]
+  "How many of the gets in heard name soul."
+  (length (filter (fn [msg]
+                    (let [souls (get msg "get")]
+                      (and souls
+                           (not (empty? (filter (fn [s] (= s soul)) souls))))))
+                  heard)))
 
 (defn puts-of [heard soul key]
   "The encodings that the puts in heard carry for key of soul."
@@ -189,6 +201,16 @@
     (hang-up)
     (mute:close))
 
+  (let [leaver (raw-server true :leave-on "put")
+        c (open-db)
+        hang-up (gun:connect c leaver:url)]
+    (within 10 "a put whose only peer leaves stops waiting for its ack"
+            (fn []
+              (fails-with :no-ack (fn []
+                                    (gun:put (gun:get c "x") {:a 1} :ack 60)))))
+    (hang-up)
+    (leaver:close))
+
   (let [errs @[]
         inner (gun:memory-store)
         broken {:read (fn [soul] (inner:read soul))
@@ -233,7 +255,48 @@
     (assert (nil? answer) "a peer that never answers yields nothing")
     (assert (>= took 0.3) "a first read waits :wait for a peer that is silent")
     (hang-up)
-    (silent:close)))
+    (silent:close))
+
+  (let [leaver (raw-server false :leave-on "get")
+        d (open-db :wait 60)
+        hang-up (gun:connect d leaver:url)]
+    (within 10 "a first read whose peer leaves stops waiting for its answer"
+            (fn [] (assert (nil? (gun:once (gun:get d "gone"))) "nothing")))
+    (hang-up)
+    (leaver:close))
+
+  # The second fiber finds the soul pending and waits for the first fetch.
+  # A second fetch would send a second get.
+  (let [counting (raw-server true)
+        e (open-db)
+        hang-up (gun:connect e counting:url)
+        twin (gun:get e "twin")]
+    (ev/join [(ev/spawn (fn [] (gun:once twin)))
+              (ev/spawn (fn [] (gun:once twin)))])
+    (assert (= (gets-of counting:heard "twin") 1)
+            "two first reads of one soul send one get")
+    (hang-up)
+    (counting:close))
+
+  # B answers A's resync get by asking its other peer, which never answers,
+  # so B's fetch of only-a skips A. B's own first read waits for that fetch,
+  # and must then ask A. A read that took the skipping fetch as its own
+  # answers nil. The sleep lets A's get arrive first; on a box too slow for
+  # it, B's read fetches by itself and the test passes without proving this.
+  (let [a (open-db)
+        b (open-db :wait 1)]
+    (gun:put (gun:get a "only-a") {:v 1})
+    (let [silent (raw-server false)
+          b-to-silent (gun:connect b silent:url)
+          srv (serve b)
+          a-to-b (gun:connect a srv:url)]
+      (ev/sleep 0.2)
+      (assert (= (gun:once (gun:get b "only-a")) {"v" 1})
+              "a read that waited on a fetch that skipped a peer asks that peer")
+      (a-to-b)
+      (b-to-silent)
+      (srv:close)
+      (silent:close))))
 
 # ============================================================================
 # Forwarding along a chain A - B - C
@@ -339,6 +402,9 @@
 # Concurrent sends
 # ============================================================================
 
+# The trap: small frames never tear on loopback. The std/websocket transport
+# lets two senders interleave only once a write is partial, so the values
+# are large enough to fill the socket buffer.
 (defn concurrent-sends []
   (let [a (open-db)
         b (open-db)
@@ -346,12 +412,14 @@
         hang-up (gun:connect b srv:url)
         on-a (gun:get (gun:get a "burst") "v")
         on-b (gun:get (gun:get b "burst") "v")
+        big (string/repeat "x" 300000)
         writer (fn [tag]
-                 (each i in (range 50)
-                   (gun:put on-a (string tag "-" i))))]
+                 (each i in (range 8)
+                   (gun:put on-a (string tag "-" i big))))]
     (assert (nil? (gun:once on-b)) "burst starts empty")
-    (ev/join [(ev/spawn (fn [] (writer "x"))) (ev/spawn (fn [] (writer "y")))])
-    (gun:put on-a "final" :ack 5)
+    (ev/join [(ev/spawn (fn [] (writer "x"))) (ev/spawn (fn [] (writer "y")))
+              (ev/spawn (fn [] (writer "z")))])
+    (gun:put on-a "final" :ack 20)
     (eventually "B ends on A's last write" (fn [] (= (gun:once on-b) "final")))
     (hang-up)
     (srv:close)))
