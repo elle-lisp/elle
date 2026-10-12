@@ -1,4 +1,4 @@
-// audited: 2026-09-11
+// audited: 2026-10-12
 //! The header block: what an image records about itself before its first
 //! mapped byte, and how it is read back.
 //!
@@ -15,7 +15,7 @@ pub(crate) const MAGIC: [u8; 8] = *b"ELLEIMG\0";
 
 /// Byte offset of the fingerprint length field; the string follows it. Every
 /// fixed field sits below it, so adding one moves this and bumps [`VERSION`].
-const FINGERPRINT_AT: usize = 136;
+const FINGERPRINT_AT: usize = 144;
 
 /// Everything the header block records besides the fingerprint.
 #[derive(Debug, Clone)]
@@ -52,6 +52,11 @@ pub(crate) struct Header {
     /// holds no parameter. Hydration raises the process counter past it, so
     /// the ids a fresh instance mints cannot repeat the image's.
     pub param_watermark: u64,
+    /// The dumping process's static-region counter, which hydration raises
+    /// the process counter to. The counter rather than the body's highest
+    /// slot, so an image boot compiles user code as a source boot does
+    /// (docs/impl/image/format.md).
+    pub static_region_watermark: u64,
     pub fingerprint: String,
 }
 
@@ -85,6 +90,7 @@ impl Header {
         put(&mut block, 112, self.n_recons);
         put(&mut block, 120, self.prims_len);
         put(&mut block, 128, self.param_watermark);
+        put(&mut block, 136, self.static_region_watermark);
         put(&mut block, FINGERPRINT_AT, fp.len() as u64);
         block[FINGERPRINT_AT + 8..FINGERPRINT_AT + 8 + fp.len()].copy_from_slice(fp);
         Ok(block)
@@ -130,6 +136,7 @@ impl Header {
             n_recons: get(block, 112),
             prims_len: get(block, 120),
             param_watermark: get(block, 128),
+            static_region_watermark: get(block, 136),
             fingerprint,
         })
     }
@@ -163,6 +170,7 @@ mod tests {
             prims_len: 0,
             scope_watermark: 0,
             param_watermark: 0,
+            static_region_watermark: 0,
             fingerprint: fingerprint(),
         };
         let block = header.to_block().expect("fingerprint fits");

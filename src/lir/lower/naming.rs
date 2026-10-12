@@ -4,6 +4,7 @@
 //!
 //! docs/impl/region/mechanism.md
 //! docs/impl/region/model.md
+//! docs/impl/image/format.md
 
 use super::*;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -28,9 +29,18 @@ pub fn new_static_region() -> StaticRegion {
 }
 
 /// The id the next [`new_static_region`] hands out, without minting it.
-#[allow(dead_code)]
 pub(crate) fn static_region_counter() -> u32 {
     NEXT_STATIC_REGION.load(Ordering::Relaxed)
+}
+
+/// Raise the counter so that no later [`new_static_region`] answers below
+/// `watermark`, and never lower it.
+///
+/// A hydrated image records the counter of the process that dumped it, and
+/// raising this one to it is what lets an image boot hand user code the slots
+/// a source boot would (docs/impl/image/format.md).
+pub(crate) fn raise_static_regions_to(watermark: u32) {
+    NEXT_STATIC_REGION.fetch_max(watermark, Ordering::Relaxed);
 }
 
 /// Where a value-route release reads the value whose region it means.
