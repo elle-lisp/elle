@@ -1,6 +1,6 @@
 # Dissolution: whose body the loop splices
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-12 -->
 
 How a named function's body reaches a fused loop, and what the spliced body
 keeps: its counters and its declarations.
@@ -15,9 +15,11 @@ A HOF's function argument need not be a call-site lambda literal. When it is a
 qualifying lambda — a top-level `(defn f …)` (which desugars to `(def f (fn …))`)
 or any `let`/`def`-bound `(fn …)` — the function's body is inlined into the fused
 loop, exactly as a literal's would be. The map from a binding to its fragment is
-collected by the same walk `prune.rs` uses for init keywords (over
-`Let`/`Letrec`/`Define` bindings), restricted to immutable, singly-bound lambdas
-of the op's arity whose body closes.
+collected by a walk over the forms
+[prune.rs](../../../src/hir/typeinfer/prune.rs) visits for init keywords
+(`Let`/`Letrec`/`Define` bindings). It keeps immutable, singly-bound lambdas of
+one or two fixed parameters whose body closes, and the call site checks the
+op's arity.
 
 The one structural difference from a literal is **who owns the body**. A literal
 is consumed — moved out of the call — so its parameters and node ids belong
@@ -47,7 +49,7 @@ compile unit, so a later user unit that writes `(map inc xs)` has no body for
 `inc` in its own tree and its by-binding map holds nothing for it. The
 by-name registry carries the body across the compile-unit boundary, mirroring
 the dispatch-wrapper registry
-(`monomorphize.rs`): a per-instance registry keyed by function **name**
+([monomorphize.rs](../../../src/hir/typeinfer/monomorphize.rs)): a per-instance registry keyed by function **name**
 (`SymbolId`, stable across arenas where a `Binding` is not) is populated as each
 unit compiles — the `<stdlib>` compile records `inc` — and consulted by every later
 unit, gated on the callee being `is_primitive` (a `bind_primitives` stdlib export;
@@ -60,8 +62,9 @@ resolution — the arithmetic op in `(+ x 1)`, say — is the by-name re-resolut
 the boundary needs. If a free global does not resolve in the consuming unit, the
 graft **declines** (the HOF stays a plain call) — correct-by-construction, never
 a mis-resolved reference. A fragment is plain data, so the registry also crosses
-the stdlib disk cache whole: a cache hit inlines the set a stdlib compile
-records, not a subset of it ([src/compiler/stdlib_cache.rs](../../../src/compiler/stdlib_cache.rs)).
+the stdlib disk cache ([stdlib-cache.md](../stdlib-cache.md)) and the boot image
+([image/boot.md](../image/boot.md)) whole. A cache hit and an image boot inline
+the set a stdlib compile records, not a subset of it.
 
 One gate fills both maps, and what separates the two paths is **where a
 fragment's free globals resolve**. When the stdlib compiles, its own exports are
@@ -75,7 +78,6 @@ function reading an enclosing runtime local never becomes a fragment at all.
 Everything else in the gate is identical — fixed arity, no rest parameter,
 unmutated parameters, and the composition reorder requirement, read from the
 body signal the fragment records.
-
 
 ## The scaffold's own counters advance by opcode
 

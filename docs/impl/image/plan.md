@@ -1,6 +1,6 @@
 # Landing order and test plan
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-12 -->
 
 What lands in which order, and the pins each milestone must land with.
 
@@ -88,16 +88,18 @@ Then the image milestones:
      ([boot.md](boot.md)); the two boots share the export-registration tails,
      and the corpus under image boot is the gate;
    - the warm cache — `--boot-image=`, the digest-keyed file, the atomic store
-     and the prune. Opt-in rather than default: a hydrating instance still
-     loses cross-unit inlining, and [boot.md](boot.md) argues the default
-     waits on it;
+     and the prune. Opt-in rather than default, for the reasons
+     [boot.md](boot.md) gives;
    - the tier half of the parity gate — the **lir** foundation carries a
      function's LIR in the payload, so a hot stdlib function reaches the JIT
-     under an image boot as under a source boot.
+     under an image boot as under a source boot;
+   - compiler-state persistence — the inline and dispatch-wrapper registries
+     cross as one bytes field of the root ([boot.md](boot.md)), so an image
+     boot inlines and monomorphizes user code as a source boot does.
 
-   Still to land: the embedded blob, per-worker hydration for `sys/spawn`,
-   compiler-state persistence, the hydrated-region interval table, and the
-   bytecode half of the parity gate. The interval table keeps `region_of_ptr`
+   Still to land: the embedded blob, per-worker hydration for `sys/spawn`, the
+   hydrated-region interval table, and the bytecode half of the parity gate.
+   The interval table keeps `region_of_ptr`
    off the probe ladder ([image.md](../image.md) § "Pointer resolution must not
    regress"); the regression it prevents needs a region the size of stdlib to
    show.
@@ -282,6 +284,14 @@ Then the image milestones:
   stores, and the start after that hits. A store prunes the superseded file and
   leaves the kept one, and the default policy neither reads a directory nor
   writes one.
+- Registries: an image-booted instance holds every inline fragment and every
+  dispatch wrapper the source boot recorded, by name. A user `map` over a
+  stdlib function fuses, and a user `push` monomorphizes, under either boot.
+  Both are asserted in the rewritten HIR. The counter-factual is an empty
+  registry, which compiles every program correctly and leaves the call in
+  place. Two registries that hold one set of entries encode to one byte
+  string, whatever order their hash maps iterate in. A `:compiler` field that
+  does not decode refuses the image as corrupt.
 - Compile parity: compile the same user file under image boot and source
   boot and assert byte-identical bytecode — the acceptance gate for the
   persisted compiler state (inline fragments, dispatch wrappers).

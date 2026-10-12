@@ -1,6 +1,6 @@
 # Images — regions hydrated at load
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-12 -->
 
 Design for image-style persistence: one mechanism, and the two configurations
 it serves.
@@ -25,8 +25,8 @@ argument. Six companions carry the rest:
   answered the design's open questions, with their numbers.
 
 This document states the design, not its progress. [plan.md](image/plan.md)
-records what has landed: the warm-cache boot has, and the embedded blob,
-per-worker hydration, compiler-state persistence, the hydrated-region interval
+records what has landed: the warm-cache boot and compiler-state persistence
+have, and the embedded blob, per-worker hydration, the hydrated-region interval
 table and the environment configuration have not.
 
 ## The problem
@@ -178,7 +178,8 @@ compile-side registries on `CompileCtx` that later user compiles read:
 
 - `FnInlineRegistry` — per-name HIR fragments of cross-unit-inlineable
   stdlib functions; user code inlines through it.
-- `DispatchWrapperRegistry` and the signal-projection memo.
+- `DispatchWrapperRegistry` — per-name arms of the stdlib's container-dispatch
+  wrappers; a user call to one monomorphizes through it.
 
 An image boot that leaves these empty compiles user code *differently* from
 a source boot — silently worse code, and divergent artifacts for anything
@@ -186,11 +187,11 @@ keyed on compiler output. That is not acceptable: the two boot modes must
 produce identical user-code compiles.
 
 `FnInlineRegistry` holds `HirFragment`s — HIR bodies closed over their own
-binding tables ([impl/hir.md](hir.md) § "A fragment is closed over its
-bindings") — so the registry is plain data that crosses a process boundary as
-it stands. The image records it the way the stdlib disk cache does, with no
-re-derivation from syntax. The parity test in [plan.md](image/plan.md) is the
-acceptance gate.
+binding tables ([impl/hir.md](hir.md)) — so the registry is plain data that
+crosses a process boundary as it stands. The boot image carries both registries
+as one bytes value in its root, with no re-derivation from syntax
+([boot.md](image/boot.md) owns the encoding). The parity test in
+[plan.md](image/plan.md) is the acceptance gate.
 
 ## Hydration
 
@@ -393,11 +394,11 @@ own for one type.
 ## Build integration
 
 - **Warm cache (no build changes):** when no valid boot image is available,
-  boot compiles from source as today, then dumps
-  `$ELLE_CACHE/boot/<digest>.image` (written atomically: temp file, rename).
-  Subsequent starts hydrate it, so development builds get fast starts from the
-  second run onward. `--boot-image=` opts in; [boot.md](image/boot.md) owns the
-  policy and the two milestones the default waits on.
+  boot compiles from source as today, then dumps `boot/<digest>.image` under
+  the `--cache=` directory (written atomically: temp file, rename). Subsequent
+  starts hydrate it, so development builds get fast starts from the second run
+  onward. `--boot-image=on` or `--boot-image=DIR` opts in;
+  [boot.md](image/boot.md) owns the policy and what the default waits on.
 - **Embedded (release):** a Makefile stage builds `elle`, runs
   `elle image dump-boot`, and rebuilds with the blob embedded (path passed
   by env var; `build.rs` declares the rerun-if). The blob is embedded

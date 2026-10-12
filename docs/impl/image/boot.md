@@ -1,6 +1,6 @@
 # Booting from an image
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-12 -->
 
 What the boot configuration carries, how `elle image dump-boot` writes it, and
 how a fresh instance starts from it.
@@ -12,7 +12,7 @@ image still describes these sources, and the warm cache that distributes it.
 
 ## The boot state is one value graph
 
-A source boot leaves three things behind that no later process can rebuild
+A source boot leaves four things behind that no later process can rebuild
 without running the front end again:
 
 - core.lisp's exports, which reach user code through `PrimitiveMeta` and macro
@@ -20,16 +20,18 @@ without running the front end again:
 - prelude.lisp's macros, each a parameter list, a template tree and a lazily
   filled transformer;
 - stdlib.lisp's exports, which reach user code through `PrimitiveMeta` and
-  macro bodies through `eval_meta`.
+  macro bodies through `eval_meta`;
+- the two cross-unit compile registries the stdlib compile fills, which every
+  later compile reads (§ "The compile registries cross as bytes").
 
-The primitives are the fourth part of a booted instance, and they are the one
+The primitives are the fifth part of a booted instance, and they are the one
 part every process already rebuilds for itself: a native-fn is an immediate
 whose id hydration remaps by name ([format.md](format.md)).
 
-The foundations sealed all three ([foundations.md](foundations.md)): exports are
-closures and parameters over region-native code payloads, and a macro is its
-template tree. So the boot image's root is one immutable struct, and its fields
-are ordinary body data:
+The foundations sealed the first three ([foundations.md](foundations.md)):
+exports are closures and parameters over region-native code payloads, and a
+macro is its template tree. So the boot image's root is one immutable struct,
+and its fields are ordinary body data:
 
 | Key | Value |
 |-----|-------|
@@ -37,6 +39,7 @@ are ordinary body data:
 | `:core` | core.lisp's export struct |
 | `:stdlib` | stdlib.lisp's export struct |
 | `:macros` | a struct of macro name to macro entry |
+| `:compiler` | the two compile registries, encoded as one immutable bytes value |
 
 A macro entry is a struct of its own: `:params`, `:optional` and `:rest` carry
 the parameter lists, `:template` carries the template tree, and `:transformer`
@@ -59,6 +62,38 @@ boots to drift apart. The header still carries what is not a value: the
 fingerprint, the watermarks, and — for an image that depends on another — the
 dependency fingerprints. The boot configuration's dependency list is empty, so
 it records none.
+
+## The compile registries cross as bytes
+
+The stdlib compile fills two registries on the compile context. The inline
+registry holds each inlineable stdlib function as an HIR fragment
+([dissolution/inline.md](../dissolution/inline.md)). The dispatch-wrapper
+registry holds each container-dispatch wrapper's arms. Every later compile
+reads both, so an instance that booted without them compiles user code without
+cross-unit inlining and without stdlib dispatch monomorphization.
+
+Neither registry is a value graph. A fragment is HIR closed over its own
+binding table ([hir.md](../hir.md)), which is plain data with a serde form. So
+`:compiler` holds that form, encoded with bincode, as one immutable bytes value.
+The bytes hold no pointer, so their pages carry no relocation and stay clean.
+The entries are sorted by name, because both registries are hash maps and one
+boot state must write one file ([image.md](../image.md)).
+
+The hydration decodes the bytes once, and the install restores both registries
+into the compile context it builds. A field that is absent, is not bytes, or
+does not decode refuses the image as corrupt, and the instance boots from
+source.
+
+The fingerprint does not cover the encoding. bincode writes an enum variant as
+its index, so an image from a build with a different HIR can decode without an
+error and read wrong. An embedded blob cannot meet this, because the binary
+that carries it wrote it. The warm cache can, and
+[issue 1361](https://github.com/elle-lisp/elle/issues/1361) tracks the key it
+needs.
+
+The signal-projection memo is the one other piece of compile state, and a boot
+leaves it empty. It fills when a compile imports a file, and none of the three
+sources imports one.
 
 ## The digest decides whether the image still describes these sources
 
@@ -111,17 +146,18 @@ exists, and installs into the same structures a source boot writes:
 1. Hydrate the image into this instance's heap, replaying the name table into
    its display memo and raising its parameter counter
    ([image.md](../image.md) § Hydration).
-2. Check the digest against this binary's sources, and fall back to a source
-   boot when it differs.
+2. Check the digest against this binary's sources, and decode `:compiler`.
+   Fall back to a source boot when either fails.
 3. Register the hydrated region as a process root, so teardown releases the
    whole boot graph by the ordinary cascade — one registration, because one
    image is one region.
 4. Install `:core` into the expander's `core_env` and into `PrimitiveMeta`.
 5. Install `:macros` into the expander, and raise its scope counter past the
    image's watermark ([format.md](format.md)).
-6. Install `:stdlib` into `PrimitiveMeta` and `eval_meta`.
+6. Restore the two compile registries into the compile context.
+7. Install `:stdlib` into `PrimitiveMeta` and `eval_meta`.
 
-Steps 4 and 6 are the tails of `compile_core` and `init_stdlib`. Step 5 leaves
+Steps 4 and 7 are the tails of `compile_core` and `init_stdlib`. Step 5 leaves
 the hydrated template trees where they are. The hydrated region is a process
 root, so it outlives every expansion that reads a template, and a copy into the
 expander's own template arena would buy nothing.
@@ -185,17 +221,21 @@ Per-worker hydration is a milestone of its own ([plan.md](plan.md)).
 ## Why the cache is opt-in
 
 `--boot-image=DIR` turns the warm cache on, `--boot-image=on` uses the
-`--cache=` directory, and the default is off. The two cross-unit compile
-registries are still to land ([plan.md](plan.md)). Without them, user code
-under an image boot compiles without cross-unit inlining and without stdlib
-dispatch monomorphization, which a source boot does not pay.
+`--cache=` directory, and the default is off.
 
-The tier half of parity has landed. A hydrated closure carries its LIR in its
-payload, so a hot stdlib function promotes to the JIT under either boot
-([sealing.md](sealing.md)).
+The two boot modes must be indistinguishable to running code, tiers included
+([image.md](../image.md)). The tier half of that parity holds: a hydrated
+closure carries its LIR in its payload, so a hot stdlib function promotes to
+the JIT under either boot ([sealing.md](sealing.md)). The image carries the
+compile registries, so user code inlines and monomorphizes under either boot.
 
-A default-on cache would trade steady-state throughput for startup, which
-[image.md](../image.md) rejects as a violation of parity: the two boot modes
-must be indistinguishable to running code, tiers included. The flag is what
-makes the mechanism usable and testable meanwhile, and the default flips when
-the registries land.
+Three things keep the default off ([plan.md](plan.md)):
+
+- No gate proves that the two boots emit byte-identical user bytecode.
+- Pointer resolution has no interval table yet. Every reference count on a
+  hydrated stdlib value walks the probe ladder and scans the page list of a
+  region the size of stdlib ([image.md](../image.md)).
+- The warm cache keys on the source digest alone, so a new build hydrates an
+  older build's image ([issue 1361](https://github.com/elle-lisp/elle/issues/1361)).
+
+The flag is what makes the mechanism usable and testable meanwhile.

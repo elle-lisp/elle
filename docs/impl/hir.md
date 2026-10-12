@@ -1,6 +1,6 @@
 # HIR — High-level IR
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-12 -->
 
 The HIR pass converts expanded syntax trees into a typed intermediate
 representation. It resolves bindings, computes captures, and infers
@@ -13,7 +13,7 @@ signal profiles.
 - **`HirKind`** — the node variant: literal, variable reference, call,
   lambda, let, if, begin, etc.
 - **`Binding`** — a resolved variable reference: a `u32` index into a
-  `BindingArena` (in `arena.rs`), which holds the per-binding metadata
+  `BindingArena` (in [src/hir/arena.rs](../../src/hir/arena.rs)), which holds the per-binding metadata
   (`BindingScope` — `Parameter` or `Local` — plus `is_mutated`,
   `is_captured`, `is_immutable`, `is_primitive`, etc.)
 - **`Signal`** — inferred effect profile: a `SignalBits` set plus a
@@ -28,7 +28,7 @@ another unit, or to a file, means carrying the binding facts it needs — and a
 carrier that hoists a chosen few of them out of `BindingInner` is wrong the day
 someone adds the twelfth field.
 
-An `HirFragment` (`src/hir/fragment.rs`) closes the body over its own table
+An `HirFragment` ([src/hir/fragment.rs](../../src/hir/fragment.rs)) closes the body over its own table
 instead. Every `Binding` in a fragment's body is an index into that table, and
 each entry says what the binding is:
 
@@ -56,9 +56,10 @@ route this walk does not model. All of them decline.
 Because a fragment holds a `BindingInner` per local rather than a summary of
 one, a `let` binding's mutability and a parameter's `(numeric!)` floor travel
 with it like any other field, and the whole fragment is plain serializable data.
-The stdlib disk cache stores the cross-unit inline registry as fragments
-(`src/compiler/stdlib_cache.rs`), so a cache hit compiles user code to the same
-bytecode a stdlib compile does.
+The stdlib disk cache ([stdlib-cache.md](stdlib-cache.md)) and the boot image
+([image/boot.md](image/boot.md)) both carry the cross-unit inline registry as
+fragments. So a cache hit and an image boot inline into user code the bodies a
+stdlib compile inlines.
 
 ## What analysis does
 
@@ -83,7 +84,7 @@ bytecode a stdlib compile does.
    tree, and `regularize` marks again after map fusion introduces new nodes
 5. **Special form analysis** — `if`, `let`, `begin`, `block`,
    `match`, `fn`, etc. each have dedicated handlers, listed in the special-form
-   registry (`src/hir/analyze/forms/registry.rs`)
+   registry ([src/hir/analyze/forms/registry.rs](../../src/hir/analyze/forms/registry.rs))
 
 ## Signal inference
 
@@ -97,7 +98,7 @@ owns its rules.
 
 ## Dead binding elimination
 
-`src/hir/dead.rs` removes a `let`/`letrec` binding when two facts hold: the
+[src/hir/dead.rs](../../src/hir/dead.rs) removes a `let`/`letrec` binding when two facts hold: the
 binding has zero uses, and its initializer is provably effect-free. Removing
 the binding removes the initializer with it, so a dead call to an effect-free
 function never reaches LIR.
@@ -153,7 +154,7 @@ termination question: it can only delete calls that provably return.
 `HirKind` is currently a **wide** vocabulary: `functionalize` and `anf_lift`
 normalize a few constructs (`while → loop/recur`, `assign → ssa-let/setcell`,
 captured `var → derefcell`) and ANF names allocating subexpressions, but they
-eliminate almost nothing — the lowerer still matches all ~39 variants, so
+eliminate almost nothing — the lowerer still matches all 37 variants, so
 `cond`, `match`, `and`/`or`, `begin`, `destructure` reach LIR intact. The design
 direction is a real desugaring boundary so the lowerer consumes only the
 irreducible **kernel**:
@@ -224,15 +225,16 @@ closing the per-`eval` leak.
 
 ## Files
 
-```text
-src/hir/expr.rs           Hir and HirKind definitions
-src/hir/analyze/mod.rs    Main analysis entry point
-src/hir/analyze/binding.rs  Binding resolution
-src/hir/analyze/forms.rs  Special form handlers
-src/hir/analyze/special.rs  More special forms
-src/hir/tailcall.rs       Tail position marking
-src/hir/dead.rs           Dead binding elimination
-```
+| File | Contains |
+|------|----------|
+| [src/hir/expr.rs](../../src/hir/expr.rs) | `Hir` and `HirKind` definitions |
+| [src/hir/analyze/mod.rs](../../src/hir/analyze/mod.rs) | the main analysis entry point |
+| [src/hir/analyze/binding.rs](../../src/hir/analyze/binding.rs) | binding resolution |
+| [src/hir/analyze/forms.rs](../../src/hir/analyze/forms.rs) | special form handlers |
+| [src/hir/analyze/special.rs](../../src/hir/analyze/special.rs) | more special forms |
+| [src/hir/fragment.rs](../../src/hir/fragment.rs) | a body closed over its bindings |
+| [src/hir/tailcall.rs](../../src/hir/tailcall.rs) | tail position marking |
+| [src/hir/dead.rs](../../src/hir/dead.rs) | dead binding elimination |
 
 ---
 
