@@ -131,6 +131,8 @@ pub fn pop_with_decref(heap: &mut FiberHeap, collection: Value) -> Value {
         incref_for_escape(heap, popped_region, EscapeSite::NativeCallResult);
         // Release the container's reference, un-recording the edge beside the RC
         // decref. Both resolve `popped`'s region, which the retain above kept live.
+        // An element in the container's own region was never counted, so neither
+        // ledger moves for it, and the caller's retain is the reference it holds.
         unrecord_store(heap, collection, popped);
         decref_removed_element(heap, collection, popped);
     }

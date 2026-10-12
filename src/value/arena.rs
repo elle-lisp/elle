@@ -299,8 +299,13 @@ pub fn decref_region(heap: &mut FiberHeap, id: Option<RuntimeRegion>) {
 /// by neither half of the store funnel, exactly as the allocation scan and the
 /// free cascade skip it (docs/impl/region/rules.md, Rule 5). An immediate has no
 /// region to count.
-fn counted_store_region(heap: &FiberHeap, _container: Value, val: Value) -> Option<RuntimeRegion> {
-    region_of(heap, val)
+fn counted_store_region(heap: &FiberHeap, container: Value, val: Value) -> Option<RuntimeRegion> {
+    let r = region_of(heap, val)?;
+    if region_of(heap, container) == Some(r) {
+        None
+    } else {
+        Some(r)
+    }
 }
 
 /// Track a store that replaces `old` with `new` inside `container`.
