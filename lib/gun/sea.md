@@ -82,7 +82,7 @@ Admission runs at each place a field enters a database:
 |-------|---------------------|
 | A local `put` or `set` | Raises the reason, and writes nothing |
 | A put or an answer from a peer | Refuses the whole message before any merge. A put acks `err` with the reason. The error goes to `:on-error` |
-| A read from the store | Drops the field, and gives `:bad-signature`, with the soul and the key, to `:on-error`. The rest of the node loads |
+| A read from the store | Drops the field, and gives an error with the reason, the soul and the key to `:on-error`. The rest of the node loads |
 
 A peer forwards only the fields its merge accepted, so a forged field never
 leaves the first database it reaches. Refusing the whole message keeps a peer
