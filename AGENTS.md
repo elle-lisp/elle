@@ -1,6 +1,6 @@
 # Elle
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-11 -->
 
 Elle is a Lisp. Source text becomes bytecode; bytecode runs on a VM.
 
@@ -8,7 +8,7 @@ This is not a toy. The implementation targets correctness, performance, and
 clarity — in that order. We compile through multiple IRs, we have proper
 lexical scoping with closure capture analysis, and a unified signal/capability
 system: **signals flow up** (from callee to caller), **capabilities flow down**
-(from parent fiber to child). See [signals](docs/signals/) for the full design.
+(from parent fiber to child). See [signals](docs/signals/index.md) for the full design.
 
 You are an LLM. You will make mistakes. The test suite will catch them. Run the
 tests. Read the error messages. They are designed to be helpful.
@@ -66,19 +66,18 @@ pipeline: Syntax spans → HIR spans → the span on each LIR node →
 **Runtime:**
 - **`vm`** — Bytecode execution, builtin documentation storage
 - **`value`** — Runtime value representation (tagged-union); trait table field on
-  19 user-facing heap variants
+  20 heap variants
 - **`primitives`** — Built-in functions. Run `(help)` in the REPL for a
   full list grouped by category. See [`docs/stdlib.md`](docs/stdlib.md).
 - **`stdlib`** — Standard library functions ([src/stdlib.lisp](src/stdlib.lisp), loaded at startup).
   See [`docs/stdlib.md`](docs/stdlib.md).
 - **`arithmetic`** — Unified arithmetic operations (shared by VM and primitives)
-- **`signals`** — Signal type (`{ bits: SignalBits, propagates: u32 }`),
-  signal registry for keyword-to-bit mapping, `CAP_MASK` for capability
-  enforcement; `emit` is a special form for literal keywords/sets,
-  `yield` is a macro expanding to `(emit :yield val)`;
-  includes `SIG_EXEC` (bit 11) for subprocess operations and `SIG_FUEL`
-  (bit 12) for instruction budget exhaustion.
-  See [`docs/signals/`](docs/signals/) for the full design and
+- **`signals`** — The `Signal` type (`{ bits: SignalBits, propagates: u32 }`),
+  the registry that maps a keyword to its bit, and `CAP_MASK` for capability
+  enforcement. `emit` is a special form for literal keywords and sets, and
+  `yield` is a macro expanding to `(emit :yield val)`. `SIG_EXEC` (bit 11)
+  covers subprocess operations, and `SIG_FUEL` (bit 12) instruction budget
+  exhaustion. See [docs/signals/index.md](docs/signals/index.md) for the full design and
   [`docs/signals/capabilities.md`](docs/signals/capabilities.md)
   for capability enforcement
 - **`io`** — I/O request types, backends, timeout handling;
@@ -100,7 +99,7 @@ pipeline: Syntax spans → HIR spans → the span on each LIR node →
 - **`wasm`** — WASM backend via Wasmtime, in a `wasm` build; full-module
   compilation (`--wasm=full`) or per-closure tiered compilation (`--wasm=N`).
   See [`docs/impl/wasm.md`](docs/impl/wasm.md).
-- **`ffi`** — C interop via libloading/bindgen
+- **`ffi`** — C interop via libloading and libffi
 
 **Tooling:**
 - **`lint`** — Diagnostic types and lint rules
@@ -125,7 +124,7 @@ pipeline: Syntax spans → HIR spans → the span on each LIR node →
   primitive's `ctx`, never from an enum variant
 - Heap values live in regions; a mutable container keeps its growable store
   behind `Rc<RefCell>`
-- 19 user-facing heap variants carry a `traits: Value` field
+- 20 heap variants carry a `traits: Value` field
 - 5 infrastructure variants (`Float`, `LibHandle`, `FFISignature`, `FFIType`,
   `ClosureTemplate`) do not carry traits
 
@@ -154,7 +153,7 @@ mediate.
 | Signals | up | compile + run | `emit`, `silent!`, `bound`, `squelch` |
 | Capabilities | down | run | `:deny` on `fiber/new`, `CAP_MASK` |
 
-Full documentation: [`docs/signals/`](docs/signals/).
+Full documentation: [docs/signals/index.md](docs/signals/index.md).
 Capability enforcement: [`docs/signals/capabilities.md`](docs/signals/capabilities.md).
 
 ## Products
@@ -164,11 +163,11 @@ Capability enforcement: [`docs/signals/capabilities.md`](docs/signals/capabiliti
 | elle | `src/` | Interpreter/compiler (includes `lint`, `lsp`, and `rewrite` subcommands) |
 | docgen | `demos/docgen/` | Documentation site generator (written in Elle) |
 | conway | `demos/conway/` | Conway's Game of Life (SDL3 demo) |
-| lib/sdl3.lisp | `lib/` | SDL3 bindings via FFI (window, renderer, events, audio, TTF) |
-| lib/http.lisp | `lib/` | Pure Elle HTTP/1.1 client and server |
-| lib/http2.lisp | `lib/` | HTTP/2 client and server (h2 + h2c) |
-| lib/aws.lisp | `lib/` | Elle-native AWS client (SigV4, HTTPS) |
-| lib/gtk4.lisp | `lib/` | GTK4 declarative UI (widgets, events, CSS, WebKit) |
+| [lib/sdl3.lisp](lib/sdl3.lisp) | `lib/` | SDL3 bindings via FFI (window, renderer, events, audio, TTF) |
+| [lib/http.lisp](lib/http.lisp) | `lib/` | Pure Elle HTTP/1.1 client and server |
+| [lib/http2.lisp](lib/http2.lisp) | `lib/` | HTTP/2 client and server (h2 + h2c) |
+| [lib/aws.lisp](lib/aws.lisp) | `lib/` | Elle-native AWS client (SigV4, HTTPS) |
+| [lib/gtk4.lisp](lib/gtk4.lisp) | `lib/` | GTK4 declarative UI (widgets, events, CSS, WebKit) |
 | elle-rig | `rig/` | Hosts the same compiler for the implementation suite, configured per file by a sidecar |
 | embedding | `demos/embedding/` | Elle as a shared library (Rust + C hosts) |
 | myplugin | `demos/myplugin/` | The cookbook's worked plugin, built for the literate docs that load it |
@@ -181,7 +180,7 @@ Capability enforcement: [`docs/signals/capabilities.md`](docs/signals/capabiliti
 | `src/io/` | I/O request types and backends |
 | `src/lsp/` | Language server protocol implementation |
 | `lib/` | Reusable Elle modules (SDL, HTTP, TLS, Redis, DNS, AWS, etc.) |
-| `src/stdlib.lisp` | Standard library (loaded at startup) |
+| [src/stdlib.lisp](src/stdlib.lisp) | Standard library (loaded at startup) |
 | `tests/` | The language suite (`tests/lang/`), the implementation suite (`tests/impl/`), and the Rust unit, integration and property tests |
 | `rig/` | The rig: `elle-rig`, the executable the implementation suite runs on |
 | `bins/` | The WASM and MLIR builds as binaries of their own, each with its rig ([bins/overview.md](bins/overview.md)) |
@@ -189,7 +188,7 @@ Capability enforcement: [`docs/signals/capabilities.md`](docs/signals/capabiliti
 | `docs/` | Design documents and guides |
 | `demos/` | Demo applications (conway, docgen, mandelbrot, etc.) |
 | `plugins/` | Dynamically-loaded plugin crates (cdylib) |
-| `tools/` | The AWS client generator and a codemod script |
+| `tools/` | The AWS client generator, the page-claims profiler and a codemod script ([overview](tools/overview.md)) |
 | `site/` | Generated documentation site (ignored by git) |
 
 ## Testing
@@ -245,7 +244,7 @@ These must remain true. Violating them breaks the system:
    replace it.
    Capabilities are enforced at runtime: a parent fiber uses `:deny` to
    withhold capabilities from a child; denied operations become signals the
-   parent can catch. See [`docs/signals/`](docs/signals/) for signal
+   parent can catch. See [docs/signals/index.md](docs/signals/index.md) for signal
    inference and [`docs/signals/capabilities.md`](docs/signals/capabilities.md)
    for capability enforcement.
 
@@ -285,9 +284,9 @@ Full list: [`docs/warts.md`](docs/warts.md).
 
 - [DOCUMENTATION.md](DOCUMENTATION.md) holds the naming and size rules. The
   exception it defers to: dispatch tables run to 800 lines.
-- `make doctest` runs README.md, QUICKSTART.md, INSTALL.md and every `.md`
-  under `lib/` and `docs/` as a program, so a claim inside a ` ```lisp ` fence
-  is executed on every build. No other fence holds Elle code
+- `make doctest` runs [README.md](README.md), [QUICKSTART.md](QUICKSTART.md),
+  [INSTALL.md](INSTALL.md) and every `.md` under `lib/` and `docs/` as a
+  program, so a claim inside a ` ```lisp ` fence is executed on every build. No other fence holds Elle code
   ([docs/README.md](docs/README.md)).
 - Write a Rust file's call-out as a `//!` module doc, under the `// audited:`
   stamp. `make qa` builds rustdoc, so `//!` is the one header form a reader
