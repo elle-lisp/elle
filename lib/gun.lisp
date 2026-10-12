@@ -38,9 +38,14 @@
 
   ## ── Databases and chains ─────────────────────────────────────────────
 
-  ## A chain is a database and a path of keys. The first key names a root.
-  (defn make-chain [db path]
-    {:core db :path path})
+  ## A chain is a database, the soul of the node it starts at, and the keys
+  ## it follows from there. The database itself starts at no soul.
+  (defn make-chain [db soul keys]
+    {:core db :soul soul :keys keys})
+
+  (defn chain-path [chain]
+    "The start soul and the keys of chain, as an error names them."
+    (if (nil? chain:soul) [] [chain:soul ;chain:keys]))
 
   (defn open [&named @store @clock @wait @on-error]
     "A database: the chain with no keys. :store defaults to a fresh memory
@@ -51,14 +56,18 @@
     (default clock (state:make-clock))
     (default wait 1)
     (default on-error print-error)
-    (make-chain (core:make-core store clock wait on-error) []))
+    (make-chain (core:make-core store clock wait on-error) nil []))
 
   (defn chain-get [chain key]
-    "The chain one key further than chain. key is a string or a keyword."
-    (make-chain chain:core [;chain:path (graph:key-of key chain:path)]))
+    "The chain one key further than chain. key is a string or a keyword. On
+     the database, key names a root node."
+    (let [k (graph:key-of key (chain-path chain))]
+      (if (nil? chain:soul)
+        (make-chain chain:core (graph:root-soul k) [])
+        (make-chain chain:core chain:soul [;chain:keys k]))))
 
   (defn require-soul [chain]
-    (when (empty? chain:path)
+    (when (nil? chain:soul)
       (gun-error :no-soul "the database itself names no node")))
 
   (defn fetching [db]
@@ -68,7 +77,7 @@
     "What once answers for chain: the value it reaches, read from the peers
      the first time a read reaches each node."
     (require-soul chain)
-    (core:walk chain:core chain:path (fetching chain:core)))
+    (core:walk chain:core chain:soul chain:keys (fetching chain:core)))
 
   ## ── Writing ──────────────────────────────────────────────────────────
 
@@ -81,24 +90,25 @@
       (assign i (- i 1)))
     out)
 
-  (defn plan [db path v st link-of]
-    "The writes that put v at path with state st. The walk follows each link
+  (defn plan [chain v st link-of]
+    "The writes that put v at chain with state st. The walk follows each link
      that exists, and so rewrites no link on the path that it can reach.
-     From the first key with no link, the rest of the path nests v, and
+     From the first key with no link, the rest of the keys nest v, and
      flatten writes it with link-of choosing the soul of each nested node."
-    (let [root (first path)
-          keys (slice path 1)
+    (let [db chain:core
+          keys chain:keys
           n (length keys)
           node? (graph:node-value? v)]
       (when (and (= n 0) (not node?))
-        (gun-error :not-a-node "a root holds a node, not a value" :path path))
-      (def @soul (graph:root-soul root))
+        (gun-error :not-a-node "a root holds a node, not a value"
+                   :path (chain-path chain)))
+      (def @soul chain:soul)
       (def @i 0)
       (while (and (< i n) (or (< i (- n 1)) node?)
                   (not (nil? (core:link-at db soul (get keys i)))))
         (assign soul (core:link-at db soul (get keys i)))
         (assign i (+ i 1)))
-      (let [reached (slice path 0 (+ i 1))
+      (let [reached [chain:soul ;(slice keys 0 i)]
             rest (slice keys i)]
         (graph:flatten soul (nest rest v) st reached link-of))))
 
@@ -107,13 +117,13 @@
      merge accepted to the peers, and notify. With ack, wait for an ack."
     (require-soul chain)
     (let [db chain:core]
-      (core:walk db chain:path (fetching db))
+      (core:walk db chain:soul chain:keys (fetching db))
       (let [accepted (core:locked db
                                   (fn []
                                     (let [clock db:clock
                                       st (clock:tick)]
                                       (core:apply-writes db
-                                      (plan db chain:path v st link-of)))))
+                                      (plan chain v st link-of)))))
             id (mesh:broadcast db accepted ack)]
         (let [[ok? err] (protect (core:notify db
                                  (fn [soul] (mesh:touch db soul))))]
@@ -133,12 +143,12 @@
      answer the chain of the new node. :ack is as for put."
     (unless (graph:node-value? v)
       (gun-error :not-a-node "a set member is a node, not a value"
-                 :path chain:path))
+                 :path (chain-path chain)))
     (let [db chain:core
           soul (graph:root-soul (uuid:v4))]
       (write (chain-get chain soul) v
              (fn [at key] (if (= key soul) soul (core:link-at db at key))) ack)
-      (make-chain db [soul])))
+      (make-chain db soul [])))
 
   ## ── Subscriptions ────────────────────────────────────────────────────
 
@@ -146,7 +156,7 @@
     "Call f with the value of chain now, and again after each write that
      changes it. Answers a function that ends the subscription."
     (let [v (chain-value chain)
-          stop (core:add-sub chain:core chain:path f v)]
+          stop (core:add-sub chain:core chain:soul chain:keys f v)]
       (let [[ok? err] (protect (f v))]
         (unless ok?
           (stop)
