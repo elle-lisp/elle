@@ -289,5 +289,5 @@
 ["tests/lang/gun.lisp" :objects 3029]
 ["tests/lang/gun-redis.lisp" :objects 880]
 ["tests/lang/gun-wire.lisp" :objects 323]
-["tests/lang/gun-mesh.lisp" :objects 2069]
+["tests/lang/gun-mesh.lisp" :objects 2151]
 ["tests/lang/gun-sync.lisp" :objects 1042]
