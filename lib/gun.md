@@ -81,9 +81,11 @@ A soul escapes `%` as `%25` and `/` as `%2F` in each of its parts. The key
 `a/b` of the root `x` is therefore the soul `x/a%2Fb`, and the key `b` of the
 key `a` of `x` is `x/a/b`.
 
-`gun:once` answers a node chain with a struct of the node's live fields, and a
-field chain with the field's value. Links stay links. A chain that names
-nothing answers `nil`, and a tombstone leaves its key out of the struct:
+`gun:once` answers a chain with its value. A chain that reaches a node, at a
+root or through a link, answers a struct of the node's live fields, and a link
+inside that struct stays a link. Any other chain answers the value of its
+field. A chain that names nothing answers `nil`, and a tombstone leaves its key
+out of the struct:
 
 ```lisp
 (assert (nil? (gun:once (gun:get db "nobody"))))
@@ -92,7 +94,7 @@ nothing answers `nil`, and a tombstone leaves its key out of the struct:
 ```
 
 `gun:on` calls its function at once with the chain's value, and again whenever
-a write changes that value. It returns a function that ends the subscription.
+a write through the same database changes that value. It returns a function that ends the subscription.
 A write that leaves the value as it was calls nothing:
 
 ```lisp
