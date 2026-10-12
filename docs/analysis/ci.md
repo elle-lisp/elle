@@ -352,11 +352,10 @@ same way, so the doctest steps come after the build too.
 `SUITE_PLUGINS` names what the language suite imports and nothing more, because
 each name costs every suite job a build. The implementation suite's GPU files
 import `plugin/vulkan`, which needs a GPU, so no job builds it for them.
-[plugins.rs](../../tests/integration/plugins.rs) is the standing check that
-every plugin a language-suite file imports is in `SUITE_PLUGINS`, and that the
-assertion fails on a missing artifact.
-[workflows.rs](../../tests/integration/workflows.rs) is the standing check that
-every job that runs the language suite, in every workflow, builds them first.
+[plugins.rs](../../tests/integration/plugins.rs) is the standing check on all
+three claims: every plugin a language-suite file imports is in `SUITE_PLUGINS`,
+the assertion fails on a missing artifact, and every job that runs the language
+suite, in every workflow, builds them first.
 
 ### The boot-image job
 
