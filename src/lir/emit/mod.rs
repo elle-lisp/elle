@@ -22,6 +22,7 @@ pub struct ClosureCompiled {
     pub bytecode: Bytecode,
     pub yield_points: Vec<YieldPointInfo>,
     pub call_sites: Vec<CallSiteInfo>,
+    pub charge_sites: Vec<ChargeSiteInfo>,
 }
 
 /// Emits bytecode from LIR
@@ -257,6 +258,7 @@ impl Emitter {
             bytecode: std::mem::take(&mut self.bytecode),
             yield_points: std::mem::take(&mut self.yield_points),
             call_sites: std::mem::take(&mut self.call_sites),
+            charge_sites: Vec::new(),
         }
     }
 

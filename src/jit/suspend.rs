@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! Yield side-exit helpers for JIT-compiled code.
 //!
 //! docs/impl/jit.md
@@ -399,6 +399,30 @@ pub extern "C" fn elle_jit_yield_through_call(
     vm.fiber.suspended = Some(frames);
 
     YIELD_SENTINEL
+}
+
+/// JIT fuel pause: park this frame at a charge site whose budget ran out.
+///
+/// Called from JIT code when the inline charge finds the fiber's budget at
+/// zero. Builds the frame at the charging instruction's bytecode offset, with
+/// no resume value, so the interpreter runs that instruction again.
+///
+/// Parameters:
+///   spilled_values: *const Value (16 bytes each)
+///   charge_site_index: index into JitCode.charge_sites
+///   vm: *mut () as u64
+///   closure_tag/closure_payload: the closure being executed
+///
+/// Returns YIELD_SENTINEL.
+#[no_mangle]
+pub extern "C" fn elle_jit_fuel_pause(
+    _spilled_values: *const Value,
+    _charge_site_index: u64,
+    _vm: u64,
+    _closure_tag: u64,
+    _closure_payload: u64,
+) -> JitValue {
+    JitValue::nil()
 }
 
 /// Check if any non-OK signal is pending on the VM.

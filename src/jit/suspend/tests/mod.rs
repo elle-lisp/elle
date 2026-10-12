@@ -1,6 +1,7 @@
-// audited: 2026-10-06
-//! The frame a compiled yield parks: the shared setup that installs a closure's
-//! compiled code, and one submodule per theme.
+// audited: 2026-10-12
+//! The frame a compiled side exit parks: the shared setup that installs a
+//! closure's compiled code, and one submodule per theme. `fuel` holds the frame
+//! a fuel pause parks.
 //!
 //! docs/impl/jit.md
 //
@@ -133,6 +134,7 @@ fn as_bytecode_frame(frame: &SuspendedFrame) -> &BytecodeFrame {
     }
 }
 
+mod fuel;
 mod layout;
 mod park;
 mod values;

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! `LirCode` and `LirOwned`: a frozen function's records in `Vec`s, and the values its instructions load.
 //!
 //! docs/impl/lir.md
@@ -9,7 +9,7 @@
 
 use super::record::{BlockRec, ConstRec, Node, SiteRec};
 use crate::hir::region::StaticRegion;
-use crate::lir::{CallSiteInfo, Reg, YieldPointInfo};
+use crate::lir::{CallSiteInfo, ChargeSiteInfo, Reg, YieldPointInfo};
 use crate::signals::Signal;
 use crate::syntax::files::FileId;
 use crate::syntax::Span;
@@ -97,9 +97,14 @@ impl LirOwned {
         Ok(LirOwned { code, values })
     }
 
-    /// Record the yield points and call sites emission found. Only emission
-    /// can supply them, so they arrive after the function froze.
-    pub fn set_sites(&mut self, yield_points: &[YieldPointInfo], call_sites: &[CallSiteInfo]) {
+    /// Record the yield points, call sites and charge sites emission found.
+    /// Only emission can supply them, so they arrive after the function froze.
+    pub fn set_sites(
+        &mut self,
+        yield_points: &[YieldPointInfo],
+        call_sites: &[CallSiteInfo],
+        _charge_sites: &[ChargeSiteInfo],
+    ) {
         let code = &mut self.code;
         code.site_regs.clear();
         code.yield_points = yield_points

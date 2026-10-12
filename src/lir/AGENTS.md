@@ -149,9 +149,11 @@ The rules the fixture holds:
 
 The remaining setters — `name`, `signal`, `num_captures`, `num_locals`,
 `num_params`, `num_local_params`, `capture_params_mask`, `vararg_kind`,
-`closure_id`, `yield_points`, `call_sites` — write the like-named field. A
-frozen function's fields are read-only, so a test sets them through the
-fixture.
+`closure_id`, `yield_points` — write the like-named field. A frozen function's
+fields are read-only, so a test sets them through the fixture.
+`emitted_sites` instead fills the yield points, call sites and charge sites
+from an emission of the built function, so a backend test whose subject is not
+that metadata gets the sites a lowered function would carry.
 
 ## Data flow
 

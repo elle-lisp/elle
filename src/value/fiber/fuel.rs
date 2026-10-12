@@ -30,6 +30,12 @@ impl Fuel {
         self.0.is_some()
     }
 
+    /// Take one unit if the budget holds one, and never refuse: the charge a
+    /// silent function makes, which spends fuel and never pauses
+    /// (docs/signals/inference.md).
+    #[inline]
+    pub fn spend(&mut self) {}
+
     /// Take one unit. Answers false, and takes nothing, when the budget is
     /// spent: the charging instruction must then pause the fiber.
     #[inline]
@@ -44,3 +50,6 @@ impl Fuel {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

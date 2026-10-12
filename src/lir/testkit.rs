@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 // src/lir/AGENTS.md
 //! Assembling a frozen function by hand, for the unit tests of the backends that
 //! read it.
@@ -15,8 +15,7 @@
 
 use crate::lir::code::{InstrRef, LirOwned, LirView};
 use crate::lir::{
-    for_each_terminator_use, CallSiteInfo, ClosureId, Label, LirBuilder, LirHead, Reg, Terminator,
-    YieldPointInfo,
+    for_each_terminator_use, ClosureId, Label, LirBuilder, LirHead, Reg, Terminator, YieldPointInfo,
 };
 use crate::signals::Signal;
 use crate::syntax::Span;
@@ -38,9 +37,11 @@ pub(crate) struct LirFixture {
     /// The count [`LirFixture::num_regs`] asked for, if it was called. `None`
     /// leaves the count to `build`'s inference.
     declared_regs: Option<u32>,
-    /// The sites emission would record, written into the frozen function.
+    /// The yield points written into the frozen function, unless
+    /// [`LirFixture::emitted_sites`] takes every site from an emission.
     yield_points: Vec<YieldPointInfo>,
-    call_sites: Vec<CallSiteInfo>,
+    /// Whether [`LirFixture::emitted_sites`] was called.
+    emitted_sites: bool,
 }
 
 impl LirFixture {
@@ -59,7 +60,7 @@ impl LirFixture {
             entered: false,
             declared_regs: None,
             yield_points: Vec::new(),
-            call_sites: Vec::new(),
+            emitted_sites: false,
         }
     }
 
@@ -110,14 +111,6 @@ impl LirFixture {
         self
     }
 
-    /// The per-call-site resume metadata a suspending function's backends index
-    /// by call-site number. A `Call` inside a `may_suspend` function needs one
-    /// entry per site, or the JIT's yield check fails translation.
-    pub(crate) fn call_sites(mut self, call_sites: Vec<CallSiteInfo>) -> Self {
-        self.call_sites = call_sites;
-        self
-    }
-
     /// Fix the register count instead of inferring it, for a test whose subject
     /// is the count itself.
     pub(crate) fn num_regs(mut self, num_regs: u32) -> Self {
@@ -146,15 +139,42 @@ impl LirFixture {
         self
     }
 
-    /// The frozen function, with the sites the fixture was given.
+    /// Take the yield points, call sites and charge sites from an emission of
+    /// the built function, which is where a lowered function's come from. A
+    /// backend test whose subject is not the metadata uses this rather than
+    /// writing sites out by hand, which the JIT rejects on a count mismatch.
+    pub(crate) fn emitted_sites(mut self) -> Self {
+        self.emitted_sites = true;
+        self
+    }
+
+    /// The frozen function, with the sites the fixture was given or the ones
+    /// an emission of it records.
     pub(crate) fn build(mut self) -> LirOwned {
         let mut owned = self.builder.finish_function().expect("a fixture freezes");
         owned.code.num_regs = self
             .declared_regs
             .unwrap_or_else(|| registers_used(&owned.view()));
-        owned.set_sites(&self.yield_points, &self.call_sites);
+        if self.emitted_sites {
+            let compiled = emitter().emit(&owned.view());
+            owned.set_sites(
+                &compiled.yield_points,
+                &compiled.call_sites,
+                &compiled.charge_sites,
+            );
+        } else {
+            owned.set_sites(&self.yield_points, &[], &[]);
+        }
         owned
     }
+}
+
+/// An emitter over a code region of a heap the test leaks, for the fixture and
+/// the tests that read what an emission records and run none of the code.
+pub(crate) fn emitter() -> crate::lir::Emitter {
+    crate::lir::Emitter::new(crate::value::CodeArena::mint(unsafe {
+        &mut *crate::value::arena::leaked_test_heap()
+    }))
 }
 
 /// One past the highest register id `func`'s blocks mention — as a def, as a
@@ -348,5 +368,40 @@ mod tests {
         assert_eq!(func.closure_id(), Some(ClosureId(5)));
         assert_eq!(func.yield_points().len(), 1);
         assert_eq!(func.arity(), Arity::AtLeast(1));
+    }
+
+    #[test]
+    fn emitted_sites_are_the_emitters_own() {
+        // A yield point recorded by hand at ip 0 would read the same here; the
+        // emitter's lies past the `Emit` opcode, at an offset no hand picks.
+        let func = LirFixture::new(Arity::Exact(0))
+            .signal(Signal::yields())
+            .block(
+                0,
+                &[InstrRef::Const {
+                    dst: Reg(0),
+                    value: ConstRef::Int(1),
+                }],
+                Terminator::Emit {
+                    signal: crate::value::fiber::SIG_YIELD,
+                    value: Reg(0),
+                    resume_label: Label(1),
+                },
+            )
+            .block(
+                1,
+                &[InstrRef::LoadResumeValue { dst: Reg(1) }],
+                Terminator::Return(Reg(1)),
+            )
+            .emitted_sites()
+            .build();
+        let emitted = emitter().emit(&func.view());
+        let view = func.view();
+        assert_eq!(view.yield_points().len(), 1);
+        assert_eq!(
+            view.yield_point(0).unwrap().resume_ip,
+            emitted.yield_points[0].resume_ip,
+            "the fixture's yield point is the one emission records",
+        );
     }
 }

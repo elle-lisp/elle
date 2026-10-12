@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-12
 # A compiled fiber body keeps its operand-stack values across a fuel preemption and a refuel.
 # docs/impl/jit.md
 #
@@ -9,16 +9,12 @@
 ## accumulator, a loop induction value) across the yield exactly as the
 ## bytecode interpreter does.
 ##
-## The bytecode interpreter charges fuel at every branch/call opcode
-## (`charge_fuel`, src/vm/dispatch/interp/opcodes.rs) and, on exhaustion, spills
-## its operand stack into a SuspendedFrame that a later resume restores. A
-## JIT-compiled body charges no fuel of its own; when a callee it invokes
-## exhausts fuel and yields, the JIT side-exits through `elle_jit_yield` /
-## `elle_jit_yield_through_call` (src/jit/suspend.rs), which spill the compiled
-## frame's live params/locals/operands so the interpreter can resume the body.
-## This test pins that that spill/restore preserves the value feeding an
-## `apply` splice: after preemption the spliced argument must still be the
-## computed list, never nil.
+## Both tiers charge fuel at each call and each backward jump. When the budget
+## runs out, in the body or in a callee, the compiled body spills its live
+## params, locals and operands into a frame the interpreter resumes
+## (docs/impl/jit.md). This test pins that the spill and the restore keep the
+## value feeding an `apply` splice: after the pause the spliced argument is
+## still the computed list, never nil.
 ##
 ## Determinism (no compile-vs-execute race): under eager JIT a function is
 ## compiled on a background worker and only used once ready, so WHICH tier runs

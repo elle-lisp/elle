@@ -32,7 +32,7 @@ fn frozen_and_emitted(rt: &mut Runtime, src: &str, file: &str) -> (FrozenModule,
 fn lambdas(unit: &CodeUnit) -> Vec<crate::lir::LirOwned> {
     fn walk(t: &ClosureTemplate, out: &mut Vec<crate::lir::LirOwned>) {
         let mut owned = t.lir().expect("a nested lambda carries LIR").to_owned();
-        owned.set_sites(&[], &[]);
+        owned.set_sites(&[], &[], &[]);
         out.push(owned);
         for i in 0..t.num_children() {
             walk(&t.child(i), out);

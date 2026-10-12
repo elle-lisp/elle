@@ -189,11 +189,12 @@ impl PayloadParts {
             bytecode,
             yield_points,
             call_sites,
+            charge_sites,
         } = compiled;
         // The LIR the JIT promotes this lambda from is the frozen function plus
         // the sites only emission can supply.
         let mut lir = lir.clone();
-        lir.set_sites(&yield_points, &call_sites);
+        lir.set_sites(&yield_points, &call_sites, &charge_sites);
         let func = lir.view();
         let parts = PayloadParts {
             num_locals: func.num_locals() as usize,

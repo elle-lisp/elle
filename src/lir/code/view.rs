@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! `LirView`: the one read API over a frozen function — its blocks, nodes, terminators, header, tables and sites.
 //!
 //! src/lir/AGENTS.md
@@ -245,6 +245,16 @@ impl<'a> LirView<'a> {
             .map(|s| SiteRef::of(s, self.site_regs))
     }
 
+    pub fn charge_sites(&self) -> impl ExactSizeIterator<Item = SiteRef<'a>> + 'a {
+        let regs = self.site_regs;
+        let none: &'a [SiteRec] = &[];
+        none.iter().map(move |s| SiteRef::of(s, regs))
+    }
+
+    pub fn charge_site(&self, _i: usize) -> Option<SiteRef<'a>> {
+        None
+    }
+
     /// Whether any instruction is a `op`.
     pub fn has_op(&self, op: Op) -> bool {
         self.parts.nodes.iter().any(|n| n.op == op as u8)
@@ -436,7 +446,7 @@ impl<'a> NodeRef<'a> {
     }
 }
 
-/// A yield point or a call site.
+/// A yield point, a call site or a fuel charge site.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SiteRef<'a> {
     /// The bytecode offset the interpreter resumes at.

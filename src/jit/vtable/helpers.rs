@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 // docs/impl/jit.md
 //! One Cranelift signature per `elle_jit_*` runtime helper, declared into the
 //! module before any function is translated.
@@ -113,7 +113,8 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         &[I64, I64, I64, I64, I64, I64, I64, I64],
         &[I64, I64],
     );
-    // jit_yield_through_call: (spilled_ptr, call_site_idx, vm, ctag, cpay) -> (tag, payload)
+    // jit_yield_through_call and fuel_pause:
+    // (spilled_ptr, site_idx, vm, ctag, cpay) -> (tag, payload)
     let ytc_sig = make_sig(module, &[I64, I64, I64, I64, I64], &[I64, I64]);
     // void -> (tag, payload)  (no arguments, returns NIL)
     let void_to_value = make_sig(module, &[], &[I64, I64]);
@@ -204,6 +205,7 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         tail_call_array: declare(module, "elle_jit_tail_call_array", &call_array_sig)?,
         jit_yield: declare(module, "elle_jit_yield", &yield_sig)?,
         jit_yield_through_call: declare(module, "elle_jit_yield_through_call", &ytc_sig)?,
+        fuel_pause: declare(module, "elle_jit_fuel_pause", &ytc_sig)?,
         has_signal: declare(module, "elle_jit_has_signal", &vm_only)?,
         region_enter: declare(module, "elle_jit_region_enter", &void_to_value)?,
         region_exit: declare(module, "elle_jit_region_exit", &void_to_value)?,

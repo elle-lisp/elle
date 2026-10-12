@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 // docs/impl/jit.md
 //! `JitCode`: a compiled function's entry pointer, plus everything the native
 //! code holds a raw pointer into and therefore must outlive it.
@@ -45,12 +45,16 @@ pub struct JitCode {
     /// Read by `elle_jit_yield` runtime helper.
     #[allow(dead_code)]
     pub(crate) yield_points: Vec<super::dispatch::YieldPointMeta>,
-    /// Call site metadata for yield-through-call support.
+    /// Park site metadata for yield-through-call support.
     /// Indexed by call site index (u32 immediate in JIT code).
-    /// Empty for non-yielding functions.
+    /// Empty for a silent function.
     /// Read by `elle_jit_yield_through_call` runtime helper.
     #[allow(dead_code)]
     pub(crate) call_sites: Vec<super::dispatch::CallSiteMeta>,
+    /// Fuel charge site metadata, indexed by charge site index (u32 immediate
+    /// in JIT code). Read by `elle_jit_fuel_pause` runtime helper.
+    #[allow(dead_code)]
+    pub(crate) charge_sites: Vec<super::dispatch::ChargeSiteMeta>,
     /// Immutable heap-literal templates baked by `MaterializeConst` (a string, or
     /// a quoted compound structure). The native code holds a raw pointer to each
     /// `ConstTemplate`, so they must live as long as the JIT code itself (this
@@ -79,6 +83,7 @@ impl JitCode {
             _module: Arc::new(ModuleHolder::new(module)),
             yield_points: Vec::new(),
             call_sites: Vec::new(),
+            charge_sites: Vec::new(),
             templates: Vec::new(),
         }
     }
@@ -98,6 +103,7 @@ impl JitCode {
             _module: Arc::new(ModuleHolder::new(module)),
             yield_points,
             call_sites,
+            charge_sites: Vec::new(),
             templates,
         }
     }
@@ -159,6 +165,7 @@ impl JitCode {
             _module: Arc::new(ModuleHolder::new(module)),
             yield_points,
             call_sites: Vec::new(),
+            charge_sites: Vec::new(),
             templates: Vec::new(),
         }
     }
@@ -169,6 +176,16 @@ impl JitCode {
     pub(crate) fn test_with_call_sites(call_sites: Vec<super::dispatch::CallSiteMeta>) -> Self {
         let mut code = Self::test_with_yield_points(Vec::new());
         code.call_sites = call_sites;
+        code
+    }
+
+    /// Create a JitCode with charge sites but no real compiled code.
+    /// For testing `elle_jit_fuel_pause` without Cranelift compilation.
+    pub(crate) fn test_with_charge_sites(
+        charge_sites: Vec<super::dispatch::ChargeSiteMeta>,
+    ) -> Self {
+        let mut code = Self::test_with_yield_points(Vec::new());
+        code.charge_sites = charge_sites;
         code
     }
 }

@@ -1,23 +1,120 @@
 // audited: 2026-10-12
 // docs/impl/bytecode.md
+// src/lir/AGENTS.md
 //! What the bytecode emitter writes: control flow, yield points, the
 //! coalescing oracle, and a nested lambda's payload. What an edge owes the
-//! operand stack is `depth`'s subject, and where a call parks is `callsite`'s.
+//! operand stack is `depth`'s subject, where a call parks is `callsite`'s, and
+//! where fuel is charged is `charge`'s.
 
 use super::*;
 
 mod callsite;
+mod charge;
 mod depth;
 mod opcodes;
+pub(super) use crate::lir::testkit::emitter;
 use crate::lir::testkit::LirFixture;
 use crate::value::{Arity, CodeArena};
 
-/// An emitter over a code region of a heap the test leaks, for the tests that
-/// read what the emitter wrote and run none of it.
-pub(super) fn emitter() -> Emitter {
-    Emitter::new(CodeArena::mint(unsafe {
-        &mut *crate::value::arena::leaked_test_heap()
-    }))
+/// One decoded instruction: its offset and its opcode's name.
+struct Decoded {
+    at: usize,
+    opcode: String,
+    /// A jump's signed offset, read off the disassembly.
+    jump_offset: Option<i64>,
+}
+
+/// `bytecode` decoded one instruction per entry, from the disassembler.
+fn decode(bytecode: &[u8]) -> Vec<Decoded> {
+    use crate::compiler::bytecode::disassemble_lines;
+    disassemble_lines(bytecode)
+        .iter()
+        .map(|line| {
+            let at = line
+                .trim_start_matches('[')
+                .split(']')
+                .next()
+                .and_then(|n| n.trim().parse().ok())
+                .unwrap_or_else(|| panic!("no offset on: {line}"));
+            let (_, rest) = line.split_once("] ").expect("a disassembled line");
+            let opcode = rest.split(' ').next().unwrap_or_default().to_string();
+            let jump_offset = rest
+                .split_once("offset=")
+                .and_then(|(_, tail)| tail.split(',').next())
+                .and_then(|n| n.trim().parse().ok());
+            Decoded {
+                at,
+                opcode,
+                jump_offset,
+            }
+        })
+        .collect()
+}
+
+/// The offsets where the interpreter charges fuel in `bytecode`: each call
+/// opcode, and each `Jump` whose offset is negative
+/// (src/vm/dispatch/interp/opcodes.rs).
+fn interpreter_charge_points(bytecode: &[u8]) -> Vec<usize> {
+    decode(bytecode)
+        .into_iter()
+        .filter(|d| match d.opcode.as_str() {
+            "Call" | "CallChecked" | "TailCall" | "TailCallChecked" | "CallArrayMut"
+            | "TailCallArrayMut" => true,
+            "Jump" => d.jump_offset.is_some_and(|o| o < 0),
+            _ => false,
+        })
+        .map(|d| d.at)
+        .collect()
+}
+
+/// A program with each shape that charges fuel or makes a call: self and
+/// mutual tail calls, a `while` loop, non-tail and spliced calls, a closure, a
+/// generator, a `letrec` loop, a `match` and an `each`.
+const CORPUS: &str = r#"
+(defn spin [i n] (if (< i n) (spin (+ i 1) n) i))
+(defn count-up [n] (var i 0) (while (< i n) (assign i (+ i 1))) i)
+(defn drive [k] (when (> k 0) (spin 0 3) (drive (- k 1))))
+(defn splice [xs] (+ ;xs))
+(defn splice-tail [f xs] (f ;xs))
+(defn twice [f x] (f (f x)))
+(defn adder [n] (fn [x] (+ x n)))
+(defn gen [] (yield 1) (yield 2) 3)
+(defn walk [xs]
+  (letrec [go (fn [ys acc] (if (empty? ys) acc (go (rest ys) (+ acc (first ys)))))]
+    (go xs 0)))
+(defn classify [x] (match x 0 :zero [a b] (+ a b) _ :other))
+(defn each-sum [xs] (var s 0) (each x xs (assign s (+ s x))) s)
+(defn ping [n] (if (> n 0) (pong (- n 1)) :ping))
+(defn pong [n] (if (> n 0) (ping (- n 1)) :pong))
+"#;
+
+/// Every lambda `source` compiles to through the whole pipeline, nested ones
+/// included, as its name, its bytecode and the LIR the JIT compiles it from:
+/// a copy of each code payload's, sites and all.
+fn compiled_lambdas(source: &str) -> Vec<(String, Vec<u8>, LirOwned)> {
+    use crate::compiler::stdlib_cache::StdlibCache;
+    use crate::value::ClosureTemplate;
+    fn walk(t: &ClosureTemplate, out: &mut Vec<(String, Vec<u8>, LirOwned)>) {
+        let lir = t
+            .lir()
+            .expect("a nested lambda's payload carries its LIR")
+            .to_owned();
+        let name = t.name().unwrap_or("<anonymous>").to_string();
+        out.push((name, t.bytecode().to_vec(), lir));
+        for i in 0..t.num_children() {
+            walk(&t.child(i), out);
+        }
+    }
+    let mut rt = crate::runtime::Runtime::with_stdlib_cache(StdlibCache::Off);
+    let (_, symbols, cctx) = rt.parts();
+    let unit = crate::pipeline::compile_file(source, symbols, cctx, "<lambdas>")
+        .expect("the source compiles");
+    let mut out = Vec::new();
+    let entry = unit.entry();
+    for i in 0..entry.num_children() {
+        walk(&entry.child(i), &mut out);
+    }
+    out
 }
 
 /// Emit `func` alone into a code region of `vm`'s heap and run it there.

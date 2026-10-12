@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! Function call dispatch helpers for JIT-compiled code.
 //!
 //! docs/impl/jit.md
@@ -7,7 +7,7 @@
 //!
 //! The `extern "C"` call helpers themselves live in `callops`: calling Elle
 //! closures, native functions, and parameters from JIT-compiled code. This file
-//! holds what they share: the sentinels, the yield/call-site metadata types,
+//! holds what they share: the sentinels, the side-exit metadata types,
 //! primitive signal handling, the capability denial, and the owned-argument
 //! retain of a compiled call.
 
@@ -66,6 +66,22 @@ pub(crate) struct CallSiteMeta {
     /// Whether a resume delivers its value into the site's result. False for
     /// an instruction that produces no value.
     pub push_resume_value: bool,
+}
+
+/// Metadata for a single fuel charge site in JIT-compiled code.
+/// Stored in `JitCode.charge_sites`, indexed by charge site index.
+/// Read by `elle_jit_fuel_pause` runtime helper.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub(crate) struct ChargeSiteMeta {
+    /// Bytecode IP of the charging instruction, which the resume runs again.
+    pub ip: usize,
+    /// Number of spilled operand stack values.
+    pub num_spilled: u16,
+    /// Number of locally-defined variable slots (excludes params).
+    pub num_locals: u16,
+    /// Number of function parameters (spilled from arg_var_base).
+    pub num_params: u16,
 }
 
 // =============================================================================

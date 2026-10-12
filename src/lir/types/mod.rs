@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! The LIR's scalar types: registers, labels, operators, terminators, and the site records emission produces.
 //!
 //! src/lir/AGENTS.md
@@ -179,4 +179,20 @@ pub struct CallSiteInfo {
     /// Whether a resume delivers its value into the site's result. False for an
     /// instruction that produces no value (`InstrRef::raise_delivers`).
     pub push_resume_value: bool,
+}
+
+/// Metadata about a fuel charge site, collected during bytecode emission. The
+/// JIT reads it to park a frame whose budget ran out at the charging
+/// instruction, which the interpreter then runs again (docs/impl/jit.md).
+///
+/// Only populated for functions where `signal.may_suspend()`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ChargeSiteInfo {
+    /// Bytecode offset where the charging instruction starts.
+    pub ip: usize,
+    /// Registers on the operand stack at `ip`, bottom to top: a call's
+    /// arguments and callee are still on it.
+    pub stack_regs: Vec<Reg>,
+    /// Number of local variable slots below them.
+    pub num_locals: u16,
 }
