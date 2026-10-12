@@ -50,12 +50,13 @@ answer arrives, starts its own resync, and `gun:connect` returns. So when
 arrives within `:wait`, `gun:connect` closes the connection and raises
 `{:error :gun-error :reason :peer-timeout}`.
 
-**Resync.** Once a side registers a peer, it sends that peer a `put` of every
-node it has loaded, and one `get` for every soul it has loaded. The put carries
-this side's fields to the peer. The answer to the get carries the peer's fields
-back. HAM merges both, so two databases that wrote while apart converge when
-they meet again. The caller dials again after a drop; `gun:connect` does not
-redial.
+**Resync.** Once a side registers a peer, it sends that peer one `get` for
+every soul it has loaded. The answer carries the peer's fields for those souls,
+read from its store when its memory lacks them. Both sides do this, so each
+side pulls the souls it holds, and two databases that wrote while apart
+converge when they meet again. A side needs no push: a soul it holds and the
+peer has not loaded reaches the peer on the peer's first read. The caller dials
+again after a drop; `gun:connect` does not redial.
 
 **Sends.** `std/websocket` does not order the frames of two fibers that send on
 one connection, so each peer has one send lock. A send that fails closes that
