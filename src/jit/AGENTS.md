@@ -23,10 +23,10 @@ LirView -> JitCompiler -> Cranelift IR -> Native code -> JitCode
 ### Background compilation
 
 JIT compilation runs on a dedicated background thread (`elle-jit`).
-When a function becomes hot (called as many times as the JIT threshold, 10
-by default), `prepare_task` copies the frozen LIR its code payload carries
-into a `LirOwned`, puts that in a `JitTask`, and sends it to the worker via
-`crossbeam_channel`. The task is plain
+A function becomes hot when it has been called as many times as the JIT
+threshold, 10 by default. Then `prepare_task` copies the frozen LIR its code
+payload carries into a `LirOwned`, puts that in a `JitTask`, and sends it to
+the worker via `crossbeam_channel`. The task is plain
 data, so it is `Send` by its type rather than by a hand-written claim. The
 interpreter continues running the function while Cranelift compiles it. Each VM
 owns its worker, and dropping the worker discards the tasks still in its queue
@@ -56,10 +56,10 @@ to block until all pending compilations finish before reporting.
 **`--trace=syncjit`** disables the worker entirely: `submit_jit_task`
 compiles on the VM thread and installs into `jit_cache` before returning.
 Codegen inputs are identical (same `prepare_task` output), so this is the
-first lever when chasing a suspected JIT race — a failure that persists
-under `syncjit` is a codegen or input bug; one that vanishes lives at the
-worker boundary (the task crossing to the worker, or poll/install racing
-execution). Combine with `--trace=jit` to log each synchronous install.
+first lever when chasing a suspected JIT race. A failure that persists under
+`syncjit` is a codegen or input bug. One that vanishes lives at the worker
+boundary: the task crossing to the worker, or poll/install racing execution.
+Combine with `--trace=jit` to log each synchronous install.
 
 ## Interface
 
@@ -125,7 +125,8 @@ Unsupported (returns JitError::UnsupportedInstruction):
 - `MakeClosure` — the translator has no lowering for it: a closure's code
   object is a payload in a code region, and the worker has no heap to build one
   in ([jit.md](../../docs/impl/jit.md))
-- `Eval` — runs the compiler at run time
+- `Eval` — runs the compiler at run time, and
+  [async_ops.rs](translate/instr/async_ops.rs) refuses it
 - Variadic functions with `Struct`/`StrictStruct` varargs — need fiber for keyword error reporting
 
 Supported in yielding functions (via side-exit):
@@ -137,7 +138,9 @@ Supported in yielding functions (via side-exit):
 All operations go through `extern "C"` runtime helpers for safety.
 These handle type checking and tagged-union encoding.
 
-### runtime.rs (pure arithmetic on tagged-union values)
+### runtime/ (pure arithmetic on tagged-union values)
+
+[runtime.rs](runtime.rs) re-exports its three submodules.
 
 - **Arithmetic**: `elle_jit_add`, `_sub`, `_mul`, `_div`, `_rem`
 - **Bitwise**: `elle_jit_bit_and`, `_or`, `_xor`, `_shl`, `_shr`
@@ -149,27 +152,42 @@ These handle type checking and tagged-union encoding.
 
 [dispatch.rs](dispatch.rs) re-exports everything from [calls.rs](calls.rs),
 [data.rs](data.rs) and [suspend.rs](suspend.rs), so that
-[vtable/symbols.rs](vtable/symbols.rs) can register all helpers as `dispatch::elle_jit_*`. It also
-houses:
+[vtable/symbols.rs](vtable/symbols.rs) can register all helpers as
+`dispatch::elle_jit_*`. It also houses:
 
 - **Array mutation**: `elle_jit_array_push`, `elle_jit_array_extend`
 - **Parameter frames**: `elle_jit_push_param_frame`
-- **Struct access**: `elle_jit_struct_get_or_nil`, `elle_jit_struct_get_destructure`, `elle_jit_struct_rest`
 - **Signal bound checking**: `elle_jit_check_signal_bound`
+- **Struct access** ([dispatch/structops.rs](dispatch/structops.rs)):
+  `elle_jit_struct_get_or_nil`, `elle_jit_struct_get_destructure`,
+  `elle_jit_struct_rest`
+- **Regions** ([dispatch/region.rs](dispatch/region.rs)): the refcount and
+  adopt helpers, and `elle_jit_free_region_group`
 
 ### calls.rs and calls/callops (function call dispatch)
 
 - **Sentinels**: `TAIL_CALL_SENTINEL`, `YIELD_SENTINEL`
 - **Metadata types**: `YieldPointMeta`, `CallSiteMeta`, `ChargeSiteMeta`
 - **Signal check**: `elle_jit_has_signal`
-- **Function calls**: `elle_jit_call`, `elle_jit_tail_call`, `elle_jit_call_array`, `elle_jit_tail_call_array`
+- **Function calls**: `elle_jit_call` in [callops.rs](calls/callops.rs), and
+  `elle_jit_tail_call`, `elle_jit_call_array` and `elle_jit_tail_call_array`
+  in [arraycall.rs](calls/callops/arraycall.rs)
 - **Misc call helpers**: `elle_jit_pop_param_frame`
 
-### data.rs (heap/VM interaction)
+### data.rs and data/ (heap/VM interaction)
 
-- **Data structures**: `elle_jit_pair`, `elle_jit_first`, `elle_jit_rest`, `elle_jit_make_array`, `elle_jit_is_pair`, and array/slice ops
-- **LBoxes**: `elle_jit_make_capture`, `elle_jit_load_capture_cell`, `elle_jit_store_capture_cell`, `elle_jit_load_capture`, `elle_jit_store_capture`
-- **Type checks**: `elle_jit_is_array`, `elle_jit_is_struct`, `elle_jit_is_set`, etc.
+- **Data structures** ([data/build.rs](data/build.rs)): `elle_jit_pair`,
+  `elle_jit_first`, `elle_jit_rest`, `elle_jit_make_array`,
+  `elle_jit_is_pair`, and `elle_jit_materialize_const`
+- **Type checks** ([data/build.rs](data/build.rs)): `elle_jit_is_array`,
+  `elle_jit_is_struct`, `elle_jit_is_set`, and their mutable twins
+- **Destructuring** ([data/destructure.rs](data/destructure.rs)): the
+  pattern-binding accessors and the array/slice ops
+- **Capture cells and the rest list** ([data/cell.rs](data/cell.rs)):
+  `elle_jit_make_capture`, `elle_jit_make_capture_owned`,
+  `elle_jit_load_capture_cell`, `elle_jit_store_capture_cell`,
+  `elle_jit_load_capture`, `elle_jit_store_capture`,
+  `elle_jit_collect_rest_list`
 
 ## Self-Tail-Call Optimization
 
@@ -296,7 +314,8 @@ error included, and returns on a halt. No errors are silently swallowed.
    accepts a polymorphic function and a yielding one alike: the runtime
    dispatch helper handles an arbitrary callable, and a callee that suspends
    leaves through the yield side-exit. What `compile` refuses is a
-   `Struct`/`StrictStruct` variadic and a function containing `MakeClosure`.
+   `Struct`/`StrictStruct` variadic, and a function containing `MakeClosure` or
+   `Eval`.
 
 2. **Yield metadata is populated during emission.** `Emitter::emit()` returns
    a `ClosureCompiled`: the bytecode and the metadata emission recorded.
@@ -398,8 +417,8 @@ Stored in `JitCode.yield_points`, indexed by yield point index:
 - `num_params: u16` — Number of function parameters
 
 The JIT yield helper reads the three counts to know how many u64 values to
-read from the spilled buffer and convert back to `Value`s, and where each
-run of them belongs in the rebuilt frame.
+read from the spilled buffer and convert back to `Value`s. The counts also
+say where each run of them belongs in the rebuilt frame.
 
 ### Yield Point Recording
 
@@ -465,7 +484,7 @@ rejects.
 
 ## Reclamation
 
-Regions reclaim: a region frees at `FreeRegion(ρ)` when its RC reaches 0.
+A region frees when its count reaches zero.
 The JIT emits the same `IncrefValueRegion` / `DecrefValueRegion` /
 `DecrefCellRegion` accounting the interpreter does, so a loop body or a
 self-tail-call boundary needs no separate release step.

@@ -1,6 +1,6 @@
 # Warts
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-10-11 -->
 
 Where Elle surprises a programmer from another Lisp: the intentional differences,
 then the known limitations.
@@ -39,12 +39,10 @@ The three that shape whole programs are in [AGENTS.md](../AGENTS.md) and
 
 ## Known limitations
 
-- **Non-tail recursion stops at depth 200** (#1207). Tail calls, mutual ones
-  included, run in constant stack.
 - **A macro cannot be exported from a module.** A module's `defmacro` is not a
   value its export struct can name ([macros.md](macros.md)).
 - **A macro cannot return an improper list.** The expander converts a macro's
   result to syntax, and syntax has no improper-list form.
-- **A mutable container stored into itself leaks its region** (#1228). Other
-  mutable cycles free with their owner where the ownership forest can own them
+- **A mutable cycle can leak.** A cycle frees with its owner where the ownership
+  forest can own it, and leaks where it cannot
   ([regions/semantics.md](regions/semantics.md)).

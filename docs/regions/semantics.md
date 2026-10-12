@@ -1,6 +1,6 @@
 # Region semantics — the model you write against
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-10-11 -->
 
 This is the consumer's view of *what* the memory system guarantees, so you can
 write Elle that is sympathetic to it. For the implementor's correctness
@@ -17,23 +17,23 @@ and the regions that value referenced are decremented in turn. You never call
 Knowing which mechanism frees a value tells you where its guarantees come from.
 
 **Immutable values are pure TT.** In TT, `letregion ρ in e` binds a region whose
-lifetime encloses `e`; an effect/escape analysis proves every value's lifetime is
+lifetime encloses `e`. An effect/escape analysis proves every value's lifetime is
 bounded by some region, and regions are freed when their `letregion` exits. For
 immutable data this is statically sound and complete: the compiler sees every
 cross-region reference because immutable contents never change after construction.
 
 **Mutation is what TT omits, so reference counting covers it.** TT has no
 mutable reference. A mutable cell can be made to point at a value created later
-or elsewhere *after the cell exists* — there is no static effect for "a store
+or elsewhere *after the cell exists*. There is no static effect for "a store
 that happens at runtime," so no static analysis can bound the pointed-to value's
 lifetime. Elle closes this gap with per-region counts: a store into a mutable
 container counts a reference to the stored value's region at runtime, and a
 removal releases it.
 
-**Ownership frees whole groups.** Where the compiler proves that a group of
-regions is reachable only through one owner — a parent region, an activation,
-or a fiber — it links them into an ownership forest
-([impl/region/ownership.md](../impl/region/ownership.md)). An owned region
+**Ownership frees whole groups.** Where the compiler proves that only one owner
+reaches a group of regions, it links them into an ownership forest
+([impl/region/ownership.md](../impl/region/ownership.md)). The owner is a
+parent region, an activation, or a fiber. An owned region
 carries no count. It frees when its owner frees, with everything beneath it.
 This is the direction of Project Verona's regions, reached by inference instead
 of annotation. A region the compiler cannot prove owned keeps a count; that is
@@ -76,8 +76,24 @@ A cycle leaks when the compiler cannot place all of its regions under one owner,
 for example when part of the cycle is also referenced from outside the subtree.
 Those regions keep their counts; the leak does not crash. Widening what the
 forest can own is optimization work, tracked as leak class F4 in
-[impl/memory.md](../impl/memory.md). A container stored into itself also leaks
-today (#1228).
+[impl/memory.md](../impl/memory.md).
+
+A container that holds itself is no cycle to the counts. A reference from a
+region to itself is never counted, so the container frees at its last release
+like any other value:
+
+```lisp
+(defn mirror []
+  (def a @[])
+  (push a a)
+  (length a))
+
+(def before-mirror (arena/region-count))
+(var j 0)
+(while (< j 200) (mirror) (assign j (+ j 1)))
+(assert (<= (- (arena/region-count) before-mirror) 1)
+        "200 arrays that hold themselves strand no regions")
+```
 
 A related, narrower edge (true of every mutable container): a read consumed
 *within the same expression* that also removes or overwrites the value
