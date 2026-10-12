@@ -1,6 +1,6 @@
 # VM
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-12 -->
 
 The VM is a stack-machine interpreter that executes bytecode.
 
@@ -88,8 +88,10 @@ ledger ([park.md](region/park.md)).
   fiber or scheduler
 - **Signal emission** — checks the fiber's signal mask to decide
   whether to propagate or catch
-- **Fuel** — decrements a counter at each backward jump and each call outside
-  a silent function; when zero, emits the `:fuel` signal
+- **Fuel** — charges one unit at each backward jump and each call. A charge
+  that finds the budget spent emits the `:fuel` signal outside a silent
+  function, and takes nothing inside one
+  ([inference.md](../signals/inference.md))
 
 ## Where a reported error's location comes from
 
@@ -306,7 +308,7 @@ every closure entry and carries across suspend/resume ([wasm.md](wasm.md)).
 
 When a function is JIT-compiled, `Call` dispatches to the native code
 pointer instead of interpreting bytecode. The VM interprets a function the
-JIT rejected — a polymorphic one, or one that uses an instruction the
+JIT rejected — one that builds a closure, or one that uses an instruction the
 translator lacks — and any call made while the native stack is low.
 
 ## Files

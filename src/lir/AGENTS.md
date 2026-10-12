@@ -61,15 +61,16 @@ The frozen form, which every other reader reads ([code/](code/mod.rs)):
 | `LirOwned` | A `LirCode` plus the `Value`s its `ValueConst` instructions load |
 | `LirBody` | The same records in region pages, as a code payload's `lir` field ([code/body.rs](code/body.rs)) |
 | `LirView` | The read API over either home: blocks, instructions, terminators, header, tables, sites |
-| `SiteRef` | A yield point or a call site: resume IP, live registers, local count, and whether a resume delivers a value |
+| `SiteRef` | A yield point, a call site or a fuel charge site: the IP the interpreter resumes at, live registers, local count, and whether a resume delivers a value |
 
 The emitter, which reads the frozen form:
 
 | Type | Purpose |
 |------|---------|
-| `Emitter` | LIR → `ClosureCompiled`: the bytecode, and the yield points and call sites emission records, writing each nested lambda's payload into the `CodeArena` it was built over ([emit/mod.rs](emit/mod.rs)). `emit_module_with_lambdas` also answers the header over every closure's payload, for the WASM backend's dual compile |
+| `Emitter` | LIR → `ClosureCompiled`: the bytecode, and the yield points, call sites and charge sites emission records, writing each nested lambda's payload into the `CodeArena` it was built over ([emit/mod.rs](emit/mod.rs)). `emit_module_with_lambdas` also answers the header over every closure's payload, for the WASM backend's dual compile |
 | `YieldPointInfo` | What emission records at a yield point: resume IP, live registers, local count |
 | `CallSiteInfo` | What emission records at a park site, a call or an instruction that may raise: resume IP, live registers, local count, and whether a resume delivers a value |
+| `ChargeSiteInfo` | What emission records at a fuel charge site: the charging instruction's IP, live registers and local count, for a fuel pause in compiled code |
 | `testkit::LirFixture` | Builds a frozen function by hand, for tests (`#[cfg(test)]`) |
 
 `ConstRef::Nil` and `ConstRef::EmptyList` are distinct constants. Nil is falsy
@@ -172,18 +173,20 @@ Emitter, reading each function through a LirView
     ├─► emit instruction bytes, then patch jump offsets
     ├─► build the LocationMap from the node spans
     ├─► collect YieldPointInfo at each Emit terminator
-    └─► collect CallSiteInfo at each call and each instruction that may
-        raise, in a function that may signal
+    ├─► collect CallSiteInfo at each call and each instruction that may
+    │   raise, in a function that may signal
+    └─► collect ChargeSiteInfo at each instruction that charges fuel, in a
+        function that may signal
     │
     ▼
-ClosureCompiled { bytecode, yield_points, call_sites }
+ClosureCompiled { bytecode, yield_points, call_sites, charge_sites }
     │
     ▼
 PayloadParts::lambda, at the MakeClosure that builds the lambda
     ├─► locations ← Bytecode.location_map, sorted
     ├─► children ← Bytecode.children, the lambda's own child headers
-    └─► lir ← the lambda's frozen records, with its yield points and call
-        sites, for the JIT's side exits
+    └─► lir ← the lambda's frozen records, with its yield points, call
+        sites and charge sites, for the JIT's side exits
     │
     ▼
 CodeArena::write ──► a CodePayload in the unit's code region, whose
@@ -212,17 +215,20 @@ break that, because labels are allocated in creation order.
    through `yield_stack_state`, so a value computed before the emit, such as
    the `1` in `(+ 1 (emit :yield 2) 3)`, survives into the resume block.
 
-4. **Yield and call-site metadata come from emission.** The emitter records a
-   `YieldPointInfo` at each `Terminator::Emit` and a `CallSiteInfo` at each
-   call, each `TailCall`, and each instruction that may raise
-   (`Op::may_raise`, [code/raise.rs](code/raise.rs)).
-   `PayloadParts::lambda` hands both to the code payload's LIR body beside the
-   frozen records, and the JIT reads the payload's.
+4. **Yield, call-site and charge-site metadata come from emission.** The
+   emitter records a `YieldPointInfo` at each `Terminator::Emit`, a
+   `CallSiteInfo` at each call, each `TailCall`, and each instruction that may
+   raise (`Op::may_raise`, [code/raise.rs](code/raise.rs)), and a
+   `ChargeSiteInfo` at each instruction that charges fuel.
+   `PayloadParts::lambda` hands all three to the code payload's LIR body beside
+   the frozen records, and the JIT reads the payload's.
 
-5. **Call sites are recorded only where the function may signal.**
-   `Emitter.current_func_may_suspend`, set from `signal.may_suspend()`, gates
-   the recording. That method is true for any signal bit, an error included,
-   so only a silent function has no `call_sites`.
+5. **Call sites and charge sites are recorded only where the function may
+   signal.** `Emitter.current_func_may_suspend`, set from
+   `signal.may_suspend()`, gates the recording. That method is true for any
+   signal bit, an error included, so only a silent function has neither. A
+   silent function never parks: its charges spend fuel without pausing
+   ([jit.md](../../docs/impl/jit.md)).
 
 6. **A block's first emitted predecessor fixes its operand depth.** Every
    other edge into that block must arrive at the same depth. See "Merge
@@ -233,7 +239,7 @@ break that, because labels are allocated in creation order.
    code object. A frozen function's `values` table holds the same values, so it
    needs no owner of its own. A debug build checks this after emission.
 
-## Yield and call-site metadata
+## Yield, call-site and charge-site metadata
 
 `YieldPointInfo`:
 - `resume_ip` — the bytecode offset to resume at, after the emit opcode.
@@ -261,6 +267,20 @@ the tail call starts, the block a native callee falls through to when it
 completes. A compiled frame whose tail callee suspends parks there, so the
 resume runs that block ([park.md](../../docs/impl/region/park.md)).
 `TailCallArrayMut` records none.
+
+`ChargeSiteInfo`:
+- `ip` — the bytecode offset where the charging instruction starts. A fuel
+  pause parks there, and the interpreter runs the instruction again on resume.
+- `stack_regs` — the registers on the operand stack at that offset, bottom to
+  top. For a call that is the stack with its arguments and callee still on
+  top; for a backward jump it is the stack the edge trimmed to.
+- `num_locals` — the local slots below them.
+
+The charging instructions are the interpreter's: `Call`, `CallChecked`,
+`TailCall`, `TailCallChecked`, `CallArrayMut`, `TailCallArrayMut`, and a
+`Jump` whose target block was emitted before it. Each call instruction records
+one site, and so does each `Terminator` that emits a backward `Jump`, in
+emission order.
 
 ## Merge operand depth
 

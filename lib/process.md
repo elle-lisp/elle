@@ -1,6 +1,6 @@
 # process
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-12 -->
 
 Erlang-style processes on fibers: message passing, links, monitors, timers, named registration, and OTP-shaped behaviors above them.
 
@@ -20,7 +20,7 @@ The primitives — `send`, `recv`, `spawn`, `link`, `monitor`, `exit`,
 Outside one, `make-scheduler`, `start`, `run`, `process-info` and
 `inject` drive the scheduler from ordinary code. A process is preempted
 on fuel, so no process starves its siblings, unless it loops forever inside a
-silent function, where the meter charges nothing
+silent function, where the meter never pauses it
 ([inference.md](../docs/signals/inference.md)).
 
 ## Callback shapes

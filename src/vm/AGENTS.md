@@ -1,6 +1,6 @@
 # vm
 
-<!-- audited: 2026-10-07 -->
+<!-- audited: 2026-10-12 -->
 
 The VM executes bytecode on a fiber's operand stack, with each local in a stack slot above the frame base.
 
@@ -67,8 +67,8 @@ it act on each one:
 - `SIG_PROPAGATE`: `fiber/propagate` re-signals caught signal.
 - `SIG_ABORT`: Inject an error at the target fiber's suspension point.
 - `SIG_QUERY`: Primitive reads VM state (arena stats, introspection).
-- `SIG_FUEL`: The instruction budget ran out. The loop charges no fuel while a
-  silent function runs ([inference.md](../../docs/signals/inference.md)).
+- `SIG_FUEL`: The instruction budget ran out. A silent function spends fuel
+  but never pauses ([inference.md](../../docs/signals/inference.md)).
 - `SIG_HALT`: Graceful VM termination. Non-resumable.
 
 `execute_code`, which `execute` calls, is the translation boundary. It

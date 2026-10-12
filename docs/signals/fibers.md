@@ -1,6 +1,6 @@
 # Fiber Architecture
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-12 -->
 
 Fibers are Elle's unified control-flow mechanism.
 
@@ -76,8 +76,8 @@ use keywords in set literals for fiber masks:
 | `:exec` | 11 | Subprocess execution |
 | `:fuel` | 12 | Instruction budget exhaustion |
 
-Bits 15–17 name the capabilities `:gpu`, `:os-signal` and `:fs`. The other
-bits below 32 are internal to the VM or reserved, and bit 6 is unused —
+Bits 15–18 name the capabilities `:gpu`, `:os-signal`, `:fs` and `:net`. The
+other bits below 32 are internal to the VM or reserved, and bit 6 is unused —
 [runtime.md](../runtime.md) has the full table. Bits 32–63 are for
 user-defined signals (via `(signal :keyword)`) — see
 [protocol.md](protocol.md).
@@ -135,10 +135,12 @@ Every suspension builds a chain of frames. The signalling activation parks
 its own frame with its operand stack: `handle_emit` does this for an `emit`,
 and `handle_primitive_signal` for a suspending primitive in call position.
 A signal that leaves no frame of its own — a suspend in tail position, a
-fuel pause, an error — has its frame parked by the driver it returns to. As
-a suspending signal leaves each callee, its paused caller parks a frame
-behind it. A fuel pause parks with `push_resume_value` false, so the paused
-instruction runs again with the stack as it was.
+fuel pause in the interpreter, an error — has its frame parked by the driver
+it returns to. Compiled code parks its own fuel pause
+([jit.md](../impl/jit.md)). As a suspending signal leaves each callee, its
+paused caller parks a frame behind it. A fuel pause parks with
+`push_resume_value` false, so the paused instruction runs again with the stack
+as it was.
 
 ### Frame ordering
 

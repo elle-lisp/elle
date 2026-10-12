@@ -1,6 +1,6 @@
 # LIR — Low-level IR
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-12 -->
 
 LIR is an SSA-form intermediate representation with virtual registers,
 basic blocks, and explicit control flow.
@@ -54,10 +54,11 @@ succeeded or failed. Nothing the lowerer returns points into it.
   scalars appended to the function's pool, its constants to the constant
   table. **`terminate`** sets the open block's exit, and a block never
   terminated exits `Unreachable`. **`finish_block`** closes it.
-- **A splice moves nodes.** The relocation ([lower/AGENTS.md](../../src/lir/lower/AGENTS.md)
-  § "Tail-call ownership") emits a release run at the end of the open block,
-  takes the run back out, and inserts it ahead of a tail call: in the open
-  block, or in a block already finished. Only the 48-byte nodes move. Each
+- **A splice moves nodes.** The relocation
+  ([lower/AGENTS.md](../../src/lir/lower/AGENTS.md)) emits a release run at
+  the end of the open block, takes the run back out, and inserts it ahead of
+  a tail call: in the open block, or in a block already finished. Only the
+  48-byte nodes move. Each
   node's pool words stay where `emit` wrote them, and a node names its pool
   run by offset, so the move cannot disturb an operand.
 - **The lowerer reads its own nodes back** as `InstrRef`, decoded against the
@@ -114,8 +115,8 @@ Freezing writes these records ([src/lir/code/](../../src/lir/code/mod.rs)):
 - **`BlockRec`** — a label, the block's range of nodes, the terminator's
   fields and span, and an explicit zero pad.
 - **`ConstRec`** — a kind byte, an explicit seven-byte pad, and 64 bits.
-- **`SiteRec`** — a yield point or a call site: its resume address, its local
-  count, and a range of the site-register table.
+- **`SiteRec`** — a yield point, a call site or a fuel charge site: its resume
+  address, its local count, and a range of the site-register table.
 
 A function names its own parts by index everywhere. A register list longer
 than two lives in the pool, so a node is the same size whatever it carries. A
@@ -193,7 +194,8 @@ Lowerer ──► LirBuilder: the working form, in a working region
           FrozenModule: one LirOwned per function
               │
               ▼  Emitter reads each through a LirView
-          ClosureCompiled = (Bytecode, yield points, call sites)
+          ClosureCompiled: the Bytecode, its yield points, call sites and
+          charge sites
               │
               ▼  PayloadParts::lambda, written into the unit's code region
           code payload: a LirBody, read through ClosureTemplate::lir()
@@ -205,8 +207,8 @@ Lowerer ──► LirBuilder: the working form, in a working region
 ```
 
 Freezing runs once per compiled function, as the lowerer finishes it, and
-always before emission. The yield points
-and call sites are the one part only emission can supply, so the emitter
+always before emission. The yield points, call sites and charge sites are
+the one part only emission can supply, so the emitter
 writes them into the payload's body beside the frozen records, at the
 `MakeClosure` that builds the lambda ([region/template.md](region/template.md)).
 Every reader of a code object reads the body.

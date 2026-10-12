@@ -13,7 +13,7 @@ use crate::value::fiber::Fuel;
 
 /// (fiber/set-fuel fiber n) → nil
 ///
-/// Set the instruction budget on a fiber. `n` must be a non-negative integer.
+/// Set the instruction budget on a fiber to any non-negative integer `n`.
 /// A budget of 0 pauses the fiber with `:fuel` at its next charge site outside
 /// a silent function.
 pub(crate) fn prim_fiber_set_fuel(

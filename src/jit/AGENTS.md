@@ -70,6 +70,7 @@ execution). Combine with `--trace=jit` to log each synchronous install.
 | `JitError` | Compilation errors |
 | `YieldPointMeta` | Metadata for a yield point: resume IP and the spill counts |
 | `CallSiteMeta` | Metadata for a park site, the same shape, for a frame parked at a call or an instruction that raised |
+| `ChargeSiteMeta` | Metadata for a fuel charge site, the same shape, for a frame parked where its fuel ran out |
 | `YIELD_SENTINEL` | Sentinel value indicating JIT function yielded (side-exited) |
 | `JitWorker` | Background compilation thread; allocates no Elle values, so it carries no heap |
 | `JitTask` | Compilation request (a copy of the frozen LIR + cache key) |
@@ -101,7 +102,7 @@ variables and jumps to the loop header instead of calling
 **Return values:**
 - Normal return: tagged-union `Value`
 - Tail call: `TAIL_CALL_SENTINEL` (0xDEAD_BEEF_DEAD_BEEFu64)
-- Yield: `YIELD_SENTINEL` (0xDEAD_CAFE_DEAD_CAFEu64) — `fiber.signal` and `fiber.suspended` are set by the yield helper
+- Yield or pause: `YIELD_SENTINEL` (0xDEAD_CAFE_DEAD_CAFEu64) — `fiber.signal` and `fiber.suspended` are set by the side-exit helper
 
 ## Supported Instructions
 
@@ -159,7 +160,7 @@ houses:
 ### calls.rs and calls/callops (function call dispatch)
 
 - **Sentinels**: `TAIL_CALL_SENTINEL`, `YIELD_SENTINEL`
-- **Metadata types**: `YieldPointMeta`, `CallSiteMeta`
+- **Metadata types**: `YieldPointMeta`, `CallSiteMeta`, `ChargeSiteMeta`
 - **Signal check**: `elle_jit_has_signal`
 - **Function calls**: `elle_jit_call`, `elle_jit_tail_call`, `elle_jit_call_array`, `elle_jit_tail_call_array`
 - **Misc call helpers**: `elle_jit_pop_param_frame`
@@ -243,6 +244,13 @@ The signal system and JIT side-exit mechanism enable fibers and JIT to coexist:
   `SuspendedFrame` and append it to the suspended frame chain. A tail call
   whose callee yields or raises does the same at the tail call's call site. A
   halt builds no frame.
+
+- **Fuel pause**: compiled code charges fuel inline at each charge site. In a
+  function that may signal, a charge that finds the budget spent spills the
+  frame and calls `elle_jit_fuel_pause`, which parks the frame at the charging
+  instruction's bytecode offset, takes no resume value, and returns
+  `YIELD_SENTINEL`. A silent function's charge never pauses
+  ([jit.md](../../docs/impl/jit.md)).
 
 - **Primitive signals**: `jit_handle_primitive_signal` classifies a
   primitive's signal as the interpreter does. A suspending signal parks the
@@ -332,10 +340,10 @@ error included, and returns on a halt. No errors are silently swallowed.
     dispatch pass `*const Value` pointers directly. If Value's representation
     changes (see [value/repr/AGENTS.md](../value/repr/AGENTS.md)), these casts break.
 
-12. **Yield helpers set fiber.signal and fiber.suspended.** `elle_jit_yield`
-     and `elle_jit_yield_through_call` are responsible for building the
-     `SuspendedFrame` and setting `fiber.signal` and `fiber.suspended`. The
-     JIT caller must not modify these fields.
+12. **Side-exit helpers set fiber.signal and fiber.suspended.** `elle_jit_yield`,
+     `elle_jit_yield_through_call` and `elle_jit_fuel_pause` are responsible
+     for building the `SuspendedFrame` and setting `fiber.signal` and
+     `fiber.suspended`. The JIT caller must not modify these fields.
 
 13. **Variadic functions with `VarargKind::List` are JIT-supported.** The JIT
      entry block calls `elle_jit_collect_rest_list`, which builds the rest-arg
@@ -419,14 +427,26 @@ the releases after it ([park.md](../../docs/impl/region/park.md)). The
 translator counts the sites in the emitter's order, and a count mismatch
 rejects the compile.
 
+### Charge Site Recording
+
+In a function where `signal.may_suspend()`, each instruction that charges
+fuel records a `ChargeSiteInfo`: the offset where the instruction starts, and
+the operand stack there, with a call's arguments and callee still on it
+([lir/AGENTS.md](../lir/AGENTS.md)). The translator counts the sites in the
+same order, emits the inline charge at each, and spills that stack when the
+charge finds the budget spent. `compile` turns the list into
+`JitCode.charge_sites`, which `elle_jit_fuel_pause` reads; a count mismatch
+rejects the compile. A silent function records no charge site, and its
+charges never pause.
+
 ### Environment Reconstruction on Side-Exit
 
-When building a `SuspendedFrame` for interpreter resumption, the JIT yield
-helpers (`elle_jit_yield`, `elle_jit_yield_through_call`) reconstruct the
-interpreter frame from the closure's captures and the spill buffer. The
-spill buffer layout is `[params(num_params), locals(num_locals),
-operands(num_spilled)]`, with all three counts from the yield-point /
-call-site metadata:
+When building a `SuspendedFrame` for interpreter resumption, the side-exit
+helpers (`elle_jit_yield`, `elle_jit_yield_through_call`,
+`elle_jit_fuel_pause`) reconstruct the interpreter frame from the closure's
+captures and the spill buffer. The spill buffer layout is
+`[params(num_params), locals(num_locals), operands(num_spilled)]`, with all
+three counts from the yield-point, call-site or charge-site metadata:
 
 ```
 env   = [closure.env[0], ..., closure.env[n-1], param_0, ..., param_{p-1}]

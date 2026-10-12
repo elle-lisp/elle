@@ -1,6 +1,6 @@
 # Debugger
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-12 -->
 
 A design for a debugger that pauses a program, shows its state as structured
 values, and resumes it.
@@ -146,9 +146,9 @@ tooling pause through:
 
 No tooling pause arises inside an inferred-silent function. A silent function
 is a proof that nothing stops the fiber, and the native tiers run one with no
-way to park it. So the interpreter charges no fuel and checks no breakpoint
-while a silent function runs, and a signal that leaves one is a broken proof
-([signals/inference.md](signals/inference.md)). A step passes over a silent
+way to park it. So a silent function spends fuel but never pauses, the
+interpreter checks no breakpoint while one runs, and a signal that leaves one
+is a broken proof ([signals/inference.md](signals/inference.md)). A step passes over a silent
 call whole, and a breakpoint armed inside one never fires.
 
 Rationale: `:debug` is a tooling channel, not program behavior. Mask
