@@ -48,11 +48,14 @@ jobs:
             echo "plugins=false" >> "$GITHUB_OUTPUT"
           fi
 
+  # The first gate. Every other job names `qa` in its `needs`, so nothing else
+  # starts until QA passes: QA fails in minutes, and the rest of the matrix takes
+  # up to an hour. It runs on every pull request, with no `source` gate, because
+  # a Markdown-only change can break what the prose checks read
+  # (docs/analysis/ci.md).
   qa:
-    name: QA (fmt, clippy, doc)
-    needs: changes
+    name: QA (prose, fmt, clippy, doc)
     runs-on: ubuntu-latest
-    if: needs.changes.outputs.source == 'true'
     env:
       MLIR_SYS_220_PREFIX: /usr/lib/llvm-22
       TABLEGEN_220_PREFIX: /usr/lib/llvm-22
@@ -64,6 +67,10 @@ jobs:
           components: rustfmt,clippy
           targets: x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
+      # Before LLVM: the prose checks need none of it, and they are the step a
+      # change fails most often.
+      - name: Check the prose
+        run: make prose
       - name: Install LLVM 22 (for mlir feature)
         run: |
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
@@ -115,6 +122,7 @@ jobs:
   # would skip the one job that checks it.
   docs:
     name: Documentation Build
+    needs: qa
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -134,7 +142,7 @@ jobs:
   # (docs/testing.md).
   default:
     name: Default Build Tests
-    needs: changes
+    needs: [changes, qa]
     runs-on: ubuntu-latest
     if: needs.changes.outputs.source == 'true'
     env:
@@ -178,7 +186,7 @@ jobs:
   # only the interpreter shows would reach main green without this job.
   nojit:
     name: No-JIT Build Tests
-    needs: changes
+    needs: [changes, qa]
     runs-on: ubuntu-latest
     if: needs.changes.outputs.source == 'true'
     env:
@@ -215,7 +223,7 @@ jobs:
   # workflow (docs/analysis/ci.md).
   boot-image:
     name: Boot Image Tests
-    needs: changes
+    needs: [changes, qa]
     runs-on: ubuntu-latest
     if: needs.changes.outputs.source == 'true'
     env:
@@ -259,7 +267,7 @@ jobs:
   # the very file that proves the point.
   pool:
     name: Thread-Pool I/O Tests
-    needs: changes
+    needs: [changes, qa]
     runs-on: ubuntu-latest
     if: needs.changes.outputs.source == 'true'
     env:
@@ -299,7 +307,7 @@ jobs:
 
   tests-combined:
     name: Rust Tests
-    needs: changes
+    needs: [changes, qa]
     runs-on: ubuntu-latest
     if: needs.changes.outputs.source == 'true'
     env:
@@ -322,7 +330,7 @@ jobs:
 
   mlir:
     name: MLIR Tests
-    needs: changes
+    needs: [changes, qa]
     runs-on: ubuntu-latest
     if: needs.changes.outputs.source == 'true'
     env:
@@ -362,7 +370,7 @@ jobs:
 
   wasm:
     name: WASM Build
-    needs: changes
+    needs: [changes, qa]
     runs-on: ubuntu-latest
     if: needs.changes.outputs.source == 'true'
     steps:
@@ -402,7 +410,7 @@ jobs:
   # output".
   plugins:
     name: Plugin Tests
-    needs: changes
+    needs: [changes, qa]
     runs-on: ubuntu-latest
     if: needs.changes.outputs.plugins == 'true'
     steps:
@@ -451,7 +459,7 @@ jobs:
   # docs/analysis/ci.md.
   aarch64:
     name: AArch64 Smoke
-    needs: changes
+    needs: [changes, qa]
     runs-on: ubuntu-24.04-arm
     if: needs.changes.outputs.source == 'true'
     env:
@@ -497,7 +505,7 @@ jobs:
   # fills one with release artifacts.
   aarch64-tests:
     name: AArch64 Rust Tests
-    needs: changes
+    needs: [changes, qa]
     runs-on: ubuntu-24.04-arm
     if: needs.changes.outputs.source == 'true'
     env:
@@ -522,7 +530,7 @@ jobs:
 
   aarch64-noffi:
     name: AArch64 No-Features
-    needs: changes
+    needs: [changes, qa]
     runs-on: ubuntu-24.04-arm
     if: needs.changes.outputs.source == 'true'
     env:
@@ -555,7 +563,7 @@ jobs:
 
   android:
     name: Android Cross-Check
-    needs: changes
+    needs: [changes, qa]
     runs-on: ubuntu-latest
     if: needs.changes.outputs.source == 'true'
     steps:
@@ -581,7 +589,7 @@ jobs:
   # docs/analysis/ci.md.
   macos:
     name: macOS Smoke
-    needs: changes
+    needs: [changes, qa]
     runs-on: macos-latest
     if: needs.changes.outputs.source == 'true'
     env:
@@ -676,7 +684,7 @@ jobs:
   # one with release artifacts.
   macos-tests:
     name: macOS Rust Tests
-    needs: changes
+    needs: [changes, qa]
     runs-on: macos-latest
     if: needs.changes.outputs.source == 'true'
     env:
