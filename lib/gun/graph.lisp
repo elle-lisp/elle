@@ -10,10 +10,12 @@
 ## Exports: {:root-soul :child-soul :key-of :make-graph :node :field :merge :due
 ##           :node-value? :flatten}
 ##
-## A node's fields are a struct of key to [state value]. A graph maps each
-## soul to a mutable struct of fields.
+## A node's fields are a struct of key to field, which field.lisp builds. A
+## graph maps each soul to a mutable struct of fields.
 
 (fn [&named state value ham]
+
+  (def field ((import "std/gun/field")))
 
   ## ── Souls and keys ───────────────────────────────────────────────────
 
@@ -56,8 +58,8 @@
     "The fields of the node soul in g, or nil when g has no such node."
     (when-let [n (get g soul)] (freeze n)))
 
-  (defn field [g soul key]
-    "The [state value] of key in node soul of g, or nil."
+  (defn field-at [g soul key]
+    "The field of key in node soul of g, or nil."
     (when-let [n (get g soul)] (get n key)))
 
   (defn merge-node [g soul fields now]
@@ -66,9 +68,12 @@
      state after now."
     (let [current (or (get g soul) {})
           accepted @{}]
-      (each [key [st v]] in fields
-        (let [[cur-st cur-v] (or (get current key) [nil nil])]
-          (case (ham:verdict now st v cur-st cur-v)
+      (each [key f] in fields
+        (let [st (field:state f)
+              cur (get current key)
+              cur-st (when cur (field:state cur))
+              cur-v (when cur (field:value cur))]
+          (case (ham:verdict now st (field:value f) cur-st cur-v)
             :future (error {:error :gun-error
                             :reason :future-state
                             :soul soul
@@ -76,7 +81,7 @@
                             :state st
                             :now now
                             :message "a write carries a state after now"})
-            :accept (put accepted key [st v])
+            :accept (put accepted key f)
             nil)))
       (unless (empty? accepted)
         (let [n (or (get g soul)
@@ -93,7 +98,8 @@
     (let [now-fields @{}
           later-fields @{}]
       (each [key f] in fields
-        (put (if (state:before? now (get f 0)) later-fields now-fields) key f))
+        (put (if (state:before? now (field:state f)) later-fields now-fields)
+             key f))
       [(freeze now-fields) (freeze later-fields)]))
 
   ## ── Flattening ───────────────────────────────────────────────────────
@@ -121,9 +127,9 @@
             (cond
               (node-value? child)
                 (let [target (or (link-of at key) (child-soul at key))]
-                  (put fields key [st (value:link target)])
+                  (put fields key (field:make st (value:link target)))
                   (push queue [target child child-path]))
-              (value:valid? child) (put fields key [st child])
+              (value:valid? child) (put fields key (field:make st child))
               (error {:error :gun-error
                       :reason :invalid-value
                       :value child
@@ -138,7 +144,7 @@
    :key-of key-of
    :make-graph make-graph
    :node node
-   :field field
+   :field field-at
    :merge merge-node
    :due due
    :node-value? node-value?

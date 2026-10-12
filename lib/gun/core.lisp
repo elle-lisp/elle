@@ -18,6 +18,7 @@
 
   (def sync ((import "std/sync")))
   (def uuid ((import "std/uuid")))
+  (def field ((import "std/gun/field")))
 
   ## ── The core ─────────────────────────────────────────────────────────
 
@@ -53,20 +54,20 @@
             fields (store:read soul)
             clock core:clock]
         (when fields
-          (each [_ [st _]] in fields
-            (clock:observe st))
+          (each [_ f] in fields
+            (clock:observe (field:state f)))
           (graph:merge core:graph soul fields (clock:now)))
         (put core:loaded soul true))))
 
   (defn field-of [core soul key]
-    "The [state value] of key in node soul, read from the store when needed."
+    "The field of key in node soul, read from the store when needed."
     (load core soul)
     (graph:field core:graph soul key))
 
   (defn link-at [core soul key]
     "The soul that field key of node soul links to, or nil."
     (when-let [f (field-of core soul key)]
-              (let [v (get f 1)]
+              (let [v (field:value f)]
                 (when (value:link? v) (value:link-soul v)))))
 
   (defn node-value [core soul]
@@ -74,8 +75,9 @@
     (load core soul)
     (when-let [n (graph:node core:graph soul)]
               (let [out @{}]
-                (each [key [_ v]] in n
-                  (unless (nil? v) (put out key v)))
+                (each [key f] in n
+                  (let [v (field:value f)]
+                    (unless (nil? v) (put out key v))))
                 (freeze out))))
 
   (defn nodes [core souls]
@@ -97,7 +99,7 @@
         (def @i 0)
         (while (< i (length keys))
           (let [f (field-of core soul (get keys i))
-                v (when f (get f 1))
+                v (when f (field:value f))
                 last? (= i (- (length keys) 1))]
             (cond
               (value:link? v)
@@ -147,8 +149,8 @@
                 (each [soul fields] in g
                   (load core soul)
                   (let [[due not-yet] (graph:due fields (clock:now))]
-                    (each [_ [st _]] in due
-                      (clock:observe st))
+                    (each [_ f] in due
+                      (clock:observe (field:state f)))
                     (let [diff (graph:merge core:graph soul due (clock:now))]
                       (unless (empty? diff)
                         (store:write soul diff)
