@@ -1,6 +1,6 @@
-// audited: 2026-09-11
-//! What a dump records that no caller outside this crate can build: a syntax
-//! tree's scope sets, and the port behind a parameter's default.
+// audited: 2026-10-12
+//! What a dump records that only this crate can see: a syntax tree's scope
+//! sets, the port behind a parameter's default, and the static-region counter.
 //!
 //! docs/impl/image/sealing.md
 //! docs/impl/image/format.md
@@ -69,6 +69,17 @@ fn syntax_value(heap: &mut FiberHeap, arena: &SyntaxArena, tree: Syntax) -> Valu
     )
 }
 
+/// The list `(1)`: a body that holds no syntax, no parameter and no code.
+fn one_pair(heap: &mut FiberHeap, arena: &SyntaxArena) -> Value {
+    heap.alloc_in_region(
+        HeapObject::Pair(crate::value::heap::Pair::new(
+            Value::int(1),
+            Value::EMPTY_LIST,
+        )),
+        arena.region(),
+    )
+}
+
 fn tree_of(v: Value) -> &'static Syntax {
     let HeapObject::Syntax { syntax, .. } = (unsafe { deref(v) }) else {
         panic!("the value is not syntax");
@@ -119,18 +130,7 @@ fn the_scope_watermark_clears_every_counter_in_the_body() {
 // push every later expander's counter up for nothing.
 #[test]
 fn a_body_without_syntax_has_no_watermark() {
-    let (_dst, hydrated) = round_trip(
-        |heap, arena| {
-            heap.alloc_in_region(
-                HeapObject::Pair(crate::value::heap::Pair::new(
-                    Value::int(1),
-                    Value::EMPTY_LIST,
-                )),
-                arena.region(),
-            )
-        },
-        "no-watermark",
-    );
+    let (_dst, hydrated) = round_trip(one_pair, "no-watermark");
     assert_eq!(hydrated.scope_watermark, 0);
 }
 
@@ -344,17 +344,30 @@ fn the_parameter_watermark_clears_every_id_in_the_body() {
 // reported one anyway would push every later mint up for nothing.
 #[test]
 fn a_body_without_parameters_has_no_watermark() {
-    let (_dst, hydrated) = round_trip(
-        |heap, arena| {
-            heap.alloc_in_region(
-                HeapObject::Pair(crate::value::heap::Pair::new(
-                    Value::int(1),
-                    Value::EMPTY_LIST,
-                )),
-                arena.region(),
-            )
-        },
-        "no-param-watermark",
-    );
+    let (_dst, hydrated) = round_trip(one_pair, "no-param-watermark");
     assert_eq!(hydrated.param_watermark, 0);
+}
+
+// ── The static-region counter ────────────────────────────────────────
+
+// A source boot compiles user code with the static-region counter where the
+// boot's own compiles left it, so an image boot that is to emit the same
+// bytecode has to start there too (docs/impl/image/format.md). Other tests
+// mint concurrently, so the pin is a bracket around the dump, not an equality.
+//
+// The counter-factual is a watermark taken from the body's highest slot, as
+// the scope and parameter watermarks are. This body is a pair, which holds no
+// code and so no slot: that rule records zero, below any value the counter
+// has ever held.
+#[test]
+fn the_static_region_watermark_is_the_dumping_process_counter() {
+    let before = crate::lir::lower::static_region_counter();
+    let (_dst, hydrated) = round_trip(one_pair, "static-watermark");
+    let after = crate::lir::lower::static_region_counter();
+    assert!(
+        (before..=after).contains(&hydrated.static_region_watermark),
+        "the watermark {} is not the dumping process's counter, which ran from \
+         {before} to {after} across the dump",
+        hydrated.static_region_watermark
+    );
 }

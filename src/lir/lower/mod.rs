@@ -36,6 +36,8 @@ use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 
 pub use naming::new_static_region;
+#[allow(unused_imports)]
+pub(crate) use naming::static_region_counter;
 pub(crate) use naming::ValueSlot;
 // The walk it names is a debug-only net, so the import is gated with it — an
 // unconditional `use` of a `cfg`-gated item fails the release build alone.

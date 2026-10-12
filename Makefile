@@ -7,7 +7,7 @@
        doctest doctest-list myplugin plugins plugins-all \
        plugins-verify smoke-plugins mcp embedding semver-check \
        fmt fmt-check audit agents agents-check prose budget page-claims \
-       bytecode-golden bytecode-golden-check
+       bytecode-golden bytecode-golden-check bytecode-parity
 
 .DEFAULT_GOAL := all
 
@@ -384,9 +384,10 @@ smoke-scrub: elle elle-rig  ## The language suite on the rig, each released page
 
 # The language suite booted from an image instead of from core.lisp,
 # prelude.lisp and stdlib.lisp — dump-boot's gate (docs/impl/image/boot.md).
-# `--boot-image=` is off by default and stays off while user code under an
-# image boot compiles without cross-unit inlining, so nothing else in the tree
-# boots from one.
+# `--boot-image=` is off by default, for the reasons boot.md gives, so nothing
+# else in the tree boots from one. The target runs `bytecode-parity` first: a
+# corpus that answers alike under an image boot can still have compiled to
+# other bytecode, and only the dumps show that.
 #
 # The directory lives under target/ rather than the temp root: an image is
 # megabytes, a store prunes the one an earlier digest left, and `make clean`
@@ -401,7 +402,7 @@ smoke-scrub: elle elle-rig  ## The language suite on the rig, each released page
 # `[wasm]` marker.
 BOOT_IMAGE_DIR ?= target/boot-image
 
-smoke-boot-image: elle  ## The language suite booted from an image (dump-boot's gate)
+smoke-boot-image: elle bytecode-parity  ## The language suite booted from an image (dump-boot's gate)
 	@echo "=== boot image: store one, then hydrate it ==="
 	@rm -rf "$(BOOT_IMAGE_DIR)"
 	@$(ELLE) --boot-image=$(BOOT_IMAGE_DIR) -e '(+ 1 2)' >/dev/null
@@ -424,6 +425,15 @@ bytecode-golden: elle  ## Record every corpus file's and stdlib's --dump=bytecod
 
 bytecode-golden-check: elle  ## Compare this build's --dump=bytecode with the recorded golden
 	scripts/bytecode-golden check $(ELLE) $(BYTECODE_GOLDEN) $(JOBS)
+
+# The compile half of boot parity (docs/impl/image/boot.md): every corpus
+# file's and stdlib's `--dump=bytecode` under a source boot and under an image
+# boot, each run a process of its own, compared byte for byte. A failure keeps
+# both sets of dumps here to diff.
+BYTECODE_PARITY ?= target/bytecode-parity
+
+bytecode-parity: elle  ## Compare every corpus file's --dump=bytecode under a source boot and an image boot
+	scripts/bytecode-golden parity $(ELLE) $(BYTECODE_PARITY) $(JOBS)
 
 # Each variant below is a build of its own, and runs the language suite as the
 # default build does: every file, no flag. A build is its features

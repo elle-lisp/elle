@@ -50,6 +50,10 @@ pub struct Hydrated {
     /// holds no parameter. Hydration has already raised this process's counter
     /// past it — the field is what a caller reads to see that it did.
     pub param_watermark: u32,
+    /// The static-region counter of the process that dumped the image, which
+    /// hydration has already raised this process's counter to
+    /// (docs/impl/image/format.md).
+    pub static_region_watermark: u32,
 }
 
 /// Why a dump or hydration refused.

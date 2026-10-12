@@ -1,11 +1,11 @@
-// audited: 2026-09-29
-// The boot-image gate: the flag `elle test` honours, and the target that runs
-// the language suite from an image.
+// audited: 2026-10-12
+// The boot-image gate: the flag `elle test` honours, the target that runs the
+// language suite from an image, and the bytecode parity it checks first.
 //
 // docs/impl/image/boot.md
 // docs/analysis/ci.md
 //
-// Both halves fail quietly, which is why they are pinned here. `elle test`
+// Every part fails quietly, which is why each is pinned here. `elle test`
 // partitions its argv: a flag it does not know is not refused, it is handed to
 // the runner as a file path. And the gate target is shell text nothing
 // compiles, so a target that drops the flag runs the language suite on an
@@ -28,8 +28,7 @@ const GATE: &str = "smoke-boot-image";
 /// arrive through variables, and a parser that resolved them itself would be a
 /// second `make` that can disagree with the first.
 fn gate_recipe() -> String {
-    make_dry_run(GATE)
-        .unwrap_or_else(|| panic!("`make --dry-run {GATE}` failed; no such target"))
+    make_dry_run(GATE).unwrap_or_else(|| panic!("`make --dry-run {GATE}` failed; no such target"))
 }
 
 /// Every `--boot-image=` value the gate's recipe names. A value that closes a
@@ -170,5 +169,171 @@ fn the_gate_target_proves_the_image_hydrated_before_it_runs_the_language_suite()
         recipe.contains("image-hydrate"),
         "`make {GATE}` never reads the `image-hydrate` mark, so a binary that \
          ignored `--boot-image=` would pass it:\n{recipe}"
+    );
+}
+
+// ── The compile half of parity ────────────────────────────────────────
+
+/// A program that reads both compile registries and a qualified key: a user
+/// `map` over a stdlib function fuses, a `push` on a proven array
+/// monomorphizes, and `m:quokka` names a key no token in the file spells.
+const PARITY_FIXTURE: &str = "(defn grow [xs] (map inc xs))\n\
+                              (defn add-three [] (push [1 2] 3))\n\
+                              (defn quokka-of [m] m:quokka)\n\
+                              (quokka-of {})\n";
+
+/// The first line where `a` and `b` part, numbered from one, or `None` when
+/// they agree. A whole dump is thousands of lines, so a failure names the
+/// place rather than printing both.
+fn first_difference(a: &str, b: &str) -> Option<(usize, String, String)> {
+    let mut left = a.lines();
+    let mut right = b.lines();
+    let mut n = 0;
+    loop {
+        n += 1;
+        match (left.next(), right.next()) {
+            (None, None) => return None,
+            (l, r) if l == r => continue,
+            (l, r) => {
+                return Some((
+                    n,
+                    l.unwrap_or("<end>").to_string(),
+                    r.unwrap_or("<end>").to_string(),
+                ))
+            }
+        }
+    }
+}
+
+// An image boot compiles a program to the bytecode a source boot does, each
+// boot in a process of its own: the static-region counter is process-global,
+// so two boots in one process would share it (docs/impl/image/boot.md).
+//
+// The counter-factual is a hydration that leaves that counter where a fresh
+// process starts it. The program compiles, fuses and runs as before, and every
+// region slot in its bytecode is lower than the source boot's — which only a
+// comparison of the bytecode itself can see.
+#[test]
+fn an_image_boot_compiles_a_program_to_the_bytecode_a_source_boot_does() {
+    let dir = crate::common::ScratchDir::new("boot-parity");
+    let file = dir.join("parity.lisp");
+    std::fs::write(&file, PARITY_FIXTURE).expect("write the fixture");
+    let image = format!("--boot-image={}", dir.join("boot").display());
+
+    let stored = Command::new(elle_binary())
+        .args(["--cache=", &image, "-e", "(+ 1 2)"])
+        .output()
+        .expect("run elle");
+    assert!(
+        stored.status.success(),
+        "the storing start failed: {}",
+        String::from_utf8_lossy(&stored.stderr)
+    );
+
+    let dump = |flags: &[&str]| {
+        let out = Command::new(elle_binary())
+            .arg("--cache=")
+            .args(flags)
+            .arg("--dump=bytecode")
+            .arg(&file)
+            .output()
+            .expect("run elle");
+        let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert!(
+            out.status.success(),
+            "`elle {flags:?} --dump=bytecode` failed: {stderr}"
+        );
+        (String::from_utf8_lossy(&out.stdout).into_owned(), stderr)
+    };
+    let (source, _) = dump(&[]);
+    let (hydrated, trace) = dump(&[&image, "--trace=boot"]);
+
+    assert!(
+        trace
+            .lines()
+            .any(|l| l.starts_with("[trace:boot]") && l.contains("image-hydrate")),
+        "the image dump booted from source, so the comparison is between two \
+         source boots: {trace}"
+    );
+    assert!(
+        source.contains("region="),
+        "the source dump names no region slot, so a counter that never moved \
+         would pass:\n{source}"
+    );
+    if let Some((line, want, got)) = first_difference(&source, &hydrated) {
+        panic!(
+            "an image boot compiles the fixture to other bytecode, first at line \
+             {line}:\n  source boot: {want}\n  image boot:  {got}"
+        );
+    }
+}
+
+// `make smoke-boot-image` runs the parity check before the language suite. A
+// corpus that answers alike under an image boot can still have compiled to
+// other bytecode, and the suite cannot see that; the dumps can. The recipe is
+// read as `make` expands it, so a prerequisite dropped from the target fails
+// here rather than leaving a green job that compares nothing.
+#[test]
+fn the_gate_target_compares_bytecode_before_it_runs_the_language_suite() {
+    let recipe = gate_recipe();
+    let elle = make_var("ELLE", &[]).expect("`make print-ELLE` did not run");
+    let runner = format!("{elle} test");
+    let parity = recipe
+        .find("scripts/bytecode-golden parity")
+        .unwrap_or_else(|| panic!("`make {GATE}` never runs the bytecode parity check:\n{recipe}"));
+    let suite = recipe
+        .find(&runner)
+        .unwrap_or_else(|| panic!("`make {GATE}` never runs `{runner}`:\n{recipe}"));
+    assert!(
+        parity < suite,
+        "`make {GATE}` runs the language suite before the parity check:\n{recipe}"
+    );
+}
+
+// The parity check compares two sets of dumps, and two source boots always
+// agree. So it refuses to dump anything until a start proves it hydrated the
+// image it stored. The binary here drops every `--boot-image=` it is handed —
+// the binary that accepts the flag and ignores it, which a check without the
+// proof would pass on every file.
+#[cfg(unix)]
+#[test]
+fn the_parity_check_refuses_to_compare_two_source_boots() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = crate::common::ScratchDir::new("boot-parity-refusal");
+    let deaf = dir.join("deaf-elle");
+    std::fs::write(
+        &deaf,
+        format!(
+            "#!/bin/sh\n\
+             for a do shift; case \"$a\" in --boot-image=*) ;; *) set -- \"$@\" \"$a\" ;; esac; done\n\
+             exec '{}' \"$@\"\n",
+            elle_binary()
+        ),
+    )
+    .expect("write the wrapper");
+    std::fs::set_permissions(&deaf, std::fs::Permissions::from_mode(0o755))
+        .expect("make the wrapper executable");
+
+    let out_dir = dir.join("parity");
+    let out = Command::new(crate::common::repo_root().join("scripts/bytecode-golden"))
+        .arg("parity")
+        .arg(&deaf)
+        .arg(&out_dir)
+        .arg("1")
+        .output()
+        .expect("run the parity check");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !out.status.success(),
+        "the parity check passed over a binary that never hydrates: {stderr}"
+    );
+    assert!(
+        stderr.contains("did not hydrate"),
+        "the parity check failed without saying the image never hydrated: {stderr}"
+    );
+    assert!(
+        !out_dir.join("source").exists(),
+        "the parity check dumped files before it proved the image hydrated"
     );
 }
