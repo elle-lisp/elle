@@ -370,8 +370,9 @@ A language-suite file that needs a plugin imports it under `protect`, and gates
 itself when the import fails. A build without the plugin therefore skips the
 file, and the run reports nothing wrong. The loopback tests in
 [websocket.lisp](../../tests/lang/websocket.lisp) and the `std/gun` mesh files
-need `plugin/hash` and `plugin/random`, which live in the `plugins/` submodule.
-Until the suite jobs built them, no suite job ran those tests.
+need `plugin/hash` and `plugin/random`, and the `std/gun` user-space files need
+`plugin/crypto` too. All three live in the `plugins/` submodule. Until the
+suite jobs built them, no suite job ran those tests.
 
 So every job that runs the language suite checks the submodule out and runs
 `make suite-plugins` before its first suite or doctest step. The target builds
