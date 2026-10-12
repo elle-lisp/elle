@@ -35,10 +35,11 @@ set when the diff moves only the submodule pointer.
 | All Checks Passed | ubuntu | The one status check branch protection requires | — |
 
 The merge queue ([merge-queue.yml](../../.github/workflows/merge-queue.yml))
-runs `make smoke`, split into steps: `make qa`, then each pass `SMOKE_PASSES`
-names, with `PROPTEST_CASES=1`. So the queue runs QA on the merged result,
-which no pull-request job sees. Its toolchain therefore carries what the `QA`
-job's does: rustfmt, clippy, both cross-check targets and LLVM 22. The weekly
+builds the suite plugins (§ "The plugins the language suite loads"), then runs
+`make smoke`, split into steps: `make qa`, then each pass `SMOKE_PASSES` names,
+with `PROPTEST_CASES=1`. So the queue runs QA on the merged result, which no
+pull-request job sees. Its toolchain therefore carries what the `QA` job's
+does: rustfmt, clippy, both cross-check targets and LLVM 22. The weekly
 schedule ([weekly.yml](../../.github/workflows/weekly.yml)) runs the whole
 workspace suite on beta and nightly at 128 cases, plus a dependency audit.
 
@@ -362,6 +363,32 @@ members of `plugins/Cargo.toml`'s workspace, so a plugin directory missing from
 that list is compiled by nothing and asserted by nothing, and the job stays
 green over it. [plugins.rs](../../tests/integration/plugins.rs) pins every
 plugin directory to a workspace member.
+
+### The plugins the language suite loads
+
+A language-suite file that needs a plugin imports it under `protect`, and gates
+itself when the import fails. A build without the plugin therefore skips the
+file, and the run reports nothing wrong. The loopback tests in
+[websocket.lisp](../../tests/lang/websocket.lisp) and the `std/gun` mesh files
+need `plugin/hash` and `plugin/random`, which live in the `plugins/` submodule.
+Until the suite jobs built them, no suite job ran those tests.
+
+So every job that runs the language suite checks the submodule out and runs
+`make suite-plugins` before its first suite or doctest step. The target builds
+each package that `SUITE_PLUGINS` names into the build's own `target`
+directory, where `plugin/X` resolves. Then `suite-plugins-verify` asserts each
+artifact, for the reason `plugins-verify` asserts its own: a plugin that did
+not build would only make its files skip. A document gates a plugin example the
+same way, so the doctest steps come after the build too.
+
+`SUITE_PLUGINS` names what the language suite imports and nothing more, because
+each name costs every suite job a build. The implementation suite's GPU files
+import `plugin/vulkan`, which needs a GPU, so no job builds it for them.
+[plugins.rs](../../tests/integration/plugins.rs) is the standing check that
+every plugin a language-suite file imports is in `SUITE_PLUGINS`, and that the
+assertion fails on a missing artifact.
+[workflows.rs](../../tests/integration/workflows.rs) is the standing check that
+every job that runs the language suite, in every workflow, builds them first.
 
 ### The boot-image job
 
