@@ -1,6 +1,6 @@
 # Symbols and keywords — identity is the name hash
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-12 -->
 
 A `SymbolId` is the 64-bit FNV-1a hash of the symbol's name. Nothing mints it
 and no table owns it: the same name yields the same id in every symbol table,
@@ -61,6 +61,7 @@ A memo learns a name where names already travel:
 | Site | What arrives |
 |------|--------------|
 | the reader, the expander and the analyzer | every identifier and keyword in the source text, and every keyword in a tree the expander enters or `read` converts to a value |
+| the qualified-symbol desugaring | each key a qualified symbol names: `a:b` becomes `(get a :b)`, whose keyword no source token spells |
 | primitive registration | the name and every alias of each primitive, and the struct keys of a plugin's exports |
 | primitives | every keyword a native mints through its `NativeCtx`, including the kind of an error it raises, and every symbol a native builds from a string, such as `gensym` |
 | the plugin ABI | every keyword a plugin mints through `make_keyword`'s call ctx |
