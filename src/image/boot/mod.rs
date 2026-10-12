@@ -244,6 +244,7 @@ impl Boot {
 ///
 /// The graph is the two export structs, the macro table and the encoded
 /// compile registries, under a digest of the sources they came from. The
+/// header carries the static-region mark the boot left. The
 /// aggregate is assembled in a scratch region
 /// dropped either way: it names values the instance owns and takes no
 /// reference to them, exactly as the dumper's own scratch does.
@@ -254,8 +255,9 @@ pub(crate) fn dump(
     path: &Path,
 ) -> Result<(), ImageError> {
     let scratch = heap.new_runtime_region();
-    let result = build::root(heap, symbols, cctx, scratch)
-        .and_then(|root| super::dump(heap, symbols, root, path));
+    let result = build::root(heap, symbols, cctx, scratch).and_then(|root| {
+        super::dump::dump_marked(heap, symbols, root, path, cctx.static_region_mark())
+    });
     heap.decref_region_if_present(scratch);
     result
 }

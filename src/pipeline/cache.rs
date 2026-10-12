@@ -88,6 +88,10 @@ pub struct CompileCtx {
     fn_inline: FnInlineRegistry,
     /// The core and stdlib export aggregates this instance booted with.
     exports: BootExports,
+    /// The static-region counter where this instance's boot ended, taken as
+    /// the stdlib exports install. A boot image records it, so an image boot
+    /// hands user code the slots a source boot does (docs/impl/image/format.md).
+    static_region_mark: u32,
 }
 
 impl CompileCtx {
@@ -167,6 +171,7 @@ impl CompileCtx {
                 core,
                 ..BootExports::default()
             },
+            static_region_mark: 0,
         }
     }
 
@@ -207,6 +212,7 @@ impl CompileCtx {
                 core: boot.core_exports(),
                 ..BootExports::default()
             },
+            static_region_mark: 0,
         };
         let t = std::time::Instant::now();
         boot.install_registries(&mut ctx, symbols);
@@ -306,9 +312,17 @@ impl CompileCtx {
         self.exports
     }
 
-    /// Record the stdlib export aggregate, whatever produced it.
+    /// Record the stdlib export aggregate, whatever produced it, and the
+    /// static-region counter where that ends the boot.
     pub(crate) fn set_stdlib_exports(&mut self, exports: crate::value::Value) {
         self.exports.stdlib = exports;
+        self.static_region_mark = crate::lir::lower::static_region_counter();
+    }
+
+    /// The static-region counter where this instance's boot ended, which the
+    /// boot dump records (docs/impl/image/format.md).
+    pub(crate) fn static_region_mark(&self) -> u32 {
+        self.static_region_mark
     }
 
     /// The core.lisp exports (name → Value), used to seed the expander's

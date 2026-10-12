@@ -55,8 +55,20 @@ pub fn dump(
     root: Value,
     path: &Path,
 ) -> Result<(), ImageError> {
+    dump_marked(heap, symbols, root, path, 0)
+}
+
+/// [`dump`], recording `static_region_watermark` in the header: the mark a
+/// boot left, which only the boot configuration has (docs/impl/image/format.md).
+pub(crate) fn dump_marked(
+    heap: &mut FiberHeap,
+    symbols: &SymbolTable,
+    root: Value,
+    path: &Path,
+    static_region_watermark: u32,
+) -> Result<(), ImageError> {
     let scratch = heap.new_runtime_region();
-    let result = dump_into(heap, scratch, symbols, root, path);
+    let result = dump_into(heap, scratch, symbols, root, path, static_region_watermark);
     heap.decref_region_if_present(scratch);
     result
 }
@@ -119,6 +131,7 @@ fn dump_into(
     symbols: &SymbolTable,
     root: Value,
     path: &Path,
+    static_region_watermark: u32,
 ) -> Result<(), ImageError> {
     let mut walk = Walk::new(symbols);
     let copied = copy_value(heap, scratch, root, &mut walk)?;
@@ -214,9 +227,7 @@ fn dump_into(
         prims_len: prim_table.len() as u64,
         scope_watermark: emitted.scope_watermark as u64,
         param_watermark: emitted.param_watermark as u64,
-        // The process's counter, not the body's highest slot: a source boot
-        // compiles user code from here (docs/impl/image/format.md).
-        static_region_watermark: crate::lir::lower::static_region_counter() as u64,
+        static_region_watermark: static_region_watermark as u64,
         fingerprint: format::fingerprint(),
     };
 
