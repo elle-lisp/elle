@@ -8,7 +8,7 @@
 ##   (def graph ((import "std/gun/graph") :state state :value value :ham ham))
 ##
 ## Exports: {:root-soul :child-soul :key-of :make-graph :node :field :merge
-##           :flatten}
+##           :node-value? :flatten}
 ##
 ## A node's fields are a struct of key to [state value]. A graph maps each
 ## soul to a mutable struct of fields.
@@ -131,4 +131,5 @@
    :node node
    :field field
    :merge merge-node
+   :node-value? node-value?
    :flatten flatten})

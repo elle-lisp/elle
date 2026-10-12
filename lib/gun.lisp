@@ -134,7 +134,7 @@
     (let [root (first path)
           keys (slice path 1)
           n (length keys)
-          node? (and (struct? v) (not (value:link? v)))]
+          node? (graph:node-value? v)]
       (when (and (= n 0) (not node?))
         (gun-error :not-a-node "a root holds a node, not a value" :path path))
       (def @soul (graph:root-soul root))
@@ -191,7 +191,7 @@
   (defn chain-set [chain v]
     "Add the struct v to the collection at chain under a random soul, and
      answer the chain of the new node."
-    (unless (and (struct? v) (not (value:link? v)))
+    (unless (graph:node-value? v)
       (gun-error :not-a-node "a set member is a node, not a value"
                  :path chain:path))
     (let [core chain:core
