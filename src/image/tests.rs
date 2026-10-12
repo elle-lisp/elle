@@ -18,9 +18,10 @@ use crate::value::Value;
 use super::{ImageError, Sections};
 
 /// A compiled lambda with every kind of LIR record: blocks, immediate
-/// constants, and a yield point. Its body uses intrinsics alone, so its graph
-/// is its own and holds no stdlib closure.
-const LAMBDA: &str = "(fn [x] (if (%eq x 2) (yield 42) 7))";
+/// constants, a yield point, and the charge site of the loop's backward jump.
+/// Its body uses intrinsics alone, so its graph is its own and holds no stdlib
+/// closure.
+const LAMBDA: &str = "(fn [x] (while (%eq x 2) (yield 42)) 7)";
 
 fn compiled(rt: &mut Runtime) -> Value {
     let (vm, symbols, cctx) = rt.parts();
@@ -57,9 +58,9 @@ fn two_dumps_write_one_file_whatever_the_lir_pads_hold() {
     let consts = view.const_records();
     let [yields, calls, charges] = view.site_records();
     assert!(
-        !blocks.is_empty() && !consts.is_empty() && !yields.is_empty(),
-        "the lambda must carry blocks, constants and a yield point, or the \
-         poison below reaches nothing"
+        !blocks.is_empty() && !consts.is_empty() && !yields.is_empty() && !charges.is_empty(),
+        "the lambda must carry blocks, constants, a yield point and a charge \
+         site, or the poison below reaches nothing"
     );
 
     let a = dir.path().join("a.image");
