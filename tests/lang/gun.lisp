@@ -393,6 +393,28 @@
     (gun:put cfg {:theme "light"})
     (assert (= (gun:once cfg) {"theme" "light"}) "and the next write wins")))
 
+# Two fibers put one field through a store whose first write sleeps. The
+# lock holds the second put until the first write returns, so the store
+# receives the field's writes in state order. Without the lock, the second
+# put merges and stores its newer write while the first sleeps, and then the
+# first, older write lands over it: the store keeps a value that memory
+# has already replaced.
+(let [inner (gun:memory-store)
+      @delays [0.05]
+      slow {:read (fn [soul] (inner:read soul))
+            :write (fn [soul fields]
+                     (unless (empty? delays)
+                       (let [d (first delays)]
+                         (assign delays (slice delays 1))
+                         (ev/sleep d)))
+                     (inner:write soul fields))}
+      field (gun:get (gun:get (gun:open :store slow) "race") "v")]
+  (ev/join [(ev/spawn (fn [] (gun:put field "first")))
+            (ev/spawn (fn [] (gun:put field "second")))])
+  (assert (= (gun:once (gun:get (gun:get (gun:open :store inner) "race") "v"))
+             (gun:once field))
+          "a slow store write cannot let an older write land last"))
+
 (assert (= (gun:ham 10 5 "b" 5 "a") :accept) "the module exports the verdict")
 (fails-with :redis-not-configured (fn [] (gun:redis-store :prefix "unused")))
 
