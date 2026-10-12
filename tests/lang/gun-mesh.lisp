@@ -360,6 +360,29 @@
 # ============================================================================
 
 (defn errors []
+  # A local subscriber's error leaves the put before it waits for its ack.
+  # The wait must not outlive the put. Nothing in the API shows a wait that
+  # stayed, so this reads the database's table of waits.
+  (let [a (open-db)
+        b (open-db)
+        srv (serve a)
+        hang-up (gun:connect b srv:url)
+        field (gun:get (gun:get b "raise") "v")
+        stop (gun:on field
+                     (fn [v]
+                       (when v
+                         (error {:error :subscriber
+                                 :reason :boom
+                                 :message "boom"}))))
+        [ok? err] (protect (gun:put field 1 :ack 5))]
+    (assert (and (not ok?) (= (get err :reason) :boom))
+            "a local subscriber's error leaves a put with :ack")
+    (assert (empty? (get (get b :core) :pending))
+            "and the put leaves no wait for its ack behind")
+    (stop)
+    (hang-up)
+    (srv:close))
+
   (let [errs @[]
         a (open-db)
         b (open-db :on-error (fn [err] (push errs err)))
