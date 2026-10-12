@@ -286,3 +286,5 @@
 ["tests/lang/ffi-write.lisp" :objects 412]
 ["tests/lang/ffi-string-field.lisp" :objects 309]
 ["tests/lang/caps-ffi.lisp" :objects 148]
+["tests/lang/gun.lisp" :objects 2890]
+["tests/lang/gun-redis.lisp" :objects 661]
