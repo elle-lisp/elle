@@ -23,6 +23,7 @@
 //! No per-slot free list — regions are freed in bulk only.
 
 use std::mem::{align_of, size_of};
+use std::ops::Range;
 
 use super::pagepool::{MmapPage, PageDirty, PagePool};
 use super::{holds_value_refs, needs_drop};
@@ -137,6 +138,13 @@ pub(crate) struct PageLayout {
     pub data_cursor: usize,
 }
 
+/// The pages a hydrated image mapped: the interval they tile, and how many of
+/// the pool's pages, from the first, lie in it.
+struct ImageSpan {
+    interval: Range<usize>,
+    pages: usize,
+}
+
 /// Per-region storage: owns pages, tracks objects needing Drop.
 pub(crate) struct RegionPool {
     pages: Vec<RegionPage>,
@@ -161,6 +169,11 @@ pub(crate) struct RegionPool {
     /// never a process-global — a `--trace=pages` toggle in one instance cannot
     /// make another instance's page claims spam.
     trace: crate::config::TraceCell,
+    /// The interval a hydrated image's pages tile (docs/impl/image.md). `owns`
+    /// answers inside it with a range check, and the store's interval table
+    /// reads it before the page-base walk. `None` for a region that hydrated
+    /// nothing.
+    image: Option<ImageSpan>,
 }
 
 mod introspect;
@@ -181,6 +194,7 @@ impl RegionPool {
             ref_objs: Vec::new(),
             next_page_size: initial_page_size,
             trace,
+            image: None,
         }
     }
 
@@ -292,6 +306,7 @@ impl RegionPool {
         for rp in pages {
             rp.release_into(pool);
         }
+        self.image = None;
         let freed = self.obj_count;
         self.obj_count = 0;
         freed
@@ -300,8 +315,16 @@ impl RegionPool {
     /// The address interval a hydrated image's pages tile, or `None` for a
     /// region that hydrated nothing.
     #[cfg(test)]
-    pub(crate) fn image_interval(&self) -> Option<std::ops::Range<usize>> {
-        None
+    pub(crate) fn image_interval(&self) -> Option<Range<usize>> {
+        self.image.as_ref().map(|s| s.interval.clone())
+    }
+
+    /// Whether `addr` lies in the interval a hydrated image's pages tile.
+    #[inline]
+    pub(crate) fn image_contains(&self, addr: usize) -> bool {
+        self.image
+            .as_ref()
+            .is_some_and(|s| s.interval.contains(&addr))
     }
 
     /// Byte layout of every page this region owns, in claim order. The image
@@ -319,25 +342,45 @@ impl RegionPool {
             .collect()
     }
 
-    /// Adopt a hydrated image page (docs/impl/image.md § Hydration steps 3–5):
-    /// stamp its header with this region's identity and install the cursors
-    /// the image's page table recorded, so later allocation into this region
-    /// and the release spans both see the true layout.
-    pub(crate) fn adopt_hydrated_page(
-        &mut self,
-        page: MmapPage,
-        obj_cursor: usize,
-        data_cursor: usize,
-    ) {
+    /// Adopt a hydrated image's pages (docs/impl/image.md § Hydration steps
+    /// 3–5), each with the cursors the image's page table recorded. Each header
+    /// takes this region's identity, so later allocation into this region and
+    /// the release spans both see the true layout. The pages tile one interval,
+    /// which the pool records as its image.
+    pub(crate) fn adopt_image(&mut self, pages: Vec<(MmapPage, usize, usize)>) {
         debug_assert!(
-            HEADER_SIZE <= obj_cursor && obj_cursor <= data_cursor && data_cursor <= page.len(),
-            "hydrated page cursors out of order: {obj_cursor}..{data_cursor} in {}",
-            page.len(),
+            self.pages.is_empty() && self.image.is_none(),
+            "an image is adopted into a fresh pool"
         );
-        let mut rp = RegionPage::new(page, self.region_id, self.stamp);
-        rp.obj_cursor = obj_cursor;
-        rp.data_cursor = data_cursor;
-        self.pages.push(rp);
+        let mut interval: Option<Range<usize>> = None;
+        for (page, obj_cursor, data_cursor) in pages {
+            debug_assert!(
+                HEADER_SIZE <= obj_cursor && obj_cursor <= data_cursor && data_cursor <= page.len(),
+                "hydrated page cursors out of order: {obj_cursor}..{data_cursor} in {}",
+                page.len(),
+            );
+            let base = page.as_ptr() as usize;
+            let end = base + page.len();
+            interval = Some(match interval {
+                None => base..end,
+                Some(i) => i.start.min(base)..i.end.max(end),
+            });
+            let mut rp = RegionPage::new(page, self.region_id, self.stamp);
+            rp.obj_cursor = obj_cursor;
+            rp.data_cursor = data_cursor;
+            self.pages.push(rp);
+        }
+        if let Some(interval) = interval {
+            debug_assert_eq!(
+                interval.len(),
+                self.allocated_bytes(),
+                "hydrated pages leave a gap in their interval"
+            );
+            self.image = Some(ImageSpan {
+                interval,
+                pages: self.pages.len(),
+            });
+        }
     }
 
     /// Rebuild the object bookkeeping from an image's object index

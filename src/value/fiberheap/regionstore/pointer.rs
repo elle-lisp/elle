@@ -5,7 +5,9 @@
 //!
 //! `region_of_ptr` answers `arena::region_of`, with the debug-build stale
 //! check. `owning_region` answers the allocation funnel, the free cascade and
-//! the mint-scope reclaim, which must not generation-check.
+//! the mint-scope reclaim, which must not generation-check. Both read the
+//! interval table before the page-base walk, so a pointer into a hydrated
+//! image never reads a page header (docs/impl/image.md).
 
 use super::super::regionpool::{header_of_page_ptr, region_of_page_ptr, PageStamp};
 use super::*;
@@ -22,13 +24,18 @@ impl RegionStore {
     /// through which every runtime RC decision classifies a value's region
     /// (docs/impl/region/generations.md).
     ///
-    /// The page-base walk stops at the first header that validates. A live
-    /// region of this store that owns `ptr` is the authoritative answer. Any
-    /// other validated id is the fallback answer. Either this store stamped the
-    /// page and the region is gone, a **stale deref** the debug generation check
-    /// names here, or another store stamped it: a worker reading a parent-heap
-    /// value, the tolerated cross-store borrow.
+    /// A hydrated region of this store whose interval holds `ptr` answers
+    /// first. Otherwise the page-base walk stops at the first header that
+    /// validates, and a live region of this store that owns `ptr` is the
+    /// authoritative answer. Any other validated id is the fallback answer.
+    /// Either this store stamped the page and the region is gone, a **stale
+    /// deref** the debug generation check names here, or another store stamped
+    /// it: a worker reading a parent-heap value, the tolerated cross-store
+    /// borrow.
     pub fn region_of_ptr(&self, ptr: *const ()) -> u32 {
+        if let Some(rid) = self.image_region_of(ptr as usize) {
+            return rid;
+        }
         // SAFETY: `ptr` is a heap value's payload, so it points into a region
         // page of this store or another, each with a header at its base.
         let (rid, stamp) = unsafe { header_of_page_ptr(ptr, self.pool.initial_page_size()) };
@@ -44,12 +51,16 @@ impl RegionStore {
     /// The live region of this store that owns `ptr`, or 0 when none does.
     ///
     /// The resolver behind the allocation funnel's edge record, the free
-    /// cascade's scan and fiber discharge, and the mint-scope reclaim. It reads
-    /// no generation, because teardown legitimately meets a value whose region
+    /// cascade's scan and fiber discharge, and the mint-scope reclaim. Like
+    /// `region_of_ptr`, it reads the interval table before the page-base walk.
+    /// It reads no generation, because teardown legitimately meets a value whose region
     /// is already gone, and it answers that value with 0. Ownership, not
     /// liveness alone, decides: a foreign pointer whose page header names a
     /// live local id resolves to 0, whenever it is asked.
     pub(crate) fn owning_region(&self, ptr: *const ()) -> u32 {
+        if let Some(rid) = self.image_region_of(ptr as usize) {
+            return rid;
+        }
         // SAFETY: as in `region_of_ptr`.
         let rid = unsafe { region_of_page_ptr(ptr, self.pool.initial_page_size()) };
         if rid >= 2 && self.region_owns(rid, ptr) {
@@ -57,6 +68,19 @@ impl RegionStore {
         } else {
             0
         }
+    }
+
+    /// The live hydrated region whose image interval holds `addr`, read from
+    /// the interval table with a range check per entry and no header read.
+    /// A region its free has already unindexed answers nothing here.
+    #[inline]
+    fn image_region_of(&self, addr: usize) -> Option<u32> {
+        self.images.iter().map(|r| r.get()).find(|&id| {
+            self.regions
+                .get(id as usize)
+                .and_then(|slot| slot.as_ref())
+                .is_some_and(|e| e.pool.image_contains(addr))
+        })
     }
 
     /// Panic when this store stamped `ptr`'s page for region `rid` at a

@@ -197,6 +197,11 @@ pub(crate) struct RegionStore {
     /// free path and the forest primitives count here; the `arena/*` reclamation
     /// gauges read it.
     counters: counters::ReclaimCounters,
+    /// The interval table: this store's hydrated regions, in hydration order
+    /// (docs/impl/image.md). Each one's pool holds the interval its pages tile,
+    /// and `region_of_ptr` and `owning_region` read the table before the
+    /// page-base walk. A region leaves the table when its pages are released.
+    images: Vec<RuntimeRegion>,
 }
 
 mod alloc;
@@ -258,6 +263,7 @@ impl RegionStore {
             trace,
             over_frees: 0,
             counters: counters::ReclaimCounters::default(),
+            images: Vec::new(),
         }
     }
 
@@ -267,10 +273,19 @@ impl RegionStore {
     pub fn teardown_all(&mut self) {
         for idx in 0..self.regions.len() {
             if let Some(mut entry) = self.regions[idx].take() {
-                entry.pool.teardown(&mut self.pool);
-                self.bump_generation(idx as u32);
+                self.release_pages(idx as u32, &mut entry);
             }
         }
+    }
+
+    /// Run a region's destructors, return its pages to the pool, and bump its
+    /// generation: the end every page-returning path shares. A hydrated region
+    /// leaves the interval table here. Returns the number of objects freed.
+    fn release_pages(&mut self, id: u32, entry: &mut RegionEntry) -> usize {
+        self.images.retain(|r| r.get() != id);
+        let freed = entry.pool.teardown(&mut self.pool);
+        self.bump_generation(id);
+        freed
     }
 
     /// Bump the generation counter for a physical id whose pages were just
