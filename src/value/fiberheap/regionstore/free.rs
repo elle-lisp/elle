@@ -360,8 +360,7 @@ impl RegionStore {
                     entry.pool.page_ranges(),
                 );
             }
-            freed += entry.pool.teardown(&mut self.pool);
-            self.bump_generation(r.get());
+            freed += self.release_pages(r.get(), &mut entry);
             self.free_physical.push(r.get());
         }
         // The genuinely-Shared frontier refs lie outside this subtree, untouched by the

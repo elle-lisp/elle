@@ -49,10 +49,15 @@ impl RegionPool {
             })
             .collect()
     }
-    /// Check if a pointer falls within any of this region's pages.
+    /// Check if a pointer falls within any of this region's pages. A hydrated
+    /// image's pages answer with one range check, and only the pages claimed
+    /// after hydration are scanned.
     pub fn owns(&self, ptr: *const ()) -> bool {
-        let addr = ptr as *const u8;
-        self.pages.iter().any(|p| p.contains(addr))
+        let claimed = self.image.as_ref().map_or(0, |s| s.pages);
+        self.image_contains(ptr as usize)
+            || self.pages[claimed..]
+                .iter()
+                .any(|p| p.contains(ptr as *const u8))
     }
     /// Walk objects and find region IDs of cross-region references (the
     /// free-time cascade decrefs each).

@@ -243,7 +243,7 @@ impl FiberHeap {
     /// in hydration order (docs/impl/image.md).
     #[cfg(test)]
     pub(crate) fn interval_table(&self) -> Vec<RuntimeRegion> {
-        Vec::new()
+        self.region_store.interval_table()
     }
 
     /// The page layouts and live objects of one region, for the image dumper
@@ -263,9 +263,10 @@ impl FiberHeap {
         self.region_store.page_claims()
     }
 
-    /// Region id stamped on the page `ptr` points into (0 = no region page),
-    /// with the debug-build stale-deref generation check
-    /// (docs/impl/region/generations.md). The backend of `arena::region_of`.
+    /// Region id of the page `ptr` points into (0 = no region page): the
+    /// interval table first, then the stamped page header, with the debug-build
+    /// stale-deref generation check (docs/impl/region/generations.md). The
+    /// backend of `arena::region_of`.
     pub fn region_of_ptr(&self, ptr: *const ()) -> u32 {
         self.region_store.region_of_ptr(ptr)
     }

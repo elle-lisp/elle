@@ -63,6 +63,12 @@ impl RegionStore {
         }
     }
 
+    /// The interval table's regions, in hydration order (docs/impl/image.md).
+    #[cfg(test)]
+    pub(crate) fn interval_table(&self) -> Vec<RuntimeRegion> {
+        self.images.clone()
+    }
+
     /// Sum of live objects across every active region. The
     /// `FiberHeap::alloc_count` running counter is incremented at alloc and
     /// decremented only on the decref/decref_if_present paths. This reads the
