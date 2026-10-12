@@ -278,3 +278,4 @@
 ["tests/lang/zmq.lisp" :objects 510]
 ["tests/impl/region-query-payload-leak.lisp" :objects 112]
 ["tests/impl/fuel-budget.lisp" :objects 316]
+["tests/lang/page-claims.lisp" :objects 740]
