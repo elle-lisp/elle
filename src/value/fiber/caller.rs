@@ -1,10 +1,10 @@
-// audited: 2026-09-29
+// audited: 2026-10-05
 //! A caller paused in its fiber while its interpreted callee runs on the same
 //! dispatch loop, and what completing the call needs.
 //!
 //! docs/impl/vm.md
 
-use super::SignalBits;
+use crate::value::closure::Boundary;
 use crate::value::Value;
 use std::rc::Rc;
 
@@ -12,45 +12,39 @@ use std::rc::Rc;
 ///
 /// Read off the callee when the call is made, because the callee's closure
 /// value may be freed at its last use while its body is still running.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct CallSite {
-    /// The callee's squelch mask. A suspending signal it names becomes a
-    /// `signal-violation` error at this call.
-    pub squelch_mask: SignalBits,
-    /// The callee's signal is silent, declared or inferred, so any signal
-    /// leaving it breaks that claim, and the call aborts the process with a
-    /// diagnostic.
-    pub silent: bool,
-    /// The callee's name, for the silence diagnostic.
-    pub name: Option<&'static str>,
+    /// The boundary the callee's signal crosses at this call.
+    pub boundary: Boundary,
 }
 
 /// How many `parameterize` frames a fiber held at an entry: a call, a host
-/// that runs code, or a squelch boundary (src/vm/AGENTS.md § "Parameter
-/// resolution"). Read only off a fiber ([`super::Fiber::param_depth`]).
+/// that runs code, or a call boundary (src/vm/AGENTS.md). Read only off a
+/// fiber ([`super::Fiber::param_depth`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ParamDepth(pub(super) usize);
 
-/// The squelch masks of the tail calls that replaced an activation's body,
-/// OR'd together, and the parameter depth at the last of them.
-#[derive(Debug, Clone, Copy)]
-pub struct TailSquelch {
-    pub mask: SignalBits,
+/// The boundaries of the tail calls that replaced an activation's body, joined
+/// ([`Boundary::add`]), and the parameter depth at the last of them.
+#[derive(Debug, Clone)]
+pub struct TailBoundary {
+    pub boundary: Boundary,
     pub depth: ParamDepth,
 }
 
-impl TailSquelch {
+impl TailBoundary {
     /// An activation no tail call has replaced yet, entered at `depth`.
     pub fn none(depth: ParamDepth) -> Self {
-        TailSquelch {
-            mask: SignalBits::EMPTY,
+        TailBoundary {
+            boundary: Boundary::none(),
             depth,
         }
     }
 
-    /// A tail call whose callee carries `mask` replaced the body at `depth`.
-    pub fn add(&mut self, mask: SignalBits, depth: ParamDepth) {
-        self.mask |= mask;
+    /// A tail call whose callee crosses `boundary` replaced the body at
+    /// `depth`.
+    pub fn add(&mut self, boundary: Boundary, depth: ParamDepth) {
+        self.boundary.add(boundary);
         self.depth = depth;
     }
 }
@@ -62,7 +56,7 @@ pub struct Activation {
     pub code: crate::value::Code,
     pub env: Rc<Vec<Value>>,
     /// What the tail calls that replaced this activation's body enforce.
-    pub tail_squelch: TailSquelch,
+    pub tail_boundary: TailBoundary,
     /// The call that entered this activation.
     pub call: CallSite,
     /// How many region-remap frames the fiber held before this activation

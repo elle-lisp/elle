@@ -1,13 +1,13 @@
-//! audited: 2026-09-21
+// audited: 2026-10-11
 //! Signal registry for mapping signal keywords to bit positions.
 //!
 //! The registry maintains a global mapping of signal keywords (`:error`,
 //! `:yield`, etc.) to their corresponding bit positions. Built-in signals
-//! occupy bits 0-17, bits 18-31 are runtime-reserved, and user-defined signals
+//! occupy bits 0-18, bits 19-31 are runtime-reserved, and user-defined signals
 //! are allocated from bits 32-63.
 
 use super::{
-    SIG_DEBUG, SIG_ERROR, SIG_EXEC, SIG_FFI, SIG_FS, SIG_FUEL, SIG_GPU, SIG_HALT, SIG_IO,
+    SIG_DEBUG, SIG_ERROR, SIG_EXEC, SIG_FFI, SIG_FS, SIG_FUEL, SIG_GPU, SIG_HALT, SIG_IO, SIG_NET,
     SIG_OS_SIGNAL, SIG_WAIT, SIG_YIELD,
 };
 use crate::value::fiber::SignalBits;
@@ -22,9 +22,9 @@ pub struct SignalEntry {
 
 /// Global registry mapping signal keywords to bit positions.
 ///
-/// Built-in signals (`:error`, `:yield`, `:debug`, `:ffi`, `:halt`, `:io`, `:exec`, `:fuel`) are
-/// pre-registered at bits 0, 1, 2, 4, 8, 9, 11, 12 respectively. Bits 3, 5, 6, 7, 10 are
-/// reserved for VM-internal use and not registered.
+/// Built-in signals are pre-registered at their fixed bits, 0 to 18 (the table in
+/// docs/signals/protocol.md). Bits 3, 5, 7, 10 and 13 are VM-internal and bit 6 is
+/// unused; none of them is registered.
 ///
 /// User-defined signals are allocated starting at bit 32 and proceeding upward.
 /// The registry can support up to 32 user-defined signals (bits 32-63).
@@ -58,6 +58,7 @@ impl SignalRegistry {
     /// - `:gpu` at bit 15
     /// - `:os-signal` at bit 16
     /// - `:fs` at bit 17
+    /// - `:net` at bit 18
     pub fn with_builtins() -> Self {
         let mut registry = Self::new();
         // These unwraps are safe because we're registering unique built-in names
@@ -73,6 +74,7 @@ impl SignalRegistry {
         let _ = registry.register_builtin("gpu", SIG_GPU.trailing_zeros());
         let _ = registry.register_builtin("os-signal", SIG_OS_SIGNAL.trailing_zeros());
         let _ = registry.register_builtin("fs", SIG_FS.trailing_zeros());
+        let _ = registry.register_builtin("net", SIG_NET.trailing_zeros());
         registry
     }
 
@@ -118,16 +120,18 @@ impl SignalRegistry {
 
     /// Register a user signal, or return its existing bit if already registered.
     ///
-    /// Idempotent for USER signals (bits 32-63): re-declaring one across separate
-    /// compilations reuses its bit instead of erroring. Built-in/reserved signals
+    /// Idempotent for USER signals (bits 32-63): every declaration of one, in
+    /// one compile or in many, answers the bit the first took, so two libraries
+    /// that declare a keyword share its signal. Built-in/reserved signals
     /// (bits 0-31) still error on re-declaration — a program cannot redefine
-    /// `:error`, `:yield`, etc. Intra-compilation duplicate detection is the
-    /// caller's job (see `Analyzer::declare_signal`); this only dedups across
-    /// compiles that share the process-global registry.
+    /// `:error`, `:yield`, etc. `Analyzer::declare_signal` is the caller.
     pub fn register_or_get(&mut self, name: &str) -> Result<u32, String> {
         if let Some(entry) = self.entries.iter().find(|e| e.name == name) {
             if entry.bit_position < 32 {
-                return Err(format!("Signal '{}' already registered", name));
+                return Err(format!(
+                    "signal :{} is built in and cannot be declared",
+                    name
+                ));
             }
             return Ok(entry.bit_position);
         }
@@ -283,8 +287,8 @@ where
 /// Paired with [`restore_registry`] to bracket a *diagnostic* compile that must
 /// not leave observable global side effects — e.g. `compile/dumps` / `render_all`
 /// renders a module's `--dump` artifacts by compiling it, and a `(signal :kw)`
-/// declaration in that module would otherwise permanently register the signal,
-/// colliding with a later compile of the same source. See `src/dump.rs`.
+/// declaration in that module would otherwise spend one of the 32 user bits,
+/// which the process never gets back. See `src/dump/mod.rs`.
 pub fn snapshot_registry() -> SignalRegistry {
     with_registry(|r| r.clone())
 }

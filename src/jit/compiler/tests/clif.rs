@@ -236,8 +236,8 @@ fn a_capture_load_carries_trusted_flags() {
 }
 
 /// fn(f) -> f(). A `Call` inside a function whose signal may suspend, which is
-/// what makes the translator emit all three exits: the post-call error check,
-/// the post-call yield check, and the normal return.
+/// what makes the translator emit both exits: the park after the call's signal
+/// check, and the normal return.
 fn make_suspending_call_lir() -> LirOwned {
     use crate::hir::region::StaticRegion;
     use crate::lir::CallSiteInfo;
@@ -247,6 +247,7 @@ fn make_suspending_call_lir() -> LirOwned {
             resume_ip: 0,
             stack_regs: vec![],
             num_locals: 0,
+            push_resume_value: true,
         }])
         .block(
             0,
@@ -365,7 +366,7 @@ fn called_refs(clif: &[String]) -> Vec<String> {
 }
 
 /// A self-recursive call leaves compiled code through `elle_jit_call`, like
-/// every other call (docs/impl/jit.md § "How a call leaves compiled code").
+/// every other call (docs/impl/jit.md).
 #[test]
 fn a_self_recursive_call_goes_through_the_dispatch_helper() {
     // Trap: a direct Cranelift call to the function itself reads as free here,
@@ -404,8 +405,7 @@ fn a_self_recursive_call_goes_through_the_dispatch_helper() {
 
 /// Every `return` a compiled function emits is preceded by the call that pops
 /// this activation's region-remap frame, so the prologue's push is balanced on
-/// every path out (docs/impl/region/mechanism.md § "An abandoned frame runs the
-/// releases it still owes").
+/// every path out (docs/impl/region/unwind.md).
 #[test]
 fn every_compiled_exit_pops_the_region_map() {
     // Trap: a missing pop is invisible to the compiled function itself. It
@@ -414,12 +414,11 @@ fn every_compiled_exit_pops_the_region_map() {
     // and releases against a frame that was never its own — and the remap stack
     // never shrinks back.
     //
-    // Counter-factual: the yield-check exit
-    // (`emit_yield_check_after_call`) returned straight from the suspend
-    // helper. Every corpus test that suspends through a compiled frame passed
-    // its own assertions, and only the balance check in
-    // `execute_bytecode_saving_stack` — a debug build, and only once the
-    // enclosing activation returned — said anything at all.
+    // Counter-factual: an exit that returns straight from the park helper.
+    // Every corpus test that suspends through a compiled frame passes its own
+    // assertions, and only the balance check in `execute_bytecode_saving_stack`
+    // says anything at all: in a debug build, once the enclosing activation
+    // returns.
     let compiler = JitCompiler::new().expect("Failed to create compiler");
     let pop_id = compiler.helpers.pop_region_map.as_u32();
     let clif = compiler
@@ -433,11 +432,11 @@ fn every_compiled_exit_pops_the_region_map() {
         .filter(|(_, line)| line.trim().starts_with("return"))
         .map(|(i, _)| i)
         .collect();
-    // One per exit: the error check's, the yield check's, and the terminator's.
+    // One per exit: the signal check's park, and the terminator's.
     assert_eq!(
         returns.len(),
-        3,
-        "a suspending function's Call has three exits; got:\n{}",
+        2,
+        "a suspending function's Call has two exits; got:\n{}",
         clif.join("\n")
     );
 

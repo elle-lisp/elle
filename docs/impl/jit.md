@@ -304,25 +304,30 @@ the word `0x14000000` is `b .` — an unconditional branch to itself.
 
 Compiled code has no resume point of its own. An `Emit` spills the frame's
 locals and operands and calls `elle_jit_yield`, which installs the signal in
-`fiber.signal`. For a suspending signal the helper also parks the frame as a
-bytecode frame at the emit's resume ip, so the interpreter runs the
-continuation when the fiber resumes. An error emit parks nothing, and the
-frame runs the abandoned-frame walk before it returns
+`fiber.signal` and parks the frame as a bytecode frame at the emit's resume
+ip, so the interpreter runs the continuation when the fiber resumes. An error
+emit parks the same way, because an error unwinds nothing
 ([unwind.md](region/unwind.md)).
 
-Either way the function returns `YIELD_SENTINEL`, so the sentinel alone does
-not say the function suspended. A reader of the sentinel reads the signal
-first, and treats an error or a halt as one: `run_jit`, and the
+The function returns `YIELD_SENTINEL` either way, so the sentinel alone does
+not say which signal left it. A reader of the sentinel reads the signal first,
+and treats a halt as the end of the fiber: `run_jit`, and the
 `compile/run-on :jit` entry ([differential.md](differential.md)).
 
-A call whose callee suspended is the other way out. The check after the call
-finds the callee's signal and calls `elle_jit_yield_through_call`, which parks
-this frame at the call's resume ip behind the callee's frames. A tail call
-parks the same way at the ip past the tail call, where the interpreter's
-fall-through block starts, so the resume runs the releases the frame still owed
-([park.md](region/park.md)). The emitter records each emit's resume ip, and each
-call's and each tail call's, with the operand stack at that point, during LIR
-emission. These two helpers read them.
+A call whose callee suspended or raised is the other way out, and so is an
+instruction that raised. The check after it finds the signal and calls
+`elle_jit_yield_through_call`, which parks this frame at the site's resume ip
+behind whatever frames the callee parked. A tail call parks the same way at the
+ip past the tail call, where the interpreter's fall-through block starts, so
+the resume runs the releases the frame still owed ([park.md](region/park.md)).
+In every function that may signal, the emitter records the resume ip of each
+emit, each call, each tail call and each instruction that may raise, with the
+operand stack at that point, during LIR emission. These two helpers read them.
+
+The frame that raised parks first, and it records its raise site in the
+delivery ledger as the interpreter's parker does: `Emit` for an emit,
+`NoResult` for an instruction that produces no value, and `Call` for the rest
+([vm.md](vm.md)).
 
 ## Configuration
 

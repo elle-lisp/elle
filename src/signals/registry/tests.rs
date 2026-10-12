@@ -1,4 +1,7 @@
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-10-11
+//! The registry's built-in bits, its user allocation and budget, and how it names a signal.
+//!
+//! docs/signals/protocol.md
 
 use super::*;
 
@@ -12,6 +15,15 @@ fn test_builtin_registration() {
     assert_eq!(registry.lookup("halt"), Some(SIG_HALT.trailing_zeros()));
     assert_eq!(registry.lookup("io"), Some(SIG_IO.trailing_zeros()));
     assert_eq!(registry.lookup("fuel"), Some(SIG_FUEL.trailing_zeros()));
+}
+
+/// `:net` takes bit 18, the first of the runtime-reserved range, beside the
+/// other capability bits (docs/signals/protocol.md).
+#[test]
+fn the_network_bit_is_registered_at_eighteen() {
+    let registry = SignalRegistry::with_builtins();
+    assert_eq!(crate::signals::SIG_NET.trailing_zeros(), 18);
+    assert_eq!(registry.lookup("net"), Some(18));
 }
 
 #[test]

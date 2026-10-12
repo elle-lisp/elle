@@ -237,11 +237,10 @@ NOFFI_FILES = $(shell printf '%s\n' $(LANG_FILES) | grep -v $(ELLE_SKIP_FFI))
 ELLE_NOFFI ?= $(CARGO_OUT)/elle-noffi
 
 # The files a whole-module `--wasm=full` compile cannot host. `eval` needs
-# dynamic compilation, which the WASM backend does not have. The two tiered
-# backend files force closures onto the tier with `compile/run-on :wasm`, which
-# needs the bytecode VM underneath; the wasm rig's sidecar pass runs them.
-WASM_SKIP := -e eval.lisp -e eval-env.lisp -e wasm-tier-error-signal.lisp \
-             -e wasm-tier.lisp
+# dynamic compilation, which the WASM backend does not have. The tiered
+# backend's file forces closures onto the tier with `compile/run-on :wasm`, which
+# needs the bytecode VM underneath; the wasm rig's sidecar pass runs it.
+WASM_SKIP := -e eval.lisp -e eval-env.lisp -e wasm-tier.lisp
 WASM_FULL_FILES = $(shell printf '%s\n' $(LANG_FILES) $(IMPL_FILES) | grep -v $(WASM_SKIP))
 
 # Some suite files spend most of the runner's default budget on work the case

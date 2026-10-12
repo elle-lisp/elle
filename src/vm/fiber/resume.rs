@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! One level of fiber resumption: the swap in and out, and what it funds.
 //!
 //! The abort that injects an error at the suspension point instead is here too.
@@ -246,16 +246,12 @@ impl VM {
         // fiber was created from, so a self-recursive fiber body resolves its
         // self-reference to that closure.
         self.pending_entry_closure = self.fiber.closure_value;
-        // This entrant PARKS the body's frame on an error exit (below) so the
-        // restarts system can replay it, which replays the releases among its
-        // remaining instructions — so the abandoned-frame walk must not run them
-        // (docs/impl/region/mechanism.md).
-        self.pending_error_park = true;
         let result = self.execute_bytecode_saving_stack(&closure.template.code(), &env_rc);
 
         // If the fiber signaled (not normal completion), save context for resumption.
-        // Only save if the yield instruction didn't already set up suspended frames.
-        // SIG_HALT is non-resumable — no suspended frame needed.
+        // Only save if the yield instruction didn't already set up suspended frames;
+        // an error's chain, the body's own frame included, is parked already
+        // (`VM::park_raised`). SIG_HALT is non-resumable — no suspended frame needed.
         //
         // Use the active bytecode/constants/env from ExecResult, not the
         // original closure fields — a tail call may have switched to a
@@ -270,27 +266,18 @@ impl VM {
             // args are still present and must be restored.
             //
             // push_resume_value — SIG_FUEL: re-execute the paused instruction from
-            // scratch (args on the stack, nothing extra to push). A raise with no
-            // result position: continue past it, the resume value going nowhere.
-            // All other signals (SIG_ERROR, user-defined, etc.): the instruction at
-            // result.ip expects the signal's "return value" on the stack (for
-            // example Return needs a value to pop), so push it. What the body's
+            // scratch (args on the stack, nothing extra to push). All other signals
+            // (a tail suspend, a user-defined one): the instruction at result.ip
+            // expects the signal's "return value" on the stack (for example Return
+            // needs a value to pop), so push it. What the body's
             // activation owed rode out of the popped activation in
             // `result.activation_dues` (moved, beside the region map) — park it so
             // the resumed body's completion frees it.
-            let push_resume_value = !result.bits.intersects(SIG_FUEL) && result.site.delivers();
-            // This exit built an error park, so it records what a restart owes
-            // (docs/impl/region/park.md). A denial of `:error` in call position
-            // parks its own frame and never reaches here; in tail position it
-            // does, and the ledger keeps the denial's funding for its payload.
-            if result.bits.intersects(SIG_ERROR) {
-                let payload = self.fiber.signal.map_or(Value::NIL, |(_, v)| v);
-                self.fiber.delivery.park_error(result.site, payload);
-            }
-            if !result.site.parks_frame() {
-                self.fiber.suspended = Some(Vec::new());
-                return result.bits;
-            }
+            debug_assert!(
+                !result.bits.intersects(SIG_ERROR),
+                "VM bug: a fiber body's error left no parked chain"
+            );
+            let push_resume_value = !result.bits.intersects(SIG_FUEL);
             let frame = BytecodeFrame::suspend(
                 result.code,
                 result.env,
@@ -320,24 +307,7 @@ impl VM {
             }
         };
 
-        self.replay_at_boundary(frames, resume_value)
-    }
-
-    /// Replay this fiber's parked chain, and record the error park the replay
-    /// built, if it built one, in the fiber's delivery ledger. The one route
-    /// every replay at a fiber boundary takes, so none of them can forget the
-    /// park a restart will deliver into.
-    fn replay_at_boundary(
-        &mut self,
-        frames: Vec<SuspendedFrame>,
-        resume_value: Value,
-    ) -> SignalBits {
-        let replay = self.replay_suspended(frames, resume_value);
-        if let Some(site) = replay.error_park {
-            let payload = self.fiber.signal.map_or(Value::NIL, |(_, v)| v);
-            self.fiber.delivery.park_error(site, payload);
-        }
-        replay.bits
+        self.resume_suspended(frames, resume_value)
     }
     /// Execute a fiber abort: raise the injected error at the fiber's
     /// suspension point.
@@ -458,7 +428,7 @@ impl VM {
                         // takes no retain of its own. Pinned by
                         // `region_fiber_abort_io_protect_uaf`;
                         // tests/lang/grpc.lisp is the full-scheduler witness.
-                        vm.replay_at_boundary(remaining, inner_result)
+                        vm.resume_suspended(remaining, inner_result)
                     }
                 }
                 Some(SuspendedFrame::Bytecode(frame)) => {

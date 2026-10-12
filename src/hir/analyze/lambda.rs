@@ -1,4 +1,8 @@
-//! Lambda analysis: (fn (params...) body...)
+// audited: 2026-10-05
+//! Lambda analysis: `(fn [params] body)`, its parameters, its declarations and
+//! its inferred signal.
+//!
+//! docs/signals/inference.md
 
 use super::*;
 use crate::hir::expr::ParamBound;
@@ -34,15 +38,10 @@ impl<'a> Analyzer<'a> {
         let saved_signal_sources = std::mem::take(&mut self.current_signal_sources);
         let saved_lambda_params = std::mem::take(&mut self.current_lambda_params);
 
-        // Save and reset restrict accumulators
+        // Save and reset the bound and ceiling accumulators
         let saved_param_bounds = std::mem::take(&mut self.current_param_bounds);
         let saved_declared_ceiling = self.current_declared_ceiling.take();
-        let saved_muffle_bits = std::mem::replace(
-            &mut self.current_muffle_bits,
-            crate::value::fiber::SignalBits::EMPTY,
-        );
         // Save and reset assertion accumulators
-        let saved_silence_assert = std::mem::replace(&mut self.current_silence_assert, false);
         let saved_numeric_assert = std::mem::replace(&mut self.current_numeric_assert, false);
         let saved_immutability_asserts = std::mem::take(&mut self.current_immutability_asserts);
 
@@ -225,7 +224,7 @@ impl<'a> Analyzer<'a> {
             (None, body_items)
         };
 
-        // Analyze body — restrict forms within will populate
+        // Analyze body — `bound`, `attune!` and `silent!` within populate
         // current_param_bounds and current_declared_ceiling
         let body = self.analyze_body(body_start, span)?;
 
@@ -233,22 +232,16 @@ impl<'a> Analyzer<'a> {
         let body = if param_destructures.is_empty() {
             body
         } else {
-            let body_signal = body.signal;
-            let mut exprs: Vec<Hir> = param_destructures
-                .into_iter()
-                .map(|(pattern, tmp, strict)| {
-                    Hir::silent(
-                        HirKind::Destructure {
-                            pattern,
-                            strict,
-                            value: Box::new(Hir::silent(HirKind::Var(tmp), span)),
-                        },
-                        span,
-                    )
-                })
-                .collect();
+            let mut signal = body.signal;
+            let mut exprs: Vec<Hir> = Vec::with_capacity(param_destructures.len() + 1);
+            for (pattern, tmp, strict) in param_destructures {
+                let destr =
+                    self.destructure(pattern, Hir::silent(HirKind::Var(tmp), span), strict, span);
+                signal = signal.combine(destr.signal);
+                exprs.push(destr);
+            }
             exprs.push(body);
-            Hir::new(HirKind::Begin(exprs), span, body_signal)
+            Hir::new(HirKind::Begin(exprs), span, signal)
         };
 
         let num_locals = self.current_local_count();
@@ -258,13 +251,9 @@ impl<'a> Analyzer<'a> {
         // compute_inferred_signal reads them for bounded params.
         let mut inferred_signals = self.compute_inferred_signal(&body, &params);
 
-        // Check silent! assertion (before ceiling/muffle adjustments)
-        if self.current_silence_assert && (inferred_signals != Signal::silent()) {
-            return Err(format!(
-                "{}: silent! assertion failed: function may emit {}",
-                span,
-                registry::format_bits(inferred_signals.bits),
-            ));
+        // A parameter bound is checked at entry, and the check may raise.
+        if !self.current_param_bounds.is_empty() {
+            inferred_signals = inferred_signals.combine(Signal::errors());
         }
 
         // Check immutable! assertions
@@ -294,24 +283,18 @@ impl<'a> Analyzer<'a> {
             }
         }
 
-        // Read bound accumulators (populated by analyze_silence during body analysis)
+        // Read the bound accumulators, which analyze_bound populated during the body
         let param_bounds: Vec<ParamBound> = self
             .current_param_bounds
             .drain()
             .map(|(binding, signal)| ParamBound { binding, signal })
             .collect();
         let declared_ceiling = self.current_declared_ceiling.take();
-        let muffle_bits = std::mem::replace(
-            &mut self.current_muffle_bits,
-            crate::value::fiber::SignalBits::EMPTY,
-        );
 
-        // When (silence) is declared, verify the body's inferred signal
-        // fits within the ceiling.  Muffled bits expand the ceiling —
-        // they are allowed in the body but excluded from the external signal.
+        // A declared ceiling checks and does not replace: a caller sees what
+        // the body does, not what the declaration admits.
         if let Some(ceiling) = &declared_ceiling {
-            let effective_ceiling = ceiling.bits | muffle_bits;
-            let excess = inferred_signals.bits.subtract(effective_ceiling);
+            let excess = inferred_signals.bits.subtract(ceiling.bits);
             if !excess.is_empty() {
                 return Err(format!(
                     "{}: function restricted to {} but body may emit {}",
@@ -322,15 +305,11 @@ impl<'a> Analyzer<'a> {
             }
             if ceiling.propagates == 0 && inferred_signals.propagates != 0 {
                 return Err(format!(
-                    "{}: function restricted to silent but body is polymorphic",
+                    "{}: function restricted to {} but body passes on the signal of its parameters",
                     span,
+                    registry::format_bits(ceiling.bits),
                 ));
             }
-            inferred_signals = *ceiling;
-        } else if !muffle_bits.is_empty() {
-            // No silence, but muffle is active: subtract muffled bits
-            // from the inferred signal.
-            inferred_signals.bits = inferred_signals.bits.subtract(muffle_bits);
         }
 
         self.pop_scope();
@@ -338,13 +317,12 @@ impl<'a> Analyzer<'a> {
         let captures = std::mem::replace(&mut self.current_captures, saved_captures);
         self.parent_captures = saved_parent_captures;
 
-        // Restore signal sources, restrict accumulators, and assertion accumulators
+        // Restore signal sources, bound and ceiling accumulators, and assertion
+        // accumulators
         self.current_signal_sources = saved_signal_sources;
         self.current_lambda_params = saved_lambda_params;
         self.current_param_bounds = saved_param_bounds;
         self.current_declared_ceiling = saved_declared_ceiling;
-        self.current_muffle_bits = saved_muffle_bits;
-        self.current_silence_assert = saved_silence_assert;
         self.current_numeric_assert = saved_numeric_assert;
         self.current_immutability_asserts = saved_immutability_asserts;
 

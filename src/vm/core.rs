@@ -37,7 +37,8 @@ pub(crate) struct TailCallInfo {
     /// value (a native/parameter tail target sets no pending tail call, so this is
     /// always a real closure in practice).
     pub closure: Value,
-    pub squelch_mask: SignalBits,
+    /// The boundary the callee's signal crosses when the activation ends.
+    pub boundary: crate::value::closure::Boundary,
 }
 
 /// A non-tail call to an interpreted closure, handed from `call_inner` to
@@ -166,15 +167,6 @@ pub struct VM {
     /// set, and every sentinel consumer enters the callee through that one entry;
     /// empty between calls.
     pub(crate) pending_tail_deferrals: Vec<RuntimeRegion>,
-    /// One-shot "the caller parks this activation's frame on an error exit", set
-    /// immediately before entering a body via `execute_bytecode_saving_stack`,
-    /// which takes it (resetting to `false`) at entry. A parked frame is
-    /// replayable — the restarts system resumes an `:error` fiber into it — so the
-    /// releases it still owes stay owed and the abandoned-frame walk must not run
-    /// them (docs/impl/region/mechanism.md). `do_fiber_first_resume` is the one
-    /// entrant that parks an error frame; taken at entry, so the frames that body
-    /// CALLS still walk.
-    pub(crate) pending_error_park: bool,
     /// One-shot parent-wiring override for the next `with_child_fiber`.
     /// Set by the trampoline descent in `do_fiber_resume` from
     /// `PendingFiberResume::parent`; consumed (taken) by `with_child_fiber`
@@ -293,13 +285,6 @@ mod format;
 mod lifecycle;
 mod region;
 mod resume;
-
-/// Where a tier keeps the local slots the abandoned-frame walk reads — named
-/// here because the compiled entry (`elle_jit_release_abandoned_frame`) picks
-/// the variant the interpreter never uses. That entry is the only reader, so a
-/// build without the compiled tier does not name the type here at all.
-#[cfg(feature = "jit")]
-pub(crate) use region::FrameLocals;
 
 impl VM {
     /// Access the root heap.

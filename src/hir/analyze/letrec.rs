@@ -1,4 +1,7 @@
+// audited: 2026-10-05
 //! The `letrec` binding form analyzer.
+//!
+//! docs/bindings.md
 
 use super::*;
 use crate::syntax::{Syntax, SyntaxKind};
@@ -126,13 +129,14 @@ impl<'a> Analyzer<'a> {
         //
         // Seed signal_env for all pre-bound simple bindings with Silent.
         // Without this, forward-referenced letrec siblings default to
-        // Signal::yields() (the unknown-binding fallback in
+        // `Signal::unknown()` (the unknown-callee fallback in
         // get_raw_callee_signal), causing spurious SuspendingCall
         // instructions. This matches analyze_file_letrec's optimistic
         // seeding strategy.
         for entry in &entries {
-            if let LetrecEntry::Simple(binding, _) = entry {
+            if let LetrecEntry::Simple(binding, value_syntax) = entry {
                 self.signal_env.insert(*binding, Signal::silent());
+                self.seed_lambda_facts(*binding, value_syntax);
             }
         }
 
@@ -153,21 +157,7 @@ impl<'a> Analyzer<'a> {
                     // may now read this binding's value.
                     self.arena.get_mut(*binding).init_pending = false;
                     // Track signal and arity for interprocedural analysis
-                    if let HirKind::Lambda {
-                        params: lambda_params,
-                        num_required,
-                        rest_param,
-                        inferred_signals,
-                        ..
-                    } = &value.kind
-                    {
-                        self.signal_env.insert(*binding, *inferred_signals);
-                        let arity = Arity::for_lambda(
-                            rest_param.is_some(),
-                            *num_required,
-                            lambda_params.len(),
-                        );
-                        self.arity_env.insert(*binding, arity);
+                    if self.record_lambda_facts(*binding, &value) {
                         lambda_entries.push((bindings.len(), *binding, value_syntax));
                     }
                     self.apply_transient_binding_state(*binding);
@@ -216,8 +206,8 @@ impl<'a> Analyzer<'a> {
         // sibling is the one carrying the signal, and the seed is the bottom of
         // the lattice — the early lambda therefore comes out too LOW. Too low is
         // the direction that costs a guarantee: a function that reaches `:error`
-        // through the cycle reads as silent, satisfies a compile-time
-        // `(silence)`, and aborts at runtime instead of failing to compile.
+        // through the cycle reads as silent, satisfies a `(silent!)` ceiling,
+        // and breaks its proof at run time instead of failing to compile.
         //
         // Re-analyze the lambdas against the signals now recorded, and repeat
         // until an iteration changes nothing. Each pass can only move a signal
@@ -228,7 +218,7 @@ impl<'a> Analyzer<'a> {
         // binding and fresh pattern leaves every time it runs, so replaying one
         // would add duplicate bindings rather than refine a signal.
         //
-        // See docs/pipeline.md § The fixpoint loop.
+        // See docs/pipeline.md.
         if !lambda_entries.is_empty() {
             // Re-analysis walks the same lambda bodies again and re-reports
             // whatever they raise. Keep the errors from this pass aside and
@@ -285,19 +275,13 @@ impl<'a> Analyzer<'a> {
         let final_body = if destructures.is_empty() {
             body
         } else {
-            let mut exprs: Vec<Hir> = destructures
-                .into_iter()
-                .map(|(pattern, tmp)| {
-                    Hir::silent(
-                        HirKind::Destructure {
-                            pattern,
-                            value: Box::new(Hir::silent(HirKind::Var(tmp), span)),
-                            strict: true,
-                        },
-                        span,
-                    )
-                })
-                .collect();
+            let mut exprs: Vec<Hir> = Vec::with_capacity(destructures.len() + 1);
+            for (pattern, tmp) in destructures {
+                let destr =
+                    self.destructure(pattern, Hir::silent(HirKind::Var(tmp), span), true, span);
+                signal = signal.combine(destr.signal);
+                exprs.push(destr);
+            }
             exprs.push(body);
             Hir::new(HirKind::Begin(exprs), span, signal)
         };

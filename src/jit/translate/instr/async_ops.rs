@@ -27,7 +27,6 @@ impl<'a> FunctionTranslator<'a> {
                 })?;
                 let (rt, rp) =
                     self.call_helper_value_vm(builder, self.helpers.match_fail, st, sp, vm)?;
-                self.emit_exception_check_after_call(builder)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
@@ -38,7 +37,6 @@ impl<'a> FunctionTranslator<'a> {
                 })?;
                 let (rt, rp) =
                     self.call_helper_value_vm(builder, self.helpers.first_destructure, st, sp, vm)?;
-                self.emit_exception_check_after_call(builder)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
@@ -49,7 +47,6 @@ impl<'a> FunctionTranslator<'a> {
                 })?;
                 let (rt, rp) =
                     self.call_helper_value_vm(builder, self.helpers.rest_destructure, st, sp, vm)?;
-                self.emit_exception_check_after_call(builder)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
@@ -65,7 +62,6 @@ impl<'a> FunctionTranslator<'a> {
                 let call = builder.ins().call(func_ref, &[st, sp, idx_val, vm]);
                 let rt = builder.inst_results(call)[0];
                 let rp = builder.inst_results(call)[1];
-                self.emit_exception_check_after_call(builder)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
@@ -81,7 +77,6 @@ impl<'a> FunctionTranslator<'a> {
                 let call = builder.ins().call(func_ref, &[st, sp, idx_val, vm]);
                 let rt = builder.inst_results(call)[0];
                 let rp = builder.inst_results(call)[1];
-                self.emit_exception_check_after_call(builder)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
@@ -147,7 +142,6 @@ impl<'a> FunctionTranslator<'a> {
                 let call = builder.ins().call(func_ref, &[st, sp, kt, kp, vm]);
                 let rt = builder.inst_results(call)[0];
                 let rp = builder.inst_results(call)[1];
-                self.emit_exception_check_after_call(builder)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
@@ -223,9 +217,9 @@ impl<'a> FunctionTranslator<'a> {
                 dst, func, args, ..
             } => {
                 // SuspendingCall: the callee may yield. Handled identically
-                // to Call, with an unconditional yield check after the call.
-                // LBox cells are first-class values in registers (no auto-
-                // unwrap), so yield-through-call spills them correctly.
+                // to Call, and followed by the same signal check
+                // (`translate_instr`). LBox cells are first-class values in
+                // registers (no auto-unwrap), so a park spills them correctly.
                 let (ft, fp) = self.use_var_pair(builder, func.0);
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("SuspendingCall without vm pointer".to_string())
@@ -268,12 +262,6 @@ impl<'a> FunctionTranslator<'a> {
                     )?;
                     self.def_var_pair(builder, dst.0, rt, rp);
                 }
-                self.emit_exception_check_after_call(builder)?;
-                if self.lir.signal().may_suspend() {
-                    let idx = self.call_site_index;
-                    self.call_site_index += 1;
-                    self.emit_yield_check_after_call(builder, idx)?;
-                }
             }
 
             InstrRef::ArrayMutExtend { dst, array, source } => {
@@ -291,7 +279,6 @@ impl<'a> FunctionTranslator<'a> {
                     srp,
                     vm,
                 )?;
-                self.emit_exception_check_after_call(builder)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
@@ -310,7 +297,6 @@ impl<'a> FunctionTranslator<'a> {
                     vp,
                     vm,
                 )?;
-                self.emit_exception_check_after_call(builder)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
@@ -341,12 +327,6 @@ impl<'a> FunctionTranslator<'a> {
                     args_region_const,
                 )?;
                 self.def_var_pair(builder, dst.0, rt, rp);
-                self.emit_exception_check_after_call(builder)?;
-                if self.lir.signal().may_suspend() {
-                    let idx = self.call_site_index;
-                    self.call_site_index += 1;
-                    self.emit_yield_check_after_call(builder, idx)?;
-                }
             }
 
             InstrRef::TailCallArrayMut {

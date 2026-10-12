@@ -27,8 +27,7 @@ impl VM {
             None => return (SIG_ERROR, rejected(self, "jit", "closure has no LIR")),
         };
         // Backfill a nameless LIR from the template so the compile records a
-        // readable code-address registry entry (docs/impl/jit.md § "The
-        // code-address registry").
+        // readable code-address registry entry (docs/impl/jit.md).
         if lir.view().name().is_none() {
             lir.set_name(Some(closure.template.display_label()));
         }
@@ -72,16 +71,14 @@ impl VM {
         let saved_stack = std::mem::take(&mut self.fiber.stack);
         let saved_signal = self.fiber.signal.take();
         // Where an error or a refused park truncates the parameter frames to
-        // (src/vm/AGENTS.md § "Parameter resolution").
+        // (src/vm/AGENTS.md).
         let depth = self.fiber.param_depth();
+        let mut boundary = crate::value::closure::Boundary::of(closure);
 
         let result_jv = self.call_jit(&jit_code, closure, args, closure_val);
 
         // Capture any signal the JIT set (errors, halts, yields).
         let post_signal = self.fiber.signal.take();
-        if post_signal.is_some_and(|(bits, _)| bits.intersects(SIG_ERROR)) {
-            self.fiber.unwind_params(depth);
-        }
 
         // Decode the return value — handle tail calls before restoring
         // the caller's stack, since the trampoline needs the VM state.
@@ -92,6 +89,9 @@ impl VM {
         // target may be a different closure, so we interpret its bytecode.
         if result_jv == crate::jit::TAIL_CALL_SENTINEL {
             if let Some(tail) = self.pending_tail_call.take() {
+                // The tail callee's signal crosses its own boundary and the
+                // closure's, and the closure's proof comes first.
+                boundary.add(tail.boundary);
                 // The resolved body is the tail callee's — hand it its
                 // executing-closure register (see `run_jit`'s sentinel arm).
                 self.pending_entry_closure = tail.closure;
@@ -105,6 +105,11 @@ impl VM {
                 self.fiber.stack = saved_stack;
                 self.fiber.signal = saved_signal;
 
+                // The boundary asks about the held signal, since the caller's
+                // is back in the slot.
+                if let Some(refused) = self.boundary_violation(eb, &boundary, tail_signal, depth) {
+                    return refused;
+                }
                 if eb.is_empty() {
                     let val = tail_signal.map_or(Value::NIL, |(_, v)| v);
                     return (SIG_OK, val);
@@ -116,6 +121,9 @@ impl VM {
                     return (crate::value::SIG_HALT, val);
                 } else if eb.intersects(SIG_ERROR) {
                     if let Some((bits, val)) = tail_signal {
+                        // The error parked the tail callee's chain, which this
+                        // host cannot hold; the error leaves as its own.
+                        self.discard_held_error(bits, val, depth);
                         return (bits, val);
                     }
                     return (
@@ -149,34 +157,36 @@ impl VM {
             self.fiber.signal = Some(sig);
         }
 
-        // An error or halt wins over the sentinel (docs/impl/jit.md § "How a
-        // signal leaves compiled code").
+        // An error or halt wins over the sentinel (docs/impl/jit.md). An error
+        // still crosses the boundary, whose proof it may break. The signal is
+        // on `post_signal`, not `fiber.signal`, because the caller's signal is
+        // back in place by here, so the boundary asks about the held one.
         if let Some((bits, val)) = post_signal {
             if bits.intersects(SIG_ERROR) || bits.intersects(crate::value::SIG_HALT) {
+                if let Some(refused) = self.boundary_violation(bits, &boundary, post_signal, depth)
+                {
+                    return refused;
+                }
+                // An error parked the compiled chain, which this host cannot
+                // hold; the error leaves as its own.
+                self.discard_held_error(bits, val, depth);
                 return (bits, val);
             }
         }
 
         if result_jv == crate::jit::YIELD_SENTINEL {
-            // Squelch enforcement on the suspension the sentinel reports. The
-            // signal is on `post_signal`, not `fiber.signal` — the caller's
-            // signal is back in place by here — so this asks the shared
-            // predicate directly instead of going through `enforce_squelch`.
+            // The boundary on the suspension the sentinel reports, and the
+            // park it ends is `post_signal` for the reason above.
             let yield_bits = post_signal.map_or(crate::value::SIG_YIELD, |(bits, _)| bits);
-            let squelched = crate::signals::squelched_bits(yield_bits, closure.squelch_mask);
-            if !squelched.is_empty() {
-                // …and the park it ends is `post_signal` for the same reason:
-                // `fiber.signal` holds the caller's by here.
-                return (
-                    SIG_ERROR,
-                    self.squelch_violation(squelched, post_signal, depth),
-                );
+            if let Some(refused) =
+                self.boundary_violation(yield_bits, &boundary, post_signal, depth)
+            {
+                return refused;
             }
 
-            // Not squelched: this host refuses the park and raises at its own
-            // call. The park is `post_signal`, for the reason the squelch check
-            // above names. The refusal may release the payload, so the message
-            // reads it first.
+            // Not refused: this host refuses the park and raises at its own
+            // call. The park is `post_signal`, for the reason above. The
+            // refusal may release the payload, so the message reads it first.
             let msg = match post_signal {
                 Some((bits, val)) => format!(
                     "closure yielded under compile/run-on (signal {}, value type {})",
@@ -191,15 +201,10 @@ impl VM {
 
         // Any other signal set during execution wins over the return value.
         if let Some((bits, val)) = post_signal {
-            // Squelch enforcement for a signal the sentinel did not report —
-            // same predicate, same reason for not routing through
-            // `enforce_squelch`.
-            let squelched = crate::signals::squelched_bits(bits, closure.squelch_mask);
-            if !squelched.is_empty() {
-                return (
-                    SIG_ERROR,
-                    self.squelch_violation(squelched, post_signal, depth),
-                );
+            // The boundary on a signal the sentinel did not report, asked
+            // about the held signal for the reason above.
+            if let Some(refused) = self.boundary_violation(bits, &boundary, post_signal, depth) {
+                return refused;
             }
             if !bits.is_empty() {
                 return (bits, val);

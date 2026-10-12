@@ -38,7 +38,7 @@ mod wasm_entry;
 pub use crate::value::fiber::CallFrame;
 pub use core::VM;
 
-use crate::value::fiber::TailSquelch;
+use crate::value::fiber::TailBoundary;
 use crate::value::CodeUnit;
 use crate::value::{Value, SIG_ERROR, SIG_HALT, SIG_SWITCH};
 use std::rc::Rc;
@@ -166,7 +166,7 @@ impl VM {
         self.error_loc = None;
         // The body addresses its locals from stack position 0, so it runs on a
         // stack of its own and the one found here goes back at the end
-        // (docs/impl/vm.md § "Every body starts on an empty operand stack").
+        // (docs/impl/vm.md).
         let saved_stack = std::mem::take(&mut self.fiber.stack);
 
         let empty_env = Rc::new(vec![]);
@@ -206,11 +206,11 @@ impl VM {
         // Initial execution with tail-call loop: a top-level tail call replaces
         // the body in place.
         let mut bits;
-        let mut tail_squelch = TailSquelch::none(depth);
+        let mut tail_boundary = TailBoundary::none(depth);
         loop {
             bits = self.run_dispatch(&current_code, &current_env, 0).bits;
             if let Some(tail) = self.pending_tail_call.take() {
-                tail_squelch.add(tail.squelch_mask, self.fiber.param_depth());
+                tail_boundary.add(tail.boundary, self.fiber.param_depth());
                 // A top-level tail call re-enters the frame as the callee closure.
                 #[cfg(debug_assertions)]
                 Self::debug_assert_entry_closure_matches(tail.closure, &tail.code);
@@ -218,8 +218,10 @@ impl VM {
                 current_code = tail.code;
                 current_env = tail.env;
             } else {
-                if self.enforce_squelch(bits, tail_squelch.mask, tail_squelch.depth) {
-                    bits = SIG_ERROR;
+                if let Some(raised) =
+                    self.enforce_boundary(bits, &tail_boundary.boundary, tail_boundary.depth)
+                {
+                    bits = raised;
                 }
                 break;
             }
@@ -240,6 +242,10 @@ impl VM {
                 }
                 break Err(self.format_error_with_location(value));
             } else if bits.intersects(SIG_ERROR) {
+                // The error parked its chain, which the root driver cannot
+                // hold: nothing restarts a program's uncaught error.
+                self.reclaim_root_dues(&current_code);
+                self.discard_hosted_error(bits, depth);
                 let (_, err_value) = self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
                 // Remember whether this uncaught error is a loud gate (:gated):
                 // the top-level driver treats that as a skip, not a failure.
@@ -257,6 +263,7 @@ impl VM {
                 // The keywords are what the author of
                 // the emitting call can act on; the mask alone is not. The
                 // root driver cannot hold the park, so it refuses it.
+                self.reclaim_root_dues(&current_code);
                 self.refuse_hosted_park(bits, depth);
                 break Err(format!(
                     "Unhandled signal {} outside fiber context",
@@ -278,6 +285,35 @@ impl VM {
         self.fiber.stack = saved_stack;
         self.fiber.current_closure = saved_closure;
         result
+    }
+
+    /// Hand the dues a park of the root body moved into its frame back to the
+    /// activation the root driver runs in, before the park is discarded.
+    ///
+    /// The root body opens no activation of its own: it runs on the base slot,
+    /// or on its caller's when the driver is re-entered. So the park that
+    /// `complete_call` built for it carries that activation's dues, and a
+    /// discard would release what the root's completion, or the re-entering
+    /// caller's, still owes (docs/impl/region/owner.md). The root body is the
+    /// chain's outermost frame, running `code`.
+    fn reclaim_root_dues(&mut self, code: &crate::value::Code) {
+        let Some(crate::value::SuspendedFrame::Bytecode(root)) = self
+            .fiber
+            .suspended
+            .as_mut()
+            .and_then(|frames| frames.last_mut())
+        else {
+            return;
+        };
+        if !std::ptr::eq(root.code.bytecode().as_ptr(), code.bytecode().as_ptr()) {
+            return;
+        }
+        let dues = std::mem::take(&mut root.activation_dues);
+        debug_assert!(
+            self.activation_dues().is_empty(),
+            "VM bug: the root body parked without taking its activation's dues"
+        );
+        *self.activation_dues() = dues;
     }
 }
 

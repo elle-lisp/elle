@@ -54,10 +54,12 @@ Two execution modes:
   to WASM on demand during bytecode VM execution. Complements the VM
   rather than replacing it. A closure runs on the tier from its Nth call, so
   `--wasm=1` compiles it on the first; the tier counts the calls itself,
-  because a `wasm` build has no JIT tier to share a count with. Currently
-  limited to leaf functions (no closures, tail calls, or yield). The tier keys
-  each compiled module, and each closure it refused, by the closure's bytecode
-  address, so each entry pins that code region ([jit.md](jit.md)).
+  because a `wasm` build has no JIT tier to share a count with. The tier
+  holds no park, so it compiles only a function that cannot signal: no
+  yield, no tail call, and nothing that can raise, since an error parks. The
+  tier keys each compiled module, and each closure it refused, by the
+  closure's bytecode address, so each entry pins that code region
+  ([jit.md](jit.md)).
 
 ### Pipeline (full-module)
 
@@ -128,6 +130,7 @@ WASM code calls the host for operations that need Rust heap access:
 | `rt_yield` | Save suspension frame for yield/yield-through |
 | `rt_get_resume_value` | Load the resume value after suspension |
 | `rt_load_saved_reg` | Restore a saved register during resume |
+| `rt_emit` | The capability gate on a literal emit: the value and signal it parks on |
 
 ### Closure calling convention
 
@@ -140,11 +143,10 @@ Closure WASM type: `(env_ptr: i32, args_ptr: i32, nargs: i32, ctx: i32) -> (tag:
 - `status`: 0 = normal return, >0 = suspended (resume state ID).
 
 A compiled function reports on **two channels, and both must be read**.
-`status` says whether the function suspended. The `SignalBits` it raised
-go to `SIGNAL_SLOT`, the 8 bytes at the base of linear memory. Neither
-word implies the other: a function can raise `:error` and return
-(`status = 0`, signal set), suspend carrying `:io` (`status > 0`, signal
-on the frame), or return a value (both clear).
+`status` says whether the function parked. The `SignalBits` it raised
+go to `SIGNAL_SLOT`, the 8 bytes at the base of linear memory. A function
+can park carrying `:io` or `:error` (`status > 0`, signal on the frame), halt
+(`status = 0`, signal set), or return a value (both clear).
 
 Tail calls use `return_call_indirect` (WASM tail-call proposal) via
 `rt_prepare_tail_call`, which resolves the target and builds the
@@ -154,13 +156,14 @@ callee's env at the caller's env position.
 
 `rt_call` returns four words: `(tag: i64, payload: i64, signal: i64,
 suspended: i64)`. `suspended` is the host's answer to "must my caller
-park?", and the emitted code branches on it alone.
+park?", and the emitted code branches on it alone. Every signal but a halt
+parks the caller, an error included.
 
 Emitted code must not derive that answer from the signal word. The
 callee's signal is its own vocabulary — `:io`, `:wait`, a user bit — and
-which of those suspend is the interpreter's rule, not the emitter's.
-`signals::dispatch::classify` owns it, and `rt_call` applies it once so
-the tiers cannot disagree.
+which of those park is the interpreter's rule, not the emitter's.
+`signals::dispatch::parks` owns it, and `rt_call` applies it once so the
+tiers cannot disagree.
 
 Testing a bit instead costs correctness twice over. A suspending signal
 need not carry any particular bit — `fiber/emit` of a bare `|:io|` does
@@ -171,11 +174,18 @@ puts that bit where programs can see it: `fiber/bits` reports
 `|:io :yield|` where the VM reports `|:io|`. Pinned by
 [wasm-suspend-not-by-bit.lisp](../../tests/impl/wasm-suspend-not-by-bit.lisp).
 
-A non-zero `status` likewise does not mean "parked". `(yield v)` and
-`(error …)` both compile to an `Emit` terminator and both route through
-`rt_yield`, so an error also returns `status > 0`. `handle_wasm_result`
-reads the signal off the frame `rt_yield` pushed and classifies it, which
-is what makes an uncaught error unwind rather than park.
+`(yield v)` and `(error …)` both compile to an `Emit` terminator, both
+route through `rt_yield`, and both park, because an error unwinds nothing
+([unwind.md](region/unwind.md)). `handle_wasm_result` reads the signal off
+the frame `rt_yield` pushed. An error nothing catches reaches the root
+driver, which drops the parked chain and reports the error.
+
+No host call path sees an `Emit`, so the terminator calls `rt_emit` before it
+parks. Where the driven fiber withholds a bit the emit names, `rt_emit`
+answers the denial payload and the blocked bits, and the frame parks on those
+([emit.md](../signals/emit.md)). `rt_yield` cannot ask the question itself,
+because every park site calls it, and a frame that parks behind a callee's
+denial carries that denial's withheld bits.
 
 ### Callee dispatch spectrum
 
@@ -222,7 +232,7 @@ A resume adds the resumer's set to the fiber it drives, as `with_child_fiber`
 does on the VM. [capabilities.md](../signals/capabilities.md) states both rules.
 
 The denial travels back as the call's own signal, classified by the same
-`is_suspending` rule as any other — never by a test on the denied bits. Where
+`parks` rule as any other — never by a test on the denied bits. Where
 the fiber then comes to rest is its own mask's answer: `:paused` holding the
 payload where the mask names the denied bit, propagating to the resumer where it
 does not. The handle table that `value_to_wasm` inserts the payload into is what
@@ -234,18 +244,36 @@ struct whichever tier ran its body. Pinned by
 
 ### Suspension and resume
 
-Yielding closures use a CPS-like scheme:
+A function that may signal parks at every place a signal can leave it: each
+`Emit`, each call, and each instruction that may raise (`Op::may_raise`).
+An error parks like a yield, so a call to a callee that only raises is a park
+site too.
 
-1. At each yield point and yield-through call site, the emitter
-   assigns a resume state ID.
-2. On yield: live registers are spilled to linear memory, then
-   `rt_yield` saves them as a `WasmSuspensionFrame` on the host.
-3. On resume: `ctx` parameter is non-zero. The resume prologue
-   dispatches on `ctx` via `br_table`, restores saved registers,
-   and jumps to the continuation block.
-4. For yield-through-call (callee yields through a non-yielding
-   caller), the caller's frame is saved too, forming a chain.
-   `drive_resume_chain` ([resume.rs](../../src/wasm/resume.rs)) walks the chain.
+1. The emitter splits each block after every park site, and gives each site a
+   resume state ID and a resume entry: a case of the dispatch loop that
+   delivers the restart value into the site's result.
+2. On a park, the site spills the registers and local slots live after it
+   to `ARGS_BASE`, and `rt_yield` saves them as a `WasmSuspensionFrame` on
+   the host. The env stack begins above the widest such spill, as it does
+   above the widest call's args.
+3. On resume, the `ctx` parameter is non-zero. The resume prologue restores
+   every saved slot once, then selects the state's case through the dispatch
+   loop.
+4. When a callee or a host operation parks, its caller's frame is saved too,
+   forming a chain. `drive_resume_chain`
+   ([resume.rs](../../src/wasm/resume.rs)) walks the chain.
+
+The dispatch loop orders its cases so that each resume entry sits between the
+block that ends at its site and the block after it
+([layout.rs](../../src/wasm/layout.rs)). A forward edge is a plain `br`, and
+only a branch back goes round the loop, because Wasmtime merges every value
+the loop carries once for each edge into the loop header.
+
+A resume entry still costs Wasmtime one merge per value live across its site.
+A module with a park site at every call therefore compiles several times
+slower than one that parks only at suspending calls. A function with hundreds
+of calls and hundreds of values live across them spills past the WASM
+per-function size limit, and the module fails to parse.
 
 ### Cross-thread spawn (dual-compiled bytecode)
 
@@ -316,59 +344,11 @@ production workload, so a figure in this document ages with nothing to fail.
 3. **Separate stdlib compilation**: compile stdlib as a separate WASM
    module, cached independently. Link user code against it.
 
-### Debug builds optimize dependencies
+### The Cranelift underneath
 
-A **debug** build applies
-
-```toml
-[profile.dev.package."*"]
-opt-level = 3
-```
-
-so every dependency — `cranelift-codegen`/`cranelift-frontend`/`regalloc2`
-included — compiles optimized while `elle` itself stays at `opt-level = 0` with
-full debug assertions. Without the override those crates build at `opt-level =
-0`, where Cranelift's hot SSA-construction and bitset ops are un-inlined
-call-per-op (profiled: `cranelift_bitset` / `SSABuilder` self-time dominates)
-and one stdlib module costs seconds of wasmtime compile where the override
-costs a fraction of one. (`--cache=<dir>` amortizes either way.)
-
-`cranelift-codegen` is shared between the WASM path (via `wasmtime`) and the
-**Cranelift JIT** (`cranelift-jit`), so optimizing it also speeds up JIT
-compilation. The generated JIT *code* is unchanged: the JIT pins its own output
-at `opt_level = "speed"` ([compiler.rs](../../src/jit/compiler.rs)) independent
-of how `cranelift-codegen` was itself built, so the tier is behavior-identical
-across the override — only compile *latency* moves. A faster background compile
-does shift *when* a hot function crosses from the interpreter to JIT
-mid-execution, so two crossover invariants are each pinned by a test that fails
-if the shift mishandles the boundary: a fuel-suspended callee's frame survives
-the JIT tier ([fuel-jit-preempt.lisp](../../tests/impl/fuel-jit-preempt.lisp)),
-and a value emitted from JIT-compiled code is retained as it escapes into
-`fiber.signal`, where the resumer reads it
-([region-jit-emit-escape-uaf.lisp](../../tests/impl/region-jit-emit-escape-uaf.lisp)).
-
-### One Cranelift in the dependency graph
-
-That sharing holds only while `wasmtime` and the JIT's `cranelift-*` crates
-resolve to the same `cranelift-codegen`. Cargo picks one version per
-semver-incompatible requirement, so a JIT held a minor line behind the
-Cranelift `wasmtime` carries puts two complete copies of the code generator
-into a `--features wasm` build. The copies do not stay independent either:
-they share the one `regalloc2` the union of their requirements allows, so the
-JIT every default build runs gets its register allocator chosen by the WASM
-tier's pin.
-
-The two pins therefore move together. `wasmtime 49` carries Cranelift 0.136,
-and `Cargo.toml` pins `cranelift-codegen`, `-frontend`, `-module`, `-jit`, and
-`-native` at 0.136 to match. Raising `wasmtime` means raising the JIT's
-Cranelift in the same change, which is a code change and not only a manifest
-one. Each Cranelift line has changed a builder call the translator makes
-([impl/jit.md](jit.md)).
-`integration::deps` ([deps.rs](../../tests/integration/deps.rs)) reads
-`Cargo.lock` and fails if the graph ever holds two versions of
-`cranelift-codegen` or `regalloc2`. It also fails if `wasmtime` resolves below
-the release that fixed its newest published advisory. When `cargo audit` names
-a newer fix, raise that floor in the same change as the pin.
+Wasmtime compiles through the same Cranelift the JIT uses. A debug build
+compiles it optimized, and its version moves with the JIT's
+([cranelift.md](cranelift.md)).
 
 ## Full-module coverage and its two teardown/lowering invariants
 
@@ -438,9 +418,8 @@ make smoke-wasm
 elle-wasm --wasm=full tests/lang/arithmetic.lisp
 elle-rig-wasm --profile tests/impl/profiles/wasm-full.toml tests/impl/region-capture-cell-loop-uaf.lisp
 
-# Tiered backend tests, on the wasm build's rig
+# Tiered backend test, on the wasm build's rig
 elle-rig-wasm tests/impl/wasm-tier.lisp
-elle-rig-wasm tests/impl/wasm-tier-error-signal.lisp
 
 # Rust-side WASM tests — the feature is off by default, so name it
 cargo test -p elle --lib --features wasm wasm::

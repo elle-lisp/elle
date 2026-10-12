@@ -1,5 +1,8 @@
+// audited: 2026-10-06
 //! Fiber suspend/resume host functions:
-//! `rt_yield`, `rt_get_resume_value`, `rt_load_saved_reg`.
+//! `rt_yield`, `rt_emit`, `rt_get_resume_value`, `rt_load_saved_reg`.
+//!
+//! docs/impl/wasm.md
 
 use wasmtime::*;
 
@@ -46,7 +49,8 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
             // stamp it so resume re-drives the child before running the frame.
             let fiber_id = host.current_fiber_id();
             let redrive_child = host.pending_redrive.remove(&fiber_id);
-            host.push_suspension_frame(crate::wasm::host::WasmSuspensionFrame {
+            host.push_parked(crate::wasm::host::ParkedFrame::Wasm(
+                crate::wasm::host::WasmSuspensionFrame {
                 wasm_func_idx: func_idx as u32,
                 resume_state: resume_state as u32,
                 saved_regs,
@@ -56,7 +60,46 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                 self_tag,
                 self_payload,
                 redrive_child,
-            });
+            }));
+        },
+    )?;
+
+    // rt_emit(tag: i64, payload: i64, signal_bits: i64) -> (tag: i64, payload: i64, signal_bits: i64)
+    //
+    // The capability gate on a literal emit, which no host call path's gate
+    // sees: the value and signal the emit parks on. Where the driven fiber
+    // withholds a bit the emit names, that is the denial and its blocked bits,
+    // the payload a call to `fiber/emit` would be denied with
+    // (`VM::build_emit_denial_payload`). The handle table holds the payload, as
+    // for a denied call (`host::capability_denial`).
+    linker.func_wrap(
+        "elle",
+        "rt_emit",
+        |mut caller: Caller<'_, ElleHost>,
+         tag: i64,
+         payload: i64,
+         signal_bits: i64|
+         -> (i64, i64, i64) {
+            let bits = crate::value::fiber::SignalBits::new(signal_bits as u64);
+            let vm = caller.data().vm;
+            let blocked = crate::vm::VM::emit_blocked(caller.data().calling_withheld(vm), bits);
+            if blocked.is_empty() {
+                return (tag, payload, signal_bits);
+            }
+            let value = caller.data().wasm_to_value(tag, payload);
+            let denial = {
+                let vm = unsafe { &mut *vm };
+                let mut ctx = crate::primitives::ctx::Alloc::new(unsafe { &mut *vm.heap_ptr });
+                crate::vm::VM::build_emit_denial_payload(
+                    &mut ctx,
+                    bits,
+                    blocked,
+                    value,
+                    vm.symbols(),
+                )
+            };
+            let (tag, payload) = caller.data_mut().value_to_wasm(denial);
+            (tag, payload, blocked.raw() as i64)
         },
     )?;
 

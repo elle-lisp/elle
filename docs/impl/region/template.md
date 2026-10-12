@@ -8,8 +8,7 @@ A closure template is the code object of one lambda: its bytecode, constant
 pool, source locations, LIR, and the region tables its body needs. This doc owns
 the argument for how that object is represented and who owns each part. The
 foundation it serves is named in [image/foundations.md](../image/foundations.md);
-the rule it obeys is [model.md](model.md) § "Constants lower as ordinary
-allocations".
+the rule it obeys is [model.md](model.md).
 
 ## Two things, not one
 
@@ -70,8 +69,8 @@ A debug build counts the live handles and checks the count at teardown.
 ## Every reference held from Rust is named on the heap
 
 A macro expansion reclaims its scratch by balancing the references a scan of
-heap contents cannot explain ([rules.md](rules.md) § "Macro expansion — a
-closed allocation scope"). A `CodeUnit` and a `CodePin` hold their references in
+heap contents cannot explain ([rules.md](rules.md)). A `CodeUnit` and a
+`CodePin` hold their references in
 Rust, where that scan cannot reach them. So the heap keeps a **code-hold
 registry**: every code region a Rust handle holds, with the number of handles.
 The reclaim excludes those regions, exactly as it excludes the process roots.
@@ -122,10 +121,9 @@ The emitter holds two inputs at a `MakeClosure`: the lambda's frozen LIR, and
 the bytecode its own emission produced. `PayloadParts::lambda` takes those two
 and the capture count the site decided, and fills every field. The two release
 tables are the fields that cost the most when one is left out. A closure built
-from such a payload runs correctly until one of its frames is abandoned. The
-error exit then walks an empty table, and every region that frame owed is
-stranded ([mechanism.md](mechanism.md) § "An abandoned frame runs the releases
-it still owes").
+from such a payload runs correctly until a parked frame of it is discarded.
+The discard then walks an empty table, and every region that frame owed is
+stranded ([unwind.md](unwind.md)).
 
 The JIT builds no payload. It refuses a function that holds a `MakeClosure`,
 and it has no translation for one.
@@ -138,7 +136,7 @@ Pinned by
 `rt_make_closure` is the host function an emitted module calls at every closure
 creation. It has no LIR to read. What it holds is the module's dual-compiled
 code unit, whose payload for that closure was written from the closure's LIR
-([wasm.md](../wasm.md) § "Cross-thread spawn"). The call also passes the shape
+([wasm.md](../wasm.md)). The call also passes the shape
 of the frame the lambda runs in — arity, the three counts, the two capture
 masks, the signal — through linear memory.
 
@@ -152,8 +150,7 @@ region. Every call at one index supplies the lambda's own shape, so a closure
 built in a loop costs a header, as a `MakeClosure` does.
 
 The dual-compiled bytecode is what a spawned OS-thread worker runs, so a frame
-of it abandoned on an error exit walks whichever table this constructor
-carried.
+of it that a discard abandons walks whichever table this constructor carried.
 
 Pinned by
 `wasm::tests::closure::a_wasm_built_closure_carries_the_frame_release_tables`
@@ -166,7 +163,7 @@ loop is once per iteration. Whatever it copies, it copies that often.
 
 The header is per-creation because the region model says so: a heap literal is
 an ordinary, reclaimable allocation born in the executing frame's region
-(model.md § "Constants lower as ordinary allocations"), and a closure template
+([model.md](model.md)), and a closure template
 is a heap literal. The payload is not per-creation, because copying a
 function's whole bytecode on every iteration of a loop that builds a closure is
 a cost a shared payload does not pay.

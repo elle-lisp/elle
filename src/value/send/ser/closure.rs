@@ -1,6 +1,7 @@
 // audited: 2026-10-06
-// docs/threads.md
 //! Serializing a live closure instance into the bundle's intern table.
+//!
+//! docs/threads.md
 //!
 //! Split from the value-tag `match` because the closure arm manages cycle
 //! detection: it pre-inserts a placeholder before recursing into `env`, the

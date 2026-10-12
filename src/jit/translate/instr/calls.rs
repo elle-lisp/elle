@@ -36,12 +36,6 @@ impl<'a> FunctionTranslator<'a> {
                         region_id_const,
                     )?;
                     self.def_var_pair(builder, dst.0, rt, rp);
-                    self.emit_exception_check_after_call(builder)?;
-                    if self.lir.signal().may_suspend() {
-                        let idx = self.call_site_index;
-                        self.call_site_index += 1;
-                        self.emit_yield_check_after_call(builder, idx)?;
-                    }
                 } else {
                     // Spill args to stack (16 bytes each)
                     let slot =
@@ -66,12 +60,6 @@ impl<'a> FunctionTranslator<'a> {
                         region_id_const,
                     )?;
                     self.def_var_pair(builder, dst.0, rt, rp);
-                    self.emit_exception_check_after_call(builder)?;
-                    if self.lir.signal().may_suspend() {
-                        let idx = self.call_site_index;
-                        self.call_site_index += 1;
-                        self.emit_yield_check_after_call(builder, idx)?;
-                    }
                 }
             }
 
@@ -90,8 +78,7 @@ impl<'a> FunctionTranslator<'a> {
                 // The releases this call strands past the frame replacement. The
                 // helper hands them to the activation that runs the callee, this
                 // one having popped its own dues slot by then
-                // (docs/impl/region/relocate.md § "A channel built in compiled
-                // code hands its release forward").
+                // (docs/impl/region/relocate.md).
                 let defer = TailDeferrals::of(*defer_callee_release, *deferred_release_slot);
 
                 // The emitter records one call site per tail call of a function

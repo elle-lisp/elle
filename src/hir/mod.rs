@@ -1,6 +1,7 @@
-// audited: 2026-09-06
-// src/hir/AGENTS.md
-//! High-level Intermediate Representation (HIR)
+// audited: 2026-10-05
+//! High-level Intermediate Representation (HIR): the analyzed program, and the passes over it.
+//!
+//! docs/impl/hir.md
 //!
 //! HIR is the fully-analyzed form produced from expanded Syntax. All bindings
 //! are resolved, signals are inferred, and captures are computed. This is the
@@ -31,6 +32,7 @@ mod pattern;
 pub mod region;
 mod regularize;
 mod return_incref;
+pub(crate) mod spec;
 pub mod symbols;
 pub mod tailcall;
 #[cfg(test)]

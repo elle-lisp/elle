@@ -1,5 +1,8 @@
+// audited: 2026-10-06
 //! Data-op dispatch and dynamic-parameter frame management:
 //! `rt_data_op`, `rt_push_param`, `rt_pop_param`.
+//!
+//! docs/impl/wasm.md
 
 use wasmtime::*;
 
@@ -20,11 +23,16 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
         },
     )?;
 
-    // rt_push_param(args_ptr: i32, npairs: i32) -> ()
+    // rt_push_param(args_ptr: i32, npairs: i32) -> (tag: i64, payload: i64, signal: i64)
+    //
+    // A non-parameter raises a type-error and pushes an empty frame in place of
+    // the aborted one, as the interpreter's `PushParamFrame` does: a restart
+    // continues into the `parameterize` body, whose scope-end `rt_pop_param`
+    // pops that empty frame and not the one below it.
     linker.func_wrap(
         "elle",
         "rt_push_param",
-        |mut caller: Caller<'_, ElleHost>, args_ptr: i32, npairs: i32| {
+        |mut caller: Caller<'_, ElleHost>, args_ptr: i32, npairs: i32| -> (i64, i64, i64) {
             let memory = caller
                 .get_export("__elle_memory")
                 .and_then(|e| e.into_memory())
@@ -52,12 +60,20 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                     .data()
                     .wasm_to_value(val_tag as i64, val_payload as i64);
 
-                // Extract parameter id
-                if let Some((id, _)) = param_val.as_parameter() {
-                    frame.push((id, value));
-                }
+                let Some((id, _)) = param_val.as_parameter() else {
+                    caller.data_mut().param_frames.push(Vec::new());
+                    let heap = unsafe { &mut *caller.data().heap_ptr() };
+                    let err = crate::primitives::ctx::Alloc::new(heap).error(
+                        "type-error",
+                        format!("parameterize: {} is not a parameter", param_val.type_name()),
+                    );
+                    let (tag, payload) = caller.data_mut().value_to_wasm(err);
+                    return (tag, payload, crate::value::SIG_ERROR.raw() as i64);
+                };
+                frame.push((id, value));
             }
             caller.data_mut().param_frames.push(frame);
+            (crate::value::repr::TAG_NIL as i64, 0, 0)
         },
     )?;
 

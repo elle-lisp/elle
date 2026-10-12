@@ -1,16 +1,19 @@
-// audited: 2026-09-30
+// audited: 2026-10-11
 //! Network primitives — TCP and UDP.
 //!
 //! docs/io.md
 //! docs/io/timeout.md
+//! docs/signals/capabilities.md
 //!
-//! tests/lang/prim-net.lisp pins them.
+//! tests/lang/prim-net.lisp pins them, and tests/lang/caps-net.lisp pins the
+//! capability each declares.
 //!
 //! Unix domain socket primitives are in src/primitives/unix.rs.
 //!
 //! Listener/bind primitives are synchronous (no SIG_IO) because they
 //! complete immediately. Accept/connect/send/recv/shutdown yield SIG_IO
-//! for scheduler dispatch.
+//! for scheduler dispatch. Every primitive here but `sys/ip?` carries
+//! SIG_NET, so a fiber denied `:net` reaches no peer.
 
 use crate::io::request::{ConnectAddr, IoOp, IoRequest, PortOp};
 use crate::port::{Direction, Port, PortKind};
@@ -242,7 +245,7 @@ use udp::*;
 
 primitive! {
     "tcp/listen" => prim_tcp_listen {
-        signal: Signal::errors(),
+        signal: Signal::net_errors(),
         arity: Arity::Exact(2),
         doc: "Bind and listen on a TCP address. Returns a listener port.",
         params: &["addr", "port"],
@@ -251,7 +254,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "tcp/accept" => prim_tcp_accept {
-        signal: Signal::io_yields_errors(),
+        signal: Signal::net_io_yields_errors(),
         arity: Arity::AtLeast(1),
         doc: "Accept a connection on a TCP listener. Returns a stream port.",
         params: &["listener"],
@@ -263,7 +266,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "tcp/connect-ip" => prim_tcp_connect_ip {
-        signal: Signal::io_yields_errors(),
+        signal: Signal::net_io_yields_errors(),
         arity: Arity::AtLeast(2),
         doc: "Connect to a TCP endpoint by IP literal (IPv4 or IPv6). Hostnames are rejected — the stdlib tcp/connect wrapper resolves names and calls this per address. Returns a stream port.",
         params: &["ip", "port"],
@@ -274,7 +277,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "tcp/shutdown" => prim_tcp_shutdown {
-        signal: Signal::io_yields_errors(),
+        signal: Signal::net_io_yields_errors(),
         arity: Arity::Exact(2),
         doc: "Shutdown a TCP stream. how: :read, :write, or :read-write.",
         params: &["port", "how"],
@@ -284,7 +287,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "udp/bind" => prim_udp_bind {
-        signal: Signal::errors(),
+        signal: Signal::net_errors(),
         arity: Arity::Exact(2),
         doc: "Bind a UDP socket. Returns a UDP port.",
         params: &["addr", "port"],
@@ -293,7 +296,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "udp/send-to" => prim_udp_send_to {
-        signal: Signal::io_yields_errors(),
+        signal: Signal::net_io_yields_errors(),
         arity: Arity::AtLeast(4),
         doc: "Send data to a remote address via UDP. Returns bytes sent.",
         params: &["socket", "data", "addr", "port"],
@@ -313,7 +316,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "udp/recv-from" => prim_udp_recv_from {
-        signal: Signal::io_yields_errors(),
+        signal: Signal::net_io_yields_errors(),
         arity: Arity::AtLeast(2),
         doc: "Receive data from a UDP socket. Returns {:data :addr :port}.",
         params: &["socket", "count"],
@@ -325,7 +328,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "sys/resolve" => prim_sys_resolve {
-        signal: Signal::io_yields_errors(),
+        signal: Signal::net_io_yields_errors(),
         arity: Arity::Exact(1),
         doc: "Resolve a hostname to IP addresses via the system resolver (getaddrinfo). Returns an array of IP address strings.",
         params: &["hostname"],

@@ -51,13 +51,10 @@ pub fn render_all(
     let mut out: BTreeMap<String, String> = BTreeMap::new();
 
     // Rendering is a pure diagnostic: it must not leave the process-global signal
-    // registry mutated. A `(signal :kw)` declaration registers at compile time, so
-    // without bracketing, the fhir front-end below would register the signal and
-    // the lowered pipeline (a SECOND compile of the same source) would then collide
-    // ("already registered") — silently dropping every lowered stage — and the
-    // leftover registration would later collide with the runner's whole-module
-    // compile of the same file. Restore the registry to this baseline before each
-    // internal compile and on exit so render_all is registry-neutral.
+    // registry mutated. A `(signal :kw)` declaration registers at compile time and
+    // spends one of the 32 user bits, which the process never gets back. Restore
+    // the registry to this baseline before each internal compile and on exit so
+    // render_all is registry-neutral.
     let registry_baseline = crate::signals::registry::snapshot_registry();
 
     if let Ok(s) = render_ast(contents, source_name) {
@@ -248,8 +245,9 @@ pub fn dfa_module(module: &FrozenModule) -> String {
     s
 }
 
-/// JIT — per-function eligibility (a polymorphic `propagates` mask is
-/// ineligible).
+/// JIT — per-function eligibility, the answer the JIT itself gives
+/// (`LirView::jit_refusal`); the signal is printed beside it and decides
+/// nothing (docs/signals/jit.md).
 pub fn jit_module(module: &FrozenModule) -> String {
     let mut s = String::new();
     for (tag, f) in tagged(module) {
@@ -261,7 +259,7 @@ pub fn jit_module(module: &FrozenModule) -> String {
             f.name().unwrap_or("<anon>"),
             signal.bits,
             signal.propagates,
-            signal.propagates == 0,
+            f.jit_refusal().is_none(),
         );
     }
     s

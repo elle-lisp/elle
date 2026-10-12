@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-11
 # A process keeps the withheld set of the fiber that spawned it, and its scheduler refuses a denied call.
 # docs/process-scheduler.md
 #
@@ -12,35 +12,36 @@
 # a command naming the closure, the process takes the scheduler's authority and
 # the write lands. A sandbox inside a process escapes through any spawn.
 #
-# Each sandbox here runs inside a process and denies :fs. Its mask names only
-# :error, so the spawn command it yields travels up to the process scheduler
-# like any command the process itself yields.
+# Each sandbox here runs inside a process and denies one bit, :fs unless it
+# says otherwise. Its mask names only :error, so the spawn command it yields
+# travels up to the process scheduler like any command the process itself
+# yields.
 
 (def process ((import "std/process")))
 
-(defn refused? [outcome primitive]
-  "Whether a protect outcome is the refusal of `primitive`."
+(defn refused? [outcome primitive bit]
+  "Whether a protect outcome is the refusal of `primitive`, denied `bit`."
   (let [[ok? denial] outcome]
     (and (not ok?) (= (get denial :error) :capability-denied)
          (= (get denial :primitive) primitive)
-         (contains? (get denial :denied) :fs))))
+         (contains? (get denial :denied) bit))))
 
-(defn from-sandbox [spawner body]
-  "Inside a process, spawn body through spawner from a sandbox denied :fs, and
-   return the first message the spawned process sends back."
+(defn from-sandbox [deny spawner body]
+  "Inside a process, spawn body through spawner from a sandbox denied `deny`,
+   and return the first message the spawned process sends back."
   (let [@got nil]
     (process:start (fn []
                      (let* [me (process:self)
                             sandbox (fiber/new (fn []
                               (spawner (fn [] (process:send me (body)))))
-                            |:error| :deny |:fs|)]
+                            |:error| :deny deny)]
                        (fiber/resume sandbox)
                        (assign got (process:recv)))))
     got))
 
 # ── The spawned process holds its spawner's set ───────────────────────
 
-(let [caps (from-sandbox process:spawn (fn [] (fiber/caps)))]
+(let [caps (from-sandbox |:fs| process:spawn (fn [] (fiber/caps)))]
   (assert (not (contains? caps :fs))
           "a process spawned from the sandbox lacks :fs")
   (assert (contains? caps :io) "and keeps what nobody withheld"))
@@ -49,18 +50,18 @@
 
 (with-temp-dir dir
                (let [target (path/join dir "spawn")]
-                 (assert (refused? (from-sandbox process:spawn
+                 (assert (refused? (from-sandbox |:fs| process:spawn
                                    (fn [] (protect (file/write target "x"))))
-                                   "file/write")
+                                   "file/write" :fs)
                          "process:spawn: the write is refused where the process made it")
                  (assert (not (path/exists? target))
                          "and nothing reaches the disk")))
 
 (with-temp-dir dir
                (let [target (path/join dir "link")]
-                 (assert (refused? (from-sandbox process:spawn-link
+                 (assert (refused? (from-sandbox |:fs| process:spawn-link
                                    (fn [] (protect (file/write target "x"))))
-                                   "file/write")
+                                   "file/write" :fs)
                          "process:spawn-link carries the denial too")
                  (assert (not (path/exists? target))
                          "and nothing reaches the disk")))
@@ -68,13 +69,19 @@
 # spawn-monitor answers [pid ref], so the sandbox's spawner discards the ref.
 (with-temp-dir dir
                (let [target (path/join dir "monitor")]
-                 (assert (refused? (from-sandbox (fn [body]
+                 (assert (refused? (from-sandbox |:fs|
+                                   (fn [body]
                                      (first (process:spawn-monitor body)))
                                    (fn [] (protect (file/write target "x"))))
-                                   "file/write")
+                                   "file/write" :fs)
                          "process:spawn-monitor carries the denial too")
                  (assert (not (path/exists? target))
                          "and nothing reaches the disk")))
+
+(assert (refused? (from-sandbox |:net| process:spawn
+                                (fn [] (protect (tcp/listen "127.0.0.1" 0))))
+                  "tcp/listen" :net)
+        "a process denied :net is refused its listen")
 
 # ── An uncaught refusal ends the process with the denial ──────────────
 
@@ -109,30 +116,43 @@
                                             (file/write target "x"))))))
                                         |:error| :deny |:fs|)]
                                     (assign outcome (fiber/resume sandbox)))))
-                 (assert (refused? outcome "file/write")
+                 (assert (refused? outcome "file/write" :fs)
                          "the sub-fiber's write is refused, and the join raises the denial")
                  (assert (not (path/exists? target))
                          "and nothing reaches the disk")))
 
 # ── A process system started inside a sandbox ─────────────────────────
 
-# Every process and sub-fiber here is created inside the sandbox, so the
-# scheduler refuses the denial itself. The sandbox's :error-only mask means a
-# denial that escaped the scheduler instead would end this file at the root.
+# Every process here is created inside the sandbox, so its own scheduler refuses
+# the denial. The process fiber's mask must name each bit a denial can carry.
+# The sandbox's mask catches the denied bit, so a denial that passed the
+# process scheduler stops the sandbox there, and it never finishes.
+#
+# The trap: with a sandbox masked |:error| alone, a denial that passed the
+# process scheduler still reaches the async scheduler, whose ev/spawn mask
+# names the bit and refuses it at the same call site, so the case passes.
+(defn sandboxed-system [deny thunk]
+  "Run thunk as the one process of a system started in a sandbox denied
+   `deny` and masked to catch it. Answer what the process answered."
+  (let [out @[]
+        sandbox (fiber/new (fn [] (process:start (fn [] (push out (thunk)))))
+                           (union |:error| deny) :deny deny)]
+    (fiber/resume sandbox)
+    (assert (= (fiber/status sandbox) :dead)
+            "the sandboxed process system finishes")
+    (get out 0)))
+
 (with-temp-dir dir
-               (let [target (path/join dir "inner")
-                     out @[]
-                     sandbox (fiber/new (fn []
-                                          (process:start (fn []
-                                            (push out
-                                            (protect (file/write target "x"))))))
-                                        |:error| :deny |:fs|)]
-                 (fiber/resume sandbox)
-                 (assert (= (fiber/status sandbox) :dead)
-                         "the sandboxed process system finishes")
-                 (assert (refused? (get out 0) "file/write")
+               (let [target (path/join dir "inner")]
+                 (assert (refused? (sandboxed-system |:fs|
+                                   (fn [] (protect (file/write target "x"))))
+                                   "file/write" :fs)
                          "a process in a sandboxed system is refused by its own scheduler")
                  (assert (not (path/exists? target))
                          "and nothing reaches the disk")))
+
+(assert (refused? (sandboxed-system |:net|
+                                    (fn [] (protect (tcp/listen "127.0.0.1" 0))))
+                  "tcp/listen" :net) "and so is its listen, denied :net")
 
 (println "caps-process: OK")

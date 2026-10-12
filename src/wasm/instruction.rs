@@ -6,10 +6,11 @@
 //! `wasm-encoder`. Covers arithmetic, comparisons, data operations,
 //! calls, tail calls, constants, and memory access helpers.
 //!
-//! The per-instruction dispatch lives in [`dispatch`]; the concrete emitters
-//! are grouped by concern across [`calls`] (closures/calls/tail calls),
-//! [`data`] (`rt_data_op` helpers), [`arith`] (inline numeric/comparison), and
-//! [`mem`] (memory marshalling + constant materialization).
+//! The per-instruction dispatch lives in [`dispatch`], and [`intrinsics`] takes
+//! its tail. The concrete emitters are grouped by concern across [`calls`]
+//! (closures/calls/tail calls), [`data`] (`rt_data_op` helpers), [`arith`]
+//! (inline numeric/comparison), and [`mem`] (memory marshalling + constant
+//! materialization).
 
 use crate::lir::code::ConstRef;
 use crate::lir::{BinOp, CmpOp, InstrRef, Reg, UnaryOp};
@@ -18,6 +19,7 @@ use crate::value::Value;
 use wasm_encoder::*;
 
 use super::emit::*;
+use super::suspend::SignalExit;
 
 mod arith;
 mod calls;

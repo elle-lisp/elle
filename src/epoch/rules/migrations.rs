@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-10-05
 //! Every registered migration, ordered by epoch: the data one epoch bump adds.
 //!
 //! docs/epochs.md
@@ -326,6 +326,36 @@ pub(super) static MIGRATIONS: &[Migration] = &[
                 symbol: "ev/step",
                 arity: 0,
                 template: "(ev/step :timeout 0)",
+            },
+        ],
+        lexical: &[],
+    },
+    Migration {
+        epoch: 15,
+        summary: "one form per signal concept: (silent!) for (silence), (bound p ||) for \
+                  (silence p), squelch takes its spec first, and muffle goes",
+        rules: &[
+            MigrationRule::Replace {
+                symbol: "silence",
+                arity: 0,
+                template: "(silent!)",
+            },
+            MigrationRule::Replace {
+                symbol: "silence",
+                arity: 1,
+                template: "(bound $1 ||)",
+            },
+            // The template keeps its head, so the walk rewrites a matched form
+            // once and then descends into its elements.
+            MigrationRule::Replace {
+                symbol: "squelch",
+                arity: 2,
+                template: "(squelch $2 $1)",
+            },
+            MigrationRule::Remove {
+                symbol: "muffle",
+                message: "a boundary belongs to the caller; wrap the closure with \
+                          (squelch spec f) where it is called",
             },
         ],
         lexical: &[],

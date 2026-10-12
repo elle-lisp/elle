@@ -1,6 +1,6 @@
 # Authority
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-11 -->
 
 What holds authority in a running program, and where the runtime asks whether a
 fiber may spend it.
@@ -19,8 +19,8 @@ A second question follows: **may this fiber cause this effect?** The two differ
 whenever the effect's cost rides a value rather than the primitive's name. The
 runtime asks this second question at three call sites now, each reading the
 requirement from an argument: a request handed to `io/submit`, a native library
-named to `import`, and the bits a dynamic `emit` raises. This document states the
-rule they follow, and the crossings that still ask nothing.
+named to `import`, and the bits an `emit` raises. This document states the rule
+they follow, and the crossings that still ask nothing.
 
 ## The unit is the fiber
 
@@ -60,16 +60,14 @@ makes enforcement depend on how hot a loop is.
 
 Two constructs leave the dispatch path the check lives on. Arithmetic compiles to
 specialized instructions that run no capability test, which
-[capabilities.md](capabilities.md) states. `emit` is a bytecode instruction whose
-handler never reads the withheld set, which [emit.md](emit.md) states.
+[capabilities.md](capabilities.md) states. A literal `emit` compiles to the `Emit`
+instruction, so its handler asks the question itself, of the bits the instruction
+carries ([emit.md](emit.md)).
 
-A fiber therefore raises any signal bit it names, including one it does not hold.
-A parent that masks a bit to watch for an operation sees whatever the child
-chooses to raise, so a mask audits a cooperative child and not a hostile one.
-
-Neither construct is a mistake on its own. Together they say the call site cannot
-carry the whole check, because the language has more than one way to reach an
-effect.
+So the call site cannot carry the whole check, because the language has more
+than one way to reach an effect. A construct that leaves the dispatch path asks
+the question where it runs, as `Emit` does, or nothing asks it, as for
+arithmetic.
 
 ## Minting is not spending
 
@@ -82,22 +80,23 @@ struct field like any other value, and a path or a keyword is plainer still.
 Three primitives read the requirement from the value instead of the name:
 
 - `io/submit` reads the operation its request carries — a spawn needs
-  `|:io :exec|`, an open needs `|:io :fs|`, a plain read needs `|:io|`.
+  `|:io :exec|`, an open needs `|:io :fs|`, a connect needs `|:io :net|`, a
+  plain read needs `|:io|`.
 - native `import` reads the path it is given — a shared library needs `:ffi`
   for the foreign `elle_plugin_init` its load runs, a `.lisp` module needs none.
-- dynamic `emit` reads the bits its first argument names.
+- `emit` reads the bits it names: the dynamic form from its first argument, the
+  literal form from its instruction.
 
 Each tests the requirement against the fiber making the call, so a fiber cannot
 spend what it withholds however it obtained the value.
 [capabilities.md](capabilities.md) states the checks and the denial payload.
 
-Three edges still ask nothing, and each follows from the rule below rather than
+Two edges still ask nothing, and each follows from the rule below rather than
 defeats it. `io/submit` tests the submitter, so a scheduler that submits on
 another fiber's behalf spends its own authority. A loaded module's primitives
-carry the plugin's declared bits, so a fiber handed a module reaches them. And a
-literal `emit` compiles to a bytecode instruction, not a call, so no call-site
-gate reaches it. **A check on minting is not a check on spending**, and the rule
-closes a route only where a crossing reads the requirement off the value.
+carry the plugin's declared bits, so a fiber handed a module reaches them. **A
+check on minting is not a check on spending**, and the rule closes a route only
+where a crossing reads the requirement off the value.
 
 ## Where a fiber's work crosses out
 
@@ -107,7 +106,7 @@ what the runtime asks today.
 | Crossing | What crosses | Asked today |
 |---|---|---|
 | The scheduler | a request submitted to `io/submit` | the submitter's spend check |
-| A signal | a dynamic `emit`, or the literal `Emit` instruction | the dynamic form's spend check; nothing on the literal |
+| A signal | a dynamic `emit`, or the literal `Emit` instruction | the spend check, in both forms |
 | Native code | a primitive call, its requirement fixed or argument-derived | the call site's check, reading `import`'s `:ffi` off its path |
 | A device | a fiber lowered and dispatched | nothing exists yet |
 | A child fiber or a thread | the withheld set itself | the transitive check |
@@ -141,7 +140,8 @@ off the argument for every tier alike: `io/submit` derives its bits from the
 request's operation, `import` from the path's extension, dynamic `emit` from the
 bits its argument names. The gate is the same in each case; only the derivation
 is the primitive's own, so a fourth such primitive adds a derivation and changes
-no gate.
+no gate. The literal `emit` reaches no gate, so its instruction handler tests the
+bits it carries against the same withheld set.
 
 ## What the model makes possible
 
@@ -186,5 +186,5 @@ which needs no runtime support at all.
 
 - [capabilities.md](capabilities.md) — the enforcement reference: `:deny`,
   `fiber/caps`, denial payloads, mediation and refusal
-- [emit.md](emit.md) — signal emission, and what it does not check
+- [emit.md](emit.md) — signal emission, and its capability check
 - [protocol.md](protocol.md) — the signal protocol and the registry

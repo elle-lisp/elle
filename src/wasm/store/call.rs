@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! Calling, resuming, and driving full-module WASM closures; the precached
 //! per-closure path lives in `precached.rs`.
 //!
@@ -69,10 +69,10 @@ pub(in crate::wasm) fn handle_wasm_result(
                     );
                 }
 
-                // `status > 0` says the function ran an `Emit`, NOT that it
-                // parked: `(yield v)` and `(error …)` both route through
-                // `rt_yield`. The frame `rt_yield` just pushed carries which, so
-                // read it and let `is_suspending` classify.
+                // `status > 0` says the function parked, not on what: a yield,
+                // an error, an io request all park through `rt_yield`. The frame
+                // `rt_yield` just pushed carries the signal, so read it and let
+                // `parks` classify.
                 //
                 // The BACK frame, not the front: during a resume the front may
                 // still be a stale outer frame from the previous suspension,
@@ -81,9 +81,11 @@ pub(in crate::wasm) fn handle_wasm_result(
                 // records the same real signal, because the caller's `rt_yield`
                 // records the signal word this function returns.
                 //
-                // Classifying here is what makes an uncaught `(error …)` unwind.
-                // Reported as a park, it would leave SIGNAL_SLOT empty, and
-                // `run_module`'s uncaught-error check would read zero and exit 0
+                // Carrying the signal is what makes an uncaught `(error …)` fail
+                // the program. Every frame parks on it up to the entry, which is
+                // no park site: it writes the signal to SIGNAL_SLOT, where
+                // `run_module`'s uncaught-error check reads it. With the signal
+                // dropped, the check reads zero and exits 0
                 // (tests/lang/upvalue-u16.lisp).
                 let emitted = caller
                     .data()
@@ -97,9 +99,11 @@ pub(in crate::wasm) fn handle_wasm_result(
                 // A tail-position native that yielded `SIG_IO` — the path
                 // `tcp/connect`'s `(apply tcp/connect-ip …)` takes, via
                 // `rt_prepare_tail_call` — lands here with no frame pushed, and
-                // `is_suspending` parks the caller on it without the signal
-                // having to carry `SIG_YIELD`. Pinned by
-                // tests/lang/wasm-tail-io-in-fiber.lisp.
+                // `parks` parks the caller on it without the signal having to
+                // carry `SIG_YIELD`. Pinned by
+                // tests/lang/wasm-tail-io-in-fiber.lisp. A tail-position native
+                // that raised lands here the same way: the frame the tail call
+                // replaced cannot park, so the caller parks at its call.
                 let signal = super::take_raised_signal(&mut *caller, &memory);
 
                 if caller.data().debug {
@@ -304,7 +308,7 @@ pub(in crate::wasm) fn resume_wasm_closure(
 
     // Pop the front frame now that the call is done. If the function yielded
     // again, rt_yield pushed new frames to the back — they survive this pop.
-    caller.data_mut().pop_suspension_frame();
+    caller.data_mut().pop_parked();
     caller.data_mut().resume_value = None;
 
     Some(handle_wasm_result(
@@ -322,64 +326,22 @@ pub fn compile_module(engine: &Engine, wasm_bytes: &[u8]) -> Result<Module> {
 }
 
 /// Instantiate a module and call its entry function.
-/// If the entry function suspends (e.g. I/O inside ev/run), drive it
-/// to completion by processing I/O inline on the host's backend and resuming.
+///
+/// The entry never parks: it is emitted as a function that does not signal,
+/// so a callee that parks under it hands the entry its signal, and the entry
+/// returns with the signal in `SIGNAL_SLOT` and a zero status.
 pub fn run_module(
     linker: &Linker<ElleHost>,
     store: &mut Store<ElleHost>,
     module: &Module,
 ) -> Result<Value> {
-    use crate::io::request::IoRequest;
-    use crate::signals::SIG_IO;
-
     let instance = linker.instantiate(&mut *store, module)?;
     let entry = instance.get_typed_func::<(i32,), (i64, i64, i64)>(&mut *store, "__elle_entry")?;
-    let (mut tag, mut payload, mut status) = entry.call(&mut *store, (0,))?;
-
-    // The entry function may suspend when ev/run's scheduler does I/O
-    // (SIG_IO propagates through yield-through-call to the top level).
-    // Drive it to completion by executing I/O inline and re-calling the
-    // entry function with the resume state from its outermost frame.
-    while status > 0 {
-        let value = store.data().wasm_to_value(tag, payload);
-
-        // Execute I/O if the innermost frame has SIG_IO
-        let resume_val = if let Some(frame) = store.data().first_suspension_frame() {
-            if frame.signal_bits & SIG_IO.raw() != 0 {
-                if let Some(request) = value.as_external::<IoRequest>() {
-                    let (_bits, result) = store.data_mut().execute_io_inline(request);
-                    result
-                } else {
-                    value
-                }
-            } else {
-                value
-            }
-        } else {
-            break;
-        };
-
-        // Drain all suspension frames. The outermost (last) frame has the
-        // entry function's resume_state; inner frames are discarded because
-        // the entry function's CPS will re-create them on re-entry.
-        let mut resume_state = 0i32;
-        while store.data().has_suspension_frames() {
-            if let Some(frame) = store.data_mut().pop_suspension_frame() {
-                resume_state = frame.resume_state as i32;
-            }
-        }
-
-        let (resume_tag, resume_pay) = store.data_mut().value_to_wasm(resume_val);
-        store.data_mut().resume_value = Some((resume_tag, resume_pay));
-
-        let (t, p, s) = entry.call(&mut *store, (resume_state,))?;
-        store.data_mut().resume_value = None;
-        tag = t;
-        payload = p;
-        status = s;
-    }
-
+    let (tag, payload, _) = entry.call(&mut *store, (0,))?;
     let value = store.data().wasm_to_value(tag, payload);
+    // What parked under the entry parked under the root, which holds no park:
+    // it drops the chain and reports the error the chain parked on.
+    store.data_mut().discard_parked(0, value);
 
     // Surface an uncaught top-level error the way the VM does (a nonzero exit),
     // instead of returning the raised value as if it were a normal result. The

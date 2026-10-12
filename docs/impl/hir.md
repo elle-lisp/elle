@@ -1,5 +1,7 @@
 # HIR — High-level IR
 
+<!-- audited: 2026-10-05 -->
+
 The HIR pass converts expanded syntax trees into a typed intermediate
 representation. It resolves bindings, computes captures, and infers
 signal profiles.
@@ -80,18 +82,18 @@ bytecode a stdlib compile does.
    the linter and the call-graph builder both read `is_tail` off the analyzed
    tree, and `regularize` marks again after map fusion introduces new nodes
 5. **Special form analysis** — `if`, `let`, `begin`, `block`,
-   `match`, `defmacro`, etc. each have dedicated handlers
+   `match`, `fn`, etc. each have dedicated handlers, listed in the special-form
+   registry (`src/hir/analyze/forms/registry.rs`)
 
 ## Signal inference
 
-Three signal categories:
-- **Silent** — no signal bits set and no propagation (`Signal::silent()`)
-- **Yields** — has signal bits set (`:io`, `:yield`, `:error`, etc.)
-- **Polymorphic** — signal behavior depends on a parameter, encoded in
-  the `propagates` mask (e.g., `(map f xs)` — signals depend on `f`)
-
-`silence` constrains a parameter to be silent at compile time.
-The inference propagates through call chains interprocedurally.
+Every function carries a `Signal`: the bits it may emit, and the parameters
+whose signal it passes on. It is silent when both are empty, and polymorphic
+when it passes a parameter's signal on, as `(map f xs)` passes on `f`'s.
+`(attune! spec)` and `(silent!)` check a function's own signal, and
+`(bound p spec)` bounds a parameter's. The inference propagates through call
+chains interprocedurally, and [signals/inference.md](../signals/inference.md)
+owns its rules.
 
 ## Dead binding elimination
 

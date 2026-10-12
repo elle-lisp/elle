@@ -3,6 +3,7 @@
 //!
 //! docs/macros.md
 //! docs/impl/spirv.md
+//! docs/signals/inference.md
 //!
 //! `tests/lang/prim-meta.lisp`, `tests/lang/syntax-predicates.lisp` and
 //! `tests/lang/macros.lisp` pin them.
@@ -374,22 +375,23 @@ primitive! {
     "squelch" => prim_squelch {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
-        doc: "Return a new closure that intercepts and converts the specified signals to :error at runtime. \
-              The second argument can be a keyword, set, array, list, or integer of signal bits.",
-        params: &["closure", "signals"],
+        doc: "Return a new closure over the same code whose boundary turns the given signals into a \
+              :signal-violation error. The spec comes first: a keyword, set, array, list, or \
+              integer of signal bits. :error, :halt and a :fuel pause cross every boundary.",
+        params: &["signals", "closure"],
         category: "fn",
-        example: "(squelch (fn () (yield 1)) |:yield|)",
+        example: "(squelch |:yield| (fn [] (yield 1)))",
         effect: RegionEffect::Fresh,
     }
     "attune" => prim_attune {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
-        doc: "Return a new closure that permits ONLY the specified signals — all others are \
-              intercepted and converted to :error. Dual of squelch: squelch blocks specific \
-              signals, attune allows only specific signals. Mask-first argument order.",
+        doc: "Return a new closure over the same code whose boundary lets through only the given \
+              signals and turns every other one into a :signal-violation error: \
+              (squelch (complement spec) f). The spec comes first, as for squelch.",
         params: &["signals", "closure"],
         category: "fn",
-        example: "(attune |:yield :error| (fn () (yield 1)))",
+        example: "(attune |:yield :error| (fn [] (yield 1)))",
         effect: RegionEffect::Fresh,
     }
     "meta/origin" => prim_meta_origin {

@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! `compile/run-on :bytecode` — force pure interpreter execution.
 //!
 //! docs/impl/differential.md
@@ -9,7 +9,7 @@ use crate::vm::core::VM;
 
 impl VM {
     /// Run a closure under bytecode interpretation, with the JIT policy off
-    /// for the run (docs/impl/differential.md § "Primitive").
+    /// for the run (docs/impl/differential.md).
     pub fn invoke_closure_bytecode(
         &mut self,
         closure_val: Value,
@@ -32,7 +32,7 @@ impl VM {
         let saved_jit = self.runtime_config.jit.clone();
         self.runtime_config.jit = crate::config::JitPolicy::Off;
 
-        let squelch_mask = closure.squelch_mask;
+        let boundary = crate::value::closure::Boundary::of(closure);
 
         // Hand the target its executing-closure register via the one-shot — a
         // forced-tier entry runs a closure body like any other entrant.
@@ -63,13 +63,16 @@ impl VM {
             return (crate::value::SIG_HALT, val);
         }
 
-        if self.enforce_squelch(bits, squelch_mask, depth) {
+        if self.enforce_boundary(bits, &boundary, depth).is_some() {
             return self.fiber.signal.take().unwrap();
         }
 
         // A suspend-class signal leaves this forced-tier entry as a value; the
         // park it names is abandoned with its host (`abandon_hosted_park`).
         self.abandon_hosted_park(bits);
+        // An error parked the closure's chain, which this entry cannot hold;
+        // the error leaves as the entry's own.
+        self.discard_hosted_error(bits, depth);
 
         // An error, or the suspension handed on: the slot holds the result.
         if let Some((sig_bits, val)) = self.fiber.signal.take() {

@@ -1,6 +1,6 @@
 # Region diagnostics and validation
 
-<!-- audited: 2026-09-30 -->
+<!-- audited: 2026-10-05 -->
 
 Implementation-facing: the instruments that tell correct from broken, and the
 test scaffolding that keeps the region rules honest.
@@ -406,20 +406,20 @@ The gauge probes measure **region reclamation**, not wall-clock or handle-table
 growth; the handle table is host-side Rust memory invisible to `arena/*`, named
 above so its growth is not mistaken for a gauge artifact.
 
-## The squelch/abort discard
+## The boundary discard
 
-Abandoning suspended work routes through one chokepoint,
-`VM::discard_suspended_frames` ([discard.rs](../../../src/vm/core/discard.rs)),
-on every tier — the interpreter's `enforce_squelch`, `compile/run-on`'s squelch
-enforcement, and the JIT call paths. The chokepoint runs everything a discarded
+Abandoning suspended work while the fiber runs on routes through one chokepoint,
+`VM::discard_suspended_frames` ([discard.rs](../../../src/vm/core/discard.rs)).
+A call boundary reaches it through `VM::boundary_violation` on every tier — the
+interpreter trampoline, `compile/run-on`, and the JIT call paths — and a host that
+refuses a park reaches it through `VM::refuse_hosted_park`. The chokepoint runs everything a discarded
 frame chain owed and nothing else ([owner.md](owner.md)): each frame's parked
 activation owner node, the releases its activation took over from its own
 frame-replacing tail calls, and the releases its two emitter-recorded tables
 name. What stays refused is the rest of the frame's
 `activation_region_map` — a borrowed view of regions that may be shared with an outer,
-non-discarded frame or with the activation that catches the squelch, so a blanket
-per-slot release there over-frees (the historical squelch double-free — a non-unwinding
-abort in scheduler-heavy programs). The three the chokepoint does run each carry their
+non-discarded frame or with the activation the boundary's error reaches, so a blanket
+per-slot release there over-frees. The three the chokepoint does run each carry their
 own warrant: the node's members are exactly the regions adoption moved in, a deferred
 region is one the compiler named as this activation's, and a table entry carries a
 receipt that says the release did not run. The pin is two-sided:
@@ -438,8 +438,8 @@ The rate the tables carry is gauged by
 
 ## The terminal-fiber teardown
 
-The discard chokepoint serves the LIVE fiber (a squelch/abort abandons its own parked
-chain; the fiber runs on). A fiber that reaches a **terminal** state instead — completion,
+The discard chokepoint serves the LIVE fiber (a call boundary or a refusing host abandons
+its own parked chain; the fiber runs on). A fiber that reaches a **terminal** state instead — completion,
 halt, `fiber/cancel`, `fiber/abort` of a not-yet-started fiber — releases everything it
 owns through `take_fiber_owned` / `release_fiber_owned`
 ([owner.md](owner.md)): every still-parked frame's activation owner node plus

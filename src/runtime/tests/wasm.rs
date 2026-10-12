@@ -38,7 +38,7 @@ fn a_tiered_wasm_module_pins_its_code_region() {
     rt.vm().wasm_tier = Some(crate::wasm::lazy::WasmTier::new().expect("a tier starts"));
     let f = run(
         &mut rt,
-        "(defn wasm-add [a b] (silence) (muffle :error) (numeric!) (%add a b)) \
+        "(defn wasm-add [a b] (silent!) (numeric!) (%add a b)) \
          (assert (= (compile/run-on :wasm wasm-add 3 4) 7)) \
          wasm-add",
     );

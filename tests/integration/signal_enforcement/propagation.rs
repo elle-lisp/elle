@@ -1,3 +1,7 @@
+// audited: 2026-10-05
+// Signal inference through calls: direct, nested, polymorphic, and after assign.
+// docs/signals/inference.md
+
 use super::*;
 
 // ============================================================================
@@ -152,12 +156,13 @@ fn test_signal_polymorphic_direct_call() {
     let (mut symbols, mut vm) = setup();
     let result = analyze(        r#"(begin            (def apply-fn (fn (f x) (f x)))            (apply-fn (fn (x) (yield x)) 42))"#,        &mut symbols, &mut vm, "<test>")
     .unwrap();
-    // apply-fn is polymorphic(0) with no inherent bits.
-    // Called with a yielding lambda → just yields.
+    // apply-fn is polymorphic(0), and its call to `f` may raise, since the
+    // compiler cannot check the count of a call to a parameter. Called with a
+    // yielding lambda it yields and may raise.
     assert_eq!(
         result.hir.signal,
-        Signal::yields(),
-        "Higher-order function with yielding arg resolves to yields"
+        Signal::yields_errors(),
+        "Higher-order function with yielding arg resolves to yields+errors"
     );
 }
 

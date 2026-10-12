@@ -39,7 +39,7 @@ fn every_record_is_exactly_its_fields() {
     let s = SiteRec::default();
     assert_eq!(
         size_of::<SiteRec>(),
-        fields!(s; resume_ip, num_locals, pad, regs, n_regs)
+        fields!(s; resume_ip, num_locals, delivers, pad, regs, n_regs)
     );
 }
 

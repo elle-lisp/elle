@@ -1,6 +1,6 @@
 # Capability enforcement
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-11 -->
 
 Capabilities flow down. A fiber's parent decides what the fiber is
 permitted to do. Operations the fiber can't perform become signals the
@@ -72,21 +72,22 @@ released ([what a park retains](../impl/region/park.md)).
 ## Deniable capabilities
 
 Every signal bit is a capability bit. A fiber's `:deny` set is tested
-against the bits a primitive *declares*, so any bit a primitive declares
-is one a parent can withhold. Some bits also drive dispatch — `:io`
-routes a request through the scheduler — and some do no dispatch work at
-all. That distinction belongs to the VM. It changes neither what a mask
+against the bits a primitive *declares* and the bits an `emit` names, so
+any such bit is one a parent can withhold. Some bits also drive dispatch —
+`:io` routes a request through the scheduler — and some do no dispatch work
+at all. That distinction belongs to the VM. It changes neither what a mask
 can deny nor what it can catch.
 
-`:yield` is not in this table. It is the cooperative suspension `(yield v)`
-raises, not a capability: an I/O request raises `|:io|` alone, so a
-generator masked `|:yield|` catches its own yields while its reads travel
-out to the scheduler. See [protocol.md](protocol.md).
+`:yield` is the cooperative suspension `(yield v)` raises, and no I/O
+request carries it: a request raises `|:io|` alone. So a generator masked
+`|:yield|` catches its own yields while its reads travel out to the
+scheduler, and a fiber denied `:yield` cannot yield but can still read. See
+[protocol.md](protocol.md).
 
 | Keyword | Bit | Effect when denied | Dispatch |
 |---------|-----|--------------------|----------|
-| `:error` | 0 | Blocks every primitive that may error | yes |
-| `:yield` | 1 | Blocks cooperative suspension | yes |
+| `:error` | 0 | Blocks every primitive that may error, and `error` | yes |
+| `:yield` | 1 | Blocks cooperative suspension, `yield` included | yes |
 | `:debug` | 2 | Blocks breakpoints/tracing | yes |
 | `:ffi` | 4 | Blocks foreign function calls | no |
 | `:halt` | 8 | Blocks VM termination | yes |
@@ -95,9 +96,10 @@ out to the scheduler. See [protocol.md](protocol.md).
 | `:gpu` | 15 | Blocks `git`, which compiles a closure to SPIR-V, and calls to a closure it compiled | no |
 | `:os-signal` | 16 | Blocks POSIX signal send/raise | no |
 | `:fs` | 17 | Blocks filesystem access | no |
+| `:net` | 18 | Blocks sockets and name resolution | no |
 
-VM-internal signals (resume, propagate, abort, query, terminal,
-switch, wait) cannot be denied.
+VM-internal signals (resume, propagate, query, terminal, fuel, switch,
+wait) cannot be denied.
 
 ## Filesystem authority is `:fs`, not `:io`
 
@@ -130,11 +132,41 @@ path, decided by reading the implementation and not the name. `path/join`,
 it. `path/exists?`, `path/canonicalize`, and `path/cwd` reach the
 filesystem and do.
 
+## Network authority is `:net`, not `:io`
+
+`:net` is the bit that means "opens a socket or asks a name server". Every
+socket primitive carries it: the `tcp/`, `udp/` and `unix/` primitives, and
+`sys/resolve`. `sys/ip?` only reads a string, so it carries nothing.
+
+Denying `:io` closes the network too, because a primitive that waits on a peer
+reaches the scheduler. It also closes stdout, pipes and `ev/sleep`. Deny `:net`
+to close the network alone:
+
+```lisp
+(let [f (fiber/new (fn [] (tcp/listen "127.0.0.1" 0)) |:net :error| :deny |:net|)]
+  (assert (= (get (fiber/resume f) :denied) |:net|)))
+
+(let [f (fiber/new (fn [] (ev/sleep 0) (port/flush (port/stdout)) :done)
+                   |:error| :deny |:net|)]
+  (assert (= (fiber/resume f) :done) "timers and stdout stay open"))
+```
+
+A socket primitive carries every bit its implementation needs, so any one
+denial blocks it. One that waits on a peer also carries `:io`. `unix/listen`
+and `unix/connect` resolve a filesystem path, so they also carry `:fs`, and
+`unix/connect` carries `|:fs :net :io|`.
+
+A port a fiber already holds needs no `:net`. `port/read` and `port/write`
+carry `:io` alone on a socket, as they carry no `:fs` on a file. The denial
+gates the primitive that opens a connection, so a parent that hands a child a
+connected port grants it that connection.
+
 ## What happens on denial
 
 When a fiber calls a primitive whose declared signal bits overlap
 with the fiber's withheld capabilities, the primitive does not run.
-Instead, the fiber emits a signal with:
+An `emit` of a withheld bit raises nothing, as a call to `fiber/emit`
+would not run ([emit.md](emit.md)). Instead, the fiber emits a signal with:
 
 - **Bits**: the blocked capability bits, for example `:io`
 - **Payload**: a struct describing the denial
@@ -161,12 +193,16 @@ fiber, so a fiber cannot spend what it withholds however it obtained the value.
 Three primitives work this way, each in its own domain:
 
 - `io/submit` spends the operation its request argument carries. A spawn request
-  needs `|:io :exec|`, an open needs `|:io :fs|`, a plain read needs `|:io|`.
+  needs `|:io :exec|` and an open needs `|:io :fs|`. A socket operation needs
+  `|:io :net|`: a connect, an accept, a datagram, a shutdown or a name lookup.
+  A connect to a Unix socket adds `:fs`, and a plain read needs `|:io|`.
 - native `import` runs a shared library's `elle_plugin_init`, which is foreign
   code, so a `.so`/`.dylib`/`.dll` spec needs `:ffi`. A `.lisp` module needs only
   the `:fs` that `import` already declares.
-- dynamic `emit` raises the bits its first argument names, so it needs those
-  bits.
+- `emit` raises the bits its first argument names, so it needs those bits. The
+  literal form compiles to the `Emit` instruction rather than a call, and that
+  instruction asks the same question of the bits it carries
+  ([emit.md](emit.md)).
 
 ```lisp
 # The first fiber may build the request; `f` may not spend it.
@@ -181,14 +217,15 @@ Three primitives work this way, each in its own domain:
   (assert (= (get (fiber/value f) :denied) |:exec|)))
 ```
 
-Three edges the gate does not reach. `io/submit` tests the fiber that submits, so
+Two edges the gate does not reach. `io/submit` tests the fiber that submits, so
 a scheduler that submits a request on another fiber's behalf spends its own
 authority. A loaded module's own primitives carry whatever bits the plugin
-declared, so a fiber handed a module still reaches them. And the literal `emit`
-compiles to a bytecode instruction rather than a call, so a fiber raises any
-literal bit it names — a mask therefore audits a cooperative child, not a hostile
-one. [authority.md](authority.md) states the model these follow from, and
-[emit.md](emit.md) covers what `emit` does not check.
+declared, so a fiber handed a module still reaches them.
+[authority.md](authority.md) states the model these follow from.
+
+Since no fiber raises a bit it withholds, a parent that denies a bit and names
+it in the mask sees every attempt to raise it, from a hostile child as from a
+cooperative one.
 
 ## Introspection
 
@@ -198,12 +235,34 @@ capability space that is NOT withheld:
 
 ```lisp
 (fiber/caps)
-# => |:debug :error :exec :ffi :fs :gpu :halt :io :os-signal :yield|
+# => |:debug :error :exec :ffi :fs :gpu :halt :io :net :os-signal :yield|
 
 (let [f (fiber/new (fn [] 42) |:error| :deny |:fs :ffi|)]
   (fiber/caps f))
-# => |:debug :error :exec :gpu :halt :io :os-signal :yield|
+# => |:debug :error :exec :gpu :halt :io :net :os-signal :yield|
 ```
+
+## Reading a body against its mask and deny set
+
+A `fiber/new` call can show both directions at once. When its body is a
+function literal and its mask and `:deny` set are literal keywords or sets,
+the compiler knows the signals the body may raise, the signals its parent
+catches, and the capabilities its parent withholds. The linter then gives two
+hints:
+
+- **A call that will be denied**: the body may raise a bit the `:deny` set
+  withholds, so the call that raises it does not run, and its denial reaches
+  the parent instead.
+- **A signal that will pass the parent**: the body may raise a bit the mask
+  does not name, so a signal that carries only that bit passes the parent to
+  the fiber above it.
+
+Each is a hint, not a warning. A denial is how the language mediates a call,
+and a signal passing the parent is how a request reaches the scheduler. The
+hints say what the program does, so that a reader sees it without tracing the
+bits by hand. A body that is not a function literal, and a mask or `:deny` set
+computed at run time, give no hint, because the compiler does not know one of
+the sides. [lint-rules.md](../cookbook/lint-rules.md) lists the codes.
 
 ## Transitivity
 
@@ -221,7 +280,7 @@ A child inherits both restrictions plus any `:deny` of its own:
                |:error|
                :deny |:fs|)]
   (fiber/resume outer))
-# => |:debug :error :exec :gpu :halt :io :os-signal :yield|
+# => |:debug :error :exec :gpu :halt :io :net :os-signal :yield|
 # (missing :fs from parent, missing :ffi from own deny)
 ```
 
@@ -264,135 +323,10 @@ a thread.
 
 ## Mediation
 
-The parent can catch a denial, perform the operation on the child's
-behalf, and resume the child with the result:
-
-```lisp
-(let [f (fiber/new
-           (fn [] (length "hello"))
-           |:error|
-           :deny |:error|)]
-  (let [denial (fiber/resume f)]
-    # denial is {:error :capability-denied :primitive "length" ...}
-    (let [val (fiber/value f)]
-      (let [result (apply length (val :args))]
-        (fiber/resume f result)))))
-```
-
-### Refusing
-
-Resuming with an ordinary value tells the child the call succeeded and
-returned that value. A mediator that wants to say *no* must not do that:
-agent-written code reads the resume value as `file/write`'s return and
-proceeds as though the write happened.
-
-`fiber/refuse` raises the denied call as a failure **at the child's own
-call site**. The child's `protect` or `try` catches it, and the child
-keeps running:
-
-```lisp
-(with-temp-dir dir
-  (let [target (path/join dir "notes")
-        f (fiber/new
-             (fn []
-               (let [[ok? err] (protect (file/write target "x"))]
-                 (list :refused (not ok?) err)))
-             |:fs :error|
-             :deny |:fs|)]
-    (fiber/resume f)
-    (fiber/refuse f :not-permitted)
-    (fiber/value f)))
-# => (:refused true :not-permitted)
-```
-
-The fiber stays alive. A refused call is an ordinary event in a mediated
-session — the child is told no and carries on, and may be refused again
-on its next call.
-
-Refuse with `:fs`, not with `:error`. The child's own `protect` runs
-primitives that declare `:error`, so a fiber denying that bit has no
-working recovery path for the refusal to land in.
-
-An uncaught refusal stops the child `:error` at the refused call. With
-`:error` in the child's mask, `fiber/refuse` answers the refusal and
-`fiber/value` holds it. Without `:error`, the refusal raises past
-`fiber/refuse` into the mediator, as an error passes `fiber/resume`:
-
-```lisp
-(let [f (fiber/new (fn [] (file/read "/etc/hostname")) |:fs| :deny |:fs|)]
-  (fiber/resume f)
-  (let [[ok? err] (protect (fiber/refuse f :not-permitted))]
-    (assert (not ok?))
-    (assert (= err :not-permitted))
-    (assert (= (fiber/status f) :error))))
-```
-
-The mediator then decides what the stopped child does. `fiber/resume`
-restarts it at the refused call, and the resume value answers the call
-exactly as a grant would. `fiber/cancel` ends it `:dead`, and the code past
-the call never runs:
-
-```lisp
-(with-temp-dir dir
-  (let [target (path/join dir "notes")
-        f (fiber/new (fn [] (list :wrote (file/write target "x")))
-                     |:fs :error| :deny |:fs|)]
-    (fiber/resume f)
-    (assert (= (fiber/refuse f :not-permitted) :not-permitted))
-    (assert (= (fiber/status f) :error))
-    (assert (= (fiber/value f) :not-permitted))
-    (assert (= (fiber/resume f 1) (list :wrote 1)))   # the restart answers the call
-    (assert (not (path/exists? target)))))            # and nothing was written
-
-(let [ran @[]
-      f (fiber/new (fn [] (file/read "/etc/hostname") (push ran :continued))
-                   |:fs :error| :deny |:fs|)]
-  (fiber/resume f)
-  (fiber/refuse f :not-permitted)
-  (fiber/cancel f)
-  (assert (= (fiber/status f) :dead))
-  (assert (empty? ran)))                              # the continuation never ran
-```
-
-To end a fiber outright rather than refuse one call, use `fiber/cancel`.
-
-## A fiber a scheduler runs
-
-`ev/spawn` creates a fiber in the calling fiber and hands it to the scheduler,
-which resumes it. The spawned fiber therefore carries its creator's denial. Its
-resumer is the scheduler, though, and the scheduler is not the mediator that
-imposed the denial.
-
-So the scheduler refuses the call. It hands the fiber `fiber/refuse`, with the
-denial payload as the error, and the fiber's `protect` sees that payload at its
-own call site. An uncaught refusal ends the fiber, and `ev/join` raises the
-payload in the fiber that joins it:
-
-```lisp
-(with-temp-dir dir
-  (let [target (path/join dir "x")
-        sandbox (fiber/new
-                  (fn []
-                    (let [caught (ev/join (ev/spawn (fn [] (protect (file/write target "x")))))
-                          raised (protect (ev/join (ev/spawn (fn [] (file/write target "x")))))]
-                      [caught raised]))
-                  |:fs :error| :deny |:fs|)
-        [[ok1? denial] [ok2? raised]] (fiber/resume sandbox)]
-    (assert (not ok1?) "the spawned fiber's protect sees the refusal")
-    (assert (= (get denial :error) :capability-denied) "carrying the denial")
-    (assert (= (get denial :primitive) "file/write") "which names the call")
-    (assert (not ok2?) "an uncaught refusal ends the fiber, and the join raises it")
-    (assert (= (get raised :error) :capability-denied))
-    (assert (not (path/exists? target)) "nothing is written")))
-```
-
-A spawned fiber's mask names the bits a denial raises, `:ffi`, `:exec`, `:gpu`,
-`:os-signal` and `:fs`, as well as the bits the scheduler's own protocol uses.
-A mediator above the scheduler therefore never sees a spawned fiber's denial.
-The process scheduler does the same for a process and for each fiber a process
-spawns, and `process:spawn` creates the new process's fiber in the fiber that
-calls it ([process-scheduler.md](../process-scheduler.md)).
-
+A parent that catches a denial decides what the denied call does: it can
+perform the call and resume the child with the result, or refuse it with
+`fiber/refuse`. A fiber a scheduler runs is refused by that scheduler.
+[mediation.md](mediation.md) holds all three.
 ## Intrinsics are not checked
 
 The `%` [intrinsics](../intrinsics.md) compile to bytecode instructions that

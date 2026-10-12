@@ -1,4 +1,7 @@
+// audited: 2026-10-06
 //! Signal classification for routing primitive return values.
+//!
+//! docs/signals/protocol.md
 //!
 //! Both the VM (`vm/signal.rs`) and JIT (`jit/calls.rs`) must route
 //! signal bits to the appropriate handler. This module provides a
@@ -65,12 +68,16 @@ pub fn classify(bits: SignalBits, value: &Value) -> SignalAction {
     SignalAction::Suspend
 }
 
-/// True when `bits` parks its caller rather than returning, unwinding, or
-/// asking the VM to do something.
+/// True when `bits` parks its caller on the suspend route, rather than
+/// returning, leaving by the error or halt exit, or asking the VM to do
+/// something. The error exit parks the frame too
+/// (docs/impl/region/park.md); it is a different route.
 ///
 /// The question every tier asks after a call, and it must have one answer. The
-/// interpreter asks it in `VM::call_inner`; the WASM tier asks it in `rt_call`,
-/// where the result becomes the `suspended` word emitted code branches on.
+/// interpreter and the JIT route by [`classify`], whose `Suspend` arm is this
+/// answer; the WASM tier asks here when it reports a call's outcome
+/// (`wasm/outcome.rs`), where the result becomes the `suspended` word emitted
+/// code branches on.
 ///
 /// Deliberately not a test for any particular bit. `:yield`, `:io`, `:wait`,
 /// `:fuel`, and every user-defined signal all park, and a compound signal parks
@@ -88,6 +95,17 @@ pub fn is_suspending(bits: SignalBits) -> bool {
         return false;
     }
     !bits.intersects(SIG_ERROR) && !bits.intersects(SIG_HALT)
+}
+
+/// True when `bits` parks the frame that raised it and every caller behind it.
+/// Every signal parks but an empty one, a halt, and a request to the VM; an
+/// error parks too, because an error unwinds nothing
+/// (docs/impl/region/unwind.md). The tiers that do not route through the
+/// interpreter's `complete_call` ask here: the JIT at a call site, and the
+/// WASM tier when it reports a call's outcome.
+#[inline]
+pub fn parks(bits: SignalBits) -> bool {
+    bits.intersects(SIG_ERROR) || is_suspending(bits)
 }
 
 #[cfg(test)]

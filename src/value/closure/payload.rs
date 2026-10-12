@@ -1,7 +1,8 @@
 // audited: 2026-10-06
-// docs/impl/region/template.md
-// docs/impl/image/sealing.md
 //! `CodePayload` — a code object's variable-length data, inline in region pages.
+//!
+//! docs/impl/region/template.md
+//! docs/impl/image/sealing.md
 //!
 //! One payload per lambda, written into its compile unit's code region at
 //! emission and shared by every header built over it. Nothing here owns Rust
@@ -207,7 +208,7 @@ impl<'a> LocationTable<'a> {
     }
 }
 
-/// A payload's builder-idiom merge set (docs/impl/region/merging.md § Merging).
+/// A payload's builder-idiom merge set (docs/impl/region/merging.md).
 /// Empty unless a merge fired, so the common case is a length check.
 #[derive(Clone, Copy, Debug)]
 pub struct MergedSlots<'a>(&'a [u32]);

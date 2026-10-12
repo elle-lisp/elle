@@ -13,8 +13,9 @@
 //! - `emit` — Module structure, WasmEmitter state, orchestration
 //! - `instruction` — LIR instruction → WASM instruction translation
 //! - `controlflow` — CFG emission, loop+br_table dispatch, terminators
-//! - `suspend` — CPS suspension/resume, spill/restore, block splitting
-//! - `liveness` — which register slots are live at a suspend point
+//! - `layout` — the order of the dispatch loop's cases, and the branch to each
+//! - `suspend` — park sites, the park, spill/restore, block splitting
+//! - `liveness` — which register and local slots are live where a frame parks
 //! - `outcome` — what a call reports back to emitted code: value, signal, park
 //! - `handle` — Handle table mapping u64 handles to `Value`
 //! - `host` — Host state (`ElleHost`), primitive dispatch, I/O
@@ -34,6 +35,7 @@ pub mod emit;
 pub mod handle;
 pub mod host;
 mod instruction;
+mod layout;
 pub mod lazy;
 pub mod linker;
 mod liveness;

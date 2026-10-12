@@ -1,6 +1,6 @@
 # Fiber Primitives
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-06 -->
 
 User-facing fiber operations and patterns.
 
@@ -117,11 +117,22 @@ instruction, and the rest of the expression runs on it:
 (assert (= (fiber/resume lookup 41) 42))        # 41 stands in for the get
 ```
 
-A raise in a function the body calls lands the same way, and the frames
-above it run on. That holds for a callee that has suspended once before it
-raises:
+A raise in a function the body calls lands the same way. An error unwinds
+nothing: every frame from the raise to the body parks, so the restart answers
+the raising call inside the callee and the frames above it run on. That holds
+on the fiber's first run, through a tail call, and after the callee suspended:
 
 ```lisp
+(defn first-run [] (+ 100 (error :boom)))
+(def early (fiber/new (fn [] (list :got (first-run))) |:error|))
+(fiber/resume early)
+(assert (= (fiber/resume early 41) (list :got 141)))   # 41 answers the error
+
+(defn via-tail [] (first-run))
+(def tailed (fiber/new (fn [] (list :got (via-tail))) |:error|))
+(fiber/resume tailed)
+(assert (= (fiber/resume tailed 41) (list :got 141)))
+
 (defn after-yield [] (yield 1) (+ 100 (error :boom)))
 (def nested (fiber/new (fn [] (list :got (after-yield))) |:yield :error|))
 (assert (= (fiber/resume nested) 1))
@@ -129,29 +140,17 @@ raises:
 (assert (= (fiber/resume nested 41) (list :got 141)))
 ```
 
-A raise in a callee on the fiber's first run is the exception. The callee's
-frames are gone by the time the fiber stops, so the restart answers the
-body's call to that callee instead
-([#1289](https://github.com/elle-lisp/elle/issues/1289)):
-
-```lisp
-(defn first-run [] (+ 100 (error :boom)))
-(def early (fiber/new (fn [] (list :got (first-run))) |:error|))
-(fiber/resume early)
-(assert (= (fiber/resume early 41) (list :got 41)))   # the call to first-run answers
-```
-
-The `parameterize` bindings those callee frames made go with them, so the body
-runs on with its own:
+The `parameterize` bindings the parked frames made stay in force, so the
+restart runs the callee with its own:
 
 ```lisp
 (def depth (make-parameter 0))
-(defn bound-raise [] (parameterize ((depth 9)) (+ 1 (get nil :x))))
+(defn bound-raise [] (parameterize ((depth 9)) (+ (depth) (get nil :x))))
 (def scoped
   (fiber/new (fn [] (parameterize ((depth 5)) (list (bound-raise) (depth))))
              |:error|))
 (fiber/resume scoped)
-(assert (= (fiber/resume scoped 41) (list 41 5)))   # the callee's 9 is gone
+(assert (= (fiber/resume scoped 41) (list 50 5)))   # the callee still reads 9
 ```
 
 An `:error` fiber restarts at the raising call too. When a child's error
@@ -165,7 +164,7 @@ restart of the parent answers that call.
 (assert (= (fiber/resume escaped 41) (list :got 42)))
 ```
 
-A raise with no result has nothing to answer. A `silence` bound on a
+A raise with no result has nothing to answer. A `bound` on a
 parameter and a `parameterize` of a value that is not a parameter each raise
 where no call result is waiting. A restart continues after the raise, and the
 recovery value goes nowhere. A `parameterize` that raised binds nothing, so
@@ -189,13 +188,19 @@ that call, as it answers any other.
 A host that runs code on the current fiber cannot hold a suspension of that
 code. `eval`, `import` and `compile/run-on :jit` each refuse one with an error
 at their own call. The suspended code is dropped, and a restart answers the
-host's call:
+host's call. An error the hosted code raises parks its frames as any error
+does, and the host drops them the same way:
 
 ```lisp
 (def hosted
   (fiber/new (fn [] (list :got (eval '(begin (yield 1) :inner)))) |:yield :error|))
 (assert (= (get (fiber/resume hosted) :error) :eval-error))
 (assert (= (fiber/resume hosted 41) (list :got 41)))   # 41 answers the eval
+
+(def hosted-raise
+  (fiber/new (fn [] (list :got (eval '(+ 1 (error :inner))))) |:error|))
+(assert (= (get (fiber/resume hosted-raise) :error) :eval-error))
+(assert (= (fiber/resume hosted-raise 41) (list :got 41)))
 ```
 
 A `squelch` boundary refuses a suspension the same way, at the call to the
@@ -205,7 +210,7 @@ code made, with its frames, so the code around the call runs on with its own:
 ```lisp
 (defn bound-yield [] (parameterize ((depth 9)) (yield 1) :inner))
 (def squelched
-  (fiber/new (fn [] (list :got ((squelch bound-yield :yield)) (depth)))
+  (fiber/new (fn [] (list :got ((squelch :yield bound-yield)) (depth)))
              |:yield :error|))
 (assert (= (get (fiber/resume squelched) :error) :signal-violation))
 (assert (= (fiber/resume squelched 41) (list :got 41 0)))   # the 9 is gone
@@ -224,13 +229,13 @@ value becomes the fiber's result. Both hold whether or not the fiber suspended
 before the refusal:
 
 ```lisp
-(defn relay [] (yield 0) ((squelch bound-yield :yield)))
+(defn relay [] (yield 0) ((squelch :yield bound-yield)))
 (def relayed (fiber/new (fn [] (list :got (relay) (depth))) |:yield :error|))
 (assert (= (fiber/resume relayed) 0))
 (assert (= (get (fiber/resume relayed) :error) :signal-violation))
 (assert (= (fiber/resume relayed 41) (list :got 41 0)))   # 41 answers relay
 
-(def ended (fiber/new (fn [] ((squelch bound-yield :yield))) |:yield :error|))
+(def ended (fiber/new (fn [] ((squelch :yield bound-yield))) |:yield :error|))
 (assert (= (get (fiber/resume ended) :error) :signal-violation))
 (assert (= (fiber/resume ended 41) 41))                   # the body's result
 (assert (= (fiber/status ended) :dead))

@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-22
+(elle/epoch 15)
+# audited: 2026-10-05
 # Each error kind a primitive raises arrives in the :error field protect returns.
 
 
@@ -55,8 +55,8 @@
   (assert (= (get err :error) :signal-error) "fiber/new unknown signal keyword"))
 # ── stack-overflow ────────────────────────────────────────────────────────────
 # Stack overflow is a resource exhaustion condition (SIG_HALT), not a catchable
-# error (SIG_ERROR).  It cannot be intercepted by protect, silence, or signal
-# masks.  The script simply terminates with exit code 1 and an error message.
+# error (SIG_ERROR).  It cannot be intercepted by protect, a squelch, or a signal
+# mask.  The script simply terminates with exit code 1 and an error message.
 #
 # Testing this requires running a separate elle process: the recursions that
 # reach the depth cap and the native-stack reserve are in

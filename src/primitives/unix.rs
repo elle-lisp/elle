@@ -1,8 +1,9 @@
-// audited: 2026-09-30
+// audited: 2026-10-11
 //! Unix domain socket primitives: listen, accept, connect and shutdown.
 //!
 //! docs/io.md
 //! docs/io/timeout.md
+//! docs/signals/capabilities.md
 
 use crate::io::request::{ConnectAddr, IoOp, IoRequest, PortOp};
 use crate::port::{Direction, Port, PortKind};
@@ -208,9 +209,9 @@ pub(crate) fn prim_unix_shutdown(
 primitive! {
     // Binds a socket at a filesystem path, and unlinks that path first.
     // Abstract-namespace names ("@name") touch no filesystem, but the
-    // primitive accepts either, so the capability covers both.
+    // primitive accepts either, so the :fs capability covers both.
     "unix/listen" => prim_unix_listen {
-        signal: Signal::fs_errors(),
+        signal: Signal::fs_net_errors(),
         arity: Arity::Exact(1),
         doc: "Listen on a Unix domain socket. Returns a listener port.",
         params: &["path"],
@@ -219,7 +220,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "unix/accept" => prim_unix_accept {
-        signal: Signal::io_yields_errors(),
+        signal: Signal::net_io_yields_errors(),
         arity: Arity::AtLeast(1),
         doc: "Accept a connection on a Unix listener. Returns a stream port.",
         params: &["listener"],
@@ -230,7 +231,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "unix/connect" => prim_unix_connect {
-        signal: Signal::fs_io_yields_errors(),
+        signal: Signal::fs_net_io_yields_errors(),
         arity: Arity::AtLeast(1),
         doc: "Connect to a Unix domain socket. Returns a stream port.",
         params: &["path"],
@@ -240,7 +241,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "unix/shutdown" => prim_unix_shutdown {
-        signal: Signal::io_yields_errors(),
+        signal: Signal::net_io_yields_errors(),
         arity: Arity::Exact(2),
         doc: "Shutdown a Unix stream. how: :read, :write, or :read-write.",
         params: &["port", "how"],

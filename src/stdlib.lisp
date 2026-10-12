@@ -1,4 +1,4 @@
-(elle/epoch 14)
+(elle/epoch 15)
 ## Elle standard library
 ##
 ## Loaded at startup after primitives are registered.
@@ -1887,10 +1887,10 @@
    refuses a denied call at the fiber's own call site
    (docs/signals/capabilities.md)."
   # :io, :wait and :error are the scheduler's protocol. :exec, :ffi, :gpu,
-  # :os-signal and :fs are there so a denial of any of them reaches the
+  # :os-signal, :fs and :net are there so a denial of any of them reaches the
   # scheduler, which refuses it.
   (let [fiber (fiber/new closure
-                         |:error :io :exec :wait :ffi :gpu :os-signal :fs|)]
+                         |:error :io :exec :wait :ffi :gpu :os-signal :fs :net|)]
     ((*spawn*) fiber)))
 
 ## ── Bounds on a wait ────────────────────────────────────────────────

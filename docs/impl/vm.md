@@ -60,7 +60,7 @@ pops that placeholder. A fiber stopped on an error therefore parks with
 nothing in the raising call's result position, and a restart pushes the
 resume value there.
 
-Two instructions produce no value: a `silence` bound on a parameter
+Two instructions produce no value: a `bound` on a parameter
 (`CheckSignalBound`) and a `parameterize` of a value that is not a parameter
 (`PushParamFrame`). They raise without a placeholder, the fiber parks without
 taking a resume value, and a restart continues after the raise.
@@ -72,23 +72,24 @@ restart answers the allocating instruction. An allocation made outside the
 frame's own instructions, such as a callee's environment, trips the limit
 before the frame's first instruction runs. That raise has no result position.
 
-The exit also carries the raise site, `RaiseSite`, out to the fiber
-boundary. An `Emit` raise is `Emit`, because its continuation funds its own
+The exit also carries the raise site, `RaiseSite`, out to the code that parks
+the raising frame: `complete_call` for a callee, the fiber boundary for a
+body. An `Emit` raise is `Emit`, because its continuation funds its own
 release of the resume value. A raise with no result position is `NoResult`,
 and a restart delivers nothing to fund. Every other raise is `Call`, and the
-delivery must mint instead. The boundary records the site in the delivery
+delivery must mint instead. The parker records the site in the delivery
 ledger ([park.md](region/park.md)).
 
 ## Fiber integration
 
 - **Emit** (`Instruction::Emit` with a signal bits operand — see
-  [impl/bytecode.md](bytecode.md) § "Signal-bits operands") — saves
+  [impl/bytecode.md](bytecode.md)) — saves
   the current frame as a `SuspendedFrame`, returns control to the parent
   fiber or scheduler
 - **Signal emission** — checks the fiber's signal mask to decide
   whether to propagate or catch
-- **Fuel** — decrements a counter at each backward jump and each call; when
-  zero, emits the `:fuel` signal
+- **Fuel** — decrements a counter at each backward jump and each call outside
+  a silent function; when zero, emits the `:fuel` signal
 
 ## Where a reported error's location comes from
 
@@ -102,7 +103,7 @@ The dispatch loop records it. Every path that leaves
 `VM::record_error_loc`, which maps the current instruction offset through
 the frame's `LocationMap`. A paused caller that the error leaves records the
 offset of its call instruction the same way. Recording is first-writer-wins: the raising frame
-reaches its exit path first, and each frame the error then unwinds through
+reaches its exit path first, and each frame the error then parks
 finds the slot already taken, so the innermost location is the one that
 survives to the root. A frame whose `LocationMap` has no entry for the
 instruction leaves the slot empty for an outer frame to fill.
@@ -160,14 +161,14 @@ restores the caller's stack and register, and completes the call:
 
 - **Return** — the result goes on the caller's stack, and the caller continues
   at its resume offset.
-- **Suspend** — the caller parks behind the callee, and the caller's own
-  activation leaves by the same signal. Every paused caller parks in turn, so
-  `Fiber::suspended` holds the innermost frame first, as `resume_suspended`
-  expects.
-- **Error or halt** — the caller leaves by the same signal from the call
-  instruction. The abandoned-frame walk runs for each callee frame on the way
-  out. A fiber body's own frame is parked for a restart instead
-  ([unwind.md](region/unwind.md)).
+- **Suspend or error** — the caller parks behind the callee, and the
+  caller's own activation leaves by the same signal. Every paused caller parks
+  in turn, so `Fiber::suspended` holds the innermost frame first, as
+  `resume_suspended` expects. An error parks the raising callee first, from
+  the exit its activation ended at, so a restart answers the raising call
+  ([unwind.md](region/unwind.md)). The callee's `parameterize` frames stay on
+  the fiber for the restart.
+- **Halt** — the caller leaves by the same signal from the call instruction.
 
 `execute_code` (the root) and `trampoline_loop` (every other entry) call
 `run_dispatch` where they would call the dispatch loop itself. The callers that
@@ -198,7 +199,8 @@ deep recursion that started compiled continues interpreted
 
 `Fiber::call_depth` counts the non-tail closure calls in progress, on every
 tier. A call past `(vm/config :max-depth)` — 10,000,000 by default — halts
-with `:stack-overflow`. A halt passes every signal mask, so `protect` does not
+with `:stack-overflow`. A halt passes every signal mask and the boundary of a
+silent function, so `protect` does not
 catch it. The cap stops a runaway recursion before it takes the machine's
 memory: each paused caller costs a few hundred bytes
 ([config.md](../config.md)).

@@ -37,7 +37,7 @@ pub(in crate::wasm) fn write_self_slot<T: 'static>(
 /// returns (0 = ran to completion, >0 = the resume state it suspended at), and
 /// the `SignalBits` it raised, written to `SIGNAL_SLOT`. A caller that reads
 /// only `status` reports a failed primitive as a successful return of the error
-/// value — pinned by `tests/impl/wasm-tier-error-signal.lisp`.
+/// value — pinned by `wasm::tests::tier`.
 ///
 /// Generic over the host type so the full-module (`ElleHost`) and tiered
 /// (`TieredHost`) paths, and both `Caller` and `Store` contexts, share it.

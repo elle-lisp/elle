@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-10-05
 //! Library migration rules driving the edit engine: rename, replace and
 //! report rules supplied as data, applied to a fixpoint.
 //!
@@ -97,7 +97,7 @@ fn one_pass(text: &str, name: &str, rules: &LibraryRules) -> Result<Vec<Edit>, S
     let replace_edits = if replaces.is_empty() {
         Vec::new()
     } else {
-        collect_replace_edits(st, &replaces)?
+        collect_replace_edits(st, &replaces, &[])?
     };
     let mut edits = if rules.renames.is_empty() {
         Vec::new()

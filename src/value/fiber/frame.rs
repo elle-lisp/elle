@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-06
 //! Suspension and call-frame types: a parked bytecode execution point, a step in
 //! a fiber's replay chain, and the frames a stack trace uses.
 //!
@@ -51,26 +51,25 @@ pub struct BytecodeFrame {
     /// leaves every activation it passes and pops each one's region frame;
     /// without carrying it here, a region allocated before the yield and
     /// `DecrefRegion`'d after resume would resolve in the wrong frame (a leak,
-    /// or — on a static-slot collision — a use-after-free). `replay_suspended`
+    /// or — on a static-slot collision — a use-after-free). `resume_suspended`
     /// restores this as the activation's region frame before re-entering.
     pub activation_region_map: rustc_hash::FxHashMap<u32, crate::hir::region::MappedRegion>,
     /// What this activation owed at the moment of suspension — MOVED (taken,
     /// never cloned) out of the activation's `Fiber::activation_dues` slot by
     /// the suspend site, so the record lives in exactly one place: the live slot
-    /// or one parked frame (docs/impl/region/owner.md § "Owner nodes" — "A park
-    /// moves the node into the suspended frame"). The owner node's members are
+    /// or one parked frame (docs/impl/region/owner.md). The owner node's members are
     /// `Owned` (RC frozen) with no other release route, and the deferred set's
     /// regions have no route at all — their emitting instruction died with the
     /// frame the tail call replaced — so both must ride the park to the resumed
     /// body's completion, where the trampoline's clean-break release runs them.
-    /// `replay_suspended` restores the record into the live slot beside
+    /// `resume_suspended` restores the record into the live slot beside
     /// `activation_region_map`. Default (no node, nothing deferred) for an
     /// activation that neither adopted nor tail-called.
     pub activation_dues: crate::value::fiber::ActivationDues,
     /// The executing-closure register (`Fiber::current_closure`) at the moment this
     /// activation suspended. A yield leaves every activation it passes and restores the
     /// live register to the caller's value, so without parking it here a self-edge
-    /// resolved after resume would name the wrong closure. `replay_suspended`
+    /// resolved after resume would name the wrong closure. `resume_suspended`
     /// re-installs it before re-entering the body. An uncounted borrow that may be
     /// DEAD by resume time — the region solver frees a closure value at its last
     /// use while the activation's `code`/`env` live on as `Rc`s — so it is never
@@ -82,11 +81,11 @@ pub struct BytecodeFrame {
     /// Debug-only snapshot of the uncounted region borrows `activation_region_map`
     /// holds at suspension: `(slot, region, establish-generation)` per LIVE mapped
     /// region. The suspended-frame analogue of the cross-fiber param snapshot's
-    /// `param_borrows` (docs/impl/region/generations.md § "Two borrow shapes"). The
+    /// `param_borrows` (docs/impl/region/generations.md). The
     /// snapshotted regions are this activation's own live allocations, kept alive by
     /// its still-pending `DecrefRegion`s while the fiber is parked; a map slot whose
     /// region's generation has already moved on is a dead leftover (see
-    /// `record_region_borrows`) and is skipped, not recorded. `replay_suspended`
+    /// `record_region_borrows`) and is skipped, not recorded. `resume_suspended`
     /// re-checks each recorded generation before `restore_activation_region_map`, so
     /// a live borrow freed while parked panics at the resume boundary (naming the
     /// slot) instead of corrupting the resumed activation's allocs/decrefs. Filled by
@@ -98,8 +97,7 @@ pub struct BytecodeFrame {
 impl BytecodeFrame {
     /// Build a suspended bytecode frame, snapshotting (debug builds) the uncounted
     /// region borrows its `activation_region_map` holds — the suspended-frame
-    /// recorded-generation handle (docs/impl/region/generations.md § "Two borrow
-    /// shapes"). Every suspend site goes through this one constructor
+    /// recorded-generation handle (docs/impl/region/generations.md). Every suspend site goes through this one constructor
     /// ("constructor, not literal"), so the snapshot is taken once, centrally, at the
     /// moment the map is captured. `heap` is read only under `debug_assertions`; the
     /// signature is build-agnostic so suspend sites need no `cfg`.
@@ -139,7 +137,7 @@ impl BytecodeFrame {
 /// `activation_region_map` holds: for each live `(slot, region)`, record
 /// `(slot, region, establish-generation)`. The suspended-frame analogue of
 /// `record_param_borrows` (the cross-fiber param snapshot, `src/vm/fiber/param.rs`);
-/// the recorded generation lets `replay_suspended`'s `first_stale_borrow`
+/// the recorded generation lets `resume_suspended`'s `first_stale_borrow`
 /// confirm the region has not been freed since the fiber parked.
 ///
 /// A slot whose recorded `MappedRegion::gen` no longer matches the region's
@@ -149,13 +147,13 @@ impl BytecodeFrame {
 /// unrelated region. That slot is not a borrow the activation still holds, so it
 /// is skipped: recording it would forge a borrow of a region this activation
 /// never owned and trip the resume check on an unrelated incarnation's free (the
-/// stale-suspended-frame false positive; docs/impl/region/generations.md
-/// § "Uncounted-borrow check"). A slot whose generation still matches is a
+/// stale-suspended-frame false positive; docs/impl/region/generations.md). A
+/// slot whose generation still matches is a
 /// genuine live borrow; recording its establish-generation means a free of *that*
 /// incarnation while the fiber is parked still trips the check. The region and
 /// its generation are read from the SAME `heap`, so the recorded pair and the
 /// later check compare within one store. Debug builds only
-/// (docs/impl/region/generations.md § "Two borrow shapes").
+/// (docs/impl/region/generations.md).
 ///
 /// The generation answers only once the region has been freed, which is why
 /// `slot_routed` — the function's `Code::frame_release_regions`, the static slots
@@ -199,7 +197,7 @@ pub struct ParkSite<'a> {
 
 impl<'a> ParkSite<'a> {
     /// Read the site off the frame's own code object and resume ip. `frame` is
-    /// the index `replay_suspended` is replaying and `frames` the chain's
+    /// the index `resume_suspended` is replaying and `frames` the chain's
     /// length, which together say how far into the replay the park sits.
     pub fn of(code: &'a crate::value::Code, ip: usize, frame: usize, frames: usize) -> Self {
         let locations = code.locations();
@@ -236,7 +234,7 @@ impl<'a> ParkSite<'a> {
             "stale suspended-frame region borrow on resume: activation region \
              slot {slot} maps to region {}, which was freed while this fiber was \
              parked — an uncounted suspended-frame borrow outlived its region \
-             (docs/impl/region/generations.md § 'Uncounted-borrow check')\
+             (docs/impl/region/generations.md)\
              \n  parked in {}{where_}, frame {} of {}, ip {}",
             region.get(),
             self.function.unwrap_or("<anonymous>"),
@@ -250,7 +248,7 @@ impl<'a> ParkSite<'a> {
 /// A suspended execution step — either a bytecode frame or a sub-fiber resume.
 ///
 /// The `suspended` Vec on a `Fiber` contains a chain of these, replayed
-/// innermost-first by `replay_suspended`.
+/// innermost-first by `resume_suspended`.
 ///
 /// - `Bytecode`: resume bytecode execution at a saved instruction pointer.
 /// - `FiberResume`: resume a suspended sub-fiber (e.g. a `defer`/`protect`

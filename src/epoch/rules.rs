@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-10-05
 //! Epoch migration rule definitions.
 //!
 //! docs/epochs.md
@@ -17,7 +17,7 @@ use std::fmt;
 
 /// Current language epoch. Bump this when making a breaking change
 /// and add a corresponding entry to `MIGRATIONS`.
-pub const CURRENT_EPOCH: u64 = 14;
+pub const CURRENT_EPOCH: u64 = 15;
 
 /// The epoch-gated lexer rules (docs/impl/lexicon.md). The lexer consults
 /// a `Lexicon` instead of hard-coding these, so an epoch bump can change

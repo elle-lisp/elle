@@ -1,6 +1,6 @@
 # Epochs
 
-<!-- audited: 2026-09-30 -->
+<!-- audited: 2026-10-05 -->
 
 Epochs are Elle's mechanism for making breaking changes to the language while
 preserving backwards compatibility. Each epoch is a numbered version of the
@@ -91,7 +91,14 @@ symbol). The template uses current-epoch syntax. Arguments are spliced in as
 complete subtrees.
 
 If the arity does not match, the form is left unchanged — this allows a symbol
-to be used with different arities without triggering an unintended rewrite.
+to be used with different arities without triggering an unintended rewrite. A
+symbol may carry one rule for each arity, as `silence` does in epoch 15.
+
+A matched form is rewritten once. The walk then descends into the elements of
+the replacement, so a template may keep its own head symbol, as epoch 15's
+`(squelch $2 $1)` does, and a form nested in an argument is rewritten as well.
+`elle rewrite` builds the replacement from the arguments' rewritten text, so it
+reaches the same nested forms.
 
 ### MillisToSeconds
 
@@ -457,3 +464,36 @@ covers `sys/join`, `os/join`, `chan/select`, `chan/wait-ready`, `io/wait`,
 `ev/step` and `ev/shutdown`. `(ev/step)` did not wait before, and a step with
 no bound now does, so the old spelling gains `:timeout 0`. `elle rewrite`
 applies the same rules, so a rewritten file reads its bounds in seconds.
+
+### Epoch 15 — one form per signal concept
+
+Each signal concept takes one form ([signals/inference.md](signals/inference.md)).
+`squelch` takes its spec first, as `attune` does.
+
+| Epoch ≤ 14 | Epoch 15 |
+|------------|----------|
+| `(silence)` | `(silent!)` |
+| `(silence p)` | `(bound p \|\|)` |
+| `(squelch f spec)` | `(squelch spec f)` |
+| `(muffle spec)` | removed |
+
+`muffle` declared, inside a function, a boundary that only its caller can
+place. A file that declares epoch 14 or earlier and uses it does not compile,
+and the error says to wrap the closure with `(squelch spec f)` instead.
+`elle rewrite` applies the other three rules.
+
+```lisp
+(defn compiles? [src]
+  (first (protect (compile/whole-module src "<doc>"))))
+
+(assert (compiles? "(elle/epoch 14)\n(defn f [] (silence) 1)")
+        "epoch 14 reads (silence) as (silent!)")
+(assert (not (compiles? "(defn f [] (silence) 1)")) "epoch 15 has no silence")
+(defn run [src]
+  ((get (get (compile/whole-module src "<doc>") 0) 1)))
+
+(def [ok? err] (run "(elle/epoch 14)\n(defn p [] (yield 1))\n(protect ((squelch p :yield)))"))
+(assert (= :signal-violation (get err :error)) "epoch 14 reads the closure first")
+(assert (not (compiles? "(elle/epoch 14)\n(defn f [] (muffle :yield) (yield 1))"))
+        "muffle has no epoch 15 spelling")
+```

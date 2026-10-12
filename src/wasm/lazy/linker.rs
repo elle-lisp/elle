@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! The tiered linker: host functions for a standalone per-closure module,
 //! with `rt_call` dispatching back into the VM for bytecode callees.
 //!
@@ -220,12 +220,21 @@ pub(super) fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>
                 // executing-closure register via the one-shot (the WASM→interp
                 // entry boundary), so a self-reference in the fallback body
                 // resolves to the callee, not NIL.
+                //
+                // An error parks the callee's chain on the VM's fiber. A tiered
+                // closure holds no park, so this host ends the chain, as every
+                // host that cannot hold one does (`VM::discard_hosted_error`).
+                // Kept, the chain would sit under the frame the VM parks at its
+                // call to this closure, and a restart would answer that call
+                // from inside the callee.
                 match vm_ref.build_closure_env(closure, &args) {
                     Some(env) => {
                         vm_ref.pending_entry_closure = func_val;
+                        let depth = vm_ref.fiber.param_depth();
                         let exec =
                             vm_ref.execute_bytecode_saving_stack(&closure.template.code(), &env);
                         let bits = exec.bits;
+                        vm_ref.discard_hosted_error(bits, depth);
                         if bits.is_empty() {
                             let (_, val) = vm_ref.fiber.signal.take().unwrap();
                             let (tag, payload) = caller.data_mut().inner.value_to_wasm(val);
@@ -325,42 +334,22 @@ pub(super) fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>
         },
     )?;
 
-    // rt_push_param
+    // rt_push_param — stub: a `parameterize` may raise, so `standalone_emittable`
+    // refuses every closure that holds one
     linker.func_wrap(
         "elle",
         "rt_push_param",
-        |mut caller: Caller<'_, TieredHost>, args_ptr: i32, npairs: i32| -> () {
-            let mut pairs = Vec::new();
-            let memory = caller
-                .get_export("__elle_memory")
-                .and_then(|e| e.into_memory())
-                .expect("no memory");
-            let data = memory.data(&caller);
-            for i in 0..npairs as usize {
-                let offset = args_ptr as usize + i * 24;
-                let param_id =
-                    i64::from_le_bytes(data[offset..offset + 8].try_into().unwrap()) as u32;
-                let tag =
-                    i64::from_le_bytes(data[offset + 8..offset + 16].try_into().unwrap()) as u64;
-                let payload =
-                    i64::from_le_bytes(data[offset + 16..offset + 24].try_into().unwrap()) as u64;
-                let value = if tag < TAG_HEAP_START {
-                    Value { tag, payload }
-                } else {
-                    caller.data().inner.handles.get(payload)
-                };
-                pairs.push((param_id, value));
-            }
-            caller.data_mut().inner.param_frames.push(pairs);
+        |_caller: Caller<'_, TieredHost>, _args_ptr: i32, _npairs: i32| -> (i64, i64, i64) {
+            panic!("rt_push_param called in tiered mode — should not happen");
         },
     )?;
 
-    // rt_pop_param
+    // rt_pop_param — stub, for the same reason
     linker.func_wrap(
         "elle",
         "rt_pop_param",
-        |mut caller: Caller<'_, TieredHost>| -> () {
-            caller.data_mut().inner.param_frames.pop();
+        |_caller: Caller<'_, TieredHost>| -> () {
+            panic!("rt_pop_param called in tiered mode — should not happen");
         },
     )?;
 
@@ -379,7 +368,7 @@ pub(super) fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>
         },
     )?;
 
-    // rt_yield — stub: `standalone_emittable` refuses every closure that emits
+    // rt_yield — stub: `standalone_emittable` refuses every closure that may signal
     linker.func_wrap(
         "elle",
         "rt_yield",
@@ -411,6 +400,20 @@ pub(super) fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>
         "rt_load_saved_reg",
         |_caller: Caller<'_, TieredHost>, _index: i32| -> (i64, i64) {
             panic!("rt_load_saved_reg called in tiered mode — should not happen");
+        },
+    )?;
+
+    // rt_emit — stub: an emit makes its closure one that may signal, which
+    // `standalone_emittable` refuses
+    linker.func_wrap(
+        "elle",
+        "rt_emit",
+        |_caller: Caller<'_, TieredHost>,
+         _tag: i64,
+         _payload: i64,
+         _signal_bits: i64|
+         -> (i64, i64, i64) {
+            panic!("rt_emit called in tiered mode — should not happen");
         },
     )?;
 

@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-05
 //! A-normal form (ANF) lift: each value a frame releases through a slot gets a
 //! binding naming that slot.
 //!

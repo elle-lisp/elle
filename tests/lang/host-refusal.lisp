@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-06
 # A host that refuses a suspension raises at its own call, and a restart answers that call.
 # docs/signals/primitives.md
 #
@@ -44,6 +44,31 @@
                                     |:yield :error :fs|)]
                    (assert (= (get (fiber/resume f) :error) :eval-error)
                            "import refuses a module that yields")
+                   (assert (= (fiber/resume f 41) (list :got 41))
+                           "a restart answers the import call"))))
+
+# ── an error the hosted code raises ──────────────────────────────────────────
+#
+# An error parks every frame from the raise up, as a suspension does, and the
+# host drops that chain the same way. The counter-factual leaves the hosted
+# code's chain parked under the host's own error, and a restart replays the
+# hosted code instead of answering the host's call.
+
+(def eval-raise
+  (fiber/new (fn [] (list :got (eval '((fn [] (+ 1 (error :inner))))))) |:error|))
+(assert (= (get (fiber/resume eval-raise) :error) :eval-error)
+        "eval reports the hosted error as its own")
+(assert (= (fiber/resume eval-raise 41) (list :got 41))
+        "a restart answers the eval call, not the raise inside it")
+
+(with-temp-dir dir
+               (let [mod (path/join dir "raises.lisp")]
+                 (file/write mod
+                             "(elle/epoch 15)\n(+ 1 (error {:error :inner}))\n:module\n")
+                 (let [f (fiber/new (fn [] (list :got (import mod)))
+                                    |:yield :error :fs|)]
+                   (assert (= (get (fiber/resume f) :error) :eval-error)
+                           "import reports a module's error as its own")
                    (assert (= (fiber/resume f 41) (list :got 41))
                            "a restart answers the import call"))))
 

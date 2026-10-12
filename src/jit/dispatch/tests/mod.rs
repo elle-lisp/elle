@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! The JIT runtime helpers' pins, one submodule per subject, and the VM set-up they share.
 //!
 //! docs/impl/jit.md
@@ -7,7 +7,7 @@
 //! - `push` — the push helpers mutate an @array in place and count what they insert.
 //! - `copies` — the copying helpers allocate into the region they are handed.
 //! - `adopt` — the adopt and group-free helpers resolve Values and forward.
-//! - `exits` — the pending-exception probe and the compiled error exit.
+//! - `params` — a raising parameter-frame push still pushes a frame.
 
 use super::*;
 use crate::hir::region::RuntimeRegion;
@@ -17,7 +17,7 @@ use crate::vm::VM;
 
 mod adopt;
 mod copies;
-mod exits;
+mod params;
 mod push;
 
 /// A VM with the primitives registered, as the helpers that call back into them

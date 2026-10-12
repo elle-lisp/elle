@@ -117,7 +117,11 @@ impl ConstRec {
 pub struct SiteRec {
     pub(crate) resume_ip: u32,
     pub(crate) num_locals: u16,
-    pub(crate) pad: u16,
+    /// One when a resume delivers its value into the site's result, zero for
+    /// a call site at an instruction that produces no value. A yield point
+    /// always delivers.
+    pub(crate) delivers: u8,
+    pub(crate) pad: u8,
     /// The site's run in the function's site-register table.
     pub(crate) regs: u32,
     pub(crate) n_regs: u32,

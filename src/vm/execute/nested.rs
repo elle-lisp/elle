@@ -1,11 +1,11 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! Interpreted non-tail calls on one dispatch loop: a caller pauses in the
 //! fiber while its callee runs, and resumes when the callee ends.
 //!
 //! docs/impl/vm.md
 
 use super::{ExecResult, Exit};
-use crate::value::fiber::{Activation, CallSite, ParamDepth, PausedCaller, TailSquelch};
+use crate::value::fiber::{Activation, CallSite, ParamDepth, PausedCaller, TailBoundary};
 use crate::value::{BytecodeFrame, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT};
 use crate::vm::core::{PendingCall, VM};
 use std::rc::Rc;
@@ -18,7 +18,7 @@ impl VM {
     /// which the activation it was entered with leaves, the calls that
     /// activation made having completed in between. A caller waits
     /// in `fiber.callers` while its callee runs, so the Rust stack stays flat
-    /// however deep the calls go (docs/impl/vm.md § "Non-tail calls").
+    /// however deep the calls go (docs/impl/vm.md).
     pub(in crate::vm) fn run_dispatch(
         &mut self,
         code: &crate::value::Code,
@@ -56,24 +56,22 @@ impl VM {
                 return exit;
             };
             if bits.is_empty() {
-                if let Some(tail) = self.pending_tail_call.take() {
+                if let Some(mut tail) = self.pending_tail_call.take() {
                     callee
-                        .tail_squelch
-                        .add(tail.squelch_mask, self.fiber.param_depth());
+                        .tail_boundary
+                        .add(std::mem::take(&mut tail.boundary), self.fiber.param_depth());
                     (callee.code, callee.env) = self.replace_by_tail_call(tail);
                     exit = self.execute_bytecode_inner_impl(&callee.code, &callee.env, 0);
                     running = Some(callee);
                     continue;
                 }
             }
-            let site = callee.call;
-            let result = self.leave_callee(callee, exit);
+            let (result, site) = self.leave_callee(callee, exit);
             let caller = self
                 .fiber
                 .callers
                 .pop()
                 .expect("VM bug: a callee returns into a paused caller");
-            self.drop_abandoned_param_frames(caller.param_depth);
             self.fiber.stack.clear();
             self.fiber.stack.extend(caller.stack);
             self.fiber.current_closure = caller.closure;
@@ -120,12 +118,6 @@ impl VM {
             param_depth: self.fiber.param_depth(),
             closure: self.fiber.current_closure,
         });
-        // `do_fiber_first_resume` sets this for the fiber body alone, and the
-        // body's entry took it, so no callee is a parked error frame.
-        debug_assert!(
-            !self.pending_error_park,
-            "VM bug: a nested callee was handed the fiber body's error park"
-        );
         #[cfg(debug_assertions)]
         Self::debug_assert_entry_closure_matches(call.closure, &call.code);
         self.fiber.current_closure = call.closure;
@@ -135,26 +127,25 @@ impl VM {
         Activation {
             code: call.code,
             env: call.env,
-            tail_squelch: TailSquelch::none(self.fiber.param_depth()),
+            tail_boundary: TailBoundary::none(self.fiber.param_depth()),
             call: call.site,
             #[cfg(debug_assertions)]
             entry_depth,
         }
     }
 
-    /// End a callee's activation whose dispatch loop exited at `exit`. A
-    /// callee is always abandoned by an error, so the walk runs.
-    fn leave_callee(&mut self, callee: Activation, exit: Exit) -> ExecResult {
+    /// End a callee's activation whose dispatch loop exited at `exit`,
+    /// answering how it ended and the call that entered it.
+    fn leave_callee(&mut self, callee: Activation, exit: Exit) -> (ExecResult, CallSite) {
         #[cfg(debug_assertions)]
         let entry_depth = callee.entry_depth;
-        let mut result =
-            self.end_activation(callee.code, callee.env, exit, callee.tail_squelch, true);
+        let mut result = self.end_activation(callee.code, callee.env, exit, callee.tail_boundary);
         self.close_activation(
             &mut result,
             #[cfg(debug_assertions)]
             entry_depth,
         );
-        result
+        (result, callee.call)
     }
 
     /// Complete a non-tail closure call whose callee ended with `result`, in
@@ -162,9 +153,9 @@ impl VM {
     /// `depth` is the parameter depth at the call.
     ///
     /// `None`: the result is on the caller's stack and the caller continues.
-    /// `Some(bits)`: the caller leaves by `bits` too. A suspend has parked the
-    /// caller behind the callee; an error or halt keeps the trace frame for
-    /// the stack trace.
+    /// `Some(bits)`: the caller leaves by `bits` too. A suspend or an error has
+    /// parked the caller behind the callee, and an error or halt keeps the trace
+    /// frame for the stack trace.
     fn complete_call(
         &mut self,
         code: &crate::value::Code,
@@ -172,48 +163,28 @@ impl VM {
         resume_ip: usize,
         site: CallSite,
         depth: ParamDepth,
-        result: ExecResult,
+        mut result: ExecResult,
     ) -> Option<SignalBits> {
         self.fiber.call_depth -= 1;
         let bits = result.bits;
+        let raised = bits.intersects(SIG_ERROR) && !bits.intersects(SIG_HALT);
 
-        // Silence enforcement: if the callee's signal is silent, declared or
-        // inferred, and the body produced ANY signal, that claim was wrong.
-        // Abort with a clear diagnostic.
-        if site.silent
-            && self
-                .fiber
-                .signal
-                .as_ref()
-                .is_some_and(|(b, _)| !b.is_empty())
-        {
-            let (sig_bits, sig_val) = self.fiber.signal.take().unwrap();
-            let name = site.name.unwrap_or("<anonymous>");
-            eprintln!("panic: silence violation in '{}'", name);
-            eprintln!(
-                "  A function whose signal is silent, declared or inferred, signaled at runtime."
-            );
-            eprintln!(
-                "  signal: {}",
-                crate::signals::registry::format_bits(sig_bits)
-            );
-            eprintln!("  value:  {}", sig_val);
-            if let Some(loc) = self.error_loc.as_ref() {
-                eprintln!("  at {}", loc);
-            }
-            std::process::abort();
+        // An error parks the callee that raised it, as a suspend parked it
+        // before returning here, so a boundary that refuses the signal below
+        // discards the callee's frame with the rest of the chain.
+        if raised {
+            self.park_raised(&mut result);
         }
 
-        // Squelch enforcement: a suspending signal the callee's squelch mask
-        // names becomes a signal-violation error. SIG_ERROR (already an error)
-        // and SIG_HALT (terminal) pass. `enforce_squelch` discards the suspended
-        // frames: the call is converted to an error, not suspended.
+        // The callee's boundary may refuse its signal: a broken proof, or a
+        // signal its squelch names. `enforce_boundary` discards the suspended
+        // frames, so the call leaves by the refusal's error, not suspended.
         //
         // A fiber body is exempt: it runs outside any call, so its first resume
-        // enforces no squelch.
-        if self.enforce_squelch(bits, site.squelch_mask, depth) {
+        // crosses no boundary.
+        if let Some(refusal) = self.enforce_boundary(bits, &site.boundary, depth) {
             self.fiber.call_stack.pop();
-            return Some(SIG_ERROR);
+            return Some(refusal);
         }
         if bits.is_empty() {
             let (_, value) = self.fiber.signal.take().unwrap();
@@ -221,15 +192,15 @@ impl VM {
             self.fiber.call_stack.pop();
             return None;
         }
-        if bits.intersects(SIG_ERROR) || bits.intersects(SIG_HALT) {
-            // The call frame is preserved on error for stack traces.
+        if bits.intersects(SIG_HALT) {
+            // The call frame is preserved for the stack trace.
             return Some(bits);
         }
 
-        // A suspending signal — any bits except SIG_ERROR/SIG_HALT — parks the
-        // caller behind the callee for resumption. The caller frame is built
-        // whether or not the callee populated fiber.suspended: a callee that
-        // tail-called a native yielding primitive creates no SuspendedFrame
+        // Every other signal parks the caller behind the callee for resumption,
+        // an error included (docs/impl/region/unwind.md). The caller frame is
+        // built whether or not the callee populated fiber.suspended: a callee
+        // that tail-called a native yielding primitive creates no SuspendedFrame
         // (TCO), so fiber.suspended may be None here.
         let (_, value) = self.fiber.signal.take().unwrap();
         let caller_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
@@ -257,8 +228,7 @@ impl VM {
             .cloned()
             .unwrap_or_default();
         // MOVE what the caller's activation owes into its park — this activation
-        // leaves with the suspending signal (docs/impl/region/owner.md § "Owner
-        // nodes").
+        // leaves with the suspending signal (docs/impl/region/owner.md).
         let caller_dues = self.take_activation_dues();
         // The caller's register is restored, so park the caller's value here; the
         // callee's value rode out in `result.current_closure`.
@@ -278,8 +248,10 @@ impl VM {
         let mut frames = self.fiber.suspended.take().unwrap_or_default();
         // Preserve a non-yield-suspended (e.g. SIG_FUEL) callee's inner frame —
         // it lives in result.stack, not fiber.suspended (see
-        // park_suspended_callee_frame).
-        self.park_suspended_callee_frame(&mut frames, bits, result);
+        // park_suspended_callee_frame). An error parked it above.
+        if !raised {
+            self.park_suspended_callee_frame(&mut frames, bits, result);
+        }
         if self
             .runtime_config
             .has_trace_bit(crate::config::trace_bits::FIBER)
@@ -296,7 +268,10 @@ impl VM {
         frames.push(caller_frame);
         self.fiber.signal = Some((bits, value));
         self.fiber.suspended = Some(frames);
-        self.fiber.call_stack.pop();
+        // An error keeps the trace frame for the stack trace.
+        if !raised {
+            self.fiber.call_stack.pop();
+        }
         Some(bits)
     }
 }

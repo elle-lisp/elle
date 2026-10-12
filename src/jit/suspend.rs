@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! Yield side-exit helpers for JIT-compiled code.
 //!
 //! docs/impl/jit.md
@@ -153,20 +153,34 @@ pub extern "C" fn elle_jit_yield(
         stack.push(unsafe { *spilled_values.add(i) });
     }
 
-    // Escape retain for the emitted value — the exact mirror of the
-    // interpreter's `Emit` handler (`handle_emit`, src/vm/dispatch.rs). The
-    // yielded value escapes into `fiber.signal`, where the resumer reads it via
-    // `fiber/value`. The compiler emits a `DecrefRegion` at the emit's
-    // decref_point (fired as this activation suspends and, on resume, continues
-    // past the yield); without this incref that decref drops the value's only
-    // reference while the resumer still holds it, freeing it out from under the
-    // read (tests/impl/region-jit-emit-escape-uaf.lisp). The symmetric release
-    // is the resume path's own pending decref, `release_discarded_signal` for a
-    // fiber that never runs again, or the free-path fiber discharge — all
-    // tier-agnostic (they act on `fiber.signal`), so they balance this retain
-    // exactly as they balance `handle_emit`'s. `region_of` no-ops an immediate.
     let sig = crate::value::fiber::SignalBits::new(signal_bits);
-    {
+    // An emit of a bit the fiber withholds raises nothing: the fiber parks on
+    // the denial, and the resume value answers the emit, as in `handle_emit`.
+    let blocked = crate::vm::VM::emit_blocked(vm.fiber.withheld, sig);
+    let denied = !blocked.is_empty();
+    let raised = if denied {
+        vm.park_denied_emit(sig, blocked, yielded);
+        false
+    } else if sig.intersects(crate::value::fiber::SIG_HALT) {
+        // A halt takes neither the retain nor the record: the halted fiber is
+        // promoted to `:dead` and never resumed, so its delivery has no
+        // consumer (docs/impl/region/park.md).
+        vm.fiber.signal = Some((sig, yielded));
+        false
+    } else {
+        // Escape retain for the emitted value — the exact mirror of the
+        // interpreter's `Emit` handler (`handle_emit`, src/vm/dispatch.rs). The
+        // yielded value escapes into `fiber.signal`, where the resumer reads it
+        // via `fiber/value`. The compiler emits a `DecrefRegion` at the emit's
+        // decref_point (fired as this activation suspends and, on resume,
+        // continues past the yield); without this incref that decref drops the
+        // value's only reference while the resumer still holds it, freeing it
+        // out from under the read (tests/impl/region-jit-emit-escape-uaf.lisp).
+        // The symmetric release is the resume path's own pending decref,
+        // `release_discarded_signal` for a fiber that never runs again, or the
+        // free-path fiber discharge — all tier-agnostic (they act on
+        // `fiber.signal`), so they balance this retain exactly as they balance
+        // `handle_emit`'s. `region_of` no-ops an immediate.
         let heap = unsafe { &mut *vm.heap_ptr };
         let yielded_region = crate::value::arena::region_of(heap, yielded);
         crate::value::arena::incref_for_escape(
@@ -174,25 +188,36 @@ pub extern "C" fn elle_jit_yield(
             yielded_region,
             crate::value::arena::EscapeSite::EmitEscape,
         );
-    }
-    // An ERROR emit's retain is the payload's whole delivery — record the mint,
-    // exactly as `handle_emit` does, so the walk and the parked frame's
-    // discharge reclaim the raise chain's own reference.
-    if sig.intersects(crate::value::fiber::SIG_ERROR) {
-        vm.fiber.delivery.record_mint(yielded);
-    } else {
-        // …and every other emit records the PARK, so a `squelch`/`attune`
-        // boundary can release the delivery retain no reader will consume
-        // (docs/impl/region/park.md). The record follows the retain this helper
-        // took just above, which is what keeps the two balanced whatever the bits
-        // are.
-        vm.fiber.delivery.park_emit(sig, yielded);
-    }
-    vm.fiber.signal = Some((sig, yielded));
+        // An ERROR emit's retain is the payload's whole delivery — record the
+        // mint, exactly as `handle_emit` does, so the parked frame's discharge
+        // reclaims the raise chain's own reference.
+        let raised = sig.intersects(crate::value::fiber::SIG_ERROR);
+        if raised {
+            vm.fiber.delivery.record_mint(yielded);
+        } else {
+            // …and every other emit records the PARK, so a `squelch`/`attune`
+            // boundary can release the delivery retain no reader will consume
+            // (docs/impl/region/park.md). The record follows the retain this
+            // helper took just above, which is what keeps the two balanced
+            // whatever the bits are.
+            vm.fiber.delivery.park_emit(sig, yielded);
+        }
+        vm.fiber.signal = Some((sig, yielded));
+        raised
+    };
 
-    if !sig.intersects(crate::value::fiber::SIG_ERROR) {
-        // Suspension: build a frame for later resumption. The compiled
-        // prologue pushed THIS activation's region-remap frame
+    if denied || !sig.intersects(crate::value::fiber::SIG_HALT) {
+        // A denial, and any signal but a halt, parks: build a frame for later
+        // resumption. An error parks as a suspend does, because an error
+        // unwinds nothing (docs/impl/region/unwind.md), and this frame is the
+        // innermost, so it records its raise site; the emit's continuation
+        // funds its own release of the restart value.
+        if raised {
+            vm.fiber
+                .delivery
+                .park_error(crate::value::fiber::RaiseSite::Emit, yielded);
+        }
+        // The compiled prologue pushed THIS activation's region-remap frame
         // (`elle_jit_push_region_map`), and the side-exit's pop runs after
         // this helper, so `last()` is this activation's map — captured here so
         // post-resume allocs/decrefs (re-entering via the interpreter) resolve
@@ -234,11 +259,15 @@ pub extern "C" fn elle_jit_yield(
     YIELD_SENTINEL
 }
 
-/// JIT yield-through-call: append a caller frame to fiber.suspended.
+/// JIT park at a site: append this frame to fiber.suspended.
 ///
-/// Called from JIT code when a callee yields (detected by post-call
-/// signal check). Builds a caller SuspendedFrame and appends it to
-/// the existing suspended frame chain.
+/// Called from JIT code when the check after a call or an instruction that
+/// may raise finds a pending signal. Builds this frame's SuspendedFrame and
+/// appends it to the chain the callee parked, an error included. A halt
+/// builds no frame. Where nothing parked yet, this frame is the innermost of
+/// an error's chain, and it records the raise site in the delivery ledger:
+/// `Call` where a restart delivers into the site's result, `NoResult` where
+/// the instruction produces none (docs/impl/vm.md).
 ///
 /// Parameters:
 ///   spilled_values: *const Value (16 bytes each)
@@ -260,6 +289,13 @@ pub extern "C" fn elle_jit_yield_through_call(
     closure_payload: u64,
 ) -> JitValue {
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
+    let (sig, payload) = vm
+        .fiber
+        .signal
+        .expect("VM bug: elle_jit_yield_through_call reached with no pending signal");
+    if sig.intersects(crate::value::fiber::SIG_HALT) {
+        return YIELD_SENTINEL;
+    }
     let closure_val = Value {
         tag: closure_tag,
         payload: closure_payload,
@@ -279,6 +315,7 @@ pub extern "C" fn elle_jit_yield_through_call(
     let num_params = call_meta.num_params as usize;
     let num_locals = call_meta.num_locals as usize;
     let num_operands = call_meta.num_spilled as usize;
+    let push_resume_value = call_meta.push_resume_value;
 
     // Spill buffer layout: [params(num_params), locals(num_locals), operands(num_spilled)]
     //
@@ -332,15 +369,24 @@ pub extern "C" fn elle_jit_yield_through_call(
         &stack,
     );
     // MOVE what the caller's activation owes into its park — this compiled activation
-    // unwinds with the callee's suspending signal (see elle_jit_yield).
+    // leaves with the signal (see elle_jit_yield).
     let activation_dues = vm.take_activation_dues();
+    // The innermost frame of an error's chain records its raise site.
+    if sig.intersects(crate::value::fiber::SIG_ERROR) && vm.fiber.suspended.is_none() {
+        let site = if push_resume_value {
+            crate::value::fiber::RaiseSite::Call
+        } else {
+            crate::value::fiber::RaiseSite::NoResult
+        };
+        vm.fiber.delivery.park_error(site, payload);
+    }
     // The caller body's own closure (see elle_jit_yield) — park it for the resume.
     let caller_frame = SuspendedFrame::Bytecode(BytecodeFrame::suspend(
         code,
         env,
         resume_ip,
         stack,
-        true,
+        push_resume_value,
         activation_region_map,
         activation_dues,
         closure_val,
@@ -358,9 +404,8 @@ pub extern "C" fn elle_jit_yield_through_call(
 /// Check if any non-OK signal is pending on the VM.
 /// Returns TRUE if set, FALSE otherwise.
 ///
-/// This extends `elle_jit_has_exception` to also detect suspending signals
-/// (SIG_YIELD, SIG_SWITCH, user-defined). Used after Call instructions in
-/// yielding functions.
+/// The one check after a call or an instruction that may raise: an error, a
+/// halt, and every suspending signal (SIG_YIELD, SIG_SWITCH, user-defined).
 ///
 /// Checks `!is_empty()` rather than matching specific signal bits, because
 /// I/O primitives return compound signals like `SIG_YIELD | SIG_IO` and

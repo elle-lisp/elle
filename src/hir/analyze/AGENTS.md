@@ -1,6 +1,6 @@
 # hir/analyze
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-10-05 -->
 
 Syntax to HIR analysis: binding resolution, capture computation, signal inference, and linting.
 
@@ -27,10 +27,13 @@ file covers how the analyzer produces it.
 |------|---------|
 | `Analyzer` | Main struct that transforms Syntax → HIR |
 | `BlockContext` | Active block for `break` targeting (block_id, name, fn_depth) |
-| `SignalSources` | Separates a lambda body's signal sources into parameter calls, direct `emit` bits, and bits from non-parameter callees |
+| `SignalSources` | Separates a lambda body's signal sources into parameter calls, direct `emit` bits, and bits from non-parameter callees. `add_inherent_bits` is how a form that may raise reports itself |
+| `keyword_collectors` | The bindings whose function collects `&keys` or `&named`, from a lambda initializer or a closure value; a call to one may raise at the call |
+| `arity_env` | The arity of each binding whose callee is known: a primitive, a closure value from the stdlib or core, and a binding initialized with a lambda. A call to anything else may raise at the call |
 | `ParamBound` | Struct: `{ binding, signal }` — a parameter bound |
-| `current_param_bounds` | Maps `Binding` → `Signal` for parameters bounded by `(silence p)` in the lambda being analyzed |
-| `current_declared_ceiling` | `Option<Signal>`: the function-level ceiling set by `(silence)` or `(attune! …)` |
+| `current_param_bounds` | Maps `Binding` → `Signal` for parameters bounded by `(bound p spec)` in the lambda being analyzed |
+| `bound_env` | The parameter bounds of each binding initialized with a lambda that declares one, by parameter position; a call checks an argument whose signal is known against them |
+| `current_declared_ceiling` | `Option<Signal>`: the ceiling `(silent!)` or `(attune! …)` declares, the intersection when a body declares several. `analyze_lambda` checks the inferred signal against it and does not replace the signal with it |
 | `ScopedBinding` | Binding with its scope set for hygienic resolution |
 | `Scope` | Lexical scope with bindings HashMap and local index tracking |
 
@@ -68,7 +71,10 @@ The analyzer tracks signals across function boundaries (see
    (`primitive_signal_of`), which `bind_primitives` also seeds into
    `signal_env`. A same-named *user* binding must never resolve through it,
    or it would inherit the primitive's signal.
-3. **Call analysis**: Looks up the callee's signal and propagates it.
+3. **Call analysis**: Looks up the callee's signal and propagates it. A
+   call to a polymorphic callee that passes a parameter in a propagated
+   position adds that parameter to the sources, and still adds the callee's
+   own bits.
 4. **Mutation invalidation**: `assign` clears the mutated binding's
    `signal_env` entry. This is sound only because the fallback in (2) is
    gated to primitives: a reassigned non-primitive local therefore resolves
@@ -126,14 +132,29 @@ This prevents accidental capture in macros while allowing intentional capture vi
    critical field is `primitive_values: HashMap<Binding, Value>` on
    `Analyzer`.
 
-4. **`silence` records a bound for the innermost enclosing function.** It is
-   a special form accepted anywhere in a function body. `(silence)` sets the
-   function's ceiling to empty; `(silence p)` bounds parameter `p`. Signal
-   keywords are rejected: `(silence :kw ...)` and `(silence p :kw ...)` are
-   compile errors. The name must be a declared parameter. For a duplicate
-   bound on the same parameter, the last one wins. `analyze_lambda` reads the
-   accumulators after analyzing the body and checks the ceiling there. No
-   call site is checked at compile time; the bound is checked on entry.
+4. **`bound` records a bound for the innermost enclosing function.** It is
+   a special form accepted anywhere in a function body. `(bound p spec)`
+   bounds parameter `p` to `spec`, a keyword or a literal keyword set, `||`
+   included. The name must be a declared parameter, and a second bound on one
+   parameter is a compile error. `analyze_lambda` reads the accumulators after
+   analyzing the body. The bound is checked on entry, and that check may
+   raise, so a lambda with a bound carries `:error`. `analyze_call` also
+   checks each argument whose signal it knows against the callee's
+   `bound_env` entry, and a violation is a compile error.
+
+5. **A ceiling checks and never replaces.** `(attune! spec)` and
+   `(silent!)`, which is `(attune! ||)`, record a ceiling. `analyze_lambda`
+   checks the inferred signal against it after the body, and an excess bit or
+   a propagated parameter is a compile error.
+
+6. **A construct that can raise carries `:error`, on its node and in the
+   enclosing function's sources.** The list is in
+   [docs/signals/inference.md](../../../docs/signals/inference.md), "What
+   raises". Each site reports through `add_inherent_bits`; a strict
+   `Destructure` is built by `destructure`, which reports for it. A call
+   reports `:error` unless the compiler checked its argument count against a
+   known arity and knows whether the callee collects keywords
+   (`analyze_call`).
 
 ## When to modify
 
@@ -141,8 +162,9 @@ This prevents accidental capture in macros while allowing intentional capture vi
   `forms/registry.rs` and implement its `analyze_*` method
 - **Changing binding semantics**: Update `binding.rs` and `destructure.rs`
 - **Changing signal inference**: Update `call.rs` and `lambda.rs`
-- **Changing signal bounds**: Update `special.rs` for `analyze_silence` and
-  `lambda.rs` for the ceiling check; the entry check is emitted in
+- **Changing signal bounds**: Update `special.rs` for `analyze_bound` and
+  `lambda.rs` for the ceiling check, and `call.rs` for the check at a call;
+  the entry check is emitted in
   `lir/lower/lambda/body.rs` (`CheckSignalBound`)
 - **Changing pattern matching**: Update `special/pattern.rs` and `destructure.rs`
 - **Changing scope resolution**: Update `scopes.rs` (`lookup()` and `bind()`)
@@ -158,7 +180,7 @@ This prevents accidental capture in macros while allowing intentional capture vi
 - **Conflating nil and empty list**: Use `HirKind::EmptyList` for `()`, not `HirKind::Nil`
 - **Not propagating signals**: When combining sub-expressions, use
   `signal.combine()` to merge signals upward. A node's signal alone does not
-  reach the enclosing function: add the bits to `current_signal_sources`
-  too, as `analyze_match` does (#1243).
+  reach the enclosing function: report the bits through `add_inherent_bits`
+  too, as `analyze_match` and `analyze_eval` do.
 - **Breaking scope hygiene**: When creating synthetic bindings, use the correct scope set from the original Syntax node
-- **Forgetting to include bounded parameter bits in inferred_signals**: When a parameter has a `silence` bound, its bits must be included in the lambda's `inferred_signals`, not tracked as polymorphic.
+- **Forgetting to include bounded parameter bits in inferred_signals**: When a parameter has a `bound`, its bits must be included in the lambda's `inferred_signals`, not tracked as polymorphic.

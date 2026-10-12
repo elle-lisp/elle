@@ -10,9 +10,9 @@ Compile a function's frozen LIR, read through a `LirView`
 ([lir.md](../../docs/impl/lir.md)), to native code for the host, x86_64 or
 AArch64. A function's signal decides nothing about admission (see
 [signals/AGENTS.md](../signals/AGENTS.md) for signal definitions); what it
-decides is the code around a call. Yielding functions use side-exit: JIT code
-calls a runtime helper that builds a `SuspendedFrame` and returns
-`YIELD_SENTINEL` to the interpreter.
+decides is the code around a call. A yield, an error, and a callee's park all
+leave by side-exit: JIT code calls a runtime helper that builds a
+`SuspendedFrame` and returns `YIELD_SENTINEL` to the interpreter.
 
 ## Architecture
 
@@ -127,7 +127,7 @@ Unsupported (returns JitError::UnsupportedInstruction):
 
 Supported in yielding functions (via side-exit):
 - `LoadResumeValue` — emitted as dead code (unreachable in JIT, resume goes through interpreter)
-- `Emit` of a yield — emitted as side-exit: spill registers, call `elle_jit_yield`, return `YIELD_SENTINEL`
+- `Emit` — emitted as side-exit, for an error as for a yield: spill registers, call `elle_jit_yield`, return `YIELD_SENTINEL`
 ## Runtime Helpers
 
 All operations go through `extern "C"` runtime helpers for safety.
@@ -157,7 +157,7 @@ houses:
 
 - **Sentinels**: `TAIL_CALL_SENTINEL`, `YIELD_SENTINEL`
 - **Metadata types**: `YieldPointMeta`, `CallSiteMeta`
-- **Exception check**: `elle_jit_has_exception`
+- **Signal check**: `elle_jit_has_signal`
 - **Function calls**: `elle_jit_call`, `elle_jit_tail_call`, `elle_jit_call_array`, `elle_jit_tail_call_array`
 - **Misc call helpers**: `elle_jit_pop_param_frame`
 
@@ -255,19 +255,22 @@ The signal system and JIT side-exit mechanism enable fibers and JIT to coexist:
   runtime helper) which:
   1. Reads yield point metadata from `JitCode.yield_points`
   2. Rebuilds the frame's env and stack from the spill buffer
-  3. Builds a `SuspendedFrame` with the bytecode resume IP, for a suspending
-     signal
-  4. Sets `fiber.signal` to the emit's signal and value, and `fiber.suspended`
+  3. Builds a `SuspendedFrame` with the bytecode resume IP, for any signal but
+     a halt
+  4. Sets `fiber.signal` to the emit's signal and value, and `fiber.suspended`.
+     An emit of a bit the fiber withholds sets the capability denial instead
+     (`VM::park_denied_emit`), and parks even for a halt
   5. Returns `YIELD_SENTINEL` to the JIT caller
 
   The JIT caller detects `YIELD_SENTINEL` and returns it to the interpreter,
   which resumes via `execute_bytecode_from_ip`.
 
-- **Yield-through-call**: When a JIT-compiled function calls another function
-  that yields, the JIT detects the yield via post-call signal check and calls
-  `elle_jit_yield_through_call` to build the caller's `SuspendedFrame` and
-  append it to the suspended frame chain. A tail call whose callee yields does
-  the same at the tail call's call site.
+- **Yield-through-call**: When a callee a JIT-compiled function calls yields or
+  raises, or an instruction it runs raises, the JIT detects the signal via the
+  check after it and calls `elle_jit_yield_through_call` to build the caller's
+  `SuspendedFrame` and append it to the suspended frame chain. A tail call
+  whose callee yields or raises does the same at the tail call's call site. A
+  halt builds no frame.
 
 - **Primitive signals**: `jit_handle_primitive_signal` classifies a
   primitive's signal as the interpreter does. A suspending signal parks the
@@ -297,14 +300,15 @@ Key details:
 - **Call depth tracking**: Increments/decrements `call_depth` for stack traces.
 - **Tail call handling**: If the callee returns `TAIL_CALL_SENTINEL`, the
   pending tail call is executed via `execute_bytecode_saving_stack`.
-- **Exception propagation**: Checks `fiber.signal` for `SIG_ERROR` after call.
+- **Signal propagation**: The caller's check after the call finds the callee's
+  signal and parks, or returns on a halt.
 
 ## Error Handling in Dispatch
 
 All dispatch helpers (`elle_jit_call`, `elle_jit_tail_call`) set `vm.fiber.signal` to `(SIG_ERROR, error_value)` on
-error and return `TAG_NIL`. The JIT checks for pending error signals after each
-call via `elle_jit_has_exception` (which checks `fiber.signal` for `SIG_ERROR`).
-No errors are silently swallowed.
+error and return `TAG_NIL`. The JIT checks for a pending signal after each call
+via `elle_jit_has_signal`. It parks the frame on any signal but a halt, an
+error included, and returns on a halt. No errors are silently swallowed.
 
 ## Invariants
 
@@ -427,17 +431,19 @@ JIT derives a `YieldPointMeta` from each as invariant 3 says.
 ### Call Site Recording
 
 During bytecode emission, in a function where `signal.may_suspend()`, each
-call (`Call`, `SuspendingCall`, `CallArrayMut`) and each `TailCall` records a
-`CallSiteInfo` in `Emitter.call_sites`:
-1. `resume_ip` — the bytecode position after the call instruction. For a
+call (`Call`, `SuspendingCall`, `CallArrayMut`), each `TailCall`, and each
+instruction that may raise records a `CallSiteInfo` in `Emitter.call_sites`:
+1. `resume_ip` — the bytecode position after the instruction. For a
    `TailCall` that is where the block a completing native falls through to
    starts
-2. `stack_regs` — the operand stack after the callee and arguments are popped,
-   before the result is pushed
+2. `stack_regs` — the operand stack after the instruction's operands are
+   popped, before its result is pushed
+3. `push_resume_value` — false for an instruction that produces no value
+   (`CheckSignalBound`, `PushParamFrame`), so a restart delivers nothing to it
 
 The JIT reads this metadata to generate yield-through-call code: when a
-callee yields, the JIT builds the caller's `SuspendedFrame` using the recorded
-resume IP and stack state. A tail call parks the same way, so the resume runs
+callee yields or raises, or the instruction raises, the JIT builds the
+caller's `SuspendedFrame` using the recorded resume IP and stack state. A tail call parks the same way, so the resume runs
 the releases after it ([park.md](../../docs/impl/region/park.md)). The
 translator counts the sites in the emitter's order, and a count mismatch
 rejects the compile.
@@ -478,15 +484,11 @@ The JIT emits the same `IncrefValueRegion` / `DecrefValueRegion` /
 `DecrefCellRegion` accounting the interpreter does, so a loop body or a
 self-tail-call boundary needs no separate release step.
 
-An **error** exit runs none of those instructions, so the releases still among
-them run at the exit instead — `elle_jit_release_abandoned_frame`, the compiled
-half of the interpreter's abandoned-frame walk
-([unwind.md](../../docs/impl/region/unwind.md)). The prologue
-materializes the function's two release tables into stack slots, and every error
-exit — the post-call exception check, and an `Emit` of `SIG_ERROR` — hands both
-to the helper with the frame's locals spilled in slot order, ahead of the
-region-map pop. `emit_abandoned_error_return` is the one route out; a new
-error exit that returns directly leaks whatever the tables name.
+An **error** parks the compiled frame as a suspend does, so no compiled exit
+runs those instructions on the frame's behalf. A restart replays them in the
+interpreter, and a discard reads the parked frame's two release tables off its
+`Code` ([unwind.md](../../docs/impl/region/unwind.md)). An exit that returned
+without parking would strand whatever the frame still owed.
 
 `elle_jit_rotate_pools` survives as an exported no-op that nothing calls —
 its vtable `FuncId` carries `#[allow(dead_code)]`. See [callops.rs](calls/callops.rs).

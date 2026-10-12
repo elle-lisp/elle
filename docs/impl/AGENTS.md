@@ -11,6 +11,7 @@ Up: [..](../AGENTS.md)
 - [assessment.md](assessment.md) — **The region roadmap** The region system's plan of work: the state gauges, the fix-selection discipline, the measured dead ends, and the open work in order.
 - [audit.md](audit.md) — **The audit queue** Every file carries the day it last met the documentation policy, and the queue names what to read next by what a stale file costs.
 - [bytecode.md](bytecode.md) — **Bytecode** The bytecode instruction set is a `repr(u8)` enum.
+- [cranelift.md](cranelift.md) — **Cranelift** The JIT and the WASM backend share one Cranelift code generator, which every build compiles optimized.
 - [differential.md](differential.md) — **Differential Tier Testing** A correct closure returns the same value on every execution tier that accepts it, and `compile/run-on` is how a test asks each tier.
 - [dissolution.md](dissolution.md) — **Dissolution — HOF loop fusion** The pass that turns a higher-order call over a proven array into a loop with the function's body spliced in.
 - [escape.md](escape.md) — **Escape analysis — the authoritative true-escape pass** Escape analysis decides, once for every consumer, whether a value outlives the activation it was born in.

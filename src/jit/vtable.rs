@@ -104,7 +104,6 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) store_capture: FuncId,
     pub(crate) call: FuncId,
     pub(crate) tail_call: FuncId,
-    pub(crate) has_exception: FuncId,
     pub(crate) pop_param_frame: FuncId,
     pub(crate) call_array: FuncId,
     pub(crate) tail_call_array: FuncId,
@@ -141,9 +140,6 @@ pub(crate) struct RuntimeHelpers {
     /// Free the current activation's owner node at the compiled `Return` path —
     /// the JIT twin of the interpreter trampoline's clean-break release.
     pub(crate) release_activation_dues: FuncId,
-    /// Run the releases this compiled activation still owed at an **error** exit
-    /// — the compiled entry to the interpreter's abandoned-frame walk.
-    pub(crate) release_abandoned_frame: FuncId,
     /// Free a co-owned region group as one unit — the `FreeRegionGroup`
     /// instruction's JIT helper, mirroring `handle_free_region_group`.
     pub(crate) free_region_group: FuncId,
@@ -152,7 +148,7 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) resolve_alloc_region: FuncId,
     /// The mint-or-reuse variant of `resolve_alloc_region`, selected at emit time
     /// for a slot in `LirView::merged_slots` (builder-idiom merge;
-    /// docs/impl/region/merging.md § Merging).
+    /// docs/impl/region/merging.md).
     pub(crate) resolve_alloc_region_merged: FuncId,
     #[allow(dead_code)]
     pub(crate) rotate_pools: FuncId,

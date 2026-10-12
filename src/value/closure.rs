@@ -1,12 +1,17 @@
 // audited: 2026-10-06
-// docs/impl/region/template.md
 //! Closure type for the Elle runtime
+//!
+//! docs/impl/region/template.md
+//! docs/signals/inference.md
 //!
 //! `Closure` pairs a template with a captured environment and an optional
 //! per-instance squelch mask. When non-zero, `squelch_mask` modifies the
 //! effective signal: squelched bits are cleared and `SIG_ERROR` is added
 //! (only when the closure could actually emit them). Use `effective_signal()`
 //! externally; `template.signal()` is the underlying code's signal.
+//!
+//! What a call boundary enforces is a [`Boundary`]: the instance's squelch, and
+//! the proof of the function when it is inferred silent.
 //!
 //! A code object is two things — a region-resident [`CodePayload`] in its
 //! compile unit's code region, and the [`ClosureTemplate`] header a closure
@@ -18,12 +23,14 @@ use crate::value::region_slice::RegionSlice;
 use crate::value::Value;
 
 mod arena;
+mod boundary;
 mod builder;
 mod header;
 mod payload;
 mod unit;
 
 pub use arena::{CodeArena, PayloadParts, WasmClosureMeta};
+pub use boundary::Boundary;
 pub use builder::CodeBuilder;
 pub use header::ClosureTemplate;
 pub use payload::{

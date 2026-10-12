@@ -1,6 +1,6 @@
 # Design Philosophy
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-10-05 -->
 
 Why Elle infers signals instead of asking for them, and the gap that leaves
 between what the compiler knows and what a reader sees.
@@ -10,7 +10,8 @@ between what the compiler knows and what a reader sees.
 The compiler infers a signal for every function. A function whose body cannot
 signal is silent with no annotation. A function that uses generic arithmetic
 may raise `:error`, because `+` rejects a non-number. A function that calls a
-parameter takes its signal from the argument: it is polymorphic.
+parameter takes its signal from the argument: it is polymorphic. The call
+itself may raise too, since nothing checked the argument count.
 
 ```lisp
 (def a (compile/analyze "
@@ -22,6 +23,7 @@ parameter takes its signal from the argument: it is polymorphic.
 (assert (= |:error| (get (compile/signal a :add) :bits)) "add may raise :error")
 (assert (= |0| (get (compile/signal a :call) :propagates))
         "call takes its signal from parameter 0")
+(assert (= |:error| (get (compile/signal a :call) :bits)) "and may raise")
 ```
 
 The signal decides the calling convention. A call whose callee may yield, do
@@ -40,42 +42,45 @@ most callbacks, at every `map`, every `ev/spawn` and every handler. Elle
 charges the annotation to the minority case instead: the code that must not
 suspend.
 
-`(silence f)` bounds the parameter `f`. The function is then silent with
-respect to `f`, and a closure that may signal fails a check at entry:
+`(bound f ||)` bounds the parameter `f` to silence. The function then takes
+no signal from `f`, and a closure that may signal fails a check at entry, or a
+compile error where the compiler knows the argument's signal. The check may
+raise, so the function carries `:error` and nothing else:
 
 ```lisp
 (defn apply-silent [f x]
-  (silence f)
+  (bound f ||)
   (f x))
 
 (assert (= 42 (apply-silent (fn [x] x) 42)) "a silent closure passes")
 
-(def [ok? err] (protect (apply-silent (fn [x] (yield x)) 42)))
+(def opaque @[(fn [x] (yield x))])
+(def [ok? err] (protect (apply-silent (get opaque 0) 42)))
 (assert (not ok?) "a yielding closure fails the entry check")
 (assert (= :signal-violation (get err :error)))
 ```
 
-## Silence means no signal at all
+## Silent means no signal at all
 
-`(silence)` with no argument declares that the function emits nothing,
-`:error` included. It fits a body that cannot fail: branching, locals, and
-the `%` intrinsics on values already known to be numbers. The compiler
-rejects a `(silence)` body that may signal.
+`(silent!)` declares that the function emits nothing, `:error` included. It
+fits a body that cannot fail: branching, locals, and the `%` intrinsics on
+values already known to be numbers. The compiler rejects a `(silent!)` body
+that may signal.
 
 ```lisp
 (defn select [flag a b]
-  (silence)
+  (silent!)
   (if flag a b))
 
 (assert (= 1 (select true 1 2)))
 
-(def [ok? err] (protect (eval '(fn [x y] (silence) (+ x y)))))
-(assert (not ok?) "generic + may raise :error, so (silence) rejects it")
+(def [ok? err] (protect (eval '(fn [x y] (silent!) (+ x y)))))
+(assert (not ok?) "generic + may raise :error, so (silent!) rejects it")
 (assert (string/contains? (get err :message) "body may emit {:error}"))
 ```
 
 A function that may fail but must not suspend declares `(attune! :error)`,
-which sets the ceiling to `:error` alone. See
+and the compiler checks that the body emits nothing else. See
 [signals/inference.md](signals/inference.md) for every declaration form.
 
 ## The gap is visibility
@@ -101,13 +106,13 @@ query. See [Agent Reasoning in Elle](analysis/agent-reasoning.md).
 ## Reasoning about a call
 
 - A function that calls a parameter is polymorphic, unless it bounds that
-  parameter with `(silence f)`.
-- A function that does I/O, or uses fibers through `ev/spawn` or `ev/join`,
-  may yield.
+  parameter with `(bound f spec)`, and it may raise `:error`.
+- A function that does I/O, or waits on a fiber through `ev/join`, may
+  suspend.
 - A function's signal is at least the union of its callees' signals.
 - Generic arithmetic, `get` and `assert` may raise `:error`.
 
-Declare `(silence)` where the contract matters to callers, or where a hot path
+Declare `(silent!)` where the contract matters to callers, or where a hot path
 must not suspend. It is a contract, not a default.
 
 ## See also

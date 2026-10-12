@@ -1,6 +1,6 @@
 # Elle Quickstart
 
-<!-- audited: 2026-09-26 -->
+<!-- audited: 2026-10-05 -->
 
 Elle is a Lisp with lexical scope, closures, and a signal system.
 
@@ -57,7 +57,7 @@ make smoke ELLE=./target/release/elle ELLE_RIG=./target/release/elle-rig CARGO_P
 | [loops](docs/loops.md) | while, forever, each, repeat |
 | [match](docs/match.md) | Pattern matching with guards |
 | [errors](docs/errors.md) | error, try/catch, protect, defer, with |
-| [signals](docs/signals/index.md) | Signal system, silence, squelch |
+| [signals](docs/signals/index.md) | Signal system, `silent!`, `bound`, `squelch` |
 | [fibers](docs/signals/fibers.md) | Fiber basics, signal masks, status |
 | [concurrency](docs/concurrency.md) | ev/spawn, ev/join, ev/race, ev/scope, processes |
 | [threads](docs/threads.md) | OS threads, channels |

@@ -175,8 +175,9 @@ impl<'a> Lowerer<'a> {
         self.head().num_local_params = num_local_params;
 
         // Each param is an OWNED binding: the analysis gave it a placeholder
-        // region in `call_result_regions` (see the Lambda arm of `regions.rs`).
-        // Record `region_to_slot[param_r] = slot` so `emit_decrefs_for` can
+        // region in `call_result_regions` (the Lambda arm of
+        // src/hir/region/infer/walk.rs). Record `region_to_slot[param_r] = slot`
+        // so `emit_decrefs_for` can
         // release it at the param's true last use. `binding_to_slot` already
         // holds the right slot for each kind:
         //   - non-captured param → a LOCAL slot; released `LoadLocal` +
@@ -247,8 +248,7 @@ impl<'a> Lowerer<'a> {
         // the `TailCall` for every param the call does not name — an unused param
         // is by definition not one of its arguments, but the exemption is what
         // keeps a param used ONLY as such an argument out of the hoist
-        // (docs/impl/region/mechanism.md § "A release past a frame-replacing tail
-        // call is not a release").
+        // (docs/impl/region/mechanism.md).
         //
         // The nil stamp is what makes the release SELF-CANCELLING, and with it
         // replicable into the arms of a branch the body ends in: whichever copy a
@@ -286,7 +286,6 @@ impl<'a> Lowerer<'a> {
         let head = self.head();
         head.entry = Label(0);
         head.num_regs = num_regs;
-        // Propagate inferred signal to LIR function
         head.signal = inferred_signal;
 
         self.current_function_binding = None;

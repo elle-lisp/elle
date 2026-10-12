@@ -1,6 +1,6 @@
 # Scheduler
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-11 -->
 
 The async scheduler is the only supported execution backend, and user code runs inside it automatically.
 
@@ -250,8 +250,8 @@ A fiber the scheduler runs can park on a capability denial, because it carries
 the withheld set of the fiber that spawned it. The scheduler is not the fiber
 that imposed the denial, so it refuses the call: `fiber/refuse` raises the
 denial payload at the fiber's own call site, and the fiber either catches it or
-ends `:error`. [capabilities.md](signals/capabilities.md) states the rule and
-the mask bits that carry a denial to the scheduler.
+ends `:error`. [mediation.md](signals/mediation.md) states the rule and the
+mask bits that carry a denial to the scheduler.
 
 ---
 

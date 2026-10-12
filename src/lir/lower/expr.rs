@@ -112,10 +112,9 @@ impl<'a> Lowerer<'a> {
             HirKind::QuoteConst(template) => {
                 // Quoted compound data is an ordinary allocation: materialize a
                 // FRESH structure from the template into this literal's OWN
-                // solver-assigned region each execution (docs/impl/region/model.md
-                // § "Constants lower as ordinary allocations"). `emit_alloc` stamps the
-                // region (arming its `DecrefRegion` at `decref_point`), exactly
-                // like `HirKind::String`.
+                // solver-assigned region each execution (docs/impl/region/model.md).
+                // `emit_alloc` stamps the region (arming its `DecrefRegion` at
+                // `decref_point`), exactly like `HirKind::String`.
                 Ok(self.emit_materialize(template))
             }
             HirKind::Cond {

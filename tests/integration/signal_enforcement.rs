@@ -1,4 +1,6 @@
-// Integration tests for interprocedural signal tracking and enforcement
+// audited: 2026-10-05
+// Interprocedural signal tracking: the shared setup for the signal enforcement tests.
+// docs/signals/inference.md
 //
 // These tests verify that signals propagate correctly across function boundaries:
 // - Direct yield has Yields signal
@@ -7,7 +9,8 @@
 // - Silent functions remain silent
 // - assign invalidates signal tracking
 // - Unknown callees use Signal::unknown() (sound conservative)
-// - Parameter calls are purely polymorphic (no inherent error)
+// - A call to a parameter is polymorphic, and may raise: the compiler cannot
+//   check its argument count
 //
 // This file is a coordinator: it holds the shared `use` imports and free
 // helpers, then `include!`s the themed test subfiles. Each subfile opens with
@@ -16,7 +19,7 @@
 
 use elle::hir::HirKind;
 use elle::primitives::register_primitives;
-use elle::signals::{Signal, SIG_OK, SIG_YIELD};
+use elle::signals::{Signal, SIG_ERROR, SIG_YIELD};
 use elle::symbol::SymbolTable;
 use elle::vm::VM;
 
@@ -56,7 +59,12 @@ fn analyze_with_stdlib(
 ) -> Result<elle::pipeline::AnalyzeResult, String> {
     let mut cctx = elle::pipeline::CompileCtx::new();
     vm.set_symbols(symbols as *mut SymbolTable);
-    elle::init_stdlib(vm, symbols, &mut cctx, &elle::compiler::stdlib_cache::StdlibCache::Off);
+    elle::init_stdlib(
+        vm,
+        symbols,
+        &mut cctx,
+        &elle::compiler::stdlib_cache::StdlibCache::Off,
+    );
     elle::pipeline::analyze(source, symbols, vm, &mut cctx, source_name)
 }
 

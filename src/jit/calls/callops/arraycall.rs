@@ -351,7 +351,7 @@ fn jit_tail_call_inner(
             code: closure.template.code(),
             env: new_env,
             closure: func,
-            squelch_mask: closure.squelch_mask,
+            boundary: crate::value::closure::Boundary::of(closure),
         });
         // Hand both stranded releases to the activation that runs the callee. This
         // activation is the compiled caller's, and it pops its own dues slot on the

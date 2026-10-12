@@ -68,6 +68,8 @@ melior = { version = "0.27", optional = true }
 criterion = "0.5"
 proptest = "1.4"
 stats_alloc = { version = "0.1.10", features = ["nightly"] }
+# Reads the WASM backend's emitted code back in its tests.
+wasmparser = "0.246"
 
 [features]
 default = ["jit", "ffi", "uring"]

@@ -1,6 +1,7 @@
 // audited: 2026-10-06
 //! Cache the compiled standard library on disk, so a later process
 //! deserializes it instead of running the front end again.
+//!
 //! docs/impl/stdlib-cache.md
 
 use crate::signals::Signal;
@@ -9,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Version tag: bump when the serialized layout changes in an incompatible way.
-const FORMAT_VERSION: u32 = 8;
+const FORMAT_VERSION: u32 = 9;
 
 /// Bytes of payload hash a cache file carries ahead of its `StoredBytecode`.
 const PAYLOAD_HASH_BYTES: usize = 8;

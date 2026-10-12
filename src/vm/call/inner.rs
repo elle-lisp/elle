@@ -181,7 +181,7 @@ impl VM {
 
             // A compiled callee runs as a native call nested on the Rust stack.
             // While that stack is low, the callee runs here instead, on fiber
-            // frames (docs/impl/vm.md § "What still uses the Rust stack").
+            // frames (docs/impl/vm.md).
             #[cfg(any(feature = "jit", feature = "wasm", feature = "mlir"))]
             let compiled_room =
                 !crate::vm::native_stack::below(crate::vm::native_stack::COMPILED_CALL_RESERVE);
@@ -220,13 +220,10 @@ impl VM {
                 if let Some(bits) = self.try_jit_call(closure, &args, func, param_depth) {
                     self.fiber.call_depth -= 1;
                     self.fiber.call_stack.pop();
-                    // A compiled callee's frames are abandoned by its raise,
-                    // and the `parameterize` frames they pushed with them.
-                    self.drop_abandoned_param_frames(param_depth);
                     match bits {
-                        Some(sig) if !sig.intersects(SIG_ERROR) && !sig.intersects(SIG_HALT) => {
-                            // JIT function suspended — any bits except SIG_ERROR/SIG_HALT
-                            // cause the caller frame to be appended for resumption.
+                        Some(sig) if !sig.intersects(SIG_HALT) => {
+                            // The compiled callee parked: any bits but a halt, an
+                            // error included, append the caller frame for resumption.
                             // fiber.signal and fiber.suspended are set by the JIT yield
                             // helpers. Build the interpreter-level caller frame.
                             // Use unwrap_or_default() so this works whether the JIT callee
@@ -247,7 +244,7 @@ impl VM {
                                 // `activation_region_maps.last()`) is the caller's.
                                 // MOVE what the caller's activation owes into its park — this
                                 // activation unwinds with the suspending signal
-                                // (docs/impl/region/owner.md § "Owner nodes").
+                                // (docs/impl/region/owner.md).
                                 let caller_dues = self.take_activation_dues();
                                 // The JIT callee suspended without entering an
                                 // interpreter activation, so `current_closure` is
@@ -308,19 +305,16 @@ impl VM {
             // Hand the callee to the dispatch loop's driver, which pauses this
             // caller in the fiber and runs the callee on the same loop; the
             // callee's closure value becomes its executing-closure register
-            // (docs/impl/vm.md § "Non-tail calls"). What completing the call
+            // (docs/impl/vm.md). What completing the call
             // needs to know about the callee is read here, while `func` is
             // certainly live.
-            let signal = closure.template.signal();
             self.pending_call = Some(crate::vm::core::PendingCall {
                 code: closure.template.code(),
                 env: new_env_rc,
                 closure: func,
                 call_ip: instr_ip,
                 site: crate::value::fiber::CallSite {
-                    squelch_mask: closure.squelch_mask,
-                    silent: signal.bits.is_empty() && signal.propagates == 0,
-                    name: closure.template.name(),
+                    boundary: crate::value::closure::Boundary::of(closure),
                 },
             });
             return Some(SIG_OK);

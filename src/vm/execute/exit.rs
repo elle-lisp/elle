@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-06
 //! How an activation ends: the dispatch loop's `Exit`, and the `ExecResult` a
 //! closed activation hands to whoever parks or completes it.
 //!
@@ -9,8 +9,8 @@ use crate::value::{SignalBits, Value};
 use std::rc::Rc;
 
 /// How one activation's dispatch loop exited: the signal, the ip it stopped
-/// at, and, for an error, where the raise happened (docs/impl/vm.md § "The
-/// error exit"). The site rides out to the fiber boundary, which records what a
+/// at, and, for an error, where the raise happened (docs/impl/vm.md). The site
+/// rides out to the code that parks the raising frame, which records what a
 /// restart delivers into.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Exit {
@@ -80,7 +80,7 @@ pub(crate) struct ExecResult {
     /// `complete_call`. A suspend handler that parked the frame itself (the
     /// yield path) already took the record, so this reads default there — the
     /// move discipline holds. Always default for `execute_bytecode_from_ip`
-    /// (`replay_suspended` manages the slot directly).
+    /// (`resume_suspended` manages the slot directly).
     pub activation_dues: ActivationDues,
     /// The executing-closure register (`fiber.current_closure`) at the moment the
     /// activation ended — the callee's value, possibly re-installed by tail calls

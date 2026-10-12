@@ -1,11 +1,12 @@
-// audited: 2026-09-29
-//! The suspension frames a WASM closure saves when it yields, kept per fiber in the host.
+// audited: 2026-10-06
+//! The frames a fiber parks on this tier, kept per fiber in the host: a
+//! compiled closure's saved state, and a bytecode callee's parked chain.
 //!
 //! docs/impl/wasm.md
 
 use super::ElleHost;
 use crate::value::fiber::SignalBits;
-use crate::value::Value;
+use crate::value::{SuspendedFrame, Value};
 
 /// Saved state for a suspended WASM closure.
 ///
@@ -45,9 +46,69 @@ pub struct WasmSuspensionFrame {
     pub redrive_child: Option<Value>,
 }
 
+/// The chain a bytecode callee parked, lifted off the driving VM's fiber.
+///
+/// A compiled call reaches a closure the module never compiled through the
+/// host VM (`linker::run_bytecode_closure`), on the VM's own fiber. A park
+/// there leaves the callee's frames and the `parameterize` frames it pushed on
+/// that fiber, which is not the fiber this tier drives. The bridge moves both
+/// here, so the chain resumes with the fiber that parked it, innermost first,
+/// before the compiled caller parked behind it (`linker::resume_bytecode_park`).
+pub struct BytecodePark {
+    /// The callee's frames, innermost first, as `VM::resume_suspended` takes them.
+    pub frames: Vec<SuspendedFrame>,
+    /// The `parameterize` frames the callee pushed and had not popped.
+    pub param_frames: Vec<Vec<(u32, Value)>>,
+    /// Whether the resume value owes the `ResumeDelivery` mint that the
+    /// delivery ledger recorded for the park (`Delivery::take_resume_funding`).
+    pub unfunded: bool,
+    /// The signal the chain parked on.
+    pub signal: SignalBits,
+}
+
+impl BytecodePark {
+    /// End a chain that will never resume: run what each frame owed, through
+    /// the VM's chokepoint for discarded frames, leaving `payload` standing.
+    fn discard(self, heap: &mut crate::value::fiberheap::FiberHeap, payload: Value) {
+        let dues = crate::value::fiber::ParkedDues::of(self.frames);
+        crate::vm::fiber::release_parked_dues(heap, dues, Some(payload), None);
+    }
+}
+
+/// One frame of a fiber's parked chain on this tier.
+pub enum ParkedFrame {
+    /// A compiled closure's frame, saved by `rt_yield`.
+    Wasm(WasmSuspensionFrame),
+    /// A bytecode callee's chain, lifted off the VM's fiber.
+    Bytecode(BytecodePark),
+}
+
+impl ParkedFrame {
+    fn signal(&self) -> SignalBits {
+        match self {
+            ParkedFrame::Wasm(f) => SignalBits::new(f.signal_bits),
+            ParkedFrame::Bytecode(p) => p.signal,
+        }
+    }
+
+    fn as_wasm(&self) -> Option<&WasmSuspensionFrame> {
+        match self {
+            ParkedFrame::Wasm(f) => Some(f),
+            ParkedFrame::Bytecode(_) => None,
+        }
+    }
+
+    fn as_wasm_mut(&mut self) -> Option<&mut WasmSuspensionFrame> {
+        match self {
+            ParkedFrame::Wasm(f) => Some(f),
+            ParkedFrame::Bytecode(_) => None,
+        }
+    }
+}
+
 impl ElleHost {
-    /// Push a suspension frame for the current fiber (appends to back).
-    pub fn push_suspension_frame(&mut self, frame: WasmSuspensionFrame) {
+    /// Push a frame onto the current fiber's chain (appends to back).
+    pub fn push_parked(&mut self, frame: ParkedFrame) {
         let id = self.current_fiber_id();
         self.suspension_frames
             .entry(id)
@@ -55,8 +116,8 @@ impl ElleHost {
             .push_back(frame);
     }
 
-    /// Pop the front suspension frame for the current fiber (innermost first).
-    pub fn pop_suspension_frame(&mut self) -> Option<WasmSuspensionFrame> {
+    /// Pop the front frame of the current fiber's chain (innermost first).
+    pub fn pop_parked(&mut self) -> Option<ParkedFrame> {
         let id = self.current_fiber_id();
         let frames = self.suspension_frames.get_mut(&id)?;
         let frame = frames.pop_front();
@@ -66,39 +127,77 @@ impl ElleHost {
         frame
     }
 
-    /// Get the front suspension frame for the current fiber (innermost).
-    pub fn first_suspension_frame(&self) -> Option<&WasmSuspensionFrame> {
+    /// Pop the front frame of the current fiber's chain when it is a bytecode
+    /// callee's chain.
+    pub fn pop_bytecode_park(&mut self) -> Option<BytecodePark> {
         let id = self.current_fiber_id();
-        self.suspension_frames.get(&id)?.front()
+        let front = self.suspension_frames.get(&id)?.front()?;
+        if front.as_wasm().is_some() {
+            return None;
+        }
+        match self.pop_parked() {
+            Some(ParkedFrame::Bytecode(park)) => Some(park),
+            _ => unreachable!("the front frame was a bytecode park"),
+        }
     }
 
-    /// Get the front suspension frame for the current fiber (innermost, mutable).
+    /// End every frame fiber `id` parked, running what a bytecode chain among
+    /// them owed. `payload` is the value that leaves with the discard, whose
+    /// region no release here may take. Fiber ids are addresses, so a fiber
+    /// that starts anew may find the chain of a dead fiber that never resumed.
+    pub fn discard_parked(&mut self, id: usize, payload: Value) {
+        let Some(frames) = self.suspension_frames.remove(&id) else {
+            return;
+        };
+        let heap = unsafe { &mut *self.heap_ptr() };
+        for frame in frames {
+            if let ParkedFrame::Bytecode(park) = frame {
+                park.discard(heap, payload);
+            }
+        }
+    }
+
+    /// The front frame of the current fiber's chain (innermost), when it is a
+    /// compiled closure's.
+    pub fn first_suspension_frame(&self) -> Option<&WasmSuspensionFrame> {
+        let id = self.current_fiber_id();
+        self.suspension_frames.get(&id)?.front()?.as_wasm()
+    }
+
+    /// The front frame of the current fiber's chain (innermost, mutable), when
+    /// it is a compiled closure's.
     pub fn first_suspension_frame_mut(&mut self) -> Option<&mut WasmSuspensionFrame> {
         let id = self.current_fiber_id();
-        self.suspension_frames.get_mut(&id)?.front_mut()
+        self.suspension_frames
+            .get_mut(&id)?
+            .front_mut()?
+            .as_wasm_mut()
     }
 
     /// The signal on the most recently pushed frame for the current fiber.
     ///
-    /// `handle_wasm_result` classifies an `Emit` with this. An `Emit` terminator
-    /// carries whatever the emission raised — `(yield v)` and `(error …)` alike
-    /// route through `rt_yield` — so "the function returned a non-zero status"
-    /// does not by itself mean it parked. This is the back frame rather than the
-    /// front because the front may still be a stale outer frame from a previous
-    /// suspension until `drive_resume_chain` rotates.
+    /// `handle_wasm_result` classifies a park with this. A function that
+    /// returned a non-zero status parked, and the frame it pushed says on
+    /// what: a yield, an error, an io request. This is the back frame rather
+    /// than the front because the front may still be a stale outer frame from
+    /// a previous suspension until `drive_resume_chain` rotates.
     pub fn back_suspension_frame_signal(&self) -> Option<SignalBits> {
         let id = self.current_fiber_id();
         self.suspension_frames
             .get(&id)?
             .back()
-            .map(|f| SignalBits::new(f.signal_bits))
+            .map(ParkedFrame::signal)
     }
 
-    /// Get the back suspension frame for the current fiber (most recently pushed).
-    /// Used by handle_wasm_result to update the frame that rt_yield just pushed.
+    /// The most recently pushed frame for the current fiber, when it is a
+    /// compiled closure's. `handle_wasm_result` updates the frame `rt_yield`
+    /// just pushed.
     pub fn back_suspension_frame_mut(&mut self) -> Option<&mut WasmSuspensionFrame> {
         let id = self.current_fiber_id();
-        self.suspension_frames.get_mut(&id)?.back_mut()
+        self.suspension_frames
+            .get_mut(&id)?
+            .back_mut()?
+            .as_wasm_mut()
     }
 
     /// The child fiber the current fiber's FRONT frame must re-drive before

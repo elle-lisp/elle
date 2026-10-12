@@ -175,9 +175,8 @@ impl VM {
         let deferred_release_slot = StaticRegion::new(self.read_u32(bytecode, ip));
         // The borrowed-argument stash slots. Decoded unconditionally so `ip`
         // stays aligned; a SIGNAL exit consumes their retains
-        // (docs/impl/region/mechanism.md § "What the fall-through owes, a signal
-        // exit owes too") and the normal fall-through ignores them — it runs the
-        // block's own `DecrefValueRegion`s.
+        // (docs/impl/region/signalexit.md), and the normal fall-through ignores
+        // them — it runs the block's own `DecrefValueRegion`s.
         let borrowed_count = self.read_u8(bytecode, ip) as usize;
         let mut borrowed_arg_slots = Vec::with_capacity(borrowed_count);
         for _ in 0..borrowed_count {
@@ -366,6 +365,7 @@ impl VM {
         // Execute the closure bytecode, saving/restoring the caller's stack.
         // The one-shot hands the body its executing-closure register.
         self.pending_entry_closure = closure_val;
+        let depth = self.fiber.param_depth();
         let result = self.execute_bytecode_saving_stack(&closure.template.code(), &new_env);
 
         let bits = result.bits;
@@ -380,6 +380,9 @@ impl VM {
                 Err(self.format_error_with_location(value))
             }
         } else if bits.intersects(crate::value::SIG_ERROR) {
+            // The error parked the closure's chain, which this host cannot
+            // hold.
+            self.discard_hosted_error(bits, depth);
             let (_, err) = self
                 .fiber
                 .signal
@@ -387,8 +390,9 @@ impl VM {
                 .unwrap_or((crate::value::SIG_ERROR, Value::NIL));
             Err(self.format_error_with_location(err))
         } else {
-            // Unexpected suspending signal (yield from macro body — not supported).
-            self.fiber.signal.take();
+            // Unexpected suspending signal (yield from macro body — not
+            // supported). This host cannot hold the park, so it refuses it.
+            self.refuse_hosted_park(bits, depth);
             Err(format!(
                 "Unexpected signal from macro transformer: {}",
                 crate::signals::registry::format_bits(bits)
@@ -400,5 +404,7 @@ impl VM {
 mod collection;
 pub(crate) use collection::call_collection;
 
+#[cfg(test)]
+mod proof_tests;
 #[cfg(test)]
 mod tests;

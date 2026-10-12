@@ -121,7 +121,7 @@ impl WasmEmitter {
             wasm_bytes: module.finish(),
             const_pool: std::mem::take(&mut self.const_pool),
             closure_bytecodes,
-            env_stack_base: super::env_stack_base(lir_module),
+            env_stack_base: super::env_stack_base(lir_module, self.max_spill_slots as usize),
         }
     }
     pub(super) fn emit_single_closure_module(&mut self, func: &LirView<'_>) -> EmitResult {
@@ -176,7 +176,7 @@ impl WasmEmitter {
             wasm_bytes: module.finish(),
             const_pool: std::mem::take(&mut self.const_pool),
             closure_bytecodes: super::super::host::ModuleCode::none(),
-            env_stack_base: super::env_stack_base_for_func(func),
+            env_stack_base: super::env_stack_base_for_func(func, self.max_spill_slots as usize),
         }
     }
     /// Emit the entry function body.
@@ -199,8 +199,8 @@ impl WasmEmitter {
         // Reset the suspend/resume scratch that `emit_cfg` consumes. Closures are
         // emitted before the entry (emit_module_from_lir), and a suspending
         // closure leaves `call_continuations` populated with offsets into ITS
-        // blocks. `emit_cfg` emits one virtual resume block per continuation and
-        // slices `func.blocks[..][instr_offset..]`; against the entry's own
+        // blocks. `emit_cfg` emits one resume entry per continuation and slices
+        // `func.blocks[..][instr_offset..]`; against the entry's own
         // (unrelated, shorter) blocks a stale offset panics. The entry does not
         // suspend to its host caller (`may_suspend = false` above), so the
         // correct state is empty. Pinned by tests/lang/bug-propagate-free-at.lisp
@@ -212,12 +212,16 @@ impl WasmEmitter {
         self.yield_state_map.clear();
         self.call_state_map.clear();
 
-        // The trailing I64 pair is `signal_local` then `suspended_local`
-        // (`WasmEmitter::suspended_local`); they must stay adjacent and last.
+        // `signal_local` then `suspended_local` (`WasmEmitter::suspended_local`)
+        // stay adjacent, and the park pair follows them. The entry never parks,
+        // so the pair only takes what `rt_push_param` hands back.
+        self.park_tag_local = self.signal_local + 2;
+        self.park_pay_local = self.signal_local + 3;
         let mut f = Function::new([
             (n, ValType::I64),
             (n, ValType::I64),
             (1, ValType::I32),
+            (2, ValType::I64),
             (2, ValType::I64),
         ]);
 
@@ -227,13 +231,13 @@ impl WasmEmitter {
     }
     /// Emit a closure function body.
     pub(super) fn emit_closure_function(&mut self, func: &LirView<'_>) -> Function {
-        // A suspending closure ends a block after each suspending call, so its
-        // CPS resume blocks start at a block boundary rather than copying the
-        // rest of the block once per call.
+        // A closure that may signal ends a block after each park site, so a
+        // site's resume entry starts at a block boundary rather than copying the
+        // rest of the block once per site.
         let split;
         let split_view;
         let func = if func.signal().may_suspend() {
-            split = func.split_after(|op| matches!(op, Op::SuspendingCall | Op::CallArrayMut));
+            split = func.split_after(super::super::suspend::ParkSite::at);
             split_view = split.view();
             &split_view
         } else {
@@ -283,13 +287,26 @@ impl WasmEmitter {
 
         let m = self.num_stack_locals;
         self.signal_local = 4 + 2 * n + 2 * m;
+        // Past signal_local, suspended_local, and the three I32 tail-call
+        // scratch locals (see `emit_tail_call_dispatch`): the resume pair and
+        // the park pair. Every closure declares them all, so one layout serves.
+        self.resume_tag_local = self.signal_local + 5;
+        self.resume_pay_local = self.signal_local + 6;
+        self.park_tag_local = self.signal_local + 7;
+        self.park_pay_local = self.signal_local + 8;
+        let locals = [
+            (n, ValType::I64),
+            (n, ValType::I64),
+            (m, ValType::I64),
+            (m, ValType::I64),
+            (2, ValType::I64),
+            (3, ValType::I32),
+            (2, ValType::I64),
+            (2, ValType::I64),
+        ];
 
         if self.may_suspend {
-            // Past signal_local, suspended_local, and the three I32 tail-call
-            // scratch locals (see `emit_tail_call_dispatch`).
-            self.resume_tag_local = 4 + 2 * n + 2 * m + 5;
-            self.resume_pay_local = 4 + 2 * n + 2 * m + 6;
-
+            self.max_spill_slots = self.max_spill_slots.max(n + m);
             self.pre_scan_resume_states(func);
             self.next_resume_state = 1;
 
@@ -323,31 +340,10 @@ impl WasmEmitter {
                     eprintln!("[emit]     term: {:?}", block.terminator());
                 }
             }
-
-            let mut f = Function::new([
-                (n, ValType::I64),
-                (n, ValType::I64),
-                (m, ValType::I64),
-                (m, ValType::I64),
-                (2, ValType::I64),
-                (3, ValType::I32),
-                (2, ValType::I64),
-            ]);
-            self.emit_cfg(&mut f, func);
-            f.instruction(&Instruction::End);
-            f
-        } else {
-            let mut f = Function::new([
-                (n, ValType::I64),
-                (n, ValType::I64),
-                (m, ValType::I64),
-                (m, ValType::I64),
-                (2, ValType::I64),
-                (3, ValType::I32),
-            ]);
-            self.emit_cfg(&mut f, func);
-            f.instruction(&Instruction::End);
-            f
         }
+        let mut f = Function::new(locals);
+        self.emit_cfg(&mut f, func);
+        f.instruction(&Instruction::End);
+        f
     }
 }

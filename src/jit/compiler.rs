@@ -3,9 +3,10 @@
 //! `JitCompiler`: the Cranelift module a compile owns, and the two entry points
 //! that drive one frozen function through it.
 //!
-//! `compile` produces native code and the `JitCode` that keeps it alive;
-//! `clif_text` stops at the rendered Cranelift IR, for diagnostics. `compile`
-//! refuses two shapes, and the refusals are the whole of what admission asks.
+//! `compile` produces native code and the `JitCode` that keeps it alive, and
+//! refuses the two shapes `LirView::jit_refusal` names; those refusals are
+//! the whole of what admission asks. `clif_text` stops at the rendered
+//! Cranelift IR, for diagnostics, and renders whatever it is handed.
 
 use std::collections::HashMap;
 
@@ -18,7 +19,6 @@ use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{Linkage, Module};
 
-use crate::lir::code::Op;
 #[cfg(test)]
 use crate::lir::LirOwned;
 use crate::lir::{Label, LirView};
@@ -99,27 +99,11 @@ impl JitCompiler {
     pub fn compile(mut self, lir: &LirView<'_>) -> Result<JitCode, JitError> {
         // Polymorphic and yielding functions are supported via side-exit.
         // The runtime helper elle_jit_call handles arbitrary callables
-        // (closures, arrays, structs), and emit_yield_check_after_call
-        // builds a yield-through-call frame if the callee suspends.
-
-        // Variadic functions with struct/named varargs require fiber access
-        // for error reporting on invalid keyword arguments. The JIT entry
-        // block has no fiber pointer, so these fall back to the interpreter.
-        // VarargKind::List variadics are fully supported (pair loop in entry block).
-        if matches!(lir.arity(), Arity::AtLeast(_))
-            && !matches!(lir.vararg_kind(), crate::hir::VarargKind::List)
-        {
-            return Err(JitError::UnsupportedInstruction(
-                "variadic function with struct/named varargs".to_string(),
-            ));
-        }
-
-        // Functions containing MakeClosure fall back to the interpreter. The
-        // translator has no lowering for one: a closure's code object is a
-        // payload in a code region, and the worker has no heap to write one
-        // into (docs/impl/jit.md). Refusing here skips the translation.
-        if lir.has_op(Op::MakeClosure) {
-            return Err(JitError::UnsupportedInstruction("MakeClosure".to_string()));
+        // (closures, arrays, structs), and the check after each site
+        // (`emit_signal_check`) parks the frame when a signal leaves there. What
+        // the JIT refuses is two shapes, and `--dump=jit` reports the same answer.
+        if let Some(reason) = lir.jit_refusal() {
+            return Err(JitError::UnsupportedInstruction(reason.to_string()));
         }
 
         // Create function signature
@@ -171,6 +155,7 @@ impl JitCompiler {
                 num_spilled: cs.stack_regs.len() as u16,
                 num_locals: cs.num_locals,
                 num_params: lir.num_params() as u16,
+                push_resume_value: cs.push_resume_value,
             })
             .collect();
 

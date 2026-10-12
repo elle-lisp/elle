@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-05
 // Which HIR nodes `Hir::allocates` counts, and so which ones the ANF lift names.
 //
 // docs/impl/anf.md

@@ -12,37 +12,6 @@ fn make_vm() -> VM {
     VM::new()
 }
 
-#[test]
-fn test_has_exception() {
-    crate::value::arena::with_test_region(|| {
-        use crate::primitives::register_primitives;
-        use crate::symbol::SymbolTable;
-
-        let mut symbols = SymbolTable::new();
-        let mut vm = VM::new();
-        let _signals = register_primitives(&mut vm, &mut symbols);
-
-        // Initially no exception
-        let result = elle_jit_has_exception(&mut vm as *mut VM as *mut () as u64);
-        assert_eq!(result, JitValue::bool_val(false));
-
-        // Set an error signal
-        let err = vm.escaping_error("division-by-zero", "test");
-        vm.fiber.signal = Some((crate::value::SIG_ERROR, err));
-
-        // Now should return true
-        let result = elle_jit_has_exception(&mut vm as *mut VM as *mut () as u64);
-        assert_eq!(result, JitValue::bool_val(true));
-
-        // Clear signal
-        vm.fiber.signal = None;
-
-        // Should return false again
-        let result = elle_jit_has_exception(&mut vm as *mut VM as *mut () as u64);
-        assert_eq!(result, JitValue::bool_val(false));
-    });
-}
-
 // -- jit_handle_primitive_signal: composed signal coverage --
 
 #[test]

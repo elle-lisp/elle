@@ -1,6 +1,6 @@
 # Processes
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-05 -->
 
 [lib/process.lisp](../lib/process.lisp) provides Erlang-style concurrent
 processes built on Elle's fiber scheduler. Processes have mailboxes, links,
@@ -61,8 +61,9 @@ scheduler stops, where `r` is the exit reason as a string.
   (assert (= (get err :error) :process-error) "as a process error"))
 ```
 
-`make-scheduler` and `start` take `:fuel`, the instructions a process runs
-before it is preempted, 1000 by default. Neither builds an I/O backend, because
+`make-scheduler` and `start` take `:fuel`, the fuel a process spends before it
+is preempted: one unit at each backward jump and call outside a silent
+function, 1000 by default. Neither builds an I/O backend, because
 a process scheduler forwards its I/O to its parent scheduler (see
 [process-scheduler.md](process-scheduler.md)).
 
@@ -279,7 +280,11 @@ configuration that doesn't belong in the main state.
 
 Processes are cooperatively scheduled with fuel budgets. A CPU-bound
 process gets preempted after exhausting its fuel, allowing other
-processes to run.
+processes to run. A silent function is a proof that nothing stops the fiber,
+so the meter charges nothing while one runs
+([signals/inference.md](signals/inference.md)). A process that loops forever
+inside a silent function is therefore never preempted. The busy-looper below
+uses `+`, which may raise, so it is not silent.
 
 ```lisp
 (process:start (fn []

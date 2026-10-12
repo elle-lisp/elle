@@ -1,6 +1,6 @@
 # emit
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-10-11 -->
 
 `emit` raises a signal from Elle code: a yield, an error, or a signal the program declares.
 
@@ -28,6 +28,21 @@ resolves its bits at compile time and emits the `Emit` instruction:
   (fiber/resume f)
   (assert (= (fiber/value f) :both)))      # a mask catches a set it overlaps
 ```
+
+Inside quoted data, a set literal becomes the list `(set :yield :io)`.
+`emit` reads that list as the set it spells, so an `emit` built as data and
+handed to `eval` compiles as written:
+
+```lisp
+(def quoted-emit (eval '(fn [v] (emit |:yield :io| v))))
+(assert (= |:yield :io| (get (get (fn/signature quoted-emit) :signals) :bits)))
+(let [f (fiber/new (fn [] (quoted-emit :data)) |:yield :io|)]
+  (assert (= (fiber/resume f) :data)))
+```
+
+The list must name the `set` primitive. Where a binding shadows `set`, the
+list is a call to that binding, and `emit` takes its result at run time, as
+for any computed signal (see "Dynamic emit" below).
 
 A literal keyword the registry does not know is a compile error:
 
@@ -134,20 +149,44 @@ This is rare. Prefer literal keywords for compile-time signal inference.
 
 ## Capability interaction
 
-A literal `emit` is a bytecode instruction, not a primitive call, so its
-handler never reads the fiber's withheld set. A fiber raises any bit it
-names that way, including one it withholds. A dynamic `emit` is a call to
-`fiber/emit`, and the capability gate reads the bits its first argument
-names ([authority.md](authority.md)):
+A fiber cannot raise a bit it withholds. When `emit` names one, the signal is
+not raised. The fiber parks on a capability denial instead, exactly as for a
+denied call to the `fiber/emit` primitive. The literal and the dynamic form
+deny alike, and the parent reads the same payload from each:
 
 ```lisp
-(let [f (fiber/new (fn [] (emit :heartbeat :literal))
-                   |:heartbeat| :deny |:heartbeat|)]
-  (assert (= (fiber/resume f) :literal)))   # the literal form is not gated
+(let [f (fiber/new (fn [] (emit :heartbeat 7))
+                   |:heartbeat :error| :deny |:heartbeat|)
+      denial (fiber/resume f)]
+  (assert (= (get denial :error) :capability-denied))
+  (assert (= (get denial :denied) |:heartbeat|))
+  (assert (= (get denial :primitive) "fiber/emit"))
+  (assert (= (get denial :args) [|:heartbeat| 7])))
 
 (let [f (fiber/new (fn [] (emit which :dynamic))
                    |:heartbeat :error| :deny |:heartbeat|)]
-  (assert (= (get (fiber/resume f) :error) :capability-denied)))
+  (assert (= (get (fiber/resume f) :args) [:heartbeat :dynamic])))
 ```
 
-See [capabilities.md](capabilities.md) for the full capability system.
+`:args` holds the signal as the emit named it: the literal form as a keyword
+set, the dynamic form as its first argument. The parent mediates the denial
+as any other. It can raise the signal itself with `(apply (get denial :func)
+(get denial :args))`, and resume the child with the answer, which becomes the
+result of the child's `emit`:
+
+```lisp
+(let [child (fiber/new (fn [] (+ 1 (emit :heartbeat 7)))
+                       |:heartbeat :error| :deny |:heartbeat|)
+      relay (fiber/new (fn []
+                         (let [denial (fiber/resume child)]
+                           (fiber/resume child
+                                         (apply (get denial :func) (get denial :args)))))
+                       |:heartbeat|)]
+  (assert (= (fiber/resume relay) 7))       # the relay raised the heartbeat
+  (assert (= (fiber/resume relay 10) 11)))  # and its answer reached the emit
+```
+
+`yield` and `error` are `emit`, so a fiber that withholds `:yield` cannot
+yield and one that withholds `:error` cannot raise an error. Each parks on the
+denial instead. See [capabilities.md](capabilities.md) for the full capability
+system.

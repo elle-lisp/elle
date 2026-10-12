@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-19
+(elle/epoch 15)
+# audited: 2026-10-06
 # A payload the RUNTIME built is released by the install that displaces it —
 # the soundness face (docs/impl/region/park.md).
 #
@@ -155,6 +155,29 @@
               "payload freed by the abort that displaced it")
       (length (get p :primitive)))))
 
+# ── (h) a denial of `:error`, its fiber dropped or killed while parked ──────
+# A denial of `:error` parks under `SIG_ERROR`, a terminal bit, so its payload
+# also takes a terminal result's park retain, which the fiber's free releases.
+# The discharge releases the allocation's reference beside it, and no more:
+# releasing the reader's as well frees the payload under the parent that holds
+# it. The dropped face reads after the fiber's own region has gone.
+(defn error-denied-body ()
+  (let [r (length "ab")]
+    r))
+(defn w-error-dropped (n)
+  (let [p (let [f (fiber/new error-denied-body |:error| :deny |:error|)]
+            (fiber/resume f))]
+    (assert (= (get p :error) :capability-denied)
+            "an :error denial's payload freed with the fiber dropped while parked")
+    (length (get p :primitive))))
+(defn w-error-cancel (n)
+  (let [f (fiber/new error-denied-body |:error| :deny |:error|)
+        p (fiber/resume f)]
+    (fiber/cancel f :gone)
+    (assert (= (get p :error) :capability-denied)
+            "an :error denial's payload freed by the cancel that killed its fiber")
+    (length (get p :primitive))))
+
 # ── controls — a body-allocated park payload, displaced the same three ways ──
 # Its body owns a reference of its own, so the install owes nothing. A release
 # added here would free the payload under these very reads.
@@ -190,6 +213,8 @@
   (var m 0)
   (var n 0)
   (var p 0)
+  (var q 0)
+  (var s 0)
   (while (%lt i reps)
     (assign a (w-hold-resume i))
     (assign b (w-alias-resume i))
@@ -203,9 +228,11 @@
     (assign k (w-abort i))
     (assign m (c-emit-resume i))
     (assign n (c-emit-refuse i))
+    (assign q (w-error-dropped i))
+    (assign s (w-error-cancel i))
     (assign denials @[])
     (assign i (%add i 1)))
-  (list a b c d e f g h k m n p))
+  (list a b c d e f g h k m n p q s))
 
 (let [r (drive 300)]
   (assert (> (get r 0) 0) "payload freed under a held read past the resume")
@@ -219,6 +246,9 @@
   (assert (> (get r 8) 0) "payload freed under the read past the abort")
   (assert (> (get r 9) 0) "control: emit payload freed by the resume install")
   (assert (> (get r 10) 0) "control: emit payload freed by the refusal install")
-  (assert (> (get r 11) 0) ":io denial's payload released twice at the abort"))
+  (assert (> (get r 11) 0) ":io denial's payload released twice at the abort")
+  (assert (> (get r 12) 0)
+          ":error denial's payload freed with its dropped fiber")
+  (assert (> (get r 13) 0) ":error denial's payload freed by the cancel"))
 
 (println "region-denial-park-uaf: ok")

@@ -4,7 +4,7 @@
 // Signal projection: the compiler extracts signal profiles from exported
 // closures in module files, enabling cross-file signal inference.
 //
-// Compile-time squelch: the analyzer recognizes (squelch f :kw) as a
+// Compile-time squelch: the analyzer recognizes (squelch :kw f) as a
 // signal-narrowing operation and computes the result signal statically.
 //
 // docs/signals/inference.md
@@ -143,12 +143,12 @@ fn test_projection_lambda_returning_struct() {
 
 #[test]
 fn test_squelch_binding_signal_inference() {
-    // (def safe (squelch f :error)) where f has signal {:error}
+    // (def safe (squelch :error f)) where f has signal {:error}
     // should infer safe as silent (squelch removes :error, but since
     // the mask catches all signal bits, the result is just {:error} from squelch itself).
     let source = r#"
 (defn f [x] (+ x 1))
-(def safe (squelch f :error))
+(def safe (squelch :error f))
 safe
 "#;
     let (mut symbols, mut vm) = setup();
@@ -161,18 +161,18 @@ safe
 }
 
 #[test]
-fn test_squelch_set_mask() {
-    // (squelch f |:yield :io|) should handle set masks.
+fn test_squelch_of_a_yielding_closure() {
+    // (squelch :yield f) narrows a yielding closure.
     let source = r#"
 (defn f [] (yield 1))
-(def safe (squelch f :yield))
+(def safe (squelch :yield f))
 safe
 "#;
     let (mut symbols, mut vm) = setup();
     let result = analyze_file(source, &mut symbols, &mut vm, "<test>").unwrap();
     assert!(
         !matches!(result.hir.kind, HirKind::Error),
-        "squelch with set mask should compile"
+        "squelch of a yielding closure should compile"
     );
 }
 
@@ -238,14 +238,14 @@ fn test_projection_yields_function() {
 }
 
 // ============================================================================
-// 4. THE IMPORT PROJECTION PROBE
+// 5. THE IMPORT PROJECTION PROBE
 // ============================================================================
 
 #[test]
 fn import_projection_probe_compiles_the_imported_module() {
     // `((import "…"))` makes the analyzer compile the imported file to read its
-    // signal projection (src/hir/analyze/call.rs § "Import projection
-    // detection"). `compile_file` never executes the import, so the probe is the
+    // signal projection (the import projection detection in
+    // src/hir/analyze/call.rs). `compile_file` never executes the import, so the probe is the
     // only thing that reaches the module's source at all.
     //
     // The trap: `SymbolId::of` derives an id without recording anything, so the
@@ -278,7 +278,7 @@ fn import_projection_probe_compiles_the_imported_module() {
 #[test]
 fn each_keeps_its_collection_when_an_import_probe_expanded_the_macro_first() {
     // The trap: `each` decides whether it was written in `in` form with
-    // `(= (syntax->datum iter-or-in) 'in)` (src/prelude.lisp § each). That `'in`
+    // `(= (syntax->datum iter-or-in) 'in)` (`each` in src/prelude.lisp). That `'in`
     // is a quoted literal in the transformer's own bytecode, and a transformer
     // compiles once, lazily, on its first expansion, then caches on the shared
     // expander (`ensure_transformer`, src/syntax/expand/macro_expand.rs). So

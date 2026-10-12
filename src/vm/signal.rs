@@ -1,5 +1,5 @@
-// audited: 2026-09-29
-//! Primitive signal dispatch.
+// audited: 2026-10-06
+//! Primitive signal dispatch, and the capability gate and denial every native call passes.
 //!
 //! Routes signal bits returned by NativeFn primitives to the appropriate
 //! handler: stack push for SIG_OK, error storage for SIG_ERROR, fiber
@@ -7,6 +7,7 @@
 //! for SIG_QUERY.
 //!
 //! docs/impl/region/park.md
+//! docs/signals/authority.md
 
 use crate::signals::dispatch::{classify, SignalAction};
 use crate::value::{BytecodeFrame, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_OK};
@@ -20,12 +21,13 @@ mod modules;
 
 mod config;
 
+mod emit;
+
 impl VM {
     /// Mint the DELIVERY reference of a payload a native call is RAISING, where
     /// the payload is one of the call's own arguments — the shape a dynamic
     /// `emit` takes, its non-literal first argument making the raise an ordinary
-    /// native call (docs/impl/region/park.md § "What yields is the emit
-    /// OPERATION, not the `Emit` node").
+    /// native call (docs/impl/region/park.md).
     ///
     /// The catcher's read of the signal consumes exactly one reference, and every
     /// other reference the raising frame holds answers to that frame's own release
@@ -38,8 +40,7 @@ impl VM {
     /// then takes is theirs to arrange: a tail exit consumes its borrowed-argument
     /// retains and nil-stamps their stashes, while a Call-position site's payload
     /// stash is a recorded value route the replay or the walk runs
-    /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
-    /// still owes").
+    /// (docs/impl/region/mechanism.md).
     ///
     /// A payload the native BUILT — a fresh error struct — is nobody's argument
     /// and funds the delivery with its birth reference, so the identity test is
@@ -68,8 +69,7 @@ impl VM {
     ///
     /// Every such park owes its resume value a mint, because the primitive never
     /// returns. What it owes its payload is the question only this site can
-    /// answer (docs/impl/region/park.md § "A payload the RUNTIME built is
-    /// released by the install that displaces it"). An io op's `IoRequest` is
+    /// answer (docs/impl/region/park.md). An io op's `IoRequest` is
     /// one the op built, and no body reference stands on it, so the install that
     /// displaces it owes a release. The `emit` primitive relaying a child's io
     /// park parks that same request under the same bits, but as one of its own
@@ -176,12 +176,10 @@ impl VM {
                 // This primitive never returns, so the frame's continuation —
                 // the code after the Call, including the call's own result
                 // release — is funded by the delivery instead of by a `Return`
-                // mint (docs/impl/region/park.md § "A delivery into a replayed
-                // frame carries one owning reference"). The payload rides the
+                // mint (docs/impl/region/park.md). The payload rides the
                 // record too: the retain above has no consumer where a boundary
                 // ends the park, and the boundary cannot read the signal slot
-                // for it (§ "A boundary ends a park with no reader and no
-                // install"). An io op's request rides it once more, as the
+                // for it. An io op's request rides it once more, as the
                 // payload the install that displaces it owes a release.
                 self.park_suspending_primitive(bits, value, args);
                 let saved_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
@@ -299,7 +297,9 @@ impl VM {
     /// native paths through `wasm::host::capability_denial`. The
     /// argument-derived term is what lets `io/submit` be denied for the
     /// operation its request carries rather than for the `:error` it declares.
-    /// See docs/signals/authority.md.
+    ///
+    /// A literal `emit` is no call, so no tier's `Emit` handler reaches this
+    /// gate; each asks `VM::emit_blocked` instead.
     pub(crate) fn capability_blocked(
         &self,
         def: &'static crate::primitives::def::PrimitiveDef,
@@ -371,9 +371,8 @@ impl VM {
         // owes, and the payload whose release the displacing install owes —
         // because only this classifier can tell a denial from an `(emit …)`
         // under the same withheld bits (docs/impl/region/park.md), and the
-        // payload once more as the park whose delivery
-        // retain a boundary would have to release (§ "A boundary ends a park
-        // with no reader and no install").
+        // payload once more as the park whose delivery retain a boundary would
+        // have to release.
         self.fiber.delivery.park_denial(blocked, payload);
 
         // Save the stack and build a suspended frame (same as suspending signals)
@@ -440,11 +439,11 @@ impl VM {
     ///
     /// Returns `{:error :capability-denied :denied <keyword-set>
     ///           :primitive <name> :func <native-fn> :args <array>}`.
-    /// Build the denial payload through `ctx` so every heap field (`:denied`
-    /// set, `:primitive` string, `:args` array) and the struct itself are born
-    /// in the call's own region. Shared with the JIT denial path
-    /// (`crate::jit::calls::jit_capability_denial`), which lacks the interpreter's
-    /// pre-call capability gate and reuses this builder verbatim.
+    /// Every heap field (`:denied` set, `:primitive` string, `:args` array) and
+    /// the struct itself are born through `ctx`, in the call's own region. Every
+    /// denial builds its payload here: the JIT's `jit_capability_denial`, the
+    /// WASM host's `capability_denial`, and the `Emit` gate's
+    /// `build_emit_denial_payload`.
     pub(crate) fn build_denial_payload(
         ctx: &mut crate::primitives::ctx::Alloc,
         def: &'static crate::primitives::def::PrimitiveDef,

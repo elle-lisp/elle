@@ -159,11 +159,13 @@ fn sites_set_after_freezing_read_back() {
                 resume_ip: 9,
                 stack_regs: vec![],
                 num_locals: 4,
+                push_resume_value: false,
             },
             CallSiteInfo {
                 resume_ip: 30,
                 stack_regs: vec![r(5)],
                 num_locals: 4,
+                push_resume_value: true,
             },
         ],
     );
@@ -175,6 +177,12 @@ fn sites_set_after_freezing_read_back() {
     );
     let ips: Vec<usize> = view.call_sites().map(|c| c.resume_ip).collect();
     assert_eq!(ips, vec![9, 30]);
+    let delivers: Vec<bool> = view.call_sites().map(|c| c.push_resume_value).collect();
+    assert_eq!(delivers, vec![false, true], "each site keeps its delivery");
+    assert!(
+        yp.push_resume_value,
+        "a yield point delivers its resume value"
+    );
     assert_eq!(view.call_site(1).unwrap().stack_regs, &[r(5)]);
     assert!(view.yield_point(1).is_none());
 }

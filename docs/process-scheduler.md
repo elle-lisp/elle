@@ -1,6 +1,6 @@
 # Process scheduler
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-11 -->
 
 How a process scheduler runs sub-fibers, forwards its I/O to the scheduler it runs in, and nests.
 
@@ -166,8 +166,8 @@ take the scheduler's authority instead.
 
 The scheduler refuses a denied call from a process, and from a sub-fiber a
 process spawns, exactly as the async scheduler does
-([capabilities.md](signals/capabilities.md)). The process sees the denial at its
-own call site:
+([mediation.md](signals/mediation.md)). The process sees the denial at its own
+call site:
 
 ```lisp
 (with-temp-dir dir

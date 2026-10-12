@@ -94,8 +94,8 @@ impl JitCompiler {
         // layout). Its address is threaded to the intrinsic fast-path helpers so
         // they resolve the VM from the bundle, keeping the VM dependency explicit so
         // two embedded instances on one thread each reach their own VM
-        // (docs/impl/region/ctx.md "JIT intrinsic helpers reach the VM through a
-        // JitCtx"). The heap axis grows this slot with a heap capability.
+        // (docs/impl/region/ctx.md). The heap axis grows this slot with a heap
+        // capability.
         let jit_ctx_slot =
             builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
                 cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
@@ -318,13 +318,6 @@ impl JitCompiler {
         if num_locally_defined > 0 {
             translator.init_locally_defined_vars(&mut builder, num_locally_defined)?;
         }
-
-        // Materialize the abandoned-frame release tables (constants) and reserve
-        // the locals scratch every error exit spills into
-        // (docs/impl/region/mechanism.md § "An abandoned frame runs the releases
-        // it still owes"). After `init_locally_defined_vars`, so the spill at an
-        // exit reads locals that are already defined.
-        translator.emit_abandoned_tables(&mut builder);
 
         // Allocate shared spill slot for emit/call sites (if any).
         // Check yield_points (emit terminators) and call_sites directly,

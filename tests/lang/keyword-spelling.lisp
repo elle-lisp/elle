@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-05
 # Every keyword the runtime coins has a spelling it prints, and that json/serialize can write.
 # docs/impl/symbol.md
 #
@@ -152,16 +152,18 @@
 # ── The kind of an error the VM raises ────────────────────────────────
 #
 # The VM builds its own errors through an allocator that holds no memo, so
-# only the vocabulary can spell their kinds. A `silence`d parameter handed a
+# only the vocabulary can spell their kinds. A bounded parameter handed a
 # closure that may raise is one: nothing proves `x` a number, so `+` may
-# raise, and the bound check refuses the closure at run time.
+# raise, and the bound check refuses the closure at run time. The closure
+# sits in an array, so the compiler cannot refuse it at the call.
 
 (defn silenced-map [f xs]
-  (silence f)
+  (bound f ||)
   (map f xs))
 
-(def [bounded? violation] (protect (silenced-map (fn [x] (+ x 1)) [1 2])))
+(def hidden-raise (get @[(fn [x] (+ x 1))] 0))
+(def [bounded? violation] (protect (silenced-map hidden-raise [1 2])))
 
-(assert (not bounded?) "a closure that may raise breaks the silence bound")
-(assert (not (unspelled? violation)) "a silence violation spells its kind")
-(assert (encodes? violation) "a silence violation encodes as JSON")
+(assert (not bounded?) "a closure that may raise breaks the bound")
+(assert (not (unspelled? violation)) "a bound violation spells its kind")
+(assert (encodes? violation) "a bound violation encodes as JSON")

@@ -1,9 +1,14 @@
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-10-05
+//! The HIR linter's rules, each driven through analysis of real source.
+//!
+//! docs/cookbook/lint-rules.md
 
 use super::*;
 use crate::pipeline::CompileCtx;
 use crate::primitives::register_primitives;
 use crate::vm::VM;
+
+mod fiber;
 
 /// Analyze test source with a fresh per-call `CompileCtx` — each compile names
 /// its instance's compile state explicitly (docs/impl/region/ctx.md), so the
@@ -421,6 +426,6 @@ fn test_hir_linter_nested_expressions() {
     let mut linter = HirLinter::new();
     linter.lint(&analysis.hir, &symbols, &analysis.arena);
 
-    // Let bindings don't trigger naming convention checks (only define does)
+    // No rule judges a binding by its spelling, and `camelCase` is read.
     assert!(!linter.has_warnings());
 }

@@ -39,7 +39,7 @@
             ["[io.lisp](https://github.com/elle-lisp/elle/blob/main/examples/io.lisp)", "Files, JSON, modules: slurp/spit, paths, directories, json-parse/json-serialize, import-file"],
             ["[introspection.lisp](https://github.com/elle-lisp/elle/blob/main/examples/introspection.lisp)", "Looking inside: clock primitives, time/elapsed, closure introspection, disbit/disjit, benchmarking"],
             ["[ffi.lisp](https://github.com/elle-lisp/elle/blob/main/examples/ffi.lisp)", "C interop: ffi/native, ffi/defbind, structs, variadic calls, callbacks (qsort)"],
-            ["[signals.lisp](https://github.com/elle-lisp/elle/blob/main/examples/signals.lisp)", "User-defined signals, silence restrictions, early termination, progress reporting, logging, plugin sandboxing"],
+            ["[signals.lisp](https://github.com/elle-lisp/elle/blob/main/examples/signals.lisp)", "User-defined signals, silent! ceilings, early termination, progress reporting, logging, plugin sandboxing"],
             ["[fuel.lisp](https://github.com/elle-lisp/elle/blob/main/examples/fuel.lisp)", "Instruction budget management"],
             ["[parameters.lisp](https://github.com/elle-lisp/elle/blob/main/examples/parameters.lisp)", "Dynamic bindings"],
             ["[channels.lisp](https://github.com/elle-lisp/elle/blob/main/examples/channels.lisp)", "Message passing channels"],

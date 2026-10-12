@@ -1,4 +1,7 @@
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-10-05
+//! The diagnostic types, and the code tables the cookbook publishes.
+//!
+//! docs/cookbook/lint-rules.md
 
 use super::*;
 
@@ -53,7 +56,7 @@ fn code_row(line: &str) -> Option<(&str, &str)> {
 fn the_cookbook_code_tables_name_exactly_the_codes_that_are_taken() {
     // The cookbook's tables are a rule author's index of codes already taken,
     // and they are prose: nothing but this test stops them drifting from
-    // `WARNINGS` and `ERRORS`.
+    // `WARNINGS`, `HINTS` and `ERRORS`.
     //
     // The trap: drift is silent in both directions and neither is cosmetic. A
     // code the table lists but nothing raises gets skipped as taken, so the
@@ -63,17 +66,18 @@ fn the_cookbook_code_tables_name_exactly_the_codes_that_are_taken() {
     const COOKBOOK: &str = include_str!("../../../docs/cookbook/lint-rules.md");
 
     let documented: Vec<(&str, &str)> = COOKBOOK.lines().filter_map(code_row).collect();
-    // Warnings first, then errors — the order the two tables appear in.
+    // Warnings, then hints, then errors — the order the tables appear in.
     let taken: Vec<(&str, &str)> = WARNINGS
         .iter()
+        .chain(HINTS)
         .chain(ERRORS)
         .map(|c| (c.code, c.rule))
         .collect();
 
     assert_eq!(
         documented, taken,
-        "docs/cookbook/lint-rules.md § Diagnostic codes disagrees with \
-         diagnostics::WARNINGS ++ diagnostics::ERRORS"
+        "docs/cookbook/lint-rules.md disagrees with diagnostics::WARNINGS ++ \
+         diagnostics::HINTS ++ diagnostics::ERRORS"
     );
 }
 

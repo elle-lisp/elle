@@ -67,7 +67,8 @@ it act on each one:
 - `SIG_PROPAGATE`: `fiber/propagate` re-signals caught signal.
 - `SIG_ABORT`: Inject an error at the target fiber's suspension point.
 - `SIG_QUERY`: Primitive reads VM state (arena stats, introspection).
-- `SIG_FUEL`: The instruction budget ran out.
+- `SIG_FUEL`: The instruction budget ran out. The loop charges no fuel while a
+  silent function runs ([inference.md](../../docs/signals/inference.md)).
 - `SIG_HALT`: Graceful VM termination. Non-resumable.
 
 `execute_code`, which `execute` calls, is the translation boundary. It
@@ -95,7 +96,8 @@ call, emit and closure handlers, and the signal handlers they call take the
 - `execute_bytecode_from_ip` / `execute_bytecode_saving_stack` take a `&Code`
 - `TailCallInfo` carries the tail callee's `Code`, env `Rc`, the callee closure
   value (installed as `fiber.current_closure` on the frame replacement), and its
-  squelch mask — tail calls clone the `Rc`s (cheap), not the `Vec`s (expensive).
+  boundary, its squelch mask and whether its function is silent — tail calls
+  clone the `Rc`s (cheap), not the `Vec`s (expensive).
   The releases the call strands are NOT carried here: `tail_call_inner` records
   them on the activation's own `ActivationDues`, which outlives whoever consumes
   the pending call ([owner.md](../../docs/impl/region/owner.md))
@@ -163,9 +165,10 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
    `fiber.callers` and runs the callee on the same loop (see
    [vm.md](../../docs/impl/vm.md)).
 
-6. **Yield uses `SuspendedFrame` chains.** On yield, a `SuspendedFrame`
-   captures the code object, env (`Rc`), IP, and operand stack. When the yield
-   leaves a callee, `run_dispatch` appends each paused caller's frame to
+6. **A yield and an error use `SuspendedFrame` chains.** On either, a
+   `SuspendedFrame` captures the code object, env (`Rc`), IP, and operand
+   stack. When the signal leaves a callee, `run_dispatch` parks the callee
+   where it stopped and appends each paused caller's frame to
    `fiber.suspended`. `resume_suspended` replays frames from innermost (index
    0) to outermost (last index).
 
@@ -256,7 +259,9 @@ parameter frames). Each re-entry nests on the Rust stack, so it halts with
 A host that runs code on the current fiber cannot hold a suspension of that
 code. `eval`, `import`, the `compile/*-module` setup runs, `compile/run-on :jit`
 and the root driver refuse one: `refuse_hosted_park` ends the park through the
-discard chokepoint, and the host raises at its own call. `arena/allocs` and
+discard chokepoint, and the host raises at its own call. An error the hosted
+code raises parks its chain as any error does, and every host ends that park
+through `discard_hosted_error` before it raises or reports. `arena/allocs` and
 `compile/run-on :bytecode` hand the suspension on as their own call's park
 (`abandon_hosted_park`). The module doc of [execute.rs](execute.rs) holds the
 rules on what is preserved, what is overwritten, and how to add a caller.
@@ -265,14 +270,17 @@ rules on what is preserved, what is overwritten, and how to add a caller.
 
 When a fiber suspends, or stops on an error:
 
-1. **Emit instruction** (`handle_emit`): captures innermost frame as a
-   `SuspendedFrame` with the code object, env (Rc clone), IP (after the emit),
-   and operand stack. Stored in `fiber.suspended`.
+1. **Emit instruction** (`handle_emit`): a suspending emit captures the
+   innermost frame as a `SuspendedFrame` with the code object, env (Rc
+   clone), IP (after the emit), and operand stack. Stored in
+   `fiber.suspended`. An emit of a bit the fiber withholds raises nothing: it
+   parks the same frame on a capability denial (`VM::emit_blocked`).
 2. **Suspending primitive** (`handle_primitive_signal`, call position): parks
    its own frame the same way. A tail-position suspend, a fuel pause and an
-   error park no frame of their own: the driver they return to parks it
-   (`do_fiber_first_resume`, the re-suspend in `resume_suspended`).
-3. **Return into a paused caller** (if a suspend leaves a callee):
+   error park no frame of their own: the code they return to parks it
+   (`complete_call` for a callee, `do_fiber_first_resume`, the re-suspend in
+   `resume_suspended`).
+3. **Return into a paused caller** (if a suspend or an error leaves a callee):
    `run_dispatch` appends the caller's frame to the `fiber.suspended` vec.
 4. **Frame ordering**: innermost (yielder/signaler) at index 0, outermost
    (caller) at last index.
@@ -293,10 +301,9 @@ Key methods:
 - `execute_bytecode_from_ip`: Executes from a given IP with the code object (`&Code`)
 - `execute_bytecode_saving_stack`: Saves/restores caller's stack, handles tail calls
 - `run_thunk_to_completion`: `execute_bytecode_saving_stack` + the `SIG_SWITCH` drain loop — the safe entry for re-entrant callers running a thunk on the current fiber (`eval`, `import`, `arena/allocs`, test-setup module loader)
-- `replay_suspended`: Replays `Vec<SuspendedFrame>`, handles re-yields and
-  errors, and answers a `Replay` naming the error park it built; a fiber
-  boundary records that park in the delivery ledger. `resume_suspended` is the
-  same replay for a driver that records no park (`handle_sig_switch`)
+- `resume_suspended`: Replays `Vec<SuspendedFrame>`, handles re-yields and
+  errors; a frame that raises parks through `park_raised`, which records the
+  raise site in the delivery ledger
 - `with_child_fiber` ([child.rs](fiber/child.rs)): Shared swap protocol for
   fiber resume and abort. Swaps the child fiber into `vm.fiber`, wires the
   parent/child chain, runs the body, then swaps back. No heap swap is
@@ -337,10 +344,12 @@ child. The baseline is a counted holder of every heap value in it
 ([park.md](../../docs/impl/region/park.md)).
 
 **Abandonment**: code that stops running pops no frame it pushed, so whatever
-abandons it truncates the stack. Each call, host and boundary records the depth
-at its entry as a `ParamDepth`. A caller whose callee raised truncates to it,
-and so does the discard chokepoint where a `squelch` boundary or a refusing
-host ends a park (`discard_suspended_frames`).
+abandons it truncates the stack. An error parks the frames that pushed them,
+so a raise truncates nothing, and a restart runs on with every binding in
+force. Each host and boundary records the depth at its entry as a
+`ParamDepth`, and the discard chokepoint truncates to it where a `squelch`
+boundary, a broken proof, a refusing host or a host's error ends a park
+(`discard_suspended_frames`).
 
 ## Truthiness
 

@@ -115,7 +115,7 @@ impl VM {
     /// Option follows handle_call's convention), or `None` to fall through
     /// to the interpreter path. Caller is responsible for decrementing
     /// call_depth on the `Some` path. `depth` is the parameter depth at the
-    /// call, where a squelch violation truncates to.
+    /// call, where a boundary's refusal truncates to.
     pub(super) fn try_jit_call(
         &mut self,
         closure: &crate::value::Closure,
@@ -292,20 +292,23 @@ impl VM {
         func: Value,
         depth: ParamDepth,
     ) -> Option<SignalBits> {
+        let mut boundary = crate::value::closure::Boundary::of(closure);
         let result = self.call_jit(jit_code, closure, args, func);
 
-        // Check if the JIT function (or a callee) set an error or halt
-        if self
-            .fiber
-            .signal
-            .as_ref()
-            .is_some_and(|(b, _)| b.intersects(SIG_ERROR) || b.intersects(SIG_HALT))
-        {
-            self.fiber.stack.push(Value::NIL);
-            return None;
+        // A halt ends the call where it stands. An error that came back without
+        // the sentinel parked nothing — a silent function returns on any signal
+        // — so it raises at this call, as a primitive's does. Either still
+        // crosses the boundary, whose proof it may break.
+        if let Some((bits, _)) = self.fiber.signal {
+            if bits.intersects(SIG_HALT) || (bits.intersects(SIG_ERROR) && result != YIELD_SENTINEL)
+            {
+                self.enforce_boundary(bits, &boundary, depth);
+                self.fiber.stack.push(Value::NIL);
+                return None;
+            }
         }
 
-        // Check for yield sentinel (JIT function yielded directly)
+        // The sentinel: the compiled function parked, on a suspend or an error.
         if result == YIELD_SENTINEL {
             let sig = self
                 .fiber
@@ -314,7 +317,7 @@ impl VM {
                 .map(|(b, _)| *b)
                 .unwrap_or(SIG_YIELD);
 
-            if self.enforce_squelch(sig, closure.squelch_mask, depth) {
+            if self.enforce_boundary(sig, &boundary, depth).is_some() {
                 self.fiber.stack.push(Value::NIL);
                 return None;
             }
@@ -328,6 +331,9 @@ impl VM {
         // replacement, so a self-reference in it resolves to the callee.
         if result == TAIL_CALL_SENTINEL {
             if let Some(tail) = self.pending_tail_call.take() {
+                // The tail callee's signal crosses its own boundary and the
+                // closure's, and the closure's proof comes first.
+                boundary.add(tail.boundary);
                 self.pending_entry_closure = tail.closure;
                 let exec_result = self.execute_bytecode_saving_stack(&tail.code, &tail.env);
                 let eb = exec_result.bits;
@@ -351,21 +357,21 @@ impl VM {
                     // Non-NIL halt: leave signal in place, dispatch loop will see it.
                     self.fiber.stack.push(Value::NIL);
                     return None;
-                } else if eb.intersects(SIG_ERROR) {
-                    // SIG_ERROR — signal already set on fiber
-                    self.fiber.stack.push(Value::NIL);
-                    return None;
                 } else {
-                    // Suspending signal (SIG_FUEL, SIG_YIELD, SIG_SWITCH, user-defined).
-                    // A non-yield suspend (fuel) leaves the tail callee's inner
-                    // frame in exec_result.stack, not fiber.suspended; park it so
-                    // resume re-enters the callee — a tail-recursive interpreter
-                    // callee (for example `fold`) otherwise loses its accumulator across
+                    // Any other signal parks: SIG_FUEL, SIG_YIELD, SIG_SWITCH, a
+                    // user-defined one, and an error, whose chain the tail
+                    // callee's activation parked as it ended. A non-yield suspend
+                    // (fuel) leaves the tail callee's inner frame in
+                    // exec_result.stack, not fiber.suspended; park it so resume
+                    // re-enters the callee — a tail-recursive interpreter callee
+                    // (for example `fold`) otherwise loses its accumulator across
                     // preemption (tests/impl/fuel-jit-preempt.lisp).
-                    let mut frames = self.fiber.suspended.take().unwrap_or_default();
-                    self.park_suspended_callee_frame(&mut frames, eb, exec_result);
-                    self.fiber.suspended = Some(frames);
-                    if self.enforce_squelch(eb, tail.squelch_mask | closure.squelch_mask, depth) {
+                    if !eb.intersects(SIG_ERROR) {
+                        let mut frames = self.fiber.suspended.take().unwrap_or_default();
+                        self.park_suspended_callee_frame(&mut frames, eb, exec_result);
+                        self.fiber.suspended = Some(frames);
+                    }
+                    if self.enforce_boundary(eb, &boundary, depth).is_some() {
                         self.fiber.stack.push(Value::NIL);
                         return None;
                     }

@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-10-05
 //! Tests for `elle rewrite`: the edits each rule kind makes to real source text,
 //! and the epoch tag the tool leaves behind.
 //!
@@ -303,7 +303,7 @@ fn a_shebang_does_not_shift_the_edits_below_it() {
     );
 }
 
-// --- durations in seconds (docs/epochs.md § MillisToSeconds) ---
+// --- durations in seconds (docs/epochs.md) ---
 
 /// `body` written at `epoch`, rewritten, with the new epoch tag taken off.
 fn rewritten_from(epoch: u64, body: &str) -> String {
@@ -428,3 +428,5 @@ fn a_renamed_symbol_that_is_the_whole_expression_is_renamed_inside_the_wrap() {
         "(port/read p 1 :timeout (if-let [ms first] (/ ms 1000.0) nil))\n"
     );
 }
+
+mod signals;

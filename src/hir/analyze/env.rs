@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-10-05
 //! The ambient environment a compilation starts from: the primitives, and what
 //! `begin-for-syntax` or the core library exports.
 //!
@@ -28,14 +28,37 @@ impl Analyzer<'_> {
             let binding = self.bind_by_sym(sym_id, BindingScope::Local);
             self.arena.get_mut(binding).is_immutable = true;
             self.arena.get_mut(binding).is_primitive = true;
+            if let Some(&func_value) = meta.functions.get(&sym_id) {
+                self.primitive_values.insert(binding, func_value);
+                self.arena.get_mut(binding).is_native_fn = func_value.is_native_fn();
+                self.record_closure_facts(binding, func_value);
+            }
             self.signal_env.insert(binding, signal);
             if let Some(&arity) = meta.arities.get(&sym_id) {
                 self.arity_env.insert(binding, arity);
             }
-            if let Some(&func_value) = meta.functions.get(&sym_id) {
-                self.primitive_values.insert(binding, func_value);
-                self.arena.get_mut(binding).is_native_fn = func_value.is_native_fn();
-            }
+        }
+    }
+
+    /// Record what a closure value states about a call to it: its signal, its
+    /// arity, and whether it collects keyword arguments. A stdlib or core
+    /// export reaches the analyzer as a value, not as a lambda it analyzed, so
+    /// without these a call to one could not be checked and would carry
+    /// `:error` (docs/signals/inference.md, "What raises").
+    fn record_closure_facts(&mut self, binding: Binding, value: Value) {
+        let Some(closure) = value.as_closure() else {
+            return;
+        };
+        let template = &closure.template;
+        self.signal_env.insert(binding, closure.effective_signal());
+        self.arity_env.insert(binding, template.arity());
+        if matches!(
+            template.vararg_tag(),
+            crate::value::closure::VarargTag::Struct
+                | crate::value::closure::VarargTag::StrictStruct
+        ) && matches!(template.arity(), crate::value::types::Arity::AtLeast(_))
+        {
+            self.keyword_collectors.insert(binding);
         }
     }
 
@@ -59,8 +82,8 @@ impl Analyzer<'_> {
     /// `is_primitive`: mark each binding as a primitive. This is for the
     /// **core.lisp export env** (`fold`/`reduce`/`concat`/`append`/`reverse`/…),
     /// whose bindings here are the *canonical* definitions user code calls — they
-    /// deliberately override any earlier `meta` entry (e.g. `reverse` was once a
-    /// native, now core.lisp), so this binding must win *and* be recognizable to
+    /// deliberately override any earlier `meta` entry (a core.lisp closure may
+    /// share its name with a native), so this binding must win *and* be recognizable to
     /// passes that key on `is_primitive` (loop fusion, dispatch monomorphization),
     /// exactly as stdlib exports are. Without the flag a core HOF is invisible to
     /// those passes even though it is as canonical as `map`/`filter`. Passed false
@@ -81,6 +104,7 @@ impl Analyzer<'_> {
             // call to that name replaces the frame (`may_replace_frame`).
             self.arena.get_mut(binding).is_native_fn = value.is_native_fn();
             self.primitive_values.insert(binding, *value);
+            self.record_closure_facts(binding, *value);
         }
     }
 }

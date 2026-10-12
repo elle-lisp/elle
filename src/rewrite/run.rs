@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-10-05
 //! CLI entry point for `elle rewrite`.
 //!
 //! docs/epochs.md
@@ -270,18 +270,6 @@ pub(crate) fn rewrite_file(
     let binding_forms = &["let", "letrec", "let*", "if-let", "when-let", "when-ok"];
     let bracket_edits = collect_bracket_edits(text, binding_forms)?;
 
-    // Collect replace edits (syntax-level, whole-form rewrites)
-    let replace_edits = if let Some(epoch) = file_epoch {
-        let replaces = replace_rules_in_range(epoch, CURRENT_EPOCH);
-        if replaces.is_empty() {
-            Vec::new()
-        } else {
-            collect_replace_edits(text, &replaces)?
-        }
-    } else {
-        Vec::new()
-    };
-
     // Build rename rules for this file's epoch
     let rename_rule = file_epoch.and_then(|epoch| {
         let renames = collapsed_renames(epoch, CURRENT_EPOCH);
@@ -324,11 +312,10 @@ pub(crate) fn rewrite_file(
     )?);
     edits.extend(desugar_edits);
 
-    // Merge all structural edits (unwrap + replace + flatten), filtering out the
-    // token edits that fall within their spans.
-    let structural_edits: Vec<Edit> = replace_edits
+    // Merge the structural edits (unwrap + flatten + bracket), filtering out
+    // the token edits that fall within their spans.
+    let structural_edits: Vec<Edit> = unwrap_edits
         .into_iter()
-        .chain(unwrap_edits)
         .chain(flatten_edits)
         .chain(flatten_clause_edits)
         .chain(bracket_edits)
@@ -341,6 +328,23 @@ pub(crate) fn rewrite_file(
             })
         });
         edits.extend(structural_edits);
+    }
+
+    // Replace edits (whole-form rewrites through a template) come last. Each
+    // builds its arguments from source text with every other edit inside them
+    // applied, so those edits leave the list in favor of the replacement.
+    if let Some(epoch) = file_epoch {
+        let replaces = replace_rules_in_range(epoch, CURRENT_EPOCH);
+        if !replaces.is_empty() {
+            let replace_edits = collect_replace_edits(text, &replaces, &edits)?;
+            edits.retain(|edit| {
+                !replace_edits.iter().any(|re| {
+                    edit.byte_offset >= re.byte_offset
+                        && edit.byte_offset + edit.byte_len <= re.byte_offset + re.byte_len
+                })
+            });
+            edits.extend(replace_edits);
+        }
     }
 
     // Update the epoch tag: replace old tag with current, or add if missing.

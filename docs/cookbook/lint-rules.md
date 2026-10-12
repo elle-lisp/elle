@@ -1,24 +1,25 @@
 # Adding a New Lint Rule
 
+<!-- audited: 2026-10-05 -->
 
-Linting operates on HIR trees. Rules live in `src/lint/rules.rs`; the
-tree walker lives in `src/hir/lint.rs`.
+Linting operates on HIR trees. Rules live in [src/lint/rules.rs](../../src/lint/rules.rs); the
+tree walker lives in [src/hir/lint.rs](../../src/hir/lint.rs).
 
 ### Files to modify (in order)
 
-1. **`src/lint/diagnostics.rs`** — Claim a code: add a `LintCode` const and
-   list it in `WARNINGS`.
+1. **[src/lint/diagnostics.rs](../../src/lint/diagnostics.rs)** — Claim a code: add a `LintCode` const and
+   list it in `WARNINGS`, or in `HINTS` for a hint.
 
-2. **`src/lint/rules.rs`** — Implement the rule function.
+2. **[src/lint/rules.rs](../../src/lint/rules.rs)** — Implement the rule function.
 
-3. **`src/hir/lint.rs`** — Call the rule from the appropriate `HirKind`
+3. **[src/hir/lint.rs](../../src/hir/lint.rs)** — Call the rule from the appropriate `HirKind`
    arm in `HirLinter::check()`.
 
 4. **This file** — Add the code to the table below.
 
 ### Step by step
 
-**Step 1: `src/lint/diagnostics.rs`** — Claim a code. The const binds the
+**Step 1: [src/lint/diagnostics.rs](../../src/lint/diagnostics.rs)** — Claim a code. The const binds the
 code to the rule name, and `WARNINGS` is what the table below is checked
 against:
 
@@ -34,7 +35,7 @@ pub const WARNINGS: &[LintCode] = &[
 ];
 ```
 
-**Step 2: `src/lint/rules.rs`** — Write the rule. Rules take context and
+**Step 2: [src/lint/rules.rs](../../src/lint/rules.rs)** — Write the rule. Rules take context and
 push `Diagnostic`s:
 
 ```rust
@@ -58,7 +59,7 @@ pub(crate) fn check_my_rule(
 }
 ```
 
-**Step 3: `src/hir/lint.rs`** — Call the rule from the tree walker. A rule
+**Step 3: [src/hir/lint.rs](../../src/hir/lint.rs)** — Call the rule from the tree walker. A rule
 about a binding goes in `check_binding_site`, which `Let`, `Letrec`, and
 `Define` all route through; a rule about any other form goes in that form's
 `HirKind` arm in `check()`:
@@ -87,11 +88,11 @@ rule placed there does not see them.
 
 | Type | Location | Purpose |
 |------|----------|---------|
-| `Diagnostic` | `src/lint/diagnostics.rs` | Finding with severity, code, message, location |
-| `LintCode` | `src/lint/diagnostics.rs` | A code and the rule name it travels with |
-| `Severity` | `src/lint/diagnostics.rs` | `Info`, `Warning`, `Error` |
-| `HirLinter` | `src/hir/lint.rs` | Tree walker that calls rules |
-| `Linter` | `src/lint/cli.rs` | CLI wrapper that runs `HirLinter` |
+| `Diagnostic` | [src/lint/diagnostics.rs](../../src/lint/diagnostics.rs) | Finding with severity, code, message, location |
+| `LintCode` | [src/lint/diagnostics.rs](../../src/lint/diagnostics.rs) | A code and the rule name it travels with |
+| `Severity` | [src/lint/diagnostics.rs](../../src/lint/diagnostics.rs) | `Info`, `Warning`, `Error` |
+| `HirLinter` | [src/hir/lint.rs](../../src/hir/lint.rs) | Tree walker that calls rules |
+| `Linter` | [src/lint/cli.rs](../../src/lint/cli.rs) | CLI wrapper that runs `HirLinter` |
 
 ### Diagnostic codes
 
@@ -104,12 +105,42 @@ The linter raises these warnings:
 | `W004` | `unused-binding` | A `def`/`let`/`letrec` binding with zero uses. |
 | `W005` | `non-tail-self-recursion` | A function whose self-call is not in tail position. |
 
-`diagnostics::WARNINGS` (`src/lint/diagnostics.rs`) is the source of this
-table, and a test in `src/lint/diagnostics/tests.rs` compares the two. A rule
-that lands without its row here fails that test.
+The linter also gives these hints, at severity `info`. A hint says what a
+program does that a reader may not see at once; nothing in it is a fault.
+A rule raises one with `Diagnostic::hint`, as a warning rule uses
+`Diagnostic::warn`:
 
-`W004` reads the def-use chains `src/hir/defuse.rs` builds, and `W005`
-reads the `is_tail` flag `src/hir/tailcall.rs` sets. Neither rule tracks
+| Code | Rule | Fires on |
+|------|------|----------|
+| `I001` | `denied-fiber-call` | A literal `fiber/new` body that may raise a bit its literal `:deny` set withholds. |
+| `I002` | `fiber-signal-passes` | A literal `fiber/new` body that may raise a bit its literal mask does not name. |
+
+Both read the body's inferred signal against the call's literal mask and
+`:deny` set ([capabilities](../signals/capabilities.md)). A body that is not a
+function literal, and a mask or `:deny` set computed at run time, give neither:
+
+```lisp
+(defn codes [src]
+  (seq->set (map (fn [d] (get d :code))
+                 (compile/diagnostics (compile/analyze src)))))
+
+(def sandbox
+  "(fiber/new (fn [] (file/read \"/etc/hostname\")) |:error| :deny |:fs|)")
+(assert (= |"I001" "I002"| (codes sandbox))
+        ":fs is denied, and the mask does not catch its denial")
+(assert (empty? (codes "(fiber/new (fn [] (file/read \"x\")) |:fs :error|)"))
+        "a mask that names every bit the body raises gives no hint")
+(assert (empty? (codes "(fn [body] (fiber/new body |:error| :deny |:fs|))"))
+        "a body the compiler cannot see gives no hint")
+```
+
+`diagnostics::WARNINGS` and `diagnostics::HINTS` ([src/lint/diagnostics.rs](../../src/lint/diagnostics.rs))
+are the sources of these two tables, and a test in
+[src/lint/diagnostics/tests.rs](../../src/lint/diagnostics/tests.rs) compares each with its table. A rule that
+lands without its row here fails that test.
+
+`W004` reads the def-use chains [src/hir/defuse.rs](../../src/hir/defuse.rs) builds, and `W005`
+reads the `is_tail` flag [src/hir/tailcall.rs](../../src/hir/tailcall.rs) sets. Neither rule tracks
 its own state, and neither adds a field to `BindingInner`.
 
 These are the analysis failures, which are not rules — no linter pass raises
@@ -124,27 +155,25 @@ them:
 | `E004` | `compile-error` | A failure raised by a compiler pass. |
 | `E005` | `syntax-error` | Source the reader could not parse. |
 
-`LintCode::for_error_kind` (`src/lint/diagnostics.rs`) maps an `ErrorKind` to
+`LintCode::for_error_kind` ([src/lint/diagnostics.rs](../../src/lint/diagnostics.rs)) maps an `ErrorKind` to
 one of these, and the lint CLI, `compile/diagnostics`, and the LSP all read it
 — so one failure reports one code whichever surface a consumer asks. The same
 test holds this table and `diagnostics::ERRORS` in step.
 
 `W001` is unclaimed and no rule raises it, so the table has no row for it.
-Use `W006+` for new warnings, `E006+` for a new error, and `I001` for the
-first info diagnostic.
+Use `W006+` for new warnings, `E006+` for a new error, and `I003+` for a new
+hint.
 
 ### How linting runs
 
-1. `Linter::lint_str()` (in `src/lint/cli.rs`) calls `analyze_all()` to
-   get HIR.
-2. For each analysis result, it creates a `HirLinter` and calls
-   `hir_linter.lint(&analysis.hir, &symbols)`.
+1. `Linter::lint_str()` (in [src/lint/cli.rs](../../src/lint/cli.rs)) calls `analyze_file()` to
+   get the file's HIR.
+2. It creates a `HirLinter` and calls
+   `hir_linter.lint(&analysis.hir, symbols, &analysis.arena)`.
 3. `HirLinter::check()` recursively walks the HIR tree, calling rule
    functions that push `Diagnostic`s.
-4. The LSP (`src/lsp/state.rs`) uses the same `HirLinter` for real-time
+4. The LSP ([src/lsp/state.rs](../../src/lsp/state.rs)) uses the same `HirLinter` for real-time
    diagnostics.
-
----
 
 ---
 

@@ -1,6 +1,8 @@
 // audited: 2026-10-06
-// src/wasm/AGENTS.md
 //! Closure construction, calls, tail calls, and result handling.
+//!
+//! src/wasm/AGENTS.md
+//! docs/impl/wasm.md
 //!
 //! These emitters marshal register values into linear memory at `ARGS_BASE`,
 //! invoke the runtime dispatch functions (`rt_call`, `rt_make_closure`), and
@@ -37,7 +39,7 @@ impl WasmEmitter {
         let meta_base = ARGS_BASE + (captures.len() as i32) * 16;
         // `capture_locals_mask` is unbounded (`CaptureMask`), so slot 6 carries
         // the WORD COUNT and the words are appended after the 8 fixed slots
-        // (read symmetrically in `rt_make_closure`, src/wasm/linker/create.rs).
+        // (read symmetrically in `rt_make_closure`, src/wasm/linker/create/closure.rs).
         // The common case (no captured locals) is 0 words.
         let locals_mask_words = nested.capture_locals_mask().words();
         let meta_vals: [i64; 8] = [
@@ -134,14 +136,14 @@ impl WasmEmitter {
         self.store_call_result(f, dst);
     }
 
-    /// Store `rt_call`'s FOUR-word result in a NON-suspending function.
+    /// Store `rt_call`'s FOUR-word result where the call is not a park site:
+    /// in a silent function, or in the entry.
     ///
-    /// This function has no continuation frame to capture, so a callee that
-    /// parked is handled the same way as one that raised: the signal goes to
+    /// Such a function has no continuation frame to capture, so a callee that
+    /// parked is handled the same way as one that halted: the signal goes to
     /// `SIGNAL_SLOT` and the function returns with `status = 0`. The caller's
-    /// `handle_wasm_result` reads the slot and classifies it there — that is the
-    /// yield-through path, and it is why `suspended` is popped and dropped here
-    /// rather than branched on.
+    /// `handle_wasm_result` reads the slot and classifies it there, which is why
+    /// `suspended` is popped and dropped here rather than branched on.
     ///
     /// Only `rt_call` returns four words. `rt_data_op` and `call_primitive`
     /// return three and use [`Self::store_result_with_signal`] directly.
@@ -150,12 +152,39 @@ impl WasmEmitter {
         self.store_result_with_signal(f, dst);
     }
 
-    /// Store a THREE-word `(tag, payload, signal)` result, early-returning on
-    /// any signal. Shared by `rt_data_op` and `call_primitive`.
+    /// Store a THREE-word `(tag, payload, signal)` result in `dst`, and leave
+    /// by the signal exit on any signal. Shared by `rt_data_op` and
+    /// `call_primitive`.
     pub(in crate::wasm) fn store_result_with_signal(&self, f: &mut Function, dst: Reg) {
+        self.store_signalled(f, (self.tag_local(dst), self.pay_local(dst)));
+    }
+
+    /// Store a THREE-word `(tag, payload, signal)` result in the locals
+    /// `(tag, pay)`, and leave by the emitter's `signal_exit` on any signal: return
+    /// with the signal in `SIGNAL_SLOT`, or park the frame at a park site.
+    pub(in crate::wasm) fn store_signalled(&self, f: &mut Function, (tag, pay): (u32, u32)) {
         f.instruction(&Instruction::LocalSet(self.signal_local));
-        f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
-        f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
+        f.instruction(&Instruction::LocalSet(pay));
+        f.instruction(&Instruction::LocalSet(tag));
+        if let SignalExit::Park {
+            resume_state,
+            spill_key,
+        } = self.signal_exit
+        {
+            f.instruction(&Instruction::LocalGet(self.signal_local));
+            f.instruction(&Instruction::I64Const(0));
+            f.instruction(&Instruction::I64Ne);
+            f.instruction(&Instruction::If(BlockType::Empty));
+            self.emit_park(
+                f,
+                (tag, pay),
+                resume_state,
+                spill_key,
+                &Instruction::LocalGet(self.signal_local),
+            );
+            f.instruction(&Instruction::End);
+            return;
+        }
         f.instruction(&Instruction::I32Const(SIGNAL_SLOT));
         f.instruction(&Instruction::LocalGet(self.signal_local));
         f.instruction(&Instruction::I64Store(MemArg {
@@ -167,8 +196,8 @@ impl WasmEmitter {
         f.instruction(&Instruction::I64Const(0));
         f.instruction(&Instruction::I64Ne);
         f.instruction(&Instruction::If(BlockType::Empty));
-        f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
-        f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
+        f.instruction(&Instruction::LocalGet(tag));
+        f.instruction(&Instruction::LocalGet(pay));
         f.instruction(&Instruction::I64Const(0));
         f.instruction(&Instruction::Return);
         f.instruction(&Instruction::End);

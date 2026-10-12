@@ -1,6 +1,6 @@
 # primitives
 
-<!-- audited: 2026-10-04 -->
+<!-- audited: 2026-10-11 -->
 
 Built-in functions. Registered into the VM at startup.
 
@@ -219,7 +219,7 @@ named substitution modes: [format/](format/AGENTS.md).
   `filter_map` to skip non-UTF-8 entries. Returns empty struct `{}` if no
   env vars. With an optional string argument `(sys/env "NAME")`, looks up a
   single variable and returns its value as a string, or `nil` if not set.
-  Signal: `Signal::silent()`. Arity: `Range(0, 1)`.
+  Signal: `Signal::errors()`, for a name that is not a string. Arity: `Range(0, 1)`.
 
 ## Subprocess Primitives
 
@@ -252,6 +252,10 @@ and the one boundary that checks it: [subprocess/](subprocess/AGENTS.md).
 
 **Bounds:** every yielding network primitive takes `:timeout` and `:deadline`
 ([I/O deadlines](../../docs/io/timeout.md)).
+
+**Capability:** every primitive here carries `:net` but `sys/ip?`, which only
+reads a string. `unix/listen` and `unix/connect` also carry `:fs`, for the path
+they resolve ([capabilities.md](../../docs/signals/capabilities.md)).
 
 ## Keyword Argument Helper
 
@@ -330,31 +334,31 @@ every call on the port that names none takes; `:timeout nil` removes it
 2. **Coherent with seek.** `(port/seek p N)` followed by `(port/tell p)` returns `N` (assuming no buffered bytes after seek).
 3. **File ports only.** Non-file ports always return type-error.
 
-## squelch Primitive
+## squelch and attune Primitives
 
 **Location:** [meta/syntaxops.rs](meta/syntaxops.rs)
 
-**Signature:** `(squelch closure :keyword)` or `(squelch closure |:kw1 :kw2|)`
+**Signature:** `(squelch spec closure)` and `(attune spec closure)`
 
-**Purpose:** Transform a closure by applying a runtime signal squelch mask.
-Returns a new closure that, when called, intercepts the named signal(s) and
-converts them to `:error` with kind `"signal-violation"`.
+**Purpose:** Wrap a closure in a runtime boundary. `squelch` blocks the
+signals in `spec`, and `attune` lets through only the signals in `spec`. The
+boundary converts a blocked signal to `:error` with kind `"signal-violation"`.
 
 **Behavior:**
-- Takes a closure and a signal spec: a keyword, set, array, list, or integer
-  of signal bits, resolved by `resolve_signal_bits`
+- Takes the spec first: a keyword, set, array, list, or integer of signal
+  bits, resolved by `resolve_signal_bits`
 - Returns a **new** closure (same template and environment), whose squelch
-  mask is the old mask OR the new bits
-- `(squelch f |:yield :io|)` squelches both yield and io
+  mask is the old mask OR the blocked bits
+- `(squelch |:yield :io| f)` squelches both yield and io
 
 **Signal:** `Signal::errors()`
 
 **Arity:** `Exact(2)`
 
-**Tail-call enforcement:** A squelch holds across a tail call. Each
-`TailCallInfo` carries its callee's `squelch_mask`; `trampoline_loop` ORs it
-into the activation's mask, and `end_activation` enforces the result when the
-activation ends.
+**Tail-call enforcement:** A boundary holds across a tail call. Each
+`TailCallInfo` carries its callee's boundary: its squelch mask, and whether
+its function is silent. `trampoline_loop` adds both into the activation's
+boundary, and `end_activation` enforces the result when the activation ends.
 
 ## meta/origin Primitive
 

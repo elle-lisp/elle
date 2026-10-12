@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! Tail-call preparation host function: `rt_prepare_tail_call`.
 //!
 //! docs/impl/wasm.md
@@ -20,7 +20,7 @@ use crate::wasm::outcome::CallOutcome;
 /// and no status word to set — the dispatch returns `(tag, payload, 0)` right
 /// after this. The signal therefore travels in the slot, and the caller's
 /// `handle_wasm_result` classifies it there. That is why `suspended` is dropped:
-/// re-deriving it from the signal is exactly what `is_suspending` is for, and
+/// re-deriving it from the signal is exactly what `parks` is for, and
 /// doing it in one place keeps the tail and non-tail paths agreeing.
 fn return_via_slot(
     caller: &mut Caller<'_, ElleHost>,

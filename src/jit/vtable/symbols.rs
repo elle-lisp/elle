@@ -178,10 +178,6 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
         dispatch::elle_jit_tail_call as *const u8,
     );
     builder.symbol(
-        "elle_jit_has_exception",
-        dispatch::elle_jit_has_exception as *const u8,
-    );
-    builder.symbol(
         "elle_jit_pop_param_frame",
         dispatch::elle_jit_pop_param_frame as *const u8,
     );
@@ -253,10 +249,6 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
     builder.symbol(
         "elle_jit_release_activation_dues",
         dispatch::elle_jit_release_activation_dues as *const u8,
-    );
-    builder.symbol(
-        "elle_jit_release_abandoned_frame",
-        dispatch::elle_jit_release_abandoned_frame as *const u8,
     );
     builder.symbol(
         "elle_jit_free_region_group",

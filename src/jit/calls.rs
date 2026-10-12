@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! Function call dispatch helpers for JIT-compiled code.
 //!
 //! docs/impl/jit.md
@@ -49,9 +49,9 @@ pub(crate) struct YieldPointMeta {
     pub num_params: u16,
 }
 
-/// Metadata for a single call site in JIT-compiled code.
-/// Stored in `JitCode.call_sites`, indexed by call site index.
-/// Read by `elle_jit_yield_through_call` runtime helper.
+/// Metadata for a single park site in JIT-compiled code: a call, or an
+/// instruction that may raise. Stored in `JitCode.call_sites`, indexed by call
+/// site index. Read by `elle_jit_yield_through_call` runtime helper.
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub(crate) struct CallSiteMeta {
@@ -63,6 +63,9 @@ pub(crate) struct CallSiteMeta {
     pub num_locals: u16,
     /// Number of function parameters (spilled from arg_var_base).
     pub num_params: u16,
+    /// Whether a resume delivers its value into the site's result. False for
+    /// an instruction that produces no value.
+    pub push_resume_value: bool,
 }
 
 // =============================================================================
@@ -171,26 +174,6 @@ pub(crate) fn jit_capability_denial(
     vm.fiber.delivery.park_denial(blocked, payload);
     vm.fiber.signal = Some((blocked, payload));
     YIELD_SENTINEL
-}
-
-// =============================================================================
-// Exception Checking
-// =============================================================================
-
-/// Check if a terminal signal is pending on the VM (error or halt).
-/// Returns TRUE if one is set, FALSE otherwise.
-///
-/// Uses bitwise containment (`contains`) rather than exact equality,
-/// because signals can be compound (for example `SIG_ERROR | SIG_IO`).
-#[no_mangle]
-pub extern "C" fn elle_jit_has_exception(vm: u64) -> JitValue {
-    let vm = unsafe { &*(vm as *const crate::vm::VM) };
-    JitValue::bool_val(
-        vm.fiber
-            .signal
-            .as_ref()
-            .is_some_and(|(b, _)| b.intersects(SIG_ERROR) || b.intersects(SIG_HALT)),
-    )
 }
 
 // =============================================================================

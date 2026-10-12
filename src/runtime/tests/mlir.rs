@@ -12,7 +12,7 @@ use super::*;
 use crate::pipeline::compile_file;
 
 /// An MLIR-CPU eligible function, defined.
-const ADD: &str = "(defn mlir-add [a b] (silence) (muffle :error) (numeric!) (%add a b))";
+const ADD: &str = "(defn mlir-add [a b] (silent!) (numeric!) (%add a b))";
 
 /// Run `ADD` and then `body` on `rt`, and answer the program's value. The
 /// unit is dropped before this returns.

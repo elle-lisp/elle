@@ -1,12 +1,12 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 // docs/impl/wasm.md
-//! The capability gate on this tier: a native the calling fiber withholds is
-//! denied, and the fiber reads the shared denial payload.
+//! The capability gate on this tier: a native or an emit of a bit the fiber
+//! withholds is denied, with the shared denial payload.
 //!
 //! The trap every case here is built around: a body that reaches a primitive
 //! THROUGH a prelude function runs that function on the host VM, whose own gate
 //! then fires. Such a shape passes with this tier's gate missing entirely, so
-//! each case names a native the fiber body calls directly. Written with
+//! each case names a native or an emit in the fiber body itself. Written with
 //! `println`, these tests are green against an ungated host.
 //!
 //! Each expression evaluates to a boolean so the assertion reads the language's
@@ -96,10 +96,8 @@ fn wasm_full_leaves_a_native_the_denial_does_not_name() {
 
 /// A denial parks whatever bits it carries, `:error` included.
 ///
-/// This is the one case that separates the two ways a host call can report a
-/// suspension. `is_suspending` excludes `SIG_ERROR`, so classifying a denial by
-/// its bits would let an `:error` denial through as an ordinary error return and
-/// never park the fiber. The interpreter parks it — `handle_capability_denial`
+/// The counter-factual lets an `:error` denial through as an error that does
+/// not park the fiber. The interpreter parks it — `handle_capability_denial`
 /// builds a frame whatever the bits are — and mediation is built on that: the
 /// worked example in docs/signals/capabilities.md denies `:error`, catches the
 /// denial, and resumes the fiber with the result of the call it refused.
@@ -125,9 +123,8 @@ fn wasm_full_denial_of_error_parks_like_any_other() {
 /// The interpreter's `handle_capability_denial_tail` builds no frame: it sets
 /// the signal and lets the driver it unwinds to park one. This tier's tail
 /// dispatch has no `suspended` word either — `return_via_slot` sends the bits
-/// through `SIGNAL_SLOT` and `handle_wasm_result` classifies them. So an
-/// `:error` denial reaches the fiber's own mask rather than a park decision,
-/// and the fiber must still come to rest `:paused` holding the payload.
+/// through `SIGNAL_SLOT`, and `handle_wasm_result` classifies them by the shared
+/// rule. The fiber must still come to rest `:paused` holding the payload.
 #[test]
 fn wasm_full_tail_denial_of_error_parks_like_any_other() {
     assert_eq!(
@@ -229,5 +226,46 @@ fn wasm_full_denies_a_submit_for_the_operation_its_request_carries() {
         "true",
         "io/submit must be denied for the :exec its request carries, not for \
          the :error it declares"
+    );
+}
+
+/// A literal `emit` is an instruction, not a native call, so no host path's
+/// gate sees it. The emit itself asks, on this tier as on the others: a fiber
+/// denied `:yield` parks on a denial, and the resume answers the `yield`.
+#[test]
+fn wasm_full_denies_a_literal_emit_of_a_withheld_bit() {
+    assert_eq!(
+        eval_with_stdlib(
+            "(let [f (fiber/new (fn [] (+ 1 (yield 1))) |:yield :error| :deny |:yield|)] \
+               (fiber/resume f) \
+               (and (= :paused (fiber/status f)) \
+                    (= :capability-denied (get (fiber/value f) :error)) \
+                    (= 11 (fiber/resume f 10))))"
+        ),
+        "true",
+        "a yield the fiber withholds must park on a denial the resume answers"
+    );
+}
+
+/// A denied `:error` emit parks on the denial, not on the error it names: the
+/// fiber holds the denial payload, and the resume answers the emit.
+///
+/// The trap: a fiber denied `:error` cannot call a primitive that declares it,
+/// and a struct literal is a call to `struct`, as `+` reaches one. Built inside
+/// the body, the payload is denied before the emit runs, and the resume answers
+/// that call instead. The payload is built outside, and the body calls nothing.
+#[test]
+fn wasm_full_denial_of_an_error_emit_parks() {
+    assert_eq!(
+        eval_with_stdlib(
+            "(let [mine {:error :mine} \
+                   f (fiber/new (fn [] [:after (error mine)]) |:error| :deny |:error|)] \
+               (fiber/resume f) \
+               (and (= :paused (fiber/status f)) \
+                    (= [|:error| mine] (get (fiber/value f) :args)) \
+                    (= [:after 2] (fiber/resume f 2))))"
+        ),
+        "true",
+        "an error emit the fiber withholds must park on a denial the resume answers"
     );
 }

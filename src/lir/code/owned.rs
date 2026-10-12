@@ -110,6 +110,7 @@ impl LirOwned {
                     y.resume_ip,
                     y.num_locals,
                     &y.stack_regs,
+                    true,
                 )
             })
             .collect();
@@ -121,6 +122,7 @@ impl LirOwned {
                     c.resume_ip,
                     c.num_locals,
                     &c.stack_regs,
+                    c.push_resume_value,
                 )
             })
             .collect();
@@ -133,12 +135,19 @@ impl LirOwned {
 }
 
 /// One site's record, its registers appended to `regs`.
-fn site(regs: &mut Vec<Reg>, resume_ip: usize, num_locals: u16, stack: &[Reg]) -> SiteRec {
+fn site(
+    regs: &mut Vec<Reg>,
+    resume_ip: usize,
+    num_locals: u16,
+    stack: &[Reg],
+    delivers: bool,
+) -> SiteRec {
     let at = regs.len() as u32;
     regs.extend_from_slice(stack);
     SiteRec {
         resume_ip: u32::try_from(resume_ip).expect("a resume address fits 32 bits"),
         num_locals,
+        delivers: u8::from(delivers),
         pad: 0,
         regs: at,
         n_regs: stack.len() as u32,

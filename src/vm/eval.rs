@@ -15,7 +15,7 @@ use crate::lir::{Emitter, Lowerer};
 use crate::symbol::SymbolTable;
 use crate::syntax::{Span, Syntax};
 use crate::value::heap::TableKey;
-use crate::value::{Value, SIG_ERROR, SIG_OK};
+use crate::value::{Value, SIG_ERROR, SIG_HALT, SIG_OK};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -73,8 +73,8 @@ fn eval_inner(
     symbols: &mut SymbolTable,
 ) -> LResult<Value> {
     // This eval is one compilation unit, so it gets one working syntax arena,
-    // released once the form has run (docs/impl/syntax.md § "Where a node
-    // lives"). Every path out of `eval_in_arena` comes back here, which frees it.
+    // released once the form has run (docs/impl/syntax.md). Every path out of
+    // `eval_in_arena` comes back here, which frees it.
     let heap_ptr = vm.heap_ptr;
     let arena = crate::syntax::SyntaxArena::mint(unsafe { &mut *heap_ptr });
     let out = eval_in_arena(vm, arena, expr_value, env_value, symbols);
@@ -223,8 +223,8 @@ fn eval_in_arena(
 
     // Execute. The entry payload carries the function's builder-idiom merge
     // metadata, so the alloc dispatch mint-or-reuses merged slots
-    // (docs/impl/region/merging.md § Merging). The unit is held until the run
-    // ends, because the entry's `Code` takes no reference of its own.
+    // (docs/impl/region/merging.md). The unit is held until the run ends,
+    // because the entry's `Code` takes no reference of its own.
     let code = unit.entry().code();
     let empty_env = Rc::new(vec![]);
 
@@ -238,7 +238,10 @@ fn eval_in_arena(
             let (_, value) = vm.fiber.signal.take().unwrap_or((SIG_OK, Value::NIL));
             Ok(value)
         }
-        SIG_ERROR => {
+        b if b.intersects(SIG_ERROR) && !b.intersects(SIG_HALT) => {
+            // The error parked the evaluated code's chain, which eval cannot
+            // hold either, so it ends here before eval raises at its own call.
+            vm.discard_hosted_error(bits, depth);
             let (_, err_value) = vm.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
             Err(LError::generic(vm.format_error_with_location(err_value)))
         }

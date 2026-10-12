@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-10-05
 //! The process primitives: `sys/*` over this process, and `subprocess/*` over a child.
 //!
 //! docs/subprocess.md
@@ -253,6 +253,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "sys/env" => prim_sys_env {
+        signal: Signal::errors(),
         arity: Arity::Range(0, 1),
         doc: "Return the process environment as a struct with string keys and string values, or look up a single variable by name. Non-UTF-8 entries are silently skipped.",
         params: &["name"],

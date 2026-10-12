@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-11
 //! What an abandoned frame chain owed, and the teardown of a terminal fiber.
 //!
 //! [`release_parked_dues`] is the shared half: a chain nothing can re-enter owes
@@ -6,23 +6,23 @@
 //! their own frame-replacing tail calls, and the two release tables each frame's
 //! `Code` records. A squelch/abort discard and a terminal teardown run the same
 //! set, because what makes each release owed is a property of the frame rather
-//! than of the fiber (docs/impl/region/owner.md § "A discard runs what the
-//! abandoned frames owed").
+//! than of the fiber.
 //!
 //! A TERMINAL fiber owes more — its own fiber node, and the escape retain on a
 //! parked non-terminal signal — and the take/release split keeps heap mutation
 //! disjoint from fiber access there: the take empties the fiber's slots under
 //! its borrow, and the release, run after the borrow is dropped, can
-//! cascade-free the fiber's own heap value without invalidating a live borrow
-//! (docs/impl/region/owner.md § "Owner nodes").
+//! cascade-free the fiber's own heap value without invalidating a live borrow.
+//!
+//! docs/impl/region/owner.md
+//! docs/impl/region/park.md
 
 use crate::value::fiber::{FiberStatus, ParkedDues};
 use crate::value::{FiberHandle, SignalBits, Value, SIG_ERROR};
 
 /// Everything a fiber owns through the ownership forest, TAKEN out of the fiber
-/// (its slots emptied) so the release can run after the fiber borrow is dropped
-/// (docs/impl/region/owner.md § "Owner nodes" — "Fiber teardown frees everything
-/// the fiber owns"). Splitting the take from the release keeps heap mutation
+/// (its slots emptied) so the release can run after the fiber borrow is
+/// dropped. Splitting the take from the release keeps heap mutation
 /// disjoint from fiber access: the release's cascades can free the fiber's own
 /// heap value without invalidating a live borrow.
 pub(crate) struct FiberOwned {
@@ -41,8 +41,7 @@ pub(crate) struct FiberOwned {
 }
 
 /// Release everything a chain of frames nothing can re-enter still owed
-/// ([`ParkedDues`], docs/impl/region/owner.md § "A discard runs what the
-/// abandoned frames owed"). Shared by the squelch/abort discard chokepoint
+/// ([`ParkedDues`]). Shared by the squelch/abort discard chokepoint
 /// (`VM::discard_suspended_frames`), where the fiber runs on, and by the
 /// terminal-fiber teardown ([`release_fiber_owned`]), where it does not: what
 /// makes each release owed is a property of the frame, so the fiber's fate is
@@ -104,8 +103,7 @@ pub(crate) fn release_parked_dues(
 /// (cancel; abort of a not-yet-started fiber). An `:error` fiber is NOT
 /// terminal — it is resumable (the restarts system replays its re-parked
 /// frame) — so an error promotion must never take its owned state; a dropped
-/// `:error` fiber discharges at its region's free instead
-/// (docs/impl/region/owner.md § "The free-path fiber discharge").
+/// `:error` fiber discharges at its region's free instead.
 pub(crate) fn take_fiber_owned(fiber: &mut crate::value::fiber::Fiber) -> FiberOwned {
     let parked = fiber.take_parked_state();
     FiberOwned {
@@ -164,9 +162,11 @@ pub(crate) fn release_fiber_owned(
 ///
 /// A fiber stopped on an error holds a terminal signal the kill replaces, so
 /// that signal's park-retain and edge are released as it is displaced
-/// (`release_displaced_terminal_signal`), after the new payload's are taken,
-/// so a payload the two share never reaches zero in between
-/// (`runtime::tests::ownership::fnode::kill::fiber_kill_releases_displaced_error_signal`).
+/// (`release_displaced_terminal_signal`). The release runs after the new
+/// payload's retain, so a payload the two share never reaches zero in between,
+/// and after [`release_fiber_owned`], whose discharge reads the displaced
+/// payload's region: that retain may be the payload's last reference
+/// (`runtime::tests::ownership::fnode::kill`).
 pub(crate) fn kill_fiber(
     heap: &mut crate::value::fiberheap::FiberHeap,
     handle: &FiberHandle,
@@ -188,6 +188,6 @@ pub(crate) fn kill_fiber(
         (owned, displaced)
     });
     super::refcount::record_terminal_signal_park(heap, fiber_value, &signal);
-    super::release_displaced_terminal_signal(heap, fiber_value, displaced);
     release_fiber_owned(heap, owned);
+    super::release_displaced_terminal_signal(heap, fiber_value, displaced);
 }

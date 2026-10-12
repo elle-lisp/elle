@@ -1,7 +1,9 @@
-//! audited: 2026-09-28
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-10-05
+//! What every primitive table entry must hold: return types, region effects, identity, spelling, and an honest signal.
 //!
 //! docs/impl/symbol.md
+//! docs/impl/region/effects.md
+//! docs/signals/inference.md
 
 use super::super::def::RetType;
 use super::def_by_name;
@@ -61,7 +63,7 @@ fn typeinfer_ret_types_resolve_through_registry() {
 /// `effect:`, and it means "nobody has looked" — the solver then covers the
 /// callee with the full may-store arg clique, one never-balancing
 /// `IncrefRegion` per heap-argument pair per call
-/// (docs/impl/region/effects.md § "What the solver derives"). The census of
+/// (docs/impl/region/effects.md). The census of
 /// `Unknown`s over these tables is the declaration work queue, and it is
 /// empty; this test keeps it that way, so a new primitive cannot inherit the
 /// clique by silence.
@@ -154,8 +156,7 @@ fn prim_table_identity_deterministic() {
 // hash-keyed maps that keep the last spelling inserted on a hash, so a
 // collision among the names the build fixes would silently make two names one.
 // The memo's guard panics on a collision, so these tests record every
-// build-fixed spelling into one memo (docs/impl/symbol.md § "Collisions are
-// fatal").
+// build-fixed spelling into one memo (docs/impl/symbol.md).
 
 /// The name and every alias of each primitive in the canonical tables.
 fn record_primitive_spellings(memo: &mut SymbolTable) {
@@ -246,4 +247,57 @@ fn a_vocabulary_spelling_reaches_the_collision_check() {
 fn a_stdlib_symbol_reaches_the_collision_check() {
     use crate::pipeline::sources::STDLIB;
     record_source_spellings(&mut memo_with_an_impostor_on("defn"), STDLIB);
+}
+
+/// A primitive declared silent raises nothing, whatever it is handed.
+///
+/// A silent signal is a proof the compiler builds on: a function that calls
+/// only silent primitives infers silent, and a raise that leaves it is a broken
+/// proof (docs/signals/inference.md). So each silent primitive is called with
+/// arguments of every wrong type, at its fewest arguments and at one more where
+/// it takes one more. The `%` intrinsics are exempt by design: a call that names
+/// one compiles only when its operands are proven, and a call through a value
+/// reaches it as a callee the compiler does not know.
+///
+/// The counter-factual is an entry that omits `signal:`. It takes the silent
+/// default, and a primitive that checks its argument's type then breaks the
+/// proof of every function that calls it.
+#[test]
+fn a_primitive_declared_silent_raises_nothing() {
+    use super::{ffi_tables, ALL_TABLES};
+    use crate::primitives::ctx::with_test_ctx_keep_region;
+    use crate::signals::Signal;
+    use crate::value::{Arity, Value, SIG_ERROR};
+
+    let junk = [Value::int(42), Value::NIL, Value::TRUE, Value::float(1.5)];
+    let mut raising = Vec::new();
+    for def in ALL_TABLES
+        .iter()
+        .chain(ffi_tables().iter())
+        .flat_map(|t| t.iter())
+    {
+        if def.signal != Signal::silent() || def.name.starts_with('%') {
+            continue;
+        }
+        let fewest = match def.arity {
+            Arity::Exact(n) | Arity::AtLeast(n) | Arity::Range(n, _) => n,
+        };
+        let counts = [fewest, fewest + 1]
+            .into_iter()
+            .filter(|n| def.arity.matches(*n));
+        for count in counts {
+            for value in junk {
+                let args = vec![value; count];
+                let (bits, _) = with_test_ctx_keep_region(|ctx| (def.func)(ctx, &args));
+                if bits.intersects(SIG_ERROR) {
+                    raising.push(format!("{} with {} × {}", def.name, count, value));
+                }
+            }
+        }
+    }
+    assert!(
+        raising.is_empty(),
+        "primitive(s) declared silent that raise: {raising:?}\nDeclare the \
+         signal the body can raise, `Signal::errors()` for a type check."
+    );
 }

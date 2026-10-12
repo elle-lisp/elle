@@ -1,11 +1,16 @@
-//! Linting rules for Elle code
+// audited: 2026-10-05
+//! The lint rules: each reads facts analysis already holds and pushes a diagnostic.
+//!
+//! docs/cookbook/lint-rules.md
 
 use super::diagnostics::{
-    Diagnostic, ARITY_MISMATCH, MUTABLE_BINDING_NEVER_ASSIGNED, NON_TAIL_SELF_RECURSION,
-    UNUSED_BINDING,
+    Diagnostic, ARITY_MISMATCH, DENIED_FIBER_CALL, FIBER_SIGNAL_PASSES,
+    MUTABLE_BINDING_NEVER_ASSIGNED, NON_TAIL_SELF_RECURSION, UNUSED_BINDING,
 };
 use crate::primitives::registration::ALL_TABLES;
 use crate::reader::SourceLoc;
+use crate::signals::registry::format_bits;
+use crate::value::fiber::SignalBits;
 use crate::value::types::Arity;
 use crate::value::SymbolId;
 
@@ -182,6 +187,50 @@ pub(crate) fn check_mutable_never_assigned(
     ));
     diag.function = function.map(str::to_string);
     diagnostics.push(diag);
+}
+
+/// Hint what a fiber does with the signal of a body `fiber/new` names as a
+/// function literal (docs/signals/capabilities.md).
+///
+/// A bit of `body` that `deny` withholds is a call that will be denied, and a
+/// bit that `mask` does not name is a signal that will pass the parent. A side
+/// the call computes at run time is `None`, and gives no hint.
+pub(crate) fn check_fiber_body(
+    body: SignalBits,
+    mask: Option<SignalBits>,
+    deny: Option<SignalBits>,
+    location: &Option<SourceLoc>,
+    function: Option<&str>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let denied = deny.map_or(SignalBits::EMPTY, |deny| body.intersection(deny));
+    if !denied.is_empty() {
+        let mut diag = Diagnostic::hint(
+            DENIED_FIBER_CALL,
+            format!(
+                "the fiber body may raise {}, which :deny withholds, so the call that \
+                 raises it is denied and its denial goes to the parent",
+                format_bits(denied)
+            ),
+            location.clone(),
+        );
+        diag.function = function.map(str::to_string);
+        diagnostics.push(diag);
+    }
+    let passing = mask.map_or(SignalBits::EMPTY, |mask| body.subtract(mask));
+    if !passing.is_empty() {
+        let mut diag = Diagnostic::hint(
+            FIBER_SIGNAL_PASSES,
+            format!(
+                "the fiber body may raise {}, which the mask does not name, so a signal \
+                 that carries only that passes the parent",
+                format_bits(passing)
+            ),
+            location.clone(),
+        );
+        diag.function = function.map(str::to_string);
+        diagnostics.push(diag);
+    }
 }
 
 /// Get arity of a built-in function by looking up `PrimitiveDef::PRIMITIVES` tables.

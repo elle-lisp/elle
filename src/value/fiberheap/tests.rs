@@ -315,18 +315,17 @@ fn transient_region_id_comes_from_heap_pool_not_global_counter() {
 // A closure built by SHARING another closure's environment has its env
 // RegionSlice *backing* in the SOURCE closure's region, not its own. The
 // canonical producers are `squelch` and `attune`
-// (src/primitives/meta/syntaxops.rs), which build `Closure { template, env:
-// src.env, .. }` — the comment there notes "RegionSlice copy is a (ptr, len)
-// pair", that is, the backing stays put.
+// (src/primitives/meta/syntaxops.rs), which pass the source closure's `env` to
+// `Closure::new`. A `RegionSlice` copy is a (ptr, len) pair, so the backing
+// stays put.
 //
 // That is a Rule-5 cross-region escape: the new closure (in region B) holds a
 // reference into region A (the source's env backing). The alloc-time scan
 // (`find_object_cross_refs`, Closure arm) MUST incref A — otherwise A is freed
 // at its owning-scope decref while the new closure still reads its env. The
-// symptom is the protect+squelch+nested-yield hang: `populate_env` reads a
-// freed page on the first fiber resume (tests/lang/signals.lisp), because
-// `safe = (squelch outer …)` shares `outer`'s env and `outer`'s region is
-// released at rc=1 right after the `def`.
+// trap: `(def safe (squelch … outer))` shares `outer`'s env, `outer`'s region
+// can be released right after the `def`, and `populate_env` then reads a freed
+// page on the first call of `safe`.
 //
 // Counter-factual: a Closure arm that scans only the env *Values* and never the
 // env backing leaves `region_rc(A)` at 1 after the closure allocation, so the

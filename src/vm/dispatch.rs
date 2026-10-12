@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-10-06
 //! Main instruction dispatch loop.
 //!
 //! This module contains the core bytecode execution loop that dispatches
@@ -24,9 +24,13 @@ mod region;
 impl VM {
     /// Handle the Emit instruction.
     ///
+    /// An emit of a bit the fiber withholds raises nothing. The fiber parks on
+    /// the denial instead, and the resume value answers the emit
+    /// (docs/signals/emit.md).
+    ///
     /// For error signals (SIG_ERROR): stores the error in fiber.signal and
-    /// exits the dispatch loop. No SuspendedFrame — errors propagate through
-    /// the normal return/unwind path.
+    /// exits the dispatch loop. The exit's driver parks the frame
+    /// (`park_raised`), and the restart answers the emit.
     ///
     /// For suspension signals (SIG_YIELD, user-defined): captures a
     /// SuspendedFrame so that resume can continue from this exact point.
@@ -43,13 +47,19 @@ impl VM {
             .pop()
             .expect("VM bug: Stack underflow on emit");
 
+        let blocked = Self::emit_blocked(self.fiber.withheld, signal_bits);
+        if !blocked.is_empty() {
+            self.park_denied_emit(signal_bits, blocked, value);
+            self.park_emit_frame(code, closure_env, ip);
+            return (blocked, ip);
+        }
+
         // The DELIVERY reference: the resumer reads this value out of
         // `fiber.signal` as its resume result and releases it there, so the park
         // mints the reference that release consumes — the same service a
         // completing child's `Return` mint performs for a terminal result. The
         // body's own reference is a separate one, released by the continuation
-        // past this suspend (docs/impl/region/park.md § "A fiber body owns one
-        // reference of every value it yields").
+        // past this suspend (docs/impl/region/park.md).
         //
         // A HALT is the one signal whose decref never fires, so it is the one
         // signal that must not be retained. The dispatch loop leaves at this
@@ -74,15 +84,13 @@ impl VM {
             // raise chain's own reference funds nothing: record the mint so the
             // abandoned-frame walk and the parked frame's discharge stop
             // exempting the payload's region and reclaim that reference
-            // (docs/impl/region/mechanism.md § "An abandoned frame runs the
-            // releases it still owes").
+            // (docs/impl/region/unwind.md).
             if signal_bits.intersects(SIG_ERROR) {
                 self.fiber.delivery.record_mint(value);
             } else {
                 // A SUSPENDING emit records the park instead: this retain is the
                 // delivery, and a `squelch`/`attune` boundary ends the park with
-                // no reader to consume it (docs/impl/region/park.md § "A
-                // boundary ends a park with no reader and no install"). The two
+                // no reader to consume it (docs/impl/region/park.md). The two
                 // arms partition what reaches here, the halt having taken no
                 // retain to account for.
                 self.fiber.delivery.park_emit(signal_bits, value);
@@ -92,40 +100,50 @@ impl VM {
         self.fiber.signal = Some((signal_bits, value));
 
         if !signal_bits.intersects(SIG_ERROR) {
-            // Suspension: save stack and create a frame for later resumption.
-            let saved_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
-
-            // Innermost yield frame: this activation's remap is still on top
-            // (the wrapping `saving_stack` pops it after we return).
-            let activation_region_map = self
-                .fiber
-                .activation_region_maps
-                .last()
-                .cloned()
-                .unwrap_or_default();
-            // MOVE what the activation owes into the frame (its slot is
-            // likewise still on top): a node's members are Owned with no other
-            // release route and a deferred tail-call release has no emitted
-            // instruction left at all, so both must ride the park to the resumed
-            // body's completion (docs/impl/region/owner.md § "Owner nodes").
-            let activation_dues = self.take_activation_dues();
-            // The yielding activation runs the current closure — park it so the
-            // recursion resolves to the same closure after resume.
-            let current_closure = self.fiber.current_closure;
-            let frame = SuspendedFrame::Bytecode(BytecodeFrame::suspend(
-                code.clone(),
-                closure_env.clone(),
-                ip,
-                saved_stack,
-                true,
-                activation_region_map,
-                activation_dues,
-                current_closure,
-                self.heap(),
-            ));
-            self.fiber.suspended = Some(vec![frame]);
+            self.park_emit_frame(code, closure_env, ip);
         }
 
         (signal_bits, ip)
+    }
+
+    /// Park the emitting activation as the innermost frame, resuming at `ip`,
+    /// just past the emit, where the resume value answers it.
+    fn park_emit_frame(
+        &mut self,
+        code: &crate::value::Code,
+        closure_env: &Rc<Vec<Value>>,
+        ip: usize,
+    ) {
+        let saved_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
+
+        // Innermost yield frame: this activation's remap is still on top
+        // (the wrapping `saving_stack` pops it after we return).
+        let activation_region_map = self
+            .fiber
+            .activation_region_maps
+            .last()
+            .cloned()
+            .unwrap_or_default();
+        // MOVE what the activation owes into the frame (its slot is
+        // likewise still on top): a node's members are Owned with no other
+        // release route and a deferred tail-call release has no emitted
+        // instruction left at all, so both must ride the park to the resumed
+        // body's completion (docs/impl/region/owner.md).
+        let activation_dues = self.take_activation_dues();
+        // The yielding activation runs the current closure — park it so the
+        // recursion resolves to the same closure after resume.
+        let current_closure = self.fiber.current_closure;
+        let frame = SuspendedFrame::Bytecode(BytecodeFrame::suspend(
+            code.clone(),
+            closure_env.clone(),
+            ip,
+            saved_stack,
+            true,
+            activation_region_map,
+            activation_dues,
+            current_closure,
+            self.heap(),
+        ));
+        self.fiber.suspended = Some(vec![frame]);
     }
 }

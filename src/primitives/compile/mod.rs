@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-05
 //! Compiler-as-library primitives: analyze Elle source and query the results.
 //!
 //! docs/analysis/portrait.md
@@ -174,7 +174,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "compile/diagnostics" => prim_compile_diagnostics {
-        signal: Signal::silent(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Return diagnostics (warnings, errors) from an analysis.",
         params: &["analysis"],
@@ -183,7 +183,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "compile/symbols" => prim_compile_symbols {
-        signal: Signal::silent(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Return all symbol definitions from an analysis.",
         params: &["analysis"],

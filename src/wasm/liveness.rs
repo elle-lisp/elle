@@ -1,15 +1,17 @@
 // audited: 2026-10-06
-// docs/impl/wasm.md
-//! Liveness analysis for the WASM emitter's CPS spill optimization.
+//! Which register and local slots are live where a frame parks, so a park spills only those.
 //!
-//! Computes which physical register slots are live at each suspend point
-//! (suspending call or yield). Only live slots need to be spilled, which
-//! reduces code size from O(total_regs * suspend_points) to
-//! O(live_regs * suspend_points).
+//! docs/impl/wasm.md
+//!
+//! A frame parks at an emit and at every park site (`suspend::ParkSite`).
+//! Spilling the live slots alone keeps the code linear in the live state, not
+//! in park sites times slots.
 
 use crate::lir::for_each_terminator_use;
 use crate::lir::{InstrRef, Label, LirView, Reg, Terminator};
 use std::collections::{HashMap, HashSet};
+
+use super::suspend::ParkSite;
 
 /// Per-suspend-point live set, keyed by `(block_idx, instr_idx)`.
 /// Contains the set of live slots at that point, in a **combined slot space**:
@@ -178,11 +180,10 @@ pub fn compute_spill_liveness(
         }
     }
 
-    // Now compute per-suspend-point live sets.
-    // For a suspending call at (block_idx, instr_idx), the live set is
-    // the set of slots live AFTER that instruction (i.e., used in the
-    // continuation). We compute this by walking forward from the call
-    // to the end of the block, collecting uses and subtracting defs.
+    // Now compute the live set at each place the frame parks. For a park site
+    // at (block_idx, instr_idx), the live set is the set of slots live AFTER
+    // that instruction (used in the continuation): the block's live-out, with
+    // the instructions after the site applied backward.
     let mut result = SpillLiveMap::new();
 
     for (bi, block) in blocks.iter().enumerate() {
@@ -192,15 +193,10 @@ pub fn compute_spill_liveness(
             result.insert((bi, usize::MAX), live_out[bi].clone());
         }
 
-        // Check for suspending calls
         for (ii, node) in block.nodes().enumerate() {
-            let is_suspend = matches!(
-                node.instr(),
-                InstrRef::SuspendingCall { .. } | InstrRef::CallArrayMut { .. }
-            );
-            if !is_suspend {
+            let Some(site) = ParkSite::of(&node) else {
                 continue;
-            }
+            };
 
             // Live at this call = slots that are live after this instruction.
             // Start with live_out of the block, then walk backward from the
@@ -234,17 +230,12 @@ pub fn compute_spill_liveness(
                 });
             }
 
-            // Also include the dst of this call itself — it's live after
-            // the call (the resume will write it, and subsequent code uses it).
-            match node.instr() {
-                InstrRef::SuspendingCall { dst, .. } | InstrRef::CallArrayMut { dst, .. } => {
-                    if let Some(&slot) = reg_to_slot.get(&dst) {
-                        if slot < num_phys_slots {
-                            live.insert(slot);
-                        }
-                    }
+            // The site's own result is live after it: a restart writes it,
+            // and the code after the site reads it.
+            if let Some(&slot) = site.dst.and_then(|dst| reg_to_slot.get(&dst)) {
+                if slot < num_phys_slots {
+                    live.insert(slot);
                 }
-                _ => {}
             }
 
             result.insert((bi, ii), live);

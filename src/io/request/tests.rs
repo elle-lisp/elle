@@ -1,4 +1,4 @@
-//! audited: 2026-09-30
+//! audited: 2026-10-11
 //! What a request and its submitted copy carry, when it may be spent, and the fills a completion makes.
 //!
 //! src/io/AGENTS.md
@@ -89,6 +89,100 @@ fn test_ioop_seek_variant_carries_offset_and_whence() {
 fn test_ioop_tell_variant_is_unit() {
     let op = IoOp::Tell;
     assert!(matches!(op, IoOp::Tell));
+}
+
+// ── What spending a request requires ─────────────────────────────────────
+//
+// `io/submit` tests a request's required bits against the submitting fiber,
+// so these bits are the whole spend check (docs/signals/capabilities.md). The
+// counter-factual is a socket operation that requires `:io` alone: a fiber
+// denied `:net` spends a connect request somebody handed it.
+
+fn tcp_connect() -> IoOp {
+    IoOp::Connect {
+        addr: ConnectAddr::Tcp {
+            addr: std::net::IpAddr::from([127, 0, 0, 1]),
+            port: 9,
+            options: SocketOptions::default(),
+            encoding: crate::port::Encoding::Binary,
+        },
+    }
+}
+
+#[test]
+fn a_socket_operation_requires_the_network() {
+    use crate::signals::{SIG_IO, SIG_NET};
+    let net = SIG_IO.union(SIG_NET);
+    let ops = [
+        tcp_connect(),
+        IoOp::Resolve {
+            hostname: "localhost".to_string(),
+        },
+        PortOp::Accept {
+            options: SocketOptions::default(),
+            encoding: crate::port::Encoding::Binary,
+            accept_port: Value::NIL,
+        }
+        .into(),
+        PortOp::SendTo {
+            addr: "127.0.0.1".to_string(),
+            port_num: 9,
+            data: Value::NIL,
+        }
+        .into(),
+        PortOp::RecvFrom {
+            count: 16,
+            result: Value::NIL,
+        }
+        .into(),
+        PortOp::Shutdown {
+            how: libc::SHUT_RDWR,
+        }
+        .into(),
+    ];
+    for op in &ops {
+        assert_eq!(op.required_bits(), net, "{:?} requires |:io :net|", op);
+    }
+}
+
+#[test]
+fn a_unix_connect_requires_the_filesystem_too() {
+    use crate::signals::{SIG_FS, SIG_IO, SIG_NET};
+    let op = IoOp::Connect {
+        addr: ConnectAddr::Unix {
+            path: "n.sock".to_string(),
+            options: SocketOptions::default(),
+            encoding: crate::port::Encoding::Binary,
+        },
+    };
+    assert_eq!(op.required_bits(), SIG_IO.union(SIG_NET).union(SIG_FS));
+}
+
+/// A read or a write on a socket port spends a connection the fiber already
+/// holds, so it requires what it requires on any other port.
+#[test]
+fn a_stream_operation_requires_only_the_scheduler() {
+    use crate::signals::SIG_IO;
+    let ops: [IoOp; 3] = [
+        PortOp::Read {
+            count: 4,
+            buffer: Value::NIL,
+        }
+        .into(),
+        PortOp::Write { data: Value::NIL }.into(),
+        PortOp::Flush.into(),
+    ];
+    for op in &ops {
+        assert_eq!(op.required_bits(), SIG_IO, "{:?} requires |:io|", op);
+    }
+}
+
+/// A task's effects cannot be derived, so it requires every gated bit.
+#[test]
+fn a_task_requires_the_network_with_every_other_gated_bit() {
+    use crate::signals::SIG_NET;
+    let op = IoOp::Task(TaskFn::new(Box::new(|| (0, Vec::new()))));
+    assert!(op.required_bits().intersects(SIG_NET));
 }
 
 // ── The submit path's copy into the pending entry ────────────────────────

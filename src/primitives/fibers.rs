@@ -1,7 +1,8 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! Fiber lifecycle primitives.
 //!
 //! docs/impl/region/park.md
+//! docs/signals/emit.md
 //!
 //! Core fiber operations: creation, resumption, signaling, status, and
 //! value extraction. Introspection and management primitives (bits, mask,
@@ -9,9 +10,8 @@
 //! `fiber_introspect.rs`, and `fiber?` is in `introspection.rs`.
 //!
 //! Signal-bits resolution lives in `resolve`; fuel (instruction-budget) ops
-//! live in `fuel`. Both are re-exported so the `primitive!` table below — and
-//! external callers naming `crate::primitives::fibers::resolve_signal_bits` —
-//! resolve the handler paths unchanged.
+//! live in `fuel`. Both are re-exported, so the `primitive!` table below and
+//! external callers reach them through `crate::primitives::fibers`.
 //!
 //! `tests/lang/prim-fibers.lisp` pins them.
 
@@ -101,8 +101,8 @@ pub(crate) fn prim_fiber_new(
     // the child, so a resume-time snapshot would capture the resumer's (the
     // scheduler's) bindings instead of the ones the creator meant to propagate.
     // Frames are flattened into one (innermost wins) so lookup is O(1) and the
-    // resolved value is frozen. The resume-time inheritance in `do_fiber_resume`
-    // stays a no-op fallback for fibers built outside `fiber/new` — it skips a
+    // resolved value is frozen. The resume-time inheritance in
+    // `do_fiber_resume_single` stays a no-op fallback for fibers built outside `fiber/new` — it skips a
     // child whose `param_frames` is already seeded (non-empty) here.
     let parent_frames = ctx.vm().fiber.param_frames.clone();
     if !parent_frames.is_empty() {
@@ -196,8 +196,8 @@ pub(crate) fn prim_fiber_resume(
 /// (emit bits value) → suspends
 ///
 /// Emit a signal from the current fiber. The signal bits and value are
-/// returned directly — the VM's dispatch loop stores them in fiber.signal
-/// and suspends the fiber.
+/// returned directly; the VM's `handle_primitive_signal` classifies the bits,
+/// stores them with the value in `fiber.signal`, and parks or raises.
 pub(crate) fn prim_emit(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -206,11 +206,18 @@ pub(crate) fn prim_emit(
         Ok(bits) => bits,
         Err(err) => return err,
     };
-
-    // Return the signal bits and value directly.
-    // The VM's handle_primitive_signal catch-all stores (bits, value)
-    // in fiber.signal and returns Some(bits), suspending the fiber.
     (bits, args[1])
+}
+
+/// The `fiber/emit` definition, which a denied literal `emit` names in its
+/// denial payload, so the parent reads one payload from either form and can
+/// raise the signal itself through `:func` (docs/signals/emit.md). A native
+/// value names its definition by address, so this is the table's own entry.
+pub(crate) fn emit_def() -> &'static crate::primitives::def::PrimitiveDef {
+    PRIMITIVES
+        .iter()
+        .find(|def| def.name == "fiber/emit")
+        .expect("VM bug: the fiber primitive table lost fiber/emit")
 }
 
 /// (fiber/status fiber) → keyword
@@ -286,8 +293,9 @@ primitive! {
         // names, so the requirement rides that argument. `yields_errors` above
         // is what the declaration alone can promise; the gate reads the real
         // bits here so a fiber cannot raise a capability it withholds. The
-        // literal `emit` compiles to the `Emit` instruction and never reaches
-        // this gate. See docs/signals/authority.md.
+        // literal `emit` compiles to the `Emit` instruction, which asks the
+        // same question and denies in this primitive's name (`emit_def`).
+        // See docs/signals/authority.md.
         bits_from_args: Some(emit_required_bits),
     }
     "fiber/status" => prim_fiber_status {

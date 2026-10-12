@@ -114,7 +114,7 @@
             ["(spawn fn)", "Execute closure in a new OS thread"],
             ["(join handle)", "Wait for thread to complete, return result"],
             ["(signal name)", "Declare a user-defined signal keyword"],
-            ["(silence fn signals)", "Restrict which signals a function may emit"]
+            ["(squelch spec fn)", "Block the signals in spec at the boundary of fn"]
           ]
         }
       ]

@@ -1,3 +1,9 @@
+// audited: 2026-10-11
+//! Expression dispatch: literals, variables, the collection literals, and the
+//! turn to a special form or a call.
+//!
+//! docs/signals/inference.md
+
 use super::*;
 
 /// What a collection literal does with a `;splice` among its items.
@@ -16,6 +22,26 @@ pub(crate) enum SpliceRule {
 const STRUCT_SPLICE: SpliceRule =
     SpliceRule::Reject("struct constructors (key-value types require key-value pairs)");
 
+/// An element `bytes` accepts without a check: an integer literal in range.
+fn is_byte_literal(hir: &Hir) -> bool {
+    matches!(&hir.kind, HirKind::Int(n) if (0..=255).contains(n))
+}
+
+/// A key `struct` accepts without a check: an immediate or a string the
+/// literal spells out, which cannot be a mutable value.
+fn is_key_literal(hir: &Hir) -> bool {
+    matches!(
+        &hir.kind,
+        HirKind::Nil
+            | HirKind::Bool(_)
+            | HirKind::Int(_)
+            | HirKind::Float(_)
+            | HirKind::String(_)
+            | HirKind::Keyword(_)
+            | HirKind::Quote(_)
+    )
+}
+
 impl<'a> Analyzer<'a> {
     /// Lower a collection literal to a call of the primitive that builds it.
     ///
@@ -26,7 +52,11 @@ impl<'a> Analyzer<'a> {
     /// struct or a set rejects one, having no positional reading to spread it
     /// into.
     ///
-    /// The call's signal is the combination of its items'.
+    /// The call's signal is the combination of its items', plus `:error`
+    /// where the constructor checks an element at run time: a spliced value
+    /// must be a sequence, a byte must be an integer from 0 to 255, and a
+    /// struct key must be immutable. An element the literal spells out is
+    /// checked here instead, so a literal of literals stays silent.
     pub(crate) fn analyze_collection_literal(
         &mut self,
         prim: &str,
@@ -46,6 +76,16 @@ impl<'a> Analyzer<'a> {
             let hir = self.analyze_expr(inner)?;
             signal = signal.combine(hir.signal);
             args.push(CallArg { expr: hir, spliced });
+        }
+        let checked_at_run_time = args.iter().any(|a| a.spliced)
+            || match prim {
+                "bytes" | "@bytes" => !args.iter().all(|a| is_byte_literal(&a.expr)),
+                "struct" | "@struct" => !args.iter().step_by(2).all(|a| is_key_literal(&a.expr)),
+                _ => false,
+            };
+        if checked_at_run_time {
+            self.add_inherent_bits(crate::value::SIG_ERROR);
+            signal = signal.combine(Signal::errors());
         }
         let binding = self.resolve_primitive(prim);
         let func = Hir::new(HirKind::Var(binding), span, Signal::silent());
@@ -226,11 +266,7 @@ impl<'a> Analyzer<'a> {
                     match name.as_str() {
                         "emit"
                             if (items.len() == 2 || items.len() == 3)
-                                && matches!(
-                                    items[1].kind,
-                                    crate::syntax::SyntaxKind::Keyword(_)
-                                        | crate::syntax::SyntaxKind::Set(_)
-                                ) =>
+                                && self.is_static_emit_spec(&items[1]) =>
                         {
                             return self.analyze_emit(items, span);
                         }

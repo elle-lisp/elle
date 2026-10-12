@@ -74,9 +74,10 @@ pub struct SendableClosure {
     /// fills the child table. Each has empty `env`/`squelch_mask`.
     pub child_protos: Vec<SendableClosure>,
     /// The static region slots this code object's allocations SHARE after a
-    /// builder-idiom merge (`ClosureTemplate::merged_slots`; docs/impl/region/merging.md
-    /// § Merging), serialized so the worker mint-or-reuses them and its region count
-    /// matches the sender's. Empty unless a merge fired.
+    /// builder-idiom merge (`ClosureTemplate::merged_slots`;
+    /// docs/impl/region/merging.md), serialized so the worker mint-or-reuses
+    /// them and its region count matches the sender's. Empty unless a merge
+    /// fired.
     pub merged_slots: Vec<u32>,
     /// Value-routed release slots (`ClosureTemplate::frame_release_slots`), so an
     /// abandoned frame on the worker runs the releases it still owes.
@@ -205,7 +206,7 @@ pub enum SendValue {
 ///
 /// Variant order matches `TableKey`'s, because the derived `Ord` decides the
 /// order a received struct's entries land in
-/// (docs/impl/values.md § "Struct keys").
+/// (docs/impl/values.md).
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub enum SendKey {
     Nil,
@@ -291,7 +292,7 @@ pub struct SendBundle {
     /// Spelling table for every symbol and keyword in the bundle, read from
     /// the sender's memo (and, for keywords, the static vocabulary). The
     /// receiving instance replays it into its own memo so the names it now
-    /// holds can be printed (docs/impl/symbol.md § "The display memo"). A
+    /// holds can be printed (docs/impl/symbol.md). A
     /// name the sender never learned is absent — its hash still compares
     /// correctly on the other side.
     pub symbols: Vec<(u64, Box<str>)>,

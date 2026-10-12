@@ -1,4 +1,7 @@
-//! Diagnostic types for linter violations
+// audited: 2026-10-05
+//! A diagnostic's type, its severity, and the one table of codes each surface reports under.
+//!
+//! docs/cookbook/lint-rules.md
 
 use crate::reader::SourceLoc;
 use std::fmt;
@@ -21,8 +24,8 @@ impl fmt::Display for Severity {
     }
 }
 
-/// A warning the linter can raise: its code and the rule name that always
-/// travels with it.
+/// A code the linter reports, a warning's or a hint's: the code and the rule
+/// name that always travels with it.
 ///
 /// The pair has one home, so a rule cannot pick up a second code — or a code a
 /// second name — by being spelled out again at a new emission site.
@@ -41,15 +44,11 @@ impl LintCode {
 impl LintCode {
     /// The code an analysis failure reports under, on **every** surface.
     ///
-    /// The lint CLI, `compile/diagnostics`, and the LSP each used to spell this
-    /// mapping out for themselves, and they disagreed: a syntax error was
-    /// `E005` from `elle lint`, `E000` from `compile/diagnostics` (whose match
-    /// had no `SyntaxError` arm at all), and `E0001` from the LSP — a shape the
-    /// documented `E00x` scheme does not even have. A consumer that filters or
-    /// counts by code could not do it across surfaces.
+    /// The lint CLI, `compile/diagnostics`, and the LSP all ask here, so one
+    /// failure carries one code whichever surface a consumer reads, and a
+    /// consumer can filter or count by code across them.
     ///
-    /// Kinds with no code of their own report as [`ANALYSIS_ERROR`], which is
-    /// what each site's fallback arm already did.
+    /// Kinds with no code of their own report as [`ANALYSIS_ERROR`].
     pub fn for_error_kind(kind: &crate::error::ErrorKind) -> LintCode {
         use crate::error::ErrorKind;
         match kind {
@@ -68,6 +67,8 @@ pub const MUTABLE_BINDING_NEVER_ASSIGNED: LintCode =
     LintCode::new("W003", "mutable-binding-never-assigned");
 pub const UNUSED_BINDING: LintCode = LintCode::new("W004", "unused-binding");
 pub const NON_TAIL_SELF_RECURSION: LintCode = LintCode::new("W005", "non-tail-self-recursion");
+pub const DENIED_FIBER_CALL: LintCode = LintCode::new("I001", "denied-fiber-call");
+pub const FIBER_SIGNAL_PASSES: LintCode = LintCode::new("I002", "fiber-signal-passes");
 
 /// Every warning the linter raises, in code order.
 ///
@@ -80,6 +81,10 @@ pub const WARNINGS: &[LintCode] = &[
     UNUSED_BINDING,
     NON_TAIL_SELF_RECURSION,
 ];
+
+/// Every hint the linter gives, in code order, published in the cookbook
+/// beside [`WARNINGS`].
+pub const HINTS: &[LintCode] = &[DENIED_FIBER_CALL, FIBER_SIGNAL_PASSES];
 
 pub const ANALYSIS_ERROR: LintCode = LintCode::new("E000", "analysis-error");
 pub const UNDEFINED_VARIABLE: LintCode = LintCode::new("E001", "undefined-variable");
@@ -142,6 +147,12 @@ impl Diagnostic {
     /// one: the code and the rule name arrive together and cannot disagree.
     pub fn warn(lint: LintCode, message: impl Into<String>, location: Option<SourceLoc>) -> Self {
         Self::new(Severity::Warning, lint.code, lint.rule, message, location)
+    }
+
+    /// A hint built from its registry entry: what a program does that a reader
+    /// may not see at once, which is no fault.
+    pub fn hint(lint: LintCode, message: impl Into<String>, location: Option<SourceLoc>) -> Self {
+        Self::new(Severity::Info, lint.code, lint.rule, message, location)
     }
 
     /// Format as human-readable output

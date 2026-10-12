@@ -1,3 +1,4 @@
+// audited: 2026-10-04
 //! Destructuring: pattern analysis and helpers for binding forms.
 
 use super::*;
