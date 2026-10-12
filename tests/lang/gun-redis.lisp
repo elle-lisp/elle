@@ -1,14 +1,24 @@
 (elle/epoch 14)
-# audited: 2026-10-11
-# std/gun on the Redis store: the hash layout, persistence across databases, and interleaved writers.
+# audited: 2026-10-12
+# std/gun on the Redis store: the hash layout, persistence, interleaved writers, and two peers.
 # lib/gun.md
 #
-# Requires a live Redis on 127.0.0.1:6379. Every key this file writes starts
-# with test:gun:<pid>:, and the file deletes only those keys, so two runs and
-# the other Redis tests can share one server.
+# Requires a live Redis on 127.0.0.1:6379, and the hash and random plugins for
+# the peers. Every key this file writes starts with test:gun:<pid>:, and the
+# file deletes only those keys, so two runs and the other Redis tests can share
+# one server.
+
+(let [[h-ok? _] (protect (import "plugin/hash"))
+      [r-ok? _] (protect (import "plugin/random"))]
+  (unless (and h-ok? r-ok?)
+    (error (struct :error :gated
+                   :reason "plugin/hash or plugin/random not available"))))
 
 (def redis ((import "std/redis")))
-(def gun ((import "std/gun") :redis redis))
+(def ws
+  ((import "std/websocket") :hash (import "plugin/hash")
+                            :random (import "plugin/random")))
+(def gun ((import "std/gun") :redis redis :websocket ws))
 (def state ((import "std/gun/state")))
 (def value ((import "std/gun/value")))
 (def stores ((import "std/gun/store") :state state :value value :redis redis))
@@ -104,6 +114,33 @@
       (assert (= (get (get (stored "race") "v") 1) (value:encode in-memory))
               "the stored encoding is the winner's"))))
 
+# ── Peers ───────────────────────────────────────────────────────────────────
+
+# The server's reader fibers come from the accept loop, which runs in a fiber
+# spawned here. They reach Redis only when they inherit this redis:with.
+(defn mesh []
+  (let [errs @[]
+        report (fn [err] (push errs err))
+        a (gun:open :store (gun:redis-store :prefix (string prefix ":a"))
+                    :on-error report)
+        b (gun:open :store (gun:redis-store :prefix (string prefix ":b"))
+                    :on-error report)
+        listener (tcp/listen "127.0.0.1" 0)
+        at (port/path listener)
+        url (string "ws://127.0.0.1:"
+                    (parse-int (slice at (+ 1 (string/find at ":")))) "/gun")]
+    (ev/spawn (fn [] (gun:serve a listener)))
+    (let [hang-up (gun:connect b url)]
+      (gun:put (gun:get b "shared") {:v "from b"} :ack 5)
+      (assert (= (get (get (stored "a:shared") "v") 1) "s:from b")
+              "a write from a peer reaches the server's Redis hash")
+      (gun:put (gun:get a "shared") {:w "from a"} :ack 5)
+      (assert (= (get (get (stored "b:shared") "w") 1) "s:from a")
+              "and a write from the server reaches the dialer's")
+      (hang-up))
+    (port/close listener)
+    (assert (empty? errs) (string "no database reported an error: " errs))))
+
 (redis:with "127.0.0.1" 6379
             (fn []
               (clear-test-keys)
@@ -112,6 +149,7 @@
                 (store-round-trip)
                 (layout)
                 (persistence)
-                (interleaved))))
+                (interleaved)
+                (mesh))))
 
 (println "tests/lang/gun-redis.lisp: all tests passed")
