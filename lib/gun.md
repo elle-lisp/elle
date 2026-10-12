@@ -292,17 +292,19 @@ the error as its one argument. The default writes a line to stderr.
 
 ## Running tests
 
-The memory store needs nothing outside the process:
+The memory store and the peer messages need nothing outside the process:
 
 ```bash
 elle tests/lang/gun.lisp
+elle tests/lang/gun-wire.lisp
 ```
 
 The mesh needs the `plugin/hash` and `plugin/random` plugins, and joins its
-databases over loopback:
+databases over loopback. `make suite-plugins` builds both:
 
 ```bash
 elle tests/lang/gun-mesh.lisp
+elle tests/lang/gun-sync.lisp
 ```
 
 The Redis store needs Redis on 127.0.0.1:6379. The file also joins two
