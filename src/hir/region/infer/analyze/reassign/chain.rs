@@ -1,4 +1,4 @@
-// audited: 2026-09-22
+// audited: 2026-10-11
 //! The forwarding chain functionalization gives one reassigned name, and what
 //! the gate reads off it.
 //!
@@ -18,8 +18,9 @@ pub(super) type ReassignSites = HashMap<Binding, CellStores>;
 /// fall on decides whether the edge carries a reference at all (see
 /// `forwarding_edges`).
 pub(in crate::hir::region::infer::analyze) struct Reassigns {
-    /// Module-scope (file-letrec) reassigns — the cell adopts the producer
-    /// reference; the final content is freed by frame teardown.
+    /// Module-scope (file-letrec) reassigns — the cell adopts a fresh
+    /// allocation's producer reference and counts a call result's store; the
+    /// final content is freed by frame teardown.
     pub(in crate::hir::region::infer::analyze) top_level: ReassignSites,
     /// Fn-local reassigns — the cell takes a counted store and needs a content
     /// drop of its own at its scope demise.

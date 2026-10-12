@@ -1,4 +1,4 @@
-// audited: 2026-09-22
+// audited: 2026-10-11
 //! The mutable-reassign 1-slot-container gate: the questions asked of each
 //! reassigned binding, and what a yes records.
 //!
@@ -137,8 +137,9 @@ pub(super) fn apply_reassign_containers(
     }
     let sole_held = |b: Binding, r: Region| -> bool { region_holders.sole_held(b, r) };
     let pin_sole = |b: Binding, r: Region| -> bool { pin_holders.sole_held(b, r) };
-    // The module-scope half, whose cell ADOPTS the producer reference and whose
-    // final content the file-letrec frame teardown frees.
+    // The module-scope half, whose cell ADOPTS a fresh allocation's producer
+    // reference, COUNTS a call result's store, and whose final content the
+    // file-letrec frame teardown frees.
     toplevel::apply_module_scope(
         info,
         top_level_reassigns,
@@ -148,16 +149,17 @@ pub(super) fn apply_reassign_containers(
     );
 
     // ── Fn-local (in-lambda) reassigned mutables ───────────────────────────
-    // Same 1-slot-container model as the top-level loop above — the cell takes a
-    // COUNTED reference via `lower_assign`'s incref-on-store, released by
-    // drop-on-overwrite for each displaced prior. ONE difference: a fn-local
-    // cell's final content is NOT a program-lifetime root (a module-scope cell's
-    // is, freed by the file-letrec frame teardown), so the cell needs a second
-    // release channel of its own — the CONTENT DROP at the cell's scope demise,
-    // recorded in `cell_containers` and emitted by the lowerer at the enclosing
-    // scope node's exit. The producer's separate claim on each stored value is
-    // dead once the cell holds its own reference, so it is pinned to the store
-    // site (`decref::populate_decref_points` reads `cell_containers` for both).
+    // Same 1-slot-container model as the module-scope half above — the cell
+    // takes a COUNTED reference via `lower_assign`'s incref-on-store for every
+    // store, released by drop-on-overwrite for each displaced prior. ONE
+    // difference: a fn-local cell's final content is NOT a program-lifetime root
+    // (a module-scope cell's is, freed by the file-letrec frame teardown), so
+    // the cell needs a second release channel of its own — the CONTENT DROP at
+    // the cell's scope demise, recorded in `cell_containers` and emitted by the
+    // lowerer at the enclosing scope node's exit. The producer's separate claim
+    // on each stored value is dead once the cell holds its own reference, so it
+    // is pinned to the store site (`decref::populate_decref_points` reads
+    // `cell_containers` for both).
     // Two references, two channels each: no release does double duty, so the
     // accounting holds for a cell written once and for one re-minted every
     // iteration of a loop alike.

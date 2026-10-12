@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-11
 //! Region releases: what the lowerer emits at each region's `decref_point`, routed by the region's class.
 //!
 //! docs/impl/region/mechanism.md
@@ -134,13 +134,18 @@ impl<'a> Lowerer<'a> {
                     // and decref'ing would free THAT live value
                     // (tests/impl/region-mutable-reassign-flow.lisp pins it).
                     // With no untainted route the release is skipped: an
-                    // over-keep, never a mis-free. (When the suppression gate
-                    // succeeds these regions are already in
-                    // `suppressed_decref_regions` and never reach here; this only
-                    // fires on the unsuppressed baseline.) Excludes capture-cell
-                    // placeholders, whose own-region release below is correct.
+                    // over-keep, never a mis-free. (When the gate donates these
+                    // regions are already in `suppressed_decref_regions` and
+                    // never reach here; this only fires on the unsuppressed
+                    // baseline.) Two exemptions: a capture-cell placeholder,
+                    // whose own-region release below is correct, and a value a
+                    // counted module-scope cell stores (`cell_stored_regions`),
+                    // whose route is the producer's own ANF slot rather than the
+                    // cell's and whose release the cell's counted reference makes
+                    // safe to run there.
                     if self.region_info.mutated_binding_value_regions.contains(&r)
                         && !self.region_info.cell_release_regions.contains(&r)
+                        && !self.region_info.cell_stored_regions.contains(&r)
                     {
                         if crate::config::get().has_trace("rc") {
                             eprintln!(

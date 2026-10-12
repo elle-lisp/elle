@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-11
 //! The order releases sharing one `decref_point` are emitted in: holder before holdee, so no release reads a freed page.
 //!
 //! docs/impl/region/rules.md
@@ -91,14 +91,14 @@ impl<'a> Lowerer<'a> {
         for regions in decrefs_by_decref_point.values_mut() {
             Self::order_releases(regions, &adopt_owner, &value_alias, &info);
         }
-        // The fn-local 1-slot containers whose content drop lands at each scope
-        // node, indexed the same way and for the same reason as the two above.
+        // The 1-slot containers whose content drop lands at each scope node,
+        // indexed the same way and for the same reason as the two above.
         let mut cell_drops_by_demise: HashMap<HirId, Vec<Binding>> = HashMap::new();
         for (&b, c) in &info.cell_containers {
-            // A cell that forwards its final content into the next link of a
-            // loop chain has no content drop of its own: that link took the one
-            // reference over and releases it (`CellContainer::forwards_content`).
-            if c.forwards_content {
+            // A forwarding link's final content is the next link's to release,
+            // and a module-scope cell's is the file-letrec teardown's; neither
+            // emits a content drop (`CellContainer::drops_content`).
+            if !c.drops_content() {
                 continue;
             }
             cell_drops_by_demise.entry(c.demise).or_default().push(b);

@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-11
 //! The counted-init route: what an aliased init costs the cell, and what the
 //! mutated-slot backstop keeps off a cell's slot.
 //!
@@ -94,10 +94,11 @@ fn letrec_wrapper_read_of_restorable_cell_is_counted() {
 
 /// Facet C: the module-scope container NO closure captures, so it lives in a
 /// plain slot rather than a compiled cell. Its content is re-stored all the same
-/// — the top-level model donates the producer's reference and drop-on-overwrite
-/// is that reference's ONLY release — so a whole-value read of it is exposed
-/// exactly as a read of the celled realization is, and takes the same counted
-/// reference (docs/impl/region/reads.md).
+/// — the stored `%pair` is a fresh allocation, so the top-level model donates
+/// the producer's reference and drop-on-overwrite is that reference's ONLY
+/// release — so a whole-value read of it is exposed exactly as a read of the
+/// celled realization is, and takes the same counted reference
+/// (docs/impl/region/reads.md).
 ///
 /// Keying the reader rule on the cell rather than on the re-store would leave
 /// this half uncounted, and the gate would then refuse the donation to protect

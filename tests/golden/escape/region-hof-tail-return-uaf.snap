@@ -73,7 +73,7 @@
 [return_frontier]
   [r1, r30, r33, r5, r63, r65, r66, r67, r68]
 [suppressed_decref_regions]
-  [r35, r49]
+  []
 [region_instrs]
   ; entry <anon>
     block4: DecrefRegion s0
@@ -111,37 +111,39 @@
     block15: DecrefValueRegion v179
     block15: IncrefValueRegion v181
     block15: DecrefValueRegion v182
-    block15: DecrefValueRegion v187
+    block15: DecrefValueRegion v184
+    block15: DecrefValueRegion v189
     block14: DecrefRegion s16
-    block20: DecrefValueRegion v221
+    block20: DecrefValueRegion v223
     block20: DecrefRegion s17
     block20: DecrefRegion s18
-    block22: IncrefValueRegion v224
-    block22: DecrefValueRegion v225
-    block21: DecrefValueRegion v228
+    block22: IncrefValueRegion v226
+    block22: DecrefValueRegion v227
+    block21: DecrefValueRegion v230
     block26: DecrefRegion s19
     block26: DecrefRegion s20
     block26: DecrefRegion s21
     block26: DecrefRegion s22
-    block26: DecrefValueRegion v254
     block26: DecrefValueRegion v256
-    block26: DecrefValueRegion v261
-    block26: IncrefValueRegion v263
-    block26: DecrefValueRegion v264
-    block26: DecrefValueRegion v269
+    block26: DecrefValueRegion v258
+    block26: DecrefValueRegion v263
+    block26: IncrefValueRegion v265
+    block26: DecrefValueRegion v266
+    block26: DecrefValueRegion v268
+    block26: DecrefValueRegion v273
     block25: DecrefRegion s23
-    block31: DecrefValueRegion v303
+    block31: DecrefValueRegion v307
     block31: DecrefRegion s24
     block31: DecrefRegion s25
-    block33: IncrefValueRegion v306
-    block33: DecrefValueRegion v307
-    block32: DecrefValueRegion v310
+    block33: IncrefValueRegion v310
+    block33: DecrefValueRegion v311
+    block32: DecrefValueRegion v314
     block32: DecrefRegion s26
-    block32: IncrefValueRegion v315
-    block32: DecrefValueRegion v316
-    block32: DecrefValueRegion v318
+    block32: IncrefValueRegion v319
     block32: DecrefValueRegion v320
     block32: DecrefValueRegion v322
+    block32: DecrefValueRegion v324
+    block32: DecrefValueRegion v326
   ; closure[0] ctl_map
     block0: DecrefValueRegion v8
     block0: DecrefRegion s27
