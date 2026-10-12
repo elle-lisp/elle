@@ -62,10 +62,11 @@ again after a drop; `gun:connect` does not redial.
 one connection, so each peer has one send lock. A send that fails closes that
 peer.
 
-**Close.** A reader fiber is the only fiber that reads a connection, so closing
-one aborts its reader fiber. The reader's cleanup removes the peer from
-`gun:peers` and closes the socket. The other side reads the end of the stream
-and removes the peer in turn.
+**Close.** A reader fiber is the only fiber that reads a connection. Closing a
+connection removes the peer from `gun:peers` at once and closes the socket,
+which ends the reader's pending read; `ws:close` would read a frame itself, in
+a race with the reader. The other side reads the end of the stream and removes
+the peer in turn.
 
 ## Merging what a peer sends
 
@@ -106,8 +107,8 @@ diff to every peer. A put that accepted nothing sends nothing.
 The first read that reaches a soul **fetches** it: it loads the soul from the
 store, then sends a `get` to every peer and waits until each one answers or
 leaves, for `:wait` seconds at most. An answer merges like a put from the peer
-that sent it, by every step but the ack. Later reads of the soul are local, because gossip
-and resync keep the soul current.
+that sent it, by every step but the ack. Later reads of the soul are local,
+because gossip and resync keep the soul current.
 
 A soul is **pending** from the start of its fetch to its end, and **fetched**
 after that. A second fiber that reads a pending soul waits for the first fetch
