@@ -1,6 +1,6 @@
 # What a park retains, and who releases it
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-11 -->
 
 The references a suspended fiber's park leaves standing, and the one seam that consumes each.
 
@@ -463,6 +463,10 @@ symmetric with its unpark; the node and the deferred set a park moves are
   stacks another, so the free cascade over-releases the payload region
   ([async-error-propagation.lisp](../../../tests/lang/async-error-propagation.lisp)'s closed-port case is the pinning shape; the
   [region-fiber-park-symmetry.lisp](../../../tests/impl/region-fiber-park-symmetry.lisp) restart face churns the mechanism).
+  A hard kill displaces the terminal result too, and releases it last. The kill first
+  discharges the parked chain, which reads the payload's region to leave it standing. A
+  native error whose resumer has released its delivery holds the park retain alone, so a
+  release ahead of the discharge frees the region the discharge then reads.
 
 A park moves the activation's dues into the suspended frame: a suspending exit — a
 yield, a suspending native, `fiber/resume`'s SIG_SWITCH handoff, a fuel pause, a capability
