@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-10-12
 //! The boot configuration: dump a booted instance's exports and macros as one
 //! image, and install one into a fresh instance.
 //!
@@ -11,6 +11,8 @@
 
 mod build;
 mod cache;
+#[allow(dead_code)]
+mod compiler;
 mod install;
 #[cfg(test)]
 mod tests;

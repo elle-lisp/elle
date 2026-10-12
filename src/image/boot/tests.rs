@@ -1,7 +1,9 @@
-// audited: 2026-10-07
+// audited: 2026-10-12
 //! What a boot image carries that only this crate can see: transformer caches, the scope counter, and the stdlib's JIT tier.
 //!
 //! docs/impl/image/boot.md
+
+mod registries;
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -26,6 +28,16 @@ impl Scratch {
             stdlib: StdlibCache::Dir(self.0.join("stdlib")),
             image: BootImage::Dir(self.0.join("boot")),
         }
+    }
+
+    /// The image a source boot over [`Self::caches`] stored.
+    fn image(&self) -> PathBuf {
+        std::fs::read_dir(self.0.join("boot"))
+            .expect("the boot directory exists")
+            .flatten()
+            .map(|e| e.path())
+            .find(|p| p.extension().is_some_and(|e| e == "image"))
+            .expect("a stored image")
     }
 }
 
@@ -120,15 +132,9 @@ fn an_image_boot_mints_the_scopes_a_source_boot_would() {
 /// artifact so the assertion above compares the instance against the file
 /// rather than against itself.
 fn watermark_of(scratch: &Scratch) -> u32 {
-    let path = std::fs::read_dir(scratch.0.join("boot"))
-        .expect("the boot directory exists")
-        .flatten()
-        .map(|e| e.path())
-        .find(|p| p.extension().is_some_and(|e| e == "image"))
-        .expect("a stored image");
     let mut probe = Runtime::without_stdlib();
     let (heap, symbols) = probe.heap_and_symbols();
-    super::hydrate_path(heap, symbols, &path)
+    super::hydrate_path(heap, symbols, &scratch.image())
         .expect("hydrate")
         .scope_watermark
 }
