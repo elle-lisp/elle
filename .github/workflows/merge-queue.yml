@@ -50,6 +50,12 @@ jobs:
           sudo systemctl start redis-server
       - name: Build the release binary and its rig
         run: cargo build --release -p elle -p elle-rig
+      # The plugins the language suite loads (docs/analysis/ci.md § "The
+      # plugins the language suite loads").
+      - name: Check out the plugins submodule
+        run: git submodule update --init plugins
+      - name: make suite-plugins
+        run: make suite-plugins
       - name: QA, then smoke tests
         run: make smoke
       # Pass or fail: a red queue run is the one whose store a reader wants,

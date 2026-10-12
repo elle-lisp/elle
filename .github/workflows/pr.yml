@@ -166,6 +166,15 @@ jobs:
         run: make elle
       - name: make elle-rig
         run: make elle-rig
+      # A suite file or a document that imports a plugin gates itself when the
+      # import fails, so every job that runs either builds the plugins the
+      # language suite loads first. See docs/analysis/ci.md § "The plugins the
+      # language suite loads". Named, not `submodules: true`, for the reason the
+      # `plugins` job gives.
+      - name: Check out the plugins submodule
+        run: git submodule update --init plugins
+      - name: make suite-plugins
+        run: make suite-plugins
       - name: make doctest
         run: make doctest
       - name: make smoke-lang
@@ -204,6 +213,10 @@ jobs:
           sudo systemctl start redis-server
       - name: make elle-nojit
         run: make elle-nojit
+      - name: Check out the plugins submodule
+        run: git submodule update --init plugins
+      - name: make suite-plugins
+        run: make suite-plugins
       - name: make smoke-nojit
         run: make smoke-nojit
       - name: Upload the session store
@@ -245,6 +258,10 @@ jobs:
           sudo systemctl start redis-server
       - name: make elle
         run: make elle
+      - name: Check out the plugins submodule
+        run: git submodule update --init plugins
+      - name: make suite-plugins
+        run: make suite-plugins
       - name: make smoke-boot-image
         run: make smoke-boot-image
       - name: Upload the session store
@@ -293,6 +310,10 @@ jobs:
           sudo systemctl start redis-server
       - name: make elle-pool
         run: make elle-pool
+      - name: Check out the plugins submodule
+        run: git submodule update --init plugins
+      - name: make suite-plugins
+        run: make suite-plugins
       - name: make smoke-pool
         run: make smoke-pool
       - name: Upload the session store
@@ -354,6 +375,10 @@ jobs:
           sudo apt-get install -y llvm-22-dev libpolly-22-dev mlir-22-tools libmlir-22-dev libclang-22-dev clang-22 parallel
       - name: make elle-mlir
         run: make elle-mlir
+      - name: Check out the plugins submodule
+        run: git submodule update --init plugins
+      - name: make suite-plugins
+        run: make suite-plugins
       - name: make doctest
         run: make doctest ELLE=./target/release/elle-mlir
       - name: make smoke-mlir
@@ -478,6 +503,10 @@ jobs:
           sudo apt-get install -y parallel
       - name: make elle
         run: make elle
+      - name: Check out the plugins submodule
+        run: git submodule update --init plugins
+      - name: make suite-plugins
+        run: make suite-plugins
       - name: make doctest
         run: make doctest
       - name: make smoke-lang
@@ -549,6 +578,10 @@ jobs:
           sudo apt-get install -y parallel
       - name: make elle-noffi
         run: make elle-noffi
+      - name: Check out the plugins submodule
+        run: git submodule update --init plugins
+      - name: make suite-plugins
+        run: make suite-plugins
       - name: make smoke-noffi
         run: make smoke-noffi
       - name: Upload the session store
@@ -631,6 +664,10 @@ jobs:
         run: cargo clippy -p elle -- -D warnings
       - name: make elle
         run: make elle
+      - name: Check out the plugins submodule
+        run: git submodule update --init plugins
+      - name: make suite-plugins
+        run: make suite-plugins
       - name: make doctest
         run: make doctest
       - name: make smoke-lang
