@@ -59,20 +59,17 @@ impl RegionPool {
     ///
     /// Must be called BEFORE teardown (dtors are still alive).
     /// `own_id` is this region's ID — self-references are excluded.
-    /// `page_size` is needed for `region_of_page_ptr`.
-    /// `valid_region` receives the resolved id AND the pointer, and must verify
-    /// the id names a live region of the calling store that genuinely OWNS the
-    /// pointer's address (see `find_object_cross_refs`).
+    /// `owner` resolves a pointer to the live region of the calling store that
+    /// OWNS it, or 0 (see `find_object_cross_refs`).
     pub fn find_region_cross_refs(
         &self,
         own_id: u32,
-        page_size: usize,
-        valid_region: &dyn Fn(u32, *const ()) -> bool,
+        owner: &dyn Fn(*const ()) -> u32,
     ) -> Vec<u32> {
-        // Breadcrumb the member under scan. A guardfree fault inside
-        // `region_of_page_ptr` (an over-freed target page) then names the
-        // region that still HELD the dangling edge, not only the region that
-        // freed the target.
+        // Breadcrumb the member under scan. A guardfree fault inside `owner`'s
+        // header read (an over-freed target page) then names the region that
+        // still HELD the dangling edge, not only the region that freed the
+        // target.
         crate::value::fiberheap::freelog::set_scan_member(own_id);
         let mut refs = Vec::new();
         for &ptr in self.dtors.iter().chain(self.ref_objs.iter()) {
@@ -80,7 +77,7 @@ impl RegionPool {
                 continue;
             }
             let obj = unsafe { &*ptr };
-            Self::find_object_cross_refs(obj, own_id, page_size, valid_region, &mut refs);
+            Self::find_object_cross_refs(obj, own_id, owner, &mut refs);
         }
         crate::value::fiberheap::freelog::set_scan_member(0);
         refs
@@ -88,15 +85,14 @@ impl RegionPool {
 
     /// Extract cross-region Value references from a HeapObject.
     ///
-    /// `valid_region(rid, ptr)` is the OWNERSHIP predicate, not a bare liveness
-    /// check: it must verify that the calling store's live region `rid`
-    /// genuinely owns `ptr`'s address (`RegionPool::owns`).
-    /// `region_of_page_ptr` reads a stamped page-header id. A pointer NOT
-    /// managed by this store reads whatever bytes sit at the masked base, which
-    /// can collide with a live local id. Such a pointer is a foreign-heap value
-    /// (a compile-time-env constant baked into a template's pool lives on the
-    /// CompileCtx VM's heap; a worker reading a parent-heap value), or a shared
-    /// or Rc allocation.
+    /// `owner(ptr)` answers the live region of the calling store that OWNS
+    /// `ptr`'s address, or 0 when none does (`RegionStore::owning_region`).
+    /// Ownership, not a bare liveness check, is what decides. A page header
+    /// holds a stamped id, and a pointer NOT managed by this store reads
+    /// whatever id sits at its masked base, which can collide with a live local
+    /// id. Such a pointer is a foreign-heap value (a compile-time-env constant
+    /// baked into a template's pool lives on the CompileCtx VM's heap; a worker
+    /// reading a parent-heap value), or a shared or Rc allocation.
     ///
     /// Liveness alone is time-dependent: the colliding id may be dead when the
     /// allocation records its edges and live when the free scans them, and the
@@ -106,8 +102,7 @@ impl RegionPool {
     pub(crate) fn find_object_cross_refs(
         obj: &HeapObject,
         own_id: u32,
-        page_size: usize,
-        valid_region: &dyn Fn(u32, *const ()) -> bool,
+        owner: &dyn Fn(*const ()) -> u32,
         refs: &mut Vec<u32>,
     ) {
         let mut check = |val: &Value| {
@@ -115,13 +110,13 @@ impl RegionPool {
                 return;
             }
             if let Some(ptr) = val.as_heap_ptr() {
-                let rid = unsafe { region_of_page_ptr(ptr, page_size) };
+                let rid = owner(ptr);
                 // Skip ids 0 and 1 (reserved, not real regions) and the
                 // region's own id. RC-track only cross-refs into other live
                 // regions OF THIS STORE that own the pointer: the alloc-time
                 // incref, balanced by the free-time cascade decref. The funnel
                 // side of this accounting lives in value/arena.rs.
-                if rid != 0 && rid != 1 && rid != own_id && valid_region(rid, ptr) {
+                if rid > 1 && rid != own_id {
                     refs.push(rid);
                 }
             }

@@ -211,17 +211,11 @@ impl RegionStore {
     /// number of references a region's RC carries that are NOT explained by
     /// live region contents (owner/escape references never released).
     pub fn cross_ref_edges(&self) -> Vec<(u32, u32)> {
-        let page_size = self.pool.initial_page_size();
-        let valid = |rid: u32, ptr: *const ()| {
-            self.regions
-                .get(rid as usize)
-                .and_then(|s| s.as_ref())
-                .is_some_and(|e| e.pool.owns(ptr))
-        };
+        let owner = |p| self.owning_region(p);
         let mut edges = Vec::new();
         for (idx, slot) in self.regions.iter().enumerate() {
             if let Some(e) = slot.as_ref() {
-                for to in e.pool.find_region_cross_refs(idx as u32, page_size, &valid) {
+                for to in e.pool.find_region_cross_refs(idx as u32, &owner) {
                     edges.push((idx as u32, to));
                 }
             }
