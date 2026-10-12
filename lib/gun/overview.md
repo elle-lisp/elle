@@ -2,11 +2,12 @@
 
 <!-- audited: 2026-10-11 -->
 
-The submodules behind [gun.lisp](../gun.lisp): states, values, the HAM verdict, the in-memory graph and the stores.
+The submodules behind [gun.lisp](../gun.lisp): states, values, HAM, the graph, the stores, the core and the peer mesh.
 
-[gun.md](../gun.md) holds what a caller of the module sees. This file holds how
-the module divides. Each file's header says what it exports, and `(doc name)`
-carries a function's arguments.
+[gun.md](../gun.md) holds what a caller of the module sees, and
+[mesh.md](mesh.md) holds the peer protocol. This file holds how the module
+divides. Each file's header says what it exports, and `(doc name)` carries a
+function's arguments.
 
 | File | Purpose |
 |------|---------|
@@ -15,6 +16,10 @@ carries a function's arguments.
 | [ham.lisp](ham.lisp) | The HAM verdict on one incoming field against the current one |
 | [graph.lisp](graph.lisp) | Souls, the in-memory nodes, the merge that answers a diff, and the flattening of a nested struct |
 | [store.lisp](store.lisp) | The memory store and the Redis store, behind one interface |
+| [wire.lisp](wire.lisp) | The peer messages: build them, write them as JSON, and read and check them |
+| [core.lisp](core.lisp) | One database: its graph, store, clock, lock, subscriptions and peers; loading, the chain walk, the merges and notify |
+| [peer.lisp](peer.lisp) | One WebSocket connection: the hello, the reader fiber, the send lock and close |
+| [mesh.lisp](mesh.lisp) | The rules of [mesh.md](mesh.md): fetch, forward, acks, deferral and resync |
 
 A submodule takes the submodules it needs as arguments, so loading one by hand
 follows the order [gun.lisp](../gun.lisp) uses:
@@ -25,9 +30,15 @@ follows the order [gun.lisp](../gun.lisp) uses:
 (def ham ((import "std/gun/ham") :state state :value value))
 (def graph ((import "std/gun/graph") :state state :value value :ham ham))
 (def store ((import "std/gun/store") :state state :value value))
+(def wire ((import "std/gun/wire") :value value :graph graph))
+(def core ((import "std/gun/core") :state state :value value :graph graph))
+(def peer ((import "std/gun/peer") :wire wire))
+(def mesh ((import "std/gun/mesh") :core core :wire wire :peer peer))
 (assert (= (value:encode (value:link "users/alice")) "l:users/alice"))
 (assert (= (graph:child-soul "x" "a/b") "x/a%2Fb"))
+(assert (= (wire:encode (wire:get "m1" ["users"])) "{\"get\":[\"users\"],\"id\":\"m1\"}"))
 ```
 
 `std/gun/store` takes `std/redis` as `:redis`, and builds a Redis store only
-when it has one.
+when it has one. `std/gun/peer` takes `std/websocket` as `:websocket`, and
+serves or dials only when it has one.

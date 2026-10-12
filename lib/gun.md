@@ -2,7 +2,7 @@
 
 <!-- audited: 2026-10-11 -->
 
-A graph database in the shape of GUN: nodes of fields, merged field by field by the HAM rule, on a memory or Redis store.
+A graph database in the shape of GUN: nodes merged field by field by HAM, on a memory or Redis store, joined to peers by WebSocket.
 
 The export struct at the bottom of [gun.lisp](gun.lisp) lists what the module
 offers, and `(doc name)` carries each function's arguments.
@@ -10,13 +10,17 @@ offers, and `(doc name)` carries each function's arguments.
 holds the data model, the merge rule, the store layout and the invariants.
 
 The design follows [GUN](https://gun.eco/) and its HAM conflict rule. It does
-not speak GUN's wire format, and it has no peer mesh and no SEA yet.
+not speak GUN's wire format, and it has no SEA yet. Databases join over
+WebSocket; [gun/mesh.md](gun/mesh.md) holds the peer protocol.
 
 ## Loading
 
-Called with no argument, the module has the memory store only, and
-`gun:redis-store` raises `{:error :gun-error :reason :redis-not-configured}`.
-The Redis store needs the `std/redis` module as `:redis`:
+Called with no argument, the module has the memory store only and no mesh.
+`gun:redis-store` then raises
+`{:error :gun-error :reason :redis-not-configured}`, and `gun:serve` and
+`gun:connect` raise `:mesh-not-configured`. The Redis store needs the
+`std/redis` module as `:redis`, and the mesh needs the `std/websocket` module
+as `:websocket`:
 
 ```lisp
 (def gun ((import "std/gun")))
@@ -24,6 +28,12 @@ The Redis store needs the `std/redis` module as `:redis`:
 (defn gun-on-redis []
   "The gun module, able to build a Redis store."
   ((import "std/gun") :redis ((import "std/redis"))))
+
+(defn gun-with-mesh []
+  "The gun module, able to join peers."
+  ((import "std/gun")
+   :websocket ((import "std/websocket") :hash (import "plugin/hash")
+                                        :random (import "plugin/random"))))
 ```
 
 ## The data model
@@ -94,8 +104,9 @@ out of the struct:
 ```
 
 `gun:on` calls its function at once with the chain's value, and again whenever
-a write through the same database changes that value. It returns a function that ends the subscription.
-A write that leaves the value as it was calls nothing:
+a write changes that value, whether the write is local or comes from a peer. It
+returns a function that ends the subscription. A write that leaves the value as
+it was calls nothing:
 
 ```lisp
 (def seen @[])
@@ -164,9 +175,15 @@ always after the tick before it and after every state the clock has observed:
 
 A database observes every state it loads from its store before it merges
 them. A store written by a clock that ran ahead therefore loads without
-`:future`, and the next write still wins. With no mesh, nothing else can carry
-a state from the future, so a `:future` verdict inside a merge raises
+`:future`, and the next write still wins. A local write ticks the clock, and a
+tick is never after `now`. So a local merge never meets a future state, and a
+`:future` verdict inside one raises
 `{:error :gun-error :reason :future-state}`.
+
+A peer whose clock runs ahead can send a state from the future. Such a field
+waits until its state is due, and the clock never observes it while it waits.
+A field from a peer that is due is observed, so the next local write wins
+locally. [gun/mesh.md](gun/mesh.md) gives the steps.
 
 ## Stores
 
@@ -210,17 +227,62 @@ fibers spawned there, which inherit the binding:
       (fn [] (body gun (gun:open :store (gun:redis-store :prefix prefix)))))))
 ```
 
+## Peers
+
+`gun:serve` accepts peers on a TCP listener until the listener closes, so run
+it in its own fiber. `gun:connect` dials a peer at a `ws://` URL. It returns
+when each side has registered the other, and answers a function that closes the
+connection. `gun:peers` answers the ids of the connected peers. A write on
+either side reaches the other:
+
+```lisp
+(def mesh-gun (gun-with-mesh))
+(def listener (tcp/listen "127.0.0.1" 0))
+(def listen-port
+  (let [at (port/path listener)]
+    (parse-int (slice at (+ 1 (string/find at ":"))))))
+(def server (mesh-gun:open))
+(def client (mesh-gun:open))
+(def serving (ev/spawn (fn [] (mesh-gun:serve server listener))))
+(def hang-up (mesh-gun:connect client (string "ws://127.0.0.1:" listen-port "/gun")))
+(assert (= (length (mesh-gun:peers client)) 1))
+
+(mesh-gun:put (mesh-gun:get client "note") {:text "hello"} :ack 5)
+(assert (= (mesh-gun:once (mesh-gun:get server "note")) {"text" "hello"}))
+(hang-up)
+(port/close listener)
+```
+
+Every peer keeps every write it hears, and forwards what it accepted to its
+other peers. The first read that reaches a soul asks the peers for it, and
+waits for their answers for `:wait` seconds at most. `gun:open` takes `:wait`,
+which defaults to 1.
+
+`gun:put` and `gun:set` return when the write has landed locally. Given
+`:ack seconds`, they also wait for the first peer to ack. They raise
+`{:error :gun-error :reason :no-ack}` when no peer acks in time, and
+`:peer-error` when the peer's merge failed. The write has landed locally in
+both cases.
+
+A write that comes from a peer has no caller to raise to. So an error that
+handling it raises goes to the function `gun:open` takes as `:on-error`, with
+the error as its one argument. The default writes a line to stderr.
+
 ## Invariants
 
 1. A `put` validates its whole value before it merges anything, so a rejected
    value writes nothing.
-2. One lock per database covers each `put` from its first read to its last
-   store write. Each field therefore reaches the store in state order, even
-   when the store yields between two writes.
+2. One lock per database covers each `put` from its plan to its last store
+   write, and each merge of a peer's write. Each field therefore reaches the
+   store in state order, even when the store yields between two writes.
 3. A `put` notifies the `gun:on` functions after it releases the lock. A
    function can therefore write to the database it watches.
-4. An error raised by a `gun:on` function propagates out of the `put` that
-   called it. The write has reached the store by then.
+4. An error raised by a `gun:on` function propagates out of the local `put`
+   that called it. The write has reached the store by then.
+5. No fiber waits on the network while it holds the lock. Each send, and each
+   wait for an answer or an ack, happens after the lock is released.
+6. The walk that decides which `gun:on` functions to call never waits on the
+   network.
 
 ## Running tests
 
@@ -230,7 +292,15 @@ The memory store needs nothing outside the process:
 elle tests/lang/gun.lisp
 ```
 
-The Redis store needs Redis on 127.0.0.1:6379:
+The mesh needs the `plugin/hash` and `plugin/random` plugins, and joins its
+databases over loopback:
+
+```bash
+elle tests/lang/gun-mesh.lisp
+```
+
+The Redis store needs Redis on 127.0.0.1:6379. The file also joins two
+Redis-backed databases, so it needs the same plugins:
 
 ```bash
 elle tests/lang/gun-redis.lisp

@@ -6,4 +6,5 @@ Up: [..](../AGENTS.md)
 
 ## Documents
 
-- [overview.md](overview.md) — **gun** The submodules behind [gun.lisp](../gun.lisp): states, values, the HAM verdict, the in-memory graph and the stores.
+- [mesh.md](mesh.md) — **mesh** The peer protocol of std/gun: the messages, how a peer merges and forwards them, reads that ask the peers, acks, and deferral.
+- [overview.md](overview.md) — **gun** The submodules behind [gun.lisp](../gun.lisp): states, values, HAM, the graph, the stores, the core and the peer mesh.
