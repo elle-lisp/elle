@@ -4,7 +4,7 @@
        elle-nojit elle-pool elle-mlir elle-noffi elle-wasm check-wasm \
        doctest doctest-list myplugin plugins plugins-all \
        plugins-verify smoke-plugins mcp embedding semver-check \
-       fmt fmt-check audit agents agents-check prose \
+       fmt fmt-check audit agents agents-check prose page-claims \
        bytecode-golden bytecode-golden-check
 
 .DEFAULT_GOAL := all
@@ -149,6 +149,16 @@ agents-check:  ## Fail when a committed AGENTS.md is stale
 
 prose:  ## Hold every stamped file to the checkable parts of DOCUMENTATION.md
 	cargo test --test prose
+
+# ARGS is what the profiled elle runs; DEPTH and TOP shape the ranking
+# (tools/pageclaims/overview.md). Needs valgrind. The elle that runs the tool
+# takes `--cache=`, so it reads and writes no stdlib cache.
+DEPTH ?= 3
+TOP   ?= 20
+page-claims:  ## Rank the code paths that claim region pages: ARGS="FILE" [DEPTH=3] [TOP=20]
+	cargo build --profile profiling -p elle
+	./target/profiling/elle --cache= tools/pageclaims/run.lisp -- --depth $(DEPTH) --top $(TOP) \
+		--elle ./target/profiling/elle $(ARGS)
 
 # ── Format ─────────────────────────────────────────────────────────
 
