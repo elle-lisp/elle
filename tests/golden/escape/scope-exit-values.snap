@@ -96,7 +96,7 @@
 [return_frontier]
   [r61, r81]
 [suppressed_decref_regions]
-  [r35]
+  []
 [region_instrs]
   ; entry <anon>
     block2: DecrefRegion s0
@@ -136,64 +136,64 @@
     block25: DecrefValueRegion v212
     block25: IncrefValueRegion v219
     block25: DecrefValueRegion v220
-    block22: DecrefValueRegion v224
+    block25: DecrefValueRegion v222
+    block22: DecrefValueRegion v226
     block29: DecrefRegion s16
     block29: DecrefRegion s17
-    block31: IncrefValueRegion v255
-    block31: DecrefValueRegion v256
-    block30: DecrefValueRegion v259
-    block30: DecrefValueRegion v272
+    block31: IncrefValueRegion v257
+    block31: DecrefValueRegion v258
+    block30: DecrefValueRegion v261
+    block30: DecrefValueRegion v274
     block30: DecrefRegion s18
     block33: DecrefRegion s19
     block33: DecrefRegion s20
-    block35: IncrefValueRegion v307
-    block35: DecrefValueRegion v308
-    block35: DecrefValueRegion v311
-    block34: DecrefValueRegion v313
-    block34: DecrefRegion s21
+    block35: IncrefValueRegion v309
+    block35: DecrefValueRegion v310
+    block35: DecrefValueRegion v313
     block34: DecrefValueRegion v315
-    block34: DecrefValueRegion v321
+    block34: DecrefRegion s21
+    block34: DecrefValueRegion v317
+    block34: DecrefValueRegion v323
     block37: DecrefRegion s22
     block37: DecrefRegion s23
-    block39: IncrefValueRegion v352
-    block39: DecrefValueRegion v353
-    block38: DecrefValueRegion v356
+    block39: IncrefValueRegion v354
+    block39: DecrefValueRegion v355
     block38: DecrefValueRegion v358
-    block38: DecrefValueRegion v371
+    block38: DecrefValueRegion v360
+    block38: DecrefValueRegion v373
     block38: DecrefRegion s24
-    block38: DecrefValueRegion v377
+    block38: DecrefValueRegion v379
     block41: DecrefRegion s25
     block41: DecrefRegion s26
-    block43: IncrefValueRegion v411
-    block43: DecrefValueRegion v412
-    block43: DecrefValueRegion v415
-    block42: DecrefValueRegion v417
+    block43: IncrefValueRegion v413
+    block43: DecrefValueRegion v414
+    block43: DecrefValueRegion v417
     block42: DecrefValueRegion v419
+    block42: DecrefValueRegion v421
     block42: DecrefRegion s27
-    block42: DecrefValueRegion v426
+    block42: DecrefValueRegion v428
     block45: DecrefRegion s28
     block45: DecrefRegion s29
-    block47: IncrefValueRegion v455
-    block47: DecrefValueRegion v456
-    block46: DecrefValueRegion v459
-    block46: DecrefValueRegion v472
+    block47: IncrefValueRegion v457
+    block47: DecrefValueRegion v458
+    block46: DecrefValueRegion v461
+    block46: DecrefValueRegion v474
     block46: DecrefRegion s30
-    block46: DecrefValueRegion v478
+    block46: DecrefValueRegion v480
     block49: DecrefRegion s31
     block49: DecrefRegion s32
-    block51: IncrefValueRegion v512
-    block51: DecrefValueRegion v513
-    block51: DecrefValueRegion v516
-    block50: DecrefValueRegion v518
+    block51: IncrefValueRegion v514
+    block51: DecrefValueRegion v515
+    block51: DecrefValueRegion v518
     block50: DecrefValueRegion v520
-    block50: DecrefValueRegion v527
+    block50: DecrefValueRegion v522
+    block50: DecrefValueRegion v529
     block53: DecrefRegion s33
     block53: DecrefRegion s34
-    block55: IncrefValueRegion v556
-    block55: DecrefValueRegion v557
-    block54: DecrefValueRegion v560
-    block54: IncrefValueRegion v563
-    block54: DecrefValueRegion v564
+    block55: IncrefValueRegion v558
+    block55: DecrefValueRegion v559
+    block54: DecrefValueRegion v562
+    block54: IncrefValueRegion v565
     block54: DecrefValueRegion v566
     block54: DecrefValueRegion v568
     block54: DecrefValueRegion v570
@@ -201,6 +201,7 @@
     block54: DecrefValueRegion v574
     block54: DecrefValueRegion v576
     block54: DecrefValueRegion v578
+    block54: DecrefValueRegion v580
     block54: DecrefRegion s35
     block54: DecrefRegion s36
   ; closure[0] <anon>
