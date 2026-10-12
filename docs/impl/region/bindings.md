@@ -1,6 +1,6 @@
 # Reassigned mutable bindings are 1-slot containers
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-11 -->
 
 Implementation-facing: how the solver and lowerer handle a binding that is
 reassigned over its lifetime. This specializes Rule 5's mutable-container
@@ -21,24 +21,33 @@ frame teardown (module scope).
 How the cell *sources* that one reference splits by scope, because it must
 agree with which of the value's ordinary decrefs are suppressed:
 
-- **Module scope (the cell ADOPTS the producer reference).** The compiler
-  suppresses the init *and* every assign-value region's ordinary decref
-  (`suppressed_decref_regions`; the final value is released by frame
-  teardown), so the producer's single reference is donated to the cell. The
-  lowerer therefore emits **no incref-on-store** — drop-on-overwrite is that
-  donated reference's sole release. The assign sites are marked
-  `donated_overwrite_sites`. An incref-on-store here would be unbalanced
-  (born + store − overwrite = +1), holding every displaced prior to teardown:
-  an unbounded over-keep on a module mutable reassigned in a long-running loop
-  (`runtime::tests::reassign_toplevel_prior_release_is_bounded`).
-  **CALL-RESULT content is excluded from the donation** and takes the counted
-  store instead, as all fn-local content does. A call result carries a second
-  compile-time name for the same runtime value — the opaque placeholder region
-  the lowerer releases by value through the ANF temp's slot (rules.md Rule 2's
-  bound-result shape) — which the suppression above never reaches. So the
-  placeholder release fires regardless and consumes the callee's one returned
-  reference; donating on top of it leaves the cell pointing at a freed value
-  ([region-reassign-callresult-store.lisp](../../../tests/impl/region-reassign-callresult-store.lisp), [region-hof-tail-return-uaf.lisp](../../../tests/impl/region-hof-tail-return-uaf.lisp)).
+- **Module scope (the cell ADOPTS a fresh allocation and COUNTS a call
+  result).** The init is stored uncounted at the define, so its region's
+  ordinary decref is suppressed (`suppressed_decref_regions`) and
+  drop-on-overwrite is its release; a final value no store displaces is released
+  by the file-letrec frame teardown, so the cell emits no content drop. What
+  the cell takes for a STORED value turns on its producer.
+
+  A fresh local allocation is DONATED: its region's ordinary decref is
+  suppressed too, the lowerer emits no incref-on-store, and drop-on-overwrite is
+  that single reference's one release. The sites are `donated_overwrite_sites`.
+  An incref-on-store here would be unbalanced (born + store − overwrite = +1),
+  holding every displaced prior to teardown (`runtime::tests::reassign_toplevel_prior_release_is_bounded`).
+
+  A CALL RESULT takes the counted store, exactly as fn-local content does: the
+  lowerer increfs on store, and the stored region keeps its ordinary decref,
+  pinned to the store site. A call result's region is a runtime fact — the
+  callee's own, or one a counted read aliased — which the cell cannot claim by
+  name, so it counts a reference against the value, and the producer's release
+  through the ANF temp's slot consumes the callee's. The cell is recorded in
+  `cell_containers` without a content drop, the entry that carries the
+  store-site pin and the binding-chain hold-back (below). Suppressing the
+  producer's release beside the counted store leaves the cell's reference with
+  no balancing release: +1 per store, one region per trip of a loop
+  (`runtime::tests::reassign_toplevel_call_result_prior_release_is_bounded`).
+  The guardfree pins are
+  [region-reassign-callresult-store.lisp](../../../tests/impl/region-reassign-callresult-store.lisp)
+  and [region-hof-tail-return-uaf.lisp](../../../tests/impl/region-hof-tail-return-uaf.lisp).
 - **Fn-local (the cell takes a COUNTED reference).** A fn-local cell's scope
   *exits*, so its final content has no teardown to fall back on and the cell
   needs a release of its own — which means a reference of its own. The compiler
@@ -372,22 +381,23 @@ call-result region with a known binding slot, a `LoadLocal slot` +
 `DecrefValueRegion` (`emit_decrefs_for`): release by the *runtime* value in the
 slot, not a static region id. For a TOP-LEVEL (file-letrec) reassigned binding
 that route is poisoned: a `(deref-cell x)` read is solved to the cell's INIT
-region (the cell-Var walk returns the init region), so the init region's
-`decref_point` is extended to that read's last use — which a reassignment has
-pushed PAST the first overwrite. The emitted `LoadLocal slot` then loads
-whatever the slot holds at the read (a later, live value) and frees *it*, not
-the init. That is the no-alias corruption UAF: two file-letrec cells `rc`/`rd`
-interleave-reassigned, and reading `rd` returns `rc`'s last value because the
-init-region decref, routed through the cell slot, freed a live region
+region, so the init region's `decref_point` is extended to that read's last
+use — which a reassignment has pushed PAST the first overwrite. The emitted
+`LoadLocal slot` then loads whatever the slot holds at the read (a later, live
+value) and frees *it*, so two interleave-reassigned cells read each other's last value
 ([region-mutable-reassign-flow.lisp](../../../tests/impl/region-mutable-reassign-flow.lisp) facet 3;
 [region-mutable-reassign-branch.lisp](../../../tests/impl/region-mutable-reassign-branch.lisp); [region-toplevel-mutable-reassign.lisp](../../../tests/impl/region-toplevel-mutable-reassign.lisp)). So `analyze_regions_with` records the init
 and assign-value regions of every top-level reassigned binding in
 `RegionInfo::mutated_binding_value_regions` UNCONDITIONALLY (before the gate),
-and `emit_decrefs_for` SKIPS the value-routed release for any region there: an
-over-keep until file-letrec frame teardown (the final value's region lives in
-the cascade-freed frame region — no leak), never a mis-free. When the gate
-succeeds these are already in `suppressed_decref_regions` and never reach the
-route. Fn-local reassigns are deliberately NOT recorded: their final value's
+and `emit_decrefs_for` SKIPS the value-routed release for any region there.
+One region is exempt from the skip: a value a counted module-scope cell stores
+(`cell_stored_regions`), whose route is the producer's own ANF slot rather than
+the cell's, and which the cell's counted reference makes safe to release there;
+every static optimization still refuses it on the set's account. On the
+gate-refused baseline the skip is an over-keep until teardown — unbounded where
+a loop stores, which is the fallback's cost — never a mis-free. When the gate
+donates, the regions are already in `suppressed_decref_regions` and never reach
+the route. Fn-local reassigns are deliberately NOT recorded: their final value's
 release *is* a legitimate scope-exit slot route (no teardown root frees it), and
 the scope-based solver shares regions, so skipping there leaks an aliased value
 ([region-tailcall-arg-transfer.lisp](../../../tests/impl/region-tailcall-arg-transfer.lisp)). Counted cell reads ([reads.md](reads.md)) keep
@@ -451,13 +461,7 @@ over-keep — the safe direction to be wrong in. The reference is the test:
 [region-loop-acc-return.lisp](../../../tests/impl/region-loop-acc-return.lisp) (under
 guardfree) for the measured shape.
 
-One obligation binds the fallback for a NON-sole returned binding (left at the
-unsuppressed baseline): **a mutated slot is not a release route.** A
-value-routed release (`LoadLocal slot` + `DecrefValueRegion`) may target a slot
-only if the slot's occupant at the release point is provably the value whose
-region is being released; a reassigned binding's slot fails that by
-construction. With no untainted route the release is skipped — an over-keep,
-never a mis-free.
+A NON-sole returned binding stays at the baseline, under the backstop above.
 
 **Returns mint one owning reference (borrowed captured upvalues).** Every
 `Return` (and the native-tail post-block in [control.rs](../../../src/lir/lower/control.rs)) emits an
@@ -491,10 +495,6 @@ realization a binding takes (a compiled `MakeCaptureCell` in its own slot, or a
 `populate_env` env cell), what a read through one borrows, and where the cell's
 own release lands are that document's; the model they realize is this one's.
 
-Named, tolerated edge (not specific to binding cells — true of every mutable
-container): a read consumed *within the same expression* that also removes or
-overwrites the value (`(list x (begin (assign x nil) 1))`) can observe the
-removal's release mid-expression. The static analysis does not order
-intra-expression reads against runtime removals; this is the mutable-store
-analogue of the [theory](../../regions/semantics.md)'s cycle incompleteness —
-confined to mutation, named here so it is not rediscovered as a separate bug.
+A read consumed within the same expression that overwrites the value is the
+one tolerated edge of every mutable container, a cell included
+([semantics](../../regions/semantics.md)).
