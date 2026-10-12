@@ -184,9 +184,9 @@ impl FiberHeap {
 
     /// Extract `child`'s region from its owner's subtree — the moves-out
     /// counterpart of `adopt_region` (docs/impl/region/ownership.md). A
-    /// `moves_out` funnel (`%pop`) removing an element that was adopted into its
-    /// container's Owned subtree calls this so the element — now the call's
-    /// escaping result — is no longer reclaimed by the container's subtree drop.
+    /// `moves_out` funnel (`%pop`) calls this when it removes an element that was
+    /// adopted into its container's Owned subtree. The element is now the call's
+    /// escaping result, and the container's subtree drop no longer reclaims it.
     /// Moves `child` from `Owned` to `Counted`, with the caller's one reference
     /// plus one for each recorded reference from outside its own subtree; a
     /// `Counted`/absent child is a no-op (the ordinary RC path).
@@ -195,10 +195,10 @@ impl FiberHeap {
     }
 
     /// Free a co-owned region group as one unit — the runtime `FreeRegionGroup` of the
-    /// ownership forest. A mutual reference cycle
-    /// with no container parent has no owner among its members, so all are freed
-    /// symmetrically at the group's collective last use; interior member↔member references
-    /// reclaim with the group, genuinely-Shared frontier references cascade once.
+    /// ownership forest. A mutual reference cycle with no container parent has no
+    /// owner among its members, so all are freed symmetrically at the group's
+    /// collective last use. Interior member↔member references reclaim with the
+    /// group, and genuinely-Shared frontier references cascade once.
     pub fn free_region_group(&mut self, members: &[RuntimeRegion]) -> usize {
         self.region_store.free_region_group(members)
     }
@@ -366,9 +366,9 @@ impl FiberHeap {
     /// counter that tells one incarnation of a recycled id from the next
     /// (docs/impl/region/generations.md).
     ///
-    /// Read it beside a region id to record where a value lives, and read it
-    /// again later to ask whether that region is still the one it was: a
-    /// changed generation says the region was freed, whatever the id now names.
+    /// Read it beside a region id to record where a value lives. Read it again
+    /// later to ask whether that region is still the one it was: a changed
+    /// generation says the region was freed, whatever the id now names.
     /// The store's own counter, not the value's page header — a freed page that
     /// has been re-claimed carries its new owner's stamp.
     pub fn region_generation(&self, id: u32) -> u32 {

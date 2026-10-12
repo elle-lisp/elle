@@ -1,4 +1,4 @@
-//! audited: 2026-10-06
+// audited: 2026-10-12
 //! Minting, lazy region creation, and allocation into a region.
 //!
 //! docs/impl/region/model.md
@@ -13,18 +13,18 @@ use super::*;
 
 impl RegionStore {
     /// Mint a fresh physical region id. Each allocation *execution* claims
-    /// its own region (docs/regions/semantics.md — every value its own region); the
-    /// per-activation remap (in the VM) maps a static bytecode region slot
+    /// its own region (docs/regions/semantics.md — every value its own region).
+    /// The per-activation remap (in the VM) maps a static bytecode region slot
     /// to one of these per activation. Reuses a recycled id when available.
     pub fn new_runtime_region(&mut self) -> RuntimeRegion {
         // A minted id must not already name a *live* region. It can, because
-        // physical ids enter this store from two independent sources: this
-        // per-heap counter, and raw `new_static_region()` static-slot ids that
-        // some paths use directly (or that `incref`/`ensure` re-animate after a
-        // premature free). The two id ranges overlap, so `next_physical` (or a
-        // recycled id) can land on a still-live region. Issuing it would alias
-        // two logical regions onto one id → use-after-free when either is freed
-        // (e.g. demos/fib/fib.lisp's torn-read abort). Skip any live id; the
+        // physical ids enter this store from two independent sources. One is
+        // this per-heap counter. The other is raw `new_static_region()`
+        // static-slot ids, which some paths use directly, or which
+        // `incref`/`ensure` re-animate after a premature free. The two id
+        // ranges overlap, so `next_physical` (or a recycled id) can land on a
+        // still-live region. Issuing it would alias two logical regions onto
+        // one id, a use-after-free when either is freed. Skip any live id; the
         // skipped id stays owned by its current region until that region is
         // freed and recycles it. Terminates: `free_physical` is finite and a
         // brand-new `next_physical` id is never live.
@@ -36,9 +36,9 @@ impl RegionStore {
             });
             if (id as usize) >= self.regions.len() || self.regions[id as usize].is_none() {
                 // Record the mint into the active closed-scope log (macro
-                // expansion), stamping the generation `ensure_raw` will give
-                // this id's pages so the reclaim pass can tell a still-live
-                // region from a recycled-and-refreed one.
+                // expansion), with the generation `ensure_raw` will give this
+                // id's pages. The reclaim pass reads it to tell a still-live
+                // region from a recycled and refreed one.
                 if let Some(log) = self.mint_log.as_mut() {
                     let gen = self.generations.get(id as usize).copied().unwrap_or(0);
                     log.push((id, gen));
@@ -53,8 +53,8 @@ impl RegionStore {
     /// Mint a physical region id together with the receipt that can return it —
     /// the mint used where the caller may end without allocating into the id
     /// (docs/impl/region/model.md § "Physical id recycling"). The per-call result
-    /// region is that case: it is minted before the callee runs, because the
-    /// callee may allocate its result into it, and a callee that returns an
+    /// region is that case. It is minted before the callee runs, because the
+    /// callee may allocate its result into it. A callee that returns an
     /// immediate or a borrowed value allocates nothing.
     pub fn new_runtime_region_tracked(&mut self) -> RegionMint {
         let region = self.new_runtime_region();
@@ -99,9 +99,9 @@ impl RegionStore {
     pub(super) fn ensure_raw(&mut self, id: u32) {
         let idx = id as usize;
         if idx >= self.regions.len() {
-            // Backstop (always on, release included — the generation check in
-            // `region_of_ptr` is debug-only): an id this large names no region a
-            // real program can hold (see `MAX_PLAUSIBLE_REGION_ID`), so detonate
+            // Backstop, always on, release included: the generation check in
+            // `region_of_ptr` is debug-only. An id this large names no region a
+            // real program can hold (see `MAX_PLAUSIBLE_REGION_ID`). So detonate
             // here, naming it, instead of resizing the table to hundreds of GB
             // and OOM-aborting far from the deref
             // (docs/impl/region/generations.md § "Region generations").

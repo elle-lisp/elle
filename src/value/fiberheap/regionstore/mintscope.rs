@@ -1,3 +1,8 @@
+// audited: 2026-10-12
+//! The closed allocation scope of a macro expansion: its mint log, and the reclaim that balances each survivor's references.
+//!
+//! docs/impl/region/rules.md
+
 use super::*;
 
 impl RegionStore {
@@ -16,26 +21,28 @@ impl RegionStore {
     }
 
     /// Close the scope opened by `begin_mint_log` and reclaim its dead
-    /// scratch by RC. For every region minted in the scope that is still live
-    /// (its generation still matches the mint record — a recycled id whose
-    /// region was already freed mid-scope is skipped), balance its
-    /// **unexplained** references: `rc − in_degree`, where `in_degree` is the
-    /// number of references it receives from the contents of the *other
-    /// survivors* (the internal edges of the scratch DAG; see the body comment
-    /// for why scanning only the scope, not the whole heap, is both fast and
-    /// sufficient). That is exactly the owner references the scope never released
-    /// (the residue-census quantity); decreffing them lets the ordinary cascade
-    /// (Rule 7) reclaim the immutable scratch DAG. A region whose RC is fully
-    /// explained by survivor edges has `rc − in_degree == 0` and is left
-    /// untouched, so this is RC-driven, not a blanket free.
+    /// scratch by RC. The pass visits every region minted in the scope that is
+    /// still live: its generation still matches the mint record, so a recycled
+    /// id whose region was already freed mid-scope is skipped. It balances each
+    /// such region's **unexplained** references, `rc − in_degree`.
+    /// `in_degree` counts the references the region receives from the contents
+    /// of the *other survivors*, the internal edges of the scratch DAG. The body
+    /// comment argues why scanning only the scope, not the whole heap, is both
+    /// fast and sufficient.
+    ///
+    /// The unexplained references are exactly the owner references the scope
+    /// never released (the residue-census quantity). Decreffing them lets the
+    /// ordinary cascade (Rule 7) reclaim the immutable scratch DAG. A region
+    /// whose RC is fully explained by survivor edges has `rc − in_degree == 0`
+    /// and is left untouched, so this is RC-driven, not a blanket free.
     ///
     /// `protected` lists regions that must NOT be reclaimed even though they
-    /// were minted in the scope: process-lifetime roots (trait method tables
-    /// via `alloc_root`, the root region) whose single owner is held Rust-side
-    /// (the registry), invisible to the heap-content in-degree scan. A
-    /// transformer triggers the first such allocation when it dispatches a
-    /// trait method (e.g. `append`'s `empty?`), so the root region can land in
-    /// the mint log; reclaiming it would free the trait tables under the running
+    /// were minted in the scope. They are process-lifetime roots: trait method
+    /// tables via `alloc_root`, and the root region. Their single owner is held
+    /// Rust-side (the registry), invisible to the heap-content in-degree scan. A
+    /// transformer triggers the first such allocation when it dispatches a trait
+    /// method (for example `append`'s `empty?`), so the root region can land in
+    /// the mint log. Reclaiming it would free the trait tables under the running
     /// program. Returns the number of objects reclaimed (for `alloc_count`).
     pub fn reclaim_mint_scope(&mut self, protected: &[RuntimeRegion]) -> usize {
         let log = match self.mint_log.take() {
@@ -63,17 +70,19 @@ impl RegionStore {
         }
         // In-degree into each survivor from the contents of the OTHER survivors
         // (the internal edges of the scratch DAG). Scanning only the survivor
-        // set — not every live region — keeps reclaim O(scratch) per expansion;
-        // over a stdlib load (thousands of expansions) the all-regions scan was
-        // the difference between sub-second and tens of seconds. This omits an
-        // edge from a *non-scratch* live region into the scratch (a persistent
-        // cell holding a freshly-built value): a macro transformer is a pure
-        // compile-time constructor that performs no such runtime mutation, and
-        // the one class of in-scope allocation that IS held externally — the
-        // process-lifetime roots (trait tables / root region, held Rust-side) —
-        // is already excluded above. So every surviving scratch region's RC is
-        // explained by survivor edges plus the owner references the transformer
-        // never released, and `rc − internal_in_degree` is exactly the latter.
+        // set, not every live region, keeps reclaim O(scratch) per expansion. A
+        // stdlib load runs thousands of expansions, and an all-regions scan per
+        // expansion turns a sub-second load into tens of seconds.
+        //
+        // This omits an edge from a *non-scratch* live region into the scratch:
+        // a persistent cell holding a freshly-built value. A macro transformer is
+        // a pure compile-time constructor that performs no such runtime
+        // mutation. The one class of in-scope allocation that IS held
+        // externally, the process-lifetime roots (trait tables and the root
+        // region, held Rust-side), is already excluded above. So every surviving
+        // scratch region's RC is explained by survivor edges plus the owner
+        // references the transformer never released, and
+        // `rc − internal_in_degree` is exactly the latter.
         let page_size = self.pool.initial_page_size();
         // Ownership-verified (`find_object_cross_refs`): a foreign pointer whose
         // masked header bytes collide with a survivor id must not inflate that
@@ -94,26 +103,26 @@ impl RegionStore {
                 }
             }
         }
-        // Escape count per survivor, snapshotted from the pre-reclaim RC. Taken
-        // before any decref so a cascade that reduces one survivor's RC mid-pass
-        // does not shrink another's target: across the DAG the decrefs issued
-        // here (Σ escape) plus the cascades they trigger (Σ internal edges) sum
-        // to each region's full RC, so all dead scratch reaches zero.
+        // Escape count per survivor, snapshotted from the pre-reclaim RC. It is
+        // taken before any decref, so a cascade that reduces one survivor's RC
+        // mid-pass does not shrink another's target. Across the DAG the decrefs
+        // issued here (Σ escape) plus the cascades they trigger (Σ internal
+        // edges) sum to each region's full RC, so all dead scratch reaches zero.
         let escape: std::collections::HashMap<u32, u32> = survivors
             .iter()
             .map(|&(id, _)| {
-                // `count()` is 0 for an `Owned` survivor — its reclamation is the
-                // owner's subtree drop, not this scope's RC balance, so it is never
-                // decref'd here (escape saturates to 0). For `Counted` it is the
-                // live count, exactly as before.
+                // `count()` is 0 for an `Owned` survivor. Its reclamation is the
+                // owner's subtree drop, not this scope's RC balance, so it is
+                // never decref'd here (escape saturates to 0). For `Counted` it
+                // is the live count.
                 let rc = self.regions[id as usize].as_ref().map_or(0, |e| e.count());
                 (id, rc.saturating_sub(indeg.get(&id).copied().unwrap_or(0)))
             })
             .collect();
         // Balance each survivor's unexplained references. Cascades (Rule 7) may
-        // free a survivor before this loop reaches it; the per-decref
-        // liveness+generation recheck skips an already-reclaimed id (and stops
-        // once a region's own escape decrefs free it), so nothing is double-freed.
+        // free a survivor before this loop reaches it. The per-decref liveness
+        // and generation recheck skips an already-reclaimed id, and stops once a
+        // region's own escape decrefs free it, so nothing is double-freed.
         let mut freed_objs = 0;
         for (id, gen) in survivors {
             let idx = id as usize;

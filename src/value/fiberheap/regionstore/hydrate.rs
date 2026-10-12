@@ -1,8 +1,11 @@
-//! Installing a hydrated image region (docs/impl/image.md § Hydration
-//! steps 3–6): the mapped, relocated pages become the pages of a freshly
-//! minted `Counted` region, indistinguishable from any other region to RC,
-//! teardown, and the diagnostics. The mapping and relocation themselves
-//! happen in `crate::image::hydrate`; this is the region-store seam.
+// audited: 2026-10-12
+//! Installing a hydrated image region: its mapped pages become the pages of a freshly minted counted region.
+//!
+//! docs/impl/image.md
+//!
+//! The region is indistinguishable from any other to RC, teardown, and the
+//! diagnostics (§ Hydration steps 3–6). The mapping and relocation happen in
+//! `crate::image::hydrate`; this is the region-store seam.
 
 use super::super::pagepool::MmapPage;
 use super::*;

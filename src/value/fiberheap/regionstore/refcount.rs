@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-10-12
 //! Reference counting: the incref/decref pair and the bookkeeping half of a
 //! free. The free cascade walks the content-edge tables kept here, rather than
 //! scanning pages.
@@ -59,7 +59,7 @@ impl RegionStore {
 
     /// Decrement `id`'s reference count, returning `true` iff it just reached 0
     /// and its pages must now be freed. This is the pure bookkeeping half of
-    /// [`Self::decref_with_cascade`] — it performs **no** free, so the free
+    /// [`Self::decref_with_cascade`], and it performs **no** free. So the free
     /// cascade can drive reclamation from an explicit worklist
     /// ([`Self::free_region_set`]) instead of recursing through
     /// `decref → free → decref` once per cross-region link.
@@ -70,11 +70,10 @@ impl RegionStore {
     ) -> bool {
         let idx = id.get() as usize;
         // Direct decrefs (not from cascade) must hit a region that
-        // was actually allocated. A miss here means either (a) the
-        // solver assigned a region id that no instruction
-        // alloc_in_region'd (the phantom-region class of bug —
-        // see docs/impl/region/rules.md § "Every region must correspond to a
-        // real allocation"), or (b) a double-free. Cascade decrefs
+        // was actually allocated. A miss here means one of two things. Either
+        // the solver assigned a region id that no instruction
+        // alloc_in_region'd (docs/impl/region/rules.md § "Every region must
+        // correspond to a real allocation"), or a double-free. Cascade decrefs
         // are exempt because a single region may be referenced
         // multiple times by another's contents and may have already
         // been freed by an earlier cascade visit.
@@ -166,13 +165,12 @@ impl RegionStore {
     }
     /// Free a region — tolerant of "never alloc'd" callers.
     ///
-    /// This is the entry point for runtime/macro callers (the per-expansion
-    /// transient in `expand_macro_call`, the per-compilation transient in
-    /// `pipeline::compile::with_transient`, the embedding API) that reserve a
-    /// region id without necessarily
-    /// allocating into it: the block may end without producing any
-    /// heap value, in which case there is no slot in the store. That
-    /// is a legitimate pattern, not a bug, so this path silently
+    /// This is the entry point for runtime and macro callers that reserve a
+    /// region id without necessarily allocating into it: the per-expansion
+    /// transient in `expand_macro_call`, the per-compilation syntax arena in
+    /// `pipeline::compile::with_syntax_arena`, and the embedding API. The
+    /// block may end without producing any heap value, and then there is no
+    /// slot in the store. That is a legitimate pattern, so this path silently
     /// skips when the slot is absent.
     ///
     /// For the bytecode `DecrefRegion` path — the one the regions
@@ -313,10 +311,10 @@ impl RegionStore {
     /// Scan a HeapObject for cross-region Value refs and incref each.
     /// Called at allocation time to balance cascade decrefs at free time.
     /// The callback is the OWNERSHIP predicate (`find_object_cross_refs`): the
-    /// resolved id must name a live region of THIS store that owns the pointer,
-    /// so a foreign-heap value (a compile-time-env constant, a parent-heap
-    /// borrow) whose masked page-header bytes collide with a live local id is
-    /// never increfed or recorded — keeping the table scan-symmetric.
+    /// resolved id must name a live region of THIS store that owns the pointer.
+    /// A foreign-heap value (a compile-time-env constant, a parent-heap borrow)
+    /// whose masked page-header bytes collide with a live local id is therefore
+    /// never increfed or recorded, which keeps the table scan-symmetric.
     pub(super) fn incref_cross_region_refs(&mut self, obj: &HeapObject, own_id: u32) {
         let page_size = self.pool.initial_page_size();
         let valid_region = |rid: u32, ptr: *const ()| -> bool {
@@ -333,10 +331,10 @@ impl RegionStore {
                 self.incref(r);
             }
             // Record the outgoing edge in the SAME loop that increfs it, so the
-            // alloc-path table is scan-equivalent by construction — `refs` is the
+            // alloc-path table is scan-equivalent by construction. `refs` is the
             // very output of `find_object_cross_refs`, the function the free-time
-            // oracle scans with (docs/impl/region/ownership.md § "The outgoing edge
-            // table"). The reserved/self filter lives in `record_outgoing`.
+            // oracle scans with (docs/impl/region/ownership.md § "The outgoing
+            // edge table"). The reserved/self filter lives in `record_outgoing`.
             self.record_outgoing(own_id, rid);
         }
     }

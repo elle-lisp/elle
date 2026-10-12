@@ -6,9 +6,9 @@
 //! docs/impl/region/model.md
 //!
 //! A page is self-aligned, so its base is the pointer masked down by the
-//! page's own size — but the size is not known at the pointer, which is why
-//! the walk tries each power-of-two alignment and asks the candidate base
-//! whether it holds a real header.
+//! page's own size. The pointer does not carry that size, so the walk tries
+//! each power-of-two alignment and asks the candidate base whether it holds a
+//! real header.
 
 use std::mem::size_of;
 
@@ -29,13 +29,13 @@ struct PageHeader {
     /// [`size_tag`]). [`header_of_page_ptr`] finds a variable-sized page's base
     /// by masking a pointer down to each candidate power-of-2 alignment and
     /// reading this field; the alignment whose tag matches is the true base. The
-    /// 24-bit magic is what makes that search sound: a smaller sub-alignment of a
-    /// LARGE page lands mid-page, on object/inline *data*, and a bare `log2` byte
-    /// there can coincidentally equal the smaller size's log2 — a false base read
-    /// as a garbage `(region_id, stamp)` (the `oracle.lisp` 584 GB `ensure_raw`
-    /// blowup). Requiring the full magic makes a mid-page false match ~`1/2^32`
-    /// instead of ~`1/256`; the authoritative defence is the ownership-validated
-    /// walk in `RegionStore::region_of_ptr`.
+    /// 24-bit magic is what makes that search sound. A smaller sub-alignment of
+    /// a LARGE page lands mid-page, on object or inline *data*. A bare `log2`
+    /// byte there can equal the smaller size's log2 by coincidence, and the walk
+    /// would read a false base as a garbage `(region_id, stamp)`. Requiring the
+    /// full magic makes a mid-page false match ~`1/2^32` instead of ~`1/256`;
+    /// the authoritative defence is the ownership-validated walk in
+    /// `RegionStore::region_of_ptr`.
     size_tag: u32,
 }
 
@@ -91,14 +91,14 @@ pub(crate) unsafe fn write(base: *mut u8, region_id: u32, stamp: PageStamp, len:
 /// Tries progressively larger power-of-2 alignments starting from
 /// `min_page_size` until [`header_if_valid`] accepts one — its [`size_tag`]
 /// carries the [`PAGE_MAGIC`] and that alignment's log2. This handles
-/// variable-sized pages from geometric growth. The magic is what stops a
-/// smaller sub-alignment of a *large* page (whose masked base lands mid-page,
-/// on object data) from being read as a false header — but it is only
-/// probabilistic; the authoritative resolver is `RegionStore::region_of_ptr`,
-/// which additionally requires the matched region to *own* the pointer. Callers
-/// that have the store (the RC-decision funnel) use that; this magic-only form
-/// serves the free-time cross-ref scan, where the `valid_region` filter screens
-/// the result.
+/// variable-sized pages from geometric growth. The magic stops a smaller
+/// sub-alignment of a *large* page, whose masked base lands mid-page on object
+/// data, from reading as a false header. But the magic is only probabilistic.
+/// The authoritative resolver is `RegionStore::region_of_ptr`, which also
+/// requires the matched region to *own* the pointer. Callers that have the
+/// store (the RC-decision funnel) use that; this magic-only form serves the
+/// free-time cross-ref scan, where the `valid_region` filter screens the
+/// result.
 ///
 /// # Safety
 /// `ptr` must point into a page allocated by a RegionPool with a valid
@@ -109,9 +109,9 @@ pub(crate) unsafe fn header_of_page_ptr(ptr: *const (), min_page_size: usize) ->
     let mut size = min_page_size;
     // Walk every power-of-2 alignment from the smallest candidate up.
     // Geometric page growth is capped, but a single oversized allocation can
-    // still claim a one-off page larger than that cap, so the loop is bounded
-    // by the address width (shift to zero) rather than a fixed size — a fixed
-    // `1 << 30` cap returned 0 for any page above 1 GiB.
+    // still claim a one-off page larger than that cap. So the address width
+    // (shift to zero) bounds the loop, never a fixed size, which a page above
+    // it would escape.
     while size != 0 {
         if let Some(header) = header_if_valid(addr, size) {
             return header;
