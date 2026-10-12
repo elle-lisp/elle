@@ -1,6 +1,10 @@
-// audited: 2026-09-05
+// audited: 2026-10-12
 // The parts of DOCUMENTATION.md a machine can check, run against every file
 // that carries an audit stamp.
+//
+// QA runs these checks before anything else, so they are a binary of their
+// own: QA does not wait for the shared test binary to compile
+// (docs/analysis/ci.md).
 //
 // The scoping is the point (docs/impl/audit.md). An unstamped file has claimed
 // nothing and is exempt. A stamped file has claimed to meet the policy, so a
@@ -56,7 +60,10 @@ fn stamped() -> Vec<(String, String)> {
 /// success from an empty sweep is the failure this repository is least able
 /// to see.
 fn examined(n: usize, what: &str) {
-    assert!(n > 0, "the {what} sweep examined no files, so it proved nothing");
+    assert!(
+        n > 0,
+        "the {what} sweep examined no files, so it proved nothing"
+    );
 }
 
 #[test]
@@ -99,7 +106,10 @@ fn every_link_in_a_stamped_document_resolves() {
         }
     }
     examined(seen, "link");
-    assert!(broken.is_empty(), "broken links in stamped documents: {broken:#?}");
+    assert!(
+        broken.is_empty(),
+        "broken links in stamped documents: {broken:#?}"
+    );
 }
 
 #[test]
@@ -123,8 +133,7 @@ fn no_stamped_document_names_a_file_as_a_bare_code_span() {
                 // `.md` alone is an extension. A bare index name denotes the
                 // kind of file rather than one file — "read the AGENTS.md"
                 // means whichever one is nearest, and has no target to link.
-                const GENERIC: &[&str] =
-                    &["AGENTS.md", "README.md", "CLAUDE.md", "overview.md"];
+                const GENERIC: &[&str] = &["AGENTS.md", "README.md", "CLAUDE.md", "overview.md"];
                 let is_path = span.ends_with(".md")
                     && !span.starts_with('.')
                     && !span.contains(' ')
@@ -168,7 +177,7 @@ fn no_stamped_file_uses_the_banned_register() {
         // A rule's definition sites have to spell the words the rule bans:
         // the policy states the list, and this file implements it. Everywhere
         // else, naming one is using one.
-        if rel == "DOCUMENTATION.md" || rel == "tests/integration/prose.rs" {
+        if rel == "DOCUMENTATION.md" || rel == "tests/prose.rs" {
             continue;
         }
         let lower = text.to_lowercase();
@@ -179,7 +188,10 @@ fn no_stamped_file_uses_the_banned_register() {
         }
     }
     examined(seen, "banned register");
-    assert!(hits.is_empty(), "banned register in stamped files: {hits:#?}");
+    assert!(
+        hits.is_empty(),
+        "banned register in stamped files: {hits:#?}"
+    );
 }
 
 #[test]
@@ -193,14 +205,18 @@ fn every_stamped_document_opens_with_a_callout_within_budget() {
         seen += 1;
         match callout(&text) {
             None => bad.push(format!("{rel}: no call-out under its title")),
-            Some(c) if c.chars().count() > 140 => {
-                bad.push(format!("{rel}: call-out is {} characters", c.chars().count()))
-            }
+            Some(c) if c.chars().count() > 140 => bad.push(format!(
+                "{rel}: call-out is {} characters",
+                c.chars().count()
+            )),
             Some(_) => {}
         }
     }
     examined(seen, "document call-out");
-    assert!(bad.is_empty(), "call-out problems in stamped documents: {bad:#?}");
+    assert!(
+        bad.is_empty(),
+        "call-out problems in stamped documents: {bad:#?}"
+    );
 }
 
 #[test]
@@ -248,14 +264,18 @@ fn every_stamped_source_file_opens_with_a_callout() {
         seen += 1;
         match source_callout(&text) {
             None => bare.push(format!("{rel}: no call-out in its header")),
-            Some(c) if c.chars().count() > 140 => {
-                bare.push(format!("{rel}: call-out is {} characters", c.chars().count()))
-            }
+            Some(c) if c.chars().count() > 140 => bare.push(format!(
+                "{rel}: call-out is {} characters",
+                c.chars().count()
+            )),
             Some(_) => {}
         }
     }
     examined(seen, "source call-out");
-    assert!(bare.is_empty(), "stamped source files without a call-out: {bare:#?}");
+    assert!(
+        bare.is_empty(),
+        "stamped source files without a call-out: {bare:#?}"
+    );
 }
 
 /// Document paths named in one header comment line.
