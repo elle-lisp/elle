@@ -1,6 +1,6 @@
 # Region generations: stale derefs detonate in debug builds
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-10-20 -->
 
 The per-region generation counter and page stamps that turn a stale region deref
 into a debug-build panic at the deref site.
@@ -46,9 +46,11 @@ guardfree makes the re-claimed window loud in dedicated runs.
 ## Finding the page base soundly (not a generation matter, but it shares the funnel)
 
 `region_of` resolves a pointer to its region through
-`RegionStore::region_of_ptr`, which must first find the pointer's **page
-base**. Pages are variable-sized (geometric growth to 4 MiB), so the walk masks
-the pointer to each candidate power-of-2 alignment and reads the header there.
+`RegionStore::region_of_ptr`. A pointer into a hydrated image resolves through
+the store's interval table, with a range check and no header read
+([image.md](../image.md)). Every other pointer needs its **page base** first.
+Pages are variable-sized (geometric growth to 4 MiB), so the walk masks the
+pointer to each candidate power-of-2 alignment and reads the header there.
 The header's `size_tag` carries a 24-bit `PAGE_MAGIC` plus `log2(page_size)`,
 and the true base is the alignment whose tag validates.
 
@@ -63,9 +65,12 @@ names a live region of *this* store that genuinely *owns* the pointer is the
 authoritative answer, and the walk stops there. A header that validates but
 owns nothing also stops the walk. It is a real base of a foreign store or of a
 region since freed, and masking further would mask *below* this page, into
-memory nothing mapped. So its id is the fallback answer. The free-time
-cross-ref scan reads headers without a store in hand, so it has only the magic
-and its `valid_region` filter.
+memory nothing mapped. So its id is the fallback answer.
+
+The allocation funnel and the free-time cross-ref scan resolve through
+`owning_region` instead, which
+reads the same table and takes the same walk with no generation check. It
+answers no region where no live region of this store owns the pointer.
 
 ### Every byte the magic screens has to be written
 
@@ -151,8 +156,8 @@ asserting the second.
 
 The free-time cascade scan (`find_object_cross_refs`) deliberately does NOT
 check generations. Teardown legitimately scans objects whose contained values
-may already be dead, and the `valid_region` filter handles them. A panic there
-would turn tolerated teardown ordering into false positives.
+may already be dead, and the ownership check in `owning_region` drops them. A
+panic there would turn tolerated teardown ordering into false positives.
 
 The store id scopes the check to pages the checking store actually stamped.
 Generations from two different stores are unrelated numbers. A worker thread's

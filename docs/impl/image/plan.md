@@ -103,13 +103,15 @@ Then the image milestones:
    - the bytecode half of the parity gate — a boot image records the
      static-region counter where its boot ended, and hydration raises the
      counter to it, so `make bytecode-parity` finds every corpus file
-     compiling to one bytecode under either boot ([boot.md](boot.md)).
+     compiling to one bytecode under either boot ([boot.md](boot.md));
+   - the interval table — a hydrated region's pool records the interval its
+     pages tile, and the store reads its hydrated regions before the probe
+     ladder, so a pointer into the image resolves with a range check
+     ([image.md](../image.md) § "Pointer resolution must not regress").
+     Through the ladder, a pointer into a 4 MiB image page reads ten candidate
+     headers on a 4 KiB host before the eleventh validates.
 
-   Still to land: the embedded blob, per-worker hydration for `sys/spawn`,
-   and the hydrated-region interval table. The interval table keeps
-   `region_of_ptr` off the probe ladder ([image.md](../image.md) § "Pointer
-   resolution must not regress"); the regression it prevents needs a region
-   the size of stdlib to show.
+   Still to land: the embedded blob and per-worker hydration for `sys/spawn`.
 8. **environment** — `image/save` and `image/load`, manifest deltas over
    boot, mutable side-stream.
 
@@ -338,6 +340,12 @@ Then the image milestones:
   files. The counter-factual: scribble a pattern into a live object's
   padding bytes before the dump and assert the file does not change — a
   wholesale slot copy would carry the pattern into the artifact.
-- Resolution: a unit test pins that an image pointer resolves through the
-  interval table without touching the header ladder, and that `owns` on a
-  hydrated region is a range check.
+- Resolution: overwrite the region id in every page header of a hydrated
+  region, and each page still resolves to that region. `region_of_ptr` answers
+  it, and an allocation that stores an image value records its edge into the
+  image region. The counter-factual is the probe ladder, which reads the
+  overwritten id and answers no region. The pool answers its interval exactly,
+  and `owns` holds at both ends of the interval and fails one byte outside
+  either. A page the region claims after hydration lies outside the interval
+  and still resolves. A hydrated region is in its store's interval table until
+  its pages are released.

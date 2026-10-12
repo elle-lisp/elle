@@ -1,6 +1,6 @@
 # Images — regions hydrated at load
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-20 -->
 
 Design for image-style persistence: one mechanism, and the two configurations
 it serves.
@@ -25,9 +25,9 @@ argument. Six companions carry the rest:
   answered the design's open questions, with their numbers.
 
 This document states the design, not its progress. [plan.md](image/plan.md)
-records what has landed: the warm-cache boot, the body fragment and the
-bytecode parity gate have, and the embedded blob, per-worker hydration, the
-hydrated-region interval table and the environment configuration have not.
+records what has landed: the warm-cache boot, the body fragment, the bytecode
+parity gate and the interval table have, and the embedded blob, per-worker
+hydration and the environment configuration have not.
 
 ## The problem
 
@@ -298,14 +298,22 @@ on the RC hot path — every escape incref and edge record of a stdlib value
 — that is a per-operation regression, not a curiosity.
 
 The mapped layout dissolves it: a hydrated region is **one contiguous
-address interval by construction** (the aligned reservation of step 3).
-`region_of_ptr` consults a per-store table of hydrated-region intervals —
-one or two entries, two compares each — before the probe ladder, and
-`owns` for a hydrated region is the same range check. Image pointers never
-enter the ladder at all. Page headers stay, stamped for uniformity and
-diagnostics, but resolution does not depend on them — which also argues for
-large image pages: each stamped header copy-on-write dirties its 4 KiB
-frame, so fewer, larger pages keep the clean set large.
+address interval by construction** (the aligned reservation of step 3). The
+region's pool records that interval, so `owns` answers a pointer inside it with
+one range check. The store's **interval table** lists its hydrated regions,
+one or two of them. Every resolution reads the table before the probe ladder:
+`region_of_ptr`, and the ownership resolver behind the allocation funnel's edge
+record and the free cascade's scan. Image pointers never enter the ladder at
+all.
+
+The interval belongs to the pool that owns the pages, so it goes when they go,
+and a recycled id starts without one. A region leaves the table when its pages
+are released. Page headers stay, stamped for uniformity and diagnostics, and
+the hydrating store's resolution does not depend on them. A store that did not
+hydrate the image, such as a worker reading its parent's value, resolves the
+pointer through the stamped header, as it resolves any foreign page. The
+stamps also argue for large image pages: each stamped header copy-on-write
+dirties its 4 KiB frame, so fewer, larger pages keep the clean set large.
 
 **The clean set is the currency.** Relocation copy-on-write dirties every
 4 KiB frame that holds a pointer slot or a page-header stamp; those frames

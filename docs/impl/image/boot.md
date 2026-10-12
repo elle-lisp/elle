@@ -208,16 +208,16 @@ payload, so a hot stdlib function promotes to the JIT under either boot
 ([sealing.md](sealing.md)). It carries the body fragment a graft reads in the
 same payload, so a call to a library function grafts under either boot
 ([graft.md](../graft.md)). User code compiles to the same bytecode under either
-boot, and `make bytecode-parity` proves it over the corpus (§ The gate).
+boot, and `make bytecode-parity` proves it over the corpus (§ The gate). A
+reference count on a hydrated stdlib value does not walk the probe ladder: the
+store's interval table resolves the pointer with a range check
+([image.md](../image.md)).
 
-Three things keep the default off ([plan.md](plan.md)):
+Two things keep the default off ([plan.md](plan.md)):
 
 - A `sys/spawn` worker builds its own instance and boots its stdlib from
   source, whatever the spawning instance booted from. A program that spawns
   workers pays a stdlib compile per worker under either boot.
-- Pointer resolution has no interval table yet. Every reference count on a
-  hydrated stdlib value walks the probe ladder and scans the page list of a
-  region the size of stdlib ([image.md](../image.md)).
 - The warm cache keys on the source digest alone, so a new build hydrates an
   older build's image ([issue 1361](https://github.com/elle-lisp/elle/issues/1361)).
 
