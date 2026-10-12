@@ -2,7 +2,7 @@
 
 <!-- audited: 2026-10-12 -->
 
-A graph database in the shape of GUN: nodes merged field by field by HAM, on a memory or Redis store, joined to peers by WebSocket.
+A graph database in the shape of GUN: HAM merges on a memory or Redis store, WebSocket peers, signed user spaces and encryption.
 
 The export struct at the bottom of [gun.lisp](gun.lisp) lists what the module
 offers, and `(doc name)` carries each function's arguments.
@@ -10,18 +10,24 @@ offers, and `(doc name)` carries each function's arguments.
 holds the data model, the merge rule, the store layout and the invariants.
 
 The design follows [GUN](https://gun.eco/) and its HAM conflict rule. It does
-not speak GUN's wire format, and it has no SEA yet. Databases join over
-WebSocket; [gun/mesh.md](gun/mesh.md) holds the peer protocol.
+not speak GUN's wire format. Databases join over WebSocket, and
+[gun/mesh.md](gun/mesh.md) holds the peer protocol. User spaces and
+encryption follow GUN's SEA, and [gun/sea.md](gun/sea.md) holds their rules.
 
 ## Loading
 
-Called with no argument, the module has the memory store only and no mesh.
-`gun:redis-store` then raises
+Called with no argument, the module has the memory store only, no mesh and
+no user spaces. `gun:redis-store` then raises
 `{:error :gun-error :reason :redis-not-configured}`, and `gun:serve` and
-`gun:connect` raise `:mesh-not-configured`. The Redis store needs the
-`std/redis` module as `:redis`. The mesh needs the `std/websocket` module as
-`:websocket`, built from the plugins that `(import "plugin/hash")` and
-`(import "plugin/random")` load:
+`gun:connect` raise `:mesh-not-configured`. `gun:pair`, `gun:user`,
+`gun:secret`, `gun:encrypt` and `gun:decrypt` raise `:sea-not-configured`,
+and so does a chain that reaches a soul starting with `~`.
+
+The Redis store needs the `std/redis` module as `:redis`. The mesh needs the
+`std/websocket` module as `:websocket`, built from the plugins that
+`(import "plugin/hash")` and `(import "plugin/random")` load. User spaces and
+encryption need the plugins that `(import "plugin/crypto")` and
+`(import "plugin/random")` load, as `:crypto` and `:random`:
 
 ```lisp
 (def gun ((import "std/gun")))
@@ -36,8 +42,14 @@ Called with no argument, the module has the memory store only and no mesh.
    :websocket ((import "std/websocket") :hash hash-plugin
                                         :random random-plugin)))
 
+(defn gun-with-sea [crypto-plugin random-plugin]
+  "The gun module, able to sign and encrypt."
+  ((import "std/gun") :crypto crypto-plugin :random random-plugin))
+
 (let [[ok? err] (protect (gun:connect (gun:open) "ws://127.0.0.1:1/gun"))]
   (assert (= (get err :reason) :mesh-not-configured)))
+(let [[ok? err] (protect (gun:once (gun:get (gun:open) "~alice")))]
+  (assert (= (get err :reason) :sea-not-configured)))
 ```
 
 ## The data model
@@ -193,8 +205,9 @@ locally. [gun/mesh.md](gun/mesh.md) gives the steps.
 
 A store is a struct of two functions: `:read` takes a soul and answers its
 fields, or `nil`, and `:write` takes a soul and the fields a merge accepted.
-A field is a `[state value]` pair. The database reads a soul once, the first
-time a chain reaches it, and keeps the node in memory after that.
+A field is a `[state value]` pair, or `[state value signature]` in a user
+space. The database reads a soul once, the first time a chain reaches it, and
+keeps the node in memory after that.
 
 `gun:memory-store` keeps nodes in the process. Two databases opened on one
 memory store share it:
@@ -208,7 +221,8 @@ memory store share it:
 
 `gun:redis-store` keeps each node in one Redis hash named `<prefix>:<soul>`.
 Each hash field is a key of the node, and its value is the state in decimal, a
-space, and the encoding:
+space, and the encoding. A signed field puts its signature in hex between the
+state and the encoding:
 
 ```text
 HGETALL app:users/alice
@@ -274,6 +288,62 @@ A write that comes from a peer has no caller to raise to. So an error that
 handling it raises goes to the function `gun:open` takes as `:on-error`, with
 the error as its one argument. The default writes a line to stderr.
 
+## User spaces
+
+A user is a key pair. `gun:pair` makes one from a random seed, and
+`(gun:pair seed)` rebuilds the pair of a 32-byte seed. A pair is a struct of
+`:seed`, which the user keeps secret, and the public keys `:pub` and `:epub`
+in hex.
+
+The soul `~<pub>` and every soul below it form the **space** of that pair.
+Every field in a space carries a signature by the pair, and a database refuses
+a field in a space without a valid one. So only the pair can write its space,
+and everybody can read it and check it. `gun:user` answers the chain at the
+root of a pair's space, and writes through it are signed. Given the module
+that `gun-with-sea` builds, this function answers `{"name" "Alice"}`:
+
+```lisp
+(defn user-example [sea-gun]
+  "Write in a user space, and read it back through a chain without the pair."
+  (let [db (sea-gun:open)
+        alice (sea-gun:pair)]
+    (sea-gun:put (sea-gun:get (sea-gun:user db alice) "profile")
+                 {:name "Alice"})
+    (sea-gun:once (sea-gun:get (sea-gun:get db (string "~" alice:pub))
+                               "profile"))))
+```
+
+A write into a space through a chain without its pair raises
+`{:error :gun-error :reason :unsigned}`, and writes nothing.
+[gun/sea.md](gun/sea.md) holds the signed text and what each entry point does
+with a field that fails.
+
+## Encryption
+
+`gun:encrypt` seals a value under a 32-byte key and answers bytes, which a
+`put` stores like any other value. `gun:decrypt` opens the bytes under the same
+key and answers the value. It raises `:decrypt-failed` for a wrong key or
+changed bytes. `gun:secret` answers the key that two pairs share: each side
+passes its own pair and the other side's `:epub`. A user publishes `:epub` in
+its own space, so nobody else can replace it. Given the module that
+`gun-with-sea` builds, this function answers `"for Bob"`:
+
+```lisp
+(defn secret-example [sea-gun]
+  "Alice publishes her epub, encrypts a note for Bob, and Bob decrypts it."
+  (let [db (sea-gun:open)
+        alice (sea-gun:pair)
+        bob (sea-gun:pair)
+        me (sea-gun:user db alice)]
+    (sea-gun:put (sea-gun:get me "epub") alice:epub)
+    (sea-gun:put (sea-gun:get me "note")
+                 (sea-gun:encrypt (sea-gun:secret alice bob:epub) "for Bob"))
+    (let [space (sea-gun:get db (string "~" alice:pub))
+          epub (sea-gun:once (sea-gun:get space "epub"))]
+      (sea-gun:decrypt (sea-gun:secret bob epub)
+                       (sea-gun:once (sea-gun:get space "note"))))))
+```
+
 ## Invariants
 
 1. A `put` validates its whole value before it merges anything, so a rejected
@@ -289,6 +359,9 @@ the error as its one argument. The default writes a line to stderr.
    wait for an answer or an ack, happens after the lock is released.
 6. The walk that decides which `gun:on` functions to call never waits on the
    network.
+7. Every field passes admission before a merge sees it: a field from a local
+   `put`, from a peer, and from the store. So no field in a user space enters
+   memory without a valid signature by the space's key.
 
 ## Running tests
 
@@ -307,8 +380,18 @@ elle tests/lang/gun-mesh.lisp
 elle tests/lang/gun-sync.lisp
 ```
 
+User spaces and encryption need the `plugin/crypto` and `plugin/random`
+plugins, and the second file also joins databases over loopback, so it needs
+`plugin/hash` too. `make suite-plugins` builds all three:
+
+```bash
+elle tests/lang/gun-sea.lisp
+elle tests/lang/gun-sea-mesh.lisp
+```
+
 The Redis store needs Redis on 127.0.0.1:6379. The file also joins two
-Redis-backed databases, so it needs the same plugins:
+Redis-backed databases and writes in a user space, so it needs the plugins
+of the two files above:
 
 ```bash
 elle tests/lang/gun-redis.lisp

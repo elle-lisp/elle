@@ -7,4 +7,5 @@ Up: [..](../AGENTS.md)
 ## Documents
 
 - [mesh.md](mesh.md) — **mesh** The peer protocol of std/gun: the messages, how a peer merges and forwards them, reads that ask the peers, acks, and deferral.
-- [overview.md](overview.md) — **gun** The submodules behind [gun.lisp](../gun.lisp): states, values, fields, HAM, the graph, the stores, the core and the peer mesh.
+- [overview.md](overview.md) — **gun** The submodules behind [gun.lisp](../gun.lisp): states, values, fields, HAM, the graph, stores, SEA, the core and the mesh.
+- [sea.md](sea.md) — **sea** The SEA rules of std/gun: key pairs, user spaces that only their key writes, the signed text, admission, and encryption.

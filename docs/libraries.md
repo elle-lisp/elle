@@ -77,7 +77,7 @@ pattern and are imported via `(import "std/<name>")`.
 | git | `((import "std/git"))` | Git repository operations (FFI to libgit2) |
 | framing | `((import "std/framing"))` | Lines, delimited records and exact counts over any byte source, each a view of one chunk. See [framing.md](../lib/framing.md) |
 | glob | `((import "std/glob"))` | Filesystem glob pattern matching |
-| gun | `((import "std/gun"))` | Graph database in the shape of GUN: per-field HAM merge on a memory or Redis store, with a WebSocket peer mesh. See [gun.md](../lib/gun.md) |
+| gun | `((import "std/gun"))` | Graph database in the shape of GUN: per-field HAM merge on a memory or Redis store, with a WebSocket peer mesh, signed user spaces and encryption. See [gun.md](../lib/gun.md) |
 | semver | `((import "std/semver"))` | Semantic version parsing and comparison |
 | semver/arbitrate | `((import "std/semver/arbitrate"))` | Old-test arbitration of compat claims |
 | semver/diff | `((import "std/semver/diff"))` | Surface diffs, bump floors, claim verdicts. See [semver.md](semver.md) |

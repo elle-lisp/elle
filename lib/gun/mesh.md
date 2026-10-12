@@ -15,7 +15,9 @@ the rules.
 Each message is one JSON object in one WebSocket text frame. A field travels
 as `[state encoding]`, with the value in its `value:encode` form. JSON keeps
 no trait table, so a link sent as a struct would arrive as a plain struct; its
-encoding `l:<soul>` arrives as a link.
+encoding `l:<soul>` arrives as a link. A field in a user space travels as
+`[state encoding signature]`, with the signature in hex
+([sea.md](sea.md)).
 
 | Message | Meaning |
 |---------|---------|
@@ -35,8 +37,10 @@ A graph is an object of soul to node, and a node is an object of key to field:
 
 A message that is not one of these does not decode. Neither does a soul that is
 not a non-empty string, a key that is `_`, a state that is not an integer of
-zero or more, or an encoding that `value:decode` rejects. Such a message raises
-`{:error :gun-error :reason :bad-message}`.
+zero or more, an encoding that `value:decode` rejects, or a signature that is
+not 128 lowercase hex characters. Such a message raises
+`{:error :gun-error :reason :bad-message}`. Decoding checks the form of a
+signature only; admission checks that it verifies.
 
 Each hop sends messages of its own, with fresh ids, so an ack answers one hop
 only. A message id comes from `uuid:v4`.
@@ -72,17 +76,20 @@ the peer in turn.
 
 A **put** from a peer merges by these steps:
 
-1. Under the database lock, load each soul from the store.
-2. Split the fields into **due** and **later**: a field is later when its state
+1. Under the database lock, pass every field of the message through admission
+   ([sea.md](sea.md)). When one field fails, refuse the whole message, so
+   nothing of it merges.
+2. Load each soul from the store.
+3. Split the fields into **due** and **later**: a field is later when its state
    is after the clock's `now`.
-3. Observe the state of each due field, merge the due fields by HAM, and send
+4. Observe the state of each due field, merge the due fields by HAM, and send
    the accepted diff to the store. Then release the lock.
-4. Send the accepted diff, as a new put, to every peer except the one that sent
+5. Send the accepted diff, as a new put, to every peer except the one that sent
    it.
-5. Call the `gun:on` functions whose value changed.
-6. Ack the put.
-7. Give the later fields to a fiber that sleeps until the earliest of them is
-   due, and then merges them by steps 1 to 5. A field still later after that
+6. Call the `gun:on` functions whose value changed.
+7. Ack the put.
+8. Give the later fields to a fiber that sleeps until the earliest of them is
+   due, and then merges them by steps 1 to 6. A field still later after that
    sleep waits again.
 
 **HAM ends a forwarding loop.** A peer forwards only the diff that its merge
@@ -96,7 +103,8 @@ next local write is after every state this database holds, and wins locally.
 
 **Errors.** A message that does not decode goes to `:on-error` and is dropped.
 The connection stays open. A put whose merge raises acks `err`, and the error
-goes to `:on-error`. An error raised by a `gun:on` function in step 5 goes to
+goes to `:on-error`; a put that admission refuses acks `err` with the reason
+that admission gave. An error raised by a `gun:on` function in step 6 goes to
 `:on-error`, and the ack still says ok, because the write has landed.
 
 A **local put** merges under the lock as before, and then sends the accepted
