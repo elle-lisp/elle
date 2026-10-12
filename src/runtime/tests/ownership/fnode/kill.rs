@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-11
 //! What a hard kill of a parked or stopped fiber frees, the payload it must retain,
 //! and the error payload it displaces.
 //!
@@ -10,8 +10,7 @@ use super::*;
 /// fiber releases both the parked frame's activation owner node and the fiber
 /// owner node (gathered under it by `reparent_owned_children` — one set-drop),
 /// and `fiber/abort` of a not-yet-started fiber releases the fiber node
-/// (docs/impl/region/owner.md § "Owner nodes" — "Fiber teardown frees
-/// everything the fiber owns"). Both route through `kill_fiber`. The
+/// (docs/impl/region/owner.md). Both route through `kill_fiber`. The
 /// counter-factual is a cancel that drops the chain bare (`suspended = None`):
 /// no generation bumps, and the count grows per cycle.
 #[test]
@@ -76,9 +75,8 @@ fn fiber_kill_frees_parked_and_fiber_owned() {
         // The parked frame's member reaches its body through the code object's
         // constant pool — the only channel hand-built bytecode has — so the code
         // object's region references it and the cancel's set drop rescues it
-        // rather than freeing it (docs/impl/region/ownership.md § "The incoming
-        // edge table and the external-reference rescue"). It frees with the code
-        // object, which the fiber value's release takes.
+        // rather than freeing it (docs/impl/region/ownership.md). It frees with
+        // the code object, which the fiber value's release takes.
         release_fiber_value(unsafe { &mut *heap_ptr }, fiber_value);
         assert!(
             unsafe { &*heap_ptr }.generation_raw(rid_a.get()) > gen_a,
@@ -214,15 +212,14 @@ fn fiber_kill_park_retains_terminal_payload() {
 /// park-retain and recorded content edge `with_child_fiber` step 6a takes. The
 /// hard kill installs its own payload over that signal, so it owes the displaced
 /// one the release a restart's install owes (`release_displaced_terminal_signal`,
-/// docs/impl/region/park.md § "A parked TERMINAL result displaced by a resume or
-/// abort install is released as it is displaced"). Without it the retain has no
+/// docs/impl/region/park.md). Without it the retain has no
 /// consumer, and the recorded edge outlives the signal the free-time scan reads,
 /// so the equivalence oracle panics at the fiber's free.
 ///
 /// Two faces, one per status a stopped fiber can have: a mask that catches the
 /// error leaves it `:paused`, and one that does not leaves it `:error`, which
 /// the resume handler promotes. Cancel accepts both and ends the fiber `:dead`
-/// (docs/signals/primitives.md § "Cancel vs. Abort").
+/// (docs/signals/primitives.md).
 #[test]
 fn fiber_kill_releases_displaced_error_signal() {
     use crate::compiler::bytecode::{Bytecode, Instruction};
@@ -286,4 +283,34 @@ fn fiber_kill_releases_displaced_error_signal() {
         // displaced payload panics here.
         release_fiber_value(unsafe { &mut *heap_ptr }, fiber_value);
     }
+}
+
+/// A cancel of a fiber whose callee raised discharges the parked chain while the
+/// displaced error still holds its payload. `get` raises a native error, and the
+/// resumer releases its delivery as a discarded statement, so the park retain is
+/// the payload's last reference. The counter-factual releases the displaced
+/// error first: the discharge then reads the freed payload, and the generation
+/// check panics on the stale deref.
+#[test]
+fn fiber_kill_of_an_error_chain_discharges_before_the_displaced_release() {
+    use crate::pipeline::compile_file_repl;
+    let src = "(defn holder [n] (let [h (string \"h\" n)] [(get nil :x) h])) \
+               (defn outer [n] (let [o (string \"o\" n)] [(holder n) o])) \
+               (var i 0) \
+               (while (%lt i 20) \
+                 (let [f (fiber/new (fn [] [:got (outer 1)]) |:error|)] \
+                   (fiber/resume f) \
+                   (fiber/cancel f @[:gone])) \
+                 (assign i (%add i 1))) \
+               nil";
+    let mut rt = Runtime::without_stdlib();
+    let result = {
+        let (_vm, symbols, cctx) = rt.parts();
+        compile_file_repl(src, symbols, cctx, "<embed>")
+            .expect("compiles")
+            .0
+    };
+    let (vm, _symbols, cctx) = rt.parts();
+    let v = vm.execute_scheduled(&result, cctx).expect("runs");
+    assert!(v.is_nil(), "every cancel of a parked error chain completes");
 }
