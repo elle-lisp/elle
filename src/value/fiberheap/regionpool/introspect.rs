@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! What a region pool can say about itself: its live objects and pages, and the cross-region references it holds.
 //!
 //! docs/impl/region/model.md
@@ -12,8 +12,8 @@ impl RegionPool {
         self.obj_count
     }
     /// The `HeapTag` of every live object in this region, in allocation order.
-    /// Drives the `arena/dump` diagnostic — a region's object *kinds* are what
-    /// localise a leak (a stray `Fiber` / `Closure` region naming the unfreed
+    /// Drives the `arena/dump` diagnostic. A region's object *kinds* are what
+    /// localise a leak (a stray `Fiber` or `Closure` region names the unfreed
     /// value), which the bare counts of `region_info_vec` cannot.
     pub fn debug_tags(&self) -> Vec<crate::value::heap::HeapTag> {
         let mut out = Vec::new();
@@ -69,9 +69,10 @@ impl RegionPool {
         page_size: usize,
         valid_region: &dyn Fn(u32, *const ()) -> bool,
     ) -> Vec<u32> {
-        // Breadcrumb the member under scan so a guardfree fault inside
-        // `region_of_page_ptr` (an over-freed target page) names the region that
-        // still HELD the dangling edge, not only the region that freed the target.
+        // Breadcrumb the member under scan. A guardfree fault inside
+        // `region_of_page_ptr` (an over-freed target page) then names the
+        // region that still HELD the dangling edge, not only the region that
+        // freed the target.
         crate::value::fiberheap::freelog::set_scan_member(own_id);
         let mut refs = Vec::new();
         for &ptr in self.dtors.iter().chain(self.ref_objs.iter()) {
@@ -88,18 +89,20 @@ impl RegionPool {
     /// Extract cross-region Value references from a HeapObject.
     ///
     /// `valid_region(rid, ptr)` is the OWNERSHIP predicate, not a bare liveness
-    /// check: it must verify that the calling store's live region `rid` genuinely
-    /// owns `ptr`'s address (`RegionPool::owns`). `region_of_page_ptr` reads a
-    /// stamped page-header id, and a pointer NOT managed by this store — a
-    /// foreign-heap value (a compile-time-env constant baked into a template's
-    /// pool lives on the CompileCtx VM's heap; a worker reading a parent-heap
-    /// value), or a shared/Rc allocation — reads whatever bytes sit at the masked
-    /// base, which can collide with a live local id. Liveness alone is
-    /// time-dependent (the colliding id may be dead at alloc-record time and live
-    /// at free-scan time), which would let the recorded edge table and the
-    /// free-time scan disagree; ownership is time-invariant for a foreign pointer
-    /// (no local region ever owns its address), so record and scan stay
-    /// symmetric by construction.
+    /// check: it must verify that the calling store's live region `rid`
+    /// genuinely owns `ptr`'s address (`RegionPool::owns`).
+    /// `region_of_page_ptr` reads a stamped page-header id. A pointer NOT
+    /// managed by this store reads whatever bytes sit at the masked base, which
+    /// can collide with a live local id. Such a pointer is a foreign-heap value
+    /// (a compile-time-env constant baked into a template's pool lives on the
+    /// CompileCtx VM's heap; a worker reading a parent-heap value), or a shared
+    /// or Rc allocation.
+    ///
+    /// Liveness alone is time-dependent: the colliding id may be dead when the
+    /// allocation records its edges and live when the free scans them, and the
+    /// recorded table and the free-time scan would disagree. Ownership does not
+    /// change over time for a foreign pointer, because no local region ever
+    /// owns its address. So record and scan stay symmetric by construction.
     pub(crate) fn find_object_cross_refs(
         obj: &HeapObject,
         own_id: u32,
@@ -113,24 +116,25 @@ impl RegionPool {
             }
             if let Some(ptr) = val.as_heap_ptr() {
                 let rid = unsafe { region_of_page_ptr(ptr, page_size) };
-                // Skip ids 0 and 1 (reserved, not real regions) and the region's
-                // own id; RC-track only cross-refs into other live regions OF THIS
-                // STORE that own the pointer (the alloc-time incref balanced by
-                // the free-time cascade decref). The funnel side of this
-                // accounting lives in value/arena.rs.
+                // Skip ids 0 and 1 (reserved, not real regions) and the
+                // region's own id. RC-track only cross-refs into other live
+                // regions OF THIS STORE that own the pointer: the alloc-time
+                // incref, balanced by the free-time cascade decref. The funnel
+                // side of this accounting lives in value/arena.rs.
                 if rid != 0 && rid != 1 && rid != own_id && valid_region(rid, ptr) {
                     refs.push(rid);
                 }
             }
         };
 
-        // The `traits` side-field (set by `with-traits`) is a cross-region edge
-        // on EVERY traitable variant — the trait table lives in its own region,
-        // not inline. It is enumerated here, once, for all variants so the
-        // alloc-scan increfs and the free-cascade decrefs it symmetrically
-        // (Rule 5/7); the per-variant `match` below covers only the inline
-        // content fields. The counter-factual: omit it, and the table is freed at
-        // its constructor's decref_point while the host still references it.
+        // The `traits` side-field (set by `with-traits`) is a cross-region
+        // edge on EVERY traitable variant: the trait table lives in its own
+        // region, not inline. It is enumerated here, once, for all variants, so
+        // the alloc scan increfs it and the free cascade decrefs it
+        // symmetrically (Rule 5/7). The per-variant `match` below covers only
+        // the inline content fields. The counter-factual: omit it, and the
+        // table is freed at its constructor's decref_point while the host
+        // still references it.
         check(&obj.traits());
 
         match obj {
@@ -163,21 +167,22 @@ impl RegionPool {
             }
             HeapObject::Closure { closure, .. } => {
                 // The env RegionSlice backing usually lives in the closure's
-                // OWN region (built together by `MakeClosure`), so the synthetic
-                // backing ref below is filtered by `rid == own_id`. But a
-                // closure built by SHARING another closure's env — `squelch` /
-                // `attune` (src/primitives/meta/syntaxops.rs) clone the template and copy
-                // the env's `(ptr, len)` pair, leaving the backing data in the
-                // SOURCE closure's region — has its env backing in a DIFFERENT
-                // region. Without a cross-region edge to that backing, the
-                // source region is freed at its owning-scope decref while this
-                // closure still reads the env: `populate_env` reads a freed page
-                // on the first fiber resume (tests/lang/signals.lisp).
-                // Synthesize a heap Value at the backing pointer so the shared
-                // `check` routes it like any cross-region ref — symmetric with
-                // the Fiber arm below, and balanced because a closure's env is
-                // immutable for its lifetime (alloc-scan increfs, free-cascade
-                // decrefs the same edge).
+                // OWN region (`MakeClosure` builds the two together), so
+                // `rid == own_id` filters the synthetic backing ref below.
+                // `squelch` and `attune` (src/primitives/meta/syntaxops.rs)
+                // build a closure by SHARING another closure's env instead:
+                // they clone the template and copy the env's `(ptr, len)`
+                // pair. The backing data stays in the SOURCE closure's region,
+                // a DIFFERENT region from this closure's.
+                //
+                // Without a cross-region edge to that backing, the source
+                // region is freed at its owning-scope decref while this closure
+                // still reads the env (tests/lang/signals.lisp). So synthesize
+                // a heap Value at the backing pointer, and the shared `check`
+                // routes it like any cross-region ref, as the Fiber arm below
+                // does. The edge stays balanced because a closure's env is
+                // immutable for its lifetime: the alloc scan increfs the same
+                // edge the free cascade decrefs.
                 if !closure.env.is_empty() {
                     let backing = Value::from_heap_ptr(
                         closure.env.as_ptr() as *const (),
@@ -189,10 +194,11 @@ impl RegionPool {
                     check(v);
                 }
                 // The instance→template edge. A `MakeClosure`-materialized
-                // header is co-region with its instance (self-edge, filtered by
-                // `rid == own_id`); a header shared by `squelch`/`attune` lives
-                // in the SOURCE closure's region (a real cross-region edge
-                // keeping that region alive). Both route through `check`.
+                // header shares its instance's region (a self-edge, filtered
+                // by `rid == own_id`). A header `squelch` or `attune` shares
+                // lives in the SOURCE closure's region: a real cross-region
+                // edge that keeps that region alive. Both route through
+                // `check`.
                 check(&closure.template.value());
             }
             HeapObject::Pair(pair) => {
@@ -205,11 +211,11 @@ impl RegionPool {
                 }
             }
             HeapObject::LStruct { data, .. } => {
-                // A heap-valued key (`TableKey::Heap`/nested in an `Array` key) is
-                // a cross-region reference just like the value — enumerate both so
-                // the key's region is increfed/recorded at alloc and cascade-decrefed
-                // at free (else the key's region frees while the struct still points
-                // into it; see tests/impl/region-struct-heap-key-uaf.lisp).
+                // A heap-valued key (`TableKey::Heap`, or one nested in an
+                // `Array` key) is a cross-region reference just like the
+                // value. Enumerate both, so the alloc scan increfs and records
+                // the key's region and the free cascade decrefs it
+                // (tests/impl/region-struct-heap-key-uaf.lisp).
                 for (k, v) in data.iter() {
                     k.for_each_heap_value(&mut check);
                     check(v);
@@ -231,55 +237,59 @@ impl RegionPool {
             | HeapObject::Float(_)
             | HeapObject::LibHandle(_) => {}
             HeapObject::Fiber { handle, .. } => {
-                // The fiber's `traits` edge is tracked by the top-level
-                // `check(&obj.traits())` above, with every other traitable
-                // variant. This arm covers only the fiber's closure/env/signal.
-                // Keep the fiber's (immutable) closure alive. The
-                // closure's env RegionSlice backing and its captured Values
-                // live in the region where the closure was built — usually a
-                // *different* activation than the fiber. Without a cross-region
-                // edge here, the spawning activation frees that region while
-                // the parked fiber still references it (closure env reads as
-                // garbage on first resume).
+                // The top-level `check(&obj.traits())` above tracks the
+                // fiber's `traits` edge, with every other traitable variant.
+                // This arm covers only the fiber's closure, env and signal.
+                //
+                // Keep the fiber's (immutable) closure alive. The closure's
+                // env RegionSlice backing and its captured Values live in the
+                // region where the closure was built, usually a *different*
+                // activation than the fiber. Without a cross-region edge here,
+                // the spawning activation frees that region while the parked
+                // fiber still references it.
                 let mut env_vals: Vec<Value> = Vec::new();
                 let mut backing = Value::NIL;
-                // A parked/dead fiber holds its result/yield value in `signal`,
-                // read later by `fiber/value`. That value lives in whatever
-                // region the fiber allocated it in — a region the parent will
-                // `DecrefValueRegion` when the producing call's decref_point fires.
-                // Track it as a cross-region edge so the fiber keeps it alive
-                // until the fiber itself dies (cascade-decref here at free).
-                // The matching incref is added when the fiber parks/dies (see
-                // `incref_signal_region` in src/vm/fiber/refcount.rs).
+                // A parked or dead fiber holds its result or yield value in
+                // `signal`, which `fiber/value` reads later. That value lives
+                // in whatever region the fiber allocated it in, a region the
+                // parent will `DecrefValueRegion` when the producing call's
+                // decref_point fires. Track it as a cross-region edge, so the
+                // fiber keeps it alive until the fiber itself dies (the
+                // cascade decrefs it here at free). The matching incref is
+                // added when the fiber parks or dies (`incref_signal_region`
+                // in src/vm/fiber/refcount.rs).
                 let mut signal_val = Value::NIL;
                 // The fiber's closure holds a template (a region-allocated
-                // `HeapObject::ClosureTemplate`) usually CO-region with the env
-                // backing, but for an EMPTY-env closure there is no backing synth —
-                // so the template edge must be tracked explicitly, else the fiber's
-                // own template region is freed while the parked fiber still needs it
-                // (`closure.template.code()`/arity read garbage on first resume).
+                // `HeapObject::ClosureTemplate`), usually in the same region
+                // as the env backing. An EMPTY-env closure has no backing to
+                // synthesize, so track the template edge explicitly. Otherwise
+                // the fiber's own template region is freed while the parked
+                // fiber still needs `closure.template.code()` and its arity on
+                // first resume.
                 let mut template_val = Value::NIL;
-                // The fiber's `closure_value` — the wrapper VALUE it installs as the
-                // body's executing-closure register (`Fiber::closure_value`,
-                // `pending_entry_closure` on first resume). For a `MakeClosure`
-                // closure its region coincides with the env/template region tracked
-                // above (a duplicate edge, balanced against a duplicate free-cascade
-                // decref by the counted `outgoing` multiset). But a `squelch`/`attune`
-                // wrapper (src/primitives/meta/syntaxops.rs) shares the SOURCE
-                // closure's template and env yet is itself a fresh closure value in a
-                // DIFFERENT region — so its region is reachable ONLY through
-                // `closure_value`. Without this edge that region frees at its binding's
-                // decref_point while the fiber still holds the value, and a later
-                // free's cross-ref scan reads the freed page
+                // The fiber's `closure_value`: the wrapper VALUE it installs
+                // as the body's executing-closure register
+                // (`Fiber::closure_value`, `pending_entry_closure` on first
+                // resume). For a `MakeClosure` closure its region is the
+                // env/template region tracked above. That duplicate edge is
+                // balanced against a duplicate free-cascade decref by the
+                // counted `outgoing` multiset.
+                //
+                // A `squelch` or `attune` wrapper
+                // (src/primitives/meta/syntaxops.rs) shares the SOURCE
+                // closure's template and env, yet is itself a fresh closure
+                // value in a DIFFERENT region. So only `closure_value` reaches
+                // its region. Without this edge that region frees at its
+                // binding's decref_point while the fiber still holds the value
                 // (tests/impl/region-squelch-fiber-uaf.lisp).
                 let mut closure_value = Value::NIL;
                 // The seeded parameter BASELINE (frames[0], exactly when
-                // `param_baseline_seeded`) was retained at the seed with a
+                // `param_baseline_seeded`) was retained at the seed, with a
                 // recorded fiber → value edge per heap entry
-                // (`retain_param_baseline`); walking it here is the symmetric
+                // (`retain_param_baseline`). Walking it here is the symmetric
                 // release at the fiber object's free. The fiber's own later
-                // `parameterize` frames are NOT walked — their values belong
-                // to the parked activation (docs/impl/region/owner.md).
+                // `parameterize` frames are NOT walked: their values belong to
+                // the parked activation (docs/impl/region/owner.md).
                 let mut param_vals: Vec<Value> = Vec::new();
                 let _ = handle.try_with(|fib| {
                     closure_value = fib.closure_value;
@@ -290,11 +300,11 @@ impl RegionPool {
                             }
                         }
                     }
-                    // An empty env uses a dangling sentinel pointer (not in any
-                    // region page) — skip it. For a non-empty env, synthesize a
-                    // heap Value at the backing so the shared `check` routes the
-                    // closure's own region (where the RegionSlice lives) the
-                    // same way as any cross-region ref.
+                    // An empty env uses a dangling sentinel pointer, in no
+                    // region page, so skip it. For a non-empty env, synthesize
+                    // a heap Value at the backing, so the shared `check`
+                    // routes the closure's own region (where the RegionSlice
+                    // lives) like any cross-region ref.
                     if !fib.closure.env.is_empty() {
                         let p = fib.closure.env.as_ptr() as *const ();
                         backing = Value::from_heap_ptr(p, crate::value::repr::TAG_ARRAY);
@@ -304,10 +314,11 @@ impl RegionPool {
                         env_vals.push(*v);
                     }
                     if let Some((bits, v)) = fib.signal {
-                        // Only terminal results are park-retained (see
-                        // src/vm/fiber/refcount.rs `is_terminal_signal`); match that here so
-                        // the cascade-decref balances the park-retain. Yield /
-                        // suspending signal values are not pinned.
+                        // Only terminal results are park-retained
+                        // (`is_terminal_signal` in src/vm/fiber/refcount.rs),
+                        // so match that here, and the cascade decref balances
+                        // the park retain. A yield or suspending signal value
+                        // is not pinned.
                         if crate::vm::fiber::is_terminal_signal(bits) {
                             signal_val = v;
                         }
@@ -329,22 +340,24 @@ impl RegionPool {
                 }
             }
             HeapObject::ClosureTemplate(t) => {
-                // The header→payload edge. A code object's payload lives in its
-                // compile unit's code region (docs/impl/region/template.md), so
-                // a header in any other region holds a real cross-region
-                // reference: without it the code region frees while a header
-                // still reads its bytecode. Every slice of one payload lands in
-                // that one region by construction, so the payload's own backing
-                // covers them all, the child table's headers included.
-                // Synthesize a heap Value at it, as the closure-env arm does.
+                // The header→payload edge. A code object's payload lives in
+                // its compile unit's code region
+                // (docs/impl/region/template.md), so a header in any other
+                // region holds a real cross-region reference. Without it the
+                // code region frees while a header still reads its bytecode.
+                // Every slice of one payload lands in that one region by
+                // construction, so the payload's own backing covers them all,
+                // the child table's headers included. Synthesize a heap Value
+                // at it, as the closure-env arm does.
                 let payload =
                     Value::from_heap_ptr(t.payload_backing(), crate::value::repr::TAG_ARRAY);
                 check(&payload);
                 // The payload's constant pool. A string or quoted literal is a
-                // `MaterializeConst` allocation rather than a pool value, but a
-                // `ValueConst` can load a heap value — a closure — from a region
-                // of its own, so every constant is scanned like any other edge
-                // (alloc-scan increfs, free-cascade decrefs the same edge).
+                // `MaterializeConst` allocation rather than a pool value. But a
+                // `ValueConst` can load a heap value, a closure, from a region
+                // of its own. So the scan treats every constant like any other
+                // edge: the alloc scan increfs the edge the free cascade
+                // decrefs.
                 for v in t.constants().iter() {
                     check(v);
                 }

@@ -39,13 +39,13 @@ pub(crate) use header::{header_if_valid, region_of_page_ptr, PageStamp, HEADER_S
 /// Upper bound on a region's geometrically-growing page size.
 ///
 /// A region doubles its next page size each time it claims one, so a
-/// region that keeps allocating amortises page-claim cost. Left uncapped
-/// the doubling races into hundreds of MB or multi-GB pages: a region that
-/// holds its garbage until it dies claims a page double the last for the
-/// next handful of bytes, turning a linear byte total into a geometric
-/// memory total. Saturating the growth here bounds the over-allocation per
-/// region to one page. A single allocation larger than this still gets a
-/// one-off page sized to fit (see `alloc_data`).
+/// region that keeps allocating amortises page-claim cost. Uncapped, the
+/// doubling reaches pages of hundreds of MB or more. A region that holds its
+/// garbage until it dies claims a page double the last for the next handful
+/// of bytes, which turns a linear byte total into a geometric memory total.
+/// Saturating the growth here bounds the over-allocation per region to one
+/// page. A single allocation larger than this still gets a one-off page
+/// sized to fit (see `alloc_data`).
 const MAX_PAGE_SIZE: usize = 1 << 22; // 4 MiB
 
 /// A single page owned by a region.
@@ -104,9 +104,9 @@ impl RegionPage {
         Some(unsafe { self.page.as_mut_ptr().add(start) })
     }
 
-    /// Hand this page back to the pool along with the spans this region wrote —
-    /// the only route a region page takes out of a region, so the cursors that
-    /// describe it can never be read off a different page
+    /// Hand this page back to the pool along with the spans this region wrote.
+    /// This is the only route a region page takes out of a region, so the
+    /// cursors that describe it can never be read off a different page
     /// (docs/impl/region/model.md § "Page recycling").
     ///
     /// The object span starts *after* the header, so the page keeps the
