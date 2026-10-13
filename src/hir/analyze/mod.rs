@@ -82,7 +82,9 @@ pub struct AnalysisResult {
 struct SignalSources {
     /// Parameters whose calls contribute signals.
     param_calls: HashSet<Binding>,
-    /// Bits from direct `emit` forms (error, yield, io, etc.).
+    /// Bits the function raises by itself: its direct `emit` forms, a
+    /// `match` with no total arm, and each construct docs/signals/inference.md
+    /// lists under "What raises".
     direct_bits: crate::value::fiber::SignalBits,
     /// Bits from calls to non-parameter callees whose signals
     /// are statically known (not polymorphic, not parameter calls).
@@ -283,17 +285,23 @@ pub struct Analyzer<'a> {
     /// its version. Wired from the CompileCtx by the pipeline; analyzers
     /// with no VM behind them (LSP, lint) keep the process default.
     unicode_generation: crate::segment::Generation,
-    /// Each lambda's declared ceiling, keyed by the lambda node. The HIR keeps
-    /// the inferred signal and drops the ceiling it was checked against; a
-    /// reader that solves signals itself needs the declarations.
+    /// Each lambda's declared ceiling and the bits it raises by itself, keyed
+    /// by the lambda node. The HIR keeps the inferred signal, which mixes in
+    /// what the body's calls raise, and drops the ceiling it was checked
+    /// against; a reader that solves signals itself needs both.
     lambda_decls: HashMap<super::expr::HirId, LambdaDecl>,
 }
 
-/// What a lambda's body declared about its own signal.
+/// What a lambda's body declared about its own signal, and what it raises by
+/// itself.
 #[derive(Debug, Clone, Copy)]
 pub struct LambdaDecl {
     /// `(silent!)` or `(attune! spec)`: the signals the function may emit.
     pub ceiling: Option<Signal>,
+    /// The bits the body raises by itself, whatever it calls: its emits, a
+    /// bound's entry check, and each construct docs/signals/inference.md
+    /// lists under "What raises".
+    pub direct: crate::value::fiber::SignalBits,
 }
 
 mod scopes;
@@ -424,9 +432,18 @@ impl<'a> Analyzer<'a> {
         std::mem::take(&mut self.errors)
     }
 
-    /// Take every lambda's declared ceiling.
+    /// Take every lambda's declared ceiling and the bits it raises by itself.
     pub fn take_lambda_decls(&mut self) -> HashMap<super::expr::HirId, LambdaDecl> {
         std::mem::take(&mut self.lambda_decls)
+    }
+
+    /// Take the bits the code outside every lambda raised by itself, as
+    /// `LambdaDecl::direct` holds them for a lambda.
+    pub fn take_top_direct(&mut self) -> crate::value::fiber::SignalBits {
+        std::mem::replace(
+            &mut self.current_signal_sources.direct_bits,
+            crate::value::fiber::SignalBits::EMPTY,
+        )
     }
 
     /// Set whether bindings without `@` are immutable by default.
