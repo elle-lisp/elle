@@ -428,9 +428,17 @@ Each FFI primitive signals its errors as error structs. The kinds:
 
 ## Signals and capabilities
 
-`ffi/signature`, `ffi/struct`, `ffi/array`, `ffi/size`, `ffi/align` and
-`ffi/run-teardowns` signal only `:error`. Every other `ffi/` primitive also
-carries `:ffi`, so the analyzer knows that a function calls foreign code or
-touches C memory. A parent fiber withholds the `:ffi` capability with
-`:deny |:ffi|`, and a denied primitive does not run
+`ffi/signature`, `ffi/struct`, `ffi/array`, `ffi/size` and `ffi/align` signal
+only `:error`. Every other `ffi/` primitive also carries `:ffi`, so the
+analyzer knows that a function calls foreign code or touches C memory.
+`ffi/run-teardowns` is one of them, because it calls each declared teardown's
+C symbol. A parent fiber withholds the `:ffi` capability with `:deny |:ffi|`,
+and a denied primitive does not run
 ([capabilities](signals/capabilities.md)).
+
+```lisp
+(let [f (fiber/new (fn [] (ffi/run-teardowns)) |:ffi :error| :deny |:ffi|)]
+  (fiber/resume f)
+  (assert (= (get (fiber/value f) :error) :capability-denied)
+          "a fiber denied :ffi cannot run the teardowns"))
+```
