@@ -1,12 +1,13 @@
 # Modules: a proposal
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-12 -->
 
 The module system Elle is building toward: compiled once per instance, linked across files, and shipped as images.
 
 [modules.md](modules.md) describes the module system as it is. This document
-states the design it becomes, and the argument for each part. Two parts are
-implemented: [the raw primitives](#the-raw-primitives-are-raw) and
+states the design it becomes, and the argument for each part. Three parts are
+implemented: [sound signals](#silent-is-sound),
+[the raw primitives](#the-raw-primitives-are-raw) and
 [contained expansion](#expansion-is-contained).
 [solver.md](impl/solver.md) owns the cross-file signal solver that linking
 uses. The decisions that belong to the language's owner are
@@ -33,9 +34,9 @@ listed under [Open decisions](#open-decisions).
 
 ## Where the module system stands
 
-The defects below carry issue numbers. The measurements were taken on a
-release build at `8fe781a03`; [Measuring](#measuring) gives the method.
-[modules.md](modules.md) states two more under its architectural
+A defect below carries its issue number where it has one. The measurements
+were taken on a release build at `8fe781a03`; [Measuring](#measuring) gives
+the method. [modules.md](modules.md) states two more under its architectural
 constraints: every load compiles its file again (#881), and no signal crosses a
 file boundary, so a call into another file takes every bit (#1232).
 
@@ -44,17 +45,12 @@ fixpoint, and a function body runs none ([pipeline.md](pipeline.md)). A
 forward reference inside a body gets every bit, and a lambda that calls its
 enclosing definition reads the silent seed.
 
-**Silent does not mean silent.** Strict destructuring, qualified access, a
-spliced call to a known function, and `parameterize` on a non-parameter all
-infer silent and raise at run time (#1320). So do `eval` (#1243), a muffled
-signal (#1236), and the `(silence p)` entry check (#1233). An uncaught raise
-from such a function aborts the process as a silence violation.
-
 **A transformer may still reach outside its unit.** Where no fiber withholds
 the capability, a transformer may read files and load shared libraries.
-Scheduler I/O fails inside one as an unexpected signal. `eval` and `import`
-fail because expansion has no compile context, not because a rule forbids
-them. Which of these a macro may do is an [open decision](#open-decisions).
+Scheduler I/O fails inside one as an unexpected signal. In a file's compile,
+`eval` and `import` fail because the macro VM has no compile context, not
+because a rule forbids them. Which of these a macro may do is an
+[open decision](#open-decisions).
 
 **Expansion depends on more than its input.**
 
@@ -86,7 +82,6 @@ is what any sharing rule has to settle:
 included, is a possible raise. Signals describe control flow and nothing else.
 
 **Silent** means the inferred signal is empty and the inference is sound.
-Today it is not sound (#1320).
 
 **Pure** means silent, reading no ambient state, and changing no state that
 outlives the evaluation. Signals decide only the first part. `sys/env`,
@@ -150,12 +145,10 @@ language waits on its [open decision](#open-decisions).
 
 ## Silent is sound
 
-A construct that can raise carries `:error`, the `(silence p)` entry check
-included (#1320, #1233). `eval` reports its signal to the enclosing function
-(#1243). `muffle` is checked at the function boundary as `squelch` is, so a
-muffled signal becomes `:signal-violation` instead of leaving the function
-(#1236). Removing `muffle` would change the language, which the fourth
-principle puts behind a decision.
+Every construct that can raise carries `:error`, a bound's entry check and
+`eval` included. A ceiling checks the inferred signal and does not replace it,
+and `muffle` is gone. A signal that leaves a silent function is a broken
+proof, a terminal error ([inference.md](signals/inference.md)).
 
 Every later part reads an inferred signal, so each one depends on this.
 
@@ -207,9 +200,10 @@ directory searched sets `ELLE_PATH=.`.
   capabilities that fiber withholds. A denied primitive in a transformer fails
   the compile, naming the macro and the primitive (#1321,
   [capabilities.md](signals/capabilities.md)).
-- Each transformer call and each `begin-for-syntax` definition runs under a
-  fuel budget of its own. Exhausting it fails the compile, naming the macro
-  (#1322, [runtime.md](runtime.md)).
+- An expansion runs under a fuel budget the VM counts, which silent code, the
+  fibers the expansion resumes and the expansions it starts all spend.
+  Exhausting it fails the compile, naming the macro (#1322,
+  [runtime.md](runtime.md)).
 - A file compiles against the prelude, the standard library, the bindings an
   embedder registers, its own definitions and its includes. REPL macros and
   REPL definitions reach later REPL lines, not a file a line imports

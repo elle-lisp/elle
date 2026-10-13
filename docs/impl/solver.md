@@ -1,6 +1,6 @@
 # The signal solver
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-12 -->
 
 Signal inference across files: facts per file, a link through literal imports, and the least model of a few Datalog rules.
 
@@ -56,15 +56,19 @@ fact instead of fifty.
 HIR and states facts about it. A file's analysis never compiles its imports
 ([pipeline.md](../pipeline.md)), so the walk never enters another file.
 
-- An `emit` adds its bits to the enclosing function. A `match` with no total
-  arm adds `:error`.
+- What a lambda raises by itself comes from the analyzer (`LambdaDecl`): its
+  emits, a `match` with no total arm, a bound's entry check, and every
+  construct that [inference.md](../signals/inference.md) lists under "What
+  raises". The code outside every lambda takes the same bits from
+  `AnalyzeResult`. The solver states none of these rules again, so it cannot
+  drift from the analyzer on them.
 - A primitive's bits and propagated parameters come from the compile
   metadata.
 - A call states the context it runs in, the callee, the function whose
   parameters it binds, and each argument.
-- A lambda's declared ceiling and muffle bits come from the analyzer
-  (`LambdaDecl`), because the HIR keeps only the signal that results from
-  them.
+- A lambda's declared ceiling comes from the analyzer (`LambdaDecl`), because
+  the HIR keeps only the inferred signal, which the analyzer checked against
+  it.
 - A literal-mask `squelch` or `attune` becomes a variable that filters the
   bits of its target.
 
@@ -103,20 +107,27 @@ rdep(c, x)      :- sub(c, g, w, a), dep(g, w), dep(a, x).
 raw(c, TOP)     :- miss(c, g, w), dep(g, w).
 raw(c, b)       :- flow(c, a), bits(a, b).
 rdep(c, x)      :- flow(c, a), dep(a, x).
-bits(c, b)      :- raw(c, b), !muf(c, b), !ceiled(c).
-bits(c, b)      :- ceil(c, b).
-dep(c, w)       :- rdep(c, w), !ceiled(c).
+bits(c, b)      :- raw(c, b).
+dep(c, w)       :- rdep(c, w).
 bits(q, b)      :- sqof(q, f), bits(f, b), !sqm(q, b).
 bits(q, :error) :- sqof(q, f), bits(f, b), sqm(q, b).
 dep(q, w)       :- sqof(q, f), dep(f, w).
-viol(c, b)      :- raw(c, b), ceiled(c), !ceil(c, b), !muf(c, b).
+viol(c, b)      :- raw(c, b), ceiled(c), !ceil(c, b).
+vdep(c, w)      :- rdep(c, w), ceiled(c).
 ```
 
 `c` is a context, `g` a callee, `o` the function whose parameters a call binds,
 `w` a free variable, and `a` what the call binds it to. `sub` says the call
 binds `w` to `a`, `miss` that it binds `w` to nothing known, and `flow` that an
-open export may call `a`. A ceiling replaces what the body raises, and `viol`
-names the bits a body raises past its ceiling.
+open export may call `a`.
+
+A ceiling checks and does not replace, as the analyzer's does: a reader of `c`
+sees what the body raises. `viol` names the bits a body raises past its
+ceiling. `vdep` names each free variable a ceiled body depends on. No ceiling
+admits one, because the analyzer rejects a ceiled body that passes on the
+signal of its parameters. A file reaches the solver only when the analyzer
+accepts it, so a violation means the solver is looser than the analyzer
+there.
 
 The input facts also seed `raw`, `bits` and `dep`. Every negation names an
 input relation, so the program is Datalog with negation on its inputs alone.
@@ -181,9 +192,13 @@ answers in `# expect` lines, which `--expect` checks:
 `import KEY` an open export, and `instantiate` an open module instance. The
 bits, parameters and free variables must match exactly.
 
-A `# violates NAME |BITS|` line states the bits the body of `NAME` raises past
-its ceiling. Under `--expect`, every violation the model finds in a fixture
-must be stated, and every stated one found.
+A `# violates NAME |BITS| [prop I] [field I KEY] [import KEY] [instantiate]`
+line states the bits the body of `NAME` raises past its ceiling, and the free
+variables it depends on, in the words of `# expect`. Under `--expect`, every
+violation the model finds in a fixture must be stated, and every stated one
+found. A fixture holds no violation unless the solver is looser than the
+analyzer, so the fixtures state none. A unit test of the rules builds a model
+with each kind of violation, and checks that both engines find it.
 
 Where the analyzer answers with every bit, the solver is exact:
 
@@ -195,10 +210,9 @@ Where the analyzer answers with every bit, the solver is exact:
 - two modules that import each other inside function bodies, which solve
   jointly
 
-`ceiling.lisp` holds a `(silence)` function the analyzer accepts. It calls a
-function that passes its parameter to a callee which also yields by itself, and
-the analyzer keeps the parameter and drops the callee's own `:yield`. The solver
-keeps both, so it reports the ceiling exceeded by `:yield`.
+`ceiling.lisp` holds a ceiling wider than its body: `(attune! |:yield
+:error|)` over a body that only yields. The solver answers `|:yield|`, as the
+analyzer does, and finds no violation.
 
 `sep.lisp` runs with `--no-follow`, so its imports stay open. Each function
 names the exports it calls, and a literal argument to an open export adds
@@ -207,15 +221,16 @@ names the exports it calls, and a literal argument to an open export adds
 ## What the solver does not cover
 
 - `(f g)` with `f` a parameter: both the analyzer and the solver drop `g`.
-- A mutable binding, a spliced argument, and `eval`.
+- A mutable binding, which the solver answers with every bit, and the
+  position a spliced argument binds.
 - A native plugin's signals at compile time.
 - The purity facts the design needs beside signals.
 
 ## Running it
 
-`make signal-solve` builds the spike, runs every fixture with `--expect`, and
-runs it over all of `lib/`. It fails when an expectation fails or when the two
-engines disagree. `make test` runs it, and so does the `Default Build Tests`
+`make signal-solve` builds the spike, runs its unit tests, runs every fixture
+with `--expect`, and runs it over all of `lib/`. It fails when a unit test or
+an expectation fails, or when the two engines disagree. `make test` runs it, and so does the `Default Build Tests`
 job ([ci.md](../analysis/ci.md)).
 
 A fixture names each import by a literal `import-file` path, which resolves
