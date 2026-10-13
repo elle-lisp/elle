@@ -123,9 +123,9 @@ argument lives in its doc comment; this is where to find them.
   ahead of the `TailCall`. What the call can still reach keeps its place: the
   regions its callee, operands, result and `deferred_release_slot` channel name,
   and any run that reloads an operand's slot or reads a register defined outside
-  it (`hoistable_run`). A destructured leaf argument keeps the exemption only
-  where the call passes the slot the region's own release route loads
-  (`drop_named_only_arg_exemptions`). The region must also be frame-held
+  it (`hoistable_run`). A destructured leaf argument, or a retained alias from
+  `borrowed_alias_bindings`, keeps the exemption only where the call passes the
+  slot the region's own release route loads (`drop_named_only_arg_exemptions`). The region must also be frame-held
   (`RegionInfo::frame_held_regions`), because a tail callee reaches its captured
   environment too. The argument is
   [docs/impl/region/relocate.md](../../../docs/impl/region/relocate.md).
