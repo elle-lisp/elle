@@ -1,6 +1,10 @@
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-10-13
+//! A constant template survives its bytecode encoding whole, scope ids included.
+//!
+//! docs/impl/syntax.md
 
 use super::*;
+use crate::syntax::ScopeId;
 
 fn roundtrip(t: &ConstTemplate) -> ConstTemplate {
     let mut buf = Vec::new();
@@ -43,14 +47,18 @@ fn encode_decode_roundtrips_every_variant() {
 
 #[test]
 fn syntax_symbol_roundtrips_with_scopes_and_span() {
-    // A quasiquote SyntaxLiteral materializes through this variant; its scope
-    // set is load-bearing for hygiene and its span for error reporting, so the
-    // bytecode encoding must reproduce both exactly. A decode that drops a
-    // scope id silently breaks macro hygiene after a recompile.
+    // A decode that drops a scope id, or the high half of one, breaks hygiene
+    // in code that was compiled before it was loaded. The last id sets bits
+    // above 32, which an encoding four bytes wide would cut off.
     let span = crate::syntax::Span::new(10, 20, 3, 7).with_file("macro.elle");
     let t = ConstTemplate::SyntaxSymbol {
         name: "template-sym".into(),
-        scopes: vec![1, 4, 9, 16],
+        scopes: vec![
+            ScopeId::test(1),
+            ScopeId::test(4),
+            ScopeId::test(9),
+            ScopeId::from_bits(0xdead_beef_8000_0010),
+        ],
         span,
         scope_exempt: true,
     };
@@ -74,7 +82,7 @@ fn syntax_symbol_is_not_immediate() {
     let mut symbols = crate::symbol::SymbolTable::new();
     let t = ConstTemplate::SyntaxSymbol {
         name: "s".into(),
-        scopes: vec![2],
+        scopes: vec![ScopeId::test(2)],
         span: crate::syntax::Span::synthetic(),
         scope_exempt: false,
     };

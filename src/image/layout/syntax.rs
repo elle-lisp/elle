@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-13
 //! The syntax half of the layout probe: exemplars and field extents for every
 //! `SyntaxKind`, and the writer for the node that wraps one.
 //!
@@ -271,12 +271,14 @@ pub(crate) fn file_slot_in_node() -> usize {
     node_offsets()[1] + crate::syntax::Span::file_offset()
 }
 
-/// The fingerprint's syntax section: where a node keeps its fields, and where
-/// a span keeps the file id the image rewrites in place.
+/// The fingerprint's syntax section: where a node keeps its fields, how wide
+/// a scope id in its scope slice is, and where a span keeps the file id the
+/// image rewrites in place.
 pub(crate) fn fingerprint_component() -> String {
     let [kind_at, span_at, scopes_at, flag_at] = *node_offsets();
     format!(
-        "node:kind@{kind_at},span@{span_at},scopes@{scopes_at},exempt@{flag_at};span:file@{}",
+        "node:kind@{kind_at},span@{span_at},scopes@{scopes_at},exempt@{flag_at};scope:{};span:file@{}",
+        size_of::<ScopeId>(),
         crate::syntax::Span::file_offset()
     )
 }

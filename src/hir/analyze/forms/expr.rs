@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-13
 //! Expression dispatch: literals, variables, the collection literals, and the
 //! turn to a special form or a call.
 //!
@@ -206,7 +206,7 @@ impl<'a> Analyzer<'a> {
                 if let SyntaxKind::Symbol(name) = &s.kind {
                     let template = crate::value::ConstTemplate::SyntaxSymbol {
                         name: name.to_string(),
-                        scopes: s.scopes().iter().map(|sc| sc.0).collect(),
+                        scopes: s.scopes().to_vec(),
                         span: s.span,
                         scope_exempt: s.scope_exempt,
                     };

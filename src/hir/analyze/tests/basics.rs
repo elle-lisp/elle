@@ -1,7 +1,8 @@
-// audited: 2026-09-09
-// docs/impl/hir.md
-//! The analyzer's ground floor: each form it recognises, the binding metadata it
+// audited: 2026-10-13
+//! The analyzer's ground floor: each form it recognizes, the binding metadata it
 //! records, scope-aware name resolution, and collection literals.
+//!
+//! docs/impl/hir.md
 
 use super::*;
 
@@ -200,8 +201,8 @@ fn test_immutable_uncaptured_local_no_cell() {
 #[test]
 fn test_immutable_mutated_captured_local_needs_capture() {
     // Edge case: a binding marked immutable but also mutated and captured.
-    // Immutable wins — no cell needed. (In practice, the analyzer would
-    // reject set on an immutable binding, so this shouldn't happen.)
+    // Immutable wins — no cell needed. (The analyzer rejects `assign` on an
+    // immutable binding, so compiled code never reaches this state.)
     use crate::hir::arena::{BindingArena, BindingScope};
     let mut arena = BindingArena::new();
     let binding = arena.alloc(SymbolId(5), BindingScope::Local);
@@ -218,39 +219,42 @@ use crate::syntax::ScopeId;
 #[test]
 fn test_is_scope_subset_empty_is_subset_of_everything() {
     assert!(is_scope_subset(&[], &[]));
-    assert!(is_scope_subset(&[], &[ScopeId(1)]));
-    assert!(is_scope_subset(&[], &[ScopeId(1), ScopeId(2)]));
+    assert!(is_scope_subset(&[], &[ScopeId::test(1)]));
+    assert!(is_scope_subset(&[], &[ScopeId::test(1), ScopeId::test(2)]));
 }
 
 #[test]
 fn test_is_scope_subset_nonempty_not_subset_of_empty() {
-    assert!(!is_scope_subset(&[ScopeId(1)], &[]));
+    assert!(!is_scope_subset(&[ScopeId::test(1)], &[]));
 }
 
 #[test]
 fn test_is_scope_subset_identical_sets() {
     assert!(is_scope_subset(
-        &[ScopeId(1), ScopeId(2)],
-        &[ScopeId(1), ScopeId(2)]
+        &[ScopeId::test(1), ScopeId::test(2)],
+        &[ScopeId::test(1), ScopeId::test(2)]
     ));
 }
 
 #[test]
 fn test_is_scope_subset_proper_subset() {
-    assert!(is_scope_subset(&[ScopeId(1)], &[ScopeId(1), ScopeId(2)]));
+    assert!(is_scope_subset(
+        &[ScopeId::test(1)],
+        &[ScopeId::test(1), ScopeId::test(2)]
+    ));
 }
 
 #[test]
 fn test_is_scope_subset_not_subset() {
     assert!(!is_scope_subset(
-        &[ScopeId(1), ScopeId(3)],
-        &[ScopeId(1), ScopeId(2)]
+        &[ScopeId::test(1), ScopeId::test(3)],
+        &[ScopeId::test(1), ScopeId::test(2)]
     ));
 }
 
 #[test]
 fn test_bind_and_lookup_with_empty_scopes() {
-    // Pre-expansion code: empty scopes work identically to before
+    // Code no expansion touched carries empty scopes, and resolves by name
     let mut symbols = SymbolTable::new();
     let mut arena = BindingArena::new();
     let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
@@ -266,7 +270,7 @@ fn test_lookup_scope_filtering() {
     let mut arena = BindingArena::new();
     let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
     analyzer.push_scope(false);
-    analyzer.bind("tmp", &[ScopeId(1)], BindingScope::Local);
+    analyzer.bind("tmp", &[ScopeId::test(1)], BindingScope::Local);
     // Reference with empty scopes cannot see binding with {S1}
     assert_eq!(analyzer.lookup("tmp", &[]), None);
 }
@@ -278,8 +282,8 @@ fn test_lookup_scope_subset_match() {
     let mut arena = BindingArena::new();
     let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
     analyzer.push_scope(false);
-    let binding = analyzer.bind("tmp", &[ScopeId(1)], BindingScope::Local);
-    assert_eq!(analyzer.lookup("tmp", &[ScopeId(1)]), Some(binding));
+    let binding = analyzer.bind("tmp", &[ScopeId::test(1)], BindingScope::Local);
+    assert_eq!(analyzer.lookup("tmp", &[ScopeId::test(1)]), Some(binding));
 }
 
 #[test]
@@ -291,8 +295,8 @@ fn test_lookup_largest_scope_wins() {
     let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
     analyzer.push_scope(false);
     let _outer = analyzer.bind("tmp", &[], BindingScope::Local);
-    let inner = analyzer.bind("tmp", &[ScopeId(1)], BindingScope::Local);
-    assert_eq!(analyzer.lookup("tmp", &[ScopeId(1)]), Some(inner));
+    let inner = analyzer.bind("tmp", &[ScopeId::test(1)], BindingScope::Local);
+    assert_eq!(analyzer.lookup("tmp", &[ScopeId::test(1)]), Some(inner));
 }
 
 #[test]
@@ -304,7 +308,7 @@ fn test_lookup_empty_scopes_sees_empty_binding() {
     let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
     analyzer.push_scope(false);
     let outer = analyzer.bind("tmp", &[], BindingScope::Local);
-    let _inner = analyzer.bind("tmp", &[ScopeId(1)], BindingScope::Local);
+    let _inner = analyzer.bind("tmp", &[ScopeId::test(1)], BindingScope::Local);
     assert_eq!(analyzer.lookup("tmp", &[]), Some(outer));
 }
 
@@ -314,10 +318,10 @@ fn test_lookup_in_current_scope_with_scopes() {
     let mut arena = BindingArena::new();
     let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
     analyzer.push_scope(false);
-    let binding = analyzer.bind("x", &[ScopeId(1)], BindingScope::Local);
+    let binding = analyzer.bind("x", &[ScopeId::test(1)], BindingScope::Local);
     // Visible with matching scopes
     assert_eq!(
-        analyzer.lookup_in_current_scope("x", &[ScopeId(1)]),
+        analyzer.lookup_in_current_scope("x", &[ScopeId::test(1)]),
         Some(binding)
     );
     // Invisible with empty scopes
