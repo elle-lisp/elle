@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! Closure type for the Elle runtime
 //!
 //! docs/impl/region/template.md
@@ -23,6 +23,7 @@ use crate::value::region_slice::RegionSlice;
 use crate::value::Value;
 
 mod arena;
+mod arity;
 mod boundary;
 mod builder;
 mod header;
@@ -30,6 +31,7 @@ mod payload;
 mod unit;
 
 pub use arena::{CodeArena, PayloadParts, WasmClosureMeta};
+pub use arity::ArityRec;
 pub use boundary::Boundary;
 pub use builder::CodeBuilder;
 pub use header::ClosureTemplate;

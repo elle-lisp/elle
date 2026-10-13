@@ -5,12 +5,12 @@
 //! docs/impl/lir.md
 //!
 //! A body is a `repr(C)` struct of slice headers and scalars inside a code
-//! payload. A slice header has padding after its length and the scalar tail
-//! has padding after its flag, so a body is assembled from these offsets like
-//! the payload around it. The records a body names have no implicit padding.
-//! Every one but the node carries a named pad that freezing writes as zero,
-//! and the dumper zeroes it again as it copies, so whatever a live record's
-//! pad holds never reaches the artifact.
+//! payload, exactly its fields, with a named pad after its flag that the
+//! payload's writer sets to zero. The dumper assembles it from these offsets
+//! all the same, like the payload around it, so a pad reaches the artifact as
+//! zero whatever a live record holds. The records a body names have no
+//! implicit padding either. Every one but the node carries a named pad that
+//! freezing writes as zero, and the dumper zeroes it again as it copies.
 
 use std::mem::{offset_of, size_of};
 use std::sync::OnceLock;

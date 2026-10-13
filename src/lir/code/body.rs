@@ -7,7 +7,9 @@
 //! Every field is a `RegionSlice` or a scalar, so a body is sealed data an
 //! image carries with the rest of its payload. The body holds what LIR alone
 //! knows; the header fields LIR shares with the payload are the payload's, and
-//! a view over a body reads them there.
+//! a view over a body reads them there. The payload is copied whole into its
+//! code region, so the body is `repr(C)` and exactly its fields, its one pad
+//! a named field written zero (docs/impl/region/generations.md).
 
 use super::record::{BlockRec, ConstRec, Node, SiteRec};
 use super::view::LirView;
@@ -49,6 +51,9 @@ pub struct LirBody {
     /// `MakeClosure` site decided, which the payload holds.
     pub(crate) num_captures: u16,
     pub(crate) has_closure_id: bool,
+    /// Written zero, so the body ends on a word with no byte the compiler
+    /// chose.
+    pub(crate) pad: [u8; 5],
 }
 
 impl LirBody {
@@ -72,6 +77,7 @@ impl LirBody {
             num_local_params: 0,
             num_captures: 0,
             has_closure_id: false,
+            pad: [0; 5],
         }
     }
 
@@ -103,6 +109,7 @@ impl LirBody {
             num_local_params: lir.num_local_params() as u32,
             num_captures: lir.num_captures(),
             has_closure_id: lir.closure_id().is_some(),
+            pad: [0; 5],
         }
     }
 }

@@ -221,3 +221,47 @@ fn one_set_of_parts_writes_one_set_of_bytes() {
         "the payload record carries unwritten bytes at offsets {differ:?}"
     );
 }
+
+/// The sum of the named fields' sizes. A field added to a record and left out
+/// here makes the record larger than the sum, so the list cannot fall behind.
+macro_rules! fields {
+    ($rec:expr; $($f:ident),* $(,)?) => {
+        0 $(+ std::mem::size_of_val(&$rec.$f))*
+    };
+}
+
+/// A record whose size exceeds its fields' carries implicit padding: bytes no
+/// field names and no writer sets, which the copy into the code region
+/// publishes to the page-base walk (docs/impl/region/generations.md). The
+/// paint test above sees a pad only when the stack happens to differ under
+/// it; this one fails on the layout alone.
+#[test]
+fn every_payload_record_is_exactly_its_fields() {
+    let p = CodePayload::test_with_constants(crate::value::region_slice::RegionSlice::empty());
+    assert_eq!(
+        size_of::<CodePayload>(),
+        fields!(p; bytecode, constants, locations, files, name, doc, region_table, merged_slots,
+            frame_release_slots, frame_release_regions, capture_locals, strict_keys, children,
+            lir, capture_params_mask, signal_bits, origin, arity, signal_propagates, num_locals,
+            num_captures, num_params, wasm_func_idx, has_origin, has_lir, has_wasm_idx, vararg,
+            rest_list, has_name, has_doc, pad)
+    );
+
+    let b = crate::lir::LirBody::empty();
+    assert_eq!(
+        size_of::<crate::lir::LirBody>(),
+        fields!(b; nodes, blocks, pool, consts, data, files, values, yield_points, call_sites,
+            charge_sites, site_regs, closure_id, entry, num_regs, num_local_params, num_captures,
+            has_closure_id, pad)
+    );
+
+    let a = ArityRec::from(Arity::Range(1, 4));
+    assert_eq!(size_of::<ArityRec>(), fields!(a; min, max, kind, pad));
+    assert_eq!(
+        a.arity(),
+        Arity::Range(1, 4),
+        "the record answers the arity it stores"
+    );
+    assert_eq!(ArityRec::from(Arity::AtLeast(2)).arity(), Arity::AtLeast(2));
+    assert_eq!(ArityRec::from(Arity::Exact(3)).arity(), Arity::Exact(3));
+}
