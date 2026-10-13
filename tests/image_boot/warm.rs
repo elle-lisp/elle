@@ -38,22 +38,6 @@ fn images(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
     found
 }
 
-/// The executable tag the image this binary stores under `dir` opens with.
-fn own_tag(dir: &std::path::Path) -> String {
-    let path = policy_in(dir)
-        .path()
-        .expect("this binary names an image path");
-    let name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .expect("a file name")
-        .to_string();
-    let (tag, _) = name
-        .split_once('-')
-        .unwrap_or_else(|| panic!("the image name {name} carries no executable tag"));
-    tag.to_string()
-}
-
 // § Test plan, "Warm cache": a second instance over one directory boots from
 // the image the first stored, and the stored file is the one the policy names.
 // The assertion is on the reported boot source, because a cache that silently
@@ -147,48 +131,40 @@ fn a_rejected_image_is_replaced_rather_than_rejected_again() {
     );
 }
 
-// § Test plan, "Warm cache": a store prunes its own executable's superseded
-// file and leaves another executable's. Every rebuild orphans the last file,
-// at megabytes apiece, and `elle`, `elle-rig` and each test binary share the
-// default directory.
+// § Test plan, "Warm cache": a store prunes every other image in its
+// directory, another executable's included. Every rebuild orphans the last
+// file, at megabytes apiece, and a rustdoc test runs from a fresh temporary
+// executable each time, so only a rule over the whole directory bounds it.
 //
-// The counter-factual for the second half is a store that prunes every other
-// image: two executables sharing a directory then evict each other, and each
-// start after a switch pays the whole front end.
+// The counter-factual is a store that keeps another executable's images: the
+// directory then grows by one image for every executable that ever booted in
+// it.
 #[test]
-fn a_store_prunes_its_own_superseded_image_and_keeps_another_executables() {
+fn a_store_prunes_every_other_image() {
     let dir = crate::common::ScratchDir::new("image-warm-prune");
-    let tag = own_tag(dir.path());
-    let other_tag = if tag == "0000000000000000" {
-        "1111111111111111"
-    } else {
-        "0000000000000000"
-    };
     std::fs::create_dir_all(dir.join("boot")).expect("mkdir");
-    let superseded = dir
-        .join("boot")
-        .join(format!("{tag}-0123456789abcdef.image"));
-    let anothers = dir
-        .join("boot")
-        .join(format!("{other_tag}-0123456789abcdef.image"));
-    for planted in [&superseded, &anothers] {
-        std::fs::write(planted, b"an image some other build stored").expect("plant an image");
+    let planted: Vec<std::path::PathBuf> = [
+        "0123456789abcdef.image",
+        "0000000000000000-0123456789abcdef.image",
+    ]
+    .iter()
+    .map(|name| dir.join("boot").join(name))
+    .collect();
+    for path in &planted {
+        std::fs::write(path, b"an image some other build stored").expect("plant an image");
     }
 
     drop(runtime_in(dir.path()));
 
-    assert!(
-        !superseded.exists(),
-        "the store kept its own executable's superseded image"
-    );
-    assert!(
-        anothers.exists(),
-        "the store pruned another executable's image"
+    let kept = images(dir.path());
+    assert_eq!(
+        kept.len(),
+        1,
+        "the store did not prune every other image: {kept:?}"
     );
     assert_eq!(
-        images(dir.path()).len(),
-        2,
-        "the store left other files: {:?}",
-        images(dir.path())
+        Some(&kept[0]),
+        policy_in(dir.path()).path().as_ref(),
+        "the image the store kept is not the one it wrote"
     );
 }
