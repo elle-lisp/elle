@@ -1,4 +1,4 @@
-// audited: 2026-10-04
+// audited: 2026-10-13
 //! The three passes over a file's top-level forms: pre-bind every name,
 //! analyze each initializer, and run the signal fixpoint over the lambdas.
 //!
@@ -185,17 +185,9 @@ impl<'a> Analyzer<'a> {
             }
         }
 
-        // Pass 3: fixpoint loop for signal propagation through mutual recursion.
-        //
-        // Pass 2 analyzes bindings sequentially, so a lambda analyzed early may
-        // see stale (optimistic) signals for lambdas analyzed later. For mutually
-        // recursive functions, this means signals don't propagate through cycles:
-        //
-        //   (def foo (fn [] (bar)))    # analyzed first, sees bar as Pure (stale)
-        //   (def bar (fn [] (yield 1) (foo)))  # analyzed second, correctly Yields
-        //
-        // foo stays Pure even though it calls a Yields function. Fix: re-analyze
-        // lambda bindings until signal_env stabilizes.
+        // Pass 3: signals converge by fixpoint. A lambda analyzed early in
+        // Pass 2 read the silent seed of a lambda analyzed later
+        // (docs/pipeline.md).
         //
         // Scope isolation: Pass 2 may have analyzed expression entries (e.g.,
         // parameterize bodies) that contain `def` forms. Those defs register
@@ -203,67 +195,22 @@ impl<'a> Analyzer<'a> {
         // extra bindings visible would produce incorrect capture sets. We
         // snapshot the scope before Pass 3 and restore it after so that
         // re-analysis sees only the pre-bound def/var names from Pass 1.
-        //
-        // Re-analysis side signals are benign: the side signals of re-analyzing
-        // a lambda (additional `mark_captured()`, `mark_mutated()` calls on
-        // bindings) are monotonic — they only add flags, never remove them.
-        // Re-analysis can only make the result more conservative, never incorrect.
         if !lambda_entries.is_empty() {
-            // Swap in the Pass 1 scope snapshot so re-analysis doesn't see
-            // bindings added by expression entries during Pass 2.
             let mut pass2_bindings = None;
             if let (Some(snapshot), Some(scope)) = (&pass1_scope_snapshot, self.scopes.last_mut()) {
                 pass2_bindings = Some(std::mem::replace(&mut scope.bindings, snapshot.clone()));
             }
 
-            // Before fixpoint re-analysis, save Pass 2 errors and clear —
-            // re-analysis may re-accumulate the same errors inside lambda
-            // bodies, and we only want the final iteration's set for
-            // lambdas. Non-lambda (def/var) errors from Pass 2 are
-            // preserved and merged back below.
-            let pass2_errors = std::mem::take(&mut self.errors);
-            const MAX_FIXPOINT_ITERS: usize = 10;
-            for _ in 0..MAX_FIXPOINT_ITERS {
-                let mut changed = false;
-                for &(idx, binding, value_syntax) in &lambda_entries {
-                    let old_signal = self
-                        .signal_env
-                        .get(&binding)
-                        .copied()
-                        .unwrap_or_else(Signal::silent);
-                    // Re-analysis rebuilds the capture set, so the self-recursion
-                    // context must be set here too — else the final captures (from
-                    // this pass) would lose the `Recursive` classification Pass 2 made.
-                    let new_hir = self.analyze_initializer(binding, value_syntax)?;
-                    if let HirKind::Lambda {
-                        inferred_signals, ..
-                    } = &new_hir.kind
-                    {
-                        if *inferred_signals != old_signal {
-                            self.signal_env.insert(binding, *inferred_signals);
-                            changed = true;
-                        }
-                    }
-                    bindings[idx].1 = new_hir;
-                }
-                if !changed {
-                    break;
-                }
+            let entries: Vec<_> = lambda_entries.iter().map(|&(_, b, s)| (b, s)).collect();
+            let converged = self.converge_signals(&entries)?;
+            for (&(idx, _, _), value) in lambda_entries.iter().zip(converged) {
+                bindings[idx].1 = value;
             }
 
             // Restore the full scope (with Pass 2 additions) for the body.
             if let (Some(saved), Some(scope)) = (pass2_bindings, self.scopes.last_mut()) {
                 scope.bindings = saved;
             }
-
-            // Merge Pass 2 errors (from non-lambda entries) with the
-            // final-iteration lambda errors. Without this, non-lambda
-            // errors (e.g. `(def x (some-undef))`) would be silently
-            // dropped and their poison nodes would surface later as
-            // "internal: error poison node in lowerer".
-            let mut merged = pass2_errors;
-            merged.extend(std::mem::take(&mut self.errors));
-            self.errors = merged;
         }
 
         // Compute signal projection from the last binding's init value.

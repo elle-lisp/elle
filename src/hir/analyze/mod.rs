@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-13
 //! Syntax to HIR analysis
 //!
 //! docs/impl/hir.md
@@ -16,6 +16,7 @@
 //! - When a call is analyzed, we look up the callee's signal and propagate it
 //! - Polymorphic signals (like `map`) are resolved by examining the argument's signal
 //! - `assign` invalidates signal tracking for the mutated binding
+//! - A lambda that read a seed is re-analyzed until its signal holds (`fixpoint.rs`)
 
 mod binding;
 mod call;
@@ -23,6 +24,7 @@ mod destructure;
 mod env;
 mod facts;
 mod fileletrec;
+mod fixpoint;
 mod letrec;
 pub use fileletrec::classify_form;
 pub(crate) mod forms;
@@ -69,7 +71,7 @@ struct BlockContext {
 pub struct AnalysisResult {
     /// The analyzed HIR expression
     pub hir: Hir,
-    /// Accumulated non-fatal errors (undefined vars, signal mismatches)
+    /// Accumulated non-fatal errors: the undefined names
     pub errors: Vec<LError>,
 }
 
@@ -274,9 +276,9 @@ pub struct Analyzer<'a> {
     /// lambda, the intersection when there are several. Populated by
     /// `declare_ceiling`, checked by `analyze_lambda`.
     current_declared_ceiling: Option<Signal>,
-    /// Accumulated non-fatal errors. Recoverable error sites (undefined var,
-    /// signal mismatch) push here and return `Ok(Hir::error(span))` to
-    /// continue analysis. The pipeline checks this after analysis.
+    /// Accumulated non-fatal errors. A recoverable error site, an undefined
+    /// name, pushes here and returns `Ok(Hir::error(span))` to continue
+    /// analysis. The pipeline checks this after analysis.
     errors: Vec<LError>,
     /// Set by `(numeric!)` assertion form. Consumed by `analyze_lambda`.
     current_numeric_assert: bool,

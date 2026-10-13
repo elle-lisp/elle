@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-13
 //! The analyzer's unit tests, and the syntax builders they share.
 //!
 //! docs/impl/hir.md
@@ -10,6 +10,7 @@ use crate::syntax::{thread_arena, SeqCtor, Span, Syntax, SyntaxArena, SyntaxKind
 mod basics;
 mod bindings;
 mod environment;
+mod fixpoint;
 mod messages;
 
 fn make_span() -> Span {
