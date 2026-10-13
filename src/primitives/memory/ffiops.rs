@@ -99,6 +99,20 @@ pub fn prim_ffi_write(
     let ptr = addr as *mut u8;
     let value = &args[2];
 
+    if desc.holds_string() {
+        return (
+            SIG_ERROR,
+            ctx.error(
+                "ffi-error",
+                format!(
+                    "ffi/write: {} holds a :string, and nothing would own its C string; \
+                     write a :ptr instead",
+                    desc.short_name()
+                ),
+            ),
+        );
+    }
+
     let written = match desc {
         TypeDesc::Void => {
             return (
@@ -106,17 +120,12 @@ pub fn prim_ffi_write(
                 ctx.error("ffi-error", "ffi/write: cannot write void"),
             )
         }
-        TypeDesc::Str => {
-            return (
-                SIG_ERROR,
-                ctx.error("ffi-error", "ffi/write: use ptr type for writing pointers"),
-            )
-        }
         #[cfg(feature = "ffi")]
         TypeDesc::Struct(_) | TypeDesc::Array(_, _) => {
-            // The owned C strings of `:string` fields drop here, so the
-            // pointers written for those fields dangle once this returns.
-            crate::ffi::marshal::write_value_to_buffer(ptr, value, &desc).map(|_owned| ())
+            // No field is a `:string`, so the write leaves nothing to own.
+            crate::ffi::marshal::write_value_to_buffer(ptr, value, &desc).map(|owned| {
+                debug_assert!(owned.is_empty(), "ffi/write left a C string unowned");
+            })
         }
         #[cfg(not(feature = "ffi"))]
         TypeDesc::Struct(_) | TypeDesc::Array(_, _) => {

@@ -353,6 +353,14 @@ pub(crate) fn create_callback(
     if signature.fixed_args.is_some() {
         return Err("ffi/callback: variadic signatures are not supported for callbacks".into());
     }
+    // The trampoline returns before C reads the result, so nothing could own
+    // a C string the result points at.
+    if signature.ret.holds_string() {
+        return Err(format!(
+            "a callback cannot return {}, which holds a :string; return a :ptr",
+            signature.ret.short_name()
+        ));
+    }
 
     // Build the libffi CIF
     let cif = prepare_cif(&signature);

@@ -199,6 +199,17 @@ impl TypeDesc {
         }
     }
 
+    /// Whether this type is `Str`, or a struct or array with a `Str` at any
+    /// depth. Only a call can own the C string such a type points at.
+    pub fn holds_string(&self) -> bool {
+        match self {
+            TypeDesc::Str => true,
+            TypeDesc::Struct(sd) => sd.fields.iter().any(TypeDesc::holds_string),
+            TypeDesc::Array(elem, _) => elem.holds_string(),
+            _ => false,
+        }
+    }
+
     /// Short display name for this type descriptor.
     pub fn short_name(&self) -> String {
         match self {
