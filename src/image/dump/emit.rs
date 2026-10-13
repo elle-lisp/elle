@@ -349,7 +349,7 @@ impl Emitted {
                 .push(((node_off + layout::file_slot_in_node()) as u64, name.into()));
         }
         for scope in node.scopes() {
-            self.scope_watermark = self.scope_watermark.max(scope.counter() + 1);
+            self.scope_watermark = self.scope_watermark.max(scope.count() + 1);
         }
         if let Some((rel, src)) = self.slice_backing(&node.scopes, at)? {
             backings.push(Backing::raw::<ScopeId>(rel, src, node.scopes().len()));
