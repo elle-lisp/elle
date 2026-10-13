@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-13
 //! Thread primitives: `sys/spawn`, `sys/spawn-vm`, `sys/thread-state`,
 //! `sys/thread-id`, and `sys/unique`.
 //!
@@ -54,8 +54,8 @@ fn spawn_dispatch(args: &[Value], load_stdlib: bool, ctx: &mut NativeCtx) -> (Si
 
 /// `(sys/spawn closure)` — heavy worker: a fresh VM with primitives AND the
 /// standard library loaded, so runtime reflection (`eval`/`read`) in the
-/// worker resolves stdlib names. `init_stdlib` runs per spawn — prefer
-/// `sys/spawn-vm` when the worker needs only primitives at runtime.
+/// worker resolves stdlib names. The worker boots as the spawning instance
+/// did: from its boot image, or by compiling (docs/impl/image/boot.md).
 pub(crate) fn prim_spawn(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -64,8 +64,8 @@ pub(crate) fn prim_spawn(
 }
 
 /// `(sys/spawn-vm closure)` — light worker: a fresh VM with primitives only
-/// (plus `%`-intrinsics). The cheap path; eval in the worker resolves
-/// primitives/intrinsics but not the standard library.
+/// (plus `%`-intrinsics). Eval in the worker resolves primitives and
+/// intrinsics but not the standard library.
 pub(crate) fn prim_spawn_vm(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -170,7 +170,7 @@ primitive! {
     "sys/spawn" => prim_spawn {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
-        doc: "Spawn a thread running a deep-copied closure in a fresh VM with the standard library loaded (so eval/read in the worker resolve stdlib). Heavier than sys/spawn-vm (init_stdlib per spawn).",
+        doc: "Spawn a thread running a deep-copied closure in a fresh VM with the standard library loaded (so eval/read in the worker resolve stdlib). The worker hydrates the spawning instance's boot image, or compiles the stdlib when that instance has none.",
         params: &["closure"],
         category: "sys",
         example: "(sys/spawn (fn [] (+ 1 2)))",
@@ -180,7 +180,7 @@ primitive! {
     "sys/spawn-vm" => prim_spawn_vm {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
-        doc: "Spawn a thread running a deep-copied closure in a fresh VM with primitives only (no stdlib). The cheap path; eval in the worker resolves primitives/intrinsics but not stdlib.",
+        doc: "Spawn a thread running a deep-copied closure in a fresh VM with primitives only (no stdlib). Eval in the worker resolves primitives and intrinsics but not stdlib.",
         params: &["closure"],
         category: "sys",
         example: "(sys/spawn-vm (fn [] (+ 1 2)))",

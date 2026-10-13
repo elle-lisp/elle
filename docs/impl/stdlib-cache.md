@@ -1,11 +1,11 @@
 # Standard Library Disk Cache
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-10-13 -->
 
-[stdlib.lisp](../../src/stdlib.lisp) (~3200 lines) is recompiled on every
-process start. The `compile_file` front end (expand → analyze → regions → lower → freeze → emit)
-is what boot spends its time on; executing the compiled artifact costs a few
-milliseconds. The front end is **deterministic**: same source, same elle binary
+Without a cache, [stdlib.lisp](../../src/stdlib.lisp) (~3200 lines) is
+recompiled on every process start. The `compile_file` front end (expand →
+analyze → regions → lower → freeze → emit) is what boot spends its time on;
+executing the compiled artifact costs a few milliseconds. The front end is **deterministic**: same source, same elle binary
 → same bytecode. This design turns that work into a one-time cost by serializing
 the compiled code unit to disk, so later processes deserialize instead of
 recompiling.
@@ -57,10 +57,10 @@ cache_key = hash(stdlib source, build identity, FORMAT_VERSION,
 
 The directory is a **construction parameter**, `StdlibCache`, passed to
 `Runtime::with_stdlib_cache` and threaded to `try_load`/`try_store`. It is not
-read from process-global state: the suite builds many runtimes across threads,
-and a directory that travels with the instance is what keeps one runtime's
-cache invisible to the runtime beside it — and what lets a test tell the
-instance that wrote a cache from the instance that read it.
+read from process-global state, because the suite builds many runtimes across
+threads. A directory that travels with the instance keeps one runtime's cache
+invisible to the runtime beside it. It also lets a test tell the instance that
+wrote a cache from the instance that read it.
 
 | Variant | Directory |
 |---------|-----------|
@@ -75,14 +75,14 @@ alone cannot distinguish the two; the tests assert on this instead.
 The boot image's warm cache is on by default, and it comes first. An instance
 that hydrates an image reads no stdlib cache, and one that misses compiles so
 that it can store an image ([boot.md](image/boot.md)). This cache's readers are
-therefore the `sys/spawn` worker, the language server, the WASM entry, and
-every instance that boots with the image off.
+therefore every instance that boots with the image off, and every `sys/spawn`
+worker of an instance that holds no image.
 
-A `sys/spawn` worker builds its own runtime on a new thread and runs
-`init_stdlib` there, so it caches too. It reaches the spawning instance only
-through `ctx.vm()`, so the policy is recorded on the VM by
-`RuntimeCore::load_stdlib` and moved into the worker thread beside the Unicode
-generation — a worker caches where its parent was told to, never in the
+A worker of an instance with no image builds its own runtime on a new thread
+and compiles its stdlib there, so it caches too. It reaches the spawning
+instance only through `ctx.vm()`, so the spawning instance records its policy
+on its VM, and the policy moves into the worker thread beside the Unicode
+generation. A worker caches where its parent was told to, never in the
 process-wide directory.
 
 ## File layout
@@ -115,10 +115,11 @@ directory evict each other, so alternating between them costs one stdlib
 compile per switch. Give them separate directories (`--cache=`) if that matters.
 
 A store never writes the final path. It writes a temporary file in the same
-directory and renames it over the target: two elle processes starting at once
+directory and renames it over the target. Two elle processes starting at once
 is ordinary, and writing the path directly lets one read the other's
-half-written file, or edits an inode a reader already holds open. Same
-directory because a rename is atomic only within one filesystem.
+half-written file, or edits an inode a reader already holds open. The
+temporary file shares the directory because a rename is atomic only within one
+filesystem.
 
 ## What the cached path does not restore
 
@@ -226,7 +227,7 @@ Hand-written tuple serialization drifts from derived deserialization
 (bincode's enum-tag encoding differs), so both directions go through one
 derived mirror enum ([mirror.rs](../../src/value/send/mirror.rs)). Struct keys
 travel as `SendKey`, [the owning key form](values.md), which owns its bytes and
-derives serde directly; a symbol or keyword key travels as its name hash, which
+derives serde directly. A symbol or keyword key travels as its name hash, which
 names the same symbol in the loading process. An identity key has no `SendKey`
 form and is refused, which the cache layer turns into a miss. Heap `Value`s are rejected too —
 compound literals in the constant pool lower to `MaterializeConst` templates at
