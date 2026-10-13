@@ -1,13 +1,35 @@
-//! FFI type descriptors.
+// audited: 2026-10-13
+//! FFI type descriptors: the C type each keyword names, its size and alignment, and the storage of a C boolean.
 //!
-//! C types are described by keywords at the Elle level. This module
-//! provides the Rust representation and conversion from Elle keywords.
+//! docs/ffi.md
+
+use crate::value::Value;
+
+/// The storage of `TypeDesc::Bool`, the C `bool`. Read it as a byte, never as
+/// a Rust `bool`: a byte other than 0 or 1 makes a `bool` read undefined.
+pub type CBool = u8;
+
+/// The storage of `TypeDesc::Bool32`, a boolean held in a 32-bit integer.
+pub type CBool32 = i32;
+
+/// The C truth value of `value`: 1 when it is truthy, 0 when it is falsy.
+pub fn to_c_bool<T: From<u8>>(value: &Value) -> T {
+    T::from(u8::from(value.is_truthy()))
+}
+
+/// The Elle boolean of the C truth value `c`: true when it is nonzero.
+pub fn from_c_bool<T: Into<i64>>(c: T) -> Value {
+    Value::bool(c.into() != 0)
+}
 
 /// Describes a C type for marshalling.
 #[derive(Debug, Clone, PartialEq, Hash)]
 pub enum TypeDesc {
     Void,
+    /// C `bool`, stored as a `CBool`
     Bool,
+    /// A boolean held in a 32-bit integer, stored as a `CBool32`
+    Bool32,
     I8,
     U8,
     I16,
@@ -91,6 +113,7 @@ impl TypeDesc {
         match name {
             "void" => Some(TypeDesc::Void),
             "bool" => Some(TypeDesc::Bool),
+            "bool32" => Some(TypeDesc::Bool32),
             "i8" => Some(TypeDesc::I8),
             "u8" => Some(TypeDesc::U8),
             "i16" => Some(TypeDesc::I16),
@@ -123,7 +146,8 @@ impl TypeDesc {
     pub fn size(&self) -> Option<usize> {
         match self {
             TypeDesc::Void => None,
-            TypeDesc::Bool => Some(std::mem::size_of::<std::ffi::c_int>()), // C _Bool
+            TypeDesc::Bool => Some(std::mem::size_of::<CBool>()),
+            TypeDesc::Bool32 => Some(std::mem::size_of::<CBool32>()),
             TypeDesc::I8 | TypeDesc::U8 => Some(1),
             TypeDesc::I16 | TypeDesc::U16 => Some(2),
             TypeDesc::I32 | TypeDesc::U32 => Some(4),
@@ -148,7 +172,8 @@ impl TypeDesc {
     pub fn align(&self) -> Option<usize> {
         match self {
             TypeDesc::Void => None,
-            TypeDesc::Bool => Some(std::mem::align_of::<std::ffi::c_int>()),
+            TypeDesc::Bool => Some(std::mem::align_of::<CBool>()),
+            TypeDesc::Bool32 => Some(std::mem::align_of::<CBool32>()),
             TypeDesc::I8 | TypeDesc::U8 => Some(1),
             TypeDesc::I16 | TypeDesc::U16 => Some(2),
             TypeDesc::I32 | TypeDesc::U32 => Some(4),
@@ -179,6 +204,7 @@ impl TypeDesc {
         match self {
             TypeDesc::Void => "void".to_string(),
             TypeDesc::Bool => "bool".to_string(),
+            TypeDesc::Bool32 => "bool32".to_string(),
             TypeDesc::I8 => "i8".to_string(),
             TypeDesc::U8 => "u8".to_string(),
             TypeDesc::I16 => "i16".to_string(),
@@ -210,8 +236,8 @@ impl TypeDesc {
 /// Reified function signature for FFI calls.
 ///
 /// Created by `ffi/signature`. Contains calling convention, return type,
-/// and argument types. Signatures are cached/reused since creating one
-/// involves libffi prep work.
+/// and argument types. The signature value caches the libffi CIF prepared
+/// from it, so each value prepares one CIF.
 #[derive(Debug, Clone, PartialEq, Hash)]
 pub struct Signature {
     /// Calling convention (currently only `:default`)

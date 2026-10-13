@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-10-13
 //! The keyword vocabulary: every spelling the Rust runtime mints from a fixed
 //! string.
 //!
@@ -371,6 +371,7 @@ pub(crate) static VOCABULARY: &[&str] = &[
     // FFI type keywords (`TypeDesc::from_keyword`; "float"/"string" appear
     // above)
     "bool",
+    "bool32",
     "char",
     "default",
     "double",

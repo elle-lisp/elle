@@ -1,6 +1,7 @@
-//! C → Value unmarshalling: read_value_from_buffer.
+// audited: 2026-10-13
+//! C → Value unmarshalling: `read_value_from_buffer` reads C memory of a described type into a value.
 //!
-//! Converts C-typed data back into Elle Values.
+//! docs/ffi.md
 //!
 //! # u64 round-trip convention
 //!
@@ -18,7 +19,7 @@
 //! (no truncation — the tagged-union representation stores a full i64).
 
 use crate::error::{LError, LResult};
-use crate::ffi::types::TypeDesc;
+use crate::ffi::types::{from_c_bool, CBool, CBool32, TypeDesc};
 use crate::primitives::ctx::Alloc;
 use crate::value::Value;
 use std::ffi::c_void;
@@ -39,10 +40,8 @@ pub(crate) fn read_value_from_buffer(
     match desc {
         TypeDesc::Void => Ok(Value::NIL),
 
-        TypeDesc::Bool => {
-            let v = unsafe { *(ptr as *const std::ffi::c_int) };
-            Ok(Value::bool(v != 0))
-        }
+        TypeDesc::Bool => Ok(from_c_bool(unsafe { *(ptr as *const CBool) })),
+        TypeDesc::Bool32 => Ok(from_c_bool(unsafe { *(ptr as *const CBool32) })),
 
         TypeDesc::I8 | TypeDesc::Char => {
             let v = unsafe { *(ptr as *const i8) };

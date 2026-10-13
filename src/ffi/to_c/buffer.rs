@@ -1,13 +1,15 @@
-//! `write_value_to_buffer` — writing an Elle Value into raw C storage.
+// audited: 2026-10-13
+//! `write_value_to_buffer`: write a value into caller-provided C memory of a described type.
 //!
-//! Split from the module root: this is the low-level counterpart to
-//! `MarshalledArg::new`, writing directly into a caller-provided buffer rather
-//! than allocating owned `ArgStorage`.
+//! docs/ffi.md
+//!
+//! This is the counterpart of `MarshalledArg::new` for memory the caller owns:
+//! a struct field, an array element, `ffi/write`, or a callback's struct result.
 
 use super::{ArgStorage, MarshalledArg};
 use crate::error::{LError, LResult};
 use crate::ffi::marshal::{desc_name_full, extract_int, range_check};
-use crate::ffi::types::TypeDesc;
+use crate::ffi::types::{to_c_bool, CBool, CBool32, TypeDesc};
 use crate::value::Value;
 use std::ffi::{c_void, CString};
 
@@ -29,8 +31,11 @@ pub fn write_value_to_buffer(
         TypeDesc::Void => Err(LError::ffi_error("marshal", "cannot write void to buffer")),
 
         TypeDesc::Bool => {
-            let v: std::ffi::c_int = if value.is_truthy() { 1 } else { 0 };
-            unsafe { *(ptr as *mut std::ffi::c_int) = v };
+            unsafe { *(ptr as *mut CBool) = to_c_bool(value) };
+            Ok(Vec::new())
+        }
+        TypeDesc::Bool32 => {
+            unsafe { *(ptr as *mut CBool32) = to_c_bool(value) };
             Ok(Vec::new())
         }
 

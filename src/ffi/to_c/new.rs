@@ -1,14 +1,13 @@
-//! `MarshalledArg::new` and its struct/array marshalling helpers.
+// audited: 2026-10-13
+//! `MarshalledArg::new`: convert one argument value to the C storage its type names, structs and arrays included.
 //!
-//! Split from the module root so the large per-`TypeDesc` conversion match and
-//! its compound (struct/array) helpers live apart from the storage type
-//! definitions and the `as_arg` accessor.
+//! docs/ffi.md
 
 use super::{ArgStorage, MarshalledArg};
 use crate::error::{LError, LResult};
 use crate::ffi::marshal::{desc_name, extract_int, range_check, AlignedBuffer};
 use crate::ffi::to_c::write_value_to_buffer;
-use crate::ffi::types::{StructDesc, TypeDesc};
+use crate::ffi::types::{to_c_bool, StructDesc, TypeDesc};
 use crate::value::Value;
 use std::ffi::{c_void, CString};
 
@@ -23,7 +22,8 @@ impl MarshalledArg {
                 ));
             }
 
-            TypeDesc::Bool => ArgStorage::I32(if value.is_truthy() { 1 } else { 0 }),
+            TypeDesc::Bool => ArgStorage::U8(to_c_bool(value)),
+            TypeDesc::Bool32 => ArgStorage::I32(to_c_bool(value)),
 
             TypeDesc::I8 => {
                 let n = extract_int(value, "i8")?;

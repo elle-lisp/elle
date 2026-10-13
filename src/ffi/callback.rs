@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-13
 //! FFI callback trampolines.
 //!
 //! docs/ffi.md
@@ -26,7 +26,7 @@
 
 use crate::ffi::call::prepare_cif;
 use crate::ffi::marshal::{read_value_from_buffer, write_value_to_buffer};
-use crate::ffi::types::{Signature, TypeDesc};
+use crate::ffi::types::{to_c_bool, CBool, CBool32, Signature, TypeDesc};
 use crate::value::{Closure, Value};
 use std::collections::HashMap;
 use std::ffi::c_void;
@@ -36,7 +36,7 @@ use std::rc::Rc;
 
 /// Data captured by an FFI callback trampoline.
 ///
-/// Leaked onto the heap (via `Box::leak`) so the libffi closure can
+/// Leaked onto the heap (via `Box::into_raw`) so the libffi closure can
 /// reference it with `'static` lifetime. Recovered and dropped by
 /// `free_callback`.
 struct CallbackData {
@@ -293,8 +293,10 @@ unsafe fn write_return_value(
             *(ptr as *mut f64) = f;
         }
         TypeDesc::Bool => {
-            let v: std::ffi::c_int = if value.is_truthy() { 1 } else { 0 };
-            *(ptr as *mut std::ffi::c_int) = v;
+            *(ptr as *mut CBool) = to_c_bool(value);
+        }
+        TypeDesc::Bool32 => {
+            *(ptr as *mut CBool32) = to_c_bool(value);
         }
         TypeDesc::Ptr | TypeDesc::Str => {
             let p = if value.is_nil() {
@@ -366,8 +368,8 @@ pub(crate) fn create_callback(
     let userdata_ref: &'static CallbackData = unsafe { &*userdata_ptr };
 
     // Create the libffi closure.
-    // We use c_void as the return type R because we write the actual
-    // result manually in the trampoline via write_value_to_buffer.
+    // We use c_void as the return type R because the trampoline writes the
+    // result itself, through write_return_value.
     let ffi_closure = libffi::middle::Closure::new(cif, trampoline_callback, userdata_ref);
 
     // code_ptr() returns &unsafe extern "C" fn() — dereference to get

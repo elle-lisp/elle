@@ -1,14 +1,16 @@
-//! Marshalling between Elle Values and C-typed data for libffi calls.
+// audited: 2026-10-13
+//! Marshalling helpers shared by both directions: libffi types, the aligned buffer, and integer checks.
 //!
-//! Shared types and helpers. Value→C conversion is in `to_c.rs`,
-//! C→Value conversion is in `from_c.rs`.
+//! docs/ffi.md
+//!
+//! Value→C conversion is in `to_c.rs`, C→Value conversion is in `from_c.rs`.
 
 use crate::error::{LError, LResult};
 use crate::ffi::types::TypeDesc;
 use crate::value::Value;
 use libffi::middle::Type;
 
-// Re-export moved items so existing callers don't break.
+// One import path for both conversion directions.
 pub(crate) use crate::ffi::from_c::read_value_from_buffer;
 pub(crate) use crate::ffi::to_c::write_value_to_buffer;
 pub use crate::ffi::to_c::MarshalledArg;
@@ -17,7 +19,9 @@ pub use crate::ffi::to_c::MarshalledArg;
 pub(crate) fn to_libffi_type(desc: &TypeDesc) -> Type {
     match desc {
         TypeDesc::Void => Type::void(),
-        TypeDesc::Bool => Type::c_int(),
+        // `CBool` and `CBool32`
+        TypeDesc::Bool => Type::u8(),
+        TypeDesc::Bool32 => Type::i32(),
         TypeDesc::I8 => Type::i8(),
         TypeDesc::U8 => Type::u8(),
         TypeDesc::I16 => Type::i16(),
@@ -148,6 +152,7 @@ pub(crate) fn desc_name_full(desc: &TypeDesc) -> &'static str {
         TypeDesc::Ptr => "ptr",
         TypeDesc::Str => "string",
         TypeDesc::Bool => "bool",
+        TypeDesc::Bool32 => "bool32",
         TypeDesc::Void => "void",
         TypeDesc::Struct(_) => "struct",
         TypeDesc::Array(_, _) => "array",

@@ -1,4 +1,10 @@
+// audited: 2026-10-13
+//! `ffi/read`, `ffi/write` and `ffi/string`: typed access to C memory through a pointer.
+//!
+//! docs/ffi.md
+
 use super::*;
+use crate::ffi::types::{from_c_bool, to_c_bool, CBool, CBool32};
 
 pub fn prim_ffi_read(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
@@ -27,7 +33,8 @@ pub fn prim_ffi_read(
             }
             TypeDesc::Float => Value::float(*(ptr as *const f32) as f64),
             TypeDesc::Double => Value::float(*(ptr as *const f64)),
-            TypeDesc::Bool => Value::bool(*(ptr as *const std::ffi::c_int) != 0),
+            TypeDesc::Bool => from_c_bool(*(ptr as *const CBool)),
+            TypeDesc::Bool32 => from_c_bool(*(ptr as *const CBool32)),
             TypeDesc::Ptr => Value::pointer(*(ptr as *const usize)),
             TypeDesc::Str => {
                 let cptr = *(ptr as *const *const std::ffi::c_char);
@@ -220,7 +227,10 @@ pub fn prim_ffi_write(
                 *(ptr as *mut f64) = f;
             }
             TypeDesc::Bool => {
-                *(ptr as *mut std::ffi::c_int) = if value.is_truthy() { 1 } else { 0 };
+                *(ptr as *mut CBool) = to_c_bool(value);
+            }
+            TypeDesc::Bool32 => {
+                *(ptr as *mut CBool32) = to_c_bool(value);
             }
             TypeDesc::Ptr => {
                 let p = if value.is_nil() {
@@ -264,9 +274,8 @@ pub fn prim_ffi_write(
             TypeDesc::Struct(_) | TypeDesc::Array(_, _) => {
                 match crate::ffi::marshal::write_value_to_buffer(ptr, value, &desc) {
                     Ok(_owned) => {
-                        // Note: owned data (CStrings for string fields) is dropped here.
-                        // This is fine for ffi/write since the data has already been written
-                        // to the buffer at this point.
+                        // The owned C strings of `:string` fields drop here, so the
+                        // pointers written for those fields dangle once this returns.
                     }
                     Err(e) => {
                         return (

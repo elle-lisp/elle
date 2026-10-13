@@ -1,11 +1,11 @@
-//! FFI call dispatch via libffi.
+// audited: 2026-10-13
+//! FFI call dispatch: prepare a libffi CIF from a signature, and call C through it.
 //!
-//! Wraps `libffi::middle::Cif` to perform actual C function calls,
-//! converting between Elle `Value` and C types.
+//! docs/ffi.md
 
 use crate::error::{LError, LResult};
 use crate::ffi::marshal::{read_value_from_buffer, to_libffi_type, AlignedBuffer, MarshalledArg};
-use crate::ffi::types::{Signature, TypeDesc};
+use crate::ffi::types::{from_c_bool, CBool, CBool32, Signature, TypeDesc};
 use crate::primitives::ctx::NativeCtx;
 use crate::value::Value;
 use libffi::middle::{Cif, CodePtr, Type};
@@ -57,8 +57,12 @@ pub unsafe fn ffi_call(
             Ok(Value::NIL)
         }
         TypeDesc::Bool => {
-            let r: std::ffi::c_int = cif.call(code_ptr, &ffi_args);
-            Ok(Value::bool(r != 0))
+            let r: CBool = cif.call(code_ptr, &ffi_args);
+            Ok(from_c_bool(r))
+        }
+        TypeDesc::Bool32 => {
+            let r: CBool32 = cif.call(code_ptr, &ffi_args);
+            Ok(from_c_bool(r))
         }
         TypeDesc::I8 | TypeDesc::Char => {
             let r: i8 = cif.call(code_ptr, &ffi_args);
