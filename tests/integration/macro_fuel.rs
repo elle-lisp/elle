@@ -71,9 +71,6 @@ fn run_elle(cwd: &Path, args: &[&str], stdin: &str) -> Run {
 /// A macro whose body never returns.
 const SPIN: &str = "(defmacro spin [] (forever nil))";
 
-/// A macro whose body never returns, and whose loop is not silent.
-const COUNT_ON: &str = "(defmacro count-on [] (begin (var i 0) (while true (assign i (+ i 1)))))";
-
 #[test]
 fn a_looping_macro_fails_the_compile_of_a_file() {
     let dir = tempfile::tempdir().expect("scratch dir");
@@ -242,35 +239,39 @@ fn a_silent_loop_a_transformer_calls_fails_the_compile() {
     );
 }
 
-/// A nested expansion spends the budget of the expansion that started it. The
-/// inner `count-on` exhausts it, and its failure is caught, so the loop after
-/// the `protect` finds the budget spent and halts `outer`. The counter-factual
-/// gives each expansion a fresh budget: the inner loop is not silent, so its
-/// own budget stops it, `outer` survives, and the program prints `:survived`.
+/// A nested expansion spends the budget of the expansion that started it.
+/// `outer` spends 9,000,000 units, then its `eval` expands `inner`, which
+/// spends 9,000,000 more, past the 16,777,216 the two share, and halts. `spin`
+/// is silent and charges one unit per trip. The counter-factual gives each
+/// expansion a fresh budget, so `inner` fits, and the program prints
+/// `:survived`.
+///
+/// The outer expansion runs through `eval`, because the macro VM a file
+/// compiles on holds no compile context, and an `eval` there fails. The inner
+/// form is read from a string when `outer` runs: the outer `eval` expands the
+/// macro calls inside a quoted form ahead of time, which would run `inner`
+/// before `outer` and outside its budget.
 #[test]
 fn a_nested_expansion_spends_the_outer_budget() {
     let dir = tempfile::tempdir().expect("scratch dir");
-    let file = dir.path().join("nested.lisp");
+    let spin = "(begin-for-syntax (def spin (fn [n] (numeric!) (def @i 0) \
+                (while (%lt i n) (assign i (%add i 1))) i)))";
     let program = format!(
-        "(defmacro outer []\n  \
-         (begin (protect (eval '(begin {COUNT_ON} (count-on))))\n         \
-         (var k 0) (while (< k 10) (assign k (+ k 1)))\n         \
-         :survived))\n\
-         (print (outer))\n"
+        r#"(def [ok? r]
+  (protect (eval '(begin {spin}
+    (defmacro outer []
+      (begin (spin 9000000)
+             (eval (read "(begin {spin} (defmacro inner [] (begin (spin 9000000) 1)) (inner))"))
+             :survived))
+    (outer)))))
+(print (if ok? r (get r :message)))
+"#
     );
-    std::fs::write(&file, program).expect("write nested.lisp");
-    let file = file.display().to_string();
-    let run = run_elle(dir.path(), &[&file], "");
-    assert_eq!(
-        run.code,
-        Some(1),
-        "the compile fails: {}{}",
-        run.stdout,
-        run.stderr
-    );
+    let run = run_elle(dir.path(), &["-"], &program);
+    assert_eq!(run.code, Some(0), "the program runs: {}", run.stderr);
     assert!(
-        run.stderr.contains("macro 'outer'") && run.stderr.contains("fuel"),
-        "the error names the outer macro and its budget: {}",
-        run.stderr
+        run.stdout.contains("macro 'inner'") && run.stdout.contains("fuel"),
+        "the inner expansion finds the shared budget spent: {}",
+        run.stdout
     );
 }
