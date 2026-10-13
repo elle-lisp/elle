@@ -120,7 +120,8 @@ borrowed VM. Macro side effects do NOT persist in the caller's VM.
 **`eval_syntax` is special**: It also borrows the caller's `Expander`, not just
 the VM. This is because it's called from inside `Expander::expand_macro_call_inner`
 — the macro expansion engine needs to compile and run a macro body while
-preserving the current expansion context (macro registry, scope state). Nested
+preserving the current expansion context (macro registry, compile-time
+definitions). Nested
 macro calls work because the same Expander is threaded through. Its macro-body
 metadata rides on the expander (`eval_meta`), so no separate `CompileCtx`
 borrow is needed mid-expansion.
@@ -133,14 +134,20 @@ The prelude ([prelude.lisp](../src/prelude.lisp), embedded at build time) define
 point expands with a clone of that `Expander`: `compile` and `compile_file`
 through `with_macro_expansion`, the `eval` and `analyze` families through
 `expander_and_meta`. A clone carries the loaded prelude, so no call parses it
-again.
+again. Each takes the unit the compile expands and hands out a clone that has
+begun it, so every scope the clone mints names that unit
+([syntax.md](impl/syntax.md)). The VM's `eval` instruction keeps one expander
+across calls instead, and begins a unit for each datum, which drops the
+`begin-for-syntax` definitions the last one made.
 
 A REPL line compiles through `compile_file_repl`. Its clone also carries the
 macros earlier lines defined, and its analysis the definitions they made. No
 other entry point sees either, so a file a line imports compiles as it would
 from any program.
 
-`eval_syntax` reuses the caller's `Expander` because it runs mid-expansion.
+`eval_syntax` reuses the caller's `Expander` because it runs mid-expansion. A
+transformer's compile runs it in a unit of its own, and the caller's unit
+resumes after.
 
 Every transformer call runs through `VM::call_transformer`, and every
 `begin-for-syntax` definition through `eval_syntax`. Both run the body under
@@ -310,13 +317,15 @@ exports or REPL definitions.
 ### `with_macro_expansion()`
 
 Runs a closure with the macro-expansion VM (fiber reset), a clone of the
-`Expander` (independent expansion state), and a clone of the compile `meta`.
+`Expander` that has begun the unit the compile expands, and a clone of the
+compile `meta`.
 The clones decouple it from `self`'s borrow so a nested compile does not alias.
 Used by `compile` and `compile_file`.
 
 ### `expander_and_meta()`
 
-Returns a cloned `(Expander, PrimitiveMeta)` without borrowing the macro VM.
+Returns a cloned `(Expander, PrimitiveMeta)`, the expander begun on the
+caller's unit, without borrowing the macro VM.
 Used by `eval`, `analyze` and `analyze_file`, which run expansion on their own
 VM.
 
