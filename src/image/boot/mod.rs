@@ -25,7 +25,7 @@ use crate::value::{TableKey, Value};
 
 use super::ImageError;
 
-pub(crate) use cache::{store, Executable};
+pub(crate) use cache::{store, Executable, OpenImage};
 
 /// The keys the root struct and a macro entry carry. Both halves name them —
 /// [`build`] writing, [`install`] reading — so they are spelled once.
@@ -44,7 +44,7 @@ mod key {
 /// Where an instance looks for its boot image, and where it stores one.
 ///
 /// A construction parameter rather than process state, for the reason
-/// [`crate::compiler::stdlib_cache::StdlibCache`] is one: the suite builds many
+/// [`crate::compiler::stdlib_cache::StdlibCache`] is one. The suite builds many
 /// instances across threads, and a directory that travels with the instance is
 /// what keeps one test's cache invisible to the test beside it.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -89,8 +89,8 @@ pub fn sources_digest() -> String {
 /// A hydrated boot image, installed as a process root and ready for a fresh
 /// instance to read its pieces out of.
 ///
-/// The three fields are read out of the root struct once, here, rather than on
-/// every question: a borrow of the macro table is then the `Boot`'s, which is
+/// The value fields are read out of the root struct once, here, rather than on
+/// every question. A borrow of the macro table is then the `Boot`'s, which is
 /// the region's lifetime rather than a temporary's.
 #[derive(Debug)]
 pub struct Boot {
@@ -161,18 +161,27 @@ pub(super) fn field_text(structure: Value, name: &str) -> Option<String> {
     value.as_str().map(str::to_owned)
 }
 
-/// Hydrate the boot image at `path` into `heap`, or answer why this binary
-/// refuses it.
-///
-/// A refusal leaves no region behind. On success the image's region is a
-/// process root, so the whole boot graph is released by one decref at teardown
-/// — the caller installs the pieces and never frees them itself.
+/// Hydrate the boot image at `path` into `heap`: [`hydrate`] over the whole file.
 pub fn hydrate_path(
     heap: &mut FiberHeap,
     symbols: &mut SymbolTable,
     path: &Path,
 ) -> Result<Boot, ImageError> {
-    let hydrated = super::hydrate_path(heap, symbols, path)?;
+    hydrate(heap, symbols, &super::ImageSource::open(path)?)
+}
+
+/// Hydrate the boot image `source` holds into `heap`, or answer why this binary
+/// refuses it.
+///
+/// A refusal leaves no region behind. On success the image's region is a
+/// process root, so the whole boot graph is released by one decref at teardown
+/// — the caller installs the pieces and never frees them itself.
+pub fn hydrate(
+    heap: &mut FiberHeap,
+    symbols: &mut SymbolTable,
+    source: &super::ImageSource,
+) -> Result<Boot, ImageError> {
+    let hydrated = super::hydrate(heap, symbols, source)?;
     let nil_field = |name| field(hydrated.root, name).unwrap_or(Value::NIL);
     let boot = Boot {
         root: hydrated.root,
@@ -233,7 +242,7 @@ pub(crate) fn dump(
     symbols: &mut SymbolTable,
     cctx: &crate::pipeline::CompileCtx,
     path: &Path,
-) -> Result<(), ImageError> {
+) -> Result<std::fs::File, ImageError> {
     let scratch = heap.new_runtime_region();
     let result = build::root(heap, symbols, cctx, scratch).and_then(|root| {
         super::dump::dump_marked(heap, symbols, root, path, cctx.static_region_mark())

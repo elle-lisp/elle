@@ -1,16 +1,20 @@
-//! Resident compiler state for LSP server
+// audited: 2026-10-20
+//! The language server's resident state: the open documents, and the instance they compile against.
 //!
-//! Manages compilation state for open documents and provides
-//! symbol index for IDE features.
+//! src/lsp/README.md
+//! docs/impl/image/boot.md
+//!
+//! Each document keeps its source, its diagnostics and its symbol index. Every
+//! document compiles against one resident instance, which boots as `elle` does.
 
+use crate::analyze_file;
 use crate::hir::{extract_symbols_from_hir, HirLinter};
 use crate::lint::diagnostics::{Diagnostic, Severity};
-use crate::pipeline::CompileCtx;
 use crate::primitives::def::Doc;
 use crate::reader::SourceLoc;
+use crate::runtime::{BootCaches, BootFrom, RuntimeCore};
 use crate::symbol::SymbolTable;
 use crate::symbols::SymbolIndex;
-use crate::{analyze_file, init_stdlib, register_primitives, VM};
 use std::collections::HashMap;
 
 /// Strip a `file://` scheme from a document URI to recover a filesystem path.
@@ -19,7 +23,7 @@ use std::collections::HashMap;
 /// and therefore every symbol-index location — carries the document's real
 /// file. Reconstructing `file://` + path round-trips back to the request URI,
 /// which is what makes rename/definition/references emit edits the client
-/// accepts. Non-`file:` URIs (e.g. `untitled:`) pass through unchanged.
+/// accepts. Non-`file:` URIs (for example `untitled:`) pass through unchanged.
 pub(crate) fn uri_to_source_name(uri: &str) -> &str {
     uri.strip_prefix("file://").unwrap_or(uri)
 }
@@ -27,9 +31,9 @@ pub(crate) fn uri_to_source_name(uri: &str) -> &str {
 /// Extract a `SourceLoc` from a reader/analyzer error string.
 ///
 /// Reader and analyzer errors are formatted as `file:line:col: message`, where
-/// `file` is the source name — now a real path (e.g. `/home/u/foo.lisp`), not
-/// just the old `<lsp>` sentinel. Parses from the right so a message containing
-/// colons does not confuse the line/col fields.
+/// `file` is the source name, which is the document's real path (for example
+/// `/home/u/foo.lisp`). Parses from the right so a message containing colons
+/// does not confuse the line/col fields.
 fn extract_location_from_error(msg: &str) -> Option<SourceLoc> {
     let (prefix, _message) = msg.split_once(": ")?; // "file:line:col"
     let (file_and_line, col_str) = prefix.rsplit_once(':')?;
@@ -65,39 +69,24 @@ impl DocumentState {
 /// Resident compiler state for LSP server
 pub struct CompilerState {
     documents: HashMap<String, DocumentState>,
-    /// Boxed for a stable address — the VM holds a pointer to it
-    /// (`VM::set_symbols`), so a macro transformer's `gensym` resolves names in
-    /// THIS instance's own table.
-    symbol_table: Box<SymbolTable>,
-    vm: VM,
-    /// This instance's per-instance compile context (macro expander, meta,
-    /// projections). Boxed for a stable address (the VM holds a pointer to it).
-    compile: Box<CompileCtx>,
+    /// The resident instance every document compiles against. It boots as
+    /// `elle` does, under the process policy (docs/impl/image/boot.md), and
+    /// lives as long as the server.
+    core: RuntimeCore,
 }
 
 impl CompilerState {
     /// Create new compiler state
     pub fn new() -> Self {
-        let mut symbol_table = Box::new(SymbolTable::new());
-        let mut vm = VM::new();
-        let _signals = register_primitives(&mut vm, &mut symbol_table);
-        // Point the VM at this instance's symbol table (stable boxed address);
-        // macro expansion during analysis resolves names through it.
-        vm.set_symbols(&mut *symbol_table as *mut SymbolTable);
-        let mut compile = Box::new(CompileCtx::new());
-        vm.set_compile_ctx(&mut *compile as *mut CompileCtx);
-        init_stdlib(
-            &mut vm,
-            &mut symbol_table,
-            &mut compile,
-            &crate::compiler::stdlib_cache::StdlibCache::Process,
-        );
-
+        let core = RuntimeCore::boot(
+            crate::config::get().unicode_generation(),
+            true,
+            BootFrom::Caches(BootCaches::process()),
+        )
+        .core;
         Self {
             documents: HashMap::new(),
-            symbol_table,
-            vm,
-            compile,
+            core,
         }
     }
 
@@ -135,20 +124,15 @@ impl CompilerState {
         // location — carry the actual file, which definition/references/rename
         // need to emit client-acceptable URIs.
         let source_name = uri_to_source_name(uri).to_string();
-        let analysis = match analyze_file(
-            &doc.source_text,
-            &mut self.symbol_table,
-            &mut self.vm,
-            &mut self.compile,
-            &source_name,
-        ) {
+        let (vm, symbols, compile) = self.core.parts();
+        let analysis = match analyze_file(&doc.source_text, symbols, vm, compile, &source_name) {
             Ok(result) => result,
             Err(e) => {
                 // Analysis error - add as diagnostic
                 let location = extract_location_from_error(&e);
                 // `analyze_file` hands back a message, not an `ErrorKind`, so
-                // the classification is fixed here rather than looked up —
-                // but the code comes from the registry, so the LSP reports the
+                // the classification is fixed here rather than looked up. The
+                // code still comes from the registry, so the LSP reports the
                 // same one the lint CLI and `compile/diagnostics` do.
                 let syntax_error = crate::lint::diagnostics::SYNTAX_ERROR;
                 doc.diagnostics.push(Diagnostic::new(
@@ -165,13 +149,12 @@ impl CompilerState {
         // Extract symbols from the file-level HIR, then snap definition columns
         // onto the actual name tokens (the analyzer records them at the
         // initializer span). Usages are already accurate.
-        doc.symbol_index =
-            extract_symbols_from_hir(&analysis.hir, &self.symbol_table, &analysis.arena);
+        doc.symbol_index = extract_symbols_from_hir(&analysis.hir, symbols, &analysis.arena);
         crate::lsp::locate::snap_definition_locations(&mut doc.symbol_index, &doc.source_text);
 
         // Run HIR linter
         let mut linter = HirLinter::new();
-        linter.lint(&analysis.hir, &self.symbol_table, &analysis.arena);
+        linter.lint(&analysis.hir, symbols, &analysis.arena);
         doc.diagnostics.extend(linter.diagnostics().iter().cloned());
 
         true
@@ -189,12 +172,12 @@ impl CompilerState {
 
     /// Get symbol table
     pub fn symbol_table(&self) -> &SymbolTable {
-        &self.symbol_table
+        self.core.parts_shared().1
     }
 
     /// Get the VM's documentation map
     pub fn docs(&self) -> &std::collections::HashMap<String, Doc> {
-        &self.vm.docs
+        &self.core.parts_shared().0.docs
     }
 
     /// User-facing builtin/stdlib names for completion: every globally-bound
@@ -203,9 +186,10 @@ impl CompilerState {
     /// (`%`-prefixed) and compiler gensyms (`__`-prefixed) are excluded.
     pub fn builtin_names(&self) -> Vec<&str> {
         let mut seen = std::collections::HashSet::new();
-        self.compile
+        let (_vm, symbols, compile) = self.core.parts_shared();
+        compile
             .global_function_ids()
-            .filter_map(|id| self.symbol_table.name(id))
+            .filter_map(|id| symbols.name(id))
             .filter(|n| !n.starts_with('%') && !n.starts_with("__"))
             .filter(|n| seen.insert(*n))
             .collect()

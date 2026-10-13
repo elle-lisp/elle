@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-20
 //! Allocation capabilities for native code: `Alloc` carries a call's region and heap, and `NativeCtx` adds the VM.
 //!
 //! docs/impl/region/ctx.md
@@ -21,21 +21,20 @@ use std::ops::{Deref, DerefMut};
 /// re-enter the interpreter. Built at allocation-only sites with no VM in scope
 /// (the reader, the io completion builders, `send` reconstruction, plugin ctors,
 /// FFI arg marshalling, test scaffolding). A native-call capability
-/// [`NativeCtx`] wraps it with a VM and `Deref`s to it (docs/impl/region/ctx.md
-/// "The capability split"). It cannot be stored (borrows the call) and cannot be
-/// forged (private fields).
+/// [`NativeCtx`] wraps it with a VM and `Deref`s to it (docs/impl/region/ctx.md).
+/// It cannot be stored (borrows the call) and cannot be forged (private fields).
 pub struct Alloc<'h> {
     /// The call's own result region. The region every `ctx.*` allocation is
     /// born in (Rule 3).
     region: RuntimeRegion,
     /// The call's heap, as a raw pointer guarded by a phantom borrow. Raw (not
     /// `&'h mut`) so every ergonomic constructor can be `&self` and still route
-    /// allocation through the ctx's OWN heap — which keeps nested calls like
-    /// `ctx.pair(ctx.string(a), b)` borrow-checking (each transient `&mut
-    /// FiberHeap` reborrow drops before the next allocation reborrows), while
-    /// the ctx owns its heap capability outright. The `PhantomData` keeps the
-    /// lifetime contract: the ctx cannot outlive the `&'h mut FiberHeap` it
-    /// was built from.
+    /// allocation through the ctx's OWN heap, while the ctx owns its heap
+    /// capability outright. That keeps nested calls like
+    /// `ctx.pair(ctx.string(a), b)` borrow-checking: each transient `&mut
+    /// FiberHeap` reborrow drops before the next allocation reborrows. The
+    /// `PhantomData` keeps the lifetime contract: the ctx cannot outlive the
+    /// `&'h mut FiberHeap` it was built from.
     heap: *mut FiberHeap,
     _heap: PhantomData<&'h mut FiberHeap>,
 }
@@ -138,7 +137,7 @@ impl<'h> Alloc<'h> {
     }
 
     /// Allocate a `RegionSlice` payload into the ctx's region — it shares
-    /// the region of the object that will embed it (region/model.md).
+    /// the region of the object that will embed it (docs/impl/region/model.md).
     pub fn alloc_slice<T: Copy + 'static>(&self, items: &[T]) -> RegionSlice<T> {
         let region = self.region;
         self.heap().alloc_region_slice_in_region(items, region)
@@ -147,15 +146,14 @@ impl<'h> Alloc<'h> {
     /// The call's region as a syntax arena, for a native body that BUILDS a
     /// syntax tree rather than copying one it was handed. The tree lands in
     /// the same region the wrapping `ctx.syntax` object will, which is the
-    /// invariant a syntax `Value` keeps (docs/impl/syntax.md § "A syntax
-    /// `Value` owns its tree").
+    /// invariant a syntax `Value` keeps (docs/impl/syntax.md).
     pub fn syntax_arena(&self) -> crate::syntax::SyntaxArena {
         let region = self.region;
         crate::syntax::SyntaxArena::new(self.heap(), region)
     }
 
     /// The call's region as a code arena, for a receiver that rebuilds a
-    /// closure's code object: the payload lands in the region the closure is
+    /// closure's code object. The payload lands in the region the closure is
     /// born in, so the header over it is a self-edge
     /// (docs/impl/region/template.md).
     pub fn code_arena(&self) -> crate::value::CodeArena {
@@ -165,7 +163,7 @@ impl<'h> Alloc<'h> {
 
     /// Build the stored form of a struct key in the ctx's region — the
     /// forwarder a native body uses before putting a key into a struct it
-    /// builds here (docs/impl/values.md § "Struct keys").
+    /// builds here (docs/impl/values.md).
     pub fn intern_key(&self, key: &crate::value::heap::TableKey) -> crate::value::heap::TableKey {
         let region = self.region;
         key.intern_into(self.heap(), region)
@@ -173,7 +171,7 @@ impl<'h> Alloc<'h> {
 }
 
 /// The native-call capability: an [`Alloc`] plus the **non-null** driving VM
-/// (docs/impl/region/ctx.md "The capability split"). `Deref`s to `Alloc`, so
+/// (docs/impl/region/ctx.md). `Deref`s to `Alloc`, so
 /// every `ctx.string(..)`/`ctx.alloc(..)`/`ctx.error(..)` works unchanged, and
 /// adds [`vm`](Self::vm) for state access and synchronous interpreter re-entry.
 /// Built where a VM drives the call: bytecode dispatch and the JIT/WASM hosts.
@@ -297,7 +295,7 @@ impl<'h> NativeCtx<'h> {
 
     /// The spelling of a keyword value, through this instance's memo and the
     /// static vocabulary. `None` if `v` is not a keyword or the spelling was
-    /// never learned (docs/impl/symbol.md § "The display memo").
+    /// never learned (docs/impl/symbol.md).
     pub fn keyword_spelling(&self, v: crate::value::Value) -> Option<String> {
         let hash = v.keyword_hash()?;
         crate::value::keyword::resolve_keyword_name(self.symbols(), hash).map(str::to_string)
@@ -352,10 +350,10 @@ impl<'h> NativeCtx<'h> {
         self.vm().unicode_generation()
     }
 
-    /// Where this instance caches its compiled stdlib — what a worker spawned
-    /// from here inherits.
-    pub fn stdlib_cache(&self) -> crate::compiler::stdlib_cache::StdlibCache {
-        self.vm().stdlib_cache().clone()
+    /// What a worker spawned from here boots from: this instance's image, or
+    /// its stdlib cache (docs/impl/image/boot.md).
+    pub fn worker_boot(&self) -> crate::runtime::WorkerBoot {
+        self.vm().worker_boot().clone()
     }
 }
 

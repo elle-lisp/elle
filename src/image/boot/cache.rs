@@ -13,10 +13,35 @@
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
+use crate::image::{ImageError, ImageSource};
 use crate::symbol::SymbolTable;
 use crate::value::fiberheap::FiberHeap;
 
 use super::{sources_digest, BootImage};
+
+/// A boot image held open: the descriptor a hydration maps, and the path it was
+/// opened at, which a refusal names.
+///
+/// A worker hydrates from its parent's, so the descriptor travels rather than
+/// the path (docs/impl/image/boot.md). A prune or a rename over the path after
+/// this opened it changes nothing a hydration maps.
+#[derive(Debug)]
+pub(crate) struct OpenImage {
+    source: ImageSource,
+    origin: PathBuf,
+}
+
+impl OpenImage {
+    /// The descriptor and offset a hydration maps.
+    pub(crate) fn source(&self) -> &ImageSource {
+        &self.source
+    }
+
+    /// The path the image was opened at.
+    pub(crate) fn origin(&self) -> &Path {
+        &self.origin
+    }
+}
 
 impl BootImage {
     /// The directory this policy reads and writes, or `None` when it is off.
@@ -48,6 +73,21 @@ impl BootImage {
     /// could share.
     pub(crate) fn path_for(&self, exe: Option<&Executable>) -> Option<PathBuf> {
         Some(self.dir()?.join(exe?.image_name(&sources_digest())))
+    }
+
+    /// The image file this policy names, held open, or `None` when there is no
+    /// file to read. A file that exists and does not open is reported, for the
+    /// reason a refused hydration is.
+    pub(crate) fn open(&self) -> Option<OpenImage> {
+        let origin = self.path()?;
+        match ImageSource::open(&origin) {
+            Ok(source) => Some(OpenImage { source, origin }),
+            Err(ImageError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => {
+                eprintln!("[boot-image] {}: {e}", origin.display());
+                None
+            }
+        }
     }
 }
 
@@ -93,8 +133,12 @@ impl Executable {
     }
 }
 
-/// Store `cctx`'s boot state under `image`'s policy, and prune every other
-/// image in its directory.
+/// Store `cctx`'s boot state under `image`'s policy, prune every other image
+/// in its directory, and answer the stored image, held open.
+///
+/// The answer is the file this store wrote, whatever renames over its path
+/// later, which is what lets the storing instance hand it to its workers
+/// (docs/impl/image/boot.md).
 ///
 /// A failure is reported and ignored: the cache is a speedup, and a source
 /// boot is always the fallback. It is reported rather than swallowed because a
@@ -105,18 +149,30 @@ pub(crate) fn store(
     symbols: &mut SymbolTable,
     cctx: &crate::pipeline::CompileCtx,
     image: &BootImage,
-) {
-    let Some(path) = image.path() else { return };
+) -> Option<OpenImage> {
+    let path = image.path()?;
     let dir = path
         .parent()
         .expect("a cache path always names its directory");
     if let Err(e) = std::fs::create_dir_all(dir) {
         eprintln!("[boot-image] mkdir failed: {e}");
-        return;
+        return None;
     }
-    match super::dump(heap, symbols, cctx, &path) {
-        Ok(()) => prune_superseded(dir, &path),
-        Err(e) => eprintln!("[boot-image] store failed: {e}"),
+    let stored = super::dump(heap, symbols, cctx, &path)
+        .and_then(|file| ImageSource::at(file, 0))
+        .map(|source| OpenImage {
+            source,
+            origin: path.clone(),
+        });
+    match stored {
+        Ok(open) => {
+            prune_superseded(dir, &path);
+            Some(open)
+        }
+        Err(e) => {
+            eprintln!("[boot-image] store failed: {e}");
+            None
+        }
     }
 }
 
