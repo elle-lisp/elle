@@ -8,6 +8,7 @@
 use super::*;
 
 mod region;
+pub(crate) mod units;
 
 /// A heap and arena for a test that builds nodes by hand. Keep the returned
 /// `SyntaxHeap` alive for as long as the nodes.
@@ -268,8 +269,10 @@ fn test_expander_fresh_scope() {
     let scope1 = expander.fresh_scope();
     let scope2 = expander.fresh_scope();
     assert_ne!(scope1, scope2);
-    assert_eq!(scope1, ScopeId::test(1));
-    assert_eq!(scope2, ScopeId::test(2));
+    // An expander no compile began a unit on still mints under a tag of its
+    // own, from zero, and never the primitive scope.
+    assert_eq!((scope1.count(), scope2.count()), (0, 1));
+    assert_ne!(scope1, ScopeId::PRIMITIVE);
 }
 
 #[test]

@@ -320,13 +320,6 @@ impl CompileCtx {
         self.expander.macros()
     }
 
-    /// The next hygiene scope id this instance's expander will mint. Read by
-    /// the pin that an image boot mints the scopes a source boot would.
-    #[cfg(test)]
-    pub(crate) fn scope_counter(&self) -> u32 {
-        self.expander.scope_counter()
-    }
-
     /// The core and stdlib export aggregates this instance booted with, the
     /// root set a boot image carries.
     pub(crate) fn boot_exports(&self) -> BootExports {
