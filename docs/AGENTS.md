@@ -23,7 +23,7 @@ Up: [..](../AGENTS.md)
 - [empty-list.md](empty-list.md) — **Empty list vs nil** `nil` and `()` are two completely different things.
 - [epochs.md](epochs.md) — **Epochs** Epochs are Elle's mechanism for making breaking changes to the language while preserving backwards compatibility.
 - [errors.md](errors.md) — **Error Handling** Errors in Elle are values signaled via fibers.
-- [ffi.md](ffi.md) — **FFI: Architecture Reference** Elle's FFI enables calling C functions from Elle code.
+- [ffi.md](ffi.md) — **FFI** Elle calls C functions through libffi, with keyword type descriptors, reified signatures and explicit marshalling.
 - [fmt.md](fmt.md) — **elle fmt** Opinionated code formatter for Elle.
 - [functions.md](functions.md) — **Functions** How to make, call, compose and inspect functions, and how deep recursion may go.
 - [intrinsics.md](intrinsics.md) — **Intrinsics** Intrinsics are silent bytecode operations prefixed with `%`.

@@ -1,35 +1,35 @@
-# FFI: Architecture Reference
+# FFI
 
-Elle's FFI enables calling C functions from Elle code. The design is inspired
-by Janet's FFI: keyword-based type descriptors, reified signatures, and
-explicit marshalling. The backend uses the `libffi` crate (middle-level API)
+<!-- audited: 2026-10-13 -->
+
+Elle calls C functions through libffi, with keyword type descriptors, reified signatures and explicit marshalling.
+
+The design follows Janet's FFI. The implementation lives in
+[src/ffi](../src/ffi/AGENTS.md), which also documents the marshalling layer and
+its invariants. The primitives live in
+[src/primitives/loading.rs](../src/primitives/loading.rs) and
+[src/primitives/memory.rs](../src/primitives/memory.rs).
 
 ## Contents
 
-- [Quick Start](#quick-start)
-- [Library Lifetime](#library-lifetime)
-- [Type Descriptors](#type-descriptors)
-- [Compound Types](#compound-types)
+- [Quick start](#quick-start)
+- [Library lifetime](#library-lifetime)
+- [Type descriptors](#type-descriptors)
+- [Compound types](#compound-types)
 - [Signatures](#signatures)
-- [Calling C Functions](#calling-c-functions)
-- [Memory Management](#memory-management)
+- [Calling C functions](#calling-c-functions)
+- [Memory management](#memory-management)
 - [Callbacks](#callbacks)
-- [The `ffi/defbind` Macro](#the-ffidefbind-macro)
-- [Value::pointer()](#valuepointer)
-- [CIF Caching](#cif-caching)
-- [Error Handling](#error-handling)
-- [Signal System](#signal-system)
-- [Struct Marshalling](#struct-marshalling)
-- [Invariants](#invariants)
-for calling convention correctness across platforms.
-
-This document describes the implemented system.
+- [The `ffi/defbind` macro](#the-ffidefbind-macro)
+- [Pointers and NULL](#pointers-and-null)
+- [Errors](#errors)
+- [Signals and capabilities](#signals-and-capabilities)
 
 
-## Quick Start
+## Quick start
 
 ```lisp
-# Load the current process (dlopen(NULL)) — works on all platforms
+# Load the current process (dlopen(NULL))
 (def libc (ffi/native nil))
 
 # Look up a symbol
@@ -47,27 +47,32 @@ This document describes the implemented system.
 ```
 
 
-## Library Lifetime
+## Library lifetime
 
-A library loaded by `ffi/native` is held in a **process-global registry**
-(`src/ffi/registry.rs`), deduplicated by canonical path, and its mapping is owned for
-the **process lifetime — never `dlclose`d** (the same discipline plugins use). The
-per-VM handle `ffi/native` returns is only a small id into this registry; symbol
-lookup (`ffi/lookup`) resolves through it.
+`ffi/native` holds a loaded library in a process-global registry
+([registry.rs](../src/ffi/registry.rs)), one entry per canonical path. The
+registry never calls `dlclose`, so the mapping lasts for the life of the
+process, as a plugin's does. The handle `ffi/native` returns is a per-VM id
+into this registry, and `ffi/lookup` resolves symbols through it.
 
-This makes FFI safe across `os/spawn` worker threads. Many C libraries (libgit2 via
-OpenSSL, …) register thread-local destructors with `pthread_key_create`; if such a
-library were unmapped when a worker that used it exited, glibc's thread-exit
-destructor walk would jump into unmapped code and crash the process. Because the
-mapping is never unmapped, that destructor always runs against mapped code — **no
-per-worker teardown is required**.
+This makes FFI safe across worker threads. Many C libraries, for example
+libgit2 through OpenSSL, register thread-local destructors with
+`pthread_key_create`. If such a library were unmapped when a worker that used
+it exited, glibc's thread-exit destructor walk would jump into unmapped code
+and crash the process. The mapping stays, so the destructor always runs
+against mapped code, and a worker needs no teardown.
 
-Teardown is **optional and explicit**. A program may declare a library's ordered
-teardown — a zero-arg C symbol to call (e.g. `git_libgit2_shutdown`) — and run all
-declared teardowns when *it* decides it is safe (its worker threads have quiesced).
-`ffi/on-unload` resolves the symbol immediately, so a typo errors at declaration
-rather than silently at shutdown; `ffi/run-teardowns` calls every declared symbol
-in reverse load order:
+Library loading needs Unix: Linux, macOS or a BSD. On any other platform,
+`ffi/native` signals an error. A Linux-style spec such as `"libm.so.6"` is
+rewritten to the host's native form (`.dylib` or `.dll`) before loading, so
+the same call is portable.
+
+Teardown is optional and explicit. A program may declare a library's ordered
+teardown, a zero-argument C symbol such as `git_libgit2_shutdown`. It runs the
+declared teardowns when it decides that teardown is safe, after its worker
+threads have quiesced. `ffi/on-unload` resolves the symbol at once, so a typo
+errors at declaration and not at shutdown. `ffi/run-teardowns` calls every
+declared symbol in reverse load order:
 
 ```lisp
 # Guarded because libgit2 may not be installed; when it is, this loads it,
@@ -80,24 +85,25 @@ in reverse load order:
     (ffi/run-teardowns)))                           # run them (reverse load order)
 ```
 
-The runtime never runs teardowns automatically (a teardown like
+The runtime never runs a teardown by itself. A teardown such as
 `git_libgit2_shutdown` deletes the pthread key it created, which would race a
-detached worker still exiting), and teardown **never unmaps** the library — it stays
-for the process lifetime regardless, which is what keeps a late worker's destructor
-safe. Skipping teardown entirely is always safe.
+detached worker that is still exiting. A teardown also never unmaps the
+library, which is what keeps a late worker's destructor safe. A program that
+skips teardown is always safe.
 
 
-## Type Descriptors
+## Type descriptors
 
-C types are described by keywords at the Elle level. The `TypeDesc` enum in
-`src/ffi/types.rs` maps each keyword to its C equivalent.
+A keyword names each C type. `TypeDesc` in
+[types.rs](../src/ffi/types.rs) maps each keyword to its C equivalent.
 
 ### Primitive types
 
 | Keyword | C type | Size (bytes) | Notes |
 |---------|--------|-------------|-------|
-| `:void` | `void` | — | Return type only# not valid for arguments |
-| `:bool` | `_Bool` (as `int`) | 4 | Truthy/falsy conversion |
+| `:void` | `void` | — | Return type only, not valid for an argument |
+| `:bool` | `bool` (`_Bool`) | 1 | See [Booleans](#booleans) |
+| `:bool32` | `int32_t` used as a boolean | 4 | See [Booleans](#booleans) |
 | `:i8` | `int8_t` | 1 | |
 | `:u8` | `uint8_t` | 1 | |
 | `:i16` | `int16_t` | 2 | |
@@ -106,20 +112,50 @@ C types are described by keywords at the Elle level. The `TypeDesc` enum in
 | `:u32` | `uint32_t` | 4 | |
 | `:i64` | `int64_t` | 8 | |
 | `:u64` | `uint64_t` | 8 | |
-| `:float` | `float` | 4 | Accepts int or float values |
-| `:double` | `double` | 8 | Accepts int or float values |
+| `:float` | `float` | 4 | Accepts an integer or a float |
+| `:double` | `double` | 8 | Accepts an integer or a float |
 | `:int` | `int` | platform | Typically 4 bytes |
 | `:uint` | `unsigned int` | platform | |
 | `:long` | `long` | platform | 8 bytes on LP64 |
 | `:ulong` | `unsigned long` | platform | |
-| `:char` | `char` | 1 | Signed on most platforms |
+| `:char` | `char` | 1 | Read as signed |
 | `:uchar` | `unsigned char` | 1 | |
 | `:short` | `short` | platform | Typically 2 bytes |
 | `:ushort` | `unsigned short` | platform | |
 | `:size` | `size_t` | platform | 8 bytes on 64-bit |
 | `:ssize` | `ptrdiff_t` | platform | 8 bytes on 64-bit |
-| `:ptr` | `void *` | platform | Maps to `Value::pointer()` or nil for NULL |
-| `:string` | `const char *` | platform | Elle string copied to CString# interior nulls are an error |
+| `:ptr` | `void *` | platform | A pointer, or nil for NULL |
+| `:string` | `const char *` | platform | See [Calling C functions](#calling-c-functions) |
+
+### Booleans
+
+`:bool` is the C99 `bool`, which C also spells `_Bool`. It is one byte. A
+write stores 1 for a truthy value and 0 for a falsy one. A read takes any
+nonzero byte as `true`.
+
+Declare a C99 `bool` return as `:bool`, never as `:int`. The x86-64 and
+AArch64 calling conventions define only the low byte of a returned `bool`. A
+compiler may leave other bits in the rest of the register. Read as an `int`,
+a function that returned `false` can look like it returned `true`.
+
+`:bool32` is a boolean held in a 32-bit integer. GLib's `gboolean`, Win32's
+`BOOL` and Vulkan's `VkBool32` all have this shape. It is four bytes. A write
+stores 1 or 0. A read takes any nonzero value as `true`.
+
+```lisp
+(assert (= (ffi/size :bool) 1) ":bool is one byte")
+(assert (= (ffi/align :bool) 1) ":bool aligns to one byte")
+(assert (= (ffi/size :bool32) 4) ":bool32 is four bytes")
+(assert (= (ffi/size (ffi/struct [:u8 :bool :u8])) 3) "a :bool field packs like a byte")
+
+(def flags (ffi/malloc 4))
+(ffi/write flags :bool32 true)
+(assert (= (ffi/read flags :u32) 1) ":bool32 writes all four bytes")
+(ffi/write flags :u8 0)
+(ffi/write (ptr/add flags 1) :u8 255)
+(assert (= (ffi/read flags :bool) false) ":bool reads only its own byte")
+(ffi/free flags)
+```
 
 ### Type introspection
 
@@ -132,16 +168,17 @@ C types are described by keywords at the Elle level. The `TypeDesc` enum in
 ```
 
 
-## Compound Types
+## Compound types
 
 ### Structs
 
-`ffi/struct` creates a struct type descriptor from an array of field types.
-Fields are positional (unnamed) and follow C struct layout rules: alignment
-padding between fields, tail padding to the struct's alignment.
+`ffi/struct` makes a struct type descriptor from an array or a list of field
+types. Fields are positional and unnamed. The layout follows C: each field
+starts at the next offset aligned for it, and the size rounds up to the
+largest field alignment.
 
 ```lisp
-# struct { int32_t x; double y; }
+# struct { int32_t x, double y }
 (def point-type (ffi/struct [:i32 :double]))
 
 (ffi/size point-type)   # => 16  (4 + 4 padding + 8)
@@ -152,10 +189,9 @@ padding between fields, tail padding to the struct's alignment.
 (def outer (ffi/struct [:i64 inner]))    # 16 bytes
 ```
 
-Struct values are represented as Elle arrays. When marshalling to C, the
-array elements are written into a properly aligned buffer at the computed
-field offsets. When reading from C, the buffer is read back into an Elle
-array.
+A struct value is an Elle array, mutable or immutable, with one element per
+field. Marshalling to C writes each element at its field's offset. Reading
+from C builds an array of the fields.
 
 ```lisp
 # Write a struct to memory
@@ -167,14 +203,12 @@ array.
 (ffi/free buf)
 ```
 
-Constraints:
-- Structs must have at least one field
-- `:void` is not valid as a field type
-- Array length must match field count exactly
+A struct needs at least one field, and `:void` is not a valid field type. The
+array must hold exactly one element per field.
 
 ### Arrays
 
-`ffi/array` creates a fixed-size array type descriptor.
+`ffi/array` makes a fixed-size array type descriptor.
 
 ```lisp
 # int32_t[10]
@@ -184,15 +218,16 @@ Constraints:
 (ffi/align arr-type)  # => 4
 ```
 
-Array values are also represented as Elle arrays. Count must be positive
-and must match exactly when marshalling.
+An array value is also an Elle array. The count must be positive, and a value
+must hold exactly that many elements. An array of a one-byte integer type
+(`:u8`, `:i8`, `:uchar` or `:char`) reads back as `bytes`, and `ffi/write`
+also accepts `bytes` or `@bytes` for it.
 
 
 ## Signatures
 
-A signature describes a C function's calling convention, return type, and
-argument types. Created by `ffi/signature` and stored as a first-class
-Elle value (`HeapObject::FFISignature`).
+A signature describes a C function's calling convention, return type and
+argument types. `ffi/signature` makes one as a first-class value.
 
 ```lisp
 # Non-variadic: (return-type [arg-types...])
@@ -203,15 +238,15 @@ Elle value (`HeapObject::FFISignature`).
 (def printf-sig (ffi/signature :int [:ptr :int] 1))
 ```
 
-The third argument to `ffi/signature` is the number of fixed arguments for
-variadic functions. It must be in the range `[0, len(arg-types)]`. When
-omitted, the signature is non-variadic.
+The third argument is the number of fixed arguments of a variadic function.
+It must be in the range `[0, len(arg-types)]`. Without it, the signature is
+not variadic.
 
-Signatures accept both keywords (`:i32`) and compound type values (from
-`ffi/struct` or `ffi/array`) for argument and return types.
+A signature accepts keywords such as `:i32` and compound type values from
+`ffi/struct` or `ffi/array`, as argument types and as the return type.
 
 
-## Calling C Functions
+## Calling C functions
 
 `ffi/call` takes a function pointer, a signature, and the arguments:
 
@@ -231,32 +266,37 @@ The number of arguments must match the signature's argument count exactly.
 
 ### Argument marshalling
 
-Each Elle value is converted to C-typed storage based on the corresponding
-`TypeDesc`:
+`ffi/call` converts each argument to C storage of its declared type:
 
-- **Integers**: Range-checked and narrowed (e.g., `Value::int(256)` as `:i8`
-  is an error)
-- **Floats**: `:float` and `:double` accept both int and float values
-- **Booleans**: Truthy → 1, falsy → 0 (as `c_int`)
-- **Pointers**: `Value::pointer(addr)` or `nil` (→ NULL)
-- **Strings**: Copied to a `CString`# interior null bytes are an error
-- **Structs/arrays**: Elle array → aligned buffer with field-by-field marshalling
+- **Integers**: Range-checked and narrowed. Passing 256 as `:i8` is an error.
+- **Floats**: `:float` and `:double` accept an integer or a float.
+- **Booleans**: `:bool` and `:bool32` pass 1 for a truthy value and 0 for a
+  falsy one.
+- **Pointers**: A pointer, a pointer from `ffi/malloc`, or nil for NULL. A
+  freed pointer is an error.
+- **Strings**: Copied to a NUL-terminated C string that lives for the call.
+  Nil passes NULL, and a string with an interior NUL byte is an error.
+- **Structs and arrays**: An Elle array, written into an aligned buffer field
+  by field.
 
 ### Return value conversion
 
-C return values are converted back to Elle values:
+`ffi/call` converts the C return value to an Elle value:
 
-- Integer types → `Value::int()`
-- Float types → `Value::float()`
-- `:bool` → `Value::bool()`
-- `:void` → `Value::NIL`
-- `:ptr` / `:string` → `Value::pointer(addr)`
-- Struct/array → Elle array (read from aligned buffer)
+- An integer type returns an integer. A `:u64`, `:ulong` or `:size` above the
+  largest signed integer keeps its bit pattern and reads as negative.
+- `:float` and `:double` return a float.
+- `:bool` and `:bool32` return `true` or `false`.
+- `:void` returns nil.
+- `:ptr` returns a pointer, or nil for NULL.
+- `:string` returns the pointer, not a copy. Read it with `ffi/string`.
+- A struct returns an array of its fields. An array returns an array of its
+  elements, or `bytes` for a one-byte integer element type.
 
 
-## Memory Management
+## Memory management
 
-Manual memory management for C interop:
+C memory is managed by hand:
 
 ```lisp
 (def ptr (ffi/malloc 100))       # allocate 100 bytes
@@ -267,16 +307,18 @@ Manual memory management for C interop:
 
 | Primitive | Signature | Purpose |
 |-----------|-----------|---------|
-| `ffi/malloc` | `(size) → ptr` | Allocate C memory (via libc `malloc`) |
-| `ffi/free` | `(ptr) → nil` | Free C memory (via libc `free`)# nil is a no-op |
+| `ffi/malloc` | `(size) → ptr` | Allocate C memory with libc `malloc` |
+| `ffi/free` | `(ptr) → nil` | Free C memory with libc `free`. Nil is a no-op |
 | `ffi/read` | `(ptr type) → value` | Read a typed value from C memory |
 | `ffi/write` | `(ptr type value) → nil` | Write a typed value to C memory |
-| `ffi/string` | `(ptr [max-len]) → string\|nil` | Read a null-terminated C string# nil ptr → nil |
+| `ffi/string` | `(ptr [max-len]) → string\|nil` | Read a NUL-terminated C string. Nil gives nil |
 
-`ffi/string` reads a null-terminated UTF-8 string from a pointer. With an
-optional second argument, it reads at most that many bytes (stopping at the
-first null byte within that range). Returns nil for null pointers. Signals
-an error for non-UTF-8 data.
+A pointer from `ffi/malloc` knows when it is freed. Reading, writing or
+freeing it again is an error, and nothing frees it for you.
+
+`ffi/string` reads a NUL-terminated UTF-8 string from a pointer. With a second
+argument, it reads at most that many bytes, and stops at the first NUL byte in
+that range. Data that is not UTF-8 is an error.
 
 ```lisp
 (def str-ptr (ffi/malloc 16))
@@ -291,9 +333,8 @@ an error for non-UTF-8 data.
 
 ## Callbacks
 
-`ffi/callback` wraps an Elle closure as a C function pointer, enabling Elle
-functions to be passed to C APIs that expect function pointer arguments
-(e.g., `qsort` comparators, iteration callbacks).
+`ffi/callback` wraps an Elle closure as a C function pointer, for a C API that
+takes one: a `qsort` comparator, an iteration callback, and the like.
 
 ```lisp
 (def cmp-sig (ffi/signature :int [:ptr :ptr]))
@@ -309,49 +350,26 @@ functions to be passed to C APIs that expect function pointer arguments
 (ffi/callback-free cb-ptr)
 ```
 
-### How it works
+The closure's arity must admit the signature's argument count. A callback
+converts each C argument as `ffi/call` converts a return value.
 
-1. `create_callback` builds a libffi closure with a trampoline function
-2. The Elle closure and signature are `Box::leak`'d as `CallbackData` so
-   the trampoline can reference them with `'static` lifetime
-3. When C code calls the function pointer, `trampoline_callback` fires:
-   - Reads C arguments into Elle values via `read_value_from_buffer`
-   - Uses the VM captured in `CallbackData` at `create_callback`
-   - Builds a closure environment and executes the bytecode
-   - Writes the return value back to the libffi result buffer
-4. The `ActiveCallback` is stored in `FFISubsystem::callbacks` (keyed by
-   code pointer address) to keep the libffi closure alive
+A callback has these limits:
 
-### Arity validation
-
-`ffi/callback` validates that the closure's arity matches the signature's
-argument count. Exact arity must match# `AtLeast(n)` requires
-`sig.args.len() >= n`# `Range(min, max)` requires the count to be in range.
-
-### Limitations
-
-- **Single-threaded**: Callbacks can only be invoked under the VM that
-  created them. The trampoline uses the VM captured in `CallbackData`.
-- **Error handling**: If the Elle closure signals an error, the trampoline
-  writes zeros to the result buffer and stashes the error on that VM's FFI
-  subsystem (`set_callback_error`). `ffi/call` drains it with
-  `take_callback_error()` after the C function returns and propagates the
-  error to the Elle caller.
-- **No variadic callbacks**: `create_callback` rejects signatures with
-  `fixed_args` set. libffi closures don't support variadic calling
-  conventions.
-- **No yield/suspend**: Yielding or signaling inside a callback is not
-  supported. The trampoline treats unexpected signals as errors.
-- **Manual lifetime**: Callbacks must be explicitly freed with
-  `ffi/callback-free` when no longer needed. The leaked `CallbackData`
-  is recovered and dropped at that point.
+- **One VM**: Only the VM that made a callback can run it, so C code must call
+  it on the thread that drives that VM.
+- **Errors**: When the closure signals an error, C receives a zero return
+  value. `ffi/call` raises the error after the C function returns.
+- **No variadic signature**: `ffi/callback` rejects a variadic signature,
+  because a libffi closure cannot take one.
+- **No yield**: A yield or any other signal from the closure becomes an error.
+- **Manual lifetime**: Free a callback with `ffi/callback-free` when C no
+  longer holds it.
 
 
-## The `ffi/defbind` Macro
+## The `ffi/defbind` macro
 
-`ffi/defbind` is a prelude macro that provides convenient FFI function
-binding. It looks up the symbol, creates a signature, and defines a
-wrapper function — all at definition time.
+`ffi/defbind` is a prelude macro that binds a C function by name. It looks up
+the symbol, makes the signature, and defines a wrapper function.
 
 ```lisp
 # Usage: (ffi/defbind name lib "c-name" return-type [arg-types...])
@@ -365,9 +383,8 @@ wrapper function — all at definition time.
 (strlen "hello")  # => 5
 ```
 
-### Expansion
-
-`(ffi/defbind abs libc "abs" :int [:int])` expands to:
+`(ffi/defbind abs libc "abs" :int [:int])` expands to this, with a generated
+name for each parameter:
 
 ```lisp
 (def abs
@@ -376,142 +393,44 @@ wrapper function — all at definition time.
     (fn (a0) (ffi/call ptr__ sig__ a0))))
 ```
 
-The pointer lookup and signature creation happen once at definition time.
-The generated function captures them in its closure environment, so each
-call only pays for marshalling and the libffi dispatch.
+The lookup and the signature happen once, when the binding is defined. The
+wrapper captures both, so a call pays only for marshalling and the libffi
+dispatch.
 
 
-## Value::pointer()
+## Pointers and NULL
 
-C pointers are represented as tagged-union values with a dedicated pointer
-tag and a `u64` payload holding the raw address:
+A C pointer is an immediate value that holds the raw address. A C NULL is nil:
 
-```
-CPointer: (tag: POINTER_TAG, payload: raw C pointer address)
-```
+- Nil passes NULL for a `:ptr` or `:string` argument.
+- A NULL `:ptr` return value is nil.
+- `ffi/free` on nil is a no-op, as C `free(NULL)` is.
+- `ffi/string` on nil returns nil.
+- `ffi/read` and `ffi/write` on nil are errors.
 
-- `Value::pointer(addr)` — create from a `usize` address
-- `value.as_pointer()` — extract as `Option<usize>`
-- `value.is_nil()` — nil is accepted as NULL in pointer contexts
-
-### NULL semantics
-
-- Elle `nil` marshals to C `NULL` for `:ptr` arguments
-- C `NULL` return values become `Value::pointer(0)` (not nil)
-- `ffi/free` on nil is a no-op (matches C `free(NULL)` semantics)
-- `ffi/string` on nil returns nil
-- `ffi/read` on nil signals an error
+`ptr/add`, `ptr/diff`, `ptr/to-int` and `ptr/from-int` do pointer arithmetic
+and conversion. `(ptr/from-int 0)` is nil.
 
 
-## CIF Caching
+## Errors
 
-A CIF (Call Interface) describes the calling convention for a specific
-function signature. Preparing a CIF involves libffi setup work. To avoid
-repeating this on every call, CIFs are cached on the signature value itself.
+Each FFI primitive signals its errors as error structs. The kinds:
 
-`HeapObject::FFISignature(Signature, RefCell<Option<Cif>>)` stores the
-signature and an optional cached CIF. `Value::get_or_prepare_cif()` lazily
-prepares the CIF on first access and returns a `Ref` to the cached value
-on subsequent accesses.
-
-This means:
-- First `ffi/call` with a signature: prepare CIF + call
-- Subsequent calls with the same signature value: reuse cached CIF
-- Different signature values (even with identical types) have independent caches
+| Error kind | Cause |
+|------------|-------|
+| `arity-error` | A primitive got the wrong number of arguments, or a callback closure cannot take the signature's arguments |
+| `type-error` | An argument has the wrong type, for example an integer where a pointer belongs, or `ffi/call` got nil as the function |
+| `argument-error` | `ffi/read` or `ffi/write` got nil, `ffi/malloc` got a size that is not positive, `ffi/struct` or `ffi/array` got no fields, a void field or a count that is not positive, or the fixed-argument count of `ffi/signature` is out of range |
+| `use-after-free` | A pointer from `ffi/malloc` was used after `ffi/free` |
+| `double-free` | `ffi/free` got a pointer that it already freed |
+| `ffi-error` | A type keyword is unknown, a library or symbol does not load, `ffi/malloc` failed, `ffi/call` cannot marshal an argument or got the wrong argument count, `ffi/read` or `ffi/write` got `:void`, `ffi/write` got `:string`, `ffi/string` read data that is not UTF-8, `ffi/callback` got a variadic signature, or `ffi/callback-free` found no callback |
 
 
-## Error Handling
+## Signals and capabilities
 
-All FFI primitives return `(SignalBits, Value)`. Errors are signaled via
-`SIG_ERROR` with an error struct.
-
-| Error kind | Signaled by | Cause |
-|------------|-----------|-------|
-| `arity-error` | All primitives | Wrong number of arguments |
-| `type-error` | All primitives | Wrong argument type (e.g., int where pointer expected) |
-| `ffi-error` | `ffi/native` | Library not found or load failure |
-| `ffi-error` | `ffi/lookup` | Symbol not found in library |
-| `ffi-error` | `ffi/call` | Argument count mismatch, marshalling failure |
-| `ffi-error` | `ffi/read` | Cannot read void# null pointer |
-| `ffi-error` | `ffi/write` | Cannot write void# null pointer |
-| `ffi-error` | `ffi/string` | Not valid UTF-8 |
-| `ffi-error` | `ffi/callback` | Variadic signature |
-| `ffi-error` | `ffi/callback-free` | No callback at address |
-| `argument-error` | `ffi/malloc` | Size not positive |
-| `argument-error` | `ffi/struct` | Empty struct# void field |
-| `argument-error` | `ffi/array` | Non-positive count# void element |
-| `argument-error` | `ffi/signature` | `fixed_args` out of range |
-
-Integer arguments are range-checked: passing 256 as `:i8` signals an
-`ffi-type-error` from the marshalling layer.
-
-
-## Signal System
-
-FFI primitives carry the `Signal::ffi_errors()` signal, which is
-`SIG_FFI | SIG_ERROR`. This means:
-
-- The signal system knows these functions call foreign code (`SIG_FFI`)
-- They may also error (`SIG_ERROR`)
-- Pure primitives like `ffi/signature`, `ffi/struct`, `ffi/array`,
-  `ffi/size`, `ffi/align` carry `Signal::errors()` (just `SIG_ERROR`)
-
-`SIG_FFI` is bit 4 (value 16) in the signal bitmask. It is used by the
-signal system for compile-time tracking but is not a runtime signal — FFI
-calls don't emit `SIG_FFI` at runtime.
-
-
-## Struct Marshalling
-
-When passing structs to C or reading them back, the marshalling layer
-computes C-compatible field layout:
-
-1. **Field offsets**: Each field is placed at the next address aligned to
-   its alignment requirement. `StructDesc::field_offsets()` computes this.
-
-2. **Tail padding**: The total struct size is rounded up to the struct's
-   alignment (max alignment of any field).
-
-3. **Nested structs**: Alignment of a struct is the max alignment of its
-   fields. Nested structs are laid out recursively.
-
-Example: `struct { int8_t a# int32_t b# }`
-- Field `a` at offset 0 (size 1, align 1)
-- 3 bytes padding
-- Field `b` at offset 4 (size 4, align 4)
-- Total size: 8 (no tail padding needed, already aligned to 4)
-
-The `AlignedBuffer` type provides heap-allocated storage with the correct
-alignment for the struct. For arguments, `write_value_to_buffer` writes
-each field at its computed offset. For return values, `read_value_from_buffer`
-reads each field back. String fields within structs require special handling:
-the `CString` must outlive the buffer, so it's stored in a `MarshalledArg`
-that's kept alive alongside the buffer.
-
-
-## Invariants
-
-1. **MarshalledArg outlives its Arg.** The libffi `Arg` references storage
-   inside `MarshalledArg`. Dropping the `MarshalledArg` before the call
-   completes is undefined behavior.
-
-2. **Callbacks are single-threaded.** The trampoline uses the VM captured
-   in `CallbackData` at creation. Cross-thread callback invocation will fail.
-
-3. **CIF caching is per-value, not per-type.** Two `ffi/signature` calls
-   with identical types produce two independent signature values with
-   independent CIF caches.
-
-4. **Struct/array values are Elle arrays.** The marshalling layer expects
-   Elle arrays with exactly the right number of elements. Mismatches are
-   errors, not silent truncation or padding.
-
-5. **Platform-guarded loading.** Library loading requires Unix
-   (`#[cfg(unix)]` — Linux, macOS, BSD). Non-Unix platforms get error stubs.
-   Linux-style `.so` specs are rewritten to the host's native form
-   (`.dylib`/`.dll`) by `library_candidates` before loading (see
-   [Loading Libraries](#loading-libraries)), so the same call is portable.
-
-6. **No automatic memory management.** `ffi/malloc` memory must be
-   explicitly freed with `ffi/free`. Callbacks must be freed with
-   `ffi/callback-free`. There is no GC integration for C memory.
+`ffi/signature`, `ffi/struct`, `ffi/array`, `ffi/size`, `ffi/align` and
+`ffi/run-teardowns` signal only `:error`. Every other `ffi/` primitive also
+carries `:ffi`, so the analyzer knows that a function calls foreign code or
+touches C memory. A parent fiber withholds the `:ffi` capability with
+`:deny |:ffi|`, and a denied primitive does not run
+([capabilities](signals/capabilities.md)).
