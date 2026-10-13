@@ -1,21 +1,21 @@
 (elle/epoch 15)
-# audited: 2026-10-11
+# audited: 2026-10-13
 # The runner's ledger, part 1 of 2: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/impl/abort-wait-lists.lisp" :objects 805]
-["tests/impl/apply-tail-linear.lisp" :objects 237]
+["tests/impl/apply-tail-linear.lisp" :objects 223]
 ["tests/impl/arena-count.lisp" :objects 178]
 ["tests/impl/arena-reclaim-counters.lisp" :objects 353]
 ["tests/impl/arena.lisp" :objects 1267]
 ["tests/impl/barrier.lisp" :objects 241]
 ["tests/impl/begin-capture-cell-uaf.lisp" :objects 92]
 ["tests/impl/branch-phi-guard-reeval.lisp" :objects 79]
-["tests/impl/bytes-linear.lisp" :objects 382]
+["tests/impl/bytes-linear.lisp" :objects 324]
 ["tests/impl/call-arg-across-loop.lisp" :objects 316]
 ["tests/impl/caps-spawn-gpu.lisp" :objects 132]
 ["tests/impl/compile-analyze-model.lisp" :objects 136]
 ["tests/impl/compile-primitives.lisp" :objects 334]
-["tests/impl/concat-linear.lisp" :objects 388]
+["tests/impl/concat-linear.lisp" :objects 330]
 ["tests/impl/depth-cap.lisp" :objects 180]
 ["tests/impl/dissolution-capture-fuse.lisp" :objects 774]
 ["tests/impl/dissolution-count-fuse.lisp" :objects 743]
