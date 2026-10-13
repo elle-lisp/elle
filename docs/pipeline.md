@@ -164,7 +164,20 @@ does not settle.
 A function body seeds a `def` only as the `def` is reached. A lambda that
 calls a sibling defined later in the same body reads no seed for it. It takes
 the unknown-callee signal instead, which is sound and may be wider than the
-sibling's.
+sibling's. Mutual recursion between siblings takes it at the call to the later
+one. A call to an earlier sibling reads that sibling's signal:
+
+```lisp
+(defn outer-bits [src]
+  (get (compile/signal (compile/analyze src) :outer) :bits))
+
+(def later (outer-bits "(defn outer [] (defn f [] (g)) (defn g [] (yield 1)) (f))"))
+(def earlier (outer-bits "(defn outer [] (defn g [] (yield 1)) (defn f [] (g)) (f))"))
+(def mutual (outer-bits "(defn outer [] (defn f [n] (if (= n 0) 0 (g (- n 1)))) (defn g [n] (yield n) (f n)) (f 3))"))
+(assert (has? later :io) "a call to a later sibling takes every bit")
+(assert (has? mutual :io) "mutual recursion between siblings takes every bit")
+(assert (= earlier |:yield|) "a call to an earlier sibling reads its signal")
+```
 
 The inferred signals are data a program can query: `compile/signal`, the
 [portrait](analysis/portrait.md), and the [MCP server](mcp.md) read them.
