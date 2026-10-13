@@ -1,6 +1,7 @@
-// audited: 2026-10-07
-// src/pipeline/AGENTS.md
+// audited: 2026-10-13
 //! `CompileCtx`: one instance's compile-time state.
+//!
+//! src/pipeline/AGENTS.md
 //!
 //! A macro-expansion VM, the prelude/core `Expander`, the `PrimitiveMeta`
 //! (primitives + core.lisp + stdlib exports + host bindings), the REPL layer,
@@ -324,14 +325,6 @@ impl CompileCtx {
     /// (docs/impl/image/boot.md).
     pub(crate) fn macros(&self) -> &HashMap<String, crate::syntax::MacroDef> {
         self.expander.macros()
-    }
-
-    /// The next hygiene scope id this instance's expander will mint. Read by
-    /// the pin that an image boot mints the scopes a source boot would
-    /// (docs/impl/image/boot.md).
-    #[cfg(test)]
-    pub(crate) fn scope_counter(&self) -> u32 {
-        self.expander.scope_counter()
     }
 
     /// The core and stdlib export aggregates this instance booted with — the
