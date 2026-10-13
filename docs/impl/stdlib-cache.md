@@ -5,11 +5,12 @@
 A start that finds the compiled standard library on disk deserializes it instead of compiling it again.
 
 Without the cache, every process start compiles
-[stdlib.lisp](../../src/stdlib.lisp) (about 3300 lines). The `compile_file` front
-end (expand → analyze → regions → lower → freeze → emit) is what boot spends its
-time on; executing the compiled artifact costs a few milliseconds. The front end is **deterministic**: same source, same elle binary
-→ same bytecode. This design turns that work into a one-time cost by serializing
-the compiled code unit to disk, so later processes deserialize instead of
+[stdlib.lisp](../../src/stdlib.lisp) (about 3300 lines). The `compile_file`
+front end (expand → analyze → regions → lower → freeze → emit) is what boot
+spends its time on; executing the compiled artifact costs a few milliseconds.
+The front end is **deterministic**: same source, same elle binary → same
+bytecode. This design turns that work into a one-time cost by serializing the
+compiled code unit to disk, so later processes deserialize instead of
 recompiling.
 
 ## High-level flow
@@ -43,9 +44,9 @@ cache_key = hash(stdlib source, build identity, FORMAT_VERSION,
   compile stdlib differently the moment the emitter or a pass changes. A key
   blind to the rebuild hands every runtime that reads the cache, the one in
   each test included, bytecode the previous binary produced. A test failure
-  then stops implicating the branch that caused it. It also covers the ids `prim_id_of`
-  appends outside the canonical tables (trait methods, FFI callbacks), which
-  the table identity below cannot see. A binary that cannot identify itself
+  then stops implicating the branch that caused it. It also covers the ids
+  `prim_id_of` appends outside the canonical tables (trait methods, FFI
+  callbacks), which the table identity below cannot see. A binary that cannot identify itself
   gets no cache at all rather than sharing one.
 - **FORMAT_VERSION**: a hard version number bumped manually on incompatible
   layout changes; validated on load.
@@ -74,11 +75,11 @@ wrote a cache from the instance that read it.
 cache that silently never hits still yields a working runtime, so behaviour
 alone cannot distinguish the two; the tests assert on this instead.
 
-The boot image's warm cache is on by default, and it comes first. An instance
-that hydrates an image reads no stdlib cache, and one that misses compiles so
-that it can store an image ([boot.md](image/boot.md)). This cache's readers are
-therefore every instance that boots with the image off, and every `sys/spawn`
-worker of an instance that holds no image.
+The boot image comes first: the embedded blob, then the warm cache
+([boot.md](image/boot.md)). An instance that hydrates an image reads no stdlib
+cache, and one that misses compiles so that it can store an image. This cache's
+readers are therefore every instance that boots with the image off, and every
+`sys/spawn` worker of an instance that holds no image.
 
 A worker of an instance with no image builds its own runtime on a new thread
 and compiles its stdlib there, so it caches too. It reaches the spawning
@@ -193,7 +194,7 @@ The JIT compiles from the LIR a closure's code payload carries. If the cache
 dropped LIR, every stdlib function would run **interpreted forever** (no
 LIR → never submitted to the JIT worker) — a silent runtime regression, worse
 than not caching. Each template therefore stores its frozen LIR
-([lir.md](lir.md) § "The frozen form"): the `LirCode` records verbatim, and the
+([lir.md](lir.md)): the `LirCode` records verbatim, and the
 values its `ValueConst` instructions load as `SendValue`s beside it. A closure
 among those values interns into the same table as the template's constants, so
 it is stored once. The frozen function's docstring is not stored with the LIR:
@@ -245,8 +246,8 @@ travel as `SendKey`, [the owning key form](values.md), which owns its bytes and
 derives serde directly. A symbol or keyword key travels as its name hash, which
 names the same symbol in the loading process. An identity key has no `SendKey`
 form and is refused, which the cache layer turns into a miss. Heap `Value`s are
-rejected too: compound literals in the constant pool lower to `MaterializeConst` templates at
-compile time and never enter the pool.
+rejected too: compound literals in the constant pool lower to
+`MaterializeConst` templates at compile time and never enter the pool.
 
 ## Integration point
 
@@ -291,9 +292,9 @@ they move with the machine and with every change to a front-end pass.
   asserted in the release-mode boot benchmark, since debug compile time masks
   the difference.
 - `a_cache_hit_leaves_no_unexplained_references`
-  ([tests/region_process_teardown](../../tests/region_process_teardown.rs)): a hit must leave the same post-teardown
-  residue a compiled stdlib leaves, with nothing pinned from outside the region
-  graph.
+  ([tests/region_process_teardown](../../tests/region_process_teardown.rs)): a
+  hit must leave the same post-teardown residue a compiled stdlib leaves, with
+  nothing pinned from outside the region graph.
 
 ## Trade-offs
 

@@ -21,7 +21,7 @@ code, and each deletes image machinery
    sorted-container re-sort hazard, the `symbol_names` maps, and `send`'s
    re-interning.
 2. **struct** — landed. Region-native immutable struct payloads and keys
-   ([values](../values.md) § "Struct keys"); deleted the per-probe key
+   ([values](../values.md)); deleted the per-probe key
    allocation and the owned-key arms the dumper would have had to encode.
 3. **template** — landed. The blueprint / payload / header split
    ([code objects](../region/template.md)); deleted the per-creation
@@ -69,7 +69,7 @@ Then the image milestones:
    - syntax, with the file table its spans need and the scope watermark a
      fresh expander must mint above;
    - the scrub and guardfree pins over a hydrated region.
-7. **boot** — in progress. Landed so far:
+7. **boot** — landed:
    - the primitive table that remaps a native-fn by name, and the user
      traitsets it makes dumpable;
    - the reconstruction stream — which the default trait tables need before
@@ -77,7 +77,7 @@ Then the image milestones:
    - closures and closure templates in the body. The payload crosses whole
      and shared, and the header hydrates without its blueprint. The code
      objects a `MakeClosure` indexes cross as the payload's child table
-     ([sealing.md](sealing.md) § "A child code object crosses as a header").
+     ([sealing.md](sealing.md)).
      The defining span rides on the payload, so `meta/origin` answers after a
      boot from image;
    - cell snapping. A compiled forward cell crosses as its content when its
@@ -105,14 +105,16 @@ Then the image milestones:
    - the interval table. A hydrated region's pool records the interval its
      pages tile, and the store reads its hydrated regions before the probe
      ladder. So a pointer into the image resolves with a range check
-     ([image.md](../image.md) § "Pointer resolution must not regress").
+     ([image.md](../image.md)).
      Through the ladder, a pointer into a 4 MiB image page reads ten candidate
      headers on a 4 KiB host before the eleventh validates;
    - per-worker hydration — a `sys/spawn` or `sys/spawn-vm` worker hydrates
      the descriptor its parent hydrated, and the language server and the WASM
-     entry's host runtime boot under the process policy ([boot.md](boot.md)).
-
-   Still to land: the embedded blob.
+     entry's host runtime boot under the process policy ([boot.md](boot.md));
+   - the embedded blob — a release `make elle` builds twice and embeds the
+     image the first build dumped. A start maps the blob from the file that
+     holds it, or hydrates a copy when that file's bytes are not the blob's
+     ([boot.md](boot.md)).
 8. **environment** — `image/save` and `image/load`, manifest deltas over
    boot, mutable side-stream.
 
@@ -149,9 +151,8 @@ Then the image milestones:
 
     Freeing a code object's region frees its LIR, the payload's pages grow by
     the LIR it carries, and the leak suite stays green with no carve-out. Two
-    dumps of
-    a graph whose closures carry LIR write one file, whatever the pad bytes of
-    its records held. The verifier refuses an LIR slice whose extent leaves the
+    dumps of a graph whose closures carry LIR write one file, whatever the pad
+    bytes of its records held. The verifier refuses an LIR slice whose extent leaves the
     image, naming the field. A hydrated closure sent to a worker carries its
     LIR, and the stdlib-cache reload keeps it.
   - **lir-retire**: `TemplateProto` is gone, and a code object answers every
@@ -261,9 +262,9 @@ Then the image milestones:
   out of the body with its methods intact. The counter-factual is the identity
   check: a default traitset copied into the body would hydrate as a table equal
   to the instance's own and distinct from it. Only a pointer comparison
-  against `default_traits_for` can see that. Freeing the hydrated region releases the
-  trait table's region exactly once, and the free-time edge oracle agrees with
-  the recorded table.
+  against `default_traits_for` can see that. Freeing the hydrated region
+  releases the trait table's region exactly once, and the free-time edge oracle
+  agrees with the recorded table.
 - Primitives: a native-fn in the body answers to the live registry's id for its
   name, in an instance that minted its ids differently. A def the canonical
   tables do not name fails the dump by name, and two dumps write one file
@@ -327,6 +328,25 @@ Then the image milestones:
   bytes grow by less than one worker's instance across six more of them. The
   language server stores an image under a cold cache directory and writes no
   stdlib cache. The WASM entry's host runtime hydrates a stored image.
+- Embedded blob: a static in this binary is found in the file that holds it,
+  at a 64 KiB-aligned offset, and the bytes there are the static's. Bytes on
+  the heap are found in no file. A blob no file holds hydrates from an
+  anonymous copy, and so does a blob whose file holds other bytes at the
+  offset. The counter-factual is a start that maps whatever the file holds
+  there.
+
+  An instance under `BootImage::Embedded` hydrates a valid blob and stores
+  nothing in its warm-cache directory. The counter-factual is a boot that
+  ignores the blob, which answers every call and stores an image. A refused
+  blob falls back to the warm cache: the instance hydrates a stored image, or
+  compiles and stores one. A refused blob with no directory compiles.
+
+  A release `make elle` checks its own output. Stage 2's dump writes the blob
+  again, byte for byte, and a `--cache=` start maps the blob and its worker
+  hydrates it. A dry run of the Makefile shows the release `elle` and
+  `elle-rig` builds passing `ELLE_BOOT_BLOB`, and stage 1 building in a target
+  directory of its own. It shows the debug and variant builds passing none.
+  The parity target's source boots pass `--boot-image=off`.
 - Compile parity: a call to a stdlib function grafts under image boot as
   under source boot, and the same user file compiles to the same instruction
   stream under both. This is the acceptance gate for the body fragment a

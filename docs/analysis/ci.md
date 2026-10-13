@@ -154,6 +154,13 @@ s under `ci`. The profile keeps debug assertions, so the region checks still
 run. Each test runtime and each process it starts caches its standard library
 under the runner's `HOME` ([config](../config.md)).
 
+A release `make elle` builds twice, and the first build has a target directory
+of its own ([boot.md](../impl/image/boot.md)). The second build embeds the boot
+image the first one dumped, so every corpus job's `elle` and `elle-rig` carry
+the image and hydrate it at every start. The target fails when the second
+build's own dump differs from the blob it carries, or when its start does not
+map the blob.
+
 Four jobs change the release profile they build. `Default Build Tests`, `Boot
 Image Tests`, `Thread-Pool I/O Tests` and `macOS Smoke` set
 `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS`, which is what compiles the region
@@ -172,10 +179,10 @@ and its failures read as flaky timeouts (§ "Runner capacity").
 [workflows.rs](../../tests/integration/workflows.rs) is the standing check that
 both backends keep a job.
 
-`macOS Smoke` runs the rig's scrub profile beside the flag, because the panic that
-reads a scrubbed page needs both ([diagnostics](../impl/region/diagnostics.md)). Its binary
-is a release build that also runs the debug-only checks, on the smallest runner
-in the workflow. Read a macOS corpus timing against that, not against a Linux
+`macOS Smoke` runs the rig's scrub profile beside the flag, because the panic
+that reads a scrubbed page needs both
+([diagnostics](../impl/region/diagnostics.md)). Its binary is a release build
+that also runs the debug-only checks, on the smallest runner in the workflow. Read a macOS corpus timing against that, not against a Linux
 one.
 
 ### Every job that runs `cargo test` installs rustfmt and clippy
@@ -225,8 +232,8 @@ over-subscribes the other.
 
 Over-subscription does not fail the corpus, it stretches it. Every file still
 passes its assertions, and the ones nearest the per-file budget get killed on
-the way out. That failure is a `timeout` row that names the budget, which reads as a flaky
-runner rather than as a job count that never fit. `JOBS` remains an override
+the way out. That failure is a `timeout` row that names the budget, which
+reads as a flaky runner rather than as a job count that never fit. `JOBS` remains an override
 for a job that needs a different number.
 
 Outside CI the default stays the constant 16. A development box is not sized by
@@ -368,16 +375,18 @@ plugin directory to a workspace member.
 
 ### The boot-image job
 
-The warm cache is on by default ([boot.md](../impl/image/boot.md)), but a start
-that cannot hydrate boots from source, and the suites pass either way. No other
-job proves that a start hydrated, so a change that breaks hydration passes
-every other gate in the workflow.
+Every release `make elle` proves that its embedded blob hydrates. A build
+without a blob reads the warm cache instead ([boot.md](../impl/image/boot.md)),
+and a start that cannot hydrate boots from source, so the suites pass either
+way. No other job proves that the warm cache hydrates, and none compares the
+two boots' bytecode.
 
 `Boot Image Tests` runs `make smoke-boot-image`. The target first runs `make
 bytecode-parity`, which compiles every corpus file under a source boot and
 under an image boot and fails on any difference in the bytecode. It then stores
 an image, proves the next start hydrates it, and runs the corpus through that
-instance.
+instance. Each start names the warm-cache directory, and a start that names
+one never reads the blob.
 It sets `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS` for the reason the two backend
 jobs do: a hydrated region is a region, and the region checks are compiled out
 of a release build without the flag.
@@ -461,6 +470,7 @@ make test
 | **Documentation site** | `Documentation Build` fails on `./target/release/elle demos/docgen/generate.lisp` | Using `nil?` to check end-of-list. Lists terminate with `EMPTY_LIST`, not `NIL`. | Use `empty?` for list termination checks. Check [generate.lisp](../../demos/docgen/generate.lisp) and [lib](../../demos/docgen/lib). |
 | **Language suite fails** | A corpus job fails `smoke-lang` | A language test answers differently on that build. | Run `./target/release/elle tests/lang/failing.lisp` on the same build. Check the assertion message; a file that passes on one build and fails on another has found a defect in the build that fails. |
 | **Implementation suite fails** | `Default Build Tests` fails `smoke-impl` or `smoke-eager` | An implementation test on the rig, or a suite file under the eager profile. | Run `./target/release/elle-rig tests/impl/failing.lisp`; the file's sidecar sets its mode. For a profile failure, pass the same `--profile`. |
+| **The embedded blob fails** | A corpus job fails on `make elle` after the second build | The second build's dump differs from the blob it carries, so the two builds compiled the library differently. Or a start did not map the blob from its own executable. | Run `make elle CARGO_PROFILE=--release` locally. A dump difference keeps both files to `cmp`. Otherwise read the `--trace=boot` lines it prints: `blob-copy` names a blob the start could not find in its own file. |
 | **Boot from an image fails** | `Boot Image Tests` fails and every other corpus job passes | A corpus file compiles to other bytecode or answers differently under a hydrated boot, or the image no longer hydrates. | Run `make smoke-boot-image` locally. A parity failure names the files that differ and keeps both dumps of each under `target/bytecode-parity`; diff a pair. Otherwise read the hydration proof first: a target that fails there never reached the corpus. |
 | **Property tests fail** | `Rust Tests` fails with a shrunk counterexample | The shrunk output shows the *minimal* failing input. | Reproduce with the exact shrunk values as a unit test. Check the files under `tests/proptest-regressions/`. |
 | **Integration tests fail** | `Rust Tests` fails | Tests use `eval_source()` which runs the full pipeline. | Read the assertion. Check whether the test expects `.unwrap()` (success) or `.is_err()` (error). |

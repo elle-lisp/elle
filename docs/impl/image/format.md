@@ -22,7 +22,7 @@ One image is one file, or one blob embedded in a larger one:
 | primitive table | the names the body's native-fn slots hold, one length-prefixed string each, sorted by name — the primitive stream indexes it |
 | name table | the spellings of the symbols and keywords in the body, one length-prefixed string each, sorted by name |
 | file table | the source-file names the body's spans point at, one length-prefixed string each, sorted by name — the file stream indexes it |
-| signal table | user-defined signal names in dump-time bit order |
+| signal table | not written yet: a dump refuses a declared signal instead ([sealing.md](sealing.md)) |
 | watermarks | dump-time counters, carried in the header block: parameter id, hygiene scope id and static-region mint today, next signal bit with the milestone that needs it |
 | manifest | the bindings an image installs. It is body data, not a section: an export struct names each binding with a keyword key and each value answers its own signal, arity and doc ([boot.md](boot.md) owns the boot configuration's root struct). Dependency fingerprints are header fields, and an image with an empty dependency list records none |
 | side-stream | `SendValue`-encoded mutable bindings, present only where the dump policy permits mutables |
@@ -50,8 +50,8 @@ The hydrator therefore refuses a misaligned offset before it maps anything,
 naming the offset and the page size. The refusal is a build error rather than
 a corrupt file: whoever placed the image chose the offset, and the same
 descriptor is legal once the image moves to a boundary. An embedded blob meets
-the rule by construction — [image.md](../image.md) § "Build integration" pins
-its alignment to the largest base page any supported host reports.
+the rule by construction — [boot.md](boot.md) pins its alignment to the
+largest base page any supported host reports.
 
 ## Relocation slots
 
@@ -237,7 +237,7 @@ assembles as well: a syntax node, a code payload, the payload's LIR body, and
 the four LIR records the body names. A build whose layout reorders a field or
 moves the discriminant fails the fingerprint instead of hydrating garbage, so
 the two-stage embed build cannot pass with a shifted layout. The same extents
-drive slot canonicalization ([image.md](../image.md) § Dumping).
+drive slot canonicalization ([image.md](../image.md)).
 
 On mismatch the loader falls back — the `include_str!` sources never go away,
 so the image is an optimization, not a correctness dependency. Images are

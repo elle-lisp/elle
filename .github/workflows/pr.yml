@@ -221,10 +221,10 @@ jobs:
             target/elle-state/cas
           retention-days: 14
 
-  # The language suite booted from an image rather than from core.lisp,
-  # prelude.lisp and stdlib.lisp. A start that cannot hydrate boots from source
-  # and passes, so this is the one job that proves a start hydrated, and a break
-  # in hydration passes every other gate in this workflow (docs/analysis/ci.md).
+  # The language suite booted from the warm cache rather than from core.lisp,
+  # prelude.lisp and stdlib.lisp. Every release `make elle` proves its embedded
+  # blob hydrates; this is the one job that proves the warm cache does, and that
+  # a source boot and an image boot compile alike (docs/analysis/ci.md).
   boot-image:
     name: Boot Image Tests
     needs: [changes, qa]

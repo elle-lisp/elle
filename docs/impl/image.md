@@ -16,7 +16,7 @@ argument. Six companions carry the rest:
 - [Sealing](image/sealing.md) — what the body may hold, what the hydrating
   instance rebuilds, and what fails the dump.
 - [boot.md](image/boot.md) — the boot configuration: its root set, its source
-  digest, and the warm cache.
+  digest, the embedded blob and the warm cache.
 - [format.md](image/format.md) — the file's sections, and the fingerprint that
   gates a load.
 - [plan.md](image/plan.md) — the landing order, and the pins each milestone
@@ -26,8 +26,8 @@ argument. Six companions carry the rest:
 
 This document states the design, not its progress. [plan.md](image/plan.md)
 records what has landed: the warm-cache boot, the body fragment, the bytecode
-parity gate, the interval table and per-worker hydration have, and the embedded
-blob and the environment configuration have not.
+parity gate, the interval table, per-worker hydration and the embedded blob
+have, and the environment configuration has not.
 
 ## The problem
 
@@ -294,9 +294,9 @@ base and tests the 16-byte header, then confirms with `RegionPool::owns`, a
 linear scan of the region's page list. Today's regions are one or two pages,
 so both steps are cheap.
 
-A single region holding all of stdlib breaks both assumptions. A pointer into a large page fails every smaller class's header
-probe first, each a likely cache miss into arbitrary image bytes, and the owns
-scan walks the whole page list. Resolution runs on the RC hot path, at every
+A single region holding all of stdlib breaks both assumptions. A pointer into a
+large page fails every smaller class's header probe first, each a likely cache
+miss into arbitrary image bytes, and the owns scan walks the whole page list. Resolution runs on the RC hot path, at every
 escape incref and edge record of a stdlib value. So that is a per-operation
 regression, not a curiosity.
 
@@ -359,16 +359,17 @@ canonically from a zeroed buffer, so headers, cursor gaps, alignment slack,
 and relocation slots stay zero.
 
 Every record the dumper writes receives only its discriminant byte and the
-leaf-field extents the layout probes record ([format.md](image/format.md)
-§ Fingerprint). The records are an object slot, a struct entry whose key is an
+leaf-field extents the layout probes record ([format.md](image/format.md)).
+The records are an object slot, a struct entry whose key is an
 enum with padding of its own, and a syntax node, which is a struct with a
 `bool` in it around an enum. A `repr(Rust)` enum copy carries uninitialized
 padding from its construction temporary, so the dumper never copies a record
 wholesale. The extent copy leaves padding out, and two dumps of the same graph
 are byte-identical whole files. The warm cache keys on the source digest and
 the binary's identity, not on a hash of the file. Whole-file determinism buys
-reproducible embedded blobs, and concurrent dumpers racing through the atomic
-rename produce identical files.
+reproducible embedded blobs and the check that a release binary dumps its own
+blob again. Concurrent dumpers racing through the atomic rename produce
+identical files.
 
 Mutable bindings are the dump-policy fork. The strict policy (boot) fails
 the dump, naming the binding. The environment policy defaults to the same
@@ -379,7 +380,7 @@ manifest's per-binding kind field makes the opt-in mode additive.
 ## JIT
 
 The JIT compiles from the LIR a code payload carries: region-native records in
-the payload's own pages ([lir.md](lir.md) § "The frozen form"). The fifth
+the payload's own pages ([lir.md](lir.md)). The fifth
 foundation put them there ([image/foundations.md](image/foundations.md) argues
 it, and names the side-stream it deleted). A function's LIR therefore dumps in the
 dumper's own walk and arrives with the mapping, so an image's save and load
@@ -409,28 +410,18 @@ own for one type.
 
 ## Build integration
 
-- **Warm cache (no build changes):** when no valid boot image is available,
-  boot compiles from source as today, then dumps an image into `boot` under
-  the `--cache=` directory (written atomically: temp file, rename). The file is
-  named for the source digest and the binary's identity.
-  Subsequent starts hydrate it, so development builds get fast starts from the
-  second run onward. The warm cache is on by default; [boot.md](image/boot.md)
-  owns the key and the policy.
-- **Embedded (release):** a Makefile stage builds `elle`, runs
-  `elle image dump-boot`, and rebuilds with the blob embedded (path passed
-  by env var; `build.rs` declares the rerun-if). Embedding changes the binary
-  but not the fingerprint, because every fingerprint input is computed from
-  layout probes and sources, not from the binary hash. So the two-stage build
-  converges in one iteration.
-
-The embedded blob is 64 KiB-aligned. An `include_bytes!` behind a
-`#[repr(align(65536))]` wrapper keeps its virtual address aligned, and
-load-segment congruence makes its file offset aligned too. So hydration maps
-it straight from the executable's own file, with the offset recovered from the
-static's address and the segment table (`dl_iterate_phdr`; the Mach-O load
-commands on macOS). The constant is the largest base page any supported host
-reports, because the alignment a blob needs is the *host's* page size. No
-smaller constant covers a 64 KiB arm64 kernel.
+- **Warm cache (no build changes):** when no boot image hydrates, boot compiles
+  from source, then dumps an image into `boot` under the `--cache=` directory,
+  atomically. The file is named for the source digest and the binary's
+  identity, and later starts hydrate it. So a build that carries no blob starts
+  fast from its second run onward. [boot.md](image/boot.md) owns the key and
+  the policy.
+- **Embedded (release):** a release `make elle` builds twice and embeds the
+  image the first build dumps, so a release binary's first start hydrates from
+  its own executable. Embedding changes the binary and none of the
+  fingerprint's inputs, and the dump is deterministic, so the second build
+  dumps the blob it carries. [boot.md](image/boot.md) owns the two stages, the
+  64 KiB alignment, and how a start finds the bytes.
 
 ## Verifier
 
