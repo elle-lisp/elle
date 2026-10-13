@@ -241,7 +241,8 @@ discriminant byte and each leaf field's offset and length
 ([measurements.md](measurements.md) records the probe mechanism and the
 measured layout). It records the field offsets of every record the dumper
 assembles as well: a syntax node, a code payload, the payload's LIR body, and
-the four LIR records the body names. A build whose layout reorders a field or
+the four LIR records the body names, and the width of the scope ids a node
+lists. A build whose layout reorders a field or
 moves the discriminant fails the fingerprint instead of hydrating garbage, so
 the two-stage embed build cannot pass with a shifted layout. The same extents
 drive slot canonicalization ([image.md](../image.md)).
