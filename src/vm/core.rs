@@ -81,6 +81,10 @@ pub struct VM {
     /// Where `kill`'s word lives, for compiled code to load through the VM
     /// pointer. Set beside `kill`, and never by hand.
     pub(crate) kill_word: *const std::sync::atomic::AtomicU64,
+    /// The budget of the expansion running on this VM, which every fiber the
+    /// expansion runs spends apart from its own fuel. Unmetered while none runs;
+    /// opened and closed by `VM::at_expansion` alone (docs/runtime.md).
+    pub(crate) expansion_budget: crate::vm::expansion::ExpansionBudget,
     /// Handle to the current fiber's FiberHandle, if it came from a
     /// `fiber/new` allocation. `None` for the root fiber (which lives
     /// directly on the VM, not behind a handle). Used to wire up
