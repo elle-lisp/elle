@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-13
 # A string concat takes time linear in its length, measured against a bytes concat of the same size.
 # docs/testing.md
 #
@@ -11,25 +11,10 @@
 # that builds a large payload by doubling concat then runs for minutes.
 #
 # A bytes concat of the same size is the control, because `get` on bytes is
-# O(1). A wall-clock bound cannot tell a quadratic walk from a runner that lost
-# its CPU inside the measured window; the ratio between the two concats can.
-# docs/testing.md holds the argument.
+# O(1), and the ratchet's best-of times both. docs/testing.md holds the
+# argument.
 
-# Time both thunks over `rounds` alternating rounds and return [control subject]
-# — the smallest elapsed each one reached. Alternating samples the same stretch
-# of machine, and the minimum discards a round the scheduler stalled, so one
-# starved run cannot decide the comparison.
-(defn best-of [rounds control subject]
-  (let [@a nil
-        @b nil
-        @i 0]
-    (while (< i rounds)
-      (let [ca (second (time/elapsed control))
-            cb (second (time/elapsed subject))]
-        (when (or (nil? a) (< ca a)) (assign a ca))
-        (when (or (nil? b) (< cb b)) (assign b cb)))
-      (assign i (+ i 1)))
-    [a b]))
+(def r ((import "std/ratchet")))
 
 # Build a >100k-grapheme string by doubling (O(log n) concats), and the
 # same-length bytes value that is its control. `length` on a string counts
@@ -58,7 +43,7 @@
 # multiple is slack rather than a budget. A per-grapheme walk makes this one
 # concat O((1.6e5)²): tens of seconds to minutes against tens of microseconds.
 (def [control measured]
-  (best-of 5 (fn () (concat bigb bigb)) (fn () (concat big big))))
+  (r:best-of 5 (fn () (concat bigb bigb)) (fn () (concat big big))))
 (assert (< measured (* 8 control))
         (concat "string concat must be linear; (concat big big) took "
                 (string measured) "s against " (string control)

@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-13
 # A binary append or concat copies each chunk in bulk, measured against a text append of the same size.
 # docs/testing.md
 #
@@ -15,26 +15,10 @@
 # then takes under a millisecond and the same binary append about half a
 # second.
 #
-# The text append of the same size is the control. A wall-clock bound cannot
-# tell a per-byte binary path from a runner that lost its CPU inside the
-# measured window; the ratio between the two appends can. docs/testing.md
-# holds the argument.
+# The text append of the same size is the control, and the ratchet's best-of
+# times both. docs/testing.md holds the argument.
 
-# Time both thunks over `rounds` alternating rounds and return [control subject]
-# — the smallest elapsed each one reached. Alternating samples the same stretch
-# of machine, and the minimum discards a round the scheduler stalled, so one
-# starved run cannot decide the comparison.
-(defn best-of [rounds control subject]
-  (let [@a nil
-        @b nil
-        @i 0]
-    (while (< i rounds)
-      (let [ca (second (time/elapsed control))
-            cb (second (time/elapsed subject))]
-        (when (or (nil? a) (< ca a)) (assign a ca))
-        (when (or (nil? b) (< cb b)) (assign b cb)))
-      (assign i (+ i 1)))
-    [a b]))
+(def r ((import "std/ratchet")))
 
 # A 20 KiB immutable bytes chunk (the shape read-exact appends per socket read),
 # and the 20 KiB text chunk that is its control.
@@ -79,7 +63,7 @@
 # Both appends walk the same push-all branch over the same byte count, so they
 # cost about the same and the multiple is slack, not a budget: the per-byte path
 # is ~100 chunk-copies where the bulk path is one.
-(def [control measured] (best-of 5 textual binary))
+(def [control measured] (r:best-of 5 textual binary))
 (assert (< measured (* 8 control))
         (concat "binary append must be bulk; 100×20KiB append took "
                 (string measured) "s against " (string control)
