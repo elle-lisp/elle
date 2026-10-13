@@ -27,11 +27,12 @@ use crate::{init_stdlib, register_primitives};
 #[derive(Debug, Clone, Default)]
 pub struct BootCaches {
     /// Where the compiled stdlib bytecode is cached
-    /// (docs/impl/stdlib-cache.md). The instance reads it only when its image
-    /// policy is off; its `sys/spawn` workers read it when it holds no image.
+    /// (docs/impl/stdlib-cache.md). The instance reads it only when it hydrates
+    /// no image and owes no store; its `sys/spawn` workers read it when it
+    /// holds no image.
     pub stdlib: StdlibCache,
     /// Where the boot image is (docs/impl/image/boot.md). The process-wide
-    /// warm cache by default.
+    /// policy by default: the embedded blob, then the warm cache.
     pub image: BootImage,
 }
 
@@ -60,8 +61,8 @@ pub struct WorkerBoot {
 
 /// Where an instance boots from.
 pub(crate) enum BootFrom {
-    /// A fresh instance's caches: the image the policy names is hydrated on a
-    /// hit and stored on a miss.
+    /// A fresh instance's caches: the first image the policy names that
+    /// hydrates is used, and a miss stores one where the policy names a file.
     Caches(BootCaches),
     /// A worker's parent: the image it holds is hydrated, and nothing is ever
     /// stored.
@@ -75,31 +76,31 @@ pub(crate) struct Booted {
     pub(crate) boot_source: BootSource,
 }
 
-/// Hydrate `image`, or answer `None` and leave the instance to compile its
-/// three sources.
+/// Hydrate the first of `images` this binary accepts, or answer `None` and
+/// leave the instance to compile its three sources.
 ///
-/// A refusal is reported and swallowed, because a boot image is a speedup.
+/// Each refusal is reported and swallowed, because a boot image is a speedup.
 /// Every reason to refuse one — a fingerprint from another build, a digest from
-/// other sources, a truncated file — is a reason to compile instead. The
-/// report is what keeps a cache that never hits from looking like one that
-/// always does.
+/// other sources, a truncated file — is a reason to try the next or compile.
+/// The report is what keeps a cache that never hits from looking like one that
+/// always does. The answer names the image that hydrated, which the instance
+/// hands its workers.
 fn hydrate_boot_image(
     heap: &mut crate::value::fiberheap::FiberHeap,
     symbols: &mut SymbolTable,
-    image: Option<&OpenImage>,
-) -> Option<crate::image::boot::Boot> {
-    let image = image?;
-    let t = std::time::Instant::now();
-    match crate::image::boot::hydrate(heap, symbols, image.source()) {
-        Ok(boot) => {
-            crate::phase!(crate::trace::boot(), "boot", t, "image-hydrate");
-            Some(boot)
-        }
-        Err(e) => {
-            eprintln!("[boot-image] {}: {e}", image.origin().display());
-            None
+    images: &[Arc<OpenImage>],
+) -> Option<(crate::image::boot::Boot, Arc<OpenImage>)> {
+    for image in images {
+        let t = std::time::Instant::now();
+        match crate::image::boot::hydrate(heap, symbols, image.source()) {
+            Ok(boot) => {
+                crate::phase!(crate::trace::boot(), "boot", t, "image-hydrate");
+                return Some((boot, Arc::clone(image)));
+            }
+            Err(e) => eprintln!("[boot-image] {}: {e}", image.origin()),
         }
     }
+    None
 }
 
 /// The per-instance owner bundle: the `FiberHeap`, the `VM`, the `SymbolTable`,
@@ -145,7 +146,7 @@ impl RuntimeCore {
     /// Build a core whose VMs (program and macro) segment strings under the
     /// given Unicode generation for their whole lives.
     pub fn bare_with_unicode(gen: crate::segment::Generation) -> Self {
-        Self::for_boot(gen, None).0
+        Self::for_boot(gen, &[]).0
     }
 
     /// Boot a core with the stdlib under `caches`, as `Runtime::with_caches`
@@ -167,24 +168,24 @@ impl RuntimeCore {
         // A policy's image is the whole boot state, stdlib included, so an
         // instance that wants no stdlib reads and stores none — and
         // `--no-stdlib` is how core.lisp and the prelude are debugged.
-        let (policy, held, cache) = match from {
+        let (policy, images, cache) = match from {
             BootFrom::Caches(caches) if stdlib => {
-                let held = caches.image.open().map(Arc::new);
-                (Some(caches.image), held, caches.stdlib)
+                let images = caches.image.images().into_iter().map(Arc::new).collect();
+                (Some(caches.image), images, caches.stdlib)
             }
-            BootFrom::Caches(caches) => (None, None, caches.stdlib),
-            BootFrom::Parent(parent) => (None, parent.image, parent.stdlib),
+            BootFrom::Caches(caches) => (None, Vec::new(), caches.stdlib),
+            BootFrom::Parent(parent) => (None, parent.image.into_iter().collect(), parent.stdlib),
         };
-        let (mut core, boot) = Self::for_boot(gen, held.as_deref());
-        let (stdlib_source, boot_source, kept) = match boot {
-            Some(boot) => {
+        let (mut core, hydrated) = Self::for_boot(gen, &images);
+        let (stdlib_source, boot_source, kept) = match hydrated {
+            Some((boot, held)) => {
                 let stdlib_source = if stdlib {
                     core.install_stdlib_from_image(&boot);
                     StdlibSource::Image
                 } else {
                     StdlibSource::Compiled
                 };
-                (stdlib_source, BootSource::Image, held)
+                (stdlib_source, BootSource::Image, Some(held))
             }
             None if stdlib => {
                 // A boot image is dumped from a *compiled* stdlib. A disk-cache
@@ -194,9 +195,9 @@ impl RuntimeCore {
                 // instance that owes an image compiles rather than reading the
                 // other cache — once per build and digest, for the start that
                 // stores it.
-                let compiling = match &policy {
-                    Some(image) if *image != BootImage::Off => StdlibCache::Off,
-                    _ => cache.clone(),
+                let compiling = match policy.as_ref().and_then(BootImage::path) {
+                    Some(_) => StdlibCache::Off,
+                    None => cache.clone(),
                 };
                 let stdlib_source = core.load_stdlib(&compiling);
                 // The boot is complete, so this is the state the next start
@@ -223,15 +224,16 @@ impl RuntimeCore {
         }
     }
 
-    /// Build a core out of `image`, or out of the three sources when there is
-    /// no image or this binary refuses it (docs/impl/image/boot.md).
+    /// Build a core out of the first of `images` this binary accepts, or out
+    /// of the three sources when it accepts none (docs/impl/image/boot.md).
     ///
-    /// Answers the core and the hydrated image, because the caller's stdlib
-    /// step installs out of the same image the core's compile context did.
+    /// Answers the core, the hydrated image and the open image it came from,
+    /// because the caller's stdlib step installs out of the same image the
+    /// core's compile context did, and its workers hydrate the same descriptor.
     fn for_boot(
         gen: crate::segment::Generation,
-        image: Option<&OpenImage>,
-    ) -> (Self, Option<crate::image::boot::Boot>) {
+        images: &[Arc<OpenImage>],
+    ) -> (Self, Option<(crate::image::boot::Boot, Arc<OpenImage>)>) {
         // This instance's heap, owned here and shared by the program VM and the
         // macro-expansion VM. Built first: both VMs point their `heap_ptr` at it,
         // so the instance is one region store and core.lisp/stdlib closures
@@ -250,10 +252,10 @@ impl RuntimeCore {
         // value name-resolution resolve in THIS instance's own table. Mirrors
         // `set_compile_ctx` below.
         vm.set_symbols(&mut *symbols as *mut SymbolTable);
-        let boot = hydrate_boot_image(&mut heap, &mut symbols, image);
+        let hydrated = hydrate_boot_image(&mut heap, &mut symbols, images);
         // The macro VM shares this instance's heap (see `bare`'s heap comment).
-        let mut compile = Box::new(match &boot {
-            Some(boot) => CompileCtx::from_boot_image(heap_ptr, boot, &mut symbols),
+        let mut compile = Box::new(match &hydrated {
+            Some((boot, _)) => CompileCtx::from_boot_image(heap_ptr, boot, &mut symbols),
             None => CompileCtx::new_with_heap(heap_ptr),
         });
         compile.set_unicode_generation(gen);
@@ -268,7 +270,7 @@ impl RuntimeCore {
                 heap,
                 _meta: meta,
             },
-            boot,
+            hydrated,
         )
     }
 

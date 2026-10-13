@@ -203,7 +203,7 @@ pub struct Config {
     pub cache: Option<String>,
 
     /// Where a boot image is read and stored (`--boot-image=`). The default is
-    /// the warm cache beneath the `--cache=` directory
+    /// the embedded blob, then the warm cache beneath the `--cache=` directory
     /// (docs/impl/image/boot.md).
     pub boot_image: crate::image::boot::BootImage,
 

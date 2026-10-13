@@ -1,6 +1,6 @@
 // audited: 2026-10-20
-//! The warm cache: where a boot image is read from, where a compiled boot
-//! stores one, and what a store leaves behind.
+//! The boot-image policy and the warm cache: which images an instance reads,
+//! where a compiled boot stores one, and what a store leaves behind.
 //!
 //! docs/impl/image/boot.md
 //!
@@ -17,58 +17,32 @@ use crate::image::{ImageError, ImageSource};
 use crate::symbol::SymbolTable;
 use crate::value::fiberheap::FiberHeap;
 
-use super::{sources_digest, BootImage};
+use super::{sources_digest, Blob, BootImage, OpenImage};
 
-/// A boot image held open: the descriptor a hydration maps, and the path it was
-/// opened at, which a refusal names.
-///
-/// A worker hydrates from its parent's, so the descriptor travels rather than
-/// the path (docs/impl/image/boot.md). A prune or a rename over the path after
-/// this opened it changes nothing a hydration maps.
-#[derive(Debug)]
-pub(crate) struct OpenImage {
-    source: ImageSource,
-    origin: PathBuf,
-}
-
-impl OpenImage {
-    /// The descriptor and offset a hydration maps.
-    pub(crate) fn source(&self) -> &ImageSource {
-        &self.source
-    }
-
-    /// The path the image was opened at.
-    pub(crate) fn origin(&self) -> &Path {
-        &self.origin
-    }
-
-    #[cfg(test)]
-    pub(crate) fn copied(source: ImageSource) -> OpenImage {
-        OpenImage {
-            source,
-            origin: PathBuf::new(),
+impl BootImage {
+    /// The blob this policy hydrates before it reads the warm cache, or `None`
+    /// when it reads none: `Process` reads the blob this binary carries
+    /// (docs/impl/image/boot.md).
+    pub(crate) fn blob(&self) -> Option<Blob> {
+        match self {
+            BootImage::Process => Blob::this_binary(),
+            BootImage::Embedded { blob, .. } => Some(*blob),
+            BootImage::Off | BootImage::Dir(_) => None,
         }
     }
-}
 
-#[cfg(test)]
-impl BootImage {
-    pub(crate) fn blob(&self) -> Option<super::Blob> {
-        None
-    }
-}
-
-impl BootImage {
-    /// The directory this policy reads and writes, or `None` when it is off.
+    /// The warm-cache directory this policy reads and writes, or `None` when
+    /// it reads none.
     fn dir(&self) -> Option<PathBuf> {
         self.dir_in(crate::config::get())
     }
 
-    /// The directory this policy reads and writes under `config`, or `None`
-    /// when it is off.
+    /// The warm-cache directory this policy reads and writes under `config`,
+    /// or `None` when it reads none.
     pub(crate) fn dir_in(&self, config: &crate::config::Config) -> Option<PathBuf> {
         match self {
-            BootImage::Off | BootImage::Embedded { .. } => None,
+            BootImage::Off => None,
+            BootImage::Embedded { fallback, .. } => fallback.clone(),
             BootImage::Dir(d) => Some(d.clone()),
             BootImage::Process => config
                 .cache
@@ -77,8 +51,9 @@ impl BootImage {
         }
     }
 
-    /// The image file this binary reads and writes under this policy, or
-    /// `None` when the policy is off or the binary cannot identify itself.
+    /// The warm-cache file this binary reads and writes under this policy, or
+    /// `None` when the policy reads no warm cache or the binary cannot
+    /// identify itself.
     pub fn path(&self) -> Option<PathBuf> {
         self.path_for(Executable::current().as_ref())
     }
@@ -90,16 +65,29 @@ impl BootImage {
         Some(self.dir()?.join(exe?.image_name(&sources_digest())))
     }
 
-    /// The image file this policy names, held open, or `None` when there is no
-    /// file to read. A file that exists and does not open is reported, for the
-    /// reason a refused hydration is.
+    /// The images this policy reads, held open, in the order a boot tries them:
+    /// the blob, then the warm-cache file (docs/impl/image/boot.md).
+    pub(crate) fn images(&self) -> Vec<OpenImage> {
+        let blob = self.blob().and_then(|blob| match blob.open() {
+            Ok(open) => Some(open),
+            Err(e) => {
+                eprintln!("[boot-image] the blob does not open: {e}");
+                None
+            }
+        });
+        blob.into_iter().chain(self.open()).collect()
+    }
+
+    /// The warm-cache file this policy names, held open, or `None` when there
+    /// is no file to read. A file that exists and does not open is reported,
+    /// for the reason a refused hydration is.
     pub(crate) fn open(&self) -> Option<OpenImage> {
-        let origin = self.path()?;
-        match ImageSource::open(&origin) {
-            Ok(source) => Some(OpenImage { source, origin }),
+        let path = self.path()?;
+        match ImageSource::open(&path) {
+            Ok(source) => Some(OpenImage::file(source, path)),
             Err(ImageError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => None,
             Err(e) => {
-                eprintln!("[boot-image] {}: {e}", origin.display());
+                eprintln!("[boot-image] {}: {e}", path.display());
                 None
             }
         }
@@ -175,10 +163,7 @@ pub(crate) fn store(
     }
     let stored = super::dump(heap, symbols, cctx, &path)
         .and_then(|file| ImageSource::at(file, 0))
-        .map(|source| OpenImage {
-            source,
-            origin: path.clone(),
-        });
+        .map(|source| OpenImage::file(source, path.clone()));
     match stored {
         Ok(open) => {
             prune_superseded(dir, &path);

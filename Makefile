@@ -1,4 +1,4 @@
-.PHONY: all elle elle-rig docs docgen smoke test qa crosscheck clean space help \
+.PHONY: all elle elle-rig boot-blob docs docgen smoke test qa crosscheck clean space help \
        smoke-lang smoke-impl smoke-eager smoke-producers smoke-charge smoke-scrub \
        smoke-boot-image smoke-nojit smoke-pool smoke-pool-impl smoke-pool-producers \
        smoke-mlir smoke-mlir-impl smoke-mlir-producers smoke-noffi \
@@ -67,11 +67,69 @@ all: elle docs  ## Build everything
 
 # ── Build ───────────────────────────────────────────────────────────
 
-elle:  ## Build the Elle binary
-	cargo build $(CARGO_PROFILE) -p elle
+# A release build carries its own boot image, the embedded blob
+# (docs/impl/image/boot.md). Stage 1 builds a release `elle` in a target
+# directory of its own, and its dump writes the blob. Stage 2 builds in the
+# shared directory with ELLE_BOOT_BLOB naming the blob, and build.rs compiles
+# it in. Cargo keeps one build of a library per profile and feature set, and a
+# change to the variable rebuilds it, so the two stages share no directory.
+#
+# Every release cargo call that links the default-feature library passes
+# $(EMBED); one that left it out would rebuild that library without the blob.
+# The variant builds pass nothing, since a blob is what one build dumped. A
+# debug build embeds nothing, and every name below expands empty for it.
+STAGE1_DIR := target/stage1
+BOOT_BLOB  := $(STAGE1_DIR)/boot.image
+ifneq ($(findstring --release,$(CARGO_PROFILE)),)
+  BLOB_STAGE := boot-blob
+  EMBED      := ELLE_BOOT_BLOB=$(abspath $(BOOT_BLOB))
+  CHECK_BLOB  = $(CHECK_BLOB_RECIPE)
+else
+  BLOB_STAGE :=
+  EMBED      :=
+  CHECK_BLOB  =
+endif
 
-elle-rig:  ## Build the rig: the Elle runtime a test configures (rig/overview.md)
-	cargo build $(CARGO_PROFILE) -p elle-rig
+# Stage 1. The dump replaces the blob only when its bytes differ: cargo
+# rebuilds the library when the blob is newer than the last build, so a fresh
+# copy of the same bytes would rebuild it at every `make elle`.
+boot-blob:  ## Stage 1 of a release build: write the boot image stage 2 embeds
+	cargo build $(CARGO_PROFILE) -p elle --target-dir $(STAGE1_DIR)
+	@tmp=$$(mktemp "$(BOOT_BLOB).XXXXXX") || exit 1; \
+	if ! $(STAGE1_DIR)/release/elle image dump-boot "$$tmp" >/dev/null; then rm -f "$$tmp"; exit 1; fi; \
+	if cmp -s "$$tmp" "$(BOOT_BLOB)"; then rm -f "$$tmp"; else mv "$$tmp" "$(BOOT_BLOB)"; fi
+
+# Stage 2's checks. Its own dump must write the blob it carries again, byte for
+# byte: the dump is deterministic, and embedding changes none of the
+# fingerprint's inputs, so a difference means the two stages compiled the
+# library differently. A failure keeps the dump beside the blob to `cmp`. Then
+# a start with no warm cache must map the blob from its own executable, and its
+# worker must hydrate the same descriptor: a `blob-map` mark and two
+# `image-hydrate` marks. A blob no start finds in its own file is copied at
+# every start, and every suite still passes on the copy.
+define CHECK_BLOB_RECIPE
+	@tmp=$$(mktemp "$(BOOT_BLOB).check.XXXXXX") || exit 1; \
+	if ! $(CARGO_OUT)/elle image dump-boot "$$tmp" >/dev/null; then rm -f "$$tmp"; exit 1; fi; \
+	if ! cmp "$$tmp" "$(BOOT_BLOB)"; then \
+		echo "FAILED: stage 2 dumps another image than the blob it carries; both are kept: $$tmp $(BOOT_BLOB)"; \
+		exit 1; \
+	fi; \
+	rm -f "$$tmp"
+	@out=$$($(CARGO_OUT)/elle --cache= --trace=boot -e '(sys/join (sys/spawn (fn [] 1)))' 2>&1 >/dev/null); \
+	hydrations=$$(printf '%s\n' "$$out" | grep -c 'image-hydrate'); \
+	if ! printf '%s\n' "$$out" | grep -q 'blob-map' || [ "$$hydrations" -ne 2 ]; then \
+		printf '%s\n' "$$out"; \
+		echo "FAILED: the start did not map its blob, or its worker did not hydrate it"; \
+		exit 1; \
+	fi
+endef
+
+elle: $(BLOB_STAGE)  ## Build the Elle binary; a release build carries its boot image
+	$(EMBED) cargo build $(CARGO_PROFILE) -p elle
+	$(CHECK_BLOB)
+
+elle-rig: $(BLOB_STAGE)  ## Build the rig: the Elle runtime a test configures (rig/overview.md)
+	$(EMBED) cargo build $(CARGO_PROFILE) -p elle-rig
 
 MCP_PATCH := --config 'patch."https://github.com/elle-lisp/elle".elle-plugin.path="elle-plugin"'
 
@@ -382,12 +440,14 @@ smoke-scrub: elle elle-rig  ## The language suite on the rig, each released page
 	@echo "=== the language suite, each released page scrubbed ==="
 	$(call RUN_SUITE,$(LANG_FILES),--isolate '--profile $(SCRUB_PROFILE)',$(ELLE_RIG))
 
-# The language suite booted from an image instead of from core.lisp,
+# The language suite booted from the warm cache instead of from core.lisp,
 # prelude.lisp and stdlib.lisp — dump-boot's gate (docs/impl/image/boot.md).
-# A start that cannot hydrate boots from source and passes, so nothing else in
-# the tree proves that a start hydrated. The target runs `bytecode-parity`
-# first: a corpus that answers alike under an image boot can still have
-# compiled to other bytecode, and only the dumps show that.
+# A release `make elle` proves its blob hydrates, but no other target proves
+# the warm cache does, and a start that cannot hydrate boots from source and
+# passes. Every start below names the directory, so none reads the blob. The
+# target runs `bytecode-parity` first: a corpus that answers alike under an
+# image boot can still have compiled to other bytecode, and only the dumps show
+# that.
 #
 # The directory lives under target/ rather than the temp root: an image is
 # megabytes, a store prunes the one an earlier build left, and `make clean`
@@ -396,10 +456,10 @@ smoke-scrub: elle elle-rig  ## The language suite on the rig, each released page
 #
 # The hydration proof is the `[trace:boot] image-hydrate` mark, and it is the
 # whole difference between this target and `smoke-lang`. A binary that ignored
-# `--boot-image=` would accept it and boot from source, and an image every
-# start refuses is replaced and refused again — either way the suite passes and
-# the gate reports a boot that never happened. Same argument as `check-wasm`'s
-# `[wasm]` marker.
+# `--boot-image=` would accept it and boot from its blob or from source, and an
+# image every start refuses is replaced and refused again — either way the
+# suite passes and the gate reports a boot that never happened. Same argument
+# as `check-wasm`'s `[wasm]` marker.
 BOOT_IMAGE_DIR ?= target/boot-image
 
 smoke-boot-image: elle bytecode-parity  ## The language suite booted from an image (dump-boot's gate)
@@ -494,12 +554,13 @@ smoke-mlir-producers: elle-mlir  ## The producers, in-process on the MLIR build'
 	$(call RUN_SUITE,$(PRODUCER_FILES),,$(ELLE_RIG_MLIR))
 
 # The no-features binary is copied beside the build, and the default build then
-# rebuilt in its place, so the runner is always a build that has FFI.
-elle-noffi:  ## Build elle with no features beside the default build (for smoke-noffi)
+# rebuilt in its place, with its blob, so the runner is always a build that has
+# FFI.
+elle-noffi: $(BLOB_STAGE)  ## Build elle with no features beside the default build (for smoke-noffi)
 	@echo "=== build elle with no features ==="
 	cargo build $(CARGO_PROFILE) -p elle --no-default-features -q
 	cp $(CARGO_OUT)/elle $(ELLE_NOFFI)
-	cargo build $(CARGO_PROFILE) -p elle -q
+	$(EMBED) cargo build $(CARGO_PROFILE) -p elle -q
 
 smoke-noffi: elle-noffi  ## The language suite on a build with no features, less the FFI files
 	@echo "=== the language suite, no features ==="
@@ -602,8 +663,8 @@ smoke-plugins: elle plugins-verify  ## Run the plugin corpus (needs `make plugin
 EMBED_TARGET_DIR = $(CURDIR)/$(CARGO_OUT)
 
 embedding: elle  ## Build + run embedding demos (Rust + C hosts)
-	cargo build $(CARGO_PROFILE) -p elle-embed
-	cargo run $(CARGO_PROFILE) -p elle-embed --bin host
+	$(EMBED) cargo build $(CARGO_PROFILE) -p elle-embed
+	$(EMBED) cargo run $(CARGO_PROFILE) -p elle-embed --bin host
 	$(MAKE) -C demos/embedding chost TARGET_DIR=$(EMBED_TARGET_DIR)
 	LD_LIBRARY_PATH=$(EMBED_TARGET_DIR) demos/embedding/chost
 

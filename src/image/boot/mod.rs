@@ -5,14 +5,15 @@
 //! docs/impl/image/boot.md
 //!
 //! The root is one immutable struct, so the manifest is body data and the
-//! ordinary dumper and hydrator carry it. `BootImage` is the warm cache's
-//! policy: where an instance looks for an image, and where it stores the one
-//! it compiled.
+//! ordinary dumper and hydrator carry it. `BootImage` is the boot-image
+//! policy: the embedded blob an instance hydrates, the warm cache it reads,
+//! and where it stores the image it compiled.
 
 mod blob;
 mod build;
 mod cache;
 mod install;
+mod open;
 #[cfg(test)]
 mod tests;
 
@@ -27,7 +28,8 @@ use crate::value::{TableKey, Value};
 use super::ImageError;
 
 pub use blob::Blob;
-pub(crate) use cache::{store, Executable, OpenImage};
+pub(crate) use cache::{store, Executable};
+pub(crate) use open::OpenImage;
 
 /// The keys the root struct and a macro entry carry. Both halves name them —
 /// [`build`] writing, [`install`] reading — so they are spelled once.
@@ -53,11 +55,13 @@ mod key {
 pub enum BootImage {
     /// Never read or write an image; compile core, prelude and stdlib.
     Off,
-    /// The process-wide choice: `boot` beneath the `--cache=<dir>` directory.
-    /// `--cache=` with no directory turns it off.
+    /// The process-wide choice: the blob this binary carries, then the warm
+    /// cache in `boot` beneath the `--cache=<dir>` directory. `--cache=` with
+    /// no directory turns the warm cache off.
     #[default]
     Process,
-    /// This directory, whatever the process-wide choice is.
+    /// The warm cache in this directory, whatever the process-wide choice is.
+    /// It reads no blob.
     Dir(PathBuf),
     /// The image `blob` holds, then the warm cache in `fallback` when there is
     /// one and the blob is refused. `Process` resolves to this when the binary
