@@ -1,6 +1,6 @@
 # Standard Library Disk Cache
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-12 -->
 
 [stdlib.lisp](../../src/stdlib.lisp) (~3200 lines) is recompiled on every
 process start. The `compile_file` front end (expand → analyze → regions → lower → freeze → emit)
@@ -25,7 +25,7 @@ compile_file(STDLIB)         try_load (cache hit)
 
 The cache is a speedup, not a correctness dependency: any failure (no directory
 permission, corrupt file, format-version mismatch) falls back to a full
-recompile, and store failures are silently ignored.
+recompile, and a store failure is reported on stderr and ignored.
 
 ## Cache key and invalidation
 
@@ -38,10 +38,10 @@ cache_key = hash(stdlib source, build identity, FORMAT_VERSION,
   naturally invalidates it.
 - **build identity**: the running executable's length and modification time
   (`std::env::current_exe`). Not the version string: two builds of one version
-  compile stdlib differently the moment the emitter or a pass changes, and a
-  key blind to the rebuild hands every `Runtime::new()` — the one in each test
-  included — bytecode the previous binary produced, so a test failure stops
-  implicating the branch that caused it. It also covers the ids `prim_id_of`
+  compile stdlib differently the moment the emitter or a pass changes. A key
+  blind to the rebuild hands every runtime that reads the cache, the one in
+  each test included, bytecode the previous binary produced. A test failure
+  then stops implicating the branch that caused it. It also covers the ids `prim_id_of`
   appends outside the canonical tables (trait methods, FFI callbacks), which
   the table identity below cannot see. A binary that cannot identify itself
   gets no cache at all rather than sharing one.
@@ -71,6 +71,12 @@ instance that wrote a cache from the instance that read it.
 `Runtime::stdlib_source()` reports which side of the fork an instance took. A
 cache that silently never hits still yields a working runtime, so behaviour
 alone cannot distinguish the two; the tests assert on this instead.
+
+The boot image's warm cache is on by default, and it comes first. An instance
+that hydrates an image reads no stdlib cache, and one that misses compiles so
+that it can store an image ([boot.md](image/boot.md)). This cache's readers are
+therefore the `sys/spawn` worker, the language server, the WASM entry, and
+every instance that boots with the image off.
 
 A `sys/spawn` worker builds its own runtime on a new thread and runs
 `init_stdlib` there, so it caches too. It reaches the spawning instance only

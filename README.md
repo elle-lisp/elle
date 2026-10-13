@@ -1,6 +1,6 @@
 # Elle
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-12 -->
 
 A Lisp whose compiler infers what each function does and where each value dies,
 and runs on those facts.
@@ -215,20 +215,20 @@ back. An *image* is a compacted region plus a relocation table. Loading one
 maps its pages privately and rewrites its pointers in one pass. No value is
 decoded, and pages that nothing touches are never read from disk.
 
-The boot image holds the whole standard library as one region. From a warm
-image, Elle starts in under 10 ms with 12 MB resident. Loading the library from
-the default bytecode cache takes 40 ms and 39 MB, and compiling it from source
-takes 230 ms and 100 MB. Try the image with a cache directory:
+The boot image holds the whole standard library as one region. The first start
+of a new build compiles the library and stores the image in the cache
+directory, and every later start loads it. From a warm image, Elle starts in
+under 10 ms with 14 MB resident. Loading the library from the bytecode cache
+takes 40 ms and 40 MB, and compiling it from source takes 400 ms and 62 MB.
+`--boot-image=off` compiles at every start:
 
 ```sh
-elle --boot-image=$HOME/.cache/elle script.lisp
+elle --boot-image=off script.lisp
 ```
 
-The boot image is opt-in for now. A closure loaded from an image carries no
-LIR yet, so the JIT cannot compile the library's functions. Saving and loading
-a user session as an image comes next, and then [fleet](docs/impl/fleet.md):
-running a function on other machines by shipping its image.
-[docs/impl/image.md](docs/impl/image.md) holds the design.
+Saving and loading a user session as an image comes next, and then
+[fleet](docs/impl/fleet.md): running a function on other machines by shipping
+its image. [docs/impl/image.md](docs/impl/image.md) holds the design.
 
 ## Hygienic macros
 
@@ -260,7 +260,7 @@ the source file. See [docs/epochs.md](docs/epochs.md).
 - **Region merging.** Collapse regions that die together, so a collection and
   its elements share pages. This removes most of the per-value page cost.
 - **Performance.** Performance has not been a focus since the memory rewrite.
-  Today `+`, `-` and `<` are variadic library functions that the JIT cannot
+  Today `+` and `-` are variadic library functions that the JIT cannot
   compile. Plain numeric code runs 100 to 2,000 times slower than Janet or Lua,
   and code written with `%` [intrinsics](docs/intrinsics.md) about 4 to 50 times
   slower. Type inference and [dissolution](docs/impl/dissolution.md) are the

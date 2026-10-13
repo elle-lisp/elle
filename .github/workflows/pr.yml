@@ -209,10 +209,9 @@ jobs:
           retention-days: 14
 
   # The language suite booted from an image rather than from core.lisp,
-  # prelude.lisp and stdlib.lisp. `--boot-image=` is off by default
-  # (docs/impl/image/boot.md names the two milestones the default waits on), so
-  # no other job hydrates one and a break in hydration passes every gate in this
-  # workflow (docs/analysis/ci.md).
+  # prelude.lisp and stdlib.lisp. A start that cannot hydrate boots from source
+  # and passes, so this is the one job that proves a start hydrated, and a break
+  # in hydration passes every other gate in this workflow (docs/analysis/ci.md).
   boot-image:
     name: Boot Image Tests
     needs: changes
