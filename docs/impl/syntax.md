@@ -147,6 +147,12 @@ and no span. So a unit mints the same ids in every process, and two units mint
 different ones. That matters where their trees meet, as a macro an earlier
 REPL line or `eval` defined meets the code a later one expands.
 
+A macro's transformer compiles once, in the first unit that expands the macro,
+and every later expansion calls the cached closure. So the transformer's
+compile is a unit of its own, tagged by the macro's name and its `fn` form.
+Otherwise the ids a unit mints would depend on which transformers the process
+had already compiled.
+
 Tag zero names no unit. It holds the primitive scope every prelude form
 carries, and the intro scope the analyzer stamps on a form it builds itself; a
 unit whose hash folds to zero takes tag one. An image records no scope
@@ -196,9 +202,10 @@ compile-time arena for the life of every compiled closure.
   into another arena shares nothing; a stamped copy does not disturb its
   source; scope sets grow without loss; a syntax `Value` owns its tree.
 - `src/syntax/tests/units.rs` — one unit mints the same scope ids in two
-  instances and in two evals, a unit's tag ignores spans, two units with
-  different forms or names take different tags, and an id keeps its tag, its
-  intro bit and its count apart.
+  instances and in two evals, and whether or not its macros' transformers have
+  compiled. A unit's tag ignores spans, two units with different forms or names
+  take different tags, and an id keeps its tag, its intro bit and its count
+  apart.
 - `src/syntax/span/tests.rs` — `Span` is 20-byte `Copy` POD, its file name
   interns, and serde carries the name rather than the id.
 - `src/syntax/files/tests.rs` — interning is idempotent and the empty name is

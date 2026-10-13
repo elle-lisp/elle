@@ -115,8 +115,7 @@ The `Expander` maintains:
 - `compile_time_env: HashMap<String, Value>` — Values defined in `begin-for-syntax` blocks. Always starts empty (the custom `Clone` impl resets it). Visible to macro bodies compiled via `eval_syntax` through `Analyzer::bind_compile_time_env`.
 - `core_env: HashMap<String, Value>` — core.lisp's exports, which macro bodies resolve. A clone keeps it.
 - `eval_meta: Rc<PrimitiveMeta>` — The primitives and stdlib exports that macro bodies compile against.
-- `unit: UnitTag` and `next_scope_id: u32` — The unit under expansion, and the count of scopes it has minted. `begin_unit` sets the tag and starts the count at zero
-- `gensyms: u32` — The count of names `gensym` has answered for the unit. A transformer call and a `begin-for-syntax` body lend the unit's tag and this count to the VM, where `gensym` reads them while the expansion runs
+- `unit: Unit` — The unit under expansion: its tag, the count of scopes it has minted, and the count of names `gensym` has answered. `begin_unit` sets the tag and starts both counts at zero. A transformer call and a `begin-for-syntax` body lend the tag and the gensym count to the VM, where `gensym` reads them while the expansion runs. A transformer's compile runs in a unit of its own, and the caller's unit resumes after it ([docs/impl/syntax.md](../../../docs/impl/syntax.md))
 - `expansion_depth: usize` — Current recursion depth (bounded at 200)
 
 ## Prelude macros
