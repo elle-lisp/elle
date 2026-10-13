@@ -145,10 +145,10 @@ The warm cache is the boot image's development distribution: when a valid image
 is available, boot hydrates it; when none is, boot compiles from source and
 dumps one for the next start.
 
-- The file is `<dir>/<exe>-<key>.image`. `<exe>` hashes the path of the
-  running executable. `<key>` hashes the source digest the root struct carries
-  with the binary's identity, which is the length and modification time of the
-  executable, as the stdlib cache reads them ([stdlib-cache.md](../stdlib-cache.md)).
+- The file is `<dir>/<key>.image`. `<key>` hashes the source digest the root
+  struct carries with the binary's identity, which is the length and
+  modification time of the executable, as the stdlib cache reads them
+  ([stdlib-cache.md](../stdlib-cache.md)).
 - An image another build stored has another name, so this binary never opens
   it. A binary that cannot read its own identity reads and writes no image.
 - A fingerprint mismatch, a corrupt file and a missing file are one case:
@@ -163,11 +163,15 @@ dumps one for the next start.
   of one process can store one image at once. Never rewrite an image in place:
   a `MAP_PRIVATE` mapping of a file mutated underneath it is unspecified, and a
   live hydration holds one ([image.md](../image.md) § Hydration).
-- A store prunes the other images of its own executable after the rename, never
+- A store prunes every other `.image` in the directory after the rename, never
   before. Each rebuild and each edit to a boot source orphans the last file, at
-  megabytes apiece. The images of other executables stay, so `elle`,
-  `elle-rig`, a test binary and another worktree's build share one directory
-  without evicting each other.
+  megabytes apiece. A directory therefore holds one image whatever runs in it,
+  and that bound is the reason for the rule. A rustdoc test, for example, runs
+  from a fresh temporary executable every time, and each one stores an image.
+- Executables that share a directory evict each other, as they do in the stdlib
+  cache. `elle` and `elle-rig`, or a debug and a release build, then pay one
+  compile and one dump at each switch. Give them separate directories with
+  `--boot-image=DIR` or `--cache=` when that matters.
 
 A store failure is reported and ignored. The cache is a speedup, and a source
 boot is always the fallback.

@@ -410,7 +410,7 @@ own for one type.
 - **Warm cache (no build changes):** when no valid boot image is available,
   boot compiles from source as today, then dumps an image into `boot` under
   the `--cache=` directory (written atomically: temp file, rename). The file is
-  named for the executable, the source digest and the binary's identity.
+  named for the source digest and the binary's identity.
   Subsequent starts hydrate it, so development builds get fast starts from the
   second run onward. The warm cache is on by default; [boot.md](image/boot.md)
   owns the key and the policy.

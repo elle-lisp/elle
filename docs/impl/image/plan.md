@@ -89,8 +89,8 @@ Then the image milestones:
      ([boot.md](boot.md)); the two boots share the export-registration tails,
      and the corpus under image boot is the gate;
    - the warm cache — `--boot-image=`, the file keyed on the source digest and
-     the binary's identity, the atomic store and the prune of the executable's
-     own superseded images. It is on by default ([boot.md](boot.md));
+     the binary's identity, the atomic store and the prune of every
+     superseded image. It is on by default ([boot.md](boot.md));
    - the tier half of the parity gate — the **lir** foundation carries a
      function's LIR in the payload, so a hot stdlib function reaches the JIT
      under an image boot as under a source boot;
@@ -290,11 +290,10 @@ Then the image milestones:
   first stored, asserted on the reported boot source, and the stored file is
   the one the policy names. A rejected file is replaced rather than rejected
   again — the start that meets it compiles and stores, and the start after
-  that hits. Two binary identities give two keys for one source digest, one
-  executable's keys share a prefix another executable's do not, and a binary
-  with no identity has no path. A valid image filed under the plain digest, as
-  an older build named it, is never opened. A store prunes its own executable's
-  superseded file and leaves another executable's. Two threads that store one
+  that hits. Two binary identities give two keys for one source digest, and a
+  binary with no identity has no path. A valid image filed under the plain
+  digest, as an older build named it, is never opened. A store prunes every
+  other image in its directory. Two threads that store one
   image at once each rename a whole file. The default policy stores under the
   `--cache=` directory and the next start hydrates; `--boot-image=off` and
   `--cache=` with no directory read and write nothing. `elle image dump-boot`
