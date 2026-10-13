@@ -380,6 +380,41 @@ fn a_renamed_pattern_leaf_is_named_on_the_call() {
 }
 
 #[test]
+fn a_defaulted_parameter_releases_the_closure_it_built_before_the_tail_call() {
+    // The version a `default` builds is a phi over a struct leaf and a closure
+    // the body built. The call mints the phi a reference of its own, so it moves
+    // none of the frame's. Left in the dead block past the `TailCall`, the built
+    // closure's release never runs, and the mint keeps the closure once per call.
+    let module = compile_to_lir(
+        "(begin (def k (fn (a b) b)) \
+         (def m (fn (&named s @f) (begin (if f nil (assign f (fn (x) x))) (k s f)))) \
+         (m :s 1))",
+    );
+    let m = module
+        .closures
+        .iter()
+        .find(|f| f.view().name() == Some("m"))
+        .expect("a closure named m");
+    let built = flat_instrs(m)
+        .into_iter()
+        .find_map(|i| match i {
+            InstrRef::MakeClosure { region, .. } => Some(region),
+            _ => None,
+        })
+        .expect("m builds the default closure");
+    let (b, at) = tail_call_blocks_of(m).next().expect("m ends in a TailCall");
+    let releases = positions(
+        &b,
+        |i| matches!(i, InstrRef::DecrefRegion { region_id } if *region_id == built),
+    );
+    assert!(
+        !releases.is_empty() && releases.iter().all(|&r| r < at),
+        "the built default closure is released after the TailCall \
+         (at={at}, releases={releases:?}) — dead on the closure path",
+    );
+}
+
+#[test]
 fn a_renamed_capture_is_named_on_the_call() {
     // `y` renames `g`'s upvalue `x`. The env holds the only reference, so the
     // call must mint one for the move, exactly as it does for `x` itself.

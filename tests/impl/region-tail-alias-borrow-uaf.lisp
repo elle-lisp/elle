@@ -41,6 +41,11 @@
   (assign f f)
   (inner s f))
 
+(defn forward-alone [&named s @f]
+  "Reassign a &named closure to itself, then forward it with no sibling."
+  (assign f f)
+  (inner-one f))
+
 (defn forward-struct-leaf [t]
   "Rename a struct pattern's leaf, then forward it beside a sibling leaf."
   (let [{:s s :f f} t
@@ -84,6 +89,13 @@
     (assign x (list 3 4))
     (h)))
 
+(defn counted-read-direct []
+  "Forward a reassigned captured binding under its own name."
+  (def @x (list 1 2))
+  (let [h (fn [] (length x))]
+    (assign x (list 3 4))
+    (h)))
+
 # ── each alias still names the caller's closure ──────────────────
 # A fresh closure per call, as the caller writes it: its region holds no
 # reference but the caller's and the one each container takes.
@@ -98,6 +110,8 @@
           "a defaulted &named closure forwarded by name came back freed")
   (assert (= ((forward-reassigned :s i :f (fn [x] [:given x])) 1) [:given 1])
           "a reassigned &named closure came back freed from a tail call")
+  (assert (= ((forward-alone :s i :f (fn [x] [:given x])) 1) [:given 1])
+          "a reassigned &named closure forwarded alone came back freed")
   (assert (= ((forward-struct-leaf {:s i :f (fn [x] [:given x])}) 1) [:given 1])
           "a renamed struct leaf came back freed from a tail call")
   (assert (= ((forward-array-leaf [i (fn [x] [:given x])]) 1) [:given 1])
@@ -136,20 +150,32 @@
 
 (let [given-arm (region-delta (fn [k] (forward-defaulted :s k :f given)) 200)
       default-arm (region-delta (fn [k] (forward-defaulted :s k)) 200)
+      alone (region-delta (fn [k] (forward-alone :s k :f given)) 200)
       leaf (region-delta (fn [k] (forward-struct-leaf {:s k :f given})) 200)
       capture (region-delta (fn [k] (h)) 200)
-      counted (region-delta (fn [k] (counted-read-alias)) 200)]
+      counted (region-delta (fn [k] (counted-read-alias)) 200)
+      direct (region-delta (fn [k] (counted-read-direct)) 200)]
   (assert (%lt given-arm 20)
           (concat "the given arm of a default leaked: delta="
                   (number->string given-arm)))
   (assert (%lt default-arm 20)
           (concat "the default arm of a default leaked: delta="
                   (number->string default-arm)))
+  # No sibling leaf drops the collected struct's exemption here, so only the
+  # alias's own reconsideration releases the struct ahead of the call.
+  (assert (%lt alone 20)
+          (concat "a renamed leaf forwarded alone leaked: delta="
+                  (number->string alone)))
   (assert (%lt leaf 20)
           (concat "a renamed struct leaf leaked: delta=" (number->string leaf)))
   (assert (%lt capture 20)
           (concat "a renamed capture leaked: delta=" (number->string capture)))
-  (assert (%lt counted 20)
-          (concat "a counted read alias leaked: delta=" (number->string counted))))
+  # The trap: a reassigned captured binding that holds a heap value strands
+  # one region per call with no alias at all. So the counted read is read
+  # against the same shape under the binding's own name, and only the
+  # difference belongs to the alias.
+  (assert (%lt (%sub counted direct) 20)
+          (concat "a counted read alias leaked beyond its shape: delta="
+                  (number->string (%sub counted direct)))))
 
 (println "region-tail-alias-borrow-uaf: ok")
