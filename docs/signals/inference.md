@@ -1,6 +1,6 @@
 # Signal Inference
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-10-13 -->
 
 How the compiler infers each function's signal, and the forms that bound,
 narrow or check it.
@@ -55,9 +55,23 @@ The analyzer accumulates both from the body:
 (assert (contains? (get sig :bits) :io) "an unknown callee may do anything")
 ```
 
-Mutually recursive definitions in one file converge by a fixpoint; see
-[pipeline.md](../pipeline.md). The signal decides the calling convention: a
-call whose callee may yield, do I/O or wait keeps a continuation frame.
+Mutually recursive definitions in one file or one `letrec` converge by a
+fixpoint; see [pipeline.md](../pipeline.md). So does a function that calls
+itself from a lambda inside its own body, wherever it is defined. The signal
+decides the calling convention: a call whose callee may yield, do I/O or wait
+keeps a continuation frame.
+
+```lisp
+(assert (string/contains?
+          (compile-error '(defn outer []
+                            (defn walk [n]
+                              (if (= n 0)
+                                (yield n)
+                                ((fn [k] (silent!) (walk k)) (- n 1))))
+                            walk))
+          "function restricted to {} but body may emit {:error, :yield}")
+        "the lambda inside walk takes the signal of walk")
+```
 
 ### What raises
 

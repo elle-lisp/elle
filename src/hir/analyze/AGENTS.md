@@ -1,6 +1,6 @@
 # hir/analyze
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-13 -->
 
 Syntax to HIR analysis: binding resolution, capture computation, signal inference, and linting.
 
@@ -79,6 +79,11 @@ The analyzer tracks signals across function boundaries (see
    `signal_env` entry. This is sound only because the fallback in (2) is
    gated to primitives: a reassigned non-primitive local therefore resolves
    to `Signal::unknown()`, never a stale or same-named global's signal.
+5. **Convergence**: a lambda analyzed against a seed re-analyzes until its
+   signal holds. `converge_signals` ([fixpoint.rs](fixpoint.rs)) runs the
+   loop for a file letrec, a `letrec`, and a `def` or `var` whose lambda
+   refers to itself. [docs/pipeline.md](../../../docs/pipeline.md) owns the
+   algorithm.
 
 ## Scope-aware binding resolution
 
@@ -161,7 +166,8 @@ This prevents accidental capture in macros while allowing intentional capture vi
 - **Adding a new special form**: Add one `SpecialForm` entry to
   `forms/registry.rs` and implement its `analyze_*` method
 - **Changing binding semantics**: Update `binding.rs` and `destructure.rs`
-- **Changing signal inference**: Update `call.rs` and `lambda.rs`
+- **Changing signal inference**: Update `call.rs` and `lambda.rs`, and
+  `fixpoint.rs` for convergence
 - **Changing signal bounds**: Update `special.rs` for `analyze_bound` and
   `lambda.rs` for the ceiling check, and `call.rs` for the check at a call;
   the entry check is emitted in

@@ -1,6 +1,6 @@
 # Compilation Pipeline
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-13 -->
 
 Compilation entry points: source reaches bytecode through the reader, expander, analyzer, lowerer and emitter.
 
@@ -48,7 +48,7 @@ pub struct AnalyzeResult {
 
 ### Functions
 
-| Function | VM for macros | Fixpoint? | Callers |
+| Function | VM for macros | File fixpoint? | Callers |
 |----------|---------------|-----------|---------|
 | `compile` | Internal | No | Integration tests |
 | `compile_file` | Internal | Yes | `elle::program::run_source` (file, stdin, `-e`), `import-file`, the stdlib load |
@@ -122,14 +122,19 @@ again.
 
 ## The fixpoint loop
 
-Signal inference for mutually recursive definitions converges by fixpoint. The
-loop lives in `analyze_file_letrec`
-([fileletrec/letrec.rs](../src/hir/analyze/fileletrec/letrec.rs)),
-not in the pipeline module: `compile_file` and `analyze_file` both classify a
-file's forms and hand them to that one function, so the file *is* a letrec and
-the file-level fixpoint and the letrec fixpoint are the same mechanism. Local
-`(letrec ...)` forms run the same loop in
-[letrec.rs](../src/hir/analyze/letrec.rs).
+Signal inference for mutually recursive definitions, and for a function that
+refers to itself, converges by fixpoint. The loop is `converge_signals`
+([fixpoint.rs](../src/hir/analyze/fixpoint.rs)), in the analyzer rather than in
+the pipeline module. Three forms run it:
+
+- A file. `compile_file` and `analyze_file` both classify a file's forms and
+  hand them to `analyze_file_letrec`
+  ([fileletrec/letrec.rs](../src/hir/analyze/fileletrec/letrec.rs)), so the
+  file *is* a letrec.
+- A local `(letrec ...)` form ([letrec.rs](../src/hir/analyze/letrec.rs)).
+- A `def` or `var` whose lambda refers to itself, in a function body or in a
+  form compiled alone ([binding.rs](../src/hir/analyze/binding.rs)). It is a
+  letrec of one binding.
 
 The signal inference computed here is exposed to tools and agents via:
 - **`compile/signal`** — Get the inferred signal of a function
@@ -146,10 +151,30 @@ whatever `g`'s seed says rather than what `g` turns out to be, and a second
 name in the cycle can make the first one's answer wrong in either direction:
 too low if the seed is optimistic, too high if it is conservative.
 
+A function that refers to itself reads its own seed the same way. Below, the
+lambda inside `walk` calls `walk` while `walk` is still being analyzed. One
+pass gives that lambda the seed's signal, silent, and its yield then breaks
+the proof at run time.
+
+```lisp
+(defn outer []
+  (defn walk [n]
+    (if (= n 0)
+      (yield :leaf)
+      (list :back ((fn [k] (walk k)) (- n 1)))))
+  walk)
+
+(def walker (fiber/new (fn [] ((outer) 3)) |:yield|))
+(assert (= :leaf (fiber/resume walker)) "the yield reaches the resume")
+(fiber/resume walker)
+(assert (= '(:back (:back (:back nil))) (fiber/value walker)))
+```
+
 ### Algorithm
 
 1. **Pre-bind** every name in the letrec, so each initializer can resolve its
-   siblings. Seed each one's signal with `Signal::silent()`.
+   siblings. Seed each one's signal with `Signal::silent()`. A `def` or `var`
+   of a lambda seeds its own name the same way, just before its initializer.
 
 2. **Analyze initializers** in order. Record each lambda's `inferred_signals`
    in `signal_env` and its arity in `arity_env` as it is analyzed. Bindings
@@ -160,19 +185,24 @@ too low if the seed is optimistic, too high if it is conservative.
    lambda binding against the current `signal_env`. If any lambda's
    `inferred_signals` differs from what `signal_env` holds, record the new
    value and iterate again. Stop on the first iteration that changes nothing.
+   A `def` iterates only when its lambda refers to itself and its signal left
+   the seed. The lambda of any other `def` never read its own seed, so its
+   first analysis stands.
 
-4. **Analyze the body** (or, for a file-letrec, the remaining expression
-   entries) only after the loop has converged, so calls into the cycle read
-   settled signals.
+4. **Analyze the body** only after the loop has converged, so calls into the
+   cycle read settled signals. For a `def`, the body is the forms after it. A
+   file-letrec has no separate body: step 2 analyzes its expression entries
+   in order, and the loop does not analyze them again.
 
 5. **Combine** the aggregate signal from the post-fixpoint binding and body
    HIR, not from the values step 2 produced.
 
 Re-analysis is safe to repeat: its side effects on bindings (`mark_captured`,
 `mark_mutated`) only ever add flags, so an extra iteration can make the result
-more conservative but never wrong. Errors raised inside lambda bodies are
-collected from the final iteration only, so a body that fails to analyze does
-not report the same error once per iteration.
+more conservative but never wrong. Re-analysis reports again every error the
+first analysis reported. The loop keeps the errors of its last iteration
+alone, and drops each one that step 2 already reported, so a body that fails
+to analyze reports each error once.
 
 ### Convergence
 
@@ -197,6 +227,10 @@ converge, because each import is a separate compilation — see
 [signals/inference.md](signals/inference.md) for the projection that carries a
 signal across a file boundary.
 
+A function body seeds a `def` only as the `def` is reached. A lambda that
+calls a sibling defined later in the same body reads no seed for it. It takes
+the unknown-callee signal instead, which is sound and may be wider than the
+sibling's.
 
 ## Compilation phases (single-form)
 
