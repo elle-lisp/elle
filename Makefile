@@ -384,13 +384,13 @@ smoke-scrub: elle elle-rig  ## The language suite on the rig, each released page
 
 # The language suite booted from an image instead of from core.lisp,
 # prelude.lisp and stdlib.lisp — dump-boot's gate (docs/impl/image/boot.md).
-# `--boot-image=` is off by default, for the reasons boot.md gives, so nothing
-# else in the tree boots from one. The target runs `bytecode-parity` first: a
-# corpus that answers alike under an image boot can still have compiled to
-# other bytecode, and only the dumps show that.
+# A start that cannot hydrate boots from source and passes, so nothing else in
+# the tree proves that a start hydrated. The target runs `bytecode-parity`
+# first: a corpus that answers alike under an image boot can still have
+# compiled to other bytecode, and only the dumps show that.
 #
 # The directory lives under target/ rather than the temp root: an image is
-# megabytes, a store prunes the one an earlier digest left, and `make clean`
+# megabytes, a store prunes the one an earlier build left, and `make clean`
 # takes the directory with the rest of the build output. It starts empty, so
 # the first start below always pays the store every child then reads.
 #

@@ -71,10 +71,10 @@ answer with the previous library.
 
 The root struct therefore carries a digest of core.lisp, prelude.lisp and
 stdlib.lisp, and the installer refuses an image whose digest is not this
-binary's. The warm cache names its file after the same digest, so an edit to
-any of the three misses rather than loads. Keeping the digest in the image is
-what covers the sources an embedded blob is built from, because a blob has no
-filename to key on.
+binary's. The warm cache's key holds the same digest, so an edit to any of the
+three misses rather than loads. Keeping the digest in the image is what covers
+the sources an embedded blob is built from, because a blob has no filename to
+key on.
 
 ## Producing one
 
@@ -91,8 +91,8 @@ The stdlib disk cache is off for that boot, and a warm-cache store compiles for
 the same reason. A cache hit rebuilds the library's closures through the send
 codec, which carries no cell's binding, so every restored capture cell reads as
 minted at run time — and the dump refuses one of those by variant
-([sealing](sealing.md)). A boot image therefore costs one stdlib compile per
-digest, paid by the start that stores it.
+([sealing.md](sealing.md)). A boot image therefore costs one stdlib compile per
+build and digest, paid by the start that stores it.
 
 The dump is the ordinary dumper over the root struct, so determinism, the
 refusals, and the cross-build name and primitive tables are the ones
@@ -145,21 +145,29 @@ The warm cache is the boot image's development distribution: when a valid image
 is available, boot hydrates it; when none is, boot compiles from source and
 dumps one for the next start.
 
-- The file is `<dir>/<digest>.image`, where the digest is the one the root
-  struct carries. A fingerprint mismatch, a corrupt file and a missing file are
-  one case: compile, then store, so a rejected file is replaced rather than
-  rejected again by every later start.
+- The file is `<dir>/<exe>-<key>.image`. `<exe>` hashes the path of the
+  running executable. `<key>` hashes the source digest the root struct carries
+  with the binary's identity, which is the length and modification time of the
+  executable, as the stdlib cache reads them ([stdlib-cache.md](../stdlib-cache.md)).
+- An image another build stored has another name, so this binary never opens
+  it. A binary that cannot read its own identity reads and writes no image.
+- A fingerprint mismatch, a corrupt file and a missing file are one case:
+  compile, then store, so a rejected file is replaced rather than rejected
+  again by every later start.
 - The directory travels with the instance rather than coming from process
   state, for the reason [the stdlib cache](../stdlib-cache.md) argues. The suite
   builds many instances across threads, and a directory on the instance is what
   keeps one test's cache invisible to the test beside it.
 - A store writes a temporary file in the same directory and renames it over the
-  target. Never rewrite an image in place: a `MAP_PRIVATE` mapping of a file
-  mutated underneath it is unspecified, and a live hydration holds one
-  ([the image design](../image.md)).
-- A store prunes every other `.image` in the directory after the rename, never
-  before. Each edit to a boot source mints a new digest and orphans the last
-  file, at megabytes apiece.
+  target. The temporary file's name is the store's alone, because two threads
+  of one process can store one image at once. Never rewrite an image in place:
+  a `MAP_PRIVATE` mapping of a file mutated underneath it is unspecified, and a
+  live hydration holds one ([image.md](../image.md) § Hydration).
+- A store prunes the other images of its own executable after the rename, never
+  before. Each rebuild and each edit to a boot source orphans the last file, at
+  megabytes apiece. The images of other executables stay, so `elle`,
+  `elle-rig`, a test binary and another worktree's build share one directory
+  without evicting each other.
 
 A store failure is reported and ignored. The cache is a speedup, and a source
 boot is always the fallback.
@@ -198,10 +206,12 @@ then run on a worker with a VM of its own, which registers its own primitives
 and loads its own stdlib where the file needs the library at run time.
 Per-worker hydration is a milestone of its own ([the landing plan](plan.md)).
 
-## Why the cache is opt-in
+## The warm cache is on by default
 
-`--boot-image=DIR` turns the warm cache on, `--boot-image=on` uses the
-`--cache=` directory, and the default is off.
+The default is `--boot-image=on`, which keeps the warm cache in `boot` beneath
+the `--cache=` directory ([config.md](../../config.md)). `--boot-image=DIR`
+names a directory of its own. `--boot-image=off` compiles core, prelude and
+stdlib at every start, and so does `--cache=` with no directory.
 
 Both halves of parity have landed. A hydrated closure carries its LIR in its
 payload, so a hot stdlib function promotes to the JIT under either boot
@@ -211,14 +221,18 @@ same payload, so a call to a library function grafts under either boot
 boot, and `make bytecode-parity` proves it over the corpus (§ The gate). A
 reference count on a hydrated stdlib value does not walk the probe ladder: the
 store's interval table resolves the pointer with a range check
-([image.md](../image.md)).
+([image.md](../image.md)). The key holds the binary's identity, so a new build
+never hydrates an older build's image.
 
-Two things keep the default off ([plan.md](plan.md)):
+The default reaches every `Runtime::new()`: `elle`, its REPL and its
+subcommands, and an embedder's runtime. Three paths always boot from source:
+`--no-stdlib`, `elle image dump-boot` (§ Producing one), and
+`Runtime::with_stdlib_cache`, which names the stdlib cache it reads. A
+`sys/spawn` worker, the language server and the WASM entry compile their own
+stdlib until per-worker hydration lands ([plan.md](plan.md)).
 
-- A `sys/spawn` worker builds its own instance and boots its stdlib from
-  source, whatever the spawning instance booted from. A program that spawns
-  workers pays a stdlib compile per worker under either boot.
-- The warm cache keys on the source digest alone, so a new build hydrates an
-  older build's image ([issue 1361](https://github.com/elle-lisp/elle/issues/1361)).
-
-The flag is what makes the mechanism usable and testable meanwhile.
+The default has two costs. A start that misses compiles the three sources and
+skips the stdlib cache, because the store needs a compiled boot (§ Producing
+one). A process that declares a user signal before it boots cannot store at
+all, so under the default it pays that compile at every start and reports the
+refused store.

@@ -136,8 +136,8 @@ user code identically.
   types). Load re-allocates every object, re-interns every symbol, and
   rebuilds every `Rc` — O(objects) allocator and decode work on every start,
   and the measured shape confirms it: deserialization dominates the cache-hit
-  path. This design keeps the content-addressed *keying* — the warm-cache
-  path below — and decodes no value.
+  path. This design keeps the *keying* — the warm-cache path below — and
+  decodes no value.
 - **Position-independent (offset-based) pointers in the runtime
   representation.** Zero-fixup load, but every deref pays the add forever.
   The region system's point is raw-pointer deref; do not tax it for a load
@@ -278,7 +278,9 @@ that rule).
 **Never rewrite an image file in place.** The atomic temp-file-and-rename
 discipline is what keeps a mapped old inode stable while a new image
 replaces the path; `MAP_PRIVATE` over a file mutated in place is
-unspecified. A sealed memfd is immune by construction.
+unspecified. Each dump writes a temporary file no other dump names, so two
+dumps racing for one path, from two processes or two threads, each rename a
+whole file. A sealed memfd is immune by construction.
 
 **An image is code — trust it like a shared library.** Hydration installs
 raw memory and executes whatever the templates say; the verifier
@@ -361,10 +363,10 @@ struct with a `bool` in it around an enum. A `repr(Rust)` enum copy carries
 uninitialized padding from its construction temporary, so the dumper never
 copies a record wholesale; the
 extent copy leaves padding out, and two dumps of the same graph are
-byte-identical whole files. The warm cache still keys on the fingerprint,
-not a content hash; whole-file determinism buys reproducible embedded blobs,
-and concurrent dumpers racing through the atomic rename produce identical
-files.
+byte-identical whole files. The warm cache keys on the source digest and the
+binary's identity, not on a hash of the file; whole-file determinism buys
+reproducible embedded blobs, and concurrent dumpers racing through the atomic
+rename produce identical files.
 
 Mutable bindings are the dump-policy fork. The strict policy (boot) fails
 the dump, naming the binding. The environment policy defaults to the same
@@ -406,12 +408,12 @@ own for one type.
 ## Build integration
 
 - **Warm cache (no build changes):** when no valid boot image is available,
-  boot compiles from source as today, then dumps
-  `$ELLE_CACHE/boot/<digest>.image` (written atomically: temp file, rename).
+  boot compiles from source as today, then dumps an image into `boot` under
+  the `--cache=` directory (written atomically: temp file, rename). The file is
+  named for the executable, the source digest and the binary's identity.
   Subsequent starts hydrate it, so development builds get fast starts from the
-  second run onward. `--boot-image=` opts in, and
-  [booting from an image](image/boot.md) owns the policy and the two
-  milestones the default waits on.
+  second run onward. The warm cache is on by default; [boot.md](image/boot.md)
+  owns the key and the policy.
 - **Embedded (release):** a Makefile stage builds `elle`, runs
   `elle image dump-boot`, and rebuilds with the blob embedded (path passed
   by env var; `build.rs` declares the rerun-if). The blob is embedded

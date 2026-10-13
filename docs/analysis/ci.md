@@ -368,9 +368,10 @@ plugin directory to a workspace member.
 
 ### The boot-image job
 
-`--boot-image=` is off by default, for the reasons
-[boot.md](../impl/image/boot.md) gives. No other job boots from an image, so a
-change that breaks hydration passes every gate in the workflow.
+The warm cache is on by default ([boot.md](../impl/image/boot.md)), but a start
+that cannot hydrate boots from source, and the suites pass either way. No other
+job proves that a start hydrated, so a change that breaks hydration passes
+every other gate in the workflow.
 
 `Boot Image Tests` runs `make smoke-boot-image`. The target first runs `make
 bytecode-parity`, which compiles every corpus file under a source boot and

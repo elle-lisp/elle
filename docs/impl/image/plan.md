@@ -86,12 +86,11 @@ Then the image milestones:
    - dump-boot — the root struct over the core exports, the stdlib exports and
      the macro definitions, the source digest beside them, `elle image
      dump-boot`, and the install path a fresh instance boots through
-     ([booting from an image](boot.md)); the two boots share the
-     export-registration tails, and the corpus under image boot is the gate;
-   - the warm cache — `--boot-image=`, the digest-keyed file, the atomic store
-     and the prune. Opt-in rather than default: a `sys/spawn` worker still
-     boots its stdlib from source, and [boot.md](boot.md) argues the default
-     waits on per-worker hydration;
+     ([boot.md](boot.md)); the two boots share the export-registration tails,
+     and the corpus under image boot is the gate;
+   - the warm cache — `--boot-image=`, the file keyed on the source digest and
+     the binary's identity, the atomic store and the prune of the executable's
+     own superseded images. It is on by default ([boot.md](boot.md));
    - the tier half of the parity gate — the **lir** foundation carries a
      function's LIR in the payload, so a hot stdlib function reaches the JIT
      under an image boot as under a source boot;
@@ -288,19 +287,26 @@ Then the image milestones:
   graph released through one root registration. Boot from image running the
   full smoke corpus identically to source boot is dump-boot's gate.
 - Warm cache: a second instance over one directory boots from the image the
-  first stored, asserted on the reported boot source. A rejected file is
-  replaced rather than rejected again — the start that meets it compiles and
-  stores, and the start after that hits. A store prunes the superseded file and
-  leaves the kept one, and the default policy neither reads a directory nor
-  writes one.
+  first stored, asserted on the reported boot source, and the stored file is
+  the one the policy names. A rejected file is replaced rather than rejected
+  again — the start that meets it compiles and stores, and the start after
+  that hits. Two binary identities give two keys for one source digest, one
+  executable's keys share a prefix another executable's do not, and a binary
+  with no identity has no path. A valid image filed under the plain digest, as
+  an older build named it, is never opened. A store prunes its own executable's
+  superseded file and leaves another executable's. Two threads that store one
+  image at once each rename a whole file. The default policy stores under the
+  `--cache=` directory and the next start hydrates; `--boot-image=off` and
+  `--cache=` with no directory read and write nothing. `elle image dump-boot`
+  writes nothing into the cache, so it never booted from it.
 - Compile parity: a call to a stdlib function grafts under image boot as
   under source boot, and the same user file compiles to the same instruction
   stream under both. This is the acceptance gate for the body fragment a
-  hydrated payload carries. The comparison reads each code object's opcodes and length
-  rather than its bytes. A static region id in an operand comes from a
-  process-wide mint ([the region model](../region/model.md)), which a stdlib
-  compile advances, so two boots in one process differ in their operands while
-  their instructions agree.
+  hydrated payload carries. The comparison reads each code object's opcodes
+  and length rather than its bytes. A static region id in an operand comes
+  from a process-wide mint ([the region model](../region/model.md)), which a
+  stdlib compile advances, so two boots in one process differ in their
+  operands while their instructions agree.
   `a_call_to_a_stdlib_function_grafts_under_either_boot` and
   `the_two_boots_emit_one_bytecode_for_a_user_file` pin the two.
 - Bytecode parity: every corpus file and the standard library write one
