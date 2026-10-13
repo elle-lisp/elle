@@ -1,6 +1,6 @@
-// audited: 2026-10-12
+// audited: 2026-10-13
 // `--boot-image=` at the command line: where the default stores, which flags
-// turn it off, and which command never reads it.
+// turn it off, and which commands read it.
 //
 // docs/impl/image/boot.md
 // docs/config.md
@@ -117,5 +117,40 @@ fn dump_boot_writes_nothing_into_the_cache() {
     assert!(
         !cache.join("boot").exists(),
         "dump-boot's runtime used the warm cache"
+    );
+}
+
+// § "A worker boots as its parent did": the language server boots as `elle`
+// does, so over a cold cache directory it compiles and stores an image. An
+// instance that owes an image compiles rather than reading the stdlib cache, so
+// the server writes no stdlib cache. The counter-factual is a server that loads
+// the stdlib through `init_stdlib` under the process cache: it writes a stdlib
+// cache and no image.
+//
+// `ELLE_CACHE` rather than `--cache=`, because the subcommand takes no flag of
+// elle's own. Its standard input is closed, so the server exits once it has
+// booted.
+#[test]
+fn the_language_server_stores_an_image_and_writes_no_stdlib_cache() {
+    let dir = crate::common::ScratchDir::new("boot-lsp");
+    let out = Command::new(env!("CARGO_BIN_EXE_elle"))
+        .arg("lsp")
+        .env("ELLE_CACHE", dir.path())
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("run elle lsp");
+    assert!(
+        out.status.success(),
+        "elle lsp failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        images(dir.path()).len(),
+        1,
+        "the language server stored no image"
+    );
+    assert!(
+        !dir.join("stdlib-cache").exists(),
+        "the language server wrote a stdlib cache"
     );
 }

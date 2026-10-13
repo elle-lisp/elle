@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-13
 // Registers every integration test file, which is what makes one run.
 //
 // tests/AGENTS.md
@@ -185,6 +185,9 @@ mod program_value {
 }
 mod spawn_stack {
     include!("spawn_stack.rs");
+}
+mod worker_boot {
+    include!("worker_boot.rs");
 }
 mod ffi_worker {
     include!("ffi_worker.rs");

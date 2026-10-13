@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-13
 //! The WASM backend's tests, one file per subject, over the LIR fixtures and
 //! evaluation helpers they share.
 //!
@@ -10,6 +10,7 @@ use crate::lir::{ClosureId, ConstRef, FrozenModule, InstrRef, Label, LirOwned, R
 use crate::signals::{Signal, SIG_YIELD};
 use crate::value::Arity;
 
+mod boot;
 mod cache;
 mod caps;
 mod closure;
