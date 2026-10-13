@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! A spike: solve signal inference across files, and compare the answer with the analyzer's.
 //!
 //! docs/impl/solver.md
@@ -21,6 +21,9 @@ mod link;
 mod model;
 mod report;
 mod visit;
+
+#[cfg(test)]
+mod tests;
 
 use extract::{Extractor, Unit};
 use model::{Model, VarKey};

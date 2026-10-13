@@ -1,10 +1,11 @@
-(elle/epoch 14)
-# audited: 2026-10-05
+(elle/epoch 15)
+# audited: 2026-10-12
 # A parametric module whose exports call fields of the plugin it is given.
 # examples/signal_solve/main.rs
 
-# expect connect || field 0 connect
-# expect ping || field 0 ping
+# Qualified access and a call to a field each may raise.
+# expect connect |:error| field 0 connect
+# expect ping |:error| field 0 ping
 (fn [plugin]
   (defn connect [host]
     (plugin:connect host))
