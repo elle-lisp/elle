@@ -86,14 +86,16 @@ impl Runtime {
         )
     }
 
-    /// Build a stdlib-loaded runtime that caches its compiled stdlib under
-    /// `cache` rather than the process-wide directory. Two instances given the
-    /// same directory share a cache; two given different ones cannot see each
-    /// other's, which is what lets tests run beside each other.
+    /// Build a stdlib-loaded runtime that boots from source and caches its
+    /// compiled stdlib under `cache` rather than the process-wide directory.
+    /// Two instances given the same directory share a cache; two given
+    /// different ones cannot see each other's, which is what lets tests run
+    /// beside each other. No boot image is read or stored, whatever the
+    /// process-wide policy (docs/impl/image/boot.md).
     pub fn with_stdlib_cache(cache: StdlibCache) -> Self {
         Self::with_caches(BootCaches {
             stdlib: cache,
-            ..BootCaches::default()
+            image: BootImage::Off,
         })
     }
 
@@ -140,7 +142,8 @@ impl Runtime {
                 // whose capture cells record no binding, and the dump refuses
                 // one of those by variant (docs/impl/image/boot.md). So an
                 // instance that owes an image compiles rather than reading the
-                // other cache — once per digest, for the start that stores it.
+                // other cache — once per build and digest, for the start that
+                // stores it.
                 let stdlib = match image {
                     BootImage::Off => caches.stdlib.clone(),
                     _ => StdlibCache::Off,

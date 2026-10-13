@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-10-20
 //! `RuntimeCore`: the per-instance owner bundle, and the boot that fills it.
 //!
 //! docs/impl/region/rules.md
@@ -24,9 +24,11 @@ use crate::{init_stdlib, register_primitives};
 #[derive(Debug, Clone, Default)]
 pub struct BootCaches {
     /// Where the compiled stdlib bytecode is cached
-    /// (docs/impl/stdlib-cache.md). Consulted only when no boot image loads.
+    /// (docs/impl/stdlib-cache.md). The instance reads it only when its image
+    /// policy is off; its `sys/spawn` workers read it whatever the policy.
     pub stdlib: StdlibCache,
-    /// Where the boot image is (docs/impl/image/boot.md). `Off` by default.
+    /// Where the boot image is (docs/impl/image/boot.md). The process-wide
+    /// warm cache by default.
     pub image: BootImage,
 }
 

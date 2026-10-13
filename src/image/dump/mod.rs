@@ -259,21 +259,26 @@ fn dump_into(
     debug_assert_eq!(file_bytes.len() % 8, 0);
     debug_assert!(format::pages_offset() as u64 + at.len() <= file_bytes.len() as u64);
 
-    // Never rewrite an image file in place (§ Hydration): a mapped old inode
-    // must stay stable while a new image replaces the path.
-    let tmp = path.with_file_name(format!(
-        ".{}.tmp{}",
-        path.file_name().and_then(|n| n.to_str()).unwrap_or("image"),
-        std::process::id()
-    ));
-    let mut f = std::fs::File::create(&tmp)?;
-    f.write_all(&file_bytes)?;
-    f.sync_all()?;
-    drop(f);
-    if let Err(e) = std::fs::rename(&tmp, path) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e.into());
-    }
+    write_atomically(path, &file_bytes)
+}
+
+/// Write `bytes` to `path` by way of a temporary file beside it, renamed over
+/// the target.
+///
+/// Never rewrite an image file in place (§ Hydration): a mapped old inode must
+/// stay stable while a new image replaces the path. The temporary file's name
+/// is this write's alone, because two threads of one process can dump to one
+/// path at once. It sits in the target's directory because a rename is atomic
+/// only within one filesystem, and a failed write removes it.
+fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), ImageError> {
+    let dir = match path.parent() {
+        Some(d) if !d.as_os_str().is_empty() => d,
+        _ => Path::new("."),
+    };
+    let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
+    tmp.write_all(bytes)?;
+    tmp.as_file().sync_all()?;
+    tmp.persist(path).map_err(|e| e.error)?;
     Ok(())
 }
 
