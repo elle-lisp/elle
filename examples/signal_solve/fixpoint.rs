@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-12
 //! The solver: compute the least model of the solver's rules with a worklist over the variables.
 //!
 //! docs/impl/solver.md
@@ -49,7 +49,7 @@ impl State {
 }
 
 /// `raw` and `rdep` of one context: what its body raises and the free
-/// variables it reads, before a ceiling or a muffle applies.
+/// variables it reads.
 fn gather(c: VarId, t: &Tables, s: &State) -> (Bits, BTreeSet<VarId>) {
     let mut raw: Bits = t.raw.get(&c).copied().unwrap_or(0);
     let mut rdep: BTreeSet<VarId> = BTreeSet::new();
@@ -79,7 +79,6 @@ fn gather(c: VarId, t: &Tables, s: &State) -> (Bits, BTreeSet<VarId>) {
 pub fn solve(model: &Model, lowered: &Lowered) -> Solution {
     let f = &model.facts;
     let base_bits = word(&f.bits);
-    let muf = word(&f.muf);
     let ceil = word(&f.ceil);
     let sqm = word(&f.sqm);
     let mut base_dep: HashMap<VarId, BTreeSet<VarId>> = HashMap::new();
@@ -128,15 +127,12 @@ pub fn solve(model: &Model, lowered: &Lowered) -> Solution {
     let mut queued: HashSet<VarId> = queue.iter().copied().collect();
     while let Some(c) = queue.pop_front() {
         queued.remove(&c);
+        // A ceiling checks the body and does not replace it, so a ceiled
+        // context's readers see what its body raises.
         let (raw, rdep) = gather(c, &t, &s);
-        let mut new_bits = base_bits.get(&c).copied().unwrap_or(0);
+        let mut new_bits = base_bits.get(&c).copied().unwrap_or(0) | raw;
         let mut new_dep = base_dep.get(&c).cloned().unwrap_or_default();
-        if f.ceiled.contains(&c) {
-            new_bits |= ceil.get(&c).copied().unwrap_or(0);
-        } else {
-            new_bits |= raw & !muf.get(&c).copied().unwrap_or(0);
-            new_dep.extend(rdep);
-        }
+        new_dep.extend(rdep);
         if let Some(&target) = squelch.get(&c) {
             let tb = s.bits(target);
             let mask = sqm.get(&c).copied().unwrap_or(0);
@@ -165,12 +161,13 @@ pub fn solve(model: &Model, lowered: &Lowered) -> Solution {
     for (&v, ws) in &s.dep {
         out.dep.extend(ws.iter().map(|&w| (v, w)));
     }
-    // A ceiling hides what its body raises from every reader, so the bits past
-    // it are read off the settled model, once.
+    // What a ceiled body raises past its ceiling, and the free variables it
+    // depends on, are read off the settled model, once.
     for &c in &f.ceiled {
-        let (raw, _) = gather(c, &t, &s);
-        let past = raw & !ceil.get(&c).copied().unwrap_or(0) & !muf.get(&c).copied().unwrap_or(0);
+        let (raw, rdep) = gather(c, &t, &s);
+        let past = raw & !ceil.get(&c).copied().unwrap_or(0);
         out.viol.extend(bit_values(past).map(|i| (c, i)));
+        out.vdep.extend(rdep.into_iter().map(|w| (c, w)));
     }
     out
 }

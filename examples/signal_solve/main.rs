@@ -89,6 +89,7 @@ fn main() {
             hir: analysis.hir,
             arena: analysis.arena,
             decls: analysis.lambda_decls,
+            top_direct: analysis.top_direct,
         });
     }
     let analyze_time = t.elapsed();
@@ -103,7 +104,7 @@ fn main() {
         let mut ex = Extractor::new(&mut model, &meta, unit);
         let shape = ex.module_shape();
         let top = ex.model.var(VarKey::Top(unit.id));
-        ex.walk(&unit.hir, top);
+        ex.walk_file(top);
         shapes.insert(unit.path.clone(), shape);
         pendings.push(std::mem::take(&mut ex.pending));
         for (id, sym) in &ex.lambda_names {
