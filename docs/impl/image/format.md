@@ -23,7 +23,7 @@ One image is one file, or one blob embedded in a larger one:
 | name table | the spellings of the symbols and keywords the body names, a code payload's own names included, one length-prefixed string each, sorted by name |
 | file table | the source-file names the body's spans point at, one length-prefixed string each, sorted by name — the file stream indexes it |
 | signal table | not written yet: a dump refuses a declared signal instead ([sealing.md](sealing.md)) |
-| watermarks | dump-time counters, carried in the header block: parameter id, hygiene scope id and static-region mint today, next signal bit with the milestone that needs it |
+| watermarks | dump-time counters, carried in the header block: parameter id and static-region mint today, next signal bit with the milestone that needs it |
 | manifest | the bindings an image installs. It is body data, not a section: an export struct names each binding with a keyword key and each value answers its own signal, arity and doc ([boot.md](boot.md) owns the boot configuration's root struct). Dependency fingerprints are header fields, and an image with an empty dependency list records none |
 
 ## The pages section starts at a base-page boundary
@@ -163,18 +163,18 @@ edge into that region is counted like any other.
 
 ## The watermarks bound what a fresh instance may mint
 
-Three counters reach the body, and all three are process-local. An expander
-mints hygiene scope ids from one. A process-wide counter mints parameter ids
-from zero, and another mints static region slots, the region operands the
-lowerer writes into bytecode.
+Two counters reach the body, and both are process-local. A process-wide
+counter mints parameter ids from zero, and another mints static region slots,
+the region operands the lowerer writes into bytecode.
 
-A scope or a parameter id is compared for equality and nothing else, so an
-instance minting from its own start hands out ids the body already uses. Two
-unrelated scopes would then compare equal, and a new parameter would share
-`*stdin*`'s id. The header therefore records one past the highest value the
-body carries for each. The scope watermark masks the intro bit off first, since
-intro scopes and ordinary ones come from the same counter. A body carrying
-neither records zero for both.
+A parameter is compared by id and nothing else. An instance minting from its
+own start would therefore hand out an id the body already uses, and a new
+parameter would share `*stdin*`'s id. The header records one past the highest
+parameter id the body carries. A body that carries no parameter records zero.
+
+A hygiene scope needs no watermark. Its id names the unit that minted it
+([syntax.md](../syntax.md)), so an instance mints an id the body carries only
+by expanding that same unit.
 
 A static slot collides harmlessly, because a slot is a key within one function.
 Its watermark exists for parity: an image boot must emit the bytecode a source
@@ -187,8 +187,7 @@ image of any other graph records zero, because no compile waits to start from
 its counter.
 
 Hydration raises the process's parameter counter and static-region counter to
-their watermarks, and answers with the scope watermark for the loader that owns
-an expander.
+their watermarks.
 
 ## Fingerprint: regenerate, never migrate
 
