@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-12
 //! Compiler-as-library primitives: analyze Elle source and query the results.
 //!
 //! docs/analysis/portrait.md
@@ -341,7 +341,10 @@ primitive! {
     "compile/run-on" => prim_compile_run_on {
         signal: Signal::query_errors(),
         arity: Arity::AtLeast(2),
-        doc: "Force-dispatch a closure on a specific tier (:bytecode, :jit, :mlir-cpu). Returns the result, or signals :tier-rejected if the tier doesn't accept the closure.",
+        doc: "Force-dispatch a closure on a specific tier (:bytecode, :jit, :wasm, :mlir-cpu). \
+              Returns the result, or signals :tier-rejected if the tier does not accept the \
+              closure. During a macro expansion every tier but :bytecode refuses with \
+              :tier-rejected, because an expansion runs interpreted (docs/runtime.md).",
         params: &["tier", "f"],
         category: "compile",
         example: r#"(compile/run-on :bytecode (fn [a b] (+ a b)) 3 4)"#,
