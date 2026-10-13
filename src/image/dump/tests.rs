@@ -1,4 +1,4 @@
-// audited: 2026-09-11
+// audited: 2026-10-13
 //! What a dump records that no caller outside this crate can build: a syntax
 //! tree's scope sets, and the port behind a parameter's default.
 //!
@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use crate::hir::region::RuntimeRegion;
 use crate::port::{Direction, Encoding, Port, PortId, PortKind};
 use crate::symbol::SymbolTable;
-use crate::syntax::ScopeId;
+use crate::syntax::{ScopeId, UnitTag};
 use crate::syntax::{Span, Syntax, SyntaxArena};
 use crate::value::fiberheap::FiberHeap;
 use crate::value::heap::{deref, HeapObject};
@@ -81,7 +81,11 @@ fn tree_of(v: Value) -> &'static Syntax {
 // why this pin lives here rather than beside the other round-trip tests.
 #[test]
 fn a_nodes_scope_set_survives_hydration() {
-    let scopes = [ScopeId(3), ScopeId::intro(5), ScopeId(7)];
+    let scopes = [
+        ScopeId::test(3),
+        ScopeId::intro(UnitTag::NONE, 5),
+        ScopeId::test(7),
+    ];
     let (_dst, hydrated) = round_trip(
         |heap, arena| {
             let node = Syntax::symbol_scoped(arena, "scoped", Span::synthetic(), &scopes);
@@ -98,14 +102,14 @@ fn a_nodes_scope_set_survives_hydration() {
 // body — the intro scope included, since intro ids and ordinary ones come off
 // the same counter and differ only in a reserved bit.
 //
-// The counter-factual is `intro(9)`: read as a raw id it is a number near
-// `u32::MAX`, so a watermark that did not mask the bit would answer with a
+// The counter-factual is the intro scope 9: read as a raw id it is a number
+// above 2^31, so a watermark that did not mask the bit would answer with a
 // counter no expander could ever reach.
 #[test]
 fn the_scope_watermark_clears_every_counter_in_the_body() {
     let (_dst, hydrated) = round_trip(
         |heap, arena| {
-            let scopes = [ScopeId(4), ScopeId::intro(9)];
+            let scopes = [ScopeId::test(4), ScopeId::intro(UnitTag::NONE, 9)];
             let node = Syntax::symbol_scoped(arena, "scoped", Span::synthetic(), &scopes);
             syntax_value(heap, arena, node)
         },

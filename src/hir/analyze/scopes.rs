@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-10-13
 //! Lexical scopes and name resolution over them.
 //!
 //! Binding, looking up, the capture a lookup across a function boundary records,
@@ -31,7 +31,7 @@ impl DuplicateGuard {
         span: &Span,
     ) -> Result<(), String> {
         let mut key_scopes = scopes.to_vec();
-        key_scopes.sort_unstable_by_key(|s| s.0);
+        key_scopes.sort_unstable();
         if let Some(prev) = self.seen.insert((sym, key_scopes), *span) {
             return Err(format!(
                 "{}: duplicate binding '{}' (previously defined at {})",

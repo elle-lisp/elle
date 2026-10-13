@@ -1,4 +1,4 @@
-// audited: 2026-10-07
+// audited: 2026-10-13
 //! Hygienic macro expansion: the macro table, the scope counter hygiene turns
 //! on, and the walk that rewrites a form until no macro heads it.
 //!
@@ -21,7 +21,7 @@ mod tests;
 
 pub use macrodef::{MacroDef, MacroParams};
 
-use super::{ScopeId, Span, Syntax, SyntaxArena, SyntaxKind};
+use super::{ScopeId, Span, Syntax, SyntaxArena, SyntaxKind, UnitTag};
 use crate::primitives::def::PrimitiveMeta;
 use crate::symbol::SymbolTable;
 use crate::vm::VM;
@@ -106,7 +106,7 @@ impl Expander {
             compile_time_env: HashMap::new(),
             core_env: HashMap::new(),
             eval_meta: Rc::new(PrimitiveMeta::default()),
-            next_scope_id: 1, // 0 is reserved for top-level
+            next_scope_id: 1, // 0 is the primitive scope
             expansion_depth: 0,
         }
     }
@@ -219,15 +219,10 @@ impl Expander {
         vm: &mut VM,
     ) -> Result<(), String> {
         let syntaxes = crate::reader::read_syntax_all(self.arena, prelude, "<internal>")?;
-        // Use ScopeId(0) — the reserved primitive scope — so that
-        // prelude symbols match primitive bindings (which are also
-        // bound with ScopeId(0)). This is critical for macro hygiene:
-        // template symbols in quasiquotes carry ScopeId(0), allowing
-        // them to resolve to primitives even when the call site has
-        // shadowing bindings with the same name.
-        let prelude_scope = ScopeId(0);
+        // The primitive scope lets a prelude template's symbols resolve to
+        // primitives even where the call site binds the same names.
         for syntax in syntaxes {
-            let scoped = self.add_scope_recursive(syntax, prelude_scope);
+            let scoped = self.add_scope_recursive(syntax, ScopeId::PRIMITIVE);
             self.expand(scoped, symbols, vm)?;
         }
         Ok(())
@@ -245,7 +240,7 @@ impl Expander {
 
     /// Generate a fresh scope ID
     pub(crate) fn fresh_scope(&mut self) -> ScopeId {
-        let id = ScopeId(self.next_scope_id);
+        let id = ScopeId::new(UnitTag::NONE, self.next_scope_id);
         self.next_scope_id += 1;
         id
     }
@@ -254,7 +249,7 @@ impl Expander {
     /// minted per macro expansion and flipped onto template-origin nodes; the
     /// Analyzer's referential-transparency rule keys on the bit.
     pub(crate) fn fresh_intro_scope(&mut self) -> ScopeId {
-        let id = ScopeId::intro(self.next_scope_id);
+        let id = ScopeId::intro(UnitTag::NONE, self.next_scope_id);
         self.next_scope_id += 1;
         id
     }
@@ -272,7 +267,7 @@ impl Expander {
     /// Stamp a fresh file scope onto a syntax tree. This distinguishes
     /// user bindings from primitives (which have empty scopes), enabling
     /// macro hygiene: template symbols from the prelude carry
-    /// `ScopeId(0)` and won't match user bindings that carry the file
+    /// `ScopeId::PRIMITIVE` and won't match user bindings that carry the file
     /// scope instead.
     pub fn stamp_file_scope(&mut self, syntax: Syntax) -> Syntax {
         let scope = self.fresh_scope();
@@ -379,9 +374,8 @@ impl Expander {
                 // result is a mutable string (the wrapper is polymorphic and
                 // types Top). `%thaw` is Total (never rejects) and lowers to the
                 // same funnel native as the wrapper, so the runtime is identical.
-                // The op symbol carries ScopeId(0) (primitive scope).
                 let thaw_sym =
-                    Syntax::symbol_scoped(&self.arena, "%thaw", syntax.span, &[ScopeId(0)]);
+                    Syntax::symbol_scoped(&self.arena, "%thaw", syntax.span, &[ScopeId::PRIMITIVE]);
                 let str_lit = Syntax::with_scope_slice(
                     SyntaxKind::String(*s),
                     syntax.span,
