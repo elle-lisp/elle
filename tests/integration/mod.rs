@@ -186,6 +186,9 @@ mod program_value {
 mod spawn_stack {
     include!("spawn_stack.rs");
 }
+mod worker_boot {
+    include!("worker_boot.rs");
+}
 mod ffi_worker {
     include!("ffi_worker.rs");
 }
