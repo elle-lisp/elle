@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! The abstract value of an expression: what the extractor knows a callee, an argument or an export may be.
 //!
 //! docs/impl/solver.md
@@ -97,11 +97,8 @@ impl<'a> Extractor<'a> {
         let squelch = self.is_prim_named(func, "squelch");
         let attune = self.is_prim_named(func, "attune");
         if (squelch || attune) && args.len() == 2 {
-            let (target, mask) = if squelch {
-                (&args[0].expr, &args[1].expr)
-            } else {
-                (&args[1].expr, &args[0].expr)
-            };
+            // Both take the spec first.
+            let (mask, target) = (&args[0].expr, &args[1].expr);
             if let Some(mask) = literal_mask(mask) {
                 let mask = if attune {
                     elle::signals::CAP_MASK.raw() & !mask

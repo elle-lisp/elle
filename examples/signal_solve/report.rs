@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-12
 //! Compare the solver's least model with the analyzer's inferred signals, and print what the run found.
 //!
 //! docs/impl/solver.md
@@ -134,6 +134,7 @@ pub fn disagreement(ctx: &Context, check: &Solution) -> usize {
         ("bits", &s.bits, &check.bits),
         ("dep", &s.dep, &check.dep),
         ("viol", &s.viol, &check.viol),
+        ("vdep", &s.vdep, &check.vdep),
     ] {
         for (only, a, b) in [
             ("the worklist", worklist, datafrog),
@@ -321,8 +322,8 @@ pub fn print(ctx: &Context, run: &Run) -> usize {
         }
     }
 
-    if !ctx.solution.viol.is_empty() {
-        println!("-- ceilings the solver finds exceeded");
+    if !ctx.solution.viol.is_empty() || !ctx.solution.vdep.is_empty() {
+        println!("-- ceilings the solver finds broken");
         let mut by: BTreeMap<VarId, u64> = BTreeMap::new();
         for &(v, b) in &ctx.solution.viol {
             *by.entry(v).or_default() |= crate::model::to_word(std::iter::once(b));
@@ -332,6 +333,13 @@ pub fn print(ctx: &Context, run: &Run) -> usize {
                 "  {} exceeds its ceiling by {}",
                 ctx.describe(v, &lines),
                 fmt_bits(b)
+            );
+        }
+        for &(v, w) in &ctx.solution.vdep {
+            println!(
+                "  {} depends on {} under its ceiling",
+                ctx.describe(v, &lines),
+                ctx.describe(w, &lines)
             );
         }
     }

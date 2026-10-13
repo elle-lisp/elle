@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! Analysis pipeline: source -> HIR (no bytecode generation).
 //!
 //! docs/pipeline.md
@@ -52,6 +52,7 @@ fn analyze_in_arena(
     let analysis = analyzer.analyze(&expanded)?;
     let errors = analysis.errors;
     let lambda_decls = analyzer.take_lambda_decls();
+    let top_direct = analyzer.take_top_direct();
     drop(analyzer);
     let mut hir = analysis.hir;
     crate::hir::tailcall::mark_tail_calls(&mut hir);
@@ -60,6 +61,7 @@ fn analyze_in_arena(
         arena,
         errors,
         lambda_decls,
+        top_direct,
     })
 }
 
@@ -133,6 +135,7 @@ fn analyze_file_in_arena(
     let mut hir = analyzer.analyze_file_letrec(forms, span)?;
     let errors = analyzer.take_errors();
     let lambda_decls = analyzer.take_lambda_decls();
+    let top_direct = analyzer.take_top_direct();
     drop(analyzer);
 
     crate::hir::tailcall::mark_tail_calls(&mut hir);
@@ -141,5 +144,6 @@ fn analyze_file_in_arena(
         arena,
         errors,
         lambda_decls,
+        top_direct,
     })
 }
