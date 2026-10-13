@@ -1,6 +1,6 @@
-// audited: 2026-09-21
+// audited: 2026-10-20
 //! Booting from an image: what a boot dump carries, what a fresh instance
-//! answers out of it, and what the warm cache stores.
+//! answers out of it, what the warm cache stores, and what a blob boots.
 //!
 //! docs/impl/image/boot.md
 //! docs/impl/image/plan.md
@@ -25,4 +25,7 @@ mod boot {
 }
 mod warm {
     include!("image_boot/warm.rs");
+}
+mod embedded {
+    include!("image_boot/embedded.rs");
 }

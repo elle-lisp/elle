@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# audited: 2026-10-12
+# audited: 2026-10-20
 # Records or checks the bytecode golden, and checks that an image boot compiles the corpus as a source boot does.
 # docs/config.md
 # docs/impl/image/plan.md
@@ -7,10 +7,12 @@
 #
 # The golden is what one binary's emitter wrote. A representation change that
 # must not move one instruction records with the binary before it, and checks
-# with the binary after it. The stdlib cache is off for every run, so a source
-# boot compiles the standard library and mints its static region slots before
-# the file's own, and two runs number them alike. An image boot mints none of
-# them, and starts the counter at the image's watermark instead.
+# with the binary after it. Every run turns the stdlib cache and the boot image
+# off, so a source boot compiles the standard library and mints its static
+# region slots before the file's own, and two runs number them alike. A release
+# binary carries a blob it would otherwise hydrate. An image boot names its
+# image after that, mints none of the slots, and starts the counter at the
+# image's watermark instead.
 set -euo pipefail
 
 usage() {
@@ -46,13 +48,14 @@ cd "$root"
 [ -x "$elle" ] || { echo "bytecode-golden: no executable at $elle" >&2; exit 2; }
 
 # One dump: the file's path names its record, with every `/` spelled `__`.
-# `flag` is one more argument for the binary, or empty for none.
+# `flag` is one more argument for the binary, or empty for none. It follows
+# `--boot-image=off`, so a `--boot-image=` flag is the one the binary keeps.
 dump_one() {
     local elle="$1" out="$2" flag="$3" file="$4"
     local name="${file//\//__}"
     local rec="$out/$name.txt"
     local status=0
-    "$elle" --cache= ${flag:+"$flag"} --dump=bytecode "$file" >"$rec.stdout" 2>"$rec.stderr" || status=$?
+    "$elle" --cache= --boot-image=off ${flag:+"$flag"} --dump=bytecode "$file" >"$rec.stdout" 2>"$rec.stderr" || status=$?
     {
         cat "$rec.stdout"
         echo ";; ── stderr"

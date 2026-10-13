@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-20
 // The boot-image gate: the runner's flag, the target that runs the language
 // suite from an image, and the bytecode parity it checks first.
 //
@@ -154,9 +154,9 @@ fn the_gate_target_points_the_language_suite_at_one_image_directory() {
 // suite passes and the gate reports a hydration that never happened. So the
 // target asks for the boot mark and fails without it.
 //
-// The counter-factual: drop the proof, break hydration in the loader, and this
-// gate stays green while every other suite job also stays green — nothing in
-// the workflow boots from an image.
+// The counter-factual: drop the proof, break the warm cache's hydration, and
+// this gate stays green while every other suite job also stays green — no
+// other job boots from the warm cache.
 #[test]
 fn the_gate_target_proves_the_image_hydrated_before_it_runs_the_language_suite() {
     let recipe = gate_recipe();
@@ -174,9 +174,9 @@ fn the_gate_target_proves_the_image_hydrated_before_it_runs_the_language_suite()
 
 // ── The compile half of parity ────────────────────────────────────────
 
-/// A program that reads both compile registries and a qualified key: a user
-/// `map` over a stdlib function fuses, a `push` on a proven array
-/// monomorphizes, and `m:quokka` names a key no token in the file spells.
+/// A program that reads the image's body fragments and a qualified key: the
+/// calls to `map` and `push` graft the stdlib bodies they name
+/// (docs/impl/graft.md), and `m:quokka` names a key no token in the file spells.
 const PARITY_FIXTURE: &str = "(defn grow [xs] (map inc xs))\n\
                               (defn add-three [] (push [1 2] 3))\n\
                               (defn quokka-of [m] m:quokka)\n\
@@ -335,5 +335,83 @@ fn the_parity_check_refuses_to_compare_two_source_boots() {
     assert!(
         !out_dir.join("source").exists(),
         "the parity check dumped files before it proved the image hydrated"
+    );
+}
+
+/// The last `--boot-image=` value an argv names, which is the one `elle`
+/// keeps, or `None` when it names none.
+fn effective_boot_image(argv: &str) -> Option<&str> {
+    argv.split_whitespace()
+        .filter_map(|arg| arg.strip_prefix("--boot-image="))
+        .next_back()
+}
+
+// The parity check's source boots turn the boot image off by name. A binary
+// that carries a blob hydrates it under `--cache=` alone, so a source side
+// that named no policy would compare the blob with the warm cache: two image
+// boots, which agree on exactly the counter that parity exists to catch.
+//
+// The binary here records each argv and answers the way a hydrating `elle`
+// does, so the check runs every dump in seconds. A debug `elle` carries no
+// blob, so only the argv can show what a release binary would boot.
+#[cfg(unix)]
+#[test]
+fn the_parity_checks_source_boots_turn_the_boot_image_off() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = crate::common::ScratchDir::new("boot-parity-argv");
+    let log = dir.join("argv.log");
+    let fake = dir.join("recording-elle");
+    std::fs::write(
+        &fake,
+        format!(
+            "#!/bin/sh\n\
+             echo \"$*\" >> '{}'\n\
+             case \" $* \" in *' --trace=boot '*) echo '[trace:boot] image-hydrate 0.1ms' >&2 ;; esac\n\
+             case \" $* \" in *' --dump=bytecode '*) echo 'one dump' ;; esac\n\
+             exit 0\n",
+            log.display()
+        ),
+    )
+    .expect("write the recording binary");
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755))
+        .expect("make the recording binary executable");
+
+    let out_dir = dir.join("parity");
+    let out = Command::new(crate::common::repo_root().join("scripts/bytecode-golden"))
+        .arg("parity")
+        .arg(&fake)
+        .arg(&out_dir)
+        .arg("8")
+        .output()
+        .expect("run the parity check");
+    assert!(
+        out.status.success(),
+        "the parity check failed over a binary that answers alike: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let image = format!("{}/boot", out_dir.display());
+    let argvs = std::fs::read_to_string(&log).expect("read the recorded argvs");
+    let dumps: Vec<&str> = argvs
+        .lines()
+        .filter(|argv| argv.contains("--dump=bytecode"))
+        .collect();
+    let files = crate::common::suite_files().len() + 1;
+    assert_eq!(dumps.len(), 2 * files, "one dump per file under each boot");
+    let off = dumps
+        .iter()
+        .filter(|argv| effective_boot_image(argv) == Some("off"))
+        .count();
+    let hydrated = dumps
+        .iter()
+        .filter(|argv| effective_boot_image(argv) == Some(image.as_str()))
+        .count();
+    assert_eq!(
+        (off, hydrated),
+        (files, files),
+        "each file dumps once with the boot image off and once from the image; \
+         a dump that names no policy boots whatever the binary carries:\n{}",
+        dumps.iter().take(4).copied().collect::<Vec<_>>().join("\n")
     );
 }

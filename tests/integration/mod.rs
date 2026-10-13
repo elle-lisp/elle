@@ -277,6 +277,9 @@ mod boot_image_gate {
 mod boot_image_cli {
     include!("boot_image_cli.rs");
 }
+mod blob_build {
+    include!("blob_build.rs");
+}
 mod doctest {
     include!("doctest.rs");
 }

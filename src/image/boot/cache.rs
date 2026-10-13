@@ -41,6 +41,21 @@ impl OpenImage {
     pub(crate) fn origin(&self) -> &Path {
         &self.origin
     }
+
+    #[cfg(test)]
+    pub(crate) fn copied(source: ImageSource) -> OpenImage {
+        OpenImage {
+            source,
+            origin: PathBuf::new(),
+        }
+    }
+}
+
+#[cfg(test)]
+impl BootImage {
+    pub(crate) fn blob(&self) -> Option<super::Blob> {
+        None
+    }
 }
 
 impl BootImage {
@@ -53,7 +68,7 @@ impl BootImage {
     /// when it is off.
     pub(crate) fn dir_in(&self, config: &crate::config::Config) -> Option<PathBuf> {
         match self {
-            BootImage::Off => None,
+            BootImage::Off | BootImage::Embedded { .. } => None,
             BootImage::Dir(d) => Some(d.clone()),
             BootImage::Process => config
                 .cache

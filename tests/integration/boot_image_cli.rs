@@ -45,10 +45,10 @@ fn hydrated(out: &Output) -> bool {
         .any(|l| l.starts_with("[trace:boot]") && l.contains("image-hydrate"))
 }
 
-// § "The warm cache is on by default": a start that names no policy stores an
-// image under the `--cache=` directory, and the next start hydrates it. The
-// counter-factual is the opt-in policy, under which neither start touches the
-// directory and every start compiles the three sources.
+// A start that names no policy stores an image under the `--cache=` directory,
+// and the next start hydrates it. The counter-factual is the opt-in policy,
+// under which neither start touches the directory and every start compiles the
+// three sources.
 #[test]
 fn a_start_with_no_policy_stores_an_image_the_next_start_hydrates() {
     let dir = crate::common::ScratchDir::new("boot-default");
@@ -69,8 +69,8 @@ fn a_start_with_no_policy_stores_an_image_the_next_start_hydrates() {
     );
 }
 
-// § "The warm cache is on by default": `--boot-image=off` neither reads the
-// image a directory holds nor stores one in a directory that holds none.
+// `--boot-image=off` neither reads the image a directory holds nor stores one
+// in a directory that holds none.
 #[test]
 fn boot_image_off_reads_and_writes_no_image() {
     let dir = crate::common::ScratchDir::new("boot-off");
@@ -90,10 +90,10 @@ fn boot_image_off_reads_and_writes_no_image() {
     );
 }
 
-// § "Producing one": `elle image dump-boot` boots from source, so the
-// artifact it writes is the one the three sources produce. A runtime that
-// boots under the default policy stores into the cache when it misses, so a
-// cache left empty is what shows that the dump's runtime never read it.
+// `elle image dump-boot` boots from source, so the artifact it writes is the
+// one the three sources produce. A runtime that boots under the default policy
+// stores into the cache when it misses, so a cache left empty is what shows
+// that the dump's runtime never read it.
 //
 // `ELLE_CACHE` rather than `--cache=`, because the subcommand takes no flag
 // of elle's own: it starts from the default configuration.
@@ -120,10 +120,9 @@ fn dump_boot_writes_nothing_into_the_cache() {
     );
 }
 
-// § "A worker boots as its parent did": the language server boots as `elle`
-// does, so over a cold cache directory it compiles and stores an image. An
-// instance that owes an image compiles rather than reading the stdlib cache, so
-// the server writes no stdlib cache. The counter-factual is a server that loads
+// The language server boots as `elle` does, so over a cold cache directory it
+// compiles and stores an image. An instance that owes an image compiles rather
+// than reading the stdlib cache, so the server writes no stdlib cache. The counter-factual is a server that loads
 // the stdlib through `init_stdlib` under the process cache: it writes a stdlib
 // cache and no image.
 //

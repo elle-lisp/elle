@@ -9,6 +9,7 @@
 //! policy: where an instance looks for an image, and where it stores the one
 //! it compiled.
 
+mod blob;
 mod build;
 mod cache;
 mod install;
@@ -25,6 +26,7 @@ use crate::value::{TableKey, Value};
 
 use super::ImageError;
 
+pub use blob::Blob;
 pub(crate) use cache::{store, Executable, OpenImage};
 
 /// The keys the root struct and a macro entry carry. Both halves name them —
@@ -57,6 +59,13 @@ pub enum BootImage {
     Process,
     /// This directory, whatever the process-wide choice is.
     Dir(PathBuf),
+    /// The image `blob` holds, then the warm cache in `fallback` when there is
+    /// one and the blob is refused. `Process` resolves to this when the binary
+    /// carries a blob (docs/impl/image/boot.md).
+    Embedded {
+        blob: Blob,
+        fallback: Option<PathBuf>,
+    },
 }
 
 /// Where a runtime's boot state came from. A warm cache that silently never
