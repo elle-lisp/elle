@@ -8,7 +8,7 @@ use crate::value::CodeUnit;
 use serde::{Deserialize, Serialize};
 
 /// Version tag: bump when the serialized layout changes in an incompatible way.
-const FORMAT_VERSION: u32 = 12;
+const FORMAT_VERSION: u32 = 13;
 
 /// Bytes of payload hash a cache file carries ahead of its `StoredBytecode`.
 const PAYLOAD_HASH_BYTES: usize = 8;

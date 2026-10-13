@@ -48,11 +48,10 @@ pub enum ConstTemplate {
     /// always a symbol, produced by quasiquote). Materializes to a fresh
     /// `Value::syntax` wrapping a `Symbol` node carrying its scope set — a fresh
     /// ordinary (reclaimable) allocation per execution. The scope ids are
-    /// carried verbatim (they are process-global) so hygiene resolution is
-    /// preserved.
+    /// carried verbatim, so hygiene resolution is preserved.
     SyntaxSymbol {
         name: String,
-        scopes: Vec<u32>,
+        scopes: Vec<crate::syntax::ScopeId>,
         span: crate::syntax::Span,
         scope_exempt: bool,
     },
@@ -151,13 +150,12 @@ impl ConstTemplate {
                 span,
                 scope_exempt,
             } => {
-                use crate::syntax::{ScopeId, Syntax, SyntaxArena};
+                use crate::syntax::{Syntax, SyntaxArena};
                 // The node is born in the region the materialized value lives
                 // in, so the `Value` owns its tree outright
                 // (docs/impl/syntax.md).
                 let arena = unsafe { SyntaxArena::from_raw(heap as *mut _, region) };
-                let scope_ids: Vec<ScopeId> = scopes.iter().map(|&s| ScopeId(s)).collect();
-                let mut syn = Syntax::symbol_scoped(&arena, name, *span, &scope_ids);
+                let mut syn = Syntax::symbol_scoped(&arena, name, *span, scopes);
                 syn.scope_exempt = *scope_exempt;
                 alloc_in_region(
                     heap,
@@ -249,8 +247,8 @@ impl ConstTemplate {
                 out.push(TAG_SYNTAX_SYMBOL);
                 put_str(out, name);
                 out.extend_from_slice(&(scopes.len() as u32).to_be_bytes());
-                for &s in scopes {
-                    out.extend_from_slice(&s.to_be_bytes());
+                for s in scopes {
+                    out.extend_from_slice(&s.to_bits().to_be_bytes());
                 }
                 out.extend_from_slice(&(span.start as u64).to_be_bytes());
                 out.extend_from_slice(&(span.end as u64).to_be_bytes());
@@ -321,8 +319,10 @@ impl ConstTemplate {
             TAG_SYNTAX_SYMBOL => {
                 let name = get_str(bytes, ip);
                 let n = u32::from_be_bytes(take::<4>(bytes, ip)) as usize;
-                let scopes: Vec<u32> = (0..n)
-                    .map(|_| u32::from_be_bytes(take::<4>(bytes, ip)))
+                let scopes: Vec<crate::syntax::ScopeId> = (0..n)
+                    .map(|_| {
+                        crate::syntax::ScopeId::from_bits(u64::from_be_bytes(take::<8>(bytes, ip)))
+                    })
                     .collect();
                 let start = u64::from_be_bytes(take::<8>(bytes, ip)) as usize;
                 let end = u64::from_be_bytes(take::<8>(bytes, ip)) as usize;
