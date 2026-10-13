@@ -196,15 +196,16 @@ fn a_macro_within_the_budget_expands() {
 }
 
 /// A loop on a child fiber spends the expansion budget. `protect` runs its
-/// body on a fiber of its own, and the loop's `+` call is not silent. The
-/// counter-factual is a budget that only the expansion's own fiber spends: the
-/// child holds no budget, so the loop runs until the deadline.
+/// body on a fiber of its own. The loop is not silent, because its strict
+/// destructuring may raise, and it makes no call, so it spends the budget fast.
+/// The counter-factual is a budget that only the expansion's own fiber spends:
+/// the child holds no budget, so the loop runs until the deadline.
 #[test]
 fn a_loop_on_a_child_fiber_fails_the_compile() {
     let dir = tempfile::tempdir().expect("scratch dir");
     let file = dir.path().join("child.lisp");
     let program = "(defmacro on-child []\n  \
-                   (begin (protect (begin (var i 0) (while true (assign i (+ i 1))))) :caught))\n\
+                   (begin (protect (begin (var pair [1]) (while true (def [one] pair)))) :caught))\n\
                    (print (on-child))\n";
     std::fs::write(&file, program).expect("write child.lisp");
     let file = file.display().to_string();
