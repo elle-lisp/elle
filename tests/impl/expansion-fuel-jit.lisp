@@ -53,10 +53,11 @@
                       (compile/run-on :jit (fn [] 1)))
                     (forced)))))
 (assert (not forced?) "the compiled tier is refused")
-(assert (string/contains? (get forced-err :message) "macro 'forced'")
-        "naming the macro")
-(assert (string/contains? (get forced-err :message) "expansion")
-        "and the expansion")
+(assert (string/contains? (get forced-err :message) ":tier-rejected")
+        "with the tier's refusal")
+(assert (string/contains? (get forced-err :message)
+                          "compile/run-on :jit cannot run during a macro expansion")
+        "naming the expansion")
 (assert (= 7
            (eval '(begin
                     (defmacro interpreted []
