@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-12
 //! `Config::parse`: read elle's own flags off the front of an argv, and hand back
 //! the program and its arguments. Every flag `elle --help` lists is recognized here.
 //!
@@ -54,10 +54,11 @@ impl Config {
         } else if let Some(rest) = arg.strip_prefix("--cache=") {
             self.cache = (!rest.is_empty()).then(|| rest.to_string());
         } else if let Some(rest) = arg.strip_prefix("--boot-image=") {
+            use crate::image::boot::BootImage;
             self.boot_image = match rest {
-                "off" | "" => None,
-                "on" => Some(String::new()),
-                dir => Some(dir.to_string()),
+                "off" | "" => BootImage::Off,
+                "on" => BootImage::Process,
+                dir => BootImage::Dir(std::path::PathBuf::from(dir)),
             };
         } else if let Some(rest) = arg.strip_prefix("--unicode=") {
             self.unicode = Some(parse_unicode(rest)?);

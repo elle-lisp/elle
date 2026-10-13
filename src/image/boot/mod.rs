@@ -28,7 +28,7 @@ use crate::value::{TableKey, Value};
 use super::ImageError;
 use compiler::Registries;
 
-pub(crate) use cache::store;
+pub(crate) use cache::{store, Executable};
 
 /// The keys the root struct and a macro entry carry. Both halves name them —
 /// [`build`] writing, [`install`] reading — so they are spelled once.
@@ -54,9 +54,10 @@ mod key {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum BootImage {
     /// Never read or write an image; compile core, prelude and stdlib.
-    #[default]
     Off,
     /// The process-wide choice: `boot` beneath the `--cache=<dir>` directory.
+    /// `--cache=` with no directory turns it off.
+    #[default]
     Process,
     /// This directory, whatever the process-wide choice is.
     Dir(PathBuf),
@@ -77,7 +78,7 @@ pub enum BootSource {
 ///
 /// The fingerprint gates layout and says nothing about the sources, so this is
 /// what decides whether an image still describes them
-/// (docs/impl/image/boot.md). It also names the warm cache's file, so an edit
+/// (docs/impl/image/boot.md). It also enters the warm cache's key, so an edit
 /// to any of the three misses rather than loads.
 pub fn sources_digest() -> String {
     use crate::pipeline::sources::{CORE, PRELUDE, STDLIB};
