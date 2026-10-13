@@ -75,7 +75,7 @@ and `cctx`. `analyze`, `analyze_file` and `eval` expand on that VM, while
 | Type | Purpose |
 |------|---------|
 | `CodeUnit` | The entry's code object, and one counted reference to the code region every payload of the unit lives in ([template.md](../../docs/impl/region/template.md)) |
-| `AnalyzeResult` | `hir`, its `arena`, the non-fatal `errors` the analyzer collected, and `lambda_decls`, the ceiling each lambda declares, which the HIR does not keep |
+| `AnalyzeResult` | `hir`, its `arena`, the non-fatal `errors` the analyzer collected, and two facts the HIR does not keep: `lambda_decls`, each lambda's declared ceiling and the bits its body raises by itself, and `top_direct`, the bits the code outside every lambda raises by itself. A signal solver reads both ([the solver](../../docs/impl/solver.md)) |
 | `CompileCtx` | The compile context of one instance ([cache.rs](cache.rs)) |
 | `BootExports` | The core and stdlib export structs a boot leaves, which a boot image carries as its roots |
 | `directives::SemverMeta` | The version and the migration majors that `extract_semver_directives` removed from a file |
