@@ -4,9 +4,9 @@
 //!
 //! docs/impl/image/boot.md
 //!
-//! The file is named for the executable, the source digest and the binary's
-//! identity, so an edit to a boot source misses and a rebuild never opens the
-//! last build's image. A store writes a temporary file and renames it over the
+//! The file is named for the source digest and the binary's identity, so an
+//! edit to a boot source misses and a rebuild never opens the last build's
+//! image. A store writes a temporary file and renames it over the
 //! target — the dumper's own discipline, because a live hydration holds a
 //! private mapping of the old inode.
 
@@ -51,38 +51,30 @@ impl BootImage {
     }
 }
 
-/// The running executable, as the warm cache names its images: its path tags
-/// them, and its build identity keys them.
+/// The running executable, as the warm cache keys its image: by the build
+/// identity, which the stdlib cache keys on too.
 pub(crate) struct Executable {
-    path: PathBuf,
     len: u64,
     mtime: u128,
 }
 
 impl Executable {
     pub(crate) fn new(len: u64, mtime: u128) -> Self {
-        Executable {
-            path: PathBuf::new(),
-            len,
-            mtime,
-        }
+        Executable { len, mtime }
     }
 
     /// The running executable, or `None` when it cannot be located or
     /// measured.
     pub(crate) fn current() -> Option<Self> {
         let path = std::env::current_exe().ok()?;
-        let meta = std::fs::metadata(&path).ok()?;
+        let meta = std::fs::metadata(path).ok()?;
         let mtime = meta
             .modified()
             .ok()?
             .duration_since(std::time::UNIX_EPOCH)
             .ok()?
             .as_nanos();
-        Some(Executable {
-            path,
-            ..Executable::new(meta.len(), mtime)
-        })
+        Some(Executable::new(meta.len(), mtime))
     }
 
     /// The build identity: the executable's length and modification time
@@ -91,26 +83,18 @@ impl Executable {
         (self.len, self.mtime)
     }
 
-    /// The prefix every image this executable stores opens with, and the one
-    /// a store prunes by.
-    fn tag(&self) -> String {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        self.path.hash(&mut hasher);
-        format!("{:016x}-", hasher.finish())
-    }
-
     /// The file name this executable gives the image of the sources `digest`
     /// names.
     pub(crate) fn image_name(&self, digest: &str) -> String {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         digest.hash(&mut hasher);
         self.identity().hash(&mut hasher);
-        format!("{}{:016x}.image", self.tag(), hasher.finish())
+        format!("{:016x}.image", hasher.finish())
     }
 }
 
-/// Store `cctx`'s boot state under `image`'s policy, and prune the images an
-/// earlier build of this executable left behind.
+/// Store `cctx`'s boot state under `image`'s policy, and prune every other
+/// image in its directory.
 ///
 /// A failure is reported and ignored: the cache is a speedup, and a source
 /// boot is always the fallback. It is reported rather than swallowed because a
@@ -122,12 +106,7 @@ pub(crate) fn store(
     cctx: &crate::pipeline::CompileCtx,
     image: &BootImage,
 ) {
-    let Some(exe) = Executable::current() else {
-        return;
-    };
-    let Some(path) = image.path_for(Some(&exe)) else {
-        return;
-    };
+    let Some(path) = image.path() else { return };
     let dir = path
         .parent()
         .expect("a cache path always names its directory");
@@ -136,31 +115,26 @@ pub(crate) fn store(
         return;
     }
     match super::dump(heap, symbols, cctx, &path) {
-        Ok(()) => prune_superseded(dir, &path, &exe.tag()),
+        Ok(()) => prune_superseded(dir, &path),
         Err(e) => eprintln!("[boot-image] store failed: {e}"),
     }
 }
 
-/// Remove every image in `dir` that opens with `tag` except `keep` — the
-/// megabytes each earlier build of this executable orphans. Another
-/// executable's images stay, so binaries that share a directory do not evict
-/// each other.
+/// Remove every image in `dir` except `keep`, another executable's included.
+/// That bounds the directory at one image, however many builds and test
+/// binaries boot in it (docs/impl/image/boot.md).
 ///
 /// Call this after the store, never before: a store that fails must leave the
 /// directory as it found it, still holding a file another process may be about
 /// to map. A removal that fails is ignored; it is disk hygiene, and the next
 /// store tries again.
-fn prune_superseded(dir: &Path, keep: &Path, tag: &str) {
+fn prune_superseded(dir: &Path, keep: &Path) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        let ours = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|n| n.starts_with(tag) && n.ends_with(".image"));
-        if ours && path != keep {
+        if path != keep && path.extension().is_some_and(|e| e == "image") {
             let _ = std::fs::remove_file(&path);
         }
     }
