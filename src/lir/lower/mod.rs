@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-13
 //! HIR to LIR lowering: the `Lowerer` and the state one function's lowering
 //! carries. The passes themselves live in the sibling modules named below.
 //!
@@ -102,27 +102,39 @@ pub struct Lowerer<'a> {
     /// space of a captured binding's slot is asked for, so the allocation and
     /// every later recording cannot disagree.
     compiled_cell_bindings: std::collections::HashSet<Binding>,
-    /// Bindings bound to a BORROWED SUBVIEW of a scrutinee by destructuring:
-    /// a `(a & rest)` list pattern, a `(entry & rest)` head, an array element,
-    /// a struct value — every binding a structural ELEMENT load (`First`/`Rest`/
-    /// `Index`/`Key`) reaches reads a pointer aliased into the scrutinee's
-    /// region pages with NO owning reference (the region solver only registers
-    /// counted container reads for *call-site* `rest()`/`first()`/`get()`, never
-    /// for pattern loads). Marking them borrowed makes
-    /// `arg_leaf_is_borrowed`/`tail_arg_is_borrowed` treat a call arg naming one
-    /// like any other borrowed arg: the caller mints a fresh owning reference at
-    /// the call that the callee's release balances, leaving the scrutinee's own
-    /// reference untouched. `Slice`/`StructRest` (array/struct `& rest`) are
-    /// excluded: they mint fresh owned containers.
+    /// Bindings bound to a BORROWED SUBVIEW of a scrutinee by destructuring: a
+    /// `(a & rest)` list pattern, a `(entry & rest)` head, an array element, a
+    /// struct value. Every binding a structural ELEMENT load
+    /// (`First`/`Rest`/`Index`/`Key`) reaches reads a pointer aliased into the
+    /// scrutinee's region pages with NO owning reference. The region solver
+    /// registers counted container reads only for *call-site*
+    /// `rest()`/`first()`/`get()`, never for pattern loads.
+    ///
+    /// Marking them borrowed makes `arg_leaf_is_borrowed` treat a call arg naming
+    /// one like any other borrowed arg. The caller mints a fresh owning reference
+    /// at the call, the callee's release balances it, and the scrutinee's own
+    /// reference is left untouched. `Slice`/`StructRest` (array/struct `& rest`)
+    /// are excluded: they mint fresh owned containers.
     ///
     /// Computed ONCE over the whole HIR at `lower()` entry by
-    /// [`Self::precompute_destructure_aliases`] — before any body lowering — so
-    /// a `match` compound used as a tail argument has its aliases registered
-    /// before `tail_arg_is_borrowed` consults them (a call's arguments are
-    /// classified before they are lowered). The decision-tree / seq / destructure
-    /// walks also insert as they go; both routes fill the same set, and an
-    /// insert is idempotent.
+    /// [`Self::precompute_destructure_aliases`], before any body lowering. So a
+    /// `match` compound used as a tail argument has its aliases registered
+    /// before `tail_arg_is_borrowed` consults them: a call's arguments are
+    /// classified before they are lowered. The decision-tree, seq and
+    /// destructure walks also insert as they go. Both routes fill the same set,
+    /// and an insert is idempotent.
     destructure_alias_bindings: std::collections::HashSet<Binding>,
+    /// Bindings a `let`, `letrec` or `def` initializes from a value this
+    /// activation holds no reference to. The binder took no counted reference,
+    /// and the initializer would be a borrowed tail argument in the binding's
+    /// place. A binding holds only what its binder took, so it is borrowed
+    /// exactly as its initializer is (docs/impl/region/rules.md Rule 5).
+    ///
+    /// Filled by [`Self::note_borrowed_alias`] as each binder lowers, which is
+    /// always before the body that names the binding. Functionalization turns
+    /// an `assign` into such a binding, so a `default`ed `&named` parameter that
+    /// a tail call forwards lands here.
+    borrowed_alias_bindings: std::collections::HashSet<Binding>,
     /// Current span for emitted instructions
     current_span: Span,
     /// Intrinsic operations for operator specialization.
@@ -138,7 +150,6 @@ pub struct Lowerer<'a> {
     loop_lower_contexts: Vec<LoopLowerContext>,
     /// Stack of active block contexts for `break` lowering
     block_lower_contexts: Vec<BlockLowerContext>,
-    /// Current nesting depth of active allocation regions.
     /// Pending `DecrefRegion` region slots to emit before tail calls.
     pending_free_regions: Vec<StaticRegion>,
     /// Scratch slot for discarding unused intermediate values.
@@ -150,97 +161,105 @@ pub struct Lowerer<'a> {
     /// during lowering: a slot is reserved before its body is lowered, so a
     /// parent's id is lower than its children's.
     closures: Vec<Option<LirOwned>>,
-    /// Binding of the current function being analyzed (for self-tail-call
-    /// detection in escape analysis and drop insertion).
+    /// The binding whose lambda initializer is being lowered. Binders set it and
+    /// `lower_lambda_body` saves and restores it; no lowering decision reads it.
     current_function_binding: Option<Binding>,
-    /// The declared name of the lambda about to be lowered, set at the two
-    /// sites that bind a lambda initializer (`lower_letrec`, `lower_define`)
-    /// and CONSUMED by `lower_lambda_body` — taken, not read, so a nested
+    /// The declared name of the lambda about to be lowered. The two sites that
+    /// bind a lambda initializer (`lower_letrec`, `lower_define`) set it, and
+    /// `lower_lambda_body` CONSUMES it. It is taken, not read, so a nested
     /// anonymous lambda never inherits its binder's name. It becomes
-    /// `LirHead::name` and rides to the code payload for `fn/signature`
-    /// and `display_label`.
+    /// `LirHead::name` and rides to the code payload for `fn/signature` and
+    /// `display_label`.
     pending_lambda_name: Option<String>,
     /// The self-recursive binding of the lambda body currently being lowered:
-    /// the binding this lambda captures as `CaptureKind::Recursive` (a same-binding
-    /// self-edge). A reference to it in **value** position resolves to the executing
-    /// closure via `LoadSelf`; in **call** position it re-enters the current code+env
-    /// (a self-call re-dispatch) — never a cell load, since the self-edge is cell-free.
-    /// Read only from THIS lambda's own captures — a nested lambda that captures
-    /// the same binding does so as a sibling `Capture`/`Local`, not `Recursive`,
-    /// so it never sets this — and saved/restored across lambda boundaries like
-    /// `current_function_binding` (`lower_lambda_body`). `None` outside a
-    /// self-recursive lambda body.
+    /// the binding this lambda captures as `CaptureKind::Recursive`, a
+    /// same-binding self-edge. A reference to it in **value** position resolves
+    /// to the executing closure via `LoadSelf`. In **call** position it re-enters
+    /// the current code and env, a self-call re-dispatch. It is never a cell
+    /// load, since the self-edge is cell-free.
+    ///
+    /// It is read only from THIS lambda's own captures. A nested lambda that
+    /// captures the same binding does so as a sibling `Capture`/`Local`, not
+    /// `Recursive`, so it never sets this. It is saved and restored across lambda
+    /// boundaries like `current_function_binding` (`lower_lambda_body`). `None`
+    /// outside a self-recursive lambda body.
     current_self_binding: Option<Binding>,
-    /// Bindings whose initializer lambda references them across the lambda boundary
-    /// (a `CaptureKind::Recursive` self-edge) — i.e. self-recursive local functions.
-    /// A self-recursive closure is cell-free (the self-edge does not mark it captured),
-    /// but it is still a per-call allocation: its region lives through the whole
-    /// recursion (the self-reference borrows the executing closure), so its scope-end
-    /// release is stranded as dead code past the frame-replacing recursive `TailCall`.
-    /// It is consumed by `lower_letrec`/`lower_define` to derive
-    /// `stranded_self_bindings`. Recorded when the closure is built
-    /// (`lower_lambda_expr`).
+    /// Bindings whose initializer lambda references them across the lambda
+    /// boundary (a `CaptureKind::Recursive` self-edge): self-recursive local
+    /// functions. A self-recursive closure is cell-free, because the self-edge
+    /// does not mark it captured. It is still a per-call allocation: its region
+    /// lives through the whole recursion, since the self-reference borrows the
+    /// executing closure. So its scope-end release is stranded as dead code past
+    /// the frame-replacing recursive `TailCall`. `lower_letrec` and
+    /// `lower_define` consume it to derive `stranded_self_bindings`. Recorded
+    /// when the closure is built (`lower_lambda_expr`).
     self_recursive_bindings: rustc_hash::FxHashSet<Binding>,
-    /// The subset of `self_recursive_bindings` whose defining body is a **tail call**,
-    /// so the closure's scope-end `DecrefRegion` is emitted as dead code past that
-    /// frame-replacing `TailCall` and never runs — the per-call closure region would
-    /// otherwise leak. `tail_callee_defers_release` routes a tail call to such a binding
-    /// through the activation's own deferred set (`ActivationDues`), which frees
-    /// the region exactly once at whichever end that activation reaches
-    /// (docs/impl/region/owner.md § "A deferred tail-call release has the node's
-    /// life"). Gating on the
-    /// tail-call body is what keeps the deferral from double-freeing a self-recursive
-    /// closure whose `DecrefRegion` instead fires live (a non-tail body) — the
-    /// use-after-free that gate prevents.
+    /// The subset of `self_recursive_bindings` whose defining body is a **tail
+    /// call**. The closure's scope-end `DecrefRegion` is emitted as dead code past
+    /// that frame-replacing `TailCall` and never runs, so the per-call closure
+    /// region would leak. `tail_callee_defers_release` routes a tail call to such
+    /// a binding through the activation's own deferred set (`ActivationDues`).
+    /// That frees the region exactly once at whichever end the activation
+    /// reaches (docs/impl/region/owner.md § "A deferred tail-call release has the
+    /// node's life"). Gating on the tail-call body keeps the deferral from
+    /// double-freeing a self-recursive closure whose `DecrefRegion` fires live
+    /// instead, in a non-tail body.
     stranded_self_bindings: rustc_hash::FxHashSet<Binding>,
     /// Letrec bindings of a closure-cycle merge whose MERGED arena the enclosing
     /// letrec's body TAIL-CALLS. The frame-replacing `TailCall` strands the
-    /// arena's single binding-scope `DecrefRegion` as dead code, so a tail call
-    /// to one of these defers the merged region's release (`tail_callee_defers_release`
-    /// → `TailCallInfo::deferred`), run exactly once at the recursion's
-    /// normal completion — the same channel `stranded_self_bindings` rides.
-    /// Marked by `lower_letrec` from the letrec BODY's tail callees only (after
-    /// the inits are lowered, so interior sibling rotations never defer), and
-    /// honoured only through a non-upvalue reference (a nested closure that
-    /// captures the binding must not free the arena out from under a later use
-    /// in the enclosing activation).
+    /// arena's single binding-scope `DecrefRegion` as dead code. So a tail call
+    /// to one of these defers the merged region's release
+    /// (`tail_callee_defers_release` → `TailCall::defer_callee_release`), run exactly
+    /// once at the recursion's normal completion. That is the same channel
+    /// `stranded_self_bindings` rides.
+    ///
+    /// `lower_letrec` marks them from the letrec BODY's tail callees only, after
+    /// the inits are lowered, so interior sibling rotations never defer. The
+    /// marking is honored only through a non-upvalue reference: a nested closure
+    /// that captures the binding must not free the arena out from under a later
+    /// use in the enclosing activation.
     stranded_cycle_bindings: rustc_hash::FxHashSet<Binding>,
     /// Letrec bindings the enclosing letrec's BODY tail-calls whose OWN closure
-    /// region the solver releases at that letrec's scope end — the release the
-    /// frame-replacing `TailCall` strands, and the one the relocation must leave
-    /// where it is because the callee is about to enter that closure
-    /// (docs/impl/region/relocate.md). A member captured by a sibling has uses spanning the whole
-    /// letrec, so its demise lands at the scope end rather than at the call node
-    /// and `tail_callee_defers_release`'s dies-here reading never sees it. Marked
-    /// by `lower_letrec` after the inits are lowered, and honoured only through a
-    /// non-upvalue reference, for the reasons `stranded_cycle_bindings` is; a
-    /// suppressed release (owned by the store or capture-adopt path) and a
-    /// closure-cycle member (released by the merge's own channel) are excluded at
-    /// the marking, so the three channels never name one region twice.
+    /// region the solver releases at that letrec's scope end. The
+    /// frame-replacing `TailCall` strands that release. The relocation must leave
+    /// it where it is, because the callee is about to enter that closure
+    /// (docs/impl/region/relocate.md). A member captured by a sibling has uses
+    /// spanning the whole letrec, so its demise lands at the scope end rather
+    /// than at the call node. `tail_callee_defers_release`'s dies-here reading
+    /// therefore never sees it.
+    ///
+    /// `lower_letrec` marks them after the inits are lowered, and the marking is
+    /// honored only through a non-upvalue reference, for the reasons
+    /// `stranded_cycle_bindings` is. Two releases are excluded at the marking: a
+    /// suppressed release, owned by the store or capture-adopt path, and a
+    /// closure-cycle member, released by the merge's own channel. So the three
+    /// channels never name one region twice.
     stranded_member_bindings: rustc_hash::FxHashSet<Binding>,
-    /// Parameter bindings of the current function (for per-parameter
-    /// independence analysis in self-tail-calls).
+    /// The parameters of the lambda initializer being lowered. Binders set them
+    /// and `lower_lambda_body` saves and restores them; no lowering decision
+    /// reads them.
     current_function_params: Option<Vec<Binding>>,
     /// Tofte-Talpin region inference results. Scope decisions use region
     /// assignments instead of syntactic escape analysis.
     region_info: RegionInfo,
     /// Authoritative escape facts (`src/hir/escape.rs`), computed once at the
-    /// top of `lower`. Read by `control/call.rs::tail_callee_defers_release` for the
-    /// escape half of the deferral decision (region-locality stays a region fact).
-    /// NOT read by `tail_arg_is_borrowed` (a structural ownership-location test —
-    /// escape over-marks owned tail-args and double-frees across fiber resume; see
-    /// `control.rs`) nor by the `lower_return` mint (unconditional since the move
-    /// convention was removed).
+    /// top of `lower`. `tail_callee_defers_release` (`control/call/defer.rs`)
+    /// reads them for the escape half of the deferral decision; region-locality
+    /// stays a region fact. `tail_arg_is_borrowed` does NOT read them: it is a
+    /// structural ownership-location test, and escape over-marks owned tail
+    /// arguments, which double-frees across a fiber resume. The `lower_return`
+    /// mint, which is unconditional, does not read them either.
     escape_info: EscapeInfo,
-    /// `cross_region_refs` indexed by their site HirId — the `(source, target)`
+    /// `cross_region_refs` indexed by their site HirId: the `(source, target)`
     /// region pairs to `IncrefRegion` at that node. Built once in
-    /// `with_region_info` so `emit_increfs_for` is an O(1) lookup rather than a
-    /// linear scan of every cross-region ref per HIR node (an O(n²) over stdlib).
-    /// The `target` rides alongside the `source` (the lone region the incref
-    /// actually names) so `emit_increfs_for` can classify a post-merge
-    /// intra-region self-edge — `is_merge_self_edge(source, target)` — and DROP it
-    /// (transform 2: a merged `source→target` store edge is intra-region, so its
-    /// incref is unbalanced by the self-skipping cascade; region/mechanism.md
+    /// `with_region_info`, so `emit_increfs_for` is an O(1) lookup rather than a
+    /// linear scan of every cross-region ref per HIR node, an O(n²) over stdlib.
+    ///
+    /// The `target` rides alongside the `source`, the lone region the incref
+    /// names. So `emit_increfs_for` can classify a post-merge intra-region
+    /// self-edge (`is_merge_self_edge(source, target)`) and DROP it. A merged
+    /// `source→target` store edge is intra-region, so the self-skipping cascade
+    /// would never balance its incref (docs/impl/region/mechanism.md
     /// § "Self-edge elimination").
     increfs_by_site: HashMap<HirId, Vec<(crate::hir::region::Region, crate::hir::region::Region)>>,
     /// `region_data` indexed by `decref_point` HirId — regions whose demise
@@ -282,33 +301,31 @@ pub struct Lowerer<'a> {
     /// Stack slots (this function's local index space) owned by a fn-local
     /// reassigned mutable binding (`RegionInfo::reassigned_local_bindings`).
     /// Populated in `allocate_slot_routed`, reset per function like
-    /// `region_to_slot`. `emit_decrefs_for` refuses a value-route decref +
-    /// nil-stamp whose slot is in this set: `allocate_slot` never reuses a slot,
+    /// `region_to_slot`. `emit_decrefs_for` refuses a value-route decref and
+    /// nil-stamp whose slot is in this set. `allocate_slot` never reuses a slot,
     /// so such a slot holds the reassigned binding's own live value for the
-    /// binding's whole scope — nil-stamping it mid-scope would zero a live value
-    /// (the reassigned-loop-counter clobber; region-capture-cell-loop-uaf.lisp).
+    /// binding's whole scope. Nil-stamping it mid-scope would zero a live value
+    /// (region-capture-cell-loop-uaf.lisp).
     reassigned_local_slots: rustc_hash::FxHashSet<u16>,
     /// Static region slots the lowerer has stamped onto at least one
-    /// instruction via `emit_in_region` (i.e., regions the runtime
-    /// will actually have a slot for after `alloc_in_region`).
-    /// Used by `emit_decref_region` to suppress phantom DecrefRegion
-    /// emissions — the analysis may yield a `decref_point` for a region
-    /// whose alloc never landed in the bytecode (legitimately, for
-    /// `call_result_regions` going through `DecrefValueRegion`
-    /// instead; less legitimately, when the regions walk assigned a
-    /// region to a node the lowerer is transparent for). Emitting
-    /// `DecrefRegion(r)` for an unstamped r would decrement an RC
-    /// the runtime never raised.
+    /// instruction through `emit_alloc_in`: the regions the runtime will have a
+    /// slot for after `alloc_in_region`. `emit_decref_region` reads it to
+    /// suppress a phantom `DecrefRegion`. The analysis may yield a
+    /// `decref_point` for a region whose alloc never landed in the bytecode.
+    /// That is legitimate for `call_result_regions` released through
+    /// `DecrefValueRegion` instead, and less so where the regions walk assigned
+    /// a region to a node the lowerer is transparent for. Emitting
+    /// `DecrefRegion(r)` for an unstamped `r` would decrement an RC the runtime
+    /// never raised.
     emitted_alloc_regions: rustc_hash::FxHashSet<StaticRegion>,
-    /// HirIds whose trailing `emit_decrefs_for` (in `lower_expr`) is
-    /// suppressed because the caller will emit it itself at a better
-    /// point. `lower_let` uses this for a binding's init: the init's
-    /// region `decref_point` is the init's own HirId when the binding is
-    /// unused, but `lower_expr`'s automatic decref fires *before*
-    /// `lower_let` stores the init value into the slot it reloads — so the
-    /// decref would hit the slot's stamped `nil` and the real value would
-    /// leak. `lower_let` defers it, stores, then emits the decref against
-    /// the now-populated slot.
+    /// HirIds whose trailing `emit_decrefs_for` (in `lower_expr`) is suppressed,
+    /// because the caller emits it at a better point. `lower_let` uses this for
+    /// a binding's init. The init's region `decref_point` is the init's own
+    /// HirId when the binding is unused. `lower_expr`'s automatic decref fires
+    /// *before* `lower_let` stores the init value into the slot it reloads, so
+    /// the decref would hit the slot's stamped `nil` and the real value would
+    /// leak. `lower_let` defers it, stores, then emits the decref against the
+    /// now-populated slot.
     deferred_decref_points: rustc_hash::FxHashSet<HirId>,
     /// Tail-call HirIds whose result a `Return` mint already covers, so
     /// `lower_call`'s post-`TailCall` fall-through retain must stand down: the
@@ -316,23 +333,23 @@ pub struct Lowerer<'a> {
     /// (docs/impl/region/mechanism.md § "The return mint is emitted exactly once").
     ///
     /// The shape is ANF's canonical wrap of a tail call in a non-propagating tail
-    /// position — `(let [t (f …)] (return t))`, built for a tail call nested in a
-    /// `begin`/`if`/`cond`/`match` arm. There the frame HOLDS the result (the
-    /// synthetic binding) and its `decref_point` balances `lower_return`'s mint,
-    /// so the fall-through retain would be a second, unbalanced reference. A tail
-    /// call ANF leaves unnamed (a `let`/lambda body) has no binding and no
+    /// position, `(let [t (f …)] (return t))`, built for a tail call nested in a
+    /// `begin`/`if`/`cond`/`match` arm. There the frame HOLDS the result in the
+    /// synthetic binding, and its `decref_point` balances `lower_return`'s mint.
+    /// So the fall-through retain would be a second, unbalanced reference. A
+    /// tail call ANF leaves unnamed (a `let`/lambda body) has no binding and no
     /// `Return`, so its fall-through retain IS the mint and is absent here.
     /// Recorded by `lower_let`, the only lowering site that sees the wrap.
     return_minted_calls: rustc_hash::FxHashSet<HirId>,
     /// The relocation points covering every path that reaches the current
-    /// emission position (see [`TailExitHoist`]). Either a single
-    /// [`HoistBlock::Current`] entry — a frame-replacing tail call emitted into
-    /// this very block, which dominates everything after it — or the
-    /// [`HoistBlock::Finished`] points a branch merge inherited, from its arms
-    /// and from the position the branch was entered at. Set by `lower_call`'s
-    /// tail arm and by the branch lowerings, cleared at every other block
-    /// boundary, and saved/restored across lambda boundaries like every other
-    /// per-function slot map.
+    /// emission position (see [`TailExitHoist`]). It is either a single
+    /// [`HoistBlock::Current`] entry, or the [`HoistBlock::Finished`] points a
+    /// branch merge inherited. The first is a frame-replacing tail call emitted
+    /// into this very block, which dominates everything after it. The second
+    /// come from the merge's arms and from the position the branch was entered
+    /// at. Set by `lower_call`'s tail arm and by the branch lowerings, cleared at
+    /// every other block boundary, and saved and restored across lambda
+    /// boundaries like every other per-function slot map.
     tail_exit_hoist: Vec<TailExitHoist>,
     /// Points sealed from the arms of the branch currently being lowered, which
     /// `open_branch_merge` hands to its merge block. Saved and restored around
@@ -342,8 +359,8 @@ pub struct Lowerer<'a> {
     /// Set while `with_tail_exit_hoist` emits a release it is about to REPLICATE
     /// ahead of a branch arm's `TailCall`. Such a release must name a VALUE, so
     /// that the copy a path reaches second loads the `nil` the first stamped and
-    /// no-ops; `emit_decref_for_region` reads this to take the value route for a
-    /// region it would otherwise release by id (docs/impl/region/mechanism.md §
+    /// no-ops. `emit_decref_for_region` reads this to take the value route for a
+    /// region it would otherwise release by id (docs/impl/region/replicate.md §
     /// "Self-cancelling is a property of the ROUTE, not of the region's class").
     /// False everywhere else, where one point covers every path and one
     /// instruction does.
@@ -386,21 +403,23 @@ impl<'a> Lowerer<'a> {
     }
 
     fn lower_unit(&mut self, hir: &Hir) -> Result<FrozenModule, String> {
-        // Escape analysis is whole-module, like region inference — compute it
+        // Escape analysis is whole-module, like region inference: compute it
         // once over the full canonical HIR before lowering recurses into
         // closures. Computing it here keeps the pass on every real lowering path
         // through a single chokepoint; `tail_callee_defers_release` reads it.
         self.escape_info = analyze_escape(hir, self.arena, &self.call_classification);
 
         // Same whole-module contract: compute the destructure-alias set once
-        // over the full HIR before body lowering begins, so a `match` compound
+        // over the full HIR before body lowering begins. So a `match` compound
         // used as a tail argument has its aliases registered before the call
-        // site classifies that argument (arguments are classified, then
-        // lowered). The decision-tree/seq/destructure walks re-insert as they
-        // go; that stays idempotent and covers any pattern the walk reaches
-        // that the precompute pass did not enumerate.
+        // site classifies that argument; arguments are classified, then lowered.
+        // The decision-tree, seq and destructure walks re-insert as they go.
+        // That stays idempotent, and covers any pattern the walk reaches that
+        // the precompute pass did not enumerate. The binders fill the
+        // borrowed-alias set as they lower.
         self.destructure_alias_bindings.clear();
         self.precompute_destructure_aliases(hir);
+        self.borrowed_alias_bindings.clear();
 
         self.b().begin_function(Arity::Exact(0));
         self.open_block(Label(0));

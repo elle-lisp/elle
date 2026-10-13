@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-13
 //! The relocation points that say which paths a release still has to cover.
 //! A frame-replacing tail call opens one and a `break` opens one; a branch merge
 //! inherits them.
@@ -155,11 +155,11 @@ impl<'a> Lowerer<'a> {
         args: &[crate::hir::CallArg],
         operands: &[Reg],
     ) {
-        // Which slots the operands now on the stack came from. Read off the
-        // emitted instructions rather than the HIR, because ANF may have bound an
-        // operand to a synthetic binding whose region the syntax walk below does
-        // not connect back to this call — but the load that put it on the stack
-        // is right here either way.
+        // Which slots the operands now on the stack came from, read off the
+        // emitted instructions rather than the HIR. ANF may have bound an operand
+        // to a synthetic binding whose region the syntax walk below does not
+        // connect back to this call. The load that put it on the stack is right
+        // here either way.
         let (operand_locals, operand_captures) = self.loaded_from(|r| operands.contains(&r));
         let mut exempt = rustc_hash::FxHashSet::default();
         if let Some(&r) = self.region_info.alloc_region.get(&call_id) {
@@ -287,11 +287,14 @@ impl<'a> Lowerer<'a> {
     /// Take back the exemption of a region an argument only NAMES, one region at
     /// a time.
     ///
-    /// Only a destructured leaf is reconsidered; every other binding that names a
-    /// region names the whole value. A region the leaf HOLDS keeps its exemption
-    /// outright, and each remaining one keeps it where the call passes the very
-    /// slot that region's release route loads. A region with no recorded slot
-    /// releases by id and keeps it too, there being no slot to compare.
+    /// Two kinds of argument are reconsidered: a destructured leaf, and a
+    /// retained alias (`borrowed_alias_bindings`), which the call mints a
+    /// reference of its own and so moves none of the frame's. Every other
+    /// binding that names a region names the whole value. A region a leaf's
+    /// rest name HOLDS keeps its exemption outright. Each remaining one keeps it
+    /// where the call passes the very slot that region's release route loads. A
+    /// region with no recorded slot releases by id and keeps it too, there being
+    /// no slot to compare.
     ///
     /// docs/impl/region/relocate.md
     fn drop_named_only_arg_exemptions(
@@ -302,7 +305,9 @@ impl<'a> Lowerer<'a> {
         exempt: &mut rustc_hash::FxHashSet<crate::hir::region::Region>,
     ) {
         let HirKind::Var(b) = &h.kind else { return };
-        if !self.region_info.destructure_leaf_bindings.contains(b) {
+        if !self.region_info.destructure_leaf_bindings.contains(b)
+            && !self.borrowed_alias_bindings.contains(b)
+        {
             return;
         }
         for &r in self

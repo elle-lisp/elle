@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-13
 //! Building a `Lowerer`: the constructor and the `with_*` builders that hand
 //! it the front end's analysis products before `lower` runs.
 //!
@@ -22,6 +22,7 @@ impl<'a> Lowerer<'a> {
             upvalue_bindings: std::collections::HashSet::new(),
             compiled_cell_bindings: std::collections::HashSet::new(),
             destructure_alias_bindings: std::collections::HashSet::new(),
+            borrowed_alias_bindings: std::collections::HashSet::new(),
             current_span: Span::synthetic(),
             intrinsics: FxHashMap::default(),
             call_classification: crate::hir::CallClassification::default(),

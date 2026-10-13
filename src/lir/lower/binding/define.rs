@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-10-13
 //! The non-scoped mutating binding forms: `define` (a local `def`) and `set` (`lower_assign`).
 //!
 //! docs/impl/region/bindings.md
@@ -32,13 +32,13 @@ impl<'a> Lowerer<'a> {
         // binding inside a lambda takes the `populate_env` env cell.
         let compiled_cell = self.compiled_cell_bindings.contains(&binding);
 
-        // Only LBox-wrapped locals need upvalue treatment inside lambdas
+        // Only a local held in an env cell is an upvalue inside a lambda.
         if self.in_lambda && needs_capture && !compiled_cell {
             self.upvalue_bindings.insert(binding);
         }
 
-        // Set function context for lambdas so that
-        // body_escapes_heap_values can detect self-tail-calls.
+        // Name the lambda this binder initializes. The binding and params are
+        // kept for the duration of the lowering, and no decision reads them.
         if let HirKind::Lambda { params, .. } = &value.kind {
             self.current_function_binding = Some(binding);
             self.current_function_params = Some(params.clone());
@@ -49,18 +49,17 @@ impl<'a> Lowerer<'a> {
         // `emit_decrefs_for(value.id)` inside `lower_expr` can find
         // it (matches `lower_let`'s ordering).
         //
-        // EXCEPTION — a captured AND reassigned binding: its slot holds the
-        // `MakeCaptureCell` whose content a later reassignment repoints, so
-        // routing the init's region through this slot makes its decref reload the
-        // cell and (via `result_region_of`, which unwraps a capture cell) free
-        // whatever the cell holds at the decref's RUNTIME firing point — a
-        // different, live value. The pins are
-        // tests/impl/region-capture-cell-reassign-loop-uaf.lisp, and with the
-        // write inside a closure
+        // EXCEPTION — a captured AND reassigned binding. Its slot holds the
+        // `MakeCaptureCell` whose content a later reassignment repoints. Routing
+        // the init's region through this slot makes its decref reload the cell,
+        // and `result_region_of` unwraps a capture cell. So the decref frees
+        // whatever the cell holds when it fires, a different and live value. The
+        // pins are tests/impl/region-capture-cell-reassign-loop-uaf.lisp, and
+        // with the write inside a closure
         // tests/impl/region-capture-cell-closure-reassign-uaf.lisp. Skip the
         // routing and drop the init's alloc reference off its register below. A
-        // captured binding never reassigned keeps the routing (stable cell
-        // content).
+        // captured binding never reassigned keeps the routing, because its cell
+        // content is stable.
         let captured_reassigned = self
             .region_info
             .captured_reassigned_bindings
@@ -72,22 +71,26 @@ impl<'a> Lowerer<'a> {
         // Now lower the value (which can reference the binding)
         let value_reg = self.lower_expr(value)?;
         self.emit_counted_cell_init_retain(value.id, value_reg);
+        self.note_borrowed_alias(binding, value);
         self.current_function_binding = None;
         self.current_function_params = None;
 
         // Self-recursive `def` nested in a lambda: lowering `value` above ran
-        // `lower_lambda_expr`, which recorded this binding in `self_recursive_bindings`.
-        // Its cell-free closure region demises at the binding's LAST USE, and a use as a
-        // callee resolves to the node that consumes it — the call — so the ordinary
-        // `DecrefRegion` lands where the recursion has already completed. The one body
-        // shape where that node is the enclosing frame's own tail call leaves the release
-        // in dead code past the `TailCall`, exactly as the `letrec` scope-end drop is;
-        // STRAND the binding (`stranded_self_bindings`) so a tail call to it defers the
-        // region's release — the sole, once-only release on that path
-        // (docs/impl/selfrec.md). Cell-free self-recursion only (see the
-        // `lower_letrec` twin): a sibling-captured (`needs_capture`) self-recursive
-        // binding is held by a cell, so its region is released by the cell's
-        // cascade — stranding it double-frees under the live cell.
+        // `lower_lambda_expr`, which recorded this binding in
+        // `self_recursive_bindings`. Its cell-free closure region demises at the
+        // binding's LAST USE. A use as a callee resolves to the node that
+        // consumes it, the call, so the ordinary `DecrefRegion` lands where the
+        // recursion has already completed.
+        //
+        // In one body shape that node is the enclosing frame's own tail call.
+        // There the release lands in dead code past the `TailCall`, exactly as
+        // the `letrec` scope-end drop does. STRAND the binding
+        // (`stranded_self_bindings`) so a tail call to it defers the region's
+        // release, the sole, once-only release on that path
+        // (docs/impl/selfrec.md). This is for cell-free self-recursion only (see
+        // the `lower_letrec` twin). A sibling-captured (`needs_capture`)
+        // self-recursive binding is held by a cell, so the cell's cascade
+        // releases its region, and stranding it double-frees under the live cell.
         if self.self_recursive_bindings.contains(&binding)
             && !self.arena.get(binding).needs_capture()
         {
@@ -218,11 +221,12 @@ impl<'a> Lowerer<'a> {
                     .current_hir_id
                     .is_some_and(|id| self.region_info.donated_overwrite_sites.contains(&id));
                 if !donated {
-                    // Compile-time region selection (docs/impl/region/mechanism.md): a
-                    // fresh local allocation whose region is a known slot pins
+                    // Compile-time region selection (docs/impl/region/mechanism.md).
+                    // A fresh local allocation whose region is a known slot pins
                     // slot-resolved (`IncrefRegion`, guarded by the equivalence
-                    // oracle), mirroring `lower_return`; otherwise value-resolved —
-                    // the dynamic boundary `coalescible_region` enforces.
+                    // oracle), mirroring `lower_return`. Anything else pins
+                    // value-resolved, the dynamic boundary `coalescible_region`
+                    // enforces.
                     let coalesced = self.coalescible_region(value);
                     super::super::rcstats::record_reassign_store(coalesced.is_some());
                     match coalesced {
@@ -238,13 +242,13 @@ impl<'a> Lowerer<'a> {
                     }
                 }
                 // The store consumes `value_reg` (`StoreLocal` auto-pops), so the
-                // retain above must precede it: `IncrefValueRegion` peeks the
-                // operand-stack top and leaves the value in place, while after the
-                // store the register is gone from the stack model and the retain
-                // would land on whatever sits there instead (the displaced prior —
-                // `nil` on the first overwrite), pinning nothing and leaving the
-                // stored value's own release unbalanced. Same retain-while-on-top
-                // discipline as `lower_call`'s borrowed-arg retain.
+                // retain above must precede it. `IncrefValueRegion` peeks the
+                // operand-stack top and leaves the value in place. After the store
+                // the register is gone from the stack model, and the retain would
+                // land on whatever sits there instead: the displaced prior, `nil`
+                // on the first overwrite. That pins nothing and leaves the stored
+                // value's own release unbalanced. `lower_call`'s borrowed-arg
+                // retain keeps the same retain-while-on-top discipline.
                 self.emit(InstrRef::StoreLocal {
                     slot,
                     src: value_reg,
