@@ -1,7 +1,8 @@
-// audited: 2026-10-05
+// audited: 2026-10-13
 //! The `letrec` binding form analyzer.
 //!
 //! docs/bindings.md
+//! docs/pipeline.md
 
 use super::*;
 use crate::syntax::{Syntax, SyntaxKind};
@@ -198,65 +199,18 @@ impl<'a> Analyzer<'a> {
             }
         }
 
-        // Signals converge by fixpoint before anything reads them.
-        //
-        // The pass above analyzes initializers in order against a seed of
-        // `Signal::silent()`, so a lambda analyzed early reads whatever the
-        // seed says about a sibling analyzed later. In a mutual cycle that
-        // sibling is the one carrying the signal, and the seed is the bottom of
-        // the lattice — the early lambda therefore comes out too LOW. Too low is
-        // the direction that costs a guarantee: a function that reaches `:error`
-        // through the cycle reads as silent, satisfies a `(silent!)` ceiling,
-        // and breaks its proof at run time instead of failing to compile.
-        //
-        // Re-analyze the lambdas against the signals now recorded, and repeat
-        // until an iteration changes nothing. Each pass can only move a signal
-        // up the lattice, so this terminates on lattice height; the iteration
-        // cap is a guard against a lattice bug, not part of the argument.
-        //
-        // Only lambdas are re-analyzed. A destructure entry mints a fresh temp
-        // binding and fresh pattern leaves every time it runs, so replaying one
-        // would add duplicate bindings rather than refine a signal.
-        //
-        // See docs/pipeline.md.
+        // Signals converge by fixpoint before anything reads them: a lambda
+        // analyzed early read the silent seed of a sibling analyzed later
+        // (docs/pipeline.md). Only lambdas are re-analyzed. A destructure entry
+        // mints a fresh temp binding and fresh pattern leaves every time it
+        // runs, so replaying one would add duplicate bindings rather than
+        // refine a signal.
         if !lambda_entries.is_empty() {
-            // Re-analysis walks the same lambda bodies again and re-reports
-            // whatever they raise. Keep the errors from this pass aside and
-            // merge them back after, so only the final iteration's copy of a
-            // lambda-body error survives.
-            let pass_errors = std::mem::take(&mut self.errors);
-            const MAX_FIXPOINT_ITERS: usize = 10;
-            for _ in 0..MAX_FIXPOINT_ITERS {
-                let mut changed = false;
-                for &(idx, binding, value_syntax) in &lambda_entries {
-                    let old = self
-                        .signal_env
-                        .get(&binding)
-                        .copied()
-                        .unwrap_or_else(Signal::silent);
-                    self.errors.clear();
-                    // Re-analysis rebuilds the capture set, so this must go
-                    // through `analyze_initializer` — it sets the self-recursion
-                    // context that classifies a self-edge as `Recursive`.
-                    let new_hir = self.analyze_initializer(binding, value_syntax)?;
-                    if let HirKind::Lambda {
-                        inferred_signals, ..
-                    } = &new_hir.kind
-                    {
-                        if *inferred_signals != old {
-                            self.signal_env.insert(binding, *inferred_signals);
-                            changed = true;
-                        }
-                    }
-                    bindings[idx].1 = new_hir;
-                }
-                if !changed {
-                    break;
-                }
+            let entries: Vec<_> = lambda_entries.iter().map(|&(_, b, s)| (b, s)).collect();
+            let converged = self.converge_signals(&entries)?;
+            for (&(idx, _, _), value) in lambda_entries.iter().zip(converged) {
+                bindings[idx].1 = value;
             }
-            let mut merged = pass_errors;
-            merged.extend(std::mem::take(&mut self.errors));
-            self.errors = merged;
         }
 
         // The body reads the converged signals, so it is analyzed last.

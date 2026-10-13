@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-13
 //! Binding forms: `let`, `def` and `var`, and `assign`.
 //!
 //! docs/bindings.md
@@ -179,22 +179,10 @@ impl<'a> Analyzer<'a> {
                 self.arena.get_mut(binding).is_immutable = true;
             }
 
-            // A self-recursive call inside the lambda reads the seed, not the
-            // unknown-callee fallback.
-            self.seed_lambda_facts(binding, &items[2]);
-
-            // Now analyze the value (which can reference the binding). The
-            // self-recursion context lets a self-edge inside the lambda classify
-            // `CaptureKind::Recursive` (a recursive `def` nested in a lambda resolves its
-            // self-edge to the executing closure — cell-free — exactly like a
-            // self-recursive `letrec`).
-            let value = self.analyze_initializer(binding, &items[2])?;
+            let value = self.analyze_definition(binding, &items[2])?;
             // Initializer analyzed: later forms in the fn body may now
             // read this binding's value (letrec* left-to-right init).
             self.arena.get_mut(binding).init_pending = false;
-
-            self.record_lambda_facts(binding, &value);
-            self.apply_transient_binding_state(binding);
 
             let value_signal = value.signal;
             Ok(Hir::new(
@@ -223,16 +211,7 @@ impl<'a> Analyzer<'a> {
                 self.arena.get_mut(binding).is_immutable = true;
             }
 
-            // A self-recursive call inside the lambda reads the seed, not the
-            // unknown-callee fallback.
-            self.seed_lambda_facts(binding, &items[2]);
-
-            // Now analyze the value, with the self-recursion context set so a
-            // self-edge inside the lambda classifies `CaptureKind::Recursive`.
-            let value = self.analyze_initializer(binding, &items[2])?;
-
-            self.record_lambda_facts(binding, &value);
-            self.apply_transient_binding_state(binding);
+            let value = self.analyze_definition(binding, &items[2])?;
 
             let value_signal = value.signal;
             Ok(Hir::new(
@@ -244,6 +223,37 @@ impl<'a> Analyzer<'a> {
                 value_signal,
             ))
         }
+    }
+
+    /// Analyze the initializer of the `def` or `var` that binds `binding`, and
+    /// record what it establishes.
+    ///
+    /// The value may refer to the binding. The self-recursion context of
+    /// `analyze_initializer` classifies a self-edge directly inside its lambda
+    /// `CaptureKind::Recursive`, which resolves to the executing closure, cell
+    /// free, as in a self-recursive `letrec`. A self-reference reads the seed
+    /// while the lambda is analyzed, so a lambda whose signal left the seed
+    /// converges like a letrec of one binding (docs/pipeline.md).
+    fn analyze_definition(
+        &mut self,
+        binding: Binding,
+        value_syntax: &Syntax,
+    ) -> Result<Hir, String> {
+        // A self-recursive call inside the lambda reads the seed, not the
+        // unknown-callee fallback.
+        self.seed_lambda_facts(binding, value_syntax);
+        let seed = self.signal_env.get(&binding).copied();
+        let mut value = self.analyze_initializer(binding, value_syntax)?;
+        if self.record_lambda_facts(binding, &value)
+            && Self::refers_to_itself(binding, &value)
+            && self.signal_env.get(&binding).copied() != seed
+        {
+            value = self
+                .converge_signals(&[(binding, value_syntax)])?
+                .swap_remove(0);
+        }
+        self.apply_transient_binding_state(binding);
+        Ok(value)
     }
 
     pub(crate) fn analyze_assign(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
