@@ -77,21 +77,22 @@ pub(super) fn steady_region_growth(src: &str) -> i64 {
 /// program** — after 50 warm-up iterations and again after 250 — and returned as
 /// the raw delta the program computes.
 ///
-/// The mid-run sampling is what makes this a per-call gauge rather than a
-/// per-program one: a shape whose release is hoisted out of the driving loop
-/// fires once and reads 0 either way, while a genuine per-call strand shows as
-/// ~200. `rt` chooses the stdlib (a full runtime churns regions of its own; an
-/// isolated one keeps the reading to the shape under test), and `gauge` chooses
-/// the heap dimension — `arena/region-count` for whole regions,
-/// `arena/count` for objects, since a shape can strand a region without growing
-/// the object count and vice versa.
+/// The mid-run sampling makes this a per-call gauge rather than a per-program
+/// one. A shape whose release is hoisted out of the driving loop fires once and
+/// reads 0 either way, while a genuine per-call strand shows as ~200.
+///
+/// `rt` chooses the stdlib: a full runtime churns regions of its own, and an
+/// isolated one keeps the reading to the shape under test. `gauge` chooses the
+/// heap dimension: `arena/region-count` for whole regions, `arena/count` for
+/// objects. A shape can strand a region without growing the object count, and
+/// the reverse.
 ///
 /// Every reading is void without a live-growth discriminator beside it: pair the
 /// subject with a shape that legitimately retains (the self-referential
 /// accumulator `(assign acc (%pair n acc))`) and assert that one grows.
 ///
-/// The gauge natives are opaque to inference, so the closing subtraction is a
-/// `%sub` under a `match` dispatch that proves both samples `:integer` — which
+/// The gauge natives are opaque to inference. So the closing subtraction is a
+/// `%sub` under a `match` dispatch that proves both samples `:integer`, which
 /// also keeps the harness working on a runtime with no stdlib `-`.
 pub(super) fn mid_run_growth(mut rt: Runtime, prelude: &str, body: &str, gauge: &str) -> i64 {
     use crate::pipeline::compile_file_repl;
@@ -125,20 +126,23 @@ pub(super) fn mid_run_discriminator(rt: Runtime, gauge: &str) -> i64 {
     mid_run_growth(rt, "(def @acc nil)", "(assign acc (%pair n acc))", gauge)
 }
 
-/// The built-in live-growth discriminator now that the ownership forest is
-/// unconditional and every reclaimable cycle below reads bounded: a single mutable
-/// `@array` that holds ITSELF (`a ⊇ a`). This is the degenerate mutable self-cycle —
-/// per-region RC cannot collect it (the self-reference keeps the count at 1), and the
-/// forest's cycle cuts do not reclaim it: MERGE needs static-slot members, the
-/// co-owned group free needs a ≥2-member mutual cycle, and no container holds it. So
-/// re-run in the discarded top-level harness it leaks exactly one region per run. A
-/// near-zero SUBJECT growth is real reclamation ONLY beside a positive discriminator
-/// growth (else the gauge is dead and every "bounded" reading void). It is a deliberate
-/// uncollectable shape — the single-region face of the class-8 boundary
-/// (docs/impl memory model § "Closing every residual"); if a future cut reclaims a
-/// self-referential mutable region, this discriminator (and the gauge-live preconditions
-/// that read it) go red, forcing a re-choice.
-pub(super) const LEAK_DISCRIMINATOR: &str = "(begin (let [a (@array)] (%array-push a a) nil) nil)";
+/// The built-in live-growth discriminator: an `@array` holding a fiber whose
+/// closure captures the array. Per-region RC cannot collect the cycle, and no
+/// forest cut reclaims one through a fiber, whose region is never a forest member
+/// (docs/impl/region/adopt.md). So re-run in the discarded top-level harness it
+/// leaks every run.
+///
+/// A near-zero SUBJECT growth is real reclamation ONLY beside a positive
+/// discriminator growth; otherwise the gauge is dead and every "bounded" reading
+/// is void. The shape is uncollectable on purpose. If a later cut reclaims it,
+/// this discriminator and the gauge-live preconditions that read it go red, and
+/// a new one has to be chosen.
+///
+/// A single `@array` that holds itself is no discriminator: a reference from a
+/// region to itself is counted nowhere (docs/impl/region/rules.md, Rule 5), so
+/// the array frees at its last release.
+pub(super) const LEAK_DISCRIMINATOR: &str =
+    "(begin (let [a (@array)] (%array-push a (fiber/new (fn [] a) 0)) nil) nil)";
 
 /// Per-run live-region growth of [`LEAK_DISCRIMINATOR`] over the shared harness.
 /// Positive by construction — the gauge-live precondition for the bounded subject

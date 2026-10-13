@@ -1,10 +1,22 @@
-// audited: 2026-09-09
-// The arena's reference-count funnels: what a store, a remove, an escape and a
-// move-out each do to the count on a value's region.
-//
-// docs/impl/region/ownership.md
+// audited: 2026-10-11
+//! The arena's reference-count funnels: what a store, a remove, an escape and a move-out each do to a region's count.
+//!
+//! docs/impl/region/ownership.md
+//! docs/impl/region/rules.md
 
 use super::*;
+
+/// An @array in a region of its own: the container a store helper counts against.
+fn container_elsewhere(heap: &mut FiberHeap) -> Value {
+    alloc_in_fresh_region(
+        heap,
+        HeapObject::LArrayMut {
+            data: std::rc::Rc::new(std::cell::RefCell::new(vec![])),
+            traits: Value::NIL,
+        },
+    )
+    .0
+}
 
 #[test]
 fn region_of_returns_none_for_non_heap() {
@@ -36,10 +48,11 @@ fn incref_inserted_element_increfs_region() {
         alloc_in_fresh_region(heap, HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
     let rc_before = region_rc(unsafe { &*heap_ptr }, rid);
     let heap = unsafe { &mut *heap_ptr };
-    incref_inserted_element(heap, val);
+    let container = container_elsewhere(heap);
+    incref_inserted_element(heap, container, val);
     assert_eq!(region_rc(unsafe { &*heap_ptr }, rid), rc_before + 1);
     let heap = unsafe { &mut *heap_ptr };
-    decref_removed_element(heap, val);
+    decref_removed_element(heap, container, val);
 }
 
 #[test]
@@ -49,10 +62,11 @@ fn decref_removed_element_decrefs_region() {
     let (val, rid) =
         alloc_in_fresh_region(heap, HeapObject::Pair(Pair::new(Value::NIL, Value::NIL)));
     let heap = unsafe { &mut *heap_ptr };
-    incref_inserted_element(heap, val);
+    let container = container_elsewhere(heap);
+    incref_inserted_element(heap, container, val);
     let rc_after_insert = region_rc(unsafe { &*heap_ptr }, rid);
     let heap = unsafe { &mut *heap_ptr };
-    decref_removed_element(heap, val);
+    decref_removed_element(heap, container, val);
     assert_eq!(region_rc(unsafe { &*heap_ptr }, rid), rc_after_insert - 1);
 }
 
@@ -67,7 +81,8 @@ fn rebind_stored_element_same_region_is_noop() {
     };
     let rc_before = region_rc(unsafe { &*heap_ptr }, rid);
     let heap = unsafe { &mut *heap_ptr };
-    rebind_stored_element(heap, val1, val2);
+    let container = container_elsewhere(heap);
+    rebind_stored_element(heap, container, val1, val2);
     assert_eq!(
         region_rc(unsafe { &*heap_ptr }, rid),
         rc_before,
@@ -79,9 +94,11 @@ fn rebind_stored_element_same_region_is_noop() {
 fn incref_inserted_element_noop_for_immediates() {
     let heap_ptr = crate::value::arena::leaked_test_heap();
     let heap = unsafe { &mut *heap_ptr };
-    incref_inserted_element(heap, Value::int(42));
+    let container = container_elsewhere(heap);
+    incref_inserted_element(heap, container, Value::int(42));
     let heap = unsafe { &mut *heap_ptr };
-    incref_inserted_element(heap, Value::NIL);
+    let container = container_elsewhere(heap);
+    incref_inserted_element(heap, container, Value::NIL);
 }
 
 #[test]
@@ -166,7 +183,7 @@ fn mutable_array_push_keeps_region_alive() {
     // Value still points into a LIVE region. Freeing it here (a bare
     // `decref_removed_element` taking rc 1 → 0) is the free-before-retain UAF: the
     // call would hand back a Value into a region it just freed (the `raw-pop`
-    // oracle probe; docs/impl/region/ownership.md § "The outgoing edge table").
+    // oracle probe; docs/impl/region/ownership.md).
     assert_eq!(
         region_rc(unsafe { &*heap_ptr }, rid_a),
         1,
@@ -190,11 +207,11 @@ fn mutable_array_push_keeps_region_alive() {
 
 #[test]
 fn pop_extracts_moved_out_element_from_owned_subtree() {
-    // The moves-out-of-Owned-subtree case (region_pop_tail_moves_out_uaf): when the
-    // popped element was ADOPTED into its container's Owned subtree — a heap value
+    // The moves-out-of-Owned-subtree case (region_pop_tail_moves_out_uaf). The
+    // popped element was ADOPTED into its container's Owned subtree: a heap value
     // pushed into a LOCAL Owned @array, where the ownership forest emits an
-    // `AdoptRegion` at the push site — `incref`/`decref` on it are inert (RC frozen).
-    // So `pop` must EXTRACT it (Owned → Counted(1)); otherwise it stays interior and
+    // `AdoptRegion` at the push site. So `incref`/`decref` on it are inert (RC frozen).
+    // `pop` must therefore EXTRACT it (Owned → Counted(1)); otherwise it stays interior and
     // the container's subtree drop frees it under the returned Value. This pins the
     // extract path beside `mutable_array_push_keeps_region_alive`'s Counted path.
     let heap_ptr = crate::value::arena::leaked_test_heap();
@@ -212,9 +229,9 @@ fn pop_extracts_moved_out_element_from_owned_subtree() {
     );
     assert_ne!(rid_a, rid_b);
 
-    // Push val into the @array (records the edge + increfs), drop the initial
-    // reference so the array's stored reference is val's sole holder, then ADOPT
-    // val's region into the array's Owned subtree — the runtime shape of a heap
+    // Push val into the @array (records the edge + increfs). Drop the initial
+    // reference, so the array's stored reference is val's sole holder. Then ADOPT
+    // val's region into the array's Owned subtree: the runtime shape of a heap
     // element pushed into a local Owned @array.
     {
         let mut ctx = crate::primitives::ctx::Alloc::with_region(rid_b, unsafe { &mut *heap_ptr });

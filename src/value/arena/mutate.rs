@@ -1,11 +1,17 @@
+// audited: 2026-10-11
+//! The tracked mutable-store funnels: every store into, or removal from, a mutable container.
+//!
+//! docs/impl/region/rules.md
+//! docs/impl/region/ownership.md
+
 use super::*;
 
 // ── Tracked mutation helpers ────────────────────────────────────────
 //
-// THE mutable-store funnel (docs/impl/region/rules.md Rule 5, mutable store): the raw
-// `RefCell` accessors of the Value-bearing mutable containers are visible
-// only inside `value/`, so these helpers are the only way the rest of the
-// crate can store a `Value` into (or remove one from) an @array, @struct,
+// THE mutable-store funnel (docs/impl/region/rules.md Rule 5, mutable store).
+// The raw `RefCell` accessors of the Value-bearing mutable containers are
+// visible only inside `value/`. So these helpers are the only way the rest of
+// the crate can store a `Value` into (or remove one from) an @array, @struct,
 // @set, box, or capture cell. Each pairs the mutation with its region
 // tracking; an uncounted container store is a compile error, not a review
 // item.
@@ -13,7 +19,7 @@ use super::*;
 // Region tracking is two ledgers, both maintained here: the incoming RC
 // (`incref_inserted_element`/`decref_removed_element`/`rebind_stored_element`,
 // arena.rs) and the source region's outgoing edge table (`record_store`/
-// `unrecord_store` below — docs/impl/region/ownership.md § "The outgoing edge table").
+// `unrecord_store` below, the outgoing edge table).
 // Co-locating the edge op with its RC op is what keeps the two from drifting; the
 // free-time equivalence oracle asserts the result.
 
@@ -43,8 +49,7 @@ fn unrecord_store(heap: &mut FiberHeap, container: Value, elem: Value) {
 /// reference, and does come back from here.
 ///
 /// Both @struct funnels resolve their key edges here, because the remove half
-/// cannot tell how the key it removes was stored (docs/impl/values.md § "A
-/// key's region is counted like a value's").
+/// cannot tell how the key it removes was stored (docs/impl/values.md).
 fn counted_key_values(
     heap: &FiberHeap,
     container: Value,
@@ -68,7 +73,7 @@ pub fn push_with_incref(heap: &mut FiberHeap, collection: Value, elem: Value) ->
         .as_array_mut_raw()
         .expect("push_with_incref: expected @array");
     vec_ref.borrow_mut().push(elem);
-    incref_inserted_element(heap, elem);
+    incref_inserted_element(heap, collection, elem);
     record_store(heap, collection, elem);
     collection
 }
@@ -77,34 +82,33 @@ pub fn push_with_incref(heap: &mut FiberHeap, collection: Value, elem: Value) ->
 /// Panics if `collection` is not an @array or if it's empty.
 /// Returns the popped value.
 ///
-/// Unlike the other remove funnels (`struct_remove`/`set_del`/`remove_at`), which
-/// DISCARD the removed value, `pop` hands it back as the call's result — so the
-/// moved-out element must survive the container's release, and it takes one of two
-/// paths depending on how the element was held.
+/// The other remove funnels (`struct_remove`/`set_del`/`remove_at`) DISCARD the
+/// removed value. `pop` hands it back as the call's result, so the moved-out
+/// element must survive the container's release. It takes one of two paths,
+/// depending on how the element was held.
 ///
 /// **Owned element (adopted).** When the element was stored into a container the
 /// ownership forest made Owned, an `AdoptRegion` moved the element into the
 /// container's subtree (`Owned`, RC frozen). `incref`/`decref` are then inert
-/// (docs/impl/region/ownership.md § "The runtime: a reclamation typestate"), so the
-/// escape-retain path below cannot keep the element alive — and, left interior, the
-/// element would be reclaimed by the container's subtree drop while the returned
-/// Value still points into it (the moves-out-of-owned-subtree UAF the
-/// `region_pop_tail_moves_out_uaf` fixture pins). So EXTRACT it: un-record the
-/// container's outgoing edge (first, so it is not counted), then move the element
-/// back to `Counted` via `extract_owned_region` — the caller's one owning
-/// reference plus any remaining recorded external edges (each held by a live
-/// container that releases it through the ordinary cascade).
+/// (docs/impl/region/ownership.md), so the escape-retain path below cannot keep the
+/// element alive. Left interior, the element would be reclaimed by the container's
+/// subtree drop while the returned Value still points into it (pinned by the
+/// `region_pop_tail_moves_out_uaf` fixture). So EXTRACT it. First un-record the
+/// container's outgoing edge, so it is not counted. Then move the element back to
+/// `Counted` via `extract_owned_region`. Its count is the caller's one owning
+/// reference plus any remaining recorded external edges, each held by a live
+/// container that releases it through the ordinary cascade.
 ///
 /// **Counted element (not adopted — the common path).** The element carries an
-/// ordinary RC. Hold the caller's reference FIRST (the pass-through retain a native
-/// result normally receives from `dispatch_native_call`; `%pop`/`pop` declare
-/// `moves_out` so dispatch SKIPS its own, applying it twice would leak one region
-/// per op), THEN un-record the container's edge co-located with its RC decref:
+/// ordinary RC. Hold the caller's reference FIRST: the pass-through retain a native
+/// result normally receives from `dispatch_native_call`. `%pop`/`pop` declare
+/// `moves_out`, so dispatch SKIPS its own; applying it twice would leak one region
+/// per op. THEN un-record the container's edge co-located with its RC decref.
 /// `decref_removed_element` alone would take a sole-owned element's region to rc 0
-/// and free it under the returned Value (the free-before-retain UAF the `raw-pop`
-/// oracle probe and the `mutable_array_push_keeps_region_alive` unit test pin). The
-/// un-record + decref stay paired (the two-ledger co-location invariant), only now
-/// the incoming RC never transiently reaches zero.
+/// and free it under the returned Value (pinned by the `raw-pop` oracle probe and
+/// the `mutable_array_push_keeps_region_alive` unit test). The un-record + decref
+/// stay paired (the two-ledger co-location invariant), and the incoming RC never
+/// transiently reaches zero.
 pub fn pop_with_decref(heap: &mut FiberHeap, collection: Value) -> Value {
     let vec_ref = collection
         .as_array_mut_raw()
@@ -125,10 +129,12 @@ pub fn pop_with_decref(heap: &mut FiberHeap, collection: Value) -> Value {
         // Hold the caller's reference first (the popped value is the call result),
         // so the region survives the container's release below.
         incref_for_escape(heap, popped_region, EscapeSite::NativeCallResult);
-        // Release the container's reference — un-record the edge co-located with the
-        // RC decref. Both resolve `popped`'s region, which the retain above kept live.
+        // Release the container's reference, un-recording the edge beside the RC
+        // decref. Both resolve `popped`'s region, which the retain above kept live.
+        // An element in the container's own region was never counted, so neither
+        // ledger moves for it, and the caller's retain is the reference it holds.
         unrecord_store(heap, collection, popped);
-        decref_removed_element(heap, popped);
+        decref_removed_element(heap, collection, popped);
     }
     popped
 }
@@ -142,7 +148,7 @@ pub fn extend_with_incref(heap: &mut FiberHeap, collection: Value, elems: &[Valu
         .expect("extend_with_incref: expected @array");
     vec_ref.borrow_mut().extend_from_slice(elems);
     for &elem in elems {
-        incref_inserted_element(heap, elem);
+        incref_inserted_element(heap, collection, elem);
         record_store(heap, collection, elem);
     }
     collection
@@ -162,7 +168,7 @@ pub fn drain_tail_with_decref(heap: &mut FiberHeap, collection: Value, n: usize)
     for &v in &removed {
         // Un-record before decref (the decref may free `v`'s region — see `pop`).
         unrecord_store(heap, collection, v);
-        decref_removed_element(heap, v);
+        decref_removed_element(heap, collection, v);
     }
     removed
 }
@@ -175,7 +181,7 @@ pub fn insert_with_incref(heap: &mut FiberHeap, collection: Value, index: usize,
         .as_array_mut_raw()
         .expect("insert_with_incref: expected @array");
     vec_ref.borrow_mut().insert(index, elem);
-    incref_inserted_element(heap, elem);
+    incref_inserted_element(heap, collection, elem);
     record_store(heap, collection, elem);
 }
 
@@ -189,7 +195,7 @@ pub fn remove_at_with_decref(heap: &mut FiberHeap, collection: Value, index: usi
     let removed = vec_ref.borrow_mut().remove(index);
     // Un-record before decref (the decref may free `removed`'s region — see `pop`).
     unrecord_store(heap, collection, removed);
-    decref_removed_element(heap, removed);
+    decref_removed_element(heap, collection, removed);
     removed
 }
 
@@ -210,7 +216,7 @@ pub fn set_at_with_rebind(
     // making `old`'s region unresolvable); record the new edge after (the rebind's
     // incref keeps `new`'s region live).
     unrecord_store(heap, collection, old);
-    rebind_stored_element(heap, old, new);
+    rebind_stored_element(heap, collection, old, new);
     record_store(heap, collection, new);
     old
 }
@@ -248,10 +254,10 @@ pub fn struct_put_with_rebind(
     // A heap-valued KEY the struct holds outside its own region is a reference
     // like the value's, and the free-time content scan enumerates it
     // (`find_object_cross_refs`'s `LStructMut` arm walks keys). A NEW one is
-    // increfed and its edge recorded here, symmetric with the alloc-scan that
-    // does it for a struct BUILT with keys (region-struct-heap-key-uaf.lisp);
-    // otherwise the recorded edge table and the free scan disagree (a missed
-    // store-funnel edge the equivalence oracle detonates on). `counted_key_values`
+    // increfed and its edge recorded here, as the alloc-scan does for a struct
+    // BUILT with keys (region-struct-heap-key-uaf.lisp). Otherwise the recorded
+    // edge table and the free scan disagree: a missed store-funnel edge the
+    // equivalence oracle detonates on. `counted_key_values`
     // decides WHICH of the key's values that is. A rebind (`Some(old)`) keeps the
     // pre-existing key (BTreeMap::insert does not replace an equal key), so its
     // edge is untouched.
@@ -259,7 +265,7 @@ pub fn struct_put_with_rebind(
     // The caller's key borrows whatever it was built from (`TableKey::
     // from_value`), so a key that is actually stored is interned into the
     // container's own region first — the discipline the immutable constructors
-    // follow (docs/impl/values.md § "Struct keys"). Membership is probed with
+    // follow (docs/impl/values.md). Membership is probed with
     // the BORROWED key, because a rebind stores no key and interning one would
     // leave the copy unreachable in the container's region.
     let map_ref = collection
@@ -277,14 +283,14 @@ pub fn struct_put_with_rebind(
             // Un-record old before the rebind's decref may free its region; record
             // the new edge after (see `set_at_with_rebind`).
             unrecord_store(heap, collection, old);
-            rebind_stored_element(heap, old, val);
+            rebind_stored_element(heap, collection, old, val);
             record_store(heap, collection, val);
         }
         None => {
-            incref_inserted_element(heap, val);
+            incref_inserted_element(heap, collection, val);
             record_store(heap, collection, val);
             for kv in &key_heap_vals {
-                incref_inserted_element(heap, *kv);
+                incref_inserted_element(heap, collection, *kv);
                 record_store(heap, collection, *kv);
             }
         }
@@ -303,13 +309,14 @@ pub fn struct_remove_with_decref(
     let map_ref = collection
         .as_struct_mut_raw()
         .expect("struct_remove_with_decref: expected @struct");
-    // `remove_entry` hands back the STORED key, not the caller's lookup key — for a
+    // `remove_entry` hands back the STORED key, not the caller's lookup key. For a
     // value-equal-but-distinct heap key (a list) they are two allocations in two
-    // regions, and the edge was recorded against the STORED one (mirrors the @set
-    // del fix). Its heap edges are released through `counted_key_values`, which is
-    // also what `struct_put_with_rebind` takes them on: this half cannot tell
-    // whether the key it removes was interned by a constructor or by that funnel,
-    // so the two must agree on which of a key's values is a reference at all.
+    // regions, and the edge was recorded against the STORED one, as
+    // `set_del_with_decref` resolves the stored member. Its heap edges are released
+    // through `counted_key_values`, which is also what `struct_put_with_rebind`
+    // takes them on. This half cannot tell whether the key it removes was interned
+    // by a constructor or by that funnel, so the two must agree on which of a key's
+    // values is a reference at all.
     let removed = map_ref.borrow_mut().remove_entry(key);
     if let Some((stored_key, v)) = removed {
         // Every region this call will release is resolved FIRST, and every
@@ -320,9 +327,9 @@ pub fn struct_remove_with_decref(
         for kv in &key_heap_vals {
             unrecord_store(heap, collection, *kv);
         }
-        decref_removed_element(heap, v);
+        decref_removed_element(heap, collection, v);
         for kv in key_heap_vals {
-            decref_removed_element(heap, kv);
+            decref_removed_element(heap, collection, kv);
         }
         return Some(v);
     }
@@ -339,7 +346,7 @@ pub fn set_add_with_incref(heap: &mut FiberHeap, collection: Value, frozen: Valu
         .expect("set_add_with_incref: expected @set");
     let inserted = set_ref.borrow_mut().insert(frozen);
     if inserted {
-        incref_inserted_element(heap, frozen);
+        incref_inserted_element(heap, collection, frozen);
         record_store(heap, collection, frozen);
     }
     inserted
@@ -353,19 +360,19 @@ pub fn set_del_with_decref(heap: &mut FiberHeap, collection: Value, frozen: &Val
         .as_set_mut_raw()
         .expect("set_del_with_decref: expected @set");
     // `take` HANDS BACK the stored member — a plain `remove` yields only a bool. For
-    // a heap member the stored element and the caller's `frozen` are DISTINCT
-    // allocations in distinct regions that merely compare equal, and the add half
+    // a heap member, the stored element and the caller's `frozen` are DISTINCT
+    // allocations in distinct regions that merely compare equal. The add half
     // (`set_add_with_incref`) recorded the outgoing edge and incref against the
     // STORED member's region. Resolving the un-record and decref from `frozen`
     // instead un-records an edge that was never recorded (outgoing-edge accounting
     // drift) and decrefs a live region the caller still owns (an over-free). Resolve
-    // them from the removed member, mirroring `struct_remove_with_decref` — whose
-    // `BTreeMap::remove` already returns the stored value.
+    // them from the removed member, as `struct_remove_with_decref` does with the
+    // entry `remove_entry` returns.
     let removed = set_ref.borrow_mut().take(frozen);
     if let Some(member) = removed {
         // Un-record before decref (the decref may free the region — see `pop`).
         unrecord_store(heap, collection, member);
-        decref_removed_element(heap, member);
+        decref_removed_element(heap, collection, member);
         true
     } else {
         false
@@ -383,15 +390,15 @@ pub fn lbox_store_with_rebind(heap: &mut FiberHeap, bx: Value, new: Value) -> Va
     // Un-record old before the rebind's decref may free its region; record new after
     // (see `set_at_with_rebind`).
     unrecord_store(heap, bx, old);
-    rebind_stored_element(heap, old, new);
+    rebind_stored_element(heap, bx, old, new);
     record_store(heap, bx, new);
     old
 }
 
 /// Store into a compiler capture cell, tracking relative to the CELL's
-/// region (Rule 5, capture store): the displaced value's region is released
-/// and the stored value's region retained only when they differ from the
-/// cell's own region — a same-region store is the self-edge the alloc-scan
+/// region (Rule 5, capture store). The displaced value's region is released,
+/// and the stored value's region retained, only when it differs from the
+/// cell's own region: a same-region store is the self-edge the alloc-scan
 /// already filters. Returns the displaced value. Panics if `cell_val` is not
 /// a capture cell. The single store routine for every tier (interpreter,
 /// JIT, WASM host).
@@ -416,7 +423,7 @@ pub fn capture_store_with_rebind(heap: &mut FiberHeap, cell_val: Value, new_valu
                 decref_region(heap, Some(old_r));
                 // The cell's outgoing edge to its old contents, removed in lockstep
                 // with the RC decref (the source is the CELL's region, not a
-                // container — docs/impl/region/ownership.md § "The outgoing edge table").
+                // container — docs/impl/region/ownership.md).
                 heap.unrecord_outgoing_edge(Some(cell_r), Some(old_r));
             }
         }
