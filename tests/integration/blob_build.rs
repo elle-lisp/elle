@@ -1,6 +1,6 @@
 // audited: 2026-10-20
-// The release build that embeds the boot image: its two stages, the variable
-// each release cargo call passes, the checks it runs, and the builds without one.
+// The release build that embeds the boot image: two stages, the variable each
+// release build passes, its checks, and the builds without one.
 //
 // docs/impl/image/boot.md
 // docs/analysis/ci.md
