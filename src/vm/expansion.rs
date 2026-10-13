@@ -159,3 +159,6 @@ impl VM {
         field("primitive")?.with_string(|s| s.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests;
