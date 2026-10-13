@@ -13,6 +13,7 @@ use crate::value::region_slice::RegionSlice;
 use crate::value::types::Arity;
 use crate::value::{CaptureMask, Value};
 
+use super::arity::ArityRec;
 use super::header::ClosureTemplate;
 use super::payload::{CodePayload, LocEntry, RestListLayout, VarargTag};
 
@@ -399,22 +400,24 @@ impl PayloadParts {
             capture_locals,
             strict_keys,
             children,
-            origin: self.origin.unwrap_or_else(crate::syntax::Span::synthetic),
-            has_origin: self.origin.is_some(),
             lir,
-            has_lir: self.lir.is_some(),
-            arity: self.arity,
-            signal: self.signal,
             capture_params_mask: self.capture_params_mask,
+            signal_bits: self.signal.bits,
+            origin: self.origin.unwrap_or_else(crate::syntax::Span::synthetic),
+            arity: ArityRec::from(self.arity),
+            signal_propagates: self.signal.propagates,
             num_locals: self.num_locals as u32,
             num_captures: self.num_captures as u32,
             num_params: self.num_params as u32,
             wasm_func_idx: self.wasm_func_idx.unwrap_or(0),
+            has_origin: self.origin.is_some(),
+            has_lir: self.lir.is_some(),
             has_wasm_idx: self.wasm_func_idx.is_some(),
             vararg: self.vararg_tag(),
             rest_list: self.rest_list_layout,
             has_name: name.1,
             has_doc: doc.1,
+            pad: [0; 5],
         };
         heap.alloc_region_slice_in_region::<CodePayload>(&[payload], region)
     }

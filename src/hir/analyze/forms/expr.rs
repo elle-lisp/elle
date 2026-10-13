@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-10-12
 //! Expression dispatch: literals, variables, the collection literals, and the
 //! turn to a special form or a call.
 //!
@@ -290,12 +290,8 @@ impl<'a> Analyzer<'a> {
                                     .unwrap_or(false);
                                 if !has_closure_value {
                                     let mut rewritten = items.to_vec();
-                                    rewritten[1] = Syntax {
-                                        kind: SyntaxKind::String(*sym_name),
-                                        span: items[1].span,
-                                        scopes: items[1].scopes,
-                                        scope_exempt: items[1].scope_exempt,
-                                    };
+                                    rewritten[1] =
+                                        items[1].with_kind(SyntaxKind::String(*sym_name));
                                     return self.analyze_call(&rewritten, span);
                                 }
                             }

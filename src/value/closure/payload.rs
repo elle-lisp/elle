@@ -1,21 +1,27 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! `CodePayload` — a code object's variable-length data, inline in region pages.
 //!
 //! docs/impl/region/template.md
+//! docs/impl/region/generations.md
 //! docs/impl/image/sealing.md
 //!
 //! One payload per lambda, written into its compile unit's code region at
 //! emission and shared by every header built over it. Nothing here owns Rust
 //! heap memory: the payload's bytes *are* the payload, which is what an image
-//! needs of body data.
+//! needs of body data. The record is copied whole into the code region, so it
+//! is `repr(C)` and exactly its fields: every pad is a named field written
+//! zero, and no field is an enum whose shorter variants leave bytes unwritten.
 
 use crate::hir::region::StaticRegion;
 use crate::reader::SourceLoc;
 use crate::signals::Signal;
 use crate::syntax::Span;
+use crate::value::fiber::SignalBits;
 use crate::value::region_slice::RegionSlice;
 use crate::value::types::Arity;
 use crate::value::Value;
+
+use super::arity::ArityRec;
 
 /// How a lambda's rest parameter collects its arguments. The `&named` key set
 /// itself is variable-length, so it lives beside this tag in the payload rather
@@ -112,6 +118,14 @@ pub struct CodePayload {
     /// instruction order, each a `HeapObject::ClosureTemplate` in the same
     /// code region. The emitter fills it (docs/impl/region/template.md).
     pub(crate) children: RegionSlice<Value>,
+    /// The frozen function the JIT promotes this code object from, its sites
+    /// and its values (docs/impl/lir.md). Meaningful only when `has_lir`: an
+    /// entry thunk's code object and a WASM-built closure's have no LIR.
+    pub(crate) lir: crate::lir::LirBody,
+    pub(crate) capture_params_mask: u64,
+    /// The signal's two words, stored apart because a `Signal` carries a pad
+    /// after its `propagates`.
+    pub(crate) signal_bits: SignalBits,
     /// Where the source lambda was written, for `(meta/origin f)`. Meaningful
     /// only when `has_origin`, because a span of zeros is a real answer for
     /// the first form of a file.
@@ -120,23 +134,17 @@ pub struct CodePayload {
     /// one process-local number a payload holds and an image rewrites it from
     /// the file table (docs/impl/image/format.md).
     pub(crate) origin: Span,
-    pub(crate) has_origin: bool,
-    /// The frozen function the JIT promotes this code object from, its sites
-    /// and its values (docs/impl/lir.md). Meaningful only when `has_lir`: an
-    /// entry thunk's code object and a WASM-built closure's have no LIR.
-    pub(crate) lir: crate::lir::LirBody,
-    pub(crate) has_lir: bool,
-    pub(crate) arity: Arity,
-    pub(crate) signal: Signal,
-    pub(crate) capture_params_mask: u64,
+    pub(crate) arity: ArityRec,
+    pub(crate) signal_propagates: u32,
     pub(crate) num_locals: u32,
     pub(crate) num_captures: u32,
     pub(crate) num_params: u32,
     /// The WASM function-table index, meaningful only when `has_wasm_idx`.
     /// Split from an `Option<u32>` so every byte of the field is written: an
-    /// enum's niche-less `None` carries uninitialized payload bytes, which the
-    /// image's canonical writer could not reproduce.
+    /// enum's niche-less `None` carries uninitialized payload bytes.
     pub(crate) wasm_func_idx: u32,
+    pub(crate) has_origin: bool,
+    pub(crate) has_lir: bool,
     pub(crate) has_wasm_idx: bool,
     pub(crate) vararg: VarargTag,
     /// How the `&` rest list is built. Meaningful only when `vararg` is `List`.
@@ -145,6 +153,9 @@ pub struct CodePayload {
     /// empty one are different answers to `(doc f)`, and both are empty slices.
     pub(crate) has_name: bool,
     pub(crate) has_doc: bool,
+    /// Written zero, so the record ends on a word with no byte the compiler
+    /// chose.
+    pub(crate) pad: [u8; 5],
 }
 
 /// A payload's source-location table.
@@ -316,22 +327,24 @@ impl CodePayload {
             capture_locals: RegionSlice::empty(),
             strict_keys: RegionSlice::empty(),
             children: RegionSlice::empty(),
-            origin: Span::synthetic(),
-            has_origin: false,
             lir: crate::lir::LirBody::empty(),
-            has_lir: false,
-            arity: Arity::Exact(0),
-            signal: Signal::silent(),
             capture_params_mask: 0,
+            signal_bits: SignalBits::EMPTY,
+            origin: Span::synthetic(),
+            arity: ArityRec::from(Arity::Exact(0)),
+            signal_propagates: 0,
             num_locals: 0,
             num_captures: 0,
             num_params: 0,
             wasm_func_idx: 0,
+            has_origin: false,
+            has_lir: false,
             has_wasm_idx: false,
             vararg: VarargTag::List,
             rest_list: RestListLayout::PerCell,
             has_name: false,
             has_doc: false,
+            pad: [0; 5],
         }
     }
 
@@ -391,11 +404,14 @@ impl CodePayload {
     }
 
     pub fn arity(&self) -> Arity {
-        self.arity
+        self.arity.arity()
     }
 
     pub fn signal(&self) -> Signal {
-        self.signal
+        Signal {
+            bits: self.signal_bits,
+            propagates: self.signal_propagates,
+        }
     }
 
     pub fn capture_params_mask(&self) -> u64 {
@@ -437,8 +453,8 @@ impl CodePayload {
                     name: self.name(),
                     doc: self.doc(),
                     origin: self.origin(),
-                    arity: self.arity,
-                    signal: self.signal,
+                    arity: self.arity(),
+                    signal: self.signal(),
                     num_locals: self.num_locals as u16,
                     num_params: self.num_params,
                     capture_params_mask: self.capture_params_mask,

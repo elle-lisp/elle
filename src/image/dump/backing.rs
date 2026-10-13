@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! One slice's backing bytes, and how they reach the pages section.
 //!
 //! docs/impl/image.md
@@ -26,8 +26,8 @@ pub(super) enum Backing {
     /// an enum whose padding a copy would carry into the artifact
     /// (docs/impl/image.md § Dumping).
     Entries { rel: u64, src: usize, count: usize },
-    /// One code payload, assembled from probed offsets: thirteen slice headers,
-    /// an LIR body, an arity through its own probe, and a scalar tail
+    /// One code payload, assembled from measured offsets: thirteen slice
+    /// headers, an LIR body, an arity record, a span and a scalar tail
     /// (docs/impl/image.md § Dumping).
     Payload { rel: u64, src: usize },
     /// Slice headers end to end — a payload's file names, its `&named` keys, or

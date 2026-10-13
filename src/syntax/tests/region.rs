@@ -1,4 +1,7 @@
-//! The claims that make the tree region-native (docs/impl/syntax.md).
+// audited: 2026-10-12
+//! The claims that make the tree region-native.
+//!
+//! docs/impl/syntax.md
 
 use crate::syntax::{ScopeId, Span, Syntax, SyntaxArena, SyntaxHeap, SyntaxKind};
 
@@ -235,4 +238,78 @@ fn arena_of(
     region: crate::hir::region::RuntimeRegion,
 ) -> SyntaxArena {
     SyntaxArena::new(store, region)
+}
+
+/// A node is copied whole into its arena's pages, so every byte of it has to
+/// be written: a pad the compiler chose, or a payload byte a short kind leaves
+/// alone, publishes whatever the builder's stack held, and the page-base walk
+/// reads a page's bytes wherever they came from
+/// (docs/impl/region/generations.md). One set of nodes copied in over two
+/// differently painted stacks must therefore give one set of bytes.
+///
+/// The counter-factual is a node with implicit padding, or a kind whose
+/// shorter variants leave payload bytes unwritten: the paint shows through,
+/// and the two copies differ.
+#[test]
+fn one_set_of_nodes_copies_in_as_one_set_of_bytes() {
+    use crate::syntax::SynRef;
+    use crate::value::region_slice::{RegionSlice, RegionStr};
+
+    /// One node of every payload shape, built after the stack is painted so
+    /// each temporary inherits the paint.
+    #[inline(never)]
+    fn nodes() -> [Syntax; 7] {
+        let span = Span::new(1, 2, 3, 4);
+        // A wrapping kind's reference names no node: nothing follows it.
+        let unread = unsafe { SynRef::from_raw(std::ptr::NonNull::<Syntax>::dangling().as_ptr()) };
+        [
+            Syntax::new(SyntaxKind::Nil, span),
+            Syntax::new(SyntaxKind::Bool(true), span),
+            Syntax::new(SyntaxKind::Int(7), span),
+            Syntax::new(SyntaxKind::Float(1.5), span),
+            Syntax::new(SyntaxKind::Symbol(RegionStr::empty()), span),
+            Syntax::new(SyntaxKind::List(RegionSlice::empty()), span),
+            Syntax::new(SyntaxKind::Quote(unread), span),
+        ]
+    }
+
+    fn written(pattern: u8) -> Vec<u8> {
+        let mut home = SyntaxHeap::new();
+        let arena = home.arena();
+        crate::image::layout::paint_stack(pattern, 16);
+        let slice = arena.nodes(&nodes());
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                slice.as_ptr() as *const u8,
+                slice.len() * std::mem::size_of::<Syntax>(),
+            )
+        };
+        bytes.to_vec()
+    }
+
+    let a = written(0xAA);
+    let b = written(0x55);
+    let differ: Vec<String> = (0..a.len())
+        .filter(|&i| a[i] != b[i])
+        .map(|i| format!("node {} byte {}", i / 64, i % 64))
+        .collect();
+    assert!(
+        differ.is_empty(),
+        "the nodes carry unwritten bytes at {differ:?}"
+    );
+}
+
+/// A node whose size exceeds its fields' carries implicit padding: bytes no
+/// field names and no constructor writes, which the copy into an arena would
+/// publish. The paint test above sees such a byte only when the stack happens
+/// to differ under it; this one fails on the layout alone.
+#[test]
+fn a_node_is_exactly_its_fields() {
+    let node = Syntax::new(SyntaxKind::Nil, Span::synthetic());
+    let fields = std::mem::size_of_val(&node.kind)
+        + std::mem::size_of_val(&node.scopes)
+        + std::mem::size_of_val(&node.span)
+        + std::mem::size_of_val(&node.scope_exempt)
+        + std::mem::size_of_val(&node.pad);
+    assert_eq!(std::mem::size_of::<Syntax>(), fields);
 }

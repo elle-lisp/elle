@@ -1,3 +1,4 @@
+// audited: 2026-10-12
 //! The syntax node: a region-resident, `Copy` tree node.
 //!
 //! docs/impl/syntax.md § "The node" owns the model. Every payload here is a
@@ -5,9 +6,9 @@
 //! name, a `&[Syntax]` for children, a `&Syntax` for a wrapped form — so a
 //! reader of the tree matches and walks it without knowing about regions.
 
-use crate::value::region_slice::{RegionSlice, RegionStr};
+use crate::value::region_slice::RegionSlice;
 
-use super::{ScopeId, Span, SyntaxArena};
+use super::{ScopeId, Span, SyntaxArena, SyntaxKind};
 
 /// A pointer to one node owned by a region: the payload of the single-child
 /// kinds (`Quote`, `Unquote`, …).
@@ -45,154 +46,26 @@ impl std::fmt::Debug for SynRef {
 }
 
 /// Pre-analysis syntax tree node. `Copy` POD — see the module docs.
+///
+/// `repr(C)` and exactly its fields, because a node is copied whole into
+/// its arena's pages (docs/impl/syntax.md § "The node"). The constructors
+/// below are the only literals, so every one writes the pad.
 #[derive(Debug, Clone, Copy)]
+#[repr(C)]
 pub struct Syntax {
     pub kind: SyntaxKind,
-    pub span: Span,
     /// Scope set for hygiene. Two identifiers match only if their
     /// scope sets are compatible (implementation: subset check).
     pub(crate) scopes: RegionSlice<ScopeId>,
+    pub span: Span,
     /// When true, `add_scope_recursive` skips this node and its children.
     /// Set by `datum->syntax` to prevent the intro scope from being added
     /// to nodes that should resolve at the call site (hygiene escape hatch).
     /// Only affects `add_scope_recursive`, not `add_scope`.
     pub scope_exempt: bool,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum SyntaxKind {
-    // Atoms
-    Nil,
-    Bool(bool),
-    Int(i64),
-    Float(f64),
-    Symbol(RegionStr),
-    Keyword(RegionStr),
-    String(RegionStr),
-    /// Mutable string literal: `@"..."`
-    StringMut(RegionStr),
-
-    // Compounds
-    List(RegionSlice<Syntax>),
-    /// Bracket-delimited immutable array: `[...]`
-    Array(RegionSlice<Syntax>),
-    /// Bracket-delimited mutable array: `@[...]`
-    ArrayMut(RegionSlice<Syntax>),
-    /// Brace-delimited immutable struct: `{...}`
-    Struct(RegionSlice<Syntax>),
-    /// Brace-delimited mutable struct: `@{...}`
-    StructMut(RegionSlice<Syntax>),
-    /// Pipe-delimited immutable set literal: `|...|`
-    Set(RegionSlice<Syntax>),
-    /// Pipe-delimited mutable set literal: `@|...|`
-    SetMut(RegionSlice<Syntax>),
-    /// Bytes literal: `b[...]`
-    Bytes(RegionSlice<Syntax>),
-    /// Mutable bytes literal: `@b[...]`
-    BytesMut(RegionSlice<Syntax>),
-
-    // Quote forms - preserved as structure for macro handling
-    Quote(SynRef),
-    Quasiquote(SynRef),
-    Unquote(SynRef),
-    UnquoteSplicing(SynRef),
-    /// Splice form: `;expr` or `(splice expr)`. Marks a value for
-    /// array-spreading at call sites and data constructors.
-    Splice(SynRef),
-
-    /// Internal: a hygiene-bearing template symbol carried as plain compile-time
-    /// data (NOT a pre-baked heap `Value`). Never produced by the reader; created
-    /// by quasiquote (`quasiquote_to_code`) to preserve a template symbol's scope
-    /// set through the expansion round-trip. The analyzer materializes it as an
-    /// ORDINARY allocation per execution via `HirKind::QuoteConst`
-    /// (`ConstTemplate::SyntaxSymbol`) — a heap literal is an ordinary,
-    /// reclaimable allocation.
-    SyntaxLiteral(SynRef),
-}
-
-/// The constructor of a sequence kind: `SyntaxKind::List` and its eight
-/// siblings all have this signature, so a caller can name one by value.
-pub type SeqCtor = fn(RegionSlice<Syntax>) -> SyntaxKind;
-
-/// The constructor of a single-child kind: `SyntaxKind::Quote` and its
-/// siblings.
-pub type WrapCtor = fn(SynRef) -> SyntaxKind;
-
-/// How a compound kind holds its children — the shape a generic walk needs in
-/// order to take a tree apart and put an equivalent one back together.
-///
-/// The nine sequence kinds and the six single-child kinds each differ only in
-/// their tag, so every recursive pass over the tree (deep copy, scope
-/// stamping, keyword learning, the `SyntaxLiteral` scan) would otherwise
-/// repeat a fifteen-arm match. [`SyntaxKind::children`] and
-/// [`SyntaxKind::rebuild`] are that match, written once.
-enum Shape {
-    Atom,
-    /// A sequence kind and its constructor.
-    Seq(SeqCtor),
-    /// A single-child kind and its constructor.
-    Wrap(WrapCtor),
-}
-
-impl SyntaxKind {
-    fn shape(&self) -> Shape {
-        match self {
-            SyntaxKind::List(_) => Shape::Seq(SyntaxKind::List),
-            SyntaxKind::Array(_) => Shape::Seq(SyntaxKind::Array),
-            SyntaxKind::ArrayMut(_) => Shape::Seq(SyntaxKind::ArrayMut),
-            SyntaxKind::Struct(_) => Shape::Seq(SyntaxKind::Struct),
-            SyntaxKind::StructMut(_) => Shape::Seq(SyntaxKind::StructMut),
-            SyntaxKind::Set(_) => Shape::Seq(SyntaxKind::Set),
-            SyntaxKind::SetMut(_) => Shape::Seq(SyntaxKind::SetMut),
-            SyntaxKind::Bytes(_) => Shape::Seq(SyntaxKind::Bytes),
-            SyntaxKind::BytesMut(_) => Shape::Seq(SyntaxKind::BytesMut),
-            SyntaxKind::Quote(_) => Shape::Wrap(SyntaxKind::Quote),
-            SyntaxKind::Quasiquote(_) => Shape::Wrap(SyntaxKind::Quasiquote),
-            SyntaxKind::Unquote(_) => Shape::Wrap(SyntaxKind::Unquote),
-            SyntaxKind::UnquoteSplicing(_) => Shape::Wrap(SyntaxKind::UnquoteSplicing),
-            SyntaxKind::Splice(_) => Shape::Wrap(SyntaxKind::Splice),
-            SyntaxKind::SyntaxLiteral(_) => Shape::Wrap(SyntaxKind::SyntaxLiteral),
-            _ => Shape::Atom,
-        }
-    }
-
-    /// This kind's children: the elements of a sequence, the one child of a
-    /// wrapping kind, or nothing for an atom.
-    pub fn children(&self) -> &[Syntax] {
-        match self {
-            SyntaxKind::List(items)
-            | SyntaxKind::Array(items)
-            | SyntaxKind::ArrayMut(items)
-            | SyntaxKind::Struct(items)
-            | SyntaxKind::StructMut(items)
-            | SyntaxKind::Set(items)
-            | SyntaxKind::SetMut(items)
-            | SyntaxKind::Bytes(items)
-            | SyntaxKind::BytesMut(items) => items.as_slice(),
-            SyntaxKind::Quote(inner)
-            | SyntaxKind::Quasiquote(inner)
-            | SyntaxKind::Unquote(inner)
-            | SyntaxKind::UnquoteSplicing(inner)
-            | SyntaxKind::Splice(inner) => unsafe { std::slice::from_raw_parts(inner.as_ptr(), 1) },
-            // A syntax literal's child is data the walkers must not descend
-            // into: it carries the scopes of the context it was captured in.
-            // Reporting no children is how `children`/`rebuild` state that.
-            SyntaxKind::SyntaxLiteral(_) => &[],
-            _ => &[],
-        }
-    }
-
-    /// This kind again, over `items` — the inverse of [`children`](Self::children).
-    ///
-    /// An atom, and a `SyntaxLiteral` (which reports no children), rebuild as
-    /// themselves. A wrapping kind takes `items[0]`.
-    pub(crate) fn rebuild(&self, arena: &SyntaxArena, items: &[Syntax]) -> SyntaxKind {
-        match self.shape() {
-            Shape::Atom => *self,
-            Shape::Seq(make) => make(arena.nodes(items)),
-            Shape::Wrap(make) => make(arena.node(items[0])),
-        }
-    }
+    /// Written zero, so the node ends on a word with no byte the compiler
+    /// chose.
+    pub(crate) pad: [u8; 3],
 }
 
 impl Syntax {
@@ -200,10 +73,16 @@ impl Syntax {
     pub fn new(kind: SyntaxKind, span: Span) -> Self {
         Syntax {
             kind,
-            span,
             scopes: RegionSlice::empty(),
+            span,
             scope_exempt: false,
+            pad: [0; 3],
         }
+    }
+
+    /// This node with another kind: the same span, scopes and exemption.
+    pub(crate) fn with_kind(self, kind: SyntaxKind) -> Self {
+        Syntax { kind, ..self }
     }
 
     /// Create a new Syntax node with the given scope set, copied into `arena`.
@@ -215,9 +94,10 @@ impl Syntax {
     ) -> Self {
         Syntax {
             kind,
-            span,
             scopes: arena.scopes(scopes),
+            span,
             scope_exempt: false,
+            pad: [0; 3],
         }
     }
 
@@ -234,9 +114,10 @@ impl Syntax {
     ) -> Self {
         Syntax {
             kind,
-            span,
             scopes,
+            span,
             scope_exempt: false,
+            pad: [0; 3],
         }
     }
 
@@ -343,9 +224,10 @@ impl Syntax {
         };
         Syntax {
             kind,
-            span: self.span,
             scopes: arena.scopes(self.scopes.as_slice()),
+            span: self.span,
             scope_exempt: self.scope_exempt,
+            pad: [0; 3],
         }
     }
 

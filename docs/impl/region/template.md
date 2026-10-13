@@ -1,6 +1,6 @@
 # Code objects — a payload, a header and a code unit
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-12 -->
 
 A code object is a payload in a code region and a one-word header naming it, and a compile unit owns the region.
 
@@ -191,6 +191,14 @@ One field holds a process-local number inside those bytes: the origin span's
 file id indexes a process-wide interner, exactly as a syntax node's does, so an
 image rewrites it from the file table ([format.md](../image/format.md)).
 
+The payload and the LIR body inside it are copied whole into the code region,
+so each is `repr(C)` and exactly its fields, with every byte written
+([generations.md](generations.md) § "Every byte the magic screens has to be
+written"). A pad is a named field written zero, as the LIR records carry one.
+No field is an enum whose shorter variants leave bytes unwritten: the arity is
+a record of two counts and a kind byte, and the signal is stored as its two
+words. The record's own tail pad brings it to a whole number of words.
+
 | Field | Representation |
 |-------|----------------|
 | bytecode | `RegionSlice<u8>` |
@@ -206,7 +214,14 @@ image rewrites it from the file table ([format.md](../image/format.md)).
 | children | `RegionSlice<Value>` — the headers a `MakeClosure` indexes, in instruction order |
 | origin | a `Span` and a present flag — where the lambda was written, for `meta/origin` |
 | lir | a `LirBody` and a present flag — the frozen function the JIT promotes from ([lir.md](../lir.md)) |
-| arity, param and local counts, signal, capture-params mask, vararg kind, rest-list layout ([restlist.md](restlist.md)), WASM index | scalars, inline |
+| arity | an `ArityRec`: the minimum and maximum counts as `u32`, a kind byte, and a three-byte pad written zero |
+| signal | the signal's bits as one word and its propagation mask as a `u32`, two fields |
+| param and local counts, capture-params mask, vararg kind, rest-list layout ([restlist.md](restlist.md)), WASM index | scalars, inline |
+| pad | five bytes written zero |
+
+Pinned by `one_set_of_parts_writes_one_set_of_bytes` and
+`every_payload_record_is_exactly_its_fields`
+([payload.rs](../../../src/value/closure/tests/payload.rs)).
 
 The LIR body is present on the payload of every nested lambda, and absent on an
 entry function's and on a placeholder's. The body holds only what LIR alone

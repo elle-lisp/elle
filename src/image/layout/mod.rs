@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! Layout probes for the records the dumper writes into page bytes: each
 //! variant's discriminant byte and the byte extents of its leaf fields.
 //!
@@ -12,18 +12,18 @@
 //! a discriminant or reorders fields fails loudly before any image is written
 //! or trusted.
 //!
-//! Four records carry a discriminant into the body, so four are probed: the
+//! Three records carry a discriminant into the body, so three are probed: the
 //! `HeapObject` an object slot holds, the `TableKey` a struct entry begins
-//! with, the `SyntaxKind` inside a node (syntax.rs, which also writes the
-//! node around it), and the `Arity` inside a code payload (payload.rs, which
-//! also writes the payload around it). The fingerprint records
-//! them, so a binary whose layout shifted rejects foreign images. The dumper
-//! copies only the discriminant byte and these extents into zeroed slots, so
-//! a construction temporary's uninitialized padding never reaches the file
-//! and dumps are byte-identical whole files.
+//! with, and the `SyntaxKind` inside a node (syntax.rs, which also writes the
+//! node around it). The fingerprint records them, so a binary whose layout
+//! shifted rejects foreign images. The dumper copies only the discriminant
+//! byte and these extents into zeroed slots, so a construction temporary's
+//! uninitialized padding never reaches the file and dumps are byte-identical
+//! whole files.
 //!
-//! A payload's LIR body carries no discriminant, so lir.rs measures it with
-//! `offset_of!` alone, with the records it names and their pads.
+//! A code payload and its LIR body carry no discriminant, so payload.rs and
+//! lir.rs measure them with `offset_of!` alone, with the records a body names
+//! and their pads.
 
 mod heap;
 mod key;
@@ -241,7 +241,6 @@ pub(crate) fn fingerprint_component() -> String {
     describe::<crate::value::heap::HeapObject>(&mut out);
     describe::<TableKey>(&mut out);
     describe::<crate::syntax::SyntaxKind>(&mut out);
-    describe::<crate::value::types::Arity>(&mut out);
     out
 }
 

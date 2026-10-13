@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-10-12
 //! The syntax half of the layout probe: exemplars and field extents for every
 //! `SyntaxKind`, and the writer for the node that wraps one.
 //!
@@ -7,9 +7,11 @@
 //!
 //! A node is the third record the dumper writes into page bytes, and the least
 //! plain of the three: a struct holding an enum, a 20-byte span, an inline
-//! slice, and a `bool`. Copying one would carry its construction temporary's
-//! padding into the artifact, so a node is assembled from these extents like
-//! an object slot and a struct entry.
+//! slice, a `bool` and a pad. A node in a region page has every byte written,
+//! because its arena zeroes what a short kind leaves alone as it copies the
+//! node in. The dumper assembles a node from these extents all the same, like
+//! an object slot and a struct entry, so the artifact holds the fields and
+//! zeros whatever a live node holds.
 
 use std::mem::{offset_of, size_of};
 use std::sync::OnceLock;
