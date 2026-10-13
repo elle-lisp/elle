@@ -11,7 +11,8 @@
 //! Compiled code charges the word in place; [`Fuel::WORD_OFFSET_IN_VM`] is
 //! where it finds it.
 
-/// A fiber's instruction budget: a count of units left, or no budget at all.
+/// An instruction budget: a count of units left, or no budget at all. Each fiber
+/// holds one, and so does the expansion budget a VM keeps (`ExpansionBudget`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct Fuel(u64);

@@ -1,4 +1,4 @@
-// audited: 2026-10-07
+// audited: 2026-10-12
 //! The `VM` struct — the per-instance state a running program reaches — and the
 //! accessors that reborrow the allocations it points at.
 //!
@@ -114,6 +114,10 @@ pub struct VM {
     /// The current fiber holding all per-execution state:
     /// operand stack, call frames, signal and fiber state.
     pub fiber: Fiber,
+    /// The budget of the expansion running on this VM, which every fiber the
+    /// expansion runs spends apart from its own fuel. Unmetered while none runs;
+    /// opened and closed by `VM::at_expansion` alone (docs/runtime.md).
+    pub(crate) expansion_budget: crate::vm::expansion::ExpansionBudget,
     /// Handle to the current fiber's FiberHandle, if it came from a
     /// `fiber/new` allocation. `None` for the root fiber (which lives
     /// directly on the VM, not behind a handle). Used to wire up

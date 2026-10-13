@@ -165,6 +165,7 @@ pub(crate) static VOCABULARY: &[&str] = &[
     // Capability / feature gating
     "capability-denied",
     "feature-disabled",
+    "expansion",
     // Signal names the registry pre-registers. A signal a program declares at
     // run time cannot be listed here; it is learned where the registry is read
     // (docs/impl/symbol.md).
