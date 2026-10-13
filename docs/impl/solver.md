@@ -206,7 +206,9 @@ Where the analyzer answers with every bit, the solver is exact:
 - a parameter called from a nested lambda
 - a parametric module whose exports call fields of the plugin it is given:
   `go` solves to `port/open`'s `|:error :io :fs|`
-- a higher-order export, which solves to `|:yield|` or `||` by its argument
+- a higher-order export, which solves to `|:yield :error|` or `|:error|` by
+  its argument: its call to the argument checks no argument count, so it may
+  raise
 - two modules that import each other inside function bodies, which solve
   jointly
 
