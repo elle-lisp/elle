@@ -77,14 +77,15 @@ alone cannot distinguish the two; the tests assert on this instead.
 The boot image's warm cache is on by default, and it comes first. An instance
 that hydrates an image reads no stdlib cache, and one that misses compiles so
 that it can store an image ([boot.md](image/boot.md)). This cache's readers are
-therefore the `sys/spawn` worker, the language server, the WASM entry, and
-every instance that boots with the image off.
+therefore every instance that boots with the image off, and every `sys/spawn`
+worker of an instance that holds no image.
 
-A `sys/spawn` worker builds its own runtime on a new thread and runs
-`init_stdlib` there, so it caches too. It reaches the spawning instance only
-through `ctx.vm()`. So `RuntimeCore::load_stdlib` records the policy on the VM,
-and it moves into the worker thread beside the Unicode generation. A worker
-caches where its parent was told to, never in the process-wide directory.
+A worker of an instance with no image builds its own runtime on a new thread
+and compiles its stdlib there, so it caches too. It reaches the spawning
+instance only through `ctx.vm()`, so the spawning instance records its policy
+on its VM, and the policy moves into the worker thread beside the Unicode
+generation. A worker caches where its parent was told to, never in the
+process-wide directory.
 
 ## File layout
 
@@ -117,9 +118,10 @@ compile per switch. Give them separate directories (`--cache=`) if that matters.
 
 A store never writes the final path. It writes a temporary file in the same
 directory and renames it over the target. Two elle processes starting at once
-is ordinary. Writing the path directly lets one read the other's half-written
-file, or edits an inode a reader already holds open. Same
-directory because a rename is atomic only within one filesystem.
+is ordinary, and writing the path directly lets one read the other's
+half-written file, or edits an inode a reader already holds open. The
+temporary file shares the directory because a rename is atomic only within one
+filesystem.
 
 ## What the cached path does not restore
 

@@ -1,6 +1,6 @@
 # WASM Backend
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-20 -->
 
 The WASM backend compiles Elle programs to WebAssembly and runs them under
 Wasmtime, over the same front end the bytecode VM uses.
@@ -53,7 +53,7 @@ Two execution modes:
 - **Tiered** (`--wasm=N`): compiles individual hot closures
   to WASM on demand during bytecode VM execution. Complements the VM
   rather than replacing it. A closure runs on the tier from its Nth call, so
-  `--wasm=1` compiles it on the first; the tier counts the calls itself,
+  `--wasm=1` compiles it on the first. The tier counts the calls itself,
   because a `wasm` build has no JIT tier to share a count with. The tier
   holds no park, so it compiles only a function that cannot signal: no
   yield, no tail call, and nothing that can raise, since an error parks. The
@@ -86,17 +86,18 @@ scheduler around already-top-level-analyzed bytecode.
 
 Splicing stdlib as *source* (step 1) makes stdlib callable from WASM at
 **runtime** — but it does nothing for **compile time**. Macro expansion in
-step 2 runs on the compile context's macro VM, and a prelude or user macro's
-transformer body may call a stdlib function while expanding (`assert`'s
-transformer calls `pair?` to detect a comparison form). So the full-module
-path also loads stdlib into the compile context (`init_stdlib` in
-`eval_wasm_raw`) on a heap shared with the macro VM, exactly as the bytecode
-runtime does. Without it, expansion fails with `undefined variable: pair?`
-before any WASM is emitted. The two mechanisms are independent: the
-source-splice serves runtime calls, the `init_stdlib` load serves macro
-expansion. User references still bind to the spliced letrec definitions
-(lexical scope shadows the registered exports), so the emitted WASM calls the
-compiled stdlib.
+step 2 runs on the compile context's macro VM. A prelude or user macro's
+transformer body may call a stdlib function while expanding: `assert`'s
+transformer calls `pair?` to detect a comparison form. So `eval_wasm_raw`
+also boots a host runtime with the stdlib registered in its compile context,
+as the bytecode runtime boots: from the boot image when one hydrates, from
+source otherwise ([boot.md](image/boot.md)). Without it, expansion fails with
+`undefined variable: pair?` before any WASM is emitted.
+
+The two mechanisms are independent: the source-splice serves runtime calls,
+and the host runtime's stdlib serves macro expansion. User references still
+bind to the spliced letrec definitions (lexical scope shadows the registered
+exports), so the emitted WASM calls the compiled stdlib.
 
 A quoted **symbol** inside a *compound* literal (`(quote (= a 2))`, which
 `assert`'s comparison branch emits) is baked into the const pool at emit time,
@@ -166,9 +167,9 @@ which of those park is the interpreter's rule, not the emitter's.
 tiers cannot disagree.
 
 Testing a bit instead costs correctness twice over. A suspending signal
-need not carry any particular bit — `fiber/emit` of a bare `|:io|` does
-not — so a bit test misses the park, captures no continuation frame, and
-drops the code after the suspend; the fiber then returns its resume value.
+need not carry any particular bit, and `fiber/emit` of a bare `|:io|` does
+not. So a bit test misses the park, captures no continuation frame, and drops
+the code after the suspend; the fiber then returns its resume value.
 And a host that answers "suspended" by OR-ing a bit back onto the signal
 puts that bit where programs can see it: `fiber/bits` reports
 `|:io :yield|` where the VM reports `|:io|`. Pinned by
@@ -250,8 +251,8 @@ An error parks like a yield, so a call to a callee that only raises is a park
 site too.
 
 1. The emitter splits each block after every park site, and gives each site a
-   resume state ID and a resume entry: a case of the dispatch loop that
-   delivers the restart value into the site's result.
+   resume state ID and a resume entry. A resume entry is a case of the
+   dispatch loop that delivers the restart value into the site's result.
 2. On a park, the site spills the registers and local slots live after it
    to `ARGS_BASE`, and `rt_yield` saves them as a `WasmSuspensionFrame` on
    the host. The env stack begins above the widest such spill, as it does
@@ -356,24 +357,24 @@ compiles it optimized, and its version moves with the JIT's
 `elle-rig-wasm` ([bins](../../bins/overview.md)). It runs the language suite
 through `elle test` on `elle-wasm` ([testing](../testing.md)). It runs the
 implementation suite on the rig under each file's sidecar
-([rig](../../rig/overview.md)), which is where the tiered backend's files run:
-each forces its closures onto the tier with `compile/run-on :wasm`, and skips
+([rig](../../rig/overview.md)), which is where the tiered backend's files run.
+Each forces its closures onto the tier with `compile/run-on :wasm`, and skips
 itself on a build without the backend. It then runs both suites on the rig
 under the profile [wasm-full.toml](../../tests/impl/profiles/wasm-full.toml),
 less the files the Makefile's `WASM_SKIP` names: dynamic compilation (`eval`)
 is not a WASM backend feature.
 
-Two invariants that the full-module tier — and only this tier — must uphold are
-worth calling out, because each is invisible on the VM/JIT path and each is
-pinned by a specific suite file that one of those passes runs.
+The full-module tier, and only this tier, must uphold two invariants. Each is
+invisible on the VM/JIT path, and each is pinned by a specific suite file that
+one of those passes runs.
 
 - **every io-backend strands to the heap's teardown.** Every region instruction
-  is a structural no-op on this tier (its emitter lowers each to nothing —
-  [dispatch.rs](../../src/wasm/instruction/dispatch.rs)), so a scheduler I/O
-  backend — a heap `ExternalObject` (`Value::external("io-backend", …)`) whose
-  `pending` map holds `Port`/`ProcessHandle` values for ops
-  submitted-but-unreaped at exit (a POSIX signal waiter, a spawned-process
-  waiter) — is never reclaimed during execution. Where the VM strands one
+  is a structural no-op on this tier: its emitter lowers each to nothing
+  ([dispatch.rs](../../src/wasm/instruction/dispatch.rs)). So a scheduler I/O
+  backend is never reclaimed during execution. That backend is a heap
+  `ExternalObject` (`Value::external("io-backend", …)`) whose `pending` map
+  holds `Port`/`ProcessHandle` values for ops submitted-but-unreaped at exit (a
+  POSIX signal waiter, a spawned-process waiter). Where the VM strands one
   backend, this tier strands every one.
 
   What handles them is not this tier's: `FiberHeap::quiesce_io_backends` drains
@@ -387,15 +388,17 @@ pinned by a specific suite file that one of those passes runs.
   nil-stamped.** `allocate_slot` gives such a binding its own never-reused stack
   slot, holding a live value for the binding's whole scope. The region analysis
   can still keep a spurious assign-value region for an immediate-valued counter
-  (`(assign ii (%add ii 1))`) whose `decref_point` lands inside the loop; the
+  (`(assign ii (%add ii 1))`) whose `decref_point` lands inside the loop. The
   lowerer's value-route release would nil-stamp that slot before the increment
-  reads it, and the emitter's inline `BinOp Add` would read `Nil` as 0, sticking
-  the counter so the loop never terminates. `emit_decrefs_for` refuses the value
-  route for any slot in `reassigned_local_slots` (fed from
-  `RegionInfo::reassigned_local_bindings`), an over-keep, never a mid-scope
-  nil-stamp. This is a lowering the VM/JIT (bytecode-derived LIR) never take. The
-  branch-result-loop nil-stamp guard is untouched — the suppression keys on the
-  slot's binding, not the branch-union region
+  reads it. The emitter's inline `BinOp Add` would then read `Nil` as 0, and
+  the counter would stick so the loop never terminates.
+
+  `emit_decrefs_for` refuses the value route for any slot in
+  `reassigned_local_slots` (fed from `RegionInfo::reassigned_local_bindings`):
+  an over-keep, never a mid-scope nil-stamp. The VM/JIT (bytecode-derived LIR)
+  never take this lowering. The branch-result-loop nil-stamp guard is
+  untouched, because the suppression keys on the slot's binding, not the
+  branch-union region
   ([region-branch-result-loop-uaf.lisp](../../tests/impl/region-branch-result-loop-uaf.lisp)
   stays green). Canonical reference:
   [region-capture-cell-loop-uaf.lisp](../../tests/impl/region-capture-cell-loop-uaf.lisp).

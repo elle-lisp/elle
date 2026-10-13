@@ -5,11 +5,11 @@
 What the boot configuration carries, how `elle image dump-boot` writes it, and
 how a fresh instance starts from it.
 
-[The image design](../image.md) owns the argument, [sealing](sealing.md) what a
-body may hold, and [the image file](format.md) the file's sections. This
-document owns the boot configuration: its root set, the source digest that
-decides whether an image still describes these sources, and the warm cache that
-distributes it.
+[image.md](../image.md) owns the design, [sealing.md](sealing.md) what a body
+may hold, and [format.md](format.md) the file's sections. This document owns
+the boot configuration: its root set, and the source digest that decides
+whether an image still describes these sources. It also owns the warm cache
+that distributes an image, and how a worker boots from its parent's.
 
 ## The boot state is one value graph
 
@@ -89,8 +89,8 @@ check by rebuilding it.
 
 The stdlib disk cache is off for that boot, and a warm-cache store compiles for
 the same reason. A cache hit rebuilds the library's closures through the send
-codec, which carries no cell's binding, so every restored capture cell reads as
-minted at run time — and the dump refuses one of those by variant
+codec, which carries no cell's binding. So every restored capture cell reads as
+minted at run time, and the dump refuses one of those by variant
 ([sealing.md](sealing.md)). A boot image therefore costs one stdlib compile per
 build and digest, paid by the start that stores it.
 
@@ -130,8 +130,8 @@ expander's own template arena would buy nothing.
 The raise in step 5 has nothing to clear at boot. A prelude template carries
 the prelude scope, which is zero, so a boot image's watermark is one — where an
 expander starts anyway. Every scope a boot mints is minted on a per-compile
-clone of the master expander, and a clone's counter never reaches the master,
-so an image boot and a source boot hand out the same ids with or without the
+clone of the master expander, and a clone's counter never reaches the master.
+So an image boot and a source boot hand out the same ids with or without the
 raise. The environment configuration is what will need it, because a macro a
 session defined carries its file's scope.
 
@@ -176,6 +176,50 @@ dumps one for the next start.
 A store failure is reported and ignored. The cache is a speedup, and a source
 boot is always the fallback.
 
+## A worker boots as its parent did
+
+A `sys/spawn` worker builds an instance of its own on a new thread
+([threads.md](../../threads.md)). A region belongs to one store, so the worker
+cannot read the region its parent hydrated. It hydrates the same image into its
+own heap instead. Each worker holds a private mapping, and the clean pages are
+shared between them through the page cache.
+
+- The worker hydrates from the descriptor its parent hydrated, never from a
+  path. The parent records the open image on its VM, and the worker takes a
+  share of it, as it takes the Unicode generation. A prune or a rename over the
+  file after the parent opened it therefore changes nothing a worker maps.
+- A parent that compiled and then stored an image hands its workers the file
+  it stored, so the workers of a cold start hydrate too.
+- A parent with no image to hand on has workers that compile, through the
+  parent's stdlib cache. That parent booted with `--no-stdlib` or through
+  `Runtime::with_stdlib_cache`, or its store failed. A worker never reads the
+  process policy itself, so it never boots from an image its parent did not
+  hold.
+- A worker never stores. Its parent already holds the image a store would
+  write.
+- A worker whose hydration refuses the image reports the refusal and compiles.
+  It hands on only an image it hydrated, so its own workers compile too.
+
+The descriptor is the hydrator's input form ([image.md](../image.md)
+§ Hydration). So the embedded blob, which maps from the executable's own
+descriptor, reaches a worker the same way.
+
+`sys/spawn-vm` starts a light worker, with no standard library. A source boot
+of one compiles core.lisp and prelude.lisp and never compiles stdlib.lisp. An
+image boot of one installs the same two parts, the core exports and the macros,
+and leaves out the stdlib exports. So `eval` in a light worker resolves no
+stdlib name under either boot, and it grafts no stdlib call. A transformer
+that the image carries filled was compiled while the boot compiled stdlib.lisp, before any stdlib
+export existed, so it calls no stdlib function that a light worker lacks.
+
+The language server and the host side of the WASM entry boot as `elle` does:
+under the process policy, hydrating on a hit, and storing on a miss. A WASM
+entry without the stdlib boots from source, as `--no-stdlib` does.
+
+`init_stdlib` stays the path that compiles stdlib.lisp. An image installs
+before the compile context exists, and `init_stdlib` runs after it, so it
+cannot hydrate. An embedder that wants the image boots through `Runtime`.
+
 ## The gate
 
 `make smoke-boot-image` runs the corpus from an image instead of from the three
@@ -204,11 +248,9 @@ Without it the target reports on a source boot: a binary that ignored
 replaces. The parity target asks for the same mark, or it would compare two
 source boots.
 
-The runner instance is the one that hydrates, so every corpus file is read,
-expanded and compiled against the image's macros and exports. A file's forms
-then run on a worker with a VM of its own, which registers its own primitives
-and loads its own stdlib where the file needs the library at run time.
-Per-worker hydration is a milestone of its own ([the landing plan](plan.md)).
+The runner instance hydrates, and so does every worker it spawns to run a
+file's forms (§ A worker boots as its parent did). So every corpus file is
+read, expanded, compiled and run against the image's macros and exports.
 
 ## The warm cache is on by default
 
@@ -229,11 +271,12 @@ store's interval table resolves the pointer with a range check
 never hydrates an older build's image.
 
 The default reaches every `Runtime::new()`: `elle`, its REPL and its
-subcommands, and an embedder's runtime. Three paths always boot from source:
-`--no-stdlib`, `elle image dump-boot` (§ Producing one), and
-`Runtime::with_stdlib_cache`, which names the stdlib cache it reads. A
-`sys/spawn` worker, the language server and the WASM entry compile their own
-stdlib until per-worker hydration lands ([plan.md](plan.md)).
+subcommands, and an embedder's runtime. It reaches the language server and the
+WASM entry's host runtime, and every worker of an instance that holds an image
+(§ A worker boots as its parent did). Four paths always boot from source:
+`--no-stdlib`, `elle image dump-boot` (§ Producing one),
+`Runtime::with_stdlib_cache`, which names the stdlib cache it reads, and
+`init_stdlib`.
 
 The default has two costs. A start that misses compiles the three sources and
 skips the stdlib cache, because the store needs a compiled boot (§ Producing

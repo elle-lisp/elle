@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-15
+# audited: 2026-10-20
 ## elle test — running one test: worker isolation, output capture, the
 ## per-form deadline, and the build's tiers.
 ## docs/test-runner.md
@@ -33,26 +33,25 @@
 # back the structured [ok? payload]. The barrier lives OUTSIDE the tiered
 # closure deliberately — a fiber-based catch INSIDE a closure handed to
 # compile/run-on is rejected by the optimizing tiers (they cannot create the
-# handler closure). This probe path joins with no deadline (its closures are
-# trivial and always finish); real test forms run under exec-thunk-capture,
-# which bounds the join with `form-budget` so a hung test is recorded
-# `timeout`, not a wedge.
+# handler closure). This probe path joins with no deadline, because its
+# closures are trivial and always finish. Real test forms run under
+# exec-thunk-capture, which bounds the join with `form-budget`, so a hung test
+# is recorded `timeout`, not a wedge.
 (defn exec-thunk [tier thunk]
   (os/join (os/spawn-vm (fn [] (protect (compile/run-on tier thunk))))))
 
 # Worker kind for the per-form execution (exec-thunk-capture). Default is the
-# LIGHT worker (sys/spawn-vm, primitives only), which skips the init_stdlib the
-# heavy worker (sys/spawn) runs on every spawn: a single-form thunk captures its
-# already-imported deps from the eager main-VM setup, so it needs no stdlib in
-# the worker. Nothing in the runner binds this to true. A whole-file run needs
-# the heavy worker, and exec-source-capture calls os/spawn itself.
+# LIGHT worker (sys/spawn-vm, primitives only). A single-form thunk captures
+# its already-imported deps from the eager main-VM setup, so it needs no stdlib
+# in the worker. Nothing in the runner binds this to true. A whole-file run
+# needs the heavy worker, and exec-source-capture calls os/spawn itself.
 (def *heavy-worker* (make-parameter false))
 (defn worker-spawn [closure]
   (if (*heavy-worker*) (os/spawn closure) (os/spawn-vm closure)))
 
 # The wall-clock budget bounding ONE form's worker, in ms. main.lisp binds it
-# per path to what that path earned, because the budget is a property of the
-# file a form came from rather than of the run (docs/test-cli.md). An ad-hoc
+# per path to what that path earned. The budget is a property of the file a
+# form came from rather than of the run (docs/test-cli.md). An ad-hoc
 # `-e` form has no path to earn one, so nil here falls through to `--timeout`.
 (def *form-budget-ms* (make-parameter nil))
 
@@ -183,10 +182,10 @@
             (eprintln "── jit code map (addr name; match ??? frames to the nearest preceding addr) ──")
             (eprintln jit-map)))
         # The words each sampled JIT frame is parked on. The map names the
-        # frame's function; this shows the bytes its PC is executing, which
-        # is what decides whether the wedge is IN the emitted code or in
-        # what the core fetched (docs/impl/jit.md; on AArch64, `0x14000000` is a
-        # branch to itself).
+        # frame's function, and this shows the bytes its PC is executing.
+        # Those bytes decide whether the wedge is IN the emitted code or in
+        # what the core fetched (docs/impl/jit.md; on AArch64, `0x14000000` is
+        # a branch to itself).
         (let [[a-ok? addrs] (protect (jit-frame-addrs shot))]
           (when (and a-ok? (> (length addrs) 0))
             (eprintln "── code around sampled jit frames (each line names its address) ──")
@@ -200,7 +199,7 @@
 
 # A timeout's reason names the budget that ran out — `join: deadline exceeded`
 # — and says nothing about where the form was when it did. The last line the
-# form printed says exactly that, so carry it in the reason: the problem list
+# form printed says exactly that, so carry it in the reason. The problem list
 # is what a terminal-only reader (a CI log) gets, and it should not need a
 # query to name the call that hung. The full output stays in the assets.
 (defn note-last-output [c cap]
@@ -274,9 +273,11 @@
 # `(spawn thunk)` adds to that scheduler and `(join …)` waits for.
 # EVRUN/SPAWN/JOIN/OUT/ERR are passed so the caller supplies the SAME stdlib
 # instance the thunk uses (the worker's, or the main VM's for the in-process
-# fallback). Returns {:result [ok? value] :stdout :stderr :cpu-us :gauges}. The
-# fibers the script spawns run on this thread's scheduler, so its CPU time
-# counts them. The gauges bracket the pumped run as capture-run's do.
+# fallback).
+#
+# Returns {:result [ok? value] :stdout :stderr :cpu-us :gauges}. The fibers
+# the script spawns run on this thread's scheduler, so its CPU time counts
+# them. The gauges bracket the pumped run as capture-run's do.
 (defn
   capture-pumped
   [evrun spawn join out-param err-param thunk out-path err-path]
@@ -308,20 +309,23 @@
 
 # Whole-file (legacy multi-form) execution. Unlike exec-thunk-capture — which
 # ships a MAIN-compiled thunk — this ships the file's parsed SYNTAX (sendable via
-# os/spawn) and the worker compiles it with compile/whole-module-syntax against
-# its OWN stdlib, then runs it (pumped) under the WORKER's ev/run. That is what
-# makes the file's runtime `import`s and the scheduler agree on dynamic params: a
-# main-compiled thunk binds `ev/spawn`/`*spawn*` to the MAIN stdlib, but a module
-# the thunk `import`s at runtime resolves to the WORKER stdlib — two distinct
-# *spawn* parameter objects, so any file whose forms import a module that yields
-# (sync/redis/http2/process/grpc) breaks. ev/run, *stdout*, *stderr* are resolved
-# IN the worker (eval) for the same reason — they must be the worker's parameter
-# objects. Syntax compiles in the heavy worker (it runs the file's own
-# import/eval), so os/spawn (not -vm). `policy` is the JIT policy (:off /
-# :eager, see whole-file-policies): the worker sets it via (vm/config-set :jit
-# policy) before running, so the SAME file runs under bytecode and under JIT.
-# Only the process running `elle test` may set either (docs/test-runner.md).
-# The worker's VM is fresh, so the policy is isolated; the in-process fallback
+# os/spawn). The worker compiles it with compile/whole-module-syntax against
+# its OWN stdlib, then runs it (pumped) under the WORKER's ev/run.
+#
+# That is what makes the file's runtime `import`s and the scheduler agree on
+# dynamic params. A main-compiled thunk binds `ev/spawn`/`*spawn*` to the MAIN
+# stdlib, but a module the thunk `import`s at runtime resolves to the WORKER
+# stdlib. Those are two distinct *spawn* parameter objects, so any file whose
+# forms import a module that yields (sync/redis/http2/process/grpc) breaks.
+# The worker resolves ev/run, *stdout* and *stderr* itself (eval) for the same
+# reason: they must be the worker's parameter objects.
+#
+# Syntax compiles in the heavy worker (it runs the file's own import/eval), so
+# os/spawn (not -vm). `policy` is the JIT policy (:off / :eager, see
+# whole-file-policies). The worker sets it via (vm/config-set :jit policy)
+# before running, so the SAME file runs under bytecode and under JIT. Only the
+# process running `elle test` may set either (docs/test-runner.md). The
+# worker's VM is fresh, so the policy is isolated; the in-process fallback
 # saves and restores the main VM's policy around the run.
 (defn exec-source-capture [policy forms name out-path err-path]
   (let [outcome (protect (os/join (os/spawn (fn []
@@ -340,11 +344,12 @@
     (if (get outcome 0)
       (get outcome 1)
       # Unsendable RESULT (an orphan fiber, an io-request, …) can't cross back
-      # through os/join. Fall back to running IN-PROCESS — no isolation, no
-      # timeout — compiling the same syntax against the MAIN stdlib and running
-      # under the runner's own ev/run + *stdout*/*stderr* (all main-consistent),
-      # as exec-thunk-capture does for a value that cannot cross. The main VM's
-      # JIT policy is set for the run and restored after (it is shared, not fresh).
+      # through os/join. Fall back to running IN-PROCESS, with no isolation and
+      # no timeout, as exec-thunk-capture does for a value that cannot cross.
+      # The run compiles the same syntax against the MAIN stdlib, under the
+      # runner's own ev/run + *stdout*/*stderr* (all main-consistent). The main
+      # VM's JIT policy is set for the run and restored after (it is shared,
+      # not fresh).
       (if (serialization-error? (get outcome 1))
         (let [saved (jit-setting (vm/config :jit))
               saved-trace (vm/config :trace)
@@ -382,9 +387,9 @@
 # A whole-file (legacy multi-form) thunk is a yielding imperative script: it runs
 # under the worker's full scheduler, NOT forced onto a backend via compile/run-on
 # (that only fits a single non-yielding form). So instead of a tier we vary the
-# JIT POLICY it runs under — :off (pure bytecode, recorded "vm") and :eager (JIT
-# every function, recorded "jit") — set per-worker via (vm/config-set :jit …).
-# :eager is included only when this build carries the JIT. Each entry is
+# JIT POLICY it runs under: :off (pure bytecode, recorded "vm") and :eager (JIT
+# every function, recorded "jit"). Each worker sets it via (vm/config-set :jit
+# …). :eager is included only when this build carries the JIT. Each entry is
 # [policy label].
 # No value-divergence is judged across policies (process-whole passes diverge?
 # false): a script's pids/timestamps differ run-to-run by design.

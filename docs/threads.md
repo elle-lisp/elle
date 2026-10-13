@@ -53,17 +53,23 @@ the fourth a worker could call that primitive and could not name it in an
 
 ### Two worker environments: `sys/spawn` vs `sys/spawn-vm`
 
-Both run a deep-copied closure on a fresh OS thread with its own VM; they
-differ in how much of the language is *materialized* in that worker, which
-matters for **runtime reflection** (`eval`, `read`, `meta`) — code the worker
-compiles on the fly, which resolves names against the worker's own symbol
-table and globals (the shipped closure itself doesn't need this — its
-references are baked in at compile time and ride along in the bundle).
+Both run a deep-copied closure on a fresh OS thread with its own VM. They
+differ in how much of the language is *materialized* in that worker. That
+matters for **runtime reflection** (`eval`, `read`, `meta`): code the worker
+compiles on the fly resolves names against the worker's own symbol table and
+globals. The shipped closure itself does not need them, because its references
+are baked in at compile time and ride along in the bundle.
 
-| Primitive | Worker has | `eval` can resolve | Cost |
-|-----------|-----------|--------------------|------|
-| `sys/spawn-vm` | primitives, the host's primitives and `%`-intrinsics | special forms, primitives, intrinsics | cheap |
-| `sys/spawn` | the above **+ the standard library** | special forms, primitives, intrinsics, **stdlib** (`+`, `map`, …) | `init_stdlib` per spawn |
+| Primitive | Worker has | `eval` can resolve |
+|-----------|-----------|--------------------|
+| `sys/spawn-vm` | primitives, the host's primitives and `%`-intrinsics | special forms, primitives, intrinsics |
+| `sys/spawn` | the above **+ the standard library** | special forms, primitives, intrinsics, **stdlib** (`+`, `map`, …) |
+
+A worker boots as the spawning instance did
+([boot.md](impl/image/boot.md)). When that instance hydrated a boot image, a
+worker of either kind hydrates the same image, so a spawn maps pages rather
+than compiling. When that instance compiled, a light worker compiles core.lisp
+and prelude.lisp, and a heavy worker compiles the standard library as well.
 
 **Special forms** (`if`, `fn`, `begin`/`do`, `def`/`var`, `let`, `quote`, …) are
 recognized by the analyzer *by name*, so they resolve in **either** worker — they
@@ -112,10 +118,11 @@ it, as the bytes the payload holds ([impl/graft.md](impl/graft.md)).
 
 A worker must be able to compile and run anything the main thread can. The test
 runner ships a file's *syntax* to a worker, which compiles it with the worker's
-own stdlib — and the frontend's HIR passes (notably `functionalize`) recurse
+own stdlib. The frontend's HIR passes (notably `functionalize`) recurse
 depth-first over the program, so a deep file needs as much stack as the main
-thread or the worker overflows mid-compile (a raw `SIGSEGV` — a stack overflow on
-a secondary thread blows past the guard page with no panic message).
+thread has. Without it the worker overflows mid-compile, and the result is a raw
+`SIGSEGV`: a stack overflow on a secondary thread blows past the guard page with
+no panic message.
 
 Rust's `std::thread::spawn` gives a new thread only a **2 MB** default stack,
 versus the main thread's `RLIMIT_STACK` (commonly 8 MB). Workers are therefore
@@ -154,8 +161,9 @@ region page pools hold from the OS across every thread.
 yourself if it does async I/O (`ev/run` resolves there, since stdlib is
 loaded). An I/O call outside one ends the worker with a `:thread-error`.
 `eval` in a worker compiles in the worker's global scope, so it cannot see
-the spawning closure's lexical upvalues. Prefer `sys/spawn-vm` whenever the
-worker doesn't need stdlib at runtime; `init_stdlib` per spawn is not free.
+the spawning closure's lexical upvalues. When the spawning instance boots from
+source and the worker needs no stdlib at run time, prefer `sys/spawn-vm`: a
+heavy worker of that instance compiles the standard library at every spawn.
 
 ```lisp
 (let [[ok? err] (protect (sys/join (sys/spawn (fn [] (ev/sleep 0) :slept))))]

@@ -74,43 +74,45 @@ Then the image milestones:
      traitsets it makes dumpable;
    - the reconstruction stream — which the default trait tables need before
      `Parameter`'s stdio default does;
-   - closures and closure templates in the body: the payload crosses whole
-     and shared, the header hydrates without its blueprint, and the code
+   - closures and closure templates in the body. The payload crosses whole
+     and shared, and the header hydrates without its blueprint. The code
      objects a `MakeClosure` indexes cross as the payload's child table
-     ([sealing](sealing.md) § "A child code object crosses as a header"),
-     with the defining span on the payload so `meta/origin` answers after a
+     ([sealing.md](sealing.md) § "A child code object crosses as a header").
+     The defining span rides on the payload, so `meta/origin` answers after a
      boot from image;
-   - cell snapping — a compiled forward cell crosses as its content when its
-     binding is never assigned, an assigned binding fails the dump by name,
-     and a run-time cell still refuses ([sealing](sealing.md));
-   - dump-boot — the root struct over the core exports, the stdlib exports and
-     the macro definitions, the source digest beside them, `elle image
-     dump-boot`, and the install path a fresh instance boots through
-     ([boot.md](boot.md)); the two boots share the export-registration tails,
-     and the corpus under image boot is the gate;
+   - cell snapping. A compiled forward cell crosses as its content when its
+     binding is never assigned, and an assigned binding fails the dump by
+     name. A run-time cell still refuses ([sealing.md](sealing.md));
+   - dump-boot: the root struct over the core exports, the stdlib exports and
+     the macro definitions, and the source digest beside them. It brought
+     `elle image dump-boot` and the install path a fresh instance boots
+     through ([boot.md](boot.md)). The two boots share the
+     export-registration tails, and the corpus under image boot is the gate;
    - the warm cache — `--boot-image=`, the file keyed on the source digest and
      the binary's identity, the atomic store and the prune of every
      superseded image. It is on by default ([boot.md](boot.md));
    - the tier half of the parity gate — the **lir** foundation carries a
      function's LIR in the payload, so a hot stdlib function reaches the JIT
      under an image boot as under a source boot;
-   - the compile half of the parity gate — the payload carries the body
+   - the compile half of the parity gate. The payload carries the body
      fragment as bytes ([region/template.md](../region/template.md)), so a
-     hydrated closure grafts as a compiled one does
-     ([graft.md](../graft.md)) and a user file compiles to the same
-     instruction stream under both boots;
-   - the bytecode half of the parity gate — a boot image records the
+     hydrated closure grafts as a compiled one does ([graft.md](../graft.md)),
+     and a user file compiles to the same instruction stream under both boots;
+   - the bytecode half of the parity gate. A boot image records the
      static-region counter where its boot ended, and hydration raises the
-     counter to it, so `make bytecode-parity` finds every corpus file
+     counter to it. So `make bytecode-parity` finds every corpus file
      compiling to one bytecode under either boot ([boot.md](boot.md));
-   - the interval table — a hydrated region's pool records the interval its
+   - the interval table. A hydrated region's pool records the interval its
      pages tile, and the store reads its hydrated regions before the probe
-     ladder, so a pointer into the image resolves with a range check
+     ladder. So a pointer into the image resolves with a range check
      ([image.md](../image.md) § "Pointer resolution must not regress").
      Through the ladder, a pointer into a 4 MiB image page reads ten candidate
-     headers on a 4 KiB host before the eleventh validates.
+     headers on a 4 KiB host before the eleventh validates;
+   - per-worker hydration — a `sys/spawn` or `sys/spawn-vm` worker hydrates
+     the descriptor its parent hydrated, and the language server and the WASM
+     entry's host runtime boot under the process policy ([boot.md](boot.md)).
 
-   Still to land: the embedded blob and per-worker hydration for `sys/spawn`.
+   Still to land: the embedded blob.
 8. **environment** — `image/save` and `image/load`, manifest deltas over
    boot, mutable side-stream.
 
@@ -120,7 +122,7 @@ Then the image milestones:
   layouts, the no-clone `MakeClosure`, stable symbol ordering across two
   tables, and syntax round-trips through `send`.
 - LIR: every corpus file and the standard library emit byte-identical
-  bytecode through each step, which is the foundation's acceptance gate — a
+  bytecode through each step, which is the foundation's acceptance gate. A
   representation change that moves one instruction is a defect, and the golden
   is what the binary emitted before the step. `make bytecode-golden` records
   it under `target/` and `make bytecode-golden-check` compares, and
@@ -142,16 +144,18 @@ Then the image milestones:
     answers its LIR too, and under `--boot-image` a hot stdlib function
     compiles on the JIT as it does under source boot. A promotion copies its
     function out of the region, and the copy answers after that region is
-    freed and its pages reused; the counter-factual is handing the worker a
-    slice into live pages, which is correct until the free lands. Freeing a
-    code object's region frees its LIR, the payload's pages grow by the LIR
-    it carries, and the leak suite stays green with no carve-out. Two dumps of
+    freed and its pages reused. The counter-factual is handing the worker a
+    slice into live pages, which is correct until the free lands.
+
+    Freeing a code object's region frees its LIR, the payload's pages grow by
+    the LIR it carries, and the leak suite stays green with no carve-out. Two
+    dumps of
     a graph whose closures carry LIR write one file, whatever the pad bytes of
     its records held. The verifier refuses an LIR slice whose extent leaves the
     image, naming the field. A hydrated closure sent to a worker carries its
     LIR, and the stdlib-cache reload keeps it.
   - **lir-retire**: `TemplateProto` is gone, and a code object answers every
-    question from its payload — the counter-factual is a blueprint kept "just
+    question from its payload. The counter-factual is a blueprint kept "just
     for the JIT", which passes every other test here and keeps the second copy
     of the bytecode alive. A header is the size of one payload slice, a live
     closure's payload child table is filled, and a dropped unit's code region
@@ -163,15 +167,18 @@ Then the image milestones:
     four ways.
   - **lir-lower**: a `RegionVec` answers as a `Vec` does over random sequences
     of pushes, truncations and insertions, checked against a `Vec::splice`
-    model, through growth into fresh extents and across pages; every extent it
-    claims lies in its own region. Lowering claims pages from the heap the
-    lowerer names, and returns with no region left behind, on a lowering that
-    fails as on one that succeeds; the counter-factual is a lowerer that keeps
-    its working form on the Rust heap, which claims no page at all. Every
-    opcode round-trips through `LirBuilder::emit` and the view, field by field,
-    from the list the compiler checks against `Op`. A string literal pattern
-    under a guard that may suspend compiles and matches, because no constant
-    holds a string; the counter-factual is the freeze that refused one.
+    model. That holds through growth into fresh extents and across pages, and
+    every extent it claims lies in its own region. Lowering claims pages from
+    the heap the lowerer names. It returns with no region left behind, on a
+    lowering that fails as on one that succeeds. The counter-factual is a
+    lowerer that keeps its working form on the Rust heap, which claims no page
+    at all.
+
+    Every opcode round-trips through `LirBuilder::emit` and the view, field by
+    field, from the list the compiler checks against `Op`. A string literal
+    pattern under a guard that may suspend compiles and matches, because no
+    constant holds a string. The counter-factual is the freeze that refused
+    one.
 - Round-trip: dump a data graph, hydrate in a fresh runtime, assert
   structural equality — and a counter-factual load with a corrupted
   fingerprint falls back cleanly.
@@ -196,10 +203,10 @@ Then the image milestones:
   region and no mapping behind. The four are a relocation slot outside the
   image, a relocation slot that is not 8-byte aligned, a `RegionSlice` whose
   extent leaves the image, and a page cursor that disagrees with the object
-  index. A closure header is refused the same way four ways: a header naming
-  zero payloads, a payload landing misaligned, a payload field whose extent
-  leaves the image, and a child slot naming an object the index does not call
-  a header. The child slot is the one slot whose target is read back as a
+  index. A closure header is refused the same way four ways. They are a header
+  naming zero payloads, a payload landing misaligned, a payload field whose
+  extent leaves the image, and a child slot naming an object the index does not
+  call a header. The child slot is the one slot whose target is read back as a
   header rather than as data.
 - Hygiene: hydrate, run, exit — the live region count returns to baseline
   and the leak suite stays green with no image-specific carve-out. Free the
@@ -220,21 +227,23 @@ Then the image milestones:
   goes through the ordinary dispatch path. The payload survives field by
   field: bytecode, constants (a heap constant included), arity, signal,
   name, doc, and the capture masks. Two headers over one payload hydrate
-  naming one payload copy — the counter-factual is a per-header deep copy,
-  which round-trips equal and silently doubles every payload. A hydrated header
-  answers its LIR, because the LIR is the payload's. `meta/origin` still
-  answers, because the defining span is the payload's:
-  a hydrated closure reports the line, the column and the file it was
-  written at. The file table decides the file — rename the spelling there
-  and the origin follows it. A lambda with no origin still answers nil,
-  which is what stops the file stream from writing the table's first entry
-  over an absent id. A WASM-dispatch closure and an env holding a
-  run-time-minted capture cell each refuse the dump with a named error. A
-  dumped closure writes one file across two dumps, whatever its construction
-  temporaries held. The relocation stream records a shared payload's slots
-  once, however many headers name it. The counter-factual is a per-header
-  walk, which appends every inner entry again for each header and grows the
-  tables with the header count.
+  naming one payload copy. The counter-factual is a per-header deep copy,
+  which round-trips equal and silently doubles every payload.
+
+  A hydrated header answers its LIR, because the LIR is the payload's.
+  `meta/origin` still answers, because the defining span is the payload's: a
+  hydrated closure reports the line, the column and the file it was written
+  at. The file table decides the file — rename the spelling there and the
+  origin follows it. A lambda with no origin still answers nil, which is what
+  stops the file stream from writing the table's first entry over an absent
+  id.
+
+  A WASM-dispatch closure and an env holding a run-time-minted capture cell
+  each refuse the dump with a named error. A dumped closure writes one file
+  across two dumps, whatever its construction temporaries held. The relocation
+  stream records a shared payload's slots once, however many headers name it.
+  The counter-factual is a per-header walk, which appends every inner entry
+  again for each header and grows the tables with the header count.
 - Children: a hydrated closure builds its nested lambda, and the lambda
   answers a call — through a REPL binding, so `MakeClosure` runs on the
   ordinary dispatch path. The child's payload crosses field by field, and a
@@ -273,14 +282,17 @@ Then the image milestones:
   the two apart. A macro the boot never expanded still expands after
   hydration, which is the lazy transformer fill working over a hydrated
   template. The installed expander mints the scopes a source boot would, above
-  the watermark the image records — which for a boot graph is one, because a
-  prelude template carries the prelude scope alone, so the raise itself is
-  pinned separately. A fresh instance prints a hydrated stdlib closure's name
-  and answers `meta/origin` with the file it was written in, both out of the
-  image's tables. An image whose source digest is not this binary's is refused by its
+  the watermark the image records. For a boot graph that watermark is one,
+  because a prelude template carries the prelude scope alone, so the raise
+  itself is pinned separately.
+
+  A fresh instance prints a hydrated stdlib closure's name and answers
+  `meta/origin` with the file it was written in, both out of the image's
+  tables. An image whose source digest is not this binary's is refused by its
   own name, not the fingerprint's, and the instance boots from source instead.
   The counter-factual is an instance that answers with the previous library. A
   process holding a user signal bit fails the boot dump, naming the signal.
+
   Two dumps of one boot state write one file, which is determinism at the
   scale where a code payload's padding can leak. Hygiene: an image-booted
   instance tears down to the residue a source-booted one leaves, the whole boot
@@ -292,12 +304,29 @@ Then the image milestones:
   again — the start that meets it compiles and stores, and the start after
   that hits. Two binary identities give two keys for one source digest, and a
   binary with no identity has no path. A valid image filed under the plain
-  digest, as an older build named it, is never opened. A store prunes every
-  other image in its directory. Two threads that store one
-  image at once each rename a whole file. The default policy stores under the
-  `--cache=` directory and the next start hydrates; `--boot-image=off` and
+  digest, as an older build named it, is never opened.
+
+  A store prunes every other image in its directory. Two threads that store
+  one image at once each rename a whole file. The default policy stores under
+  the `--cache=` directory and the next start hydrates; `--boot-image=off` and
   `--cache=` with no directory read and write nothing. `elle image dump-boot`
   writes nothing into the cache, so it never booted from it.
+- Workers: under `--trace=boot`, a start whose instance hydrated prints one
+  `image-hydrate` mark for itself and one for each worker, heavy or light. A
+  worker that a worker spawns prints one too. The counter-factual is a worker
+  that compiles, which answers every call correctly and prints no mark. A cold
+  start's worker hydrates the image the start stored.
+
+  A `--no-stdlib` start's worker prints no mark, though the policy names a
+  directory that holds an image. The counter-factual is a worker that reads
+  the policy itself. A worker whose inherited image refuses, because its
+  header was overwritten after the parent hydrated it, compiles and answers. A
+  light worker of an image-booted instance still refuses a stdlib name.
+
+  Image-booted workers run in sequence give back their mappings: the mapped
+  bytes grow by less than one worker's instance across six more of them. The
+  language server stores an image under a cold cache directory and writes no
+  stdlib cache. The WASM entry's host runtime hydrates a stored image.
 - Compile parity: a call to a stdlib function grafts under image boot as
   under source boot, and the same user file compiles to the same instruction
   stream under both. This is the acceptance gate for the body fragment a
