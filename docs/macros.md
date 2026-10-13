@@ -1,6 +1,6 @@
 # Macros
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-12 -->
 
 Elle's macros run as ordinary Elle code at expansion time, and are hygienic by
 sets of scopes; `datum->syntax` breaks hygiene on purpose.
@@ -40,9 +40,10 @@ module.
 
 A macro body runs while a compile waits for it, so the compile bounds it:
 
-- **Each call runs under a fuel budget** of its own
-  ([runtime.md](runtime.md)). A body that exhausts it fails the compile, and
-  the error names the macro.
+- **A macro call runs under a fuel budget** ([runtime.md](runtime.md)). The
+  budget counts silent code, the fibers the body resumes and the expansions it
+  starts. A body that exhausts it fails the compile, and the error names the
+  macro.
 - **A body runs with the capabilities of the fiber whose code started the
   compile.** A primitive that fiber withholds is denied, and the compile fails
   naming the macro and the primitive
