@@ -86,3 +86,13 @@
   (quad (syntax->datum n)))
 
 (assert (= (quadruple 3) 12) "a second begin-for-syntax block calls the first")
+
+# A begin-for-syntax definition belongs to the unit that makes it, and each
+# eval is a unit. The counter-factual is an eval expander that keeps the
+# definitions: the third eval below finds the first one's helper and answers 42.
+(eval '(begin-for-syntax (def eval-helper (fn [] 42))))
+(eval '(defmacro uses-eval-helper []
+        (eval-helper)))
+(let [[ok? _] (protect (eval '(uses-eval-helper)))]
+  (assert (not ok?)
+          "an eval does not see an earlier eval's begin-for-syntax definition"))
