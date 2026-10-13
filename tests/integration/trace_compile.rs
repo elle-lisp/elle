@@ -1,8 +1,11 @@
+// audited: 2026-10-20
 // `--trace` phase marks around the stdlib disk cache.
+// docs/impl/stdlib-cache.md
 //
 // The cache and the boot marks meet in `init_stdlib`: the cache exists to skip
 // the stdlib compile, the marks exist to attribute it. Loading the stdlib is
-// still the phase, so it is still marked.
+// still the phase, so it is still marked. The runs turn the boot image off,
+// because an instance that hydrates one reads no stdlib cache.
 
 use std::process::Command;
 
@@ -35,9 +38,9 @@ fn a_cache_hit_still_reports_the_stdlib_boot_phase() {
     let cache = format!("--cache={}", dir.join("cache").display());
 
     // The first run compiles and stores; the second loads what the first wrote.
-    let (ok, first) = run(&[&cache, "--trace=boot"], &script);
+    let (ok, first) = run(&[&cache, "--boot-image=off", "--trace=boot"], &script);
     assert!(ok, "first run failed:\n{first}");
-    let (ok, second) = run(&[&cache, "--trace=boot"], &script);
+    let (ok, second) = run(&[&cache, "--boot-image=off", "--trace=boot"], &script);
     assert!(ok, "second run failed:\n{second}");
 
     // The trap: the cache-hit path returns early, so a mark placed only on the

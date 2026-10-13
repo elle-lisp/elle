@@ -1,5 +1,5 @@
-// audited: 2026-10-14
-//! What a boot image carries that only this crate can see: transformer caches, the scope counter, and the stdlib's JIT tier.
+// audited: 2026-10-20
+//! What a boot image carries that only this crate can see, compile parity under either boot, and the warm cache's file name.
 //!
 //! docs/impl/image/boot.md
 
@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use crate::compiler::stdlib_cache::StdlibCache;
 use crate::runtime::{BootCaches, Runtime};
 
+use super::cache::Executable;
 use super::{BootImage, BootSource};
 
 /// A scratch directory this test owns, removed when it goes out of scope.
@@ -310,4 +311,79 @@ fn the_two_boots_emit_one_bytecode_for_a_user_file() {
         compiled,
         "an image boot compiles the file to other instructions"
     );
+}
+
+// ── The warm cache's file name ───────────────────────────────────────
+
+/// The executable tag a warm-cache file name opens with, or `None` when the
+/// name carries none.
+fn tag_of(name: &str) -> Option<&str> {
+    name.split_once('-').map(|(tag, _)| tag)
+}
+
+// § "The warm cache": one executable rebuilt gives one source digest two
+// names, and both open with the executable's tag, which is what a store
+// prunes by. The counter-factual is a name from the digest alone: the new
+// build opens the image the old one stored, and runs the code the old build
+// compiled.
+#[test]
+fn two_builds_of_one_executable_name_one_digests_image_apart() {
+    let path = PathBuf::from("/opt/elle/bin/elle");
+    let old = Executable::new(path.clone(), 12_563_264, 1);
+    let new = Executable::new(path, 12_563_264, 2);
+    let digest = super::sources_digest();
+    let (a, b) = (old.image_name(&digest), new.image_name(&digest));
+    assert_ne!(a, b, "two builds file one digest's image under one name");
+    assert!(
+        tag_of(&a).is_some(),
+        "the name {a} carries no executable tag"
+    );
+    assert_eq!(
+        tag_of(&a),
+        tag_of(&b),
+        "a rebuild changed the executable's tag, so its store cannot prune the last build's image"
+    );
+}
+
+// § "The warm cache": two executables tag their images apart, so a store by
+// one never prunes the other's. The counter-factual is `elle` and `elle-rig`
+// sharing a cache directory and evicting each other at every switch.
+#[test]
+fn two_executables_tag_their_images_apart() {
+    let digest = super::sources_digest();
+    let elle = Executable::new(PathBuf::from("/a/elle"), 1, 1).image_name(&digest);
+    let rig = Executable::new(PathBuf::from("/a/elle-rig"), 1, 1).image_name(&digest);
+    assert!(
+        tag_of(&elle).is_some(),
+        "the name {elle} carries no executable tag"
+    );
+    assert_ne!(tag_of(&elle), tag_of(&rig), "two executables share a tag");
+}
+
+// § "The warm cache": a binary that cannot read its own identity reads and
+// writes no image, as the stdlib cache declines to cache. Falling back to the
+// digest alone would bring back the confusion the identity exists to prevent.
+#[test]
+fn a_binary_with_no_identity_has_no_image_path() {
+    let policy = BootImage::Dir(PathBuf::from("/nowhere/boot"));
+    assert_eq!(policy.path_for(None), None);
+}
+
+/// The identity is read from the executable this process runs, which is the
+/// file whose rebuild must change the key.
+///
+/// Characterization, not a failing-first regression: "a different build
+/// yields a different key" is observable only across builds.
+#[test]
+fn the_build_identity_is_read_from_the_running_executable() {
+    let exe = Executable::current().expect("the test binary can identify itself");
+    let (len, _mtime) = exe.identity();
+    let meta = std::fs::metadata(std::env::current_exe().expect("current_exe"))
+        .expect("the executable's metadata");
+    assert_eq!(
+        len,
+        meta.len(),
+        "the identity must be the binary's own size"
+    );
+    assert!(len > 0, "a zero-length identity separates nothing");
 }
