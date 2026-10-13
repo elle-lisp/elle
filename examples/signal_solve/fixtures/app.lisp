@@ -1,12 +1,12 @@
-(elle/epoch 14)
-# audited: 2026-10-06
+(elle/epoch 15)
+# audited: 2026-10-12
 # Calls through module instances: a parametric module, its plugin, and a higher-order export.
 # examples/signal_solve/main.rs
 
 # expect go |:error :io :fs|
-# expect quiet ||
-# expect gen |:yield|
-# expect pure ||
+# expect quiet |:error|
+# expect gen |:yield :error|
+# expect pure |:error|
 (def plug ((import-file "fakeplug.lisp")))
 (def mq ((import-file "mq.lisp") plug))
 (defn go []

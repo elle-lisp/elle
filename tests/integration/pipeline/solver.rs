@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 // What an analysis hands a signal solver: each lambda's declarations, and a file analyzed without compiling its imports.
 //
 // docs/impl/solver.md
@@ -6,7 +6,7 @@
 
 use super::*;
 use elle::hir::{Hir, LambdaDecl};
-use elle::signals::SIG_YIELD;
+use elle::signals::{SIG_ERROR, SIG_YIELD};
 use elle::value::fiber::SignalBits;
 use elle::value::SymbolId;
 
@@ -135,4 +135,72 @@ fn a_lambda_keeps_its_declared_ceiling() {
 
     let plain = decl_of(&analysis.hir, &analysis, "plain").expect("plain is a lambda");
     assert!(plain.ceiling.is_none(), "plain declares no ceiling");
+}
+
+#[test]
+fn a_lambda_reports_what_it_raises_by_itself() {
+    // A solver computes what a call raises from the callee, and needs from
+    // the analyzer only what each body raises on its own. The counter-factual
+    // reads the inferred signal instead, which also holds what the body's
+    // calls raise, so `caller` would report `gen`'s :yield as its own.
+    let source = "(defn strict [x] (def [a b] x) a)\n\
+                  (defn gen [] (yield 1))\n\
+                  (defn caller [] (gen))\n\
+                  (defn guarded [f] (bound f ||) 1)\n\
+                  (defn maker [] (fn [] (yield 1)))\n";
+    let mut rt = setup();
+    let (vm, symbols, cctx) = rt.parts();
+    let analysis = elle::pipeline::analyze_file(source, symbols, vm, cctx, "<direct>")
+        .expect("the file analyzes");
+    assert!(analysis.errors.is_empty(), "{:?}", analysis.errors);
+    let direct = |name: &str| {
+        decl_of(&analysis.hir, &analysis, name)
+            .unwrap_or_else(|| panic!("{name} is a lambda"))
+            .direct
+    };
+    assert_eq!(
+        direct("strict"),
+        SIG_ERROR,
+        "strict destructuring may raise"
+    );
+    assert_eq!(direct("gen"), SIG_YIELD, "an emit is the body's own");
+    assert_eq!(
+        direct("caller"),
+        SignalBits::EMPTY,
+        "a call to a known function raises nothing of the caller's own"
+    );
+    assert_eq!(
+        direct("guarded"),
+        SIG_ERROR,
+        "a bound's entry check may raise"
+    );
+    assert_eq!(
+        direct("maker"),
+        SignalBits::EMPTY,
+        "a nested lambda's emit is the nested lambda's own"
+    );
+}
+
+#[test]
+fn the_top_level_reports_what_it_raises_by_itself() {
+    // The code outside every lambda is a context of its own for a solver.
+    // The counter-factual leaves it with nothing, so a strict destructure at
+    // the top level would raise nothing the solver can see.
+    let mut rt = setup();
+    let (vm, symbols, cctx) = rt.parts();
+    let strict = elle::pipeline::analyze_file("(def [a b] [1 2])\na\n", symbols, vm, cctx, "<top>")
+        .expect("the file analyzes");
+    assert!(strict.errors.is_empty(), "{:?}", strict.errors);
+    assert_eq!(strict.top_direct, SIG_ERROR, "the destructure may raise");
+
+    let (vm, symbols, cctx) = rt.parts();
+    let plain =
+        elle::pipeline::analyze_file("(defn f [] (yield 1))\nf\n", symbols, vm, cctx, "<top>")
+            .expect("the file analyzes");
+    assert!(plain.errors.is_empty(), "{:?}", plain.errors);
+    assert_eq!(
+        plain.top_direct,
+        SignalBits::EMPTY,
+        "the lambda's emit is the lambda's own"
+    );
 }
