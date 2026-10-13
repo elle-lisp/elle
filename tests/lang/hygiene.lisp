@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-09-30
+(elle/epoch 15)
+# audited: 2026-10-13
 # A macro template resolves its own names where the macro is defined, and datum->syntax is how a template binds a name for its caller.
 # docs/macros.md
 
@@ -167,3 +167,20 @@
 
 (assert (= (inject-list x) (list 1 2 3))
         "a template reference sees the binding datum->syntax made")
+
+# ── A macro another unit wrote ───────────────────────────────────────
+
+## `gen`'s expansion writes `m` whole, so `m`'s body carries the scope of that
+## expansion, the first scope its eval mints. `m`'s transformer compiles in a
+## unit of its own, where `wrap`'s expansion is the first scope minted. The
+## two units take different tags, so `wrap`'s `+` does not capture the `+`
+## `gen` wrote. The counter-factual is a count with no tag: both are the first
+## count of a unit, they compare equal, and `m` answers (- 2 1).
+(eval '(defmacro wrap [body]
+        (list 'let ['+ '-] body)))
+(eval '(begin
+         (defmacro gen []
+           (list 'defmacro 'm [] (list 'wrap '(+ 2 1))))
+         (gen)))
+(assert (= (eval '(m)) 3)
+        "a binder one unit's expansion makes does not capture another unit's name")

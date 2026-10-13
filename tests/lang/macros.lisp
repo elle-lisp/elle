@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-09-30
+(elle/epoch 15)
+# audited: 2026-10-13
 # A macro expands where it is called, may expand into another macro, and calls helpers defined by begin-for-syntax.
 # docs/macros.md
 
@@ -44,7 +44,26 @@
 
 (assert (= (with-temp (+ 1 2)) 3) "a template binds the symbol gensym makes")
 (assert (symbol? (gensym "v")) "gensym answers a symbol")
-(assert (not (= (gensym "v") (gensym "v"))) "each gensym is a fresh symbol")
+(assert (not (= (gensym "v") (gensym "v")))
+        "each gensym at run time is a fresh symbol")
+
+# While a unit expands, gensym names its symbols after the unit, and the datum
+# one eval compiles is a unit. The counter-factual is a count that runs across
+# the process: the second eval of one datum answers a name the first did not.
+(def one-unit
+  '(begin
+     (defmacro fresh []
+       (list 'quote (gensym "t")))
+     (fresh)))
+(def other-unit
+  '(begin
+     (defmacro other []
+       (list 'quote (gensym "t")))
+     (other)))
+
+(assert (= (eval one-unit) (eval one-unit)) "one unit expands to one name")
+(assert (not (= (eval one-unit) (eval other-unit)))
+        "two units expand to two names")
 
 # ── begin-for-syntax ─────────────────────────────────────────────────
 
