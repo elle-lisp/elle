@@ -1,13 +1,12 @@
-// audited: 2026-10-12
+// audited: 2026-10-13
 //! The process runtime: one lifecycle for compile/evaluate, shared by every
 //! entry path (`elle foo.lisp`, the REPL, and the embedding API).
 //!
-//! A [`Runtime`] owns the VM, symbol table, and per-instance compile state
-//! (a [`RuntimeCore`], which points the VM at the symbol table and compile
-//! context), registers primitives and
-//! (optionally) loads the stdlib, and — on `Drop` or an explicit
-//! [`Runtime::teardown`] — runs the **process teardown sweep** specified in
-//! docs/impl/region/rules.md § "Teardown — every region frees":
+//! A [`Runtime`] owns the VM, symbol table, and per-instance compile state (a
+//! [`RuntimeCore`], which points the VM at the symbol table and compile
+//! context). It boots them, from the boot image or from source. On `Drop` or an
+//! explicit [`Runtime::teardown`] it runs the **process teardown sweep**
+//! specified in docs/impl/region/rules.md § "Teardown — every region frees":
 //!
 //! 1. **RC-driven, never iterate-and-free.** It releases the registered process
 //!    roots (each decref'd once) and lets the ordinary region RC cascade reclaim
@@ -24,13 +23,14 @@
 
 mod core;
 
-pub use core::{BootCaches, RuntimeCore};
+pub use core::{BootCaches, RuntimeCore, WorkerBoot};
 
 use crate::compiler::stdlib_cache::StdlibCache;
 use crate::image::boot::{BootImage, BootSource};
 use crate::pipeline::CompileCtx;
 use crate::symbol::SymbolTable;
 use crate::vm::VM;
+pub(crate) use core::{BootFrom, Booted};
 
 /// The observable result of a teardown sweep (docs/impl/region/rules.md §
 /// "Teardown — every region frees", property 2). The standing target is
@@ -75,14 +75,7 @@ impl Runtime {
     /// given Unicode generation for its whole life. `Runtime::new()` uses
     /// the newest vendored generation (or the process `--unicode=` choice).
     pub fn with_unicode(gen: crate::segment::Generation) -> Self {
-        Self::build_with(
-            true,
-            gen,
-            BootCaches {
-                stdlib: StdlibCache::Process,
-                image: crate::config::get().boot_image(),
-            },
-        )
+        Self::build_with(true, gen, BootCaches::process())
     }
 
     /// Build a stdlib-loaded runtime that boots from source and caches its
@@ -108,60 +101,16 @@ impl Runtime {
         Self::build_with(
             load_stdlib,
             crate::config::get().unicode_generation(),
-            BootCaches {
-                stdlib: StdlibCache::Process,
-                image: crate::config::get().boot_image(),
-            },
+            BootCaches::process(),
         )
     }
 
     fn build_with(load_stdlib: bool, gen: crate::segment::Generation, caches: BootCaches) -> Self {
-        use crate::primitives::module_init::StdlibSource;
-        // A boot image is the whole boot state, stdlib included, so an instance
-        // that wants no stdlib wants no image either — and `--no-stdlib` is how
-        // core.lisp and the prelude are debugged.
-        let image = if load_stdlib {
-            caches.image
-        } else {
-            BootImage::Off
-        };
-        let (mut core, boot) = RuntimeCore::for_boot(gen, &image);
-
-        // `for_boot` already pointed the VM at this instance's symbol
-        // table, so stdlib-load gensym (and all runtime name resolution) resolve
-        // through `ctx.vm().symbols()` — this instance's own table.
-        let (stdlib_source, boot_source) = match (load_stdlib, &boot) {
-            (true, Some(boot)) => {
-                core.install_stdlib_from_image(boot);
-                (StdlibSource::Image, BootSource::Image)
-            }
-            (true, None) => {
-                // A boot image is dumped from a *compiled* stdlib. A disk-cache
-                // hit rebuilds the library's closures through the send codec,
-                // whose capture cells record no binding, and the dump refuses
-                // one of those by variant (docs/impl/image/boot.md). So an
-                // instance that owes an image compiles rather than reading the
-                // other cache — once per build and digest, for the start that stores it.
-                let stdlib = match image {
-                    BootImage::Off => caches.stdlib.clone(),
-                    _ => StdlibCache::Off,
-                };
-                let source = core.load_stdlib(&stdlib);
-                // The boot is complete, so this is the state the next start
-                // hydrates instead of repeating (docs/impl/image/boot.md).
-                let t = std::time::Instant::now();
-                let (heap, symbols, cctx) = core.dump_parts();
-                crate::image::boot::store(heap, symbols, cctx, &image);
-                crate::phase!(crate::trace::boot(), "boot", t, "image-store");
-                (source, BootSource::Compiled)
-            }
-            (false, _) => (StdlibSource::Compiled, BootSource::Compiled),
-        };
-        // Record the caller's stdlib cache on the VM whichever arm ran: a
-        // `sys/spawn` worker reaches the spawning instance only through
-        // `ctx.vm()`, and it compiles its own stdlib whether or not this
-        // instance hydrated one.
-        core.vm().set_stdlib_cache(caches.stdlib.clone());
+        let Booted {
+            mut core,
+            stdlib_source,
+            boot_source,
+        } = RuntimeCore::boot(gen, load_stdlib, BootFrom::Caches(caches));
 
         // The post-boot heap census (docs/impl/image/measurements.md, item 2):
         // at this point every live object is boot state, the graph a boot
@@ -205,7 +154,7 @@ impl Runtime {
         path: &std::path::Path,
     ) -> Result<(), crate::image::ImageError> {
         let (heap, symbols, cctx) = self.core.dump_parts();
-        crate::image::boot::dump(heap, symbols, cctx, path)
+        crate::image::boot::dump(heap, symbols, cctx, path).map(drop)
     }
 
     /// Mutable access to the VM.
@@ -273,7 +222,7 @@ impl Runtime {
 
         // (1) Release the per-instance compile-time state's resident references.
         //     A macro transformer's cell holds a region reference, and it gives
-        //     it back when its definition drops; the master expander and the
+        //     it back when its definition drops. The master expander and the
         //     program VM's `eval` expander would drop after the count below, so
         //     both release here. The `CompileCtx` itself (macro VM, expander,
         //     meta) drops with this core; the region pages its `Value`s alias

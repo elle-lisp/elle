@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-13
 //! The dumper: a compacting copy of a sealed data graph into a scratch
 //! region, written out as an image file.
 //!
@@ -6,13 +6,13 @@
 //! docs/impl/image/format.md
 //!
 //! This file assembles the file: it copies the graph, asks emit.rs what the
-//! sections hold, and writes the result out under a temporary name. copy.rs
-//! owns the walk and the set of values it accepts, code.rs the half of it that
-//! copies a code object, and crossing.rs the two fields that may name a
-//! process-owned resource. emit.rs owns the page bytes and the streams that
-//! point into them, and payload.rs the part of that pass that walks a code
-//! payload and its LIR body. backing.rs owns the writers that put a slice's
-//! bytes into their place.
+//! sections hold, and writes the result out under a temporary name. The file
+//! copy.rs owns the walk and the set of values it accepts, code.rs the half of
+//! it that copies a code object, and crossing.rs the two fields that may name a
+//! process-owned resource. The file emit.rs owns the page bytes and the streams
+//! that point into them, and payload.rs the part of that pass that walks a code
+//! payload and its LIR body. The file backing.rs owns the writers that put a
+//! slice's bytes into their place.
 //!
 //! Determinism is engineered: the copy visits children in order, no map is
 //! ever iterated, and every table is sorted before it is written. Two dumps
@@ -29,6 +29,7 @@ mod payload;
 mod tests;
 
 use std::collections::BTreeSet;
+use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 
@@ -55,18 +56,20 @@ pub fn dump(
     root: Value,
     path: &Path,
 ) -> Result<(), ImageError> {
-    dump_marked(heap, symbols, root, path, 0)
+    dump_marked(heap, symbols, root, path, 0).map(drop)
 }
 
 /// [`dump`], recording `static_region_watermark` in the header: the mark a
 /// boot left, which only the boot configuration has (docs/impl/image/format.md).
+/// Answers the file it wrote, open, so a caller can map the bytes it dumped
+/// whatever renames over `path` later.
 pub(crate) fn dump_marked(
     heap: &mut FiberHeap,
     symbols: &SymbolTable,
     root: Value,
     path: &Path,
     static_region_watermark: u32,
-) -> Result<(), ImageError> {
+) -> Result<File, ImageError> {
     let scratch = heap.new_runtime_region();
     let result = dump_into(heap, scratch, symbols, root, path, static_region_watermark);
     heap.decref_region_if_present(scratch);
@@ -83,9 +86,9 @@ const FIRST_USER_SIGNAL_BIT: u32 = 32;
 /// Such a bit means whatever the registry handed out here, and no image
 /// carries a signal table (docs/impl/image/sealing.md). The test is against
 /// what the registry actually handed out rather than against the whole user
-/// range: signal inference sets high bits to mean "this may signal anything",
+/// range. Signal inference sets high bits to mean "this may signal anything",
 /// and those mean the same in the instance that hydrates them as in the one
-/// that dumped them — a declared bit does not. `what` names the value the mask
+/// that dumped them. A declared bit does not. `what` names the value the mask
 /// is on, so a refusal points at the closure rather than at a number.
 pub(super) fn portable_signals(
     bits: crate::value::fiber::SignalBits,
@@ -132,7 +135,7 @@ fn dump_into(
     root: Value,
     path: &Path,
     static_region_watermark: u32,
-) -> Result<(), ImageError> {
+) -> Result<File, ImageError> {
     let mut walk = Walk::new(symbols);
     let copied = copy_value(heap, scratch, root, &mut walk)?;
     let (names, reconstructions) = walk.into_tables();
@@ -155,7 +158,7 @@ fn dump_into(
 
     // A primitive travels by name (docs/impl/image/format.md). The table holds
     // the spellings the body's slots name, plus the root's when the whole
-    // image is one native-fn — that root rides in the header, where no stream
+    // image is one native-fn. That root rides in the header, where no stream
     // can reach it, so its payload is a table index and its tag says so.
     let root_prim = if copied.is_native_fn() {
         Some(primitive_name(copied)?)
@@ -269,8 +272,9 @@ fn dump_into(
 /// stay stable while a new image replaces the path. The temporary file's name
 /// is this write's alone, because two threads of one process can dump to one
 /// path at once. It sits in the target's directory because a rename is atomic
-/// only within one filesystem, and a failed write removes it.
-fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), ImageError> {
+/// only within one filesystem, and a failed write removes it. Answers the file
+/// the rename put in place.
+fn write_atomically(path: &Path, bytes: &[u8]) -> Result<File, ImageError> {
     let dir = match path.parent() {
         Some(d) if !d.as_os_str().is_empty() => d,
         _ => Path::new("."),
@@ -278,12 +282,11 @@ fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), ImageError> {
     let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
     tmp.write_all(bytes)?;
     tmp.as_file().sync_all()?;
-    tmp.persist(path).map_err(|e| e.error)?;
-    Ok(())
+    Ok(tmp.persist(path).map_err(|e| e.error)?)
 }
 
-/// The name and file tables share one encoding: length-prefixed spellings,
-/// already in the sorted order their writer put them in.
+/// The name, file and primitive tables share one encoding: length-prefixed
+/// spellings, already in the sorted order their writer put them in.
 fn string_table(entries: &[Box<str>]) -> Vec<u8> {
     let mut out = Vec::new();
     for e in entries {

@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-13
 //! `RuntimeCore`: the per-instance owner bundle, and the boot that fills it.
 //!
 //! docs/impl/region/rules.md
@@ -9,9 +9,12 @@
 //! of the constructor. The boot either hydrates an image or compiles the three
 //! sources; both arms end in the same registration tails.
 
+use std::sync::Arc;
+
 use crate::compiler::stdlib_cache::StdlibCache;
-use crate::image::boot::BootImage;
+use crate::image::boot::{BootImage, BootSource, OpenImage};
 use crate::pipeline::CompileCtx;
+use crate::primitives::module_init::StdlibSource;
 use crate::symbol::SymbolTable;
 use crate::vm::VM;
 use crate::{init_stdlib, register_primitives};
@@ -25,37 +28,75 @@ use crate::{init_stdlib, register_primitives};
 pub struct BootCaches {
     /// Where the compiled stdlib bytecode is cached
     /// (docs/impl/stdlib-cache.md). The instance reads it only when its image
-    /// policy is off; its `sys/spawn` workers read it whatever the policy.
+    /// policy is off; its `sys/spawn` workers read it when it holds no image.
     pub stdlib: StdlibCache,
     /// Where the boot image is (docs/impl/image/boot.md). The process-wide
     /// warm cache by default.
     pub image: BootImage,
 }
 
-/// Hydrate the image `image` names, or answer `None` and leave the instance to
-/// compile its three sources.
+impl BootCaches {
+    /// The process-wide choice of both: the `--cache=` stdlib directory, and
+    /// the `--boot-image=` policy.
+    pub fn process() -> Self {
+        BootCaches {
+            stdlib: StdlibCache::Process,
+            image: crate::config::get().boot_image(),
+        }
+    }
+}
+
+/// What a worker spawned from this instance boots from: the image this
+/// instance holds, and the stdlib cache a worker compiles through when it
+/// holds none (docs/impl/image/boot.md).
 ///
-/// A refusal is reported and swallowed: a boot image is a speedup, and every
-/// reason to refuse one — a fingerprint from another build, a digest from other
-/// sources, a truncated file — is a reason to compile instead. The report is
-/// what keeps a cache that never hits from looking like one that always does.
+/// The image is the descriptor this instance hydrated or stored, shared, so a
+/// worker maps the bytes its parent mapped whatever happened to the path since.
+#[derive(Debug, Clone, Default)]
+pub struct WorkerBoot {
+    image: Option<Arc<OpenImage>>,
+    stdlib: StdlibCache,
+}
+
+/// Where an instance boots from.
+pub(crate) enum BootFrom {
+    /// A fresh instance's caches: the image the policy names is hydrated on a
+    /// hit and stored on a miss.
+    Caches(BootCaches),
+    /// A worker's parent: the image it holds is hydrated, and nothing is ever
+    /// stored.
+    Parent(WorkerBoot),
+}
+
+/// A booted core, and where its boot state came from.
+pub(crate) struct Booted {
+    pub(crate) core: RuntimeCore,
+    pub(crate) stdlib_source: StdlibSource,
+    pub(crate) boot_source: BootSource,
+}
+
+/// Hydrate `image`, or answer `None` and leave the instance to compile its
+/// three sources.
+///
+/// A refusal is reported and swallowed, because a boot image is a speedup.
+/// Every reason to refuse one — a fingerprint from another build, a digest from
+/// other sources, a truncated file — is a reason to compile instead. The
+/// report is what keeps a cache that never hits from looking like one that
+/// always does.
 fn hydrate_boot_image(
     heap: &mut crate::value::fiberheap::FiberHeap,
     symbols: &mut SymbolTable,
-    image: &BootImage,
+    image: Option<&OpenImage>,
 ) -> Option<crate::image::boot::Boot> {
-    let path = image.path()?;
-    if !path.exists() {
-        return None;
-    }
+    let image = image?;
     let t = std::time::Instant::now();
-    match crate::image::boot::hydrate_path(heap, symbols, &path) {
+    match crate::image::boot::hydrate(heap, symbols, image.source()) {
         Ok(boot) => {
             crate::phase!(crate::trace::boot(), "boot", t, "image-hydrate");
             Some(boot)
         }
         Err(e) => {
-            eprintln!("[boot-image] {}: {e}", path.display());
+            eprintln!("[boot-image] {}: {e}", image.origin().display());
             None
         }
     }
@@ -69,16 +110,17 @@ fn hydrate_boot_image(
 /// the `os/spawn` worker construct one.
 ///
 /// The members are boxed where an address must stay stable across the move out
-/// of a constructor: the `SymbolTable`, `CompileCtx`, and `FiberHeap` because the
-/// `VM` holds a raw pointer to each (`set_symbols` / `set_compile_ctx` /
-/// `heap_ptr`), through which the runtime `eval` instruction, value
-/// name-resolution, and every allocation/RC operation reach them.
+/// of a constructor. The `VM` holds a raw pointer to the `SymbolTable`, the
+/// `CompileCtx` and the `FiberHeap` (`set_symbols` / `set_compile_ctx` /
+/// `heap_ptr`). The runtime `eval` instruction, value name-resolution, and every
+/// allocation/RC operation reach them through those pointers.
 ///
-/// The heap is a sibling of the `VM`, not a field inside it: the `VM` reaches it
+/// The heap is a sibling of the `VM`, not a field inside it. The `VM` reaches it
 /// only through `heap_ptr`, so a `&mut VM` reborrow and a `&mut FiberHeap`
-/// reborrow never alias one allocation (the soundness contract `ctx.vm()` +
-/// `ctx.heap_mut()` already rely on). Declared after the `VM`/`CompileCtx` so it
-/// drops last — after teardown has run and after the pointer-holders drop.
+/// reborrow never alias one allocation. That is the soundness contract
+/// `ctx.vm()` + `ctx.heap_mut()` already rely on. Declared after the
+/// `VM`/`CompileCtx` so it drops last — after teardown has run and after the
+/// pointer-holders drop.
 pub struct RuntimeCore {
     vm: Box<VM>,
     symbols: Box<SymbolTable>,
@@ -103,18 +145,94 @@ impl RuntimeCore {
     /// Build a core whose VMs (program and macro) segment strings under the
     /// given Unicode generation for their whole lives.
     pub fn bare_with_unicode(gen: crate::segment::Generation) -> Self {
-        Self::for_boot(gen, &BootImage::Off).0
+        Self::for_boot(gen, None, false).0
     }
 
-    /// Build a core out of the boot image `image` names, or out of the three
-    /// sources when it names none this binary can hydrate
-    /// (docs/impl/image/boot.md).
+    /// Boot a core with the stdlib under `caches`, as `Runtime::with_caches`
+    /// does, for a holder that never tears it down: a core has no teardown
+    /// sweep to run on drop.
+    pub fn with_caches(caches: BootCaches) -> Self {
+        let gen = crate::config::get().unicode_generation();
+        Self::boot(gen, true, BootFrom::Caches(caches)).core
+    }
+
+    /// Boot a core from `from`: out of a boot image where there is one this
+    /// binary hydrates, out of the three sources otherwise
+    /// (docs/impl/image/boot.md). With `stdlib` false the core holds core.lisp
+    /// and the prelude alone.
+    ///
+    /// The core records what its own workers boot from: the image it hydrated
+    /// or stored, and the stdlib cache `from` names.
+    pub(crate) fn boot(gen: crate::segment::Generation, stdlib: bool, from: BootFrom) -> Booted {
+        // A policy's image is the whole boot state, stdlib included, so an
+        // instance that wants no stdlib reads and stores none — and
+        // `--no-stdlib` is how core.lisp and the prelude are debugged.
+        let (policy, held, cache) = match from {
+            BootFrom::Caches(caches) if stdlib => {
+                let held = caches.image.open().map(Arc::new);
+                (Some(caches.image), held, caches.stdlib)
+            }
+            BootFrom::Caches(caches) => (None, None, caches.stdlib),
+            BootFrom::Parent(parent) => (None, parent.image, parent.stdlib),
+        };
+        let (mut core, boot) = Self::for_boot(gen, held.as_deref(), stdlib);
+        let (stdlib_source, boot_source, kept) = match boot {
+            Some(boot) => {
+                let stdlib_source = if stdlib {
+                    core.install_stdlib_from_image(&boot);
+                    StdlibSource::Image
+                } else {
+                    StdlibSource::Compiled
+                };
+                (stdlib_source, BootSource::Image, held)
+            }
+            None if stdlib => {
+                // A boot image is dumped from a *compiled* stdlib. A disk-cache
+                // hit rebuilds the library's closures through the send codec,
+                // whose capture cells record no binding, and the dump refuses
+                // one of those by variant (docs/impl/image/boot.md). So an
+                // instance that owes an image compiles rather than reading the
+                // other cache — once per build and digest, for the start that
+                // stores it.
+                let compiling = match &policy {
+                    Some(image) if *image != BootImage::Off => StdlibCache::Off,
+                    _ => cache.clone(),
+                };
+                let stdlib_source = core.load_stdlib(&compiling);
+                // The boot is complete, so this is the state the next start
+                // hydrates instead of repeating (docs/impl/image/boot.md).
+                let stored = policy.and_then(|image| {
+                    let t = std::time::Instant::now();
+                    let (heap, symbols, cctx) = core.dump_parts();
+                    let stored = crate::image::boot::store(heap, symbols, cctx, &image);
+                    crate::phase!(crate::trace::boot(), "boot", t, "image-store");
+                    stored
+                });
+                (stdlib_source, BootSource::Compiled, stored.map(Arc::new))
+            }
+            None => (StdlibSource::Compiled, BootSource::Compiled, None),
+        };
+        core.vm().set_worker_boot(WorkerBoot {
+            image: kept,
+            stdlib: cache,
+        });
+        Booted {
+            core,
+            stdlib_source,
+            boot_source,
+        }
+    }
+
+    /// Build a core out of `image`, or out of the three sources when there is
+    /// no image or this binary refuses it (docs/impl/image/boot.md).
     ///
     /// Answers the core and the hydrated image, because the caller's stdlib
-    /// step installs out of the same image the core's compile context did.
-    pub(crate) fn for_boot(
+    /// step installs out of the same image the core's compile context did. A
+    /// core without the stdlib takes no compile registries from the image.
+    fn for_boot(
         gen: crate::segment::Generation,
-        image: &BootImage,
+        image: Option<&OpenImage>,
+        stdlib: bool,
     ) -> (Self, Option<crate::image::boot::Boot>) {
         // This instance's heap, owned here and shared by the program VM and the
         // macro-expansion VM. Built first: both VMs point their `heap_ptr` at it,
@@ -135,6 +253,11 @@ impl RuntimeCore {
         // `set_compile_ctx` below.
         vm.set_symbols(&mut *symbols as *mut SymbolTable);
         let mut boot = hydrate_boot_image(&mut heap, &mut symbols, image);
+        if !stdlib {
+            if let Some(boot) = &mut boot {
+                boot.discard_registries();
+            }
+        }
         // The macro VM shares this instance's heap (see `bare`'s heap comment).
         let mut compile = Box::new(match &mut boot {
             Some(boot) => CompileCtx::from_boot_image(heap_ptr, boot, &mut symbols),
@@ -159,7 +282,7 @@ impl RuntimeCore {
     /// Install a hydrated image's stdlib exports, in place of compiling and
     /// running stdlib.lisp. The image's region is already a process root, so
     /// this roots nothing of its own (docs/impl/image/boot.md).
-    pub(crate) fn install_stdlib_from_image(&mut self, boot: &crate::image::boot::Boot) {
+    fn install_stdlib_from_image(&mut self, boot: &crate::image::boot::Boot) {
         let exports = boot.stdlib_exports();
         let (_vm, symbols, compile) = self.parts();
         crate::primitives::module_init::install_exports(symbols, compile, exports);
@@ -180,14 +303,14 @@ impl RuntimeCore {
 
     /// Compile and execute stdlib.lisp into this core's `CompileCtx`. The caller
     /// must have installed the symbol-table context first (stdlib macros gensym).
-    pub fn load_stdlib(
-        &mut self,
-        cache: &crate::compiler::stdlib_cache::StdlibCache,
-    ) -> crate::primitives::module_init::StdlibSource {
+    pub fn load_stdlib(&mut self, cache: &StdlibCache) -> StdlibSource {
         // Record it on the VM so a `sys/spawn` worker, which reaches the
         // spawning instance only through `ctx.vm()`, inherits this directory
         // instead of falling back to the process-wide one.
-        self.vm.set_stdlib_cache(cache.clone());
+        self.vm.set_worker_boot(WorkerBoot {
+            image: None,
+            stdlib: cache.clone(),
+        });
         let (vm, symbols, compile) = self.parts();
         init_stdlib(vm, symbols, compile, cache)
     }
@@ -222,6 +345,12 @@ impl RuntimeCore {
     /// compile context (macro expansion, meta, projections).
     pub fn parts(&mut self) -> (&mut VM, &mut SymbolTable, &mut CompileCtx) {
         (&mut self.vm, &mut self.symbols, &mut self.compile)
+    }
+
+    /// The same three, shared: for a reader that holds them beside a borrow of
+    /// its own state, as the language server's handlers do.
+    pub(crate) fn parts_shared(&self) -> (&VM, &SymbolTable, &CompileCtx) {
+        (&self.vm, &self.symbols, &self.compile)
     }
 
     /// The heap and the symbol table as disjoint borrows — the pair the image

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-13
 //! Allocation capabilities for native code: `Alloc` carries a call's region and heap, and `NativeCtx` adds the VM.
 //!
 //! docs/impl/region/ctx.md
@@ -30,10 +30,10 @@ pub struct Alloc<'h> {
     region: RuntimeRegion,
     /// The call's heap, as a raw pointer guarded by a phantom borrow. Raw (not
     /// `&'h mut`) so every ergonomic constructor can be `&self` and still route
-    /// allocation through the ctx's OWN heap — which keeps nested calls like
-    /// `ctx.pair(ctx.string(a), b)` borrow-checking (each transient `&mut
-    /// FiberHeap` reborrow drops before the next allocation reborrows), while
-    /// the ctx owns its heap capability outright. The `PhantomData` keeps the
+    /// allocation through the ctx's OWN heap, while the ctx owns its heap
+    /// capability outright. That keeps nested calls like
+    /// `ctx.pair(ctx.string(a), b)` borrow-checking: each transient `&mut
+    /// FiberHeap` reborrow drops before the next allocation reborrows. The `PhantomData` keeps the
     /// lifetime contract: the ctx cannot outlive the `&'h mut FiberHeap` it
     /// was built from.
     heap: *mut FiberHeap,
@@ -155,7 +155,7 @@ impl<'h> Alloc<'h> {
     }
 
     /// The call's region as a code arena, for a receiver that rebuilds a
-    /// closure's code object: the payload lands in the region the closure is
+    /// closure's code object. The payload lands in the region the closure is
     /// born in, so the header over it is a self-edge
     /// (docs/impl/region/template.md).
     pub fn code_arena(&self) -> crate::value::CodeArena {
@@ -352,10 +352,10 @@ impl<'h> NativeCtx<'h> {
         self.vm().unicode_generation()
     }
 
-    /// Where this instance caches its compiled stdlib — what a worker spawned
-    /// from here inherits.
-    pub fn stdlib_cache(&self) -> crate::compiler::stdlib_cache::StdlibCache {
-        self.vm().stdlib_cache().clone()
+    /// What a worker spawned from here boots from: this instance's image, or
+    /// its stdlib cache (docs/impl/image/boot.md).
+    pub fn worker_boot(&self) -> crate::runtime::WorkerBoot {
+        self.vm().worker_boot().clone()
     }
 }
 

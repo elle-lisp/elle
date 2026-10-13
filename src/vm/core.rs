@@ -1,4 +1,4 @@
-// audited: 2026-10-07
+// audited: 2026-10-13
 //! The `VM` struct — the per-instance state a running program reaches — and the
 //! accessors that reborrow the allocations it points at.
 //!
@@ -81,12 +81,12 @@ pub struct VM {
     /// split at cluster boundaries, so a mid-run change would corrupt
     /// their framing.
     pub(crate) unicode_generation: crate::segment::Generation,
-    /// Where this instance caches its compiled stdlib. Recorded by
-    /// `RuntimeCore::load_stdlib`, and read by `sys/spawn`: a worker builds its
-    /// own runtime on a new thread and reaches the spawning instance only
-    /// through `ctx.vm()`, so this is how it inherits the directory its parent
-    /// was given instead of falling back to the process-wide one.
-    pub(crate) stdlib_cache: crate::compiler::stdlib_cache::StdlibCache,
+    /// What a worker spawned from this instance boots from: the image this
+    /// instance holds, and the stdlib cache a worker compiles through. Recorded
+    /// by the boot, and read by `sys/spawn`: a worker builds its own runtime on
+    /// a new thread and reaches the spawning instance only through `ctx.vm()`
+    /// (docs/impl/image/boot.md).
+    pub(crate) worker_boot: crate::runtime::WorkerBoot,
     /// Pointer to this instance's heap. The VM does not own it: a `RuntimeCore`
     /// owns it as a sibling `Box<FiberHeap>` (`VM::new_with_heap`), or — for a bare
     /// VM with no `RuntimeCore` — it is a privately leaked heap (`VM::new`). Either
@@ -145,17 +145,19 @@ pub struct VM {
     /// entering a body via `execute_bytecode_saving_stack` or the raw
     /// `execute_code`, which take it (resetting to `NIL`) and install it as
     /// `fiber.current_closure` for that activation. **Every entrant that runs a
-    /// closure body through a re-entry must set it** — the JIT helpers'
-    /// interpreter fallback and tail-call resolution, the forced-tier entries,
-    /// the fiber's first resume, the measured-thunk entry, the macro-transformer
-    /// call, the FFI callback trampoline, the WASM host's bytecode fallback, and
-    /// the spawned-worker body — or the body's `LoadSelf` resolves a
-    /// self-reference to `NIL` (docs/impl/vm.md; `handle_load_self` debug-asserts
-    /// the register is populated). A `NIL` (untracked) entry is legal only for a
-    /// body that is not a closure instance — a top-level program, module body, or
-    /// eval'd form. An interpreted non-tail call names its callee in
-    /// `PendingCall` instead. `NIL` between calls; never read except by the
-    /// immediately following entry.
+    /// closure body through a re-entry must set it**, or the body's `LoadSelf`
+    /// resolves a self-reference to `NIL` (docs/impl/vm.md; `handle_load_self`
+    /// debug-asserts the register is populated). The entrants are the JIT
+    /// helpers' interpreter fallback and tail-call resolution, the forced-tier
+    /// entries, the fiber's first resume, and the measured-thunk entry. So are
+    /// the macro-transformer call, the FFI callback trampoline, the WASM host's
+    /// bytecode fallback, and the spawned-worker body.
+    ///
+    /// A `NIL` (untracked) entry is legal only for a body that is not a closure
+    /// instance — a top-level program, module body, or eval'd form. An
+    /// interpreted non-tail call names its callee in `PendingCall` instead.
+    /// `NIL` between calls; never read except by the immediately following
+    /// entry.
     pub(crate) pending_entry_closure: Value,
     /// One-shot "the activation about to start takes these releases over", set by
     /// a tail call BUILT in compiled code and taken by the activation that runs
@@ -190,10 +192,10 @@ pub struct VM {
     /// Written only while that trace bit is set — the dispatch loop reads the
     /// bit once per frame into a local, so an ordinary run pays one predictable
     /// branch per instruction and never resolves a location. It names the
-    /// ALLOCATION rather than the enclosing call, which is the difference
-    /// between "a string was made somewhere in this function" and the line that
-    /// made it, and it is the only reading available inside a fiber's entry
-    /// closure, where the call stack is still empty.
+    /// ALLOCATION rather than the enclosing call: the line that made a string,
+    /// not "a string was made somewhere in this function". It is also the only
+    /// reading available inside a fiber's entry closure, where the call stack is
+    /// still empty.
     pub(crate) arena_site: Option<(SourceLoc, Option<&'static str>)>,
     /// Reason carried by the most recent uncaught `:gated` error to propagate
     /// out of `execute_code`. A loud `(gate! …)` whose condition is unmet
@@ -214,8 +216,9 @@ pub struct VM {
     /// terminating the process. Toggled by `(sys/trap-exit! on)`. The test runner
     /// brackets each test with it so a test's `(exit)` records a result and the run
     /// continues. A `VM` field: one VM per worker thread, so per-VM equals
-    /// per-thread, keeping the trap scoped to the calling OS thread (the runner's
-    /// own `exit`, on a VM with the trap unset, still terminates the process).
+    /// per-thread, which keeps the trap scoped to the calling OS thread. The
+    /// runner's own `exit`, on a VM with the trap unset, still terminates the
+    /// process.
     pub(crate) exit_trapped: bool,
     /// JIT code cache: bytecode pointer → pinned entry (see `JitCacheEntry`
     /// and docs/impl/jit.md). Write through
@@ -319,9 +322,9 @@ impl VM {
     /// The owning instance's symbol table, for runtime name interning/resolution.
     /// Returns `None` for a bare VM (no `RuntimeCore`); the readers treat that as
     /// "symbol table unavailable". The borrow is sound by the same contract as
-    /// `heap()`/`compile_ctx()`: the `SymbolTable` is a disjoint allocation owned
-    /// by the `RuntimeCore` that outlives the VM, reborrowed per call (the VM does
-    /// not touch it during the synchronous read).
+    /// `heap()`/`compile_ctx()`. The `SymbolTable` is a disjoint allocation owned
+    /// by the `RuntimeCore` that outlives the VM, reborrowed per call, and the VM
+    /// does not touch it during the synchronous read.
     #[allow(clippy::mut_from_ref)]
     pub(crate) fn symbols(&self) -> Option<&mut crate::symbol::SymbolTable> {
         if self.symbols_ptr.is_null() {

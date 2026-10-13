@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-13
 //! Shared test helpers: the evals, the cached evals property tests use, and a scratch directory.
 //!
 //! tests/AGENTS.md
@@ -16,7 +16,7 @@
 //! table and `CompileCtx`, so executed code that resolves through the VM sees
 //! this instance's state.
 
-use elle::runtime::{Runtime, RuntimeCore};
+use elle::runtime::{BootCaches, Runtime, RuntimeCore};
 use elle::{compile_file, eval_all, Value};
 
 pub mod documents;
@@ -84,8 +84,8 @@ pub fn eval_source<R>(input: &str, f: impl FnOnce(Result<Value, String>) -> R) -
 
 /// Like `eval_source` (stdlib loaded) but runs WITHOUT the async scheduler —
 /// a plain `vm.execute`, no `ev/run` wrapping. Real top-level Elle always runs
-/// scheduled (so `eval_source` does too); use this only for the rare test that
-/// asserts behavior *outside* a scheduler — for example, that an I/O primitive's
+/// scheduled, so `eval_source` does too. Use this only for the rare test that
+/// asserts behavior *outside* a scheduler: for example, that an I/O primitive's
 /// SIG_IO yield errors at top level when nothing is there to service it.
 #[allow(dead_code)]
 pub fn eval_source_unscheduled<R>(input: &str, f: impl FnOnce(Result<Value, String>) -> R) -> R {
@@ -143,8 +143,8 @@ pub fn proptest_cases(default: u32) -> proptest::prelude::ProptestConfig {
 // loading, CompileCtx construction). Between cases the fiber is reset.
 //
 // `RuntimeCore` (not `Runtime`) is cached deliberately: a `Runtime` runs a
-// teardown sweep on `Drop`, and a thread-local that drops at thread exit would
-// run that sweep at an unpredictable point, against an instance other cases may
+// teardown sweep on `Drop`. A thread-local that drops at thread exit would run
+// that sweep at an unpredictable point, against an instance other cases may
 // still be using. `RuntimeCore` has no such `Drop`, so caching it is safe.
 //
 // Use `eval_reuse_bare` for tests that don't need stdlib (the common case).
@@ -168,15 +168,14 @@ fn eval_with_cache(
 ) -> Result<Value, String> {
     cache.with(|cell| {
         let mut borrow = cell.borrow_mut();
+        // The stdlib core boots as `Runtime::new` does, from the boot image when
+        // one hydrates (docs/impl/image/boot.md).
         let core = borrow.get_or_insert_with(|| {
-            let mut core = RuntimeCore::bare();
             if with_stdlib {
-                // `RuntimeCore::bare` already points the VM at this instance's own
-                // symbol table, so stdlib-load gensym (and all name resolution)
-                // resolves through it.
-                core.load_stdlib(&elle::compiler::stdlib_cache::StdlibCache::Off);
+                RuntimeCore::with_caches(BootCaches::process())
+            } else {
+                RuntimeCore::bare()
             }
-            core
         });
 
         let (vm, symbols, cctx) = core.parts();
@@ -190,9 +189,9 @@ fn eval_with_cache(
     })
 }
 
-/// Evaluate Elle source with a cached Runtime (primitives only, no stdlib).
+/// Evaluate Elle source with a cached core (primitives only, no stdlib).
 ///
-/// Drop-in replacement for `eval_source_bare` in property tests. The Runtime
+/// Drop-in replacement for `eval_source_bare` in property tests. The core
 /// is created once per thread and reused across proptest cases. Between
 /// cases, the fiber is reset.
 #[allow(dead_code)]
@@ -200,9 +199,9 @@ pub fn eval_reuse_bare(input: &str) -> Result<Value, String> {
     eval_with_cache(input, &BARE_CACHE, false)
 }
 
-/// Evaluate Elle source with a cached Runtime (primitives + stdlib).
+/// Evaluate Elle source with a cached core (primitives + stdlib).
 ///
-/// Drop-in replacement for `eval_source` in property tests. The Runtime
+/// Drop-in replacement for `eval_source` in property tests. The core
 /// is created once per thread and reused across proptest cases. Between
 /// cases, the fiber is reset.
 #[allow(dead_code)]
