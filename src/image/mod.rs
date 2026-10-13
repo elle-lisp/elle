@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! Image persistence: an image is the page bytes of one compacted region plus
 //! a relocation table, and hydration maps those pages privately.
 //!
@@ -19,7 +19,7 @@ pub mod boot;
 mod dump;
 mod format;
 mod hydrate;
-mod layout;
+pub(crate) mod layout;
 mod source;
 mod verify;
 

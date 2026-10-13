@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! What a payload carries: the tables and masks a header reads out of it.
 //! docs/impl/region/template.md
 
@@ -189,4 +189,35 @@ fn the_region_table_holds_static_region_slots() {
             sr.get()
         );
     }
+}
+
+/// A payload is copied whole into its code region, so every byte of the record
+/// has to be written: a pad the compiler chose publishes whatever the writer's
+/// stack held, and the page-base walk reads a page's bytes wherever they came
+/// from (docs/impl/region/generations.md). One set of parts written over two
+/// differently painted stacks must therefore give one set of bytes.
+///
+/// The counter-factual is a record with implicit padding, or an enum field
+/// whose shorter variants leave payload bytes unwritten: the paint shows
+/// through, and the two copies differ.
+#[test]
+fn one_set_of_parts_writes_one_set_of_bytes() {
+    fn written(pattern: u8) -> Vec<u8> {
+        let mut heap = FiberHeap::new();
+        let arena = CodeArena::mint(&mut heap);
+        let parts = PayloadParts::new(Vec::new(), Arity::Exact(0), Vec::new());
+        crate::image::layout::paint_stack(pattern, 16);
+        let payload = arena.write(parts);
+        let bytes = unsafe {
+            std::slice::from_raw_parts(payload.as_ptr() as *const u8, size_of::<CodePayload>())
+        };
+        bytes.to_vec()
+    }
+    let a = written(0xAA);
+    let b = written(0x55);
+    let differ: Vec<usize> = (0..a.len()).filter(|&i| a[i] != b[i]).collect();
+    assert!(
+        differ.is_empty(),
+        "the payload record carries unwritten bytes at offsets {differ:?}"
+    );
 }
