@@ -1,21 +1,15 @@
-(elle/epoch 14)
-# audited: 2026-10-05
-# A ceiling the analyzer accepts, and the solver finds exceeded.
+(elle/epoch 15)
+# audited: 2026-10-12
+# A ceiling wider than its body: the solver answers what the body raises, and finds no violation.
 # examples/signal_solve/main.rs
 
-# relay passes its parameter to noisy-apply, which also yields by itself. The
-# solver keeps both the parameter and the :yield, so quiet's (silence) is
-# exceeded by :yield.
-# expect noisy-apply |:yield| prop 0
-# expect relay |:yield| prop 0
-# expect quiet ||
-# violates quiet |:yield|
-(defn noisy-apply [g x]
-  (yield 1)
-  (g x))
-(defn relay [g x]
-  (noisy-apply g x))
-(defn quiet []
-  (silence)
-  (relay (fn [y] y) 5))
-(fn [] {:quiet quiet})
+# A ceiling checks the body and does not replace it, so a caller sees the
+# body's |:yield|, not the |:yield :error| the ceiling admits.
+# expect produce |:yield|
+# expect consume |:yield|
+(defn produce [x]
+  (attune! |:yield :error|)
+  (yield x))
+(defn consume []
+  (produce 1))
+(fn [] {:consume consume})
