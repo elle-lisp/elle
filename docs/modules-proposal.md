@@ -1,6 +1,6 @@
 # Modules: a proposal
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-10-13 -->
 
 The module system Elle is building toward: compiled once per instance, linked across files, and shipped as images.
 
@@ -40,10 +40,10 @@ the method. [modules.md](modules.md) states two more under its architectural
 constraints: every load compiles its file again (#881), and no signal crosses a
 file boundary, so a call into another file takes every bit (#1232).
 
-**A function body infers less than a file.** A file's top level converges by a
-fixpoint, and a function body runs none ([pipeline.md](pipeline.md)). A
-forward reference inside a body gets every bit, and a lambda that calls its
-enclosing definition reads the silent seed.
+**A function body infers less than a file.** A file converges its definitions
+jointly. A body converges a definition only against itself, so a call to a
+later sibling, mutual recursion included, takes every bit
+([pipeline.md](pipeline.md)).
 
 **A transformer may still reach outside its unit.** Where no fiber withholds
 the capability, a transformer may read files and load shared libraries.
@@ -62,7 +62,7 @@ because a rule forbids them. Which of these a macro may do is an
   `:alpha` is bit 32 or 33 depending on which declaration ran first. Compiled
   code carries the bit number.
 
-**The standard library already has the shape.** 69 of the 70 files in
+**The standard library already has the shape.** 85 of the 86 files in
 [lib/](../lib/) end in a `(fn …)` that builds the export struct; `lua.lisp` is
 the exception, and it does not compile (#1217). What sits outside that lambda
 is what any sharing rule has to settle:
@@ -332,7 +332,7 @@ suspending:
    briefly, and the compile is the cost: 0.29 s for `std/http2`, all of it CPU
    on the one scheduler thread. One compile per file and linking remove the
    runtime compile for a literal import. `lib/`, `tests/`, `demos/` and
-   `tools/` hold 439 literal specs and about 15 computed ones.
+   `tools/` hold 317 literal specs and 15 computed ones.
 
 ## What is shared is pure
 

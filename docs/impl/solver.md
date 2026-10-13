@@ -1,6 +1,6 @@
 # The signal solver
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-10-13 -->
 
 Signal inference across files: facts per file, a link through literal imports, and the least model of a few Datalog rules.
 
@@ -14,9 +14,10 @@ the compiler, and nothing in the compiler uses it yet.
 
 The analyzer infers one file at a time ([signals/inference.md](../signals/inference.md)):
 
-- A file's top level converges by a fixpoint, and a function body runs none
-  ([pipeline.md](../pipeline.md)). A forward reference inside a body gets every
-  bit, and a lambda that calls its enclosing definition reads the silent seed.
+- A file's top level converges by a fixpoint over every definition, and a
+  function body converges only a definition that refers to itself
+  ([pipeline.md](../pipeline.md)). A call to a sibling the body defines later
+  gets every bit, and so does mutual recursion between siblings.
 - No signal crosses a file boundary, so a call into another file takes every
   bit (#1232). A map from each exported field to a signal would not be enough:
   it cannot say "field `:connect` of parameter 0", a parameter captured from an
