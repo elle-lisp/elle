@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-12
+(elle/epoch 15)
+# audited: 2026-10-13
 # std/gun user spaces between peers: signed writes travel and verify, and a peer refuses a forged or unsigned put whole.
 # lib/gun/sea.md
 # lib/gun/mesh.md
@@ -85,7 +85,7 @@
 
 (defn ack-of [heard id]
   "The ack in heard that answers the put id, or nil."
-  (first (filter (fn [m] (= (get m "ack") id)) heard)))
+  (find (fn [m] (= (get m "ack") id)) heard))
 
 (defn puts-to [heard soul]
   "The messages in heard whose graph holds soul."
@@ -200,8 +200,8 @@
       # so the spy's silence before it means something.
       (raw:send {"id" "valid"
                  "put" {alice-root {"city" [st "s:Paris" city-sig]}}})
-      (eventually "a valid put is acked ok"
-                  (fn [] (= (get (ack-of raw:heard "valid") "ok") true)))
+      (eventually "a valid put is acked" (fn [] (ack-of raw:heard "valid")))
+      (assert (= (get (ack-of raw:heard "valid") "ok") true) "with ok true")
       (assert (= (gun:once (gun:get (gun:get b alice-root) "city")) "Paris")
               "a valid signed put from a peer merges")
       (eventually "and is forwarded to the spy"
