@@ -1,6 +1,6 @@
 # Plugins
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-10-12 -->
 
 Elle ships with Rust plugins and pure Elle standard library modules.
 Plugins are cdylib crates loaded at runtime via `import`. Standard modules
@@ -63,15 +63,16 @@ Then build from the elle repo root:
 ```bash
 make plugins          # portable plugins
 make plugins-all      # every plugin in the workspace
-make mcp              # just oxigraph + syn (for the MCP server)
+make mcp              # elle, oxigraph and syn (for the MCP server)
 ```
 
 `make plugins` builds the `PORTABLE` list in `plugins/Makefile`.
 `make plugins-all` adds `elle-arrow`, `elle-polars`, `elle-vulkan`,
-`elle-egui` and `elle-wayland`. All five compile on a stock toolchain — each
-opens its system library with dlopen — but the last three need a GPU or a
-display before they can do anything. That is what keeps them out of the
-portable list; docs/analysis/ci.md § "The plugins job" owns the split.
+`elle-egui` and `elle-wayland`. All five compile on a stock toolchain, because
+none links a system library: a plugin that needs one opens it with dlopen. The
+last three need a GPU or a display before they can do anything, and that keeps
+them out of the portable list. [docs/analysis/ci.md](analysis/ci.md) owns the
+split, in "The plugins job".
 
 Or build individual plugins:
 
@@ -82,10 +83,10 @@ cargo build --release --manifest-path plugins/Cargo.toml \
 ```
 
 The `--target-dir target` flag (or `make` from the root) places `.so` files
-in elle's `target/release/`, where the `plugin/` import prefix looks. If
-you build from inside `plugins/` directly with plain `cargo build`, the
-output lands in `plugins/target/release/` instead — elle won't find it
-unless you move the `.so` files or use `--path` (see below).
+in elle's `target/release/`, where the `plugin/` import prefix looks. A plain
+`cargo build` inside `plugins/` puts the output in `plugins/target/release/`
+instead. Elle does not find it there unless you move the `.so` files or use
+`--path` (see below).
 
 The plugins submodule's own Makefile handles this automatically when it
 detects it's inside the elle repo, so `cd plugins && make` also works.
@@ -162,7 +163,7 @@ elle --path=/opt/elle-plugins/target/release my-script.lisp
 | Plugin | Import name | Description |
 |--------|-------------|-------------|
 | `elle-arrow` | `"plugin/arrow"` | Apache Arrow columnar data |
-| `elle-crypto` | `"plugin/crypto"` | SHA-2 hashing and HMAC |
+| `elle-crypto` | `"plugin/crypto"` | SHA-2, HMAC, Ed25519, X25519, HKDF and XChaCha20-Poly1305 |
 | `elle-csv` | `"plugin/csv"` | CSV reading and writing |
 | `elle-egui` | `"plugin/egui"` | Immediate-mode GUI |
 | `elle-hash` | `"plugin/hash"` | Universal hashing (SHA-3, BLAKE3, CRC32, etc.) |
@@ -171,11 +172,11 @@ elle --path=/opt/elle-plugins/target/release my-script.lisp
 | `elle-mqtt` | `"plugin/mqtt"` | MQTT client |
 | `elle-msgpack` | `"plugin/msgpack"` | MessagePack serialization |
 | `elle-oxigraph` | `"plugin/oxigraph"` | RDF triple store |
+| `elle-plotters` | `"plugin/plotters"` | Chart and plot generation |
 | `elle-polars` | `"plugin/polars"` | DataFrames (Polars) |
 | `elle-protobuf` | `"plugin/protobuf"` | Protocol Buffers |
 | `elle-random` | `"plugin/random"` | Pseudo-random numbers |
 | `elle-regex` | `"plugin/regex"` | Regular expressions |
-| `elle-plotters` | `"plugin/plotters"` | Chart and plot generation |
 | `elle-selkie` | `"plugin/selkie"` | Mermaid diagram rendering |
 | `elle-svg` | `"plugin/svg"` | SVG rasterization (resvg) |
 | `elle-syn` | `"plugin/syn"` | Rust source parsing |
