@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-13
 //! What the file gets from the copied graph: page bytes, the four relocation
 //! streams, the object index, and the two watermarks.
 //!
@@ -348,7 +348,7 @@ impl Emitted {
                 .push(((node_off + layout::file_slot_in_node()) as u64, name.into()));
         }
         for scope in node.scopes() {
-            self.scope_watermark = self.scope_watermark.max(scope.counter() + 1);
+            self.scope_watermark = self.scope_watermark.max(scope.count() + 1);
         }
         if let Some((rel, src)) = self.slice_backing(&node.scopes, at)? {
             backings.push(Backing::raw::<ScopeId>(rel, src, node.scopes().len()));

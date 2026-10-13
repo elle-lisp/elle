@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-13
 //! Cache the compiled standard library on disk, so a later process
 //! deserializes it instead of running the front end again.
 //!
@@ -8,7 +8,7 @@ use crate::value::CodeUnit;
 use serde::{Deserialize, Serialize};
 
 /// Version tag: bump when the serialized layout changes in an incompatible way.
-const FORMAT_VERSION: u32 = 11;
+const FORMAT_VERSION: u32 = 12;
 
 /// Bytes of payload hash a cache file carries ahead of its `StoredBytecode`.
 const PAYLOAD_HASH_BYTES: usize = 8;
