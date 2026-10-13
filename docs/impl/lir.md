@@ -148,6 +148,9 @@ A frozen function has two homes, and both hold the same records:
   `RegionSlice` or a scalar, so the body is sealed data and an image carries
   it with the rest of the payload. Its file table holds spellings rather than
   `FileId`s, so a body holds no process-local number and needs no file stream.
+  The payload around it is copied whole into the code region, so the body is
+  `repr(C)` and exactly its fields, with a named pad written zero after its
+  flag, as the records above carry one.
 
 A body carries only what LIR alone knows: the closure id, the entry label, the
 register count, the capture and local-parameter counts, and the sites. The
