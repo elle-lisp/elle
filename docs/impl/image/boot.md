@@ -119,8 +119,7 @@ exists, and installs into the same structures a source boot writes:
    whole boot graph by the ordinary cascade — one registration, because one
    image is one region.
 4. Install `:core` into the expander's `core_env` and into `PrimitiveMeta`.
-5. Install `:macros` into the expander, and raise its scope counter past the
-   image's watermark ([the image file](format.md)).
+5. Install `:macros` into the expander.
 6. Install `:stdlib` into `PrimitiveMeta` and `eval_meta`.
 
 Steps 4 and 6 are the tails of `compile_core` and `init_stdlib`. Step 5 leaves
@@ -128,13 +127,11 @@ the hydrated template trees where they are. The hydrated region is a process
 root, so it outlives every expansion that reads a template, and a copy into the
 expander's own template arena would buy nothing.
 
-The raise in step 5 has nothing to clear at boot. A prelude template carries
-the prelude scope, which is zero, so a boot image's watermark is one — where an
-expander starts anyway. Every scope a boot mints is minted on a per-compile
-clone of the master expander, and a clone's counter never reaches the master.
-So an image boot and a source boot hand out the same ids with or without the
-raise. The environment configuration is what will need it, because a macro a
-session defined carries its file's scope.
+Step 5 raises no counter. A scope id names the unit that minted it
+([syntax.md](../syntax.md)), and a hydrating instance never expands the
+prelude, so it mints no id a prelude template carries. A macro a session
+defined carries its own unit's tag, so the environment configuration needs no
+raise either.
 
 The expander reads a template and never writes one, because it copies as it
 stamps scopes ([the syntax tree](../syntax.md)). So a template's pages stay clean,

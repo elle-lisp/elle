@@ -1,6 +1,6 @@
 # syntax/expand
 
-<!-- audited: 2026-10-07 -->
+<!-- audited: 2026-10-13 -->
 
 Hygienic macro expansion: macro definition, macro calls, quasiquote, and introspection.
 
@@ -115,7 +115,8 @@ The `Expander` maintains:
 - `compile_time_env: HashMap<String, Value>` — Values defined in `begin-for-syntax` blocks. Always starts empty (the custom `Clone` impl resets it). Visible to macro bodies compiled via `eval_syntax` through `Analyzer::bind_compile_time_env`.
 - `core_env: HashMap<String, Value>` — core.lisp's exports, which macro bodies resolve. A clone keeps it.
 - `eval_meta: Rc<PrimitiveMeta>` — The primitives and stdlib exports that macro bodies compile against.
-- `next_scope_id: u32` — Counter for generating fresh scope IDs
+- `unit: UnitTag` and `next_scope_id: u32` — The unit under expansion, and the count of scopes it has minted. `begin_unit` sets the tag and starts the count at zero
+- `gensyms: u32` — The count of names `gensym` has answered for the unit. A transformer call and a `begin-for-syntax` body lend the unit's tag and this count to the VM, where `gensym` reads them while the expansion runs
 - `expansion_depth: usize` — Current recursion depth (bounded at 200)
 
 ## Prelude macros

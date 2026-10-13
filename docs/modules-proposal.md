@@ -5,10 +5,11 @@
 The module system Elle is building toward: compiled once per instance, linked across files, and shipped as images.
 
 [modules.md](modules.md) describes the module system as it is. This document
-states the design it becomes, and the argument for each part. Three parts are
+states the design it becomes, and the argument for each part. Four parts are
 implemented: [sound signals](#silent-is-sound),
-[the raw primitives](#the-raw-primitives-are-raw) and
-[contained expansion](#expansion-is-contained).
+[the raw primitives](#the-raw-primitives-are-raw),
+[contained expansion](#expansion-is-contained) and
+[deterministic expansion](#expansion-is-deterministic).
 [solver.md](impl/solver.md) owns the cross-file signal solver that linking
 uses. The decisions that belong to the language's owner are
 listed under [Open decisions](#open-decisions).
@@ -52,15 +53,9 @@ Scheduler I/O fails inside one as an unexpected signal. In a file's compile,
 because a rule forbids them. Which of these a macro may do is an
 [open decision](#open-decisions).
 
-**Expansion depends on more than its input.**
-
-- State kept in `begin-for-syntax` resets on every compile, so it is fixed by
-  the unit's source and is not an input of its own.
-- `gensym` draws from a process-global counter, and scope ids from a
-  per-instance counter.
-- A user signal's bit is assigned in declaration order, process-wide:
-  `:alpha` is bit 32 or 33 depending on which declaration ran first. Compiled
-  code carries the bit number.
+**A user signal's bit depends on the process.** A bit is assigned in
+declaration order, process-wide: `:alpha` is bit 32 or 33 depending on which
+declaration ran first. Compiled code carries the bit number.
 
 **The standard library already has the shape.** 85 of the 86 files in
 [lib/](../lib/) end in a `(fn …)` that builds the export struct; `lua.lisp` is
@@ -218,24 +213,31 @@ which the LSP, the linter and `compile/analyze` do.
 
 ## Expansion is deterministic
 
-- Number gensyms and intro scopes per unit, so an expansion depends on its
-  unit and not on what the process expanded before it.
-- Give a user signal a stable identity in compiled code: its name, relocated
-  to the process's bit when the code loads. The image documents disagree
-  today: [image.md](impl/image.md) replays a signal table at hydration, and
-  [sealing.md](impl/image/sealing.md) says no image carries one and refuses
-  the dump. Relocation by name replaces both.
-- Write down the complete set of compile inputs.
+A unit expands to the same tree in every process. Its scope ids and its
+expansion-time gensym names come from its own tag and its own count
+([macros.md](macros.md)). State kept in
+`begin-for-syntax` resets on every compile, so the unit's source fixes it too.
 
-The compile inputs, as far as they are known:
+A user signal's bit still follows declaration order, so a compile takes the
+declarations as an input. Within one process a bit never changes, and an
+in-instance cache needs nothing more. Code that crosses processes needs the
+signal's name instead, and [module images](#images-and-exported-macros) are the
+first such code.
+
+The compile inputs:
 
 | Input | Why it changes a compile |
 |-------|--------------------------|
 | The source text, and every included file's text | The forms themselves |
+| The unit's own path | Its spans, `(meta/location)`, and the directory a relative `import-file` joins |
 | The epoch and the Unicode generation | Migration rules and string semantics |
-| The binary's build identity and the primitive table | Codegen, primitive ids, the prelude and stdlib |
+| The binary's build identity and the primitive table | Codegen, primitive ids, the prelude and stdlib, the registries the stdlib compile fills, and the expansion budget |
 | The bindings an embedder registers | Every compile in the instance resolves them, as it resolves a primitive |
 | The macro environment | Prelude, plus the unit's own macros; plus the macros of every literal import once modules export them |
+| The REPL layer, for a REPL line | The macros and definitions earlier lines made |
+| The `env` struct an `eval` takes | Its entries bind as immutable names |
+| The capabilities the compiling fiber withholds | A macro that calls a denied primitive fails the compile |
+| The `elle test` transforms | The runner wraps each test form before analysis |
 | The resolved path of every literal `import-file` and every `include` | The writer's directory and the search paths decide which file a path names |
 | The facts of every literal import | Linking reads them to solve the file's signals |
 | User signal declarations | Bit numbers, until signals relocate by name |
@@ -404,11 +406,15 @@ The rules images already state carry over:
 - A closure that carries a process-declared signal bit refuses the dump until
   signals relocate by name.
 
+A module image gives a user signal a stable identity in compiled code: its
+name, relocated to the process's bit when the code loads. The image documents
+disagree today: [image.md](impl/image.md) replays a signal table at
+hydration, and [sealing.md](impl/image/sealing.md) says no image carries one
+and refuses the dump. Relocation by name replaces both.
+
 [image.md](impl/image.md) describes the boot and environment configurations
-only. Module images wait on two image milestones
-([plan.md](impl/image/plan.md)): the environment configuration, and LIR that
-lives in regions. Until the second lands, an image-loaded closure never
-reaches the JIT.
+only. Module images wait on the environment configuration
+([plan.md](impl/image/plan.md)).
 
 A module whose top level is pure can be evaluated while its importer compiles.
 Its macros can then be exported as values, and they join the macro environment

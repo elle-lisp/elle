@@ -1,6 +1,6 @@
 # Syntax — a region-native immutable tree
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-10-13 -->
 
 The pre-analysis tree the reader produces, the expander rewrites, and the
 analyzer consumes. Every node, every child slice, and every string payload
@@ -139,6 +139,21 @@ tiny — every one of the ~430,000 scope operations in a stdlib expansion ended
 with three scopes or fewer — and regrowing on each add costs 8 ns per visit,
 so the growth is not on any path that matters.
 
+A `ScopeId` is 64 bits: the tag of the unit that minted it in the high half,
+then the intro bit, then a count that starts at zero in each unit. A unit's tag
+is the 64-bit FNV-1a hash of its source name and of the forms it expands, as
+read, folded to 32 bits. The hash reads each node's kind, atoms and spellings,
+and no span. So a unit mints the same ids in every process, and two units mint
+different ones. That matters where their trees meet, as a macro an earlier
+REPL line or `eval` defined meets the code a later one expands.
+
+Tag zero names no unit. It holds the primitive scope every prelude form
+carries, and the intro scope the analyzer stamps on a form it builds itself; a
+unit whose hash folds to zero takes tag one. An image records no scope
+watermark, because an instance mints ids only under the tags of the units it
+expands ([image/format.md](image/format.md)). `gensym` names its symbols after
+the same tag while an expansion runs ([macros.md](../macros.md)).
+
 ## Span
 
 `Span` is `Copy` POD: `start`, `end`, `line`, `col` as `u32`, and a `FileId`.
@@ -180,6 +195,10 @@ compile-time arena for the life of every compiled closure.
   arena's region; payloads deref to `&str`, `&[Syntax]`, and `&Syntax`; a copy
   into another arena shares nothing; a stamped copy does not disturb its
   source; scope sets grow without loss; a syntax `Value` owns its tree.
+- `src/syntax/tests/units.rs` — one unit mints the same scope ids in two
+  instances and in two evals, a unit's tag ignores spans, two units with
+  different forms or names take different tags, and an id keeps its tag, its
+  intro bit and its count apart.
 - `src/syntax/span/tests.rs` — `Span` is 20-byte `Copy` POD, its file name
   interns, and serde carries the name rather than the id.
 - `src/syntax/files/tests.rs` — interning is idempotent and the empty name is

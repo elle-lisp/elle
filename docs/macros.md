@@ -1,6 +1,6 @@
 # Macros
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-10-13 -->
 
 Elle's macros run as ordinary Elle code at expansion time, and are hygienic by
 sets of scopes; `datum->syntax` breaks hygiene on purpose.
@@ -105,6 +105,24 @@ call-site `let` therefore cannot shadow a name the template uses:
 
 `gensym` is still available for a unique name that has nothing to do with
 hygiene, such as a generated global.
+
+### An expansion depends on its unit alone
+
+A unit is what one compile expands: a file, a REPL line, or the datum one
+`eval` compiles. The scopes an expansion mints, and the names `gensym` answers
+while it runs, carry the unit's tag and a count that starts at zero in the unit
+([impl/syntax.md](impl/syntax.md)). A unit therefore expands to the same tree in
+every process, whatever the process expanded before it, and two units mint
+different names. Outside an expansion, `gensym` counts across the process, so
+two calls at run time answer two symbols.
+
+```lisp
+(def fresh-name '(begin (defmacro fresh [] (list 'quote (gensym "t"))) (fresh)))
+(def other-unit '(begin (defmacro other [] (list 'quote (gensym "t"))) (other)))
+(assert (= (eval fresh-name) (eval fresh-name)) "one unit expands to one name")
+(assert (not (= (eval fresh-name) (eval other-unit))) "two units, two names")
+(assert (not (= (gensym "t") (gensym "t"))) "two calls at run time, two symbols")
+```
 
 ## Breaking hygiene on purpose: `datum->syntax`
 
