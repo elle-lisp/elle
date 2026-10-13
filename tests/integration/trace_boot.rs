@@ -1,9 +1,13 @@
-// Boot attribution rides the trace system: `--trace=boot` marks each boot
-// phase (primitive registration, core, prelude, stdlib) and `--trace=compile`
-// marks each pipeline phase, both as `[trace:...] <label> <N>ms` on stderr.
-// The trap this pins: `--trace=` rejects unknown keywords, so a binary
-// without the `boot` keyword fails these runs outright rather than running
-// silently without marks.
+// audited: 2026-10-12
+// Boot attribution rides the trace system: `--trace=boot` marks each boot phase
+// and `--trace=compile` each pipeline phase.
+// docs/config.md
+//
+// Each mark prints as `[trace:...] <label> <N>ms` on stderr. The trap this
+// pins: `--trace=` rejects unknown keywords, so a binary without the `boot`
+// keyword fails these runs outright rather than running silently without
+// marks. The runs boot from source, because a start that hydrates a boot image
+// skips the core, prelude and stdlib phases they name.
 
 use std::process::Command;
 
@@ -16,6 +20,7 @@ fn run_traced(trace: &str, source: &str, tag: &str) -> (bool, String) {
     let script = dir.join("script.lisp");
     std::fs::write(&script, source).expect("write script");
     let out = Command::new(elle_binary())
+        .arg("--boot-image=off")
         .arg(format!("--trace={}", trace))
         .arg(&script)
         .output()

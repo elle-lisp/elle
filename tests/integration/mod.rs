@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-12
 // Registers every integration test file, which is what makes one run.
 //
 // tests/AGENTS.md
@@ -255,6 +255,9 @@ mod capacity {
 }
 mod boot_image_gate {
     include!("boot_image_gate.rs");
+}
+mod boot_image_cli {
+    include!("boot_image_cli.rs");
 }
 mod doctest {
     include!("doctest.rs");

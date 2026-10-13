@@ -1,19 +1,28 @@
-// audited: 2026-09-10
+// audited: 2026-10-12
 // The post-boot heap census: the regression net for the image design's
 // sealing claims.
 // docs/impl/image/sealing.md
 // docs/impl/image/measurements.md
 //
-// After `Runtime::new()` completes, every live object in the instance's
-// region store is boot state, and the census (item 2 there) enumerates the
-// graph a boot image must dump. These tests fail the moment an unsealed
+// After a source boot completes, every live object in the instance's region
+// store is boot state, and the census (item 2 there) enumerates the graph a
+// boot image must dump. The instances here boot from source and ask for it by
+// name: a runtime that hydrated an image holds the one region the dump made,
+// with every capture cell snapped. These tests fail the moment an unsealed
 // variant enters the boot graph, which is exactly the condition that would
 // make the boot image undumpable.
 
+use elle::compiler::stdlib_cache::StdlibCache;
 use elle::runtime::Runtime;
 use elle::value::fiberheap::census::Sealing;
 use elle::value::HeapTag;
 use std::process::Command;
+
+/// A runtime booted from core.lisp, prelude.lisp and stdlib.lisp, whatever
+/// the process's boot-image policy.
+fn source_boot() -> Runtime {
+    Runtime::with_stdlib_cache(StdlibCache::Process)
+}
 
 // ── The sealing net ─────────────────────────────────────────────────
 
@@ -29,7 +38,7 @@ use std::process::Command;
 // instead.
 #[test]
 fn boot_heap_unsealed_leaves_are_exactly_the_reconstructible_set() {
-    let mut rt = Runtime::new();
+    let mut rt = source_boot();
     let census = rt.heap().census();
 
     let mut unsealed: Vec<String> = census
@@ -54,7 +63,7 @@ fn boot_heap_unsealed_leaves_are_exactly_the_reconstructible_set() {
 // the letrec lowering changed shape and the snapping design step is stale.
 #[test]
 fn boot_heap_holds_capture_cells_for_snapping() {
-    let mut rt = Runtime::new();
+    let mut rt = source_boot();
     let census = rt.heap().census();
     assert!(
         census.capture_cells > 0,
@@ -68,7 +77,7 @@ fn boot_heap_holds_capture_cells_for_snapping() {
 // many per-cell letrec regions the design's compaction argument rests on.
 #[test]
 fn boot_census_reports_the_expected_shape() {
-    let mut rt = Runtime::new();
+    let mut rt = source_boot();
     let census = rt.heap().census();
 
     assert!(census.objects > 0, "empty boot census");

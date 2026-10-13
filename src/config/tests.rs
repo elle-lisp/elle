@@ -1,8 +1,9 @@
-// audited: 2026-09-29
+// audited: 2026-10-12
 //! Pins the configuration: per-instance trace cells, the tier a build starts, the
-//! refused flags and the page size.
+//! refused flags, the page size and the boot-image policy.
 //!
 //! docs/config.md
+//! docs/impl/image/boot.md
 
 use super::*;
 use crate::value::fiberheap::pagepool::base_page;
@@ -292,5 +293,45 @@ fn region_page_size_below_the_base_page_is_rejected() {
             .unwrap()
             .region_page_size,
         4 * base_page(),
+    );
+}
+
+// ── The boot image (docs/impl/image/boot.md) ──
+
+/// The warm cache is on unless a flag turns it off: no flag means the
+/// `--cache=` directory's `boot`, for the CLI and an embedding host alike.
+#[test]
+fn the_warm_cache_is_on_by_default() {
+    use crate::image::boot::BootImage;
+    assert_eq!(parse_args(&[]).unwrap().boot_image(), BootImage::Process);
+    assert_eq!(Config::default().boot_image(), BootImage::Process);
+}
+
+/// Each `--boot-image=` value names one policy.
+#[test]
+fn each_boot_image_value_names_its_policy() {
+    use crate::image::boot::BootImage;
+    let policy = |flag: &str| parse_args(&[flag]).unwrap().boot_image();
+    assert_eq!(policy("--boot-image=off"), BootImage::Off);
+    assert_eq!(policy("--boot-image=on"), BootImage::Process);
+    assert_eq!(
+        policy("--boot-image=/srv/boot"),
+        BootImage::Dir(std::path::PathBuf::from("/srv/boot"))
+    );
+}
+
+/// The default keeps the cache beneath `--cache=`, so an empty `--cache=`
+/// turns the warm cache off with the other caches. The counter-factual is a
+/// default that found a directory of its own, which a user who switched
+/// caching off would still find filling.
+#[test]
+fn an_empty_cache_flag_turns_the_warm_cache_off() {
+    use crate::image::boot::BootImage;
+    let off = parse_args(&["--cache="]).unwrap();
+    assert_eq!(BootImage::Process.dir_in(&off), None);
+    let on = parse_args(&["--cache=/srv/cache"]).unwrap();
+    assert_eq!(
+        BootImage::Process.dir_in(&on),
+        Some(std::path::PathBuf::from("/srv/cache/boot"))
     );
 }

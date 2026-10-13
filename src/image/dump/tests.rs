@@ -1,6 +1,6 @@
 // audited: 2026-10-12
-//! What a dump records that only this crate can see: scope sets, a parameter's
-//! port default, and the static-region watermark.
+//! What a dump writes that only this crate can see: scope sets, a port default,
+//! the static-region watermark, and a raced path.
 //!
 //! docs/impl/image/sealing.md
 //! docs/impl/image/format.md
@@ -362,4 +362,67 @@ fn a_body_without_parameters_has_no_watermark() {
 fn a_plain_dump_records_no_static_region_watermark() {
     let (_dst, hydrated) = round_trip(one_pair, "no-static-watermark");
     assert_eq!(hydrated.static_region_watermark, 0);
+}
+
+// ── Two dumps racing for one path ────────────────────────────────────
+
+/// The list `(0 1 … n-1)`, reversed, in one region of `heap`: megabytes of
+/// pages once `n` is large, so a dump spends long enough writing them for a
+/// second dump to arrive while it does.
+fn long_list(heap: &mut FiberHeap, n: i64) -> Value {
+    let region = heap.new_runtime_region();
+    let mut list = Value::EMPTY_LIST;
+    for i in 0..n {
+        list = heap.alloc_in_region(
+            HeapObject::Pair(crate::value::heap::Pair::new(Value::int(i), list)),
+            region,
+        );
+    }
+    list
+}
+
+// § Hydration, "Never rewrite an image file in place": two dumps racing for
+// one path each rename a whole file. The warm cache meets this whenever two
+// threads of one process boot at once and both miss.
+//
+// The trap is the thread. A temporary file named for the process is one name
+// for every thread in it, so the second dump truncates the first one's file,
+// the first rename takes it, and the second rename finds nothing to move. The
+// rounds are there because the race needs the two writes to overlap.
+#[test]
+fn two_threads_dumping_to_one_path_each_rename_a_whole_file() {
+    const LENGTH: i64 = 50_000;
+    let scratch = Scratch::new("race");
+    for round in 0..8 {
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let dumps: Vec<_> = (0..2)
+            .map(|_| {
+                let path = scratch.0.clone();
+                let barrier = std::sync::Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    let mut heap = FiberHeap::new();
+                    let root = long_list(&mut heap, LENGTH);
+                    barrier.wait();
+                    super::dump(&mut heap, &SymbolTable::new(), root, &path)
+                        .map_err(|e| e.to_string())
+                })
+            })
+            .collect();
+        for dump in dumps {
+            if let Err(e) = dump.join().expect("a dumping thread panicked") {
+                panic!("round {round}: a dump racing another for its path failed: {e}");
+            }
+        }
+
+        let (_dst, hydrated) = hydrate(&scratch);
+        let items = hydrated
+            .root
+            .list_to_vec()
+            .expect("the raced file holds a list");
+        assert_eq!(
+            items.len() as i64,
+            LENGTH,
+            "round {round}: the raced file holds a torn list"
+        );
+    }
 }

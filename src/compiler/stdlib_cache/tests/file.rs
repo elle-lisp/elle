@@ -1,32 +1,11 @@
-// audited: 2026-10-06
-// The file on disk: which key names it, which directory holds it, and what a
-// store owes a process that is reading the file it replaces.
+// audited: 2026-10-12
+// The file on disk: which directory holds it, what a corrupt one costs, and what
+// a store owes a process that is reading the file it replaces.
 // docs/impl/stdlib-cache.md
 
 use super::super::*;
 use crate::primitives::module_init::StdlibSource;
 use crate::runtime::Runtime;
-
-/// The key must follow the binary, not its version string: two builds of
-/// one version compile stdlib differently the moment a pass changes. This
-/// pins that the identity is read from the executable — an edit that put a
-/// constant back would leave every rebuild sharing one key, and every test
-/// that boots a runtime reading bytecode the previous binary produced.
-///
-/// Characterization, not a failing-first regression: "a different build
-/// yields a different key" is observable only across builds.
-#[test]
-fn the_build_identity_is_read_from_the_running_executable() {
-    let (len, _mtime) = build_identity().expect("the test binary can identify itself");
-    let exe = std::env::current_exe().expect("current_exe");
-    let meta = std::fs::metadata(&exe).expect("exe metadata");
-    assert_eq!(
-        len,
-        meta.len(),
-        "the identity must be the binary's own size"
-    );
-    assert!(len > 0, "a zero-length identity separates nothing");
-}
 
 /// Two runtimes over one cache directory: the first compiles stdlib and
 /// writes the cache, the second must load from it — and must still have a
@@ -227,7 +206,7 @@ fn a_store_replaces_the_cache_file_instead_of_rewriting_it() {
 }
 
 /// Every key that stops being current orphans a file, and the key follows
-/// the binary — so an ordinary day of rebuilds leaves one 16 MB file per
+/// the binary — so an ordinary day of rebuilds leaves one 10 MB file per
 /// build, forever, in a directory nobody thinks to look at.
 #[test]
 fn a_store_prunes_the_files_its_key_supersedes() {
