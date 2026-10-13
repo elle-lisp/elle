@@ -1,6 +1,6 @@
 # ratchet
 
-<!-- audited: 2026-10-04 -->
+<!-- audited: 2026-10-13 -->
 
 Measure a shape and print one reading line per subject, for the runner to
 judge against the committed ledger.
@@ -117,6 +117,23 @@ thunk's own return convention would reclaim the strand on its way out.
 (assert (= (get (get stmt 0) :subject) "statement drop") "stmt-run makes a run-block of a thunk")
 ```
 
+## A timing is the thread's CPU time
+
+`best-of` runs two thunks in alternating rounds and answers
+`[control subject]`, the smallest time each one took. It reads `clock/cpu`,
+the time the calling thread ran, so a round spent waiting for a CPU costs no
+more than one that ran straight through. [Testing](../docs/testing.md) says
+why a performance gate times a ratio this way.
+
+```lisp
+(def [control-time subject-time] (r:best-of 3 (fn [] (+ 1 2)) (fn [] (+ 3 4))))
+(assert (>= control-time 0.0) "the control's smallest time, in seconds")
+(assert (>= subject-time 0.0) "and the subject's")
+```
+
+`ratio` prints the subject's time over the control's as one reading on the
+`:time` axis.
+
 ## The judge
 
 The judge lives in the ledger module, and the runner is its one caller.
@@ -154,5 +171,6 @@ is not the estimator's uncertainty, which every rate already carries.
 | `(rate subject probe &named on epsilon block min max stable)` | the adaptive per-op rate of `(probe j)`, on each gauge in `on` |
 | `(drive subject run-block &named on epsilon block min max stable)` | the same rate over `(run-block b)`, which performs `b` ops of the caller's own shape |
 | `(stmt-run thunk)` | the run-block that calls `thunk` `b` times as a discarded statement |
-| `(ratio subject measured control &named rounds)` | the best of `rounds` alternating timings of `measured` over the best of `control`, on the `:time` axis |
+| `(best-of rounds control subject)` | `[control subject]`: the smallest CPU time each thunk took over `rounds` alternating rounds |
+| `(ratio subject measured control &named rounds)` | the `best-of` time of `measured` over that of `control`, on the `:time` axis |
 | `readings` | every reading this instrument printed, in order |
