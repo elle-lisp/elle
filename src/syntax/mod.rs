@@ -159,4 +159,4 @@ pub(crate) fn is_rest_marker(name: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
