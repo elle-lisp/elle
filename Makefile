@@ -592,16 +592,17 @@ embedding: elle  ## Build + run embedding demos (Rust + C hosts)
 	$(MAKE) -C demos/embedding chost TARGET_DIR=$(EMBED_TARGET_DIR)
 	LD_LIBRARY_PATH=$(EMBED_TARGET_DIR) demos/embedding/chost
 
-# The signal solver spike (docs/impl/solver.md): every fixture's `# expect`
-# lines, and the worklist and datafrog solving one model over all of lib/. A
-# fixture names each import by a path relative to itself, so the fixtures run
-# from the repository root. The spike exits non-zero on a failed expectation or
-# a disagreement.
+# The signal solver spike (docs/impl/solver.md): its unit tests of the rules,
+# every fixture's `# expect` lines, and the worklist and datafrog solving one
+# model over all of lib/. A fixture names each import by a path relative to
+# itself, so the fixtures run from the repository root. The spike exits non-zero
+# on a failed expectation or a disagreement.
 SIGNAL_SOLVE = $(CURDIR)/$(CARGO_OUT)/examples/signal_solve
 SOLVE_FIXTURES = examples/signal_solve/fixtures
 
-signal-solve:  ## The signal solver spike: its fixtures, and both engines over lib/
+signal-solve:  ## The signal solver spike: its unit tests, its fixtures, and both engines over lib/
 	cargo build $(CARGO_PROFILE) --example signal_solve
+	cargo test $(CARGO_PROFILE) --example signal_solve
 	$(SIGNAL_SOLVE) --expect $(SOLVE_FIXTURES)/parity.lisp
 	$(SIGNAL_SOLVE) --expect $(SOLVE_FIXTURES)/app.lisp
 	$(SIGNAL_SOLVE) --expect $(SOLVE_FIXTURES)/cyc_a.lisp

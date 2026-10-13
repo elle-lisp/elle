@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-05
+(elle/epoch 15)
+# audited: 2026-10-12
 # Single-file cases for the solver, most of which today's analyzer answers as unknown.
 # examples/signal_solve/main.rs
 
@@ -15,8 +15,9 @@
   (yield n)
   (top-a n))
 
-# A parameter called inside a nested lambda: the lambda depends on it.
-# expect outer || prop 0
+# A parameter called inside a nested lambda: the lambda depends on it. The
+# call checks no argument count, so it may raise.
+# expect outer |:error| prop 0
 (defn apply1 [g x]
   (g x))
 (defn outer [f]
@@ -26,20 +27,21 @@
 # expect use-quiet |:error|
 (defn noisy []
   (yield 1))
-(def quiet (squelch noisy :yield))
+(def quiet (squelch :yield noisy))
 (defn use-quiet []
   (quiet))
 
 (fn []
   # Inside a function body there is no fixpoint: a forward reference reads
-  # nothing yet, and a mutual recursion reads the seed.
-  # expect fwd ||
+  # nothing yet, and a mutual recursion reads the seed. A call forward checks
+  # no argument count, so it may raise.
+  # expect fwd |:error|
   (defn fwd [x]
     (later x))
   (defn later [x]
     x)
-  # expect mut-a |:yield|
-  # expect mut-b |:yield|
+  # expect mut-a |:yield :error|
+  # expect mut-b |:yield :error|
   (defn mut-a [n]
     (if n (mut-b n) 0))
   (defn mut-b [n]
