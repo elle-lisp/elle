@@ -41,11 +41,6 @@ while the context is mid expansion.
 Each clone is independent, so a compile nested inside an expansion, such as a
 `begin-for-syntax` that imports a file, does not alias the compile context.
 
-Every transformer call runs through `VM::call_transformer`, and every
-`begin-for-syntax` definition through `eval_syntax`. Both run the body under
-the expansion fuel budget ([runtime signals](runtime.md)), and both turn a park
-the body raises into a compile error, because an expansion cannot hold one.
-
 ## The REPL layer
 
 A REPL line compiles through `compile_file_repl`. Its clone also carries the
@@ -53,6 +48,20 @@ macros earlier lines defined, and its analysis the definitions they made. No
 other entry point sees either, so a file a line imports compiles as it would
 from any program. A macro one compile defines reaches a later compile only
 when the REPL registers it with `register_repl_macros`.
+
+## Units
+
+Each clone has begun the unit its compile expands, so every scope the clone
+mints names that unit ([the syntax tree](impl/syntax.md)). The VM's `eval`
+instruction keeps one expander across calls instead, and begins a unit for each
+datum. That drops the `begin-for-syntax` definitions the last datum made.
+`eval_syntax` compiles a transformer in a unit of its own, and the caller's
+unit resumes after.
+
+Every transformer call runs through `VM::call_transformer`, and every
+`begin-for-syntax` definition through `eval_syntax`. Both run the body under
+the expansion fuel budget ([runtime signals](runtime.md)), and both turn a park
+the body raises into a compile error, because an expansion cannot hold one.
 
 ## No compile reads another file
 
