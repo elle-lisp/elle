@@ -94,9 +94,11 @@
   (assert (not (empty? (file/ls (path/join dir "stdlib-cache"))))
           "the unmeasured run wrote the standard library to the cache")
   # [the key of a program's subject on the path, its boot flags]. `--cache=`
-  # with no directory turns every cache off. The cached path turns the boot
-  # image off, because a start that hydrates one reads no stdlib cache.
-  (def paths [[:compiled ["--cache="]] [:cached cached]])
+  # with no directory turns both disk caches off, and `--boot-image=off` turns
+  # off the blob a release rig carries, so the compiled path compiles. The
+  # cached path turns the boot image off too, because a start that hydrates
+  # one reads no stdlib cache.
+  (def paths [[:compiled ["--cache=" "--boot-image=off"]] [:cached cached]])
   # Every run starts before any is read, so the producer costs about one run.
   (def @children @[])
   (each [path boot] in paths

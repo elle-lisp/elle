@@ -230,9 +230,11 @@ fn an_image_boot_compiles_a_program_to_the_bytecode_a_source_boot_does() {
         String::from_utf8_lossy(&stored.stderr)
     );
 
+    // Every dump turns the boot image off first, so the source dump compiles
+    // whatever the binary carries, and the image dump's flag overrides it.
     let dump = |flags: &[&str]| {
         let out = Command::new(elle_binary())
-            .arg("--cache=")
+            .args(["--cache=", "--boot-image=off"])
             .args(flags)
             .arg("--dump=bytecode")
             .arg(&file)
