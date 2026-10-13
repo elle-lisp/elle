@@ -1,7 +1,6 @@
 # Compilation Pipeline
 
 <!-- audited: 2026-10-13 -->
-
 Compilation entry points: source reaches bytecode through the reader, expander, analyzer, lowerer and emitter.
 
 Module: [src/pipeline](../src/pipeline/AGENTS.md).
@@ -44,11 +43,16 @@ pub struct AnalyzeResult {
     pub arena: BindingArena,
     pub errors: Vec<LError>,   // non-fatal analysis errors
     pub lambda_decls: HashMap<HirId, LambdaDecl>,
+    pub top_direct: SignalBits,
 }
 ```
 
-`lambda_decls` holds the ceiling each lambda declares. The HIR keeps the
-inferred signal, which the analyzer checked against that ceiling.
+`lambda_decls` holds the ceiling each lambda declares, and the bits its body
+raises by itself: its emits, and each construct that may raise
+([signals/inference.md](signals/inference.md)). The HIR keeps the inferred
+signal, which the analyzer checked against that ceiling. `top_direct` holds
+the bits the code outside every lambda raises by itself. A signal solver reads
+both ([impl/solver.md](impl/solver.md)).
 
 ### Functions
 
