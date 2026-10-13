@@ -1,4 +1,7 @@
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-10-13
+//! Type keywords, primitive sizes, and the C layout of structs and arrays.
+//!
+//! docs/ffi.md
 
 use super::*;
 
@@ -22,6 +25,20 @@ fn test_primitive_sizes() {
     assert_eq!(TypeDesc::Float.size(), Some(4));
     assert_eq!(TypeDesc::Double.size(), Some(8));
     assert_eq!(TypeDesc::Ptr.size(), Some(8)); // 64-bit platform
+}
+
+// A C `bool` is one byte with byte alignment, so it packs between two bytes.
+// Counter-factual: sized as an `int`, it lands at offset 4 of a 12-byte struct.
+#[test]
+fn bool_is_a_one_byte_c_bool() {
+    assert_eq!(TypeDesc::Bool.size(), Some(1));
+    assert_eq!(TypeDesc::Bool.align(), Some(1));
+    let desc = StructDesc {
+        fields: vec![TypeDesc::U8, TypeDesc::Bool, TypeDesc::U8],
+    };
+    let (offsets, total) = desc.field_offsets().unwrap();
+    assert_eq!(offsets, vec![0, 1, 2]);
+    assert_eq!(total, 3);
 }
 
 #[test]

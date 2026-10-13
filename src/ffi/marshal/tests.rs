@@ -1,6 +1,10 @@
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-10-13
+//! Marshalling between values and C storage: libffi types, argument storage, and buffer reads and writes.
+//!
+//! docs/ffi.md
 
 use super::*;
+use crate::ffi::to_c::ArgStorage;
 use crate::ffi::types::StructDesc;
 
 /// Run `f` with an `Alloc` over a fresh region on the root heap, NOT releasing
@@ -106,6 +110,45 @@ fn test_marshal_bool() {
     let f = Value::bool(false);
     assert!(MarshalledArg::new(&t, &TypeDesc::Bool).is_ok());
     assert!(MarshalledArg::new(&f, &TypeDesc::Bool).is_ok());
+}
+
+// A C `bool` argument is stored as one byte. Counter-factual: `int` storage is
+// `ArgStorage::I32`, four bytes for a parameter the callee reads as one.
+#[test]
+fn bool_argument_is_one_byte() {
+    let t = MarshalledArg::new(&Value::bool(true), &TypeDesc::Bool).unwrap();
+    let f = MarshalledArg::new(&Value::bool(false), &TypeDesc::Bool).unwrap();
+    assert!(matches!(t.storage, ArgStorage::U8(1)));
+    assert!(matches!(f.storage, ArgStorage::U8(0)));
+}
+
+/// An aligned four-byte buffer holding `bytes`.
+fn four_bytes(bytes: [u8; 4]) -> AlignedBuffer {
+    let buf = AlignedBuffer::new(4, 4);
+    unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf.as_mut_ptr(), 4) };
+    buf
+}
+
+// A `:bool` read takes one byte. Counter-factual: a `c_int` read over these
+// bytes is nonzero, so the false byte reads as true.
+#[test]
+fn bool_reads_only_its_own_byte() {
+    let buf = four_bytes([0, 0xFF, 0xFF, 0xFF]);
+    let v = crate::primitives::ctx::with_test_ctx(|ctx| {
+        read_value_from_buffer(buf.as_mut_ptr(), &TypeDesc::Bool, ctx)
+    })
+    .unwrap();
+    assert_eq!(v, Value::bool(false));
+}
+
+// A `:bool` write stores one byte and leaves its neighbors. Counter-factual:
+// a `c_int` write zeroes the three bytes after it.
+#[test]
+fn bool_writes_only_its_own_byte() {
+    let buf = four_bytes([0xFF; 4]);
+    write_value_to_buffer(buf.as_mut_ptr(), &Value::bool(true), &TypeDesc::Bool).unwrap();
+    let written = unsafe { std::slice::from_raw_parts(buf.as_mut_ptr(), 4) };
+    assert_eq!(written, &[1, 0xFF, 0xFF, 0xFF]);
 }
 
 #[test]
