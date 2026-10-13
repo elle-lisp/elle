@@ -170,12 +170,11 @@
 
 # ── A macro another unit wrote ───────────────────────────────────────
 
-## `gen`'s expansion writes `m` whole, so `m`'s body carries the scope of that
-## expansion, the first scope its eval mints. `m`'s transformer compiles in a
-## unit of its own, where `wrap`'s expansion is the first scope minted. The
-## two units take different tags, so `wrap`'s `+` does not capture the `+`
-## `gen` wrote. The counter-factual is a count with no tag: both are the first
-## count of a unit, they compare equal, and `m` answers (- 2 1).
+## `gen` writes `m` whole in one eval, and `m`'s transformer compiles in a later
+## one, where `wrap` binds `+` around the body `gen` wrote. That `+` is `gen`'s,
+## not `wrap`'s. The counter-factual is a flip that leaves an expansion's scope
+## on its arguments: `wrap`'s `+` then captures the body's, and `m` answers
+## (- 2 1).
 (eval '(defmacro wrap [body]
         (list 'let ['+ '-] body)))
 (eval '(begin
