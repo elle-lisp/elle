@@ -1,13 +1,12 @@
 // audited: 2026-10-13
-//! Marshalling helpers shared by both directions: libffi types, the aligned buffer, and integer checks.
+//! Marshalling helpers shared by both directions: the libffi type of a descriptor, and the aligned buffer.
 //!
 //! docs/ffi.md
 //!
-//! Value→C conversion is in `to_c.rs`, C→Value conversion is in `from_c.rs`.
+//! Value→C conversion is in `to_c.rs`, C→Value conversion is in `from_c.rs`,
+//! and the scalar checks both use are in `scalar.rs`.
 
-use crate::error::{LError, LResult};
 use crate::ffi::types::TypeDesc;
-use crate::value::Value;
 use libffi::middle::Type;
 
 // One import path for both conversion directions.
@@ -94,68 +93,6 @@ impl Drop for AlignedBuffer {
         unsafe {
             std::alloc::dealloc(self.ptr, self.layout);
         }
-    }
-}
-
-// ── Helpers ─────────────────────────────────────────────────────────
-
-pub(crate) fn extract_int(value: &Value, type_name: &str) -> LResult<i64> {
-    value.as_int().ok_or_else(|| {
-        LError::ffi_type_error(
-            type_name,
-            format!("expected integer, got {}", value.type_name()),
-        )
-    })
-}
-
-pub(crate) fn range_check(n: i64, min: i64, max: i64, type_name: &str) -> LResult<()> {
-    if n < min || n > max {
-        Err(LError::ffi_type_error(
-            type_name,
-            format!("value {} out of range [{}, {}]", n, min, max),
-        ))
-    } else {
-        Ok(())
-    }
-}
-
-pub(crate) fn desc_name(desc: &TypeDesc) -> &'static str {
-    match desc {
-        TypeDesc::UChar => "uchar",
-        TypeDesc::U8 => "u8",
-        _ => "unknown",
-    }
-}
-
-pub(crate) fn desc_name_full(desc: &TypeDesc) -> &'static str {
-    match desc {
-        TypeDesc::I8 => "i8",
-        TypeDesc::U8 => "u8",
-        TypeDesc::I16 => "i16",
-        TypeDesc::U16 => "u16",
-        TypeDesc::I32 => "i32",
-        TypeDesc::U32 => "u32",
-        TypeDesc::I64 => "i64",
-        TypeDesc::U64 => "u64",
-        TypeDesc::Int => "int",
-        TypeDesc::UInt => "uint",
-        TypeDesc::Long => "long",
-        TypeDesc::ULong => "ulong",
-        TypeDesc::Char => "char",
-        TypeDesc::UChar => "uchar",
-        TypeDesc::Short => "short",
-        TypeDesc::UShort => "ushort",
-        TypeDesc::Size => "size",
-        TypeDesc::SSize => "ssize",
-        TypeDesc::Float => "float",
-        TypeDesc::Double => "double",
-        TypeDesc::Ptr => "ptr",
-        TypeDesc::Str => "string",
-        TypeDesc::Bool => "bool",
-        TypeDesc::Bool32 => "bool32",
-        TypeDesc::Void => "void",
-        TypeDesc::Struct(_) => "struct",
-        TypeDesc::Array(_, _) => "array",
     }
 }
 

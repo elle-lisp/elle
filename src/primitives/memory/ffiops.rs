@@ -4,7 +4,8 @@
 //! docs/ffi.md
 
 use super::*;
-use crate::ffi::types::{from_c_bool, to_c_bool, CBool, CBool32};
+use crate::ffi::scalar::write_scalar;
+use crate::ffi::types::{from_c_bool, CBool, CBool32};
 
 pub fn prim_ffi_read(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
@@ -98,206 +99,44 @@ pub fn prim_ffi_write(
     let ptr = addr as *mut u8;
     let value = &args[2];
 
-    unsafe {
-        match desc {
-            TypeDesc::I8 | TypeDesc::Char => {
-                let n = match value.as_int() {
-                    Some(n) => n as i8,
-                    None => {
-                        return (
-                            SIG_ERROR,
-                            ctx.error("type-error", "ffi/write: expected integer"),
-                        )
-                    }
-                };
-                *(ptr as *mut i8) = n;
-            }
-            TypeDesc::U8 | TypeDesc::UChar => {
-                let n = match value.as_int() {
-                    Some(n) => n as u8,
-                    None => {
-                        return (
-                            SIG_ERROR,
-                            ctx.error("type-error", "ffi/write: expected integer"),
-                        )
-                    }
-                };
-                *ptr = n;
-            }
-            TypeDesc::I16 | TypeDesc::Short => {
-                let n = match value.as_int() {
-                    Some(n) => n as i16,
-                    None => {
-                        return (
-                            SIG_ERROR,
-                            ctx.error("type-error", "ffi/write: expected integer"),
-                        )
-                    }
-                };
-                *(ptr as *mut i16) = n;
-            }
-            TypeDesc::U16 | TypeDesc::UShort => {
-                let n = match value.as_int() {
-                    Some(n) => n as u16,
-                    None => {
-                        return (
-                            SIG_ERROR,
-                            ctx.error("type-error", "ffi/write: expected integer"),
-                        )
-                    }
-                };
-                *(ptr as *mut u16) = n;
-            }
-            TypeDesc::I32 | TypeDesc::Int => {
-                let n = match value.as_int() {
-                    Some(n) => n as i32,
-                    None => {
-                        return (
-                            SIG_ERROR,
-                            ctx.error("type-error", "ffi/write: expected integer"),
-                        )
-                    }
-                };
-                *(ptr as *mut i32) = n;
-            }
-            TypeDesc::U32 | TypeDesc::UInt => {
-                let n = match value.as_int() {
-                    Some(n) => n as u32,
-                    None => {
-                        return (
-                            SIG_ERROR,
-                            ctx.error("type-error", "ffi/write: expected integer"),
-                        )
-                    }
-                };
-                *(ptr as *mut u32) = n;
-            }
-            TypeDesc::I64 | TypeDesc::Long | TypeDesc::SSize => {
-                let n = match value.as_int() {
-                    Some(n) => n,
-                    None => {
-                        return (
-                            SIG_ERROR,
-                            ctx.error("type-error", "ffi/write: expected integer"),
-                        )
-                    }
-                };
-                *(ptr as *mut i64) = n;
-            }
-            TypeDesc::U64 | TypeDesc::ULong | TypeDesc::Size => {
-                let n = match value.as_int() {
-                    Some(n) => n as u64,
-                    None => {
-                        return (
-                            SIG_ERROR,
-                            ctx.error("type-error", "ffi/write: expected integer"),
-                        )
-                    }
-                };
-                *(ptr as *mut u64) = n;
-            }
-            TypeDesc::Float => {
-                let f = match value
-                    .as_float()
-                    .or_else(|| value.as_int().map(|i| i as f64))
-                {
-                    Some(f) => f,
-                    None => {
-                        return (
-                            SIG_ERROR,
-                            ctx.error("type-error", "ffi/write: expected number"),
-                        )
-                    }
-                };
-                *(ptr as *mut f32) = f as f32;
-            }
-            TypeDesc::Double => {
-                let f = match value
-                    .as_float()
-                    .or_else(|| value.as_int().map(|i| i as f64))
-                {
-                    Some(f) => f,
-                    None => {
-                        return (
-                            SIG_ERROR,
-                            ctx.error("type-error", "ffi/write: expected number"),
-                        )
-                    }
-                };
-                *(ptr as *mut f64) = f;
-            }
-            TypeDesc::Bool => {
-                *(ptr as *mut CBool) = to_c_bool(value);
-            }
-            TypeDesc::Bool32 => {
-                *(ptr as *mut CBool32) = to_c_bool(value);
-            }
-            TypeDesc::Ptr => {
-                let p = if value.is_nil() {
-                    0usize
-                } else if let Some(a) = value.as_pointer() {
-                    a
-                } else if let Some(cell) = value.as_managed_pointer() {
-                    match cell.get() {
-                        Some(a) => a,
-                        None => {
-                            return (
-                                SIG_ERROR,
-                                ctx.error(
-                                    "use-after-free",
-                                    "ffi/write: source pointer has been freed",
-                                ),
-                            )
-                        }
-                    }
-                } else {
-                    return (
-                        SIG_ERROR,
-                        ctx.error("type-error", "ffi/write: expected pointer"),
-                    );
-                };
-                *(ptr as *mut usize) = p;
-            }
-            TypeDesc::Void => {
-                return (
-                    SIG_ERROR,
-                    ctx.error("ffi-error", "ffi/write: cannot write void"),
-                )
-            }
-            TypeDesc::Str => {
-                return (
-                    SIG_ERROR,
-                    ctx.error("ffi-error", "ffi/write: use ptr type for writing pointers"),
-                )
-            }
-            #[cfg(feature = "ffi")]
-            TypeDesc::Struct(_) | TypeDesc::Array(_, _) => {
-                match crate::ffi::marshal::write_value_to_buffer(ptr, value, &desc) {
-                    Ok(_owned) => {
-                        // The owned C strings of `:string` fields drop here, so the
-                        // pointers written for those fields dangle once this returns.
-                    }
-                    Err(e) => {
-                        return (
-                            SIG_ERROR,
-                            ctx.error("ffi-error", format!("ffi/write: {}", e)),
-                        )
-                    }
-                }
-            }
-            #[cfg(not(feature = "ffi"))]
-            TypeDesc::Struct(_) | TypeDesc::Array(_, _) => {
-                return (
-                    SIG_ERROR,
-                    ctx.error(
-                        "ffi-error",
-                        "ffi/write: struct/array requires `ffi` feature",
-                    ),
-                )
-            }
+    let written = match desc {
+        TypeDesc::Void => {
+            return (
+                SIG_ERROR,
+                ctx.error("ffi-error", "ffi/write: cannot write void"),
+            )
         }
+        TypeDesc::Str => {
+            return (
+                SIG_ERROR,
+                ctx.error("ffi-error", "ffi/write: use ptr type for writing pointers"),
+            )
+        }
+        #[cfg(feature = "ffi")]
+        TypeDesc::Struct(_) | TypeDesc::Array(_, _) => {
+            // The owned C strings of `:string` fields drop here, so the
+            // pointers written for those fields dangle once this returns.
+            crate::ffi::marshal::write_value_to_buffer(ptr, value, &desc).map(|_owned| ())
+        }
+        #[cfg(not(feature = "ffi"))]
+        TypeDesc::Struct(_) | TypeDesc::Array(_, _) => {
+            return (
+                SIG_ERROR,
+                ctx.error(
+                    "ffi-error",
+                    "ffi/write: struct/array requires `ffi` feature",
+                ),
+            )
+        }
+        _ => write_scalar(ptr, value, &desc),
+    };
+    match written {
+        Ok(()) => (SIG_OK, Value::NIL),
+        Err(e) => (
+            SIG_ERROR,
+            ctx.error("ffi-error", format!("ffi/write: {}", e)),
+        ),
     }
-    (SIG_OK, Value::NIL)
 }
 pub(crate) fn prim_ffi_string(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,

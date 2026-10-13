@@ -6,6 +6,7 @@
 use super::*;
 use crate::ffi::to_c::ArgStorage;
 use crate::ffi::types::StructDesc;
+use crate::value::Value;
 
 /// Run `f` with an `Alloc` over a fresh region on the root heap, NOT releasing
 /// it: a reconstructed heap value must outlive the call (the test reads it

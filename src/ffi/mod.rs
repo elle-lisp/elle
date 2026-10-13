@@ -1,10 +1,11 @@
-//! Elle Foreign Function Interface (FFI) subsystem.
+// audited: 2026-10-13
+//! The FFI subsystem: a VM's loaded-library ids and live callbacks, over the modules that call C.
 //!
-//! Enables calling C functions from Elle code. This module is being rebuilt
-//! to match the design in docs/ffi.md.
+//! docs/ffi.md
 //!
-//! The `ffi` cargo feature gates the libffi-dependent call/callback
-//! machinery. Type descriptors and library loading are always available.
+//! The `ffi` cargo feature gates the libffi-dependent call, callback and
+//! marshalling modules. Type descriptors, library loading and the scalar
+//! writer are always available.
 
 #[cfg(feature = "ffi")]
 pub mod call;
@@ -15,6 +16,7 @@ pub(crate) mod from_c;
 #[cfg(feature = "ffi")]
 pub mod marshal;
 pub mod registry;
+pub(crate) mod scalar;
 #[cfg(feature = "ffi")]
 pub(crate) mod to_c;
 pub mod types;

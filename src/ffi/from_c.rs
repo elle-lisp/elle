@@ -12,8 +12,9 @@
 //!
 //! This is lossless — all 64 bits are preserved. Callers that need the
 //! original unsigned value recover it with `value.as_int().unwrap() as u64`.
-//! The same reinterpretation happens in `to_c.rs` when writing the value back
-//! to C: `extract_int(value)? as u64` recovers the original bits.
+//! The same reinterpretation happens in `scalar.rs` and `to_c/new.rs` when
+//! writing the value back to C: `extract_int(..)? as u64` recovers the
+//! original bits.
 //!
 //! This convention works correctly because `Value::int` stores a full i64
 //! (no truncation — the tagged-union representation stores a full i64).
