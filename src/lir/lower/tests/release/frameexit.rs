@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-13
 //! A release past a frame-replacing tail call is carried ahead of it, unless it is the call's ownership move.
 //!
 //! docs/impl/region/mechanism.md
@@ -338,6 +338,122 @@ fn an_owned_tail_argument_is_not_named_on_the_call() {
         "an owned tail argument was named as a borrowed retain (slots={slots:?}) — \
          releasing it at a signal exit drops the reference the move handed over",
     );
+}
+
+#[test]
+fn a_renamed_pattern_leaf_is_named_on_the_call() {
+    // Each body renames a pattern leaf and passes the new name beside a sibling
+    // leaf, so the call names two borrowed arguments. Naming only the sibling is
+    // the counter-factual: the renamed value moves with no mint, and the callee's
+    // release lowers the count the scrutinee holds. The conditional `assign` is
+    // the version a `default` builds, a phi with one fresh arm.
+    let mut unminted = Vec::new();
+    for (label, params, body) in [
+        ("a let", "(t)", "(let [[s f] t] (let [g f] (k s g)))"),
+        ("a letrec", "(t)", "(let [[s f] t] (letrec [g f] (k s g)))"),
+        ("a def", "(&named s f)", "(begin (def g f) (k s g))"),
+        ("an assign", "(&named s @f)", "(begin (assign f f) (k s f))"),
+        (
+            "a conditional assign",
+            "(&named s @f)",
+            "(begin (if f nil (assign f (fn (x) x))) (k s f))",
+        ),
+    ] {
+        let call = if params == "(t)" {
+            "(m [1 (fn (x) x)])"
+        } else {
+            "(m :s 1 :f (fn (x) x))"
+        };
+        let module = compile_to_lir(&format!(
+            "(begin (def k (fn (a b) b)) (def m (fn {params} {body})) {call})"
+        ));
+        let slots = tail_call_borrowed_slots(&module);
+        if !slots.iter().any(|s| s.len() == 2) {
+            unminted.push(format!("{label} (slots={slots:?})"));
+        }
+    }
+    assert!(
+        unminted.is_empty(),
+        "a renamed leaf was moved without a mint: {unminted:?} — the call must \
+         name the alias beside the sibling leaf",
+    );
+}
+
+#[test]
+fn a_defaulted_parameter_releases_the_closure_it_built_before_the_tail_call() {
+    // The version a `default` builds is a phi over a struct leaf and a closure
+    // the body built. The call mints the phi a reference of its own, so it moves
+    // none of the frame's. Left in the dead block past the `TailCall`, the built
+    // closure's release never runs, and the mint keeps the closure once per call.
+    let module = compile_to_lir(
+        "(begin (def k (fn (a b) b)) \
+         (def m (fn (&named s @f) (begin (if f nil (assign f (fn (x) x))) (k s f)))) \
+         (m :s 1))",
+    );
+    let m = module
+        .closures
+        .iter()
+        .find(|f| f.view().name() == Some("m"))
+        .expect("a closure named m");
+    let built = flat_instrs(m)
+        .into_iter()
+        .find_map(|i| match i {
+            InstrRef::MakeClosure { region, .. } => Some(region),
+            _ => None,
+        })
+        .expect("m builds the default closure");
+    let (b, at) = tail_call_blocks_of(m).next().expect("m ends in a TailCall");
+    let releases = positions(
+        &b,
+        |i| matches!(i, InstrRef::DecrefRegion { region_id } if *region_id == built),
+    );
+    assert!(
+        !releases.is_empty() && releases.iter().all(|&r| r < at),
+        "the built default closure is released after the TailCall \
+         (at={at}, releases={releases:?}) — dead on the closure path",
+    );
+}
+
+#[test]
+fn a_renamed_capture_is_named_on_the_call() {
+    // `y` renames `g`'s upvalue `x`. The env holds the only reference, so the
+    // call must mint one for the move, exactly as it does for `x` itself.
+    let module = compile_to_lir(
+        "(begin (def f (fn (x) (let [g (fn () (let [y x] (length y)))] (g)))) \
+         (f (list 1 2)))",
+    );
+    let slots = tail_call_borrowed_slots(&module);
+    assert!(
+        slots.iter().any(|s| s.len() == 1),
+        "a renamed capture was moved without a mint (slots={slots:?})",
+    );
+}
+
+#[test]
+fn a_renamed_owned_tail_argument_is_not_named_on_the_call() {
+    // The over-mint face. A rename of an owned value moves the frame's own
+    // reference. A counted read of a reassigned capture takes a reference of its
+    // own at the binder, so its name owns what it moves. A mint for either is one
+    // reference no release consumes.
+    for (label, src) in [
+        (
+            "an owned value",
+            "(begin (def f (fn () (let [w (list 1 2) y w] (length y)))) (f))",
+        ),
+        (
+            "a counted read",
+            "(begin (def f (fn () (begin (def @x (list 1)) \
+             (let [h (fn () (let [y x] (length y)))] (begin (assign x (list 2)) (h)))))) \
+             (f))",
+        ),
+    ] {
+        let module = compile_to_lir(src);
+        let slots = tail_call_borrowed_slots(&module);
+        assert!(
+            slots.iter().all(|s| s.is_empty()),
+            "a rename of {label} was named as a borrowed retain (slots={slots:?})",
+        );
+    }
 }
 
 #[test]

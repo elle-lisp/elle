@@ -1,6 +1,6 @@
 # Testing
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-13 -->
 
 The two test suites, what each one claims, the builds that run them, and how a
 run is read.
@@ -233,23 +233,30 @@ a 0.5 bound, on a commit that costs 0.003s on a quiet box.
 
 Measure a **control** instead. Pick an operation of the same size, in the same
 process, that runs the path the regression cannot reach, and require the
-subject to stay within a small multiple of it. A starved machine slows both
+subject to stay within a small multiple of it. A slow machine slows both
 measurements, so the ratio survives what an absolute bound does not, and a
 per-byte path costs about a hundred times the bulk one.
 
-Two rules keep the ratio steady:
+Three rules keep the ratio steady:
 
+- **Time the thread's CPU, not the wall.** A child on a crowded runner can
+  wait for a CPU through every round of one thunk and through none of the
+  other's. `clock/cpu` counts only the time the calling thread ran, so the
+  wait never enters a timing. The thunk must do its work on that thread.
 - **Alternate the two measurements, and keep the smallest of several rounds.**
-  Both thunks then sample the same stretch of machine, and one stalled round
+  Both thunks then sample the same stretch of machine, and one slow round
   decides nothing.
 - **Build the operands outside the timed thunk.** `length` on a string counts
   graphemes, so a loop that re-reads it times the walk instead of the work.
 
-The two worked examples are [bytes-linear.lisp](../tests/impl/bytes-linear.lisp),
-which gates a binary append against the same-size text append, and
+`best-of` in [the ratchet](../lib/ratchet.md) keeps the first two rules, so
+time a gate with it rather than with a loop of your own. The worked examples
+are [bytes-linear.lisp](../tests/impl/bytes-linear.lisp), which gates a binary
+append against the same-size text append,
 [concat-linear.lisp](../tests/impl/concat-linear.lisp), which gates a string
-concat against the
-same-size bytes concat.
+concat against the same-size bytes concat, and
+[apply-tail-linear.lisp](../tests/impl/apply-tail-linear.lisp), which gates a
+tail call against the same call in non-tail position.
 
 A **timeout** test is the other case, and it keeps its absolute bound. There
 the deadline is the specification: a 50 ms `chan/select` has to return in about

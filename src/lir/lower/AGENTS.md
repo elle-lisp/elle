@@ -1,6 +1,6 @@
 # lir/lower
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-13 -->
 
 HIR to LIR lowering: explicit control flow, binding slot allocation, capture cells, and region RC instruction emission.
 
@@ -101,8 +101,10 @@ argument lives in its doc comment; this is where to find them.
 - `tail_arg_is_borrowed` ([control.rs](control.rs)) — a tail-call argument is
   borrowed when any value-producing leaf of it is a captured upvalue (inside a
   lambda), a binding a pattern bound to a borrowed subview of its scrutinee
-  (`destructure_alias_bindings`), or a heap constant. It is structural and does
-  not read `EscapeInfo`, because escape over-approximates "the env owns it" and
+  (`destructure_alias_bindings`), or a heap constant. A `let`, `letrec` or `def`
+  binding whose initializer passes the same test is such a leaf too, unless its
+  binder took a counted reference (`borrowed_alias_bindings`). The predicate is
+  structural and does not read `EscapeInfo`, because escape over-approximates "the env owns it" and
   a mint for an owned escaping argument double-releases across a fiber
   suspend/resume.
 - `tail_callee_defers_release` ([control/call/defer.rs](control/call/defer.rs))
@@ -121,9 +123,9 @@ argument lives in its doc comment; this is where to find them.
   ahead of the `TailCall`. What the call can still reach keeps its place: the
   regions its callee, operands, result and `deferred_release_slot` channel name,
   and any run that reloads an operand's slot or reads a register defined outside
-  it (`hoistable_run`). A destructured leaf argument keeps the exemption only
-  where the call passes the slot the region's own release route loads
-  (`drop_named_only_arg_exemptions`). The region must also be frame-held
+  it (`hoistable_run`). A destructured leaf argument, or a retained alias from
+  `borrowed_alias_bindings`, keeps the exemption only where the call passes the
+  slot the region's own release route loads (`drop_named_only_arg_exemptions`). The region must also be frame-held
   (`RegionInfo::frame_held_regions`), because a tail callee reaches its captured
   environment too. The argument is
   [docs/impl/region/relocate.md](../../../docs/impl/region/relocate.md).

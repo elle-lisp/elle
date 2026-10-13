@@ -1,6 +1,6 @@
 # The ratchet
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-13 -->
 
 One library measures, one committed ledger holds every bound, and the runner
 judges, records and re-pins; nothing else carries a number.
@@ -141,8 +141,8 @@ own build alone, and every pin is two-sided there. A row of another build is
 no row at all.
 
 A row with no class is a control: a shape the tree reclaims, pinned at what it
-reads. The slack is for a subject the machine makes noisy, a wall-clock ratio
-for instance. It is not for the estimator's uncertainty, which every rate
+reads. The slack is for a subject the machine makes noisy, a timing ratio for
+instance. It is not for the estimator's uncertainty, which every rate
 already carries as `half`. Nor is it a resolution. A rate's resolution is the
 epsilon the producer measures it to, and a producer that wants to see a tenth
 of an object per operation measures to a tenth.
@@ -186,8 +186,7 @@ what the gate can hold.
 A void reading is one the instrument refuses to stand behind. That is a rate
 whose B-invariance check found it block-dependent, a growth row that read
 flat, or any later reading on an axis whose growth row read flat. The message
-names the cause and the rows it voids, once, here. Today each dashboard writes
-that sentence itself.
+names the cause and the rows it voids, once, here.
 
 `missing` is what closes elle-lisp/elle#1144. The ledger names every subject
 and axis the tree claims to measure, and a run that reports none of a claimed
@@ -298,8 +297,9 @@ producer prints the same lines the runner reads, and judges none of them.
 | `(rate subject probe & opts)` | the adaptive per-op rate of `(probe j)`, reported on `:on` gauges (default `objects`), to `:epsilon`, over `:block` ops per block between `:min` and `:max` blocks; `:stable true` runs the B-invariance check |
 | `(drive subject run-block & opts)` | the same rate over a run-block of the caller's own, `(fn [b])` performing `b` ops: a tail recursion, a fiber drained after `b` yields, a loop that must be a discarded statement |
 | `(stmt-run thunk)` | the run-block that calls `thunk` `b` times as a discarded statement, the while-loop shape a per-call leak needs to show |
-| `(delta subject gauge body :n N)` | the gauge's change over `N` runs of `body`, per run, after one uncounted run |
-| `(ratio subject measured control)` | the smaller of several alternating timings of `measured` over the same of `control` |
+| `(delta subject body & opts)` | each `:on` gauge's change over `:n` runs of `body`, per run, after one uncounted run |
+| `(best-of rounds control subject)` | the smallest CPU time each thunk took over `rounds` alternating rounds, as `[control subject]`; it prints nothing |
+| `(ratio subject measured control)` | the `best-of` timing of `measured` over that of `control` |
 | `(read subject axis value & opts)` | any number from anywhere: a count a script parsed, a byte total `valgrind` printed |
 
 **The instrument proves each gauge live.** The first time a producer reads an
@@ -325,7 +325,8 @@ whole contract, so that step adds a parser and no second channel.
 ## Landing order
 
 Each phase lands as documentation, then a failing test, then code, and each
-is one pull request. The first four are in.
+is one pull request. The first four are in. Of the fifth, the runner's own
+gauges, the audit queue, valgrind and the first residue tests are in.
 
 1. **The library and the ledger.** `lib/ratchet.lisp` with `rate`, `delta`,
    `read` and the gauges, the judge and the row reader, and `tests/ledger/`.

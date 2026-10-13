@@ -1,6 +1,6 @@
 # Region rules — the implementor's correctness obligations
 
-<!-- audited: 2026-10-11 -->
+<!-- audited: 2026-10-13 -->
 
 The exhaustive correctness contract the compiler and runtime must uphold for
 regions.
@@ -225,11 +225,15 @@ is a correctness defect, not a tuning knob.
      what lets that block's deadness carry weight, and it does so for
      **arguments only**. A release landing there for anything the call does
      not name has no such story. It is carried back ahead of the `TailCall`
-     ([relocate.md](relocate.md)). Two borrow routes: a captured upvalue (owned
-     by the closure env's capture-incref), and a compile-time-constant heap value
+     ([relocate.md](relocate.md)). Three borrow routes: a captured upvalue
+     (owned by the closure env's capture-incref), a pattern's element binding (a
+     subview its scrutinee owns), and a compile-time-constant heap value
      (`immutable_values`). That value is a stdlib export closure or a
-     `begin-for-syntax` value, owned by the env that seeded it. It is never
-     captured, so the frame holds no reference at all. `tail_arg_is_borrowed`,
+     `begin-for-syntax` value, which the seeding env owns, so the frame holds no
+     reference at all. A `let`, `letrec` or `def` binding whose binder counts no
+     read ([reads.md](reads.md)) holds no reference either. So it is borrowed
+     wherever its initializer would be as the argument, and the version an
+     `assign` functionalizes to is one. `tail_arg_is_borrowed`,
      [control.rs](../../../src/lir/lower/control.rs).
      The move is **one reference per occurrence, not one per call**. The frame
      holds a single reference to a region, while the callee's owned-param

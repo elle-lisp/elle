@@ -281,3 +281,4 @@
 ["tests/lang/page-claims.lisp" :objects 740]
 ["tests/impl/region-self-store.lisp" :objects 208]
 ["tests/lang/self-reference-signal.lisp" :objects 336]
+["tests/impl/ratchet-cpu-timing.lisp" :objects 144]
