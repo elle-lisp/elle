@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-12
 //! The solver's vocabulary: interned signal variables, and the facts that the extractor states over them.
 //!
 //! docs/impl/solver.md
@@ -43,7 +43,7 @@ pub enum VarKey {
 /// The facts the extractor emits. Each field is one Datalog relation.
 #[derive(Default)]
 pub struct Facts {
-    /// `raw(C, B)`: context C emits bit B itself.
+    /// `raw(C, B)`: context C raises bit B by itself, whatever it calls.
     pub raw: BTreeSet<(VarId, u32)>,
     /// `bits(V, B)`: V raises bit B by itself. Primitives, literals and
     /// unknown values carry these.
@@ -72,8 +72,6 @@ pub struct Facts {
     pub hasfld: BTreeSet<(VarId, KeyId)>,
     /// `opaque(A)`: A's fields are unknown.
     pub opaque: BTreeSet<VarId>,
-    /// `muf(C, B)`: C muffles bit B.
-    pub muf: BTreeSet<(VarId, u32)>,
     /// `ceiled(C)`: C declares a ceiling.
     pub ceiled: BTreeSet<VarId>,
     /// `ceil(C, B)`: C's ceiling allows bit B.
@@ -206,12 +204,16 @@ pub fn to_word(bits: impl Iterator<Item = u32>) -> u64 {
 }
 
 /// The least model of the rules in docs/impl/solver.md: each variable's bits,
-/// its free variables, and each ceiling a body raises past.
+/// its free variables, and how each ceiled body breaks its ceiling.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Solution {
     pub bits: BTreeSet<(VarId, u32)>,
     pub dep: BTreeSet<(VarId, VarId)>,
+    /// `viol(C, B)`: ceiled C raises bit B, which its ceiling does not admit.
     pub viol: BTreeSet<(VarId, u32)>,
+    /// `vdep(C, W)`: ceiled C depends on free variable W, which no ceiling
+    /// admits.
+    pub vdep: BTreeSet<(VarId, VarId)>,
 }
 
 impl Model {
