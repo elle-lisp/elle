@@ -1,5 +1,5 @@
-// audited: 2026-10-06
-// A macro that never returns fails the compile that expands it, and a transformer spends a fuel budget of its own.
+// audited: 2026-10-12
+// A macro that never returns fails the compile that expands it: an expansion spends a budget apart from fiber fuel.
 //
 // docs/macros.md
 // docs/runtime.md
@@ -70,6 +70,9 @@ fn run_elle(cwd: &Path, args: &[&str], stdin: &str) -> Run {
 
 /// A macro whose body never returns.
 const SPIN: &str = "(defmacro spin [] (forever nil))";
+
+/// A macro whose body never returns, and whose loop is not silent.
+const COUNT_ON: &str = "(defmacro count-on [] (begin (var i 0) (while true (assign i (+ i 1)))))";
 
 #[test]
 fn a_looping_macro_fails_the_compile_of_a_file() {
@@ -193,4 +196,81 @@ fn a_macro_within_the_budget_expands() {
     let run = run_elle(dir.path(), &["-"], program);
     assert_eq!(run.code, Some(0), "the program runs: {}", run.stderr);
     assert_eq!(run.stdout.trim(), "100000");
+}
+
+/// A loop on a child fiber spends the expansion budget. `protect` runs its
+/// body on a fiber of its own, and the loop's `+` call is not silent. The
+/// counter-factual is a budget that only the expansion's own fiber spends: the
+/// child holds no budget, so the loop runs until the deadline.
+#[test]
+fn a_loop_on_a_child_fiber_fails_the_compile() {
+    let dir = tempfile::tempdir().expect("scratch dir");
+    let file = dir.path().join("child.lisp");
+    let program = "(defmacro on-child []\n  \
+                   (begin (protect (begin (var i 0) (while true (assign i (+ i 1))))) :caught))\n\
+                   (print (on-child))\n";
+    std::fs::write(&file, program).expect("write child.lisp");
+    let file = file.display().to_string();
+    let run = run_elle(dir.path(), &[&file], "");
+    assert_eq!(run.code, Some(1), "the compile fails: {}", run.stderr);
+    assert!(
+        run.stderr.contains("macro 'on-child'") && run.stderr.contains("fuel"),
+        "the error names the macro and its budget: {}",
+        run.stderr
+    );
+}
+
+/// A silent function the transformer calls spends the budget too, and the
+/// halt crosses its boundary. `helper` holds no call, so its signal is silent.
+/// The counter-factual is the silent spend outside an expansion, which never
+/// stops the fiber, so the loop runs until the deadline.
+#[test]
+fn a_silent_loop_a_transformer_calls_fails_the_compile() {
+    let dir = tempfile::tempdir().expect("scratch dir");
+    let file = dir.path().join("silent.lisp");
+    let program = "(begin-for-syntax (def helper (fn [go] (while go nil) 0)))\n\
+                   (defmacro spin-in-helper [] (helper true))\n\
+                   (print (spin-in-helper))\n";
+    std::fs::write(&file, program).expect("write silent.lisp");
+    let file = file.display().to_string();
+    let run = run_elle(dir.path(), &[&file], "");
+    assert_eq!(run.code, Some(1), "the compile fails: {}", run.stderr);
+    assert!(
+        run.stderr.contains("macro 'spin-in-helper'") && run.stderr.contains("fuel"),
+        "the error names the macro and its budget: {}",
+        run.stderr
+    );
+}
+
+/// A nested expansion spends the budget of the expansion that started it. The
+/// inner `count-on` exhausts it, and its failure is caught, so the loop after
+/// the `protect` finds the budget spent and halts `outer`. The counter-factual
+/// gives each expansion a fresh budget: the inner loop is not silent, so its
+/// own budget stops it, `outer` survives, and the program prints `:survived`.
+#[test]
+fn a_nested_expansion_spends_the_outer_budget() {
+    let dir = tempfile::tempdir().expect("scratch dir");
+    let file = dir.path().join("nested.lisp");
+    let program = format!(
+        "(defmacro outer []\n  \
+         (begin (protect (eval '(begin {COUNT_ON} (count-on))))\n         \
+         (var k 0) (while (< k 10) (assign k (+ k 1)))\n         \
+         :survived))\n\
+         (print (outer))\n"
+    );
+    std::fs::write(&file, program).expect("write nested.lisp");
+    let file = file.display().to_string();
+    let run = run_elle(dir.path(), &[&file], "");
+    assert_eq!(
+        run.code,
+        Some(1),
+        "the compile fails: {}{}",
+        run.stdout,
+        run.stderr
+    );
+    assert!(
+        run.stderr.contains("macro 'outer'") && run.stderr.contains("fuel"),
+        "the error names the outer macro and its budget: {}",
+        run.stderr
+    );
 }
