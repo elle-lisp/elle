@@ -266,7 +266,9 @@ The number of arguments must match the signature's argument count exactly.
 
 ### Argument marshalling
 
-`ffi/call` converts each argument to C storage of its declared type:
+`ffi/call` converts each argument to C storage of its declared type.
+`ffi/write` converts its value by the same rules, and so does each struct
+field and array element:
 
 - **Integers**: Range-checked and narrowed. Passing 256 as `:i8` is an error.
 - **Floats**: `:float` and `:double` accept an integer or a float.
@@ -315,6 +317,21 @@ C memory is managed by hand:
 
 A pointer from `ffi/malloc` knows when it is freed. Reading, writing or
 freeing it again is an error, and nothing frees it for you.
+
+`ffi/write` checks its value as `ffi/call` checks an argument. A value that
+the type cannot hold is an `ffi-error`, and the write does not happen:
+
+```lisp
+(def cell (ffi/malloc 4))
+(ffi/write cell :u32 7)
+(def [fits? err] (protect (ffi/write cell :u8 256)))
+(assert (not fits?) "256 does not fit in :u8")
+(assert (= (get err :error) :ffi-error) "a value out of range is an ffi-error")
+(assert (= (ffi/read cell :u32) 7) "the failed write leaves the memory alone")
+(def [int? _] (protect (ffi/write cell :i32 "seven")))
+(assert (not int?) "a string is not an :i32")
+(ffi/free cell)
+```
 
 `ffi/string` reads a NUL-terminated UTF-8 string from a pointer. With a second
 argument, it reads at most that many bytes, and stops at the first NUL byte in
@@ -421,9 +438,9 @@ Each FFI primitive signals its errors as error structs. The kinds:
 | `arity-error` | A primitive got the wrong number of arguments, or a callback closure cannot take the signature's arguments |
 | `type-error` | An argument has the wrong type, for example an integer where a pointer belongs, or `ffi/call` got nil as the function |
 | `argument-error` | `ffi/read` or `ffi/write` got nil, `ffi/malloc` got a size that is not positive, `ffi/struct` or `ffi/array` got no fields, a void field or a count that is not positive, or the fixed-argument count of `ffi/signature` is out of range |
-| `use-after-free` | A pointer from `ffi/malloc` was used after `ffi/free` |
+| `use-after-free` | A primitive got a pointer that `ffi/free` already freed, as the memory to read, write or offset |
 | `double-free` | `ffi/free` got a pointer that it already freed |
-| `ffi-error` | A type keyword is unknown, a library or symbol does not load, `ffi/malloc` failed, `ffi/call` cannot marshal an argument or got the wrong argument count, `ffi/read` or `ffi/write` got `:void`, `ffi/write` got `:string`, `ffi/string` read data that is not UTF-8, `ffi/callback` got a variadic signature, or `ffi/callback-free` found no callback |
+| `ffi-error` | A type keyword is unknown, a library or symbol does not load, `ffi/malloc` failed, `ffi/call` or `ffi/write` cannot convert a value to its type, `ffi/call` got the wrong argument count, `ffi/read` or `ffi/write` got `:void`, `ffi/write` got `:string`, `ffi/string` read data that is not UTF-8, `ffi/callback` got a variadic signature, or `ffi/callback-free` found no callback |
 
 
 ## Signals and capabilities

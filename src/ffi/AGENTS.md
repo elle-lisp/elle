@@ -27,7 +27,8 @@ Does NOT:
 - Own the `Value::pointer()` representation (that's `value/repr`)
 
 The `ffi` cargo feature gates libffi: the call, callback and marshalling
-modules. Type descriptors and library loading build without it.
+modules. Type descriptors, library loading and the scalar writer build without
+it, so `ffi/write` checks a scalar the same way in every build.
 
 ## Interface
 
@@ -40,6 +41,7 @@ modules. Type descriptors and library loading build without it.
 | `StructDesc` | [types.rs](types.rs) | Positional struct descriptor with field layout |
 | `MarshalledArg` | [to_c.rs](to_c.rs) | Holds C-typed storage for one FFI argument |
 | `write_value_to_buffer` | [to_c/buffer.rs](to_c/buffer.rs) | Write a value into caller-provided C memory |
+| `write_scalar` | [scalar.rs](scalar.rs) | Write a number, boolean or pointer into C memory, checked against its type |
 | `read_value_from_buffer` | [from_c.rs](from_c.rs) | Read C memory into a value |
 | `AlignedBuffer` | [marshal.rs](marshal.rs) | Heap buffer with guaranteed alignment for struct data |
 | `to_libffi_type` | [marshal.rs](marshal.rs) | The libffi type of a `TypeDesc` |
