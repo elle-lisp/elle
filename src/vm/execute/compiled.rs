@@ -24,11 +24,16 @@ impl VM {
     /// Count a tail call to `closure` for the JIT, and answer the compiled code
     /// the trampoline runs it with: the cached code, while the native stack has
     /// room for it (docs/impl/jit.md). Counting runs no code, so the reserve
-    /// does not gate it.
+    /// does not gate it. During an expansion the call is neither counted nor
+    /// compiled, as in call position, because compiled code cannot spend the
+    /// expansion budget (docs/runtime.md).
     pub(in crate::vm) fn tail_callee_code(
         &mut self,
         closure: &crate::value::Closure,
     ) -> Option<Arc<JitCode>> {
+        if self.expanding() {
+            return None;
+        }
         let code = self.profile_jit_candidate(closure)?;
         let low = crate::vm::native_stack::below(crate::vm::native_stack::COMPILED_CALL_RESERVE);
         (!low).then_some(code)

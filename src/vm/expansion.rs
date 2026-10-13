@@ -1,6 +1,6 @@
 // audited: 2026-10-12
 //! Code a compile runs on a VM: a macro transformer call, and the body of a
-//! `begin-for-syntax` definition, each under an expansion fuel budget.
+//! `begin-for-syntax` definition, each under the expansion budget.
 //!
 //! docs/macros.md
 //! docs/runtime.md
@@ -8,21 +8,67 @@
 //!
 //! Both run on the fiber the expansion runs on: the macro VM's fresh fiber, or
 //! the fiber whose `eval` or `compile/analyze` started the compile. The budget
-//! replaces that fiber's fuel for the call, and the fiber's own fuel comes back
-//! unspent. A compile cannot hold a park, so a body that suspends has its park
-//! refused, as `eval` refuses one, and the call answers a fault.
+//! lives on the VM, so every fiber the expansion resumes spends it, and an
+//! expansion nested inside another spends the outer one's. The fiber's own fuel
+//! is put aside for the call and comes back unspent. A compile cannot hold a
+//! park, so a body that suspends has its park refused, as `eval` refuses one,
+//! and the call answers a fault.
 
 use super::core::VM;
 use crate::signals::registry::format_bits;
 use crate::value::fiber::Fuel;
 use crate::value::heap::TableKey;
 use crate::value::CodeUnit;
-use crate::value::{SignalBits, Value, SIG_ERROR, SIG_FUEL, SIG_HALT};
+use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT};
 use std::rc::Rc;
 
-/// The fuel one transformer call, or one `begin-for-syntax` definition, may
-/// spend, whatever fuel its fiber holds.
+/// The fuel an expansion may spend, with every expansion nested inside it,
+/// whatever fuel its fiber holds.
 pub const EXPANSION_FUEL: u64 = 1 << 24;
+
+/// The error kind of the halt a spent expansion budget raises.
+const SPENT_KIND: &str = "out-of-fuel";
+
+/// The budget of the expansion running on a VM, apart from the fuel of every
+/// fiber. Unmetered while no expansion runs, so a charge then takes nothing.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct ExpansionBudget(Fuel);
+
+impl ExpansionBudget {
+    /// Whether an expansion is running.
+    #[inline]
+    pub(crate) fn is_live(self) -> bool {
+        self.0.is_metered()
+    }
+
+    /// Take one unit. Answers false, and takes nothing, when an expansion runs
+    /// and its budget is spent: the charging instruction must then halt it.
+    #[inline]
+    pub(crate) fn charge(&mut self) -> bool {
+        !self.0.is_metered() || self.0.charge()
+    }
+
+    /// Start the budget, unless an expansion already runs. Answers whether this
+    /// call started it, which makes the caller the one to [`Self::close`] it.
+    fn open(&mut self) -> bool {
+        if self.is_live() {
+            return false;
+        }
+        self.0 = Fuel::budget(EXPANSION_FUEL).expect("the expansion budget is an integer");
+        true
+    }
+
+    /// End the budget: no expansion runs.
+    fn close(&mut self) {
+        self.0 = Fuel::unmetered();
+    }
+
+    /// The units left, or `None` while no expansion runs.
+    #[cfg(test)]
+    fn remaining(self) -> Option<u64> {
+        self.0.remaining()
+    }
+}
 
 /// Why code a compile ran answered no value.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,7 +76,7 @@ pub enum CompileTimeFault {
     /// The body called `primitive`, which needs `bits` that the fiber the
     /// compile runs for withholds.
     Denied { primitive: String, bits: SignalBits },
-    /// The body spent the whole expansion budget.
+    /// The expansion budget ran out while the body ran.
     Fuel,
     /// The body raised this error, or halted with it.
     Raised(String),
@@ -98,17 +144,22 @@ impl VM {
         self.at_expansion(|vm| vm.run_thunk_to_completion(&code, &env))
     }
 
-    /// Run `body` with the fiber's fuel replaced by the expansion budget, then
-    /// give the fiber its own fuel back and read what the body answered.
+    /// Run `body` under the expansion budget, with the fiber's own fuel put
+    /// aside, then give the fiber its fuel back and read what the body
+    /// answered. An expansion nested inside another spends the outer budget.
     fn at_expansion(
         &mut self,
         body: impl FnOnce(&mut VM) -> SignalBits,
     ) -> Result<Value, CompileTimeFault> {
         let depth = self.fiber.param_depth();
-        let budget = Fuel::budget(EXPANSION_FUEL).expect("the expansion budget is an integer");
-        let fuel = std::mem::replace(&mut self.fiber.fuel, budget);
+        let opened = self.expansion_budget.open();
+        // A fiber's default fuel is no budget at all.
+        let fuel = std::mem::take(&mut self.fiber.fuel);
         let bits = body(self);
         self.fiber.fuel = fuel;
+        if opened {
+            self.expansion_budget.close();
+        }
         if bits.is_empty() {
             let (_, value) = self.fiber.signal.take().unwrap_or((bits, Value::NIL));
             return Ok(value);
@@ -117,6 +168,8 @@ impl VM {
             let (_, value) = self.fiber.signal.take().unwrap_or((bits, Value::NIL));
             return if value.is_nil() {
                 Ok(value)
+            } else if error_kind_is(value, SPENT_KIND) {
+                Err(CompileTimeFault::Fuel)
             } else {
                 Err(CompileTimeFault::Raised(
                     self.format_error_with_location(value),
@@ -130,15 +183,32 @@ impl VM {
             return Err(self.raised_now());
         }
         // The denial payload is read before the refusal, which may release it.
-        let fault = if bits == SIG_FUEL {
-            CompileTimeFault::Fuel
-        } else if let Some(primitive) = self.denied_primitive() {
-            CompileTimeFault::Denied { primitive, bits }
-        } else {
-            CompileTimeFault::Parked(bits)
+        let fault = match self.denied_primitive() {
+            Some(primitive) => CompileTimeFault::Denied { primitive, bits },
+            None => CompileTimeFault::Parked(bits),
         };
         self.refuse_hosted_park(bits, depth);
         Err(fault)
+    }
+
+    /// Halt the running expansion, whose budget a charge at `resume_ip` found
+    /// spent. A halt, not an error, because no handler can give the budget
+    /// back, so it passes every mask and silent boundary on its way to
+    /// `at_expansion`.
+    pub(crate) fn halt_spent_expansion(&mut self, resume_ip: usize) -> (SignalBits, usize) {
+        let err = self.escaping_error(
+            SPENT_KIND,
+            format!("the expansion fuel budget of {EXPANSION_FUEL} units is spent"),
+        );
+        self.fiber.signal = Some((SIG_HALT, err));
+        (SIG_HALT, resume_ip)
+    }
+
+    /// Whether code runs inside an expansion, where every call runs on the
+    /// interpreter so each charge site spends the budget.
+    #[inline]
+    pub(crate) fn expanding(&self) -> bool {
+        self.expansion_budget.is_live()
     }
 
     /// The error in the fiber's signal slot, taken and formatted.
@@ -158,6 +228,15 @@ impl VM {
         }
         field("primitive")?.with_string(|s| s.to_string())
     }
+}
+
+/// Whether `value` is an error struct whose `:error` field is the keyword
+/// `kind`.
+fn error_kind_is(value: Value, kind: &str) -> bool {
+    value.as_struct().is_some_and(|fields| {
+        crate::value::sorted_struct_get(fields, &TableKey::keyword("error"))
+            .is_some_and(|v| v.is_keyword_named(kind))
+    })
 }
 
 #[cfg(test)]
