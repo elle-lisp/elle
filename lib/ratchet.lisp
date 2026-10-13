@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-05
+(elle/epoch 15)
+# audited: 2026-10-13
 ## lib/ratchet.lisp — measure a shape and print one reading line per subject,
 ## for the runner to judge against the committed ledger.
 ## docs/ratchet.md
@@ -171,25 +171,32 @@
     (drive subject (fn [b] (est:run-thunk-block probe b)) :on on
            :epsilon epsilon :block block :min min :max max :stable stable))
 
+  (defn cpu-time [thunk]
+    "The seconds the calling thread ran while THUNK ran. Time the thread spent
+     waiting for a CPU is not in it."
+    (let [start (clock/cpu)]
+      (thunk)
+      (- (clock/cpu) start)))
+
   (defn best-of [rounds control subject]
-    "The smallest elapsed each thunk reached over ROUNDS alternating rounds.
-     Alternating samples the same stretch of machine, and the minimum
-     discards a round the scheduler stalled."
+    "[control subject]: the smallest CPU time each thunk took over ROUNDS
+     alternating rounds. Alternating samples the same stretch of machine, and
+     the minimum discards a round the machine ran slow."
     (let [@a nil
           @b nil
           @i 0]
       (while (< i rounds)
-        (let [ca (second (time/elapsed control))
-              cb (second (time/elapsed subject))]
+        (let [ca (cpu-time control)
+              cb (cpu-time subject)]
           (when (or (nil? a) (< ca a)) (assign a ca))
           (when (or (nil? b) (< cb b)) (assign b cb)))
         (assign i (+ i 1)))
       [a b]))
 
   (defn ratio [subject measured control &named @rounds]
-    "The best timing of MEASURED over the best of CONTROL, on the :time axis.
-     A starved machine slows both, so the ratio survives what a wall-clock
-     bound does not."
+    "The best-of time of MEASURED over that of CONTROL, on the :time axis. A
+     slow machine slows both, so the ratio survives what an absolute bound
+     does not."
     (default rounds 5)
     (let [[c m] (best-of rounds control measured)]
       (settle! {:subject subject :axis :time :value (/ m c) :half 0 :unit "x"})))
@@ -205,5 +212,6 @@
    :rate rate
    :drive drive
    :stmt-run est:stmt-run
+   :best-of best-of
    :ratio ratio
    :readings readings})
