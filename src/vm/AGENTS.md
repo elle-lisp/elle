@@ -68,7 +68,8 @@ it act on each one:
 - `SIG_ABORT`: Inject an error at the target fiber's suspension point.
 - `SIG_QUERY`: Primitive reads VM state (arena stats, introspection).
 - `SIG_FUEL`: The instruction budget ran out. A silent function spends fuel
-  but never pauses ([inference.md](../../docs/signals/inference.md)).
+  but never pauses ([inference.md](../../docs/signals/inference.md)). A spent
+  expansion budget halts instead ([runtime.md](../../docs/runtime.md)).
 - `SIG_HALT`: Graceful VM termination. Non-resumable.
 
 `execute_code`, which `execute` calls, is the translation boundary. It
@@ -199,6 +200,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `fiber` | `Fiber` | Current fiber: stack, call frames, signal state |
 | `kill` | `KillSwitch` | The kill word every charge site reads first; a worker takes its spawner's through `set_kill_switch` ([runtime.md](../../docs/runtime.md)) |
 | `kill_word` | `*const AtomicU64` | Where `kill`'s word lives, for compiled code to load through the VM pointer |
+| `expansion_budget` | `ExpansionBudget` | The budget of the expansion running on this VM, spent by every fiber it runs; unmetered while none runs ([runtime.md](../../docs/runtime.md)) |
 | `heap_ptr` | `*mut FiberHeap` | This instance's single heap, owned by `RuntimeCore` (or privately leaked for a bare VM). All fibers share it; reach it via `heap()` |
 | `current_fiber_handle` | `Option<FiberHandle>` | Handle for current fiber (`None` for root) |
 | `current_fiber_value` | `Option<Value>` | Cached Value for current fiber (`None` for root) |
