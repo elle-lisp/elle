@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! Walk one file's analyzed HIR and emit the facts the solver reads.
 //!
 //! docs/impl/solver.md
@@ -13,6 +13,7 @@ use crate::model::{bit_positions, FileId, Model, SiteId, VarId, VarKey};
 use crate::visit::each_child;
 use elle::hir::{Binding, BindingArena, Hir, HirId, HirKind, HirPattern, LambdaDecl, PatternKey};
 use elle::signals::Signal;
+use elle::value::fiber::SignalBits;
 use elle::value::SymbolId;
 use std::collections::{HashMap, HashSet};
 
@@ -67,6 +68,8 @@ pub struct Unit {
     pub hir: Hir,
     pub arena: BindingArena,
     pub decls: HashMap<HirId, LambdaDecl>,
+    /// What the code outside every lambda raises by itself.
+    pub top_direct: SignalBits,
 }
 
 pub struct Extractor<'a> {
@@ -211,42 +214,41 @@ impl<'a> Extractor<'a> {
         v
     }
 
+    /// Walk the whole file, emitting facts, with `top` the variable of the
+    /// code outside every lambda.
+    pub fn walk_file(&mut self, top: VarId) {
+        self.raises(top, self.unit.top_direct);
+        self.walk(&self.unit.hir, top);
+    }
+
+    /// State that `ctx` raises `bits` by itself.
+    fn raises(&mut self, ctx: VarId, bits: SignalBits) {
+        for bit in bit_positions(bits.raw()) {
+            self.model.facts.raw.insert((ctx, bit));
+        }
+    }
+
     /// Walk the file, emitting facts. `ctx` is the variable whose signal the
-    /// code being walked contributes to.
-    pub fn walk(&mut self, hir: &'a Hir, ctx: VarId) {
+    /// code being walked contributes to. What a body raises by itself comes
+    /// from the analyzer, so an `emit`, a `match` and every other form that
+    /// may raise is walked only for the calls inside it.
+    fn walk(&mut self, hir: &'a Hir, ctx: VarId) {
         match &hir.kind {
             HirKind::Lambda { body, .. } => {
                 let lam = self.lam_var(hir.id);
-                if let Some(decl) = self.unit.decls.get(&hir.id).copied() {
-                    if let Some(c) = decl.ceiling {
-                        self.model.facts.ceiled.insert(lam);
-                        for bit in bit_positions(c.bits.raw()) {
-                            self.model.facts.ceil.insert((lam, bit));
-                        }
+                let decl = *self
+                    .unit
+                    .decls
+                    .get(&hir.id)
+                    .expect("the analyzer declares every lambda");
+                self.raises(lam, decl.direct);
+                if let Some(c) = decl.ceiling {
+                    self.model.facts.ceiled.insert(lam);
+                    for bit in bit_positions(c.bits.raw()) {
+                        self.model.facts.ceil.insert((lam, bit));
                     }
                 }
                 self.walk(body, lam);
-            }
-            HirKind::Emit { signal, value } => {
-                for bit in bit_positions(signal.raw()) {
-                    self.model.facts.raw.insert((ctx, bit));
-                }
-                self.walk(value, ctx);
-            }
-            HirKind::Match { value, arms } => {
-                let total = arms
-                    .iter()
-                    .any(|(p, g, _)| g.is_none() && p.is_irrefutable());
-                if !total {
-                    self.model.facts.raw.insert((ctx, 0));
-                }
-                self.walk(value, ctx);
-                for (_, g, body) in arms {
-                    if let Some(g) = g {
-                        self.walk(g, ctx);
-                    }
-                    self.walk(body, ctx);
-                }
             }
             HirKind::Call { func, args, .. } => {
                 self.call(hir, func, args, ctx);
@@ -268,9 +270,11 @@ impl<'a> Extractor<'a> {
             self.model.facts.arg.insert((site, i as u32, v));
         }
         let callee = self.aval(func);
-        // A collection literal and a qualified name build a call the analyzer
-        // never charges to the enclosing function. Both give the callee the
-        // span of the whole form, where a written call's callee has its own.
+        // A collection literal and a qualified name build a call whose signal
+        // the analyzer never charges to the enclosing function; the :error
+        // such a form may raise arrives with the function's own bits. Both give
+        // the callee the span of the whole form, where a written call's callee
+        // has its own.
         // A form the compiler builds, such as `import-file`'s load, spans its
         // callee the same way and is charged, so the span alone cannot tell.
         if func.span == hir.span && UNCHARGED.iter().any(|p| self.is_prim_named(func, p)) {
@@ -334,7 +338,8 @@ impl<'a> Extractor<'a> {
 
 /// The primitives a collection literal or a qualified name calls: the
 /// analyzer's `analyze_collection_literal`, `meta/location` and the `a:b`
-/// desugaring build these calls without charging their signal.
+/// desugaring build these calls without charging their signal, and report
+/// what the form may raise as the enclosing function's own bits.
 const UNCHARGED: &[&str] = &[
     "array", "@array", "bytes", "@bytes", "struct", "@struct", "get",
 ];

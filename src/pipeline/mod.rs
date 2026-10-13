@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! The compilation pipeline's entry points: source text to bytecode, or to HIR
 //! for a reader that wants the analysis alone.
 //!
@@ -28,8 +28,8 @@ pub use compile::{
 };
 pub use eval::{eval, eval_all, eval_file, eval_syntax};
 
-/// Analysis-only result (no bytecode generation)
-/// Used by linter and LSP which need HIR but not bytecode
+/// Analysis-only result (no bytecode generation), for the linter, the LSP,
+/// `compile/analyze` and the signal solver, which need HIR but not bytecode.
 #[derive(Debug)]
 pub struct AnalyzeResult {
     /// The analyzed tree, with tail calls already marked. Consumers that read
@@ -41,6 +41,9 @@ pub struct AnalyzeResult {
     pub arena: crate::hir::BindingArena,
     /// Accumulated non-fatal analysis errors
     pub errors: Vec<crate::error::LError>,
-    /// Each lambda's declared ceiling, keyed by its node.
+    /// Each lambda's declared ceiling and the bits it raises by itself, keyed
+    /// by its node.
     pub lambda_decls: std::collections::HashMap<crate::hir::HirId, crate::hir::LambdaDecl>,
+    /// The bits the code outside every lambda raises by itself.
+    pub top_direct: crate::value::fiber::SignalBits,
 }
