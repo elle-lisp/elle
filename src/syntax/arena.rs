@@ -1,3 +1,4 @@
+// audited: 2026-10-12
 //! Where syntax nodes are allocated.
 //!
 //! A [`Syntax`] node is region data, so every constructor names a region.
@@ -80,12 +81,23 @@ impl SyntaxArena {
         self.heap
     }
 
-    /// Copy `items` into the region and return the slice.
+    /// Copy `items` into the region and return the slice, every byte of it
+    /// written.
     pub(crate) fn nodes(&self, items: &[Syntax]) -> RegionSlice<Syntax> {
         if items.is_empty() {
             return RegionSlice::empty();
         }
-        unsafe { (*self.heap).alloc_region_slice_in_region(items, self.region) }
+        let slice = unsafe { (*self.heap).alloc_region_slice_in_region(items, self.region) };
+        // The copy carried whatever each kind's unwritten bytes held on the
+        // stack. The region's copy is the one a page-base walk can read, so
+        // it carries nothing (docs/impl/syntax.md § "The node"). Nothing else
+        // names these bytes yet, so the view is unique.
+        let copied =
+            unsafe { std::slice::from_raw_parts_mut(slice.as_ptr() as *mut Syntax, slice.len()) };
+        for node in copied {
+            node.kind.zero_unwritten();
+        }
+        slice
     }
 
     /// Copy one node into the region and return a reference to it.

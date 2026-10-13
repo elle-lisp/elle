@@ -1,4 +1,4 @@
-// audited: 2026-10-07
+// audited: 2026-10-12
 //! Syntax tree representation for Elle source code
 //!
 //! docs/impl/syntax.md
@@ -23,12 +23,14 @@ pub(crate) mod convert;
 mod display;
 mod expand;
 pub mod files;
+mod kind;
 mod node;
 mod span;
 
 pub use arena::{thread_arena, SyntaxArena, SyntaxHeap};
 pub use expand::{Expander, MacroDef, MacroParams};
-pub use node::{SeqCtor, SynRef, Syntax, SyntaxKind, WrapCtor};
+pub use kind::{SeqCtor, SyntaxKind, WrapCtor};
+pub use node::{SynRef, Syntax};
 pub use span::Span;
 
 /// Unique identifier for a lexical scope.

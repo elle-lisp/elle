@@ -298,3 +298,18 @@ fn one_set_of_nodes_copies_in_as_one_set_of_bytes() {
         "the nodes carry unwritten bytes at {differ:?}"
     );
 }
+
+/// A node whose size exceeds its fields' carries implicit padding: bytes no
+/// field names and no constructor writes, which the copy into an arena would
+/// publish. The paint test above sees such a byte only when the stack happens
+/// to differ under it; this one fails on the layout alone.
+#[test]
+fn a_node_is_exactly_its_fields() {
+    let node = Syntax::new(SyntaxKind::Nil, Span::synthetic());
+    let fields = std::mem::size_of_val(&node.kind)
+        + std::mem::size_of_val(&node.scopes)
+        + std::mem::size_of_val(&node.span)
+        + std::mem::size_of_val(&node.scope_exempt)
+        + std::mem::size_of_val(&node.pad);
+    assert_eq!(std::mem::size_of::<Syntax>(), fields);
+}
