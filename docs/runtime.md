@@ -56,11 +56,35 @@ A budget can be any non-negative integer:
 
 ### The expansion budget
 
-A macro transformer call, and each `begin-for-syntax` definition, runs under a
-budget of its own: 16,777,216 units, whatever the fiber's own fuel. What it
-spends is not charged to the fiber. An expansion cannot pause, so a transformer
-that exhausts the budget fails the compile, and the error names the macro
+An expansion is a macro transformer call, or the body of a `begin-for-syntax`
+definition. It runs under a budget of 16,777,216 units, which the VM counts
+apart from the fuel of every fiber. Each charge site that runs during the
+expansion spends one unit of it. That includes a charge site in a silent
+function, on a child fiber the body resumes, and in an expansion the body
+starts, such as a macro call that `eval` expands. Such a nested expansion
+spends the budget of the expansion that started it.
+
+The fiber the expansion runs on spends none of its own fuel until the
+expansion ends, and no fuel stop pauses it. A child fiber with a budget of its
+own spends both, and pauses as usual when its own budget runs out.
+
+Every closure call during an expansion runs on the interpreter, because
+compiled code charges the fuel of a fiber and cannot spend the expansion's.
+`compile/run-on` refuses every tier but `:bytecode` there.
+
+A charge site that finds the budget spent halts the expansion. The halt is a
+resource fault, like the depth cap's: it passes every mask and the boundary of
+every silent function, so a `protect` inside the body does not catch it. The
+compile fails, and the error names the macro or the definition
 ([macros.md](macros.md)).
+
+```lisp
+(def [ok? err]
+  (protect (eval '(begin (defmacro stubborn [] (begin (protect (forever nil)) :caught))
+                         (stubborn)))))
+(assert (not ok?) "the halt passes the protect inside the macro")
+(assert (string/contains? (get err :message) "macro 'stubborn'"))
+```
 
 ## SIG_QUERY
 
