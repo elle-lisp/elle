@@ -1,4 +1,4 @@
-// audited: 2026-10-07
+// audited: 2026-10-12
 //! Building a VM over a heap it owns or shares, and resetting one for reuse.
 //!
 //! docs/impl/vm.md
@@ -97,6 +97,7 @@ impl VM {
             compile_ctx_ptr: std::ptr::null_mut(),
             symbols_ptr: std::ptr::null_mut(),
             fiber,
+            expansion_budget: Default::default(),
             current_fiber_handle: None, // root fiber has no handle
             current_fiber_value: None,  // root fiber has no Value
             ffi: FFISubsystem::new(),
