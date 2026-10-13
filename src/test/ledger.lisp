@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-05
+(elle/epoch 15)
+# audited: 2026-10-13
 ## elle test — the readings a result printed: read out of its captured stdout,
 ## judged against the rows the run's build holds in the file's ledger,
 ## recorded, and the rows nobody answered.
@@ -38,7 +38,7 @@
                 (get row :bound) (get row :kind) :missing]))
 
 # Every reading --repin may act on, each with the file that printed it, kept
-# as it lands: a reading's class and floor are here and not in the table, and
+# as it lands. A reading's class and floor are here and not in the table, and
 # a pin moves to the worst of every tier's readings.
 (def @repin-queue @[])
 

@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-06
+(elle/epoch 15)
+# audited: 2026-10-13
 ## elle test — the command line, the store it opens, and the run it drives.
 ## docs/test-cli.md
 ##
@@ -151,15 +151,16 @@
 # The default per-form wall-clock budget (ms), which every path takes unless it
 # earns the wider one below. A test form whose worker does not finish within its
 # budget is recorded `timeout` (not fail/pass), and the run gates non-zero.
-# os/join yields to the scheduler while waiting (no polling); on the deadline it
-# raises {:error :timeout} and the runaway worker is abandoned (docs/test-runner.md).
+# The join yields to the scheduler while waiting (no polling). On the deadline it
+# raises {:error :timeout}, and the runaway worker is abandoned
+# (docs/test-runner.md).
 (def test-timeout-ms (get opts :timeout))
 
 # A budget follows the FILE a form came from, not the run. Some corpus families
 # carry a `deadline` of their own that is wider than the default budget, and a
 # form killed at the narrower one never prints the report that deadline exists
-# to give. `--wide` names a path substring and `--wide-timeout` is what a named
-# path's forms get; the Makefile owns the list of families and hands it to every
+# to give. `--wide` names a path substring, and `--wide-timeout` is what a named
+# path's forms get. The Makefile owns the list of families and hands it to every
 # pass, so no second copy of it lives here (docs/test-cli.md).
 (def wide-patterns (get opts :wide))
 (def wide-timeout-ms (or (get opts :wide-timeout) test-timeout-ms))
@@ -257,10 +258,10 @@
 
 (when (and (get opts :repin) (nil? run-build)) (refuse-repin-without-build))
 
-# n_selected, the code state and the pid land at insert (everything else about
-# the row is written at completion), so an unfinished run's row still says how
-# much work was planned, which commit, worktree and machine it was planned on,
-# and which process to ask whether it is still working.
+# n_selected, the code state and the pid land at insert, and everything else
+# about the row is written at completion. So an unfinished run's row still says
+# how much work was planned, and which commit, worktree and machine it was
+# planned on. It also names the process to ask whether it is still working.
 (def ident (run-identity))
 (sqlite:exec conn
              "INSERT INTO run (tiers, n_selected, git_commit, git_dirty, tree_hash, worktree, boot_fingerprint, elle_version, build_profile, host, argv, run_key, pid, build) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)"

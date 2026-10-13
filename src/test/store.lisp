@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-05
+(elle/epoch 15)
+# audited: 2026-10-13
 ## elle test — the session store: where a run is kept, the schema it is kept
 ## in, what a run row says about the code it ran against, and the CAS.
 ## docs/test-store.md
@@ -74,13 +74,14 @@
                "CREATE TABLE IF NOT EXISTS changed_file (run_id INTEGER, path TEXT, status TEXT, blob_hash TEXT)")
   # Run honesty (docs/test-runner.md § Run honesty): finished_at is stamped
   # only when a run completes, so a NULL is the kill marker. Migrate session
-  # DBs that predate the columns, then backfill the legacy rows (recognizable
-  # by n_selected IS NULL — new rows always set it): one that reached its
-  # final counter aggregation had completed, and one with no results at all is
-  # assumed completed (a zero-result selection is legal; only "results present
-  # but counters never aggregated" is evidence of a kill). started_at is the
-  # best available stamp. New-schema rows are never backfilled — for them the
-  # stamp is authoritative, however empty the run.
+  # DBs that predate the columns, then backfill the legacy rows, which
+  # n_selected IS NULL recognizes because new rows always set it. A legacy row
+  # that reached its final counter aggregation had completed. One with no
+  # results at all is assumed completed: a zero-result selection is legal, and
+  # only "results present but counters never aggregated" is evidence of a kill.
+  #
+  # started_at is the best available stamp. New-schema rows are never
+  # backfilled: for them the stamp is authoritative, however empty the run.
   (ensure-column conn "run" "finished_at" "TEXT")
   (ensure-column conn "run" "n_selected" "INTEGER")
   # A run recorded before the code-state columns existed keeps NULL for each
@@ -143,9 +144,9 @@
 # The code state and the machine this run ran on. Outside a repository the git
 # fields are nil, which lands as SQL NULL: the run happened, and nothing names
 # the code it ran against. The host is a fact about the box, so it is recorded
-# either way, and so is the pid: with the host, it is what tells a run still in
-# flight from a killed one (view.lisp). The build is the runner's own, and nil
-# outside the rig (main.lisp).
+# either way, and so is the pid. With the host, the pid is what tells a run
+# still in flight from a killed one (view.lisp). The build is the runner's own,
+# and nil outside the rig (main.lisp).
 #
 # The boot fingerprint is the binary itself, hashed (docs/test-store.md § The
 # boot fingerprint): a commit says which sources a run was meant to test, and

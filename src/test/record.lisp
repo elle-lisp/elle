@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-05
+(elle/epoch 15)
+# audited: 2026-10-13
 ## elle test — turning an outcome into rows: the label a form is known by, what
 ## analysis finds in it, the status a payload classifies to, and one row per
 ## (form × tier).
@@ -129,9 +129,9 @@
 # ── the form row ─────────────────────────────────────────────────────
 # The row's own fields as one value: what identifies a form, what it is known
 # by, and what analysis found in it. One constructor, because a call site that
-# wrote the struct out could leave the profile off and nothing would say so —
-# the row would simply record NULL, which is the answer reserved for an
-# analysis that refused.
+# wrote the struct out could leave the profile off and nothing would say so. The
+# row would simply record NULL, which is the answer reserved for an analysis
+# that refused.
 (defn form-row [h origin file idx label src profile]
   (struct :hash h :origin (string origin) :file (string file) :index idx
           :label label :src src :caps (get profile :caps)
@@ -149,8 +149,8 @@
 
 # Insert the `form` row every recording path needs first. A form is deduped
 # across runs by the hash of its syntax, so a second run of the same code
-# re-uses the row rather than adding one — which is what lets a result join to
-# a form and a form's history join across runs. IGNORE, not REPLACE: the row
+# re-uses the row rather than adding one. That is what lets a result join to a
+# form, and a form's history join across runs. IGNORE, not REPLACE: the row
 # that is already there was written from the same hash.
 (defn insert-form [conn row]
   (sqlite:exec conn
@@ -269,9 +269,9 @@
       (process-entries conn run-id origin file forms profile (rest entries)
                        dumps (concat acc statuses)))))
 
-# A file that won't compile (or whose setup faults) has no test forms to run:
-# record ONE file-level failure (a `vm` row joined to a synthetic form row whose
-# `file` is the offending file, so SQL selection by file still finds it).
+# A file that won't compile (or whose setup faults) has no test forms to run, so
+# record ONE file-level failure. It is a `vm` row joined to a synthetic form row
+# whose `file` is the offending file, so SQL selection by file still finds it.
 (defn record-file-error [conn run-id origin file payload dumps profile]
   (let [msg (field-str payload :message)
         row (file-row "file-error" origin file "file-level error"
@@ -328,10 +328,11 @@
 # script (read-before-write) and re-runs shared mutations per tier; one thunk
 # eliminates that. The file is its own form: src = the file, label = the first
 # assert message anywhere in it. See docs/test-runner.md.
+#
 # Compile ONCE in the main VM to detect a compile error or a top-level :gated
 # (dispatch-compiled records the file-level error/skip row) — but DON'T run that
 # thunk. For execution we ship the file's parsed SYNTAX to a worker that
-# compiles + runs it with its own stdlib (exec-source-capture), so a file whose
+# compiles + runs it with its own stdlib (exec-source-capture). So a file whose
 # forms `import` a yielding module (sync/redis/http2/process/grpc/subprocess)
 # shares one scheduler with the worker's ev/run. read-forms is sendable syntax.
 (defn process-whole [conn run-id origin file name src forms profile dumps]
@@ -391,8 +392,8 @@
             cap (run-child (child-argv flags file) budget)
             c (classify-child cap budget)]
         # The label is scavenged from the source, and a file the child will
-        # reject as unreadable has none to give — the child's own status is
-        # the verdict either way, so a failed scan costs the label and nothing
+        # reject as unreadable has none to give. The child's own status is the
+        # verdict either way, so a failed scan costs the label and nothing
         # else. The profile is read here rather than in the child: a form's
         # effect profile is a property of its source, and this process has the
         # compiler open already.

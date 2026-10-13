@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-05
+(elle/epoch 15)
+# audited: 2026-10-13
 ## elle test — merging another store's runs into this one: the key that makes
 ## an import repeatable, the rows that follow a run, and the bytes copied by
 ## address.
@@ -8,11 +8,11 @@
 ## A fragment of one module (see store.lisp).
 
 # ── the columns each table is copied by ──────────────────────────────
-# One list per table, in the order the INSERT binds them, and each starting
-# with the column the import supplies itself: a run's key, and the run or
-# result id the row is remapped onto. Written as data because five tables are
-# copied the same way, and a hand-written INSERT per table is five chances to
-# bind a value under the wrong name.
+# One list per table, in the order the INSERT binds them. Each starts with the
+# column the import supplies itself: a run's key, and the run or result id the
+# row is remapped onto. Written as data because five tables are copied the same
+# way, and a hand-written INSERT per table is five chances to bind a value under
+# the wrong name.
 (def run-columns
   ["run_key" "started_at" "finished_at" "tiers" "selection" "n_selected"
    "git_commit" "git_dirty" "tree_hash" "worktree" "boot_fingerprint"

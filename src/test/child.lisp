@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-05
+(elle/epoch 15)
+# audited: 2026-10-13
 ## elle test — a file as its own process: the child's argv, the run to its end
 ## or its deadline, and the row its exit status becomes.
 ## docs/test-runner.md
@@ -7,8 +7,8 @@
 ## A fragment of one module (see store.lisp).
 
 # A worker thread isolates a fault and shares the process, which is not enough
-# for a mode the process sets once: --trace=guardfree reports a use-after-free
-# as a SIGSEGV that would take the runner down with every result it had not
+# for a mode the process sets once. The --trace=guardfree mode reports a
+# use-after-free as a SIGSEGV, which would take the runner down with every result it had not
 # written yet. `--isolate FLAGS` runs each path as its own child instead, and
 # the child's exit status is the whole verdict. The child is this executable,
 # so `elle-rig test` runs each path on the rig; `--host PROGRAM` names another
@@ -19,7 +19,7 @@
   (concat (filter (fn [f] (> (length f) 0)) (string/split flags " ")) [path]))
 
 # Read a child's stream to EOF. Spawned as a fiber per stream, so both drain
-# while the wait runs: a child that fills a pipe buffer with nobody reading is
+# while the wait runs. A child that fills a pipe buffer with nobody reading is
 # stopped in a write, which would read as a hang against its own budget.
 (defn drain [p]
   (if (= p nil)
@@ -37,7 +37,7 @@
 # (docs/subprocess.md).
 #
 # The child is THIS binary unless `--host` names another, never whatever `elle` a
-# PATH lookup finds: a run has to say something about the build under test, and
+# PATH lookup finds. A run has to say something about the build under test, and
 # a different build would make it say nothing. (sys/argv) cannot answer — under
 # a subcommand its head is the subcommand's own source name — so the binary
 # reports its own path.
@@ -63,8 +63,8 @@
               :max-rss-kb (if u (get u :max-rss-kb) nil)))))
 
 # What a terminating status says, rendered for a reader. A signalled child
-# answers its signal number negated (docs/subprocess.md), so the sign is what
-# separates the two cases and no second read is needed. os/sig-name covers the
+# answers its signal number negated (docs/subprocess.md). So the sign is what
+# separates the two cases, and no second read is needed. os/sig-name covers the
 # fault set that os/sig-send refuses, which is where a child's death lives.
 (defn signal-note [n]
   (let [kw (os/sig-name n)]

@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-05
+(elle/epoch 15)
+# audited: 2026-10-13
 ## elle test — reading a run back: the tally, the problem list, the warning
 ## about a predecessor that never finished, and raw SQL.
 ## docs/test-store.md
@@ -93,10 +93,10 @@
 
 # ── the readings a run recorded (docs/test-store.md § Measurements) ──
 # A tally by verdict, then a line for each reading that is neither `ok` nor
-# unjudged. Those two are the expected answers — a reading within its bound,
-# and one with no row of the run's build yet — so listing them would bury the
-# readings a reader acts on under a few hundred that say nothing happened. The
-# rest is a query.
+# unjudged. Those two are the expected answers: a reading within its bound, and
+# one with no row of the run's build yet. Listing them would bury the readings
+# a reader acts on under a few hundred that say nothing happened. The rest is a
+# query.
 
 # The order the tally reads in: the expected answer first, then the gating
 # verdicts as the judge names them, then the readings nothing judged.
@@ -170,9 +170,9 @@
   nil)
 
 # ── what the run cost each heap (docs/test-gauges.md) ─────────────────
-# A leak per compiled file used to reach us as an OOM kill and a batch size,
-# with nothing naming the file. These lines are that number, one block per
-# heap: the run's totals, then the files that grew that heap most.
+# Without these lines, a leak per compiled file reaches a reader as an OOM kill
+# and a batch size, with nothing naming the file. These lines are that number,
+# one block per heap: the run's totals, then the files that grew that heap most.
 
 # How many files each growers list names.
 (def gauge-top 5)
@@ -280,7 +280,7 @@
     (print-gauges conn run-id)))
 
 # Gate honesty at startup: if this session DB's latest run never completed,
-# say so before starting a new one — the killed process could not report
+# say so before starting a new one. The killed process could not report
 # anything itself, and its absence of failures must not read as green. Every
 # checkout on the box shares this DB, and two runs may share it at once, so a
 # row still being written by a live sibling gets one line naming it, not the

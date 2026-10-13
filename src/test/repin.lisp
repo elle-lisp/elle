@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-05
+(elle/epoch 15)
+# audited: 2026-10-13
 ## elle test — --repin: after the run, move each ledger to what the run read,
 ## adopt what it had no row for, and refuse what regressed.
 ## docs/ratchet.md
