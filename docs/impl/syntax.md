@@ -1,6 +1,6 @@
 # Syntax — a region-native immutable tree
 
-<!-- audited: 2026-09-09 -->
+<!-- audited: 2026-10-12 -->
 
 The pre-analysis tree the reader produces, the expander rewrites, and the
 analyzer consumes. Every node, every child slice, and every string payload
@@ -13,13 +13,24 @@ needs this property. This document owns the model.
 ## The node
 
 ```rust
+#[repr(C)]
 pub struct Syntax {
-    pub kind: SyntaxKind,        // 24 bytes: tag + one 16-byte payload
-    pub span: Span,              // 20 bytes: four u32 offsets + a FileId
+    pub kind: SyntaxKind,        // 24 bytes: a tag byte + one 16-byte payload
     scopes: RegionSlice<ScopeId>,// 16 bytes
+    pub span: Span,              // 20 bytes: four u32 offsets + a FileId
     pub scope_exempt: bool,
+    pad: [u8; 3],                // written zero
 }
 ```
+
+A node is copied whole into its arena's pages, so it is `repr(C)` and exactly
+its fields, with a named pad written zero where a node is built
+([generations.md](region/generations.md) § "Every byte the magic screens has
+to be written"). The kind is `repr(C, u8)`: its tag is byte 0 and a payload
+sits at its own alignment after it. A variant shorter than 16 bytes leaves
+payload bytes unwritten, so `SyntaxArena::nodes` zeroes every byte outside the
+tag and the payload as it copies a node in. A node in a region page therefore
+has every byte written, whatever the stack held where it was built.
 
 `SyntaxKind` is `Copy`. Every payload is a region handle, never an owned
 allocation:
@@ -163,11 +174,12 @@ compile-time arena for the life of every compiled closure.
 
 ## Pinned by
 
-- `src/syntax/tests/region.rs` — the node is `Copy` POD at 64 bytes; children
-  and name bytes resolve to the arena's region; payloads deref to `&str`,
-  `&[Syntax]`, and `&Syntax`; a copy into another arena shares nothing; a
-  stamped copy does not disturb its source; scope sets grow without loss; a
-  syntax `Value` owns its tree.
+- `src/syntax/tests/region.rs` — the node is `Copy` POD at 64 bytes and
+  exactly its fields; one set of nodes copies into an arena as one set of
+  bytes, whatever the stack held; children and name bytes resolve to the
+  arena's region; payloads deref to `&str`, `&[Syntax]`, and `&Syntax`; a copy
+  into another arena shares nothing; a stamped copy does not disturb its
+  source; scope sets grow without loss; a syntax `Value` owns its tree.
 - `src/syntax/span/tests.rs` — `Span` is 20-byte `Copy` POD, its file name
   interns, and serde carries the name rather than the id.
 - `src/syntax/files/tests.rs` — interning is idempotent and the empty name is

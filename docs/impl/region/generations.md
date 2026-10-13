@@ -82,20 +82,24 @@ writing a slice header clears those four bytes instead of leaving them, and no
 live page holds a forged base at a slice header's address. A `size_tag` always
 carries the magic in its high 24 bits, so a zero word never reads as one.
 
-The rule binds every record a region copies whole, at every word of it. A
-record longer than 16 bytes puts some word of its own at offset 12 of whichever
-candidate base falls inside it, and a copy carries the construction temporary's
-padding along with the fields. The code payload is the record that reached the
-walk: the alloc scan resolves a new header's payload pointer through it, the
-candidate bases below that pointer fall on the earlier payloads of the same code
-region, and a payload copied off the stack had published the pad after a flag,
-an enum's unwritten payload bytes, and the tail of its LIR body. So a record a
-region copies whole is `repr(C)` and exactly its fields: a pad is a named field
+The rule binds every record a region copies whole into its inline data, at
+every word of it. A record longer than 16 bytes puts some word of its own at
+offset 12 of whichever candidate base falls inside it, and a copy carries the
+construction temporary's padding along with the fields. Two records reached the
+walk. The alloc scan resolves a new header's payload pointer through it, and
+the candidate bases below that pointer fall on what the same region holds
+already: the earlier code payloads, and the syntax nodes a rebuilt constant
+carries. A payload copied off the stack had published the pad after a flag, an
+enum's unwritten payload bytes, and the tail of its LIR body; a syntax node had
+published the pad after its flag and the bytes a short kind leaves unwritten.
+So such a record is `repr(C)` and exactly its fields: a pad is a named field
 written zero, and a scalar an enum would leave half written is stored as its
-parts ([template.md](template.md) § "What the payload holds"). Memcheck is the
-oracle: [valgrind.lisp](../../../tests/ratchet/valgrind.lisp) reads the error
-contexts of a boot on both standard-library paths, and its ledger pins every
-one at zero.
+parts ([template.md](template.md) § "What the payload holds") or zeroed as the
+node is copied in, where the enum is the node's own kind
+([syntax.md](../syntax.md) § "The node"). Memcheck is the oracle:
+[valgrind.lisp](../../../tests/ratchet/valgrind.lisp) reads the error contexts
+of a boot on both standard-library paths, and its ledger pins every one at
+zero.
 
 The free-time cross-ref scan is where a forged base costs the most and says the
 least. It resolves a pointer through this same walk and then filters the answer
