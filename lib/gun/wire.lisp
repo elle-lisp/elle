@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-12
+(elle/epoch 15)
+# audited: 2026-10-13
 ## The peer messages of std/gun: build them, write them as JSON text, and read them back with every check.
 ## lib/gun/mesh.md
 ## lib/gun/overview.md
@@ -11,7 +11,8 @@
 ##
 ## A message is a struct with a :kind. A graph in a message maps each soul to
 ## its fields, a struct of key to field; on the wire each value travels in
-## its value:encode form, which keeps a link a link.
+## its value:encode form, which keeps a link a link, and a signature travels
+## in hex. Decoding checks a signature's form, never whether it verifies.
 
 (fn [&named value graph]
 
@@ -51,7 +52,10 @@
       (each [soul fields] in g
         (let [node @{}]
           (each [key f] in fields
-            (put node key [(field:state f) (value:encode (field:value f))]))
+            (let [st (field:state f)
+                  enc (value:encode (field:value f))
+                  sig (field:signature f)]
+              (put node key (if sig [st enc (seq->hex sig)] [st enc]))))
           (put out soul (freeze node))))
       (freeze out)))
 
@@ -84,16 +88,24 @@
     (let [[ok? v] (protect (thunk))]
       (if ok? v (bad why text))))
 
+  (defn json->signature [sig text]
+    "The bytes that sig, 128 lowercase hex characters, spells."
+    (unless (and (= (type-of sig) :string) (= (length sig) 128))
+      (bad "a signature is not 128 hex characters" text))
+    (checked "a signature is not lowercase hex" text
+             (fn [] (value:decode (string "x:" sig)))))
+
   (defn json->field [f text]
-    (unless (and (array? f) (= (length f) 2))
-      (bad "a field is not a [state encoding] pair" text))
+    (unless (and (array? f) (or (= (length f) 2) (= (length f) 3)))
+      (bad "a field is not [state encoding] or [state encoding signature]" text))
     (let [[st enc] f]
       (unless (and (integer? st) (>= st 0))
         (bad "a state is not an integer of zero or more" text))
       (unless (= (type-of enc) :string) (bad "an encoding is not a string" text))
       (field:make st
                   (checked "a value does not decode" text
-                           (fn [] (value:decode enc))))))
+                           (fn [] (value:decode enc)))
+                  (when (= (length f) 3) (json->signature (get f 2) text)))))
 
   (defn json->graph [g text]
     (unless (struct? g) (bad "a graph is not an object" text))

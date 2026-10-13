@@ -1,21 +1,24 @@
-(elle/epoch 14)
-# audited: 2026-10-12
+(elle/epoch 15)
+# audited: 2026-10-13
 ## A graph database in the shape of GUN: chains over nodes merged by HAM, on a memory or Redis store, joined to peers.
 ## lib/gun.md
+## lib/gun/sea.md
 ## lib/gun/overview.md
 ##
 ## Memory store only:
 ##   (def gun ((import "std/gun")))
 ##
-## With the Redis store, and with the peer mesh:
+## With the Redis store, the peer mesh, and user spaces:
 ##   (def gun ((import "std/gun") :redis ((import "std/redis"))
-##                                :websocket ws))
+##                                :websocket ws
+##                                :crypto (import "plugin/crypto")
+##                                :random (import "plugin/random")))
 ##
 ## Usage: (def db (gun:open))
 ##        (gun:put (gun:get db "cfg") {:theme "dark"})
 ##        (gun:once (gun:get db "cfg"))
 
-(fn [&named redis websocket]
+(fn [&named redis websocket crypto random]
 
   ## ── Submodules ───────────────────────────────────────────────────────
 
@@ -25,7 +28,9 @@
   (def graph ((import "std/gun/graph") :state state :value value :ham ham))
   (def stores ((import "std/gun/store") :state state :value value :redis redis))
   (def wire ((import "std/gun/wire") :value value :graph graph))
-  (def core ((import "std/gun/core") :state state :value value :graph graph))
+  (def sea ((import "std/gun/sea") :value value :crypto crypto :random random))
+  (def core
+    ((import "std/gun/core") :state state :value value :graph graph :sea sea))
   (def peer ((import "std/gun/peer") :wire wire :websocket websocket))
   (def mesh ((import "std/gun/mesh") :core core :wire wire :peer peer))
   (def uuid ((import "std/uuid")))
@@ -38,10 +43,11 @@
 
   ## ── Databases and chains ─────────────────────────────────────────────
 
-  ## A chain is a database, the soul of the node it starts at, and the keys
-  ## it follows from there. The database itself starts at no soul.
-  (defn make-chain [db soul keys]
-    {:core db :soul soul :keys keys})
+  ## A chain is a database, the soul of the node it starts at, the keys it
+  ## follows from there, and the pair that signs what it writes, or nil. The
+  ## database itself starts at no soul.
+  (defn make-chain [db soul keys &opt signer]
+    {:core db :soul soul :keys keys :signer signer})
 
   (defn chain-path [chain]
     "The start soul and the keys of chain, as an error names them."
@@ -63,8 +69,8 @@
      the database, key names a root node."
     (let [k (graph:key-of key (chain-path chain))]
       (if (nil? chain:soul)
-        (make-chain chain:core (graph:root-soul k) [])
-        (make-chain chain:core chain:soul [;chain:keys k]))))
+        (make-chain chain:core (graph:root-soul k) [] chain:signer)
+        (make-chain chain:core chain:soul [;chain:keys k] chain:signer))))
 
   (defn require-soul [chain]
     (when (nil? chain:soul)
@@ -123,7 +129,8 @@
                                     (let [clock db:clock
                                       st (clock:tick)]
                                       (core:apply-writes db
-                                      (plan chain v st link-of)))))
+                                      (sea:sign chain:signer
+                                      (plan chain v st link-of))))))
             id (mesh:broadcast db accepted ack)]
         (let [[ok? err] (protect (core:notify db
                                  (fn [soul] (mesh:touch db soul))))]
@@ -140,15 +147,19 @@
 
   (defn chain-set [chain v &named ack]
     "Add the struct v to the collection at chain under a random soul, and
-     answer the chain of the new node. :ack is as for put."
+     answer the chain of the new node. In a user space, the new node's soul
+     is in the same space. :ack is as for put."
     (unless (graph:node-value? v)
       (gun-error :not-a-node "a set member is a node, not a value"
                  :path (chain-path chain)))
     (let [db chain:core
-          soul (graph:root-soul (uuid:v4))]
+          space (sea:space-of chain:soul)
+          soul (if space
+                 (graph:child-soul space (uuid:v4))
+                 (graph:root-soul (uuid:v4)))]
       (write (chain-get chain soul) v
              (fn [at key] (if (= key soul) soul (core:link-at db at key))) ack)
-      (make-chain db soul [])))
+      (make-chain db soul [] chain:signer)))
 
   ## ── Subscriptions ────────────────────────────────────────────────────
 
@@ -179,6 +190,15 @@
     "The ids of the peers connected to the database chain."
     (mesh:peers chain:core))
 
+  ## ── User spaces ──────────────────────────────────────────────────────
+
+  (defn user [chain pair]
+    "The chain at the root of the space of pair, on the database chain. What
+     it writes into that space, it signs with pair. Writes nothing itself."
+    (let [root (string "~" pair:pub)]
+      (sea:check-soul root)
+      (make-chain chain:core root [] pair)))
+
   ## ── Exports ──────────────────────────────────────────────────────────
 
   {:open open
@@ -196,4 +216,9 @@
    :ham ham:verdict
    :clock state:make-clock
    :memory-store stores:memory-store
-   :redis-store stores:redis-store})
+   :redis-store stores:redis-store
+   :pair sea:pair
+   :user user
+   :secret sea:secret
+   :encrypt sea:encrypt
+   :decrypt sea:decrypt})

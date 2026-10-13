@@ -1,23 +1,26 @@
-(elle/epoch 14)
-# audited: 2026-10-12
-## A field of a gun node: the state of its last write and its value, built and read only here.
+(elle/epoch 15)
+# audited: 2026-10-13
+## A field of a gun node: its state, its value, and its signature in a user space, built and read only here.
 ## lib/gun.md
+## lib/gun/sea.md
 ## lib/gun/overview.md
 ##
 ## Loaded via:
 ##   (def field ((import "std/gun/field")))
 ##
-## Exports: {:make :state :value}
+## Exports: {:make :state :value :signature}
 ##
-## A field is the immutable array [state value]. Code outside this file
-## builds one through make and reads it through state and value, so the
-## representation can change here alone.
+## A field is the immutable array [state value], or [state value signature]
+## when it belongs to a user space. Code outside this file builds one through
+## make and reads it through the accessors, so the representation can change
+## here alone.
 
 (fn []
 
-  (defn make [st v]
-    "The field holding value v, written at state st."
-    [st v])
+  (defn make [st v &opt sig]
+    "The field holding value v, written at state st, signed by the bytes sig
+     when sig is given."
+    (if (nil? sig) [st v] [st v sig]))
 
   (defn field-state [f]
     "The state of field f."
@@ -27,4 +30,8 @@
     "The value of field f."
     (get f 1))
 
-  {:make make :state field-state :value field-value})
+  (defn signature [f]
+    "The signature of field f, or nil when it carries none."
+    (when (> (length f) 2) (get f 2)))
+
+  {:make make :state field-state :value field-value :signature signature})
