@@ -1,9 +1,13 @@
-// audited: 2026-10-06
-// src/pipeline/AGENTS.md
+// audited: 2026-10-13
 //! Shared file/syntax compilation front end: parse → epoch-migrate → macro
-//! expand (with include splicing) → classify → analyze → regularize. Every
-//! backend (bytecode, LIR, FHIR, the test-mode transforms) feeds off the HIR
-//! this stage produces, so it lives apart from the per-backend lowering wrappers.
+//! expand (with include splicing) → classify → analyze → regularize.
+//!
+//! src/pipeline/AGENTS.md
+//!
+//! Every backend (bytecode, LIR, FHIR, the test-mode transforms) feeds off the
+//! HIR this stage produces, so it lives apart from the per-backend lowering
+//! wrappers. A unit's tag hashes its forms as the reader produced them, before
+//! epoch migration rewrites them.
 
 use super::*;
 
@@ -119,6 +123,8 @@ pub(super) fn compile_syntaxes_frontend_xform(
 /// Shared frontend worker (epoch-migrate → expand → `xform` → classify →
 /// analyze). Run inside `with_syntax_arena` by every public caller so
 /// per-compilation scratch is reclaimed while the result is promoted out.
+/// `syntaxes` are the forms as the caller read them, so the unit's tag is
+/// taken here, before migration rewrites them.
 #[allow(clippy::type_complexity)]
 fn compile_syntaxes_frontend_xform_inner(
     arena: SyntaxArena,
@@ -131,6 +137,7 @@ fn compile_syntaxes_frontend_xform_inner(
 ) -> FrontendResult {
     let ct = crate::trace::compile();
     let t = std::time::Instant::now();
+    let unit = UnitTag::of(source_name, &syntaxes);
 
     let source_epoch = crate::epoch::extract_epoch(&mut syntaxes)?;
     // Version and migration declarations vanish before migration, so an
@@ -141,7 +148,7 @@ fn compile_syntaxes_frontend_xform_inner(
     }
 
     let (expanded_forms, mut expander, meta) =
-        cctx.with_macro_expansion(arena, layer, |macro_vm, mut expander, meta| {
+        cctx.with_macro_expansion(arena, layer, unit, |macro_vm, mut expander, meta| {
             let mut pending: std::collections::VecDeque<Syntax> = if source_name.starts_with('<') {
                 syntaxes.into()
             } else {

@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-13
 //! The `VM` struct — the per-instance state a running program reaches — and the
 //! accessors that reborrow the allocations it points at.
 //!
@@ -118,6 +118,10 @@ pub struct VM {
     /// expansion runs spends apart from its own fuel. Unmetered while none runs;
     /// opened and closed by `VM::at_expansion` alone (docs/runtime.md).
     pub(crate) expansion_budget: crate::vm::expansion::ExpansionBudget,
+    /// The unit whose expansion runs code on this VM, lent by
+    /// `VM::at_expansion` for the length of the call. `gensym` names its symbols
+    /// after it, and counts across the process while it is `None`.
+    pub(crate) expansion_unit: Option<crate::syntax::Unit>,
     /// Handle to the current fiber's FiberHandle, if it came from a
     /// `fiber/new` allocation. `None` for the root fiber (which lives
     /// directly on the VM, not behind a handle). Used to wire up

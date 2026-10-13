@@ -25,6 +25,7 @@ Does NOT:
 | `SynRef` | A pointer to one node: the payload of the single-child kinds |
 | `Span` | Source range with line/col, over an interned `FileId` |
 | `ScopeId` | A hygiene scope: the tag of the unit that minted it, the intro bit, and a count within the unit |
+| `UnitTag` | The tag of a unit of expansion: a hash of its source name and its forms as read ([unit.rs](unit.rs)) |
 | `SyntaxArena` | Where nodes are born: a heap and a region on it |
 | `SyntaxHeap` | An arena plus the heap under it, for callers with no runtime |
 | `Expander` | Macro expansion engine |
