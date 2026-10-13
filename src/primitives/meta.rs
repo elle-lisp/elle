@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-13
 //! Meta-programming primitives: gensym, the syntax-object operations, squelch and attune, meta/origin, and git.
 //!
 //! docs/macros.md
@@ -260,7 +260,10 @@ primitive! {
     "meta/gensym" => prim_gensym {
         signal: Signal::errors(),
         arity: Arity::Range(0, 1),
-        doc: "Generate a unique symbol with optional prefix",
+        doc: "Generate a fresh symbol from an optional prefix, G by default. While an expansion \
+              runs, the name is the prefix, a count that starts at zero in the unit, a hyphen and \
+              the unit's tag in hex, so a unit expands to the same names in every process. At run \
+              time the count runs across the process, and every call answers a new symbol.",
         params: &["prefix"],
         category: "meta",
         example: "(meta/gensym \"tmp\")",
