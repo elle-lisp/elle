@@ -1,6 +1,6 @@
 # Landing order and test plan
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-13 -->
 
 What lands in which order, and the pins each milestone must land with.
 
@@ -65,8 +65,7 @@ Then the image milestones:
      symbols and keywords carry;
    - the sorted containers, whose entries the dumper assembles from probed
      extents exactly as it does an object's;
-   - syntax, with the file table its spans need and the scope watermark a
-     fresh expander must mint above;
+   - syntax, with the file table its spans need;
    - the scrub and guardfree pins over a hydrated region.
 7. **boot** — in progress. Landed so far:
    - the primitive table that remaps a native-fn by name, and the user
@@ -174,8 +173,8 @@ Then the image milestones:
 - Syntax: a tree round-trips with its structure, its spans, its scope sets,
   and its scope-exempt flags intact. The file table decides a hydrated
   span's file: rename the spelling in the table, and every span follows it. A
-  synthetic span still names no file. The scope watermark
-  exceeds every counter value the body carries, intro scopes included.
+  synthetic span still names no file. A scope id hydrates unchanged, its unit
+  tag and its intro bit included.
 - Source: an image parked at a non-zero, base-page-aligned offset inside a
   larger file hydrates from that descriptor and offset. A misaligned offset
   is refused by name, before anything is mapped.
@@ -262,10 +261,8 @@ Then the image milestones:
   reports that it booted from the image, because behaviour alone cannot tell
   the two apart. A macro the boot never expanded still expands after
   hydration, which is the lazy transformer fill working over a hydrated
-  template. The installed expander mints the scopes a source boot would, above
-  the watermark the image records — which for a boot graph is one, because a
-  prelude template carries the prelude scope alone, so the raise itself is
-  pinned separately. A fresh instance prints a hydrated stdlib closure's name
+  template. The installed expander mints the scopes a source boot would. A
+  fresh instance prints a hydrated stdlib closure's name
   and answers
   `meta/origin` with the file it was written in, both out of the image's
   tables. An image whose source digest is not this binary's is refused by its
