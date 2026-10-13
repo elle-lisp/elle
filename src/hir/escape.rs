@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-13
 //! Escape analysis over the canonical (functionalized + ANF) HIR: the one authority on
 //! whether a value outlives its activation.
 //!
@@ -41,16 +41,18 @@ pub struct EscapeInfo {
     /// and fiber escapes, and (unlike the full set) does not propagate through
     /// capture edges.
     ///
-    /// This is what the reassign 1-slot-container gate's "not-returned" check
-    /// reads — the gate refuses the optimization for a *returned* value (two
-    /// static owners of one transferred reference) while *keeping* it for a value
-    /// that merely stores into a container or is captured (those are
-    /// runtime-counted), so the *return* facet, not the full escape set, is the
-    /// right question. It is read **per binding** (atom-level). Together with
-    /// `return_frontier_sites` it is the return half of the ownership Shared seed,
-    /// projected to regions by `region::infer::escape` — precise for a cell that merely
-    /// *points at* a region some function returns without itself flowing to a tail
-    /// (the value genuinely is not returned).
+    /// The reassign 1-slot-container gate's "not-returned" check reads this. The
+    /// gate refuses the optimization for a *returned* value, which would give one
+    /// transferred reference two static owners. It keeps the optimization for a
+    /// value that merely stores into a container or is captured, both
+    /// runtime-counted. So the *return* facet, not the full escape set, is the
+    /// right question, and it is read **per binding** (atom-level).
+    ///
+    /// Together with `return_frontier_sites` it is the return half of the
+    /// ownership Shared seed, projected to regions by `region::infer::escape`. The
+    /// projection is precise for a cell that merely *points at* a region some
+    /// function returns without itself flowing to a tail: that value genuinely is
+    /// not returned.
     binding_returns: FxHashSet<Binding>,
     /// Bindings whose value escapes by some facet **other than** return — store,
     /// capture, or fiber. The complement of `binding_returns` within the full set,
@@ -61,14 +63,12 @@ pub struct EscapeInfo {
     ///
     /// Unlike `binding_returns` this DOES propagate through capture edges, because
     /// the facets it carries are the ones a closure's escape genuinely transmits.
-    /// A closure that leaves only by being *returned* seeds nothing here, which is
-    /// the reading its consumer needs: that closure's hold on its captures is the
-    /// funnel's counted edge, and whatever it carries out is the return facet's
-    /// business.
+    /// A closure that leaves only by being *returned* seeds nothing here. Its hold
+    /// on its captures is the funnel's counted edge, and whatever it carries out is
+    /// the return facet's business.
     ///
-    /// Read by the frame-held admission the branch-arm window and the frame-exit
-    /// release share (docs/impl/region/relocate.md), which admits the return facet
-    /// and must therefore know no other facet is also refusing.
+    /// The frame-held admission reads the narrower `binding_escapes_containment`
+    /// below, not this set.
     binding_escapes_beyond: FxHashSet<Binding>,
     /// Bindings whose value escapes by a **containment** facet — stored into a
     /// longer-lived region, or captured by a closure that itself escapes. The
@@ -77,18 +77,18 @@ pub struct EscapeInfo {
     /// The split exists because the two groups answer the *holder* question
     /// differently. A containment escape hands the value to a holder the frame
     /// cannot see and, for a declared native store, cannot count. A fiber crossing
-    /// hands it to a seam that counts its own reference — the park's `EmitEscape`
-    /// retain going out, the resume value's own mint coming back, `chan/send`'s
-    /// send-site incref — so the second holder it creates is counted, exactly as a
-    /// lexical capture's is.
+    /// hands it to a seam that counts its own reference: the park's `EmitEscape`
+    /// retain going out, the resume value's own mint coming back, and `chan/send`'s
+    /// send-site incref. So the second holder a crossing creates is counted,
+    /// exactly as a lexical capture's is.
     /// Read by the frame-held admission (`region::infer::escape::frame_held_regions`),
     /// which exists to exclude *uncounted* second holders.
     binding_escapes_containment: FxHashSet<Binding>,
-    /// Allocation-site `HirId`s a value reaches a **tail/return** through — the
-    /// region-level half of the return facet, naming the *atomless* escapes
-    /// `binding_returns` cannot (a bare `(%pair …)` / `(@array …)` / call result /
-    /// string literal at a tail, or a returned lambda). The region solver projects
-    /// these through its `alloc_region` map; together with `binding_returns`
+    /// Allocation-site `HirId`s a value reaches a **tail/return** through: the
+    /// region-level half of the return facet. These name the *atomless* escapes
+    /// `binding_returns` cannot, such as a bare `(%pair …)` / `(@array …)` / call
+    /// result / string literal at a tail, or a returned lambda. The region solver
+    /// projects these through its `alloc_region` map; together with `binding_returns`
     /// (projected through `binding_source_regions`) they are the region-level return
     /// frontier. See `escapes_return_frontier`.
     return_frontier_sites: FxHashSet<HirId>,
@@ -174,42 +174,44 @@ impl EscapeInfo {
 ///
 /// Several seed sources, one shared backward propagation. Escape is a value-flow,
 /// not a syntactic check, because it propagates *backward* through binding
-/// definitions: returning/storing a binding that holds a closure escapes that
+/// definitions. Returning or storing a binding that holds a closure escapes that
 /// closure (`(def f (fn …)) … f`), and an alias chain (`(let [g f] g)`) escapes
 /// the original.
 ///
-///   1. **Seed (return)** the atoms in a tail/return position — the top-level
+///   1. **Seed (return)** the atoms in a tail/return position: the top-level
 ///      expression's tail and every lambda body's tail, descended through the
-///      region-transparent forms (`tail_sources`), *including interprocedurally*
-///      through an arg-returning callee (the arg-return summary;
+///      region-transparent forms (`tail_sources`). The descent is
+///      *interprocedural* through an arg-returning callee (the arg-return summary;
 ///      docs/impl/escape.md).
-///   2. **Seed (store)** the atoms stored into a longer-lived region — the operands
-///      the solver records as `cross_region_refs` sources. Two sources: the
-///      allocating intrinsics (`collect_flow`'s `Intrinsic` arm — `%pair` every
-///      arg, `%array-push` arg 1, `%put` arg 2) and **native calls that declare a
-///      store** (`collect_flow`'s `Call` arm, keyed on the callee's `RegionEffect`
-///      from `call_class`): `Stores{args}` seeds those args, `Sends{args}` and
-///      `Delivers{args}` seed them on the fiber facet (a seam-counted frontier
-///      crossing, not an edge source), `Mixed`/`Unknown` seeds every arg (the
-///      solver's mutual clique), and `Fresh`/`Immediate`/`PassThrough`/`Funnel`/
-///      `Opaque` seed nothing. This is how
-///      `chan/send` (`Sends{[1]}`) marks its message escaping while `fiber/new`
-///      (`Fresh` — the closure rides the fresh fiber result) and `chan/recv`
-///      (`Fresh`) do not.
+///   2. **Seed (store)** the atoms stored into a longer-lived region, the operands
+///      the solver records as `cross_region_refs` sources. There are two sources:
+///      - the allocating intrinsics (`collect_flow`'s `Intrinsic` arm): `%pair`
+///        every arg, `%array-push` arg 1, `%put` arg 2;
+///      - **native calls that declare a store** (`collect_flow`'s `Call` arm),
+///        keyed on the callee's `RegionEffect` from `call_class`. `Stores{args}`
+///        seeds those args. `Sends{args}` and `Delivers{args}` seed them on the
+///        fiber facet, a seam-counted frontier crossing rather than an edge
+///        source. `Mixed`/`Unknown` seeds every arg (the solver's mutual clique),
+///        and `Fresh`/`Immediate`/`PassThrough`/`Funnel`/`Opaque` seed nothing.
+///
+///      This is how `chan/send` (`Sends{[1]}`) marks its message escaping while
+///      `fiber/new` and `chan/recv` (both `Fresh`) do not: the spawned closure
+///      rides the fresh fiber result.
 ///   3. **Seed (fiber boundary)** the value of each `Emit` (yield/emit), handed to
 ///      the resumer.
-///   4. **Propagate** backward to a fixpoint over two edge kinds: binding-definition
-///      edges (an escaping binding pulls in the atoms its definition flows from —
-///      `edges`, collected over Let/Letrec/Loop/Define/Destructure/Match/Assign/
-///      SetCell) and capture edges (an escaping lambda pulls in every binding it
-///      captures — `lambda_captures`). The **capture facet has no seed step**: a
-///      value escapes via capture only here, pulled in transitively once a frontier
-///      seed marks its capturing closure escaping.
+///   4. **Propagate** backward to a fixpoint over two edge kinds. A
+///      binding-definition edge pulls in the atoms an escaping binding's definition
+///      flows from (`edges`, collected over
+///      Let/Letrec/Loop/Define/Destructure/Match/Assign/SetCell). A capture edge
+///      pulls in every binding an escaping lambda captures (`lambda_captures`). The
+///      **capture facet has no seed step**: a value escapes via capture only here,
+///      pulled in transitively once a frontier seed marks its capturing closure
+///      escaping.
 ///
-/// The seed positions mirror the solver's value-flow walk (so the projection lines
-/// up with the regions the lowerer emits): the binding-definition edges parallel
-/// `binding_source_regions` copying an init's regions, and the store seeds parallel
-/// the `cross_region_refs` edges recorded at the same intrinsics/native calls. The
+/// The seed positions mirror the solver's value-flow walk, so the projection lines
+/// up with the regions the lowerer emits. The binding-definition edges parallel
+/// `binding_source_regions` copying an init's regions. The store seeds parallel the
+/// `cross_region_refs` edges recorded at the same intrinsics/native calls. The
 /// facets and their precision characteristics are documented in docs/impl/escape.md.
 pub fn analyze_escape(
     hir: &Hir,
@@ -280,9 +282,9 @@ pub fn analyze_escape(
     beyond_seeds.extend(other_seeds.iter().copied());
     let beyond = propagate(&beyond_seeds, &edges, Some(&lambda_captures));
     // Containment alone: the store/capture half of beyond-return, without the fiber
-    // seeds. The frame-held admission reads this rather than `beyond`, because a
-    // fiber crossing counts its own reference at the seam and so is not the
-    // uncounted second holder that admission refuses (see `binding_escapes_containment`).
+    // seeds. The frame-held admission reads this rather than `beyond`. A fiber
+    // crossing counts its own reference at the seam, so it is not the uncounted
+    // second holder that admission refuses (see `binding_escapes_containment`).
     let containment = propagate(&other_seeds, &edges, Some(&lambda_captures));
     // Full escape: every facet's seeds, propagated through binding-definition AND
     // capture edges (a value captured by an escaping closure escapes too,
@@ -338,10 +340,10 @@ pub fn analyze_escape(
 /// binding-definition edges (`edges`: an escaping binding pulls in the atoms its
 /// definition flows from — aliases). Follows capture edges (`captures`: an
 /// escaping lambda pulls in every binding it captures) only when `captures` is
-/// `Some`: the full escape set propagates capture (a value captured by an
-/// escaping closure escapes), the return-only set does not (a captured value is
-/// not itself returned — matching `returned_regions`, which records no
-/// captured-by-returned-closure region).
+/// `Some`. The full escape set propagates capture: a value captured by an
+/// escaping closure escapes. The return-only set does not, because a captured
+/// value is not itself returned. That matches `returned_regions`, which records
+/// no captured-by-returned-closure region.
 fn propagate(
     seeds: &[Atom],
     edges: &FxHashMap<Binding, Vec<Atom>>,
