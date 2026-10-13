@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-14
+# audited: 2026-10-20
 # Four programs under memcheck on both stdlib paths: lost bytes and error
 # contexts, read against the rows of tests/ledger/valgrind.lisp.
 # tests/ratchet/overview.md
@@ -75,34 +75,35 @@
       (error {:error :unparsed :message "no error summary in the report"}))
     (count-of (get (words-after line "ERROR SUMMARY: ") 3))))
 
-(defn start [cache flags source]
-  "One memcheck run of SOURCE on this rig, under CACHE and the rig FLAGS."
+(defn start [boot flags source]
+  "One memcheck run of SOURCE on this rig, booted under BOOT and the rig FLAGS."
   (subprocess/exec "valgrind"
-                   (concat memcheck [(elle/executable) cache] flags
-                           ["-e" source]) {:stdin :null :stdout :null}))
+                   (concat memcheck [(elle/executable)] boot flags ["-e" source])
+                   {:stdin :null :stdout :null}))
 
 (defn measure [dir]
   "Fill DIR's cache with one unmeasured run, then read every program on both
    paths."
-  (def cached (string "--cache=" dir))
+  (def cached [(string "--cache=" dir) "--boot-image=off"])
   # The cached path loads the file this run writes. Without the file, every
   # cached run would compile the standard library and read the compiled
   # path's sites under the cached path's subjects.
-  (let [warm (subprocess/system (elle/executable) [cached "-e" "nil"])]
+  (let [warm (subprocess/system (elle/executable) (concat cached ["-e" "nil"]))]
     (assert (= (get warm :exit) 0)
             (string "the unmeasured run exits 0\n" (get warm :stderr))))
   (assert (not (empty? (file/ls (path/join dir "stdlib-cache"))))
           "the unmeasured run wrote the standard library to the cache")
-  # [the key of a program's subject on the path, cache-flag]. `--cache=` with
-  # no directory turns caching off.
-  (def paths [[:compiled "--cache="] [:cached cached]])
+  # [the key of a program's subject on the path, its boot flags]. `--cache=`
+  # with no directory turns every cache off. The cached path turns the boot
+  # image off, because a start that hydrates one reads no stdlib cache.
+  (def paths [[:compiled ["--cache="]] [:cached cached]])
   # Every run starts before any is read, so the producer costs about one run.
   (def @children @[])
-  (each [path cache] in paths
+  (each [path boot] in paths
     (each program in programs
       (push children
             [(get program path)
-             (start cache (get program :flags) (get program :source))])))
+             (start boot (get program :flags) (get program :source))])))
   (each [subject child] in children
     (let [report (string (port/read-all (get child :stderr)))
           code (subprocess/wait child)
