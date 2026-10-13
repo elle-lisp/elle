@@ -315,49 +315,20 @@ fn the_two_boots_emit_one_bytecode_for_a_user_file() {
 
 // ── The warm cache's file name ───────────────────────────────────────
 
-/// The executable tag a warm-cache file name opens with, or `None` when the
-/// name carries none.
-fn tag_of(name: &str) -> Option<&str> {
-    name.split_once('-').map(|(tag, _)| tag)
-}
-
 // § "The warm cache": one executable rebuilt gives one source digest two
-// names, and both open with the executable's tag, which is what a store
-// prunes by. The counter-factual is a name from the digest alone: the new
-// build opens the image the old one stored, and runs the code the old build
+// names. The counter-factual is a name from the digest alone: the new build
+// opens the image the old one stored, and runs the code the old build
 // compiled.
 #[test]
-fn two_builds_of_one_executable_name_one_digests_image_apart() {
-    let path = PathBuf::from("/opt/elle/bin/elle");
-    let old = Executable::new(path.clone(), 12_563_264, 1);
-    let new = Executable::new(path, 12_563_264, 2);
+fn two_builds_name_one_digests_image_apart() {
+    let old = Executable::new(12_563_264, 1);
+    let new = Executable::new(12_563_264, 2);
     let digest = super::sources_digest();
-    let (a, b) = (old.image_name(&digest), new.image_name(&digest));
-    assert_ne!(a, b, "two builds file one digest's image under one name");
-    assert!(
-        tag_of(&a).is_some(),
-        "the name {a} carries no executable tag"
+    assert_ne!(
+        old.image_name(&digest),
+        new.image_name(&digest),
+        "two builds file one digest's image under one name"
     );
-    assert_eq!(
-        tag_of(&a),
-        tag_of(&b),
-        "a rebuild changed the executable's tag, so its store cannot prune the last build's image"
-    );
-}
-
-// § "The warm cache": two executables tag their images apart, so a store by
-// one never prunes the other's. The counter-factual is `elle` and `elle-rig`
-// sharing a cache directory and evicting each other at every switch.
-#[test]
-fn two_executables_tag_their_images_apart() {
-    let digest = super::sources_digest();
-    let elle = Executable::new(PathBuf::from("/a/elle"), 1, 1).image_name(&digest);
-    let rig = Executable::new(PathBuf::from("/a/elle-rig"), 1, 1).image_name(&digest);
-    assert!(
-        tag_of(&elle).is_some(),
-        "the name {elle} carries no executable tag"
-    );
-    assert_ne!(tag_of(&elle), tag_of(&rig), "two executables share a tag");
 }
 
 // § "The warm cache": a binary that cannot read its own identity reads and

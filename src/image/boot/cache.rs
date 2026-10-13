@@ -60,8 +60,12 @@ pub(crate) struct Executable {
 }
 
 impl Executable {
-    pub(crate) fn new(path: PathBuf, len: u64, mtime: u128) -> Self {
-        Executable { path, len, mtime }
+    pub(crate) fn new(len: u64, mtime: u128) -> Self {
+        Executable {
+            path: PathBuf::new(),
+            len,
+            mtime,
+        }
     }
 
     /// The running executable, or `None` when it cannot be located or
@@ -75,7 +79,10 @@ impl Executable {
             .duration_since(std::time::UNIX_EPOCH)
             .ok()?
             .as_nanos();
-        Some(Executable::new(path, meta.len(), mtime))
+        Some(Executable {
+            path,
+            ..Executable::new(meta.len(), mtime)
+        })
     }
 
     /// The build identity: the executable's length and modification time
