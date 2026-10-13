@@ -277,7 +277,9 @@ field and array element:
 - **Pointers**: A pointer, a pointer from `ffi/malloc`, or nil for NULL. A
   freed pointer is an error.
 - **Strings**: Copied to a NUL-terminated C string that lives for the call.
-  Nil passes NULL, and a string with an interior NUL byte is an error.
+  Nil passes NULL, and a string with an interior NUL byte is an error. Only
+  `ffi/call` has a call for the copy to live through, so `ffi/write` and a
+  callback's return type refuse any type that holds `:string`.
 - **Structs and arrays**: An Elle array, written into an aligned buffer field
   by field.
 
@@ -333,6 +335,27 @@ the type cannot hold is an `ffi-error`, and the write does not happen:
 (ffi/free cell)
 ```
 
+`ffi/write` refuses a type that holds `:string`, at any depth, before it
+writes a byte. A C string written into memory must outlive the write, and
+nothing would own the copy. Write a `:ptr` to a NUL-terminated copy that the
+program owns and frees:
+
+```lisp
+(def named (ffi/struct [:i32 :string]))
+(def slot (ffi/malloc (ffi/size named)))
+(def [wrote? refusal] (protect (ffi/write slot named [1 "one"])))
+(assert (not wrote?) "ffi/write refuses a :string field")
+(assert (= (get refusal :error) :ffi-error) "the refusal is an ffi-error")
+
+(def one (ffi/pin (concat (bytes "one") (bytes 0))))
+(def by-pointer (ffi/struct [:i32 :ptr]))
+(ffi/write slot by-pointer [1 one])
+(assert (= (ffi/string (get (ffi/read slot by-pointer) 1)) "one")
+        "a :ptr field holds a C string the program owns")
+(ffi/free one)
+(ffi/free slot)
+```
+
 `ffi/string` reads a NUL-terminated UTF-8 string from a pointer. With a second
 argument, it reads at most that many bytes, and stops at the first NUL byte in
 that range. Data that is not UTF-8 is an error.
@@ -378,6 +401,9 @@ A callback has these limits:
   value. `ffi/call` raises the error after the C function returns.
 - **No variadic signature**: `ffi/callback` rejects a variadic signature,
   because a libffi closure cannot take one.
+- **No string return**: `ffi/callback` rejects a return type that holds
+  `:string`. The C string would be freed before C could read it. Return a
+  `:ptr` to memory the program owns.
 - **No yield**: A yield or any other signal from the closure becomes an error.
 - **Manual lifetime**: Free a callback with `ffi/callback-free` when C no
   longer holds it.
@@ -440,7 +466,7 @@ Each FFI primitive signals its errors as error structs. The kinds:
 | `argument-error` | `ffi/read` or `ffi/write` got nil, `ffi/malloc` got a size that is not positive, `ffi/struct` or `ffi/array` got no fields, a void field or a count that is not positive, or the fixed-argument count of `ffi/signature` is out of range |
 | `use-after-free` | A primitive got a pointer that `ffi/free` already freed, as the memory to read, write or offset |
 | `double-free` | `ffi/free` got a pointer that it already freed |
-| `ffi-error` | A type keyword is unknown, a library or symbol does not load, `ffi/malloc` failed, `ffi/call` or `ffi/write` cannot convert a value to its type, `ffi/call` got the wrong argument count, `ffi/read` or `ffi/write` got `:void`, `ffi/write` got `:string`, `ffi/string` read data that is not UTF-8, `ffi/callback` got a variadic signature, or `ffi/callback-free` found no callback |
+| `ffi-error` | A type keyword is unknown, a library or symbol does not load, `ffi/malloc` failed, `ffi/call` or `ffi/write` cannot convert a value to its type, `ffi/call` got the wrong argument count, `ffi/read` or `ffi/write` got `:void`, `ffi/write` got a type that holds `:string`, `ffi/string` read data that is not UTF-8, `ffi/callback` got a variadic signature or a return type that holds `:string`, or `ffi/callback-free` found no callback |
 
 
 ## Signals and capabilities

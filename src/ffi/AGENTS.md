@@ -109,6 +109,8 @@ Enum describing a C type. Variants: `Void`, `Bool`, `Bool32`, `I8`..`U64`,
 - `size()` → `Option<usize>` — byte size on current platform (`None` for Void)
 - `align()` → `Option<usize>` — alignment on current platform
 - `short_name()` → display string
+- `holds_string()` → whether the type is `Str`, or a struct or array with a
+  `Str` at any depth
 
 `Bool` is the C99 `bool`, held as a `CBool` (`u8`). A read is never a Rust
 `bool`: a byte that is neither 0 nor 1 would make that read undefined
@@ -176,7 +178,9 @@ so dropping a worker's `FFISubsystem` `dlclose`s nothing. Methods: `load_library
 2. **CStrings must outlive their pointers.** For `:string` arguments, the
    `CString` is owned by `ArgStorage::Str`. For struct fields containing
    strings, the `CString` is owned by a `MarshalledArg` in the struct's
-   `owned` vec. Dropping these before the C call is UB.
+   `owned` vec. Dropping these before the C call is UB. Only `ffi_call` has a
+   call to keep them through, so `ffi/write` and `create_callback` refuse a
+   type for which `TypeDesc::holds_string` is true.
 
 3. **Callbacks run under the VM that created them.** The trampoline uses the
    `*mut VM` captured in `CallbackData` at `create_callback`. The callback is
@@ -191,7 +195,8 @@ so dropping a worker's `FFISubsystem` `dlclose`s nothing. Methods: `load_library
 
 5. **Variadic callbacks are rejected.** `create_callback` returns an error
    if `signature.fixed_args.is_some()`. libffi closures don't support
-   variadic calling conventions.
+   variadic calling conventions. It also refuses a return type that holds
+   `:string` (invariant 2).
 
 6. **CIF caching is per signature value.** `HeapObject::FFISignature` holds a
    `RefCell<Option<Cif>>` that `Value::get_or_prepare_cif()` fills on first
