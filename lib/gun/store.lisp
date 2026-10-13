@@ -1,7 +1,8 @@
-(elle/epoch 14)
-# audited: 2026-10-12
+(elle/epoch 15)
+# audited: 2026-10-13
 ## The memory store and the Redis store, behind one interface of :read and :write.
 ## lib/gun.md
+## lib/gun/sea.md
 ## lib/gun/overview.md
 ##
 ## Loaded via:
@@ -40,19 +41,34 @@
   ## ── Redis ────────────────────────────────────────────────────────────
 
   (defn field->text [f]
-    "The Redis text of field f: the state, a space, and the encoding."
-    (string (state:format (field:state f)) " " (value:encode (field:value f))))
+    "The Redis text of field f: the state, a space, and the encoding. A
+     signed field puts its signature in hex, and a space, before the
+     encoding."
+    (let [st (state:format (field:state f))
+          enc (value:encode (field:value f))
+          sig (field:signature f)]
+      (if sig (string st " " (seq->hex sig) " " enc) (string st " " enc))))
+
+  (defn bad-text [text]
+    (error {:error :gun-error
+            :reason :bad-encoding
+            :encoding text
+            :message (string "not a stored field: " text)}))
 
   (defn text->field [text]
-    "The field that field->text wrote as text."
+    "The field that field->text wrote as text. An encoding holds a : at index
+     1 and a signature in hex holds none, so the two never read as each
+     other."
     (let [space (string/find text " ")]
-      (when (nil? space)
-        (error {:error :gun-error
-                :reason :bad-encoding
-                :encoding text
-                :message (string "not a stored field: " text)}))
-      (field:make (state:parse (slice text 0 space))
-                  (value:decode (slice text (+ space 1))))))
+      (when (nil? space) (bad-text text))
+      (let [st (state:parse (slice text 0 space))
+            rest (slice text (+ space 1))]
+        (if (and (>= (length rest) 2) (= (get rest 1) ":"))
+          (field:make st (value:decode rest))
+          (let [gap (string/find rest " ")]
+            (when (nil? gap) (bad-text text))
+            (let [sig (value:decode (string "x:" (slice rest 0 gap)))]
+              (field:make st (value:decode (slice rest (+ gap 1))) sig)))))))
 
   (defn redis-store [&named @prefix]
     "A store that keeps each node in the Redis hash <prefix>:<soul>, through

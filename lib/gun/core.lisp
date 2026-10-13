@@ -1,20 +1,22 @@
-(elle/epoch 14)
-# audited: 2026-10-12
+(elle/epoch 15)
+# audited: 2026-10-13
 ## One gun database: its graph, store, clock, lock, subscriptions and peers; loading, the chain walk, the merges and notify.
 ## lib/gun.md
 ## lib/gun/mesh.md
-## lib/gun/overview.md
+## lib/gun/sea.md
 ##
 ## Loaded via:
-##   (def core ((import "std/gun/core") :state state :value value :graph graph))
+##   (def core ((import "std/gun/core") :state state :value value :graph graph
+##                                      :sea sea))
 ##
 ## Exports: {:make-core :report :load :field-of :link-at :nodes :walk :locked
 ##           :apply-writes :merge-remote :add-sub :notify}
 ##
+## Every field passes sea:admit or sea:admitted before a merge sees it.
 ## Nothing here waits on the network. A walk takes a reach function, which
 ## the caller chooses: one that fetches from the peers, or one that does not.
 
-(fn [&named state value graph]
+(fn [&named state value graph sea]
 
   (def sync ((import "std/sync")))
   (def uuid ((import "std/uuid")))
@@ -48,15 +50,19 @@
   ## ── Reading local data ───────────────────────────────────────────────
 
   (defn load [core soul]
-    "Read soul from the store once, observe its states, and merge it."
+    "Read soul from the store once, drop each field that fails admission,
+     observe the states of the rest, and merge them. Raises what
+     sea:check-soul raises for soul."
     (unless (get core:loaded soul)
+      (sea:check-soul soul)
       (let [store core:store
-            fields (store:read soul)
+            stored (store:read soul)
             clock core:clock]
-        (when fields
-          (each [_ f] in fields
-            (clock:observe (field:state f)))
-          (graph:merge core:graph soul fields (clock:now)))
+        (when stored
+          (let [fields (sea:admitted soul stored (fn [err] (report core err)))]
+            (each [_ f] in fields
+              (clock:observe (field:state f)))
+            (graph:merge core:graph soul fields (clock:now))))
         (put core:loaded soul true))))
 
   (defn field-of [core soul key]
@@ -123,11 +129,13 @@
 
   (defn apply-writes [core writes]
     "Merge each [soul fields] of writes into memory, send what each merge
-     accepted to the store, and answer the accepted graph. The caller holds
-     the lock."
+     accepted to the store, and answer the accepted graph. Raises, and merges
+     nothing, when any field fails admission. The caller holds the lock."
     (let [store core:store
           clock core:clock
           accepted @{}]
+      (each [soul fields] in writes
+        (sea:admit soul fields))
       (each [soul fields] in writes
         (load core soul)
         (let [diff (graph:merge core:graph soul fields (clock:now))]
@@ -139,13 +147,16 @@
   (defn merge-remote [core g]
     "Merge the graph g from a peer under the lock: observe and merge each due
      field, and store what the merge accepted. Answers [accepted later]: the
-     accepted graph, and the graph of fields whose states are not due yet."
+     accepted graph, and the graph of fields whose states are not due yet.
+     Raises, and merges nothing of g, when any field fails admission."
     (locked core
             (fn []
               (let [store core:store
                     clock core:clock
                     accepted @{}
                     later @{}]
+                (each [soul fields] in g
+                  (sea:admit soul fields))
                 (each [soul fields] in g
                   (load core soul)
                   (let [[due not-yet] (graph:due fields (clock:now))]
