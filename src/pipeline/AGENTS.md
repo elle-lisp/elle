@@ -1,6 +1,6 @@
 # pipeline
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-13 -->
 
 Compilation entry points: source text to bytecode, or to HIR for a reader that wants the analysis alone.
 
@@ -119,7 +119,7 @@ Properties:
 
 4. **Primitives are pre-bound in file-level analysis.** `Analyzer.bind_primitives`
    wraps the file's letrec in an outer scope containing all registered primitives.
-   This enables compile-time checks (for example, `(set + 42)` is an error) and
+   This enables compile-time checks (for example, `(assign + 42)` is an error) and
    signal/arity tracking via `Binding` identity.
 
 5. **File return value is the last expression.** If the last form is a `def`/`var`,
@@ -129,7 +129,9 @@ Properties:
 
 6. **Macro expansion runs on the instance's `CompileCtx`.** Its macro VM and a
    clone of its `Expander`, which already holds the prelude, expand every form,
-   so no compile parses the prelude again (docs/pipeline.md). Only a REPL line,
+   so no compile parses the prelude again (docs/pipeline.md). The clone has
+   begun the unit the compile expands: `with_macro_expansion` and
+   `expander_and_meta` take the unit's tag beside its arena. Only a REPL line,
    compiled through `compile_file_repl`, also sees the macros and definitions
    earlier lines made. A file the REPL imports compiles as it would from any
    program.

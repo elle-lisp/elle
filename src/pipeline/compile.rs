@@ -1,13 +1,14 @@
-// audited: 2026-10-12
-// src/pipeline/AGENTS.md
+// audited: 2026-10-13
 //! Compilation pipeline: source -> bytecode.
+//!
+//! src/pipeline/AGENTS.md
 
 use super::{CompileCtx, Layer};
 use crate::hir::{classify_form, Analyzer, BindingArena, FileForm};
 use crate::lir::{Emitter, Lowerer};
 use crate::reader::{read_syntax, read_syntax_all_for};
 use crate::symbol::SymbolTable;
-use crate::syntax::{Span, Syntax, SyntaxArena, SyntaxKind};
+use crate::syntax::{Span, Syntax, SyntaxArena, SyntaxKind, UnitTag};
 use crate::value::CodeUnit;
 use std::collections::HashSet;
 
@@ -74,13 +75,18 @@ fn compile_inner(
 
     // Phase 1: Parse to Syntax
     let syntax = read_syntax(arena, source, source_name)?;
+    let unit = UnitTag::of(source_name, std::slice::from_ref(&syntax));
 
     // Phase 2: Macro expansion (the compile context's macro VM)
-    let (expanded, meta, core_env) =
-        cctx.with_macro_expansion(arena, Layer::Instance, |macro_vm, mut expander, meta| {
+    let (expanded, meta, core_env) = cctx.with_macro_expansion(
+        arena,
+        Layer::Instance,
+        unit,
+        |macro_vm, mut expander, meta| {
             let expanded = expander.expand(syntax, symbols, macro_vm)?;
             Ok::<_, String>((expanded, meta, expander.core_env.clone()))
-        })?;
+        },
+    )?;
 
     // Phase 3: Analyze to HIR with interprocedural signal and arity tracking
     let mut arena = BindingArena::new();
@@ -165,6 +171,7 @@ fn compile_file_to_lir_inner(
 ) -> Result<crate::lir::FrozenModule, String> {
     let mut syntaxes = read_syntax_all_for(arena, source, source_name)?;
     crate::epoch::check_lexicon_agreement(&syntaxes, source, source_name)?;
+    let unit = UnitTag::of(source_name, &syntaxes);
 
     let source_epoch = crate::epoch::extract_epoch(&mut syntaxes)?;
     crate::pipeline::directives::extract_semver_directives(&mut syntaxes)?;
@@ -177,8 +184,11 @@ fn compile_file_to_lir_inner(
     }
 
     // Expand all forms, splicing include/include-file inline
-    let (expanded_forms, meta, core_env) =
-        cctx.with_macro_expansion(arena, Layer::Instance, |macro_vm, mut expander, meta| {
+    let (expanded_forms, meta, core_env) = cctx.with_macro_expansion(
+        arena,
+        Layer::Instance,
+        unit,
+        |macro_vm, mut expander, meta| {
             let mut pending: std::collections::VecDeque<Syntax> = syntaxes.into();
             let mut expanded_forms = Vec::new();
             let mut included = included_root(source_name);
@@ -196,7 +206,8 @@ fn compile_file_to_lir_inner(
                 expanded_forms.push(expander.expand(syntax, symbols, macro_vm)?);
             }
             Ok::<_, String>((expanded_forms, meta, expander.core_env.clone()))
-        })?;
+        },
+    )?;
 
     let forms: Vec<FileForm> = expanded_forms.iter().map(classify_form).collect();
 
