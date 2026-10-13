@@ -114,7 +114,9 @@ while it runs, carry the unit's tag and a count that starts at zero in the unit
 ([impl/syntax.md](impl/syntax.md)). A unit therefore expands to the same tree in
 every process, whatever the process expanded before it, and two units mint
 different names. Outside an expansion, `gensym` counts across the process, so
-two calls at run time answer two symbols.
+two calls at run time answer two symbols. A `begin-for-syntax` definition
+belongs to the unit that makes it, so a later `eval` does not see one an
+earlier `eval` made.
 
 ```lisp
 (def fresh-name '(begin (defmacro fresh [] (list 'quote (gensym "t"))) (fresh)))
@@ -122,6 +124,11 @@ two calls at run time answer two symbols.
 (assert (= (eval fresh-name) (eval fresh-name)) "one unit expands to one name")
 (assert (not (= (eval fresh-name) (eval other-unit))) "two units, two names")
 (assert (not (= (gensym "t") (gensym "t"))) "two calls at run time, two symbols")
+
+(eval '(begin-for-syntax (def helper (fn [] 42))))
+(eval '(defmacro uses-helper [] (helper)))
+(let [[ok? _] (protect (eval '(uses-helper)))]
+  (assert (not ok?) "a later eval does not see the helper"))
 ```
 
 ## Breaking hygiene on purpose: `datum->syntax`
