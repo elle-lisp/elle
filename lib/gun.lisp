@@ -96,25 +96,32 @@
       (assign i (- i 1)))
     out)
 
+  (defn follow-links [db start keys limit]
+    "Follow the links that the first limit keys hold, from the node start,
+     up to the first key that holds no link. Answers [soul i]: the node
+     reached, and how many keys led there."
+    (def @soul start)
+    (def @i 0)
+    (while (and (< i limit) (not (nil? (core:link-at db soul (get keys i)))))
+      (assign soul (core:link-at db soul (get keys i)))
+      (assign i (+ i 1)))
+    [soul i])
+
   (defn plan [chain v st link-of]
     "The writes that put v at chain with state st. The walk follows each link
-     that exists, and so rewrites no link on the path that it can reach.
-     From the first key with no link, the rest of the keys nest v, and
-     flatten writes it with link-of choosing the soul of each nested node."
-    (let [db chain:core
-          keys chain:keys
+     that exists, and so rewrites no link on the path that it can reach. A
+     value that is not a node replaces the last field, link or not. From the
+     first key with no link, the rest of the keys nest v, and flatten writes
+     it with link-of choosing the soul of each nested node."
+    (let [keys chain:keys
           n (length keys)
           node? (graph:node-value? v)]
       (when (and (= n 0) (not node?))
         (gun-error :not-a-node "a root holds a node, not a value"
                    :path (chain-path chain)))
-      (def @soul chain:soul)
-      (def @i 0)
-      (while (and (< i n) (or (< i (- n 1)) node?)
-                  (not (nil? (core:link-at db soul (get keys i)))))
-        (assign soul (core:link-at db soul (get keys i)))
-        (assign i (+ i 1)))
-      (let [reached [chain:soul ;(slice keys 0 i)]
+      (let [[soul i] (follow-links chain:core chain:soul keys
+                                   (if node? n (- n 1)))
+            reached [chain:soul ;(slice keys 0 i)]
             rest (slice keys i)]
         (graph:flatten soul (nest rest v) st reached link-of))))
 
