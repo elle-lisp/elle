@@ -223,6 +223,14 @@
              (fn [at key] (if (= key soul) soul (core:link-at db at key))) ack)
       (make-chain db soul [] chain:signer)))
 
+  (defn put-content [chain v &named ack]
+    "Write v into the content node of the database of chain, under the key
+     that content-key answers for v, and answer that key. :ack is as for
+     put. See lib/gun/sea.md."
+    (let [k (sea:content-key v)]
+      (chain-put (make-chain chain:core sea:content-soul []) {k v} :ack ack)
+      k))
+
   (defn chain-unset [chain member &named ack]
     "Remove member, a chain or a link, from the collection at chain: write a
      tombstone to each field of the collection's node that links to the
@@ -306,6 +314,8 @@
    :map chain-map
    :soul chain-soul
    :unset chain-unset
+   :content-key sea:content-key
+   :put-content put-content
    :serve serve
    :connect connect
    :peers peers

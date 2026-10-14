@@ -1,6 +1,6 @@
 (elle/epoch 15)
-# audited: 2026-10-13
-## The SEA rules of std/gun: key pairs, user spaces, the signature of a field, admission, and encryption.
+# audited: 2026-10-14
+## The SEA rules of std/gun: key pairs, user spaces, the signature of a field, the content node, admission, and encryption.
 ## lib/gun/sea.md
 ## lib/gun/overview.md
 ##
@@ -10,11 +10,12 @@
 ##                                    :crypto (import "plugin/crypto")
 ##                                    :random (import "plugin/random")))
 ##
-## Exports: {:space-of :check-soul :pair :sign :admit :admitted :secret
-##           :encrypt :decrypt}
+## Exports: {:space-of :content-soul :check-soul :content-key :pair :sign
+##           :admit :admitted :secret :encrypt :decrypt}
 ##
 ## Without both plugins, pair, secret, encrypt and decrypt raise
-## :sea-not-configured, and so does each check of a soul in a space.
+## :sea-not-configured, and so does each check of a soul in a space. Without
+## :crypto, content-key and each check of the content node raise it.
 
 (fn [&named value crypto random]
 
@@ -36,6 +37,10 @@
     (when (or (nil? crypto) (nil? random))
       (gun-error :sea-not-configured ":crypto and :random were not both supplied to (import \"std/gun\")")))
 
+  (defn require-hash []
+    (when (nil? crypto)
+      (gun-error :sea-not-configured ":crypto was not supplied to (import \"std/gun\")")))
+
   (defn hex->bytes [h]
     "The bytes that the lowercase hex h spells. Raises :bad-encoding on
      anything else."
@@ -54,17 +59,40 @@
       (let [slash (string/find soul "/")]
         (if (nil? slash) soul (slice soul 0 slash)))))
 
+  ## ── The content node ─────────────────────────────────────────────────
+
+  (def content-soul "#")
+
+  (defn content-key [v]
+    "The key of v in the content node: the lowercase hex of the SHA-256 of
+     v's encoding. Raises :invalid-value for what is not a value."
+    (require-hash)
+    (seq->hex (crypto:sha256 (value:encode v))))
+
+  ## ── Checking a soul ──────────────────────────────────────────────────
+
   (defn check-soul [soul]
-    "The public key, as bytes, that signs the fields of soul, or nil for a
-     soul outside every space. Raises :sea-not-configured for a soul in a
-     space without the plugins, and :invalid-space for a space whose name is
-     not ~ and 64 lowercase hex characters."
-    (when-let [space (space-of soul)] (require-sea)
-              (let [[ok? pub] (protect (hex->bytes (slice space 1)))]
-                (unless (and ok? (= (length pub) key-size))
-                  (gun-error :invalid-space (string "a space is ~ and 64 lowercase hex characters: "
-                             space) :soul soul))
-                pub)))
+    "How admission checks the fields of soul: the public key, as bytes, that
+     signs a soul in a space, :hash for the content node, and nil for any
+     other soul. Raises :sea-not-configured when the check needs a plugin
+     this module lacks. Raises :invalid-space for a space whose name is not
+     ~ and 64 lowercase hex characters, and for any other soul that starts
+     with #."
+    (let [space (space-of soul)]
+      (cond
+        (= soul content-soul) (begin
+                                (require-hash)
+                                :hash)
+        (string/starts-with? soul content-soul) (gun-error :invalid-space (string "the one soul that starts with # is #: "
+        soul) :soul soul)
+        (nil? space) nil
+        (begin
+          (require-sea)
+          (let [[ok? pub] (protect (hex->bytes (slice space 1)))]
+            (unless (and ok? (= (length pub) key-size))
+              (gun-error :invalid-space (string "a space is ~ and 64 lowercase hex characters: "
+                         space) :soul soul))
+            pub)))))
 
   ## ── Pairs ────────────────────────────────────────────────────────────
 
@@ -107,16 +135,22 @@
 
   ## ── Admission ────────────────────────────────────────────────────────
 
-  (defn verdict [soul key f pub]
-    "The reason field f of key in soul fails admission under the public key
-     pub, or nil when it passes. pub is nil for a soul outside every space,
-     where a field passes only without a signature."
+  (defn verdict [soul key f check]
+    "The reason field f of key in soul fails admission under check, what
+     check-soul answers for soul, or nil when it passes. Outside every space,
+     a field passes only without a signature, and in the content node, only
+     under the key of its value."
     (let [sig (field:signature f)]
       (cond
-        (nil? pub) (when sig :bad-signature)
+        (= check :hash)
+          (cond
+            sig :bad-signature
+            (= key (content-key (field:value f))) nil
+            :bad-hash)
+        (nil? check) (when sig :bad-signature)
         (nil? sig) :unsigned
         (not (and (bytes? sig) (= (length sig) signature-size))) :bad-signature
-        (crypto:ed25519-verify pub (signed-text soul key f) sig) nil
+        (crypto:ed25519-verify check (signed-text soul key f) sig) nil
         :bad-signature)))
 
   (defn refusal [reason soul key]
@@ -126,19 +160,24 @@
      :key key
      :message (string "field " key " of " soul " fails admission: " reason)})
 
-  (defn admit [soul fields]
-    "Raise the refusal of the first field of soul that fails admission."
-    (let [pub (check-soul soul)]
-      (each [key f] in fields
-        (when-let [r (verdict soul key f pub)] (error (refusal r soul key))))))
+  (defn admit [writes]
+    "Raise the refusal of the first field in writes, pairs of soul and
+     fields, that fails admission. Checks every soul before any field, so a
+     soul that may not exist raises before a field that names it."
+    (each [soul _] in writes
+      (check-soul soul))
+    (each [soul fields] in writes
+      (let [check (check-soul soul)]
+        (each [key f] in fields
+          (when-let [r (verdict soul key f check)] (error (refusal r soul key)))))))
 
   (defn admitted [soul fields report]
     "The fields of soul that pass admission. Calls report with the refusal
      of each field that fails."
-    (let [pub (check-soul soul)
+    (let [check (check-soul soul)
           out @{}]
       (each [key f] in fields
-        (let [r (verdict soul key f pub)]
+        (let [r (verdict soul key f check)]
           (if r (report (refusal r soul key)) (put out key f))))
       (freeze out)))
 
@@ -188,7 +227,9 @@
           v))))
 
   {:space-of space-of
+   :content-soul content-soul
    :check-soul check-soul
+   :content-key content-key
    :pair pair
    :sign sign
    :admit admit

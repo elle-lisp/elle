@@ -165,8 +165,7 @@
     (let [store core:store
           clock core:clock
           accepted @{}]
-      (each [soul fields] in writes
-        (sea:admit soul fields))
+      (sea:admit writes)
       (each [soul fields] in writes
         (load core soul)
         (let [diff (graph:merge core:graph soul fields (clock:now))]
@@ -186,8 +185,7 @@
                     clock core:clock
                     accepted @{}
                     later @{}]
-                (each [soul fields] in g
-                  (sea:admit soul fields))
+                (sea:admit g)
                 (each [soul fields] in g
                   (load core soul)
                   (let [[due not-yet] (graph:due fields (clock:now))]
