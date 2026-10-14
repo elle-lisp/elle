@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-13
+# audited: 2026-10-14
 # The runner's ledger, part 1 of 2: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/impl/abort-wait-lists.lisp" :objects 805]
@@ -44,7 +44,6 @@
 ["tests/impl/io-stale-operation-ends.lisp" :objects 268]
 ["tests/impl/jit-bytes-push.lisp" :objects 375]
 ["tests/impl/jit-callable-collection.lisp" :objects 215]
-["tests/impl/jit-compiled-caller-promotes-callee.lisp" :objects 134]
 ["tests/impl/jit-lbox-param-noyield.lisp" :objects 92]
 ["tests/impl/jit-lbox-param-repro.lisp" :objects 102]
 ["tests/impl/jit-medium-instructions.lisp" :objects 469]
@@ -156,7 +155,6 @@
 ["tests/impl/region-query-clique-leak.lisp" :objects 111]
 ["tests/impl/region-read-meta-leak.lisp" :objects 422]
 ["tests/impl/region-reassign-return-park-uaf.lisp" :objects 117]
-["tests/impl/region-rest-pattern-slice.lisp" :objects 1391]
 ["tests/impl/region-return-coalesce.lisp" :objects 118]
 ["tests/impl/region-scope.lisp" :objects 861]
 ["tests/impl/region-sequence-read-effect.lisp" :objects 696]
