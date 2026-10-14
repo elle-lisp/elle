@@ -1,6 +1,6 @@
 # pipeline
 
-<!-- audited: 2026-10-13 -->
+<!-- audited: 2026-10-14 -->
 
 Compilation entry points: source text to bytecode, or to HIR for a reader that wants the analysis alone.
 
@@ -98,7 +98,7 @@ Properties:
 ## Dependents
 
 - `program.rs` — file, stdin and `-e` execution use `compile_file`
-- `primitives/modules.rs` — `import/load-file` uses `compile_file`
+- `primitives/modules.rs` — `import/load-file` uses `compile_file_stored`
 - `primitives/module_init.rs` — the stdlib load uses `compile_file`
 - `repl/` — each prompt form compiles through `compile_file_repl`
 - `lsp/state.rs` and `lint/cli.rs` — file analysis uses `analyze_file`
@@ -129,14 +129,21 @@ Properties:
 
 6. **Macro expansion runs on the instance's `CompileCtx`.** Its macro VM and a
    clone of its `Expander`, which already holds the prelude, expand every form,
-   so no compile parses the prelude again (docs/pipeline.md). The clone has
-   begun the unit the compile expands: `with_macro_expansion` and
-   `expander_and_meta` take the unit's tag beside its arena. Only a REPL line,
-   compiled through `compile_file_repl`, also sees the macros and definitions
-   earlier lines made. A file the REPL imports compiles as it would from any
-   program.
+   so no compile parses the prelude again
+   ([docs/pipeline.md](../../docs/pipeline.md)). The clone has begun the unit
+   the compile expands: `with_macro_expansion` and `expander_and_meta` take the
+   unit's tag beside its arena. Only a REPL line, compiled through
+   `compile_file_repl`, also sees the macros and definitions earlier lines
+   made. A file the REPL imports compiles as it would from any program.
 
 7. **A compile never compiles another file.** The analyzer reads nothing from
    the target of an `import-file`. The loader compiles that file when the
    import runs, so a cycle of imports is a cycle of loads, which the loader
    reports.
+
+8. **A loader compiles a file once while its inputs match.**
+   `compile_file_stored` keeps each unit in the instance's store under the
+   file's path, beside a digest of the compile inputs that can change. A load
+   whose digest matches runs a clone of the kept unit. Registering a host
+   binding, a host primitive or the standard library's exports empties the
+   store ([docs/pipeline.md](../../docs/pipeline.md)).
