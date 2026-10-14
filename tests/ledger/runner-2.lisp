@@ -293,3 +293,4 @@
 ["tests/lang/caps-ffi.lisp" :objects 148]
 ["tests/lang/compile-isolation.lisp" :objects 133]
 ["tests/lang/macro-purity.lisp" :objects 425]
+["tests/lang/import-again.lisp" :objects 319]
