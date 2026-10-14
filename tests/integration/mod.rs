@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-14
 // Registers every integration test file, which is what makes one run.
 //
 // tests/AGENTS.md
@@ -62,6 +62,9 @@ mod argv_cli {
 }
 mod macro_fuel {
     include!("macro_fuel.rs");
+}
+mod macro_purity {
+    include!("macro_purity.rs");
 }
 mod module_cli {
     include!("module_cli.rs");
