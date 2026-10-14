@@ -63,6 +63,9 @@ mod argv_cli {
 mod macro_fuel {
     include!("macro_fuel.rs");
 }
+mod macro_purity {
+    include!("macro_purity.rs");
+}
 mod module_cli {
     include!("module_cli.rs");
 }
