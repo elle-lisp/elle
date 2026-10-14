@@ -1,28 +1,30 @@
-(elle/epoch 14)
-# audited: 2026-10-06
-# A macro expands with the capabilities the compiling fiber withholds, and a denied primitive fails that compile.
+(elle/epoch 15)
+# audited: 2026-10-14
+# A macro expands without the effect capabilities and what the compiling fiber withholds; a denied primitive fails the compile.
 # docs/signals/capabilities.md
 # docs/macros.md
 
-# Each sandbox below builds its source as text and reads it inside the fiber.
-# A quoted form would not do: an explicit quote is macro-expanded at the outer
+# Each compile below builds its source as text and reads it at run time. A
+# quoted form would not do: an explicit quote is macro-expanded at the outer
 # compile (#1229), which runs outside every sandbox.
 
-(def root (file/mktempdir))
-(def secret (path/join root "secret"))
-(file/write secret "3311")
+(signal :caps-macro/beat)
 
-# Source text for `(defmacro NAME [] (file/read SECRET))`.
-(defn reader-macro [name]
-  (string/join ["(defmacro " name " [] (file/read \"" secret "\"))"] ""))
+# Source text for `(defmacro m [] (emit :caps-macro/beat 1))`. The bit is no
+# effect capability, so only a fiber's :deny withholds it.
+(def beat-macro "(defmacro m [] (emit :caps-macro/beat 1))")
 
-# Source text that defines the reader macro NAME and then calls it.
-(defn reader-forms [name]
-  (string/join [(reader-macro name) " (" name ")"] ""))
+# Source text for `(defmacro m [] (file/read PATH))`.
+(defn reader-macro [path]
+  (string/join ["(defmacro m [] (file/read \"" path "\"))"] ""))
+
+# Source text for MACRO and then a call of it.
+(defn forms [macro]
+  (string/join [macro " (m)"] ""))
 
 # The same two forms as one, for a compile that takes a single form.
-(defn reader-program [name]
-  (string/join ["(begin " (reader-forms name) ")"] ""))
+(defn program [macro]
+  (string/join ["(begin " (forms macro) ")"] ""))
 
 # Source text for `(include-file PATH)`.
 (defn include-program [path]
@@ -33,7 +35,14 @@
 # does, so the value tells the two apart: the mask catches the denied bits
 # too, and a denial that escaped the compile comes back as its payload.
 (defn sandboxed [deny body]
-  (fiber/resume (fiber/new body |:fs :ffi :error| :deny deny)))
+  (fiber/resume (fiber/new body |:caps-macro/beat :fs :error| :deny deny)))
+
+# Run `body` on this fiber, which withholds nothing, and answer the error it
+# raised.
+(defn unrestricted [body what]
+  (let [[ok? err] (protect (body))]
+    (assert (not ok?) (string/join [what ": the compile fails"] ""))
+    err))
 
 # Assert that `v` is the error a failed compile raised: `:eval-error` from
 # `eval` and the loaders, `:compile-error` from `compile/analyze`.
@@ -50,55 +59,84 @@
     (assert (string/contains? msg primitive)
             (string/join [what ": the error names " primitive ": " msg] ""))))
 
-# ── Every compile a fiber starts ──────────────────────────────────────
+(with-temp-dir root (def secret (path/join root "secret"))
+               (file/write secret "3311")
 
-# `eval` expands on the calling fiber. The counter-factual reported an
-# unexpected signal from the transformer and named neither the macro nor the
-# primitive.
-(assert-denied (sandboxed |:fs| (fn [] (eval (read (reader-program "m")))))
-               "file/read" "eval")
+               # ── What the compiling fiber withholds ──────────────────────────────
 
-# `import/load-syntax` compiles on the instance's macro VM. The counter-factual
-# ran the transformer there with every capability and answered "3311".
-(defn load-reader []
-  (import/load-syntax (read (reader-program "m"))))
-(assert-denied (sandboxed |:fs| load-reader) "file/read" "import/load-syntax")
+               # Each compile a fiber starts expands without the bits that fiber withholds.
+               # The counter-factual let the macro emit, and the compile reported a
+               # suspension that named no primitive.
+               (def deny-beat |:caps-macro/beat|)
 
-# A file loaded through `import-file` compiles on the macro VM as well. The
-# loader needs :fs, so this fiber withholds :ffi, and the module's macro calls
-# `ffi/native`, which answers a handle to the process itself when it runs. The
-# counter-factual expanded the macro and answered 7.
-(def module (path/join root "m.lisp"))
-(file/write module "(defmacro m [] (begin (ffi/native nil) 7))\n(m)\n")
-(assert-denied (sandboxed |:ffi| (fn [] (import-file module))) "ffi/native"
-               "import-file")
+               # `eval` and `compile/analyze` expand on the calling fiber.
+               (assert-denied (sandboxed deny-beat
+                              (fn [] (eval (read (program beat-macro)))))
+                              "fiber/emit" "eval")
+               (assert-denied (sandboxed deny-beat
+                              (fn [] (compile/analyze (forms beat-macro))))
+                              "fiber/emit" "compile/analyze")
 
-# `compile/analyze` expands on the calling fiber, as `eval` does.
-(assert-denied (sandboxed |:fs| (fn [] (compile/analyze (reader-forms "m"))))
-               "file/read" "compile/analyze")
+               # `import/load-syntax` and `import-file` compile on the instance's macro VM.
+               (assert-denied (sandboxed deny-beat
+                              (fn []
+                                (import/load-syntax (read (program beat-macro)))))
+                              "fiber/emit" "import/load-syntax")
+               (def module (path/join root "m.lisp"))
+               (file/write module (string/join [(forms beat-macro) "\n"] ""))
+               (assert-denied (sandboxed deny-beat (fn [] (import-file module)))
+                              "fiber/emit" "import-file")
 
-# ── An include reads under the same rule ──────────────────────────────
+               # ── What every expansion withholds ──────────────────────────────────
 
-# The counter-factual spliced the file in and answered 42.
-(def included (path/join root "inc.lisp"))
-(file/write included "42\n")
-(defn load-include []
-  (import/load-syntax (read (include-program included))))
-(let [v (sandboxed |:fs| load-include)]
-  (assert-compile-error v "include-file under :deny |:fs|")
-  (assert (string/contains? (get v :message) "include")
-          "the error names the include"))
+               # This fiber withholds nothing, and still no macro reads a file. The
+               # counter-factual expanded each macro with every capability and answered
+               # "3311".
+               (def read-secret (reader-macro secret))
+               (assert-denied (unrestricted (fn []
+                                (eval (read (program read-secret)))) "eval")
+                              "file/read" "eval")
+               (assert-denied (unrestricted (fn []
+                                (compile/analyze (forms read-secret)))
+                              "compile/analyze") "file/read" "compile/analyze")
+               (assert-denied (unrestricted (fn []
+                                (import/load-syntax (read (program read-secret))))
+                              "import/load-syntax") "file/read"
+                              "import/load-syntax")
 
-# ── A compile no fiber restricts ──────────────────────────────────────
+               # `ffi/native` answers a handle to the process itself, so a macro that
+               # called it would load nothing and still reach outside the unit.
+               (def native (path/join root "native.lisp"))
+               (file/write native
+                           "(defmacro m [] (begin (ffi/native nil) 7))\n(m)\n")
+               (assert-denied (unrestricted (fn [] (import-file native))
+                              "import-file") "ffi/native" "import-file")
 
-(assert (= "3311" (eval (read (reader-program "u"))))
-        "eval of an unrestricted fiber runs a macro that reads a file")
+               # ── An include ──────────────────────────────────────────────────────
 
-# The denials above ran on the instance's macro VM, and what they withheld
-# does not outlast them.
-(assert (= "3311" (import/load-syntax (read (reader-program "v"))))
-        "a later compile no fiber restricts reads the file")
-(assert (= 42 (load-include)) "and includes one")
+               # An include is an input of the compile, so it reads under the fiber's own
+               # capabilities. The counter-factual for the denial spliced the file in and
+               # answered 42.
+               (def included (path/join root "inc.lisp"))
+               (file/write included "42\n")
+               (defn load-include []
+                 (import/load-syntax (read (include-program included))))
+               (let [v (sandboxed |:fs| load-include)]
+                 (assert-compile-error v "include-file under :deny |:fs|")
+                 (assert (string/contains? (get v :message) "include")
+                         "the error names the include"))
+               (assert (= 42 (load-include))
+                       "the denial does not outlast its compile, and an unrestricted one includes")
 
-(file/delete-dir-all root)
+               # ── Code a compile produced ─────────────────────────────────────────
+
+               # The expansion ends before its unit runs, and the unit runs with the
+               # capabilities of its fiber. The counter-factual left the effect bits
+               # withheld past the expansion, and the read was denied.
+               (def after
+                 (string/join ["(begin (defmacro w [] 0) (w) (file/read \""
+                               secret "\"))"] ""))
+               (assert (= "3311" (eval (read after)))
+                       "run-time code reads the file"))
+
 (println "caps-macro: OK")
