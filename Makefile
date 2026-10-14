@@ -2,7 +2,8 @@
        smoke-lang smoke-impl smoke-boot-image smoke-nojit smoke-pool smoke-mlir \
        smoke-noffi smoke-wasm \
        elle-nojit elle-pool elle-mlir elle-noffi elle-wasm check-wasm \
-       doctest doctest-list myplugin plugins plugins-all \
+       doctest doctest-list myplugin suite-plugins suite-plugins-verify \
+       plugins plugins-all \
        plugins-verify smoke-plugins mcp embedding semver-check \
        fmt fmt-check audit agents agents-check prose page-claims \
        bytecode-golden bytecode-golden-check
@@ -522,6 +523,34 @@ DOCTEST_TIMEOUT ?= 180s
 # both as passing. tests/integration/doctest.rs pins the agreement.
 myplugin:  ## Build the plugin the literate documents load
 	cargo build $(CARGO_PROFILE) -p elle-myplugin -q
+
+# The plugins the language suite imports. A suite file gates itself when its
+# import fails, so a build without them skips those files and stays green; every
+# suite job therefore builds them before its first suite step
+# (docs/analysis/ci.md). They land in this build's own target directory, where
+# `plugin/X` resolves, and the assertion after the build is what reports one
+# that did not build. tests/integration/plugins.rs pins the list against the
+# suite's imports.
+SUITE_PLUGINS   := hash random crypto
+SUITE_PLUGIN_SO  = $(foreach p,$(SUITE_PLUGINS),$(CARGO_OUT)/libelle_$(p).$(if $(filter Darwin,$(HOST_OS)),dylib,so))
+
+suite-plugins:  ## Build the plugins the language suite loads (needs the plugins submodule)
+	@[ -f plugins/Cargo.toml ] || { \
+		echo "FAILED: the plugins submodule is not checked out — run: git submodule update --init plugins"; \
+		exit 1; }
+	cargo build $(CARGO_PROFILE) --manifest-path plugins/Cargo.toml --target-dir target \
+		$(foreach p,$(SUITE_PLUGINS),-p elle-$(p)) -q
+	@$(MAKE) --no-print-directory suite-plugins-verify
+
+suite-plugins-verify:  ## Assert every plugin the language suite loads built its artifact
+	@[ -n "$(SUITE_PLUGIN_SO)" ] || { echo "FAILED: SUITE_PLUGINS names no plugin"; exit 1; }
+	@missing=""; for so in $(SUITE_PLUGIN_SO); do \
+		[ -f "$$so" ] || missing="$$missing $$so"; \
+	done; \
+	[ -z "$$missing" ] || { \
+		echo "FAILED: the suite plugins build produced no artifact for:$$missing"; \
+		exit 1; }
+	@echo "=== suite plugins: $(SUITE_PLUGINS) present ==="
 
 
 # The documents `doctest` runs: the three root guides, and every document under

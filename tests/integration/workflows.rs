@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 // What `.github/workflows/pr.yml` claims to gate must be what it gates, and
 // what each job builds must let its own checks run.
 //
