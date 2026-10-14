@@ -1,8 +1,6 @@
-// audited: 2026-10-06
+// audited: 2026-10-13
 //! Loading the standard library into one runtime: obtain its compiled unit,
 //! run it, and register what it exports.
-//!
-//! Every later compile resolves a stdlib name out of what is registered here.
 //!
 //! docs/impl/stdlib-cache.md
 //! docs/stdlib.md
@@ -134,7 +132,10 @@ pub(crate) fn install_exports(
     let boot = crate::trace::boot();
     let t = std::time::Instant::now();
     let exports = extract_exports(exports_val, symbols);
-    register_stdlib_exports(cctx, symbols, &exports);
+    // No VM global holds an export. User code sees each one as a global through
+    // `bind_primitives`, which reads the compile `meta`, and a macro body calls
+    // one through `eval_meta`.
+    cctx.register_stdlib_exports(&exports);
     cctx.set_stdlib_exports(exports_val);
     crate::phase!(boot, "boot", t, "stdlib-exports");
     // Arm guardfree page-protection (no-op unless --trace=guardfree): from
@@ -223,25 +224,5 @@ fn extract_exports(
     }
     result
 }
-/// Register stdlib exports into the compile context.
-///
-/// In the letrec model there are no VM globals. Stdlib exports are
-/// made available to user code via `bind_primitives`, which reads
-/// from `PrimitiveMeta.functions` and `PrimitiveMeta.signals`.
-fn register_stdlib_exports(
-    cctx: &mut CompileCtx,
-    symbols: &mut SymbolTable,
-    exports: &HashMap<SymbolId, (Value, Signal)>,
-) {
-    // Add the exports to this instance's compile context: user code sees them as
-    // globals (`meta`), and macro-transformer bodies can call them (`eval_meta`).
-    cctx.register_stdlib_exports(exports);
-    // `SymbolTable::name` only looks a name up; `extract_exports` already
-    // interned every export name in this same table.
-    for sym_id in exports.keys() {
-        let _ = symbols.name(*sym_id);
-    }
-}
-
 #[cfg(test)]
 mod tests;
