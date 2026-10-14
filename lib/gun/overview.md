@@ -1,6 +1,6 @@
 # gun
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-10-14 -->
 
 The submodules behind [gun.lisp](../gun.lisp): states, values, fields, HAM, the graph, stores, SEA, the core and the mesh.
 
@@ -45,6 +45,18 @@ for itself:
 (assert (= (sea:space-of "~ab/c") "~ab"))
 (assert (nil? (sea:space-of "users/alice")))
 (assert (= (wire:encode (wire:get "m1" ["users"])) "{\"get\":[\"users\"],\"id\":\"m1\"}"))
+```
+
+A link is a struct `{:soul s}` whose trait table carries the `:Gun`
+protocol. Its `:kind` method answers `:link`, and its `:soul` method answers
+`s`. [value.lisp](value.lisp) builds the table, and
+[traits.md](../../docs/traits.md) says how a library's own protocol works:
+
+```lisp
+(let [l (value:link "users/alice")
+      methods (get (traits l) :Gun)]
+  (assert (= ((get methods :kind) l) :link))
+  (assert (= ((get methods :soul) l) "users/alice")))
 ```
 
 `std/gun/store` takes `std/redis` as `:redis`, and builds a Redis store only
