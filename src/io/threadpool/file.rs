@@ -12,6 +12,11 @@ pub(super) fn run(op: FileOp) -> (i32, Vec<u8>) {
             Ok(path) => sync(&path),
             Err(_) => (-libc::EINVAL, Vec::new()),
         },
+        FileOp::Read { .. }
+        | FileOp::Lines { .. }
+        | FileOp::Write { .. }
+        | FileOp::Append { .. }
+        | FileOp::Copy { .. } => (0, Vec::new()),
     }
 }
 

@@ -197,7 +197,12 @@ pub(super) fn process_raw_completion(
                 return Completion::failed(id, birth, "io-error", msg);
             }
             match kind {
-                FileKind::Sync => Completion::ok(id, birth, Value::NIL),
+                FileKind::Sync
+                | FileKind::Read
+                | FileKind::Lines
+                | FileKind::Write
+                | FileKind::Append
+                | FileKind::Copy => Completion::ok(id, birth, Value::NIL),
             }
         }
         PendingOp::Connect {

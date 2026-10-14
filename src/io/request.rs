@@ -155,6 +155,16 @@ pub enum PortOp {
 /// into the `PoolOp` the worker runs.
 #[derive(Debug, Clone)]
 pub enum FileOp {
+    /// Read the whole file. Returns its text.
+    Read { path: String },
+    /// Read the whole file. Returns a list of its lines.
+    Lines { path: String },
+    /// Replace the file's contents with `data`, creating it. Returns true.
+    Write { path: String, data: Vec<u8> },
+    /// Add `data` to the end of the file, creating it. Returns true.
+    Append { path: String, data: Vec<u8> },
+    /// Copy the file at `from` to `to`. Returns true.
+    Copy { from: String, to: String },
     /// Flush the file or directory at `path` to stable storage, as fsync(2)
     /// does. Returns nil.
     Sync { path: String },
@@ -164,6 +174,11 @@ pub enum FileOp {
 /// entry keeps in place of the operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileKind {
+    Read,
+    Lines,
+    Write,
+    Append,
+    Copy,
     Sync,
 }
 
@@ -171,14 +186,25 @@ impl FileOp {
     /// The kind of answer this operation's completion builds.
     pub fn kind(&self) -> FileKind {
         match self {
+            FileOp::Read { .. } => FileKind::Read,
+            FileOp::Lines { .. } => FileKind::Lines,
+            FileOp::Write { .. } => FileKind::Write,
+            FileOp::Append { .. } => FileKind::Append,
+            FileOp::Copy { .. } => FileKind::Copy,
             FileOp::Sync { .. } => FileKind::Sync,
         }
     }
 
-    /// The path the operation names, which its error reports.
+    /// The path the operation names, which its error reports: for a copy,
+    /// the file it copies.
     pub fn path(&self) -> &str {
         match self {
-            FileOp::Sync { path } => path,
+            FileOp::Read { path }
+            | FileOp::Lines { path }
+            | FileOp::Write { path, .. }
+            | FileOp::Append { path, .. }
+            | FileOp::Sync { path } => path,
+            FileOp::Copy { from, .. } => from,
         }
     }
 }

@@ -1,5 +1,5 @@
 // audited: 2026-10-14
-//! The operations a pool worker runs on a file by its path: what each reports for a file, a directory, a missing path and a fifo.
+//! The operations a pool worker runs on a file by its path: what each reports for a file, a missing path and a fifo.
 //!
 //! src/io/AGENTS.md
 
@@ -57,4 +57,105 @@ fn syncing_a_fifo_fails_at_once() {
     let fifo = Fifo::new("sync-fifo");
     let code = sync_result(23, &fifo.0);
     assert!(code < 0, "a fifo cannot be synced, got {}", code);
+}
+
+/// Run `op` on a worker and answer the result code and the bytes it reports.
+fn run_file_op(id: u64, op: FileOp) -> (i32, Vec<u8>) {
+    let mut pool = CompletionHub::new();
+    pool.submit(
+        SubmissionId::from_raw(id),
+        PoolOp::File(op),
+        Bounds::uninterruptible(),
+    )
+    .unwrap();
+    let mut completions = pool
+        .wait_pool(Some(5000))
+        .expect("the operation must report back");
+    assert_eq!(completions.len(), 1, "one operation, one completion");
+    let c = completions.pop().unwrap();
+    assert_eq!(c.id, id);
+    (c.result_code, c.data)
+}
+
+#[test]
+fn a_read_reports_the_files_bytes() {
+    let path = file_path("read");
+    std::fs::write(&path, "one\ntwo\n").unwrap();
+    assert_eq!(
+        run_file_op(30, FileOp::Read { path: path.clone() }),
+        (0, b"one\ntwo\n".to_vec())
+    );
+    assert_eq!(
+        run_file_op(31, FileOp::Lines { path: path.clone() }),
+        (0, b"one\ntwo\n".to_vec()),
+        "lines reads the same bytes, and the completion splits them"
+    );
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn a_write_replaces_and_an_append_extends() {
+    let path = file_path("write");
+    std::fs::write(&path, "old contents").unwrap();
+    let write = FileOp::Write {
+        path: path.clone(),
+        data: b"ab".to_vec(),
+    };
+    assert_eq!(run_file_op(32, write).0, 0);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "ab");
+    let append = FileOp::Append {
+        path: path.clone(),
+        data: b"cd".to_vec(),
+    };
+    assert_eq!(run_file_op(33, append).0, 0);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "abcd");
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn a_copy_copies_the_file() {
+    let from = file_path("copy-from");
+    let to = file_path("copy-to");
+    std::fs::write(&from, "copied").unwrap();
+    let copy = FileOp::Copy {
+        from: from.clone(),
+        to: to.clone(),
+    };
+    assert_eq!(run_file_op(34, copy).0, 0);
+    assert_eq!(std::fs::read_to_string(&to).unwrap(), "copied");
+    std::fs::remove_file(&from).ok();
+    std::fs::remove_file(&to).ok();
+}
+
+#[test]
+fn a_file_operation_on_a_missing_path_reports_enoent() {
+    let missing = format!("{}/nofile", file_path("file-no-such-dir"));
+    let ops = [
+        FileOp::Read {
+            path: missing.clone(),
+        },
+        FileOp::Lines {
+            path: missing.clone(),
+        },
+        FileOp::Write {
+            path: missing.clone(),
+            data: b"x".to_vec(),
+        },
+        FileOp::Append {
+            path: missing.clone(),
+            data: b"x".to_vec(),
+        },
+        FileOp::Copy {
+            from: missing.clone(),
+            to: file_path("copy-nowhere"),
+        },
+    ];
+    for (i, op) in ops.into_iter().enumerate() {
+        let kind = op.kind();
+        assert_eq!(
+            run_file_op(40 + i as u64, op).0,
+            -libc::ENOENT,
+            "{kind:?} on a missing path"
+        );
+    }
 }
