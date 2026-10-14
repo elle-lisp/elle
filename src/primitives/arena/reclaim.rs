@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-14
 //! The reclamation gauges: how a heap's regions have ended, one integer per primitive.
 //!
 //! docs/impl/region/diagnostics.md
@@ -47,6 +47,7 @@ pub(crate) fn prim_owned(ctx: &mut NativeCtx<'_>, _args: &[Value]) -> (SignalBit
 
 primitive! {
     "debug/arena-region-frees" => prim_region_frees {
+        ambient: true,
         ret: RetType::Int,
         signal: Signal::errors(),
         doc: "Return regions freed by a count reaching zero, an owner's drop, or a group free (monotonic).",
@@ -56,6 +57,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-page-frees" => prim_page_frees {
+        ambient: true,
         ret: RetType::Int,
         signal: Signal::errors(),
         doc: "Return the pages the freed regions held (monotonic).",
@@ -65,6 +67,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-object-frees" => prim_object_frees {
+        ambient: true,
         ret: RetType::Int,
         signal: Signal::errors(),
         doc: "Return the objects the freed regions held (monotonic).",
@@ -74,6 +77,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-one-page-frees" => prim_one_page_frees {
+        ambient: true,
         ret: RetType::Int,
         signal: Signal::errors(),
         doc: "Return the freed regions that held one page or none (monotonic).",
@@ -83,6 +87,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-empty-frees" => prim_empty_frees {
+        ambient: true,
         ret: RetType::Int,
         signal: Signal::errors(),
         doc: "Return the freed regions that held no object (monotonic).",
@@ -92,6 +97,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-one-object-frees" => prim_one_object_frees {
+        ambient: true,
         ret: RetType::Int,
         signal: Signal::errors(),
         doc: "Return the freed regions that held one object (monotonic).",
@@ -101,6 +107,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-few-object-frees" => prim_few_object_frees {
+        ambient: true,
         ret: RetType::Int,
         signal: Signal::errors(),
         doc: "Return the freed regions that held two to four objects (monotonic).",
@@ -110,6 +117,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-many-object-frees" => prim_many_object_frees {
+        ambient: true,
         ret: RetType::Int,
         signal: Signal::errors(),
         doc: "Return the freed regions that held five objects or more (monotonic).",
@@ -119,6 +127,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-adopts" => prim_adopts {
+        ambient: true,
         ret: RetType::Int,
         signal: Signal::errors(),
         doc: "Return adoptions: counted regions made members of an owner's subtree (monotonic).",
@@ -128,6 +137,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-adopts-into-empty" => prim_adopts_into_empty {
+        ambient: true,
         ret: RetType::Int,
         signal: Signal::errors(),
         doc: "Return adoptions into an owner that held no object (monotonic).",
@@ -137,6 +147,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-owned-frees" => prim_owned_frees {
+        ambient: true,
         ret: RetType::Int,
         signal: Signal::errors(),
         doc: "Return owned regions freed by their owner's drop (monotonic).",
@@ -146,6 +157,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-owned-free-pages" => prim_owned_free_pages {
+        ambient: true,
         ret: RetType::Int,
         signal: Signal::errors(),
         doc: "Return the pages the owned regions freed by their owner's drop held (monotonic).",
@@ -155,6 +167,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-owned-free-objects" => prim_owned_free_objects {
+        ambient: true,
         ret: RetType::Int,
         signal: Signal::errors(),
         doc: "Return the objects the owned regions freed by their owner's drop held (monotonic).",
@@ -164,6 +177,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-owned-one-page-frees" => prim_owned_one_page_frees {
+        ambient: true,
         ret: RetType::Int,
         signal: Signal::errors(),
         doc: "Return owned regions freed while they held one page or none (monotonic).",
@@ -173,6 +187,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-rescues" => prim_rescues {
+        ambient: true,
         ret: RetType::Int,
         signal: Signal::errors(),
         doc: "Return owned regions the drop-time rescue returned to counted (monotonic).",
@@ -182,6 +197,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-rescue-survivors" => prim_rescue_survivors {
+        ambient: true,
         ret: RetType::Int,
         signal: Signal::errors(),
         doc: "Return regions that outlived their owner's drop through a rescue, with the subtrees they keep (monotonic).",
@@ -191,6 +207,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-extracts" => prim_extracts {
+        ambient: true,
         ret: RetType::Int,
         signal: Signal::errors(),
         doc: "Return owned regions a moves-out removal returned to counted (monotonic).",
@@ -200,6 +217,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-reparents" => prim_reparents {
+        ambient: true,
         ret: RetType::Int,
         signal: Signal::errors(),
         doc: "Return owned regions handed from one owner to another (monotonic).",
@@ -209,6 +227,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-owned" => prim_owned {
+        ambient: true,
         ret: RetType::Int,
         signal: Signal::errors(),
         doc: "Return the regions owned now (a reading, not a count).",

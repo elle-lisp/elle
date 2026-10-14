@@ -32,7 +32,7 @@ pub(super) struct NameKey {
 impl NameKey {
     pub(super) fn new(sym: SymbolId, scopes: &[ScopeId]) -> Self {
         let mut scopes = scopes.to_vec();
-        scopes.sort_unstable_by_key(|s| s.0);
+        scopes.sort_unstable();
         NameKey { sym, scopes }
     }
 }

@@ -181,6 +181,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "elle/executable" => prim_executable {
+        ambient: true,
         doc: "Return the path of the running elle binary, or nil when the OS will not say.",
         category: "elle",
         example: "(elle/executable)",

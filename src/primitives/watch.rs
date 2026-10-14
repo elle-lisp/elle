@@ -1,4 +1,4 @@
-//! audited: 2026-09-18
+// audited: 2026-10-14
 //! Filesystem watch primitives — event-driven via inotify (Linux) / kqueue (macOS).
 //!
 //! docs/io.md
@@ -136,6 +136,7 @@ fn prim_watch_close(
 
 primitive! {
     "watch" => prim_watch {
+        ambient: true,
         signal: Signal::errors(),
         doc: "Create a filesystem watcher. Returns a watcher handle for use with watch-add, watch-next, watch-close.",
         category: "watch",
@@ -174,6 +175,7 @@ primitive! {
         effect: RegionEffect::Opaque,
     }
     "watch-close" => prim_watch_close {
+        ambient: true,
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Close the watcher and release its resources.",

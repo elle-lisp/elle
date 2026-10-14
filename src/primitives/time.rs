@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-10-14
 //! The clocks a program reads, the thread sleep, and the instant a `:deadline` reading names.
 //!
 //! docs/io/timeout.md
@@ -101,6 +101,7 @@ pub(crate) fn prim_sleep(
 // Declarative primitive definitions for time operations
 primitive! {
     "clock/monotonic" => prim_clock_monotonic {
+        ambient: true,
         signal: Signal::errors(),
         doc: "Return seconds elapsed on the monotonic clock since its first reading in this process",
         category: "clock",
@@ -108,6 +109,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "clock/realtime" => prim_clock_realtime {
+        ambient: true,
         signal: Signal::errors(),
         doc: "Return seconds since Unix epoch (wall clock)",
         category: "clock",
@@ -115,6 +117,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "clock/cpu" => prim_clock_cpu {
+        ambient: true,
         signal: Signal::errors(),
         doc: "Return thread CPU time in seconds",
         category: "clock",

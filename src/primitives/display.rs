@@ -458,6 +458,7 @@ pub(crate) fn prim_describe(
 
 primitive! {
     "pp" => prim_pp {
+        ambient: true,
         arity: Arity::Exact(1),
         doc: "Pretty-print a value with indentation. Returns the value.",
         params: &["value"],
