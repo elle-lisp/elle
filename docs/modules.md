@@ -489,8 +489,8 @@ reasoning patterns.
 | [registry.rs](../src/hir/analyze/forms/registry.rs) | The `import-file` and `meta/location` special forms |
 | [special.rs](../src/hir/analyze/forms/special.rs) | Qualified symbol desugaring (`a:b` → `(get a :b)`) |
 | [lexer.rs](../src/reader/lexer.rs) | Qualified symbol lexing (`a:b` as a single token) |
-| [compile.rs](../src/pipeline/compile.rs) | `compile_file`: file-as-letrec compilation and `include`/`include-file` splicing |
-| [transforms.rs](../src/pipeline/compile/transforms.rs) | `include` and `include-file` resolution, and the circular include check |
+| [compile.rs](../src/pipeline/compile.rs) | `compile_file`: file-as-letrec compilation |
+| [include.rs](../src/pipeline/compile/include.rs) | `include` and `include-file` resolution and splicing, and the circular include check |
 | [module_cli.rs](../tests/integration/module_cli.rs) | A cycle of literal imports, run as a program and analyzed |
 | [modules.lisp](../tests/lang/modules.lisp) | Behavioral tests for module patterns |
 | [include.lisp](../tests/lang/include.lisp) | Behavioral tests for compile-time inclusion |

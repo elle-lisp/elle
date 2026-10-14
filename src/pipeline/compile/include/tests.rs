@@ -1,7 +1,7 @@
-// audited: 2026-10-06
-// Splicing an include re-reads the forms it renders, and the round trip keeps each literal's type.
-//
-// docs/modules.md
+// audited: 2026-10-14
+//! Splicing an include re-reads the forms it renders, and the round trip keeps each literal's type.
+//!
+//! docs/modules.md
 
 use super::*;
 
