@@ -58,12 +58,15 @@
                    (assert (>= ticks 3)
                            "other fibers run while file/lines waits"))
 
-                 (let [shell (late feed)
-                       [v ticks] (while-ticking (fn [] (file/copy fifo dest)))]
+                 # A copy's source must be a regular file, so the fifo is the
+                 # destination, and the copy waits for its reader.
+                 (file/write dest text)
+                 (let [shell (late drain)
+                       [v ticks] (while-ticking (fn [] (file/copy dest fifo)))]
                    (subprocess/wait shell)
                    (assert (= v true) "file/copy answers true")
-                   (assert (= (file/read dest) text)
-                           "and copies what the writer wrote")
+                   (assert (= (file/read out) text)
+                           "and the reader got what it copied")
                    (assert (>= ticks 3) "other fibers run while file/copy waits"))
 
                  (let [shell (late drain)
