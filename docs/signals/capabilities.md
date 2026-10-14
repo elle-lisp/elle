@@ -312,15 +312,18 @@ root fiber starts with the spawning fiber's withheld set. A worker
 cannot reach what the fiber that spawned it could not.
 
 A worker has no parent to suspend into, so a denial there cannot be
-mediated. The thread ends instead, and the join raises `:thread-error`:
+mediated. The thread ends instead, and the join raises `:thread-error`.
+`file/mkdir` is synchronous, so only the denial stops it. A call that
+reaches the scheduler ends a worker with no `ev/run` whatever it denies
+([threads](../threads.md)):
 
 ```lisp
 (with-temp-dir dir
   (let [target (path/join dir "x")
-        f (fiber/new (fn [] (sys/join (sys/spawn-vm (fn [] (file/write target "x")))))
+        f (fiber/new (fn [] (sys/join (sys/spawn-vm (fn [] (file/mkdir target)))))
                      |:error| :deny |:fs|)]
     (assert (= (get (fiber/resume f) :error) :thread-error))
-    (assert (not (path/exists? target)))))   # nothing is written
+    (assert (not (path/exists? target)))))   # nothing is made
 ```
 
 Mediate on the fiber side of the boundary, before the work is handed to

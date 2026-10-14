@@ -76,6 +76,11 @@ recognized by the analyzer *by name*, so they resolve in **either** worker — t
 are not stdlib and need no materialization. What distinguishes the two workers is
 only whether stdlib *functions* (`+`, `map`, …) are present.
 
+`eval` in a worker compiles in the worker's global scope, so it cannot see
+the spawning closure's lexical upvalues. When the spawning instance boots from
+source and the worker needs no stdlib at run time, prefer `sys/spawn-vm`: a
+heavy worker of that instance compiles the standard library at every spawn.
+
 ```lisp
 # Light worker — special forms + primitives + intrinsics resolve; stdlib does not.
 (assert (= 3 (sys/join (sys/spawn-vm (fn [] (eval '(%add 1 2)))))))
@@ -157,13 +162,12 @@ largest single file.
 gauge (`elle::value::fiberheap::mapped_bytes`), which counts the bytes the
 region page pools hold from the OS across every thread.
 
-`sys/spawn` does **not** start a scheduler — wrap the body in `(ev/run …)`
-yourself if it does async I/O (`ev/run` resolves there, since stdlib is
-loaded). An I/O call outside one ends the worker with a `:thread-error`.
-`eval` in a worker compiles in the worker's global scope, so it cannot see
-the spawning closure's lexical upvalues. When the spawning instance boots from
-source and the worker needs no stdlib at run time, prefer `sys/spawn-vm`: a
-heavy worker of that instance compiles the standard library at every spawn.
+#### A worker has no scheduler
+
+Neither worker starts a scheduler. Wrap the body in `(ev/run …)` if it does
+I/O, and that includes `file/read` and `file/write` ([io](io.md)). The closure
+carries its reference to `ev/run`, so a light worker can call it too. An I/O
+call outside one ends the worker with a `:thread-error`.
 
 ```lisp
 (let [[ok? err] (protect (sys/join (sys/spawn (fn [] (ev/sleep 0) :slept))))]
@@ -171,6 +175,14 @@ heavy worker of that instance compiles the standard library at every spawn.
   (assert (= (get err :error) :thread-error)))
 (assert (= :slept (sys/join (sys/spawn (fn [] (ev/run (fn [] (ev/sleep 0) :slept))))))
         "ev/run gives it one")
+
+(with-temp-dir dir
+  (let [note (path/join dir "note")]
+    (let [[ok? err] (protect (sys/join (sys/spawn-vm (fn [] (file/write note "hi")))))]
+      (assert (not ok?) "file/write is I/O, so a bare light worker cannot run it")
+      (assert (= (get err :error) :thread-error)))
+    (sys/join (sys/spawn-vm (fn [] (ev/run (fn [] (file/write note "hi"))))))
+    (assert (= (file/read note) "hi") "under ev/run a light worker writes the file")))
 ```
 
 ### join with a deadline
