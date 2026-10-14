@@ -152,3 +152,28 @@ fn count_emits(h: &Hir) -> usize {
     h.for_each_child(|c| n += count_emits(c));
     n
 }
+
+/// How many calls to `name` the tree holds with a spliced operand, and how many
+/// without one. A spliced call never grafts, and a definition keeps the one its
+/// general arm makes through `apply`, so a test about a call counts the
+/// unspliced ones.
+fn calls_by_splice(h: &Hir, arena: &BindingArena, name: &str) -> (usize, usize) {
+    let mut counts = (0, 0);
+    if let HirKind::Call { func, args, .. } = &h.kind {
+        if let Some(b) = crate::hir::typeinfer::unwrap_callee_binding(func) {
+            if arena.get(b).name == crate::value::SymbolId::of(name) {
+                if args.iter().any(|a| a.spliced) {
+                    counts.0 += 1;
+                } else {
+                    counts.1 += 1;
+                }
+            }
+        }
+    }
+    h.for_each_child(|c| {
+        let (s, w) = calls_by_splice(c, arena, name);
+        counts.0 += s;
+        counts.1 += w;
+    });
+    counts
+}

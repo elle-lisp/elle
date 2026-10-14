@@ -7,7 +7,9 @@
 //! These compile against a booted runtime, because most of the callees are
 //! stdlib closures: without the stdlib a source's `+` names nothing.
 
-use super::{compile_booted, count_calls_to, count_emits, count_intrinsics, count_ops};
+use super::{
+    calls_by_splice, compile_booted, count_calls_to, count_emits, count_intrinsics, count_ops,
+};
 use crate::hir::{BindingArena, Hir, HirKind};
 
 /// The eight wrappers and the op each one's two-operand arm reaches.
@@ -130,29 +132,6 @@ fn three_operands_to_a_comparison_graft_to_one_spliced_call() {
             "{src}: the tail is compared through a spliced call to {wrapper}"
         );
     }
-}
-
-/// How many calls to `name` the tree holds with a spliced operand, and how many
-/// without one.
-fn calls_by_splice(h: &Hir, arena: &BindingArena, name: &str) -> (usize, usize) {
-    let mut counts = (0, 0);
-    if let HirKind::Call { func, args, .. } = &h.kind {
-        if let Some(b) = crate::hir::typeinfer::unwrap_callee_binding(func) {
-            if arena.get(b).name == crate::value::SymbolId::of(name) {
-                if args.iter().any(|a| a.spliced) {
-                    counts.0 += 1;
-                } else {
-                    counts.1 += 1;
-                }
-            }
-        }
-    }
-    h.for_each_child(|c| {
-        let (s, w) = calls_by_splice(c, arena, name);
-        counts.0 += s;
-        counts.1 += w;
-    });
-    counts
 }
 
 #[test]
