@@ -448,4 +448,24 @@
 (assert (= (gun:ham 10 5 "b" 5 "a") :accept) "the module exports the verdict")
 (fails-with :redis-not-configured (fn [] (gun:redis-store :prefix "unused")))
 
+# ============================================================================
+# Closing, and the options of the mesh
+# ============================================================================
+
+(let [db (gun:open :clock (frozen-clock 1000))
+      cfg (gun:get db "cfg")]
+  (gun:put cfg {:theme "dark"})
+  (gun:close db)
+  (gun:close db)
+  (assert (empty? (gun:peers db)) "a closed database lists no peer")
+  (gun:put cfg {:font "mono"})
+  (assert (= (gun:once cfg) {"theme" "dark" "font" "mono"})
+          "a closed database reads and writes locally"))
+
+(each r in [[5 1] [0 1] [-1 1] [1 -1] [1] [1 2 3] [1 "a"] "fast" 1]
+  (fails-with :invalid-redial (fn [] (gun:open :redial r))))
+(gun:close (gun:open :redial [0.5 0.5]))
+(fails-with :mesh-not-configured (fn []
+                                   (gun:open :peers ["ws://127.0.0.1:1/gun"])))
+
 (println "tests/lang/gun.lisp: all tests passed")
