@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-12
+(elle/epoch 15)
+# audited: 2026-10-14
 # std/gun peers converging over loopback WebSocket: clocks that run ahead, resync, and the walks that fetch.
 # lib/gun/mesh.md
 # lib/gun.md
@@ -58,6 +58,39 @@
     {:url url :close (fn [] (port/close listener))}))
 
 # ── Peers by hand ───────────────────────────────────────────────────────────
+
+(defn raw-send [conn msg]
+  (ws:send conn (json/serialize msg)))
+
+(defn raw-recv [conn]
+  "The next message on conn, parsed, or nil when the connection closed."
+  (let [m (ws:recv conn)]
+    (unless (= m:type :close) (json/parse (string m:data)))))
+
+(defn raw-server []
+  "A peer by hand that serves: it answers hi, records each message it hears,
+   and answers each get with no nodes."
+  (let [[listener url] (listen)
+        heard @[]]
+    (ev/spawn (fn []
+                (ws:serve listener
+                          (fn [conn]
+                            (push heard (raw-recv conn))
+                            (raw-send conn {"hi" "raw-server"})
+                            (forever
+                              (let [msg (raw-recv conn)]
+                                (when (nil? msg) (break nil))
+                                (push heard msg)
+                                (when (get msg "get")
+                                  (raw-send conn {"ack" (get msg "id") "put" {}}))))))))
+    {:url url :heard heard :close (fn [] (port/close listener))}))
+
+(defn gets-naming [heard soul]
+  "The gets in heard that name soul."
+  (filter (fn [msg]
+            (when-let [souls (get msg "get")]
+                      (not (nil? (find (fn [s] (= s soul)) souls))))) heard))
+
 # ============================================================================
 # States from the future
 # ============================================================================
@@ -200,12 +233,37 @@
       (hang-up)
       (srv:close))))
 
+# B opens on a store that another database filled, so B has loaded nothing,
+# and its only peer records every get. A map that fetched its members one by
+# one would send three gets and still answer the same struct.
+(defn map-fetches-once []
+  (let [store (gun:memory-store)
+        filler (gun:open :store store)]
+    (gun:put (gun:get filler "crew") {:a {:n 1} :b {:n 2} :c {:n 3}})
+    (let [b (open-db :store store)
+          spy (raw-server)
+          hang-up (gun:connect b spy:url)
+          members ["crew/a" "crew/b" "crew/c"]]
+      (assert (= (gun:once (gun:get (gun:map (gun:get b "crew")) "n"))
+                 {"a" 1 "b" 2 "c" 3}) "the map reads every member")
+      (assert (= (length (gets-naming spy:heard "crew")) 1)
+              "one get fetches the collection")
+      (each soul in members
+        (assert (= (length (gets-naming spy:heard soul)) 1)
+                (string "one get names " soul)))
+      (assert (= (gets-naming spy:heard "crew/a")
+                 (gets-naming spy:heard "crew/c"))
+              "and it is one get for all three members")
+      (hang-up)
+      (spy:close))))
+
 (deferral)
 (observing)
 (resync)
 (subscriptions)
 (notify-fetches)
 (put-walks-the-mesh)
+(map-fetches-once)
 
 (assert (empty? unexpected)
         (string "no database reported an error: " unexpected))
