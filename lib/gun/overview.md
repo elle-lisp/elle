@@ -4,7 +4,8 @@
 
 The submodules behind [gun.lisp](../gun.lisp): states, values, fields, HAM, the graph, stores, SEA, the core and the mesh.
 
-[gun.md](../gun.md) holds what a caller of the module sees.
+[gun.md](../gun.md) holds what a caller of the module sees, and
+[chains.md](chains.md) holds the functions that read and write a database.
 [mesh.md](mesh.md) holds the peer protocol, and [sea.md](sea.md) holds the
 rules of user spaces and encryption. This file holds how the module divides.
 Each file's header says what it exports, and `(doc name)` carries a function's

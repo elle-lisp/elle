@@ -1,6 +1,6 @@
 # mesh
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-10-14 -->
 
 The peer protocol of std/gun: the messages, how a peer merges and forwards them, reads that ask the peers, acks, and deferral.
 
@@ -140,9 +140,11 @@ pending soul and is answered at once, so no get travels further than one lap.
 
 Which reads fetch:
 
-- `gun:once` and `gun:on` fetch each node their chain reaches.
-- `gun:put` and `gun:set` fetch each node on their path before they take the
-  lock, so the plan follows the links that the mesh holds.
+- `gun:once` and `gun:on` fetch each node their chain reaches. A map fetches
+  the nodes of all its members with one get.
+- `gun:put`, `gun:set`, `gun:unset` and `gun:soul` fetch each node on their
+  path before they take the lock, so the plan follows the links that the mesh
+  holds.
 - The walk that decides which `gun:on` functions to call never waits on the
   network. When it reaches a soul that nobody has fetched, it starts a fetch in
   a new fiber, and the answer calls the functions again.

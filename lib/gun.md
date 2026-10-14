@@ -1,13 +1,15 @@
 # gun
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-10-14 -->
 
 A graph database in the shape of GUN: HAM merges on a memory or Redis store, WebSocket peers, signed user spaces and encryption.
 
 The export struct at the bottom of [gun.lisp](gun.lisp) lists what the module
 offers, and `(doc name)` carries each function's arguments.
-[gun/overview.md](gun/overview.md) lists the submodules behind it. This file
-holds the data model, the merge rule, the store layout and the invariants.
+[gun/overview.md](gun/overview.md) lists the submodules behind it, and
+[gun/chains.md](gun/chains.md) holds the functions that read and write a
+database. This file holds the data model, the merge rule, the store layout and
+the invariants.
 
 The design follows [GUN](https://gun.eco/) and its HAM conflict rule. It does
 not speak GUN's wire format. Databases join over WebSocket, and
@@ -63,7 +65,8 @@ A value is one of these:
   takes part in the merge.
 - a boolean, an integer, a finite float, an immutable string or immutable
   bytes.
-- a **link** to another node, built by `gun:link` from a soul.
+- a **link** to another node, built by `gun:link` from a soul. A `put` also
+  takes a chain where it takes a value, and writes a link to the chain's soul.
 
 Nothing else is a value: not an array, a list, a set, a keyword, a closure, a
 NaN, an infinity, or a mutable string or bytes. A `put` that holds one raises
@@ -77,73 +80,10 @@ the same key, and a read returns string keys. The key `_` is reserved, and a
 
 ## Chains
 
-A database is a chain, and `gun:get` extends a chain by one key. The first key
-names a root node. Each later key names a field of the node before it. The
-database itself names no node, so a `put` or a `once` on it raises
-`{:error :gun-error :reason :no-soul}`. A root holds a node, so a `put` of
-anything but a struct on a root raises `:not-a-node`:
-
-```lisp
-(def db (gun:open))
-(def alice (gun:get (gun:get db "users") "alice"))
-
-(gun:put alice {:name "Alice" :age 30})
-(assert (= (gun:once alice) {"name" "Alice" "age" 30}))
-(assert (= (gun:once (gun:get alice "name")) "Alice"))
-```
-
-A nested struct becomes a node of its own, and the parent field holds a link to
-it. When the field already holds a link, the struct is written to the node the
-link names. Otherwise the child's soul is the parent's soul, a `/`, and the
-key, so two writers who create the same nested node create one node, not two:
-
-```lisp
-(def users (gun:once (gun:get db "users")))
-(assert (gun:link? (get users "alice")))
-(assert (= (gun:link-soul (get users "alice")) "users/alice"))
-```
-
-A soul escapes `%` as `%25` and `/` as `%2F` in each of its parts. The key
-`a/b` of the root `x` is therefore the soul `x/a%2Fb`, and the key `b` of the
-key `a` of `x` is `x/a/b`.
-
-`gun:once` answers a chain with its value. A chain that reaches a node, at a
-root or through a link, answers a struct of the node's live fields, and a link
-inside that struct stays a link. Any other chain answers the value of its
-field. A chain that names nothing answers `nil`, and a tombstone leaves its key
-out of the struct:
-
-```lisp
-(assert (nil? (gun:once (gun:get db "nobody"))))
-(gun:put (gun:get alice "age") nil)
-(assert (= (gun:once alice) {"name" "Alice"}))
-```
-
-`gun:on` calls its function at once with the chain's value, and again whenever
-a write changes that value, whether the write is local or comes from a peer. It
-returns a function that ends the subscription. A write that leaves the value as
-it was calls nothing:
-
-```lisp
-(def seen @[])
-(def stop (gun:on (gun:get alice "name") (fn [v] (push seen v))))
-(gun:put (gun:get alice "name") "Alicia")
-(gun:put (gun:get alice "name") "Alicia")
-(stop)
-(gun:put (gun:get alice "name") "Ali")
-(assert (= (freeze seen) ["Alice" "Alicia"]))
-```
-
-`gun:set` adds a node to an unordered collection. It gives the node a random
-soul, links it from the collection under that soul, and returns the chain of
-the new node:
-
-```lisp
-(def todo (gun:get db "todo"))
-(def item (gun:set todo {:title "write docs"}))
-(assert (= (gun:once (gun:get item "title")) "write docs"))
-(assert (= (length (gun:once todo)) 1))
-```
+A database is a chain, and `gun:get` extends a chain by one key. A chain names
+a node or a field, and `gun:put`, `gun:once`, `gun:on`, `gun:set`, `gun:map`,
+`gun:soul` and `gun:unset` read and write what it names.
+[gun/chains.md](gun/chains.md) holds each of them.
 
 ## The merge rule
 
@@ -365,10 +305,12 @@ its own space, so nobody else can replace it. Given the module that
 
 ## Running tests
 
-The memory store and the peer messages need nothing outside the process:
+The memory store, maps and the peer messages need nothing outside the
+process:
 
 ```bash
 elle tests/lang/gun.lisp
+elle tests/lang/gun-map.lisp
 elle tests/lang/gun-wire.lisp
 ```
 
