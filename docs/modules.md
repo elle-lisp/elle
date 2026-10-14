@@ -1,6 +1,6 @@
 # Modules
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-13 -->
 
 Elle's modules: three raw loaders, the `import-file` form over them, an `import` macro in Elle, and conventions built from closures.
 
@@ -47,7 +47,9 @@ path resolves against the working directory. Code calls `import-file` or
 
 `import/load-file` reads the file as UTF-8 source. It compiles the file, runs
 it on the current fiber, and returns the file's last expression. The file runs
-as a single letrec. Every call compiles and runs the file again.
+as a single letrec. Every call compiles and runs the file again. A file's
+definitions reach no other compile, so what an earlier load defined never
+changes how a later file compiles.
 
 A loader compiles on behalf of the fiber that calls it. The file's macros
 expand with the capabilities that fiber withholds, and each runs under the
