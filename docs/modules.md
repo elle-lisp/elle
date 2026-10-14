@@ -1,6 +1,6 @@
 # Modules
 
-<!-- audited: 2026-10-13 -->
+<!-- audited: 2026-10-14 -->
 
 Elle's modules: three raw loaders, the `import-file` form over them, an `import` macro in Elle, and conventions built from closures.
 
@@ -52,9 +52,10 @@ definitions reach no other compile, so what an earlier load defined never
 changes how a later file compiles.
 
 A loader compiles on behalf of the fiber that calls it. The file's macros
-expand with the capabilities that fiber withholds, and each runs under the
-expansion fuel budget ([macros.md](macros.md)). The file compiles against the
-prelude and the standard library, never against what a REPL session defined.
+expand without the capabilities that fiber withholds and without the effect
+capabilities every expansion withholds, and each runs under the expansion fuel
+budget ([macros.md](macros.md)). The file compiles against the prelude and the
+standard library, never against what a REPL session defined.
 
 `import/load-plugin` loads the library, calls `elle_plugin_init`, and returns
 the struct of primitives that the init builds. A later call with the same path
