@@ -41,6 +41,7 @@ graft and the fold.
 | [analyze.rs](analyze.rs) | `analyze` and `analyze_file` |
 | [eval.rs](eval.rs) | `eval`, `eval_all`, `eval_file` and `eval_syntax` |
 | [cache.rs](cache.rs) | `CompileCtx` and `BootExports` |
+| [cache/register.rs](cache/register.rs) | What a host, a REPL line and the standard library register into a `CompileCtx` |
 | [bootstrap.rs](bootstrap.rs) | The core.lisp compile, and `install_core_exports` |
 | [sources.rs](sources.rs) | The three boot sources, embedded at build time |
 | [directives.rs](directives.rs) | The `elle/version` and `elle/migration` declarations ([versioning](../../docs/versioning.md)) |
