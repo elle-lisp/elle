@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-13
+# audited: 2026-10-14
 # The runner's ledger, part 2 of 2: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/lang/each.lisp" :objects 1012]
@@ -254,7 +254,7 @@
 ["tests/lang/threading.lisp" :objects 147]
 ["tests/lang/time-sleep.lisp" :objects 239]
 ["tests/lang/tls.lisp" :objects 899]
-["tests/lang/trait-dispatch.lisp" :objects 1351]
+["tests/lang/trait-dispatch.lisp" :objects 1341]
 ["tests/lang/trait-operator-fallback.lisp" :objects 1162]
 ["tests/lang/trait-operator-methods.lisp" :objects 786]
 ["tests/lang/traits.lisp" :objects 1891]
@@ -285,9 +285,11 @@
 ["tests/lang/import-loaders.lisp" :objects 365]
 ["tests/lang/meta-location.lisp" :objects 154]
 ["tests/lang/import-resolve.lisp" :objects 318]
-["tests/lang/caps-macro.lisp" :objects 425]
+["tests/lang/caps-macro.lisp" :objects 525]
 ["tests/impl/region-query-carrier-leak.lisp" :objects 291]
 ["tests/lang/ffi-bool.lisp" :objects 586]
 ["tests/lang/ffi-write.lisp" :objects 412]
 ["tests/lang/ffi-string-field.lisp" :objects 309]
 ["tests/lang/caps-ffi.lisp" :objects 148]
+["tests/lang/compile-isolation.lisp" :objects 133]
+["tests/lang/macro-purity.lisp" :objects 425]
