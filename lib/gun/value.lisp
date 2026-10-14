@@ -7,7 +7,8 @@
 ## Loaded via:
 ##   (def value ((import "std/gun/value")))
 ##
-## Exports: {:valid? :link :link? :link-soul :encode :decode :before?}
+## Exports: {:kind-of :valid? :link :link? :link-soul :encode :decode
+##           :before?}
 ##
 ## A link is a struct {:soul s} whose trait table carries the :Gun protocol:
 ## :kind answers :link, and :soul answers s. Equality ignores traits, so
@@ -124,7 +125,8 @@
     "True when the encoding of value a sorts before the encoding of b."
     (< (encode a) (encode b)))
 
-  {:valid? valid?
+  {:kind-of kind-of
+   :valid? valid?
    :link link
    :link? link?
    :link-soul link-soul

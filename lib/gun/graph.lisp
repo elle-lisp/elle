@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-12
+(elle/epoch 15)
+# audited: 2026-10-14
 ## Souls, the in-memory nodes, the merge that answers a diff, and the flattening of a nested struct.
 ## lib/gun.md
 ## lib/gun/overview.md
@@ -105,8 +105,9 @@
   ## ── Flattening ───────────────────────────────────────────────────────
 
   (defn node-value? [v]
-    "True when v is a struct to write as a node of its own."
-    (and (struct? v) (not (value:link? v))))
+    "True when v is a struct to write as a node of its own: a struct whose
+     trait table carries no :Gun protocol, so not a link."
+    (and (struct? v) (nil? (value:kind-of v))))
 
   (defn flatten [soul v st path link-of]
     "The writes that put the struct v at node soul with state st: an array of
