@@ -98,6 +98,6 @@ pub(in crate::value::send) fn code_fields(
         merged_slots: t.merged_slots().as_slice().to_vec(),
         frame_release_slots: t.frame_release_slots().to_vec(),
         frame_release_regions: t.frame_release_regions().to_vec(),
-        fragment: Vec::new(),
+        fragment: t.fragment().to_vec(),
     }
 }

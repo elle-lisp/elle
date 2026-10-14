@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! Lambda body compilation: state save and restore, environment layout, and the body frozen as a function of its own.
 //!
 //! src/lir/lower/AGENTS.md
@@ -35,6 +35,13 @@ impl<'a> Lowerer<'a> {
         head.vararg_kind = lambda.vararg_kind.clone();
         head.rest_list_layout = rest_list_layout;
         head.num_params = lambda.params.len();
+        // The body closed for a graft rides to the code payload as bytes, which
+        // a later compile decodes once (docs/impl/graft.md).
+        head.fragment = match &lambda.fragment {
+            Some(fragment) => bincode::serialize(fragment.as_ref())
+                .expect("a LambdaFragment is plain data, so it serializes"),
+            None => Vec::new(),
+        };
 
         // Save state
         let saved_reg = self.next_reg;

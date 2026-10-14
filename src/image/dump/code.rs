@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-14
 //! The code-object half of the compacting copy: a payload, its LIR body, and the
 //! child code objects its `MakeClosure` instructions index.
 //!
@@ -74,6 +74,7 @@ pub(super) fn copy_payload(
         capture_locals: heap.alloc_region_slice_in_region(src.capture_locals.as_slice(), region),
         strict_keys: copy_bytes_slices(heap, region, &src.strict_keys),
         children,
+        fragment: heap.alloc_region_slice_in_region(src.fragment.as_slice(), region),
         lir: copy_lir(heap, region, &src.lir, walk)?,
         ..src
     };

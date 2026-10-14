@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! A function closed into fragments, one per arity its body dispatches on, for a graft or a fused loop.
 //!
 //! docs/impl/graft.md
@@ -12,8 +12,8 @@ use crate::hir::pattern::HirPattern;
 use crate::value::SymbolId;
 
 /// A function's body, closed so another unit or another call site can take a
-/// copy of it. The function's template carries one, and the unit that defines
-/// the function reads the same one off its lambda node.
+/// copy of it. The function's code payload carries one as bytes, and the unit
+/// that defines the function reads the same one off its lambda node.
 ///
 /// A body that dispatches on its rest list with `(match rest …)` closes arm by
 /// arm, because a call's operand count decides the arm before the call runs.

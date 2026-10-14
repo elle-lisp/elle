@@ -80,10 +80,23 @@ impl FragmentMemo {
         self.of_template(&closure.template)
     }
 
-    /// The fragment `t`'s payload carries, decoded once per memo.
+    /// The fragment `t`'s payload carries, decoded once per memo. Bytes that
+    /// do not decode are a body the payload does not carry, and so is an
+    /// empty slice: the call stays a call.
     pub(crate) fn of_template(&self, t: &ClosureTemplate) -> Option<Rc<LambdaFragment>> {
-        let _ = (t, &self.decoded);
-        None
+        let bytes = t.fragment();
+        if bytes.is_empty() {
+            return None;
+        }
+        let key = t.payload_backing() as usize;
+        if let Some(hit) = self.decoded.borrow().get(&key) {
+            return hit.clone();
+        }
+        let decoded = bincode::deserialize::<LambdaFragment>(bytes)
+            .ok()
+            .map(Rc::new);
+        self.decoded.borrow_mut().insert(key, decoded.clone());
+        decoded
     }
 }
 

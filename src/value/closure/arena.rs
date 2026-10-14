@@ -292,6 +292,7 @@ impl PayloadParts {
             frame_release_slots: t.frame_release_slots().to_vec(),
             frame_release_regions: t.frame_release_regions().to_vec(),
             children: t.payload().children().to_vec(),
+            fragment: t.fragment().to_vec(),
             ..PayloadParts::new(t.bytecode().to_vec(), t.arity(), t.constants().to_vec())
         }
     }

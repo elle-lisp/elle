@@ -151,6 +151,10 @@ fn raising_the_scope_counter_only_moves_it_up() {
 #[cfg(feature = "jit")]
 fn inc_promotes(rt: &mut Runtime) -> bool {
     rt.vm().runtime_config.jit = crate::config::JitPolicy::Eager;
+    // The graft would replace the call below with inc's body, which it reads
+    // off the value, and the question here is whether inc's own code reaches
+    // the JIT. So this compile keeps the call a call.
+    rt.compile().set_graft(crate::config::GraftPolicy::Off);
     let inc = {
         let (vm, symbols, cctx) = rt.parts();
         crate::pipeline::eval_all("inc", symbols, vm, cctx, "<tier>").expect("inc")
@@ -159,8 +163,8 @@ fn inc_promotes(rt: &mut Runtime) -> bool {
         let t = &inc.as_closure().expect("inc is a closure").template;
         (t.bytecode().as_ptr(), t.signal(), t.arity())
     };
-    // A REPL binding the compiler knows only by value, so the call below is a
-    // call: a name the inline registry carries would have its body spliced in.
+    // A REPL binding, so the call below reaches inc's closure through the
+    // ordinary dispatch path.
     let sym = rt.symbols().intern("tier-f");
     {
         let (cctx, heap) = rt.compile_and_heap();

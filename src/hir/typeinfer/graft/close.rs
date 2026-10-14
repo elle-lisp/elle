@@ -1,5 +1,5 @@
-// audited: 2026-10-06
-//! Closes every lambda of the unit into the fragment its template will carry, and names the functions a call may graft.
+// audited: 2026-10-14
+//! Closes every lambda of the unit into the fragment its code payload will carry, and names the functions a call may graft.
 //!
 //! docs/impl/graft.md
 //! docs/impl/dissolution/inline.md

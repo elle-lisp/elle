@@ -63,7 +63,7 @@ pub(super) fn freeze(work: &mut Work) -> Result<LirOwned, String> {
         frame_release_regions: ascending(&mut head.frame_release_regions, |r| r.get()),
         doc: head.doc.as_deref().map(str::to_string),
         origin: head.origin,
-        fragment: Vec::new(),
+        fragment: std::mem::take(&mut head.fragment),
     };
     Ok(LirOwned {
         code,

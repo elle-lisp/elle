@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! Deserializing a `SendBundle`: every received value is rebuilt on the
 //! receiving heap, in the call's region.
 //!
@@ -136,6 +136,7 @@ pub(in crate::value::send) fn parts_from_sendable(
         merged_slots: sc.merged_slots,
         frame_release_slots: sc.frame_release_slots,
         frame_release_regions: sc.frame_release_regions,
+        fragment: sc.fragment,
         ..PayloadParts::new(sc.bytecode, sc.arity, constants)
     }
 }

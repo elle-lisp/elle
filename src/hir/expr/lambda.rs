@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! A function literal as the analyzer leaves it: its parameters, captures and body, and what a call to it signals.
 //!
 //! docs/impl/hir.md
@@ -53,9 +53,9 @@ pub struct Lambda {
     /// The inferred signal of a call to this lambda, which can differ from
     /// `body.signal`. A call to unbounded parameter i sets bit i of
     /// `propagates` instead of adding bits. A call to a parameter bounded by
-    /// `(silence p)` adds the bound's bits.
+    /// `(bound p spec)` adds the bound's bits.
     pub inferred_signals: Signal,
-    /// Declared signal bounds for parameters (from `(silence param)`).
+    /// Declared signal bounds for parameters (from `(bound param spec)`).
     /// Only parameters with explicit bounds appear here. The bounds feed
     /// `inferred_signals`, and the function checks each on entry
     /// (`CheckSignalBound`).
@@ -74,8 +74,8 @@ pub struct Lambda {
     /// The lowerer checks `is_gpu_eligible()` after lowering.
     pub assert_numeric: bool,
     /// The body closed for a later graft or fused loop, when it closes.
-    /// Attached before functionalization, and carried by the lowerer to
-    /// the function's template (docs/impl/graft.md).
+    /// Attached before functionalization, and encoded by the lowerer onto
+    /// the function's code payload (docs/impl/graft.md).
     #[serde(skip)]
     pub fragment: Option<Rc<LambdaFragment>>,
 }
@@ -116,7 +116,7 @@ impl Lambda {
         self
     }
 
-    /// The signal a call to the lambda emits, and the `(silence p)` bounds
+    /// The signal a call to the lambda emits, and the `(bound p spec)` bounds
     /// that signal was computed under.
     pub fn signal(mut self, inferred_signals: Signal, param_bounds: Vec<ParamBound>) -> Self {
         self.inferred_signals = inferred_signals;
