@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! The 16-byte tagged-union `Value`: its tags, its immediate predicates, and its scalar serde.
 //!
 //! Every value is exactly 16 bytes:
@@ -214,9 +214,10 @@ impl Value {
     ///
     /// A conservative structural check for the park/resume tripwires
     /// (`elle_jit_yield`, `resume_suspended`): the tag must not exceed the
-    /// largest `TAG_*` constant, and a heap tag must carry a non-null, 8-byte-aligned
-    /// payload. A permutation of valid values passes — this catches torn or
-    /// zeroed slots, not misplaced ones.
+    /// largest `TAG_*` constant, and a heap tag must carry an 8-byte-aligned
+    /// payload above the first page, where no mapping ever lands. A permutation
+    /// of valid values passes — this catches torn or zeroed slots, and a slot a
+    /// freed page's recycled bytes spell, not misplaced ones.
     pub fn malformed_reason(&self) -> Option<&'static str> {
         if self.tag > TAG_CLOSURE_TEMPLATE {
             return Some("tag out of range");
@@ -224,6 +225,9 @@ impl Value {
         if self.is_heap() {
             if self.payload == 0 {
                 return Some("heap tag with null payload");
+            }
+            if self.payload < 4096 {
+                return Some("heap tag with payload below the first page");
             }
             if !self.payload.is_multiple_of(8) {
                 return Some("heap tag with unaligned payload");

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! Replaying a fiber's suspended frame chain: each frame's stack, region map and
 //! dues are restored before its body is re-entered.
 //!
@@ -189,6 +189,7 @@ impl VM {
                     for (section, values) in [
                         ("stack", frame.stack.as_slice()),
                         ("env", frame.env.as_slice()),
+                        ("resume-value", std::slice::from_ref(&current_value)),
                     ] {
                         for (vi, v) in values.iter().enumerate() {
                             if let Some(reason) = v.malformed_reason() {

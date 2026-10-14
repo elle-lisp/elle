@@ -1,5 +1,12 @@
+// audited: 2026-10-14
+//! Each Owned subtree's adopt edges: one owner per member, keyed by emit site, under the root's lifetime obligation.
+//!
+//! docs/impl/region/adopt.md
+//! docs/impl/region/ownership.md
+
 use super::super::postdom::{EmitMode, PostDom};
 use super::super::*;
+use super::aliases::AliasTables;
 use super::inputs::OwnershipInputs;
 use super::subtree::compute_owned_subtrees;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -97,7 +104,9 @@ pub(in crate::hir::region::infer) struct AdoptEdges {
 ///    Shared, where the retain is live again. An opaque CALL over a member
 ///    (`RegionInfo::opaque_result_aliases`) is the same deref reached one step further
 ///    out: its result may BE a member or the container, so it is closed into the same
-///    alias set and bounded the same way.
+///    alias set and bounded the same way. A release routed through a compiled capture
+///    cell (`RegionInfo::cell_route_regions`) loads the cell and unwraps it, so the
+///    routed region is an alias of the cell and joins the set keyed by the cell.
 /// 2. **No merge overlap**: a subtree touching any builder-idiom MERGE participant is
 ///    skipped — MERGE collapses those to one region; adopting them too would link a
 ///    region that no longer exists independently. The two emit modes never both fire
@@ -130,24 +139,7 @@ pub(in crate::hir::region::infer) fn compute_adopt_edges(
     order: &HashMap<HirId, u32>,
 ) -> AdoptEdges {
     let owned = compute_owned_subtrees(inputs, info);
-    // The read/funnel alias tables, indexed by source/container, are built once
-    // for the whole ownership pass. The per-root fixpoint below walks only the
-    // edges out of the regions its reachable set actually touches.
-    let mut aliases_by_source: FxHashMap<Region, Vec<Region>> = FxHashMap::default();
-    for &(_, alias, source) in info
-        .counted_read_aliases
-        .iter()
-        .chain(info.opaque_result_aliases.iter())
-    {
-        aliases_by_source.entry(source).or_default().push(alias);
-    }
-    let mut funnel_by_container: FxHashMap<Region, Vec<Region>> = FxHashMap::default();
-    for &(_, result, container) in &info.funnel_result_containers {
-        funnel_by_container
-            .entry(container)
-            .or_default()
-            .push(result);
-    }
+    let aliases = AliasTables::new(info);
     // Capture containment edges `(lambda_id, captured, closure)` — re-derived (capture
     // records no `cross_region_refs` edge), so they are a second source of interior
     // owner-edges, emitted at the closure's construction site rather than a store node.
@@ -405,75 +397,14 @@ pub(in crate::hir::region::infer) fn compute_adopt_edges(
         }) {
             continue;
         }
-        // The same obligation over the values read back OUT of this subtree. A native
-        // container read (`get`/`first`/`rest` — `counted_read_aliases`) hands the reader
-        // a value that still lives inside the container, under a **counted** pass-through
-        // retain (Rule 5) the RC baseline honours — but adoption FREEZES the member's RC,
-        // so that retain buys nothing and the root's drop reclaims the element under the
-        // reader (whose own value-resolved release then faults on the freed page). The
-        // alias's region is a fresh call-result placeholder no containment edge relates to
-        // any member, so nothing above sees it: check it here. A read whose alias the
-        // root's drop does not post-dominate refuses the subtree to Shared, where the
-        // retain is live again (region/adopt.md § "The lifetime obligation the root
-        // carries"; `region_container_read_borrow_uaf`).
-        //
-        // Aliasing is TRANSITIVE: reading out of an alias reaches deeper into the same
-        // subtree (`(get (get c 0) 0)` names a value inside a member of a member), and
-        // the inner alias's own bound says nothing about the outer one's. Close the read
-        // edges over the member set to a fixpoint — bounded by the alias count, since
-        // each round adds at least one region — so every value reachable from the subtree
-        // through any chain of reads is bound by the root's drop.
-        //
-        // An opaque CALL closes in the same fixpoint (`opaque_result_aliases`). Its
-        // result is under no declaration that it lives in the call's own region, so it
-        // may BE an argument (`concat` returns a mutable first argument in place) or a
-        // value read out of one (`last`) — one edge covering both, because both make the
-        // result a region inside the argument's subtree. Reaching it therefore bounds its
-        // own release (it may be a member) AND lets the read edges reach on through it
-        // (it may be the container), which no single-relation closure would give.
-        //
-        // A `Funnel`'s result (`funnel_result_containers`) reaches just as far and needs
-        // no bound: the declaration pins it to arg0 in place or a fresh copy — the
-        // container, never an interior element — so it carries arg0's own counted
-        // reference where it is the root, and no-ops on the frozen region where arg0 is
-        // itself a member (the emit-order paragraph in region/adopt.md). Bounding it
-        // would refuse every mutable-store subtree over its own trailing discarded store
-        // result.
-        //
-        // Reachability and boundedness are tracked SEPARATELY: a region can be reachable
-        // without needing a bound (a funnel result), and one relation must not consume
-        // the other's obligation — a read alias that a funnel edge happened to make
-        // reachable first still owes its own bound.
-        let mut reachable: FxHashSet<Region> = members.clone();
-        let mut bounded: FxHashSet<Region> = FxHashSet::default();
-        // Each alias's own release point — `None` where none is recorded, which bounds
-        // nothing and so refuses, exactly as an unbounded member does.
-        let mut alias_dps: Vec<Option<HirId>> = Vec::new();
-        let mut worklist: Vec<Region> = reachable.iter().copied().collect();
-        while let Some(src) = worklist.pop() {
-            if let Some(aliases) = aliases_by_source.get(&src) {
-                for &alias in aliases {
-                    // Bounding is per-edge, not per-new-reach: a read alias that a
-                    // funnel edge happened to make reachable first still owes its own
-                    // bound, so `bounded`/`alias_dps` must see every alias whose
-                    // source is reachable, regardless of which edge grew `reachable`.
-                    if bounded.insert(alias) {
-                        alias_dps.push(info.region_data.get(&alias).map(|d| d.lifetime_point));
-                    }
-                    if reachable.insert(alias) {
-                        worklist.push(alias);
-                    }
-                }
-            }
-            if let Some(results) = funnel_by_container.get(&src) {
-                for &result in results {
-                    if reachable.insert(result) {
-                        worklist.push(result);
-                    }
-                }
-            }
-        }
-        if !alias_dps
+        // The same obligation over every alias of a member: a value read back out
+        // of the subtree, an opaque call's result over it, and a release routed
+        // through a member cell. Each is a region the root's drop can tear that no
+        // member's own point names, so the drop must post-dominate its release
+        // too, else the subtree refuses to Shared, where the pass-through retain
+        // is live again (`AliasTables`).
+        if !aliases
+            .release_points(members, info)
             .iter()
             .all(|dp| dp.is_some_and(|lu| pd.drop_post_dominates(root_dp_id, lu, EmitMode::Adopt)))
         {

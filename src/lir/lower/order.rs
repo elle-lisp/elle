@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-10-14
 //! The order releases sharing one `decref_point` are emitted in: holder before holdee, so no release reads a freed page.
 //!
 //! docs/impl/region/rules.md
@@ -48,8 +48,10 @@ impl<'a> Lowerer<'a> {
         //   `alias → source` throughout (docs/impl/region/adopt.md): a native
         //   read's result and the container it read from
         //   (`counted_read_aliases`), an opaque call's result and its arguments
-        //   (`opaque_result_aliases`), and a `Funnel`'s result and its container
-        //   (`funnel_result_containers`). They compose transitively through the sort, so a
+        //   (`opaque_result_aliases`), a `Funnel`'s result and its container
+        //   (`funnel_result_containers`), and the region a release routed through a
+        //   compiled capture cell names, with the cell it loads
+        //   (`cell_route_regions`). They compose transitively through the sort, so a
         //   read out of a CALL's result — whose recorded container is the call's
         //   placeholder, not the container the call handed back — is still ordered ahead
         //   of the container that frees the page. An opcode read mints no region of its
@@ -87,6 +89,9 @@ impl<'a> Lowerer<'a> {
             .chain(info.funnel_result_containers.iter())
         {
             value_alias.entry(alias).or_default().push(source);
+        }
+        for (&cell, &routed) in &info.cell_route_regions {
+            value_alias.entry(routed).or_default().push(cell);
         }
         for regions in decrefs_by_decref_point.values_mut() {
             Self::order_releases(regions, &adopt_owner, &value_alias, &info);

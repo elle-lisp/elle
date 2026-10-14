@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-10-14
 //! `RegionInfo`: what region inference produces for a compilation unit — the
 //! per-allocation and per-scope assignments, and the lowerer's cuts.
 //!
@@ -266,6 +266,14 @@ pub struct RegionInfo {
     ///
     /// docs/impl/region/cells.md
     pub begin_cell_regions: HashMap<HirId, Vec<(Binding, Region)>>,
+    /// Compiled capture-cell region → the region whose value-routed release
+    /// loads that cell and unwraps it to the content: the cell binding's
+    /// call-result init. The adopt obligation bounds the routed release by the
+    /// closure's drop, and the lowerer orders it ahead of the cell's own
+    /// release. A literal init and a captured reassigned binding record none.
+    ///
+    /// docs/impl/region/adopt.md
+    pub cell_route_regions: HashMap<Region, Region>,
     /// `Destructure`/`Match` HirId → one entry per collection the node's
     /// pattern BUILDS and binds a name to. Each region is phantom, is in
     /// `call_result_regions`, and is pinned to the node keying it. A collection
@@ -421,6 +429,7 @@ impl RegionInfo {
             cell_containers: HashMap::new(),
             cell_stored_regions: FxHashSet::default(),
             begin_cell_regions: HashMap::new(),
+            cell_route_regions: HashMap::new(),
             pattern_rest_regions: HashMap::new(),
             merged_parent: HashMap::new(),
             closure_cycle_members: FxHashSet::default(),
