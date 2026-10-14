@@ -48,9 +48,13 @@ and [plan.md](plan.md) the order everything lands in.
    static scan found zero top-level `assign`s in stdlib.lisp, so every
    cell snaps. The unsealed leaves are exactly the reconstruction stream's
    two classes: the three stdio-port `External`s and the two default
-   traitsets ([sealing.md](sealing.md)); nothing else in the graph is refused, so the boot image is
-   dumpable. Relocation load: 1,258 heap-pointer slots + 350 `RegionSlice`
-   ptrs + 684 primitive slots ≈ 2,300 relocation entries.
+   traitsets ([sealing.md](sealing.md)); nothing else in the graph is refused,
+   so the boot image is dumpable. The default traitsets have since become
+   immutable structs ([traits.md](../../traits.md)). The census now counts them
+   among the sealed `LStruct`s, and its unsealed leaves are the three ports
+   alone. The dumper still never copies a default traitset. Relocation load:
+   1,258 heap-pointer slots + 350 `RegionSlice` ptrs + 684 primitive slots ≈
+   2,300 relocation entries.
 
    Most of the payload is source locations. The template foundation moved a
    code object's data into region pages, so what the census now measures
