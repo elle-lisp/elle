@@ -1,12 +1,13 @@
-(elle/epoch 14)
-# audited: 2026-10-12
+(elle/epoch 15)
+# audited: 2026-10-13
 # std/gun on the Redis store: the hash layout, signed fields, persistence, interleaved writers, and two peers.
 # lib/gun.md
 #
 # Requires a live Redis on 127.0.0.1:6379, the hash and random plugins for
-# the peers, and the crypto plugin for the signed fields. Every key this file
-# writes starts with test:gun:<pid>:, and the file deletes only those keys, so
-# two runs and the other Redis tests can share one server.
+# the peers, and the crypto plugin for the signed fields. Without any of them,
+# the file records a reasoned skip. Every key this file writes starts with
+# test:gun:<pid>:, and the file deletes only those keys, so two runs and the
+# other Redis tests can share one server.
 
 (let [[h-ok? _] (protect (import "plugin/hash"))
       [r-ok? _] (protect (import "plugin/random"))
@@ -185,16 +186,16 @@
     (port/close listener)
     (assert (empty? errs) (string "no database reported an error: " errs))))
 
-(redis:with "127.0.0.1" 6379
-            (fn []
-              (clear-test-keys)
-              (defer
-                (clear-test-keys)
-                (store-round-trip)
-                (layout)
-                (signed-layout)
-                (persistence)
-                (interleaved)
-                (mesh))))
-
-(println "tests/lang/gun-redis.lisp: all tests passed")
+(gate! (service-up? "127.0.0.1" 6379) "redis not running on 127.0.0.1:6379"
+       (redis:with "127.0.0.1" 6379
+                   (fn []
+                     (clear-test-keys)
+                     (defer
+                       (clear-test-keys)
+                       (store-round-trip)
+                       (layout)
+                       (signed-layout)
+                       (persistence)
+                       (interleaved)
+                       (mesh))))
+       (println "tests/lang/gun-redis.lisp: all tests passed"))
