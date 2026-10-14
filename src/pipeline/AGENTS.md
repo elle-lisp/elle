@@ -35,8 +35,9 @@ graft and the fold.
 | File | Holds |
 |------|-------|
 | [mod.rs](mod.rs) | `AnalyzeResult`, and the re-exports |
-| [compile.rs](compile.rs) | The bytecode, LIR and FHIR entry points, and the lowering they share |
+| [compile.rs](compile.rs) | The bytecode and FHIR entry points, and the lowering they share |
 | [compile/frontend.rs](compile/frontend.rs) | The file front end: source text or forms to regularized HIR |
+| [compile/lir.rs](compile/lir.rs) | `compile_file_to_lir`: a file to frozen LIR |
 | [compile/transforms.rs](compile/transforms.rs) | The two test-runner transforms, include splicing, and the entry points over them |
 | [analyze.rs](analyze.rs) | `analyze` and `analyze_file` |
 | [eval.rs](eval.rs) | `eval`, `eval_all`, `eval_file` and `eval_syntax` |
@@ -165,8 +166,9 @@ eval_file and eval_all run it on the caller's VM
 [regularize.rs](../hir/regularize.rs) says why the passes run in that order.
 The other entry points leave this path:
 
-- `compile_file_to_lir` repeats the front end in [compile.rs](compile.rs). It
-  stamps no file scope, honors `epoch_skip`, and stops at LIR.
+- `compile_file_to_lir` repeats the front end in
+  [compile/lir.rs](compile/lir.rs). It stamps no file scope, honors
+  `epoch_skip`, and stops at LIR.
 - `analyze_file` reads with `read_syntax_all`, strips the declarations,
   migrates and expands. It checks no lexicon, stamps no file scope, splices no
   include, and binds no `core_env`. It then analyzes the letrec and marks tail
