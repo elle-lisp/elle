@@ -192,7 +192,8 @@ Both halves of parity have landed. A hydrated closure carries its LIR in its
 payload, so a hot stdlib function promotes to the JIT under either boot
 ([sealing.md](sealing.md)). It carries the body fragment a graft reads in the
 same payload, so a call to a library function grafts under either boot and a
-user file compiles to one bytecode under both ([graft.md](../graft.md)).
+user file compiles to the same instruction stream under both
+([graft.md](../graft.md)).
 
 One piece is still to land ([plan.md](plan.md)): per-worker hydration. A
 `sys/spawn` worker builds its own instance and boots its stdlib from source,

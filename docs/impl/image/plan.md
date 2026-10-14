@@ -98,8 +98,8 @@ Then the image milestones:
    - the compile half of the parity gate — the payload carries the body
      fragment as bytes ([region/template.md](../region/template.md)), so a
      hydrated closure grafts as a compiled one does
-     ([graft.md](../graft.md)) and a user file compiles to one bytecode under
-     both boots.
+     ([graft.md](../graft.md)) and a user file compiles to the same
+     instruction stream under both boots.
 
    Still to land: the embedded blob, per-worker hydration for `sys/spawn`,
    and the hydrated-region interval table. The interval table keeps
@@ -288,9 +288,14 @@ Then the image milestones:
   leaves the kept one, and the default policy neither reads a directory nor
   writes one.
 - Compile parity: a call to a stdlib function grafts under image boot as
-  under source boot, and the same user file compiles to byte-identical
-  bytecode under both — the acceptance gate for the body fragment a hydrated
-  payload carries. `a_call_to_a_stdlib_function_grafts_under_either_boot` and
+  under source boot, and the same user file compiles to the same instruction
+  stream under both — the acceptance gate for the body fragment a hydrated
+  payload carries. The comparison reads each code object's opcodes and length
+  rather than its bytes. A static region id in an operand comes from a
+  process-wide mint ([the region model](../region/model.md)), which a stdlib
+  compile advances and a hydration does not, so the two boots' operands
+  differ in one process while their instructions agree.
+  `a_call_to_a_stdlib_function_grafts_under_either_boot` and
   `the_two_boots_emit_one_bytecode_for_a_user_file` pin the two.
 - Tier parity: a hot stdlib function reaches the JIT under image boot
   exactly as under source boot — the hydrated payload's own LIR feeds
