@@ -64,7 +64,6 @@ const AMBIENT: &[&str] = &[
     "debug/trace",
     "disgit",
     "elle/executable",
-    "ffi/run-teardowns",
     "fiber/parent",
     "fn/disasm-jit",
     "fn/git?",
