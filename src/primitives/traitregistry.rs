@@ -1,8 +1,8 @@
-// audited: 2026-09-20
+// audited: 2026-10-13
 //! Per-instance trait registry: default traitsets stamped at allocation.
 //! docs/traits.md
 //!
-//! Each collection/sequence HeapTag has a default @struct traitset. The tables
+//! Each collection/sequence HeapTag has a default traitset, an immutable struct. The tables
 //! are **instance state** living on the `FiberHeap` (tls.md: nothing
 //! correctness-bearing is thread-centric), so two embedded instances on one
 //! thread each carry their own and never cross-reference. The trait-method
