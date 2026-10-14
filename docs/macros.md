@@ -60,6 +60,9 @@ raise, but it reads no state outside the unit and changes none:
   boundary of every silent function. The compile fails naming the macro and
   the primitive. `(vm/primitive-meta name)`
   answers `:ambient true` for each, and `(doc name)` says so.
+- **The primitives the compile binds are an input.** `vm/list-primitives`,
+  `doc` and `vm/primitive-meta` answer for each in a body as they do at run
+  time, a primitive the host registers included ([embedding.md](embedding.md)).
 - **A plugin's primitive runs** unless it declares a capability the expansion
   withholds.
 - **A macro defined at the REPL reaches later REPL lines only.** A file that a

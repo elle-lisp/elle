@@ -38,7 +38,9 @@ The init sequence:
 2. Register a custom primitive with `rt.register_primitive(&DEF)`. Compiled
    code and `eval` then see it as they see a built-in, and so does code that a
    `sys/spawn` worker of this instance compiles ([threads](threads.md)). A
-   value that is not a primitive goes through `rt.compile_and_heap()` →
+   macro body sees it too: `doc`, `vm/primitive-meta` and `vm/list-primitives`
+   answer for it at expansion as they do at run time. A value that is not a
+   primitive goes through `rt.compile_and_heap()` →
    `CompileCtx::register_host_binding`. Every compile in the instance sees it,
    the files a program imports included, and `eval` does not.
 3. `let (vm, symbols, cctx) = rt.parts();` — borrow the three pieces the
