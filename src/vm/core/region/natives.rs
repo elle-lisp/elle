@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! Dispatching a native call: the result region it mints, the pass-through
 //! retain it hands the caller, and the declaration oracle over both.
 //!
@@ -74,6 +74,11 @@ impl VM {
         args: &[Value],
         region_id: StaticRegion,
     ) -> (SignalBits, Value) {
+        // An expansion refuses an ambient primitive before it runs or mints
+        // (docs/macros.md).
+        if def.ambient && self.expanding() {
+            return self.refuse_ambient(def);
+        }
         let mint = self.new_runtime_region_for_call_slot(region_id);
         let alloc_region = mint.region();
         // The question a `SIG_QUERY` asked, once the dispatch has answered it.

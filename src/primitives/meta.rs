@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-14
 //! Meta-programming primitives: gensym, the syntax-object operations, squelch and attune, meta/origin, and git.
 //!
 //! docs/macros.md
@@ -424,6 +424,7 @@ primitive! {
         effect: RegionEffect::Mixed,
     }
     "fn/git?" => prim_fn_git {
+        ambient: true,
         signal: Signal::errors(),
         arity: Arity::Range(1, 2),
         doc: "Returns true if the VM caches SPIR-V for the closure at the workgroup size \
@@ -434,6 +435,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "disgit" => prim_disgit {
+        ambient: true,
         signal: Signal::errors(),
         arity: Arity::Range(1, 2),
         doc: "Return the SPIR-V bytes the VM caches for a closure at the workgroup size \

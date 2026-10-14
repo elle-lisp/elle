@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-14
 //! FFI library loading, symbol lookup, signature creation, call, and callback primitives.
 //!
 //! docs/ffi.md

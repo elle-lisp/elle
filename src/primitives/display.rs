@@ -1,3 +1,8 @@
+// audited: 2026-10-14
+//! The display primitives: `pp` pretty-prints a value to stdout, and `describe` names its type and size.
+//!
+//! docs/io.md
+
 use crate::primitives::def::RegionEffect;
 use crate::value::fiber::{SignalBits, SIG_OK};
 use crate::value::types::Arity;
@@ -462,6 +467,7 @@ pub(crate) fn prim_describe(
 
 primitive! {
     "pp" => prim_pp {
+        ambient: true,
         arity: Arity::Exact(1),
         doc: "Pretty-print a value with indentation. Returns the value.",
         params: &["value"],
