@@ -57,6 +57,16 @@ impl Doc {
         }
     }
 
+    /// Enter the doc of `def` in `docs`, a VM's table, under every spelling
+    /// of the primitive, where `doc`, `vm/primitive-meta` and
+    /// `vm/list-primitives` read it.
+    pub fn enter(docs: &mut HashMap<String, Doc>, def: &'static PrimitiveDef) {
+        let doc = Doc::of(def);
+        for name in def.names() {
+            docs.insert(name.to_string(), doc.clone());
+        }
+    }
+
     /// Format as a human-readable doc string for REPL display.
     pub fn format(&self) -> String {
         let mut out = String::new();

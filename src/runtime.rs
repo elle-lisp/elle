@@ -192,8 +192,9 @@ impl Runtime {
     }
 
     /// Register a host primitive on this instance: compiled code and `eval`
-    /// resolve it as a built-in, `doc` answers for it, and so do the workers
-    /// the instance spawns (docs/embedding.md).
+    /// resolve it as a built-in, `doc` answers for it at run time and in a
+    /// macro body, and so do the workers the instance spawns
+    /// (docs/embedding.md).
     pub fn register_primitive(&mut self, def: &'static crate::primitives::def::PrimitiveDef) {
         let (vm, symbols, cctx) = self.parts();
         vm.register_host_primitive(symbols, cctx, def);
