@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-13
+# audited: 2026-10-14
 # The runner's ledger, part 2 of 2: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/lang/each.lisp" :objects 1012]
@@ -286,7 +286,7 @@
 ["tests/lang/ffi-write.lisp" :objects 412]
 ["tests/lang/ffi-string-field.lisp" :objects 309]
 ["tests/lang/caps-ffi.lisp" :objects 148]
-["tests/lang/gun.lisp" :objects 3029]
+["tests/lang/gun.lisp" :objects 3115]
 ["tests/lang/gun-redis.lisp" :objects 1155]
 ["tests/lang/gun-wire.lisp" :objects 471]
 ["tests/lang/gun-mesh.lisp" :objects 2151]
