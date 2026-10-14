@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-13
+# audited: 2026-10-14
 ## One gun database: its graph, store, clock, lock, subscriptions and peers; loading, the chain walk, the merges and notify.
 ## lib/gun.md
 ## lib/gun/mesh.md
@@ -13,8 +13,9 @@
 ##           :apply-writes :merge-remote :add-sub :notify}
 ##
 ## Every field passes sea:admit or sea:admitted before a merge sees it.
-## Nothing here waits on the network. A walk takes a reach function, which
-## the caller chooses: one that fetches from the peers, or one that does not.
+## Nothing here waits on the network. A walk takes a reach function over a
+## list of souls, which the caller chooses: one that fetches from the peers,
+## or one that does not.
 
 (fn [&named state value graph sea]
 
@@ -97,11 +98,11 @@
 
   (defn walk [core start keys reach]
     "The value that keys reach from the node start: that node, a field's
-     value, or the node a link reaches. Calls (reach soul) on each soul
-     before it reads that node."
+     value, or the node a link reaches. Calls (reach souls) with a list of
+     the souls it is about to read, before it reads them."
     (block :walk
       (def @soul start)
-      (reach soul)
+      (reach [soul])
       (def @i 0)
       (while (< i (length keys))
         (let [f (field-of core soul (get keys i))
@@ -111,7 +112,7 @@
             (value:link? v)
               (begin
                 (assign soul (value:link-soul v))
-                (reach soul))
+                (reach [soul]))
             last? (break :walk v)
             (break :walk nil)))
         (assign i (+ i 1)))

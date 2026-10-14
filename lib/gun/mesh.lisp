@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-12
+(elle/epoch 15)
+# audited: 2026-10-14
 ## The std/gun mesh rules: fetch, forward, acks, deferral and resync, over the connections peer.lisp runs.
 ## lib/gun/mesh.md
 ## lib/gun/overview.md
@@ -117,22 +117,25 @@
                           (map first others))]
         (unless (empty? again) (fetch-souls c again except)))))
 
-  (defn fetch [c soul]
-    "Fetch soul from the peers the first time a read reaches it."
-    (fetch-souls c [soul] nil))
+  (defn fetch [c souls]
+    "Fetch each soul in souls from the peers the first time a read reaches
+     it, with one get for all of them."
+    (fetch-souls c souls nil))
 
   ## ── Merging what a peer sends ────────────────────────────────────────
 
-  (defn touch [c soul]
-    "Load soul from the store, and start a fetch of it in a new fiber when
-     nobody has fetched it. Never waits on the network."
-    (core:load c soul)
-    (unless (get c:fetched soul)
-      (ev/spawn (fn [] (reporting c (fn [] (fetch c soul))))))
+  (defn touch [c souls]
+    "Load each soul in souls from the store, and start one fetch, in a new
+     fiber, of those that nobody has fetched. Never waits on the network."
+    (each soul in souls
+      (core:load c soul))
+    (let [fresh (filter (fn [soul] (nil? (get c:fetched soul))) souls)]
+      (unless (empty? fresh)
+        (ev/spawn (fn [] (reporting c (fn [] (fetch c fresh)))))))
     nil)
 
   (defn notify [c]
-    (reporting c (fn [] (core:notify c (fn [soul] (touch c soul))))))
+    (reporting c (fn [] (core:notify c (fn [souls] (touch c souls))))))
 
   (defn forward [c g except]
     "Send the graph g, as a new put, to every peer but except."

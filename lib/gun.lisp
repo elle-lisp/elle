@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-13
+# audited: 2026-10-14
 ## A graph database in the shape of GUN: chains over nodes merged by HAM, on a memory or Redis store, joined to peers.
 ## lib/gun.md
 ## lib/gun/sea.md
@@ -77,7 +77,7 @@
       (gun-error :no-soul "the database itself names no node")))
 
   (defn fetching [db]
-    (fn [soul] (mesh:fetch db soul)))
+    (fn [souls] (mesh:fetch db souls)))
 
   (defn chain-value [chain]
     "What once answers for chain: the value it reaches, read from the peers
@@ -133,7 +133,7 @@
                                       (plan chain v st link-of))))))
             id (mesh:broadcast db accepted ack)]
         (let [[ok? err] (protect (core:notify db
-                                 (fn [soul] (mesh:touch db soul))))]
+                                 (fn [souls] (mesh:touch db souls))))]
           (unless ok?
             (when ack (mesh:forget db id))
             (error err)))
