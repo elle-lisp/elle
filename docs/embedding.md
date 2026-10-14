@@ -1,6 +1,6 @@
 # Embedding
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-14 -->
 
 Elle can be embedded as a scripting engine in Rust or C programs. The host
 creates a runtime, optionally registers custom primitives, compiles and
@@ -37,7 +37,9 @@ The init sequence:
    vendored generation. See the "Unicode version" section in
    [`strings.md`](strings.md).
 2. Register a custom primitive with `rt.register_primitive(&DEF)`. Compiled
-   code and `eval` then see it as they see a built-in. A value that is not a
+   code and `eval` then see it as they see a built-in, and so does a macro
+   body: `doc`, `vm/primitive-meta` and `vm/list-primitives` answer for it at
+   expansion as they do at run time. A value that is not a
    primitive goes through `rt.compile_and_heap()` →
    `CompileCtx::register_host_binding`. Every compile in the instance sees it,
    the files a program imports included, and `eval` does not.
