@@ -139,7 +139,7 @@ impl crate::io::IoBackend for MockBackend {
             IoOp::Spawn(_) => "spawn",
             IoOp::ProcessWait => "process-wait",
             IoOp::Open { .. } => "open",
-            IoOp::Sync { .. } => "sync",
+            IoOp::File(_) => "file",
             IoOp::Seek { .. } => "seek",
             IoOp::Tell => "tell",
             IoOp::Task(_) => "task",
@@ -262,7 +262,7 @@ impl crate::io::IoBackend for MockBackend {
                     Err(birth.error("io-error", "mock: subprocess ops not supported"))
                 }
                 IoOp::Open { .. } => Err(birth.error("io-error", "mock: open not supported")),
-                IoOp::Sync { .. } => Err(birth.error("io-error", "mock: sync not supported")),
+                IoOp::File(_) => Err(birth.error("io-error", "mock: file ops not supported")),
                 IoOp::Seek { .. } | IoOp::Tell => {
                     Err(birth.error("io-error", "mock: seek/tell not supported"))
                 }

@@ -320,9 +320,9 @@ Two conditions decide which operations carry one:
   as the peer takes what is already in it. A peer that stops reading fills the
   buffer and parks the write in `bound.wait(POLLOUT)`, so the write carries a
   pipe like the reads do. `Flush`, `SendTo` and `Shutdown` transfer what the
-  process already handed over. `Sync` opens its path with `O_NONBLOCK`, so a
-  fifo cannot make it wait for a writer. Those four take no pipe
-  (`Bounds::prompt`).
+  process already handed over. A `File` sync opens its path with
+  `O_NONBLOCK`, so a fifo cannot make it wait for a writer. Those four take no
+  pipe (`Bounds::prompt`).
 - **Stopping it must not park it instead.** `OpBound` takes the descriptor
   non-blocking for the operation's lifetime, so the syscall reports
   `EAGAIN` and hands the wait back to the poll where the stop is visible. A

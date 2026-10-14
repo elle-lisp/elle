@@ -14,7 +14,7 @@
 //! src/io/AGENTS.md
 
 use super::*;
-use crate::io::request::{SpawnRequest, StdioDisposition, TaskFn};
+use crate::io::request::{FileKind, FileOp, SpawnRequest, StdioDisposition, TaskFn};
 
 /// Submit `req` and assert the backend filed exactly one new pending entry,
 /// keyed by the id `submit` returned.
@@ -163,7 +163,7 @@ fn a_sync_completes_under_the_id_it_was_submitted_with() {
     crate::value::arena::with_test_region(|| {
         let backend = AsyncBackend::new().unwrap();
         let path = write_temp_file("sync me");
-        let req = IoRequest::unbounded(IoOp::Sync { path: path.clone() }, Value::NIL);
+        let req = IoRequest::unbounded(IoOp::File(FileOp::Sync { path: path.clone() }), Value::NIL);
         let id = submit_pending(&backend, &req, "sync");
         let completion = expect_completion(&backend, id, "sync");
         assert!(
@@ -182,7 +182,7 @@ fn a_failed_sync_names_its_path() {
     crate::value::arena::with_test_region(|| {
         let backend = AsyncBackend::new().unwrap();
         let path = format!("{}/missing", temp_path("sync-no-such-dir"));
-        let req = IoRequest::unbounded(IoOp::Sync { path: path.clone() }, Value::NIL);
+        let req = IoRequest::unbounded(IoOp::File(FileOp::Sync { path: path.clone() }), Value::NIL);
         let id = submit_pending(&backend, &req, "sync");
         let completion = expect_completion(&backend, id, "sync");
         let err = *completion
@@ -331,11 +331,12 @@ fn a_pending_entry_accepts_only_the_kind_of_operation_that_filed_it() {
             OpKind::Poll,
         ),
         (
-            PendingOp::Sync {
+            PendingOp::File {
+                kind: FileKind::Sync,
                 path: "synced".to_string(),
                 buffer_handle: pool.alloc(0),
             },
-            OpKind::Sync,
+            OpKind::File,
         ),
     ];
     let every_kind = [
@@ -344,7 +345,7 @@ fn a_pending_entry_accepts_only_the_kind_of_operation_that_filed_it() {
         OpKind::Sleep,
         OpKind::ProcessWait,
         OpKind::Open,
-        OpKind::Sync,
+        OpKind::File,
         OpKind::Task,
         OpKind::Resolve,
         OpKind::Watch,

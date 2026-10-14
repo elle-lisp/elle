@@ -5,7 +5,7 @@
 //! docs/impl/io-inflight.md
 
 use crate::io::pool::{BufferHandle, BufferPool};
-use crate::io::request::{Bound, ConnectAddr, PortOp};
+use crate::io::request::{Bound, ConnectAddr, FileKind, PortOp};
 use crate::io::types::PortKey;
 use crate::port::PortKind;
 use crate::value::Value;
@@ -26,7 +26,7 @@ pub(crate) enum OpKind {
     Sleep,
     ProcessWait,
     Open,
-    Sync,
+    File,
     Task,
     Resolve,
     Watch,
@@ -124,12 +124,14 @@ pub(crate) enum PendingOp {
         /// Pre-allocated port Value (born in the solver's region at the call site).
         port: Value,
     },
-    /// Flush a file or directory to stable storage. Portless.
+    /// An operation on a file named by its path. Portless.
     ///
-    /// A sync runs on the thread pool on every platform, as an open does, so
-    /// `PoolOp::Sync` owns the path the syscall reads, and `buffer_handle` is
-    /// an empty placeholder.
-    Sync {
+    /// A file operation runs on the thread pool on every platform, as an open
+    /// does, so `PoolOp::File` owns what the syscalls read, and
+    /// `buffer_handle` is an empty placeholder.
+    File {
+        /// What the completion builds from the worker's result.
+        kind: FileKind,
         /// The path (for error messages).
         path: String,
         buffer_handle: BufferHandle,
@@ -226,7 +228,7 @@ impl PendingOp {
             PendingOp::Sleep { buffer_handle, .. } => Some(*buffer_handle),
             PendingOp::ProcessWait { buffer_handle, .. } => Some(*buffer_handle),
             PendingOp::Open { buffer_handle, .. } => Some(*buffer_handle),
-            PendingOp::Sync { buffer_handle, .. } => Some(*buffer_handle),
+            PendingOp::File { buffer_handle, .. } => Some(*buffer_handle),
             PendingOp::Task { buffer_handle, .. } => Some(*buffer_handle),
             PendingOp::Resolve { buffer_handle, .. } => Some(*buffer_handle),
             PendingOp::WatchNext { buffer_handle, .. } => Some(*buffer_handle),
@@ -259,7 +261,7 @@ impl PendingOp {
             PendingOp::WatchNext { watcher, .. } => out[0] = *watcher,
             PendingOp::SigNext { receiver, .. } => out[0] = *receiver,
             PendingOp::Sleep { .. }
-            | PendingOp::Sync { .. }
+            | PendingOp::File { .. }
             | PendingOp::Task { .. }
             | PendingOp::Resolve { .. }
             | PendingOp::PollFd { .. }
@@ -292,7 +294,7 @@ impl PendingOp {
             | PendingOp::Sleep { .. }
             | PendingOp::ProcessWait { .. }
             | PendingOp::Open { .. }
-            | PendingOp::Sync { .. }
+            | PendingOp::File { .. }
             | PendingOp::Task { .. }
             | PendingOp::Resolve { .. }
             | PendingOp::WatchNext { .. }
@@ -314,7 +316,7 @@ impl PendingOp {
                 | (PendingOp::Sleep { .. }, OpKind::Sleep)
                 | (PendingOp::ProcessWait { .. }, OpKind::ProcessWait)
                 | (PendingOp::Open { .. }, OpKind::Open)
-                | (PendingOp::Sync { .. }, OpKind::Sync)
+                | (PendingOp::File { .. }, OpKind::File)
                 | (PendingOp::Task { .. }, OpKind::Task)
                 | (PendingOp::Resolve { .. }, OpKind::Resolve)
                 | (PendingOp::WatchNext { .. }, OpKind::Watch)
@@ -333,7 +335,7 @@ impl PendingOp {
             PendingOp::Sleep { .. } => "sleep",
             PendingOp::ProcessWait { .. } => "process wait",
             PendingOp::Open { .. } => "open",
-            PendingOp::Sync { .. } => "sync",
+            PendingOp::File { .. } => "file",
             PendingOp::Task { .. } => "task",
             PendingOp::Resolve { .. } => "resolve",
             PendingOp::WatchNext { .. } => "watch",

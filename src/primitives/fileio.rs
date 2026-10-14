@@ -2,7 +2,7 @@
 //! The file/ primitives: whole-file reads and writes, directories, metadata, and file/sync.
 //!
 //! docs/io.md
-use crate::io::request::{IoOp, IoRequest};
+use crate::io::request::{FileOp, IoOp, IoRequest};
 use crate::primitives::def::RegionEffect;
 use crate::rich_error;
 use crate::signals::Signal;
@@ -192,13 +192,16 @@ pub(crate) fn prim_read_lines(
 }
 
 /// Flush the file or directory at a path to stable storage, on the I/O
-/// thread pool. Yields `SIG_IO` with an `IoRequest` containing `IoOp::Sync`.
+/// thread pool. Yields `SIG_IO` with an `IoRequest` containing `FileOp::Sync`.
 pub(crate) fn prim_file_sync(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
     match args[0].with_string(|s| s.to_string()) {
-        Some(path) => (SIG_IO, IoRequest::portless(ctx, IoOp::Sync { path })),
+        Some(path) => (
+            SIG_IO,
+            IoRequest::portless(ctx, IoOp::File(FileOp::Sync { path })),
+        ),
         None => type_error!(ctx, args[0], "file/sync", "string"),
     }
 }

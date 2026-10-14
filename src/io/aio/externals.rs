@@ -170,23 +170,26 @@ impl AsyncBackend {
         )
     }
 
-    /// Submit a sync of the file or directory at `path`.
+    /// Submit an operation on a file named by its path.
     ///
     /// This is a thread-pool operation on every platform, for the reason an
-    /// open is: the worker opens the path before it syncs it. The open is
-    /// non-blocking and `fsync(2)` waits on nothing outside this process, so
-    /// the operation takes no stop pipe.
-    pub(super) fn submit_sync(&self, path: &str) -> Result<SubmissionId, String> {
-        let c_path = std::ffi::CString::new(path)
-            .map_err(|_| format!("file/sync: path contains null byte: {}", path))?;
+    /// open is: the worker opens the path before it does anything else. A
+    /// sync opens it non-blocking, and `fsync(2)` waits on nothing outside
+    /// this process, so the operation takes no stop pipe.
+    pub(super) fn submit_file(&self, op: &FileOp) -> Result<SubmissionId, String> {
+        let path = op.path();
+        if path.contains('\0') {
+            return Err(format!("file: path contains null byte: {}", path));
+        }
 
         self.submit_op(
             0,
             |d| {
                 d.hub
-                    .submit(d.id, PoolOp::Sync { path: c_path }, Bounds::prompt())
+                    .submit(d.id, PoolOp::File(op.clone()), Bounds::prompt())
             },
-            |buffer, ()| PendingOp::Sync {
+            |buffer, ()| PendingOp::File {
+                kind: op.kind(),
                 path: path.to_string(),
                 buffer_handle: buffer,
             },

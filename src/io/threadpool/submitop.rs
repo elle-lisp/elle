@@ -69,7 +69,7 @@ impl CompletionHub {
 ///
 /// `Task` and `Resolve` take no bound because nothing can bound them; their
 /// submissions say so with `Bounds::uninterruptible`, and dropping the bounds
-/// here is what disposes of them. `Flush` and `Sync` take none because they
+/// here is what disposes of them. `Flush` and `File` take none because they
 /// wait on nothing outside this process, and their submissions say
 /// `Bounds::prompt`.
 pub(super) fn run(op: PoolOp, bounds: Bounds) -> (i32, Vec<u8>) {
@@ -123,7 +123,7 @@ pub(super) fn run(op: PoolOp, bounds: Bounds) -> (i32, Vec<u8>) {
         PoolOp::Open { path, flags, mode } => {
             open::open(OpBound::detached(bounds), &path, flags, mode)
         }
-        PoolOp::Sync { path } => open::sync(&path),
+        PoolOp::File(op) => file::run(op),
         PoolOp::Task(closure) => closure(),
         PoolOp::Resolve { hostname } => resolve(&hostname),
 

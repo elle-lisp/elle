@@ -148,6 +148,41 @@ pub enum PortOp {
     Shutdown { how: i32 },
 }
 
+/// An operation on a file named by its path, which a pool worker runs on every
+/// platform (src/io/AGENTS.md, invariant 14).
+///
+/// Every field is owned and `Send`, so the submission clones the operation
+/// into the `PoolOp` the worker runs.
+#[derive(Debug, Clone)]
+pub enum FileOp {
+    /// Flush the file or directory at `path` to stable storage, as fsync(2)
+    /// does. Returns nil.
+    Sync { path: String },
+}
+
+/// What a completion builds from a [`FileOp`]'s result, which the pending
+/// entry keeps in place of the operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileKind {
+    Sync,
+}
+
+impl FileOp {
+    /// The kind of answer this operation's completion builds.
+    pub fn kind(&self) -> FileKind {
+        match self {
+            FileOp::Sync { .. } => FileKind::Sync,
+        }
+    }
+
+    /// The path the operation names, which its error reports.
+    pub fn path(&self) -> &str {
+        match self {
+            FileOp::Sync { path } => path,
+        }
+    }
+}
+
 /// I/O operation descriptor.
 #[derive(Debug)]
 pub enum IoOp {
@@ -182,9 +217,8 @@ pub enum IoOp {
         direction: Direction,
         encoding: Encoding,
     },
-    /// Flush the file or directory at `path` to stable storage, as fsync(2)
-    /// does. Portless. Returns nil on completion.
-    Sync { path: String },
+    /// An operation on a file named by its path. Portless.
+    File(FileOp),
     /// Run an arbitrary closure on a background thread.
     /// Returns bytes on success, error on failure.
     #[allow(dead_code)]
@@ -241,7 +275,7 @@ impl IoOp {
         let base = SIG_IO;
         match self {
             IoOp::Spawn(_) | IoOp::ProcessWait => base.union(SIG_EXEC),
-            IoOp::Open { .. } | IoOp::Sync { .. } => base.union(SIG_FS),
+            IoOp::Open { .. } | IoOp::File(_) => base.union(SIG_FS),
             IoOp::Connect {
                 addr: ConnectAddr::Unix { .. },
             } => base.union(SIG_NET).union(SIG_FS),

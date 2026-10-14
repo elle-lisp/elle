@@ -1,4 +1,4 @@
-//! audited: 2026-09-30
+//! audited: 2026-10-14
 //! `AsyncBackend`: the state an in-flight operation is tracked through, and the
 //! platform that runs it.
 //!
@@ -11,7 +11,7 @@ use crate::io::completion;
 use crate::io::pending::{OpKind, PendingOp, PendingTable, Taken};
 use crate::io::pool::BufferPool;
 use crate::io::request::{
-    Bound, ConnectAddr, IoOp, IoRequest, PortOp, ProcessHandle, SpawnRequest, TaskFn,
+    Bound, ConnectAddr, FileOp, IoOp, IoRequest, PortOp, ProcessHandle, SpawnRequest, TaskFn,
 };
 use crate::io::threadpool::{
     Bounds, CompletionHub, PoolCompletion, PoolOp, RawCompletion, StdinOpKind, StdinThread,

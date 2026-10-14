@@ -7,7 +7,7 @@
 
 use crate::io::pending::PendingOp;
 use crate::io::pool::{BufferHandle, BufferPool};
-use crate::io::request::{PortOp, Reap};
+use crate::io::request::{FileKind, PortOp, Reap};
 use crate::io::types::{FdState, PortKey};
 use crate::io::{Completion, SubmissionId};
 use crate::port::{Encoding, Port, PortKind};
@@ -190,13 +190,15 @@ pub(super) fn process_raw_completion(
             port_ref.set_fd(fd);
             Completion::ok(id, birth, *port_val)
         }
-        PendingOp::Sync { path, .. } => {
+        PendingOp::File { kind, path, .. } => {
             if result_code < 0 {
                 let os_err = std::io::Error::from_raw_os_error(-result_code);
                 let msg = format!("file/sync: {}: {}", path, os_err);
                 return Completion::failed(id, birth, "io-error", msg);
             }
-            Completion::ok(id, birth, Value::NIL)
+            match kind {
+                FileKind::Sync => Completion::ok(id, birth, Value::NIL),
+            }
         }
         PendingOp::Connect {
             connect_fd,

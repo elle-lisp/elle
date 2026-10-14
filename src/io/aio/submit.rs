@@ -75,9 +75,9 @@ impl AsyncBackend {
             return self.submit_open(path, flags, mode, request.bound, request.port);
         }
 
-        // Sync is portless — it names a path, which the worker opens.
-        if let IoOp::Sync { ref path } = request.op {
-            return self.submit_sync(path);
+        // A file operation is portless — it names a path, which the worker opens.
+        if let IoOp::File(ref op) = request.op {
+            return self.submit_file(op);
         }
 
         // Task: run closure on thread pool.
