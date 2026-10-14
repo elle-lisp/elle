@@ -12,7 +12,8 @@
 //! `destructure` for what a destructuring write proves, `branch` for what a
 //! branch's write and a block's `break` leave behind, `prune` for dead-arm
 //! removal, `contract` for prove-or-reject, `graft` for which calls become
-//! their callee's body, `fold` for what the recorded types then delete.
+//! their callee's body, `live` for which lambdas the graft reaches, `fold`
+//! for what the recorded types then delete.
 
 use super::TypeInfo;
 use crate::hir::types::TyId;
@@ -26,6 +27,7 @@ mod contract;
 mod destructure;
 mod fold;
 mod graft;
+mod live;
 mod mutation;
 mod narrow;
 mod prune;
