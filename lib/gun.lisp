@@ -45,13 +45,62 @@
 
   ## A chain is a database, the soul of the node it starts at, the keys it
   ## follows from there, and the pair that signs what it writes, or nil. The
-  ## database itself starts at no soul.
-  (defn make-chain [db soul keys &opt signer]
-    {:core db :soul soul :keys keys :signer signer})
+  ## database itself starts at no soul. A key is a string, or a key range
+  ## that gun:map adds, and a chain that holds a range only reads. A chain
+  ## carries the :Gun protocol, whose :soul is chain-soul, so the functions
+  ## up to chain-soul take a chain but build none.
 
   (defn chain-path [chain]
     "The start soul and the keys of chain, as an error names them."
     (if (nil? chain:soul) [] [chain:soul ;chain:keys]))
+
+  (defn require-soul [chain]
+    (when (nil? chain:soul)
+      (gun-error :no-soul "the database itself names no node")))
+
+  (defn map-chain? [chain]
+    "True when chain holds a key range."
+    (not (nil? (find graph:key-range? chain:keys))))
+
+  (defn require-plain [chain]
+    (when (map-chain? chain)
+      (gun-error :map-chain "a map chain only reads" :path (chain-path chain))))
+
+  (defn fetching [db]
+    (fn [souls] (mesh:fetch db souls)))
+
+  (defn follow-links [db start keys limit]
+    "Follow the links that the first limit keys hold, from the node start,
+     up to the first key that holds no link. Answers [soul i]: the node
+     reached, and how many keys led there."
+    (def @soul start)
+    (def @i 0)
+    (while (and (< i limit) (not (nil? (core:link-at db soul (get keys i)))))
+      (assign soul (core:link-at db soul (get keys i)))
+      (assign i (+ i 1)))
+    [soul i])
+
+  (defn chain-soul [chain]
+    "The soul that a put of a struct at chain writes to. Follows each link
+     on the path, read from the peers as a put reads it, and derives a child
+     soul for each key after the last link."
+    (require-soul chain)
+    (require-plain chain)
+    (let [db chain:core
+          keys chain:keys]
+      (core:walk db chain:soul keys (fetching db))
+      (let [[soul i] (follow-links db chain:soul keys (length keys))]
+        (fold graph:child-soul soul (slice keys i)))))
+
+  (def chain-traits
+    {:Gun {:kind (fn [self] :chain) :soul (fn [self] (chain-soul self))}})
+
+  (defn make-chain [db soul keys &opt signer]
+    (with-traits {:core db :soul soul :keys keys :signer signer} chain-traits))
+
+  (defn chain? [v]
+    "True when v is a chain."
+    (= (value:kind-of v) :chain))
 
   (defn open [&named @store @clock @wait @on-error]
     "A database: the chain with no keys. :store defaults to a fresh memory
@@ -72,12 +121,13 @@
         (make-chain chain:core (graph:root-soul k) [] chain:signer)
         (make-chain chain:core chain:soul [;chain:keys k] chain:signer))))
 
-  (defn require-soul [chain]
-    (when (nil? chain:soul)
-      (gun-error :no-soul "the database itself names no node")))
-
-  (defn fetching [db]
-    (fn [souls] (mesh:fetch db souls)))
+  (defn chain-map [chain &named prefix from to]
+    "The map chain over the members of the node that chain reaches: its
+     fields whose keys start with :prefix, are at least :from, and are before
+     :to. get extends it past the members. See lib/gun/chains.md."
+    (require-soul chain)
+    (make-chain chain:core chain:soul
+                [;chain:keys (graph:key-range prefix from to)] chain:signer))
 
   (defn chain-value [chain]
     "What once answers for chain: the value it reaches, read from the peers
@@ -96,16 +146,18 @@
       (assign i (- i 1)))
     out)
 
-  (defn follow-links [db start keys limit]
-    "Follow the links that the first limit keys hold, from the node start,
-     up to the first key that holds no link. Answers [soul i]: the node
-     reached, and how many keys led there."
-    (def @soul start)
-    (def @i 0)
-    (while (and (< i limit) (not (nil? (core:link-at db soul (get keys i)))))
-      (assign soul (core:link-at db soul (get keys i)))
-      (assign i (+ i 1)))
-    [soul i])
+  (defn linked [v]
+    "v with each chain in it, at the top or nested in a struct, replaced by a
+     link to the chain's soul."
+    (cond
+      (chain? v) (value:link (chain-soul v))
+      (graph:node-value? v)
+        (let [@out (freeze v)]
+          (each [k child] in v
+            (when (or (chain? child) (graph:node-value? child))
+              (assign out (put out k (linked child)))))
+          out)
+      v))
 
   (defn plan [chain v st link-of]
     "The writes that put v at chain with state st. The walk follows each link
@@ -126,10 +178,13 @@
         (graph:flatten soul (nest rest v) st reached link-of))))
 
   (defn write [chain v link-of ack]
-    "Read the path from the peers, merge v under the lock, send what the
-     merge accepted to the peers, and notify. With ack, wait for an ack."
+    "Replace each chain in v with a link to its soul, read the path from the
+     peers, merge v under the lock, send what the merge accepted to the
+     peers, and notify. With ack, wait for an ack."
     (require-soul chain)
-    (let [db chain:core]
+    (require-plain chain)
+    (let [db chain:core
+          v (linked v)]
       (core:walk db chain:soul chain:keys (fetching db))
       (let [accepted (core:locked db
                                   (fn []
@@ -168,14 +223,48 @@
              (fn [at key] (if (= key soul) soul (core:link-at db at key))) ack)
       (make-chain db soul [] chain:signer)))
 
+  (defn chain-unset [chain member &named ack]
+    "Remove member, a chain or a link, from the collection at chain: write a
+     tombstone to each field of the collection's node that links to the
+     member's soul, as a put does, and answer nil. When no field links to
+     it, write nothing and wait for no ack."
+    (require-soul chain)
+    (require-plain chain)
+    (let [soul (if (chain? member) (chain-soul member) (value:link-soul member))
+          node (chain-value chain)
+          @gone {}]
+      (when (graph:node-value? node)
+        (each [key v] in node
+          (when (and (value:link? v) (= (value:link-soul v) soul))
+            (assign gone (put gone key nil)))))
+      (unless (empty? gone) (chain-put chain gone :ack ack))
+      nil))
+
   ## ── Subscriptions ────────────────────────────────────────────────────
+
+  (defn member-calls [f]
+    "The function of a map chain's value that calls (f v key) for each
+     member whose value differs from the last value it was given, and
+     (f nil key) for each member that left."
+    (let [seen (box {})]
+      (fn [m]
+        (let [before (unbox seen)
+              after (or m {})]
+          (rebox seen after)
+          (each [key v] in after
+            (unless (identical? v (get before key)) (f v key)))
+          (each [key _] in before
+            (when (nil? (get after key)) (f nil key)))))))
 
   (defn chain-on [chain f]
     "Call f with the value of chain now, and again after each write that
-     changes it. Answers a function that ends the subscription."
+     changes it. On a map chain, call (f v key) for each member now, and
+     after each write for each member it changed, with nil for a member that
+     left. Answers a function that ends the subscription."
     (let [v (chain-value chain)
-          stop (core:add-sub chain:core chain:soul chain:keys f v)]
-      (let [[ok? err] (protect (f v))]
+          g (if (map-chain? chain) (member-calls f) f)
+          stop (core:add-sub chain:core chain:soul chain:keys g v)]
+      (let [[ok? err] (protect (g v))]
         (unless ok?
           (stop)
           (error err)))
@@ -214,6 +303,9 @@
    :once chain-value
    :on chain-on
    :set chain-set
+   :map chain-map
+   :soul chain-soul
+   :unset chain-unset
    :serve serve
    :connect connect
    :peers peers

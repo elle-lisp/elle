@@ -96,27 +96,57 @@
         (when-let [n (graph:node core:graph soul)] (put out soul n)))
       (freeze out)))
 
-  (defn walk [core start keys reach]
-    "The value that keys reach from the node start: that node, a field's
-     value, or the node a link reaches. Calls (reach souls) with a list of
-     the souls it is about to read, before it reads them."
+  (defn walk-from [core start keys reach]
+    "walk, from a node start that reach has already seen."
     (block :walk
       (def @soul start)
-      (reach [soul])
       (def @i 0)
       (while (< i (length keys))
-        (let [f (field-of core soul (get keys i))
-              v (when f (field:value f))
-              last? (= i (- (length keys) 1))]
-          (cond
-            (value:link? v)
-              (begin
-                (assign soul (value:link-soul v))
-                (reach [soul]))
-            last? (break :walk v)
-            (break :walk nil)))
+        (let [k (get keys i)]
+          (when (graph:key-range? k)
+            (break :walk (when-let [n (node-value core soul)]
+                                   (members core n k (slice keys (+ i 1)) reach))))
+          (let [f (field-of core soul k)
+                v (when f (field:value f))
+                last? (= i (- (length keys) 1))]
+            (cond
+              (value:link? v)
+                (begin
+                  (assign soul (value:link-soul v))
+                  (reach [soul]))
+              last? (break :walk v)
+              (break :walk nil))))
         (assign i (+ i 1)))
       (node-value core soul)))
+
+  (defn members [core n r rest reach]
+    "The members of the live node n under the range r, as a struct of key to
+     the value that the keys rest reach from each. A member that links walks
+     on from the linked node. Any other member is kept only when rest is
+     empty. A member whose walk answers nil is left out. Reaches every linked
+     member in one call."
+    (let [out @{}
+          linked @[]]
+      (each [key v] in n
+        (when (graph:in-range? r key)
+          (cond
+            (value:link? v)
+              (push linked [key (value:link-soul v)])
+            (empty? rest) (put out key v))))
+      (unless (empty? linked)
+        (reach (map (fn [[_ soul]] soul) linked)))
+      (each [key soul] in linked
+        (let [v (walk-from core soul rest reach)]
+          (unless (nil? v) (put out key v))))
+      (freeze out)))
+
+  (defn walk [core start keys reach]
+    "The value that keys reach from the node start: that node, a field's
+     value, or the node a link reaches. A key range among keys answers a
+     struct of each member's value, as members does. Calls (reach souls)
+     with a list of the souls it is about to read, before it reads them."
+    (reach [start])
+    (walk-from core start keys reach))
 
   ## ── Merging ──────────────────────────────────────────────────────────
 

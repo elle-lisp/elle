@@ -7,8 +7,11 @@
 ## Loaded via:
 ##   (def graph ((import "std/gun/graph") :state state :value value :ham ham))
 ##
-## Exports: {:root-soul :child-soul :key-of :make-graph :node :field :merge :due
-##           :node-value? :flatten}
+## Exports: {:root-soul :child-soul :key-of :key-range :key-range? :in-range?
+##           :make-graph :node :field :merge :due :node-value? :flatten}
+##
+## A key range is a struct of :prefix, :from and :to whose :Gun protocol
+## answers :range, so a chain can hold one among its keys.
 ##
 ## A node's fields are a struct of key to field, which field.lisp builds. A
 ## graph maps each soul to a mutable struct of fields.
@@ -47,6 +50,32 @@
                 (invalid-key k path))]
       (when (= key "_") (invalid-key k path))
       key))
+
+  ## ── Key ranges ───────────────────────────────────────────────────────
+
+  (def range-traits {:Gun {:kind (fn [self] :range)}})
+
+  (defn key-range [prefix from to]
+    "The range of keys that start with prefix, are at least from, and are
+     before to. A bound that is nil passes every key. Raises :invalid-range
+     for a bound that is not a string."
+    (each [name bound] in [[:prefix prefix] [:from from] [:to to]]
+      (unless (or (nil? bound) (string? bound))
+        (error {:error :gun-error
+                :reason :invalid-range
+                :bound name
+                :value bound
+                :message "a range bound is a string"})))
+    (with-traits {:prefix prefix :from from :to to} range-traits))
+
+  (defn key-range? [k]
+    "True when k is a range built by key-range, not a key."
+    (= (value:kind-of k) :range))
+
+  (defn in-range? [r key]
+    "True when the string key passes the range r."
+    (and (or (nil? r:prefix) (string/starts-with? key r:prefix))
+         (or (nil? r:from) (not (< key r:from))) (or (nil? r:to) (< key r:to))))
 
   ## ── Nodes ────────────────────────────────────────────────────────────
 
@@ -143,6 +172,9 @@
   {:root-soul root-soul
    :child-soul child-soul
    :key-of key-of
+   :key-range key-range
+   :key-range? key-range?
+   :in-range? in-range?
    :make-graph make-graph
    :node node
    :field field-at
