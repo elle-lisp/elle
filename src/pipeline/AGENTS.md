@@ -1,6 +1,6 @@
 # pipeline
 
-<!-- audited: 2026-10-13 -->
+<!-- audited: 2026-10-14 -->
 
 The compilation entry points, from source text to bytecode, LIR, HIR or a value, and the compile context they share.
 
@@ -10,7 +10,8 @@ The compilation entry points, from source text to bytecode, LIR, HIR or a value,
   migrate, expand, analyze, regularize, infer regions, lower, emit, and run
   when the entry point asks.
 - Own `CompileCtx`, the compile context of one instance: the macro VM, the
-  expander, the compile metadata of every global name, and the REPL layer.
+  expander, the compile metadata of every global name, the REPL layer, and
+  the store of the units loaded files compiled to.
 - Boot the compile context: compile [core.lisp](../core.lisp) and load
   [prelude.lisp](../prelude.lisp), or install both from a boot image
   ([booting from an image](../../docs/impl/image/boot.md)).
@@ -25,9 +26,9 @@ Does NOT:
 [src/hir/AGENTS.md](../hir/AGENTS.md) owns the passes `regularize` runs, the
 shape of a file's letrec, and how primitives are bound.
 [docs/pipeline.md](../../docs/pipeline.md) owns why each entry point expands
-on the VM it does, the REPL layer, and the signal fixpoint over a file's
-letrec. [Grafting a call](../../docs/impl/graft.md) owns the graft and the
-fold.
+on the VM it does, the REPL layer, the store's key, and the signal fixpoint
+over a file's letrec. [Grafting a call](../../docs/impl/graft.md) owns the
+graft and the fold.
 
 ## Files
 
@@ -56,6 +57,7 @@ and `cctx`. `analyze`, `analyze_file` and `eval` expand on that VM, while
 |----------|---------|---------|
 | `compile` | `CodeUnit` | One form: read, expand, analyze, regularize, lower, emit |
 | `compile_file` | `CodeUnit` | A file as one letrec, through the file front end. Sets the entry's signal |
+| `compile_file_stored(…, path)` | `CodeUnit` | `compile_file` for a loader: the unit the store keeps for `path` while its compile inputs match |
 | `compile_file_repl` | `(CodeUnit, Expander)` | `compile_file` over the REPL layer, and the expander, so the REPL keeps the macros a line defines |
 | `compile_value(form, …)` | `CodeUnit` | One form, handed over as a datum or a syntax object, as a whole file |
 | `compile_file_to_lir(…, epoch_skip)` | `FrozenModule` | A file to frozen LIR, for the WASM backend and the dumps. When `epoch_skip` is less than the form count, that many leading forms skip epoch migration |
@@ -184,8 +186,8 @@ The other entry points leave this path:
   context with `new_with_heap` or `from_boot_image`
 - [primitives/module_init.rs](../primitives/module_init.rs) — compiles
   stdlib.lisp through `compile_file`, then calls `register_stdlib_exports`
-- [primitives/modules.rs](../primitives/modules.rs) — `import/load-file`
-  compiles a loaded file through `compile_file`, on behalf of the calling fiber
+- [primitives/modules.rs](../primitives/modules.rs) — compiles a loaded file
+  through `compile_file_stored`, on behalf of the calling fiber
 - [repl/eval.rs](../repl/eval.rs) and [repl/defer.rs](../repl/defer.rs) —
   compile each input with `compile_file_repl`, then register its definitions
   and macros
@@ -218,7 +220,8 @@ The other entry points leave this path:
 
 1. **Each instance owns one compile context, passed as a parameter.** The
    `RuntimeCore` owns it beside the VM and the symbol table. Two instances on
-   one thread see neither the other's stdlib exports nor its REPL definitions.
+   one thread see neither the other's stdlib exports, its REPL definitions,
+   nor its stored units.
 
 2. **A call expands with clones.** `with_macro_expansion` and
    `expander_and_meta` clone the expander and the compile metadata, so a
@@ -254,3 +257,10 @@ The other entry points leave this path:
    the target of an `import-file`. The loader compiles that file when the
    import runs, so a cycle of imports is a cycle of loads, which the loader
    reports.
+
+9. **A loader compiles a file once while its inputs match.**
+   `compile_file_stored` keeps each unit in the instance's store under the
+   file's path, beside a digest of the compile inputs that can change. A load
+   whose digest matches runs a clone of the kept unit. Registering a host
+   binding, a host primitive or the standard library's exports empties the
+   store ([docs/pipeline.md](../../docs/pipeline.md)).
