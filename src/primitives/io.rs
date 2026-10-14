@@ -1,4 +1,4 @@
-//! audited: 2026-09-30
+// audited: 2026-10-14
 //! I/O primitives: type predicates and backend operations.
 //!
 //! src/io/AGENTS.md
@@ -366,6 +366,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "io/backend" => prim_io_backend {
+        ambient: true,
         signal: Signal::errors(),
         arity: Arity::Range(1, 2),
         doc: "Create an I/O backend. :async for asynchronous, :mock for testing. Optional second arg is the worker keepalive in seconds (nil for the default): how long an idle I/O worker thread waits for another operation before it retires.",
@@ -385,6 +386,7 @@ primitive! {
         bits_from_args: Some(io_submit_required_bits),
     }
     "io/workers" => prim_io_workers {
+        ambient: true,
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Background worker operations this backend has submitted but not yet reaped. Zero for a backend that runs its operations in the kernel (io_uring) rather than on threads.",
@@ -394,6 +396,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "io/reap" => prim_io_reap {
+        ambient: true,
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Non-blocking poll for async I/O completions. Returns array of completion structs.",
@@ -403,6 +406,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "io/wait" => prim_io_wait {
+        ambient: true,
         signal: Signal::errors(),
         arity: Arity::AtLeast(1),
         doc: "Wait for async I/O completions until one arrives or the :timeout or :deadline passes. No bound waits as long as it takes; :timeout 0 polls. Returns array of completion structs.",
@@ -419,6 +423,7 @@ primitive! {
         ret: RetType::Array,
     }
     "io/cancel" => prim_io_cancel {
+        ambient: true,
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Cancel a pending async I/O operation by submission ID. Returns nil.",

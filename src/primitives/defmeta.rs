@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-14
 //! What a primitive carries beyond its call behavior: the `Doc` a lookup
 //! shows, and the `PrimitiveMeta` maps the pipeline threads.
 //!
@@ -22,9 +22,26 @@ pub struct Doc {
     pub category: &'static str,
     pub example: &'static str,
     pub aliases: &'static [&'static str],
+    /// Whether a macro expansion refuses the primitive
+    /// ([`PrimitiveDef::ambient`]).
+    pub ambient: bool,
 }
 
 impl Doc {
+    /// Default for struct-update syntax: the doc of a form no expansion refuses,
+    /// with every text field empty.
+    pub const DEFAULT: Doc = Doc {
+        name: "",
+        doc: "",
+        params: &[],
+        arity: Arity::AtLeast(0),
+        signal: Signal::silent(),
+        category: "",
+        example: "",
+        aliases: &[],
+        ambient: false,
+    };
+
     /// The doc a primitive's definition carries, as `doc` shows it.
     pub fn of(def: &PrimitiveDef) -> Doc {
         Doc {
@@ -36,6 +53,7 @@ impl Doc {
             category: def.category,
             example: def.example,
             aliases: def.aliases,
+            ambient: def.ambient,
         }
     }
 
@@ -61,6 +79,9 @@ impl Doc {
         out.push_str("  arity: ");
         out.push_str(&format!("{}", self.arity));
         out.push('\n');
+        if self.ambient {
+            out.push_str("  expansion: refused; it reads or changes state outside the unit\n");
+        }
         // Example
         if !self.example.is_empty() {
             out.push_str("  example:\n");
