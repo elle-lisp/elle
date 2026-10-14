@@ -26,16 +26,16 @@ fn source_boot() -> Runtime {
 
 // ── The sealing net ─────────────────────────────────────────────────
 
-// The design names the boot graph's only unsealed leaves,
-// both handled by the reconstruction stream: the three `External` stdio
-// ports (the *stdin*/*stdout*/*stderr* `Parameter` defaults) and the
-// instance's two default traitsets (`@struct`s built by `init_default_traits`
-// at VM init). Anything else unsealed is a new dump obstacle and must be
-// recorded in the design before this expectation moves. The counter-factual
-// this guards: a stdlib change that defines a mutable top-level (an @struct
-// cache, a box) would boot fine and pass every behavioral test, yet silently
-// make the future boot image undumpable — this assertion is what fails
-// instead.
+// The design names the boot graph's only unsealed leaves, which the
+// reconstruction stream handles: the three `External` stdio ports (the
+// *stdin*/*stdout*/*stderr* `Parameter` defaults). The instance's two default
+// traitsets are immutable structs, sealed, and the dumper finds them by
+// identity, so they are not among them. Anything else unsealed is a new dump
+// obstacle and must be recorded in the design before this expectation moves.
+// The counter-factual this guards: a stdlib change that defines a mutable
+// top-level (an @struct cache, a box) would boot fine and pass every
+// behavioral test, yet silently make the future boot image undumpable — this
+// assertion is what fails instead.
 #[test]
 fn boot_heap_unsealed_leaves_are_exactly_the_reconstructible_set() {
     let mut rt = source_boot();
@@ -49,10 +49,7 @@ fn boot_heap_unsealed_leaves_are_exactly_the_reconstructible_set() {
     unsealed.sort();
     assert_eq!(
         unsealed,
-        vec![
-            "External(port) x3".to_string(),
-            "LStructMut() x2".to_string()
-        ],
+        vec!["External(port) x3".to_string()],
         "boot graph's unsealed leaves changed; census:\n{}",
         census.lines().join("\n")
     );
