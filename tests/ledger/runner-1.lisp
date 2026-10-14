@@ -233,7 +233,7 @@
 ["tests/lang/caps-process.lisp" :objects 644]
 ["tests/lang/caps-refuse.lisp" :objects 794]
 ["tests/lang/caps-spawn.lisp" :objects 511]
-["tests/lang/caps-thread.lisp" :objects 273]
+["tests/lang/caps-thread.lisp" :objects 267]
 ["tests/lang/caps-wasm-host.lisp" :objects 481]
 ["tests/lang/caps.lisp" :objects 839]
 ["tests/lang/chan-select-deadline.lisp" :objects 946]

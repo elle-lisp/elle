@@ -31,6 +31,7 @@
 ["tests/lang/fiber-resume.lisp" :objects 658]
 ["tests/lang/fiber-stress.lisp" :objects 1129]
 ["tests/lang/fibers.lisp" :objects 1629]
+["tests/lang/file-content.lisp" :objects 615]
 ["tests/lang/file-stat.lisp" :objects 412]
 ["tests/lang/file-sync.lisp" :objects 274]
 ["tests/lang/flatlet.lisp" :objects 305]
