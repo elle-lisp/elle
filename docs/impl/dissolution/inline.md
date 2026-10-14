@@ -1,6 +1,6 @@
 # Dissolution: whose body the loop splices
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-13 -->
 
 How a named function's body reaches a fused loop, and what the spliced body
 keeps: its counters and its declarations.
@@ -48,10 +48,19 @@ compile unit, so a later user unit that writes `(map inc xs)` has no body for
 by-name registry carries the body across the compile-unit boundary, mirroring
 the dispatch-wrapper registry
 (`monomorphize.rs`): a per-instance registry keyed by function **name**
-(`SymbolId`, stable across arenas where a `Binding` is not) is populated as each
-unit compiles — the `<stdlib>` compile records `inc` — and consulted by every later
-unit, gated on the callee being `is_primitive` (a `bind_primitives` stdlib export;
-a user redefinition shadows it with a non-primitive binding and is left alone).
+(`SymbolId`, stable across arenas where a `Binding` is not). The `<stdlib>`
+compile records `inc` into it, and every later unit reads it, gated on the
+callee being `is_primitive` (a `bind_primitives` stdlib export; a user
+redefinition shadows it with a non-primitive binding and is left alone).
+
+**Only the standard library's compile records**, into either registry. Its
+definitions become the instance's globals, so a name in a registry means the
+binding that a later unit's `is_primitive` callee names. A user file's `(defn
+length …)` binds a name in that file alone, and a REPL line that defines a name
+again replaces the global a registry entry would still describe. A later unit
+that grafted either body would run a function its callee does not name. So
+every other compile reads the registries and writes nothing, and its named
+functions inline within its own unit.
 
 The registry entry is the same `HirFragment` the same-unit map holds. Nothing of
 the defining unit is consulted at the call site: the fragment's own table carries
@@ -63,7 +72,7 @@ a mis-resolved reference. A fragment is plain data, so the registry also crosses
 the stdlib disk cache whole: a cache hit inlines the set a stdlib compile
 records, not a subset of it ([src/compiler/stdlib_cache.rs](../../../src/compiler/stdlib_cache.rs)).
 
-One gate fills both maps, and what separates the two paths is **where a
+One gate decides what enters both maps, and what separates the two paths is **where a
 fragment's free globals resolve**. When the stdlib compiles, its own exports are
 not yet `is_primitive` — `+` is a file-scope (`is_file_scope`) letrec sibling —
 so `inc`'s fragment records `+` as a global that the defining unit cannot itself
