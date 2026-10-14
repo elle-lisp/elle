@@ -123,15 +123,12 @@ pub fn load_plugin(path: &str, vm: &mut VM, symbols: &mut SymbolTable) -> LResul
         );
     }
 
-    // Register docs
+    // Teach the instance each spelling, and enter each doc.
     for def in &collected {
-        let _sym_id = symbols.intern(def.name);
-        let doc = Doc::of(def);
-        vm.docs.insert(def.name.to_string(), doc.clone());
-        for alias in def.aliases {
-            let _alias_id = symbols.intern(alias);
-            vm.docs.insert((*alias).to_string(), doc.clone());
+        for name in def.names() {
+            symbols.intern(name);
         }
+        Doc::enter(&mut vm.docs, def);
     }
 
     // Leak the library handle — never unload plugins

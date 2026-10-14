@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-14
 //! `CompileCtx`: one instance's compile-time state.
 //!
 //! src/pipeline/AGENTS.md
@@ -422,20 +422,23 @@ impl CompileCtx {
     /// and `eval` both resolve it as they resolve a built-in.
     ///
     /// A host binding reaches the compile `meta` alone, and `eval` compiles
-    /// against the macro-body `eval_meta`; a primitive belongs in both. A
-    /// primitive value is an immediate, so nothing here needs a root.
+    /// against the macro-body `eval_meta`; a primitive belongs in both. The
+    /// macro VM's doc table learns it too, so a macro body reads it as run
+    /// time does (docs/macros.md). A primitive value is an immediate, so
+    /// nothing here needs a root.
     pub fn register_primitive(
         &mut self,
         symbols: &mut SymbolTable,
         def: &'static crate::primitives::def::PrimitiveDef,
     ) {
         let mut eval_meta = self.expander.eval_meta().clone();
-        for name in std::iter::once(&def.name).chain(def.aliases) {
+        for name in def.names() {
             let sym_id = symbols.intern(name);
             self.meta.insert_def(sym_id, def);
             eval_meta.insert_def(sym_id, def);
         }
         self.expander.set_eval_meta(eval_meta);
+        crate::primitives::def::Doc::enter(&mut self.vm.docs, def);
     }
 
     /// Keep the macros a REPL line defined, from the expander that compiled
