@@ -46,11 +46,18 @@ pub struct DispatchWrapperRegistry {
 }
 
 impl super::super::Registries<'_> {
-    /// Record a wrapper the compile defines under its name, when the compile
-    /// records at all.
-    pub(super) fn record_dispatch(&mut self, name: SymbolId, w: &Wrapper, arena: &BindingArena) {
+    /// Record a wrapper the compile defines at its top level under the
+    /// binding's name, when the compile records at all.
+    pub(super) fn record_dispatch(
+        &mut self,
+        binding: &crate::hir::arena::BindingInner,
+        w: &Wrapper,
+        arena: &BindingArena,
+    ) {
         if let Self::Record { dispatch, .. } = self {
-            dispatch.record(name, w, arena);
+            if binding.is_file_scope {
+                dispatch.record(binding.name, w, arena);
+            }
         }
     }
 }

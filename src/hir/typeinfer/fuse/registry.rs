@@ -28,11 +28,20 @@ pub struct FnInlineRegistry {
 }
 
 impl Registries<'_> {
-    /// Record a fragment the compile defines under its name, when the compile
-    /// records at all.
-    pub(super) fn record_inline(&mut self, name: SymbolId, f: &FnFragment) {
+    /// Record the fragment of a function the compile defines at its top level
+    /// under the binding's name, when the compile records at all.
+    pub(super) fn record_inline(
+        &mut self,
+        binding: &crate::hir::arena::BindingInner,
+        f: &FnFragment,
+    ) {
         if let Self::Record { inline, .. } = self {
-            inline.by_name.entry(name).or_insert_with(|| f.clone());
+            if binding.is_file_scope {
+                inline
+                    .by_name
+                    .entry(binding.name)
+                    .or_insert_with(|| f.clone());
+            }
         }
     }
 }
