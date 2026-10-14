@@ -1,8 +1,9 @@
-// audited: 2026-10-13
-//! The expansion budget: one count that nested expansions share, apart from
-//! the fuel of the fiber an expansion runs on.
+// audited: 2026-10-14
+//! The expansion budget, one count that nested expansions share apart from
+//! fiber fuel, and the capabilities an expansion withholds.
 //!
 //! docs/runtime.md
+//! docs/macros.md
 //!
 //! Each test drives `at_expansion` with a body written in Rust. A nested
 //! expansion written in Elle needs a transformer whose `eval` expands a macro,
@@ -77,4 +78,38 @@ fn a_spent_budget_answers_the_fuel_fault() {
     let answer = vm.at_expansion(&mut unit(), |vm| vm.halt_spent_expansion(0).0);
     assert_eq!(answer, Err(CompileTimeFault::Fuel));
     assert!(!vm.expanding(), "the halted expansion closes the budget");
+}
+
+/// An expansion withholds the effect capabilities beside what its fiber
+/// withholds, and the fiber gets its own set back when the expansion ends. The
+/// counter-factual runs the transformer with the fiber's set alone, so a macro
+/// reads a file wherever no fiber denied `:fs`.
+#[test]
+fn an_expansion_withholds_the_effect_capabilities_until_it_ends() {
+    use crate::signals::{SIG_EXEC, SIG_FFI, SIG_FS, SIG_GPU, SIG_IO, SIG_NET, SIG_OS_SIGNAL};
+    let effects = [
+        SIG_FFI,
+        SIG_IO,
+        SIG_EXEC,
+        SIG_GPU,
+        SIG_OS_SIGNAL,
+        SIG_FS,
+        SIG_NET,
+    ];
+    let mut vm = VM::new();
+    vm.fiber.withheld = SIG_ERROR;
+    let mut during = SignalBits::EMPTY;
+    let answer = vm.at_expansion(&mut unit(), |vm| {
+        during = vm.fiber.withheld;
+        SignalBits::EMPTY
+    });
+    assert_eq!(answer, Ok(Value::NIL));
+    for bit in effects {
+        assert!(during.intersects(bit), "the expansion withholds {bit}");
+    }
+    assert!(during.intersects(SIG_ERROR), "and what the fiber withholds");
+    assert_eq!(
+        vm.fiber.withheld, SIG_ERROR,
+        "the fiber gets its own set back"
+    );
 }
