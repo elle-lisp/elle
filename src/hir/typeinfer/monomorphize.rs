@@ -116,7 +116,7 @@ pub(super) fn monomorphize_dispatch_wrappers(
     let mut wrappers: HashMap<Binding, Wrapper> = HashMap::new();
     collect_wrappers(hir, arena, typeof_aliases, &mut wrappers);
     for (b, w) in &wrappers {
-        registries.record_dispatch(arena.get(*b).name, w, arena);
+        registries.record_dispatch(arena.get(*b), w, arena);
     }
     let registry = registries.dispatch();
     if wrappers.is_empty() && registry.by_name.is_empty() {

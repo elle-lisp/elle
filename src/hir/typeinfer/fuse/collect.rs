@@ -124,7 +124,7 @@ impl<'a> Collector<'a> {
         let Some(fragment) = fn_fragment(value, self.arena, self.bases) else {
             return;
         };
-        registries.record_inline(inner.name, &fragment);
+        registries.record_inline(inner, &fragment);
         if !doubly_bound {
             self.templates.insert(b, fragment);
         }
