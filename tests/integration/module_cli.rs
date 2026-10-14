@@ -1,5 +1,5 @@
-// audited: 2026-10-06
-// Where a program finds a module, from a file or from none, and what a cycle of literal imports reports when it runs or is analyzed.
+// audited: 2026-10-14
+// Where a program finds a module, what a cycle of literal imports reports, and how often a file that loads twice compiles.
 // docs/modules.md
 // docs/config.md
 
@@ -213,4 +213,57 @@ fn analyzing_a_cycle_of_literal_imports_ends() {
     let (code, stdout, stderr) = run_elle(dir.path(), &["-"], &program);
     assert_eq!(code, 0, "the analysis returns (stderr: {stderr})");
     assert_eq!(stdout.trim(), "analyzed");
+}
+
+/// How many compiles of `file` a `--trace=compile` run reported: each compile
+/// traces its read phase once, under the file's path.
+fn compiles_of(stderr: &str, file: &str) -> usize {
+    let read = format!("{file} read ");
+    stderr
+        .lines()
+        .filter(|l| l.starts_with("[trace:compile]") && l.contains(&read))
+        .count()
+}
+
+/// Two loads of one file compile it once, and both run it. The
+/// counter-factual compiled the file on every load, and its read phase
+/// appeared twice.
+#[test]
+fn two_loads_of_one_file_compile_it_once() {
+    let dir = module_dir();
+    let (code, stdout, stderr) = run_elle(
+        dir.path(),
+        &["--trace=compile", "-"],
+        "(print (+ (import-file \"m.lisp\") (import-file \"m.lisp\")))",
+    );
+    assert_eq!(code, 0, "both loads succeed (stderr: {stderr})");
+    assert_eq!(stdout.trim(), "84", "both loads ran the file");
+    assert_eq!(
+        compiles_of(&stderr, "m.lisp"),
+        1,
+        "m.lisp compiled once: {stderr}"
+    );
+}
+
+/// A compile that fails keeps nothing, so the next load of the file compiles
+/// it again and reports the error again. The counter-factual kept the failure
+/// beside the code, and the second load compiled nothing.
+#[test]
+fn a_failed_compile_compiles_again_on_the_next_load() {
+    let dir = tempfile::tempdir().expect("scratch dir");
+    std::fs::write(dir.path().join("bad.lisp"), "(no-such-name)\n").expect("write bad.lisp");
+    let (code, stdout, stderr) = run_elle(
+        dir.path(),
+        &["--trace=compile", "-"],
+        "(def [a? _] (protect (import-file \"bad.lisp\")))\n\
+         (def [b? _] (protect (import-file \"bad.lisp\")))\n\
+         (print [a? b?])",
+    );
+    assert_eq!(code, 0, "the program runs (stderr: {stderr})");
+    assert_eq!(stdout.trim(), "[false false]", "both loads fail");
+    assert_eq!(
+        compiles_of(&stderr, "bad.lisp"),
+        2,
+        "bad.lisp compiled on each load: {stderr}"
+    );
 }
