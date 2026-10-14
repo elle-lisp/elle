@@ -56,8 +56,9 @@ raise, but it reads no state outside the unit and changes none:
   unit through no capability bit: the environment, the arguments, the pid, the
   clocks, `vm/config`, the signal registry, `hash`, the standard ports, and
   the VM's caches and gauges. A call to one halts the expansion. The halt
-  passes every `protect` and the boundary of every silent function, and the
-  compile fails naming the macro and the primitive. `(vm/primitive-meta name)`
+  carries `:terminal`, so it passes every fiber mask, every `protect` and the
+  boundary of every silent function. The compile fails naming the macro and
+  the primitive. `(vm/primitive-meta name)`
   answers `:ambient true` for each, and `(doc name)` says so.
 - **A plugin's primitive runs** unless it declares a capability the expansion
   withholds.
@@ -82,6 +83,11 @@ needs `:fs` for it.
 (let [msg (compile-error home)]
   (assert (string/contains? msg "macro 'home'") "naming the macro")
   (assert (string/contains? msg "sys/env") "and the primitive, past the protect"))
+
+(def pid '(begin (defmacro pid []
+                   (fiber/resume (fiber/new (fn [] (sys/pid)) |:halt :error|)))
+                 (pid)))
+(assert (string/contains? (compile-error pid) "sys/pid") "no fiber mask catches the halt")
 
 (def shout '(begin (defmacro shout [] (println "expanding")) (shout)))
 (assert (string/contains? (compile-error shout) "macro 'shout'") "printing is an effect")
