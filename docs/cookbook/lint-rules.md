@@ -1,6 +1,6 @@
 # Adding a New Lint Rule
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-14 -->
 
 Linting operates on HIR trees. Rules live in [src/lint/rules.rs](../../src/lint/rules.rs); the
 tree walker lives in [src/hir/lint.rs](../../src/hir/lint.rs).
@@ -125,10 +125,10 @@ function literal, and a mask or `:deny` set computed at run time, give neither:
                  (compile/diagnostics (compile/analyze src)))))
 
 (def sandbox
-  "(fiber/new (fn [] (file/read \"/etc/hostname\")) |:error| :deny |:fs|)")
+  "(fiber/new (fn [] (file/stat \"/etc/hostname\")) |:error| :deny |:fs|)")
 (assert (= |"I001" "I002"| (codes sandbox))
         ":fs is denied, and the mask does not catch its denial")
-(assert (empty? (codes "(fiber/new (fn [] (file/read \"x\")) |:fs :error|)"))
+(assert (empty? (codes "(fiber/new (fn [] (file/stat \"x\")) |:fs :error|)"))
         "a mask that names every bit the body raises gives no hint")
 (assert (empty? (codes "(fn [body] (fiber/new body |:error| :deny |:fs|))"))
         "a body the compiler cannot see gives no hint")
