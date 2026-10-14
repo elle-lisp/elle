@@ -2,8 +2,11 @@
 
 <!-- audited: 2026-10-20 -->
 
-All I/O in Elle is async — reads and writes yield to the scheduler. User
-code runs inside the async scheduler automatically.
+Port, socket, timer and subprocess I/O in Elle is async: each call yields to
+the scheduler, and other fibers run until it completes. User code runs inside
+the async scheduler automatically. The `file/` functions that take a path are
+the exception. Each runs on the scheduler's thread and holds up every fiber of
+that scheduler until it returns. `file/sync` is async, as a port call is.
 
 ## I/O backend
 
@@ -150,7 +153,7 @@ with `port/close`.
 | `(port/read-line p)` | read to the next newline, without it, whatever the line's length; `nil` at EOF |
 | `(port/read-all p)` | read everything that remains |
 | `(port/write p data)` | write all of a string or bytes |
-| `(port/flush p)` | flush buffers |
+| `(port/flush p)` | flush a file port's data to stable storage, as `fsync(2)` does; nothing on any other port |
 | `(port/seek p offset)` | seek to a byte offset, from the start unless `:from :current` or `:from :end` |
 | `(port/tell p)` | the current logical byte position |
 | `(port/close p)` | close the port; idempotent |
@@ -333,6 +336,31 @@ recursive delete (`file/delete-dir` only removes empty directories).
 (with-temp-dir dir
   (file/write (path/join dir "scratch.txt") "data")
   (assert (= (file/read (path/join dir "scratch.txt")) "data")))
+```
+
+## Syncing to storage
+
+`(file/sync path)` flushes the file or directory at `path` to stable storage,
+as `fsync(2)` does, and answers nil. It runs on the I/O thread pool on every
+platform, so other fibers run while it waits for the disk. It opens `path` for
+reading, so a path that does not exist, or that the process cannot read,
+raises `:io-error`. A path that names neither a file nor a directory, such as
+a fifo, raises `:io-error` at once. `file/sync` needs the `:fs` capability.
+
+A rename is durable only after its directory is synced too:
+
+```lisp
+(with-temp-dir dir
+  (let [tmp (path/join dir "state.tmp")
+        final (path/join dir "state")]
+    (file/write tmp "v2")
+    (assert (nil? (file/sync tmp)) "sync the new contents first")
+    (file/rename tmp final)
+    (assert (nil? (file/sync dir)) "then the directory that holds the rename")
+    (assert (= (file/read final) "v2"))
+    (let [[ok? err] (protect (file/sync (path/join dir "missing")))]
+      (assert (not ok?))
+      (assert (= (get err :error) :io-error)))))
 ```
 
 ## System args and environment

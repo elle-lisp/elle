@@ -1,6 +1,6 @@
 # I/O Module
 
-<!-- audited: 2026-10-04 -->
+<!-- audited: 2026-10-14 -->
 
 ## Purpose
 
@@ -40,7 +40,7 @@ to a backend for execution.
 | [threadpool/opbound.rs](threadpool/opbound.rs) | `Bounds` and `OpBound` — the declared and the live half of one operation's bound — plus `Wake`, the stop pipe, `take_when_ready` and `pace_retry`. |
 | [threadpool/submitop.rs](threadpool/submitop.rs) | `CompletionHub::submit`: hand the operation to a worker, run it, publish the result. The `match` there names each operation's runner and the descriptor its bound watches. |
 | [threadpool/pool.rs](threadpool/pool.rs) | `WorkerPool`, `Crew` and `Job` — the parked workers' handoffs, and the choice between handing a job to one of them and starting a thread. See [descriptors and workers](../../docs/impl/io-descriptor.md). |
-| `threadpool/{stream,net,event,child,open}.rs` | The runners, grouped by what they wait on: byte streams, sockets, event descriptors (inotify / kqueue / signalfd), a child's exit, a file open. |
+| `threadpool/{stream,net,event,child,open}.rs` | The runners, grouped by what they wait on: byte streams, sockets, event descriptors (inotify / kqueue / signalfd), a child's exit, a file open or sync. |
 | [uring.rs](uring.rs) | io_uring SQE submission and CQE processing (Linux only). The standing `POLL_ADD` on the hub's bridge eventfd carries the `EVENTFD_USER_DATA` sentinel; `drain_cqes` reports it as `eventfd_fired` and the wait/poll path clears + re-arms it. |
 | [isolate.rs](isolate.rs) | Test-only. `run` executes a test's body as the only thread of a fresh process, for the tests that signal, fault or rewire descriptor 0. See [testing](../../docs/analysis/testing.md). |
 | [eventfd.rs](eventfd.rs) | Bridge eventfd helpers — `create`/`signal`/`drain` (Linux only). One definition of each eventfd syscall, shared by the io_uring bridge and `primitives::chan`'s wake fd. |
@@ -56,7 +56,7 @@ Stream primitive → (SIG_IO, IoRequest) → Scheduler → io/submit → AsyncBa
 
 ### IoOp and PortOp
 
-`IoOp` has 15 variants. Every operation that names an existing port is one
+`IoOp` has 16 variants. Every operation that names an existing port is one
 `PortOp` under `IoOp::Port`, so the port guard runs once for all of them:
 
 **`PortOp` (10):** `ReadLine`, `Read { count }`, `ReadExact { count }`,
@@ -66,8 +66,8 @@ data }`, `RecvFrom { count, result }`, `Shutdown { how }`
 **File position:** `Seek { offset: i64, whence: i32 }`, `Tell`
 
 **The rest:** `Connect { addr }`, `Close`,
-`Open { path, flags, mode, direction, encoding }`, `Resolve { hostname }`,
-`PollFd`, `ChanSelectPark`
+`Open { path, flags, mode, direction, encoding }`, `Sync { path }`,
+`Resolve { hostname }`, `PollFd`, `ChanSelectPark`
 
 `RecvFrom` pre-allocates its `{:data :addr :port}` result struct on the
 **requesting fiber's heap** (`prim_udp_recv_from`) and the completion fills it
@@ -137,6 +137,7 @@ variant is what that operation alone must remember:
 - `Port { op, port_key, port, descriptor, buffer_handle, listener_kind, lent, filled, bound }` — operation on an existing port (stream I/O, accept, datagram, shutdown). `descriptor` is this operation's share of the number it names — see [descriptors and workers](../../docs/impl/io-descriptor.md). `listener_kind` is `Some(PortKind)` for Accept only. `lent` is the remainder the port handed to a read — see [where a stream operation's bytes live](../../docs/impl/io-bytes.md).
 - `Connect { addr, buffer_handle, connect_fd, port }` — creates a new port on completion. `connect_fd` starts as `Some(fd)` for io_uring (pre-created socket) or `None` for thread pool (set on completion).
 - `Open { path, buffer_handle, port }` — creates a new port on completion; `path` is kept for the error message.
+- `Sync { path, buffer_handle }` — flushes the file or directory at `path` to stable storage, and answers nil; `path` is kept for the error message.
 - `Sleep { buffer_handle }` — portless timer.
 - `ProcessWait { buffer_handle, handle_val, siginfo, exit }` — waiting for subprocess exit via IORING_OP_WAITID. `siginfo` is a heap-allocated `siginfo_t` filled by the kernel; released in completion processing or by `retire`. Null on the thread-pool path, where the worker reports the exit code itself. `exit` is a clone of the handle's `ExitRecord`, so the completion reaps through it without dereferencing `handle_val`; "A reap is never wasted" below says why.
 - `Task { buffer_handle }` — background task running on thread pool.
@@ -417,7 +418,8 @@ in what they remember. Both watch that descriptor without changing it — it
 belongs to whoever passed it in — so the pool worker takes `OpBound::watching`
 rather than `OpBound::new`.
 
-`Open` names no platform at all: it always goes to the pool. See invariant 14.
+`Open` and `Sync` name no platform at all: both always go to the pool. See
+invariant 14.
 
 `dispatch` returns what the platform decided and the pending entry must record
 — the pre-created socket fd for a connect, the `siginfo_t` allocation for a
@@ -484,7 +486,7 @@ The ports and the handle are built at the completion's `Birthplace` — one regi
 11. **Dispatch-before-port-guard:** `Spawn` and `ProcessWait` must be dispatched before the `as_external::<Port>()` guard. `Spawn` has `Value::NIL` as its port field; `ProcessWait` has a `ProcessHandle` in the port field (not a `Port`).
 12. **ProcessWait siginfo lifetime:** The `siginfo_t` buffer in `PendingOp::ProcessWait` is heap-allocated via `Box::into_raw` and must remain valid until the CQE arrives. Completion processing reclaims it via `Box::from_raw`, and so does `PendingOp::retire`. The fast path (a status already on the handle) never inserts a `PendingOp::ProcessWait`, so the buffer is only allocated for truly pending operations.
 13. **IORING_OP_WAITID requirement:** Linux 6.7+; older kernels return `-EINVAL` in the CQE. The thread-pool backend reaps the child itself, asking with `WNOHANG` and pacing the asks under the operation's bound.
-14. **Open runs on the thread pool, on every platform.** An `open(2)` of a fifo waits for the other end, and a wait is only answerable where the worker holds it: `IORING_OP_OPENAT` blocks an io-wq thread that a linked timeout marks cancelled but cannot retract. One implementation is also one answer — the fifo behavior in [io](../../docs/io.md) is the same whichever platform is underneath. Pinned by [openfile.rs](../../src/io/threadpool/tests/openfile.rs).
+14. **Open and Sync run on the thread pool, on every platform.** An `open(2)` of a fifo waits for the other end, and a wait is only answerable where the worker holds it: `IORING_OP_OPENAT` blocks an io-wq thread that a linked timeout marks cancelled but cannot retract. One implementation is also one answer — the fifo behavior in [io](../../docs/io.md) is the same whichever platform is underneath. A sync opens its path with `O_NONBLOCK`, so a fifo answers `EINVAL` at once rather than parking the worker until a writer arrives. Pinned by [openfile.rs](../../src/io/threadpool/tests/openfile.rs) and [file-sync.lisp](../../tests/lang/file-sync.lisp).
 15. **Seek/Tell are immediate completions.** `IoOp::Seek` and `IoOp::Tell` are never submitted to io_uring or the thread pool. They call `libc::lseek(2)` synchronously in the backend's submit/execute path and return an immediate completion. `PoolOp` has no `Seek` or `Tell` variant.
 16. **Task dispatch:** `IoOp::Task` is dispatched before the port guard (it is portless). There is no io_uring equivalent for an arbitrary closure, so a `Task` always runs on the thread pool (feeding the `CompletionHub`) on every platform. The `TaskFn` closure is taken exactly once via `RefCell<Option<...>>`; double-take returns an error.
 17. **One submission, one pending entry, one id.** `submit_op` files the
