@@ -38,3 +38,6 @@ impl InstanceRegistries {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
