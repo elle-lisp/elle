@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-10-14
 //! Built-in documentation for special forms and prelude macros, and the text `(help)` prints.
 //!
 //! docs/stdlib.md
@@ -24,6 +24,7 @@ pub(crate) const HAND_WRITTEN: &[Doc] = &[
         category: "special form",
         example: "(defmacro unless-zero (n & body)\n  `(if (= ,n 0) nil (begin ,;body)))\n(unless-zero 3 :nonzero)  # => :nonzero",
         aliases: &[],
+        ..Doc::DEFAULT
     },
     Doc {
         name: "each",
@@ -34,6 +35,7 @@ pub(crate) const HAND_WRITTEN: &[Doc] = &[
         category: "syntax sugar",
         example: "(each x in [1 2 3]\n  (println x))",
         aliases: &[],
+        ..Doc::DEFAULT
     },
     Doc {
         name: "yield",
@@ -44,6 +46,7 @@ pub(crate) const HAND_WRITTEN: &[Doc] = &[
         category: "syntax sugar",
         example: "(def gen (fiber/new (fn () (yield 1) (yield 2)) |:yield|))\n(fiber/resume gen)  # => 1",
         aliases: &[],
+        ..Doc::DEFAULT
     },
     Doc {
         name: "defn",
@@ -54,6 +57,7 @@ pub(crate) const HAND_WRITTEN: &[Doc] = &[
         category: "syntax sugar",
         example: "(defn add [x y] (+ x y))\n(add 1 2)  # => 3",
         aliases: &[],
+        ..Doc::DEFAULT
     },
     Doc {
         name: "let*",
@@ -64,6 +68,7 @@ pub(crate) const HAND_WRITTEN: &[Doc] = &[
         category: "syntax sugar",
         example: "(let* [x 1 y (+ x 1)] (+ x y))  # => 3",
         aliases: &[],
+        ..Doc::DEFAULT
     },
     Doc {
         name: "->",
@@ -74,6 +79,7 @@ pub(crate) const HAND_WRITTEN: &[Doc] = &[
         category: "syntax sugar",
         example: "(-> 5 (+ 3) (* 2))  # => (* (+ 5 3) 2) => 16",
         aliases: &[],
+        ..Doc::DEFAULT
     },
     Doc {
         name: "->>",
@@ -84,6 +90,7 @@ pub(crate) const HAND_WRITTEN: &[Doc] = &[
         category: "syntax sugar",
         example: "(->> 5 (- 10) (* 2))  # => (* 2 (- 10 5)) => 10",
         aliases: &[],
+        ..Doc::DEFAULT
     },
     Doc {
         name: "when",
@@ -94,6 +101,7 @@ pub(crate) const HAND_WRITTEN: &[Doc] = &[
         category: "syntax sugar",
         example: "(when (> 3 0) (println \"positive\"))",
         aliases: &[],
+        ..Doc::DEFAULT
     },
     Doc {
         name: "unless",
@@ -104,6 +112,7 @@ pub(crate) const HAND_WRITTEN: &[Doc] = &[
         category: "syntax sugar",
         example: "(unless (empty? [1 2]) (first [1 2]))  # => 1",
         aliases: &[],
+        ..Doc::DEFAULT
     },
     Doc {
         name: "error",
@@ -114,6 +123,7 @@ pub(crate) const HAND_WRITTEN: &[Doc] = &[
         category: "syntax sugar",
         example: "(protect (error {:error :not-found :message \"missing key\"}))\n# => [false {:error :not-found :message \"missing key\"}]",
         aliases: &[],
+        ..Doc::DEFAULT
     },
     Doc {
         name: "try",
@@ -124,6 +134,7 @@ pub(crate) const HAND_WRITTEN: &[Doc] = &[
         category: "syntax sugar",
         example: "(try (error {:error :boom}) (catch e (get e :error)))  # => :boom",
         aliases: &[],
+        ..Doc::DEFAULT
     },
     Doc {
         name: "protect",
@@ -134,6 +145,7 @@ pub(crate) const HAND_WRITTEN: &[Doc] = &[
         category: "syntax sugar",
         example: "(protect (+ 1 2))                 # => [true 3]\n(protect (error {:error :boom}))  # => [false {:error :boom}]",
         aliases: &[],
+        ..Doc::DEFAULT
     },
     Doc {
         name: "defer",
@@ -144,6 +156,7 @@ pub(crate) const HAND_WRITTEN: &[Doc] = &[
         category: "syntax sugar",
         example: "(def log @[])\n(defer (push log :cleanup)\n  (push log :body)\n  42)  # => 42, and log is @[:body :cleanup]",
         aliases: &[],
+        ..Doc::DEFAULT
     },
     Doc {
         name: "with",
@@ -154,6 +167,7 @@ pub(crate) const HAND_WRITTEN: &[Doc] = &[
         category: "syntax sugar",
         example: "(def closed @[])\n(with xs @[1 2] (fn [v] (push closed v))\n  (length xs))  # => 2, and closed holds xs",
         aliases: &[],
+        ..Doc::DEFAULT
     },
     Doc {
         name: "yield*",
@@ -164,6 +178,7 @@ pub(crate) const HAND_WRITTEN: &[Doc] = &[
         category: "syntax sugar",
         example: "(def inner (fiber/new (fn () (yield 1) 2) |:yield|))\n(def outer (fiber/new (fn () (yield* inner)) |:yield|))\n(fiber/resume outer)  # => 1",
         aliases: &[],
+        ..Doc::DEFAULT
     },
     Doc {
         name: "ffi/defbind",
@@ -174,6 +189,7 @@ pub(crate) const HAND_WRITTEN: &[Doc] = &[
         category: "syntax sugar",
         example: "(def libc (ffi/native nil))\n(ffi/defbind abs libc \"abs\" :int [:int])\n(abs -3)  # => 3",
         aliases: &[],
+        ..Doc::DEFAULT
     },
 ];
 
@@ -198,6 +214,7 @@ pub(crate) fn register_builtin_docs(docs: &mut std::collections::HashMap<String,
             category: "special form",
             example: form.example,
             aliases: form.aliases,
+            ..Doc::DEFAULT
         };
         for name in std::iter::once(form.name).chain(form.aliases.iter().copied()) {
             docs.insert(name.to_string(), doc.clone());

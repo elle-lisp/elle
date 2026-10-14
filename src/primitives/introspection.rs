@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! Introspection primitives: what a closure is, `doc`, `vm/query`, the signal registry, and `keyword`.
 //!
 //! docs/functions.md
@@ -299,6 +299,7 @@ pub(crate) fn prim_compile_spirv(
 // Declarative primitive definitions for introspection operations.
 primitive! {
     "jit?" => prim_is_jit {
+        ambient: true,
         signal: Signal::query_errors(),
         arity: Arity::Exact(1),
         doc: "Returns true if closure has JIT-compiled code",
@@ -396,6 +397,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "vm/query" => prim_vm_query {
+        ambient: true,
         signal: Signal::query_errors(),
         arity: Arity::Exact(2),
         doc: "Query VM state by operation name, such as call-count, doc, global? or fiber/self.",
@@ -414,6 +416,7 @@ primitive! {
         effect: RegionEffect::Opaque,
     }
     "signals" => prim_signals {
+        ambient: true,
         signal: Signal::errors(),
         doc: "Return the signal registry as a struct mapping keywords to bit positions.",
         category: "meta",
@@ -421,6 +424,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "jit/rejections" => prim_jit_rejections {
+        ambient: true,
         signal: Signal::query_errors(),
         doc: "List closures rejected from JIT compilation. Returns list of {:name :reason :calls :attempts} structs sorted by call count ascending.",
         category: "meta",
@@ -443,6 +447,7 @@ primitive! {
 primitive!(
     pub(crate) static MLIR_PRIMITIVES =
         "mlir/compile-spirv" => prim_compile_spirv {
+            ambient: true,
             signal: Signal::query_errors(),
             arity: Arity::Range(1, 2),
             doc: "Compile a GPU-eligible closure to SPIR-V bytes at the workgroup size \

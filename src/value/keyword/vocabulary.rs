@@ -27,6 +27,7 @@ pub(crate) static VOCABULARY: &[&str] = &[
     "addr",
     "aliases",
     "allocated-bytes",
+    "ambient",
     "annotated",
     "args",
     "arity",
@@ -230,6 +231,7 @@ pub(crate) static VOCABULARY: &[&str] = &[
     "exited",
     "signal-violation",
     "broken-proof",
+    "ambient-refused",
     "use-after-free",
     "wasm-error",
     // Type names (`type-of` and type errors mint `Value::keyword(type_name())`)

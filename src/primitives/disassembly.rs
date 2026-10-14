@@ -1,7 +1,9 @@
-// audited: 2026-10-23
-// docs/impl/jit.md
-//! The primitives that render a closure's bytecode, Cranelift IR and LIR
-//! control flow graph, and the two that list the primitives.
+// audited: 2026-10-14
+//! The primitives that render a closure's compiled forms, and the two that read the primitive registry.
+//!
+//! docs/impl/jit.md
+//!
+//! A closure renders as bytecode, Cranelift IR, or its LIR control flow graph.
 
 use crate::lir::{terminator_kind, Terminator};
 use crate::primitives::def::RegionEffect;
@@ -29,7 +31,8 @@ pub(crate) fn prim_list_primitives(
 
 /// (vm/primitive-meta name) — get structured metadata for a primitive
 ///
-/// Returns a struct with keys: "name", "doc", "params", "category", "example", "arity", "signal".
+/// Returns a struct with keys :name, :doc, :params, :category, :example,
+/// :arity, :signal, :aliases and :ambient.
 /// Returns nil if the primitive is not found.
 pub(crate) fn prim_primitive_meta(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
@@ -326,7 +329,7 @@ primitive! {
     "fn/disasm" => prim_disbit {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
-        doc: "Disassemble a closure's bytecode into a list of instruction strings.",
+        doc: "Disassemble a closure's bytecode into a mutable array of instruction strings, followed by its constants.",
         params: &["closure"],
         category: "fn",
         example: "(fn/disasm (fn (x) x))",
@@ -334,6 +337,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "fn/disasm-jit" => prim_disjit {
+        ambient: true,
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Render the Cranelift IR the JIT emits for a closure, or nil if it has none.",
@@ -365,10 +369,10 @@ primitive! {
     "vm/primitive-meta" => prim_primitive_meta {
         signal: Signal::query_errors(),
         arity: Arity::Exact(1),
-        doc: "Get structured metadata for a primitive as a struct.",
+        doc: "Get a primitive's metadata as a struct: :name, :doc, :params, :category, :example, :arity, :signal, :aliases, and :ambient, which is true when a macro expansion refuses the primitive.",
         params: &["name"],
         category: "meta",
-        example: "(struct-get (vm/primitive-meta \"pair\") \"doc\") #=> \"Construct a pair...\"",
+        example: "(get (vm/primitive-meta \"first\") :name) #=> \"first\"",
         aliases: &["primitive-meta"],
         effect: RegionEffect::Fresh,
     }

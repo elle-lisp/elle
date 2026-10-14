@@ -12,7 +12,7 @@ use crate::io::sigfd::SignalReceiver;
 use crate::io::sigmap;
 use crate::primitives::ctx::NativeCtx;
 use crate::primitives::def::RegionEffect;
-use crate::signals::{Signal, SIG_OS_SIGNAL};
+use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::Value;
@@ -410,6 +410,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "os/sig-watch" => prim_sig_watch {
+        ambient: true,
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Open a signal receiver that watches a set of POSIX signals. Blocks the signals on the calling thread and queues deliveries onto a kernel fd. Returns a SignalReceiver. See docs/posix-signals.md for mask policy.",
@@ -431,6 +432,7 @@ primitive! {
         effect: RegionEffect::Opaque,
     }
     "os/sig-close" => prim_sig_close {
+        ambient: true,
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Close a signal receiver. Decrements the watched-set refcount; the signal is unblocked process-wide when the last watcher releases it. Idempotent.",
@@ -449,6 +451,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "os/sig-pending" => prim_sig_pending {
+        ambient: true,
         signal: Signal::silent(),
         arity: Arity::Exact(0),
         doc: "Return a set of keywords for signals currently pending delivery on the calling thread (sigpending(2)).",
@@ -457,6 +460,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "os/sig-mask" => prim_sig_mask {
+        ambient: true,
         signal: Signal::silent(),
         arity: Arity::Exact(0),
         doc: "Return a set of keywords for signals currently blocked on the calling thread (pthread_sigmask).",
@@ -465,6 +469,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "os/sig-watching" => prim_sig_watching {
+        ambient: true,
         signal: Signal::silent(),
         arity: Arity::Exact(0),
         doc: "Return a set of keywords for signals currently being watched by at least one live receiver.",
@@ -473,9 +478,3 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
 }
-
-// Suppress dead-code warning for the SIG_OS_SIGNAL re-export now that
-// posix.rs is the only caller. Keep `pub use` so the capability bit is
-// visible to anyone who imports it.
-#[allow(dead_code)]
-pub(crate) const _SIG_OS_SIGNAL_USED: SignalBits = SIG_OS_SIGNAL;
