@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-13
 //! Closes this unit's inlineable function bodies into fragments, by binding for
 //! this unit and by name for the registry.
 //!
@@ -76,9 +76,8 @@ pub(super) struct Collector<'a> {
     /// argument finds it.
     pub(super) templates: FxHashMap<Binding, FnFragment>,
     /// A binding bound more than once has no single stable value, so it leaves
-    /// the by-binding map. The registry keeps first-wins instead: a name is
-    /// claimed by the unit that defines it, and a later same-named user binding
-    /// must not clobber the stdlib's.
+    /// the by-binding map. The registry keeps the first definition of a name
+    /// instead.
     seen: FxHashSet<Binding>,
 }
 
@@ -97,22 +96,23 @@ impl<'a> Collector<'a> {
 
     /// Walk every `Let`/`Letrec`/`Define` binding — the forms
     /// `prune::collect_inits` visits — recording each inlineable function under
-    /// its binding here and under its name in `registry`, for every later unit.
-    /// One gate serves both: a fragment either closes or it does not.
-    pub(super) fn walk(&mut self, hir: &Hir, registry: &mut FnInlineRegistry) {
+    /// its binding here, and under its name in the inline registry when the
+    /// compile records. One gate serves both: a fragment either closes or it
+    /// does not.
+    pub(super) fn walk(&mut self, hir: &Hir, registries: &mut Registries) {
         match &hir.kind {
             HirKind::Let { bindings, .. } | HirKind::Letrec { bindings, .. } => {
                 for (b, value) in bindings {
-                    self.record(*b, value, registry);
+                    self.record(*b, value, registries);
                 }
             }
-            HirKind::Define { binding, value } => self.record(*binding, value, registry),
+            HirKind::Define { binding, value } => self.record(*binding, value, registries),
             _ => {}
         }
-        hir.for_each_child(|c| self.walk(c, registry));
+        hir.for_each_child(|c| self.walk(c, registries));
     }
 
-    fn record(&mut self, b: Binding, value: &Hir, registry: &mut FnInlineRegistry) {
+    fn record(&mut self, b: Binding, value: &Hir, registries: &mut Registries) {
         let doubly_bound = !self.seen.insert(b);
         if doubly_bound {
             self.templates.remove(&b);
@@ -124,7 +124,7 @@ impl<'a> Collector<'a> {
         let Some(fragment) = fn_fragment(value, self.arena, self.bases) else {
             return;
         };
-        registry.record(inner.name, fragment.clone());
+        registries.record_inline(inner, &fragment);
         if !doubly_bound {
             self.templates.insert(b, fragment);
         }

@@ -1,6 +1,6 @@
 # The image file
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-13 -->
 
 The byte layout of an image, and the fingerprint that decides whether this
 binary may map it.
@@ -23,7 +23,7 @@ One image is one file, or one blob embedded in a larger one:
 | name table | the spellings of the symbols and keywords in the body, one length-prefixed string each, sorted by name |
 | file table | the source-file names the body's spans point at, one length-prefixed string each, sorted by name — the file stream indexes it |
 | signal table | user-defined signal names in dump-time bit order |
-| watermarks | dump-time counters, carried in the header block: parameter id and hygiene scope id today, static-region mint and next signal bit with the milestones that need them |
+| watermarks | dump-time counters, carried in the header block: parameter id today, static-region mint and next signal bit with the milestones that need them |
 | manifest | the bindings an image installs. It is body data, not a section: an export struct names each binding with a keyword key and each value answers its own signal, arity and doc ([boot.md](boot.md) owns the boot configuration's root struct). Dependency fingerprints are header fields, and an image with an empty dependency list records none |
 | side-stream | `SendValue`-encoded mutable bindings, present only where the dump policy permits mutables |
 
@@ -73,8 +73,7 @@ that hold the records carry no slot at all, so they stay clean in a mapping.
 **Static region slots** baked into bytecode operands are opaque per-function
 keys; they collide harmlessly across functions. The loader bumps the global
 mint counter past the image watermark anyway, so uniqueness diagnostics stay
-truthful. Parameter ids, hygiene scopes, and signal bits get the same
-watermark treatment.
+truthful. Parameter ids and signal bits get the same watermark treatment.
 
 ## The name table carries spellings, not hashes
 
@@ -159,20 +158,20 @@ port names which stream, and the hydrating instance opens a fresh one. That
 second constructor allocates, so its value lands in a companion region and the
 edge into that region is counted like any other.
 
-## The watermarks bound what a fresh instance may mint
+## The watermark bounds what a fresh instance may mint
 
-Two counters reach the body, and both are process-local. An expander mints
-hygiene scope ids from one; a process-wide counter mints parameter ids from
-zero. Each is compared for equality and nothing else, so an instance minting
-from its own start hands out ids the body already uses. Two unrelated scopes
-would then compare equal, and a new parameter would share `*stdin*`'s id.
+A process-wide counter mints parameter ids from zero, and a parameter is
+compared by id and nothing else. An instance minting from its own start would
+therefore hand out an id the body already uses, and a new parameter would
+share `*stdin*`'s id.
 
-The header therefore records one watermark per counter: one past the highest
-value the body carries. The scope watermark masks the intro bit off first,
-since intro scopes and ordinary ones come from the same counter. Hydration
-raises the process's parameter counter past its own watermark, and answers with
-the scope watermark for the loader that owns an expander. A body carrying
-neither records zero for both.
+The header records the watermark: one past the highest parameter id the body
+carries. Hydration raises the process's counter past it. A body that carries
+no parameter records zero.
+
+A hygiene scope needs no watermark. Its id names the unit that minted it
+([syntax.md](../syntax.md)), so an instance mints an id the body carries only
+by expanding that same unit.
 
 ## Fingerprint: regenerate, never migrate
 
@@ -212,7 +211,8 @@ discriminant byte and each leaf field's offset and length
 ([measurements.md](measurements.md) item 6 records the probe mechanism and the
 measured layout). It records the field offsets of every record the dumper
 assembles as well: a syntax node, a code payload, the payload's LIR body, and
-the four LIR records the body names. A build whose layout reorders a field or
+the four LIR records the body names, and the width of the scope ids a node
+lists. A build whose layout reorders a field or
 moves the discriminant fails the fingerprint instead of hydrating garbage, so
 the two-stage embed build cannot pass with a shifted layout. The same extents
 drive slot canonicalization ([image.md](../image.md) § Dumping).

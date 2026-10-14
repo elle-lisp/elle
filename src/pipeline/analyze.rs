@@ -1,16 +1,18 @@
-// audited: 2026-09-21
+// audited: 2026-10-13
 //! Analysis pipeline: source -> HIR (no bytecode generation).
+//!
+//! docs/pipeline.md
 
 use super::AnalyzeResult;
 use super::CompileCtx;
 use crate::hir::{classify_form, Analyzer, BindingArena};
 use crate::reader::{read_syntax, read_syntax_all};
 use crate::symbol::SymbolTable;
-use crate::syntax::Span;
+use crate::syntax::{Span, UnitTag};
 use crate::vm::VM;
 
-/// Analyze source code without generating bytecode.
-/// Used by linter and LSP which need HIR but not bytecode.
+/// Analyze one form without generating bytecode. Tests use it; the linter and
+/// the LSP analyze whole files with `analyze_file`.
 pub fn analyze(
     source: &str,
     symbols: &mut SymbolTable,
@@ -36,7 +38,8 @@ fn analyze_in_arena(
 ) -> Result<AnalyzeResult, String> {
     let syntax = read_syntax(arena, source, source_name)?;
 
-    let (mut expander, meta) = cctx.expander_and_meta(arena);
+    let unit = UnitTag::of(source_name, std::slice::from_ref(&syntax));
+    let (mut expander, meta) = cctx.expander_and_meta(arena, unit);
 
     let expanded = expander.expand(syntax, symbols, vm)?;
     let mut arena = BindingArena::new();
@@ -46,20 +49,28 @@ fn analyze_in_arena(
         meta.signals.clone(),
         meta.arities.clone(),
     );
-    analyzer.set_compile_ctx(cctx);
     analyzer.bind_primitives(&meta);
     let analysis = analyzer.analyze(&expanded)?;
     let errors = analysis.errors;
+    let lambda_decls = analyzer.take_lambda_decls();
+    let top_direct = analyzer.take_top_direct();
     drop(analyzer);
     let mut hir = analysis.hir;
     crate::hir::tailcall::mark_tail_calls(&mut hir);
-    Ok(AnalyzeResult { hir, arena, errors })
+    Ok(AnalyzeResult {
+        hir,
+        arena,
+        errors,
+        lambda_decls,
+        top_direct,
+    })
 }
 
 /// Analyze a file as a single synthetic letrec (no bytecode).
 ///
-/// Used by linter and LSP for file-level analysis. Primitives are
-/// pre-bound as immutable Global bindings.
+/// The LSP, the linter, `compile/analyze` and the signal solver read a file
+/// this way. Primitives are pre-bound as immutable Global bindings. The
+/// analysis compiles no other file, so a cycle of imports does not recurse.
 pub fn analyze_file(
     source: &str,
     symbols: &mut SymbolTable,
@@ -82,6 +93,7 @@ fn analyze_file_in_arena(
     source_name: &str,
 ) -> Result<AnalyzeResult, String> {
     let mut syntaxes = read_syntax_all(arena, source, source_name)?;
+    let unit = UnitTag::of(source_name, &syntaxes);
 
     // The compile front end consumes the epoch and versioning declarations
     // and migrates old-epoch syntax; analysis must see the same file the
@@ -92,7 +104,7 @@ fn analyze_file_in_arena(
         crate::epoch::migrate_forms(&arena, &mut syntaxes, epoch)?;
     }
 
-    let (mut expander, meta) = cctx.expander_and_meta(arena);
+    let (mut expander, meta) = cctx.expander_and_meta(arena, unit);
 
     // Expand all forms
     let mut expanded_forms = Vec::new();
@@ -121,12 +133,19 @@ fn analyze_file_in_arena(
         meta.signals.clone(),
         meta.arities.clone(),
     );
-    analyzer.set_compile_ctx(cctx);
     analyzer.bind_primitives(&meta);
     let mut hir = analyzer.analyze_file_letrec(forms, span)?;
     let errors = analyzer.take_errors();
+    let lambda_decls = analyzer.take_lambda_decls();
+    let top_direct = analyzer.take_top_direct();
     drop(analyzer);
 
     crate::hir::tailcall::mark_tail_calls(&mut hir);
-    Ok(AnalyzeResult { hir, arena, errors })
+    Ok(AnalyzeResult {
+        hir,
+        arena,
+        errors,
+        lambda_decls,
+        top_direct,
+    })
 }

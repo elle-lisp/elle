@@ -1,6 +1,6 @@
 # hir
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-12 -->
 
 High-level Intermediate Representation: the analyzed program, with bindings
 resolved, captures computed and signals inferred, and the passes over it.
@@ -40,6 +40,7 @@ Does NOT:
 | `BlockId` | Unique identifier for a block, used by `break` to target the correct block |
 | `Analyzer` | Transforms Syntax → HIR; takes `&mut BindingArena` |
 | `AnalysisResult` | HIR produced by the analyzer |
+| `LambdaDecl` | A lambda's declared ceiling, which the HIR checks and does not keep, and the bits its body raises by itself. `take_lambda_decls` hands them over, keyed by the lambda's `HirId`, and `take_top_direct` the bits of the code outside every lambda |
 | `HirLinter` | HIR-based linter producing Diagnostics (no constructor args) |
 | `extract_symbols_from_hir` | Builds SymbolIndex from HIR (3 args: hir, symbols, arena) |
 
@@ -191,8 +192,9 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     `(get (get a :b) :c)`. The first segment is resolved as a variable.
     Subsequent segments become keyword arguments to `get`. This produces
     standard `HirKind::Call` nodes — no special HIR variant. The `get`
-    binding always resolves to the primitive. All synthesized nodes carry the
-    original symbol's span.
+    binding always resolves to the primitive, and each `get` may raise, so the
+    form carries `:error`. All synthesized nodes carry the original symbol's
+    span.
 
 20. **`Parameterize` creates dynamic binding frames.**
     `HirKind::Parameterize { bindings: Vec<(Hir, Hir)>, body: Box<Hir> }`

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-13
 //! Loading the standard library into one runtime: obtain its compiled unit,
 //! run it, and register what it exports.
 //!
@@ -25,7 +25,7 @@ use std::rc::Rc;
 /// definitions are visible to subsequent forms (mutual recursion).
 /// The last expression is a closure returning a struct of all exports.
 /// We call that closure, iterate the exports struct, and register each
-/// export into the compilation cache's PrimitiveMeta so that
+/// export into the compile context's `PrimitiveMeta` so that
 /// `bind_primitives` pre-binds them for all subsequent compilations.
 pub fn init_stdlib(
     vm: &mut VM,
@@ -36,7 +36,7 @@ pub fn init_stdlib(
     let boot = crate::trace::boot();
     let t = std::time::Instant::now();
     // Try the disk cache first: same stdlib source + same elle binary → same
-    // compiled bytecode. On hit we skip the entire ~2.4s front end.
+    // compiled bytecode. A hit skips the whole front end.
     //
     // One fork, two arms, one tail. A rejected file falls into the compiling
     // arm along with a plain absence, so it is *replaced* rather than left to
@@ -57,7 +57,11 @@ pub fn init_stdlib(
                     crate::phase!(boot, "boot", t, "stdlib-cache-rejected ({e}); recompiling");
                 }
                 let t = std::time::Instant::now();
-                let result = match compile_file(STDLIB, symbols, cctx, "<stdlib>") {
+                // The stdlib's definitions become the instance's globals, so its
+                // compile alone records into the cross-unit registries.
+                let compiled =
+                    cctx.compiling_stdlib(|cctx| compile_file(STDLIB, symbols, cctx, "<stdlib>"));
+                let result = match compiled {
                     Ok(r) => r,
                     Err(e) => panic!("stdlib compilation failed: {}", e),
                 };
@@ -100,9 +104,8 @@ pub enum StdlibSource {
     Image,
 }
 
-/// Register each stdlib export into the compilation cache (the tail of the
-/// original `init_stdlib`, split out so both the cached and compiled paths
-/// share it).
+/// Register each stdlib export into the compile context, for the cached and
+/// the compiled path alike.
 fn register_exports(
     vm: &mut VM,
     symbols: &mut SymbolTable,
@@ -138,7 +141,10 @@ pub(crate) fn install_exports(
     let boot = crate::trace::boot();
     let t = std::time::Instant::now();
     let exports = extract_exports(exports_val, symbols);
-    register_stdlib_exports(cctx, symbols, &exports);
+    // No VM global holds an export. User code sees each one as a global through
+    // `bind_primitives`, which reads the compile `meta`, and a macro body calls
+    // one through `eval_meta`.
+    cctx.register_stdlib_exports(&exports);
     cctx.set_stdlib_exports(exports_val);
     crate::phase!(boot, "boot", t, "stdlib-exports");
     // Arm guardfree page-protection (no-op unless --trace=guardfree): from
@@ -222,26 +228,5 @@ fn extract_exports(
     }
     result
 }
-/// Register stdlib exports into the compilation caches.
-///
-/// In the letrec model there are no VM globals. Stdlib exports are
-/// made available to user code via `bind_primitives`, which reads
-/// from `PrimitiveMeta.functions` and `PrimitiveMeta.signals`.
-fn register_stdlib_exports(
-    cctx: &mut CompileCtx,
-    symbols: &mut SymbolTable,
-    exports: &HashMap<SymbolId, (Value, Signal)>,
-) {
-    // Add the exports to this instance's compile context: user code sees them as
-    // globals (`meta`), and macro-transformer bodies can call them (`eval_meta`).
-    cctx.register_stdlib_exports(exports);
-    // Intern all stdlib export names in the symbol table.
-    for sym_id in exports.keys() {
-        // Already interned by extract_exports, but ensure the caller's
-        // symbol table has them too.
-        let _ = symbols.name(*sym_id);
-    }
-}
-
 #[cfg(test)]
 mod tests;

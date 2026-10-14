@@ -1,23 +1,28 @@
-//! The post-analysis HIR regularization sequence.
+// audited: 2026-10-13
+//! The post-analysis HIR regularization sequence, in the one order every compile entry runs it.
+//!
+//! docs/impl/hir.md
 //!
 //! Between analysis and region inference, every compile entry transforms the
 //! analyzed HIR into the canonical (functionalized + ANF) form the region/escape
-//! analyses and the lowerer consume. Centralizing the sequence here keeps its
-//! order — which is load-bearing — identical at every call site.
+//! analyses and the lowerer consume. The sequence lives here so that its order
+//! is the same at every call site.
 
 use crate::hir::arena::BindingArena;
 use crate::hir::expr::Hir;
 use crate::hir::typeinfer::{
-    fuse_map_chains, infer_and_rewrite, prune_typeof_match_arms, DispatchWrapperRegistry,
-    FnInlineRegistry, TypeInfo,
+    fuse_map_chains, infer_and_rewrite, prune_typeof_match_arms, Registries, TypeInfo,
 };
 use crate::symbol::SymbolTable;
 
-/// Mark tail calls, prune dead `(type-of x)` arms, functionalize, ANF-lift, and
-/// run type inference and the intrinsic operand proofs. Returns the inference result (`Err`
-/// is the monomorphization proof obligation; see `typeinfer`).
+/// Prune dead `(type-of x)` arms, fuse HOF chains, eliminate dead bindings, mark
+/// tail calls, functionalize, ANF-lift, and run type inference and the intrinsic
+/// operand proofs. Returns the inference result (`Err` is the intrinsic operand
+/// proof obligation; see `typeinfer`). `registries` are
+/// the instance's cross-unit registries as this compile sees them
+/// (docs/impl/dissolution/inline.md).
 ///
-/// **Order is load-bearing.** Dead-arm pruning runs *before* `functionalize`: a
+/// **The order matters.** Dead-arm pruning runs *before* `functionalize`: a
 /// `(match (type-of x) …)` dead arm can introduce prebound/captured bindings (the
 /// `each` macro's `(def @cur seq)`) that `functionalize` would hoist to the
 /// enclosing scope's cell layout — after which removing the arm orphans the
@@ -29,8 +34,7 @@ pub(crate) fn regularize(
     hir: &mut Hir,
     arena: &mut BindingArena,
     symbols: &SymbolTable,
-    dispatch_wrappers: &mut DispatchWrapperRegistry,
-    fn_inline: &mut FnInlineRegistry,
+    registries: &mut Registries,
 ) -> Result<TypeInfo, String> {
     prune_typeof_match_arms(hir, arena);
     // Closure dissolution: fuse `(map f xs)` / `(map g (map f xs))` over a proven
@@ -39,7 +43,7 @@ pub(crate) fn regularize(
     // (docs/impl/dissolution.md). Runs after pruning (which leaves map calls
     // untouched) and before tail-call marking, so the fused loop's `freeze` tail
     // is marked in place of the collapsed `map` call.
-    fuse_map_chains(hir, arena, fn_inline);
+    fuse_map_chains(hir, arena, registries);
     // Dead binding elimination runs after pruning and fusion, which both make
     // bindings unused, and before functionalize, for the same reason pruning
     // does: the region solver runs after these transforms, so a call deleted
@@ -48,5 +52,5 @@ pub(crate) fn regularize(
     crate::hir::tailcall::mark_tail_calls(hir);
     crate::hir::functionalize::functionalize(hir, arena);
     crate::hir::anf::anf_lift(hir, arena);
-    infer_and_rewrite(hir, arena, dispatch_wrappers)
+    infer_and_rewrite(hir, arena, registries)
 }

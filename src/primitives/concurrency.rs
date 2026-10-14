@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-14
 //! Thread primitives: `sys/spawn`, `sys/spawn-vm`, `sys/thread-state`,
 //! `sys/thread-id`, and `sys/unique`.
 //!
@@ -168,6 +168,7 @@ pub(crate) fn prim_current_thread_id(
 // Declarative primitive definitions for concurrency operations
 primitive! {
     "sys/spawn" => prim_spawn {
+        ambient: true,
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Spawn a thread running a deep-copied closure in a fresh VM with the standard library loaded (so eval/read in the worker resolve stdlib). Heavier than sys/spawn-vm (init_stdlib per spawn).",
@@ -178,6 +179,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "sys/spawn-vm" => prim_spawn_vm {
+        ambient: true,
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Spawn a thread running a deep-copied closure in a fresh VM with primitives only (no stdlib). The cheap path; eval in the worker resolves primitives/intrinsics but not stdlib.",
@@ -198,6 +200,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "sys/thread-id" => prim_current_thread_id {
+        ambient: true,
         signal: Signal::silent(),
         arity: Arity::Exact(0),
         doc: "Return the ID of the current thread",
@@ -207,6 +210,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "sys/unique" => prim_unique {
+        ambient: true,
         signal: Signal::silent(),
         arity: Arity::Exact(0),
         doc: "Return a fresh integer, unique across the whole process. A coordination key (futex key, correlation id) that, unlike a gensym, interns nothing.",

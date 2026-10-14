@@ -1,4 +1,4 @@
-// audited: 2026-09-11
+// audited: 2026-10-13
 //! The hydrator: map an image's pages privately, relocate them, and install
 //! them as a freshly minted counted region.
 //!
@@ -102,7 +102,6 @@ pub fn hydrate(
         || header.names_len > 1 << 32
         || header.files_len > 1 << 32
         || header.prims_len > 1 << 32
-        || header.scope_watermark > u32::MAX as u64
         || header.param_watermark > u32::MAX as u64
     {
         return Err(corrupt("section counts out of range"));
@@ -175,7 +174,6 @@ pub fn hydrate(
         return Ok(Hydrated {
             root,
             region,
-            scope_watermark: header.scope_watermark as u32,
             param_watermark,
         });
     }
@@ -341,7 +339,6 @@ pub fn hydrate(
             header.root_tag,
         ),
         region,
-        scope_watermark: header.scope_watermark as u32,
         param_watermark,
     })
 }

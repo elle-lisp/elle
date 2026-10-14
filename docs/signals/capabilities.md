@@ -1,6 +1,6 @@
 # Capability enforcement
 
-<!-- audited: 2026-10-11 -->
+<!-- audited: 2026-10-14 -->
 
 Capabilities flow down. A fiber's parent decides what the fiber is
 permitted to do. Operations the fiber can't perform become signals the
@@ -190,19 +190,21 @@ and the value — not the primitive's name — says what the spend costs. For th
 the gate reads the requirement from the argument and tests it against the calling
 fiber, so a fiber cannot spend what it withholds however it obtained the value.
 
-Three primitives work this way, each in its own domain:
+Two primitives work this way, each in its own domain:
 
 - `io/submit` spends the operation its request argument carries. A spawn request
   needs `|:io :exec|` and an open needs `|:io :fs|`. A socket operation needs
   `|:io :net|`: a connect, an accept, a datagram, a shutdown or a name lookup.
   A connect to a Unix socket adds `:fs`, and a plain read needs `|:io|`.
-- native `import` runs a shared library's `elle_plugin_init`, which is foreign
-  code, so a `.so`/`.dylib`/`.dll` spec needs `:ffi`. A `.lisp` module needs only
-  the `:fs` that `import` already declares.
 - `emit` raises the bits its first argument names, so it needs those bits. The
   literal form compiles to the `Emit` instruction rather than a call, and that
   instruction asks the same question of the bits it carries
   ([emit.md](emit.md)).
+
+Loading a module needs no such rule, because each loader does one thing.
+`import/load-plugin` runs a shared library's `elle_plugin_init`, which is
+foreign code, so it declares `:ffi`. `import/load-file` loads Elle source and
+declares `:fs` and no `:ffi`.
 
 ```lisp
 # The first fiber may build the request; `f` may not spend it.
@@ -327,6 +329,37 @@ A parent that catches a denial decides what the denied call does: it can
 perform the call and resume the child with the result, or refuse it with
 `fiber/refuse`. A fiber a scheduler runs is refused by that scheduler.
 [mediation.md](mediation.md) holds all three.
+
+## A macro expands with fewer capabilities than its fiber
+
+Code on a fiber can start a compile: `eval`, a module loader, `compile/analyze`
+and the other `compile/*` primitives that compile source. Every macro that
+compile expands runs without the capabilities the fiber withholds, and without
+the effect capabilities `|:ffi :io :exec :gpu :os-signal :fs :net|`, which
+every expansion withholds ([macros.md](../macros.md)). The file `elle` runs
+compiles before any fiber exists, and its macros lose the effect capabilities
+too. An expansion cannot pause, so a parent cannot mediate a denial there. The
+compile fails, and the error names the macro and the denied primitive:
+
+```lisp
+(defn read-at-expansion []
+  (eval '(begin (defmacro m [] (file/read "/etc/hostname")) (m))))
+
+(let [[ok? err] (protect (read-at-expansion))]
+  (assert (not ok?) "a fiber that withholds nothing cannot read at expansion")
+  (assert (string/contains? (get err :message) "macro 'm'") "naming the macro")
+  (assert (string/contains? (get err :message) "file/read") "and the primitive"))
+
+(let [f (fiber/new read-at-expansion |:fs :error| :deny |:fs|)
+      err (fiber/resume f)]
+  (assert (= (get err :error) :eval-error) "the compile fails, and no denial escapes it"))
+```
+
+The expansion's own capabilities come back when it ends, so code the compile
+produces runs with the fiber's. An `include` or `include-file` reads its file
+as an input of that compile, so the effect capabilities do not reach it. A
+fiber that withholds `:fs` still cannot include a file.
+
 ## Intrinsics are not checked
 
 The `%` [intrinsics](../intrinsics.md) compile to bytecode instructions that
@@ -347,8 +380,8 @@ calls — the internal-helper seam #930 describes:
 
 Each sandbox below holds against the primitives the fiber names. A
 capability-bearing value handed in from outside is confined only where a crossing
-checks it: a submitted request is, and loading a native library is; a module
-already loaded and handed in is not — see the spend section above.
+checks it: a submitted request is; a module already loaded and handed in is
+not — see the spend section above.
 
 ```lisp
 (defn compute [] (* 6 7))
@@ -372,9 +405,17 @@ already loaded and handed in is not — see the spend section above.
   (fiber/cancel f))
 ```
 
-Denying `:ffi` stops the fiber loading a native module: a `.so` spec requires
-`:ffi` for the foreign code its load runs. A `.lisp` module needs only the `:fs`
-that `import` declares.
+Denying `:ffi` stops the fiber loading a native module, because
+`import/load-plugin` declares `:ffi` for the foreign code its load runs. The
+gate refuses the call before the loader reads the path, so no library need
+exist. A `.lisp` module loads through `import/load-file`, which needs only
+`:fs`.
+
+```lisp
+(let [f (fiber/new (fn [] (import/load-plugin "nonexistent.so")) |:ffi :error|
+                   :deny |:ffi|)]
+  (assert (= (get (fiber/resume f) :primitive) "import/load-plugin")))
+```
 
 ```lisp
 # Nested sandbox: outer denies IO, inner denies errors

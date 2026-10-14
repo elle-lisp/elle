@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! Dispatching a native call: the result region it mints, the pass-through
 //! retain it hands the caller, and the declaration oracle over both.
 //!
@@ -74,6 +74,11 @@ impl VM {
         args: &[Value],
         region_id: StaticRegion,
     ) -> (SignalBits, Value) {
+        // An expansion refuses an ambient primitive before it runs or mints
+        // (docs/macros.md).
+        if def.ambient && self.expanding() {
+            return self.refuse_ambient(def);
+        }
         let mint = self.new_runtime_region_for_call_slot(region_id);
         let alloc_region = mint.region();
         // The question a `SIG_QUERY` asked, once the dispatch has answered it.
@@ -188,12 +193,12 @@ impl VM {
         // or a sole-owned element would be freed under the returned Value
         // (`arena::pop_with_decref`). Retaining again here would double-count (one
         // leaked region per op — the `raw-pop` probe in tests/impl/probe/store.lisp).
-        // AND EXCEPT a `result_minted` native (`import`, the `compile/*-module`
-        // test loaders): its result was produced by compiled code run on this VM,
-        // so it left that code through the return convention already carrying the
-        // one owed reference the caller's release consumes — and the declarant
-        // supplies that reference itself on any path that did not run a thunk
-        // (`import`'s plugin-cache retain). Retaining again here is the same
+        // AND EXCEPT a `result_minted` native (the module loaders, the
+        // `compile/*-module` test loaders): its result was produced by compiled
+        // code run on this VM, so it left that code through the return convention
+        // already carrying the one owed reference the caller's release consumes —
+        // and the declarant supplies that reference itself on any path that did
+        // not run a thunk (`import/load-plugin`'s retain). Retaining again here is the same
         // double-count — one stranded region graph per call (the `import-result`
         // probe in tests/impl/probe/native.lisp).
         // AND ONLY for a value the native returns as a RESULT. The retain funds

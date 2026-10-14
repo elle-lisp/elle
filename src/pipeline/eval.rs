@@ -1,6 +1,7 @@
-// audited: 2026-10-12
-// src/pipeline/AGENTS.md
-//! Evaluation pipeline: source -> value.
+// audited: 2026-10-13
+//! Evaluation pipeline: source -> value, and the body a macro expansion runs.
+//!
+//! docs/pipeline.md
 
 use super::compile::compile_file;
 use super::CompileCtx;
@@ -10,15 +11,16 @@ use crate::hir::{Analyzer, BindingArena};
 use crate::lir::{Emitter, Lowerer};
 use crate::reader::read_syntax;
 use crate::symbol::SymbolTable;
-use crate::syntax::Expander;
+use crate::syntax::{Expander, UnitTag};
 use crate::vm::VM;
 
 /// Compile and execute a Syntax tree, reusing the caller's Expander.
 ///
-/// This is the entry point for macro body evaluation: the Expander builds
-/// a let-expression wrapping the macro body, then calls this to compile
-/// and run it in the VM. The same Expander is threaded through so nested
-/// macro calls work.
+/// This is the entry point for macro body evaluation: `ensure_transformer`
+/// compiles a transformer's `(fn (params) template)` here, and
+/// `begin-for-syntax` the expression of each definition. The same Expander is
+/// threaded through so nested macro calls work, and the body runs under the
+/// expansion fuel budget (`VM::run_at_expansion`).
 pub fn eval_syntax(
     syntax: crate::syntax::Syntax,
     expander: &mut Expander,
@@ -76,8 +78,14 @@ pub fn eval_syntax(
     let mut emitter = Emitter::new(code);
     let bytecode = emitter.emit_module(&lir_module).bytecode;
 
-    vm.execute(&crate::value::CodeUnit::new(code, bytecode))
-        .map_err(|e| e.to_string())
+    // The body runs under the expansion fuel budget, and a park it raises is
+    // refused: an expansion cannot hold one. A gensym it calls counts in the
+    // expander's unit.
+    vm.run_at_expansion(
+        &crate::value::CodeUnit::new(code, bytecode),
+        expander.unit_mut(),
+    )
+    .map_err(|fault| fault.describe())
 }
 
 /// Compile and execute using the pipeline.
@@ -107,7 +115,8 @@ fn eval_in_arena(
     let syntax = read_syntax(arena, source, source_name)?;
 
     // The instance's expander + compile meta; expansion runs on the caller's vm.
-    let (mut expander, meta) = cctx.expander_and_meta(arena);
+    let unit = UnitTag::of(source_name, std::slice::from_ref(&syntax));
+    let (mut expander, meta) = cctx.expander_and_meta(arena, unit);
 
     let scoped = if source_name.starts_with('<') {
         syntax
@@ -123,7 +132,6 @@ fn eval_in_arena(
         meta.signals.clone(),
         meta.arities.clone(),
     );
-    analyzer.set_compile_ctx(cctx);
     analyzer.bind_primitives(&meta);
     if !expander.core_env.is_empty() {
         analyzer.bind_compile_time_env(&expander.core_env, true);

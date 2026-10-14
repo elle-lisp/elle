@@ -369,9 +369,9 @@
   (and (not (get r 0)) (= (get (get r 1) :error) :tier-rejected)
        (= (get (get r 1) :reason) :feature-disabled)))
 
+# A tier is available when a trivial closure runs on it.
 (defn tier-available? [tk]
   (not (feature-disabled? (exec-thunk tk (fn [] 0)))))
-# probe with a trivial closure
 
 # Candidate tiers as [tier-keyword tier-label]; :bytecode is recorded as :vm.
 # The label is a keyword (result.tier is keyword-typed; sqlite stores its name).

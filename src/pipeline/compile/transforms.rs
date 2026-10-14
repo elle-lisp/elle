@@ -1,5 +1,5 @@
-// audited: 2026-10-06
-//! The source transforms the test-runner compile modes apply to a file's forms, and the include splice.
+// audited: 2026-10-14
+//! The source transforms the test-runner compile modes apply to a file's forms.
 //!
 //! docs/test-runner.md
 //! src/pipeline/AGENTS.md
@@ -79,7 +79,7 @@ pub(super) fn barrier_transform(
 /// macro-EXPANDED top-level forms and wraps **all** of them — `def`/`var` setup
 /// and expressions alike — into the body of a single 0-arg thunk, returned as
 /// one `[0 thunk]` entry. This is the legacy multi-form path: a file is an
-/// imperative script whose meaning depends on the order its forms run in, so it is run as one
+/// imperative script whose forms depend on their order, so it is run as one
 /// unit (in source order, once per tier, in isolation) rather than sliced into
 /// per-form thunks with `def`/`var` hoisted eagerly — which reorders the program
 /// (read-before-write) and re-runs shared mutations per tier. The thunk body is
@@ -166,97 +166,3 @@ pub fn compile_whole_module_forms(
 ) -> Result<CodeUnit, String> {
     compile_syntaxes_with_transform(syntaxes, symbols, cctx, source_name, whole_module_transform)
 }
-
-/// Splice include/include-file directives in source text.
-///
-/// Reads top-level forms, resolves includes, and returns a single string
-/// with all included content inlined. Used by the WASM backend to resolve
-/// includes before wrapping user code in ev/run.
-pub fn splice_includes(source: &str, source_name: &str) -> Result<String, String> {
-    // Text in, text out: the trees exist only to be re-rendered, so they get
-    // their own heap and die with it.
-    let mut home = crate::syntax::SyntaxHeap::new();
-    let arena = home.arena();
-    let syntaxes = read_syntax_all_for(arena, source, source_name)?;
-    let mut pending: std::collections::VecDeque<Syntax> = syntaxes.into();
-    let mut included: HashSet<String> = HashSet::from([source_name.to_string()]);
-    let mut parts: Vec<String> = Vec::new();
-
-    while let Some(syntax) = pending.pop_front() {
-        if resolve_and_splice_include(&arena, &syntax, source_name, &mut pending, &mut included)? {
-            continue;
-        }
-        parts.push(format!("{}", syntax));
-    }
-
-    Ok(parts.join("\n"))
-}
-
-/// Resolve and splice a single include directive into the pending queue.
-/// Returns `Ok(true)` if the syntax was an include (resolved and spliced),
-/// `Ok(false)` if it was not an include, or `Err` on resolution failure.
-pub(super) fn resolve_and_splice_include(
-    arena: &SyntaxArena,
-    syntax: &Syntax,
-    source_name: &str,
-    pending: &mut std::collections::VecDeque<Syntax>,
-    included: &mut HashSet<String>,
-) -> Result<bool, String> {
-    let (spec, is_include) = match extract_include(syntax) {
-        Some(pair) => pair,
-        None => return Ok(false),
-    };
-    let path = if is_include {
-        crate::primitives::modules::resolve_import(&spec)
-    } else {
-        resolve_include_file(&spec, source_name)
-    };
-    let path = path.ok_or_else(|| format!("{}: include: '{}' not found", syntax.span, spec))?;
-    if !included.insert(path.clone()) {
-        return Err(format!(
-            "{}: include: circular dependency on '{}'",
-            syntax.span, path
-        ));
-    }
-    let contents = std::fs::read_to_string(&path)
-        .map_err(|e| format!("{}: include: failed to read '{}': {}", syntax.span, path, e))?;
-    let forms = read_syntax_all_for(*arena, &contents, &path)?;
-    for (i, form) in forms.into_iter().enumerate() {
-        pending.insert(i, form);
-    }
-    Ok(true)
-}
-
-/// Extract the spec from `(include-file "path")` or `(include "spec")`.
-/// Returns `(spec, is_include)` where `is_include` means use resolve_import.
-pub(super) fn extract_include(syntax: &Syntax) -> Option<(String, bool)> {
-    if let SyntaxKind::List(items) = &syntax.kind {
-        if items.len() == 2 {
-            if let Some(head) = items[0].as_symbol() {
-                let is_include = match head {
-                    "include" => true,
-                    "include-file" => false,
-                    _ => return None,
-                };
-                if let SyntaxKind::String(s) = &items[1].kind {
-                    return Some((s.to_string(), is_include));
-                }
-            }
-        }
-    }
-    None
-}
-
-/// Resolve an include-file path relative to the including file's directory.
-pub(super) fn resolve_include_file(spec: &str, source_name: &str) -> Option<String> {
-    let base = std::path::Path::new(source_name).parent()?;
-    let path = base.join(spec);
-    if path.is_file() {
-        Some(path.to_string_lossy().into_owned())
-    } else {
-        None
-    }
-}
-
-#[cfg(test)]
-mod tests;

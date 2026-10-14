@@ -1,6 +1,6 @@
 # Sealing
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-14 -->
 
 What an image's body may hold, what the hydrating instance rebuilds for itself,
 and what fails the dump.
@@ -158,11 +158,13 @@ reconstructible nor side-streamable fails the dump with a named binding.
 
 ## A traits slot has three answers
 
-The **default trait tables** are the first reconstructible class, found by
-the census ([measurements.md](measurements.md) item 2). Every collection the
-runtime allocates carries a `traits` field pointing at one of the instance's
-two default traitsets — `@struct`s built by `init_default_traits` at VM init,
-before any stdlib load or hydration. They are instance infrastructure, not
+The **default trait tables** are the first reconstructible class. Every
+collection the runtime allocates carries a `traits` field pointing at one of the
+instance's two default traitsets — immutable structs built by
+`init_default_traits` at VM init, before any stdlib load or hydration. They
+are sealed, so the census counts them among the `LStruct`s
+([measurements.md](measurements.md) item 2), and the dumper finds them by
+identity rather than by variant. They are instance infrastructure, not
 program state, so the dumper never copies them. A `traits` slot aimed at a
 default traitset becomes a reconstruction entry whose constructor resolves the
 hydrating instance's own table for that tag. The tables exist before hydration

@@ -1,4 +1,4 @@
-// audited: 2026-10-07
+// audited: 2026-10-14
 //! The process runtime: one lifecycle for compile/evaluate, shared by every
 //! entry path (`elle foo.lisp`, the REPL, and the embedding API).
 //!
@@ -235,18 +235,16 @@ impl Runtime {
     }
 
     /// Register a host primitive on this instance: compiled code and `eval`
-    /// resolve it as a built-in, and `doc` answers for it (docs/embedding.md).
+    /// resolve it as a built-in, and `doc` answers for it at run time and in a
+    /// macro body (docs/embedding.md).
     pub fn register_primitive(&mut self, def: &'static crate::primitives::def::PrimitiveDef) {
-        let doc = crate::primitives::def::Doc::of(def);
         let (vm, symbols, cctx) = self.parts();
         cctx.register_primitive(symbols, def);
-        for name in std::iter::once(&def.name).chain(def.aliases) {
-            vm.docs.insert((*name).to_string(), doc.clone());
-        }
+        crate::primitives::def::Doc::enter(&mut vm.docs, def);
     }
 
     /// The compile context and this instance's heap as disjoint borrows — the
-    /// pair an embedder hands to [`CompileCtx::register_repl_binding`] (see
+    /// pair an embedder hands to [`CompileCtx::register_host_binding`] (see
     /// [`RuntimeCore::compile_and_heap`]).
     pub fn compile_and_heap(
         &mut self,

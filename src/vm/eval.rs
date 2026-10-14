@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-13
 //! Runtime eval instruction handler.
 //!
 //! Compiles and executes a datum (quoted value) at runtime.
@@ -140,7 +140,12 @@ fn eval_in_arena(
         }
     }
 
-    // Expand
+    // The datum is a unit of its own: the counts this expander ran up for
+    // earlier evals do not reach it.
+    expander.begin_unit(crate::syntax::UnitTag::of(
+        "<eval>",
+        std::slice::from_ref(&syntax),
+    ));
     let expanded = match expander.expand(syntax, symbols, vm) {
         Ok(e) => e,
         Err(e) => {

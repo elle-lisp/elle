@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-13
 //! The core.lisp bootstrap: compile and run the core module before any
 //! compile context exists, and hand its exports to the one being built.
 //!
@@ -9,7 +9,7 @@
 //! primitives alone. Its exports reach user code as globals and macro bodies
 //! through the expander core env.
 
-use crate::hir::typeinfer::{DispatchWrapperRegistry, FnInlineRegistry};
+use crate::hir::typeinfer::{DispatchWrapperRegistry, FnInlineRegistry, Registries};
 use crate::primitives::def::PrimitiveMeta;
 use crate::signals::Signal;
 use crate::symbol::SymbolTable;
@@ -90,6 +90,7 @@ pub(super) fn compile_core(
     // Expand with bare expander (no prelude)
     let mut bare_expander = unsafe { Expander::new(heap_ptr) };
     bare_expander.set_arena(syntax_arena);
+    bare_expander.begin_unit(crate::syntax::UnitTag::of("<core>", &syntaxes));
     let expanded_forms: Vec<_> = syntaxes
         .into_iter()
         .map(|s| bare_expander.expand(s, symbols, vm))
@@ -131,18 +132,19 @@ pub(super) fn compile_core(
     }
 
     // core.lisp runs before the instance `CompileCtx` (and its registries) exists,
-    // during `on_vm` construction, so throwaway registries are correct here: it
-    // defines no container-dispatch wrappers (its `concat`/`reverse` fan to helpers,
-    // not single monomorphic-op arms), and its cross-unit-inlineable fns are not
-    // recorded for later units. The cross-unit templates every later unit reads
-    // (`inc`/`dec`) live in `stdlib.lisp`, which compiles through the instance
-    // registries.
+    // during `on_vm` construction, so it reads empty registries and records
+    // nothing: it defines no container-dispatch wrappers (its `concat`/`reverse`
+    // fan to helpers, not single monomorphic-op arms), and its cross-unit-inlineable
+    // fns are not recorded for later units. The cross-unit templates every later
+    // unit reads (`inc`/`dec`) live in `stdlib.lisp`, whose compile records them.
     let types = crate::hir::regularize(
         &mut hir,
         &mut arena,
         symbols,
-        &mut DispatchWrapperRegistry::default(),
-        &mut FnInlineRegistry::default(),
+        &mut Registries::Read {
+            dispatch: &DispatchWrapperRegistry::default(),
+            inline: &FnInlineRegistry::default(),
+        },
     )
     .expect("core.lisp uses no monomorphic container ops, so the proof obligation holds");
 

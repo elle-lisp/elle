@@ -188,7 +188,7 @@ pub unsafe extern "C" fn elle_register_prim(
     // The binding's region is rooted through this instance's own heap; the
     // compile context and heap are taken as disjoint borrows of the runtime.
     let (cctx, heap) = ctx.runtime.compile_and_heap();
-    cctx.register_repl_binding(
+    cctx.register_host_binding(
         heap,
         sym_id,
         native,

@@ -1,4 +1,4 @@
-// audited: 2026-10-07
+// audited: 2026-10-13
 //! The `VM` struct — the per-instance state a running program reaches — and the
 //! accessors that reborrow the allocations it points at.
 //!
@@ -114,6 +114,14 @@ pub struct VM {
     /// The current fiber holding all per-execution state:
     /// operand stack, call frames, signal and fiber state.
     pub fiber: Fiber,
+    /// The budget of the expansion running on this VM, which every fiber the
+    /// expansion runs spends apart from its own fuel. Unmetered while none runs;
+    /// opened and closed by `VM::at_expansion` alone (docs/runtime.md).
+    pub(crate) expansion_budget: crate::vm::expansion::ExpansionBudget,
+    /// The unit whose expansion runs code on this VM, lent by
+    /// `VM::at_expansion` for the length of the call. `gensym` names its symbols
+    /// after it, and counts across the process while it is `None`.
+    pub(crate) expansion_unit: Option<crate::syntax::Unit>,
     /// Handle to the current fiber's FiberHandle, if it came from a
     /// `fiber/new` allocation. `None` for the root fiber (which lives
     /// directly on the VM, not behind a handle). Used to wire up
@@ -124,10 +132,11 @@ pub struct VM {
     /// so `fiber/parent` can return the original Value without re-allocating.
     pub current_fiber_value: Option<Value>,
     pub(crate) ffi: FFISubsystem,
-    /// Modules currently being loaded (circular-import guard).
-    /// Added before execution, removed after. If a module is in this set
-    /// when import-file is called, it's a circular dependency.
-    pub loading_modules: std::collections::HashSet<String>,
+    /// The loads in progress, oldest first (the circular-import guard). A
+    /// loader pushes its file before the load runs and pops it after. A
+    /// loader called on a file already here closes a cycle, and the files
+    /// from that one on name it.
+    pub loading_modules: Vec<String>,
     /// Plugins already loaded (path → return value). Prevents double-loading
     /// which would re-register primitives and leak library handles.
     pub loaded_plugins: HashMap<String, Value>,
@@ -362,19 +371,29 @@ impl VM {
         self.gated_exit_reason.take()
     }
 
-    /// Check if a module is currently being loaded (circular dependency).
-    pub fn is_module_loading(&self, module_path: &str) -> bool {
-        self.loading_modules.contains(module_path)
+    /// The cycle a load of `module_path` would close: every load in progress
+    /// from the one of `module_path` on, then `module_path` again, joined by
+    /// ` -> `. `None` when no load of it is in progress.
+    pub fn loading_cycle(&self, module_path: &str) -> Option<String> {
+        let start = self.loading_modules.iter().position(|p| p == module_path)?;
+        let mut chain: Vec<&str> = self.loading_modules[start..]
+            .iter()
+            .map(String::as_str)
+            .collect();
+        chain.push(module_path);
+        Some(chain.join(" -> "))
     }
 
-    /// Mark a module as currently loading (for circular-import detection).
+    /// Push a load of `module_path` onto the loads in progress.
     pub fn mark_module_loading(&mut self, module_path: String) {
-        self.loading_modules.insert(module_path);
+        self.loading_modules.push(module_path);
     }
 
-    /// Unmark a module as loading (after execution completes).
+    /// Pop the newest load of `module_path` off the loads in progress.
     pub fn unmark_module_loading(&mut self, module_path: &str) {
-        self.loading_modules.remove(module_path);
+        if let Some(i) = self.loading_modules.iter().rposition(|p| p == module_path) {
+            self.loading_modules.remove(i);
+        }
     }
 
     /// Get the frame base for the current call frame

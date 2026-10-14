@@ -1,6 +1,6 @@
 # Foundations
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-13 -->
 
 Five representation fixes the image needs: each pays at runtime today, and each
 deletes image machinery.
@@ -101,9 +101,8 @@ fallback compile pays it too; [measurements.md](measurements.md) item 5
 measured the prototype at 2–5× faster than a Rust-heap tree on every
 expansion-hot operation, so the boundary-only split never had a case.
 
-Hygiene scope ids minted by the expander remain process-local counters; the
-image records a scope watermark so a fresh expander mints above every scope
-baked into persisted syntax.
+A hygiene scope id names the unit that minted it and a count within that unit
+([syntax.md](../syntax.md)), so persisted syntax needs no scope watermark.
 
 ## Region-native LIR — landed
 

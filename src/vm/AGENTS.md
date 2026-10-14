@@ -1,6 +1,6 @@
 # vm
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-10-14 -->
 
 The VM executes bytecode on a fiber's operand stack, with each local in a stack slot above the frame base.
 
@@ -68,8 +68,11 @@ it act on each one:
 - `SIG_ABORT`: Inject an error at the target fiber's suspension point.
 - `SIG_QUERY`: Primitive reads VM state (arena stats, introspection).
 - `SIG_FUEL`: The instruction budget ran out. A silent function spends fuel
-  but never pauses ([inference.md](../../docs/signals/inference.md)).
-- `SIG_HALT`: Graceful VM termination. Non-resumable.
+  but never pauses ([inference.md](../../docs/signals/inference.md)). A spent
+  expansion budget halts instead ([runtime.md](../../docs/runtime.md)).
+- `SIG_HALT`: Graceful VM termination. Non-resumable. An expansion refuses an
+  ambient primitive with a halt that carries `:terminal`, so no mask catches it
+  ([macros.md](../../docs/macros.md)).
 
 `execute_code`, which `execute` calls, is the translation boundary. It
 converts `SignalBits` to `Result<Value, String>` for external callers. On
@@ -197,6 +200,8 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | Field | Type | Purpose |
 |-------|-------|---------|
 | `fiber` | `Fiber` | Current fiber: stack, call frames, signal state |
+| `expansion_budget` | `ExpansionBudget` | The budget of the expansion running on this VM, spent by every fiber it runs; unmetered while none runs ([runtime.md](../../docs/runtime.md)) |
+| `expansion_unit` | `Option<Unit>` | The unit whose expansion runs code on this VM, lent by `at_expansion`; `gensym` names its symbols after it, and counts across the process while it is `None` ([macros.md](../../docs/macros.md)) |
 | `heap_ptr` | `*mut FiberHeap` | This instance's single heap, owned by `RuntimeCore` (or privately leaked for a bare VM). All fibers share it; reach it via `heap()` |
 | `current_fiber_handle` | `Option<FiberHandle>` | Handle for current fiber (`None` for root) |
 | `current_fiber_value` | `Option<Value>` | Cached Value for current fiber (`None` for root) |
@@ -210,7 +215,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `error_loc` | `Option<SourceLoc>` | Where the error now propagating was raised. Written by `record_error_loc` (first-writer-wins, so the innermost frame keeps it), taken by `absorbs` when a mask catches ([vm.md](../../docs/impl/vm.md)) |
 | `env_cache` | `Vec<Value>` | Reusable buffer for `build_closure_env` (avoids alloc per call) |
 | `tail_call_env_cache` | `Vec<Value>` | Reusable buffer for the tail-call env built by `tail_call_inner` and `build_tail_call_env` |
-| `eval_expander` | `Option<Expander>` | Cached Expander for runtime `eval` (avoids re-loading prelude) |
+| `eval_expander` | `Option<Expander>` | Cached Expander for runtime `eval` (avoids re-loading prelude); each eval begins a unit on it |
 | `user_args` | `Vec<String>` | The arguments after the source file, after `-`, or after `--`; empty when none follow. Read by `sys/args` |
 
 ### Key Fiber fields (on `vm.fiber`)
@@ -245,26 +250,28 @@ parameter frames). Each re-entry nests on the Rust stack, so it halts with
 | Caller | File | Context |
 |--------|------|---------|
 | `Eval` instruction | [eval.rs](eval.rs) | Compiles and runs Elle source from within running code |
-| `import` | [modules.rs](../primitives/modules.rs) | Runs a module's body |
+| `import/load-file`, `import/load-syntax` | [modules.rs](../primitives/modules.rs) | Run a module's body |
 | The test-setup loader | [modules.rs](signal/modules.rs) | Runs a test file's setup module |
 | A fiber's first resume | [resume.rs](fiber/resume.rs) | Runs a new fiber's body |
 | `arena/allocs` SIG_QUERY handler | [config.rs](signal/config.rs) | Runs a thunk to measure its allocations |
 | `compile/run-on :bytecode` | [bytecode.rs](run_on/bytecode.rs) | Runs a closure on the bytecode tier |
 | The tail-call sentinel | [jit.rs](run_on/jit.rs), [jit_entry.rs](jit_entry.rs) | Finishes a tail call a compiled callee handed back |
-| `call_closure` | [call.rs](call.rs) | Macro transformers and trait methods |
+| `call_transformer`, `run_at_expansion` | [expansion.rs](expansion.rs) | Macro transformers and `begin-for-syntax` definitions, under the expansion fuel budget, with the unit they expand lent to `gensym` |
+| `call_closure` | [call.rs](call.rs) | Trait methods, and the `import/resolve` an `include` calls |
 | JIT helpers | [callops.rs](../jit/calls/callops.rs) | Run an uncompiled callee, or any callee once the native stack is low |
 | The WASM host | [linker.rs](../wasm/linker.rs), [linker.rs](../wasm/lazy/linker.rs) | Falls back to bytecode for a callee the module does not hold |
 | FFI callback | [callback.rs](../ffi/callback.rs) | Runs a closure a C function calls back |
 
 A host that runs code on the current fiber cannot hold a suspension of that
-code. `eval`, `import`, the `compile/*-module` setup runs, `compile/run-on :jit`
-and the root driver refuse one: `refuse_hosted_park` ends the park through the
-discard chokepoint, and the host raises at its own call. An error the hosted
-code raises parks its chain as any error does, and every host ends that park
-through `discard_hosted_error` before it raises or reports. `arena/allocs` and
-`compile/run-on :bytecode` hand the suspension on as their own call's park
-(`abandon_hosted_park`). The module doc of [execute.rs](execute.rs) holds the
-rules on what is preserved, what is overwritten, and how to add a caller.
+code. `eval`, `import/load-file`, `import/load-syntax`, the `compile/*-module`
+setup runs, `compile/run-on :jit`, a macro expansion and the root driver refuse
+one: `refuse_hosted_park` ends the park through the discard chokepoint, and the
+host raises at its own call. An error the hosted code raises parks its chain as
+any error does, and every host ends that park through `discard_hosted_error`
+before it raises or reports. `arena/allocs` and `compile/run-on :bytecode` hand
+the suspension on as their own call's park (`abandon_hosted_park`). The module
+doc of [execute.rs](execute.rs) holds the rules on what is preserved, what is
+overwritten, and how to add a caller.
 
 ## Suspension mechanism
 
@@ -300,7 +307,7 @@ Key methods:
   scheduler-facing entry points
 - `execute_bytecode_from_ip`: Executes from a given IP with the code object (`&Code`)
 - `execute_bytecode_saving_stack`: Saves/restores caller's stack, handles tail calls
-- `run_thunk_to_completion`: `execute_bytecode_saving_stack` + the `SIG_SWITCH` drain loop — the safe entry for re-entrant callers running a thunk on the current fiber (`eval`, `import`, `arena/allocs`, test-setup module loader)
+- `run_thunk_to_completion`: `execute_bytecode_saving_stack` + the `SIG_SWITCH` drain loop — the safe entry for re-entrant callers running a thunk on the current fiber (`eval`, `import/load-file`, `import/load-syntax`, `arena/allocs`, test-setup module loader)
 - `resume_suspended`: Replays `Vec<SuspendedFrame>`, handles re-yields and
   errors; a frame that raises parks through `park_raised`, which records the
   raise site in the delivery ledger

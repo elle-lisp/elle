@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-13
 //! HOF-chain loop fusion: a higher-order call over a proven array becomes one loop
 //! with its function's body spliced in.
 //!
@@ -15,8 +15,8 @@
 //!
 //! A function argument is a call-site lambda literal, which the rewrite moves and
 //! which may capture when its op is alone in the chain (`captures_locals`), or a
-//! named function whose body a fragment carries: this unit's, by binding, or an
-//! earlier unit's, by name through the registry. A chain of two or more ops
+//! named function whose body a fragment carries: this unit's, by binding, or the
+//! standard library's, by name through the registry. A chain of two or more ops
 //! interleaves its functions' calls, so each must pass `reorder_safe` and capture
 //! nothing. Only the chain's innermost op may end the walk early; every other
 //! early exit gates its own stage.
@@ -29,6 +29,7 @@
 
 use super::prune::concrete_init_keywords;
 use super::unwrap_callee_binding;
+use super::Registries;
 use crate::hir::arena::{BindingArena, BindingScope};
 use crate::hir::binding::{Binding, CaptureKind};
 use crate::hir::expr::{CallArg, Hir, HirKind};
@@ -41,7 +42,7 @@ use std::collections::HashMap;
 // The pass in reading order: `Ops` resolves the stdlib bindings the fused loop
 // is built from; `chain` recognizes a fusable HOF chain and validates it;
 // `collect` closes this unit's inlineable function bodies into fragments and
-// `registry` holds the ones earlier units left; `build` emits the loop.
+// `registry` holds the ones the standard library left; `build` emits the loop.
 mod build;
 mod chain;
 mod collect;
@@ -59,14 +60,14 @@ use registry::*;
 pub(crate) use registry::{FnInlineRegistry, StoredFnInlineRegistry};
 
 /// Fuse every qualifying HOF chain into an inlined index-walk loop. Runs on
-/// surface HIR, before functionalize (see the module doc). `registry` is the
-/// per-instance cross-unit function-inline registry: this unit's inlineable
-/// functions are recorded into it (so later units can inline them) and its earlier
-/// entries — the `<stdlib>` compile's `inc`/`dec`/… — are consulted here.
+/// surface HIR, before functionalize (see the module doc). `registries` are the
+/// instance's cross-unit registries as this compile sees them: the standard
+/// library's compile records its inlineable functions into the inline registry,
+/// and every compile consults the entries it recorded — `inc`/`dec`/….
 pub(crate) fn fuse_map_chains(
     hir: &mut Hir,
     arena: &mut BindingArena,
-    registry: &mut FnInlineRegistry,
+    registries: &mut Registries,
 ) {
     // The sound `binding → type-of keyword` proof dead-arm pruning already
     // computes (`prune::concrete_init_keywords`). A `map`'s base collection may be
@@ -77,15 +78,16 @@ pub(crate) fn fuse_map_chains(
     // too, for the array proof a `mapcat` asks of its function.
     let bases = concrete_init_keywords(hir, arena);
     // Close this unit's inlineable functions into fragments: by `Binding` for a
-    // `Var` naming one here, and by NAME into the registry so later units can
-    // reach them (docs/impl/dissolution/inline.md). Done over the pre-rewrite
+    // `Var` naming one here, and, in the standard library's compile, by NAME
+    // into the registry so later units can reach them
+    // (docs/impl/dissolution/inline.md). Done over the pre-rewrite
     // tree, and BEFORE `Ops::resolve` below: during the `<stdlib>` compile the
     // loop-scaffold primitives are not yet `is_primitive`, so `Ops::resolve` fails
     // and fusion is inert here — but the stdlib is exactly where the `inc`/`dec`
     // fragments that later units inline are defined, so the recording must not
     // sit behind that gate.
     let mut collector = Collector::new(arena, &bases);
-    collector.walk(hir, registry);
+    collector.walk(hir, registries);
     let templates = collector.templates;
     let Some(ops) = Ops::resolve(arena) else {
         return;
@@ -105,7 +107,7 @@ pub(crate) fn fuse_map_chains(
     }
     let fns = FnResolver {
         templates: &templates,
-        registry,
+        registry: registries.inline(),
         prim_by_name: &prim_by_name,
     };
     rewrite(hir, arena, &ops, &bases, &fns);

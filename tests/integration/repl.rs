@@ -1,15 +1,21 @@
-// Integration tests for REPL behavior.
-//
-// Tests pipe input through the elle binary to verify form-by-form
-// evaluation, def persistence, multi-line accumulation, and error
-// handling.
+// audited: 2026-10-13
+// The REPL fed through a pipe: one form at a time, what a line binds, and what a file a line imports cannot see.
+// docs/pipeline.md
 
 use std::io::Write;
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 fn elle(input: &str) -> (String, String, i32) {
+    elle_in(Path::new("."), input)
+}
+
+/// Run a session in `cwd`, so that a relative `import-file` path resolves
+/// against it: a REPL line has no file of its own.
+fn elle_in(cwd: &Path, input: &str) -> (String, String, i32) {
     let bin = env!("CARGO_BIN_EXE_elle");
     let mut child = Command::new(bin)
+        .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -98,6 +104,21 @@ fn def_redefinition() {
     assert!(lines[2].contains("2"), "redefined value: {}", out);
 }
 
+/// A function a line defines again is the body a later line's `map` runs. The
+/// counter-factual recorded each line's functions for later lines to splice
+/// into a fused `map`, keeping the first definition, so the `map` answered
+/// `[1 1]` while a direct call answered 2.
+#[test]
+fn a_redefined_function_is_the_body_a_later_map_runs() {
+    let (out, _, code) = elle("(defn f [x] 1)\n(defn f [x] 2)\n(map f [1 2])\n(f 0)\n");
+    assert_eq!(code, 0);
+    assert!(out.contains("⟹ [2 2]"), "the map runs the second f: {out}");
+    assert!(
+        out.contains("⟹ 2"),
+        "a direct call runs the second f: {out}"
+    );
+}
+
 // ── Multi-line accumulation ──────────────────────────────────────────
 
 #[test]
@@ -116,7 +137,8 @@ fn multiline_let() {
 
 #[test]
 fn multiline_defn() {
-    let (out, _, code) = elle("(defn fib (n)\n  (if (< n 2) n\n    (+ (fib (- n 1)) (fib (- n 2)))))\n(fib 10)\n");
+    let (out, _, code) =
+        elle("(defn fib (n)\n  (if (< n 2) n\n    (+ (fib (- n 1)) (fib (- n 2)))))\n(fib 10)\n");
     assert_eq!(code, 0);
     assert!(out.contains("⟹ 55"), "fib result: {}", out);
 }
@@ -157,9 +179,7 @@ fn var_destructure_persists() {
 
 #[test]
 fn defmacro_persists() {
-    let (out, _, code) = elle(
-        "(defmacro double (x) (list (quote *) x 2))\n(double 5)\n",
-    );
+    let (out, _, code) = elle("(defmacro double (x) (list (quote *) x 2))\n(double 5)\n");
     assert_eq!(code, 0);
     assert!(out.contains("⟹ 10"), "macro call: {}", out);
 }
@@ -172,6 +192,51 @@ fn defmacro_redefinition() {
     assert_eq!(code, 0);
     assert!(out.contains("⟹ 11"), "first def: {}", out);
     assert!(out.contains("⟹ 12"), "redefined: {}", out);
+}
+
+/// A macro typed at the prompt reaches later lines, and not a file a line
+/// imports: the file expands against the prelude and its own macros, as it
+/// would from any program. The counter-factual merged REPL macros into the
+/// instance's expander, so the import expanded `rmac` and answered 43.
+#[test]
+fn a_repl_macro_does_not_reach_an_imported_file() {
+    let dir = tempfile::tempdir().expect("scratch dir");
+    std::fs::write(dir.path().join("m.lisp"), "(+ (rmac) 1)\n").expect("write m.lisp");
+    let (out, err, _) = elle_in(
+        dir.path(),
+        "(defmacro rmac [] 42)\n(rmac)\n(import-file \"m.lisp\")\n",
+    );
+    assert!(out.contains("⟹ 42"), "a later line expands rmac: {out}");
+    assert!(
+        !out.contains("⟹ 43"),
+        "the import must not expand rmac: {out}"
+    );
+    assert!(
+        err.contains("undefined variable: rmac"),
+        "the import compiles without the REPL macro: {err}"
+    );
+}
+
+/// A `def` typed at the prompt reaches later lines, and not a file a line
+/// imports. The counter-factual registered REPL bindings with the instance,
+/// so the import resolved `rdef` and answered 43.
+#[test]
+fn a_repl_def_does_not_reach_an_imported_file() {
+    let dir = tempfile::tempdir().expect("scratch dir");
+    std::fs::write(dir.path().join("m.lisp"), "(+ rdef 2)\n").expect("write m.lisp");
+    let (out, err, _) = elle_in(
+        dir.path(),
+        "(def rdef 41)\n(+ rdef 1)\n(import-file \"m.lisp\")\n",
+    );
+    assert!(out.contains("⟹ 42"), "a later line resolves rdef: {out}");
+    assert!(
+        !out.contains("⟹ 43"),
+        "the import must not resolve rdef: {out}"
+    );
+    assert!(
+        err.contains("undefined variable: rdef"),
+        "the import compiles without the REPL binding: {err}"
+    );
 }
 
 #[test]

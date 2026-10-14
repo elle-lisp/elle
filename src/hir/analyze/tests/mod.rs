@@ -46,7 +46,7 @@ fn make_splice(inner: Syntax) -> Syntax {
 
 fn make_symbol_scoped(name: &str, scopes: &[u32]) -> Syntax {
     let arena: SyntaxArena = thread_arena();
-    let scopes: Vec<ScopeId> = scopes.iter().map(|&n| ScopeId(n)).collect();
+    let scopes: Vec<ScopeId> = scopes.iter().map(|&n| ScopeId::test(n)).collect();
     Syntax::symbol_scoped(&arena, name, make_span(), &scopes)
 }
 

@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! The `sys/spawn` worker: stack sizing, the fresh VM it stands up, and the
 //! completion channel it answers on.
 //!
@@ -179,7 +179,7 @@ pub(super) fn spawn_closure_impl(
                 vm.set_symbols(&mut symbols as *mut SymbolTable);
 
                 // This worker's per-instance compile context (macro expander,
-                // core.lisp env, primitive/stdlib metadata, projections), so a
+                // core.lisp env, primitive/stdlib metadata), so a
                 // runtime `(eval …)` / `(import …)` inside the spawned closure
                 // resolves macros and exports. Boxed for a stable address; the VM
                 // points at it. Its macro-expansion VM shares THIS worker's heap,

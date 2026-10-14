@@ -402,14 +402,14 @@ A function whose inferred signal is empty is a proof that nothing stops the
 fiber while it runs. Backends depend on that proof. The MLIR and SPIR-V tiers
 compile a silent function to code with no signal path at all, and the JIT
 records no resume point inside one ([jit.md](jit.md)). Every tier therefore
-keeps two rules: a meter never stops the fiber inside a silent function, and a
-signal that leaves one is a broken proof.
+keeps two rules: a meter never pauses the fiber inside a silent function, and
+a signal that leaves one is a broken proof.
 
 A silent function spends fuel and never pauses. Each charge site inside it
 takes one unit while the budget holds one, and takes nothing once the budget
 is spent. The pause comes at the next charge site outside the silent
 function, which finds the budget spent. So a fiber pays for the work a silent
-function does, and a meter never stops the fiber inside one. The interpreter
+function does, and a meter never pauses the fiber inside one. The interpreter
 and the JIT charge a silent function this way. The MLIR, SPIR-V and WASM
 tiers charge nothing in the code they compile.
 
@@ -451,7 +451,8 @@ ends the program with its report, and each fiber it passes stops where it
 stood, so the chain stays inspectable.
 
 Two signals pass a silent function's boundary as themselves. A halt passes,
-because the depth cap halts a deep recursion: that is a resource fault, not a
+because the depth cap halts a deep recursion and a spent expansion budget halts
+an expansion ([runtime.md](../runtime.md)). Each is a resource fault, not a
 broken proof. A signal that already carries `:terminal` passes whole, so the
 report names the innermost function whose proof broke.
 
@@ -459,18 +460,21 @@ Elle code cannot build a broken proof, because inference is sound.
 [proof_tests.rs](../../src/vm/call/proof_tests.rs) forges a silent code
 object that yields, and pins the report.
 
-## Across files: signal projection
+## Across files
 
-When a file returns a struct literal of closures, or a function whose body is
-one, the compiler records a projection: a signal for each field. The
-analyzer unwraps `begin`, `let`, `letrec` and `fn` bodies to find the struct,
-and takes the union of the two branches of an `if`. Any other return shape
-gives no projection.
+The analysis of a file never compiles another file, so it knows nothing about
+what an import returns. A call into another file, such as `(m:f)`, takes the
+signal of an unknown callee (#1232). A `(silent!)` function therefore cannot
+call into another module. The file below imports one that does not exist, and
+its analysis still succeeds:
 
-An importing file that binds `((import "literal"))` looks the projection up.
-Today the projected signal never reaches a call through `module:field`, so a
-call into another file is treated as unknown (#1232). A `(silent!)` function
-cannot call into another module until that is fixed.
+```lisp
+(def sig (signal-of "(def m ((import-file \"/nonexistent/m.lisp\"))) (defn g [] (m:f))" :g))
+(assert (contains? (get sig :bits) :io) "a call into another file may do anything")
+```
+
+[solver.md](../impl/solver.md) solves signals across the files of a program,
+and the [module design](../modules-proposal.md) links them with it.
 
 ## See also
 

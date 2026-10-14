@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-13
 //! The `escape` dump kind: an id-normalized snapshot of the escape facts and the region
 //! instructions they drive.
 //!
@@ -90,15 +90,9 @@ pub fn escape_module(
         .enumerate()
         .map(|(i, b)| (*b, i))
         .collect();
-    // Per-binding DISPLAY name, with the gensym counter normalized away. A
-    // gensym name is `<prefix><GENSYM_COUNTER>` (src/primitives/meta.rs) — that
-    // trailing global counter leaks the process-wide allocation history into the
-    // name (`G26` here, `G12` there), so it is renumbered to a first-appearance
-    // index per base (`G26 G27` → `G#0 G#1`), keyed off the deterministic walk
-    // order so two contexts that mint different raw counters still render
-    // identically. Names without a trailing-digit suffix (`x`, `down`, `~`) are
-    // left verbatim. Hygiene does not depend on the counter (it is carried by
-    // scopes), so this is display-only.
+    // Per-binding display name, with the gensym count and unit normalized away
+    // (`build_name_labels`). Hygiene rides on scopes, not on the name, so this
+    // is display-only.
     let name_label = build_name_labels(&binding_order, arena, symbols);
     let h = |id: HirId| -> String {
         match hir_norm.get(&id) {
@@ -294,11 +288,13 @@ fn blabel(
     }
 }
 
-/// Build each binding's normalized display name. Gensym names carry a trailing
-/// process-global counter (`G26`); strip it and renumber per base by
-/// first-appearance over `order` (the deterministic walk), so the label is
-/// independent of how many gensyms were minted before this compile. Names with no
-/// trailing digit run are kept verbatim (`x`, `down`, the synthetic `~`).
+/// Build each binding's normalized display name. A gensym name ends in a count:
+/// the unit's count and the unit's tag while an expansion runs (`G0-1f2e3d4c`),
+/// the process's count at run time (`G26`). Strip the count, and the tag with
+/// it, and renumber per base by first appearance over `order` (the deterministic
+/// walk), so the label depends neither on the unit's text nor on how many
+/// gensyms the process minted before this compile. Names with no trailing digit
+/// run are kept verbatim (`x`, `down`, the synthetic `~`).
 fn build_name_labels(
     order: &[Binding],
     arena: &BindingArena,
@@ -313,8 +309,9 @@ fn build_name_labels(
             .unwrap_or("~")
             .to_string();
         let label = by_raw.entry(raw.clone()).or_insert_with(|| {
-            let base = raw.trim_end_matches(|c: char| c.is_ascii_digit());
-            if base.len() == raw.len() || base.is_empty() {
+            let counted = without_unit_tag(&raw);
+            let base = counted.trim_end_matches(|c: char| c.is_ascii_digit());
+            if base.len() == counted.len() || base.is_empty() {
                 // no trailing digits (or all-digits, which a symbol never is)
                 raw.clone()
             } else {
@@ -327,6 +324,23 @@ fn build_name_labels(
         out.insert(b, label.clone());
     }
     out
+}
+
+/// `name` without the `-` and eight hex digits an expansion-time gensym
+/// appends after its count, or `name` itself when it ends in no such tag.
+fn without_unit_tag(name: &str) -> &str {
+    let bytes = name.as_bytes();
+    let Some(at) = bytes.len().checked_sub(9) else {
+        return name;
+    };
+    let (head, tag) = bytes.split_at(at);
+    let hex = |b: &u8| b.is_ascii_digit() || (b'a'..=b'f').contains(b);
+    if tag[0] == b'-' && tag[1..].iter().all(hex) && head.last().is_some_and(u8::is_ascii_digit) {
+        // The tag is ASCII, so `at` falls between two characters.
+        &name[..at]
+    } else {
+        name
+    }
 }
 
 /// One pre-order walk collecting both the `HirId` order (the structural

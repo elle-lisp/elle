@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-14
 //! What this build of Elle is: its version, its epoch, the cargo profile it
 //! was compiled under, and the fingerprint of the binary itself.
 //!
@@ -194,6 +194,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "elle/executable" => prim_executable {
+        ambient: true,
         doc: "Return the path of the running elle binary, or nil when the OS will not say.",
         category: "elle",
         example: "(elle/executable)",

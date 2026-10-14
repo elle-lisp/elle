@@ -1,6 +1,5 @@
 // audited: 2026-10-06
-// The meta and runtime primitives: gensym, package metadata, import-file,
-// thread spawn, sleep, trace, the clocks, and memory usage.
+// The meta and runtime primitives: gensym, the package query, the module loader, threads, tracing, the clocks and memory usage.
 //
 // docs/stdlib.md
 
@@ -67,25 +66,23 @@ fn test_package_manager() {
 }
 
 #[test]
-fn test_import_file_primitive() {
+fn import_load_file_refuses_a_path_that_is_not_a_string() {
     let (_vm, mut symbols, meta) = setup();
-    let import_file = get_primitive(&meta, &mut symbols, "import-file");
-    let h = elle::primitives::ctx::TestHeap::new();
-
-    // Test with valid string argument (file may not exist, but function should accept it)
-    let result = call_primitive(&import_file, &[h.ctx().string("lib/math.lisp")]);
-    // Result depends on file existence - we're just checking error handling
-    assert!(result.is_ok() || result.is_err());
-
-    // Test with invalid argument type
-    let result = call_primitive(&import_file, &[Value::int(42)]);
-    assert!(result.is_err());
+    let load_file = get_primitive(&meta, &mut symbols, "import/load-file");
+    let err = call_primitive(&load_file, &[Value::int(42)])
+        .expect_err("an integer is not a path")
+        .to_string();
+    assert!(
+        err.contains("type-error") && err.contains("import/load-file"),
+        "the loader names itself in a type error: {err}"
+    );
 }
 
 // import-file needs a full instance (a compile context and the symbol table),
 // which `call_primitive`'s bare test ctx does not provide — so these drive it
 // through the pipeline (`eval_source`, a Runtime with both), the way real code
-// reaches the primitive.
+// reaches the loader. An `eval_source` program has no file, so a relative path
+// resolves against the working directory, the repository root under cargo.
 #[test]
 fn test_import_file_with_valid_file() {
     eval_source(r#"(import-file "tests/modules/test.lisp")"#, |result| {
@@ -102,13 +99,16 @@ fn test_import_file_with_invalid_file() {
 
 #[test]
 fn test_import_file_circular_dependency_prevention() {
-    // Re-importing the same module is idempotent (already loaded → cached value),
-    // not an error.
+    // A second load of a module after the first finished is no cycle: the first
+    // load released its mark.
     eval_source(
         "(import-file \"tests/modules/test.lisp\")\n\
          (import-file \"tests/modules/test.lisp\")",
         |result| {
-            assert!(result.is_ok(), "Idempotent re-import should succeed");
+            assert!(
+                result.is_ok(),
+                "a second load of a finished module succeeds"
+            );
         },
     );
 }
@@ -153,9 +153,8 @@ fn test_spawn_primitive() {
 
 #[test]
 fn test_join_primitive() {
-    // `join` is now a stdlib function (scheduler-cooperative wait + timeout);
-    // its primitive building block is `sys/thread-state`. A non-handle argument
-    // is rejected the same way the old `join` primitive rejected it.
+    // `join` is a stdlib function (a scheduler-cooperative wait with a timeout)
+    // over the `sys/thread-state` primitive, which refuses a non-handle argument.
     let (_vm, mut symbols, meta) = setup();
     let state = get_primitive(&meta, &mut symbols, "sys/thread-state");
     let h = elle::primitives::ctx::TestHeap::new();

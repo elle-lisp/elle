@@ -35,12 +35,19 @@ impl VM {
     /// nothing stops the fiber while it runs, so the pause comes at the next
     /// charge site outside it (docs/signals/inference.md). Its signal is read
     /// only on a metered fiber.
+    ///
+    /// During an expansion every charge site, a silent function's included,
+    /// also spends the expansion budget, and one that finds it spent halts the
+    /// expansion (docs/runtime.md).
     #[inline]
     fn charge_fuel(
         &mut self,
         code: &crate::value::Code,
         resume_ip: usize,
     ) -> Option<(SignalBits, usize)> {
+        if !self.expansion_budget.charge() {
+            return Some(self.halt_spent_expansion(resume_ip));
+        }
         if self.fiber.fuel.is_metered() && code.template().signal().is_silent() {
             self.fiber.fuel.spend();
             return None;

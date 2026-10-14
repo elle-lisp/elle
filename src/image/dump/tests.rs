@@ -1,4 +1,4 @@
-// audited: 2026-09-11
+// audited: 2026-10-13
 //! What a dump records that no caller outside this crate can build: a syntax
 //! tree's scope sets, and the port behind a parameter's default.
 //!
@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use crate::hir::region::RuntimeRegion;
 use crate::port::{Direction, Encoding, Port, PortId, PortKind};
 use crate::symbol::SymbolTable;
-use crate::syntax::ScopeId;
+use crate::syntax::{ScopeId, UnitTag};
 use crate::syntax::{Span, Syntax, SyntaxArena};
 use crate::value::fiberheap::FiberHeap;
 use crate::value::heap::{deref, HeapObject};
@@ -77,11 +77,16 @@ fn tree_of(v: Value) -> &'static Syntax {
 }
 
 // A node's scope set is what hygiene compares, so it crosses like any other
-// inline slice. Nothing outside this crate can build a scoped node, which is
+// inline slice, and an id hydrates unchanged: its unit's tag, its intro bit
+// and its count. Nothing outside this crate can build a scoped node, which is
 // why this pin lives here rather than beside the other round-trip tests.
 #[test]
 fn a_nodes_scope_set_survives_hydration() {
-    let scopes = [ScopeId(3), ScopeId::intro(5), ScopeId(7)];
+    let scopes = [
+        ScopeId::test(3),
+        ScopeId::intro(UnitTag::NONE, 5),
+        ScopeId::from_bits(0x9e37_79b9_8000_0007),
+    ];
     let (_dst, hydrated) = round_trip(
         |heap, arena| {
             let node = Syntax::symbol_scoped(arena, "scoped", Span::synthetic(), &scopes);
@@ -90,48 +95,6 @@ fn a_nodes_scope_set_survives_hydration() {
         "scopes",
     );
     assert_eq!(tree_of(hydrated.root).scopes(), scopes);
-}
-
-// § "The scope watermark bounds what a fresh expander may mint": an expander
-// starts its counter at one, so a hydrated body's scopes and a fresh
-// expander's would collide. The watermark clears every counter value in the
-// body — the intro scope included, since intro ids and ordinary ones come off
-// the same counter and differ only in a reserved bit.
-//
-// The counter-factual is `intro(9)`: read as a raw id it is a number near
-// `u32::MAX`, so a watermark that did not mask the bit would answer with a
-// counter no expander could ever reach.
-#[test]
-fn the_scope_watermark_clears_every_counter_in_the_body() {
-    let (_dst, hydrated) = round_trip(
-        |heap, arena| {
-            let scopes = [ScopeId(4), ScopeId::intro(9)];
-            let node = Syntax::symbol_scoped(arena, "scoped", Span::synthetic(), &scopes);
-            syntax_value(heap, arena, node)
-        },
-        "watermark",
-    );
-    assert_eq!(hydrated.scope_watermark, 10);
-}
-
-// A body with no syntax carries no scopes, so a loader may mint from its own
-// start. Zero says exactly that, and a dump that reported one anyway would
-// push every later expander's counter up for nothing.
-#[test]
-fn a_body_without_syntax_has_no_watermark() {
-    let (_dst, hydrated) = round_trip(
-        |heap, arena| {
-            heap.alloc_in_region(
-                HeapObject::Pair(crate::value::heap::Pair::new(
-                    Value::int(1),
-                    Value::EMPTY_LIST,
-                )),
-                arena.region(),
-            )
-        },
-        "no-watermark",
-    );
-    assert_eq!(hydrated.scope_watermark, 0);
 }
 
 // ── A parameter and the resource behind its default ──────────────────

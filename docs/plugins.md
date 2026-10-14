@@ -1,6 +1,6 @@
 # Plugins
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-10-13 -->
 
 Elle ships with Rust plugins and pure Elle standard library modules.
 Plugins are cdylib crates loaded at runtime via `import`. Standard modules
@@ -102,7 +102,7 @@ make smoke-plugins    # assert the artifacts, then run plugins/tests/*.lisp
 ```
 
 `smoke-plugins` runs `plugins-verify` first, which fails when a portable plugin
-produced no `.so`. That assertion is not decoration. Every test file imports its
+produced no `.so`. Every test file imports its
 `.so` under `protect` and exits 0 when the import fails, so a plugin that did
 not build makes its own test report success. The reasoning, and the CI job that
 runs these targets, are in
@@ -125,34 +125,13 @@ example plugin is the one `make doctest` builds.
 
 ## Module search path
 
-When `import` resolves a specifier, it searches in order:
+`(import "plugin/X")` looks for `libelle_X` with the platform's suffix in
+`<root>/target/<profile>/`, under the running binary's profile first. When it
+is not there, `import` searches each `--path` entry, then home, for
+`plugin/libelle_X` and `libelle_X`. [modules.md](modules.md) owns the full
+rules.
 
-**1. Virtual prefixes** (checked first, before the search path):
-
-| Prefix | Resolves to |
-|--------|-------------|
-| `std/X` | `<root>/lib/X.lisp` |
-| `plugin/X` | `<root>/target/<profile>/libelle_X.so` |
-
-The root is `--home` (or `ELLE_HOME`), or auto-detected by walking up
-from the elle binary to find `Cargo.toml`. Plugin resolution prefers the
-same build profile as the running binary (release or debug) and falls
-back to the other.
-
-**2. Search path** (for specifiers that don't match a virtual prefix):
-
-For each directory in the search path, `import` tries:
-- `<dir>/<spec>.lisp`
-- `<dir>/<spec>` (as-is)
-- `<dir>/<spec_dir>/libelle_<leaf>.so` (hierarchical plugin)
-- `<dir>/libelle_<leaf>.so` (flat plugin)
-
-Search directories, in order:
-1. Current working directory
-2. `--path` / `ELLE_PATH` entries (colon-separated)
-3. `--home` / `ELLE_HOME` (or directory of the elle binary)
-
-**Example:** if you built plugins somewhere else, point elle at them:
+If you built plugins somewhere else, point elle at them:
 
 ```bash
 elle --path=/opt/elle-plugins/target/release my-script.lisp

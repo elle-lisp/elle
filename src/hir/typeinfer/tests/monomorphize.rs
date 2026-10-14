@@ -1,18 +1,18 @@
-// audited: 2026-09-07
+// audited: 2026-10-13
 // src/hir/AGENTS.md
 // docs/impl/hir.md
-//! Container-dispatch wrapper monomorphization (F1b).
+//! Container-dispatch wrapper monomorphization.
 //!
 //! A `(match (type-of coll) …arms…)` wrapper (`push`/`put`/`del`/`add`/…) whose
 //! container argument has a statically-proven concrete container type collapses,
 //! at the call site, to the arm that type selects — a direct call to that arm's
 //! monomorphic `%`-op. This removes the multi-arm dispatch and, with it, the
 //! container-scrutinee over-keep the dispatch strands in the textually-last arm
-//! (the F1b leak: the owned container arg's release lands in an arm the executed
-//! path never reaches). An UNPROVEN container leaves the dispatch intact.
+//! (the owned container argument's release lands in an arm the executed path
+//! never reaches). An UNPROVEN container leaves the dispatch intact.
 
 use super::super::unwrap_callee_binding;
-use super::{compile_fhir, infer_and_rewrite};
+use super::{compile_fhir, infer};
 use crate::hir::{BindingArena, Hir, HirKind};
 use crate::symbol::SymbolTable;
 
@@ -42,7 +42,7 @@ fn container_dispatch_wrapper_monomorphizes_on_proven_container() {
                (let [s @{:x 0}] (myp s :x 9))";
     let mut symbols = SymbolTable::new();
     let (mut hir, arena) = compile_fhir(src, &mut symbols);
-    infer_and_rewrite(&mut hir, &arena, &mut Default::default()).expect("infer");
+    infer(&mut hir, &arena);
     assert_eq!(
         count_calls_to(&hir, &arena, "myp"),
         0,
@@ -62,7 +62,7 @@ fn container_dispatch_wrapper_stays_dynamic_on_unproven_container() {
                (defn g [c] (myp c :x 9)) (g @{:x 0}) (g @[1])";
     let mut symbols = SymbolTable::new();
     let (mut hir, arena) = compile_fhir(src, &mut symbols);
-    infer_and_rewrite(&mut hir, &arena, &mut Default::default()).expect("infer");
+    infer(&mut hir, &arena);
     assert!(
         count_calls_to(&hir, &arena, "myp") >= 1,
         "an unproven container leaves the dispatch-wrapper call intact"

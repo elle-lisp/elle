@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-10-14
 //! Signal type for tracking which signals a function may emit.
 //!
 //! docs/signals/protocol.md
@@ -57,14 +57,14 @@ use crate::value::fiber::SignalBits;
 //   Bit  16:    OsSignal — POSIX signal send/raise capability (see below)
 //   Bit  17:    Fs — filesystem capability (see below)
 //   Bit  18:    Net — network capability (see below)
+//   Bits 19-31: Runtime-reserved (future runtime signals)
+//   Bits 32-63: User-defined signal types
 //
 // "Capability bit" says only that the bit selects no I/O backend: `SIG_IO` is
 // what routes a request to the scheduler, and `:exec` rides alongside it rather
 // than replacing it. It does NOT mean the bit is inert in a fiber mask. A mask
 // catches a signal on any shared bit, so `|:exec|` catches a subprocess request
-// exactly as `|:io|` does — see `SignalBits::covers` and #895.
-//   Bits 19-31: Runtime-reserved (future runtime signals)
-//   Bits 32-63: User-defined signal types
+// exactly as `|:io|` does — see `SignalBits::covers`.
 
 pub const SIG_OK: SignalBits = SignalBits::EMPTY; // no bits set = normal return
 pub const SIG_ERROR: SignalBits = SignalBits::new(1 << 0); // exception / panic
@@ -98,6 +98,18 @@ pub const SIG_NET: SignalBits = SignalBits::new(1 << 18); // sockets and name re
 /// generator's mask names, and a request that carried it would be caught by
 /// every such mask on its way to the scheduler.
 const IO_ROUND_TRIP: SignalBits = SIG_IO.union(SIG_ERROR);
+
+/// The effect capabilities: every bit that grants a reach outside the process's
+/// own values, through foreign code, the scheduler, a child process, the GPU,
+/// a POSIX signal, the filesystem or the network. Every macro expansion
+/// withholds them (docs/macros.md).
+pub const EFFECT_CAPS: SignalBits = SIG_FFI
+    .union(SIG_IO)
+    .union(SIG_EXEC)
+    .union(SIG_GPU)
+    .union(SIG_OS_SIGNAL)
+    .union(SIG_FS)
+    .union(SIG_NET);
 
 /// VM-internal signal bits: signals the runtime raises for its own machinery
 /// rather than for what a program does — the VM's dispatch, fuel metering, and

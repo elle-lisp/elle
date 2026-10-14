@@ -1,4 +1,4 @@
-// audited: 2026-10-07
+// audited: 2026-10-13
 //! Tests for syntax nodes: construction, scopes, the printed form the reader
 //! reads back, and expansion.
 //!
@@ -8,6 +8,7 @@
 use super::*;
 
 mod region;
+pub(crate) mod units;
 
 /// A heap and arena for a test that builds nodes by hand. Keep the returned
 /// `SyntaxHeap` alive for as long as the nodes.
@@ -36,10 +37,10 @@ fn test_syntax_construction() {
 fn test_syntax_with_scopes() {
     let (_home, a) = arena();
     let span = Span::new(0, 5, 1, 1);
-    let syntax = Syntax::symbol_scoped(&a, "x", span, &[ScopeId(1), ScopeId(2)]);
+    let syntax = Syntax::symbol_scoped(&a, "x", span, &[ScopeId::test(1), ScopeId::test(2)]);
     assert_eq!(syntax.scopes().len(), 2);
-    assert_eq!(syntax.scopes()[0], ScopeId(1));
-    assert_eq!(syntax.scopes()[1], ScopeId(2));
+    assert_eq!(syntax.scopes()[0], ScopeId::test(1));
+    assert_eq!(syntax.scopes()[1], ScopeId::test(2));
 }
 
 #[test]
@@ -49,16 +50,16 @@ fn test_add_scope() {
     let mut syntax = Syntax::symbol(&a, "x", span);
     assert_eq!(syntax.scopes().len(), 0);
 
-    syntax.add_scope(&a, ScopeId(1));
+    syntax.add_scope(&a, ScopeId::test(1));
     assert_eq!(syntax.scopes().len(), 1);
-    assert_eq!(syntax.scopes()[0], ScopeId(1));
+    assert_eq!(syntax.scopes()[0], ScopeId::test(1));
 
     // Adding same scope again should not duplicate
-    syntax.add_scope(&a, ScopeId(1));
+    syntax.add_scope(&a, ScopeId::test(1));
     assert_eq!(syntax.scopes().len(), 1);
 
     // Adding different scope should work
-    syntax.add_scope(&a, ScopeId(2));
+    syntax.add_scope(&a, ScopeId::test(2));
     assert_eq!(syntax.scopes().len(), 2);
 }
 
@@ -217,7 +218,7 @@ fn test_display_list() {
 }
 
 #[test]
-fn test_display_tuple() {
+fn test_display_array() {
     let (_home, a) = arena();
     let span = Span::new(0, 10, 1, 1);
     let items = [
@@ -229,7 +230,7 @@ fn test_display_tuple() {
 }
 
 #[test]
-fn test_display_array() {
+fn test_display_array_mut() {
     let (_home, a) = arena();
     let span = Span::new(0, 10, 1, 1);
     let items = [
@@ -268,8 +269,10 @@ fn test_expander_fresh_scope() {
     let scope1 = expander.fresh_scope();
     let scope2 = expander.fresh_scope();
     assert_ne!(scope1, scope2);
-    assert_eq!(scope1, ScopeId(1));
-    assert_eq!(scope2, ScopeId(2));
+    // An expander no compile began a unit on still mints under a tag of its
+    // own, from zero, and never the primitive scope.
+    assert_eq!((scope1.count(), scope2.count()), (0, 1));
+    assert_ne!(scope1, ScopeId::PRIMITIVE);
 }
 
 #[test]
@@ -407,7 +410,7 @@ fn test_macro_arity_check() {
 }
 
 #[test]
-fn test_scope_merge() {
+fn test_span_merge() {
     let span1 = Span::new(0, 5, 1, 1);
     let span2 = Span::new(10, 15, 2, 5);
     let merged = span1.merge(&span2);

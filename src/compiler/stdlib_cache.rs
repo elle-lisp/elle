@@ -1,16 +1,14 @@
-// audited: 2026-10-12
+// audited: 2026-10-13
 //! Cache the compiled standard library on disk, so a later process
 //! deserializes it instead of running the front end again.
 //!
 //! docs/impl/stdlib-cache.md
 
-use crate::signals::Signal;
 use crate::value::CodeUnit;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Version tag: bump when the serialized layout changes in an incompatible way.
-const FORMAT_VERSION: u32 = 10;
+const FORMAT_VERSION: u32 = 12;
 
 /// Bytes of payload hash a cache file carries ahead of its `StoredBytecode`.
 const PAYLOAD_HASH_BYTES: usize = 8;
@@ -52,7 +50,6 @@ pub struct StoredBytecode {
     /// name hashes and cross unchanged; without this table they would still
     /// compare correctly but print as `#<symbol:hash>`.
     pub names: Vec<(u64, Box<str>)>,
-    pub signal_projection: Option<HashMap<String, Signal>>,
     /// Cross-unit dispatch-wrapper registry (stdlib `push`/`put`/`add`
     /// monomorphization), snapshotted because the disk cache skips the stdlib
     /// compile that would otherwise populate it.
@@ -259,7 +256,7 @@ pub fn store_bytecode(
     symbols: &crate::symbol::SymbolTable,
     cctx: &mut crate::pipeline::CompileCtx,
 ) -> Result<StoredBytecode, String> {
-    let (dispatch_wrappers, fn_inline) = cctx.compile_registries_mut();
+    let (dispatch_wrappers, fn_inline) = cctx.stdlib_registries_mut();
     let stored_dispatch = dispatch_wrappers.to_stored(symbols);
     let stored_fn_inline = fn_inline.to_stored(symbols);
     // The entry thunk is not JIT'd; the nested lambdas carry their own LIR.
@@ -274,7 +271,6 @@ pub fn store_bytecode(
         entry,
         intern_table: sent.intern_table,
         names: sent.names,
-        signal_projection: unit.signal_projection().cloned(),
         dispatch_wrappers: stored_dispatch,
         fn_inline: stored_fn_inline,
     })
@@ -321,10 +317,10 @@ pub fn load_bytecode(
         .expect("deserialize_templates returns one per input");
     // Restore the cross-unit registries the skipped stdlib compile would have
     // populated.
-    let (dispatch_wrappers, fn_inline) = cctx.compile_registries_mut();
+    let (dispatch_wrappers, fn_inline) = cctx.stdlib_registries_mut();
     dispatch_wrappers.restore(stored.dispatch_wrappers, symbols);
     fn_inline.restore(stored.fn_inline, symbols);
-    Ok(CodeUnit::of_parts(code, entry, stored.signal_projection))
+    Ok(CodeUnit::of_parts(code, entry))
 }
 
 #[cfg(test)]

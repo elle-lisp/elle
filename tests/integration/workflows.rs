@@ -474,3 +474,23 @@ fn the_mlir_job_runs_the_doctests_on_the_mlir_build() {
         line.trim()
     );
 }
+
+// The signal solver spike runs in `make test` and in one CI job
+// (docs/impl/solver.md). Its fixtures pin the analysis seams the solver reads,
+// and its run over `lib/` is the one place the two engines meet an input nobody
+// wrote expectations for.
+//
+// The counter-factual: drop the step, and a change to what the analysis hands
+// the solver, or a rule one engine drops, goes green in every job.
+#[test]
+fn a_linux_job_runs_the_signal_solver_spike() {
+    let text = workflow_text();
+    assert!(
+        jobs(&text)
+            .into_iter()
+            .any(|(_, body)| body.contains("runs-on: ubuntu") && runs_target(&body, "signal-solve")),
+        "no Linux job in {} runs `make signal-solve`, so the solver spike's \
+         fixtures and its engine check run only where somebody runs `make test`",
+        workflow_path().display()
+    );
+}

@@ -1,16 +1,14 @@
-(elle/epoch 12)
-
-## Regex plugin integration tests
-## Tests the regex plugin (.so loaded via import-file)
-## Migrated from tests/integration/regex.rs
-##
-## Plugin symbols (regex/compile, regex/match?, etc.) are only available at
-## runtime after import-file loads the .so. Because file-as-letrec compiles
-## the entire file before executing any of it, we use the struct returned by
-## import-file to access plugin functions.
+(elle/epoch 14)
+# audited: 2026-10-06
+# The regex plugin compiles a pattern, then matches, finds and captures with it.
+# docs/plugins.md
+#
+## The file compiles whole before the import runs, so no name in it can resolve
+## to a plugin primitive. The tests reach each primitive through the struct that
+## the import returns.
 
 ## Try to load the regex plugin. If it's not built, gate (loud :gated skip).
-(def [ok? plugin] (protect (import-file "target/release/libelle_regex.so")))
+(def [ok? plugin] (protect (import "plugin/regex")))
 (unless ok? (error (struct :error :gated :reason "regex plugin not built")))
 
 ## Extract plugin functions from the returned struct
