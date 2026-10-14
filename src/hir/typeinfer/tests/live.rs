@@ -1,7 +1,7 @@
 // audited: 2026-10-14
 // src/hir/AGENTS.md
 // docs/impl/graft.md
-//! Which lambdas the graft reaches: live code, and in a lambda nothing live
+//! Which lambdas the graft reaches: live code, and in a lambda nothing
 //! reaches, only a call whose body holds no op with a proof obligation.
 //!
 //! These compile against a booted runtime, because the stdlib source compiled
