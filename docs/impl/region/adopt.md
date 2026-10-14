@@ -328,7 +328,7 @@ release ([cells.md](cells.md)). The lowerer orders the same pair at a shared
 `decref_point`, the routed release ahead of the cell's. Only a call-result region takes
 the value route, so a literal init records no pair, and a captured reassigned binding
 records none because its binder drops the init off its own register. Pinned by
-`region::infer::tests::adopt::captures::cell_routed_release_past_the_root_refuses_the_adopt`
+`region::infer::tests::adopt::structural::cell_routed_release_past_the_root_refuses_the_adopt`
 and the guardfree witness
 [region-capture-cell-adopt-uaf.lisp](../../../tests/impl/region-capture-cell-adopt-uaf.lisp):
 a top-level binding captured by a closure handed to `sys/spawn-vm`, whose join lands
