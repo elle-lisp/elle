@@ -1,6 +1,6 @@
 # Booting from an image
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-14 -->
 
 What the boot configuration carries, how `elle image dump-boot` writes it, and
 how a fresh instance starts from it.
@@ -186,20 +186,17 @@ Per-worker hydration is a milestone of its own ([the landing plan](plan.md)).
 ## Why the cache is opt-in
 
 `--boot-image=DIR` turns the warm cache on, `--boot-image=on` uses the
-`--cache=` directory, and the default is off. One piece is still to land
-([plan.md](plan.md)): until the image carries each function's body fragment
-beside its template, a hydrated closure carries none. User code then compiles
-with every call to a library function left a call: none is grafted
-([graft.md](../graft.md)), and no named library function is fused
-([dissolution/inline.md](../dissolution/inline.md)). A source boot does
-not pay that.
+`--cache=` directory, and the default is off.
 
-The tier half of parity has landed. A hydrated closure carries its LIR in its
+Both halves of parity have landed. A hydrated closure carries its LIR in its
 payload, so a hot stdlib function promotes to the JIT under either boot
-([sealing.md](sealing.md)).
+([sealing.md](sealing.md)). It carries the body fragment a graft reads in the
+same payload, so a call to a library function grafts under either boot and a
+user file compiles to one bytecode under both ([graft.md](../graft.md)).
 
-A default-on cache would trade steady-state throughput for startup, which
-[the image design](../image.md) rejects as a violation of parity: the two boot
-modes must be indistinguishable to running code, tiers included. The flag is what
-makes the mechanism usable and testable meanwhile, and the default flips when
-the fragment lands.
+One piece is still to land ([plan.md](plan.md)): per-worker hydration. A
+`sys/spawn` worker builds its own instance and boots its stdlib from source,
+whatever the spawning instance booted from, so a program that spawns workers
+pays a stdlib compile per worker under an image boot as under a source boot.
+The flag is what makes the mechanism usable and testable meanwhile, and the
+default flips when a worker hydrates its own mapping.

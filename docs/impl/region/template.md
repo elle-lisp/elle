@@ -1,11 +1,12 @@
 # Code objects — a payload, a header and a code unit
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-10-14 -->
 
 A code object is a payload in a code region and a one-word header naming it, and a compile unit owns the region.
 
 A closure template is the code object of one lambda: its bytecode, constant
-pool, source locations, LIR, and the region tables its body needs. This doc owns
+pool, source locations, LIR, the body fragment a graft reads, and the region
+tables its body needs. This doc owns
 the argument for how that object is represented and who owns each part. The
 foundation it serves is named in [image/foundations.md](../image/foundations.md);
 the rule it obeys is [model.md](model.md).
@@ -214,6 +215,7 @@ words. The record's own tail pad brings it to a whole number of words.
 | children | `RegionSlice<Value>` — the headers a `MakeClosure` indexes, in instruction order |
 | origin | a `Span` and a present flag — where the lambda was written, for `meta/origin` |
 | lir | a `LirBody` and a present flag — the frozen function the JIT promotes from ([lir.md](../lir.md)) |
+| fragment | `RegionSlice<u8>` — the body closed for a graft, as the bytes `bincode` wrote; empty when the body did not close ([graft.md](../graft.md)) |
 | arity | an `ArityRec`: the minimum and maximum counts as `u32`, a kind byte, and a three-byte pad written zero |
 | signal | the signal's bits as one word and its propagation mask as a `u32`, two fields |
 | param and local counts, capture-params mask, vararg kind, rest-list layout ([restlist.md](restlist.md)), WASM index | scalars, inline |
@@ -229,6 +231,16 @@ knows. Every header field the two share — the merge set and the two release
 tables among them — is the payload's, and a view over the body reads it there,
 off the one record. Freezing records those three tables ascending, so the
 payload's copy and a `LirCode`'s agree on order as well as content.
+
+The fragment is present on the payload of a nested lambda whose body closes
+([graft.md](../graft.md)). It is the `LambdaFragment` the lowerer carried on
+the function's head, encoded with `bincode`, so on the payload it is bytes like
+the docstring: an image copies it whole, the stdlib cache stores it as it
+stands, and a thread send carries it. Nothing decodes it until a compile grafts
+the function, and that compile decodes it once. The encoding has a version,
+`FRAGMENT_ENCODING`, which the image fingerprint records, so an image written
+under another encoding falls back to a source boot rather than grafting a body
+it cannot read ([format.md](../image/format.md)).
 
 Two of the fields changed shape rather than merely moving.
 

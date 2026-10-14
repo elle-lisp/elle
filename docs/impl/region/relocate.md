@@ -1,6 +1,6 @@
 # A release past a frame-replacing tail call
 
-<!-- audited: 2026-10-13 -->
+<!-- audited: 2026-10-14 -->
 
 Every release the lowerer emits after a `TailCall` is dead on the closure path,
 and what it costs to move one ahead of that call.
@@ -364,7 +364,7 @@ everyday shape is the closure-as-module whose last form is a struct literal over
 the closures its captured defs built:
 `(fn [] (def a (ptr/from-int 0)) (defn p [] a) {:p p})`.
 `a_cell_release_declines_a_move_across_a_read_through_it` pins it, in
-[lir::lower::tests::release::frameexit::cells](../../../src/lir/lower/tests/release/frameexit/cells.rs).
+[lir::lower::tests::release::cellexit](../../../src/lir/lower/tests/release/cellexit.rs).
 Beside it is the admitted face,
 `reassigned_env_cell_release_precedes_the_frame_replacing_tail_call`, whose cell
 holds an immediate and so has no release routed through it at all.

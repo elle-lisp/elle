@@ -1,17 +1,16 @@
 # Region rules — the implementor's correctness obligations
 
-<!-- audited: 2026-10-13 -->
+<!-- audited: 2026-10-14 -->
 
 The exhaustive correctness contract the compiler and runtime must uphold for
 regions.
 
-Read this file before you touch the region code. The RC-instruction mechanism these
-rules constrain — value/slot resolution, coalescing, self-edge elimination, and
-the equivalence oracle — is in [mechanism.md](mechanism.md).
-For the consumer-facing model — how to write Elle that is sympathetic to the
-memory system — see [docs/regions.md](../../regions.md) and the
-[docs/regions/](../../regions/) series. The semantics (Tofte–Talpin for immutable
-values, reference counting for mutation) and the cycles that still leak are in
+Read this file before you touch the region code. The RC-instruction mechanism
+these rules constrain is in [mechanism.md](mechanism.md). The consumer-facing
+model, how to write Elle that is sympathetic to the memory system, is in
+[docs/regions.md](../../regions.md) and the [docs/regions/](../../regions/)
+series. The semantics (Tofte–Talpin for immutable values, reference counting for
+mutation) and the cycles that still leak are in
 [regions/semantics.md](../../regions/semantics.md).
 
 ## There are exactly two measures: correct, then optimal
@@ -19,8 +18,7 @@ values, reference counting for mutation) and the cycles that still leak are in
 A region implementation is **correct** iff it never reads freed memory and
 never frees live memory. That means no use-after-free, no double-free, no
 dangling pointer, and (the dual we hold ourselves to) no value leaked past the
-point its last reference dies. There is no third state and no spectrum. Code is not
-"conservative" or "aggressive"; it is correct or it is broken.
+point its last reference dies. There is no third state.
 
 Everything else — how many physical regions exist, how aggressively the solver
 merges, peak RSS, mmap churn — is **optimization**. Optimization may never buy
@@ -303,14 +301,12 @@ is a correctness defect, not a tuning knob.
    trampoline truncates it to the frame base before installing the callee
    (`trampoline_loop`, [execute.rs](../../../src/vm/execute.rs)). The
    caller's locals are dead there: every owned value was released at its last
-   use or moved into the callee. Any slot left un-truncated would surface as
-   the callee's stale read. That turns a scope-end release into an over-free
-   of a region the frame owns no reference to. The same replacement empties the
-   activation's region map, for the same reason: an entry left there is the
-   caller's, its release dead past the `TailCall`, and a slot-resolved release
-   or a merged allocation in the callee would reach it
-   ([merging.md](merging.md)). Pinned by
-   `runtime::tests::ownership::frame`.
+   use or moved into the callee. A slot left un-truncated would surface as the
+   callee's stale read, and turn a scope-end release into an over-free of a
+   region the frame owns no reference to. The same replacement empties the
+   activation's region map: an entry left there is the caller's, and a
+   slot-resolved release or a merged allocation in the callee would reach it
+   ([merging.md](merging.md)). Pinned by `runtime::tests::ownership::frame`.
 
 6. **No commingling.** Objects from different regions never share a page —
    otherwise freeing one region cannot munmap its pages while another's objects

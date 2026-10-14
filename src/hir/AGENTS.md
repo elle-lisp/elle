@@ -1,6 +1,6 @@
 # hir
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-14 -->
 
 The analyzed program, with bindings resolved, captures computed and signals
 inferred, and the passes over it.
@@ -236,8 +236,8 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     own table — a `BindingInner` per binding the body introduces, a
     `SymbolId` per free global — and `graft` re-hosts it in any arena.
     Nothing may hoist selected `BindingInner` fields beside a body instead.
-    A function's own template carries the fragment of its body, so a later
-    unit reaches the body through the function value. See
+    A function's own code payload carries the fragment of its body as bytes,
+    so a later unit reaches the body through the function value. See
     [docs/impl/hir.md](../../docs/impl/hir.md).
 
 26. **A call to a known function becomes its body.** The graft replaces a

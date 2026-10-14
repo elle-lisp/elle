@@ -1,6 +1,6 @@
 # Landing order and test plan
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-14 -->
 
 What lands in which order, and the pins each milestone must land with.
 
@@ -89,17 +89,20 @@ Then the image milestones:
      ([booting from an image](boot.md)); the two boots share the
      export-registration tails, and the corpus under image boot is the gate;
    - the warm cache — `--boot-image=`, the digest-keyed file, the atomic store
-     and the prune. Opt-in rather than default: a hydrating instance still
-     loses the body fragments that grafting and cross-unit fusion read
-     ([graft.md](../graft.md)), and [boot.md](boot.md) argues the default
-     waits on it;
+     and the prune. Opt-in rather than default: a `sys/spawn` worker still
+     boots its stdlib from source, and [boot.md](boot.md) argues the default
+     waits on per-worker hydration;
    - the tier half of the parity gate — the **lir** foundation carries a
      function's LIR in the payload, so a hot stdlib function reaches the JIT
-     under an image boot as under a source boot.
+     under an image boot as under a source boot;
+   - the compile half of the parity gate — the payload carries the body
+     fragment as bytes ([region/template.md](../region/template.md)), so a
+     hydrated closure grafts as a compiled one does
+     ([graft.md](../graft.md)) and a user file compiles to one bytecode under
+     both boots.
 
    Still to land: the embedded blob, per-worker hydration for `sys/spawn`,
-   the body fragment on a hydrated template, the hydrated-region interval
-   table, and the bytecode half of the parity gate. The interval table keeps
+   and the hydrated-region interval table. The interval table keeps
    `region_of_ptr` off the probe ladder ([image.md](../image.md) § "Pointer
    resolution must not regress"); the regression it prevents needs a region
    the size of stdlib to show.
@@ -284,9 +287,11 @@ Then the image milestones:
   stores, and the start after that hits. A store prunes the superseded file and
   leaves the kept one, and the default policy neither reads a directory nor
   writes one.
-- Compile parity: compile the same user file under image boot and source
-  boot and assert byte-identical bytecode — the acceptance gate for the
-  body fragments a hydrated template carries.
+- Compile parity: a call to a stdlib function grafts under image boot as
+  under source boot, and the same user file compiles to byte-identical
+  bytecode under both — the acceptance gate for the body fragment a hydrated
+  payload carries. `a_call_to_a_stdlib_function_grafts_under_either_boot` and
+  `the_two_boots_emit_one_bytecode_for_a_user_file` pin the two.
 - Tier parity: a hot stdlib function reaches the JIT under image boot
   exactly as under source boot — the hydrated payload's own LIR feeds
   `submit_jit_task` and the compiled result executes.

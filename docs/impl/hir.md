@@ -1,6 +1,6 @@
 # HIR — High-level IR
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-14 -->
 
 The HIR pass converts expanded syntax trees into a typed intermediate
 representation. It resolves bindings, computes captures, and infers
@@ -58,14 +58,16 @@ route this walk does not model. All of them decline.
 Because a fragment holds a `BindingInner` per local rather than a summary of
 one, a `let` binding's mutability and a parameter's `(numeric!)` floor travel
 with it like any other field, and the whole fragment is plain serializable data.
-A function's template carries the fragment of its own body, closed before
-functionalization in the unit that defines it. The graft
+A function's code payload carries the fragment of its own body as bytes, closed
+before functionalization in the unit that defines it
+([code objects](region/template.md)). The graft
 ([grafting a call](graft.md)) and loop fusion
 ([named functions](dissolution/inline.md)) read a callee's fragment off the
 value its binding holds, so a body crosses a unit boundary with the function
-itself. The stdlib disk cache stores the fragment with the template
-([the stdlib cache](stdlib-cache.md)), so a cache hit compiles user code to the
-same bytecode a stdlib compile does.
+itself. The stdlib disk cache stores the bytes with the payload
+([the stdlib cache](stdlib-cache.md)) and a boot image maps them with it
+([booting from an image](image/boot.md)), so a cache hit and an image boot
+compile user code to the same bytecode a stdlib compile does.
 
 ## What analysis does
 

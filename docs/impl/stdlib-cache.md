@@ -149,9 +149,9 @@ struct StoredBytecode {
 }
 ```
 
-Nothing a later compile reads rides beside the templates. Each template carries
-the fragment of its own body, and the cache stores it with the template
-(§ "The body fragment must be preserved").
+Nothing a later compile reads rides beside the code objects. Each payload
+carries the fragment of its own body as bytes, and the cache stores those bytes
+with the payload (§ "The body fragment must be preserved").
 
 ### Why serialize the unit's entry header?
 
@@ -199,17 +199,18 @@ the start that meets it compiles and stores a new one.
 
 A later compile grafts a call to a stdlib function from that function's body
 ([graft.md](graft.md)), and fusion inlines a named stdlib function from the
-same body ([dissolution/functions.md](dissolution/functions.md)). The body is
-an `HirFragment` on the function's template, closed before functionalization
-while the stdlib compiles and stored when the lambda lowers. A cache hit skips
-that compile, so the fragment must arrive with the template, or the cached path
-would compile user code differently from the compiled path.
+same body ([dissolution/inline.md](dissolution/inline.md)). The body is a
+`LambdaFragment` closed before functionalization while the stdlib compiles, and
+the code payload carries it as the bytes `bincode` wrote
+([region/template.md](region/template.md)). A cache hit skips that compile, so
+the bytes must arrive with the payload, or the cached path would compile user
+code differently from the compiled path.
 
-`SendableClosure` therefore carries the fragment. A fragment is an HIR body
-closed over its own binding table ([hir.md](hir.md)), so it is plain data and
-needs no conversion. The cache path fills the field. A send to another thread
-leaves it empty, because a `sys/spawn` worker loads a stdlib of its own and
-grafts from those templates.
+`SendableClosure` therefore carries the fragment's bytes, and a load writes them
+into the rebuilt payload as they stand: nothing decodes them until a compile
+grafts the function. A send to another thread carries them the same way, so a
+closure crosses whole whichever path moves it. The bytes are part of the file's
+layout, so adding them moved `FORMAT_VERSION`.
 
 ### Symbols across processes
 

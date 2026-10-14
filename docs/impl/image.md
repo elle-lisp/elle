@@ -1,6 +1,6 @@
 # Images — regions hydrated at load
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-14 -->
 
 Design for image-style persistence: one mechanism, and the two configurations
 it serves.
@@ -25,9 +25,9 @@ argument. Six companions carry the rest:
   answered the design's open questions, with their numbers.
 
 This document states the design, not its progress. [plan.md](image/plan.md)
-records what has landed: the warm-cache boot has, and the embedded blob,
-per-worker hydration, compiler-state persistence, the hydrated-region interval
-table and the environment configuration have not.
+records what has landed: the warm-cache boot and the body fragment have, and
+the embedded blob, per-worker hydration, the hydrated-region interval table and
+the environment configuration have not.
 
 ## The problem
 
@@ -176,10 +176,11 @@ user code identically.
 The heap is not the whole boot product. A later user compile reads two more
 things the stdlib compile leaves behind:
 
-- The body of each stdlib function, as an `HirFragment` on its closure's
-  template. A user compile grafts a call to a stdlib function from it
-  ([grafting a call](graft.md)), and fusion inlines a named stdlib function
-  from it ([dissolving a named function](dissolution/inline.md)).
+- The body of each stdlib function, as a `LambdaFragment` encoded in the
+  bytes its closure's code payload carries. A user compile grafts a call to a
+  stdlib function from it ([grafting a call](graft.md)), and fusion inlines a
+  named stdlib function from it
+  ([dissolving a named function](dissolution/inline.md)).
 - The signal-projection memo.
 
 An image boot that leaves these out compiles user code *differently* from a
@@ -189,12 +190,11 @@ identical user-code compiles.
 
 A fragment is an HIR body closed over its own binding table
 ([the HIR design](hir.md)), so it is plain data that crosses a process boundary
-as it stands. The stdlib disk cache stores each one with its template
-([the stdlib cache](stdlib-cache.md)). A template hydrated from an image carries
-none yet, so under an image boot a call to a library function stays a call: it
-is neither grafted nor fused. The body carries the fragment beside its template
-once it does, the way it will carry the LIR (§ JIT), with no re-derivation from
-syntax. The parity test in [the landing plan](image/plan.md) is the acceptance
+as it stands. The payload carries it as bytes, like the docstring, so the
+stdlib disk cache stores it with the payload ([the stdlib cache](stdlib-cache.md))
+and an image maps it with the payload, as it maps the LIR (§ JIT), with no
+re-derivation from syntax. A hydrated closure therefore grafts as a compiled one
+does. The parity test in [the landing plan](image/plan.md) is the acceptance
 gate.
 
 ## Hydration

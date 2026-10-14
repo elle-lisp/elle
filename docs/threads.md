@@ -1,6 +1,6 @@
 # Threads
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-14 -->
 
 OS threads for CPU-bound work. For I/O-bound concurrency, prefer
 `ev/spawn` / `ev/join` (see [concurrency.md](concurrency.md)).
@@ -95,7 +95,8 @@ copy verbatim, and the values its `ValueConst` instructions load cross through
 the same value walk as the closure's constants. A stdlib closure that such a
 value names interns into the bundle once, like any closure the graph reaches
 twice. Nothing in the LIR is rewritten on the way out or patched on the way in
-([impl/lir.md](impl/lir.md)).
+([impl/lir.md](impl/lir.md)). The body fragment a graft reads crosses beside
+it, as the bytes the payload holds ([impl/graft.md](impl/graft.md)).
 
 #### Worker stack size matches the main thread
 

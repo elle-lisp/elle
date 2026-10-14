@@ -1,6 +1,6 @@
 # Grafting a call
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-14 -->
 
 A call into another unit's function becomes that function's body, and the proven types delete every branch its operands cannot take.
 
@@ -112,10 +112,14 @@ initializer's body into a fragment before it grafts any call.
 
 A function from another unit is reached through its value. When a unit is
 analyzed, each binding the earlier units export maps to its compile-time value,
-and for a stdlib function that value is a closure. A closure's template carries
-the fragment of its own body, closed before functionalization in the unit that
-defined it and stored when the lambda lowers. The graft reads the fragment off
-the value the binding holds. A user binding that shadows `+` holds a different
+and for a stdlib function that value is a closure. A closure's code payload
+carries the fragment of its own body as bytes, closed before functionalization
+in the unit that defined it and encoded when the lambda lowers
+([code objects](region/template.md)). The graft reads the fragment off the
+value the binding holds. It decodes a payload's bytes once per compile, into a
+memo keyed by the payload, so a unit that calls `+` a hundred times decodes
+`+` once. Bytes that do not decode are a body the payload does not carry, and
+the call stays a call. A user binding that shadows `+` holds a different
 value, so it can never reach `+`'s body.
 
 Such a fragment names its free globals by name. The graft resolves each one
@@ -124,9 +128,10 @@ stdlib's exports. A global that does not resolve keeps the call a call, so the
 stdlib exports every helper a wrapper's body names, such as `dynamic-lt` and
 `check-comparable`.
 
-The stdlib disk cache stores each template's fragment with the template
-([the stdlib cache](stdlib-cache.md)). A template hydrated from an image carries
-none yet, so a call to it stays a call ([booting from an image](image/boot.md)).
+The stdlib disk cache stores each payload's fragment with the payload
+([the stdlib cache](stdlib-cache.md)), and a boot image maps it with the
+payload ([booting from an image](image/boot.md)). So a call into the stdlib
+grafts the same body under a source boot, a cache hit and an image boot.
 
 ### A grafted call still proves the definition
 
@@ -288,7 +293,7 @@ place.
 
 A deleted guard takes its `emit` with it, and the signal re-propagation then
 drops the site's error bit. The signal the analyzer recorded for the enclosing
-function does not change, so `(silence)` accepts and refuses exactly the
+function does not change, so `(silent!)` accepts and refuses exactly the
 programs it did before.
 
 ## Guard facts from a grafted predicate
@@ -316,11 +321,10 @@ stdlib's `even?` guards `%rem x 2` with exactly this condition.
 
 - A guard that raises in a grafted body raises the same error value, from the
   caller's frame. A backtrace no longer shows the wrapper's frame.
-- A raise in a grafted body is a raise in the caller's frame. On a fiber's
-  first run a restart therefore answers the raise, and the grafted body runs
-  on, as the language asks ([fiber primitives](../signals/primitives.md)). A
-  callee whose call stays a call loses its frames to a first-run raise
-  instead.
+- A raise in a grafted body is a raise in the caller's frame. A restart
+  answers it there and the grafted body runs on, exactly as a restart answers
+  a raise inside a callee whose call stayed a call
+  ([fiber primitives](../signals/primitives.md)).
 - A grafted body from this unit keeps the source locations it was written
   with. So an error it raises names the raising form, as it did while the call
   stayed a call ([the VM](vm.md)).
@@ -404,8 +408,18 @@ still runs, and deletes what the types decide around the calls that stay.
   and the error bit a dissolved body loses. It also pins a `cond` clause and
   the `and` and `or` operands a decided test removes, and a block its own
   `break` leaves, which proves nothing after it.
+- `hir::typeinfer::tests::graft::a_payloads_fragment_decodes_once_per_compile`
+  — two lookups of one stdlib function in one compile hand out one fragment.
+- `value::closure::tests::payload` — the payload record is exactly its
+  fields, the fragment among them.
+- `lir::emit::tests::a_nested_lambdas_payload_carries_its_fragment` — the
+  bytes the lowerer put on the function's head reach its payload.
 - `compiler::stdlib_cache::tests::fragment` — a stdlib restored from the disk
-  cache grafts as a compiled one does.
+  cache grafts as a compiled one does, and the stored form carries the bytes.
+- `image::boot::tests::a_call_to_a_stdlib_function_grafts_under_either_boot`
+  and `..::the_two_boots_emit_one_bytecode_for_a_user_file` — a hydrated
+  closure grafts as a compiled one does, and a user file compiles to one
+  bytecode under both boots.
 - [the graft corpus test](../../tests/impl/graft.lisp) — a branch no value
   reaches goes without the binding the rest of the program reads, a deletion
   narrows a join, and a guard narrows through the wrappers it is written with.

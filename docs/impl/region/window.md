@@ -1,6 +1,6 @@
 # The branch-arm release window
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-14 -->
 
 Where a branch puts the ONE release of a region several arms use. The anchor is
 the merge every path reaches, not the arm that happens to name it last.
@@ -356,7 +356,7 @@ The placement pins are
 `tail_call_argument_release_stays_the_ownership_move` in
 [lir::lower::tests::release::arms](../../../src/lir/lower/tests/release/arms.rs),
 and `moved_argument_takes_no_replica_in_the_arm_that_moves_it` in
-[lir::lower::tests::release::frameexit::arms](../../../src/lir/lower/tests/release/frameexit/arms.rs).
+[lir::lower::tests::release::armexit](../../../src/lir/lower/tests/release/armexit.rs).
 
 [region::infer::tests::compensate](../../../src/hir/region/infer/tests/compensate.rs)
 holds two more groups. The value-route narrowing pins are

@@ -1,6 +1,6 @@
 # Per-arm compensation
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-14 -->
 
 The releases a branch adds one per arm, each funded by a retain on its own node.
 The head route takes an arm that never names the region, the tail route one that
@@ -217,7 +217,7 @@ The analysis pins are in
 on every other region.
 
 The placement pins are in
-[lir::lower::tests::release::frameexit::cells](../../../src/lir/lower/tests/release/frameexit/cells.rs):
+[lir::lower::tests::release::cellexit](../../../src/lir/lower/tests/release/cellexit.rs):
 `a_falling_through_arm_head_releases_the_env_cell_its_sibling_relocated` and
 `a_reading_arm_tail_releases_the_env_cell_its_sibling_relocated`, beside the
 decline `escaping_holder_env_cell_release_stays_after_the_tail_call`.

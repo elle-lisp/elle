@@ -1,6 +1,6 @@
 # Self-recursion: the executing-closure mechanism (no cell)
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-14 -->
 
 How a self-recursive closure refers to itself without a forward cell, and is reclaimed by ordinary region RC.
 
@@ -349,7 +349,7 @@ The rest of the runtime pins are in `runtime::tests::ownership::selfrec`:
   callee, so the relocation's replica is the channel rather than the deferral.
   Both arms are driven. The placement peer is
   `a_letrec_closure_under_a_branch_tail_is_replicated_into_every_arm` in
-  [lir::lower::tests::release::frameexit::arms](../../src/lir/lower/tests/release/frameexit/arms.rs),
+  [lir::lower::tests::release::armexit](../../src/lir/lower/tests/release/armexit.rs),
   with `…_no_arm_strands_keeps_its_release_by_id` as the decline. The leak rows
   are h–h3 of
   [region-tail-frame-exit-letrec.lisp](../../tests/impl/region-tail-frame-exit-letrec.lisp),

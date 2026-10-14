@@ -368,8 +368,8 @@ plugin directory to a workspace member.
 
 ### The boot-image job
 
-`--boot-image=` is off by default, and stays off until a hydrated closure
-carries its body fragment ([boot.md](../impl/image/boot.md)). No other job
+`--boot-image=` is off by default, and stays off until a `sys/spawn` worker
+hydrates its own stdlib ([boot.md](../impl/image/boot.md)). No other job
 boots from an image, so a change that breaks hydration passes every gate in the
 workflow.
 

@@ -1,6 +1,6 @@
 # Elle
 
-<!-- audited: 2026-10-07 -->
+<!-- audited: 2026-10-14 -->
 
 A Lisp whose compiler infers what each function does and where each value dies,
 and runs on those facts.
@@ -17,7 +17,7 @@ collector.
 None of it asks the programmer for annotations. Languages with this much
 control, speed or soundness ask for lifetimes, types and `async` markers, and
 an Elle program writes none of them. The few declarations Elle has, such as
-`(silence)` and `(immutable!)`, state a fact the compiler then checks. They
+`(silent!)` and `(immutable!)`, state a fact the compiler then checks. They
 guard a program; they never enable one.
 
 This file explains those ideas, what works today, and what we are building
@@ -232,10 +232,10 @@ takes 270 ms and 100 MB. Try the image with a cache directory:
 elle --boot-image=$HOME/.cache/elle script.lisp
 ```
 
-The boot image is opt-in for now. A closure loaded from an image carries
-neither LIR nor the body a graft reads yet. So the JIT cannot compile the
-library's functions, a call to `+` stays a call, and a recursive `fib` of 30
-takes 10 s where it takes 0.07 s without an image. Saving and loading
+The boot image is opt-in for now. A closure loaded from an image carries its
+LIR and the body a graft reads, so the library compiles on the JIT and a call
+to `+` becomes its body under either boot. A thread a program spawns still
+compiles its library from source. Saving and loading
 a user session as an image comes next, and then [fleet](docs/impl/fleet.md):
 running a function on other machines by shipping its image. The
 [image design](docs/impl/image.md) holds the details.

@@ -1,6 +1,6 @@
 # What a signal exit owes
 
-<!-- audited: 2026-10-13 -->
+<!-- audited: 2026-10-14 -->
 
 A native tail call runs its fall-through block on normal completion alone, so a
 signal exit answers for the releases left in it.
@@ -121,7 +121,7 @@ beside it, and a restarted `:error` fiber. The `abort-discard` probe in
 [the oracle](../../../tests/impl/oracle.lisp) gauges the per-op rate.
 `a_borrowed_tail_argument_is_named_on_the_call` and
 `an_owned_tail_argument_is_not_named_on_the_call` in
-[lir::lower::tests::release::frameexit::signal](../../../src/lir/lower/tests/release/frameexit/signal.rs)
+[lir::lower::tests::release::frameexit](../../../src/lir/lower/tests/release/frameexit.rs)
 are the naming pins, both faces.
 
 [region-tail-signal-exit-uaf.lisp](../../../tests/impl/region-tail-signal-exit-uaf.lisp)
