@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! What the layout probe answers for: the probed set, what canonical bytes
 //! keep and drop, and what the fingerprint names.
 //!
@@ -183,5 +183,30 @@ fn the_fingerprint_names_both_instruction_sets_and_the_lir_body() {
     assert!(
         fp.contains("lir:nodes@"),
         "the fingerprint does not record where a payload's LIR body keeps its slices: {fp}"
+    );
+}
+
+// A payload's fragment is the bytes `bincode` wrote for a `LambdaFragment`,
+// and a build whose fragment types changed shape reads them as another body or
+// as none. No layout probe sees a serde shape, so the fingerprint names the
+// encoding beside the slice's offset (docs/impl/image/format.md).
+//
+// The counter-factual is a fingerprint that names only the offset: an image
+// built before a fragment field moved maps, and every graft decodes a body
+// nobody wrote.
+#[test]
+fn the_fingerprint_names_the_fragment_encoding() {
+    let fp = crate::image::fingerprint();
+    let want = format!(
+        "fragment-encoding={}",
+        crate::hir::fragment::FRAGMENT_ENCODING
+    );
+    assert!(
+        fp.split([';', ',']).any(|part| part == want),
+        "the fingerprint does not name the fragment encoding: {fp}"
+    );
+    assert!(
+        fp.contains(",fragment@"),
+        "the fingerprint does not record where a payload keeps its fragment: {fp}"
     );
 }

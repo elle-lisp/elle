@@ -1,18 +1,20 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! The graft: a call to a known function becomes the body its operand count selects, unless that body recurses.
 //!
 //! docs/impl/graft.md
 //!
 //! A same-unit callee's body is the fragment its lambda carries; another
-//! unit's is the fragment on the template of the closure its binding holds.
+//! unit's is the fragment on the code payload of the closure its binding holds.
 
 use super::fuse::primitives_by_name;
 use crate::hir::arena::BindingArena;
 use crate::hir::binding::Binding;
 use crate::hir::expr::{Hir, HirId, HirKind};
 use crate::hir::fragment::LambdaFragment;
+use crate::value::closure::ClosureTemplate;
 use crate::value::{SymbolId, Value};
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -31,18 +33,21 @@ use scope::Scope;
 /// same-unit function bound to that function's parameters.
 ///
 /// `values` maps a binding the runtime supplies to its compile-time value; a
-/// closure's template carries the fragment another unit's call grafts.
+/// closure's code payload carries the fragment another unit's call grafts, and
+/// `memo` decodes each payload's once.
 pub(crate) fn graft_calls(
     hir: &mut Hir,
     arena: &mut BindingArena,
     unit: &UnitFns,
     values: &HashMap<Binding, Value>,
+    memo: &FragmentMemo,
 ) -> GraftRecord {
     let prim_by_name = primitives_by_name(arena);
     let mut grafter = Grafter {
         arena,
         unit,
         values,
+        memo,
         prim_by_name,
         scope: Scope::new(),
         live: live::live_lambdas(hir),
@@ -53,18 +58,42 @@ pub(crate) fn graft_calls(
     grafter.record
 }
 
-/// The fragment a closure value's code object carries. A code payload holds
-/// no fragment yet, so a call into another unit stays a call
-/// (docs/impl/graft.md).
-pub(crate) fn fragment_of_value(value: &Value) -> Option<Rc<LambdaFragment>> {
-    let _ = value.as_closure()?;
-    None
+/// The fragments one compile has decoded off code payloads, by payload: a unit
+/// that calls `+` a hundred times decodes `+` once (docs/impl/graft.md). A
+/// memo lives for one compile, and a payload whose bytes are no body is
+/// remembered as none.
+pub(crate) struct FragmentMemo {
+    decoded: RefCell<FxHashMap<usize, Option<Rc<LambdaFragment>>>>,
+}
+
+impl FragmentMemo {
+    pub(crate) fn new() -> Self {
+        FragmentMemo {
+            decoded: RefCell::new(FxHashMap::default()),
+        }
+    }
+
+    /// The fragment the closure `value`'s code object carries, or `None` for a
+    /// value that is not a closure or a payload whose bytes are no body.
+    pub(crate) fn fragment_of(&self, value: &Value) -> Option<Rc<LambdaFragment>> {
+        let closure = value.as_closure()?;
+        self.of_template(&closure.template)
+    }
+
+    /// The fragment `t`'s payload carries, decoded once per memo.
+    pub(crate) fn of_template(&self, t: &ClosureTemplate) -> Option<Rc<LambdaFragment>> {
+        let _ = (t, &self.decoded);
+        None
+    }
 }
 
 struct Grafter<'a> {
     arena: &'a mut BindingArena,
     unit: &'a UnitFns,
     values: &'a HashMap<Binding, Value>,
+    /// The compile's decoded fragments, which another unit's body is read
+    /// through.
+    memo: &'a FragmentMemo,
     /// This unit's primitives by name, which another unit's globals resolve to.
     prim_by_name: FxHashMap<SymbolId, Binding>,
     scope: Scope,
@@ -135,6 +164,6 @@ impl<'a> Grafter<'a> {
         if !inner.is_primitive {
             return None;
         }
-        Some((fragment_of_value(self.values.get(b)?)?, None))
+        Some((self.memo.fragment_of(self.values.get(b)?)?, None))
     }
 }

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! HOF-chain loop fusion: a higher-order call over a proven array becomes one loop
 //! with its function's body spliced in.
 //!
@@ -16,7 +16,7 @@
 //! A function argument is a call-site lambda literal, which the rewrite moves and
 //! which may capture when its op is alone in the chain (`captures_locals`), or a
 //! named function whose body a fragment carries: this unit's, by binding, or
-//! another unit's, on its function value's template. A chain of two or more ops
+//! another unit's, on its function value's code payload. A chain of two or more ops
 //! interleaves its functions' calls, so each must pass `reorder_safe` and capture
 //! nothing. Only the chain's innermost op may end the walk early; every other
 //! early exit gates its own stage.
@@ -57,13 +57,15 @@ pub(in crate::hir::typeinfer) use chain::classify_base;
 
 /// Fuse every qualifying HOF chain into an inlined index-walk loop. A function
 /// argument that names a function reaches its body through `unit`, this unit's
-/// closed functions, or through the fragment on the template of the value
-/// `values` holds for a binding the runtime supplies.
+/// closed functions, or through the fragment on the code payload of the value
+/// `values` holds for a binding the runtime supplies, which `memo` decodes once
+/// per compile.
 pub(crate) fn fuse_map_chains(
     hir: &mut Hir,
     arena: &mut BindingArena,
     unit: &super::graft::UnitFns,
     values: &HashMap<Binding, crate::value::Value>,
+    memo: &super::graft::FragmentMemo,
 ) {
     // The `binding → type-of keyword` proof dead-arm pruning computes. A base
     // collection may be a `Var` alias of a proven array, not only a call-site
@@ -78,6 +80,7 @@ pub(crate) fn fuse_map_chains(
     let fns = FnResolver {
         unit,
         values,
+        memo,
         prim_by_name: &prim_by_name,
     };
     rewrite(hir, arena, &ops, &bases, &fns);

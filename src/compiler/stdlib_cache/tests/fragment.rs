@@ -1,34 +1,20 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 // A function the cache restores carries its body's fragment, so a later compile
 // grafts it as it grafts a compiled one.
 // docs/impl/stdlib-cache.md
 // docs/impl/graft.md
 
 use super::super::*;
-use crate::hir::{BindingArena, Hir, HirKind};
+use crate::hir::testkit::count_calls_to;
 use crate::primitives::module_init::StdlibSource;
 use crate::runtime::Runtime;
-
-/// How many calls in `hir` name a binding spelled `name`.
-fn calls_to(hir: &Hir, arena: &BindingArena, name: &str) -> usize {
-    let mut n = 0;
-    if let HirKind::Call { func, .. } = &hir.kind {
-        if let HirKind::Var(b) = &func.kind {
-            if arena.get(*b).name == crate::value::SymbolId::of(name) {
-                n += 1;
-            }
-        }
-    }
-    hir.for_each_child(|c| n += calls_to(c, arena, name));
-    n
-}
 
 /// The calls to `+` left in `src` once `rt` has compiled it.
 fn plus_calls(rt: &mut Runtime, src: &str) -> usize {
     let (_vm, symbols, cctx) = rt.parts();
     let (hir, arena) = crate::pipeline::compile_file_to_fhir(src, symbols, cctx, "<probe>")
         .expect("the probe compiles");
-    calls_to(&hir, &arena, "+")
+    count_calls_to(&hir, &arena, "+")
 }
 
 /// Two runtimes over one directory: the first compiles the stdlib, and the

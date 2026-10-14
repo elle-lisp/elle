@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! The post-analysis HIR regularization sequence, in the one order every compile entry runs it.
 //!
 //! docs/impl/graft.md
@@ -12,7 +12,7 @@ use crate::config::GraftPolicy;
 use crate::hir::arena::BindingArena;
 use crate::hir::binding::Binding;
 use crate::hir::expr::Hir;
-use crate::hir::typeinfer::graft::{close_lambdas, graft_calls, GraftRecord};
+use crate::hir::typeinfer::graft::{close_lambdas, graft_calls, FragmentMemo, GraftRecord};
 use crate::hir::typeinfer::{
     fuse_map_chains, infer_and_rewrite, prune_typeof_match_arms, TypeInfo,
 };
@@ -26,7 +26,8 @@ use std::collections::HashMap;
 /// the inference result (`Err` is the operand proof obligation; see `typeinfer`).
 ///
 /// `values` maps each binding the runtime supplies to its compile-time value;
-/// the graft and fusion read another unit's function body off it. Under
+/// the graft and fusion read another unit's function body off it, through one
+/// memo that decodes each payload's fragment once (docs/impl/graft.md). Under
 /// `GraftPolicy::Off` the graft is skipped and every call stays a call.
 ///
 /// **The order matters.**
@@ -53,9 +54,10 @@ pub(crate) fn regularize(
 ) -> Result<TypeInfo, String> {
     prune_typeof_match_arms(hir, arena);
     let unit = close_lambdas(hir, arena);
-    fuse_map_chains(hir, arena, &unit, values);
+    let memo = FragmentMemo::new();
+    fuse_map_chains(hir, arena, &unit, values, &memo);
     let mut record = match graft {
-        GraftPolicy::On => graft_calls(hir, arena, &unit, values),
+        GraftPolicy::On => graft_calls(hir, arena, &unit, values, &memo),
         GraftPolicy::Off => GraftRecord::default(),
     };
     crate::hir::dead::eliminate_dead_bindings(hir, arena, symbols);

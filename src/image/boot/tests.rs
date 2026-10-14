@@ -1,4 +1,4 @@
-// audited: 2026-10-07
+// audited: 2026-10-14
 //! What a boot image carries that only this crate can see: transformer caches, the scope counter, and the stdlib's JIT tier.
 //!
 //! docs/impl/image/boot.md
@@ -204,5 +204,106 @@ fn a_hot_stdlib_function_compiles_on_the_jit_under_either_boot() {
     assert!(
         inc_promotes(&mut hydrated),
         "an image boot leaves inc on the interpreter tier"
+    );
+}
+
+/// A user file whose one call to `+` grafts under a source boot.
+const GRAFTS_PLUS: &str = "(defn h [a b] (+ a b)) (h 1 2)";
+
+/// The calls to `+` left in `src` once `rt` has compiled it.
+fn plus_calls(rt: &mut Runtime, src: &str) -> usize {
+    let (_vm, symbols, cctx) = rt.parts();
+    let (hir, arena) = crate::pipeline::compile_file_to_fhir(src, symbols, cctx, "<graft>")
+        .expect("the probe compiles");
+    crate::hir::testkit::count_calls_to(&hir, &arena, "+")
+}
+
+// § Test plan, "Compile parity" (docs/impl/image/plan.md): a call to a stdlib
+// function grafts under an image boot exactly as under a source boot, because
+// the hydrated payload carries the body fragment the graft reads.
+//
+// The counter-factual is a hydrated payload with no fragment: the call stays
+// a call, answers correctly, and only the tree can tell. The source boot runs
+// first, so a file nothing grafts fails here rather than passing both boots
+// vacuously.
+#[test]
+fn a_call_to_a_stdlib_function_grafts_under_either_boot() {
+    let scratch = Scratch::new("graft");
+    let mut source = Runtime::with_caches(scratch.caches());
+    assert_eq!(source.boot_source(), BootSource::Compiled);
+    assert_eq!(
+        plus_calls(&mut source, GRAFTS_PLUS),
+        0,
+        "a source boot does not graft +, so this test exercises nothing"
+    );
+    drop(source);
+
+    let mut hydrated = Runtime::with_caches(scratch.caches());
+    assert_eq!(hydrated.boot_source(), BootSource::Image);
+    assert_eq!(
+        plus_calls(&mut hydrated, GRAFTS_PLUS),
+        0,
+        "an image boot leaves the call to + a call"
+    );
+}
+
+/// Every code object `src` compiles to on `rt`, as its opcode names and its
+/// length in bytes: the entry, then each child in table order, recursively.
+fn instruction_streams(rt: &mut Runtime, src: &str) -> Vec<(Vec<String>, usize)> {
+    fn walk(t: &crate::value::ClosureTemplate, out: &mut Vec<(Vec<String>, usize)>) {
+        let bytes = t.bytecode();
+        let opcodes = crate::compiler::bytecode::disassemble_lines(bytes)
+            .iter()
+            .map(|line| {
+                let (_, rest) = line.split_once("] ").expect("a disassembled line");
+                rest.split(' ').next().unwrap_or_default().to_string()
+            })
+            .collect();
+        out.push((opcodes, bytes.len()));
+        for i in 0..t.num_children() {
+            walk(&t.child(i), out);
+        }
+    }
+    let (_vm, symbols, cctx) = rt.parts();
+    let unit =
+        crate::pipeline::compile_file(src, symbols, cctx, "<parity>").expect("the file compiles");
+    let mut out = Vec::new();
+    walk(unit.entry(), &mut out);
+    out
+}
+
+// § Test plan, "Compile parity" (docs/impl/image/plan.md): the same user file
+// compiles to the same instruction stream under both boots.
+//
+// The comparison reads opcodes and lengths rather than bytes: a static region
+// id in an operand comes from a process-wide mint that a stdlib compile
+// advances and a hydration does not. A compile with the graft off is the
+// control, so a file the graft leaves alone fails here rather than making the
+// two boots agree vacuously.
+#[test]
+fn the_two_boots_emit_one_bytecode_for_a_user_file() {
+    let scratch = Scratch::new("parity");
+    let mut source = Runtime::with_caches(scratch.caches());
+    assert_eq!(source.boot_source(), BootSource::Compiled);
+    let compiled = instruction_streams(&mut source, GRAFTS_PLUS);
+    drop(source);
+
+    let mut ungrafted = Runtime::new();
+    ungrafted
+        .compile()
+        .set_graft(crate::config::GraftPolicy::Off);
+    assert_ne!(
+        instruction_streams(&mut ungrafted, GRAFTS_PLUS),
+        compiled,
+        "the graft changes nothing in this file, so parity here proves nothing"
+    );
+    drop(ungrafted);
+
+    let mut hydrated = Runtime::with_caches(scratch.caches());
+    assert_eq!(hydrated.boot_source(), BootSource::Image);
+    assert_eq!(
+        instruction_streams(&mut hydrated, GRAFTS_PLUS),
+        compiled,
+        "an image boot compiles the file to other instructions"
     );
 }

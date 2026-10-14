@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 // src/hir/AGENTS.md
 // docs/impl/graft.md
 //! Which calls become their callee's body: a known, non-recursive function at
@@ -393,4 +393,56 @@ fn a_grafted_stdlib_body_takes_the_line_of_its_call() {
     let lines = emit_lines(&hir);
     assert!(!lines.is_empty(), "{src}: a keyword operand keeps a guard");
     assert!(lines.iter().all(|l| *l == 2), "{src}: {lines:?}");
+}
+
+/// A compile decodes a payload's fragment bytes once: two lookups of one value
+/// through one memo hand out one body, and another memo decodes again. The
+/// counter-factual is a decode per lookup, which pays for `+`'s body on every
+/// call a unit makes to it.
+#[test]
+fn a_payloads_fragment_decodes_once_per_compile() {
+    use crate::hir::typeinfer::graft::FragmentMemo;
+    use std::rc::Rc;
+
+    let mut rt = crate::runtime::Runtime::new();
+    let (vm, symbols, cctx) = rt.parts();
+    let plus = crate::pipeline::eval_all("+", symbols, vm, cctx, "<memo>").expect("+");
+    let memo = FragmentMemo::new();
+    let first = memo
+        .fragment_of(&plus)
+        .expect("+'s payload carries its body");
+    let again = memo
+        .fragment_of(&plus)
+        .expect("+'s payload carries its body");
+    assert!(Rc::ptr_eq(&first, &again), "one memo hands out one body");
+    let other = FragmentMemo::new()
+        .fragment_of(&plus)
+        .expect("+'s payload carries its body");
+    assert!(
+        !Rc::ptr_eq(&first, &other),
+        "a memo lives for one compile, so another memo decodes again"
+    );
+}
+
+/// Bytes that do not decode are a body the payload does not carry, and so is
+/// an empty slice: the call stays a call rather than failing the compile.
+#[test]
+fn bytes_that_do_not_decode_are_no_body() {
+    use crate::hir::typeinfer::graft::FragmentMemo;
+    use crate::value::{Arity, CodeBuilder};
+
+    let mut heap = crate::value::fiberheap::FiberHeap::new();
+    let garbage = CodeBuilder::new(Vec::new(), Arity::Exact(0), Vec::new())
+        .fragment(vec![0xff; 7])
+        .build(&mut heap);
+    let empty = CodeBuilder::new(Vec::new(), Arity::Exact(0), Vec::new()).build(&mut heap);
+    let memo = FragmentMemo::new();
+    assert!(
+        memo.of_template(&garbage).is_none(),
+        "bytes that do not decode are no body"
+    );
+    assert!(
+        memo.of_template(&empty).is_none(),
+        "an empty slice is no body"
+    );
 }

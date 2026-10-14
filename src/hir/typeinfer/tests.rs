@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-10-14
 // src/hir/AGENTS.md
 // docs/impl/typeinfer.md
 //! The inference pass's unit tests, and the helpers they compile through and
@@ -97,19 +97,7 @@ fn intrinsic_result_type(src: &str, op: &str) -> TyId {
     found[0]
 }
 
-/// Count Call nodes whose callee resolves to a binding named `name`.
-fn count_calls_to(hir: &Hir, arena: &BindingArena, name: &str) -> usize {
-    let mut n = 0;
-    if let HirKind::Call { func, .. } = &hir.kind {
-        if let Some(b) = super::unwrap_callee_binding(func) {
-            if arena.get(b).name == crate::value::SymbolId::of(name) {
-                n += 1;
-            }
-        }
-    }
-    hir.for_each_child(|c| n += count_calls_to(c, arena, name));
-    n
-}
+use crate::hir::testkit::count_calls_to;
 
 /// Compile `src` through the file front end (which runs `infer_and_rewrite`),
 /// discarding the result and surfacing only success/failure. `Err` is the

@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-14
 //! `LirCode` and `LirOwned`: a frozen function's records in `Vec`s, and the values its instructions load.
 //!
 //! docs/impl/lir.md
@@ -54,12 +54,15 @@ pub struct LirCode {
     pub(crate) merged_slots: Vec<StaticRegion>,
     pub(crate) frame_release_slots: Vec<u16>,
     pub(crate) frame_release_regions: Vec<StaticRegion>,
-    /// The code payload carries the docstring and the origin, and nothing
-    /// reads them off a serialized function, so neither crosses.
+    /// The code payload carries the docstring, the origin and the body
+    /// fragment, and nothing reads them off a serialized function, so none of
+    /// the three crosses.
     #[serde(skip)]
     pub(crate) doc: Option<String>,
     #[serde(skip)]
     pub(crate) origin: Option<Span>,
+    #[serde(skip)]
+    pub(crate) fragment: Vec<u8>,
 }
 
 /// A frozen function and the values its `ValueConst` instructions load.

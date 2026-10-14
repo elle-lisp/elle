@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! Finds the body a HOF's function argument names: a lambda literal, this unit's function, or a function value's fragment.
 //!
 //! docs/impl/dissolution/inline.md
@@ -6,16 +6,19 @@
 
 use super::*;
 use crate::hir::fragment::{ArmBody, LambdaFragment};
-use crate::hir::typeinfer::graft::{fragment_of_value, UnitFns};
+use crate::hir::typeinfer::graft::{FragmentMemo, UnitFns};
 use crate::value::Value;
 use std::rc::Rc;
 
 /// The resolution context for a HOF's function argument: this unit's functions
 /// by binding, and another unit's through the value its binding holds, whose
-/// template carries the fragment.
+/// code payload carries the fragment.
 pub(super) struct FnResolver<'a> {
     pub(super) unit: &'a UnitFns,
     pub(super) values: &'a HashMap<Binding, Value>,
+    /// The compile's decoded fragments, which a payload's body is read
+    /// through.
+    pub(super) memo: &'a FragmentMemo,
     /// This unit's primitives by name, which every fragment's free globals
     /// resolve through.
     pub(super) prim_by_name: &'a FxHashMap<SymbolId, Binding>,
@@ -24,9 +27,9 @@ pub(super) struct FnResolver<'a> {
 impl FnResolver<'_> {
     /// The function a `Var` argument names, when its one body may be spliced
     /// here: this unit's own, or — for an `is_primitive` binding — the one on
-    /// the template of the closure it holds. A user redefinition shadows the
-    /// export with a binding that is not `is_primitive`, so it never reaches
-    /// the export's body.
+    /// the code payload of the closure it holds. A user redefinition shadows
+    /// the export with a binding that is not `is_primitive`, so it never
+    /// reaches the export's body.
     ///
     /// The function takes one or two fixed parameters and no rest list. A body
     /// holding a call-position `%`-intrinsic qualifies only under the
@@ -40,7 +43,7 @@ impl FnResolver<'_> {
                 if !inner.is_primitive || !inner.is_immutable || inner.is_mutated {
                     return None;
                 }
-                fragment_of_value(self.values.get(&b)?)?
+                self.memo.fragment_of(self.values.get(&b)?)?
             }
         };
         let body = fragment.whole()?;

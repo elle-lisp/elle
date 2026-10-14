@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-14
 //! What a payload carries: the tables and masks a header reads out of it.
 //! docs/impl/region/template.md
 
@@ -242,7 +242,8 @@ fn every_payload_record_is_exactly_its_fields() {
         size_of::<CodePayload>(),
         fields!(p; bytecode, constants, locations, files, name, doc, region_table, merged_slots,
             frame_release_slots, frame_release_regions, capture_locals, strict_keys, children,
-            lir, capture_params_mask, signal_bits, origin, arity, signal_propagates, num_locals,
+            fragment, lir, capture_params_mask, signal_bits, origin, arity, signal_propagates,
+            num_locals,
             num_captures, num_params, wasm_func_idx, has_origin, has_lir, has_wasm_idx, vararg,
             rest_list, has_name, has_doc, pad)
     );

@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-14
 //! `CodePayload` — a code object's variable-length data, inline in region pages.
 //!
 //! docs/impl/region/template.md
@@ -118,6 +118,10 @@ pub struct CodePayload {
     /// instruction order, each a `HeapObject::ClosureTemplate` in the same
     /// code region. The emitter fills it (docs/impl/region/template.md).
     pub(crate) children: RegionSlice<Value>,
+    /// The body closed for a graft, as the bytes `bincode` wrote for its
+    /// `LambdaFragment`, and empty when the body did not close. A compile
+    /// decodes it once (docs/impl/graft.md).
+    pub(crate) fragment: RegionSlice<u8>,
     /// The frozen function the JIT promotes this code object from, its sites
     /// and its values (docs/impl/lir.md). Meaningful only when `has_lir`: an
     /// entry thunk's code object and a WASM-built closure's have no LIR.
@@ -327,6 +331,7 @@ impl CodePayload {
             capture_locals: RegionSlice::empty(),
             strict_keys: RegionSlice::empty(),
             children: RegionSlice::empty(),
+            fragment: RegionSlice::empty(),
             lir: crate::lir::LirBody::empty(),
             capture_params_mask: 0,
             signal_bits: SignalBits::EMPTY,
@@ -395,6 +400,11 @@ impl CodePayload {
     /// The headers a `MakeClosure` indexes, in instruction order.
     pub fn children(&self) -> &[Value] {
         self.children.as_slice()
+    }
+
+    /// The body fragment's bytes, empty for a body no graft can take.
+    pub fn fragment(&self) -> &[u8] {
+        self.fragment.as_slice()
     }
 
     /// Where the source lambda was written, or `None` for a lambda no reader

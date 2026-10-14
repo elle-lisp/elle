@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! An HIR body closed over the bindings it names, so it can be re-hosted in any arena.
 //!
 //! docs/impl/hir.md
@@ -25,6 +25,12 @@ mod lambda;
 mod pattern;
 
 pub use lambda::{ArmBody, LambdaFragment, Selected};
+
+/// The shape of the bytes a code payload carries for a [`LambdaFragment`].
+/// Move it when the fragment types change shape: the image fingerprint records
+/// it, so an image written under another encoding falls back to a source boot
+/// rather than reading those bytes as another body (docs/impl/image/format.md).
+pub const FRAGMENT_ENCODING: u32 = 1;
 
 /// What a fragment-local `Binding` stands for.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

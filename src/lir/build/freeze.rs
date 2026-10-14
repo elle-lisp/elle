@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-14
 //! Freezing a finished function: its blocks' nodes into one table, its tables into exact-size `Vec`s, its header across.
 //!
 //! docs/impl/lir.md
@@ -63,6 +63,7 @@ pub(super) fn freeze(work: &mut Work) -> Result<LirOwned, String> {
         frame_release_regions: ascending(&mut head.frame_release_regions, |r| r.get()),
         doc: head.doc.as_deref().map(str::to_string),
         origin: head.origin,
+        fragment: Vec::new(),
     };
     Ok(LirOwned {
         code,

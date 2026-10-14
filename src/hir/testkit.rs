@@ -1,3 +1,4 @@
+// audited: 2026-10-14
 //! Compiling a source fragment to HIR, for the unit tests of the passes that
 //! consume it.
 //!
@@ -145,6 +146,22 @@ impl HirFixture {
             meta,
         }
     }
+}
+
+/// How many `Call` nodes in `hir` name a binding spelled `name`, through a
+/// `Var` callee or the `DerefCell` around one a letrec member's recursive call
+/// reads through.
+pub(crate) fn count_calls_to(hir: &Hir, arena: &BindingArena, name: &str) -> usize {
+    let mut n = 0;
+    if let crate::hir::HirKind::Call { func, .. } = &hir.kind {
+        if let Some(b) = crate::hir::typeinfer::unwrap_callee_binding(func) {
+            if arena.get(b).name == crate::value::SymbolId::of(name) {
+                n += 1;
+            }
+        }
+    }
+    hir.for_each_child(|c| n += count_calls_to(c, arena, name));
+    n
 }
 
 /// What a compile produces beyond the tree: the by-products a downstream pass

@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-14
 //! What the serialized stdlib carries across, and the one thing a restored code object loses.
 //!
 //! docs/impl/stdlib-cache.md
@@ -189,6 +189,50 @@ fn a_cached_stdlib_closure_carries_its_lir() {
         map_has_lir(&mut hit),
         "a cache hit's map lost its LIR, so it never reaches the JIT"
     );
+}
+
+/// The stored form of a code object carries its body fragment's bytes as the
+/// payload holds them, so a load writes them back as they stand and a later
+/// compile grafts the restored function (docs/impl/stdlib-cache.md). The bytes
+/// are the `LambdaFragment` itself, so they decode back to one.
+///
+/// The counter-factual is a stored form that drops the field: every other pin
+/// here still passes, and only the end-to-end graft in `fragment.rs` sees it.
+#[test]
+fn a_stored_code_object_carries_its_fragment_bytes() {
+    let mut rt = Runtime::new();
+    let (vm, symbols, cctx) = rt.parts();
+    let unit = compile_file(
+        "(defn inc2 [x] (+ x 2)) (inc2 1)",
+        symbols,
+        cctx,
+        "<format>",
+    )
+    .expect("compiles");
+    let compiled = (0..unit.entry().num_children())
+        .map(|i| unit.entry().child(i))
+        .find(|c| c.name() == Some("inc2"))
+        .expect("the unit builds inc2");
+    assert!(
+        !compiled.fragment().is_empty(),
+        "inc2's body closes, so its payload carries a fragment"
+    );
+
+    let stored = store_bytecode(&unit, vm, symbols).expect("stores");
+    let inc2 = stored
+        .entry
+        .child_protos
+        .iter()
+        .find(|c| c.name.as_deref() == Some("inc2"))
+        .expect("inc2 is stored");
+    assert_eq!(
+        inc2.fragment,
+        compiled.fragment(),
+        "the stored form carries the payload's bytes as they stand"
+    );
+    let decoded: crate::hir::fragment::LambdaFragment =
+        bincode::deserialize(&inc2.fragment).expect("the bytes are a LambdaFragment");
+    assert_eq!(decoded.fixed(), 1, "inc2 takes one parameter");
 }
 
 /// A payload's origin does not cross the cache — a restore rebuilds code

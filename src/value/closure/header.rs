@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! `ClosureTemplate` — the region-resident header of a code object: one slice naming its payload.
 //!
 //! docs/impl/region/template.md
@@ -136,6 +136,12 @@ impl ClosureTemplate {
     #[inline]
     pub fn doc(&self) -> Option<&'static str> {
         self.payload().doc()
+    }
+
+    /// The body fragment's bytes a graft decodes (docs/impl/graft.md).
+    #[inline]
+    pub fn fragment(&self) -> &[u8] {
+        self.payload().fragment()
     }
 
     #[inline]

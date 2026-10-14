@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! `LirHead`: the header of the function under construction, written by the lowerer beside its instructions.
 //!
 //! docs/impl/lir.md
@@ -60,6 +60,10 @@ pub struct LirHead {
     /// The static slots the slot-routed releases name, the other half of the
     /// same table.
     pub frame_release_regions: Vec<StaticRegion>,
+    /// The lambda's body closed for a graft, as the bytes `bincode` wrote for
+    /// its `LambdaFragment`, for the code payload. Empty when the body did not
+    /// close (docs/impl/graft.md).
+    pub fragment: Vec<u8>,
 }
 
 impl LirHead {
@@ -87,6 +91,7 @@ impl LirHead {
             merged_slots: Vec::new(),
             frame_release_slots: Vec::new(),
             frame_release_regions: Vec::new(),
+            fragment: Vec::new(),
         }
     }
 }

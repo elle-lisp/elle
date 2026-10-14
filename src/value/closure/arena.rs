@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-14
 //! `CodeArena` and `PayloadParts`: one compile unit's code region, and the fields a payload is written into it from.
 //!
 //! docs/impl/region/template.md
@@ -130,6 +130,8 @@ pub struct PayloadParts {
     /// The headers this code object's `MakeClosure` instructions index, in
     /// instruction order.
     pub(crate) children: Vec<Value>,
+    /// The body fragment's bytes (docs/impl/graft.md).
+    pub(crate) fragment: Vec<u8>,
 }
 
 impl PayloadParts {
@@ -159,6 +161,7 @@ impl PayloadParts {
             frame_release_slots: Vec::new(),
             frame_release_regions: Vec::new(),
             children: Vec::new(),
+            fragment: Vec::new(),
         }
     }
 
@@ -196,6 +199,9 @@ impl PayloadParts {
         // the sites only emission can supply.
         let mut lir = lir.clone();
         lir.set_sites(&yield_points, &call_sites, &charge_sites);
+        // The fragment is the payload's, not the body's: the frozen function
+        // the payload keeps for the JIT never reads it.
+        let fragment = std::mem::take(&mut lir.code.fragment);
         let func = lir.view();
         let parts = PayloadParts {
             num_locals: func.num_locals() as usize,
@@ -221,6 +227,7 @@ impl PayloadParts {
                 .map(|r| r.get())
                 .collect(),
             children: bytecode.children,
+            fragment,
             ..PayloadParts::new(bytecode.instructions, func.arity(), bytecode.constants)
         };
         PayloadParts {
@@ -377,6 +384,7 @@ impl PayloadParts {
             _ => RegionSlice::empty(),
         };
         let children = heap.alloc_region_slice_in_region::<Value>(&self.children, region);
+        let fragment = heap.alloc_region_slice_in_region::<u8>(&self.fragment, region);
 
         // The frozen function lands beside the rest of the payload, so every
         // reader of the code object — the JIT, an image, `send` — reads it here
@@ -400,6 +408,7 @@ impl PayloadParts {
             capture_locals,
             strict_keys,
             children,
+            fragment,
             lir,
             capture_params_mask: self.capture_params_mask,
             signal_bits: self.signal.bits,
