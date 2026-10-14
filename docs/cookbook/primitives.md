@@ -1,6 +1,6 @@
 # Adding a New Primitive Function
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-14 -->
 
 A primitive is a Rust function callable from Elle, declared in its module's `primitive!` table.
 
@@ -69,6 +69,13 @@ Only the name and the function are required; every other field defaults to
 at the `Unknown` default. [effects.md](../impl/region/effects.md) says which
 effect a body earns. Declare `ret` when the result type is fixed, because type
 inference reads it.
+
+Declare `ambient: true` when the body reads or changes state that no argument
+carries and no capability bit names: the environment, a clock, a VM cache, a
+process-wide counter, an address. A macro expansion refuses such a primitive,
+because the unit's inputs would no longer decide its expansion
+([macros.md](../macros.md)). A primitive that declares a capability bit needs
+no mark for the effect that bit names.
 
 ### Step 3 (new module only)
 
