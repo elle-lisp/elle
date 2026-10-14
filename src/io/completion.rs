@@ -1,4 +1,4 @@
-//! audited: 2026-09-30
+//! audited: 2026-10-14
 //! Completion processing for async I/O: one arm per operation shape, each
 //! answering with a value it was handed or one it builds.
 //!
@@ -190,6 +190,7 @@ pub(super) fn process_raw_completion(
             port_ref.set_fd(fd);
             Completion::ok(id, birth, *port_val)
         }
+        PendingOp::Sync { .. } => Completion::ok(id, birth, Value::NIL),
         PendingOp::Connect {
             connect_fd,
             port: port_val,

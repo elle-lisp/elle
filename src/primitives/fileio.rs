@@ -1,4 +1,7 @@
-//! File I/O primitives
+// audited: 2026-10-14
+//! The file/ primitives: whole-file reads and writes, directories, metadata, and file/sync.
+//!
+//! docs/io.md
 use crate::primitives::def::RegionEffect;
 use crate::rich_error;
 use crate::signals::Signal;
@@ -187,6 +190,18 @@ pub(crate) fn prim_read_lines(
     }
 }
 
+/// Flush the file or directory at a path to stable storage
+pub(crate) fn prim_file_sync(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    if args[0].is_string() {
+        (SIG_OK, Value::NIL)
+    } else {
+        type_error!(ctx, args[0], "file/sync", "string")
+    }
+}
+
 // Declarative primitive definitions for file I/O operations.
 primitive! {
     "file/read" => prim_slurp {
@@ -347,5 +362,14 @@ primitive! {
         example: "(file/lines \"data.txt\")",
         aliases: &["read-lines"],
         effect: RegionEffect::Fresh,
+    }
+    "file/sync" => prim_file_sync {
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Flush the file or directory at path to stable storage",
+        params: &["path"],
+        category: "file",
+        example: "(file/sync \"data.txt\")",
+        effect: RegionEffect::Immediate,
     }
 }

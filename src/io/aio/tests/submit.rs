@@ -1,4 +1,4 @@
-//! audited: 2026-09-30
+//! audited: 2026-10-14
 //! The submission frame — what every operation the backend issues shares.
 //!
 //! A submission mints an id, hands the operation to io_uring or to a
@@ -158,6 +158,46 @@ fn an_open_completes_under_the_id_it_was_submitted_with() {
     });
 }
 
+#[test]
+fn a_sync_completes_under_the_id_it_was_submitted_with() {
+    crate::value::arena::with_test_region(|| {
+        let backend = AsyncBackend::new().unwrap();
+        let path = write_temp_file("sync me");
+        let req = IoRequest::unbounded(IoOp::Sync { path: path.clone() }, Value::NIL);
+        let id = submit_pending(&backend, &req, "sync");
+        let completion = expect_completion(&backend, id, "sync");
+        assert!(
+            completion.result.as_ref().is_ok_and(|v| v.is_nil()),
+            "sync: a file syncs, and the answer is nil"
+        );
+        completion.discard();
+
+        std::fs::remove_file(&path).ok();
+    });
+}
+
+/// A sync whose syscall failed answers an `:io-error` that names its path.
+#[test]
+fn a_failed_sync_names_its_path() {
+    crate::value::arena::with_test_region(|| {
+        let backend = AsyncBackend::new().unwrap();
+        let path = format!("{}/missing", temp_path("sync-no-such-dir"));
+        let req = IoRequest::unbounded(IoOp::Sync { path: path.clone() }, Value::NIL);
+        let id = submit_pending(&backend, &req, "sync");
+        let completion = expect_completion(&backend, id, "sync");
+        let err = *completion
+            .result
+            .as_ref()
+            .expect_err("sync: a missing path fails");
+        let msg = format!("{}", err);
+        completion.discard();
+        assert!(
+            msg.contains("io-error") && msg.contains(&path),
+            "sync: the error is an :io-error that names the path: {msg}"
+        );
+    });
+}
+
 #[cfg(any(target_os = "linux", target_os = "android", target_os = "macos"))]
 #[test]
 fn a_watch_read_completes_under_the_id_it_was_submitted_with() {
@@ -290,6 +330,13 @@ fn a_pending_entry_accepts_only_the_kind_of_operation_that_filed_it() {
             },
             OpKind::Poll,
         ),
+        (
+            PendingOp::Sync {
+                path: "synced".to_string(),
+                buffer_handle: pool.alloc(0),
+            },
+            OpKind::Sync,
+        ),
     ];
     let every_kind = [
         OpKind::Port,
@@ -297,6 +344,7 @@ fn a_pending_entry_accepts_only_the_kind_of_operation_that_filed_it() {
         OpKind::Sleep,
         OpKind::ProcessWait,
         OpKind::Open,
+        OpKind::Sync,
         OpKind::Task,
         OpKind::Resolve,
         OpKind::Watch,

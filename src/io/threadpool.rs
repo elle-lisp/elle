@@ -1,4 +1,4 @@
-//! audited: 2026-09-30
+//! audited: 2026-10-14
 //! The thread-pool backend: the operations a worker runs, and the one channel
 //! every worker reports through.
 //!
@@ -108,6 +108,12 @@ pub(super) enum PoolOp {
         flags: i32,
         mode: u32,
     },
+    /// Flush the file or directory at `path` to stable storage. Returns 0 on
+    /// success, or -errno on failure.
+    #[allow(dead_code)]
+    Sync {
+        path: std::ffi::CString,
+    },
     /// Run an arbitrary closure. Returns (result_code, data).
     Task(Box<dyn FnOnce() -> (i32, Vec<u8>) + Send>),
     /// Resolve a hostname via getaddrinfo(3). Returns IP addresses as
@@ -210,6 +216,7 @@ impl PoolOp {
             PoolOp::Sleep => OpKind::Sleep,
             PoolOp::ProcessWait { .. } => OpKind::ProcessWait,
             PoolOp::Open { .. } => OpKind::Open,
+            PoolOp::Sync { .. } => OpKind::Sync,
             PoolOp::Task(_) => OpKind::Task,
             PoolOp::Resolve { .. } => OpKind::Resolve,
             PoolOp::WatchRead { .. } => OpKind::Watch,

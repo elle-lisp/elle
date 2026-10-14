@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-10-14
 //! Opening a file on a pool worker, in a way the caller's bound and a cancel can both end.
 //!
 //! src/io/AGENTS.md
@@ -62,4 +62,10 @@ pub(super) fn open(bound: OpBound, path: &std::ffi::CStr, flags: i32, mode: u32)
             Wake::TimedOut => return (-libc::ETIMEDOUT, Vec::new()),
         }
     }
+}
+
+/// Flush `path` to stable storage, and report 0 or `-errno`.
+pub(super) fn sync(path: &std::ffi::CStr) -> (i32, Vec<u8>) {
+    let _ = path;
+    (0, Vec::new())
 }

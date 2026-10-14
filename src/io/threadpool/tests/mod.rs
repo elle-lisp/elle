@@ -1,4 +1,4 @@
-// audited: 2026-09-05
+// audited: 2026-10-14
 // src/io/AGENTS.md
 // Unit tests for the thread-pool backend, one module per concern.
 //
@@ -8,7 +8,7 @@
 //   - `opbound`:  the per-operation timeout bound, on a pipe
 //   - `pool`:     worker reuse: the crew's handover, growth, and retirement
 //   - `process`:  ProcessWait completion encoding
-//   - `openfile`: Open op fd/errno results
+//   - `openfile`: Open op fd/errno results, and what Sync reports
 //   - `signals`:  forked signalfd/kqueue read + close-time drain regressions
 //   - `stdin`:    stdin worker shutdown (idle and mid-read)
 mod hub;

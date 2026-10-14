@@ -1,4 +1,4 @@
-//! audited: 2026-09-30
+//! audited: 2026-10-14
 //! One in-flight operation: the shapes it can take, the heap values it holds,
 //! and what it gives back when nobody will read its result.
 //!
@@ -26,6 +26,7 @@ pub(crate) enum OpKind {
     Sleep,
     ProcessWait,
     Open,
+    Sync,
     Task,
     Resolve,
     Watch,
@@ -123,6 +124,17 @@ pub(crate) enum PendingOp {
         /// Pre-allocated port Value (born in the solver's region at the call site).
         port: Value,
     },
+    /// Flush a file or directory to stable storage. Portless.
+    ///
+    /// A sync runs on the thread pool on every platform, as an open does, so
+    /// `PoolOp::Sync` owns the path the syscall reads, and `buffer_handle` is
+    /// an empty placeholder.
+    #[allow(dead_code)]
+    Sync {
+        /// The path (for error messages).
+        path: String,
+        buffer_handle: BufferHandle,
+    },
     /// Background task — arbitrary closure running on thread pool.
     Task { buffer_handle: BufferHandle },
     /// DNS resolution via getaddrinfo(3). Portless.
@@ -215,6 +227,7 @@ impl PendingOp {
             PendingOp::Sleep { buffer_handle, .. } => Some(*buffer_handle),
             PendingOp::ProcessWait { buffer_handle, .. } => Some(*buffer_handle),
             PendingOp::Open { buffer_handle, .. } => Some(*buffer_handle),
+            PendingOp::Sync { buffer_handle, .. } => Some(*buffer_handle),
             PendingOp::Task { buffer_handle, .. } => Some(*buffer_handle),
             PendingOp::Resolve { buffer_handle, .. } => Some(*buffer_handle),
             PendingOp::WatchNext { buffer_handle, .. } => Some(*buffer_handle),
@@ -247,6 +260,7 @@ impl PendingOp {
             PendingOp::WatchNext { watcher, .. } => out[0] = *watcher,
             PendingOp::SigNext { receiver, .. } => out[0] = *receiver,
             PendingOp::Sleep { .. }
+            | PendingOp::Sync { .. }
             | PendingOp::Task { .. }
             | PendingOp::Resolve { .. }
             | PendingOp::PollFd { .. }
@@ -279,6 +293,7 @@ impl PendingOp {
             | PendingOp::Sleep { .. }
             | PendingOp::ProcessWait { .. }
             | PendingOp::Open { .. }
+            | PendingOp::Sync { .. }
             | PendingOp::Task { .. }
             | PendingOp::Resolve { .. }
             | PendingOp::WatchNext { .. }
@@ -318,6 +333,7 @@ impl PendingOp {
             PendingOp::Sleep { .. } => "sleep",
             PendingOp::ProcessWait { .. } => "process wait",
             PendingOp::Open { .. } => "open",
+            PendingOp::Sync { .. } => "sync",
             PendingOp::Task { .. } => "task",
             PendingOp::Resolve { .. } => "resolve",
             PendingOp::WatchNext { .. } => "watch",

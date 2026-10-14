@@ -1,4 +1,4 @@
-//! audited: 2026-09-23
+//! audited: 2026-10-14
 //! `CompletionHub::submit`, and the runner each pool operation dispatches to
 //! on the worker that takes it.
 //!
@@ -121,6 +121,7 @@ pub(super) fn run(op: PoolOp, bounds: Bounds) -> (i32, Vec<u8>) {
         PoolOp::Open { path, flags, mode } => {
             open::open(OpBound::detached(bounds), &path, flags, mode)
         }
+        PoolOp::Sync { path } => open::sync(&path),
         PoolOp::Task(closure) => closure(),
         PoolOp::Resolve { hostname } => resolve(&hostname),
 

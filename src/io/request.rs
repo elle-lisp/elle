@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-10-14
 //! IoRequest — typed I/O request descriptors.
 //!
 //! Stream primitives build IoRequest values and yield them via SIG_IO.
@@ -182,6 +182,9 @@ pub enum IoOp {
         direction: Direction,
         encoding: Encoding,
     },
+    /// Flush the file or directory at `path` to stable storage, as fsync(2)
+    /// does. Portless. Returns nil on completion.
+    Sync { path: String },
     /// Run an arbitrary closure on a background thread.
     /// Returns bytes on success, error on failure.
     #[allow(dead_code)]
