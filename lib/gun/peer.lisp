@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-12
+(elle/epoch 15)
+# audited: 2026-10-14
 ## One std/gun WebSocket connection: the hello, the reader loop, the send lock, and close.
 ## lib/gun/mesh.md
 ## lib/gun/overview.md
@@ -7,19 +7,21 @@
 ## Loaded via:
 ##   (def peer ((import "std/gun/peer") :wire wire :websocket ws))
 ##
-## Exports: {:serve :dial}
+## Exports: {:serve :dial :require-websocket}
 ##
 ## Both take an `on` struct of five functions, which the mesh supplies:
 ## :up and :ready take the new peer, :message takes the peer and a message,
 ## :down takes the peer that left, and :error takes an error with no caller.
-## A peer is {:key :id :send :close}: :key is unique to the connection, and
-## :id is the database id the other side sent in its hello.
+## A peer is {:key :id :send :close :gone}: :key is unique to the connection,
+## :id is the database id the other side sent in its hello, and :gone is a
+## latch that close opens. A peer that :up closes is not answered or readied.
 
 (fn [&named wire websocket]
 
   (def sync ((import "std/sync")))
 
   (defn require-websocket []
+    "Raise :mesh-not-configured when this module has no :websocket."
     (when (nil? websocket)
       (error {:error :gun-error
               :reason :mesh-not-configured
@@ -48,20 +50,25 @@
     (let [send (make-sender conn)
           transport (get conn :transport)
           @peer nil
-          @gone false
+          gone (sync:make-latch)
           close (fn []
-                  (unless gone
-                    (assign gone true)
+                  (unless (gone:open?)
+                    (gone:open)
                     (when peer (on:down peer)))
                   (protect (transport:close))
                   nil)
           hello (fn [msg]
                   (assign
                     peer
-                    {:key (sys/unique) :id msg:peer :send send :close close})
+                    {:key (sys/unique)
+                     :id msg:peer
+                     :send send
+                     :close close
+                     :gone gone})
                   (on:up peer)
-                  (unless dialer? (send (wire:hi my-id)))
-                  (on:ready peer))
+                  (unless (gone:open?)
+                    (unless dialer? (send (wire:hi my-id)))
+                    (on:ready peer)))
           handle (fn [text]
                    (let [[ok? msg] (protect (wire:decode text))]
                      (cond
@@ -130,4 +137,4 @@
                 :message (string "no hello from " url)}))
       peer))
 
-  {:serve serve :dial dial})
+  {:serve serve :dial dial :require-websocket require-websocket})

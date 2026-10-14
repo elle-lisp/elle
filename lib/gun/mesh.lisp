@@ -1,6 +1,6 @@
 (elle/epoch 15)
 # audited: 2026-10-14
-## The std/gun mesh rules: fetch, forward, acks, deferral and resync, over the connections peer.lisp runs.
+## The std/gun mesh rules: fetch, forward, acks, deferral, resync, redial and close, over the connections peer.lisp runs.
 ## lib/gun/mesh.md
 ## lib/gun/overview.md
 ##
@@ -8,11 +8,11 @@
 ##   (def mesh ((import "std/gun/mesh") :core core :wire wire :peer peer))
 ##
 ## Exports: {:fetch :touch :broadcast :forget :await-ack :serve :connect
-##           :peers}
+##           :keep :close :peers}
 ##
 ## A wait is a record of the peers a get or a put went to, and a latch that
 ## opens when every one answered or left (a get), or when the first one
-## acked (a put).
+## acked (a put). The database's :closed latch opens once, on close.
 
 (fn [&named core wire peer]
 
@@ -31,6 +31,11 @@
     "Run thunk, and give any error it raises to the database's :on-error."
     (let [[ok? err] (protect (thunk))]
       (unless ok? (core:report c err))))
+
+  (defn closed? [c]
+    "True once c has closed."
+    (let [latch c:closed]
+      (latch:open?)))
 
   ## ── Peers ────────────────────────────────────────────────────────────
 
@@ -188,7 +193,7 @@
 
   (defn handlers [c]
     "The functions peer.lisp calls for the database c."
-    {:up (fn [p] (put c:peers p:key p))
+    {:up (fn [p] (if (closed? c) (p:close) (put c:peers p:key p)))
      :ready (fn [p]
               (let [souls [;(keys c:loaded)]]
                 (unless (empty? souls)
@@ -250,11 +255,54 @@
     "Accept peers for c on listener until it closes."
     (peer:serve listener c:id (handlers c)))
 
+  (defn dial [c url]
+    (peer:dial url c:id c:wait (handlers c)))
+
   (defn connect [c url]
     "Dial the peer at url for c, and answer a function that closes the
-     connection."
-    (let [p (peer:dial url c:id c:wait (handlers c))]
+     connection. Raises :closed once c has closed."
+    (when (closed? c) (gun-error :closed "the database is closed"))
+    (let [p (dial c url)]
       p:close))
+
+  (defn pause [c seconds]
+    "Wait seconds, or until c closes."
+    (let [latch c:closed]
+      (ev/timeout seconds
+                  (fn []
+                    (latch:wait)
+                    true))))
+
+  (defn keep [c url lo hi]
+    "Start a keeper: a fiber that dials url for c until c closes. After a
+     dial that succeeds, it waits for the peer to leave, and its delay goes
+     back to lo. After a dial that fails, it reports the error. Then it waits
+     its delay, which each failed dial doubles up to hi, and dials again."
+    (peer:require-websocket)
+    (ev/spawn (fn []
+                (def @delay lo)
+                (while (not (closed? c))
+                  (let [[ok? p] (protect (dial c url))]
+                    (cond
+                      ok? (let [gone p:gone]
+                            (gone:wait)
+                            (assign delay lo)
+                            (pause c delay))
+                      (closed? c) nil
+                      (begin
+                        (core:report c p)
+                        (pause c delay)
+                        (assign delay (min hi (* 2 delay)))))))))
+    nil)
+
+  (defn close [c]
+    "Close c: end every keeper, close every connected peer, and close each
+     peer that registers after this. A second close does nothing."
+    (let [latch c:closed]
+      (latch:open))
+    (each p in (values c:peers)
+      (p:close))
+    nil)
 
   (defn peers [c]
     "The database ids of the peers connected to c."
@@ -267,4 +315,6 @@
    :await-ack await-ack
    :serve serve
    :connect connect
+   :keep keep
+   :close close
    :peers peers})

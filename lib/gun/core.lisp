@@ -1,6 +1,6 @@
 (elle/epoch 15)
 # audited: 2026-10-14
-## One gun database: its graph, store, clock, lock, subscriptions and peers; loading, the chain walk, the merges and notify.
+## One gun database: its graph, store, clock, lock, subscriptions, peers and close latch; loading, the walk, the merges and notify.
 ## lib/gun.md
 ## lib/gun/mesh.md
 ## lib/gun/sea.md
@@ -41,7 +41,8 @@
      :next-sub (box 0)
      :peers @{}
      :pending @{}
-     :lock (sync:make-lock)})
+     :lock (sync:make-lock)
+     :closed (sync:make-latch)})
 
   (defn report [core err]
     "Give err to the database's :on-error."

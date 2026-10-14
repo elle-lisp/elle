@@ -102,16 +102,33 @@
     "True when v is a chain."
     (= (value:kind-of v) :chain))
 
-  (defn open [&named @store @clock @wait @on-error]
+  (defn check-redial [redial]
+    "Raise :invalid-redial unless redial is [min max], two positive numbers
+     with min no more than max."
+    (unless (and (array? redial) (= (length redial) 2) (all? number? redial)
+                 (< 0 (first redial)) (<= (first redial) (get redial 1)))
+      (gun-error :invalid-redial (string ":redial is not [min max] in seconds: "
+                 redial))))
+
+  (defn open [&named @store @clock @wait @on-error @peers @redial]
     "A database: the chain with no keys. :store defaults to a fresh memory
      store, and :clock to a clock on the wall clock. :wait is how long a first
      read waits for the peers, 1 second by default. :on-error takes each error
-     that a write from a peer raises; the default writes it to stderr."
+     that a write from a peer, or a dial to one, raises; the default writes it
+     to stderr. :peers lists ws:// urls to keep a connection to, redialing
+     with the [min max] seconds of :redial, [0.1 30] by default."
     (default store (stores:memory-store))
     (default clock (state:make-clock))
     (default wait 1)
     (default on-error print-error)
-    (make-chain (core:make-core store clock wait on-error) nil []))
+    (default peers [])
+    (default redial [0.1 30])
+    (check-redial redial)
+    (let [db (core:make-core store clock wait on-error)
+          [lo hi] redial]
+      (each url in peers
+        (mesh:keep db url lo hi))
+      (make-chain db nil [])))
 
   (defn chain-get [chain key]
     "The chain one key further than chain. key is a string or a keyword. On
@@ -294,6 +311,11 @@
     "The ids of the peers connected to the database chain."
     (mesh:peers chain:core))
 
+  (defn close [chain]
+    "End the keepers of the database chain, close its peers, and close each
+     peer that registers after this. Local reads and writes still work."
+    (mesh:close chain:core))
+
   ## ── User spaces ──────────────────────────────────────────────────────
 
   (defn user [chain pair]
@@ -319,6 +341,7 @@
    :serve serve
    :connect connect
    :peers peers
+   :close close
    :link value:link
    :link? value:link?
    :link-soul value:link-soul
