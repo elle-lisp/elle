@@ -1,15 +1,17 @@
-//! `write_value_to_buffer` — writing an Elle Value into raw C storage.
+// audited: 2026-10-13
+//! `write_value_to_buffer`: write a value into caller-provided C memory of a described type.
 //!
-//! Split from the module root: this is the low-level counterpart to
-//! `MarshalledArg::new`, writing directly into a caller-provided buffer rather
-//! than allocating owned `ArgStorage`.
+//! docs/ffi.md
+//!
+//! This is the counterpart of `MarshalledArg::new` for memory the caller owns:
+//! a struct field, an array element, `ffi/write`, or a callback's struct result.
 
 use super::{ArgStorage, MarshalledArg};
 use crate::error::{LError, LResult};
-use crate::ffi::marshal::{desc_name_full, extract_int, range_check};
+use crate::ffi::scalar::write_scalar;
 use crate::ffi::types::TypeDesc;
 use crate::value::Value;
-use std::ffi::{c_void, CString};
+use std::ffi::CString;
 
 /// Write a single Elle Value into a C buffer at the given pointer.
 ///
@@ -27,115 +29,6 @@ pub fn write_value_to_buffer(
 ) -> LResult<Vec<MarshalledArg>> {
     match desc {
         TypeDesc::Void => Err(LError::ffi_error("marshal", "cannot write void to buffer")),
-
-        TypeDesc::Bool => {
-            let v: std::ffi::c_int = if value.is_truthy() { 1 } else { 0 };
-            unsafe { *(ptr as *mut std::ffi::c_int) = v };
-            Ok(Vec::new())
-        }
-
-        TypeDesc::I8 | TypeDesc::Char => {
-            let n = extract_int(value, desc_name_full(desc))?;
-            range_check(n, i8::MIN as i64, i8::MAX as i64, desc_name_full(desc))?;
-            unsafe { *(ptr as *mut i8) = n as i8 };
-            Ok(Vec::new())
-        }
-        TypeDesc::U8 | TypeDesc::UChar => {
-            let n = extract_int(value, desc_name_full(desc))?;
-            range_check(n, u8::MIN as i64, u8::MAX as i64, desc_name_full(desc))?;
-            unsafe { *ptr = n as u8 };
-            Ok(Vec::new())
-        }
-        TypeDesc::I16 | TypeDesc::Short => {
-            let n = extract_int(value, desc_name_full(desc))?;
-            range_check(n, i16::MIN as i64, i16::MAX as i64, desc_name_full(desc))?;
-            unsafe { *(ptr as *mut i16) = n as i16 };
-            Ok(Vec::new())
-        }
-        TypeDesc::U16 | TypeDesc::UShort => {
-            let n = extract_int(value, desc_name_full(desc))?;
-            range_check(n, u16::MIN as i64, u16::MAX as i64, desc_name_full(desc))?;
-            unsafe { *(ptr as *mut u16) = n as u16 };
-            Ok(Vec::new())
-        }
-        TypeDesc::I32 | TypeDesc::Int => {
-            let n = extract_int(value, desc_name_full(desc))?;
-            range_check(
-                n,
-                std::ffi::c_int::MIN as i64,
-                std::ffi::c_int::MAX as i64,
-                desc_name_full(desc),
-            )?;
-            unsafe { *(ptr as *mut i32) = n as i32 };
-            Ok(Vec::new())
-        }
-        TypeDesc::U32 | TypeDesc::UInt => {
-            let n = extract_int(value, desc_name_full(desc))?;
-            range_check(n, 0, std::ffi::c_uint::MAX as i64, desc_name_full(desc))?;
-            unsafe { *(ptr as *mut u32) = n as u32 };
-            Ok(Vec::new())
-        }
-        TypeDesc::I64 | TypeDesc::Long | TypeDesc::SSize => {
-            let n = extract_int(value, desc_name_full(desc))?;
-            unsafe { *(ptr as *mut i64) = n };
-            Ok(Vec::new())
-        }
-        TypeDesc::U64 | TypeDesc::ULong | TypeDesc::Size => {
-            let n = extract_int(value, desc_name_full(desc))?;
-            // Bit-reinterpret back to u64: completes the lossless round-trip
-            // with from_c.rs. See from_c.rs module-level doc for convention.
-            unsafe { *(ptr as *mut u64) = n as u64 };
-            Ok(Vec::new())
-        }
-
-        TypeDesc::Float => {
-            let f = value
-                .as_float()
-                .or_else(|| value.as_int().map(|i| i as f64))
-                .ok_or_else(|| {
-                    LError::ffi_type_error(
-                        "float",
-                        format!("expected number, got {}", value.type_name()),
-                    )
-                })?;
-            unsafe { *(ptr as *mut f32) = f as f32 };
-            Ok(Vec::new())
-        }
-        TypeDesc::Double => {
-            let f = value
-                .as_float()
-                .or_else(|| value.as_int().map(|i| i as f64))
-                .ok_or_else(|| {
-                    LError::ffi_type_error(
-                        "double",
-                        format!("expected number, got {}", value.type_name()),
-                    )
-                })?;
-            unsafe { *(ptr as *mut f64) = f };
-            Ok(Vec::new())
-        }
-
-        TypeDesc::Ptr => {
-            let p = if value.is_nil() {
-                std::ptr::null::<c_void>()
-            } else if let Some(addr) = value.as_pointer() {
-                addr as *const c_void
-            } else if let Some(cell) = value.as_managed_pointer() {
-                match cell.get() {
-                    Some(addr) => addr as *const c_void,
-                    None => {
-                        return Err(LError::ffi_type_error("ptr", "pointer has been freed"));
-                    }
-                }
-            } else {
-                return Err(LError::ffi_type_error(
-                    "ptr",
-                    format!("expected pointer or nil, got {}", value.type_name()),
-                ));
-            };
-            unsafe { *(ptr as *mut *const c_void) = p };
-            Ok(Vec::new())
-        }
 
         TypeDesc::Str => {
             // nil → NULL pointer
@@ -273,5 +166,8 @@ pub fn write_value_to_buffer(
                 ))
             }
         }
+
+        // Every other type is a scalar, and owns nothing beyond the write.
+        _ => write_scalar(ptr, value, desc).map(|()| Vec::new()),
     }
 }

@@ -1,16 +1,16 @@
-//! `MarshalledArg::new` and its struct/array marshalling helpers.
+// audited: 2026-10-13
+//! `MarshalledArg::new`: convert one argument value to the C storage its type names, structs and arrays included.
 //!
-//! Split from the module root so the large per-`TypeDesc` conversion match and
-//! its compound (struct/array) helpers live apart from the storage type
-//! definitions and the `as_arg` accessor.
+//! docs/ffi.md
 
 use super::{ArgStorage, MarshalledArg};
 use crate::error::{LError, LResult};
-use crate::ffi::marshal::{desc_name, extract_int, range_check, AlignedBuffer};
+use crate::ffi::marshal::AlignedBuffer;
+use crate::ffi::scalar::{desc_name_full, extract_int, int_in, number, pointer};
 use crate::ffi::to_c::write_value_to_buffer;
-use crate::ffi::types::{StructDesc, TypeDesc};
+use crate::ffi::types::{to_c_bool, StructDesc, TypeDesc};
 use crate::value::Value;
-use std::ffi::{c_void, CString};
+use std::ffi::CString;
 
 impl MarshalledArg {
     /// Create from an Elle Value and a type descriptor.
@@ -23,144 +23,43 @@ impl MarshalledArg {
                 ));
             }
 
-            TypeDesc::Bool => ArgStorage::I32(if value.is_truthy() { 1 } else { 0 }),
+            TypeDesc::Bool => ArgStorage::U8(to_c_bool(value)),
+            TypeDesc::Bool32 => ArgStorage::I32(to_c_bool(value)),
 
-            TypeDesc::I8 => {
-                let n = extract_int(value, "i8")?;
-                range_check(n, i8::MIN as i64, i8::MAX as i64, "i8")?;
-                ArgStorage::I8(n as i8)
+            TypeDesc::I8 | TypeDesc::Char => {
+                ArgStorage::I8(int_in(value, desc, i8::MIN as i64, i8::MAX as i64)? as i8)
             }
             TypeDesc::U8 | TypeDesc::UChar => {
-                let n = extract_int(value, desc_name(desc))?;
-                range_check(n, u8::MIN as i64, u8::MAX as i64, desc_name(desc))?;
-                ArgStorage::U8(n as u8)
+                ArgStorage::U8(int_in(value, desc, u8::MIN as i64, u8::MAX as i64)? as u8)
             }
-            TypeDesc::I16 => {
-                let n = extract_int(value, "i16")?;
-                range_check(n, i16::MIN as i64, i16::MAX as i64, "i16")?;
-                ArgStorage::I16(n as i16)
+            TypeDesc::I16 | TypeDesc::Short => {
+                ArgStorage::I16(int_in(value, desc, i16::MIN as i64, i16::MAX as i64)? as i16)
             }
-            TypeDesc::U16 => {
-                let n = extract_int(value, "u16")?;
-                range_check(n, u16::MIN as i64, u16::MAX as i64, "u16")?;
-                ArgStorage::U16(n as u16)
+            TypeDesc::U16 | TypeDesc::UShort => {
+                ArgStorage::U16(int_in(value, desc, u16::MIN as i64, u16::MAX as i64)? as u16)
             }
-            TypeDesc::I32 => {
-                let n = extract_int(value, "i32")?;
-                range_check(n, i32::MIN as i64, i32::MAX as i64, "i32")?;
-                ArgStorage::I32(n as i32)
+            TypeDesc::I32 | TypeDesc::Int => ArgStorage::I32(int_in(
+                value,
+                desc,
+                std::ffi::c_int::MIN as i64,
+                std::ffi::c_int::MAX as i64,
+            )? as i32),
+            TypeDesc::U32 | TypeDesc::UInt => {
+                ArgStorage::U32(int_in(value, desc, 0, std::ffi::c_uint::MAX as i64)? as u32)
             }
-            TypeDesc::U32 => {
-                let n = extract_int(value, "u32")?;
-                range_check(n, u32::MIN as i64, u32::MAX as i64, "u32")?;
-                ArgStorage::U32(n as u32)
+            TypeDesc::I64 | TypeDesc::Long | TypeDesc::SSize => {
+                ArgStorage::I64(extract_int(value, desc_name_full(desc))?)
             }
-            TypeDesc::I64 => {
-                let n = extract_int(value, "i64")?;
-                ArgStorage::I64(n)
-            }
-            TypeDesc::U64 => {
-                let n = extract_int(value, "u64")?;
+            TypeDesc::U64 | TypeDesc::ULong | TypeDesc::Size => {
                 // Bit-reinterpret back to u64: completes the lossless round-trip
                 // with from_c.rs. See from_c.rs module-level doc for convention.
-                ArgStorage::U64(n as u64)
-            }
-            TypeDesc::Int => {
-                let n = extract_int(value, "int")?;
-                range_check(
-                    n,
-                    std::ffi::c_int::MIN as i64,
-                    std::ffi::c_int::MAX as i64,
-                    "int",
-                )?;
-                ArgStorage::I32(n as i32)
-            }
-            TypeDesc::UInt => {
-                let n = extract_int(value, "uint")?;
-                range_check(n, 0, std::ffi::c_uint::MAX as i64, "uint")?;
-                ArgStorage::U32(n as u32)
-            }
-            TypeDesc::Long => {
-                let n = extract_int(value, "long")?;
-                ArgStorage::I64(n as std::ffi::c_long as i64)
-            }
-            TypeDesc::ULong => {
-                let n = extract_int(value, "ulong")?;
-                ArgStorage::U64(n as std::ffi::c_ulong as u64)
-            }
-            TypeDesc::Char => {
-                let n = extract_int(value, "char")?;
-                range_check(n, i8::MIN as i64, i8::MAX as i64, "char")?;
-                ArgStorage::I8(n as i8)
-            }
-            TypeDesc::Short => {
-                let n = extract_int(value, "short")?;
-                range_check(
-                    n,
-                    std::ffi::c_short::MIN as i64,
-                    std::ffi::c_short::MAX as i64,
-                    "short",
-                )?;
-                ArgStorage::I16(n as i16)
-            }
-            TypeDesc::UShort => {
-                let n = extract_int(value, "ushort")?;
-                range_check(n, 0, std::ffi::c_ushort::MAX as i64, "ushort")?;
-                ArgStorage::U16(n as u16)
-            }
-            TypeDesc::Size => {
-                let n = extract_int(value, "size")?;
-                ArgStorage::U64(n as usize as u64)
-            }
-            TypeDesc::SSize => {
-                let n = extract_int(value, "ssize")?;
-                ArgStorage::I64(n as isize as i64)
+                ArgStorage::U64(extract_int(value, desc_name_full(desc))? as u64)
             }
 
-            TypeDesc::Float => {
-                let f = value
-                    .as_float()
-                    .or_else(|| value.as_int().map(|i| i as f64))
-                    .ok_or_else(|| {
-                        LError::ffi_type_error(
-                            "float",
-                            format!("expected number, got {}", value.type_name()),
-                        )
-                    })?;
-                ArgStorage::F32(f as f32)
-            }
-            TypeDesc::Double => {
-                let f = value
-                    .as_float()
-                    .or_else(|| value.as_int().map(|i| i as f64))
-                    .ok_or_else(|| {
-                        LError::ffi_type_error(
-                            "double",
-                            format!("expected number, got {}", value.type_name()),
-                        )
-                    })?;
-                ArgStorage::F64(f)
-            }
+            TypeDesc::Float => ArgStorage::F32(number(value, desc)? as f32),
+            TypeDesc::Double => ArgStorage::F64(number(value, desc)?),
 
-            TypeDesc::Ptr => {
-                if value.is_nil() {
-                    ArgStorage::Ptr(std::ptr::null())
-                } else if let Some(addr) = value.as_pointer() {
-                    ArgStorage::Ptr(addr as *const c_void)
-                } else if let Some(cell) = value.as_managed_pointer() {
-                    match cell.get() {
-                        Some(addr) => ArgStorage::Ptr(addr as *const c_void),
-                        None => {
-                            return Err(LError::ffi_type_error("ptr", "pointer has been freed"));
-                        }
-                    }
-                } else {
-                    return Err(LError::ffi_type_error(
-                        "ptr",
-                        format!("expected pointer or nil, got {}", value.type_name()),
-                    ));
-                }
-            }
+            TypeDesc::Ptr => ArgStorage::Ptr(pointer(value)?),
 
             TypeDesc::Str => {
                 // nil → NULL pointer

@@ -1,4 +1,7 @@
-//! FFI library loading, symbol lookup, signature creation, call, and callback primitives
+// audited: 2026-10-13
+//! FFI library loading, symbol lookup, signature creation, call, and callback primitives.
+//!
+//! docs/ffi.md
 
 use crate::ffi::types::{CallingConvention, Signature};
 use crate::primitives::def::RegionEffect;
@@ -330,7 +333,8 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "ffi/run-teardowns" => prim_ffi_run_teardowns {
-        signal: Signal::errors(),
+        // Each teardown is a C symbol, so running them is a foreign call.
+        signal: Signal::ffi_errors(),
         arity: Arity::Exact(0),
         doc: "Run all registered FFI library teardowns (ffi/on-unload), in reverse \
               load order. Explicit-only; never unloads the libraries. Call only when \
@@ -366,10 +370,8 @@ primitive!(
             // AlignedBuffer — src/ffi/to_c.rs), `:ptr` accepts only
             // user-managed pointer values (never an Elle heap payload), and
             // the result is converted from C memory into the call's own
-            // region. No Elle reference survives the call, so the arg clique
-            // would be pure over-keep — it leaked one region per heap arg per
-            // call once call-result-arg clique increfs became real
-            // (region-ffi-callback-arg-uaf.lisp's bounded assert is the pin).
+            // region. No Elle reference survives the call, so an arg clique
+            // would keep each heap arg's region alive for nothing.
             effect: RegionEffect::Fresh,
         }
         "ffi/callback" => prim_ffi_callback {

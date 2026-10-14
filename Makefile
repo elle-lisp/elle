@@ -241,7 +241,8 @@ IMPL_PROFILES     ?=
 # gate inside it can run. The patterns are `grep -e` substrings of a path.
 ELLE_SKIP_FFI := -e ffi.lisp -e prim-ffi.lisp -e compress.lisp -e sqlite.lisp \
                  -e zmq.lisp -e git.lisp -e http.lisp \
-                 -e git-write.lisp -e semver-check.lisp
+                 -e git-write.lisp -e semver-check.lisp \
+                 -e ffi-bool.lisp -e ffi-string-field.lisp
 NOFFI_FILES = $(shell printf '%s\n' $(LANG_FILES) | grep -v $(ELLE_SKIP_FFI))
 
 # The no-features binary, beside the runner's build. That build cannot host the

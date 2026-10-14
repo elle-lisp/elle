@@ -1,6 +1,7 @@
-//! C → Value unmarshalling: read_value_from_buffer.
+// audited: 2026-10-13
+//! C → Value unmarshalling: `read_value_from_buffer` reads C memory of a described type into a value.
 //!
-//! Converts C-typed data back into Elle Values.
+//! docs/ffi.md
 //!
 //! # u64 round-trip convention
 //!
@@ -11,14 +12,15 @@
 //!
 //! This is lossless — all 64 bits are preserved. Callers that need the
 //! original unsigned value recover it with `value.as_int().unwrap() as u64`.
-//! The same reinterpretation happens in `to_c.rs` when writing the value back
-//! to C: `extract_int(value)? as u64` recovers the original bits.
+//! The same reinterpretation happens in `scalar.rs` and `to_c/new.rs` when
+//! writing the value back to C: `extract_int(..)? as u64` recovers the
+//! original bits.
 //!
 //! This convention works correctly because `Value::int` stores a full i64
 //! (no truncation — the tagged-union representation stores a full i64).
 
 use crate::error::{LError, LResult};
-use crate::ffi::types::TypeDesc;
+use crate::ffi::types::{from_c_bool, CBool, CBool32, TypeDesc};
 use crate::primitives::ctx::Alloc;
 use crate::value::Value;
 use std::ffi::c_void;
@@ -39,10 +41,8 @@ pub(crate) fn read_value_from_buffer(
     match desc {
         TypeDesc::Void => Ok(Value::NIL),
 
-        TypeDesc::Bool => {
-            let v = unsafe { *(ptr as *const std::ffi::c_int) };
-            Ok(Value::bool(v != 0))
-        }
+        TypeDesc::Bool => Ok(from_c_bool(unsafe { *(ptr as *const CBool) })),
+        TypeDesc::Bool32 => Ok(from_c_bool(unsafe { *(ptr as *const CBool32) })),
 
         TypeDesc::I8 | TypeDesc::Char => {
             let v = unsafe { *(ptr as *const i8) };
