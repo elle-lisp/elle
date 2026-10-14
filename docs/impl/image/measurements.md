@@ -1,6 +1,6 @@
 # What the experiments measured
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-14 -->
 
 Eight questions the image design turned on, each answered by an experiment,
 with the numbers it produced.
@@ -50,8 +50,13 @@ and [plan.md](plan.md) the order everything lands in.
    two classes: the three stdio-port `External`s and the two default
    traitsets ([image.md](../image.md) § "Process-owned resources reconstruct
    in place"); nothing else in the graph is refused, so the boot image is
-   dumpable. Relocation load: 1,258 heap-pointer slots + 350 `RegionSlice`
-   ptrs + 684 primitive slots ≈ 2,300 relocation entries.
+   dumpable. The default traitsets have since become immutable structs
+   ([traits.md](../../traits.md)). The census now counts them among the
+   sealed `LStruct`s, and its unsealed leaves are the three ports alone. The
+   dumper still never copies a default traitset ([sealing.md](sealing.md)
+   § "A traits slot has three answers"). Relocation load: 1,258 heap-pointer
+   slots + 350 `RegionSlice` ptrs + 684 primitive slots ≈ 2,300 relocation
+   entries.
 
    Most of the payload is source locations. The template foundation moved a
    code object's data into region pages, so what the census now measures
