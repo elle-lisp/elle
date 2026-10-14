@@ -68,10 +68,7 @@ impl VM {
         def: &'static crate::primitives::def::PrimitiveDef,
     ) {
         cctx.register_primitive(symbols, def);
-        let doc = Doc::of(def);
-        for name in std::iter::once(&def.name).chain(def.aliases) {
-            self.docs.insert((*name).to_string(), doc.clone());
-        }
+        Doc::enter(&mut self.docs, def);
         self.host_primitives.push(def);
     }
 
