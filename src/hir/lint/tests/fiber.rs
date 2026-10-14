@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-14
 //! The two hints a literal `fiber/new` gets: a call its deny set will deny, and a signal that will pass its mask.
 //!
 //! docs/signals/capabilities.md
@@ -10,8 +10,9 @@ use crate::lint::diagnostics::{Diagnostic, Severity};
 const DENIED: &str = "denied-fiber-call";
 const PASSES: &str = "fiber-signal-passes";
 
-/// A body that may raise `:fs` and `:error`: `file/read` declares both.
-const READS: &str = "(fn [] (file/read \"x\"))";
+/// A body that may raise `:fs` and `:error`, and nothing else: `file/stat`
+/// declares exactly those two.
+const READS: &str = "(fn [] (file/stat \"x\"))";
 
 /// The one hint of `rule` that `source` gets. Panics unless there is exactly one.
 fn the_hint(source: &str, rule: &str) -> Diagnostic {
