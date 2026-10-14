@@ -1,9 +1,15 @@
 // audited: 2026-10-14
-// A macro body reads and changes nothing outside its unit: the primitives an expansion refuses, and a file's compile.
+// A macro body reads and changes nothing outside its unit: the primitives an expansion refuses, a file's compile, a host primitive.
 //
 // docs/macros.md
 
 use crate::common::eval_source;
+use elle::primitives::ctx::NativeCtx;
+use elle::primitives::def::{PrimitiveDef, RegionEffect};
+use elle::signals::Signal;
+use elle::value::fiber::{SignalBits, SIG_OK};
+use elle::value::types::Arity;
+use elle::Value;
 
 /// Every primitive that reaches state outside the unit through no capability
 /// bit, by its canonical name. A primitive joins the list when its body reads
@@ -172,4 +178,50 @@ fn a_forced_tier_reports_the_refusal() {
         err.contains("macro 'pid'") && err.contains("sys/pid"),
         "the error names the macro and the primitive: {err}"
     );
+}
+
+fn prim_host_answer(_ctx: &mut NativeCtx<'_>, _args: &[Value]) -> (SignalBits, Value) {
+    (SIG_OK, Value::int(42))
+}
+
+/// A primitive the host registers after boot, as the rig registers
+/// `elle/build`.
+static HOST_ANSWER: PrimitiveDef = PrimitiveDef {
+    name: "host/answer",
+    func: prim_host_answer,
+    signal: Signal::silent(),
+    arity: Arity::Exact(0),
+    doc: "Answer 42, the primitive a host registers in this test.",
+    params: &[],
+    category: "host",
+    example: "(host/answer)",
+    effect: RegionEffect::Immediate,
+    ..PrimitiveDef::DEFAULT
+};
+
+/// A macro body reads a host primitive as run time does: it is listed, it has
+/// metadata and a docstring, and it runs. The counter-factual registered the
+/// primitive's documentation on the program VM alone, and the body found
+/// neither the name nor the docstring.
+#[test]
+fn a_macro_body_sees_a_host_primitive() {
+    let source = r#"
+(defmacro seen []
+  (string/join
+    (map string
+         [(contains? (apply set (vm/list-primitives)) 'host/answer)
+          (if-let [meta (vm/primitive-meta "host/answer")] (get meta :name) "no-meta")
+          (string/contains? (doc host/answer) "Answer 42")
+          (host/answer)])
+    " "))
+(seen)
+"#;
+    let mut rt = elle::runtime::Runtime::new();
+    rt.register_primitive(&HOST_ANSWER);
+    let (vm, symbols, cctx) = rt.parts();
+    let seen = elle::eval_all(source, symbols, vm, cctx, "<test>").map(|v| {
+        v.with_string(str::to_string)
+            .expect("the expansion is a string")
+    });
+    assert_eq!(seen, Ok("true host/answer true 42".to_string()));
 }
