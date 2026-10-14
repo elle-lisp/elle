@@ -1,6 +1,6 @@
 # Compilation Pipeline
 
-<!-- audited: 2026-10-13 -->
+<!-- audited: 2026-10-14 -->
 Compilation entry points: source reaches bytecode through the reader, expander, analyzer, lowerer and emitter.
 
 Module: [src/pipeline](../src/pipeline/AGENTS.md).
@@ -59,7 +59,8 @@ both ([impl/solver.md](impl/solver.md)).
 | Function | VM for macros | File fixpoint? | Callers |
 |----------|---------------|-----------|---------|
 | `compile` | Internal | No | Integration tests |
-| `compile_file` | Internal | Yes | `elle::program::run_source` (file, stdin, `-e`), `import/load-file`, the stdlib load, `eval_all`, `eval_file` |
+| `compile_file` | Internal | Yes | `elle::program::run_source` (file, stdin, `-e`), the stdlib load, `eval_all`, `eval_file` |
+| `compile_file_stored` | Internal | Yes | `import/load-file` |
 | `compile_file_repl` | Internal | Yes | The REPL, for each line |
 | `eval` | Borrowed | No | Tests |
 | `eval_all` | Internal (delegates to `compile_file`) | Yes | Tests |
@@ -82,6 +83,7 @@ expand macros on the context's own macro VM, so they need no caller VM; the
 ```rust
 pub fn compile(source: &str, symbols: &mut SymbolTable, cctx: &mut CompileCtx, source_name: &str) -> Result<CodeUnit, String>
 pub fn compile_file(source: &str, symbols: &mut SymbolTable, cctx: &mut CompileCtx, source_name: &str) -> Result<CodeUnit, String>
+pub fn compile_file_stored(source: &str, symbols: &mut SymbolTable, cctx: &mut CompileCtx, path: &str) -> Result<CodeUnit, String>
 pub fn compile_file_repl(source: &str, symbols: &mut SymbolTable, cctx: &mut CompileCtx, source_name: &str) -> Result<(CodeUnit, Expander), String>
 pub fn eval(source: &str, symbols: &mut SymbolTable, vm: &mut VM, cctx: &mut CompileCtx, source_name: &str) -> Result<Value, String>
 pub fn eval_all(source: &str, symbols: &mut SymbolTable, vm: &mut VM, cctx: &mut CompileCtx, source_name: &str) -> Result<Value, String>
@@ -306,13 +308,14 @@ one. A call to an earlier sibling reads that sibling's signal:
 
 ## Compile context
 
-[cache.rs](../src/pipeline/cache.rs) holds it. `CompileCtx` is the per-instance compile-time state: a macro-expansion VM
-(primitives registered), the core.lisp/prelude `Expander`, the
-`PrimitiveMeta`, and the REPL layer: the macros and definitions earlier REPL
-lines made. It is built once when the instance's `RuntimeCore` is constructed
-and threaded explicitly through every pipeline call — two embedded Elle
-instances on one thread each own their own, so neither sees the other's
-exports or REPL definitions.
+[cache.rs](../src/pipeline/cache.rs) holds it. `CompileCtx` is the per-instance
+compile-time state: a macro-expansion VM (primitives registered), the
+core.lisp/prelude `Expander`, the `PrimitiveMeta`, the REPL layer (the macros
+and definitions earlier REPL lines made), and the store of compiled files. It
+is built once when the instance's `RuntimeCore` is constructed and threaded
+explicitly through every pipeline call. Two embedded Elle instances on one
+thread each own their own, so neither sees the other's exports, REPL
+definitions or stored files.
 
 ### `with_macro_expansion()`
 
@@ -329,12 +332,40 @@ caller's unit, without borrowing the macro VM.
 Used by `eval`, `analyze` and `analyze_file`, which run expansion on their own
 VM.
 
+### The store
+
+`compile_file_stored` answers the `CodeUnit` the store keeps for `path` while
+the compile inputs still match, and otherwise compiles the file and keeps the
+unit. An entry holds a digest of the inputs that can change within an
+instance: the source text, the path, the capabilities `on_behalf_of` named,
+and each include's resolved path and text. A lookup resolves each include again
+on the macro VM, as the compile did, and reads it again. A compile that fails
+keeps nothing. Each load runs a clone of the kept unit, so every load runs the
+same code and builds values of its own ([modules.md](modules.md)).
+
+Registering a host binding, a host primitive or the standard library's exports
+empties the store, because every compile resolves those names. No other
+compile input needs a place in the key:
+
+- The epoch is in the source text. The build, the Unicode generation and the
+  configuration are fixed when the instance is built.
+- A loader's compile reads the instance's layer alone: no REPL layer, no
+  `eval` environment and no test transform.
+- A declared user signal keeps its bit for the life of the process, and a
+  compile that names an undeclared one fails.
+- A file's compile reads none of its imports (§ "Invariants" below).
+- A transformer is pure, so it reads nothing outside these inputs
+  ([macros.md](macros.md)).
+
+`CompileCtx::release` empties the store before teardown counts the residue.
+
 ### Invariants
 
 - Prelude must be 100% defmacro (no runtime definitions)
 - Primitives must be registered in the context's macro VM at construction
 - A compile never compiles another file. A file names its imports, and the
-  loader compiles each one when the import runs
+  loader compiles each one, or runs the code the store keeps, when the import
+  runs
 - A compile may run Elle code from the standard library: an `include` calls
   `import/resolve` to find its file, on the macro VM
   ([modules.md](modules.md))
