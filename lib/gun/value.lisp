@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-11
+(elle/epoch 15)
+# audited: 2026-10-14
 ## What a gun value may be, the link that points at a node, and the encoding that stores and orders values.
 ## lib/gun.md
 ## lib/gun/overview.md
@@ -9,18 +9,26 @@
 ##
 ## Exports: {:valid? :link :link? :link-soul :encode :decode :before?}
 ##
-## A link is a struct {:soul s} whose trait table carries {:gun :link}.
-## Equality ignores traits, so link? reads the table, never the shape.
+## A link is a struct {:soul s} whose trait table carries the :Gun protocol:
+## :kind answers :link, and :soul answers s. Equality ignores traits, so
+## link? reads the protocol, never the shape.
 
 (fn []
 
-  (def link-traits {:gun :link})
+  (def link-traits
+    {:Gun {:kind (fn [self] :link) :soul (fn [self] (get self :soul))}})
+
+  (defn kind-of [v]
+    "What the :kind method of v's :Gun protocol answers, or nil when v
+     carries no such protocol."
+    (when-let [t (when (struct? v) (traits v))]
+              (when-let [methods (get t :Gun)]
+                        (let [kind (get methods :kind)]
+                          (kind v)))))
 
   (defn link? [v]
     "True when v is a link built by link."
-    (and (struct? v)
-         (let [t (traits v)]
-           (and (not (nil? t)) (= (get t :gun) :link)))))
+    (= (kind-of v) :link))
 
   (defn link [soul]
     "A link to the node named soul, a non-empty immutable string."
