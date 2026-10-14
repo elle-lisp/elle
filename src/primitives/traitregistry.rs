@@ -2,13 +2,14 @@
 //! Per-instance trait registry: default traitsets stamped at allocation.
 //! docs/traits.md
 //!
-//! Each collection/sequence HeapTag has a default @struct traitset. The tables
-//! are **instance state** living on the `FiberHeap` (docs/impl/region/ctx.md:
-//! nothing correctness-bearing is thread-centric), so two embedded instances
-//! on one thread each carry their own and never cross-reference. The trait-method
-//! natives themselves are static `&'static PrimitiveDef` immediates — process-
-//! global and correctly shared, like every other primitive. Constructors read
-//! the heap's registry entry and stamp it into the new object's `traits` field.
+//! Each collection/sequence HeapTag has a default traitset, an immutable
+//! struct. The tables are **instance state** living on the `FiberHeap`
+//! (docs/impl/region/ctx.md: nothing correctness-bearing is thread-centric),
+//! so two embedded instances on one thread each carry their own and never
+//! cross-reference. The trait-method natives themselves are static
+//! `&'static PrimitiveDef` immediates — process-global and correctly shared,
+//! like every other primitive. Constructors read the heap's registry entry and
+//! stamp it into the new object's `traits` field.
 
 use std::collections::BTreeMap;
 

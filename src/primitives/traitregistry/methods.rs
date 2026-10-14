@@ -1,5 +1,5 @@
 // audited: 2026-10-23
-//! The default trait tables and their method natives: the Sequence and Collection protocols every collection carries.
+//! The default traitsets' method structs, the immutable tables that hold them, and the native methods they name.
 //!
 //! docs/traits.md
 
@@ -128,19 +128,9 @@ pub(super) fn alloc_trait_table(heap: &mut FiberHeap, entries: BTreeMap<TableKey
     )
 }
 
-/// Allocate a mutable trait-table struct as a ROOT of `heap`, alive for the
-/// instance's lifetime (see [`alloc_trait_table`]). Its node extent shares
-/// the shell's region, so it too is built through the root region.
-pub(super) fn alloc_trait_table_mut(
-    heap: &mut FiberHeap,
-    entries: BTreeMap<TableKey, Value>,
-) -> Value {
-    let region = crate::value::arena::root_region(heap);
-    let entries: Vec<(TableKey, Value)> = entries.into_iter().collect();
-    crate::value::build::struct_mut_with_traits(heap, &entries, Value::NIL, region)
-}
-
-/// Build a traitset @struct from optional protocol method structs into `heap`.
+/// Build a traitset from optional protocol method structs into `heap`. The
+/// traitset is immutable, so no write changes what every value of a family
+/// dispatches to (docs/traits.md).
 pub(super) fn make_traitset(
     heap: &mut FiberHeap,
     sequence: Option<Value>,
@@ -153,7 +143,7 @@ pub(super) fn make_traitset(
     if let Some(coll) = collection {
         entries.insert(TableKey::keyword("Collection"), coll);
     }
-    alloc_trait_table_mut(heap, entries)
+    alloc_trait_table(heap, entries)
 }
 
 // ── Trait method implementations ────────────────────────────────────
@@ -378,5 +368,3 @@ pub(super) fn trait_coll_empty_new(
         ),
     )
 }
-
-// ── Dispatch helper ─────────────────────────────────────────────────
