@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-12
+(elle/epoch 15)
+# audited: 2026-10-14
 # std/gun on the memory store: states, values, the HAM verdict, souls, merges and the chain API.
 # lib/gun.md
 #
@@ -110,6 +110,20 @@
   (assert (not (value:link? {:soul "users/alice"}))
           "a struct of the same shape is not a link")
   (assert (not (value:link? "users/alice")) "a soul is not a link"))
+
+# A trait table maps each protocol to a struct of methods (docs/traits.md).
+# A tag such as {:gun :link} passes link? and every other test in this file;
+# only reading the table itself catches it.
+(each l in [(value:link "users/alice") (value:decode "l:users/alice")]
+  (let [t (traits l)
+        methods (get t :Gun)]
+    (assert (= (keys t) (list :Gun)) "a link's table names the :Gun protocol")
+    (assert (struct? methods) "the protocol is a struct")
+    (each [name m] in methods
+      (assert (fn? m) (string "and its " name " is a method")))
+    (assert (= ((get methods :kind) l) :link) ":kind answers :link")
+    (assert (= ((get methods :soul) l) "users/alice")
+            ":soul answers the link's soul")))
 
 (each v in [[1] @[1] (list 1) |1| {:a 1} @{:a 1} (fn [] 1) :keyword 'symbol
             (/ 0.0 0.0) (/ 1.0 0.0) (/ -1.0 0.0) @"mutable" (@bytes 1)]
