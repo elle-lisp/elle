@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-14
 //! The keyword vocabulary: every spelling the Rust runtime mints from a fixed
 //! string.
 //!
@@ -27,6 +27,7 @@ pub(crate) static VOCABULARY: &[&str] = &[
     "addr",
     "aliases",
     "allocated-bytes",
+    "ambient",
     "annotated",
     "args",
     "arity",
@@ -229,6 +230,7 @@ pub(crate) static VOCABULARY: &[&str] = &[
     "exited",
     "signal-violation",
     "broken-proof",
+    "ambient-refused",
     "use-after-free",
     "wasm-error",
     // Type names (`type-of` and type errors mint `Value::keyword(type_name())`)

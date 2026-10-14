@@ -1,4 +1,4 @@
-// audited: 2026-10-07
+// audited: 2026-10-14
 //! `SIG_QUERY` dispatch: the questions a primitive asks the running VM.
 //!
 //! docs/runtime.md
@@ -209,6 +209,7 @@ impl VM {
                     // aliases as a list of strings
                     let aliases: Vec<Value> = doc.aliases.iter().map(|a| ctx.string(*a)).collect();
                     fields.insert(TableKey::keyword("aliases"), ctx.list(aliases));
+                    fields.insert(TableKey::keyword("ambient"), Value::bool(doc.ambient));
                     (SIG_OK, ctx.struct_from(fields))
                 } else {
                     (SIG_OK, Value::NIL)

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! Plugin loading for dynamically-linked Rust libraries.
 //!
 //! Plugins are `.so` files (cdylib crates) that depend on `elle-plugin`
@@ -126,16 +126,7 @@ pub fn load_plugin(path: &str, vm: &mut VM, symbols: &mut SymbolTable) -> LResul
     // Register docs
     for def in &collected {
         let _sym_id = symbols.intern(def.name);
-        let doc = Doc {
-            name: def.name,
-            doc: def.doc,
-            params: def.params,
-            arity: def.arity,
-            signal: def.signal,
-            category: def.category,
-            example: def.example,
-            aliases: def.aliases,
-        };
+        let doc = Doc::of(def);
         vm.docs.insert(def.name.to_string(), doc.clone());
         for alias in def.aliases {
             let _alias_id = symbols.intern(alias);

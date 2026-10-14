@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! Primitive definition type for declarative registration.
 //!
 //! src/primitives/AGENTS.md
@@ -280,6 +280,14 @@ pub struct PrimitiveDef {
     /// than fixed by its name. `None` (the default) for every primitive whose
     /// requirement is exactly its declared `signal.bits`.
     pub bits_from_args: Option<fn(&[Value]) -> crate::value::fiber::SignalBits>,
+    /// The body reads or changes state that no argument carries and no capability
+    /// bit names: the environment, a clock, a VM cache, a process-wide counter,
+    /// an address. A macro expansion refuses the call, because the unit's inputs
+    /// would no longer decide the expansion (docs/macros.md). A primitive that
+    /// declares a capability bit needs no mark for the effect that bit names.
+    /// False (the default) for every primitive whose answer its arguments and
+    /// the compile's bindings decide.
+    pub ambient: bool,
 }
 
 impl PrimitiveDef {
@@ -301,6 +309,7 @@ impl PrimitiveDef {
         moves_out: false,
         result_minted: false,
         bits_from_args: None,
+        ambient: false,
     };
 }
 
