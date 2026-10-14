@@ -70,7 +70,9 @@ it act on each one:
 - `SIG_FUEL`: The instruction budget ran out. A silent function spends fuel
   but never pauses ([inference.md](../../docs/signals/inference.md)). A spent
   expansion budget halts instead ([runtime.md](../../docs/runtime.md)).
-- `SIG_HALT`: Graceful VM termination. Non-resumable.
+- `SIG_HALT`: Graceful VM termination. Non-resumable. An expansion refuses an
+  ambient primitive with a halt that carries `:terminal`, so no mask catches it
+  ([macros.md](../../docs/macros.md)).
 
 `execute_code`, which `execute` calls, is the translation boundary. It
 converts `SignalBits` to `Result<Value, String>` for external callers. On
