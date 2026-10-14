@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-12
+# audited: 2026-10-14
 # An expansion runs every call on the interpreter, so silent compiled code cannot outrun its budget.
 # docs/runtime.md
 #
@@ -9,23 +9,9 @@
 # call, so compiled, it spends the fuel word and never tests the budget.
 #
 # The counter-factual: an expansion that reaches the JIT compiles `helper` on
-# its first call, so the probe answers true, and `spin` runs the compiled loop,
-# which no budget can halt, until the rig's deadline.
-
-## No call during an expansion is profiled, so nothing compiles.
-(def probed
-  (eval '(begin
-           (begin-for-syntax (def helper
-                               (fn [go]
-                                 (while go nil)
-                                 0)))
-           (defmacro probe []
-             (begin
-               (helper false)
-               (helper false)
-               (jit? helper)))
-           (probe))))
-(assert (= false probed) "the helper stays interpreted during the expansion")
+# its second call, and `spin` runs the compiled loop, which no budget can halt,
+# until the rig's deadline. No probe inside the expansion can ask instead:
+# `jit?` reads the VM's JIT cache, and an expansion refuses it (docs/macros.md).
 
 ## A silent loop after the warm-up spends the expansion budget, and halts.
 (def [spun? spin-err]
