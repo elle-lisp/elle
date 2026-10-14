@@ -298,7 +298,7 @@
 ["tests/lang/framing-records.lisp" :objects 1121]
 ["tests/lang/redis-resp.lisp" :objects 143]
 ["tests/lang/gun.lisp" :objects 3029]
-["tests/lang/gun-redis.lisp" :objects 1147]
+["tests/lang/gun-redis.lisp" :objects 1155]
 ["tests/lang/gun-wire.lisp" :objects 471]
 ["tests/lang/gun-mesh.lisp" :objects 2151]
 ["tests/lang/gun-sync.lisp" :objects 1042]
