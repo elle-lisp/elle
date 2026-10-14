@@ -1,6 +1,6 @@
 # Ownership adopts and the root's lifetime obligation
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-14 -->
 
 The owner edges no store site names, the capture and funnel adopts, and the lifetime obligation a root's single demise must meet.
 
@@ -311,6 +311,28 @@ is no longer interior and the container is not borrowed from. Pinned by
 and the guardfree witness [region-container-read-borrow-uaf.lisp](../../../tests/impl/region-container-read-borrow-uaf.lisp); the sibling face — a read
 result that *escapes* — is escape's, not this pass's ([escape.md](../escape.md), pinned by
 [region-container-read-escape-uaf.lisp](../../../tests/impl/region-container-read-escape-uaf.lisp)).
+
+**A release routed through a cell is a read of the cell.** A compiled capture cell sits
+in its binding's own stack slot, and a binder whose init is a call result records that
+result's region against the slot ([cells.md](cells.md)). The lowerer then releases the
+region by value: it loads the slot, finds the cell, and unwraps it to the content. That
+release reads the cell's page at the content region's own `decref_point`, which the
+binding chain can carry past the closure's last use. The cell's tight last use does not
+include it, because the release is no node of the tree. So a cell adopted into that
+closure is freed by the closure's subtree drop before the routed release unwraps it.
+The analysis therefore records each such pair, the cell and its routed region
+(`RegionInfo::cell_route_regions`). The obligation closes the pair into the alias set
+above: the root's drop must post-dominate the routed region's release, or the subtree
+refuses to Shared. On that baseline the cell's own release is clamped after the routed
+release ([cells.md](cells.md)). The lowerer orders the same pair at a shared
+`decref_point`, the routed release ahead of the cell's. Only a call-result region takes
+the value route, so a literal init records no pair, and a captured reassigned binding
+records none because its binder drops the init off its own register. Pinned by
+`region::infer::tests::adopt::captures::cell_routed_release_past_the_root_refuses_the_adopt`
+and the guardfree witness
+[region-capture-cell-adopt-uaf.lisp](../../../tests/impl/region-capture-cell-adopt-uaf.lisp):
+a top-level binding captured by a closure handed to `sys/spawn-vm`, whose join lands
+after the closure's last use.
 
 ## Why this is hybrid, and where RC remains
 
