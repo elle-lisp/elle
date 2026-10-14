@@ -131,7 +131,6 @@
 ["tests/impl/region-jit-emit-escape-uaf.lisp" :objects 175]
 ["tests/impl/region-jit-env.lisp" :objects 232]
 ["tests/impl/region-jit-error-unwind.lisp" :objects 361]
-["tests/impl/region-jit-halt-emit.lisp" :objects 193]
 ["tests/impl/region-jit-io-suspend-uaf.lisp" :objects 221]
 ["tests/impl/region-jit-tail-suspend.lisp" :objects 492]
 ["tests/impl/region-jit-tailloop.lisp" :objects 163]
