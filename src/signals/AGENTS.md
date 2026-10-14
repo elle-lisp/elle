@@ -1,6 +1,6 @@
 # signals
 
-<!-- audited: 2026-10-11 -->
+<!-- audited: 2026-10-14 -->
 
 Signal system for tracking which signals a function may emit. Includes the global signal registry for mapping signal keywords to bit positions.
 
@@ -57,6 +57,7 @@ Each predicate asks a specific question. No vague "is_inert".
 |----------|-------|
 | `Signal::SILENT` | `Signal::silent()` |
 | `Signal::YIELDS` | `Signal::yields()` |
+| `EFFECT_CAPS` | `\|:ffi :io :exec :gpu :os-signal :fs :net\|`, which every macro expansion withholds ([macros.md](../../docs/macros.md)) |
 
 ## Signal Registry
 
