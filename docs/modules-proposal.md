@@ -1,6 +1,6 @@
 # Modules: a proposal
 
-<!-- audited: 2026-10-13 -->
+<!-- audited: 2026-10-14 -->
 
 The module system Elle is building toward: compiled once per instance, linked across files, and shipped as images.
 
@@ -46,12 +46,12 @@ jointly. A body converges a definition only against itself, so a call to a
 later sibling, mutual recursion included, takes every bit
 ([pipeline.md](pipeline.md)).
 
-**A transformer may still reach outside its unit.** Where no fiber withholds
-the capability, a transformer may read files and load shared libraries.
-Scheduler I/O fails inside one as an unexpected signal. In a file's compile,
-`eval` and `import` fail because the macro VM has no compile context, not
-because a rule forbids them. Which of these a macro may do is an
-[open decision](#open-decisions).
+**A transformer still reads two things outside its unit.** Under `eval`, a
+parameter it calls answers the caller's dynamic binding. A closure, a syntax
+object and a parameter order by their address, so a transformer that sorts
+them may expand differently in two processes (#1387). Every other read and
+change outside the unit is refused ([macros.md](macros.md)). `eval` inside a
+transformer fails because the macro VM has no compile context.
 
 **A user signal's bit depends on the process.** A bit is assigned in
 declaration order, process-wide: `:alpha` is bit 32 or 33 depending on which
@@ -191,10 +191,18 @@ directory searched sets `ELLE_PATH=.`.
 
 ## Expansion is contained
 
-- A compile that code on a fiber starts expands every macro with the
-  capabilities that fiber withholds. A denied primitive in a transformer fails
-  the compile, naming the macro and the primitive (#1321,
+- A transformer is deterministic and changes no state outside its unit. It
+  may raise, because a raise is a compile error the unit's inputs decide, and
+  `list`, `concat` and quasiquote all raise.
+- A compile that code on a fiber starts expands every macro without the
+  capabilities that fiber withholds, and every expansion withholds the effect
+  capabilities as well. A denied primitive in a transformer fails the compile,
+  naming the macro and the primitive (#1321,
   [capabilities.md](signals/capabilities.md)).
+- A primitive that reads or changes ambient state through no capability bit
+  carries a mark, and an expansion refuses it. The refusal halts the
+  expansion, so no handler in the transformer catches it, and the compile
+  fails naming the macro and the primitive ([macros.md](macros.md)).
 - An expansion runs under a fuel budget the VM counts, which silent code, the
   fibers the expansion resumes and the expansions it starts all spend.
   Exhausting it fails the compile, naming the macro (#1322,
@@ -209,7 +217,9 @@ directory searched sets `ELLE_PATH=.`.
   [modules.md](modules.md)).
 
 Containment is what makes it safe to expand a file its reader did not write,
-which the LSP, the linter and `compile/analyze` do.
+which the LSP, the linter and `compile/analyze` do. A pure transformer is what
+lets [one compile per file](#one-compile-per-file) keep a unit: an input
+outside the key cannot change the expansion.
 
 ## Expansion is deterministic
 
@@ -342,8 +352,9 @@ Under (b), the top level must be pure. Signals answer whether it can raise.
 A second analysis answers whether it reads ambient state or changes shared
 state:
 
-- Mark the primitives that read process state: the environment, the
-  arguments, the pid, the clock, configuration, and identity hashes.
+- Read the mark an expansion refuses. It names the primitives that read or
+  change process state: the environment, the arguments, the pid, the clock,
+  configuration, and identity hashes.
 - Reject a top level that assigns a captured binding, mutates a container it
   did not allocate, or lets a mutable allocation escape into the value.
 - Reject a lambda that assigns a binding of the top level. `lib/aws.lisp`
@@ -351,8 +362,9 @@ state:
   lambda, so under (b) a second instantiation would overwrite the first's.
 - Enforce it at run time as well, by evaluating the top level in a fiber that
   withholds every capability. That catches the effects that carry a bit. The
-  ambient reads carry none, so whether they gain one is an
-  [open decision](#open-decisions); until then the analysis alone covers them.
+  ambient reads carry none, so the mark covers them, as it does for an
+  expansion. Whether they gain a bit instead is an
+  [open decision](#open-decisions).
 
 Literal imports at the top level need a rule of their own. Once imports link,
 a literal import of a pure module is a dependency, not an effect. A top level
@@ -440,18 +452,14 @@ fails too, because a function that holds an import may run from any file.
 extension, or by whether the file is UTF-8, must read its argument to know
 what it needs. `import-file` picks by name, and each loader declares its need.
 
+**Impure macros.** A transformer allowed to read ambient state makes its unit
+one that no store may keep, so every file whose macros read the environment
+compiles on every load. Recording each read in the unit's key, as `include`
+records its file, was the other way to keep such a unit. Transformers are
+pure instead, and `include` stays the one read a compile records.
+
 ## Open decisions
 
-- **Macro purity: strict or deterministic.** A transformer builds its result
-  with `list`, `concat` and quasiquote, which may raise `:error`, so under
-  strict purity few of the 31 prelude macro bodies pass. Determinism is
-  enough for a code cache, because a deterministic raise is a compile error
-  the cache can store. Strictness matters only where expansion is reordered
-  or hoisted.
-- **Impure macros.** Either allow them and never cache their unit, or let a
-  macro read only through primitives that record what they read in the unit's
-  key, as `include` already does. The second keeps file embedding,
-  environment-driven configuration and `feature?` possible.
 - **The module shape**: (a), (b) or (c).
 - **Identity under (b)**: whether one parameter and trait table per instance
   is the intended meaning.
