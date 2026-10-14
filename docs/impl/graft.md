@@ -76,7 +76,8 @@ A call grafts when all of these hold:
 - Inside a lambda, every binding of this unit that a same-unit body names is
   one the lambda captures or binds. The analyzer fixed the captures before the
   graft runs, so a body that names another binding stays a call there.
-- The call sits in live code (see "Code nothing reaches").
+- The call sits in live code, or the selected body holds no op with a proof
+  obligation (see "Code nothing reaches").
 
 A call that fails any of these stays the call it was. Nothing else is asked:
 there is no declaration and no list of names. A stdlib function and a function
@@ -86,15 +87,25 @@ the program defines graft alike.
 
 Code outside every lambda is live. A lambda written in live code is live,
 unless it initializes a binding: then it is live when live code names that
-binding, as a callee or as a value. A lambda that nothing live reaches holds
-no call the graft replaces.
+binding, as a callee or as a value. A file binds each top-level expression
+before its last to a name nothing reads, so a lambda such an expression builds
+is not live, whatever its body names.
 
 Such a function's parameters take no type from any call, so they prove nothing
-([type inference](typeinfer.md)). A body grafted there would put the callee's
-ops over operands that prove nothing. The same ops in the callee's own
-definition prove against the callers that do exist. Below, `go` calls `helper`
-and nothing calls `go`, so the program compiles only while that call stays a
-call:
+([type inference](typeinfer.md)). In a lambda nothing live reaches, the graft
+therefore replaces only a call whose selected body holds no `%`-op with a
+proof obligation: a predicate, a one-operand `not`, an equality. A body with
+an op to prove, grafted there, would put that op over operands that prove
+nothing, while the same op in the callee's own definition proves against the
+callers that do exist. A body with nothing to prove adds no site the contract
+could reject, and grafting it is what lets a guard written with a predicate of
+this unit narrow there. The stdlib compiled as one unit with a program after
+its export closure proves the `%rem` in `even?` only that way.
+
+Below, `go` calls `helper` and nothing calls `go`, so the program compiles only
+while that call stays a call. Nothing names `low-bit` either: the keyword after
+it is the file's value, so no live code reaches it. Its guard still proves the
+`%bit-and` through the grafted `int-only?`:
 
 ```lisp
 (assert (compiles? "(defn plain [n]
@@ -103,6 +114,12 @@ call:
                         (helper n)))
                     (plain 5)")
         "the call in go stays a call, and helper's x is proven by (helper n)")
+(assert (compiles? "(defn int-only? [x] (match (type-of x) :integer true _ false))
+                    (defn low-bit [x]
+                      (when (%not (int-only? x)) (error :x))
+                      (%bit-and x 1))
+                    :done")
+        "the guard narrows through the grafted int-only?, and nothing reaches low-bit")
 ```
 
 ### Where the body comes from
@@ -391,11 +408,15 @@ still runs, and deletes what the types decide around the calls that stay.
   keeps the call. A user binding named `+` never reaches the stdlib body, a
   recursive function stays a call, a `(numeric!)` parameter keeps its floor in
   the graft, and a function the program defines grafts while its definition
-  still proves its parameters. A call inside a function nothing calls stays a
-  call. Under `GraftPolicy::Off` every call stays a call, to a function the
-  program defines and to the stdlib, and the stdlib keeps its own grafts. A
-  body the program defines keeps its own lines where it grafts, and a stdlib
-  body takes the line of the call.
+  still proves its parameters. Under `GraftPolicy::Off` every call stays a
+  call, to a function the program defines and to the stdlib, and the stdlib
+  keeps its own grafts. A body the program defines keeps its own lines where
+  it grafts, and a stdlib body takes the line of the call.
+- `hir::typeinfer::tests::live::*` — which lambdas the graft reaches. In a
+  function nothing calls, a call whose body holds an op to prove stays a call,
+  a predicate of this unit grafts and its guard narrows, and so does a
+  one-operand negation of this unit. The stdlib source followed by a program
+  compiles as one unit.
 - [the error-location tests](../../tests/integration/error_reporting.rs) — an
   error raised in a grafted body of the program is reported at the raising
   form.

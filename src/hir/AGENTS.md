@@ -245,8 +245,9 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     the callee's fragment, at the call's arity: a same-unit function's from
     the tree, another unit's from its value. It records the operand it bound
     to each parameter, and inference joins that record into the parameter
-    as it joins a call site, so the definition keeps its proofs. A call in
-    a function nothing live reaches stays a call. The graft runs in
+    as it joins a call site, so the definition keeps its proofs. In a
+    function nothing live reaches, only a call whose body holds no op with a
+    proof obligation grafts. The graft runs in
     `regularize` after map fusion and before dead-binding elimination, and
     it reads no name. Under `GraftPolicy::Off`, `regularize` skips the graft
     and every call stays a call. See
