@@ -1,18 +1,19 @@
-// audited: 2026-10-13
+// audited: 2026-10-14
 //! Shared file/syntax compilation front end: parse → epoch-migrate → macro
 //! expand (with include splicing) → classify → analyze → regularize.
 //!
 //! src/pipeline/AGENTS.md
 //!
-//! Every backend (bytecode, LIR, FHIR, the test-mode transforms) feeds off the
-//! HIR this stage produces, so it lives apart from the per-backend lowering
-//! wrappers. A unit's tag hashes its forms as the reader produced them, before
-//! epoch migration rewrites them.
+//! The bytecode entry points, the FHIR dump and the test-mode transforms feed
+//! off the HIR this stage produces, so it lives apart from their lowering
+//! wrappers. `compile_file_to_lir` reads and expands on its own (compile/lir.rs).
+//! A unit's tag hashes its forms as the reader produced them, before epoch
+//! migration rewrites them.
 
 use super::*;
 
 /// What the file/syntax front end produces, shared by the source and syntax
-/// test-compile entry points (see `lower_test_frontend`).
+/// test-compile entry points (see `lower_frontend`).
 ///
 /// A caller that does not need a field ignores it.
 pub(super) struct Frontend {
@@ -24,6 +25,8 @@ pub(super) struct Frontend {
     /// operands the intrinsic operand contract proved are integers
     /// (docs/impl/lir.md).
     pub types: crate::hir::TypeInfo,
+    /// Each file the compile included, in the order it read them.
+    pub includes: Vec<IncludeRead>,
 }
 
 pub(super) type FrontendResult = Result<Frontend, String>;
@@ -147,7 +150,7 @@ fn compile_syntaxes_frontend_xform_inner(
         crate::epoch::migrate_forms(&arena, &mut syntaxes, epoch)?;
     }
 
-    let (expanded_forms, mut expander, meta) =
+    let (expanded_forms, mut expander, meta, includes) =
         cctx.with_macro_expansion(arena, layer, unit, |macro_vm, mut expander, meta| {
             let mut pending: std::collections::VecDeque<Syntax> = if source_name.starts_with('<') {
                 syntaxes.into()
@@ -159,7 +162,7 @@ fn compile_syntaxes_frontend_xform_inner(
                     .collect()
             };
             let mut expanded_forms = Vec::new();
-            let mut included = included_root(source_name);
+            let mut includes = Includes::root(source_name);
             while let Some(syntax) = pending.pop_front() {
                 if resolve_and_splice_include(
                     &arena,
@@ -167,13 +170,13 @@ fn compile_syntaxes_frontend_xform_inner(
                     macro_vm,
                     &meta,
                     &mut pending,
-                    &mut included,
+                    &mut includes,
                 )? {
                     continue;
                 }
                 expanded_forms.push(expander.expand(syntax, symbols, macro_vm)?);
             }
-            Ok::<_, String>((expanded_forms, expander, meta))
+            Ok::<_, String>((expanded_forms, expander, meta, includes.into_read()))
         })?;
     crate::phase!(ct, "compile", t, "{} expand", source_name);
     let t = std::time::Instant::now();
@@ -237,5 +240,6 @@ fn compile_syntaxes_frontend_xform_inner(
         expander,
         prim_values,
         types,
+        includes,
     })
 }

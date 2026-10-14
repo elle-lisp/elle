@@ -55,7 +55,7 @@ fn compile_file_to_lir_inner(
         |macro_vm, mut expander, meta| {
             let mut pending: std::collections::VecDeque<Syntax> = syntaxes.into();
             let mut expanded_forms = Vec::new();
-            let mut included = included_root(source_name);
+            let mut includes = Includes::root(source_name);
             while let Some(syntax) = pending.pop_front() {
                 if resolve_and_splice_include(
                     &arena,
@@ -63,7 +63,7 @@ fn compile_file_to_lir_inner(
                     macro_vm,
                     &meta,
                     &mut pending,
-                    &mut included,
+                    &mut includes,
                 )? {
                     continue;
                 }

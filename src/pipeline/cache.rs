@@ -5,7 +5,8 @@
 //!
 //! A macro-expansion VM, the prelude/core `Expander`, the `PrimitiveMeta`
 //! (primitives + core.lisp + stdlib exports + host bindings), the REPL layer,
-//! and the capabilities the fiber a compile runs for withholds.
+//! the capabilities the fiber a compile runs for withholds, and the store of
+//! the units loaded files compiled to.
 //!
 //! This is owned by the instance's `RuntimeCore` (a sibling of the `VM` and
 //! `SymbolTable`) and threaded explicitly through the pipeline: two embedded Elle
@@ -26,9 +27,12 @@ use super::bootstrap::{compile_core, install_core_exports};
 mod register;
 mod registries;
 mod repl;
+mod store;
 use registries::InstanceRegistries;
 pub use repl::Layer;
 use repl::ReplLayer;
+pub use store::compile_file_stored;
+use store::Store;
 
 /// The two export structs a boot leaves behind: core.lisp's and stdlib.lisp's.
 ///
@@ -86,6 +90,9 @@ pub struct CompileCtx {
     registries: InstanceRegistries,
     /// The core and stdlib export aggregates this instance booted with.
     exports: BootExports,
+    /// The unit each file a loader compiled left, while its compile inputs
+    /// match ([`compile_file_stored`]).
+    store: Store,
 }
 
 impl CompileCtx {
@@ -205,6 +212,7 @@ impl CompileCtx {
                 core,
                 ..BootExports::default()
             },
+            store: Store::default(),
         }
     }
 
@@ -372,8 +380,9 @@ impl CompileCtx {
     /// built.
     ///
     /// The macro VM's JIT and SPIR-V caches pin code regions from Rust, so they
-    /// go here too (docs/impl/jit.md).
+    /// go here too (docs/impl/jit.md), and so does each unit the store keeps.
     pub fn release(&mut self) {
+        self.store.clear();
         self.expander.release_cached_transformers();
         self.repl.release();
         self.vm.eval_expander = None;

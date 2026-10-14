@@ -20,6 +20,7 @@ Module: [src/pipeline](../src/pipeline/AGENTS.md).
 | [mod.rs](../src/pipeline/mod.rs) | `AnalyzeResult`, re-exports |
 | [cache.rs](../src/pipeline/cache.rs) | `CompileCtx`: per-instance compile state (macro VM, Expander, PrimitiveMeta, the REPL layer) |
 | [cache/register.rs](../src/pipeline/cache/register.rs) | What a host, a REPL line and the standard library register into a `CompileCtx` |
+| [cache/store.rs](../src/pipeline/cache/store.rs) | The store, and `compile_file_stored()`: the unit each loaded file compiled to, kept while its compile inputs match |
 | [bootstrap.rs](../src/pipeline/bootstrap.rs) | Compile and run core.lisp before any compile context exists |
 | [sources.rs](../src/pipeline/sources.rs) | The core, prelude and stdlib sources a boot compiles, embedded at build time |
 | [directives.rs](../src/pipeline/directives.rs) | Validate and strip `(elle/version …)` and `(elle/migration …)` |
