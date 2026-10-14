@@ -287,7 +287,7 @@
 ["tests/lang/ffi-string-field.lisp" :objects 309]
 ["tests/lang/caps-ffi.lisp" :objects 148]
 ["tests/lang/gun.lisp" :objects 3029]
-["tests/lang/gun-redis.lisp" :objects 1147]
+["tests/lang/gun-redis.lisp" :objects 1155]
 ["tests/lang/gun-wire.lisp" :objects 471]
 ["tests/lang/gun-mesh.lisp" :objects 2151]
 ["tests/lang/gun-sync.lisp" :objects 1042]
