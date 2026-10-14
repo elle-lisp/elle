@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-10-13
 // docs/impl/typeinfer.md
 // docs/intrinsics.md
 //! Bidirectional type inference and the intrinsic operand proofs.
@@ -39,6 +39,8 @@ pub use monomorphize::DispatchWrapperRegistry;
 pub(crate) use monomorphize::StoredDispatchRegistry;
 mod prune;
 pub(crate) use prune::prune_typeof_match_arms;
+mod registries;
+pub use registries::Registries;
 
 /// Result of type inference — currently just tracks whether the pass
 /// found any immediates for region inference.
@@ -55,7 +57,7 @@ pub struct TypeInfo {
 pub fn infer_and_rewrite(
     hir: &mut Hir,
     arena: &BindingArena,
-    dispatch_wrappers: &mut DispatchWrapperRegistry,
+    registries: &mut Registries,
 ) -> Result<TypeInfo, String> {
     let interner = TypeInterner::new();
 
@@ -67,8 +69,8 @@ pub fn infer_and_rewrite(
 
     // Collapse container-dispatch wrapper calls (`(put s :x j)` with `s` a proven
     // concrete container → `(%put-struct-mut s :x j)`) so the multi-arm dispatch and
-    // the container over-keep it strands cease to exist (`monomorphize.rs`; the F1b
-    // close). Runs after the inference fixpoint (types are known) and before the
+    // the container over-keep it strands cease to exist (`monomorphize.rs`). Runs
+    // after the inference fixpoint (types are known) and before the
     // operand proofs, so each rewritten op is contract-checked by the same proof that
     // selected it.
     monomorphize::monomorphize_dispatch_wrappers(
@@ -76,7 +78,7 @@ pub fn infer_and_rewrite(
         &infer.hir_types,
         arena,
         &infer.typeof_aliases,
-        dispatch_wrappers,
+        registries,
     );
 
     // The prove-or-reject gate: every call-position %-intrinsic must discharge

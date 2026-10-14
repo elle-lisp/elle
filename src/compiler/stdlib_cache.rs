@@ -256,7 +256,7 @@ pub fn store_bytecode(
     symbols: &crate::symbol::SymbolTable,
     cctx: &mut crate::pipeline::CompileCtx,
 ) -> Result<StoredBytecode, String> {
-    let (dispatch_wrappers, fn_inline) = cctx.compile_registries_mut();
+    let (dispatch_wrappers, fn_inline) = cctx.stdlib_registries_mut();
     let stored_dispatch = dispatch_wrappers.to_stored(symbols);
     let stored_fn_inline = fn_inline.to_stored(symbols);
     // The entry thunk is not JIT'd; the nested lambdas carry their own LIR.
@@ -317,7 +317,7 @@ pub fn load_bytecode(
         .expect("deserialize_templates returns one per input");
     // Restore the cross-unit registries the skipped stdlib compile would have
     // populated.
-    let (dispatch_wrappers, fn_inline) = cctx.compile_registries_mut();
+    let (dispatch_wrappers, fn_inline) = cctx.stdlib_registries_mut();
     dispatch_wrappers.restore(stored.dispatch_wrappers, symbols);
     fn_inline.restore(stored.fn_inline, symbols);
     Ok(CodeUnit::of_parts(code, entry))

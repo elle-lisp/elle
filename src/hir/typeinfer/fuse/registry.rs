@@ -1,18 +1,17 @@
-// audited: 2026-09-28
+// audited: 2026-10-13
 //! The per-instance registry that carries an inlineable function body from the
-//! unit that defines it to every later unit.
+//! standard library's compile to every later unit.
 //!
 //! docs/impl/dissolution/inline.md
 
 use super::*;
 
 /// Per-instance persistent map of cross-unit-inlineable function fragments,
-/// keyed by function NAME (`SymbolId`). Each unit's `fuse_map_chains` records
-/// its locally-defined inlineable functions here (the `<stdlib>` compile records
-/// `inc`/`dec`/…), and every later unit consults it, so a user→stdlib `(map inc
-/// xs)` inlines the stdlib body exactly as a same-unit named fn does — the
-/// dissolution leg reaching across the compile-unit boundary
-/// (docs/impl/dissolution/inline.md).
+/// keyed by function NAME (`SymbolId`). The `<stdlib>` compile's
+/// `fuse_map_chains` records its inlineable functions here (`inc`/`dec`/…), and
+/// every later unit consults it, so a user→stdlib `(map inc xs)` inlines the
+/// stdlib body exactly as a same-unit named fn does — the dissolution leg
+/// reaching across the compile-unit boundary (docs/impl/dissolution/inline.md).
 ///
 /// Compile-time-only state: the rewrite it drives leaves the inlined body in the
 /// HIR, so nothing here reaches the runtime. It rides on `CompileCtx` (the
@@ -28,14 +27,17 @@ pub struct FnInlineRegistry {
     pub(crate) by_name: FxHashMap<SymbolId, FnFragment>,
 }
 
-impl FnInlineRegistry {
-    /// Record a fragment under its name. First definition wins, so the stdlib's
-    /// canonical fn is never clobbered by a later same-named user binding, and
-    /// re-recording across compiles is a cheap no-op.
-    pub(super) fn record(&mut self, name: SymbolId, f: FnFragment) {
-        self.by_name.entry(name).or_insert(f);
+impl Registries<'_> {
+    /// Record a fragment the compile defines under its name, when the compile
+    /// records at all.
+    pub(super) fn record_inline(&mut self, name: SymbolId, f: &FnFragment) {
+        if let Self::Record { inline, .. } = self {
+            inline.by_name.entry(name).or_insert_with(|| f.clone());
+        }
     }
+}
 
+impl FnInlineRegistry {
     /// Snapshot the registry for the stdlib disk cache. Ids are name hashes and
     /// cross unchanged (docs/impl/symbol.md); the spellings ride alongside so
     /// the loading instance can re-intern them into its own display memo.

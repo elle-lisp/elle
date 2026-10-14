@@ -1,5 +1,5 @@
-// audited: 2026-09-28
-//! The dispatch-wrapper registry: each unit's wrappers by name, so a later unit's call to one monomorphizes too.
+// audited: 2026-10-13
+//! The dispatch-wrapper registry: the standard library's wrappers by name, so a later unit's call to one monomorphizes too.
 //!
 //! docs/impl/dissolution.md
 //! docs/impl/stdlib-cache.md
@@ -30,12 +30,11 @@ pub(crate) struct RegWrapper {
     pub(crate) arms: Vec<RegArm>,
 }
 
-/// Per-instance persistent map of dispatch wrappers, keyed by wrapper NAME. Each
-/// unit's `monomorphize_dispatch_wrappers` records its locally-defined wrappers
-/// here (the stdlib's `push`/`put` land in it when `stdlib.lisp` compiles), and
-/// every later unit consults it, so a user→stdlib wrapper call monomorphizes
-/// exactly as an intra-unit one does, and no owned-param container reference
-/// strands behind a surviving wrapper.
+/// Per-instance persistent map of dispatch wrappers, keyed by wrapper NAME. The
+/// standard library's compile records its wrappers here (`push`/`put` among
+/// them), and every later unit consults it, so a user→stdlib wrapper call
+/// monomorphizes exactly as an intra-unit one does, and no owned-param container
+/// reference strands behind a surviving wrapper.
 ///
 /// This is compile-time-only state: the rewrite it drives leaves the direct op in
 /// the HIR, so nothing here reaches the runtime. It rides on `CompileCtx` (the
@@ -46,11 +45,20 @@ pub struct DispatchWrapperRegistry {
     pub(crate) by_name: HashMap<SymbolId, RegWrapper>,
 }
 
+impl super::super::Registries<'_> {
+    /// Record a wrapper the compile defines under its name, when the compile
+    /// records at all.
+    pub(super) fn record_dispatch(&mut self, name: SymbolId, w: &Wrapper, arena: &BindingArena) {
+        if let Self::Record { dispatch, .. } = self {
+            dispatch.record(name, w, arena);
+        }
+    }
+}
+
 impl DispatchWrapperRegistry {
-    /// Record a locally-collected wrapper under its name. First definition wins,
-    /// so the stdlib's canonical wrapper is never clobbered by a later same-named
-    /// user binding, and re-recording across compiles is a cheap no-op.
-    pub(super) fn record(&mut self, name: SymbolId, w: &Wrapper, arena: &BindingArena) {
+    /// Record a locally-collected wrapper under its name. The standard library
+    /// binds each name once, so the first definition is its only one.
+    fn record(&mut self, name: SymbolId, w: &Wrapper, arena: &BindingArena) {
         self.by_name.entry(name).or_insert_with(|| RegWrapper {
             arity: w.arity,
             arms: w

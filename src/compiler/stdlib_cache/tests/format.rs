@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-13
 // What the serialized form carries across, and the one thing a restored
 // template loses.
 // docs/impl/stdlib-cache.md
@@ -87,8 +87,8 @@ fn bytecode_roundtrip_preserves_lir_and_closures() {
 /// the first run of a program and every run after it disagree.
 ///
 /// The counter-factual: a snapshot that omits the templates whose body is a
-/// `let` — the shape whose clone needed the defining arena — loses seven of
-/// the stdlib's thirty-six, and the assertion names them.
+/// `let` — the shape whose clone needed the defining arena — loses those of
+/// the stdlib's templates, and the assertion names them.
 #[test]
 fn the_stored_inline_registry_keeps_every_template_the_compile_recorded() {
     use std::collections::BTreeSet;
@@ -108,7 +108,7 @@ fn the_stored_inline_registry_keeps_every_template_the_compile_recorded() {
     let (_vm, symbols, cctx) = rt.parts();
 
     let (recorded, stored) = {
-        let (_, fn_inline) = cctx.compile_registries_mut();
+        let (_, fn_inline) = cctx.stdlib_registries_mut();
         (names(fn_inline, symbols), fn_inline.to_stored(symbols))
     };
     assert!(

@@ -228,9 +228,7 @@ fn compile_syntaxes_frontend_xform_inner(
         return Err(msg);
     }
 
-    let (dispatch_wrappers, fn_inline) = cctx.compile_registries_mut();
-    let types =
-        crate::hir::regularize(&mut hir, &mut arena, symbols, dispatch_wrappers, fn_inline)?;
+    let types = crate::hir::regularize(&mut hir, &mut arena, symbols, &mut cctx.registries())?;
     crate::phase!(ct, "compile", t, "{} analyze", source_name);
 
     Ok(Frontend {
