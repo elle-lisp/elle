@@ -23,7 +23,9 @@ no user spaces. `gun:redis-store` then raises
 `{:error :gun-error :reason :redis-not-configured}`, and `gun:serve` and
 `gun:connect` raise `:mesh-not-configured`. `gun:pair`, `gun:user`,
 `gun:secret`, `gun:encrypt` and `gun:decrypt` raise `:sea-not-configured`,
-and so does a chain that reaches a soul starting with `~`.
+and so does a chain that reaches a soul starting with `~`. The content node
+`#` needs `:crypto` alone. Without it, `gun:content-key`, `gun:put-content`
+and a chain that reaches `#` raise `:sea-not-configured`.
 
 The Redis store needs the `std/redis` module as `:redis`. The mesh needs the
 `std/websocket` module as `:websocket`, built from the plugins that
@@ -82,7 +84,8 @@ the same key, and a read returns string keys. The key `_` is reserved, and a
 
 A database is a chain, and `gun:get` extends a chain by one key. A chain names
 a node or a field, and `gun:put`, `gun:once`, `gun:on`, `gun:set`, `gun:map`,
-`gun:soul` and `gun:unset` read and write what it names.
+`gun:soul` and `gun:unset` read and write what it names. `gun:put-content`
+writes a value into the content node `#`, under the hash of the value.
 [gun/chains.md](gun/chains.md) holds each of them.
 
 ## The merge rule
@@ -301,7 +304,8 @@ its own space, so nobody else can replace it. Given the module that
    network.
 7. Every field passes admission before a merge sees it: a field from a local
    `put`, from a peer, and from the store. So no field in a user space enters
-   memory without a valid signature by the space's key.
+   memory without a valid signature by the space's key, and no field of `#`
+   enters it under a key that is not its value's hash.
 
 ## Running tests
 
@@ -323,11 +327,13 @@ elle tests/lang/gun-sync.lisp
 ```
 
 User spaces and encryption need the `plugin/crypto` and `plugin/random`
-plugins, and the second file also joins databases over loopback, so it needs
-`plugin/hash` too. `make suite-plugins` builds all three:
+plugins, and the content node needs `plugin/crypto`. The last file also joins
+databases over loopback, so it needs `plugin/hash` too.
+`make suite-plugins` builds all three:
 
 ```bash
 elle tests/lang/gun-sea.lisp
+elle tests/lang/gun-content.lisp
 elle tests/lang/gun-sea-mesh.lisp
 ```
 

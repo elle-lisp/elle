@@ -1,12 +1,13 @@
 # sea
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-10-14 -->
 
-The SEA rules of std/gun: key pairs, user spaces that only their key writes, the signed text, admission, and encryption.
+The SEA rules of std/gun: key pairs, user spaces that only their key writes, the signed text, the content node, admission, and encryption.
 
 [gun.md](../gun.md) holds what a caller sees: `gun:pair`, `gun:user`,
-`gun:secret`, `gun:encrypt` and `gun:decrypt`. This file holds the rules
-behind them, and [sea.lisp](sea.lisp) holds the code. The primitives come from
+`gun:secret`, `gun:encrypt` and `gun:decrypt`, and
+[chains.md](chains.md) holds `gun:content-key` and `gun:put-content`. This
+file holds the rules behind them, and [sea.lisp](sea.lisp) holds the code. The primitives come from
 the crypto plugin, whose
 [README](https://github.com/elle-lisp/plugins/blob/main/crypto/README.md)
 gives their arguments and failures.
@@ -65,16 +66,43 @@ hex is 128 lowercase characters. In a Redis hash it is
 `"<state> <signature-hex> <encoding>"`. An encoding holds a `:` at index 1 and
 the hex holds none, so the two layouts never read as each other.
 
+## The content node
+
+The soul `#` names the **content node**. The key of each of its fields is the
+lowercase hex of the SHA-256 of the field value's encoding, so a key names
+one value:
+
+```text
+#  159051e9a9d711b993a56b707677ffc5cb84e01cbbd587db672c08e69e04a324  "hello"
+#  1f8dc03d51e3ddcc59b608508bba5c34aecac15f1b250390a629a4231ad80a9a  nil
+```
+
+A field of `#` therefore never changes value. A tombstone passes only at the
+key of `n:`, the encoding of nil. A write of the same value again can move
+the field's state, but the value stays the same, so it calls no `gun:on`
+function. The content node is outside every space, and nobody signs it.
+
+Every other soul that starts with `#` raises
+`{:error :gun-error :reason :invalid-space}`. A nested struct in `#` would need
+such a soul, `#/<key>`, so a put of one raises `:invalid-space` too, and writes
+nothing.
+
+The check needs `crypto:sha256` alone, so a database checks `#` when its
+module has `:crypto`, without `:random`. A chain that reaches `#` without
+`:crypto` raises `{:error :gun-error :reason :sea-not-configured}`, and so do
+`gun:content-key` and `gun:put-content`.
+
 ## Admission
 
 Every field passes **admission** before any merge sees it. Admission checks
-each field of a soul in a space:
+each field of a soul in a space, and each field of the content node:
 
 | Field | Reason |
 |-------|--------|
-| No signature | `:unsigned` |
+| No signature, in a space | `:unsigned` |
 | A signature that does not verify | `:bad-signature` |
-| A signature on a soul outside every space | `:bad-signature` |
+| A signature on a soul outside every space, `#` included | `:bad-signature` |
+| A field of `#` whose key is not the hash of its value's encoding | `:bad-hash` |
 
 Admission runs at each place a field enters a database:
 
@@ -92,7 +120,7 @@ A database opened without the crypto and random plugins cannot check a
 signature. A chain that reaches a soul in a space then raises
 `{:error :gun-error :reason :sea-not-configured}`, for a read and for a
 write, and a peer's message that holds such a soul is refused for that
-reason.
+reason. The content node needs the crypto plugin alone, as above.
 
 ## Encryption
 

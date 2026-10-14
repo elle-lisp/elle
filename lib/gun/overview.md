@@ -20,7 +20,7 @@ arguments.
 | [graph.lisp](graph.lisp) | Souls, the in-memory nodes, the merge that answers a diff, and the flattening of a nested struct |
 | [store.lisp](store.lisp) | The memory store and the Redis store, behind one interface |
 | [wire.lisp](wire.lisp) | The peer messages: build them, write them as JSON, and read and check them |
-| [sea.lisp](sea.lisp) | The rules of [sea.md](sea.md): key pairs, user spaces, signing, admission and encryption |
+| [sea.lisp](sea.lisp) | The rules of [sea.md](sea.md): key pairs, user spaces, signing, the content node, admission and encryption |
 | [core.lisp](core.lisp) | One database: its graph, store, clock, lock, subscriptions and peers; loading, the chain walk, the merges and notify |
 | [peer.lisp](peer.lisp) | One WebSocket connection: the hello, the reader fiber, the send lock and close |
 | [mesh.lisp](mesh.lisp) | The rules of [mesh.md](mesh.md): fetch, forward, acks, deferral and resync |
@@ -64,4 +64,5 @@ protocol. Its `:kind` method answers `:link`, and its `:soul` method answers
 when it has one. `std/gun/peer` takes `std/websocket` as `:websocket`, and
 serves or dials only when it has one. `std/gun/sea` takes the crypto and
 random plugins as `:crypto` and `:random`, and makes pairs, signs, checks and
-encrypts only when it has both.
+encrypts only when it has both. It checks the content node `#` when it has
+`:crypto`.

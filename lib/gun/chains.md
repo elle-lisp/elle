@@ -2,7 +2,7 @@
 
 <!-- audited: 2026-10-14 -->
 
-How a std/gun chain reads and writes: get, put, once, on and set, maps over a node, key ranges, souls, links by chain and unset.
+How a std/gun chain reads and writes: get, put, once, on and set, maps, key ranges, souls, links by chain, unset and content.
 
 [gun.md](../gun.md) holds the data model that a chain reads and writes, and
 the merge rule that decides each write. This file holds the chain functions.
@@ -185,4 +185,26 @@ a `put` does. When no field links to the member, it writes nothing:
 (let [titles (gun:once (gun:get (gun:map chores) "title"))]
   (assert (= (length titles) 1))
   (assert (= (first (values titles)) "laundry")))
+```
+
+## Content
+
+`gun:put-content` writes a value into the content node `#`, under the key
+that `gun:content-key` answers for it: the SHA-256 hex of the value's
+encoding. It takes any chain of the database, and `:ack` as a `put` does.
+Its answer is the key. [sea.md](sea.md) holds the rules of `#`, and the
+content node needs the module's `:crypto`:
+
+```lisp
+(defn content-example [sea-gun]
+  "Write a value into the content node, and read it back by its key."
+  (let [db (sea-gun:open)
+        k (sea-gun:put-content db "hello")]
+    (assert (= k "159051e9a9d711b993a56b707677ffc5cb84e01cbbd587db672c08e69e04a324"))
+    (assert (= (sea-gun:content-key "hello") k))
+    (sea-gun:once (sea-gun:get (sea-gun:get db "#") k))))
+
+(let [[ok? crypto] (protect (import "plugin/crypto"))]
+  (when ok?
+    (assert (= (content-example ((import "std/gun") :crypto crypto)) "hello"))))
 ```
