@@ -55,6 +55,24 @@ fn wait_failed(
     Completion::failed(id, birth, "exec-error", msg)
 }
 
+/// A file operation by path that failed with `why`: an `:io-error` whose
+/// `:path` names the file.
+fn file_failed(
+    id: SubmissionId,
+    mut birth: crate::io::Birthplace,
+    kind: FileKind,
+    path: &str,
+    why: impl std::fmt::Display,
+) -> Completion {
+    let error = {
+        let ctx = birth.alloc();
+        let msg = format!("{}: {}: {}", kind.primitive(), path, why);
+        let named = ctx.string(path);
+        ctx.error_extra("io-error", msg, &[("path", named)])
+    };
+    Completion::err(id, birth, error)
+}
+
 /// True when this errno says the caller's `:timeout` elapsed rather than the
 /// operation failing.
 ///
@@ -192,17 +210,37 @@ pub(super) fn process_raw_completion(
         }
         PendingOp::File { kind, path, .. } => {
             if result_code < 0 {
-                let os_err = std::io::Error::from_raw_os_error(-result_code);
-                let msg = format!("file/sync: {}: {}", path, os_err);
-                return Completion::failed(id, birth, "io-error", msg);
+                // A worker sends the error's own text; a sync sends none.
+                let why = if data.is_empty() {
+                    std::io::Error::from_raw_os_error(-result_code).to_string()
+                } else {
+                    String::from_utf8_lossy(&data).into_owned()
+                };
+                return file_failed(id, birth, *kind, path, why);
             }
             match kind {
-                FileKind::Sync
-                | FileKind::Read
-                | FileKind::Lines
-                | FileKind::Write
-                | FileKind::Append
-                | FileKind::Copy => Completion::ok(id, birth, Value::NIL),
+                FileKind::Read => match String::from_utf8(data) {
+                    Ok(s) => {
+                        let answer = birth.alloc().string(s);
+                        Completion::ok(id, birth, answer)
+                    }
+                    Err(e) => file_failed(id, birth, *kind, path, e),
+                },
+                FileKind::Lines => match String::from_utf8(data) {
+                    Ok(s) => {
+                        let answer = {
+                            let ctx = birth.alloc();
+                            let lines: Vec<Value> = s.lines().map(|l| ctx.string(l)).collect();
+                            ctx.list(lines)
+                        };
+                        Completion::ok(id, birth, answer)
+                    }
+                    Err(e) => file_failed(id, birth, *kind, path, e),
+                },
+                FileKind::Write | FileKind::Append | FileKind::Copy => {
+                    Completion::ok(id, birth, Value::TRUE)
+                }
+                FileKind::Sync => Completion::ok(id, birth, Value::NIL),
             }
         }
         PendingOp::Connect {

@@ -25,7 +25,7 @@ to a backend for execution.
 | [request.rs](request.rs) | `IoRequest`, `IoOp` and `PortOp` — typed I/O request descriptors |
 | [request/spawn.rs](request/spawn.rs) | `SpawnRequest`, the command it builds, and `spawn_to_subprocess` |
 | [request/process.rs](request/process.rs) | `ProcessHandle` and `ExitRecord` — the `subprocess` value and the record its status is kept in |
-| `request/{buffer,socket}.rs` | In-place buffer edits a completion makes, and the socket request shapes. |
+| `request/{buffer,socket,file}.rs` | In-place buffer edits a completion makes, the socket request shapes, and `FileOp`, an operation on a file by its path. |
 | [completion.rs](completion.rs) | `process_raw_completion` — converts raw CQE/thread results to `Completion` |
 | [frame.rs](frame.rs) | Where a read's answer ends in the bytes it owns, and how a port's remainder joins it |
 | [landing.rs](landing.rs) | Where a stream operation's bytes land: the remainder a read borrows, a write's payload by address, and what a pool worker is handed of both. See [where a stream operation's bytes live](../../docs/impl/io-bytes.md). |

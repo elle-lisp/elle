@@ -1,3 +1,8 @@
+// audited: 2026-10-14
+//! The file/ primitives that only read or change metadata: delete, mkdir, mktempdir, rename, size and stat.
+//!
+//! docs/io.md
+
 use super::*;
 use crate::rich_error;
 
@@ -197,34 +202,6 @@ pub(crate) fn prim_rename_file(
             "io-error",
             format!("rename-file: failed to rename '{}': {}", old_path, e),
             path = ctx.string(old_path.as_str()),
-        ),
-    }
-}
-
-/// Copy a file
-pub(crate) fn prim_copy_file(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    let src = if let Some(s) = args[0].with_string(|s| s.to_string()) {
-        s
-    } else {
-        return type_error!(ctx, args[0], "copy-file", "string");
-    };
-
-    let dst = if let Some(s) = args[1].with_string(|s| s.to_string()) {
-        s
-    } else {
-        return type_error!(ctx, args[1], "copy-file", "string");
-    };
-
-    match std::fs::copy(&src, &dst) {
-        Ok(_) => (SIG_OK, Value::TRUE),
-        Err(e) => rich_error!(
-            ctx,
-            "io-error",
-            format!("copy-file: failed to copy '{}': {}", src, e),
-            path = ctx.string(src.as_str()),
         ),
     }
 }

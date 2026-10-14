@@ -175,19 +175,30 @@ impl AsyncBackend {
     /// This is a thread-pool operation on every platform, for the reason an
     /// open is: the worker opens the path before it does anything else. A
     /// sync opens it non-blocking, and `fsync(2)` waits on nothing outside
-    /// this process, so the operation takes no stop pipe.
+    /// this process, so a sync takes no stop pipe. Every other operation runs
+    /// through blocking `std::fs` calls that a stop pipe cannot reach, and on
+    /// a fifo they wait for the other end: `Bounds::uninterruptible`.
     pub(super) fn submit_file(&self, op: &FileOp) -> Result<SubmissionId, String> {
         let path = op.path();
         if path.contains('\0') {
-            return Err(format!("file: path contains null byte: {}", path));
+            return Err(format!(
+                "{}: path contains null byte: {}",
+                op.kind().primitive(),
+                path
+            ));
         }
+        let bounds = match op {
+            FileOp::Sync { .. } => Bounds::prompt(),
+            FileOp::Read { .. }
+            | FileOp::Lines { .. }
+            | FileOp::Write { .. }
+            | FileOp::Append { .. }
+            | FileOp::Copy { .. } => Bounds::uninterruptible(),
+        };
 
         self.submit_op(
             0,
-            |d| {
-                d.hub
-                    .submit(d.id, PoolOp::File(op.clone()), Bounds::prompt())
-            },
+            |d| d.hub.submit(d.id, PoolOp::File(op.clone()), bounds),
             |buffer, ()| PendingOp::File {
                 kind: op.kind(),
                 path: path.to_string(),

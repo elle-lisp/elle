@@ -15,26 +15,67 @@ use std::time::{SystemTime, UNIX_EPOCH};
 mod manage;
 pub(crate) use manage::*;
 
+// The primitives below move a file's contents, so each yields its operation
+// to the scheduler, which hands it to a pool worker (docs/io.md).
+
+/// Yield `op` to the scheduler as a portless request.
+fn file_request(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    op: FileOp,
+) -> (SignalBits, Value) {
+    (SIG_IO, IoRequest::portless(ctx, IoOp::File(op)))
+}
+
+/// Argument `i` as a string, or the type error that names `name`.
+fn string_arg(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+    i: usize,
+    name: &str,
+) -> Result<String, (SignalBits, Value)> {
+    match args[i].with_string(|s| s.to_string()) {
+        Some(s) => Ok(s),
+        None => Err((
+            SIG_ERROR,
+            ctx.error(
+                "type-error",
+                format!("{}: expected string, got {}", name, args[i].type_name()),
+            ),
+        )),
+    }
+}
+
 /// Read entire file as a string
 pub(crate) fn prim_slurp(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    if args[0].is_string() {
-        args[0]
-            .with_string(|path| match std::fs::read_to_string(path) {
-                Ok(content) => (SIG_OK, ctx.string(content)),
-                Err(e) => rich_error!(
-                    ctx,
-                    "io-error",
-                    format!("slurp: failed to read '{}': {}", path, e),
-                    path = ctx.string(path),
-                ),
-            })
-            .unwrap()
-    } else {
-        type_error!(ctx, args[0], "slurp", "string")
+    match string_arg(ctx, args, 0, "file/read") {
+        Ok(path) => file_request(ctx, FileOp::Read { path }),
+        Err(e) => e,
     }
+}
+
+/// Read lines from a file and return as a list of strings
+pub(crate) fn prim_read_lines(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    match string_arg(ctx, args, 0, "file/lines") {
+        Ok(path) => file_request(ctx, FileOp::Lines { path }),
+        Err(e) => e,
+    }
+}
+
+/// The path and the string content of a write or an append.
+fn path_and_data(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+    name: &str,
+) -> Result<(String, Vec<u8>), (SignalBits, Value)> {
+    let path = string_arg(ctx, args, 0, name)?;
+    let data = string_arg(ctx, args, 1, name)?;
+    Ok((path, data.into_bytes()))
 }
 
 /// Write string content to a file (overwrites if exists)
@@ -42,26 +83,9 @@ pub(crate) fn prim_spit(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    let path = if let Some(s) = args[0].with_string(|s| s.to_string()) {
-        s
-    } else {
-        return type_error!(ctx, args[0], "spit", "string");
-    };
-
-    let content = if let Some(s) = args[1].with_string(|s| s.to_string()) {
-        s
-    } else {
-        return type_error!(ctx, args[1], "spit", "string");
-    };
-
-    match std::fs::write(&path, &content) {
-        Ok(_) => (SIG_OK, Value::TRUE),
-        Err(e) => rich_error!(
-            ctx,
-            "io-error",
-            format!("spit: failed to write '{}': {}", path, e),
-            path = ctx.string(path.as_str()),
-        ),
+    match path_and_data(ctx, args, "file/write") {
+        Ok((path, data)) => file_request(ctx, FileOp::Write { path, data }),
+        Err(e) => e,
     }
 }
 
@@ -70,41 +94,35 @@ pub(crate) fn prim_append_file(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    let path = if let Some(s) = args[0].with_string(|s| s.to_string()) {
-        s
-    } else {
-        return type_error!(ctx, args[0], "append-file", "string");
+    match path_and_data(ctx, args, "file/append") {
+        Ok((path, data)) => file_request(ctx, FileOp::Append { path, data }),
+        Err(e) => e,
+    }
+}
+
+/// Copy a file
+pub(crate) fn prim_copy_file(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    let from = match string_arg(ctx, args, 0, "file/copy") {
+        Ok(s) => s,
+        Err(e) => return e,
     };
+    match string_arg(ctx, args, 1, "file/copy") {
+        Ok(to) => file_request(ctx, FileOp::Copy { from, to }),
+        Err(e) => e,
+    }
+}
 
-    let content = if let Some(s) = args[1].with_string(|s| s.to_string()) {
-        s
-    } else {
-        return type_error!(ctx, args[1], "append-file", "string");
-    };
-
-    use std::fs::OpenOptions;
-    use std::io::Write;
-
-    let mut file = match OpenOptions::new().create(true).append(true).open(&path) {
-        Ok(f) => f,
-        Err(e) => {
-            return rich_error!(
-                ctx,
-                "io-error",
-                format!("append-file: failed to open '{}': {}", path, e),
-                path = ctx.string(path.as_str()),
-            )
-        }
-    };
-
-    match file.write_all(content.as_bytes()) {
-        Ok(_) => (SIG_OK, Value::TRUE),
-        Err(e) => rich_error!(
-            ctx,
-            "io-error",
-            format!("append-file: failed to write '{}': {}", path, e),
-            path = ctx.string(path.as_str()),
-        ),
+/// Flush the file or directory at a path to stable storage
+pub(crate) fn prim_file_sync(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    match string_arg(ctx, args, 0, "file/sync") {
+        Ok(path) => file_request(ctx, FileOp::Sync { path }),
+        Err(e) => e,
     }
 }
 
@@ -166,60 +184,22 @@ pub(crate) fn prim_list_directory(
     }
 }
 
-/// Read lines from a file and return as a list of strings
-pub(crate) fn prim_read_lines(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    if args[0].is_string() {
-        args[0]
-            .with_string(|path| match std::fs::read_to_string(path) {
-                Ok(content) => {
-                    let lines: Vec<Value> = content.lines().map(|s| ctx.string(s)).collect();
-                    (SIG_OK, ctx.list(lines))
-                }
-                Err(e) => rich_error!(
-                    ctx,
-                    "io-error",
-                    format!("read-lines: failed to read '{}': {}", path, e),
-                    path = ctx.string(path),
-                ),
-            })
-            .unwrap()
-    } else {
-        type_error!(ctx, args[0], "read-lines", "string")
-    }
-}
-
-/// Flush the file or directory at a path to stable storage, on the I/O
-/// thread pool. Yields `SIG_IO` with an `IoRequest` containing `FileOp::Sync`.
-pub(crate) fn prim_file_sync(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    match args[0].with_string(|s| s.to_string()) {
-        Some(path) => (
-            SIG_IO,
-            IoRequest::portless(ctx, IoOp::File(FileOp::Sync { path })),
-        ),
-        None => type_error!(ctx, args[0], "file/sync", "string"),
-    }
-}
-
 // Declarative primitive definitions for file I/O operations.
 primitive! {
     "file/read" => prim_slurp {
-        signal: Signal::fs_errors(),
+        signal: Signal::fs_io_yields_errors(),
         arity: Arity::Exact(1),
         doc: "Read entire file as a string",
         params: &["path"],
         category: "file",
         example: "(file/read \"data.txt\")",
         aliases: &["slurp"],
-        effect: RegionEffect::Fresh,
+        // Opaque: stores nothing, and the answer is built at the completion's own
+        // `Birthplace`, neither this call's region nor an argument's.
+        effect: RegionEffect::Opaque,
     }
     "file/write" => prim_spit {
-        signal: Signal::fs_errors(),
+        signal: Signal::fs_io_yields_errors(),
         arity: Arity::Exact(2),
         doc: "Write string content to a file (overwrites if exists)",
         params: &["path", "content"],
@@ -229,7 +209,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "file/append" => prim_append_file {
-        signal: Signal::fs_errors(),
+        signal: Signal::fs_io_yields_errors(),
         arity: Arity::Exact(2),
         doc: "Append string content to a file",
         params: &["path", "content"],
@@ -310,7 +290,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "file/copy" => prim_copy_file {
-        signal: Signal::fs_errors(),
+        signal: Signal::fs_io_yields_errors(),
         arity: Arity::Exact(2),
         doc: "Copy a file",
         params: &["src", "dst"],
@@ -358,14 +338,16 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "file/lines" => prim_read_lines {
-        signal: Signal::fs_errors(),
+        signal: Signal::fs_io_yields_errors(),
         arity: Arity::Exact(1),
         doc: "Read lines from a file and return as a list of strings",
         params: &["path"],
         category: "file",
         example: "(file/lines \"data.txt\")",
         aliases: &["read-lines"],
-        effect: RegionEffect::Fresh,
+        // Opaque: stores nothing, and the answer is built at the completion's own
+        // `Birthplace`, neither this call's region nor an argument's.
+        effect: RegionEffect::Opaque,
     }
     "file/sync" => prim_file_sync {
         signal: Signal::fs_io_yields_errors(),
