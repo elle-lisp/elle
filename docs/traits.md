@@ -18,15 +18,17 @@ start with `nil` traits.
 
 Every array, list, string and bytes value shares one traitset object, and
 every set and struct shares another. `identical?` compares contents, so it
-cannot show the sharing; a write to the shared table can:
+cannot show the sharing; the pointer test `%identical?` can. A default
+traitset is an immutable struct, so `put` answers a new table and changes
+the traits of no value:
 
 ```lisp
-(def shared (traits [1 2]))
-(put shared :Probe 1)
-(assert (= (get (traits [3 4]) :Probe) 1))
-(assert (= (get (traits "text") :Probe) 1))
-(del shared :Probe)
-(assert (nil? (get (traits [5]) :Probe)))
+(assert (%identical? (traits [1 2]) (traits "text")) "one shared table")
+(assert (not (%identical? (traits [1 2]) (traits {:a 1}))) "and another")
+
+(def probed (put (traits [1 2]) :Probe 1))
+(assert (= (get probed :Probe) 1))
+(assert (nil? (get (traits [3 4]) :Probe)) "no value's traits changed")
 ```
 
 ## Attaching per-instance traits
@@ -63,24 +65,26 @@ allocation time.
 
 ### Trait table schema
 
-A trait table is a **mutable @struct shell** mapping protocol keywords
-to **immutable method structs**:
+A default trait table is an **immutable struct** mapping protocol
+keywords to **immutable method structs**:
 
 ```
-@{:Sequence   {:first (fn [self] ...)
-               :rest  (fn [self] ...)
-               :last  (fn [self] ...)
-               :nth   (fn [self n] ...)
-               :iter  (fn [self] ...)}
-  :Collection {:length (fn [self] ...)
-               :empty? (fn [self] ...)
-               :has?   (fn [self needle] ...)
-               :conj   (fn [self item] ...)
-               :empty  (fn [self] ...)}}
+{:Sequence   {:first (fn [self] ...)
+              :rest  (fn [self] ...)
+              :last  (fn [self] ...)
+              :nth   (fn [self n] ...)
+              :iter  (fn [self] ...)}
+ :Collection {:length (fn [self] ...)
+              :empty? (fn [self] ...)
+              :has?   (fn [self needle] ...)
+              :conj   (fn [self item] ...)
+              :empty  (fn [self] ...)}}
 ```
 
-The mutable shell lets users swap entire protocols on a shared traitset.
-Immutable method structs avoid RefCell borrow on per-method lookup.
+No program changes what every list operation does, because no write reaches
+a default table. A value takes other protocols through `with-traits`, and a
+table it attaches there may be a mutable @struct. Immutable method structs
+avoid a RefCell borrow on each method lookup.
 
 A method struct also holds whatever operator methods the collection
 overrides — `:map`, `:fold`, `:reverse` and the rest. § Collection
@@ -104,7 +108,7 @@ Immediates (int, float, bool, nil, keyword, symbol) have no traitset.
 When a primitive like `first` is called on value `v`:
 
 1. Read `v`'s `traits` field (always populated for collection types)
-2. Look up `:Sequence` in the @struct (linear scan, 2 keys)
+2. Look up `:Sequence` in the trait table (linear scan, 2 keys)
 3. Look up `:first` in the method struct (linear scan, 5 keys)
 4. Call the method (NativeFn direct call or closure via VM context)
 
@@ -259,8 +263,8 @@ When the fiber completes (status `:dead`), iteration is done.
 ## Sharing and mutability
 
 Default traitsets are **shared by reference**. All arrays point to the
-same @struct. Mutating the shared @struct is visible to all instances,
-as § Reading traits shows.
+same immutable struct, as § Reading traits shows, so a default protocol
+changes for no value.
 
 Per-instance override via `with-traits`:
 
@@ -358,7 +362,7 @@ traitset carries *are* native-fns: immediate `prim_id` values that occupy no
 region. The traitset pointer in a heap object is just a pointer — no arena
 bookkeeping overhead.
 
-The traitset @structs themselves carry `nil` traits, so a protocol primitive
+The traitset structs themselves carry `nil` traits, so a protocol primitive
 such as `has?` cannot take one: read a traitset with `get` and `keys`.
 
 The `traits` side-field is a cross-region edge enumerated for every
@@ -371,9 +375,9 @@ decref balance symmetrically. User-attached traits (arena-allocated via
 
 The hot path for builtin types:
 - Read `traits` field (pointer in the heap object)
-- Linear scan for protocol keyword (2 entries in the @struct)
+- Linear scan for protocol keyword (2 entries in the trait table)
 - Linear scan for method keyword (5 entries in the method struct)
-- Native function call (same Rust code as the old type cascade)
+- Native function call
 
 `lookup_keyword` compares the keyword's name hash against each entry's key
 directly, so it builds no key at all.
