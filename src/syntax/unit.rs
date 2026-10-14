@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-14
 //! A unit of expansion: the tag that names it, and the counts its scope ids and gensym names take.
 //!
 //! docs/impl/syntax.md
@@ -30,8 +30,8 @@ impl UnitTag {
     /// zero is [`NONE`](Self::NONE).
     pub(crate) fn of(name: &str, forms: &[Syntax]) -> UnitTag {
         let mut hash = Fnv1a::new();
-        write_str(&mut hash, name);
-        write_len(&mut hash, forms.len());
+        hash.write_str(name);
+        hash.write_len(forms.len());
         for form in forms {
             write_node(&mut hash, form);
         }
@@ -51,18 +51,9 @@ impl fmt::LowerHex for UnitTag {
     }
 }
 
-fn write_len(hash: &mut Fnv1a, len: usize) {
-    hash.write(&(len as u64).to_le_bytes());
-}
-
-fn write_str(hash: &mut Fnv1a, s: &str) {
-    write_len(hash, s.len());
-    hash.write(s.as_bytes());
-}
-
 fn write_spelling(hash: &mut Fnv1a, kind: u8, s: &str) {
     hash.write(&[kind]);
-    write_str(hash, s);
+    hash.write_str(s);
 }
 
 /// Feed one node to `hash`: a byte for its kind, then its atom, its spelling,
@@ -106,7 +97,7 @@ fn write_node(hash: &mut Fnv1a, node: &Syntax) {
         SyntaxLiteral(inner) => (22, std::slice::from_ref(&**inner)),
     };
     hash.write(&[kind]);
-    write_len(hash, children.len());
+    hash.write_len(children.len());
     for child in children {
         write_node(hash, child);
     }

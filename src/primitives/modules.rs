@@ -188,8 +188,8 @@ fn compile_with(
     }
 }
 
-/// `(import/load-file path)`: compile the Elle source at `path`, run it, and
-/// return its last expression.
+/// `(import/load-file path)`: compile the Elle source at `path`, or take the
+/// unit the store keeps for it, run it, and return its last expression.
 pub(crate) fn prim_load_file(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -213,7 +213,7 @@ pub(crate) fn prim_load_file(
             }
         };
         let compiled = compile_with(ctx, NAME, |symbols, cctx| {
-            crate::pipeline::compile_file(&source, symbols, cctx, &path)
+            crate::pipeline::compile_file_stored(&source, symbols, cctx, &path)
         });
         match compiled {
             Ok(compiled) => run_module(ctx, NAME, &path, compiled),

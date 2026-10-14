@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-14
 //! The compilation pipeline's entry points: source text to bytecode, or to HIR
 //! for a reader that wants the analysis alone.
 //!
@@ -20,7 +20,7 @@ pub mod sources;
 // Re-export public API
 pub use analyze::{analyze, analyze_file};
 pub use bootstrap::install_core_exports;
-pub use cache::{BootExports, CompileCtx, Layer};
+pub use cache::{compile_file_stored, BootExports, CompileCtx, Layer};
 #[cfg(test)]
 pub(crate) use compile::compile_file_to_typed_fhir;
 pub use compile::{
