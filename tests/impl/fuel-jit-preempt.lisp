@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-12
+# audited: 2026-10-14
 # A compiled fiber body keeps its operand-stack values across a fuel preemption and a refuel.
 # docs/impl/jit.md
 #
@@ -26,9 +26,9 @@
 ## that the body compiled, because an interpreted body passes every check here
 ## without reaching the compiled spill.
 ##
-## The second trap: the fuel pause needs a callee that runs interpreted, since
-## JIT code never pauses. Each scenario's first check reads that the fiber
-## paused, so a body that runs to completion fails there.
+## The second trap: the budget has to run out inside the body. Each scenario's
+## first check reads that the fiber paused, so a body that finishes inside its
+## budget fails there.
 ##
 ## Fibers use |:fuel :error| so a corruption-induced runtime error is caught by
 ## the fiber (recorded as its value) rather than propagating to the runner.
@@ -96,14 +96,11 @@
 # tests/lang/fuel-apply-fold.lisp holds the fold across a preemption on the
 # build's own tier; this repeats it with the body compiled, so the compiled
 # tier's spill/restore of the fold state is covered too. The step is a
-# top-level defn for the same reason as scenario 2's. It adds with three
-# operands: `(+ acc 1)` becomes `%add` (docs/impl/graft.md), the whole fold then
-# runs as JIT code, and nothing pauses. A three-operand `+` stays a call, and
-# its walker is a closure the JIT refuses, so the step runs interpreted.
+# top-level defn for the same reason as scenario 2's.
 
 (println "Scenario 3: fold accumulator across JIT preemption")
 (defn count-one [acc _]
-  (+ acc 1 0))
+  (+ acc 1))
 (defn fold-sum []
   (fold count-one 0 (range 100)))
 (force-jit fold-sum)

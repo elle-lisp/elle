@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-04
+(elle/epoch 15)
+# audited: 2026-10-14
 # ── gpu-select: git + disgit + N-ary gpu:map ──────────────────────────
 #
 # Tests the full pipeline:
@@ -37,7 +37,7 @@
 # ── Test: git + fn/git? + disgit ─────────────────────────────────────
 
 (defn select [flag a b]
-  (silence)
+  (silent!)
   (if flag a b))
 
 (assert (not (fn/git? select)) "select is not GIT'd initially")
@@ -67,7 +67,7 @@
 # value 2 must be truthy (cmpi ne, not trunci LSB)
 
 (defn gpu-truthy [x]
-  (silence)
+  (silent!)
   (if x 1 0))
 
 (git gpu-truthy)
@@ -82,7 +82,7 @@
 # ── Test: 2-ary gpu:map (add) ────────────────────────────────────────
 
 (defn gpu-add [a b]
-  (silence)
+  (silent!)
   (numeric!)
   (%add a b))
 

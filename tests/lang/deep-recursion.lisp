@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-06
+(elle/epoch 15)
+# audited: 2026-10-14
 # A non-tail recursion 10,000 deep completes, and can park, pause, raise and be
 # squelched at the bottom.
 #
@@ -69,15 +69,10 @@
   (assert (= (fiber/status f) :dead) "the deep fiber finishes"))
 
 ## ── A fuel pause inside the recursion ──────────────────────────────────
-## The trap: `sum-to` grafts `=`, `+` and `-` to their ops (docs/impl/graft.md),
-## so under an active JIT policy it runs as native code, which charges no fuel.
-## A three-operand `+` stays a call whose walker the JIT refuses, so each level
-## of `sum-to-metered` pays fuel in the interpreter.
-(defn sum-to-metered [n]
-  (if (= n 0)
-    0
-    (+ n (sum-to-metered (- n 1)) 0)))
-(let [f (fiber/new (fn [] (sum-to-metered depth)) |:fuel|)]
+## Each level is a call, and a call charges fuel in JIT code as in the
+## interpreter (docs/runtime.md), so the budget runs out inside the recursion
+## whichever tier runs it.
+(let [f (fiber/new (fn [] (sum-to depth)) |:fuel|)]
   (fiber/set-fuel f 5000)
   (fiber/resume f nil)
   (assert (= (fiber/status f) :paused) "fuel runs out inside the recursion")
@@ -99,7 +94,7 @@
         "recursion runs again after an error unwound 10,000 callers")
 
 ## ── A squelch boundary above the recursion ─────────────────────────────
-(def squelched-dive (squelch (fn [] (dive depth)) :yield))
+(def squelched-dive (squelch :yield (fn [] (dive depth))))
 (let [[ok? err] (protect ((fn [] (squelched-dive))))]
   (assert (not ok?) "a yield 10,000 calls under a squelch boundary is refused")
   (assert (= (get err :error) :signal-violation)
