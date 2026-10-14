@@ -62,6 +62,11 @@ that grafted either body would run a function its callee does not name. So
 every other compile reads the registries and writes nothing, and its named
 functions inline within its own unit.
 
+Within the standard library's compile, only a top-level definition records. A
+lambda bound inside a function body, such as `import/resolve`'s `file-in`, is
+local to that body, whatever its name. Under an export's name it would describe
+a function the export is not.
+
 The registry entry is the same `HirFragment` the same-unit map holds. Nothing of
 the defining unit is consulted at the call site: the fragment's own table carries
 the metadata of every binding its body introduces, and the graft's `Global`
