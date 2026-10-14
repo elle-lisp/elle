@@ -16,7 +16,7 @@
 
 use crate::hir::arena::{BindingArena, BindingInner};
 use crate::hir::binding::Binding;
-use crate::hir::expr::{CallArg, Hir, HirKind};
+use crate::hir::expr::{CallArg, Hir, HirKind, IntrinsicOp};
 use crate::signals::Signal;
 use crate::value::SymbolId;
 use rustc_hash::FxHashMap;
@@ -128,12 +128,19 @@ impl HirFragment {
     /// Does the body hold a call-position `%`-intrinsic? Loop fusion admits
     /// such a body only under the function's `(numeric!)` declaration.
     pub fn holds_intrinsic(&self) -> bool {
-        fn walk(h: &Hir) -> bool {
-            let mut found = matches!(h.kind, HirKind::Intrinsic { .. });
-            h.for_each_child(|c| found |= walk(c));
+        self.holds_intrinsic_where(|_| true)
+    }
+
+    /// Does the body hold a call-position `%`-intrinsic whose op satisfies
+    /// `accept`? The graft asks for an op with a proof obligation before it
+    /// grafts into a lambda nothing live reaches.
+    pub fn holds_intrinsic_where(&self, accept: impl Fn(IntrinsicOp) -> bool) -> bool {
+        fn walk(h: &Hir, accept: &impl Fn(IntrinsicOp) -> bool) -> bool {
+            let mut found = matches!(&h.kind, HirKind::Intrinsic { op, .. } if accept(*op));
+            h.for_each_child(|c| found |= walk(c, accept));
             found
         }
-        walk(&self.body)
+        walk(&self.body, &accept)
     }
 
     /// The globals the body calls with no spliced operand, as fragment index

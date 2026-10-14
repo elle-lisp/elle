@@ -1,5 +1,5 @@
-// audited: 2026-10-06
-//! Which lambdas live code reaches: a call inside any other lambda stays a call.
+// audited: 2026-10-14
+//! Which lambdas live code reaches: inside any other lambda, only a body with no op to prove grafts.
 //!
 //! docs/impl/graft.md
 

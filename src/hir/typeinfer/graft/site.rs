@@ -1,8 +1,9 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! One graft: the arm a call's operand count selects, its operands bound in order, the body in the call's place.
 //!
 //! docs/impl/graft.md
 
+use super::super::contract::has_obligation;
 use super::{Contribution, Grafter, Operand, UnitFn};
 use crate::hir::arena::BindingScope;
 use crate::hir::binding::Binding;
@@ -36,6 +37,11 @@ impl<'a> Grafter<'a> {
             None => arm.recursive,
         };
         if recursive || arm.fragment.body_signal().propagates != 0 {
+            return None;
+        }
+        // Where nothing live reaches, the operands prove nothing, so a body
+        // with an op to prove would be rejected where the call compiles.
+        if self.unreached > 0 && arm.fragment.holds_intrinsic_where(has_obligation) {
             return None;
         }
         let extras = operand_count - fragment.fixed();

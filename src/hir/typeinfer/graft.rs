@@ -51,6 +51,7 @@ pub(crate) fn graft_calls(
         prim_by_name,
         scope: Scope::new(),
         live: live::live_lambdas(hir),
+        unreached: 0,
         grafting: Vec::new(),
         record: GraftRecord::default(),
     };
@@ -110,9 +111,12 @@ struct Grafter<'a> {
     /// This unit's primitives by name, which another unit's globals resolve to.
     prim_by_name: FxHashMap<SymbolId, Binding>,
     scope: Scope,
-    /// The lambdas live code reaches. A call inside any other lambda stays a
-    /// call: its parameters prove nothing a grafted op could use.
+    /// The lambdas live code reaches. Inside any other lambda, only a body
+    /// with no op to prove grafts: the lambda's parameters prove nothing a
+    /// grafted op could use.
     live: FxHashSet<HirId>,
+    /// How many lambdas nothing live reaches the walk is inside.
+    unreached: usize,
     /// The functions whose grafted bodies the walk is inside. None of them
     /// grafts again there, which bounds a cycle that runs through several
     /// units.
@@ -124,14 +128,18 @@ impl<'a> Grafter<'a> {
     fn walk(&mut self, h: &mut Hir) {
         match &mut h.kind {
             HirKind::Lambda(lambda) => {
-                if !self.live.contains(&h.id) {
-                    return;
+                let reached = self.live.contains(&h.id);
+                if !reached {
+                    self.unreached += 1;
                 }
                 let mut introduced = lambda.params.clone();
                 introduced.extend(lambda.rest_param.iter().copied());
                 self.scope.enter_lambda(&lambda.captures, &introduced);
                 self.walk(&mut lambda.body);
                 self.scope.leave_lambda();
+                if !reached {
+                    self.unreached -= 1;
+                }
             }
             HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
                 for (b, init) in bindings.iter_mut() {
