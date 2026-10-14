@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! The three module loaders, for Elle source, a shared library and one form.
 //!
 //! `import/load-file` runs Elle source, `import/load-plugin` loads a shared
@@ -300,9 +300,10 @@ primitive! {
         arity: Arity::Exact(1),
         doc: "Compile the Elle source file at PATH, run it, and return its last \
               expression. A relative PATH resolves against the working directory, \
-              as slurp resolves one. Every call compiles and runs the file again. \
-              Code calls import-file or import, so that a relative path follows the \
-              file that wrote it.",
+              as slurp resolves one. Every call runs the file again. The instance \
+              compiles it once, and compiles again when its text, an include, or the \
+              capabilities the caller withholds change. Code calls import-file or \
+              import, so that a relative path follows the file that wrote it.",
         params: &["path"],
         example: "(import/load-file \"tests/modules/test.lisp\")",
         // Opaque, not Mixed: the path is copied out to a Rust String to read the

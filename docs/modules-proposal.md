@@ -5,11 +5,12 @@
 The module system Elle is building toward: compiled once per instance, linked across files, and shipped as images.
 
 [modules.md](modules.md) describes the module system as it is. This document
-states the design it becomes, and the argument for each part. Four parts are
+states the design it becomes, and the argument for each part. Five parts are
 implemented: [sound signals](#silent-is-sound),
 [the raw primitives](#the-raw-primitives-are-raw),
-[contained expansion](#expansion-is-contained) and
-[deterministic expansion](#expansion-is-deterministic).
+[contained expansion](#expansion-is-contained),
+[deterministic expansion](#expansion-is-deterministic) and
+[one compile per file](#one-compile-per-file).
 [solver.md](impl/solver.md) owns the cross-file signal solver that linking
 uses. The decisions that belong to the language's owner are
 listed under [Open decisions](#open-decisions).
@@ -35,11 +36,10 @@ listed under [Open decisions](#open-decisions).
 
 ## Where the module system stands
 
-A defect below carries its issue number where it has one. The measurements
-were taken on a release build at `8fe781a03`; [Measuring](#measuring) gives
-the method. [modules.md](modules.md) states two more under its architectural
-constraints: every load compiles its file again (#881), and no signal crosses a
-file boundary, so a call into another file takes every bit (#1232).
+A defect below carries its issue number where it has one.
+[modules.md](modules.md) states one more under its architectural constraints:
+no signal crosses a file boundary, so a call into another file takes every bit
+(#1232).
 
 **A function body infers less than a file.** A file converges its definitions
 jointly. A body converges a definition only against itself, so a call to a
@@ -252,28 +252,33 @@ The compile inputs:
 | The facts of every literal import | Linking reads them to solve the file's signals |
 | User signal declarations | Bit numbers, until signals relocate by name |
 
-This table is the key of [one compile per file](#one-compile-per-file), and
-the digest of a module image, as the source digest is for the boot image
-([boot.md](impl/image/boot.md)). Containment comes first, because it fixes the
-macro environment.
+This table is what the key of [one compile per file](#one-compile-per-file)
+covers, and the digest of a module image, as the source digest is for the boot
+image ([boot.md](impl/image/boot.md)). Containment comes first, because it fixes
+the macro environment.
 
 ## One compile per file
 
-Keep the bytecode a file's compile produced, keyed in the instance by its
-compile inputs, and let the runtime `import` run it instead of compiling
-again. This closes #881. No chdir primitive exists, so a resolved path is
-stable within an instance. The key follows the content, so a REPL that edits a
-module gets the new code.
+`import/load-file` keeps the code a file's compile produced in the instance's
+store, keyed by its compile inputs, and runs it instead of compiling again
+(#881, [modules.md](modules.md)). No chdir primitive exists, so a resolved path
+is stable within an instance. The key follows the content, so a REPL that edits
+a module gets the new code.
 
-An importer's key includes the keys of its literal imports. Once a call into
-another file uses the linked signal, the importer's bytecode depends on what
-its imports state. The store keeps each file's facts beside its bytecode, not
-the signals solved from them. A file solved with its imports left open is sound
-but loose ([solver.md](impl/solver.md)), and linking closes it.
+The key is a digest of the inputs in the table above that can change within an
+instance: the file's text, its path, the capabilities the compiling fiber
+withholds, and each include's resolved path and text. A lookup resolves every
+include again. A host that registers a binding or a primitive empties the store,
+and [pipeline.md](pipeline.md) says why no other input needs a place in the key.
 
-A compiled template may run twice: constants materialize per execution, so two
-runs share code and nothing else. Every import still runs the file, so module
-meaning does not change.
+A file's compile reads none of its imports, so no import is in its key yet.
+Once a call into another file uses the linked signal, an importer's key
+includes the keys of its literal imports. The store then keeps each file's
+facts beside its bytecode, not the signals solved from them. A file solved with
+its imports left open is sound but loose ([solver.md](impl/solver.md)), and
+linking closes it.
+
+Every import still runs the kept code, so module meaning does not change.
 
 ## The module shape
 
@@ -341,9 +346,9 @@ suspending:
 2. Under (b), a shared top level that runs interleaved with other fibers could
    build a different value on each run.
 3. An asynchronous read buys little. The file read and path resolution block
-   briefly, and the compile is the cost: 0.29 s for `std/http2`, all of it CPU
-   on the one scheduler thread. One compile per file and linking remove the
-   runtime compile for a literal import. `lib/`, `tests/`, `demos/` and
+   briefly, and the compile is the cost: 0.29 s for `std/http2` at `8fe781a03`,
+   all of it CPU on the one scheduler thread. One compile per file pays it once
+   per instance, and linking removes the runtime compile for a literal import. `lib/`, `tests/`, `demos/` and
    `tools/` hold 317 literal specs and 15 computed ones.
 
 ## What is shared is pure
@@ -476,25 +481,12 @@ pure instead, and `include` stays the one read a compile records.
 
 ## Measuring
 
-The repeated compile is visible per file and per phase. Run this from the
-repository root:
+Run this from the repository root:
 
 ```sh
 echo '(def a ((import-file "lib/base64.lisp"))) (def b ((import-file "lib/base64.lisp")))' | elle --trace=compile -
 ```
 
-`lib/base64.lisp` appears twice, once for each load. One compile per file is
-done when it appears once.
-
-On a release build at `8fe781a03`, where an importer's analysis compiled each
-literal import for its projection, and so did the analysis of each import
-inside `std/http2`:
-
-| Measure | Value |
-|---------|-------|
-| Files `std/http2` compiles twice | 9 |
-| Time the import adds | 0.29 s |
-| The second compiles, summed | 105 ms |
-
-The numbers move with the machine and with every front-end pass. Re-measure
-rather than read them.
+`lib/base64.lisp` appears once: the second load runs the code the first one
+compiled. Before the store, each load compiled it, and at `8fe781a03` the
+import of `std/http2` compiled nine files twice.

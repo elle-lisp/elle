@@ -47,9 +47,10 @@ path resolves against the working directory. Code calls `import-file` or
 
 `import/load-file` reads the file as UTF-8 source. It compiles the file, runs
 it on the current fiber, and returns the file's last expression. The file runs
-as a single letrec. Every call compiles and runs the file again. A file's
-definitions reach no other compile, so what an earlier load defined never
-changes how a later file compiles.
+as a single letrec. Every call runs the file again, and the instance compiles
+it once while its compile inputs stay the same (§ "A load runs the file again"
+below). A file's definitions reach no other compile, so what an earlier load
+defined never changes how a later file compiles.
 
 A loader compiles on behalf of the fiber that calls it. The file's macros
 expand without the capabilities that fiber withholds and without the effect
@@ -398,19 +399,43 @@ writes its own over `import-file` and the loaders.
 
 The module system makes four design choices, and each has a cost.
 
-### No .lisp caching
+### A load runs the file again
 
-Every load of a `.lisp` file compiles and runs it again (#881). If two modules
-both import `./utils`, the file compiles twice and runs twice.
+Every load of a `.lisp` file runs it again. If two modules both import
+`./utils`, the file runs twice. The instance compiles it once and keeps the
+code under the file's absolute path, so the second load runs the kept code.
 
-**Why**: A cache would share state between independent callers and suppress
-side effects. A stateful module, one that holds a mutable `@` binding and
-`assign`s it, gets independent state per import. Two imports of one module
-file make independent instances, as two calls to a factory function make
-independent objects.
+**Why**: A stateful module, one that holds a mutable binding and assigns it,
+gets independent state per import. Two imports of one module file make
+independent instances, as two calls to a factory function make independent
+objects. The kept code holds nothing a run builds, so each run makes values of
+its own.
 
-**Consequence**: The compile repeats. Where that matters, import once at the
-top level and pass the module value down the call stack.
+A load uses the kept code only while every compile input matches what the
+compile read: the file's text, the capabilities the calling fiber withholds,
+and each include. The loader resolves each include again and reads it again,
+so a changed include or a file that now shadows it compiles the file again. A
+compile that fails keeps nothing. When a host registers a binding or a
+primitive, the instance drops all its kept code, because every compile resolves
+those names ([pipeline.md](pipeline.md)).
+
+```lisp
+(with-temp-dir dir
+               (let [p (path/join dir "counter.lisp")]
+                 (file/write p "(var n 0)\n(fn [] (assign n (+ n 1)) n)\n")
+                 (let [a (import-file p)
+                       b (import-file p)]
+                   (a)
+                   (a)
+                   (assert (= 1 (b)) "two loads keep independent state"))
+                 (file/write p "(fn [] :edited)\n")
+                 (assert (= :edited ((import-file p)))
+                         "a load runs the text the file holds now")))
+```
+
+**Consequence**: Only the first load of a file pays for its compile. A load
+still runs the file's top level, so a module that does work there does it on
+every import.
 
 ### Circular import detection is at run time
 
