@@ -304,4 +304,5 @@
 ["tests/lang/gun-mesh.lisp" :objects 2151]
 ["tests/lang/gun-sync.lisp" :objects 1358]
 ["tests/lang/gun-sea.lisp" :objects 1804]
-["tests/lang/gun-sea-mesh.lisp" :objects 1276]
+["tests/lang/gun-content.lisp" :objects 1243]
+["tests/lang/gun-sea-mesh.lisp" :objects 1469]
