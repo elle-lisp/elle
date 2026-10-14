@@ -3,11 +3,13 @@
 //!
 //! src/pipeline/AGENTS.md
 //! docs/impl/image/boot.md
+//! docs/impl/graft.md
 //!
 //! The state is a macro-expansion VM, the prelude and core `Expander`, the
-//! `PrimitiveMeta` (primitives, host primitives, host bindings, core.lisp and
-//! stdlib exports), the REPL layer, and the capabilities the fiber a compile
-//! runs for withholds.
+//! `PrimitiveMeta` (primitives, core.lisp and stdlib exports, host bindings),
+//! the REPL layer, the capabilities the fiber a compile runs for withholds,
+//! the store of the units loaded files compiled to, and whether a unit grafts
+//! its calls.
 //!
 //! The instance's `RuntimeCore` owns it beside the `VM` and the `SymbolTable`,
 //! and the pipeline takes it as a parameter. Two embedded Elle instances on one
@@ -26,8 +28,11 @@ use super::bootstrap::{compile_core, install_core_exports};
 
 mod register;
 mod repl;
+mod store;
 pub use repl::Layer;
 use repl::ReplLayer;
+pub use store::compile_file_stored;
+use store::Store;
 
 /// The two export structs a boot leaves behind: core.lisp's and stdlib.lisp's.
 ///
@@ -82,7 +87,10 @@ pub struct CompileCtx {
     withheld: SignalBits,
     /// The core and stdlib export aggregates this instance booted with.
     exports: BootExports,
-    /// Whether a unit compiled here grafts its calls (docs/impl/graft.md).
+    /// The unit each file a loader compiled left, while its compile inputs
+    /// match ([`compile_file_stored`]).
+    store: Store,
+    /// Whether a unit compiled here grafts its calls.
     graft: crate::config::GraftPolicy,
     /// The static-region counter where this instance's boot ended, taken as
     /// the stdlib exports install. A boot image records it, so an image boot
@@ -218,6 +226,7 @@ impl CompileCtx {
                 core,
                 ..BootExports::default()
             },
+            store: Store::default(),
             graft: crate::config::GraftPolicy::On,
             static_region_mark: 0,
         }
@@ -316,9 +325,9 @@ impl CompileCtx {
         self.meta.functions.get(&sym_id).copied()
     }
 
-    /// This instance's macro table: every prelude macro, plus whatever the
-    /// REPL and later compiles defined. The boot dump reads it, and so does
-    /// the pin that a hydrated table carries the same entries.
+    /// This instance's macro table: every prelude macro, and every macro a
+    /// boot image installed. The boot dump reads it, and so does the pin that
+    /// a hydrated table carries the same entries.
     pub(crate) fn macros(&self) -> &HashMap<String, crate::syntax::MacroDef> {
         self.expander.macros()
     }
@@ -369,8 +378,9 @@ impl CompileCtx {
     /// built.
     ///
     /// The macro VM's JIT and SPIR-V caches pin code regions from Rust, so they
-    /// go here too (docs/impl/jit.md).
+    /// go here too (docs/impl/jit.md), and so does each unit the store keeps.
     pub fn release(&mut self) {
+        self.store.clear();
         self.expander.release_cached_transformers();
         self.repl.release();
         self.vm.eval_expander = None;

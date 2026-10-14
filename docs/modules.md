@@ -483,6 +483,7 @@ reasoning patterns.
 | File | Role |
 |------|------|
 | [modules.rs](../src/primitives/modules.rs) | The loaders: file I/O, compilation, execution, circular load detection, plugin caching |
+| [store.rs](../src/pipeline/cache/store.rs) | The store: one compile per file while its compile inputs match |
 | [prelude.lisp](../src/prelude.lisp) | The `import` macro |
 | [stdlib.lisp](../src/stdlib.lisp) | `import/resolve` |
 | [plugin.rs](../src/plugin.rs) | `.so` plugin loading: `dlsym`, `elle_plugin_init`, the struct of primitives |

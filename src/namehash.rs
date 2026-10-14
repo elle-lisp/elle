@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-14
 //! The 64-bit name hash that gives symbols and keywords their identity.
 //!
 //! docs/impl/symbol.md
@@ -34,7 +34,8 @@ pub const fn name_hash(name: &str) -> u64 {
 }
 
 /// The same FNV-1a, fed in pieces, for a hash over more than one name. A unit
-/// of expansion takes its tag from one ([`crate::syntax::UnitTag`]).
+/// of expansion takes its tag from one ([`crate::syntax::UnitTag`]), and a
+/// file the store keeps the digest of its compile inputs.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Fnv1a(u64);
 
@@ -48,6 +49,18 @@ impl Fnv1a {
             self.0 ^= b as u64;
             self.0 = self.0.wrapping_mul(FNV_PRIME);
         }
+    }
+
+    /// Feed a count, as eight little-endian bytes.
+    pub(crate) fn write_len(&mut self, len: usize) {
+        self.write(&(len as u64).to_le_bytes());
+    }
+
+    /// Feed a string behind its length, so that two strings fed one after the
+    /// other hash apart from any other split of the same bytes.
+    pub(crate) fn write_str(&mut self, s: &str) {
+        self.write_len(s.len());
+        self.write(s.as_bytes());
     }
 
     pub(crate) fn finish(self) -> u64 {

@@ -181,8 +181,7 @@ pub fn compile_file(
     cctx: &mut CompileCtx,
     source_name: &str,
 ) -> Result<CodeUnit, String> {
-    compile_file_inner(source, symbols, cctx, source_name, Layer::Instance)
-        .map(|(result, _)| result)
+    compile_file_inner(source, symbols, cctx, source_name, Layer::Instance).map(|file| file.unit)
 }
 
 /// Like `compile_file`, but for a REPL line: the line also sees the macros and
@@ -196,6 +195,19 @@ pub fn compile_file_repl(
     source_name: &str,
 ) -> Result<(CodeUnit, crate::syntax::Expander), String> {
     compile_file_inner(source, symbols, cctx, source_name, Layer::Repl)
+        .map(|file| (file.unit, file.expander))
+}
+
+/// `compile_file` for the store: the unit, and each file the compile included,
+/// which the store's key reads ([docs/pipeline.md](../../docs/pipeline.md)).
+pub(crate) fn compile_file_reading(
+    source: &str,
+    symbols: &mut SymbolTable,
+    cctx: &mut CompileCtx,
+    source_name: &str,
+) -> Result<(CodeUnit, Vec<IncludeRead>), String> {
+    compile_file_inner(source, symbols, cctx, source_name, Layer::Instance)
+        .map(|file| (file.unit, file.includes))
 }
 
 /// Compile one form, handed over as a value, as a whole file: `compile_file`
@@ -215,13 +227,21 @@ pub fn compile_value(
     })
 }
 
+/// What a file's compile produced: its unit, the expander that expanded it,
+/// and each file it included.
+struct FileUnit {
+    unit: CodeUnit,
+    expander: crate::syntax::Expander,
+    includes: Vec<IncludeRead>,
+}
+
 fn compile_file_inner(
     source: &str,
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
     source_name: &str,
     layer: Layer,
-) -> Result<(CodeUnit, crate::syntax::Expander), String> {
+) -> Result<FileUnit, String> {
     let ct = crate::trace::compile();
     let Frontend {
         hir,
@@ -229,6 +249,7 @@ fn compile_file_inner(
         expander,
         prim_values,
         types,
+        includes,
     } = compile_file_frontend(source, symbols, cctx, source_name, layer)?;
 
     // Lower to LIR
@@ -264,7 +285,11 @@ fn compile_file_inner(
     crate::phase!(ct, "compile", t, "{} emit", source_name);
     bytecode.signal = signal;
 
-    Ok((CodeUnit::new(code, bytecode), expander))
+    Ok(FileUnit {
+        unit: CodeUnit::new(code, bytecode),
+        expander,
+        includes,
+    })
 }
 
 /// Compile a file in the per-form fault-barrier test mode
@@ -307,9 +332,9 @@ fn compile_module_with_transform(
 
 /// Like `compile_module_with_transform`, but from already-read top-level
 /// `syntaxes`, read in one VM and compiled in another. Powers
-/// `compile/whole-module-syntax`: the runner reads a multi-form file in the
-/// main VM and ships its syntax to a worker that compiles it here. `compile_value`
-/// compiles through it too.
+/// `compile/whole-module-syntax`, where the runner reads a multi-form file in
+/// the main VM and ships its syntax to a worker that compiles it here, and
+/// `compile_value`.
 fn compile_syntaxes_with_transform(
     syntaxes: Vec<Syntax>,
     symbols: &mut SymbolTable,
