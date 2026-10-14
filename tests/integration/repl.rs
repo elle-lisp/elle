@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-13
 // The REPL fed through a pipe: one form at a time, what a line binds, and what a file a line imports cannot see.
 // docs/pipeline.md
 
@@ -102,6 +102,21 @@ fn def_redefinition() {
     let lines: Vec<&str> = out.lines().filter(|l| l.contains("⟹")).collect();
     assert_eq!(lines.len(), 3, "expected 3 results: {}", out);
     assert!(lines[2].contains("2"), "redefined value: {}", out);
+}
+
+/// A function a line defines again is the body a later line's `map` runs. The
+/// counter-factual recorded each line's functions for later lines to splice
+/// into a fused `map`, keeping the first definition, so the `map` answered
+/// `[1 1]` while a direct call answered 2.
+#[test]
+fn a_redefined_function_is_the_body_a_later_map_runs() {
+    let (out, _, code) = elle("(defn f [x] 1)\n(defn f [x] 2)\n(map f [1 2])\n(f 0)\n");
+    assert_eq!(code, 0);
+    assert!(out.contains("⟹ [2 2]"), "the map runs the second f: {out}");
+    assert!(
+        out.contains("⟹ 2"),
+        "a direct call runs the second f: {out}"
+    );
 }
 
 // ── Multi-line accumulation ──────────────────────────────────────────
