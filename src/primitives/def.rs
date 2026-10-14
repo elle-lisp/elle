@@ -312,6 +312,12 @@ impl PrimitiveDef {
         bits_from_args: None,
         ambient: false,
     };
+
+    /// Every spelling that resolves to this primitive: its name, then its
+    /// aliases.
+    pub fn names(&'static self) -> impl Iterator<Item = &'static str> {
+        std::iter::once(self.name).chain(self.aliases.iter().copied())
+    }
 }
 
 /// Placeholder function for DEFAULT — should never be called.

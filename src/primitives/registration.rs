@@ -95,10 +95,10 @@ fn ffi_tables() -> &'static [&'static [PrimitiveDef]] {
 
 /// Name→def index over every primitive table, including aliases.
 ///
-/// Compile-time consumers (type inference reading `PrimitiveDef::ret`)
-/// use this to look up primitive metadata by source name without a VM —
-/// the same static tables `register_primitives` feeds, so the data cannot
-/// drift from what runs.
+/// The readers that hold a spelling rather than an id, the image dumper and
+/// verifier and the dead-binding pass, look a primitive up here without a VM.
+/// It covers the same static tables `register_primitives` feeds, so the data
+/// cannot drift from what runs.
 pub(crate) fn def_by_name(name: &str) -> Option<&'static PrimitiveDef> {
     use std::collections::HashMap;
     use std::sync::LazyLock;
@@ -106,9 +106,8 @@ pub(crate) fn def_by_name(name: &str) -> Option<&'static PrimitiveDef> {
         let mut index = HashMap::new();
         for table in ALL_TABLES.iter().chain(ffi_tables().iter()) {
             for def in *table {
-                index.insert(def.name, def);
-                for alias in def.aliases {
-                    index.insert(*alias, def);
+                for name in def.names() {
+                    index.insert(name, def);
                 }
             }
         }
@@ -136,8 +135,8 @@ fn static_index() -> &'static std::collections::HashMap<u64, (&'static str, &'st
             let mut index = HashMap::new();
             for table in ALL_TABLES.iter().chain(ffi_tables().iter()) {
                 for def in *table {
-                    for name in std::iter::once(&def.name).chain(def.aliases) {
-                        index.insert(crate::namehash::name_hash(name), (*name, def));
+                    for name in def.names() {
+                        index.insert(crate::namehash::name_hash(name), (name, def));
                     }
                 }
             }
@@ -262,11 +261,10 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) -> PrimitiveM
 
     for table in ALL_TABLES.iter().chain(ffi_tables().iter()) {
         for def in *table {
-            let doc = Doc::of(def);
-            for name in std::iter::once(&def.name).chain(def.aliases) {
+            for name in def.names() {
                 meta.insert_def(symbols.intern(name), def);
-                vm.docs.insert((*name).to_string(), doc.clone());
             }
+            Doc::enter(&mut vm.docs, def);
         }
     }
 
@@ -277,15 +275,15 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) -> PrimitiveM
 
 /// Build primitive metadata without registering in a VM.
 ///
-/// Iterates the same PRIMITIVES tables as `register_primitives` but
-/// only builds the signals/arities maps. Used by pipeline functions
-/// that receive an already-configured VM.
+/// Walks the same tables as `register_primitives` and builds the same
+/// metadata, but enters no doc in any VM. The compile context builds its
+/// macro-body metadata this way, and so do tests that analyze with no VM.
 pub fn build_primitive_meta(symbols: &mut SymbolTable) -> PrimitiveMeta {
     let mut meta = PrimitiveMeta::new();
 
     for table in ALL_TABLES.iter().chain(ffi_tables().iter()) {
         for def in *table {
-            for name in std::iter::once(&def.name).chain(def.aliases) {
+            for name in def.names() {
                 meta.insert_def(symbols.intern(name), def);
             }
         }
