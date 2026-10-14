@@ -1,4 +1,4 @@
-//! audited: 2026-09-30
+//! audited: 2026-10-14
 //! The submissions that name an OS object the request carries or creates: a
 //! watcher, a signal receiver, a file, a child, a background task.
 //!
@@ -166,6 +166,29 @@ impl AsyncBackend {
                 path: path.to_string(),
                 buffer_handle: buffer,
                 port,
+            },
+        )
+    }
+
+    /// Submit a sync of the file or directory at `path`.
+    ///
+    /// This is a thread-pool operation on every platform, for the reason an
+    /// open is: the worker opens the path before it syncs it. The open is
+    /// non-blocking and `fsync(2)` waits on nothing outside this process, so
+    /// the operation takes no stop pipe.
+    pub(super) fn submit_sync(&self, path: &str) -> Result<SubmissionId, String> {
+        let c_path = std::ffi::CString::new(path)
+            .map_err(|_| format!("file/sync: path contains null byte: {}", path))?;
+
+        self.submit_op(
+            0,
+            |d| {
+                d.hub
+                    .submit(d.id, PoolOp::Sync { path: c_path }, Bounds::prompt())
+            },
+            |buffer, ()| PendingOp::Sync {
+                path: path.to_string(),
+                buffer_handle: buffer,
             },
         )
     }

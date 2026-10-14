@@ -69,7 +69,9 @@ impl CompletionHub {
 ///
 /// `Task` and `Resolve` take no bound because nothing can bound them; their
 /// submissions say so with `Bounds::uninterruptible`, and dropping the bounds
-/// here is what disposes of them.
+/// here is what disposes of them. `Flush` and `Sync` take none because they
+/// wait on nothing outside this process, and their submissions say
+/// `Bounds::prompt`.
 pub(super) fn run(op: PoolOp, bounds: Bounds) -> (i32, Vec<u8>) {
     match op {
         PoolOp::Read { fd, landing } => stream::read(OpBound::new(fd, bounds), fd, landing),

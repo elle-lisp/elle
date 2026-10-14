@@ -226,11 +226,12 @@ impl IoOp {
     ///
     /// Every async operation reaches the scheduler, so each carries `SIG_IO`.
     /// An operation that also exercises a gated authority adds its bit: a
-    /// subprocess spawn or wait adds `SIG_EXEC`, opening a path adds `SIG_FS`,
-    /// and a socket operation adds `SIG_NET`. This is the same requirement the
-    /// primitive that mints the request declares; the derivation lets the
-    /// spend gate at `io/submit` test a request whatever route it arrived by,
-    /// without trusting a declaration on the submission primitive.
+    /// subprocess spawn or wait adds `SIG_EXEC`, opening or syncing a path adds
+    /// `SIG_FS`, and a socket operation adds `SIG_NET`. This is the same
+    /// requirement the primitive that mints the request declares; the
+    /// derivation lets the spend gate at `io/submit` test a request whatever
+    /// route it arrived by, without trusting a declaration on the submission
+    /// primitive.
     ///
     /// `IoOp::Task` wraps an arbitrary closure whose effects are not derivable,
     /// so it is deny-by-default: it declares every gated bit. It is unreachable
@@ -240,7 +241,7 @@ impl IoOp {
         let base = SIG_IO;
         match self {
             IoOp::Spawn(_) | IoOp::ProcessWait => base.union(SIG_EXEC),
-            IoOp::Open { .. } => base.union(SIG_FS),
+            IoOp::Open { .. } | IoOp::Sync { .. } => base.union(SIG_FS),
             IoOp::Connect {
                 addr: ConnectAddr::Unix { .. },
             } => base.union(SIG_NET).union(SIG_FS),

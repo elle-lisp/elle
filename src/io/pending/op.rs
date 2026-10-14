@@ -129,7 +129,6 @@ pub(crate) enum PendingOp {
     /// A sync runs on the thread pool on every platform, as an open does, so
     /// `PoolOp::Sync` owns the path the syscall reads, and `buffer_handle` is
     /// an empty placeholder.
-    #[allow(dead_code)]
     Sync {
         /// The path (for error messages).
         path: String,
@@ -315,6 +314,7 @@ impl PendingOp {
                 | (PendingOp::Sleep { .. }, OpKind::Sleep)
                 | (PendingOp::ProcessWait { .. }, OpKind::ProcessWait)
                 | (PendingOp::Open { .. }, OpKind::Open)
+                | (PendingOp::Sync { .. }, OpKind::Sync)
                 | (PendingOp::Task { .. }, OpKind::Task)
                 | (PendingOp::Resolve { .. }, OpKind::Resolve)
                 | (PendingOp::WatchNext { .. }, OpKind::Watch)

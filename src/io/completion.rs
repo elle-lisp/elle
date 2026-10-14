@@ -190,7 +190,14 @@ pub(super) fn process_raw_completion(
             port_ref.set_fd(fd);
             Completion::ok(id, birth, *port_val)
         }
-        PendingOp::Sync { .. } => Completion::ok(id, birth, Value::NIL),
+        PendingOp::Sync { path, .. } => {
+            if result_code < 0 {
+                let os_err = std::io::Error::from_raw_os_error(-result_code);
+                let msg = format!("file/sync: {}: {}", path, os_err);
+                return Completion::failed(id, birth, "io-error", msg);
+            }
+            Completion::ok(id, birth, Value::NIL)
+        }
         PendingOp::Connect {
             connect_fd,
             port: port_val,

@@ -1,4 +1,4 @@
-//! audited: 2026-09-30
+//! audited: 2026-10-14
 //! `AsyncBackend::submit` — the one entry point, and how it routes a request to
 //! a portless path, an immediate answer, or a backend.
 //!
@@ -73,6 +73,11 @@ impl AsyncBackend {
         } = request.op
         {
             return self.submit_open(path, flags, mode, request.bound, request.port);
+        }
+
+        // Sync is portless — it names a path, which the worker opens.
+        if let IoOp::Sync { ref path } = request.op {
+            return self.submit_sync(path);
         }
 
         // Task: run closure on thread pool.

@@ -2,10 +2,11 @@
 //! The file/ primitives: whole-file reads and writes, directories, metadata, and file/sync.
 //!
 //! docs/io.md
+use crate::io::request::{IoOp, IoRequest};
 use crate::primitives::def::RegionEffect;
 use crate::rich_error;
 use crate::signals::Signal;
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{TableKey, Value};
 use std::collections::BTreeMap;
@@ -190,15 +191,15 @@ pub(crate) fn prim_read_lines(
     }
 }
 
-/// Flush the file or directory at a path to stable storage
+/// Flush the file or directory at a path to stable storage, on the I/O
+/// thread pool. Yields `SIG_IO` with an `IoRequest` containing `IoOp::Sync`.
 pub(crate) fn prim_file_sync(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    if args[0].is_string() {
-        (SIG_OK, Value::NIL)
-    } else {
-        type_error!(ctx, args[0], "file/sync", "string")
+    match args[0].with_string(|s| s.to_string()) {
+        Some(path) => (SIG_IO, IoRequest::portless(ctx, IoOp::Sync { path })),
+        None => type_error!(ctx, args[0], "file/sync", "string"),
     }
 }
 
@@ -364,12 +365,16 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "file/sync" => prim_file_sync {
-        signal: Signal::errors(),
+        signal: Signal::fs_io_yields_errors(),
         arity: Arity::Exact(1),
-        doc: "Flush the file or directory at path to stable storage",
+        doc: "Flush the file or directory at path to stable storage, as fsync(2) \
+              does, and answer nil. Other fibers run while it waits for the disk. \
+              Raises :io-error for a path that does not exist, that cannot be \
+              read, or that names neither a file nor a directory.",
         params: &["path"],
         category: "file",
         example: "(file/sync \"data.txt\")",
+        // Immediate: the Sync completion returns Value::NIL.
         effect: RegionEffect::Immediate,
     }
 }

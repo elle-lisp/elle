@@ -110,7 +110,6 @@ pub(super) enum PoolOp {
     },
     /// Flush the file or directory at `path` to stable storage. Returns 0 on
     /// success, or -errno on failure.
-    #[allow(dead_code)]
     Sync {
         path: std::ffi::CString,
     },
