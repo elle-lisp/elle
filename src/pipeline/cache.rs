@@ -15,16 +15,15 @@
 use crate::hir::typeinfer::{DispatchWrapperRegistry, FnInlineRegistry, Registries};
 use crate::primitives::def::PrimitiveMeta;
 use crate::primitives::{build_primitive_meta, register_primitives};
-use crate::signals::Signal;
 use crate::symbol::SymbolTable;
 use crate::syntax::{Expander, UnitTag};
-use crate::value::arena::RootRef;
 use crate::value::fiber::SignalBits;
 use crate::vm::VM;
 use std::collections::HashMap;
 
 use super::bootstrap::{compile_core, install_core_exports};
 
+mod register;
 mod registries;
 mod repl;
 use registries::InstanceRegistries;
@@ -363,109 +362,6 @@ impl CompileCtx {
     /// binding a host or a REPL line registers.
     pub fn primitive_meta(&self) -> &PrimitiveMeta {
         self.expander.eval_meta()
-    }
-
-    /// Register a binding an embedder makes, so that every compile in this
-    /// instance resolves it, the files a program imports included. The value
-    /// is rooted as [`register_repl_binding`](Self::register_repl_binding)
-    /// roots one.
-    pub fn register_host_binding(
-        &mut self,
-        heap: &mut crate::value::fiberheap::FiberHeap,
-        sym_id: crate::value::SymbolId,
-        value: crate::value::Value,
-        funding: RootRef,
-        signal: Signal,
-        arity: Option<crate::value::types::Arity>,
-    ) {
-        self.meta.signals.insert(sym_id, signal);
-        self.meta.functions.insert(sym_id, value);
-        if let Some(a) = arity {
-            self.meta.arities.insert(sym_id, a);
-        }
-        crate::value::arena::register_process_root(heap, value, funding);
-    }
-
-    /// Register a REPL `def` binding so later REPL lines resolve it. No other
-    /// compile does: a file a line imports compiles as it would from any
-    /// program.
-    ///
-    /// A REPL `def` value outlives the line that produced it. Under the
-    /// mint-at-return convention the top-level return mint's +1 is balanced by
-    /// the caller's decref at the result's decref_point, so without a root the
-    /// value would be freed at the end of its line; register the value's region
-    /// as a process root to keep it live for the session and release it by RC
-    /// at teardown.
-    ///
-    /// `funding` says which reference that root is made of
-    /// (docs/impl/region/rules.md § "The program value is the host's to
-    /// release"): a caller holding the value's own reference hands it over with
-    /// `RootRef::Take`, and one registering a value it reaches through another
-    /// (a leaf of a destructuring `def`) asks for `RootRef::Mint`. A minted root
-    /// funds itself per registration, so two leaves that share one region mint
-    /// two references against the sweep's two decrefs. A taken root does not:
-    /// the caller holds one reference, so it registers the region once (R9).
-    pub fn register_repl_binding(
-        &mut self,
-        heap: &mut crate::value::fiberheap::FiberHeap,
-        sym_id: crate::value::SymbolId,
-        value: crate::value::Value,
-        funding: RootRef,
-        signal: Signal,
-        arity: Option<crate::value::types::Arity>,
-    ) {
-        self.repl.bind(sym_id, value, signal, arity);
-        crate::value::arena::register_process_root(heap, value, funding);
-    }
-
-    /// Register a host primitive under its name and aliases, so compiled code
-    /// and `eval` both resolve it as they resolve a built-in.
-    ///
-    /// A host binding reaches the compile `meta` alone, and `eval` compiles
-    /// against the macro-body `eval_meta`; a primitive belongs in both. The
-    /// macro VM's doc table learns it too, so a macro body reads it as run
-    /// time does (docs/macros.md). A primitive value is an immediate, so
-    /// nothing here needs a root.
-    pub fn register_primitive(
-        &mut self,
-        symbols: &mut SymbolTable,
-        def: &'static crate::primitives::def::PrimitiveDef,
-    ) {
-        let mut eval_meta = self.expander.eval_meta().clone();
-        for name in def.names() {
-            let sym_id = symbols.intern(name);
-            self.meta.insert_def(sym_id, def);
-            eval_meta.insert_def(sym_id, def);
-        }
-        self.expander.set_eval_meta(eval_meta);
-        crate::primitives::def::Doc::enter(&mut self.vm.docs, def);
-    }
-
-    /// Keep the macros a REPL line defined, from the expander that compiled
-    /// it, so later REPL lines expand them. The instance's own macros in that
-    /// expander are not the line's, and stay where they are.
-    pub fn register_repl_macros(&mut self, macros: &HashMap<String, crate::syntax::MacroDef>) {
-        self.repl.keep_macros(self.expander.macros(), macros);
-    }
-
-    /// Add stdlib exports to the compile `meta` (so user code sees them as
-    /// globals) and to the macro-body `eval_meta` (so transformer bodies can
-    /// call stdlib). Called by `init_stdlib` after executing stdlib.lisp.
-    pub fn register_stdlib_exports(
-        &mut self,
-        exports: &HashMap<crate::value::SymbolId, (crate::value::Value, Signal)>,
-    ) {
-        for (sym_id, (value, signal)) in exports {
-            self.meta.signals.insert(*sym_id, *signal);
-            self.meta.functions.insert(*sym_id, *value);
-        }
-        // Mirror into the macro-body metadata (primitives + stdlib).
-        let mut eval_meta = self.expander.eval_meta().clone();
-        for (sym_id, (value, signal)) in exports {
-            eval_meta.signals.insert(*sym_id, *signal);
-            eval_meta.functions.insert(*sym_id, *value);
-        }
-        self.expander.set_eval_meta(eval_meta);
     }
 
     /// Release what this context holds on the heap from Rust, ahead of the
