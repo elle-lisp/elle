@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-13
+# audited: 2026-10-14
 # The runner's ledger, part 2 of 2: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/lang/each.lisp" :objects 1012]
@@ -80,7 +80,7 @@
 ["tests/lang/http2-session-futex.lisp" :objects 182]
 ["tests/lang/http2.lisp" :objects 44]
 ["tests/lang/hygiene.lisp" :objects 682]
-["tests/lang/inclib.lisp" :objects 69]
+["tests/lang/inclib.lisp" :objects 63]
 ["tests/lang/include.lisp" :objects 71]
 ["tests/lang/integer-radix.lisp" :objects 325]
 ["tests/lang/intrinsic-mutable-literal.lisp" :objects 182]
@@ -203,7 +203,7 @@
 ["tests/lang/send-param.lisp" :objects 216]
 ["tests/lang/sequences.lisp" :objects 230]
 ["tests/lang/sets.lisp" :objects 2520]
-["tests/lang/signal-analysis.lisp" :objects 997]
+["tests/lang/signal-analysis.lisp" :objects 1020]
 ["tests/lang/signals.lisp" :objects 1186]
 ["tests/lang/silent-ceiling.lisp" :objects 441]
 ["tests/lang/slice.lisp" :objects 855]
@@ -224,7 +224,7 @@
 ["tests/lang/string-escapes.lisp" :objects 288]
 ["tests/lang/string.lisp" :objects 1133]
 ["tests/lang/strings.lisp" :objects 1756]
-["tests/lang/struct-apply-orphan.lisp" :objects 442]
+["tests/lang/struct-apply-orphan.lisp" :objects 439]
 ["tests/lang/struct-closure-reuse.lisp" :objects 98]
 ["tests/lang/struct-string-keys.lisp" :objects 407]
 ["tests/lang/structured-concurrency.lisp" :objects 704]
@@ -286,3 +286,6 @@
 ["tests/lang/ffi-write.lisp" :objects 412]
 ["tests/lang/ffi-string-field.lisp" :objects 309]
 ["tests/lang/caps-ffi.lisp" :objects 148]
+["tests/lang/operators.lisp" :objects 943]
+["tests/impl/graft.lisp" :objects 206]
+["tests/impl/wrapper-lowering.lisp" :objects 167]
