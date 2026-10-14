@@ -13,8 +13,10 @@ use crate::value::CodeUnit;
 use std::collections::HashSet;
 
 mod frontend;
+mod include;
 mod lir;
 mod transforms;
+pub use include::*;
 pub use lir::*;
 pub use transforms::*;
 

@@ -26,7 +26,8 @@ Module: [src/pipeline](../src/pipeline/AGENTS.md).
 | [compile.rs](../src/pipeline/compile.rs) | `compile()`, `compile_file()`, `compile_file_repl()`, and the whole-module entry points |
 | [compile/frontend.rs](../src/pipeline/compile/frontend.rs) | Read, expand, and classify forms ahead of analysis |
 | [compile/lir.rs](../src/pipeline/compile/lir.rs) | `compile_file_to_lir()`: a file to frozen LIR, for the WASM backend and the dumps |
-| [compile/transforms.rs](../src/pipeline/compile/transforms.rs) | The test-mode transforms of the expanded forms, and `include` and `include-file` resolution |
+| [compile/include.rs](../src/pipeline/compile/include.rs) | `include` and `include-file` resolution and splicing |
+| [compile/transforms.rs](../src/pipeline/compile/transforms.rs) | The test-mode transforms of the expanded forms |
 | [analyze.rs](../src/pipeline/analyze.rs) | `analyze()`, `analyze_file()` |
 | [eval.rs](../src/pipeline/eval.rs) | `eval()`, `eval_all()`, `eval_syntax()`, `eval_file()` |
 
