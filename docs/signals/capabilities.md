@@ -1,6 +1,6 @@
 # Capability enforcement
 
-<!-- audited: 2026-10-11 -->
+<!-- audited: 2026-10-14 -->
 
 Capabilities flow down. A fiber's parent decides what the fiber is
 permitted to do. Operations the fiber can't perform become signals the
@@ -330,27 +330,35 @@ perform the call and resume the child with the result, or refuse it with
 `fiber/refuse`. A fiber a scheduler runs is refused by that scheduler.
 [mediation.md](mediation.md) holds all three.
 
-## A macro expands with the fiber's capabilities
+## A macro expands with fewer capabilities than its fiber
 
 Code on a fiber can start a compile: `eval`, a module loader, `compile/analyze`
 and the other `compile/*` primitives that compile source. Every macro that
-compile expands runs with the capabilities the fiber withholds, so a fiber
-cannot spend at expansion time what its own code cannot spend. An expansion
-cannot pause, so a parent cannot mediate a denial there. The compile fails,
-and the error names the macro and the denied primitive:
+compile expands runs without the capabilities the fiber withholds, and without
+the effect capabilities `|:ffi :io :exec :gpu :os-signal :fs :net|`, which
+every expansion withholds ([macros.md](../macros.md)). The file `elle` runs
+compiles before any fiber exists, and its macros lose the effect capabilities
+too. An expansion cannot pause, so a parent cannot mediate a denial there. The
+compile fails, and the error names the macro and the denied primitive:
 
 ```lisp
-(let [f (fiber/new (fn [] (eval '(begin (defmacro m [] (file/read "/etc/hostname")) (m))))
-                   |:fs :error| :deny |:fs|)
-      err (fiber/resume f)]
-  (assert (= (get err :error) :eval-error) "the compile fails")
+(defn read-at-expansion []
+  (eval '(begin (defmacro m [] (file/read "/etc/hostname")) (m))))
+
+(let [[ok? err] (protect (read-at-expansion))]
+  (assert (not ok?) "a fiber that withholds nothing cannot read at expansion")
   (assert (string/contains? (get err :message) "macro 'm'") "naming the macro")
   (assert (string/contains? (get err :message) "file/read") "and the primitive"))
+
+(let [f (fiber/new read-at-expansion |:fs :error| :deny |:fs|)
+      err (fiber/resume f)]
+  (assert (= (get err :error) :eval-error) "the compile fails, and no denial escapes it"))
 ```
 
-An `include` or `include-file` reads its file for that compile, so a fiber
-that withholds `:fs` cannot include a file either. The file `elle` runs
-compiles before any fiber exists, so its macros run with every capability.
+The expansion's own capabilities come back when it ends, so code the compile
+produces runs with the fiber's. An `include` or `include-file` reads its file
+as an input of that compile, so the effect capabilities do not reach it. A
+fiber that withholds `:fs` still cannot include a file.
 
 ## Intrinsics are not checked
 
