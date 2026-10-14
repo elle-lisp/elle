@@ -1,6 +1,6 @@
 # process
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-14 -->
 
 The submodules behind [process.lisp](../process.lisp): the scheduler in four parts, the primitives, and one file per behavior.
 
@@ -22,11 +22,12 @@ share.
 
 ## How the scheduler divides
 
-`make-scheduler` builds the parts in dependency order. Each part is a module
-closure that takes the parts before it and returns a struct:
+`make-scheduler` builds three parts in dependency order, then closes over all
+three. Each part is a module closure that takes the parts before it. Core and
+waits return a struct, and commands returns its one function, `handle-cmd`:
 
 ```text
-core  →  waits (core)  →  commands (core)  →  scheduler (core, waits, commands)
+core  →  waits (core)  →  commands (core)  →  make-scheduler (core, waits, commands)
 ```
 
 The scheduler also imports [primitives.lisp](primitives.lisp) for
@@ -35,10 +36,12 @@ that fiber in the process that calls them, and the scheduler builds the first
 process's fiber in the caller of `start` or `run`. Either way, a process
 withholds what its creator withholds.
 
-Core owns every container the parts share: the process table, the ready and
+Core owns the containers every part reads: the process table, the ready and
 waiting queues, the timers, the pending forwarded I/O and the futex parks.
-Nothing rebinds a container after core builds it. A part that must replace a
-queue's contents does so in place, through `refill`, so every part keeps
+Waits owns the sub-fiber state, the running pid, and the completion queue and
+wake-box that forwarded I/O comes back through, which the scheduler reads too.
+Nothing rebinds a container after its part builds it. A part that must replace
+a queue's contents does so in place, through `refill`, so every part keeps
 holding the same object.
 
 ## Waiters
@@ -65,6 +68,7 @@ futex park.
 
 ## Behaviors
 
-[process.lisp](../process.lisp) imports the primitives once and passes them to
-each behavior module. A behavior never imports another module itself,
-because a `.lisp` import compiles the file again on every call.
+[process.lisp](../process.lisp) imports the primitives once, and passes them
+and the GenServer it builds to the behaviors that need them. A behavior never
+imports another module itself, because a `.lisp` import runs the file again on
+every call, and each run makes values of its own.

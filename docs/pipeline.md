@@ -1,8 +1,8 @@
 # Compilation pipeline
 
-<!-- audited: 2026-10-13 -->
+<!-- audited: 2026-10-14 -->
 
-Which VM each entry point expands macros on, and how signal inference settles over the mutual recursion of a letrec.
+Which VM each entry point expands macros on, what a loader keeps a compile under, and how signal inference settles over a letrec.
 
 [The pipeline index](../src/pipeline/AGENTS.md) lists the entry points, the
 compile context and the stages in order. [The HIR index](../src/hir/AGENTS.md)
@@ -67,12 +67,39 @@ the body raises into a compile error, because an expansion cannot hold one.
 
 No entry point compiles a file other than the one it is given. The analyzer
 reads nothing from the target of an `import-file`, so a cycle of imports does
-not recurse. A file names its imports, and the loader compiles each one when
-the import runs.
+not recurse. A file names its imports, and the loader compiles each one, or
+runs the code the store keeps, when the import runs.
 
 A compile may still run Elle code from the standard library. An `include`
 calls `import/resolve` on the macro VM to find its file
 ([modules](modules.md)).
+
+## The store
+
+`compile_file_stored` answers the `CodeUnit` the store keeps for a path while
+the compile inputs still match, and otherwise compiles the file and keeps the
+unit. An entry holds a digest of the inputs that can change within an
+instance: the source text, the path, the capabilities `on_behalf_of` named,
+and each include's resolved path and text. A lookup resolves each include again
+on the macro VM, as the compile did, and reads it again. A compile that fails
+keeps nothing. Each load runs a clone of the kept unit, so every load runs the
+same code and builds values of its own ([modules](modules.md)).
+
+Registering a host binding, a host primitive or the standard library's exports
+empties the store, because every compile resolves those names. No other
+compile input needs a place in the key:
+
+- The epoch is in the source text. The build, the Unicode generation and the
+  configuration are fixed when the instance is built.
+- A loader's compile reads the instance's layer alone: no REPL layer, no
+  `eval` environment and no test transform.
+- A declared user signal keeps its bit for the life of the process, and a
+  compile that names an undeclared one fails.
+- A file's compile reads none of its imports, as the section above says.
+- A transformer is pure, so it reads nothing outside these inputs
+  ([macros](macros.md)).
+
+`CompileCtx::release` empties the store before teardown counts the residue.
 
 ## Signal inference over a letrec
 
