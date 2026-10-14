@@ -20,8 +20,8 @@ encryption follow GUN's SEA, and [gun/sea.md](gun/sea.md) holds their rules.
 
 Called with no argument, the module has the memory store only, no mesh and
 no user spaces. `gun:redis-store` then raises
-`{:error :gun-error :reason :redis-not-configured}`, and `gun:serve` and
-`gun:connect` raise `:mesh-not-configured`. `gun:pair`, `gun:user`,
+`{:error :gun-error :reason :redis-not-configured}`. `gun:serve`,
+`gun:connect`, and `gun:open` given `:peers`, raise `:mesh-not-configured`. `gun:pair`, `gun:user`,
 `gun:secret`, `gun:encrypt` and `gun:decrypt` raise `:sea-not-configured`,
 and so does a chain that reaches a soul starting with `~`. The content node
 `#` needs `:crypto` alone. Without it, `gun:content-key`, `gun:put-content`
@@ -51,6 +51,8 @@ encryption need the plugins that `(import "plugin/crypto")` and
   ((import "std/gun") :crypto crypto-plugin :random random-plugin))
 
 (let [[ok? err] (protect (gun:connect (gun:open) "ws://127.0.0.1:1/gun"))]
+  (assert (= (get err :reason) :mesh-not-configured)))
+(let [[ok? err] (protect (gun:open :peers ["ws://127.0.0.1:1/gun"]))]
   (assert (= (get err :reason) :mesh-not-configured)))
 (let [[ok? err] (protect (gun:once (gun:get (gun:open) "~alice")))]
   (assert (= (get err :reason) :sea-not-configured)))
@@ -216,6 +218,40 @@ this function answers `{"text" "hello"}`:
         (mesh-gun:once (mesh-gun:get server "note"))))))
 ```
 
+`gun:open` takes `:peers`, a list of `ws://` URLs, and keeps the database
+joined to each one. For each URL it starts a **keeper**, a fiber that dials
+the URL, and dials again each time the connection ends. `gun:open` returns at
+once, so a read before the first connection answers from local data. When a
+connection arrives, resync pulls every soul the database has loaded, and the
+`gun:on` functions whose values changed are called.
+
+A dial that fails gives its error to `:on-error`, and the keeper waits before
+it dials again. `:redial [min max]` sets that wait in seconds, and defaults to
+`[0.1 30]`. The wait starts at `min`, doubles after each failed dial up to
+`max`, and goes back to `min` after a dial that succeeds. A `:redial` that is
+not two positive numbers, with `min` no more than `max`, raises
+`{:error :gun-error :reason :invalid-redial}`.
+
+`gun:close` ends every keeper and closes every connected peer. It also closes
+each peer that `gun:serve` registers after that, so close the listener too.
+Local reads and writes still work, and a second `gun:close` does nothing.
+After it, `gun:connect` raises `{:error :gun-error :reason :closed}`. A keeper
+is a background fiber, and the end of the program ends it as it ends every
+other. A program calls `gun:close` to end its keepers sooner:
+
+```lisp
+(let [db (gun:open)
+      cfg (gun:get db "cfg")]
+  (gun:put cfg {:theme "dark"})
+  (gun:close db)
+  (gun:close db)
+  (assert (empty? (gun:peers db)))
+  (gun:put cfg {:font "mono"})
+  (assert (= (gun:once cfg) {"theme" "dark" "font" "mono"})))
+(let [[ok? err] (protect (gun:open :redial [5 1]))]
+  (assert (= (get err :reason) :invalid-redial)))
+```
+
 Every peer keeps every write it hears, and forwards what it accepted to its
 other peers. The first read that reaches a soul asks the peers for it, and
 waits for their answers for `:wait` seconds at most. `gun:open` takes `:wait`,
@@ -324,6 +360,7 @@ databases over loopback. `make suite-plugins` builds both:
 ```bash
 elle tests/lang/gun-mesh.lisp
 elle tests/lang/gun-sync.lisp
+elle tests/lang/gun-redial.lisp
 ```
 
 User spaces and encryption need the `plugin/crypto` and `plugin/random`

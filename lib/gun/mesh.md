@@ -2,13 +2,13 @@
 
 <!-- audited: 2026-10-14 -->
 
-The peer protocol of std/gun: the messages, how a peer merges and forwards them, reads that ask the peers, acks, and deferral.
+The peer protocol of std/gun: the messages, how a peer merges and forwards them, reads that ask the peers, acks, deferral and redial.
 
 [gun.md](../gun.md) holds what a caller sees: `gun:serve`, `gun:connect`,
-`gun:peers`, and the `:ack`, `:wait` and `:on-error` options. This file holds
-the rules behind them. [wire.lisp](wire.lisp) builds and checks the messages,
-[peer.lisp](peer.lisp) runs one connection, and [mesh.lisp](mesh.lisp) holds
-the rules.
+`gun:peers`, `gun:close`, and the `:peers`, `:redial`, `:ack`, `:wait` and
+`:on-error` options. This file holds the rules behind them.
+[wire.lisp](wire.lisp) builds and checks the messages, [peer.lisp](peer.lisp)
+runs one connection, and [mesh.lisp](mesh.lisp) holds the rules.
 
 ## Messages
 
@@ -59,18 +59,34 @@ every soul it has loaded. The answer carries the peer's fields for those souls,
 read from its store when its memory lacks them. Both sides do this, so each
 side pulls the souls it holds, and two databases that wrote while apart
 converge when they meet again. A side needs no push: a soul it holds and the
-peer has not loaded reaches the peer on the peer's first read. The caller dials
-again after a drop; `gun:connect` does not redial.
+peer has not loaded reaches the peer on the peer's first read.
+
+**Redial.** `gun:connect` dials once. For each URL in the `:peers` of
+`gun:open`, a keeper fiber dials as `gun:connect` does, in a loop. After a dial
+that succeeds, the keeper waits for that peer to leave. After a dial that
+fails, it gives the dial's error to `:on-error`. Either way, it then waits for
+its delay and dials again. The delay starts at `min` of `:redial`, doubles
+after each failed dial up to `max`, and goes back to `min` after a dial that
+succeeds. So a peer that drops is dialed again `min` seconds later, and an
+unreachable peer is dialed once each `max` seconds at most.
+
+**Closing a database.** Each peer has a latch that its close opens, and a
+keeper waits on it. The database has a close latch, and a keeper waits for
+its delay on that latch, under a timeout. `gun:close` opens the close latch,
+so every keeper wakes at once and ends. It then closes every connected peer.
+A peer that registers after that, through `gun:serve` or through a dial that
+was under way, is closed as it registers, and its hello is not answered. A
+keeper whose dial fails after the close reports nothing.
 
 **Sends.** `std/websocket` does not order the frames of two fibers that send on
 one connection, so each peer has one send lock. A send that fails closes that
 peer.
 
-**Close.** A reader fiber is the only fiber that reads a connection. Closing a
-connection removes the peer from `gun:peers` at once and closes the socket,
-which ends the reader's pending read; `ws:close` would read a frame itself, in
-a race with the reader. The other side reads the end of the stream and removes
-the peer in turn.
+**Closing a connection.** A reader fiber is the only fiber that reads a
+connection. Closing a connection removes the peer from `gun:peers` at once and
+closes the socket, which ends the reader's pending read; `ws:close` would read
+a frame itself, in a race with the reader. The other side reads the end of the
+stream and removes the peer in turn.
 
 ## Merging what a peer sends
 

@@ -7,6 +7,6 @@ Up: [..](../AGENTS.md)
 ## Documents
 
 - [chains.md](chains.md) — **chains** How a std/gun chain reads and writes: get, put, once, on and set, maps, key ranges, souls, links by chain, unset and content.
-- [mesh.md](mesh.md) — **mesh** The peer protocol of std/gun: the messages, how a peer merges and forwards them, reads that ask the peers, acks, and deferral.
+- [mesh.md](mesh.md) — **mesh** The peer protocol of std/gun: the messages, how a peer merges and forwards them, reads that ask the peers, acks, deferral and redial.
 - [overview.md](overview.md) — **gun** The submodules behind [gun.lisp](../gun.lisp): states, values, fields, HAM, the graph, stores, SEA, the core and the mesh.
 - [sea.md](sea.md) — **sea** The SEA rules of std/gun: key pairs, user spaces that only their key writes, the signed text, the content node, admission, and encryption.

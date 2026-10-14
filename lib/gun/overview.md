@@ -22,8 +22,8 @@ arguments.
 | [wire.lisp](wire.lisp) | The peer messages: build them, write them as JSON, and read and check them |
 | [sea.lisp](sea.lisp) | The rules of [sea.md](sea.md): key pairs, user spaces, signing, the content node, admission and encryption |
 | [core.lisp](core.lisp) | One database: its graph, store, clock, lock, subscriptions and peers; loading, the chain walk, the merges and notify |
-| [peer.lisp](peer.lisp) | One WebSocket connection: the hello, the reader fiber, the send lock and close |
-| [mesh.lisp](mesh.lisp) | The rules of [mesh.md](mesh.md): fetch, forward, acks, deferral and resync |
+| [peer.lisp](peer.lisp) | One WebSocket connection: the hello, the reader fiber, the send lock, and close with the latch it opens |
+| [mesh.lisp](mesh.lisp) | The rules of [mesh.md](mesh.md): fetch, forward, acks, deferral, resync, redial and close |
 
 A submodule takes the submodules it needs as arguments, so loading one by hand
 follows the order [gun.lisp](../gun.lisp) uses. The exception is
