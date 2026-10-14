@@ -1,7 +1,7 @@
-// audited: 2026-09-09
+// audited: 2026-10-13
 // src/hir/AGENTS.md
 // docs/impl/typeinfer.md
-//! The inference pass's unit tests, and the four helpers every one of them
+//! The inference pass's unit tests, and the five helpers every one of them
 //! compiles through.
 //!
 //! One module per subject: `narrow` for what a guard or a dispatch arm proves,
@@ -10,7 +10,7 @@
 //! `bottom` for what the lattice's start proves, `prune` for dead-arm removal,
 //! `contract` for prove-or-reject, `monomorphize` for wrapper collapse.
 
-use super::infer_and_rewrite;
+use super::{infer_and_rewrite, DispatchWrapperRegistry, FnInlineRegistry, Registries, TypeInfo};
 use crate::hir::types::TyId;
 use crate::hir::{BindingArena, Hir, HirId, HirKind};
 use crate::symbol::SymbolTable;
@@ -34,11 +34,25 @@ fn compile_fhir(src: &str, symbols: &mut SymbolTable) -> (Hir, BindingArena) {
     (hir, arena)
 }
 
+/// Run inference over `hir` as a compile other than the standard library's
+/// would: reading empty registries.
+fn infer(hir: &mut Hir, arena: &BindingArena) -> TypeInfo {
+    let (dispatch, inline) = (
+        DispatchWrapperRegistry::default(),
+        FnInlineRegistry::default(),
+    );
+    let mut registries = Registries::Read {
+        dispatch: &dispatch,
+        inline: &inline,
+    };
+    infer_and_rewrite(hir, arena, &mut registries).expect("infer")
+}
+
 /// The set of inferred node types for `src`.
 fn inferred_types(src: &str) -> Vec<TyId> {
     let mut symbols = SymbolTable::new();
     let (mut hir, arena) = compile_fhir(src, &mut symbols);
-    let info = infer_and_rewrite(&mut hir, &arena, &mut Default::default()).expect("infer");
+    let info = infer(&mut hir, &arena);
     info.hir_types.values().copied().collect()
 }
 
@@ -59,7 +73,7 @@ fn intrinsic_result_types(src: &str, op: &str) -> Vec<TyId> {
     }
     let mut symbols = SymbolTable::new();
     let (mut hir, arena) = compile_fhir(src, &mut symbols);
-    let info = infer_and_rewrite(&mut hir, &arena, &mut Default::default()).expect("infer");
+    let info = infer(&mut hir, &arena);
     let mut found = Vec::new();
     find(&hir, op, &mut found);
     assert!(!found.is_empty(), "{src} compiled to no {op} node");
@@ -83,7 +97,7 @@ fn intrinsic_result_type(src: &str, op: &str) -> TyId {
 
 /// Compile `src` through the file front end (which runs `infer_and_rewrite`),
 /// discarding the result and surfacing only success/failure. `Err` is the
-/// monomorphization proof obligation firing (or any earlier compile error).
+/// intrinsic operand proof obligation firing (or any earlier compile error).
 fn compile_result(src: &str) -> Result<(), String> {
     let mut symbols = SymbolTable::new();
     let mut cctx = crate::pipeline::CompileCtx::new();

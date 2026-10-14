@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-13
 //! Container-dispatch wrapper monomorphization: collapse `(match (type-of coll) …)` through a call when the container type is proven.
 //!
 //! docs/impl/dissolution.md
@@ -100,26 +100,25 @@ struct Wrapper {
 ///
 /// Two wrapper sources are consulted. A wrapper DEFINED in this unit is matched by
 /// its `Binding` (the intra-unit path — the stdlib's own `map`→`push` calls, or a
-/// user's local wrapper). A wrapper defined in an EARLIER unit — the stdlib's
-/// `push`/`put` seen from user code — is matched through `registry`, keyed by name
-/// and gated on the callee being `is_primitive` (a `bind_primitives` stdlib-export
-/// reference; a user redefinition shadows it with a non-primitive binding and is
-/// left alone). Locally-collected wrappers are recorded into `registry` here, so
-/// each unit both populates it (for later units) and consumes it.
+/// user's local wrapper). A wrapper the standard library defines — its
+/// `push`/`put` seen from user code — is matched through the dispatch registry,
+/// keyed by name and gated on the callee being `is_primitive` (a `bind_primitives`
+/// stdlib-export reference; a user redefinition shadows it with a non-primitive
+/// binding and is left alone). The standard library's compile records its wrappers
+/// into that registry here (docs/impl/dissolution/inline.md).
 pub(super) fn monomorphize_dispatch_wrappers(
     hir: &mut Hir,
     hir_types: &HashMap<HirId, TyId>,
     arena: &BindingArena,
     typeof_aliases: &HashMap<Binding, Binding>,
-    registry: &mut DispatchWrapperRegistry,
+    registries: &mut super::Registries,
 ) {
     let mut wrappers: HashMap<Binding, Wrapper> = HashMap::new();
     collect_wrappers(hir, arena, typeof_aliases, &mut wrappers);
-    // Persist this unit's wrappers by name so later units can reach them (the
-    // stdlib's push/put populate the instance registry on the `<stdlib>` compile).
     for (b, w) in &wrappers {
-        registry.record(arena.get(*b).name, w, arena);
+        registries.record_dispatch(arena.get(*b).name, w, arena);
     }
+    let registry = registries.dispatch();
     if wrappers.is_empty() && registry.by_name.is_empty() {
         return;
     }

@@ -12,7 +12,7 @@
 //! instances on one thread each own their own `CompileCtx`, so instance A's stdlib
 //! exports and REPL `def`s are invisible to instance B.
 
-use crate::hir::typeinfer::{DispatchWrapperRegistry, FnInlineRegistry};
+use crate::hir::typeinfer::{DispatchWrapperRegistry, FnInlineRegistry, Registries};
 use crate::primitives::def::PrimitiveMeta;
 use crate::primitives::{build_primitive_meta, register_primitives};
 use crate::signals::Signal;
@@ -25,7 +25,9 @@ use std::collections::HashMap;
 
 use super::bootstrap::{compile_core, install_core_exports};
 
+mod registries;
 mod repl;
+use registries::InstanceRegistries;
 pub use repl::Layer;
 use repl::ReplLayer;
 
@@ -80,19 +82,9 @@ pub struct CompileCtx {
     /// withholds them too, so a transformer spends no more than the code that
     /// started the compile could.
     withheld: SignalBits,
-    /// Container-dispatch wrappers collected across every compile in this
-    /// instance, keyed by name. Populated when `stdlib.lisp` compiles (its
-    /// `push`/`put`), consumed by every later unit so a user→stdlib wrapper call
-    /// monomorphizes as an intra-unit one does (`monomorphize.rs`).
-    /// Compile-time-only state: it drives an HIR rewrite and never reaches the VM.
-    dispatch_wrappers: DispatchWrapperRegistry,
-    /// Cross-unit-inlineable function templates collected across every compile in
-    /// this instance, keyed by name. Populated when `stdlib.lisp` compiles (its
-    /// `inc`/`dec`/… bodies), consumed by every later unit so a user→stdlib
-    /// `(map inc xs)` inlines the stdlib body as a same-unit named fn would
-    /// (`fuse.rs`). Like
-    /// `dispatch_wrappers`, compile-time-only state that never reaches the VM.
-    fn_inline: FnInlineRegistry,
+    /// The cross-unit registries the standard library's compile fills and
+    /// every later compile reads.
+    registries: InstanceRegistries,
     /// The core and stdlib export aggregates this instance booted with.
     exports: BootExports,
 }
@@ -209,8 +201,7 @@ impl CompileCtx {
             meta,
             repl: ReplLayer::default(),
             withheld: SignalBits::EMPTY,
-            dispatch_wrappers: DispatchWrapperRegistry::default(),
-            fn_inline: FnInlineRegistry::default(),
+            registries: InstanceRegistries::default(),
             exports: BootExports {
                 core,
                 ..BootExports::default()
@@ -218,17 +209,28 @@ impl CompileCtx {
         }
     }
 
-    /// The instance's two cross-unit compile registries, borrowed together (they
-    /// are disjoint fields, so one accessor yields both `&mut` without aliasing —
-    /// `regularize` needs both, and two separate accessor calls would each borrow
-    /// all of `self`). The `<stdlib>` compile populates both; later user compiles
-    /// consult them. `dispatch_wrappers` drives container-dispatch monomorphization
-    /// (`monomorphize.rs`); `fn_inline` drives cross-unit HOF-argument inlining
-    /// (`fuse.rs`).
-    pub fn compile_registries_mut(
+    /// The instance's cross-unit registries as the compile now running sees
+    /// them: recording inside [`compiling_stdlib`](Self::compiling_stdlib), and
+    /// reading everywhere else (docs/impl/dissolution/inline.md).
+    pub fn registries(&mut self) -> Registries<'_> {
+        self.registries.view()
+    }
+
+    /// Run `f`, the standard library's compile, so that it records its
+    /// definitions into the instance's cross-unit registries.
+    pub fn compiling_stdlib<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
+        let saved = std::mem::replace(&mut self.registries.stdlib_compile, true);
+        let out = f(self);
+        self.registries.stdlib_compile = saved;
+        out
+    }
+
+    /// Both registries, for the stdlib disk cache: it stores what the standard
+    /// library's compile recorded, and restores that on a hit.
+    pub(crate) fn stdlib_registries_mut(
         &mut self,
     ) -> (&mut DispatchWrapperRegistry, &mut FnInlineRegistry) {
-        (&mut self.dispatch_wrappers, &mut self.fn_inline)
+        (&mut self.registries.dispatch, &mut self.registries.inline)
     }
 
     /// Run `f` with the macro-expansion VM (fiber reset), a clone of the
