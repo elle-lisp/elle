@@ -27,7 +27,7 @@ Up: [..](../AGENTS.md)
 - [fmt.md](fmt.md) — **elle fmt** Opinionated code formatter for Elle.
 - [functions.md](functions.md) — **Functions** How to make, call, compose and inspect functions, and how deep recursion may go.
 - [intrinsics.md](intrinsics.md) — **Intrinsics** Intrinsics are silent bytecode operations prefixed with `%`.
-- [io.md](io.md) — **I/O** Port, socket, timer and subprocess I/O in Elle is async: each call yields to the scheduler, and other fibers run until it completes.
+- [io.md](io.md) — **I/O** All I/O in Elle is async: each call yields to the scheduler, and other fibers run until it completes.
 - [libraries.md](libraries.md) — **Libraries** Elle ships with libraries in `lib/`.
 - [loops.md](loops.md) — **Loops** Elle's loop forms are `while`, `forever`, `repeat`, and `each`.
 - [lua.md](lua.md) — **Lua Syntax Mode** Elle supports a Lua surface syntax for `.lua` files.

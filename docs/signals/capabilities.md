@@ -1,6 +1,6 @@
 # Capability enforcement
 
-<!-- audited: 2026-10-11 -->
+<!-- audited: 2026-10-14 -->
 
 Capabilities flow down. A fiber's parent decides what the fiber is
 permitted to do. Operations the fiber can't perform become signals the
@@ -107,10 +107,11 @@ wait) cannot be denied.
 bit that a fiber can also deny, and it covers ports, sockets, and the
 subprocess pipes — everything that suspends into the event loop.
 
-The filesystem primitives are synchronous `std::fs` calls. They never
-reach the scheduler, so they carry no `:io`, and denying `:io` never
-stopped them. `:fs` is the bit that means "resolves a filesystem path",
-and it is the one to deny to close the disk off:
+The filesystem primitives that only read or change metadata, such as
+`file/stat` and `file/rename`, are synchronous `std::fs` calls. They never
+reach the scheduler, so they carry no `:io`, and denying `:io` does not stop
+them. `:fs` is the bit that means "resolves a filesystem path", and it is the
+one to deny to close the disk off:
 
 ```lisp
 (let [f (fiber/new (fn [] (file/read "/etc/hostname")) |:fs :error| :deny |:fs|)]
@@ -124,7 +125,10 @@ denied and mediated by its parent. Deny both to close off all of it.
 `port/open` carries both. It resolves a path (`:fs`) and it opens that
 path through the scheduler (`:io`), so either denial blocks it. Without
 the `:fs` bit on it, a fiber denied `:fs` alone could open a port on any
-path and read it, which is the same authority `file/read` grants.
+path and read it, which is the same authority `file/read` grants. The
+`file/` calls that move a file's contents — `file/read`, `file/lines`,
+`file/write`, `file/append`, `file/copy` and `file/sync` — run through the
+scheduler too, and carry both for the same reason ([io](../io.md)).
 
 A primitive carries `:fs` when its implementation resolves a filesystem
 path, decided by reading the implementation and not the name. `path/join`,
@@ -193,7 +197,8 @@ fiber, so a fiber cannot spend what it withholds however it obtained the value.
 Three primitives work this way, each in its own domain:
 
 - `io/submit` spends the operation its request argument carries. A spawn request
-  needs `|:io :exec|` and an open needs `|:io :fs|`. A socket operation needs
+  needs `|:io :exec|`, and an open or a file operation by path needs
+  `|:io :fs|`. A socket operation needs
   `|:io :net|`: a connect, an accept, a datagram, a shutdown or a name lookup.
   A connect to a Unix socket adds `:fs`, and a plain read needs `|:io|`.
 - native `import` runs a shared library's `elle_plugin_init`, which is foreign
@@ -327,6 +332,7 @@ A parent that catches a denial decides what the denied call does: it can
 perform the call and resume the child with the result, or refuse it with
 `fiber/refuse`. A fiber a scheduler runs is refused by that scheduler.
 [mediation.md](mediation.md) holds all three.
+
 ## Intrinsics are not checked
 
 The `%` [intrinsics](../intrinsics.md) compile to bytecode instructions that

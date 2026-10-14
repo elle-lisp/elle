@@ -279,9 +279,9 @@ reported, so each worker is asked once — a drain runs on every loop tick, and
 the completion takes a moment to come back.
 
 Operations that end on their own are asked too, and the ask reaches nothing.
-`Resolve` runs to the resolver's own end and `Task` runs until its closure
-returns, so neither carries a stop pipe; their completions arrive as they always
-would.
+`Resolve` runs to the resolver's own end, `Task` runs until its closure
+returns, and a `File` operation runs until its syscalls return, so none carries
+a stop pipe; their completions arrive as they always would.
 
 The runtime does not lean on a peer to deliver these. A peer that writes wakes
 the parked worker, and the completion then arrives without the sweep having
@@ -347,6 +347,11 @@ an AF_UNIX peer whose backlog is full.
 `getaddrinfo(3)` runs to the resolver's own end and an opaque closure runs until
 it returns; a cancel discards the result without giving the worker thread back
 any sooner. Every use of that constructor names the call that behaves this way.
+
+A `File` read, write, append or copy meets the first condition on a fifo, whose
+other end need never open, and cannot meet the second: it runs through
+blocking `std::fs` calls, which a stop pipe cannot reach. It says so with
+`Bounds::uninterruptible` too, and a cancel discards its result in the same way.
 
 `ev/timeout` cancels on every call — the body's operation or the timer's,
 whichever lost — so this path runs constantly rather than at the edges.

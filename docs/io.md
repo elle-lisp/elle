@@ -2,11 +2,12 @@
 
 <!-- audited: 2026-10-20 -->
 
-Port, socket, timer and subprocess I/O in Elle is async: each call yields to
-the scheduler, and other fibers run until it completes. User code runs inside
-the async scheduler automatically. The `file/` functions that take a path are
-the exception. Each runs on the scheduler's thread and holds up every fiber of
-that scheduler until it returns. `file/sync` is async, as a port call is.
+All I/O in Elle is async: each call yields to the scheduler, and other fibers
+run until it completes. User code runs inside the async scheduler
+automatically. A call that cannot block runs on the scheduler's thread and
+returns at once. The `file/` functions that only read or change a file's
+metadata are of this kind; the ones that move a file's contents are not.
+"Files by path" below lists both.
 
 ## I/O backend
 
@@ -338,14 +339,45 @@ recursive delete (`file/delete-dir` only removes empty directories).
   (assert (= (file/read (path/join dir "scratch.txt")) "data")))
 ```
 
-## Syncing to storage
+## Files by path
+
+`file/read`, `file/lines`, `file/write`, `file/append`, `file/copy` and
+`file/sync` move a file's contents. Each runs on the I/O thread pool on every
+platform, so other fibers run while it waits for the disk. Each needs both the
+`:fs` and the `:io` capability, as `port/open` does. A failure raises
+`:io-error`, and its `:path` names the file. `(doc name)` gives each one's
+arguments and answer.
+
+```lisp
+(with-temp-dir dir
+  (let [log (path/join dir "log")]
+    (assert (= (file/write log "one\n") true))
+    (file/append log "two\n")
+    (file/copy log (path/join dir "copy"))
+    (assert (= (file/read (path/join dir "copy")) "one\ntwo\n"))
+    (assert (= (file/lines log) (list "one" "two")))
+    (let [[ok? err] (protect (file/read (path/join dir "missing")))]
+      (assert (= (get err :error) :io-error))
+      (assert (= (get err :path) (path/join dir "missing"))))))
+```
+
+A worker runs each of these but `file/sync` through blocking system calls,
+which nothing can interrupt. `ev/timeout` and a cancel discard the answer, and
+the worker runs on to the end of the call. On a fifo, a read waits for a
+writer, and a write waits for a reader.
+
+`file/stat`, `file/lstat`, `file/size`, `file/ls`, `file/mkdir`,
+`file/mkdir-all`, `file/delete`, `file/delete-dir`, `file/delete-dir-all`,
+`file/rename` and `file/mktempdir` only read or change metadata. They run on
+the scheduler's thread, return at once, and need `:fs` alone.
+
+### Syncing to storage
 
 `(file/sync path)` flushes the file or directory at `path` to stable storage,
-as `fsync(2)` does, and answers nil. It runs on the I/O thread pool on every
-platform, so other fibers run while it waits for the disk. It opens `path` for
-reading, so a path that does not exist, or that the process cannot read,
-raises `:io-error`. A path that names neither a file nor a directory, such as
-a fifo, raises `:io-error` at once. `file/sync` needs the `:fs` capability.
+as `fsync(2)` does, and answers nil. It opens `path` for reading, so a path
+that does not exist, or that the process cannot read, raises `:io-error`. A
+path that names neither a file nor a directory, such as a fifo, raises
+`:io-error` at once.
 
 A rename is durable only after its directory is synced too:
 
