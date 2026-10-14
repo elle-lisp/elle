@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! The gates on the post-teardown residue: what one run may leave behind.
 //!
 //! docs/impl/region/rules.md
@@ -342,6 +342,38 @@ fn a_run_that_reads_a_whole_file_leaves_no_residue() {
         ),
         0,
         "{src}: regions survived teardown",
+    );
+}
+
+/// A run that loads one file twice leaves nothing, and no reference the region
+/// graph cannot explain. The instance keeps the file's compiled code from Rust,
+/// and the second load runs it, so teardown has to give that hold back.
+///
+/// The counter-factual is `teardown_leaves_no_residue` beside it, whose
+/// programs load no file. A kept unit that teardown never released pins its
+/// code region from outside the graph, and every other gate here reads clean.
+#[test]
+fn a_run_that_loads_a_file_twice_leaves_no_residue() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("residue-load.lisp");
+    std::fs::write(&path, "(def items @[1 2])\n(fn [] items)\n").expect("write");
+    let src = format!(
+        "(let [a ((import-file \"{p}\")) b ((import-file \"{p}\"))] (+ (length a) (length b)))",
+        p = path.display()
+    );
+    assert_eq!(
+        residue_after_teardown(
+            Runtime::with_stdlib_cache(StdlibCache::Off),
+            &src,
+            HandOff::Root
+        ),
+        0,
+        "{src}: regions survived teardown",
+    );
+    let pinned = pinned_after_teardown(Runtime::with_stdlib_cache(StdlibCache::Off), &src);
+    assert!(
+        pinned.is_empty(),
+        "{src}: regions pinned from outside the region graph: {pinned:#?}"
     );
 }
 
