@@ -26,10 +26,10 @@ pub fn splice_includes(
     let unit = crate::syntax::UnitTag::of(source_name, &syntaxes);
     cctx.with_macro_expansion(arena, Layer::Instance, unit, |vm, _expander, meta| {
         let mut pending: std::collections::VecDeque<Syntax> = syntaxes.into();
-        let mut included = included_root(source_name);
+        let mut includes = Includes::root(source_name);
         let mut parts: Vec<String> = Vec::new();
         while let Some(syntax) = pending.pop_front() {
-            if resolve_and_splice_include(&arena, &syntax, vm, &meta, &mut pending, &mut included)?
+            if resolve_and_splice_include(&arena, &syntax, vm, &meta, &mut pending, &mut includes)?
             {
                 continue;
             }
@@ -39,11 +39,72 @@ pub fn splice_includes(
     })
 }
 
-/// The included-file set a compile starts from: the root file itself, when it
-/// is a file, so a file that includes itself is a cycle.
-pub(super) fn included_root(source_name: &str) -> HashSet<String> {
-    let root = Span::synthetic().with_file(source_name).source_path();
-    root.into_iter().collect()
+/// How an include names its file: the spec it wrote, whether the standard
+/// library's `import/resolve` resolves it (`include`) or the directory joins
+/// it (`include-file`), and the including file's directory. Resolving the name
+/// again finds the file a compile would read now.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct IncludeName {
+    spec: String,
+    by_resolver: bool,
+    dir: Option<String>,
+}
+
+impl IncludeName {
+    /// The absolute path of the file this name resolves to, or why it names
+    /// none: `import/resolve`'s error for an `include`, and nothing for an
+    /// `include-file`, whose join has no error of its own.
+    pub(crate) fn resolve(
+        &self,
+        vm: &mut crate::vm::VM,
+        meta: &crate::primitives::def::PrimitiveMeta,
+    ) -> Result<String, Option<String>> {
+        if self.by_resolver {
+            call_import_resolve(vm, meta, &self.spec, self.dir.as_deref()).map_err(Some)
+        } else {
+            resolve_include_file(&self.spec, self.dir.as_deref()).ok_or(None)
+        }
+    }
+}
+
+/// One file a compile included: its name, the path the name resolved to, and
+/// the text read there.
+#[derive(Debug, Clone)]
+pub(crate) struct IncludeRead {
+    pub(crate) name: IncludeName,
+    pub(crate) path: String,
+    pub(crate) text: String,
+}
+
+impl IncludeRead {
+    pub(crate) fn new(name: IncludeName, path: String, text: String) -> IncludeRead {
+        IncludeRead { name, path, text }
+    }
+}
+
+/// The files a compile has included, the root file among them, which the
+/// circular-include check reads, and each include in the order the compile
+/// read it.
+pub(crate) struct Includes {
+    seen: HashSet<String>,
+    read: Vec<IncludeRead>,
+}
+
+impl Includes {
+    /// What a compile of `source_name` starts from: the root file itself, when
+    /// it is a file, so a file that includes itself is a cycle.
+    pub(super) fn root(source_name: &str) -> Includes {
+        let root = Span::synthetic().with_file(source_name).source_path();
+        Includes {
+            seen: root.into_iter().collect(),
+            read: Vec::new(),
+        }
+    }
+
+    /// Each include the compile read, in order.
+    pub(crate) fn into_read(self) -> Vec<IncludeRead> {
+        self.read
+    }
 }
 
 /// Resolve and splice a single include directive into the pending queue.
@@ -61,9 +122,9 @@ pub(super) fn resolve_and_splice_include(
     vm: &mut crate::vm::VM,
     meta: &crate::primitives::def::PrimitiveMeta,
     pending: &mut std::collections::VecDeque<Syntax>,
-    included: &mut HashSet<String>,
+    includes: &mut Includes,
 ) -> Result<bool, String> {
-    let (spec, is_include) = match extract_include(syntax) {
+    let (spec, by_resolver) = match extract_include(syntax) {
         Some(pair) => pair,
         None => return Ok(false),
     };
@@ -79,25 +140,28 @@ pub(super) fn resolve_and_splice_include(
         .span
         .source_path()
         .and_then(|f| crate::path::parent(&f).map(str::to_string));
-    let path = if is_include {
-        call_import_resolve(vm, meta, &spec, dir.as_deref())
-            .map_err(|e| format!("{}: include: '{}' not found: {}", syntax.span, spec, e))?
-    } else {
-        resolve_include_file(&spec, dir.as_deref())
-            .ok_or_else(|| format!("{}: include: '{}' not found", syntax.span, spec))?
+    let name = IncludeName {
+        spec,
+        by_resolver,
+        dir,
     };
-    if !included.insert(path.clone()) {
+    let path = name.resolve(vm, meta).map_err(|why| match why {
+        Some(e) => format!("{}: include: '{}' not found: {}", syntax.span, name.spec, e),
+        None => format!("{}: include: '{}' not found", syntax.span, name.spec),
+    })?;
+    if !includes.seen.insert(path.clone()) {
         return Err(format!(
             "{}: include: circular dependency on '{}'",
             syntax.span, path
         ));
     }
-    let contents = std::fs::read_to_string(&path)
+    let text = std::fs::read_to_string(&path)
         .map_err(|e| format!("{}: include: failed to read '{}': {}", syntax.span, path, e))?;
-    let forms = read_syntax_all_for(*arena, &contents, &path)?;
+    let forms = read_syntax_all_for(*arena, &text, &path)?;
     for (i, form) in forms.into_iter().enumerate() {
         pending.insert(i, form);
     }
+    includes.read.push(IncludeRead::new(name, path, text));
     Ok(true)
 }
 
@@ -158,7 +222,7 @@ pub(super) fn extract_include(syntax: &Syntax) -> Option<(String, bool)> {
 
 /// Resolve an include-file path against the including file's directory, or
 /// the working directory for code with no file. The answer is absolute and
-/// normalized, the spelling the included set keys on.
+/// normalized, the spelling the circular-include check keys on.
 pub(super) fn resolve_include_file(spec: &str, dir: Option<&str>) -> Option<String> {
     let joined = match dir {
         Some(dir) => crate::path::join(&[dir, spec]),

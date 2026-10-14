@@ -44,6 +44,8 @@ graft and the fold.
 | [eval.rs](eval.rs) | `eval`, `eval_all`, `eval_file` and `eval_syntax` |
 | [cache.rs](cache.rs) | `CompileCtx` and `BootExports` |
 | [cache/register.rs](cache/register.rs) | What a host, a REPL line and the standard library register into a `CompileCtx` |
+| [cache/repl.rs](cache/repl.rs) | The REPL layer: the macros and definitions earlier REPL lines made |
+| [cache/store.rs](cache/store.rs) | The store, and `compile_file_stored` |
 | [bootstrap.rs](bootstrap.rs) | The core.lisp compile, and `install_core_exports` |
 | [sources.rs](sources.rs) | The three boot sources, embedded at build time |
 | [directives.rs](directives.rs) | The `elle/version` and `elle/migration` declarations ([versioning](../../docs/versioning.md)) |
@@ -68,7 +70,7 @@ and `cctx`. `analyze`, `analyze_file` and `eval` expand on that VM, while
 | `compile_barrier_module` | `CodeUnit` | The test runner's per-form mode: the `def` and `var` forms run as the module runs, and each expression becomes an indexed thunk ([the test runner](../../docs/test-runner.md)) |
 | `compile_whole_module` | `CodeUnit` | The test runner's whole-file mode: one thunk runs every form in source order |
 | `compile_whole_module_forms(syntaxes, …)` | `CodeUnit` | `compile_whole_module` over forms that another VM read |
-| `splice_includes(source, source_name)` | `String` | The source text with each `include` and `include-file` inlined, for the WASM backend |
+| `splice_includes(source, source_name, cctx)` | `String` | The source text with each `include` and `include-file` inlined, for the WASM backend |
 | `analyze` | `AnalyzeResult` | One form to HIR, with tail calls marked. No regularize, no bytecode |
 | `analyze_file` | `AnalyzeResult` | A file as one letrec to HIR, with tail calls marked. No regularize, no bytecode |
 | `eval` | `Value` | One form, compiled and run on the caller's VM |
@@ -82,6 +84,7 @@ and `cctx`. `analyze`, `analyze_file` and `eval` expand on that VM, while
 | `CodeUnit` | The entry's code object, and one counted reference to the code region every payload of the unit lives in ([template.md](../../docs/impl/region/template.md)) |
 | `AnalyzeResult` | `hir`, its `arena`, the non-fatal `errors` the analyzer collected, and two facts the HIR does not keep: `lambda_decls`, each lambda's declared ceiling and the bits its body raises by itself, and `top_direct`, the bits the code outside every lambda raises by itself. A signal solver reads both ([the solver](../../docs/impl/solver.md)) |
 | `CompileCtx` | The compile context of one instance ([cache.rs](cache.rs)) |
+| `Layer` | Which layer a compile sees: `Instance`, or `Repl`, which adds the REPL layer |
 | `BootExports` | The core and stdlib export structs a boot leaves, which a boot image carries as its roots |
 | `directives::SemverMeta` | The version and the migration majors that `extract_semver_directives` removed from a file |
 | `sources::{CORE, PRELUDE, STDLIB}` | [core.lisp](../core.lisp), [prelude.lisp](../prelude.lisp) and [stdlib.lisp](../stdlib.lisp), as text |
@@ -90,7 +93,7 @@ and `cctx`. `analyze`, `analyze_file` and `eval` expand on that VM, while
 
 `CompileCtx` holds the macro VM, the expander, the compile metadata, the REPL
 layer, the capabilities the fiber a compile runs for withholds, the boot
-exports, and the graft policy. Its methods fall into six groups:
+exports, the store, and the graft policy. Its methods fall into seven groups:
 
 - **Build**: `new`, `new_with_heap` (the macro VM shares the instance heap),
   and `from_boot_image` (crate-internal).
@@ -108,11 +111,14 @@ exports, and the graft policy. Its methods fall into six groups:
 - **Register**: `register_host_binding` and `register_primitive` reach every
   compile in the instance. `register_stdlib_exports` installs the standard
   library's exports. `register_repl_binding` and `register_repl_macros` reach
-  later REPL lines alone.
-- **Look up**: `lookup_stdlib_value`, `global_function_ids`, `primitive_meta`
-  and `core_env`.
-- **Tear down**: `release` drops the references the cached macro transformers
-  hold, the REPL layer's among them.
+  later REPL lines alone. Each registration that every compile sees empties
+  the store.
+- **Look up**: `lookup_stdlib_value`, `global_function_ids`, `meta`,
+  `primitive_meta` and `core_env`.
+- **Store**: `compile_file_stored` keeps each loaded file's unit while its
+  compile inputs match ([docs/pipeline.md](../../docs/pipeline.md)).
+- **Tear down**: `release` empties the store, and drops the references the
+  cached macro transformers hold, the REPL layer's among them.
 
 ## Data flow
 

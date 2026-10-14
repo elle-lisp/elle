@@ -24,6 +24,8 @@ pub(super) struct Frontend {
     /// operands the intrinsic operand contract proved are integers
     /// (docs/impl/lir.md).
     pub types: crate::hir::TypeInfo,
+    /// Each file the compile included, in the order it read them.
+    pub includes: Vec<IncludeRead>,
 }
 
 pub(super) type FrontendResult = Result<Frontend, String>;
@@ -147,7 +149,7 @@ fn compile_syntaxes_frontend_xform_inner(
         crate::epoch::migrate_forms(&arena, &mut syntaxes, epoch)?;
     }
 
-    let (expanded_forms, mut expander, meta) =
+    let (expanded_forms, mut expander, meta, includes) =
         cctx.with_macro_expansion(arena, layer, unit, |macro_vm, mut expander, meta| {
             // A form takes the file scope as it leaves the queue, after the
             // include splice, so a spliced form shares the including file's
@@ -155,7 +157,7 @@ fn compile_syntaxes_frontend_xform_inner(
             let file_scope = (!source_name.starts_with('<')).then(|| expander.fresh_scope());
             let mut pending: std::collections::VecDeque<Syntax> = syntaxes.into();
             let mut expanded_forms = Vec::new();
-            let mut included = included_root(source_name);
+            let mut includes = Includes::root(source_name);
             while let Some(syntax) = pending.pop_front() {
                 if resolve_and_splice_include(
                     &arena,
@@ -163,7 +165,7 @@ fn compile_syntaxes_frontend_xform_inner(
                     macro_vm,
                     &meta,
                     &mut pending,
-                    &mut included,
+                    &mut includes,
                 )? {
                     continue;
                 }
@@ -173,7 +175,7 @@ fn compile_syntaxes_frontend_xform_inner(
                 };
                 expanded_forms.push(expander.expand(syntax, symbols, macro_vm)?);
             }
-            Ok::<_, String>((expanded_forms, expander, meta))
+            Ok::<_, String>((expanded_forms, expander, meta, includes.into_read()))
         })?;
     crate::phase!(ct, "compile", t, "{} expand", source_name);
     let t = std::time::Instant::now();
@@ -237,5 +239,6 @@ fn compile_syntaxes_frontend_xform_inner(
         expander,
         prim_values,
         types,
+        includes,
     })
 }
