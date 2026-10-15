@@ -1,8 +1,7 @@
-(elle/epoch 14)
-# audited: 2026-10-05
-## elle test — turning an outcome into rows: the label a form is known by, what
-## analysis finds in it, the status a payload classifies to, and one row per
-## (form × tier).
+(elle/epoch 15)
+# audited: 2026-10-15
+## elle test — an outcome as rows: a form's label and profile, the status its
+## payload classifies to, and one row per (form × tier).
 ## docs/test-store.md
 ##
 ## A fragment of one module (see store.lisp).
@@ -20,10 +19,10 @@
     (let [m (scan-msg (first xs))]
       (if m m (scan-children (rest xs))))))
 
+# A payload's error keyword, rendered with its leading colon.
 (defn sig-of [payload]
   (let [e (get payload :error)]
     (if e (string ":" (string e)) ":error")))
-# render keyword with its leading colon
 
 # Render a payload field to text, or nil when absent (so it lands as SQL NULL).
 (defn field-str [payload key]

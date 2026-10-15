@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-05
+(elle/epoch 15)
+# audited: 2026-10-15
 ## elle test — a file as its own process: the child's argv, the run to its end
 ## or its deadline, and the row its exit status becomes.
 ## docs/test-runner.md
@@ -63,9 +63,10 @@
               :max-rss-kb (if u (get u :max-rss-kb) nil)))))
 
 # What a terminating status says, rendered for a reader. A signalled child
-# answers its signal number negated (docs/subprocess.md), so the sign is what
-# separates the two cases and no second read is needed. os/sig-name covers the
-# fault set that os/sig-send refuses, which is where a child's death lives.
+# answers its signal number negated (the docstring of subprocess/wait), so the
+# sign is what separates the two cases and no second read is needed.
+# os/sig-name covers the fault set that os/sig-send refuses, which is where a
+# child's death lives.
 (defn signal-note [n]
   (let [kw (os/sig-name n)]
     (if kw

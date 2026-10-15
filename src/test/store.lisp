@@ -1,7 +1,7 @@
 (elle/epoch 15)
 # audited: 2026-10-15
-## elle test — the session store: where a run is kept, the schema it is kept
-## in, what a run row says about the code it ran against, and the CAS.
+## elle test — the session store: where a run is kept, its schema, the code
+## state a run row records, and the CAS.
 ## docs/test-store.md
 ##
 ## A fragment of one module: src/program/subcommand.rs concatenates the

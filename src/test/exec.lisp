@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-05
+(elle/epoch 15)
+# audited: 2026-10-15
 ## elle test — running one test: worker isolation, output capture, the
 ## per-form deadline, and the build's tiers.
 ## docs/test-runner.md
@@ -371,7 +371,6 @@
 
 (defn tier-available? [tk]
   (not (feature-disabled? (exec-thunk tk (fn [] 0)))))
-# probe with a trivial closure
 
 # Candidate tiers as [tier-keyword tier-label]; :bytecode is recorded as :vm.
 # The label is a keyword (result.tier is keyword-typed; sqlite stores its name).

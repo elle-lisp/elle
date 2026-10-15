@@ -1,8 +1,7 @@
-(elle/epoch 14)
-# audited: 2026-10-05
-## elle test — the readings a result printed: read out of its captured stdout,
-## judged against the rows the run's build holds in the file's ledger,
-## recorded, and the rows nobody answered.
+(elle/epoch 15)
+# audited: 2026-10-15
+## elle test — the readings a result printed, judged against the build's ledger
+## rows and recorded, and the rows nobody read.
 ## docs/ratchet.md
 ##
 ## A fragment of one module (see store.lisp). `run-build` and `ledgers` are

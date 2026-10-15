@@ -1,8 +1,7 @@
 (elle/epoch 15)
 # audited: 2026-10-15
-## elle test — merging another store's runs into this one: the key that makes
-## an import repeatable, the rows that follow a run, and the bytes copied by
-## address.
+## elle test — merging another store's runs into this one: the run key, the
+## rows that follow a run, and the CAS bytes.
 ## docs/test-store.md
 ##
 ## A fragment of one module (see store.lisp).
