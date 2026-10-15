@@ -124,7 +124,7 @@ impl<'a> Infer<'a> {
             value_used,
             typeof_aliases,
             binding_types,
-            hir_types: NodeTypes::default(),
+            hir_types: NodeTypes::with_capacity_and_hasher(count_nodes(hir), Default::default()),
             lambda_body_type: BindingTypes::default(),
             binding_min_length: FxHashMap::default(),
             break_types: FxHashMap::default(),

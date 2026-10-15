@@ -16,6 +16,13 @@ pub(crate) fn unwrap_make_cell(h: &Hir) -> &Hir {
     }
 }
 
+/// How many nodes the tree holds: the size the node-type table grows to.
+pub(crate) fn count_nodes(hir: &Hir) -> usize {
+    let mut n = 1;
+    hir.for_each_child(|c| n += count_nodes(c));
+    n
+}
+
 /// Bindings written by `Assign`/`SetCell` anywhere in the tree. A parameter
 /// in this set never receives call-site proofs — its value after the first
 /// write is invisible to the per-pass recomputation.
