@@ -118,14 +118,13 @@ fn compute_order_indexes_parameterize_key() {
 #[test]
 fn an_interval_holds_exactly_the_subtree() {
     let hir = hir_of(
-        "(defn f [xs]
+        "(fn [xs]
            (var acc 0)
            (def g (fn [y] (+ y 1)))
            (each x in xs
              (let [h (fn [] (g x))]
                (if (> x 1) (assign acc (+ acc (h))) (assign acc acc))))
-           acc)
-         (f [1 2 3])",
+           acc)",
     );
     let order = compute_order(&hir);
 
