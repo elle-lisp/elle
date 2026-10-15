@@ -1,6 +1,7 @@
-// audited: 2026-09-16
-// src/lir/AGENTS.md
+// audited: 2026-10-14
 //! Stack simulation helpers for the LIR emitter.
+//!
+//! src/lir/AGENTS.md
 //!
 //! Tracks which virtual register is at each stack position during bytecode
 //! emission, and emits DupN instructions to move values to the top when needed.
@@ -13,10 +14,7 @@ use crate::compiler::bytecode::Instruction;
 // to keep the instruction-dispatch table in mod.rs focused on
 // instruction encoding.
 //
-// Coupled fields on Emitter:
-//   stack: Vec<Reg>
-//   reg_to_stack: HashMap<Reg, usize>
-//   bytecode: Bytecode
+// Coupled fields on Emitter: `stack`, `reg_to_stack` and `bytecode`.
 
 impl super::Emitter {
     pub(super) fn push_reg(&mut self, reg: Reg) {
