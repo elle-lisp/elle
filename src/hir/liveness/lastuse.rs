@@ -1,8 +1,31 @@
+// audited: 2026-10-14
+//! The per-node last use: where the value each node produces is last read, solved to a fixpoint over binding chains.
+//!
+//! docs/impl/region/anchors.md
+//! docs/impl/region/cells.md
+
 use super::*;
 
 mod builder;
 use builder::LastUseBuilder;
 
+/// Compute per-HirId last-use: for each value-producing HirId, the HirId
+/// at which its value is last referenced.
+///
+/// For an allocation `A`:
+/// - If `A` is bound to some binding `b` (that is, `A` is a binding's init),
+///   `last_use[A]` is the latest "effective HirId" over all `Var(b)`
+///   references. The effective HirId of a `Var(b)` is the immediate
+///   parent expression's HirId when the parent *consumes* the value
+///   (Call, Emit, Define, Assign, SetCell, MakeCell, Intrinsic, etc.);
+///   otherwise it is the `Var(b)` HirId itself.
+/// - If `A` has no binding (inline allocation passed as an argument or
+///   value child of a consumer), `last_use[A]` is the consumer's HirId.
+/// - If `A` is bound but the binding has no uses anywhere,
+///   `last_use[A] = A` (decref immediately after the alloc).
+///
+/// Region inference gives every region exactly one `decref_point`, and this
+/// mapping supplies it for allocation HirIds.
 pub fn compute_last_use(
     hir: &Hir,
     uses: &HashMap<Binding, Vec<HirId>>,
@@ -39,8 +62,7 @@ pub fn compute_last_use(
     // must live until the `(u1)` call, reached only through u1's override).
     // The override equations must be solved to a fixpoint independent of the
     // hash-iteration order, or a chain resolves only to a random prefix and a
-    // capture cell is released too early — a use-after-free with
-    // nondeterministic codegen (region-capture-cell-noreassign-uaf.lisp).
+    // capture cell is released too early.
     //
     // Solve the override equations to their fixpoint in two phases, both
     // independent of hash iteration order:
@@ -57,7 +79,7 @@ pub fn compute_last_use(
     // chaotic re-evaluation converges to the unique least fixpoint regardless
     // of processing order — and without the per-round full-map clone that
     // makes a round-based sweep quadratic on a file letrec's chain of
-    // sequential defs (i.e. the stdlib).
+    // sequential defs, that is, the stdlib.
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     let compute_chosen = |binding: &Binding,
                           last_use: &HashMap<HirId, HirId>,
