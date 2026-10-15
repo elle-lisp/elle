@@ -20,7 +20,7 @@
 
 use super::graft::{GraftRecord, Operand};
 use super::*;
-use std::collections::HashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 mod collect;
 mod facts;
@@ -46,7 +46,7 @@ pub(super) struct Infer<'a> {
 
     // ── the program's facts: collected once, never rewritten ──
     /// Which bindings are lambdas, and what their parameters are.
-    lambda_params: HashMap<Binding, LambdaSig>,
+    lambda_params: FxHashMap<Binding, LambdaSig>,
     /// What each graft bound to a parameter of this unit's functions, joined
     /// into the parameter at the end of every pass as a call site is.
     record: &'a GraftRecord,
@@ -55,11 +55,11 @@ pub(super) struct Infer<'a> {
     /// parameter in this set never receives call-site proofs, only guard
     /// facts. A lambda binding in it records Top for its result rather than
     /// its initializer's body type.
-    mutated: HashSet<Binding>,
+    mutated: FxHashSet<Binding>,
     /// Bindings with at least one value-position use
     /// (`collect_value_position_uses`): their callers are not all visible, so
     /// call-site joins must not prove their parameters.
-    value_used: HashSet<Binding>,
+    value_used: FxHashSet<Binding>,
     /// Immutable let-bound aliases of `(type-of a)`, mapped to their subject
     /// `a` (`collect_typeof_aliases`), so a match on such an alias narrows `a`.
     pub(super) typeof_aliases: HashMap<Binding, Binding>,
@@ -70,10 +70,10 @@ pub(super) struct Infer<'a> {
     /// Each lambda binding's body type, as the last pass computed it. Every
     /// call reads its result here, a self-recursive call included.
     lambda_body_type: BindingTypes,
-    pub(super) binding_min_length: HashMap<Binding, usize>,
+    pub(super) binding_min_length: FxHashMap<Binding, usize>,
     /// The join of the values each open block's `break`s carry, which the
     /// block joins with its tail when it closes.
-    break_types: HashMap<crate::hir::expr::BlockId, TyId>,
+    break_types: FxHashMap<crate::hir::expr::BlockId, TyId>,
     /// This pass's call-site contributions to parameter types, rebuilt every
     /// pass. At pass end the ascent replaces each contributed parameter's type
     /// with its join here, so a call site's Top counts.
@@ -81,16 +81,16 @@ pub(super) struct Infer<'a> {
     /// The entries the ascent gave up on. An estimate still moving when the
     /// pass budget ran out is held at Top for the rest of the run, so nothing
     /// reads a proof out of it.
-    widened: HashSet<Binding>,
+    widened: FxHashSet<Binding>,
 }
 
 impl<'a> Infer<'a> {
     /// Collect one unit's program facts and seed the ascent's start.
     pub(super) fn new(hir: &Hir, arena: &'a BindingArena, record: &'a GraftRecord) -> Self {
-        let mut lambda_params: HashMap<Binding, LambdaSig> = HashMap::new();
+        let mut lambda_params: FxHashMap<Binding, LambdaSig> = FxHashMap::default();
         collect_lambda_info(hir, arena, &mut lambda_params);
         let mutated = collect_mutated_bindings(hir);
-        let mut value_used = HashSet::new();
+        let mut value_used = FxHashSet::default();
         collect_value_position_uses(hir, &mut value_used);
         let mut typeof_aliases: HashMap<Binding, Binding> = HashMap::new();
         collect_typeof_aliases(hir, arena, &mut typeof_aliases);
@@ -126,10 +126,10 @@ impl<'a> Infer<'a> {
             binding_types,
             hir_types: NodeTypes::default(),
             lambda_body_type: BindingTypes::default(),
-            binding_min_length: HashMap::new(),
-            break_types: HashMap::new(),
+            binding_min_length: FxHashMap::default(),
+            break_types: FxHashMap::default(),
             param_joins: BindingTypes::default(),
-            widened: HashSet::new(),
+            widened: FxHashSet::default(),
         }
     }
 }

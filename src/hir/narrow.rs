@@ -15,8 +15,6 @@ use crate::signals::Signal;
 use crate::value::fiber::SignalBits;
 use crate::value::SymbolId;
 
-use std::collections::HashMap;
-
 /// Strip SIG_ERROR from calls to known primitives when argument types
 /// prove the error path is unreachable.
 pub(super) fn narrow_signals(
@@ -24,7 +22,7 @@ pub(super) fn narrow_signals(
     interner: &TypeInterner,
     arena: &BindingArena,
     hir_types: &NodeTypes,
-    binding_min_length: &HashMap<Binding, usize>,
+    binding_min_length: &rustc_hash::FxHashMap<Binding, usize>,
 ) {
     // Try to narrow this node
     if let HirKind::Call { func, args, .. } = &hir.kind {
@@ -67,7 +65,7 @@ fn should_narrow_error(
     args: &[CallArg],
     interner: &TypeInterner,
     _arena: &BindingArena,
-    binding_min_length: &HashMap<Binding, usize>,
+    binding_min_length: &rustc_hash::FxHashMap<Binding, usize>,
 ) -> bool {
     // Const patterns over the name's hash rather than a resolved spelling:
     // recognition is identity, so it needs no symbol table (docs/impl/symbol.md).
@@ -158,7 +156,7 @@ fn extract_literal_int(hir: &Hir) -> Option<i64> {
 
 fn extract_target_min_length(
     hir: &Hir,
-    binding_min_length: &HashMap<Binding, usize>,
+    binding_min_length: &rustc_hash::FxHashMap<Binding, usize>,
 ) -> Option<usize> {
     match &hir.kind {
         HirKind::Var(b) => binding_min_length.get(b).copied(),

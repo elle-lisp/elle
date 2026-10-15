@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! The pre-passes: the program facts one walk of the tree yields, which every later pass reads.
 //!
 //! docs/impl/typeinfer.md
@@ -19,9 +19,9 @@ pub(crate) fn unwrap_make_cell(h: &Hir) -> &Hir {
 /// Bindings written by `Assign`/`SetCell` anywhere in the tree. A parameter
 /// in this set never receives call-site proofs — its value after the first
 /// write is invisible to the per-pass recomputation.
-pub(crate) fn collect_mutated_bindings(hir: &Hir) -> std::collections::HashSet<Binding> {
-    let mut out = std::collections::HashSet::new();
-    fn go(h: &Hir, out: &mut std::collections::HashSet<Binding>) {
+pub(crate) fn collect_mutated_bindings(hir: &Hir) -> rustc_hash::FxHashSet<Binding> {
+    let mut out = rustc_hash::FxHashSet::default();
+    fn go(h: &Hir, out: &mut rustc_hash::FxHashSet<Binding>) {
         match &h.kind {
             HirKind::Assign { target, .. } => {
                 out.insert(*target);
@@ -44,7 +44,7 @@ pub(crate) fn collect_mutated_bindings(hir: &Hir) -> std::collections::HashSet<B
 /// use (stored, passed as an argument, returned, exported) has callers the
 /// call-site scan cannot see, so its parameter joins are not a proof.
 /// `infer_call` consults this set before it forwards operand types.
-pub(crate) fn collect_value_position_uses(hir: &Hir, out: &mut std::collections::HashSet<Binding>) {
+pub(crate) fn collect_value_position_uses(hir: &Hir, out: &mut rustc_hash::FxHashSet<Binding>) {
     match &hir.kind {
         HirKind::Call { func, args, .. } => {
             // The callee itself is a callee-position use; anything nested
@@ -93,36 +93,37 @@ pub(crate) struct LambdaSig {
 pub(crate) fn collect_lambda_info(
     hir: &Hir,
     _arena: &BindingArena,
-    lambda_params: &mut HashMap<Binding, LambdaSig>,
+    lambda_params: &mut rustc_hash::FxHashMap<Binding, LambdaSig>,
 ) {
-    let record =
-        |binding: &Binding, value: &Hir, lambda_params: &mut HashMap<Binding, LambdaSig>| {
-            if let Some(Lambda {
-                params,
-                rest_param,
-                vararg_kind,
-                ..
-            }) = unwrap_make_cell(value).kind.as_lambda()
-            {
-                let collects_list = *vararg_kind == VarargKind::List;
-                lambda_params.insert(
-                    *binding,
-                    LambdaSig {
-                        all: params
-                            .iter()
-                            .copied()
-                            .chain(rest_param.iter().copied().filter(|r| !params.contains(r)))
-                            .collect(),
-                        fixed: params
-                            .iter()
-                            .copied()
-                            .filter(|p| Some(*p) != *rest_param)
-                            .collect(),
-                        rest: rest_param.map(|r| (r, collects_list)),
-                    },
-                );
-            }
-        };
+    let record = |binding: &Binding,
+                  value: &Hir,
+                  lambda_params: &mut rustc_hash::FxHashMap<Binding, LambdaSig>| {
+        if let Some(Lambda {
+            params,
+            rest_param,
+            vararg_kind,
+            ..
+        }) = unwrap_make_cell(value).kind.as_lambda()
+        {
+            let collects_list = *vararg_kind == VarargKind::List;
+            lambda_params.insert(
+                *binding,
+                LambdaSig {
+                    all: params
+                        .iter()
+                        .copied()
+                        .chain(rest_param.iter().copied().filter(|r| !params.contains(r)))
+                        .collect(),
+                    fixed: params
+                        .iter()
+                        .copied()
+                        .filter(|p| Some(*p) != *rest_param)
+                        .collect(),
+                    rest: rest_param.map(|r| (r, collects_list)),
+                },
+            );
+        }
+    };
     match &hir.kind {
         HirKind::Letrec { bindings, body } | HirKind::Let { bindings, body } => {
             for (binding, value) in bindings {
