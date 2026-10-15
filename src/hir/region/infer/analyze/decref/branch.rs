@@ -119,16 +119,14 @@ pub(super) fn pin_branch_arm_releases(
     }
     // Only regions whose `decref_point` lands inside the branch's arms can move,
     // so index the regions by post-order `decref_point` once and let each branch
-    // binary-search the arm-interval slices. A move writes the region's new ord
-    // straight into the index, which leaves it unsorted, so a branch that moved
-    // anything re-sorts before the next one runs — later branches, processed
-    // innermost-outward, then search an ordered index and see the post-move values.
-    let mut by_dord: Vec<(u32, Region)> = info
-        .region_data
-        .iter()
-        .map(|(&r, d)| (ord(d.decref_point), r))
-        .collect();
-    by_dord.sort_unstable_by_key(|&(o, _)| o);
+    // read the arm intervals as ranges of the index. A move files the region
+    // under its new point, so later branches, processed innermost-outward, see
+    // the post-move values.
+    let mut by_dord: std::collections::BTreeMap<u32, Vec<Region>> =
+        std::collections::BTreeMap::new();
+    for (&r, d) in &info.region_data {
+        by_dord.entry(ord(d.decref_point)).or_default().push(r);
+    }
 
     // ── The admission: the frame must be the region's only holder ────────────
     //
@@ -263,8 +261,8 @@ pub(super) fn pin_branch_arm_releases(
             i > 0 && merged_barriers[i - 1].1 > dord
         };
         // Merge the arms' closed intervals (`lo <= dord <= hi`) so each region in
-        // the branch's union is scanned once, then binary-search the `by_dord`
-        // index for each merged interval.
+        // the branch's union is scanned once, then read each merged interval as a
+        // range of the `by_dord` index.
         let mut arm_ivs: Vec<(u32, u32)> = br.arms.iter().map(|a| (a.lo, a.hi)).collect();
         arm_ivs.sort_unstable_by_key(|&(lo, _)| lo);
         let mut merged_arms: Vec<(u32, u32)> = Vec::new();
@@ -279,23 +277,19 @@ pub(super) fn pin_branch_arm_releases(
             }
             merged_arms.push((lo, hi));
         }
-        // Snapshot the branch's candidates before any move: the inner loop mutates
-        // `by_dord` in place (a move raises the entry's ord), so iterating the live
-        // slice would shift not-yet-visited entries across the fixed `end` boundary
-        // and admit regions whose ord falls OUTSIDE the arm union. Collecting the
-        // union's entries once — each region appears in exactly one merged interval —
-        // judges every candidate by the `decref_point` it had before this branch
-        // moved anything.
-        let mut candidates: Vec<(u32, Region, usize)> = Vec::new();
+        // Snapshot the branch's candidates before any move: the inner loop refiles
+        // a moved region under its new point, so iterating the live index could
+        // meet a region twice or admit one whose point falls OUTSIDE the arm
+        // union. Collecting the union's entries once — each region appears in
+        // exactly one merged interval — judges every candidate by the
+        // `decref_point` it had before this branch moved anything.
+        let mut candidates: Vec<(u32, Region)> = Vec::new();
         for &(lo, hi) in &merged_arms {
-            let start = by_dord.partition_point(|&(o, _)| o < lo);
-            let end = by_dord.partition_point(|&(o, _)| o <= hi);
-            for (rel, &(o, r)) in by_dord[start..end].iter().enumerate() {
-                candidates.push((o, r, start + rel));
+            for (&o, rs) in by_dord.range(lo..=hi) {
+                candidates.extend(rs.iter().map(|&r| (o, r)));
             }
         }
-        let mut moved = false;
-        for &(dord, r, idx) in &candidates {
+        for &(dord, r) in &candidates {
             if excluded.contains(&r) {
                 continue;
             }
@@ -343,14 +337,25 @@ pub(super) fn pin_branch_arm_releases(
             // reading the region's real lifetime and not this anchor
             // (`RegionData::lifetime_point`).
             info.region_data.get_mut(&r).unwrap().decref_point = anchor;
-            by_dord[idx].0 = anchor_ord;
-            moved = true;
-        }
-        // A move raises a region's `decref_point` in place and so unsorts the
-        // index; restore the order so the next branch's interval searches hold.
-        // Most branches move nothing, and those owe no sort at all.
-        if moved {
-            by_dord.sort_unstable_by_key(|&(o, _)| o);
+            refile(&mut by_dord, r, dord, anchor_ord);
         }
     }
+}
+
+/// Move `r` in the release index from the point it was filed under to `to`.
+fn refile(
+    by_dord: &mut std::collections::BTreeMap<u32, Vec<Region>>,
+    r: Region,
+    from: u32,
+    to: u32,
+) {
+    if let Some(rs) = by_dord.get_mut(&from) {
+        if let Some(i) = rs.iter().position(|&x| x == r) {
+            rs.swap_remove(i);
+        }
+        if rs.is_empty() {
+            by_dord.remove(&from);
+        }
+    }
+    by_dord.entry(to).or_default().push(r);
 }
