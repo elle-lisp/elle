@@ -14,7 +14,7 @@ use super::expr::HirId;
 pub struct TyId(pub u32);
 
 /// The type inference proved for each node, keyed by the node's id.
-pub type NodeTypes = std::collections::HashMap<HirId, TyId>;
+pub type NodeTypes = rustc_hash::FxHashMap<HirId, TyId>;
 
 /// Internal type representation — stored in the interner, referenced by TyId.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]

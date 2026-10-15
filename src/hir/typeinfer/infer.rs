@@ -35,7 +35,7 @@ pub(super) use facts::*;
 pub(super) use subject::*;
 
 /// The type the ascent holds for each binding.
-pub(crate) type BindingTypes = HashMap<Binding, TyId>;
+pub(crate) type BindingTypes = rustc_hash::FxHashMap<Binding, TyId>;
 
 /// The inference pass: the program facts one compilation unit yields, and the
 /// type environment the ascent rewrites over them.
