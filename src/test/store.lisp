@@ -1,7 +1,7 @@
-(elle/epoch 14)
-# audited: 2026-10-05
-## elle test — the session store: where a run is kept, the schema it is kept
-## in, what a run row says about the code it ran against, and the CAS.
+(elle/epoch 15)
+# audited: 2026-10-15
+## elle test — the session store: where a run is kept, its schema, the code
+## state a run row records, and the CAS.
 ## docs/test-store.md
 ##
 ## A fragment of one module: src/program/subcommand.rs concatenates the
@@ -59,7 +59,7 @@
 
 (defn ensure-schema [conn]
   (sqlite:exec conn
-               "CREATE TABLE IF NOT EXISTS run (id INTEGER PRIMARY KEY, started_at TEXT DEFAULT (datetime('now')), finished_at TEXT, run_key TEXT, tiers TEXT, selection TEXT, n_selected INTEGER, git_commit TEXT, git_dirty INTEGER, tree_hash TEXT, worktree TEXT, boot_fingerprint INTEGER, elle_version TEXT, build_profile TEXT, host TEXT, argv TEXT, pid INTEGER, build TEXT, n_pass INTEGER DEFAULT 0, n_fail INTEGER DEFAULT 0, n_skip INTEGER DEFAULT 0, n_diverge INTEGER DEFAULT 0, n_timeout INTEGER DEFAULT 0)")
+               "CREATE TABLE IF NOT EXISTS run (id INTEGER PRIMARY KEY, started_at TEXT DEFAULT (datetime('now')), finished_at TEXT, run_key TEXT, tiers TEXT, selection TEXT, n_selected INTEGER, git_commit TEXT, git_dirty INTEGER, tree_hash TEXT, worktree TEXT, boot_fingerprint INTEGER, elle_version TEXT, build_profile TEXT, host TEXT, argv TEXT, pid INTEGER, build TEXT, n_pass INTEGER DEFAULT 0, n_fail INTEGER DEFAULT 0, n_skip INTEGER DEFAULT 0, n_diverge INTEGER DEFAULT 0, n_timeout INTEGER DEFAULT 0, wall_ms INTEGER)")
   (sqlite:exec conn
                "CREATE TABLE IF NOT EXISTS form (hash TEXT PRIMARY KEY, origin TEXT, session TEXT, file TEXT, form_index INTEGER, line INTEGER, col INTEGER, label TEXT, src TEXT, caps TEXT, touches TEXT, signal TEXT)")
   (sqlite:exec conn
@@ -86,6 +86,9 @@
   # A run recorded before the code-state columns existed keeps NULL for each
   # of them: the run happened, and nothing recorded what it ran against.
   (ensure-code-columns conn run-code-columns)
+  # A run recorded before its wall time was kept reads NULL for it, as a run
+  # that never completed does: the summary prints no time for either.
+  (ensure-column conn "run" "wall_ms" "INTEGER")
   # A result recorded before a child's peak was kept reads NULL for it.
   (ensure-column conn "result" "max_rss_kb" "INTEGER")
   # A gauge row recorded before the heap column existed was the runner's, and
@@ -217,8 +220,9 @@
 # ── the heap gauges (docs/test-gauges.md) ──────────────────────────
 # Every gauge the runner reads, as [kind reader]. Each primitive is Immediate,
 # so a call allocates nothing and cannot move the number it reports. One list,
-# because the runner's sampling, the workers' readings and the growers query in
-# the views all have to agree about which gauges there are.
+# because the runner's sampling and the workers' readings have to agree about
+# which gauges there are. No summary prints them; they are a query over `gauge`
+# (docs/test-gauges.md).
 #
 # The runner reads them on two heaps. Its own heap sees what it does per file:
 # the compile, the syntax it holds, and the rows it writes. A worker thread has

@@ -1,8 +1,7 @@
-(elle/epoch 14)
-# audited: 2026-10-05
-## elle test — merging another store's runs into this one: the key that makes
-## an import repeatable, the rows that follow a run, and the bytes copied by
-## address.
+(elle/epoch 15)
+# audited: 2026-10-15
+## elle test — merging another store's runs into this one: the run key, the
+## rows that follow a run, and the CAS bytes.
 ## docs/test-store.md
 ##
 ## A fragment of one module (see store.lisp).
@@ -17,7 +16,7 @@
   ["run_key" "started_at" "finished_at" "tiers" "selection" "n_selected"
    "git_commit" "git_dirty" "tree_hash" "worktree" "boot_fingerprint"
    "elle_version" "build_profile" "host" "argv" "pid" "build" "n_pass" "n_fail"
-   "n_skip" "n_diverge" "n_timeout"])
+   "n_skip" "n_diverge" "n_timeout" "wall_ms"])
 
 (def form-columns
   ["hash" "origin" "session" "file" "form_index" "line" "col" "label" "src"

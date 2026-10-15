@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-15
 // The suite targets run the binary through the runner alone, `make qa` runs what the QA job runs, and runs first.
 //
 // docs/testing.md
@@ -10,7 +10,8 @@
 // in a CI log rather than a row in the session DB, so the recipe is checked
 // here.
 
-use crate::common::{make_dry_run, make_expand, workflow_files, workflow_jobs};
+use crate::common::{make_dry_run, make_expand, suite_targets, workflow_files, workflow_jobs};
+use std::collections::BTreeSet;
 
 /// What `make --dry-run TARGET` would run.
 fn recipe(target: &str) -> String {
@@ -36,15 +37,35 @@ fn every_suite_target_runs_the_binary_through_the_runner_alone() {
         .into_iter()
         .map(make_expand)
         .collect();
-    for (target, runner) in [
+    let targets = [
         ("smoke-lang", "ELLE"),
         ("smoke-impl", "ELLE_RIG"),
+        ("smoke-eager", "ELLE_RIG"),
+        ("smoke-producers", "ELLE_RIG"),
+        ("smoke-charge", "ELLE_RIG"),
+        ("smoke-scrub", "ELLE_RIG"),
         ("smoke-nojit", "ELLE"),
         ("smoke-pool", "ELLE"),
+        ("smoke-pool-impl", "ELLE_RIG"),
+        ("smoke-pool-producers", "ELLE_RIG"),
         ("smoke-mlir", "ELLE_MLIR"),
+        ("smoke-mlir-impl", "ELLE_RIG_MLIR"),
+        ("smoke-mlir-producers", "ELLE_RIG_MLIR"),
         ("smoke-noffi", "ELLE"),
         ("smoke-wasm", "ELLE_WASM"),
-    ] {
+        ("smoke-wasm-impl", "ELLE_WASM"),
+        ("smoke-wasm-full", "ELLE_WASM"),
+    ];
+    // The boot-image gate runs `elle` itself before its pass, to prove the
+    // image hydrates; boot_image_gate.rs checks that step.
+    let mut checked: BTreeSet<String> = targets.iter().map(|(t, _)| t.to_string()).collect();
+    checked.insert("smoke-boot-image".to_string());
+    assert_eq!(
+        checked,
+        suite_targets(),
+        "every suite target is checked here, and only those"
+    );
+    for (target, runner) in targets {
         let recipe = recipe(target);
         let elle = make_expand(runner);
         let runs_test: Vec<&str> = recipe

@@ -1,6 +1,6 @@
 # The variant binaries
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-15 -->
 
 Two packages that build the WASM and MLIR builds as binaries of their own, each beside the rig of the same build.
 
@@ -9,8 +9,9 @@ Two packages that build the WASM and MLIR builds as binaries of their own, each 
 and `elle-rig-mlir` from [mlir/Cargo.toml](mlir/Cargo.toml). Each binary lands
 in `target/release` or `target/debug`, beside `elle`, which stays the default
 build. A target that runs `elle` therefore runs the default build, whichever
-variant was built last. `smoke-wasm` and `smoke-mlir` run the suites on the
-variant's own binaries ([testing](../docs/testing.md)).
+variant was built last. The `smoke-wasm` and `smoke-mlir` targets, and the
+targets named after each, run the suites on the variant's own binaries
+([testing](../docs/testing.md)).
 
 ## Why a package of its own
 

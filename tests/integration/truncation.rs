@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-10-15
 // A run that did not finish reads as killed or as still running, never as green.
 //
 // docs/test-runner.md
@@ -9,7 +9,9 @@
 //
 // The trap: a live run and a killed run leave the same row, `finished_at` NULL.
 // Two batches sharing one session DB each warned that the other was killed, on
-// every batch, while both were healthy.
+// every batch, while both were healthy. Naming the live one instead still drew
+// a line per batch, so the next run now says nothing about a live predecessor,
+// and only `--summary` names it as running.
 
 use crate::common::query;
 use std::os::unix::process::ExitStatusExt;
@@ -243,10 +245,11 @@ fn a_run_in_flight_reads_as_running_until_it_is_killed() {
 }
 
 /// Two runs share a session DB whenever two batches or two worktrees run at
-/// once. The second one names the first as running, not as killed, and still
-/// gates on its own results.
+/// once. The second one says nothing about the first, and still gates on its
+/// own results. Every batch of a suite pass but the first starts beside a live
+/// sibling, so a line about each one was a line per batch in every CI log.
 #[test]
-fn the_next_run_names_a_live_predecessor_as_running() {
+fn the_next_run_says_nothing_about_a_live_predecessor() {
     let dir = crate::common::ScratchDir::new("truncation-sibling");
     let db = dir.join("s.db");
     let live = LiveRun::start(&dir, &db);
@@ -268,8 +271,8 @@ fn the_next_run_names_a_live_predecessor_as_running() {
         "a run beside a live sibling should gate green; stderr:\n{said}"
     );
     assert!(
-        said.contains("still running") && said.contains(&live.child.id().to_string()),
-        "the next run must say its predecessor is still running and name its pid, got:\n{said}"
+        !said.contains("still running") && !said.contains(&format!("pid {}", live.child.id())),
+        "the next run must say nothing about a live predecessor, got:\n{said}"
     );
     assert!(
         !said.contains("was killed") && !said.contains("DID NOT COMPLETE"),

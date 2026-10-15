@@ -1,6 +1,6 @@
-// audited: 2026-10-06
-// Each variant build's target: the binaries it builds, their features, and the
-// suite passes it runs on them.
+// audited: 2026-10-15
+// Each variant build's targets: the binaries they build, their features, and
+// the suite pass each runs on them.
 //
 // docs/testing.md
 // bins/overview.md
@@ -13,7 +13,7 @@
 
 use crate::common::{
     assert_plain_language_pass, assert_producer_pass, assert_rig_runs, impl_files,
-    isolated_impl_files, lang_files, make_dry_run, make_expand, passes, Pass,
+    isolated_impl_files, lang_files, make_dry_run, make_expand, the_pass,
 };
 use std::collections::BTreeSet;
 
@@ -34,30 +34,28 @@ fn wasm_skipped(path: &str) -> bool {
 // it nowhere.
 #[test]
 fn smoke_wasm_runs_the_language_suite_in_process_on_elle_wasm() {
-    let passes = passes("smoke-wasm", &[]);
-    let plain: Vec<&Pass> = passes.iter().filter(|p| p.isolate().is_none()).collect();
-    assert_eq!(plain.len(), 1, "one wasm pass runs inside the runner");
-    assert_plain_language_pass("smoke-wasm", plain[0], "ELLE_WASM");
+    assert_plain_language_pass("smoke-wasm", &the_pass("smoke-wasm"), "ELLE_WASM");
 }
 
 // The wasm build's rig runs the implementation suite under each file's
 // sidecar, as every rig does; the tiered backend's files run there, because
 // each forces its closures onto the tier itself.
 //
-// The counter-factual: a `smoke-wasm` with no such pass leaves
+// The counter-factual: a wasm build with no such pass leaves
 // tests/impl/wasm-tier.lisp on no wasm build at all, since the
 // full-module pass skips it.
 #[test]
-fn smoke_wasm_runs_the_implementation_suite_on_the_wasm_rig() {
-    let passes = passes("smoke-wasm", &[]);
-    let base: Vec<&Pass> = passes
-        .iter()
-        .filter(|p| p.host().is_some() && p.isolate() == Some(""))
-        .collect();
-    assert_eq!(base.len(), 1, "one wasm rig pass reads each file's sidecar");
-    assert_eq!(base[0].host(), Some(make_expand("ELLE_RIG_WASM").as_str()));
+fn smoke_wasm_impl_runs_the_implementation_suite_on_the_wasm_rig() {
+    let pass = the_pass("smoke-wasm-impl");
     assert_eq!(
-        base[0].files,
+        pass.isolate(),
+        Some(""),
+        "each file's sidecar sets its mode"
+    );
+    assert_eq!(pass.host(), Some(make_expand("ELLE_RIG_WASM").as_str()));
+    assert_eq!(pass.runner(), make_expand("ELLE_WASM"));
+    assert_eq!(
+        pass.files,
         impl_files(),
         "the wasm rig's sidecar pass runs the whole implementation suite"
     );
@@ -68,19 +66,19 @@ fn smoke_wasm_runs_the_implementation_suite_on_the_wasm_rig() {
 // invariants only the full-module tier has to uphold (docs/impl/wasm.md,
 // src/wasm/mod.rs, src/wasm/tests/toplevel.rs).
 //
-// The counter-factual: a `smoke-wasm` that runs the language suite only inside
+// The counter-factual: a wasm build that runs the language suite only inside
 // the runner leaves tests/lang/posix.lisp off the full-module tier, where every
 // io-backend strands to the heap's teardown, and nothing reports it.
 #[test]
-fn smoke_wasm_runs_both_suites_under_the_wasm_full_profile() {
-    let passes = passes("smoke-wasm", &[]);
-    let full: Vec<&Pass> = passes
-        .iter()
-        .filter(|p| p.isolate() == Some(format!("--profile {WASM_FULL}").as_str()))
-        .collect();
-    assert_eq!(full.len(), 1, "one wasm rig pass compiles each file whole");
-    let pass = full[0];
+fn smoke_wasm_full_runs_both_suites_under_the_wasm_full_profile() {
+    let pass = the_pass("smoke-wasm-full");
+    assert_eq!(
+        pass.isolate(),
+        Some(format!("--profile {WASM_FULL}").as_str()),
+        "the pass compiles each file whole"
+    );
     assert_eq!(pass.host(), Some(make_expand("ELLE_RIG_WASM").as_str()));
+    assert_eq!(pass.runner(), make_expand("ELLE_WASM"));
     let want: BTreeSet<String> = lang_files()
         .union(&impl_files())
         .filter(|path| !wasm_skipped(path))
@@ -109,42 +107,67 @@ fn smoke_wasm_runs_both_suites_under_the_wasm_full_profile() {
 // tier, tests the default build twice and the variant never.
 #[test]
 fn each_variant_runs_the_language_suite_on_its_own_build() {
-    for (target, build, runner) in [
-        ("smoke-nojit", "elle-nojit", "ELLE"),
-        ("smoke-mlir", "elle-mlir", "ELLE_MLIR"),
-        ("smoke-pool", "elle-pool", "ELLE"),
+    for (target, runner) in [
+        ("smoke-nojit", "ELLE"),
+        ("smoke-mlir", "ELLE_MLIR"),
+        ("smoke-pool", "ELLE"),
     ] {
-        let recipe = make_dry_run(target).expect("dry run");
-        assert!(
-            recipe.contains(&build_line(build)),
-            "`make {target}` does not build {build} before its passes"
-        );
-        let passes = passes(target, &[]);
-        assert_plain_language_pass(target, &passes[0], runner);
+        assert_plain_language_pass(target, &the_pass(target), runner);
+    }
+}
+
+// Each suite target of a variant builds that variant before its pass, so a
+// target run as a CI step of its own runs on the build its name promises. The
+// counter-factual: a `smoke-pool-impl` that leaned on `smoke-pool` having
+// built first runs on whatever build `target/` last held.
+#[test]
+fn each_variant_target_builds_its_variant_first() {
+    for (build, targets) in [
+        ("elle-nojit", &["smoke-nojit"][..]),
+        (
+            "elle-mlir",
+            &["smoke-mlir", "smoke-mlir-impl", "smoke-mlir-producers"][..],
+        ),
+        (
+            "elle-pool",
+            &["smoke-pool", "smoke-pool-impl", "smoke-pool-producers"][..],
+        ),
+        (
+            "elle-wasm",
+            &["smoke-wasm", "smoke-wasm-impl", "smoke-wasm-full"][..],
+        ),
+    ] {
+        for target in targets {
+            let recipe =
+                make_dry_run(target).unwrap_or_else(|| panic!("`make {target}` did not run"));
+            assert!(
+                recipe.contains(&build_line(build)),
+                "`make {target}` does not build {build} before its pass"
+            );
+        }
     }
 }
 
 // The MLIR build's rig is the one rig that carries the MLIR tier, so the
 // implementation suite's MLIR files run there and nowhere else. The
-// counter-factual: a `smoke-mlir` that runs the language suite alone runs
+// counter-factual: an MLIR build that runs the language suite alone runs
 // tests/impl/mlir.lisp on no build that carries the tier it tests.
 #[test]
-fn smoke_mlir_runs_the_implementation_suite_on_the_mlir_rig() {
-    let passes = passes("smoke-mlir", &[]);
-    let rig: Vec<&Pass> = passes.iter().filter(|p| p.isolate().is_some()).collect();
-    assert_eq!(rig.len(), 1, "one MLIR pass runs on the rig");
+fn smoke_mlir_impl_runs_the_implementation_suite_on_the_mlir_rig() {
+    let pass = the_pass("smoke-mlir-impl");
     assert_rig_runs(
-        rig[0],
+        &pass,
         "ELLE_RIG_MLIR",
         "the MLIR build's implementation suite",
     );
-    assert_eq!(rig[0].files, isolated_impl_files());
-    assert_producer_pass("smoke-mlir", &passes, "ELLE_RIG_MLIR");
+    assert_eq!(pass.files, isolated_impl_files());
     assert_eq!(
-        rig[0].isolate(),
+        pass.isolate(),
         Some(""),
         "each sidecar sets its file's mode"
     );
+    let all = [pass, the_pass("smoke-mlir-producers")];
+    assert_producer_pass("the MLIR build's rig targets", &all, "ELLE_RIG_MLIR");
 }
 
 // A variant's binaries land beside the default build's and never over them
@@ -189,9 +212,7 @@ fn a_variant_binary_lands_beside_elle_and_never_over_it() {
 // and if it is the default build the pass tests the default build twice.
 #[test]
 fn smoke_noffi_runs_the_language_suite_without_the_ffi_files() {
-    let passes = passes("smoke-noffi", &[]);
-    assert_eq!(passes.len(), 1);
-    let pass = &passes[0];
+    let pass = &the_pass("smoke-noffi");
     assert!(pass.files.is_subset(&lang_files()));
     let skipped = lang_files().len() - pass.files.len();
     assert!(
@@ -225,14 +246,13 @@ fn smoke_noffi_runs_the_language_suite_without_the_ffi_files() {
 // The thread-pool build's rig runs the implementation suite too: some of its
 // files count the pool's worker threads, which exist on no other build.
 #[test]
-fn smoke_pool_runs_the_implementation_suite_on_the_pool_rig() {
-    let passes = passes("smoke-pool", &[]);
-    let rig: Vec<&Pass> = passes.iter().filter(|p| p.isolate().is_some()).collect();
-    assert_eq!(rig.len(), 1, "one pool pass runs on the rig");
-    assert_rig_runs(rig[0], "ELLE_RIG", "the pool build's implementation suite");
-    assert_eq!(rig[0].files, isolated_impl_files());
-    assert_producer_pass("smoke-pool", &passes, "ELLE_RIG");
-    assert_eq!(rig[0].isolate(), Some(""));
+fn smoke_pool_impl_runs_the_implementation_suite_on_the_pool_rig() {
+    let pass = the_pass("smoke-pool-impl");
+    assert_rig_runs(&pass, "ELLE_RIG", "the pool build's implementation suite");
+    assert_eq!(pass.files, isolated_impl_files());
+    assert_eq!(pass.isolate(), Some(""));
+    let all = [pass, the_pass("smoke-pool-producers")];
+    assert_producer_pass("the pool build's rig targets", &all, "ELLE_RIG");
 }
 
 /// The `cargo build` line `make TARGET` runs.

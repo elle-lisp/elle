@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-15
 // A CI job that records runs publishes the store it recorded them in, so a red
 // job is read with a query rather than out of its log.
 //
@@ -15,116 +15,11 @@
 // is read out of the Makefile rather than written here, and a test below pins
 // the assumption that makes reading it sound.
 
-use crate::common::{job_steps, make_expand, runs_target, workflow_files, workflow_jobs};
-use std::collections::{BTreeMap, BTreeSet};
-
-fn makefile() -> String {
-    std::fs::read_to_string(crate::common::repo_root().join("Makefile")).expect("read the Makefile")
-}
-
-/// Every rule in the makefile, as name → (prerequisites, recipe).
-///
-/// A rule line starts at column zero and names its target before the colon. A
-/// target-specific variable assignment (`smoke-boot-image: FLAGS += …`) is a
-/// second rule line for the same target, so the two entries merge.
-fn rules(makefile: &str) -> BTreeMap<String, (String, String)> {
-    let mut out: BTreeMap<String, (String, String)> = BTreeMap::new();
-    let mut current: Option<String> = None;
-
-    for line in makefile.lines() {
-        if line.starts_with('\t') {
-            if let Some(name) = &current {
-                out.entry(name.clone()).or_default().1.push_str(line);
-            }
-            continue;
-        }
-        if line.trim().is_empty() || line.starts_with('#') || line.starts_with(' ') {
-            continue;
-        }
-        current = None;
-        let Some((head, deps)) = line.split_once(':') else {
-            continue;
-        };
-        // `NAME := value` and `NAME = value` are assignments, not rules.
-        if head.contains('=') || head.contains(' ') || head.is_empty() {
-            continue;
-        }
-        let deps = deps.trim_start_matches('=').split('#').next().unwrap_or("");
-        let entry = out.entry(head.to_string()).or_default();
-        entry.0.push(' ');
-        entry.0.push_str(deps);
-        current = Some(head.to_string());
-    }
-    out
-}
-
-/// The targets a recipe hands to a sub-make of this Makefile, with each
-/// `$(VAR)` word expanded by `make`. A `$(MAKE) -C DIR` line runs another
-/// Makefile, so its words name no target here.
-fn handed_targets(recipe: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    for part in recipe.split("$(MAKE)").skip(1) {
-        let words: Vec<&str> = part
-            .split('\t')
-            .next()
-            .unwrap_or("")
-            .split_whitespace()
-            .collect();
-        if words.contains(&"-C") {
-            continue;
-        }
-        for word in words {
-            if word.starts_with('-') || word.contains('=') {
-                continue;
-            }
-            match word.strip_prefix("$(").and_then(|w| w.strip_suffix(')')) {
-                Some(var) => out.extend(make_expand(var).split_whitespace().map(str::to_string)),
-                None => out.push(word.to_string()),
-            }
-        }
-    }
-    out
-}
-
-/// Every make target that records runs: the ones whose recipe drives the
-/// runner, and every target that reaches one through its prerequisites or
-/// through a sub-make its recipe starts.
-fn recording_targets(makefile: &str) -> BTreeSet<String> {
-    let rules = rules(makefile);
-    let mut found: BTreeSet<String> = rules
-        .iter()
-        .filter(|(_, (_, recipe))| recipe.contains("$(call RUN_SUITE"))
-        .map(|(name, _)| name.clone())
-        .collect();
-    assert!(
-        !found.is_empty(),
-        "no makefile recipe calls RUN_SUITE; the parse is broken, not the Makefile"
-    );
-
-    // A target that depends on a recording one, or hands one to a sub-make,
-    // records too, however deep the chain: `smoke` reaches the runner only
-    // through the `smoke-lang` and `smoke-impl` its recipe hands to `$(MAKE)`.
-    let reaches: BTreeMap<&String, Vec<String>> = rules
-        .iter()
-        .map(|(name, (deps, recipe))| {
-            let mut next: Vec<String> = deps.split_whitespace().map(str::to_string).collect();
-            next.extend(handed_targets(recipe));
-            (name, next)
-        })
-        .collect();
-    loop {
-        let grown: BTreeSet<String> = reaches
-            .iter()
-            .filter(|(_, next)| next.iter().any(|t| found.contains(t)))
-            .map(|(name, _)| (*name).clone())
-            .collect();
-        let before = found.len();
-        found.extend(grown);
-        if found.len() == before {
-            return found;
-        }
-    }
-}
+use crate::common::{
+    job_steps, makefile, makefile_rules, recording_targets, runs_target, workflow_files,
+    workflow_jobs,
+};
+use std::collections::BTreeMap;
 
 /// The step that uploads an artifact, if the job has one.
 fn upload_step(body: &str) -> Option<String> {
@@ -149,7 +44,7 @@ fn artifact_name(upload: &str) -> Option<String> {
 
 /// Every (workflow, job, body) that runs a target recording runs.
 fn recording_jobs() -> Vec<(String, String, String)> {
-    let targets = recording_targets(&makefile());
+    let targets = recording_targets();
     let mut out = Vec::new();
     for (path, text) in workflow_files() {
         for (name, body) in workflow_jobs(&text) {
@@ -161,10 +56,11 @@ fn recording_jobs() -> Vec<(String, String, String)> {
     out
 }
 
-/// The merge queue runs `make smoke`, which reaches the runner only through a
-/// sub-make. The counter-factual: a reading that follows prerequisites alone
-/// drops `smoke` once its recipe hands the passes to `$(MAKE)`, and the queue's
-/// upload goes unchecked with every test here still green.
+/// The merge queue runs `make smoke` as steps, one per pass, and its store is
+/// the one a reader wants when a queue run goes red. The counter-factual: a
+/// reading that took `make smoke` as the one recording target misses every
+/// pass the queue runs as a step of its own, and the queue's upload goes
+/// unchecked with every test here still green.
 #[test]
 fn the_merge_queue_smoke_job_records_runs() {
     let found = recording_jobs()
@@ -172,8 +68,8 @@ fn the_merge_queue_smoke_job_records_runs() {
         .any(|(path, name, _)| path.ends_with("/merge-queue.yml") && name == "tests");
     assert!(
         found,
-        "the merge queue's `tests` job runs `make smoke` and reads as recording \
-         no run"
+        "the merge queue's `tests` job runs the passes of `make smoke` and reads \
+         as recording no run"
     );
 }
 
@@ -274,7 +170,7 @@ fn only_run_suite_drives_the_runner() {
         "$(ELLE_RIG_MLIR) test",
         "$(ELLE_RIG_WASM) test",
     ];
-    let direct: Vec<String> = rules(&makefile)
+    let direct: Vec<String> = makefile_rules()
         .into_iter()
         .filter(|(_, (_, recipe))| runners.iter().any(|runner| recipe.contains(runner)))
         .map(|(name, _)| name)

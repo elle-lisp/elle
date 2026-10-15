@@ -1,15 +1,17 @@
-(elle/epoch 14)
-# audited: 2026-10-05
-## elle test — reading a run back: the tally, the problem list, the warning
-## about a predecessor that never finished, and raw SQL.
-## docs/test-store.md
+(elle/epoch 15)
+# audited: 2026-10-15
+## elle test — reading a run back: the run line, the tally, the problem list,
+## the warning about a predecessor that was killed, and raw SQL.
+## docs/testing.md
 ##
 ## A fragment of one module (see store.lisp).
 ##
 ## A run is otherwise silent (the gate is the exit code, the record is the DB).
 ## These render it: print-summary after every run, --summary for an existing
 ## DB, --query for arbitrary SQL. All read the session DB; none re-run
-## anything.
+## anything. A run that passed prints its run line and its tally alone: a
+## suite pass prints one summary per batch, and a line that reports nothing
+## wrong, repeated per batch, buries the lines that do.
 
 # One line per non-pass row: status, file:line, [tier], reason.
 (defn print-problems [conn run-id]
@@ -44,7 +46,7 @@
 # commit column answers to `sha` here.
 (defn run-meta [conn run-id]
   (get (sqlite:query conn
-                     "SELECT (finished_at IS NULL) AS trunc, n_selected AS sel, git_commit AS sha, git_dirty AS dirty, worktree AS worktree, host AS host, pid AS pid, build AS build FROM run WHERE id = ?1"
+                     "SELECT (finished_at IS NULL) AS trunc, n_selected AS sel, git_commit AS sha, git_dirty AS dirty, worktree AS worktree, host AS host, pid AS pid, build AS build, wall_ms AS wall FROM run WHERE id = ?1"
                      [run-id]) 0))
 
 # An unfinished row is a run still in flight when its process is still alive:
@@ -81,22 +83,27 @@
   (let [b (get meta :build)]
     (if b (string " · build " b) "")))
 
+# The run's wall time, from its insert to its completion, as seconds and
+# tenths. A run that never completed recorded none, and prints none rather than
+# a time that would read as a run that finished.
+(defn wall-note [meta]
+  (let [ms (get meta :wall)]
+    (if ms
+      (string " · " (/ ms 1000) "." (mod (/ ms 100) 10) " s")
+      "")))
+
 # One session DB serves every checkout on the box, so a warning about an
 # unfinished run has to say whose run it found.
 (defn worktree-note [meta]
   (let [w (get meta :worktree)]
     (if w (string " (worktree " w ")") "")))
 
-(defn running-note [meta]
-  (let [w (get meta :worktree)]
-    (string " (pid " (get meta :pid) (if w (string ", worktree " w) "") ")")))
-
-# ── the readings a run recorded (docs/test-store.md § Measurements) ──
-# A tally by verdict, then a line for each reading that is neither `ok` nor
-# unjudged. Those two are the expected answers — a reading within its bound,
-# and one with no row of the run's build yet — so listing them would bury the
-# readings a reader acts on under a few hundred that say nothing happened. The
-# rest is a query.
+# ── the readings a run recorded (docs/ratchet.md) ────────────────────
+# Printed only when a reading gates: a tally by verdict, then a line for each
+# reading that is neither `ok` nor unjudged. Those two are the expected
+# answers — a reading within its bound, and one with no row of the run's build
+# yet — so listing them, or a tally of them alone, would bury the readings a
+# reader acts on. The rest is a query.
 
 # The order the tally reads in: the expected answer first, then the gating
 # verdicts as the judge names them, then the readings nothing judged.
@@ -141,13 +148,12 @@
                       (get m :bound)))))))
 
 (defn print-measurements [conn run-id]
-  (let [tally (measurement-tally conn run-id)
-        total (get (get (sqlite:query conn
+  (let [total (get (get (sqlite:query conn
                                       "SELECT count(*) AS c FROM measurement WHERE run_id = ?1"
                                       [run-id]) 0) :c)]
-    (when (> total 0)
+    (when (> (count-gating-readings conn run-id) 0)
       (eprintln total " reading" (if (= total 1) "" "s") " · "
-                (render-tally tally))
+                (render-tally (measurement-tally conn run-id)))
       (each m in (sqlite:query conn
                                (string "SELECT f.file AS file, r.tier AS tier, "
                                        "m.subject AS subject, m.axis AS axis, "
@@ -169,77 +175,12 @@
                 " · no build, so none recorded or judged: run under elle-rig test")))
   nil)
 
-# ── what the run cost each heap (docs/test-gauges.md) ─────────────────
-# A leak per compiled file used to reach us as an OOM kill and a batch size,
-# with nothing naming the file. These lines are that number, one block per
-# heap: the run's totals, then the files that grew that heap most.
-
-# How many files each growers list names.
-(def gauge-top 5)
-
-# The gauge the lists are ranked by. A region is the unit the corpus leak was
-# measured in, and the one a per-file leak moves first.
-(def gauge-rank "regions")
-
-# The heaps a run records, in the order the summary prints them.
-(def gauge-heaps ["runner" "test"])
-
-# A row's heap. A store written before the heap column existed holds runner
-# rows alone, and they read NULL there.
-(def gauge-heap-sql "coalesce(heap, 'runner')")
-
-(defn signed [n]
-  "A delta with its sign always written, so a flat window reads as a
-   measurement taken rather than as one missing."
-  (if (< n 0) (string n) (string "+" n)))
-
-# One row per file of one heap, one `sum(CASE …)` column per gauge named for
-# that gauge. Built from the gauge list, so a gauge added there arrives here
-# already. The names are quoted because a gauge name carries hyphens.
-(defn gauge-growers-sql []
-  (string "SELECT file AS file, "
-          (string/join (map (fn [k]
-                              (string "sum(CASE WHEN kind = '" k
-                                      "' THEN delta END) AS \"" k "\""))
-                            (gauge-kinds)) ", ")
-          " FROM gauge WHERE run_id = ?1 AND " gauge-heap-sql
-          " = ?2 GROUP BY file ORDER BY \"" gauge-rank "\" DESC LIMIT "
-          gauge-top))
-
-# The run's total on one gauge of one heap, over every file it processed.
-(defn gauge-total [conn run-id heap kind]
-  (get (get (sqlite:query conn
-                          (string "SELECT coalesce(sum(delta), 0) AS d FROM gauge WHERE run_id = ?1 AND "
-                                  gauge-heap-sql " = ?2 AND kind = ?3")
-                          [run-id heap kind]) 0) :d))
-
-(defn render-gauge-totals [conn run-id heap]
-  (string/join (map (fn [k]
-                      (string k " " (signed (gauge-total conn run-id heap k))))
-                    (gauge-kinds)) " · "))
-
-# One grower's deltas, in gauge order. A gauge the pivot left NULL reads 0.
-(defn render-gauge-row [row]
-  (string/join (map (fn [k]
-                      (let [v (get row (keyword k))]
-                        (string k " " (signed (if (= v nil) 0 v)))))
-                    (gauge-kinds)) "  "))
-
-(defn print-gauges [conn run-id]
-  (each heap in gauge-heaps
-    (let [rows (sqlite:query conn (gauge-growers-sql) [run-id heap])]
-      (when (not (empty? rows))
-        (eprintln heap " heap · " (render-gauge-totals conn run-id heap))
-        (each r in rows
-          (eprintln "  " (render-gauge-row r) "  " (get r :file))))))
-  nil)
-
-# Tally line + the problem rows (only when there are any). Tallies are computed
-# live (count-status). A run without finished_at is either still running or was
-# KILLED mid-flight (OOM, signal — docs/test-runner.md), and is labelled as
-# whichever it is, because a partial all-pass result set must never read as
-# green. To stderr, so it never mingles with --query's stdout or a test's
-# captured output.
+# The run line, the tally line, then the problem rows and the gating readings
+# (only when there are any). Tallies are computed live (count-status). A run
+# without finished_at is either still running or was KILLED mid-flight (OOM,
+# signal — docs/test-runner.md), and is labelled as whichever it is, because a
+# partial all-pass result set must never read as green. To stderr, so it never
+# mingles with --query's stdout or a test's captured output.
 (defn print-summary [conn run-id]
   (let [meta (run-meta conn run-id)
         # The DB is a SESSION: it accumulates every run. Show which run this is of
@@ -267,7 +208,7 @@
                     " selected files; the tally below is partial, not green")))
       nil)
     (eprintln "elle test · run " run-id " of " nruns (commit-note meta)
-              (build-note meta))
+              (build-note meta) (wall-note meta))
     (eprintln np " pass · " ns " skip · " nf " fail · " nd " diverge · " nt
               " timeout")
     (if (> bad 0)
@@ -276,15 +217,14 @@
                   " (query the DB for full detail):")
         (print-problems conn run-id))
       nil)
-    (print-measurements conn run-id)
-    (print-gauges conn run-id)))
+    (print-measurements conn run-id)))
 
-# Gate honesty at startup: if this session DB's latest run never completed,
-# say so before starting a new one — the killed process could not report
-# anything itself, and its absence of failures must not read as green. Every
-# checkout on the box shares this DB, and two runs may share it at once, so a
-# row still being written by a live sibling gets one line naming it, not the
-# kill warning.
+# Gate honesty at startup: if this session DB's latest run was killed, say so
+# before starting a new one — the killed process could not report anything
+# itself, and its absence of failures must not read as green. Every batch of a
+# suite pass shares this DB, so every batch but the first starts beside a live
+# sibling; a live row draws no line, and `--summary` is what names it as
+# running (docs/test-runner.md).
 (defn warn-if-truncated [conn]
   (let [rows (sqlite:query conn
                            "SELECT id AS id FROM run WHERE finished_at IS NULL AND id = (SELECT max(id) FROM run)")]
@@ -292,13 +232,10 @@
       nil
       (let [rid (get (get rows 0) :id)
             meta (run-meta conn rid)]
-        (if (run-alive? meta)
-          (eprintln "note: the previous run in this session DB is still running"
-                    (running-note meta))
-          (begin
-            (eprintln "warning: the previous run in this session DB was killed"
-                      (worktree-note meta) ":")
-            (print-summary conn rid)))))))
+        (unless (run-alive? meta)
+          (eprintln "warning: the previous run in this session DB was killed"
+                    (worktree-note meta) ":")
+          (print-summary conn rid))))))
 
 # --query SQL: run it, print each row, exit. --summary: the latest run's tally.
 (defn run-query [conn sql]

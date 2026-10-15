@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-10-15
 // A run recorded in another store joins local history — once, with the code
 // state it ran against and the bytes its assets name.
 //
@@ -123,7 +123,7 @@ fn an_imported_run_joins_local_history() {
     // which is the whole reason the columns exist.
     let identity = "SELECT git_commit AS sha, worktree AS worktree, host AS host, \
                     argv AS argv, tiers AS tiers, n_selected AS sel, pid AS pid, \
-                    (finished_at IS NOT NULL) AS done FROM run";
+                    wall_ms AS wall, (finished_at IS NOT NULL) AS done FROM run";
     assert_eq!(
         query(&near, identity),
         query(&far, identity),

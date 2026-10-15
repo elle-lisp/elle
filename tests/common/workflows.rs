@@ -1,13 +1,13 @@
-// audited: 2026-10-04
+// audited: 2026-10-15
 //! The CI workflow files, the jobs in them, and the steps in a job.
 //!
 //! docs/analysis/ci.md
 //!
-//! `workflows.rs` asks what the pull-request gate waits for,
-//! `run_artifacts.rs` asks what each suite job leaves behind, and
-//! `toolchains.rs` asks what each job's toolchain carries. All three need the
-//! same reading — a workflow file split into jobs — and a second copy of it is a
-//! second answer to "what is a job".
+//! `workflows.rs` asks what the pull-request gate waits for, `ci_steps.rs`
+//! what each step runs, `run_artifacts.rs` what each suite job leaves behind,
+//! and `toolchains.rs` what each job's toolchain carries. All four need the
+//! same reading — a workflow file split into jobs — and a second copy of it is
+//! a second answer to "what is a job".
 
 use super::repo_root;
 
@@ -104,6 +104,18 @@ pub fn job_steps(body: &str) -> Vec<String> {
         }
     }
     out
+}
+
+/// The lines of a job's body that run something: every line but a step's
+/// `name:`, which spells the command it labels.
+#[allow(dead_code)]
+pub fn step_lines(body: &str) -> Vec<&str> {
+    body.lines()
+        .filter(|line| {
+            let line = line.trim_start().trim_start_matches("- ");
+            !line.starts_with("name:")
+        })
+        .collect()
 }
 
 /// Does this job run `make TARGET`? The name has to end where the match does:

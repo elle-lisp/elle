@@ -1,6 +1,6 @@
 # The ratchet
 
-<!-- audited: 2026-10-13 -->
+<!-- audited: 2026-10-15 -->
 
 One library measures, one committed ledger holds every bound, and the runner
 judges, records and re-pins; nothing else carries a number.
@@ -237,7 +237,10 @@ failed to report, and its rows are left alone. A run with a selection can only
 hold the producers it ran, so the full gate is a `selection IS NULL` run, as
 it is for every other verdict.
 
-The summary counts readings by verdict and lists every one that is not `ok`:
+A run whose readings all pass prints nothing about them: a tally that says
+nothing gated, printed by every batch of a pass, buries the lines that do gate.
+When a reading gates, the summary counts readings by verdict and lists every
+one that is not `ok`:
 
 ```text
 412 readings · 409 ok · 1 regression · 1 stale · 1 missing

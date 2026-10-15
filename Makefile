@@ -1,6 +1,8 @@
 .PHONY: all elle elle-rig docs docgen smoke test qa crosscheck clean space help \
-       smoke-lang smoke-impl smoke-boot-image smoke-nojit smoke-pool smoke-mlir \
-       smoke-noffi smoke-wasm \
+       smoke-lang smoke-impl smoke-eager smoke-producers smoke-charge smoke-scrub \
+       smoke-boot-image smoke-nojit smoke-pool smoke-pool-impl smoke-pool-producers \
+       smoke-mlir smoke-mlir-impl smoke-mlir-producers smoke-noffi \
+       smoke-wasm smoke-wasm-impl smoke-wasm-full \
        elle-nojit elle-pool elle-mlir elle-noffi elle-wasm check-wasm \
        doctest doctest-list myplugin plugins plugins-all \
        plugins-verify smoke-plugins mcp embedding semver-check \
@@ -224,16 +226,15 @@ SIDECAR_FREE_IMPL := $(foreach f,$(IMPL_FILES),$(if $(wildcard $(f:.lisp=.toml))
 CHARGE_FILES      := $(filter-out $(PRODUCER_FILES) $(CHARGE_SKIP),$(LANG_FILES) $(SIDECAR_FREE_IMPL))
 
 # The runner's own acceptance tests drive `elle test` themselves and read the
-# store the pass records into, so they ride the implementation suite's first
-# pass.
+# store the pass records into, so they ride the implementation suite's pass.
 RUNNER_ACCEPTANCE := tests/runner/tiers.lisp tests/runner/acceptance.lisp
 
 # The rig profiles (rig/overview.md). The eager profile runs both suites with
-# every function compiled on its first call. `IMPL_PROFILES` names more profiles
-# for the language suite: the macOS job sets it to tests/impl/profiles/scrub.toml.
+# every function compiled on its first call, and the scrub profile runs the
+# language suite with each released page zeroed; the macOS job runs that one.
 EAGER_PROFILE     := tests/impl/profiles/jit-eager.toml
+SCRUB_PROFILE     := tests/impl/profiles/scrub.toml
 WASM_FULL_PROFILE := tests/impl/profiles/wasm-full.toml
-IMPL_PROFILES     ?=
 
 # The build with no features cannot compile a file that calls an `ffi/`
 # primitive: some fail at run time with "requires `ffi` feature", and others
@@ -311,7 +312,9 @@ endif
 DEAL_CORPUS := LC_ALL=C awk 'BEGIN { for (i = 0; i < 256; i++) ord[sprintf("%c", i)] = i } { h = 5381; for (i = 1; i <= length($$0); i++) h = (h * 33 + ord[substr($$0, i, 1)]) % 1000003; printf "%07d\t%s\n", h, $$0 }' | LC_ALL=C sort | cut -f2-
 
 # One suite pass: the files, dealt into batches, `$(JOBS)` runner processes side
-# by side. A language pass runs its files inside the runner
+# by side. A suite target calls this once, so a CI step that runs the target
+# times one pass and its log holds one pass's batch summaries
+# (docs/analysis/ci.md). A language pass runs its files inside the runner
 # (docs/test-runner.md). A pass whose runner flags carry `--isolate FLAGS` runs
 # each file as its own child — the runner itself, as `RUNNER FLAGS PATH`, or
 # `PROGRAM FLAGS PATH` under `--host` — so it starts, runs as a whole program
@@ -345,28 +348,33 @@ define RUN_SUITE
 	@printf '%s\n' $(1) | $(DEAL_CORPUS) | xargs -P $(JOBS) -n $(CORPUS_BATCH) $(SUITE_ELLE) test $(2) $(WIDE_FLAGS) || { echo "FAILED: elle test — a batch failed or was killed; query the session DB (docs/testing.md)"; exit 1; }
 endef
 
-# The language suite under one rig profile. The blank line before `endef` ends
-# each expansion's line, so a `foreach` over profiles makes one pass each.
-define RUN_LANG_PROFILE
-	@echo "=== the language suite, under $(1) ==="
-	$(call RUN_SUITE,$(LANG_FILES),--isolate '--profile $(1)',$(ELLE_RIG))
-
-endef
-
 smoke-lang: elle  ## The language suite on this build
 	@echo "=== the language suite ==="
 	$(call RUN_SUITE,$(LANG_FILES),)
 
-smoke-impl: elle elle-rig  ## The implementation suite on the rig, the producers, each file's charge, then both suites under each rig profile
+# The default build's rig runs five passes, each a target of its own: the
+# implementation suite under each file's sidecar, both suites under the eager
+# profile, the producers in-process, each file's charge, and on macOS the
+# language suite under the scrub profile.
+smoke-impl: elle elle-rig  ## The implementation suite and the runner's acceptance tests on the rig
 	@echo "=== the implementation suite, on the rig ==="
 	$(call RUN_SUITE,$(ISOLATED_IMPL_FILES) $(RUNNER_ACCEPTANCE),--isolate '',$(ELLE_RIG))
+
+smoke-eager: elle elle-rig  ## Both suites on the rig, every function compiled on its first call
 	@echo "=== both suites, every function compiled on its first call ==="
 	$(call RUN_SUITE,$(LANG_FILES) $(ISOLATED_IMPL_FILES),--isolate '--profile $(EAGER_PROFILE)',$(ELLE_RIG))
+
+smoke-producers: elle elle-rig  ## The files a ledger names, in-process on the rig
 	@echo "=== the producers, in-process on the rig ==="
 	$(call RUN_SUITE,$(PRODUCER_FILES),,$(ELLE_RIG))
+
+smoke-charge: elle elle-rig  ## Each file's charge on the runner's heap, in-process on the rig
 	@echo "=== each file's charge on the runner's heap, in-process on the rig ==="
 	$(call RUN_SUITE,$(CHARGE_FILES),--charge,$(ELLE_RIG))
-	$(foreach profile,$(IMPL_PROFILES),$(call RUN_LANG_PROFILE,$(profile)))
+
+smoke-scrub: elle elle-rig  ## The language suite on the rig, each released page scrubbed
+	@echo "=== the language suite, each released page scrubbed ==="
+	$(call RUN_SUITE,$(LANG_FILES),--isolate '--profile $(SCRUB_PROFILE)',$(ELLE_RIG))
 
 # The language suite booted from an image instead of from core.lisp,
 # prelude.lisp and stdlib.lisp — dump-boot's gate (docs/impl/image/boot.md).
@@ -438,11 +446,15 @@ elle-pool:  ## Build elle and its rig without io_uring (for smoke-pool)
 	@echo "=== build elle and its rig without io_uring ==="
 	cargo build $(CARGO_PROFILE) -p elle -p elle-rig --no-default-features --features jit,ffi -q
 
-smoke-pool: elle-pool  ## Both suites on the thread-pool I/O backend (what every non-Linux build runs)
+smoke-pool: elle-pool  ## The language suite on the thread-pool I/O backend (what every non-Linux build runs)
 	@echo "=== the language suite, thread-pool I/O ==="
 	$(call RUN_SUITE,$(LANG_FILES),)
+
+smoke-pool-impl: elle-pool  ## The implementation suite on the thread-pool build's rig
 	@echo "=== the implementation suite, on the thread-pool build's rig ==="
 	$(call RUN_SUITE,$(ISOLATED_IMPL_FILES),--isolate '',$(ELLE_RIG))
+
+smoke-pool-producers: elle-pool  ## The producers, in-process on the thread-pool build's rig
 	@echo "=== the producers, in-process on the thread-pool build's rig ==="
 	$(call RUN_SUITE,$(PRODUCER_FILES),,$(ELLE_RIG))
 
@@ -452,12 +464,16 @@ elle-mlir:  ## Build elle-mlir and elle-rig-mlir, the MLIR build (for smoke-mlir
 
 # The MLIR build's rig is the one rig that carries the MLIR tier, so the
 # implementation suite's MLIR files run there.
-smoke-mlir: SUITE_ELLE = $(or $(3),$(ELLE_MLIR))
-smoke-mlir: elle-mlir  ## Both suites on the MLIR build
+smoke-mlir smoke-mlir-impl smoke-mlir-producers: SUITE_ELLE = $(or $(3),$(ELLE_MLIR))
+smoke-mlir: elle-mlir  ## The language suite on the MLIR build
 	@echo "=== the language suite, MLIR build ==="
 	$(call RUN_SUITE,$(LANG_FILES),)
+
+smoke-mlir-impl: elle-mlir  ## The implementation suite on the MLIR build's rig
 	@echo "=== the implementation suite, on the MLIR build's rig ==="
 	$(call RUN_SUITE,$(ISOLATED_IMPL_FILES),--isolate '',$(ELLE_RIG_MLIR))
+
+smoke-mlir-producers: elle-mlir  ## The producers, in-process on the MLIR build's rig
 	@echo "=== the producers, in-process on the MLIR build's rig ==="
 	$(call RUN_SUITE,$(PRODUCER_FILES),,$(ELLE_RIG_MLIR))
 
@@ -481,7 +497,8 @@ elle-wasm:  ## Build elle-wasm and elle-rig-wasm, the WASM build (for check-wasm
 # workloads: the feature still compiles, and the full-module tier still boots —
 # compiles a module to wasm, executes it, returns. The `[wasm]` marker is the
 # proof the tier engaged: a binary that ran the VM instead would green a build
-# gate that gated nothing. Suite coverage on this tier is smoke-wasm.
+# gate that gated nothing. Suite coverage on this tier is smoke-wasm and the two
+# targets named after it.
 check-wasm: elle-wasm  ## Build the WASM backend and boot one module through it
 	@echo "=== wasm boot check ==="
 	@out=$$(timeout 300s $(ELLE_WASM) --wasm=full tests/lang/arithmetic.lisp 2>&1); code=$$?; \
@@ -490,18 +507,22 @@ check-wasm: elle-wasm  ## Build the WASM backend and boot one module through it
 	printf '%s\n' "$$out" | grep -q '\[wasm\]' \
 		|| { echo "FAILED: wasm boot ran without engaging the wasm tier"; exit 1; }
 
-# Both suites on the wasm build (docs/impl/wasm.md). The language suite runs
-# inside the runner of `elle-wasm`, as on every build. The implementation suite
-# runs on the build's rig under each file's sidecar, where the tiered backend's
-# files run. Both suites then run on the rig with each file compiled whole to
-# one module.
-smoke-wasm: JOBS = $(WASM_JOBS)
-smoke-wasm: SUITE_ELLE = $(or $(3),$(ELLE_WASM))
-smoke-wasm: elle-wasm  ## Both suites on the WASM build
+# Both suites on the wasm build (docs/impl/wasm.md). `smoke-wasm` runs the
+# language suite inside the runner of `elle-wasm`, as on every build.
+# `smoke-wasm-impl` runs the implementation suite on the build's rig under each
+# file's sidecar, where the tiered backend's files run. `smoke-wasm-full` runs
+# both suites on the rig with each file compiled whole to one module.
+smoke-wasm smoke-wasm-impl smoke-wasm-full: JOBS = $(WASM_JOBS)
+smoke-wasm smoke-wasm-impl smoke-wasm-full: SUITE_ELLE = $(or $(3),$(ELLE_WASM))
+smoke-wasm: elle-wasm  ## The language suite on the WASM build
 	@echo "=== the language suite, WASM build ==="
 	$(call RUN_SUITE,$(LANG_FILES),)
+
+smoke-wasm-impl: elle-wasm  ## The implementation suite on the WASM build's rig
 	@echo "=== the implementation suite, on the WASM build's rig ==="
 	$(call RUN_SUITE,$(IMPL_FILES),--host $(ELLE_RIG_WASM) --isolate '')
+
+smoke-wasm-full: elle-wasm  ## Both suites on the WASM build's rig, each file compiled whole to one module
 	@echo "=== both suites, each file compiled whole to one module ==="
 	$(call RUN_SUITE,$(WASM_FULL_FILES),--host $(ELLE_RIG_WASM) --isolate '--profile $(WASM_FULL_PROFILE)')
 
@@ -580,7 +601,8 @@ embedding: elle  ## Build + run embedding demos (Rust + C hosts)
 # `-j` says; as prerequisites beside `qa`, `make -j` would start them together.
 # A platform's Smoke job runs each pass as a step of its own, and no `qa`
 # (docs/analysis/ci.md).
-SMOKE_PASSES := smoke-lang smoke-impl doctest embedding semver-check
+SMOKE_PASSES := smoke-lang smoke-impl smoke-eager smoke-producers smoke-charge \
+                doctest embedding semver-check
 
 smoke: qa  ## qa, then both suites, the doctests, the embedding demo and the surface gate
 	@$(MAKE) --no-print-directory $(SMOKE_PASSES)

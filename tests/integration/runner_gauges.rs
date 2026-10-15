@@ -1,4 +1,4 @@
-// audited: 2026-10-03
+// audited: 2026-10-15
 // The runner reads every heap gauge on its own heap and on its test code's heaps, per file.
 //
 // docs/test-gauges.md
@@ -317,41 +317,44 @@ fn a_file_that_fails_to_compile_records_no_test_heap_rows() {
     );
 }
 
-/// The run says what each file cost each heap, and names the files that cost
-/// the most.
+/// The gauges stay in the store, and no summary prints them. A suite pass
+/// prints one summary per batch, so a block per heap on every batch buried the
+/// lines that report a problem (docs/testing.md).
+///
+/// The counter-factual: every summary ended with a `runner heap` and a `test
+/// heap` block, each naming every gauge and the files that grew it most.
 #[test]
-fn the_summary_names_the_files_that_grew_each_heap() {
+fn no_summary_prints_a_gauge_and_the_store_still_holds_them() {
     let (stderr, db, _dir) = run_corpus("gauge-summary");
 
-    for block in ["runner heap", "test heap"] {
-        assert!(
-            stderr.contains(block),
-            "a run must report a {block} block, got:\n{stderr}"
-        );
-    }
-    for kind in KINDS {
-        assert!(
-            stderr.contains(&format!(" {kind} ")),
-            "the heap blocks must name the {kind} gauge, got:\n{stderr}"
-        );
-    }
-    for name in FIXTURES {
-        assert!(
-            stderr.contains(name),
-            "the growers list must name {name}, got:\n{stderr}"
-        );
-    }
-
-    // --summary reads the same blocks back out of the DB, with nothing re-run.
     let s = Command::new(elle_binary())
         .args(["test", "--summary"])
         .arg("--db")
         .arg(&db)
         .output()
         .expect("summary");
-    let s_err = String::from_utf8_lossy(&s.stderr);
-    assert!(
-        s_err.contains("runner heap") && s_err.contains("test heap") && s_err.contains(FIXTURES[0]),
-        "--summary must render the growers of the run it reads, got:\n{s_err}"
-    );
+    let again = String::from_utf8_lossy(&s.stderr).into_owned();
+    for (what, said) in [("the run", &stderr), ("--summary", &again)] {
+        for block in ["runner heap", "test heap"] {
+            assert!(
+                !said.contains(block),
+                "{what} prints a {block} block, got:\n{said}"
+            );
+        }
+        for kind in KINDS {
+            assert!(
+                !said.contains(&format!(" {kind} ")),
+                "{what} prints the {kind} gauge, got:\n{said}"
+            );
+        }
+    }
+
+    for heap in ["runner", "test"] {
+        let rows = rows_per_kind(&db, heap);
+        assert_eq!(
+            rows.matches(&format!(":n {}", FIXTURES.len())).count(),
+            KINDS.len(),
+            "the store holds one {heap}-heap row per gauge and file, got:\n{rows}"
+        );
+    }
 }

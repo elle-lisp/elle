@@ -1,6 +1,6 @@
 # The rig
 
-<!-- audited: 2026-10-04 -->
+<!-- audited: 2026-10-15 -->
 
 `elle-rig` hosts the same compiler and runtime as `elle`, and configures them
 in ways a user build cannot.
@@ -114,8 +114,8 @@ same rules. The implementation suite uses three, under
 
 - [jit-eager.toml](../tests/impl/profiles/jit-eager.toml) runs both suites with every
   function compiled on its first call.
-- [scrub.toml](../tests/impl/profiles/scrub.toml), on macOS, runs the language suite
-  with each released page zeroed.
+- [scrub.toml](../tests/impl/profiles/scrub.toml) runs the language suite
+  with each released page zeroed. The macOS job runs it.
 - [wasm-full.toml](../tests/impl/profiles/wasm-full.toml) runs both suites on
   the rig of a `wasm` build, with each file compiled whole to one
   WebAssembly module ([wasm](../docs/impl/wasm.md)).
@@ -128,12 +128,16 @@ keywords join the sidecar's.
 `elle-rig test --isolate FLAGS` runs each file as its own child, and the child
 is `(elle/executable)`: this rig, run as `elle-rig FLAGS PATH`
 ([test-runner](../docs/test-runner.md)). So every verdict lands in the session
-store, and the run has the rig's build. The `Makefile` target `smoke-impl` runs
-the implementation suite that way, then one pass per profile; `smoke-pool` and
-`smoke-mlir` do the same on the rig of their own build. The target `smoke-wasm`
-runs the implementation suite as `elle-wasm test --host elle-rig-wasm`, under
-each file's sidecar, and then runs both suites there under `wasm-full.toml`,
-less the files `WASM_SKIP` names. A run with `--host` has no build.
+store, and the run has the rig's build. The `Makefile` target `smoke-impl`
+runs the implementation suite that way, and `smoke-eager` and `smoke-scrub`
+run under their profiles. `smoke-producers` and `smoke-charge` run their files
+in-process under `elle-rig test`. The thread-pool and MLIR builds repeat
+`smoke-impl` and `smoke-producers` on the rig of their own build, as
+`smoke-pool-impl`, `smoke-pool-producers`, `smoke-mlir-impl` and
+`smoke-mlir-producers`. `smoke-wasm-impl` runs it
+as `elle-wasm test --host elle-rig-wasm`, under each file's sidecar, and
+`smoke-wasm-full` runs both suites there under `wasm-full.toml`, less the files
+`WASM_SKIP` names. A run with `--host` has no build.
 
 ## Building it
 

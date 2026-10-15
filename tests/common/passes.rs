@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-15
 //! The `elle test` passes a suite target runs, read off `make --dry-run`.
 //!
 //! docs/testing.md
@@ -74,6 +74,29 @@ pub fn passes(target: &str, vars: &[&str]) -> Vec<Pass> {
         "`make {target}` runs no suite pass:\n{recipe}"
     );
     passes
+}
+
+/// The one pass `make TARGET` runs. A suite target is one pass, so a CI step
+/// that runs it times one pass (docs/analysis/ci.md).
+#[allow(dead_code)]
+pub fn the_pass(target: &str) -> Pass {
+    let mut all = passes(target, &[]);
+    assert_eq!(
+        all.len(),
+        1,
+        "`make {target}` runs {} passes, and a suite target is one",
+        all.len()
+    );
+    all.remove(0)
+}
+
+/// The passes `make smoke` runs after `qa`, as `SMOKE_PASSES` names them.
+#[allow(dead_code)]
+pub fn smoke_passes() -> Vec<String> {
+    make_expand("SMOKE_PASSES")
+        .split_whitespace()
+        .map(str::to_string)
+        .collect()
 }
 
 /// Every file of the language suite.
