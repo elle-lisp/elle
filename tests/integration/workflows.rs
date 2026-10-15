@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-15
 // What `.github/workflows/pr.yml` claims to gate must be what it gates, and
 // what each job builds must let its own checks run.
 //
@@ -17,7 +17,7 @@
 // The argument for the shape the second test pins — one Smoke job and one Rust
 // Tests job per platform, never both in one — is in docs/analysis/ci.md.
 
-use crate::common::{runs_target, workflow_jobs as jobs};
+use crate::common::{runs_target, step_lines, workflow_jobs as jobs};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
@@ -379,78 +379,16 @@ fn the_macos_smoke_job_runs_the_scrub_profile() {
         .into_iter()
         .find(|(_, body)| body.contains("runs-on: macos") && runs_target(body, "smoke-impl"))
         .expect("no macOS job runs `make smoke-impl`");
-    let profile = "tests/impl/profiles/scrub.toml";
     assert!(
-        crate::common::repo_root().join(profile).exists(),
-        "{profile} is gone"
-    );
-    let line = steps(&body)
-        .into_iter()
-        .find(|line| runs_target(line, "smoke-impl"))
-        .unwrap_or_default();
-    assert!(
-        line.contains(&format!("IMPL_PROFILES={profile}")),
-        "job `{name}` runs `make smoke-impl` without the scrub profile:\n  {}",
-        line.trim()
+        step_lines(&body)
+            .iter()
+            .any(|line| runs_target(line, "smoke-scrub")),
+        "job `{name}` never runs `make smoke-scrub`"
     );
     assert!(
         body.contains("CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS"),
         "job `{name}` scrubs pages in a build that cannot panic on reading one"
     );
-}
-
-/// The lines of a job's body that run something: every line but a step's
-/// `name:`, which spells the command it labels.
-fn steps(body: &str) -> Vec<&str> {
-    body.lines()
-        .filter(|line| {
-            let line = line.trim_start().trim_start_matches("- ");
-            !line.starts_with("name:")
-        })
-        .collect()
-}
-
-/// The passes `make smoke` runs after `qa`, as `SMOKE_PASSES` names them.
-fn smoke_passes() -> Vec<String> {
-    crate::common::make_expand("SMOKE_PASSES")
-        .split_whitespace()
-        .map(str::to_string)
-        .collect()
-}
-
-// A Smoke job runs each pass of `make smoke` as a step of its own, and each
-// once (docs/analysis/ci.md). The counter-factual: a `make doctest` step, then
-// a `make smoke` step, runs the doctests twice, and a red `make smoke` step
-// names no pass. A Smoke job runs no `make qa`, which is not a pass: the QA
-// job is the QA gate.
-#[test]
-fn each_platform_smoke_job_runs_every_pass_of_make_smoke_once() {
-    let text = workflow_text();
-    let passes = smoke_passes();
-    assert!(
-        passes.len() > 2,
-        "`make smoke` names {passes:?}; the parse is broken, not the Makefile"
-    );
-    for job in ["aarch64", "macos"] {
-        let body = jobs(&text)
-            .into_iter()
-            .find(|(name, _)| name == job)
-            .map(|(_, body)| body)
-            .unwrap_or_else(|| panic!("{} defines no `{job}` job", workflow_path().display()));
-        let steps = steps(&body);
-        assert!(
-            !steps.iter().any(|line| runs_target(line, "smoke")),
-            "job `{job}` runs `make smoke` whole, so a red step names no pass"
-        );
-        assert!(
-            !passes.iter().any(|pass| pass == "qa"),
-            "`SMOKE_PASSES` names `qa`, so every Smoke job would run QA again"
-        );
-        for pass in &passes {
-            let n = steps.iter().filter(|line| runs_target(line, pass)).count();
-            assert_eq!(n, 1, "job `{job}` runs `make {pass}` {n} times");
-        }
-    }
 }
 
 // The MLIR job builds `elle-mlir` and never `elle` (bins/overview.md), so a

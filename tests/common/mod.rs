@@ -1,12 +1,13 @@
-// audited: 2026-10-06
+// audited: 2026-10-15
 //! Shared test helpers: the evals, the cached evals property tests use, and a scratch directory.
 //!
 //! tests/AGENTS.md
 //!
-//! Five children hold the readers the repository's own tests share: `repo`
-//! reads the Makefile and the two suites, `passes` the suite passes a target
-//! runs, `workflows` the CI workflow files, `documents` the list of documents
-//! `make doctest` runs, and `store` an `elle test` session store.
+//! Six children hold the readers the repository's own tests share: `repo`
+//! reads the Makefile and the two suites, `makefile` the Makefile's rules and
+//! the targets that record runs, `passes` the suite passes a target runs,
+//! `workflows` the CI workflow files, `documents` the list of documents `make
+//! doctest` runs, and `store` an `elle test` session store.
 //!
 //! Every eval drives a [`Runtime`] (`elle::runtime`), the one per-instance
 //! owner of the heap, `VM`, `SymbolTable`, and per-instance `CompileCtx`. There
@@ -20,11 +21,14 @@ use elle::runtime::{Runtime, RuntimeCore};
 use elle::{compile_file, eval_all, Value};
 
 pub mod documents;
+mod makefile;
 mod passes;
 mod repo;
 mod store;
 mod workflows;
 
+#[allow(unused_imports)]
+pub use makefile::*;
 #[allow(unused_imports)]
 pub use passes::*;
 #[allow(unused_imports)]

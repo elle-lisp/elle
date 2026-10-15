@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-15
 // Under `elle-rig test` a run has the rig's build, and each reading is judged against that build's rows.
 // docs/ratchet.md
 // docs/test-store.md
@@ -103,6 +103,58 @@ fn the_summary_names_the_build() {
         stderr(&again).contains(&want),
         "and so does --summary:\n{}",
         stderr(&again)
+    );
+}
+
+#[test]
+fn the_run_line_names_the_build_before_the_time() {
+    let b = Bench::new("build-time", &[own("[\"answer\" :count 42")], PRODUCER);
+    let out = b.run(&[]);
+    let err = stderr(&out);
+    let line = err
+        .lines()
+        .find(|line| line.starts_with("elle test · run "))
+        .unwrap_or_else(|| panic!("no run line in:\n{err}"));
+    let (head, time) = line
+        .rsplit_once(" · ")
+        .unwrap_or_else(|| panic!("the run line has no field after the run:\n{line}"));
+    assert!(
+        head.ends_with(&format!("· build {}", key())),
+        "the build comes last before the time:\n{line}"
+    );
+    let tenths = time
+        .strip_suffix(" s")
+        .and_then(|t| t.split_once('.'))
+        .is_some_and(|(whole, tenth)| {
+            !whole.is_empty()
+                && whole.chars().all(|c| c.is_ascii_digit())
+                && tenth.len() == 1
+                && tenth.chars().all(|c| c.is_ascii_digit())
+        });
+    assert!(tenths, "the run line ends with seconds and tenths:\n{line}");
+}
+
+#[test]
+fn a_run_whose_readings_all_pass_prints_none_of_them() {
+    // Every batch of a pass prints a summary, so a tally that says nothing
+    // gated, on every batch, buried the lines that do gate (docs/ratchet.md).
+    // The counter-factual: the run printed `2 readings · 2 ok`.
+    let b = Bench::new("quiet", &[own("[\"answer\" :count 42")], PRODUCER);
+    let out = b.run(&[]);
+    assert!(
+        out.status.success(),
+        "a reading at its pin gates green:\n{}",
+        stderr(&out)
+    );
+    assert!(
+        b.rows().contains(":verdict \"ok\""),
+        "precondition: the run judged a reading ok, got:\n{}",
+        b.rows()
+    );
+    let err = stderr(&out);
+    assert!(
+        !err.lines().any(|line| line.contains(" reading")),
+        "a run whose readings all pass prints no reading line:\n{err}"
     );
 }
 

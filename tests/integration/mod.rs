@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-15
 // Registers every integration test file, which is what makes one run.
 //
 // tests/AGENTS.md
@@ -225,6 +225,12 @@ mod bytecode_doc {
 }
 mod workflows {
     include!("workflows.rs");
+}
+mod ci_steps {
+    include!("ci_steps.rs");
+}
+mod runner_summary {
+    include!("runner_summary.rs");
 }
 mod qa_gate {
     include!("qa_gate.rs");

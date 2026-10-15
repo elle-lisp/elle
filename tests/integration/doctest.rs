@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-10-15
 // A literate document that `make doctest` runs must be able to reach the end of itself.
 //
 // docs/README.md
@@ -17,68 +17,12 @@
 // checks the other half: that the recipe lists every document, and that each
 // keeps its Elle where the reader runs it.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 
 use crate::common::documents::doctest_documents;
-use crate::common::repo_root;
-
-/// One Makefile rule: what it needs first, and what it runs.
-struct Rule {
-    prerequisites: Vec<String>,
-    recipe: Vec<String>,
-}
-
-/// Every rule in the Makefile, by target name.
-///
-/// A rule opens on an unindented line whose target ends at the first `:`, and
-/// its recipe is the tab-indented run that follows. Assignments (`:=`, `?=`,
-/// `+=`) and the unindented `define`/`endef` walls that separate the canned
-/// recipes therefore close a rule rather than extending one.
-fn makefile_rules() -> BTreeMap<String, Rule> {
-    let text = fs::read_to_string(repo_root().join("Makefile")).expect("read the Makefile");
-    let mut rules: BTreeMap<String, Rule> = BTreeMap::new();
-    let mut current: Option<String> = None;
-
-    for line in text.lines() {
-        if line.starts_with('\t') {
-            if let Some(target) = &current {
-                let rule = rules.get_mut(target).expect("the open rule is recorded");
-                rule.recipe.push(line.trim().to_string());
-            }
-            continue;
-        }
-        current = None;
-        let Some((head, tail)) = line.split_once(':') else {
-            continue;
-        };
-        if tail.starts_with('=') || head.ends_with(['?', '+', '!']) {
-            continue; // an assignment, not a rule
-        }
-        let target = head.trim();
-        if target.is_empty() || target.starts_with('.') || target.contains(char::is_whitespace) {
-            continue; // .PHONY, .DEFAULT_GOAL, and multi-target rules
-        }
-        // A trailing `## …` is the `make help` blurb, not a prerequisite.
-        let prerequisites = tail
-            .split("##")
-            .next()
-            .unwrap_or("")
-            .split_whitespace()
-            .map(str::to_string)
-            .collect();
-        rules.insert(
-            target.to_string(),
-            Rule {
-                prerequisites,
-                recipe: Vec::new(),
-            },
-        );
-        current = Some(target.to_string());
-    }
-    rules
-}
+use crate::common::{makefile_rules, repo_root};
 
 /// Every cargo package `make TARGET` builds, following prerequisites.
 ///
@@ -94,17 +38,15 @@ fn packages_built_by(target: &str) -> BTreeSet<String> {
         if !seen.insert(name.clone()) {
             continue;
         }
-        let Some(rule) = rules.get(&name) else {
+        let Some((prerequisites, recipe)) = rules.get(&name) else {
             continue;
         };
-        pending.extend(rule.prerequisites.iter().cloned());
-        for line in &rule.recipe {
-            let mut words = line.split_whitespace();
-            while let Some(word) = words.next() {
-                if word == "-p" {
-                    if let Some(package) = words.next() {
-                        packages.insert(package.to_string());
-                    }
+        pending.extend(prerequisites.split_whitespace().map(str::to_string));
+        let mut words = recipe.split_whitespace();
+        while let Some(word) = words.next() {
+            if word == "-p" {
+                if let Some(package) = words.next() {
+                    packages.insert(package.to_string());
                 }
             }
         }
