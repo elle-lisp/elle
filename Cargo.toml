@@ -84,6 +84,13 @@ uring = []
 [profile.dev.package."*"]
 opt-level = 3
 
+# The profile the Rust Tests jobs and `make test` build (docs/analysis/ci.md):
+# the dev profile, debug assertions and all, with the workspace optimized too.
+# Most of the Rust suite's time goes to the `elle` processes its tests start.
+[profile.ci]
+inherits = "dev"
+opt-level = 2
+
 [profile.release]
 lto = "fat"
 codegen-units = 1

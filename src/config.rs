@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-15
 //! Two configurations: `Config` is set once at startup and read anywhere,
 //! `RuntimeConfig` rides on one VM and a running program may change it.
 //!
@@ -10,21 +10,32 @@ use std::sync::{Arc, OnceLock};
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
-/// Default cache directory.
-///
-/// Resolution order:
-/// 1. `ELLE_CACHE` env var (empty string = no caching)
-/// 2. `$TMPDIR/elle-cache`
-/// 3. `$TMP/elle-cache`
-/// 4. No caching
+/// The cache directory a process takes when no `--cache=` names one
+/// (docs/config.md).
 fn default_cache_dir() -> Option<String> {
-    if let Ok(v) = std::env::var("ELLE_CACHE") {
+    cache_dir_from(|name| std::env::var(name).ok(), &std::env::temp_dir())
+}
+
+/// The default cache directory, reading variables through `var` and taking
+/// `temp` as the platform temp directory: `ELLE_CACHE`, then
+/// `$XDG_CACHE_HOME/elle`, then `$HOME/.cache/elle`, then `temp/elle-cache`.
+///
+/// `None` only for an empty `ELLE_CACHE`. Every other empty variable counts as
+/// unset, so a lookup always ends at a directory.
+fn cache_dir_from(var: impl Fn(&str) -> Option<String>, temp: &std::path::Path) -> Option<String> {
+    use std::path::Path;
+    if let Some(v) = var("ELLE_CACHE") {
         return if v.is_empty() { None } else { Some(v) };
     }
-    let base = std::env::var("TMPDIR")
-        .or_else(|_| std::env::var("TMP"))
-        .ok()?;
-    Some(format!("{}/elle-cache", base))
+    let set = |name| var(name).filter(|v| !v.is_empty());
+    let dir = if let Some(xdg) = set("XDG_CACHE_HOME") {
+        Path::new(&xdg).join("elle")
+    } else if let Some(home) = set("HOME") {
+        Path::new(&home).join(".cache").join("elle")
+    } else {
+        temp.join("elle-cache")
+    };
+    Some(dir.to_string_lossy().into_owned())
 }
 
 /// The defaults a read before [`init`] answers from. A separate cell, so
@@ -186,9 +197,9 @@ pub struct Config {
     /// Skip stdlib loading entirely (primitives only).
     pub no_stdlib: bool,
 
-    /// Disk cache directory (WASM compilation, future uses).
-    /// `None` = caching disabled (explicit `--cache=""`).
-    /// `Some(path)` = cache at that path.
+    /// The cache directory, beneath which the compiled stdlib, boot images and
+    /// compiled WASM modules live. `None` = caching disabled (`--cache=`, or an
+    /// empty `ELLE_CACHE`).
     pub cache: Option<String>,
 
     /// Where a boot image is read and stored (`--boot-image=`). `None` is the

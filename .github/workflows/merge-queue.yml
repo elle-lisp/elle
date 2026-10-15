@@ -17,7 +17,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PROPTEST_CASES: 1
-      RUST_TEST_THREADS: 2
       # The suites record every verdict in a session DB, with each result's
       # output in the CAS beside it. Naming the state directory here is what
       # lets the upload below name it too — the default sits under HOME, which

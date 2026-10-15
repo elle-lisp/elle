@@ -21,17 +21,17 @@ set when the diff moves only the submodule pointer.
 | Default Build Tests | ubuntu | `doctest`, then each suite pass of the default build and its rig, one step each | — |
 | No-JIT Build Tests | ubuntu | `smoke-nojit` — the language suite on the interpreter alone | — |
 | Boot Image Tests | ubuntu | `smoke-boot-image` — the language suite booted from an image | — |
-| Rust Tests | ubuntu | Integration tests, then property tests | 16 |
+| Rust Tests | ubuntu | Integration tests, the rig's tests, then property tests, under the `ci` profile | 16 |
 | Thread-Pool I/O Tests | ubuntu | `smoke-pool`, `smoke-pool-impl`, `smoke-pool-producers` — both suites on a build without `uring` and its rig | — |
 | MLIR Tests | ubuntu | `doctest`, `smoke-mlir`, `smoke-mlir-impl`, `smoke-mlir-producers` — the language suite on the MLIR build, the implementation suite on its rig | — |
 | WASM Build | ubuntu | `check-wasm` — the feature compiles, the tier boots | — |
 | Plugin Tests | ubuntu | Builds the `plugins/` submodule, asserts its artifacts, runs its corpus | — |
 | AArch64 Smoke | ubuntu-arm | Each pass of `make smoke`, one step each | — |
-| AArch64 Rust Tests | ubuntu-arm | Integration tests, then property tests | 8 |
+| AArch64 Rust Tests | ubuntu-arm | As Rust Tests | 8 |
 | AArch64 No-Features | ubuntu-arm | `smoke-noffi` — the language suite on a build with no features, under the default build's runner | — |
 | Android Cross-Check | ubuntu | `cargo check` for `aarch64-linux-android` | — |
 | macOS Smoke | macos | clippy, then each pass of `make smoke`, one step each, then `smoke-scrub` | — |
-| macOS Rust Tests | macos | Integration tests, then property tests | 8 |
+| macOS Rust Tests | macos | As Rust Tests | 8 |
 | All Checks Passed | ubuntu | The one status check branch protection requires | — |
 
 The merge queue ([merge-queue.yml](../../.github/workflows/merge-queue.yml))
@@ -92,7 +92,7 @@ every implementation keeps its job.
 
 The corpus and the Rust suite share no work. The corpus drives the release
 binary through `elle test`; the Rust suite
-builds separate test binaries under the dev profile. A job that runs both pays
+builds separate test binaries under the `ci` profile. A job that runs both pays
 the sum of two build trees and two run times, in series, and the pull request
 waits for whichever platform does that.
 
@@ -142,9 +142,17 @@ Every job that drives the Makefile builds `--release` and runs its binaries
 from `target/release`, on every platform: `elle` and `elle-rig`, or a variant's
 own ([bins](../../bins/overview.md)). The Makefile picks that under
 `ifdef GITHUB_ACTIONS`, which is set on all GitHub runners, so the macOS and
-AArch64 Smoke jobs are release runs exactly as the x86_64 ones are. The Rust
-Tests jobs build the dev profile, also on every platform, because `cargo test`
-does. No platform is quietly gated at a weaker optimization level.
+AArch64 Smoke jobs are release runs exactly as the x86_64 ones are. No platform
+is quietly gated at a weaker optimization level.
+
+The Rust Tests jobs build the `ci` profile on every platform, and `make test`
+builds it too. The profile is the dev profile with the workspace crates at
+`opt-level = 2`. Most of the Rust suite's time goes to the `elle` processes its
+tests start, and each one at `opt-level = 0` runs about ten times slower. With no
+stdlib cache, `integration::runner_cost` took 94 s under the dev profile and 12
+s under `ci`. The profile keeps debug assertions, so the region checks still
+run. Each test runtime and each process it starts caches its standard library
+under the runner's `HOME` ([config](../config.md)).
 
 Four jobs change the release profile they build. `Default Build Tests`, `Boot
 Image Tests`, `Thread-Pool I/O Tests` and `macOS Smoke` set
@@ -224,8 +232,12 @@ for a job that needs a different number.
 Outside CI the default stays the constant 16. A development box is not sized by
 the runner, and its owner can pass `JOBS=`.
 
+No workflow sets `RUST_TEST_THREADS`, for the same reason. The test harness
+then runs one test per processor the runner reports.
+
 [capacity.rs](../../tests/integration/capacity.rs) is the standing check that
-the CI count still tracks the runner.
+the CI count still tracks the runner, and that no workflow sets a test thread
+count.
 
 ### Corpus batch size
 
