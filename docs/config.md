@@ -1,6 +1,6 @@
 # Runtime Configuration (`vm/config`)
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-10-15 -->
 
 What a build decides, what the `elle` command line sets, and what a running
 program reads and changes through `vm/config`.
@@ -200,6 +200,30 @@ The default is off. User code under an image boot compiles without cross-unit
 inlining yet, so turning it on trades steady-state throughput for startup;
 [boot.md](impl/image/boot.md) owns the policy and names what the default waits
 on.
+
+### The cache directory
+
+```bash
+elle --cache=DIR script.lisp         # cache in DIR
+elle --cache= script.lisp            # read and write no cache
+```
+
+The cache directory holds what a later start can reuse instead of compiling
+again: the standard library ([stdlib-cache](impl/stdlib-cache.md)), a boot
+image, and compiled WebAssembly modules. With no flag, elle takes the first of
+these that names a directory:
+
+| Source | Directory |
+|--------|-----------|
+| `ELLE_CACHE` | `$ELLE_CACHE` |
+| `XDG_CACHE_HOME` | `$XDG_CACHE_HOME/elle` |
+| `HOME` | `$HOME/.cache/elle` |
+| none of them | `elle-cache` in the platform temp directory |
+
+Caching is off only when you ask for that: `--cache=` with no directory, or an
+empty `ELLE_CACHE`. Any other empty variable counts as unset. Neither `TMPDIR`
+nor `TMP` chooses the directory. Many Linux sessions set neither, and a cache
+that depends on them is off there, so every start compiles the standard library.
 
 ## Elle API
 

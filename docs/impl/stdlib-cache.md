@@ -1,11 +1,13 @@
 # Standard Library Disk Cache
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-15 -->
 
-[stdlib.lisp](../../src/stdlib.lisp) (~3200 lines) is recompiled on every
-process start. The `compile_file` front end (expand → analyze → regions → lower → freeze → emit)
-is what boot spends its time on; executing the compiled artifact costs a few
-milliseconds. The front end is **deterministic**: same source, same elle binary
+A start that finds the compiled standard library on disk deserializes it instead of compiling it again.
+
+Without the cache, every process start compiles
+[stdlib.lisp](../../src/stdlib.lisp) (~3200 lines). The `compile_file` front
+end (expand → analyze → regions → lower → freeze → emit) is what boot spends its
+time on; executing the compiled artifact costs a few milliseconds. The front end is **deterministic**: same source, same elle binary
 → same bytecode. This design turns that work into a one-time cost by serializing
 the compiled code unit to disk, so later processes deserialize instead of
 recompiling.
@@ -64,7 +66,7 @@ instance that wrote a cache from the instance that read it.
 
 | Variant | Directory |
 |---------|-----------|
-| `Process` (the default) | `stdlib-cache` beneath the `--cache=<dir>` directory; `--cache=` turns caching off for the process |
+| `Process` (the default) | `stdlib-cache` beneath the process's cache directory ([config](../config.md)); `--cache=` turns caching off for the process |
 | `Dir(path)` | `path`, whatever the process-wide choice is |
 | `Off` | none — always compile |
 
