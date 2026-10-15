@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! Type inference, the fold it drives, and the intrinsic operand proofs.
 //!
 //! The pass runs on functionalized HIR:
@@ -22,8 +22,8 @@
 
 use super::arena::BindingArena;
 use super::binding::Binding;
-use super::expr::{Hir, HirId, HirKind, IntrinsicOp};
-use super::types::{TyId, TypeInterner};
+use super::expr::{Hir, HirKind, IntrinsicOp};
+use super::types::{NodeTypes, TyId, TypeInterner};
 use crate::value::SymbolId;
 
 use std::collections::HashMap;
@@ -42,7 +42,7 @@ pub(crate) use prune::prune_typeof_match_arms;
 /// What type inference hands the LIR lowerer: the type of every node, with no
 /// Bottom left in the map.
 pub struct TypeInfo {
-    pub hir_types: HashMap<HirId, TyId>,
+    pub hir_types: NodeTypes,
 }
 
 /// Run type inference and the fold on functionalized HIR, then check the
@@ -215,7 +215,7 @@ fn intrinsic_return_type(
     op: IntrinsicOp,
     args: &[Hir],
     interner: &TypeInterner,
-    hir_types: &HashMap<HirId, TyId>,
+    hir_types: &NodeTypes,
 ) -> TyId {
     match op {
         // Arithmetic, the whole div family included: the join of the arg types

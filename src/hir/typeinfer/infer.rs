@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! The inference pass, and the one context that owns every map a pass reads and rewrites.
 //!
 //! - `fixpoint` — the ascent: passes over the whole tree until the environment
@@ -63,7 +63,7 @@ pub(super) struct Infer<'a> {
 
     // ── the environment: what a pass reads, and what it leaves behind ──
     binding_types: HashMap<Binding, TyId>,
-    pub(super) hir_types: HashMap<HirId, TyId>,
+    pub(super) hir_types: NodeTypes,
     /// Each lambda binding's body type, as the last pass computed it. Every
     /// call reads its result here, a self-recursive call included.
     lambda_body_type: HashMap<Binding, TyId>,
@@ -121,7 +121,7 @@ impl<'a> Infer<'a> {
             value_used,
             typeof_aliases,
             binding_types,
-            hir_types: HashMap::new(),
+            hir_types: NodeTypes::default(),
             lambda_body_type: HashMap::new(),
             binding_min_length: HashMap::new(),
             break_types: HashMap::new(),

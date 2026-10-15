@@ -72,7 +72,7 @@ pub(super) fn has_obligation(op: IntrinsicOp) -> bool {
 /// Walks in evaluation order, carrying the nonzero-divisor facts.
 pub(super) fn check_intrinsic_operand_proofs(
     hir: &Hir,
-    hir_types: &HashMap<HirId, TyId>,
+    hir_types: &NodeTypes,
     arena: &BindingArena,
 ) -> Result<(), String> {
     let interner = TypeInterner::new();

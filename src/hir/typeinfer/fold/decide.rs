@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! What a condition or a `(type-of x)` dispatch evaluates to, read off the inferred types.
 //!
 //! docs/impl/graft.md
@@ -8,11 +8,10 @@ use super::super::infer::unwrap_anf_let;
 use super::super::unwrap_callee_binding;
 use crate::hir::arena::BindingArena;
 use crate::hir::binding::Binding;
-use crate::hir::expr::{Hir, HirId, HirKind, IntrinsicOp};
+use crate::hir::expr::{Hir, HirKind, IntrinsicOp};
 use crate::hir::pattern::{HirPattern, PatternLiteral};
-use crate::hir::types::{TyId, TypeInterner};
+use crate::hir::types::{NodeTypes, TyId, TypeInterner};
 use crate::value::SymbolId;
-use std::collections::HashMap;
 
 /// What a condition is known to evaluate to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,13 +114,13 @@ fn arm_keywords(p: &HirPattern) -> ArmKeywords {
 
 /// Reads decisions off one round's inferred types.
 pub(super) struct Decider<'a> {
-    types: &'a HashMap<HirId, TyId>,
+    types: &'a NodeTypes,
     arena: &'a BindingArena,
     interner: TypeInterner,
 }
 
 impl<'a> Decider<'a> {
-    pub(super) fn new(types: &'a HashMap<HirId, TyId>, arena: &'a BindingArena) -> Self {
+    pub(super) fn new(types: &'a NodeTypes, arena: &'a BindingArena) -> Self {
         Decider {
             types,
             arena,

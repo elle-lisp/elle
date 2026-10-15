@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! Signal narrowing: drops `:error` from a primitive call whose argument types rule the error out.
 //!
 //! After type inference, `narrow_signals` strips SIG_ERROR from those calls.
@@ -9,8 +9,8 @@
 
 use super::arena::BindingArena;
 use super::binding::Binding;
-use super::expr::{CallArg, Hir, HirId, HirKind};
-use super::types::{TyId, TypeInterner};
+use super::expr::{CallArg, Hir, HirKind};
+use super::types::{NodeTypes, TyId, TypeInterner};
 use crate::signals::Signal;
 use crate::value::fiber::SignalBits;
 use crate::value::SymbolId;
@@ -23,7 +23,7 @@ pub(super) fn narrow_signals(
     hir: &mut Hir,
     interner: &TypeInterner,
     arena: &BindingArena,
-    hir_types: &HashMap<HirId, TyId>,
+    hir_types: &NodeTypes,
     binding_min_length: &HashMap<Binding, usize>,
 ) {
     // Try to narrow this node

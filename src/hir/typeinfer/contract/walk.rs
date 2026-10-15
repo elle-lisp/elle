@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! The walk that checks each call-position `%`-intrinsic in evaluation order, carrying nonzero-divisor facts.
 //!
 //! docs/intrinsics.md
@@ -8,7 +8,7 @@ use super::*;
 
 pub(super) fn walk(
     h: &Hir,
-    hir_types: &HashMap<HirId, TyId>,
+    hir_types: &NodeTypes,
     arena: &BindingArena,
     interner: &TypeInterner,
     env: &mut NonzeroEnv,

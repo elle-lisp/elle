@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! The fold: after inference, delete the branches and dispatch arms the inferred types decide.
 //!
 //! A decided `if` becomes its taken branch. A `(match (type-of x) …)` whose
@@ -11,10 +11,9 @@
 
 use crate::hir::arena::BindingArena;
 use crate::hir::binding::Binding;
-use crate::hir::expr::{Hir, HirId, HirKind};
-use crate::hir::types::TyId;
+use crate::hir::expr::{Hir, HirKind};
+use crate::hir::types::NodeTypes;
 use rustc_hash::FxHashMap;
-use std::collections::HashMap;
 
 mod decide;
 
@@ -22,7 +21,7 @@ use decide::{Decided, Decider};
 
 /// Fold `hir` against one round's inferred types. Answers whether anything was
 /// deleted, which is when inference has to run again.
-pub(super) fn fold(hir: &mut Hir, types: &HashMap<HirId, TyId>, arena: &BindingArena) -> bool {
+pub(super) fn fold(hir: &mut Hir, types: &NodeTypes, arena: &BindingArena) -> bool {
     let mut reads = FxHashMap::default();
     count_reads(hir, &mut reads);
     let mut folder = Folder {

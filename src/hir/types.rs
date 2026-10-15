@@ -1,12 +1,20 @@
-//! Type interner for bidirectional type inference.
+// audited: 2026-10-14
+//! The type lattice inference proves over: interned type handles, their join, meet and subtype.
+//!
+//! docs/impl/typeinfer.md
 //!
 //! Types are interned to `TyId(u32)`, following the same pattern as
 //! `Binding(u32)` / `Region(u32)`. A `TypeInterner` owns all type data
 //! and deduplicates structurally identical types.
 
+use super::expr::HirId;
+
 /// Interned type handle. Only valid for the interner that created it.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct TyId(pub u32);
+
+/// The type inference proved for each node, keyed by the node's id.
+pub type NodeTypes = std::collections::HashMap<HirId, TyId>;
 
 /// Internal type representation — stored in the interner, referenced by TyId.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -38,9 +46,8 @@ pub(crate) enum TyKind {
     Top,
 }
 
-/// Interner: deduplicates types, provides O(1) lookup by TyId.
-/// Currently only uses pre-interned constants; the `types` vec is
-/// reserved for future compound types (Pair, Closure, etc.).
+/// Interner: deduplicates types, provides O(1) lookup by TyId. Every type it
+/// holds is one of the pre-interned constants below.
 #[allow(dead_code)]
 pub struct TypeInterner {
     types: Vec<TyKind>,
