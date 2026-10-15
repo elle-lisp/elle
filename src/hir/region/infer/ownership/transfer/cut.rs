@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! The facts every face of the transfer cut reads, gathered once per unit.
 //!
 //! docs/impl/region/owner.md
@@ -35,8 +35,7 @@ pub(super) struct Cut<'a> {
     pub ix: UseIndex,
     /// Bindings some lambda captures. A captured fiber binding refuses the fiber face.
     pub captured: FxHashSet<Binding>,
-    order: &'a HashMap<HirId, u32>,
-    low: HashMap<HirId, u32>,
+    order: &'a Order,
     /// Region → allocation site: real allocations and prebound capture cells, as in
     /// the group and activation walks. The structural key for the born-inside and
     /// dies-inside gates.
@@ -55,7 +54,7 @@ impl<'a> Cut<'a> {
         escape: &crate::hir::EscapeInfo,
         arena: &BindingArena,
         call_class: &CallClassification,
-        order: &'a HashMap<HirId, u32>,
+        order: &'a Order,
     ) -> Self {
         let mut region_alloc_hir: FxHashMap<Region, HirId> = FxHashMap::default();
         for (&hid, &reg) in &info.alloc_region {
@@ -83,7 +82,6 @@ impl<'a> Cut<'a> {
             ix: UseIndex::build(hir, arena, call_class),
             captured: captured_bindings(hir),
             order,
-            low: compute_subtree_low(hir, order),
             region_alloc_hir,
             fiber_seeds,
         }
@@ -97,7 +95,7 @@ impl<'a> Cut<'a> {
     /// The post-order subtree interval of `node`.
     pub(super) fn interval(&self, node: &Hir) -> Interval {
         Interval {
-            low: self.low.get(&node.id).copied().unwrap_or(0),
+            low: self.order.low(&node.id).unwrap_or(0),
             top: self.ord(node.id),
         }
     }

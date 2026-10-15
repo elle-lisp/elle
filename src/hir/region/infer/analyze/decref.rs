@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-10-14
 //! `decref_point` population: the ordered passes that decide, for each region,
 //! the program point its release is emitted at.
 //!
@@ -39,7 +39,7 @@ pub(super) fn populate_decref_points(
     info: &mut RegionInfo,
     hir: &Hir,
     du: &DefUseBuilder,
-    order: &HashMap<HirId, u32>,
+    order: &Order,
     last_use_info: &LastUseInfo,
     inference_binding_regions: &HashMap<Binding, Vec<Region>>,
     return_sites: &[(HirId, Vec<Region>)],
@@ -101,21 +101,18 @@ pub(super) fn populate_decref_points(
     // inference's binding_regions[b].
     let binding_uses = &du.uses;
 
-    // Post-order subtree intervals `[low, order]`, so containment of a HirId is
-    // an interval test, with every iterative scope's and every branch's arm
-    // sets. Computed once for the cell passes that read them — the fn-local
+    // Every iterative scope and every branch's arm sets, each with its post-order
+    // interval. Collected once for the cell passes that read them — the fn-local
     // container's covering node and its demise hoist, the env cell's
     // once-per-activation hoist, and the clamp that follows the value releases
     // routed through an env cell — and skipped entirely when the unit has no
     // cell of either kind.
-    let mut subtree_low: HashMap<HirId, u32> = HashMap::new();
     let mut iter_scopes: Vec<(HirId, u32, u32)> = Vec::new();
     let mut branches: Vec<super::super::arms::ArmSet> = Vec::new();
     if !info.cell_containers.is_empty() || !info.cell_release_regions.is_empty() {
-        subtree_low = compute_subtree_low(hir, order);
-        collect_iter_scopes(hir, order, &subtree_low, &mut iter_scopes);
+        collect_iter_scopes(hir, order, &mut iter_scopes);
         if !info.cell_containers.is_empty() {
-            collect_branch_arm_sets(hir, order, &subtree_low, &mut branches);
+            collect_branch_arm_sets(hir, order, &mut branches);
         }
     }
 
@@ -128,7 +125,6 @@ pub(super) fn populate_decref_points(
             du,
             order,
             last_use,
-            subtree_low: &subtree_low,
             iter_scopes: &iter_scopes,
             branches: &branches,
             binder_init_sites,

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! Tofte-Talpin region inference for functional HIR: the walk's state, and how it mints a region.
 //!
 //! docs/impl/region/model.md
@@ -12,7 +12,7 @@ use super::super::arena::BindingArena;
 use super::super::binding::Binding;
 use super::super::defuse::DefUseBuilder;
 use super::super::expr::{Hir, HirId, HirKind};
-use super::super::liveness::{compute_last_use, compute_order, compute_subtree_low};
+use super::super::liveness::{compute_last_use, compute_order, Order};
 use super::super::pattern::HirPattern;
 use super::{
     CallClassification, CellStores, Region, RegionData, RegionInfo, RegionStats, RestCollection,

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! The `letrec` closure-cycle merge: one SCC of mutually-recursive closures and their
 //! prebound capture cells, collapsed onto one arena.
 //!
@@ -75,7 +75,7 @@ pub(crate) fn compute_closure_cycle_merges(
     arena: &BindingArena,
     info: &RegionInfo,
     escape: &crate::hir::EscapeInfo,
-    order: &HashMap<HirId, u32>,
+    order: &Order,
 ) -> Vec<ClosureCycleMerge> {
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
 

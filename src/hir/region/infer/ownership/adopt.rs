@@ -136,7 +136,7 @@ pub(in crate::hir::region::infer) fn compute_adopt_edges(
     hir: &Hir,
     info: &RegionInfo,
     arena: &BindingArena,
-    order: &HashMap<HirId, u32>,
+    order: &Order,
 ) -> AdoptEdges {
     let owned = compute_owned_subtrees(inputs, info);
     let aliases = AliasTables::new(info);
@@ -177,10 +177,10 @@ pub(in crate::hir::region::infer) fn compute_adopt_edges(
     // a region reached from two roots fails external uniqueness for both, so no region is a
     // member of two subtrees), so each interior region maps to exactly one root. Inverting
     // `owned` into `root_of` once, then bucketing every eligible edge under its (unique)
-    // interior root in a single pass, replaces the per-root re-scan of EVERY
-    // cross_region_refs / capture / containment edge — which was O(roots × edges), quadratic
-    // on the stdlib's one giant letrec — with O(edges). An edge is interior to root R iff
-    // BOTH endpoints are members of R's subtree, i.e. `root_of[src] == root_of[dst] == R`.
+    // interior root in a single pass, costs O(edges); a per-root scan of every edge would
+    // cost O(roots × edges), quadratic on the stdlib's one giant letrec. An edge is interior
+    // to root R iff BOTH endpoints are members of R's subtree, i.e.
+    // `root_of[src] == root_of[dst] == R`.
     let mut root_of: FxHashMap<Region, Region> = FxHashMap::default();
     for (&root, members) in &owned {
         for &m in members {
@@ -199,9 +199,8 @@ pub(in crate::hir::region::infer) fn compute_adopt_edges(
         }
     };
     // Per-root interior edge lists, built in source-list order so the emitted adopt order
-    // is identical to the pre-index per-root filter. Funnel and cell edges both come from
-    // `containment_edges` and are bucketed in one pass (an edge can qualify for both, exactly
-    // as the two independent per-root filters admitted).
+    // follows the edge lists. Funnel and cell edges both come from `containment_edges` and
+    // are bucketed in one pass; an edge can qualify for both.
     type EdgeList = Vec<(HirId, Region, Region)>;
     let mut store_by_root: FxHashMap<Region, EdgeList> = FxHashMap::default();
     for &(site, src, dst) in &info.cross_region_refs {
@@ -387,9 +386,9 @@ pub(in crate::hir::region::infer) fn compute_adopt_edges(
         // store-adopted member keeps its own decref, so a loop enclosing the root's
         // free re-derefs the member after the drop — the cross-iteration UAF the
         // loop clause refuses). A subtree with an un-post-dominated member stays
-        // Shared (the always-legal baseline). The category error this replaces: a
-        // numeric `ord(member) <= ord(root)` admits a free-before-use across branches
-        // and loop back-edges, where order is not a post-dominance proxy.
+        // Shared (the always-legal baseline). A numeric `ord(member) <= ord(root)`
+        // test would admit a free-before-use across branches and loop back-edges,
+        // where order is not a post-dominance proxy.
         if !members.iter().all(|&m| {
             m == root
                 || obligation_lu(m)

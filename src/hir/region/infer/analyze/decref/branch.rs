@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-10-14
 //! The branch-arm release window: moving a release that landed inside one arm
 //! onto the branch, where every path arrives.
 //!
@@ -21,8 +21,7 @@ use crate::hir::defuse::DefUseBuilder;
 /// consuming the branch's value, or the branch itself when nothing does — whose
 /// decrefs the lowerer emits after the merge label. Moving the release there is a
 /// placement argument, the one the break window makes: one release still, landing
-/// later (docs/impl/region/mechanism.md § "A release inside one arm is not a
-/// release on the other arms").
+/// later (docs/impl/region/window.md).
 ///
 /// Placement is enough only where this frame **holds the region alone** —
 /// the release fires on arms where none did before, and the other holder within
@@ -35,8 +34,7 @@ use crate::hir::defuse::DefUseBuilder;
 /// arm's `TailCall`, which does precede its callee's mint, owes no edge either — a
 /// callee reaches a value this frame owns as an operand or through its captured
 /// environment and by no other route, so it either counts the region or cannot mint
-/// against it (region/mechanism.md § "The callee's return mint, and why the point
-/// owes it nothing").
+/// against it (docs/impl/region/relocate.md).
 ///
 /// Once a region's `decref_point` leaves the arms, `region::infer::compensate` no
 /// longer finds it inside one, so neither of its per-arm routes fires for that
@@ -68,7 +66,7 @@ use crate::hir::defuse::DefUseBuilder;
 /// release away. The **callee's own** region has no such release standing in for
 /// it: the deferred callee channel does, and that channel is keyed on where the
 /// release sits, so anchoring it at the merge leaves the exiting arm with nothing
-/// (region/mechanism.md § "What the exemption keeps, a channel must still run").
+/// (docs/impl/region/relocate.md).
 ///
 /// The region must also be **live-in** — every allocation and holder-definition
 /// site outside the branch's subtree — so a value born inside an arm keeps its
@@ -78,22 +76,14 @@ pub(super) fn pin_branch_arm_releases(
     info: &mut RegionInfo,
     hir: &Hir,
     du: &DefUseBuilder,
-    order: &HashMap<HirId, u32>,
+    order: &Order,
     last_use: &HashMap<HirId, HirId>,
     inference_binding_regions: &HashMap<Binding, Vec<Region>>,
     frame_replacing_tail_calls: &rustc_hash::FxHashSet<HirId>,
 ) {
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
-    let low = compute_subtree_low(hir, order);
     let mut scopes = BranchWindowScopes::default();
-    collect_branch_scopes(
-        hir,
-        info,
-        order,
-        &low,
-        frame_replacing_tail_calls,
-        &mut scopes,
-    );
+    collect_branch_scopes(hir, info, order, frame_replacing_tail_calls, &mut scopes);
     if scopes.branches.is_empty() {
         return;
     }
@@ -171,12 +161,12 @@ pub(super) fn pin_branch_arm_releases(
     // one of escape's facets.
     //
     // The **return** facet is no refusal at either placement. At the merge the
-    // release follows whatever mint the taken arm already ran (§ "The return
-    // frontier is per-path"); at an arm's replica, which does precede its callee's
-    // mint, the callee reaches a value this frame owns as an operand or through its
-    // captured environment and by no other route — so it either holds a counted edge
-    // across the gap or cannot mint against the region at all (mechanism.md § "The
-    // callee's return mint, and why the point owes it nothing").
+    // release follows whatever mint the taken arm already ran
+    // (docs/impl/region/compensate.md); at an arm's replica, which does precede its
+    // callee's mint, the callee reaches a value this frame owns as an operand or
+    // through its captured environment and by no other route — so it either holds a
+    // counted edge across the gap or cannot mint against the region at all
+    // (docs/impl/region/relocate.md).
     let frame_held = info.frame_held_regions.clone();
 
     // Snapshotted for the frame-exit narrowing below, which reads it while
@@ -217,9 +207,8 @@ pub(super) fn pin_branch_arm_releases(
         // (`lir::lower::regiondecref::value_release_slot`) rather than reading the
         // region's class: releasing by id is the lowerer's DEFAULT, taken wherever a
         // single point covers every path, so a region a binder recorded a slot for
-        // takes the value route as soon as a point admits it (mechanism.md § "A
-        // release the relocation replicates names a VALUE, and a binder's slot
-        // supplies that name").
+        // takes the value route as soon as a point admits it
+        // (docs/impl/region/relocate.md).
         let arm_exits: Vec<&FrameExit> = scopes
             .frame_exits
             .iter()
@@ -295,8 +284,8 @@ pub(super) fn pin_branch_arm_releases(
         // slice would shift not-yet-visited entries across the fixed `end` boundary
         // and admit regions whose ord falls OUTSIDE the arm union. Collecting the
         // union's entries once — each region appears in exactly one merged interval —
-        // matches the original per-region pass, which read every `decref_point`
-        // before mutating any of them.
+        // judges every candidate by the `decref_point` it had before this branch
+        // moved anything.
         let mut candidates: Vec<(u32, Region, usize)> = Vec::new();
         for &(lo, hi) in &merged_arms {
             let start = by_dord.partition_point(|&(o, _)| o < lo);
@@ -316,8 +305,8 @@ pub(super) fn pin_branch_arm_releases(
             // A region the exiting arm's call names as its CALLEE is exempt from the
             // relocation, so no replica reaches that arm — and what stands in for the
             // release there is the deferred callee channel, which is keyed on where
-            // the release SITS (`deferred_release_slot`; mechanism.md § "What the
-            // exemption keeps, a channel must still run"). Moving it to the merge
+            // the release SITS (`deferred_release_slot`; docs/impl/region/relocate.md).
+            // Moving it to the merge
             // takes it out of that channel's reach and leaves the arm with nothing,
             // so such a region keeps its in-arm release. An ARGUMENT's exemption is
             // the opposite story — the release the arm never runs IS the ownership

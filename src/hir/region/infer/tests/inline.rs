@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! Pins for the region walk's inline of a callee body: the call names its own
 //! result region, and a self call is not inlined.
 //!
@@ -96,9 +96,8 @@ fn a_call_result_is_released_in_the_arm_that_calls() {
     let (hir, arena, _symbols, info) = analyze_with_class(TWO_ARMS);
     let (then_id, _else_id) = first_if_arms(&hir).expect("an If node");
     let order = compute_order(&hir);
-    let low = compute_subtree_low(&hir, &order);
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
-    let (lo, hi) = (low.get(&then_id).copied().unwrap_or(0), ord(then_id));
+    let (lo, hi) = (order.low(&then_id).unwrap_or(0), ord(then_id));
     for r in held_by(&hir, "a", &arena, &info) {
         let d = ord(info
             .region_data

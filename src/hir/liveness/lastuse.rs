@@ -29,9 +29,8 @@ use builder::LastUseBuilder;
 pub fn compute_last_use(
     hir: &Hir,
     uses: &HashMap<Binding, Vec<HirId>>,
-    order: &HashMap<HirId, u32>,
+    order: &Order,
 ) -> LastUseInfo {
-    let low = compute_subtree_low(hir, order);
     let mut builder = LastUseBuilder {
         last_use: HashMap::new(),
         capture_loop_ext: HashMap::new(),
@@ -40,7 +39,6 @@ pub fn compute_last_use(
         propagated_inits: rustc_hash::FxHashSet::default(),
         iter_scope_stack: Vec::new(),
         order,
-        low: &low,
     };
     // The root has no parent; parent_consumes=false is the conservative
     // default (the root's value is the program's result, no further use).
@@ -121,9 +119,8 @@ pub fn compute_last_use(
     // what frees an unused `let`'s allocation promptly. For a `Define` the value
     // is also the form's value, so it dies wherever the `def` does and the walk
     // already recorded that; narrowing past it would free the value under the
-    // expression the `def` was handed to (docs/impl/region/mechanism.md § "A
-    // binder's init release lands after the slot store"). A use, when there is
-    // one, still wins — the fallback is a floor, not a replacement.
+    // expression the `def` was handed to (docs/impl/region/anchors.md). A use,
+    // when there is one, still wins — the fallback is a floor, not a replacement.
     let mut staged: HashMap<HirId, HirId> = HashMap::new();
     for (binding, init_ids) in &builder.binding_init {
         let chosen = compute_chosen(binding, &builder.last_use, &builder.capture_loop_ext);

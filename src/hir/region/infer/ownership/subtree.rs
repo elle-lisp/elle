@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! The ownership cuts that free a whole subtree under one root, and a rootless cycle as one group.
 //!
 //! docs/impl/region/ownership.md
@@ -136,7 +136,7 @@ pub(in crate::hir::region::infer) fn compute_owned_region_groups(
     inputs: &OwnershipInputs,
     hir: &Hir,
     info: &RegionInfo,
-    order: &HashMap<HirId, u32>,
+    order: &Order,
 ) -> HashMap<HirId, Vec<Region>> {
     // Closure regions — refused below: the group free is the STORE-ONLY-cycle mechanism, and
     // a closure-involving cycle belongs to a different owner. A `letrec` cell↔closure clique

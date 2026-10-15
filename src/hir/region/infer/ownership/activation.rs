@@ -1,5 +1,7 @@
-//! The activation-owner cut: the capture-back-edge SCC
-//! (docs/impl/region/owner.md § "Owner nodes" — "The capture-back-edge SCC").
+// audited: 2026-10-14
+//! The activation-owner cut: a capture-back-edge SCC, adopted into the executing activation's owner node.
+//!
+//! docs/impl/region/owner.md
 //!
 //! A container captured by a closure it holds (`m ⊇ c` by store, `c ⊇ m` by
 //! capture — the m↔c SCC) is the one containment-graph cycle neither
@@ -10,10 +12,10 @@
 //! touching a closure region (`closure_regions`). The owner that CAN reclaim it
 //! is the **executing activation**: its owner node's completion release
 //! post-dominates every in-activation use by construction (the trampoline's
-//! clean break, the parks, the discard, and the fiber teardown all landed with
-//! the owner-node runtime), so adopting the SCC's members into the node and
-//! suppressing their own decrefs frees the cycle wholesale — interior m↔c
-//! references reclaim with the set, no cascade.
+//! clean break, the parks, the discard, and the fiber teardown each run it), so
+//! adopting the SCC's members into the node and suppressing their own decrefs
+//! frees the cycle wholesale — interior m↔c references reclaim with the set, no
+//! cascade.
 
 use super::super::*;
 use super::inputs::OwnershipInputs;
@@ -73,8 +75,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 ///    adopt scope can park (`Signal::may_park` on its aggregated signal), the
 ///    walk finds an early adopt key on the scope's sequential spine
 ///    ([`park_split_key`]) and emits the adopt there too; a shape the spine
-///    cannot order refuses to Shared
-///    (docs/impl/region/owner.md § "Owner nodes" — "The park split").
+///    cannot order refuses to Shared (docs/impl/region/owner.md).
 ///
 /// The **free** needs no post-dominance check of its own: the adopt only
 /// transfers ownership, and the node's release at the activation's completion is
@@ -85,7 +86,7 @@ pub(in crate::hir::region::infer) fn compute_activation_adopts(
     inputs: &OwnershipInputs,
     hir: &Hir,
     info: &RegionInfo,
-    order: &HashMap<HirId, u32>,
+    order: &Order,
 ) -> HashMap<HirId, Vec<Region>> {
     let capture_edges = inputs.capture_edges();
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
@@ -123,9 +124,8 @@ pub(in crate::hir::region::infer) fn compute_activation_adopts(
     }
 
     // Loop intervals `[low, order]` for the loop-seam gate (gate 5).
-    let low = compute_subtree_low(hir, order);
     let mut loops: Vec<(u32, u32)> = Vec::new();
-    collect_loop_intervals(hir, order, &low, &mut loops);
+    collect_loop_intervals(hir, order, &mut loops);
 
     let mut out: HashMap<HirId, Vec<Region>> = HashMap::new();
     let mut taken: FxHashSet<Region> = FxHashSet::default();
@@ -332,16 +332,11 @@ fn park_split_key(node: &Hir, targets: &FxHashSet<HirId>, allocs_before: bool) -
 /// Every `While`/`Loop` node's post-order subtree interval `[low, order]`, so
 /// "a loop encloses this position" is an interval test — the loop-seam gate's
 /// input (gate 5).
-fn collect_loop_intervals(
-    hir: &Hir,
-    order: &HashMap<HirId, u32>,
-    low: &HashMap<HirId, u32>,
-    out: &mut Vec<(u32, u32)>,
-) {
+fn collect_loop_intervals(hir: &Hir, order: &Order, out: &mut Vec<(u32, u32)>) {
     if matches!(&hir.kind, HirKind::While { .. } | HirKind::Loop { .. }) {
-        let lo = low.get(&hir.id).copied().unwrap_or(0);
+        let lo = order.low(&hir.id).unwrap_or(0);
         let hi = order.get(&hir.id).copied().unwrap_or(0);
         out.push((lo, hi));
     }
-    hir.for_each_child(|c| collect_loop_intervals(c, order, low, out));
+    hir.for_each_child(|c| collect_loop_intervals(c, order, out));
 }

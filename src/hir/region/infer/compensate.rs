@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-10-14
 //! Branch-compensation decref placement: free a region on the arms where it dies.
 //!
 //! The region solver gives every region ONE `decref_point` — the textually-last
@@ -51,8 +51,7 @@
 //! caller now holds a reference to, and what a return hands over is the content;
 //! the same-node RETAIN buys the knowledge that the arm's use named every
 //! reference, which the box's holders supply outright, no use of the binding ever
-//! yielding the box (docs/impl/region/compensate.md § "A compensating release of an
-//! env cell names the box, not the holder's slot"). What the `tail` route still owes
+//! yielding the box (docs/impl/region/compensate.md). What the `tail` route still owes
 //! is placement, so the box's per-arm release is read off the same pins the global
 //! `decref_point` is: the arm's uses, AND the arm's uncounted opcode-read borrows
 //! out of the cell, whose reader the release must post-date.
@@ -75,8 +74,7 @@
 //! `decref_point`, never both.
 //!
 //! This pass sees only the regions the **branch-arm release window** declined
-//! (`analyze/decref.rs`, docs/impl/region/window.md § "A release inside one arm
-//! is not a release on the other arms"). Where that window applies it moves the
+//! (`analyze/decref.rs`, docs/impl/region/window.md). Where that window applies it moves the
 //! region's single `decref_point` out of the arms entirely, so `arm_of_d` below
 //! finds nothing and neither route fires — one anchored release replaces the
 //! per-arm ones. The two partition the obligation: the window answers "does this
@@ -125,8 +123,7 @@ struct IterScope {
 /// `post_loop_placement` (`analyze/decref.rs`), and it exists for the same
 /// reason: `populate_env` mints the box once per activation, so a release
 /// anchored at an in-loop use frees it on the first iteration and the next
-/// iteration reads a recycled cell (docs/impl/region/cells.md § "Env cells in
-/// loops: release once per activation, not per iteration").
+/// iteration reads a recycled cell (docs/impl/region/cells.md).
 ///
 /// The loop must lie INSIDE the arm — a loop enclosing the whole branch is not a
 /// point this arm can host, and no such loop reaches here. One that encloses the
@@ -141,7 +138,7 @@ fn arm_post_loop_placement(
     loops: &[IterScope],
     arm_lo: u32,
     arm_hi: u32,
-    order: &HashMap<HirId, u32>,
+    order: &Order,
 ) -> Option<HirId> {
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     let at_ord = ord(at);
@@ -165,7 +162,7 @@ pub(super) fn compute_branch_compensation(
     escape: &crate::hir::EscapeInfo,
     du: &DefUseBuilder,
     arena: &BindingArena,
-    order: &HashMap<HirId, u32>,
+    order: &Order,
     last_use: &HashMap<HirId, HirId>,
     return_sites: &[(HirId, Vec<Region>)],
     binder_init_sites: &HashMap<crate::hir::binding::Binding, Option<HirId>>,
@@ -174,12 +171,11 @@ pub(super) fn compute_branch_compensation(
     // (== `inference_binding_regions`, already mirrored onto `info` before this
     // runs), so read them from `info` rather than threading a redundant param.
     let binding_regions = &info.binding_source_regions;
-    let low = compute_subtree_low(hir, order);
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
 
     let mut branches: Vec<ArmSet> = Vec::new();
     let mut loops: Vec<IterScope> = Vec::new();
-    collect(hir, order, &low, &mut branches, &mut loops);
+    collect(hir, order, &mut branches, &mut loops);
     if branches.is_empty() {
         return BranchComp {
             head: HashMap::new(),
@@ -371,15 +367,9 @@ pub(super) fn compute_branch_compensation(
 
 /// Collect every branch (with its arms' intervals — [`super::arms`]) and every
 /// `While`/`Loop` (with its subtree interval) in one walk.
-fn collect(
-    hir: &Hir,
-    order: &HashMap<HirId, u32>,
-    low: &HashMap<HirId, u32>,
-    branches: &mut Vec<ArmSet>,
-    loops: &mut Vec<IterScope>,
-) {
+fn collect(hir: &Hir, order: &Order, branches: &mut Vec<ArmSet>, loops: &mut Vec<IterScope>) {
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
-    let lo = |id: HirId| low.get(&id).copied().unwrap_or(0);
+    let lo = |id: HirId| order.low(&id).unwrap_or(0);
     if let HirKind::While { .. } | HirKind::Loop { .. } = &hir.kind {
         loops.push(IterScope {
             id: hir.id,
@@ -387,6 +377,6 @@ fn collect(
             hi: ord(hir.id),
         });
     }
-    branches.extend(super::arms::branch_arms(hir, order, low));
-    hir.for_each_child(|c| collect(c, order, low, branches, loops));
+    branches.extend(super::arms::branch_arms(hir, order));
+    hir.for_each_child(|c| collect(c, order, branches, loops));
 }

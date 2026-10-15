@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-10-14
 //! The releases a `break` jumps over, re-anchored onto the block it leaves.
 //!
 //! docs/impl/region/anchors.md
@@ -15,8 +15,7 @@ use super::super::super::*;
 /// Re-anchoring to `last_use[block]` — the first point both the break path and
 /// the fall-through path reach, the same anchor the broken value takes — is
 /// enough, and needs no release at the break site: moving a release LATER can
-/// only over-keep (docs/impl/region/anchors.md § "A release the break jumps over
-/// is not a release").
+/// only over-keep (docs/impl/region/anchors.md).
 ///
 /// The window is read off the structural order: a node's releases are skipped
 /// exactly when its post-order index is at or above the break's. That covers the
@@ -43,7 +42,7 @@ use super::super::super::*;
 pub(super) fn pin_break_skipped_releases(
     info: &mut RegionInfo,
     hir: &Hir,
-    order: &HashMap<HirId, u32>,
+    order: &Order,
     last_use: &HashMap<HirId, HirId>,
     break_skip_blocks: &[(HirId, Vec<HirId>)],
 ) {
@@ -51,9 +50,8 @@ pub(super) fn pin_break_skipped_releases(
         return;
     }
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
-    let low = compute_subtree_low(hir, order);
     let mut scopes = BreakWindowScopes::default();
-    collect_window_scopes(hir, order, &low, &mut scopes);
+    collect_window_scopes(hir, order, &mut scopes);
     // Where each region is allocated, as post-order indices — what the loop
     // barrier below is read off. A region absent here is allocated by a caller
     // (a parameter), so no loop in this unit re-allocates it. Capture cells
@@ -76,7 +74,7 @@ pub(super) fn pin_break_skipped_releases(
         let Some(first_break) = sites.iter().map(|s| ord(*s)).min() else {
             continue;
         };
-        let block_lo = low.get(block_id).copied().unwrap_or(0);
+        let block_lo = order.low(block_id).unwrap_or(0);
         let block_hi = ord(*block_id);
         let anchor = last_use.get(block_id).copied().unwrap_or(*block_id);
         let anchor_ord = ord(anchor);
@@ -100,12 +98,12 @@ pub(super) fn pin_break_skipped_releases(
         // A frame exit inside a targeting break's own VALUE does not refuse the
         // window: that break already jumps over every release in it, so on that
         // path there is nothing left for the exit to strand
-        // (docs/impl/region/anchors.md § "A release the break jumps over is not
-        // a release", third boundary). Only an exit on a path that would
-        // otherwise ARRIVE at the release — the block's fall-through — does.
+        // (docs/impl/region/anchors.md, the third boundary). Only an exit on a
+        // path that would otherwise ARRIVE at the release — the block's
+        // fall-through — does.
         let break_values: Vec<(u32, u32)> = sites
             .iter()
-            .map(|s| (low.get(s).copied().unwrap_or(0), ord(*s)))
+            .map(|s| (order.low(s).unwrap_or(0), ord(*s)))
             .collect();
         if scopes.frame_exits.iter().any(|&e| {
             e >= first_break
@@ -169,21 +167,16 @@ struct BreakWindowScopes {
     /// block's window means the block's exit label is not a point every path
     /// reaches.
     ///
-    /// A `Return` node is deliberately NOT one (docs/impl/region/anchors.md
-    /// § "A release the break jumps over is not a release", third boundary):
+    /// A `Return` node is deliberately NOT one (docs/impl/region/anchors.md, the
+    /// third boundary):
     /// `lower_return` emits the return mint and no control flow, so control falls
     /// through it to the exit label like any other value.
     frame_exits: Vec<u32>,
 }
 
 /// Collect [`BreakWindowScopes`] over the whole tree in one walk.
-fn collect_window_scopes(
-    hir: &Hir,
-    order: &HashMap<HirId, u32>,
-    low: &HashMap<HirId, u32>,
-    out: &mut BreakWindowScopes,
-) {
-    let lo = low.get(&hir.id).copied().unwrap_or(0);
+fn collect_window_scopes(hir: &Hir, order: &Order, out: &mut BreakWindowScopes) {
+    let lo = order.low(&hir.id).unwrap_or(0);
     let hi = order.get(&hir.id).copied().unwrap_or(0);
     match &hir.kind {
         HirKind::While { .. } | HirKind::Loop { .. } => out.loops.push((lo, hi)),
@@ -191,5 +184,5 @@ fn collect_window_scopes(
         HirKind::Call { is_tail: true, .. } => out.frame_exits.push(hi),
         _ => {}
     }
-    hir.for_each_child(|c| collect_window_scopes(c, order, low, out));
+    hir.for_each_child(|c| collect_window_scopes(c, order, out));
 }

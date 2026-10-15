@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! The transferred-returned-subtree cut: a producer's returned cycle, owned by the activation that consumes it.
 //!
 //! docs/impl/region/owner.md
@@ -68,7 +68,7 @@ pub(in crate::hir::region::infer) fn compute_transfer_adopts(
     escape: &crate::hir::EscapeInfo,
     arena: &BindingArena,
     call_class: &CallClassification,
-    order: &HashMap<HirId, u32>,
+    order: &Order,
 ) -> TransferAdopts {
     let cut = Cut::new(inputs, hir, info, escape, arena, call_class, order);
     let mut taken_roots: FxHashSet<Region> = FxHashSet::default();

@@ -9,6 +9,7 @@
 use super::binding::Binding;
 use super::expr::{Hir, HirId, HirKind};
 
+use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 
 mod lastuse;
@@ -189,33 +190,71 @@ pub(crate) fn build_binding_index(
 ///
 /// One walk over `Hir::for_each_child` computes both, once per unit, so every
 /// pass reads one numbering and enumerates children as every other walk does.
-pub fn compute_order(hir: &Hir) -> HashMap<HirId, u32> {
-    fn visit(h: &Hir, order: &mut HashMap<HirId, u32>, next: &mut u32) {
-        h.for_each_child(|c| visit(c, order, next));
-        order.insert(h.id, *next);
+pub fn compute_order(hir: &Hir) -> Order {
+    // The first node the walk numbers inside a subtree is the subtree's lowest,
+    // so a node's `low` is the counter as the walk enters it. An id the tree
+    // holds at several places keeps the place the walk numbers last.
+    fn visit(h: &Hir, at: &mut FxHashMap<HirId, Place>, next: &mut u32) {
+        let low = *next;
+        h.for_each_child(|c| visit(c, at, next));
+        at.insert(h.id, Place { index: *next, low });
         *next += 1;
     }
-    let mut order = HashMap::new();
+    let mut at = FxHashMap::default();
     let mut next = 0;
-    visit(hir, &mut order, &mut next);
-    order
+    visit(hir, &mut at, &mut next);
+    Order { at }
 }
 
-pub fn compute_subtree_low(hir: &Hir, order: &HashMap<HirId, u32>) -> HashMap<HirId, u32> {
-    fn visit(h: &Hir, order: &HashMap<HirId, u32>, low: &mut HashMap<HirId, u32>) -> u32 {
-        let mut m = order.get(&h.id).copied().unwrap_or(u32::MAX);
-        h.for_each_child(|c| {
-            let cl = visit(c, order, low);
-            if cl < m {
-                m = cl;
-            }
-        });
-        low.insert(h.id, m);
-        m
+/// The numbering `compute_order` builds: each node's post-order index, and the
+/// lowest index in its subtree.
+#[derive(Debug, Default)]
+pub struct Order {
+    at: FxHashMap<HirId, Place>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Place {
+    index: u32,
+    low: u32,
+}
+
+impl Order {
+    /// The node's post-order index.
+    pub fn get(&self, id: &HirId) -> Option<&u32> {
+        self.at.get(id).map(|p| &p.index)
     }
-    let mut low = HashMap::new();
-    visit(hir, order, &mut low);
-    low
+
+    /// The lowest post-order index in the node's subtree, which is the node's
+    /// own index when it has no children.
+    pub fn low(&self, id: &HirId) -> Option<u32> {
+        self.at.get(id).map(|p| p.low)
+    }
+
+    /// Whether the walk numbered the node.
+    pub fn contains_key(&self, id: &HirId) -> bool {
+        self.at.contains_key(id)
+    }
+
+    /// An order over nodes with no children, for a test that needs chosen
+    /// indices rather than a tree's.
+    #[cfg(test)]
+    pub fn from_indices(pairs: impl IntoIterator<Item = (HirId, u32)>) -> Order {
+        let at = pairs
+            .into_iter()
+            .map(|(id, index)| (id, Place { index, low: index }))
+            .collect();
+        Order { at }
+    }
+}
+
+impl std::ops::Index<&HirId> for Order {
+    type Output = u32;
+
+    fn index(&self, id: &HirId) -> &u32 {
+        self.get(id)
+            .unwrap_or_else(|| panic!("@{} is not in the numbered tree", id.0))
+    }
 }
 
 #[cfg(test)]

@@ -1,25 +1,27 @@
-//! Program order over HIR nodes, and the pin rule the `decref_point` passes
-//! apply against it.
+// audited: 2026-10-14
+//! Program order over HIR nodes, and the pin rule the `decref_point` passes apply against it.
+//!
+//! docs/impl/region/anchors.md
 
 use super::data::{Region, RegionData};
 use crate::hir::expr::HirId;
+use crate::hir::liveness::Order;
 use std::collections::HashMap;
 
 /// The total order in which HIR nodes execute, as computed by
 /// `liveness::compute_order`.
 ///
-/// A node the map does not name orders as 0, that is, before every named node.
-/// Wrapping the map keeps that default in one place. Each pass that compared
-/// raw positions had to restate it, and restating it wrongly — `u32::MAX` for
-/// an unknown node instead of 0 — orders that node last and lets a pin drag a
-/// region's release past the end of its scope.
+/// A node the order does not name orders as 0, that is, before every named
+/// node. Wrapping the order keeps that default in one place. Restating it
+/// wrongly — `u32::MAX` for an unknown node instead of 0 — orders that node
+/// last and lets a pin drag a region's release past the end of its scope.
 #[derive(Clone, Copy)]
 pub struct ProgramOrder<'a> {
-    positions: &'a HashMap<HirId, u32>,
+    positions: &'a Order,
 }
 
 impl<'a> ProgramOrder<'a> {
-    pub fn new(positions: &'a HashMap<HirId, u32>) -> Self {
+    pub fn new(positions: &'a Order) -> Self {
         ProgramOrder { positions }
     }
 
@@ -81,12 +83,12 @@ impl PinDecref for HashMap<Region, RegionData> {
 mod tests {
     use super::{PinDecref, ProgramOrder};
     use crate::hir::expr::HirId;
+    use crate::hir::liveness::Order;
     use crate::hir::region::{Region, RegionInfo};
-    use std::collections::HashMap;
 
     /// Three nodes, executing in the order early → middle → late.
-    fn order_map() -> HashMap<HirId, u32> {
-        HashMap::from([(HirId(1), 10), (HirId(2), 20), (HirId(3), 30)])
+    fn order_map() -> Order {
+        Order::from_indices([(HirId(1), 10), (HirId(2), 20), (HirId(3), 30)])
     }
 
     #[test]

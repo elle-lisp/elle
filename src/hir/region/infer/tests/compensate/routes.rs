@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! Pins the per-arm compensation routes: `head` on a dead sibling arm, `tail` after a
 //! used arm's read, none on the arm that returns.
 //!
@@ -46,9 +46,8 @@ fn the_walk_base_case_releases_at_its_return() {
     );
     let (then_id, _else_id) = first_if_arms(&hir).expect("an If node");
     let order = compute_order(&hir);
-    let lo = compute_subtree_low(&hir, &order)
-        .get(&then_id)
-        .copied()
+    let lo = order
+        .low(&then_id)
         .expect("the then arm has a subtree interval");
     let hi = order
         .get(&then_id)

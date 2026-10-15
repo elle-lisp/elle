@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! Release placement around loops and sibling top-level forms, and the tail region of a closure inlined in a loop.
 //!
 //! docs/impl/region/cells.md
@@ -198,7 +198,6 @@ fn env_cell_release_in_loop_hoisted_past_loop() {
         out
     }
     let order = crate::hir::liveness::compute_order(&hir);
-    let low = crate::hir::liveness::compute_subtree_low(&hir, &order);
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     let whiles = find_iter_scopes(&hir);
     assert!(
@@ -221,7 +220,7 @@ fn env_cell_release_in_loop_hoisted_past_loop() {
     // magnitude (which ANF makes meaningless — see compute_order).
     let dord = ord(cell_decref);
     let strictly_inside = whiles.iter().find(|&&w| {
-        let lo = low.get(&w).copied().unwrap_or(0);
+        let lo = order.low(&w).unwrap_or(0);
         dord >= lo && dord <= ord(w) && cell_decref != w
     });
     assert!(
@@ -307,7 +306,6 @@ fn match_pattern_binding_keeps_scrutinee_release_inside_the_loop() {
         .expect("the %pair scrutinee must have an alloc_region");
 
     let order = crate::hir::liveness::compute_order(&hir);
-    let low = crate::hir::liveness::compute_subtree_low(&hir, &order);
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     let decref = info
         .region_data
@@ -320,12 +318,12 @@ fn match_pattern_binding_keeps_scrutinee_release_inside_the_loop() {
     // inside the loop's subtree, never AT the loop node (the post-loop emission
     // point, where one release would cover every iteration) nor past it.
     let enclosing = loops.iter().copied().find(|&l| {
-        let lo = low.get(&l).copied().unwrap_or(0);
+        let lo = order.low(&l).unwrap_or(0);
         let alloc = ord(pair_id);
         alloc >= lo && alloc <= ord(l)
     });
     let enclosing = enclosing.expect("the %pair must sit inside a loop body");
-    let lo = low.get(&enclosing).copied().unwrap_or(0);
+    let lo = order.low(&enclosing).unwrap_or(0);
     assert!(
         dord >= lo && dord < ord(enclosing),
         "the scrutinee's region r{} (allocated by the %pair @{} inside the loop \

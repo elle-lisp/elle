@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! The structural walk that computes each node's raw last use, and records the bookkeeping the fixpoint solver reads.
 //!
 //! docs/impl/region/anchors.md
@@ -52,15 +52,10 @@ pub(super) struct LastUseBuilder<'a> {
     /// lands inside the loop body, and the per-iteration DecrefRegion frees
     /// the value after the first iteration.
     pub(super) iter_scope_stack: Vec<HirId>,
-    /// Structural execution-order index (see `compute_order`). Every
-    /// ordering/containment decision compares these indices, never
+    /// Structural execution order (see `compute_order`). Every ordering and
+    /// containment decision compares its indices and intervals, never
     /// `HirId` magnitude.
-    pub(super) order: &'a HashMap<HirId, u32>,
-    /// Subtree low-watermark (see `compute_subtree_low`). Pairs with
-    /// `order` to give each node the post-order interval `[low, order]`
-    /// covering its subtree, so containment ("is this scope inside the
-    /// loop body?") is an interval test, not just a magnitude compare.
-    pub(super) low: &'a HashMap<HirId, u32>,
+    pub(super) order: &'a Order,
 }
 
 impl LastUseBuilder<'_> {
@@ -72,12 +67,12 @@ impl LastUseBuilder<'_> {
 
     /// True if `inner`'s scope node lies inside `outer`'s subtree, tested
     /// over the post-order interval `[low[outer], order[outer]]` (see
-    /// `compute_subtree_low`). Distinguishes a binding bound *inside* a
+    /// `compute_order`). Distinguishes a binding bound *inside* a
     /// loop body (a descendant — re-allocated each iteration) from one
     /// bound *outside* it (an enclosing ancestor OR a preceding sibling
     /// `def`/`let*` in the same body — must outlive the loop).
     fn in_subtree(&self, inner: HirId, outer: HirId) -> bool {
-        let low = self.low.get(&outer).copied().unwrap_or(0);
+        let low = self.order.low(&outer).unwrap_or(0);
         let oi = self.ord(inner);
         oi >= low && oi <= self.ord(outer)
     }

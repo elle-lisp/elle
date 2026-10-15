@@ -1,6 +1,9 @@
-//! The builder-idiom merge seed — a freshly-built child aggregate merged into the
-//! parent `%pair` it is stored into. The soundness is pinned entirely by the
-//! six-gate predicate in [`compute_merges`] (docs/impl/region/merging.md § Merging).
+// audited: 2026-10-14
+//! The builder-idiom merge seed: a freshly built child aggregate merged into the parent `%pair` it is stored into.
+//!
+//! docs/impl/region/merging.md
+//!
+//! The six-gate predicate in [`compute_merges`] carries the whole soundness argument.
 
 use super::super::postdom::{EmitMode, PostDom};
 use super::super::*;
@@ -16,7 +19,7 @@ pub(crate) fn compute_merges(
     arena: &BindingArena,
     info: &RegionInfo,
     escape: &crate::hir::EscapeInfo,
-    order: &HashMap<HirId, u32>,
+    order: &Order,
 ) -> HashMap<Region, Region> {
     // The `%pair` intrinsic nodes — the canonical immutable aggregate-store sites.
     // (Together with `alloc_region[site] == dst` below, this uniquely selects a
@@ -138,7 +141,7 @@ pub(crate) fn compute_merges(
         //     (the child still dies within it) but is the deferred widening — start
         //     narrow with the parent as a genuine LOCAL owner (the discarded /
         //     together-consumed nested literal), widen cut by cut
-        //     (docs/impl/region/merging.md § Merging).
+        //     (docs/impl/region/merging.md).
         if returned_regions.contains(&child)
             || returned_regions.contains(&parent)
             || !holder_non_escaping(child)
@@ -150,7 +153,7 @@ pub(crate) fn compute_merges(
         //     drop point (the shared region's `DecrefRegion` at the parent's
         //     `decref_point`) must not precede the child's own last *direct* use.
         //     Decided STRUCTURALLY over the scope tree, not by `ord` magnitude
-        //     (region/merging.md § Merging, condition 6). `EmitMode::Merge`
+        //     (docs/impl/region/merging.md, condition 6). `EmitMode::Merge`
         //     waives the loop-enclosure clause: gates 1+4 make the child reachable
         //     only through the parent (containment), so a loop rebuilding the parent
         //     rebuilds the only path to the child — an in-loop nested literal still
