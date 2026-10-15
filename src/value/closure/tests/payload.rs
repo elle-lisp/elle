@@ -24,7 +24,7 @@ fn built(bytes: usize, arity: Arity, fill: impl FnOnce(CodeBuilder) -> CodeBuild
 /// search, so an unsorted table would answer wrongly rather than slowly.
 #[test]
 fn the_location_table_is_ascending_and_answers_by_offset() {
-    let mut map = LocationMap::new();
+    let mut map = LocationMap::default();
     map.insert(40, SourceLoc::new("b.lisp", 4, 1));
     map.insert(10, SourceLoc::new("a.lisp", 1, 2));
     map.insert(30, SourceLoc::new("a.lisp", 3, 3));
@@ -56,7 +56,7 @@ fn the_location_table_is_ascending_and_answers_by_offset() {
 /// a file must share one region string, not carry a copy each.
 #[test]
 fn file_names_are_interned_once_per_payload() {
-    let mut map = LocationMap::new();
+    let mut map = LocationMap::default();
     map.insert(10, SourceLoc::new("same.lisp", 1, 1));
     map.insert(20, SourceLoc::new("same.lisp", 2, 1));
     map.insert(30, SourceLoc::new("other.lisp", 3, 1));
@@ -81,7 +81,7 @@ fn file_names_are_interned_once_per_payload() {
 /// label must not depend on which entry the builder happened to visit first.
 #[test]
 fn the_display_label_is_the_smallest_offset_location() {
-    let mut map = LocationMap::new();
+    let mut map = LocationMap::default();
     map.insert(99, SourceLoc::new("late.lisp", 9, 9));
     map.insert(7, SourceLoc::new("early.lisp", 1, 1));
 

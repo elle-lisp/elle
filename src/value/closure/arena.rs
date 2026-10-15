@@ -148,7 +148,7 @@ impl PayloadParts {
             signal: Signal::silent(),
             capture_params_mask: 0,
             capture_locals_mask: CaptureMask::empty(),
-            location_map: LocationMap::new(),
+            location_map: LocationMap::default(),
             lir: None,
             doc: None,
             origin: None,

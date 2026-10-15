@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! Compiled bytecode: the instruction bytes, the constant pool, and the
 //! emit/patch surface the emitter writes through.
 //!
@@ -58,7 +58,7 @@ impl Bytecode {
         Bytecode {
             instructions: Vec::new(),
             constants: Vec::new(),
-            location_map: LocationMap::new(),
+            location_map: LocationMap::default(),
             signal: crate::signals::Signal::silent(),
             signal_projection: None,
             children: Vec::new(),
