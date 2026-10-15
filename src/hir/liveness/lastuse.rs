@@ -11,7 +11,7 @@ use builder::LastUseBuilder;
 
 /// Each node's effective last use: the node after which the value it produced
 /// is read no more.
-pub type LastUse = HashMap<HirId, HirId>;
+pub type LastUse = rustc_hash::FxHashMap<HirId, HirId>;
 
 /// Compute per-HirId last-use: for each value-producing HirId, the HirId
 /// at which its value is last referenced.

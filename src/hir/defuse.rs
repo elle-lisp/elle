@@ -11,16 +11,14 @@
 use super::binding::Binding;
 use super::expr::{Hir, HirId, HirKind};
 
-use std::collections::HashMap;
-
 /// The node that defines each binding.
-pub type DefSites = HashMap<Binding, HirId>;
+pub type DefSites = rustc_hash::FxHashMap<Binding, HirId>;
 
 /// The nodes that read each binding, in walk order.
-pub type Uses = HashMap<Binding, Vec<HirId>>;
+pub type Uses = rustc_hash::FxHashMap<Binding, Vec<HirId>>;
 
 /// What each node's value is made from.
-pub type ValueOrigins = HashMap<HirId, ValueOrigin>;
+pub type ValueOrigins = rustc_hash::FxHashMap<HirId, ValueOrigin>;
 
 /// What a result-position expression produces.
 #[derive(Debug, Clone, PartialEq, Eq)]
