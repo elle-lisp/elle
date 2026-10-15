@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-14
 //! Pins `compute_order`, the structural execution order every liveness decision compares, and the `BitSet` it runs on.
 //!
 //! docs/impl/region/anchors.md
@@ -110,6 +110,63 @@ fn compute_order_indexes_parameterize_key() {
     );
 }
 
+/// A node's interval `[low, index]` holds exactly its subtree. The expected
+/// subtree comes from a walk of its own, so the test does not read the
+/// interval back from the code that built it. The counter-factual: a `low`
+/// taken from the node's own index alone holds no descendant, and one taken
+/// from the parent's `low` also holds an earlier sibling.
+#[test]
+fn an_interval_holds_exactly_the_subtree() {
+    let hir = hir_of(
+        "(defn f [xs]
+           (var acc 0)
+           (def g (fn [y] (+ y 1)))
+           (each x in xs
+             (let [h (fn [] (g x))]
+               (if (> x 1) (assign acc (+ acc (h))) (assign acc acc))))
+           acc)
+         (f [1 2 3])",
+    );
+    let order = compute_order(&hir);
+
+    fn ids(h: &Hir, out: &mut Vec<HirId>) {
+        out.push(h.id);
+        h.for_each_child(|c| ids(c, out));
+    }
+    fn subtrees(h: &Hir, out: &mut Vec<(HirId, Vec<HirId>)>) {
+        let mut below = Vec::new();
+        ids(h, &mut below);
+        out.push((h.id, below));
+        h.for_each_child(|c| subtrees(c, out));
+    }
+    let mut all = Vec::new();
+    ids(&hir, &mut all);
+    let mut nodes = Vec::new();
+    subtrees(&hir, &mut nodes);
+    assert!(
+        nodes.len() > 20,
+        "the tree is large enough to mean something"
+    );
+
+    for (n, below) in &nodes {
+        let low = order.low(n).expect("every node has a low");
+        let top = order[n];
+        assert!(low <= top, "@{}: low {low} above index {top}", n.0);
+        for x in &all {
+            let held = (low..=top).contains(&order[x]);
+            assert_eq!(
+                held,
+                below.contains(x),
+                "@{} [{low}, {top}] and @{} at {}: the interval must hold \
+                 exactly the subtree",
+                n.0,
+                x.0,
+                order[x],
+            );
+        }
+    }
+}
+
 #[test]
 fn test_bitset_basic() {
     let mut bs = BitSet::new(128);
@@ -164,7 +221,7 @@ fn compute_order_call_func_follows_args() {
            ((get z :g) ((get z :f) \"\")))",
     );
     let order = compute_order(&hir);
-    fn check(h: &Hir, order: &HashMap<HirId, u32>, checked: &mut usize) {
+    fn check(h: &Hir, order: &Order, checked: &mut usize) {
         if let HirKind::Call { func, args, .. } = &h.kind {
             for a in args {
                 assert!(
