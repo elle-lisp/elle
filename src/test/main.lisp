@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-06
+(elle/epoch 15)
+# audited: 2026-10-15
 ## elle test — the command line, the store it opens, and the run it drives.
 ## docs/test-cli.md
 ##
@@ -272,6 +272,10 @@
               (get ident :key) (get ident :pid) (get ident :build)])
 (def run-id (last-rowid conn))
 
+# The run's wall time starts at its insert and ends at its completion stamp,
+# so it covers every file and nothing of the summary (docs/test-store.md).
+(def run-t0 (clock/monotonic))
+
 # What the runner's own heap reads before the first file. Every later reading
 # is taken at a file boundary and charged to the file that boundary closes
 # (docs/test-gauges.md).
@@ -328,12 +332,13 @@
 (def ntimeout (count-status conn run-id :timeout))
 (def nbad-readings (count-gating-readings conn run-id))
 
-# Counters and finished_at land in ONE statement: the completion stamp. A run
-# row without it was killed mid-flight and reads as truncated everywhere
-# (docs/test-runner.md).
+# Counters, the wall time and finished_at land in ONE statement: the completion
+# stamp. A run row without it was killed mid-flight and reads as truncated
+# everywhere (docs/test-runner.md).
 (sqlite:exec conn
-             "UPDATE run SET n_pass = ?1, n_fail = ?2, n_skip = ?3, n_diverge = ?4, n_timeout = ?5, finished_at = datetime('now') WHERE id = ?6"
-             [npass nfail nskip ndiverge ntimeout run-id])
+             "UPDATE run SET n_pass = ?1, n_fail = ?2, n_skip = ?3, n_diverge = ?4, n_timeout = ?5, wall_ms = ?6, finished_at = datetime('now') WHERE id = ?7"
+             [npass nfail nskip ndiverge ntimeout
+              (integer (* 1000 (- (clock/monotonic) run-t0))) run-id])
 # Always render the run: the tally, plus every problem row with its reason — so
 # you read results here, not by hand-writing SQLite (use --query to drill in).
 (print-summary conn run-id)

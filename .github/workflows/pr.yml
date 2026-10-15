@@ -138,8 +138,7 @@ jobs:
         run: ./target/release/elle demos/docgen/generate.lisp
 
   # The default build and its rig: the language suite as a user runs it, then
-  # the implementation suite on the rig and both suites under the eager profile
-  # (docs/testing.md).
+  # each pass of the rig, one step each (docs/analysis/ci.md).
   default:
     name: Default Build Tests
     needs: [changes, qa]
@@ -172,6 +171,12 @@ jobs:
         run: make smoke-lang
       - name: make smoke-impl
         run: make smoke-impl
+      - name: make smoke-eager
+        run: make smoke-eager
+      - name: make smoke-producers
+        run: make smoke-producers
+      - name: make smoke-charge
+        run: make smoke-charge
       - name: Upload the session store
         if: always()
         uses: actions/upload-artifact@v4
@@ -295,6 +300,10 @@ jobs:
         run: make elle-pool
       - name: make smoke-pool
         run: make smoke-pool
+      - name: make smoke-pool-impl
+        run: make smoke-pool-impl
+      - name: make smoke-pool-producers
+        run: make smoke-pool-producers
       - name: Upload the session store
         if: always()
         uses: actions/upload-artifact@v4
@@ -358,6 +367,10 @@ jobs:
         run: make doctest ELLE=./target/release/elle-mlir
       - name: make smoke-mlir
         run: make smoke-mlir
+      - name: make smoke-mlir-impl
+        run: make smoke-mlir-impl
+      - name: make smoke-mlir-producers
+        run: make smoke-mlir-producers
       - name: Upload the session store
         if: always()
         uses: actions/upload-artifact@v4
@@ -382,7 +395,8 @@ jobs:
       # The wasm tier carries no production workloads (docs/impl/wasm.md,
       # docs/impl/memory.md), so its suites do not gate PRs. What must stay
       # green anyway: the feature compiles, and the full-module tier boots.
-      # Restore `make smoke-wasm` here when the tier is brought back up.
+      # Restore `make smoke-wasm`, `smoke-wasm-impl` and `smoke-wasm-full` here,
+      # one step each, when the tier is brought back up.
       - name: make check-wasm
         run: make check-wasm
 
@@ -484,6 +498,12 @@ jobs:
         run: make smoke-lang
       - name: make smoke-impl
         run: make smoke-impl
+      - name: make smoke-eager
+        run: make smoke-eager
+      - name: make smoke-producers
+        run: make smoke-producers
+      - name: make smoke-charge
+        run: make smoke-charge
       - name: make embedding
         run: make embedding
       - name: make semver-check
@@ -635,18 +655,26 @@ jobs:
         run: make doctest
       - name: make smoke-lang
         run: make smoke-lang
+      - name: make smoke-impl
+        run: make smoke-impl
+      - name: make smoke-eager
+        run: make smoke-eager
+      - name: make smoke-producers
+        run: make smoke-producers
+      - name: make smoke-charge
+        run: make smoke-charge
+      - name: make embedding
+        run: make embedding
+      - name: make semver-check
+        run: make semver-check
       # The scrub profile runs the language suite on the rig with each released
       # page zeroed: this runner is where stale reads surface as wrong-typed
       # values, wedges and segfaults, on the pool backend a Mac runs. Scrub makes
       # the first stale read panic at the deref naming its site instead of
       # failing minutes later somewhere unrelated. One memset per freed page.
       # The panic itself needs CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS, set above.
-      - name: make smoke-impl, the language suite also under the scrub profile
-        run: make smoke-impl IMPL_PROFILES=tests/impl/profiles/scrub.toml
-      - name: make embedding
-        run: make embedding
-      - name: make semver-check
-        run: make semver-check
+      - name: make smoke-scrub
+        run: make smoke-scrub
       - name: Upload the session store
         if: always()
         uses: actions/upload-artifact@v4

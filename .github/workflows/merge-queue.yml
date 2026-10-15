@@ -23,8 +23,8 @@ jobs:
       # lets the upload below name it too — the default sits under HOME, which
       # moves with the runner image. See docs/analysis/ci.md.
       ELLE_STATE: ${{ github.workspace }}/target/elle-state
-      # `make smoke` starts with `make qa`, whose clippy and rustdoc build every
-      # feature, the MLIR tier among them. The PR's `qa` job sets the same three.
+      # `make qa`'s clippy and rustdoc build every feature, the MLIR tier among
+      # them. The PR's `qa` job sets the same three.
       MLIR_SYS_220_PREFIX: /usr/lib/llvm-22
       TABLEGEN_220_PREFIX: /usr/lib/llvm-22
       LIBCLANG_PATH: /usr/lib/llvm-22/lib
@@ -50,8 +50,27 @@ jobs:
           sudo systemctl start redis-server
       - name: Build the release binary and its rig
         run: cargo build --release -p elle -p elle-rig
-      - name: QA, then smoke tests
-        run: make smoke
+      # `make smoke`, one step per pass, so a red step names the pass that
+      # failed and each step's time is one pass's (docs/analysis/ci.md). The
+      # passes are `SMOKE_PASSES`, in order, after `make qa`.
+      - name: QA
+        run: make qa
+      - name: Language suite
+        run: make smoke-lang
+      - name: Implementation suite (rig)
+        run: make smoke-impl
+      - name: Both suites, eager JIT (rig)
+        run: make smoke-eager
+      - name: Producers (rig)
+        run: make smoke-producers
+      - name: Charge per file (rig)
+        run: make smoke-charge
+      - name: Doctests
+        run: make doctest
+      - name: Embedding
+        run: make embedding
+      - name: Library surfaces
+        run: make semver-check
       # Pass or fail: a red queue run is the one whose store a reader wants,
       # and the machine goes away with it. `elle test --import` merges the
       # artifact into local history (docs/test-store.md).
