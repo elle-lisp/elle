@@ -10,25 +10,32 @@ use std::sync::{Arc, OnceLock};
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
-/// Default cache directory.
-///
-/// Resolution order:
-/// 1. `ELLE_CACHE` env var (empty string = no caching)
-/// 2. `$TMPDIR/elle-cache`
-/// 3. `$TMP/elle-cache`
-/// 4. No caching
+/// The cache directory a process takes when no `--cache=` names one
+/// (docs/config.md).
 fn default_cache_dir() -> Option<String> {
     cache_dir_from(|name| std::env::var(name).ok(), &std::env::temp_dir())
 }
 
 /// The default cache directory, reading variables through `var` and taking
-/// `temp` as the platform temp directory.
-fn cache_dir_from(var: impl Fn(&str) -> Option<String>, _temp: &std::path::Path) -> Option<String> {
+/// `temp` as the platform temp directory: `ELLE_CACHE`, then
+/// `$XDG_CACHE_HOME/elle`, then `$HOME/.cache/elle`, then `temp/elle-cache`.
+///
+/// `None` only for an empty `ELLE_CACHE`. Every other empty variable counts as
+/// unset, so a lookup always ends at a directory.
+fn cache_dir_from(var: impl Fn(&str) -> Option<String>, temp: &std::path::Path) -> Option<String> {
+    use std::path::Path;
     if let Some(v) = var("ELLE_CACHE") {
         return if v.is_empty() { None } else { Some(v) };
     }
-    let base = var("TMPDIR").or_else(|| var("TMP"))?;
-    Some(format!("{}/elle-cache", base))
+    let set = |name| var(name).filter(|v| !v.is_empty());
+    let dir = if let Some(xdg) = set("XDG_CACHE_HOME") {
+        Path::new(&xdg).join("elle")
+    } else if let Some(home) = set("HOME") {
+        Path::new(&home).join(".cache").join("elle")
+    } else {
+        temp.join("elle-cache")
+    };
+    Some(dir.to_string_lossy().into_owned())
 }
 
 /// The defaults a read before [`init`] answers from. A separate cell, so

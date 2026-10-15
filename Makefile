@@ -629,10 +629,12 @@ qa: prose audit agents-check crosscheck  ## The PR gate's QA job, locally (~2min
 	cargo test --workspace --doc
 
 
+# The integration and rig tests build the `ci` profile, as the Rust Tests jobs
+# do (docs/analysis/ci.md).
 test: smoke  ## smoke (qa first), then the Rust unit, integration and rig tests
 	cargo test --workspace --lib --all-features
-	cargo test --test '*' -- --skip property
-	cargo test -p elle-rig
+	cargo test --test '*' --profile ci -- --skip property
+	cargo test -p elle-rig --profile ci
 
 # Compile the arms a Linux gate never reaches. There are two of them, and the
 # workflow checks both — so this target checks both, or a branch discovers the
@@ -670,7 +672,7 @@ clean:  ## Remove build artifacts and generated docs
 	rm -f docs/pipeline.svg
 
 space:  ## Reclaim disk: drop cargo intermediates, keep built executables
-	rm -rf target/{debug,release}/{deps,build,incremental,.fingerprint,examples}
+	rm -rf target/{debug,release,ci}/{deps,build,incremental,.fingerprint,examples}
 
 # ── Help ────────────────────────────────────────────────────────────
 

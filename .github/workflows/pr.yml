@@ -314,6 +314,8 @@ jobs:
             target/elle-state/cas
           retention-days: 14
 
+  # The Rust suite, under the `ci` profile: the dev profile with the workspace
+  # optimized. The test thread count is the runner's (docs/analysis/ci.md).
   tests-combined:
     name: Rust Tests
     needs: [changes, qa]
@@ -321,7 +323,6 @@ jobs:
     if: needs.changes.outputs.source == 'true'
     env:
       PROPTEST_CASES: 16
-      RUST_TEST_THREADS: 2
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -329,13 +330,13 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - name: Run integration tests
-        run: cargo test --test '*' -- --skip property
+        run: cargo test --test '*' --profile ci -- --skip property
       # `--test '*'` runs the root package's tests alone; the rig is a workspace
       # crate with tests of its own (rig/overview.md).
       - name: Run the rig's tests
-        run: cargo test -p elle-rig
+        run: cargo test -p elle-rig --profile ci
       - name: Run property tests
-        run: "cargo test --test lib property::"
+        run: "cargo test --test lib --profile ci property::"
 
   mlir:
     name: MLIR Tests
@@ -521,7 +522,7 @@ jobs:
   # The Rust half of the AArch64 tier, mirroring the x86_64 `tests-combined`
   # job: `cargo test` builds and runs everything it needs, so this job installs
   # no packages and never invokes the Makefile. Its cache key is its own — it
-  # fills the target directory with dev-profile artifacts, where `aarch64`
+  # fills the target directory with `ci`-profile artifacts, where `aarch64`
   # fills one with release artifacts.
   aarch64-tests:
     name: AArch64 Rust Tests
@@ -530,7 +531,6 @@ jobs:
     if: needs.changes.outputs.source == 'true'
     env:
       PROPTEST_CASES: 8
-      RUST_TEST_THREADS: 2
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -540,13 +540,13 @@ jobs:
         with:
           shared-key: aarch64-tests
       - name: Run integration tests
-        run: cargo test --test '*' -- --skip property
+        run: cargo test --test '*' --profile ci -- --skip property
       # `--test '*'` runs the root package's tests alone; the rig is a workspace
       # crate with tests of its own (rig/overview.md).
       - name: Run the rig's tests
-        run: cargo test -p elle-rig
+        run: cargo test -p elle-rig --profile ci
       - name: Run property tests
-        run: "cargo test --test lib property::"
+        run: "cargo test --test lib --profile ci property::"
 
   aarch64-noffi:
     name: AArch64 No-Features
@@ -708,7 +708,7 @@ jobs:
 
   # The Rust half of the macOS tier. It skips the clippy gate and the Makefile
   # targets that `macos` above owns, and keeps its own cache key: `cargo test`
-  # fills the target directory with dev-profile artifacts, where `macos` fills
+  # fills the target directory with `ci`-profile artifacts, where `macos` fills
   # one with release artifacts.
   macos-tests:
     name: macOS Rust Tests
@@ -717,7 +717,6 @@ jobs:
     if: needs.changes.outputs.source == 'true'
     env:
       PROPTEST_CASES: 8
-      RUST_TEST_THREADS: 2
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -735,17 +734,18 @@ jobs:
       - name: Install zstd
         run: brew install zstd
       - name: Run integration tests
-        run: cargo test --test '*' -- --skip property
+        run: cargo test --test '*' --profile ci -- --skip property
       # `--test '*'` runs the root package's tests alone; the rig is a workspace
       # crate with tests of its own (rig/overview.md).
       - name: Run the rig's tests
-        run: cargo test -p elle-rig
+        run: cargo test -p elle-rig --profile ci
       - name: Run property tests
-        run: "cargo test --test lib property::"
+        run: "cargo test --test lib --profile ci property::"
       # Same argument as the `macos` job's copy: a test whose elle subprocess
       # dies on a signal reports an exit status and nothing else, and the
-      # kernel's report is the only stack. The dev profile keeps its symbols,
-      # so this job needs no CARGO_PROFILE_RELEASE_STRIP to read the frames.
+      # kernel's report is the only stack. The `ci` profile keeps the dev
+      # profile's symbols, so this job needs no CARGO_PROFILE_RELEASE_STRIP to
+      # read the frames.
       - name: Crash reports
         if: failure()
         run: |
