@@ -75,9 +75,9 @@
 //!
 //! This pass sees only the regions the **branch-arm release window** declined
 //! (`analyze/decref.rs`, docs/impl/region/window.md). Where that window applies it moves the
-//! region's single `decref_point` out of the arms entirely, so `arm_of_d` below
-//! finds nothing and neither route fires — one anchored release replaces the
-//! per-arm ones. The two partition the obligation: the window answers "does this
+//! region's single `decref_point` out of the arms entirely, so no arm's slice of
+//! the release index below holds it and neither route fires — one anchored
+//! release replaces the per-arm ones. The two partition the obligation: the window answers "does this
 //! frame hold the region alone" with escape and needs no count argument;
 //! everything escape cannot clear arrives here, where the count argument is the
 //! retain.
@@ -191,164 +191,175 @@ pub(super) fn compute_branch_compensation(
     let mut tail: HashMap<HirId, Vec<Region>> = HashMap::new();
     let mut container_release_sites: std::collections::HashSet<HirId> =
         std::collections::HashSet::new();
-    for (&r, uses) in &p.uses {
-        if uses.is_empty() || p.excluded(info, r) {
-            continue;
-        }
-        let Some(d) = info.region_data.get(&r).map(|rd| ord(rd.decref_point)) else {
-            continue;
-        };
-        let anchors = match p.anchors.get(&r) {
-            Some(a) => a,
-            None => continue,
-        };
-        for br in &branches {
-            // Which arm holds the decref_point? (The leak is real only when the
-            // release lands inside an arm — an extension that hoisted it out, or a
-            // post-dominating point, leaves `d` outside every arm here.)
-            let arm_of_d = br.arms.iter().position(|a| d >= a.lo && d <= a.hi);
-            let Some(di) = arm_of_d else { continue };
-            // live-in: every anchor is outside C's subtree.
-            let live_in = anchors
-                .iter()
-                .all(|&a| ord(a) < br.node_lo || ord(a) > br.node_hi);
-            if !live_in {
-                continue;
-            }
-            // loop-invariant guard: no loop encloses C but not r's allocation.
-            // Asked of the ALLOCATION sites where the region has any — a holder
-            // defined outside the loop (a cell the loop stores into) says
-            // nothing about where the value is born, and the per-iteration
-            // release is correct exactly when every birth is per-iteration. A
-            // region with no recorded allocation (an env cell's phantom, a
-            // parameter's content) falls back to the anchor set, which is then
-            // the only birth reading there is.
-            let allocs = p.allocs.get(&r).unwrap_or(anchors);
-            let crosses_loop = loops.iter().any(|l| {
-                let c_in = l.lo <= br.node_lo && br.node_hi <= l.hi;
-                c_in && allocs.iter().any(|&s| ord(s) < l.lo || ord(s) > l.hi)
-            });
-            if crosses_loop {
-                continue;
-            }
-            for (ai, a) in br.arms.iter().enumerate() {
-                let (arm_id, arm_lo, arm_hi) = (a.id, a.lo, a.hi);
-                if ai == di {
-                    continue; // the arm whose in-arm decref is the global decref_point
-                }
-                // An env cell routes by its own reading of the same question, since
-                // its `tail` release carries no same-node retain to stand in for the
-                // placement (module doc). The candidates are what the global
-                // `decref_point` is a max over, restricted to this arm: each in-arm
-                // use's consuming node, plus the reader of each in-arm uncounted
-                // opcode read that borrows out of the cell. A candidate landing
-                // OUTSIDE the arm is not a point this arm can host — ANF may float a
-                // consumer past its own arm — and the arm is then declined by both
-                // routes rather than approximated: the `head` release would precede
-                // the very use that candidate came from.
-                if info.cell_release_regions.contains(&r) {
-                    let in_arm = |id: HirId| {
-                        let o = ord(id);
-                        o >= arm_lo && o <= arm_hi
-                    };
-                    let candidates: Vec<HirId> = uses
-                        .iter()
-                        .copied()
-                        .filter(|&u| in_arm(u))
-                        .chain(
-                            p.reads
-                                .get(&r)
-                                .into_iter()
-                                .flatten()
-                                .copied()
-                                .filter(|&rd| in_arm(rd)),
-                        )
-                        .map(|n| last_use.get(&n).copied().unwrap_or(n))
-                        .collect();
-                    if candidates.is_empty() {
-                        // Dead sibling arm: the head release, as below.
-                        head.entry(arm_id).or_default().push(r);
-                    } else if p.single_holder(r)
-                        && candidates.iter().all(|&n| in_arm(n) && ord(n) != d)
-                    {
-                        let node = candidates
-                            .into_iter()
-                            .max_by_key(|&n| ord(n))
-                            .expect("a non-empty candidate set has a max");
-                        // Once per execution of the arm, never once per
-                        // iteration of a loop inside it.
-                        let node = arm_post_loop_placement(node, &loops, arm_lo, arm_hi, order)
-                            .unwrap_or(node);
-                        tail.entry(node).or_default().push(r);
-                    }
+    // Every region the pass may compensate, by the post-order index of its
+    // `decref_point`. The leak is real only when the release lands inside an arm —
+    // an extension that hoisted it out, or a post-dominating point, leaves it
+    // outside every arm. A branch's arms are disjoint, so the regions released
+    // inside one arm are one slice of this index, and a branch reads only those.
+    let mut by_d: Vec<(u32, Region)> = p
+        .uses
+        .iter()
+        .filter(|&(&r, uses)| {
+            !uses.is_empty() && !p.excluded(info, r) && p.anchors.contains_key(&r)
+        })
+        .filter_map(|(&r, _)| info.region_data.get(&r).map(|rd| (ord(rd.decref_point), r)))
+        .collect();
+    by_d.sort_unstable_by_key(|&(d, _)| d);
+    for br in &branches {
+        for (di, arm_of_d) in br.arms.iter().enumerate() {
+            let start = by_d.partition_point(|&(d, _)| d < arm_of_d.lo);
+            let end = by_d.partition_point(|&(d, _)| d <= arm_of_d.hi);
+            for &(d, r) in &by_d[start..end] {
+                // The arm that holds the release is the first arm whose interval
+                // does, which is this one unless an earlier arm's interval
+                // holds the release too.
+                if br.arms[..di].iter().any(|a| d >= a.lo && d <= a.hi) {
                     continue;
                 }
-                // r's last-use nodes for uses within this sibling arm. Both the use
-                // AND its consuming (last-use) node must lie inside the arm: the
-                // decref is emitted at the node (through `emit_decrefs_for`), so a
-                // node OUTSIDE the arm would not be mutually exclusive with the
-                // `decref_point` arm — a double-free on the shared path. (ANF can
-                // float a use's consumer past its own arm; filter on the node, not
-                // just the use.)
-                let arm_last_use = uses
+                let uses = &p.uses[&r];
+                let anchors = &p.anchors[&r];
+                // live-in: every anchor is outside C's subtree.
+                let live_in = anchors
                     .iter()
-                    .filter(|&&u| {
-                        let o = ord(u);
-                        o >= arm_lo && o <= arm_hi
-                    })
-                    .map(|&u| last_use.get(&u).copied().unwrap_or(u))
-                    .filter(|&n| {
-                        let o = ord(n);
-                        o >= arm_lo && o <= arm_hi && o != d
-                    })
-                    .max_by_key(|&n| ord(n));
-                match arm_last_use {
-                    // Used sibling arm: release after its last use of r. Keyed on
-                    // the last-use node, emitted through `emit_decrefs_for` (which
-                    // fires AFTER that node), never at the arm head (which precedes
-                    // the use). `d` is in a different arm, so `node != d`.
-                    //
-                    // Restricted to `call_result_regions` — a per-call value whose
-                    // release is the value-route (`LoadLocal` slot + `DecrefValueRegion`
-                    // off the slot that still holds it in this arm), the exact target
-                    // class (a fresh string / struct stored in each arm). A
-                    // non-call-result region releases by static slot
-                    // (`DecrefRegion`, which CLEARS the activation slot), whose
-                    // cross-arm interaction is not value-route-safe; such a region
-                    // keeps the conservative single-`decref_point` baseline
-                    // (leak-preserving, never a double-free).
-                    //
-                    // An env cell never reaches here — it routed above, off the box's
-                    // own holders rather than off a retain (module doc).
-                    Some(node)
-                        if info.call_result_regions.contains(&r)
-                            && p.single_holder(r)
-                            && funding.admits(r, node) =>
-                    {
-                        // Record the site for the lowerer's ReturnValue suppression
-                        // ONLY when the funnel is a `-mut` PASS-THROUGH (the result IS
-                        // this container, whose reference the caller already owns). An
-                        // immutable funnel's container is compensated above but its FRESH
-                        // result keeps its ReturnValue retain — the caller's move/reassign
-                        // reference, whose suppression would over-free a result stored
-                        // into a reassigned slot. Pinned by `set-add`/`struct-put`/
-                        // `del-wrapper`/`native-tail-put-*` and the container-compensation
-                        // guardfree fixture.
-                        if funding.container_at(r, node)
-                            && info
-                                .funnel_passthrough_sites
-                                .get(&node)
-                                .is_some_and(|s| s.contains(&r))
-                        {
-                            container_release_sites.insert(node);
-                        }
-                        tail.entry(node).or_default().push(r)
+                    .all(|&a| ord(a) < br.node_lo || ord(a) > br.node_hi);
+                if !live_in {
+                    continue;
+                }
+                // loop-invariant guard: no loop encloses C but not r's allocation.
+                // Asked of the ALLOCATION sites where the region has any — a holder
+                // defined outside the loop (a cell the loop stores into) says
+                // nothing about where the value is born, and the per-iteration
+                // release is correct exactly when every birth is per-iteration. A
+                // region with no recorded allocation (an env cell's phantom, a
+                // parameter's content) falls back to the anchor set, which is then
+                // the only birth reading there is.
+                let allocs = p.allocs.get(&r).unwrap_or(anchors);
+                let crosses_loop = loops.iter().any(|l| {
+                    let c_in = l.lo <= br.node_lo && br.node_hi <= l.hi;
+                    c_in && allocs.iter().any(|&s| ord(s) < l.lo || ord(s) > l.hi)
+                });
+                if crosses_loop {
+                    continue;
+                }
+                for (ai, a) in br.arms.iter().enumerate() {
+                    let (arm_id, arm_lo, arm_hi) = (a.id, a.lo, a.hi);
+                    if ai == di {
+                        continue; // the arm whose in-arm decref is the global decref_point
                     }
-                    Some(_) => {}
-                    // Dead sibling arm (no use at all): head release. Admitted on
-                    // every arm of every branch kind — the arm creates no reference
-                    // to `r`, so the callee's own is the only one in existence here.
-                    None => head.entry(arm_id).or_default().push(r),
+                    // An env cell routes by its own reading of the same question, since
+                    // its `tail` release carries no same-node retain to stand in for the
+                    // placement (module doc). The candidates are what the global
+                    // `decref_point` is a max over, restricted to this arm: each in-arm
+                    // use's consuming node, plus the reader of each in-arm uncounted
+                    // opcode read that borrows out of the cell. A candidate landing
+                    // OUTSIDE the arm is not a point this arm can host — ANF may float a
+                    // consumer past its own arm — and the arm is then declined by both
+                    // routes rather than approximated: the `head` release would precede
+                    // the very use that candidate came from.
+                    if info.cell_release_regions.contains(&r) {
+                        let in_arm = |id: HirId| {
+                            let o = ord(id);
+                            o >= arm_lo && o <= arm_hi
+                        };
+                        let candidates: Vec<HirId> = uses
+                            .iter()
+                            .copied()
+                            .filter(|&u| in_arm(u))
+                            .chain(
+                                p.reads
+                                    .get(&r)
+                                    .into_iter()
+                                    .flatten()
+                                    .copied()
+                                    .filter(|&rd| in_arm(rd)),
+                            )
+                            .map(|n| last_use.get(&n).copied().unwrap_or(n))
+                            .collect();
+                        if candidates.is_empty() {
+                            // Dead sibling arm: the head release, as below.
+                            head.entry(arm_id).or_default().push(r);
+                        } else if p.single_holder(r)
+                            && candidates.iter().all(|&n| in_arm(n) && ord(n) != d)
+                        {
+                            let node = candidates
+                                .into_iter()
+                                .max_by_key(|&n| ord(n))
+                                .expect("a non-empty candidate set has a max");
+                            // Once per execution of the arm, never once per
+                            // iteration of a loop inside it.
+                            let node = arm_post_loop_placement(node, &loops, arm_lo, arm_hi, order)
+                                .unwrap_or(node);
+                            tail.entry(node).or_default().push(r);
+                        }
+                        continue;
+                    }
+                    // r's last-use nodes for uses within this sibling arm. Both the use
+                    // AND its consuming (last-use) node must lie inside the arm: the
+                    // decref is emitted at the node (through `emit_decrefs_for`), so a
+                    // node OUTSIDE the arm would not be mutually exclusive with the
+                    // `decref_point` arm — a double-free on the shared path. (ANF can
+                    // float a use's consumer past its own arm; filter on the node, not
+                    // just the use.)
+                    let arm_last_use = uses
+                        .iter()
+                        .filter(|&&u| {
+                            let o = ord(u);
+                            o >= arm_lo && o <= arm_hi
+                        })
+                        .map(|&u| last_use.get(&u).copied().unwrap_or(u))
+                        .filter(|&n| {
+                            let o = ord(n);
+                            o >= arm_lo && o <= arm_hi && o != d
+                        })
+                        .max_by_key(|&n| ord(n));
+                    match arm_last_use {
+                        // Used sibling arm: release after its last use of r. Keyed on
+                        // the last-use node, emitted through `emit_decrefs_for` (which
+                        // fires AFTER that node), never at the arm head (which precedes
+                        // the use). `d` is in a different arm, so `node != d`.
+                        //
+                        // Restricted to `call_result_regions` — a per-call value whose
+                        // release is the value-route (`LoadLocal` slot + `DecrefValueRegion`
+                        // off the slot that still holds it in this arm), the exact target
+                        // class (a fresh string / struct stored in each arm). A
+                        // non-call-result region releases by static slot
+                        // (`DecrefRegion`, which CLEARS the activation slot), whose
+                        // cross-arm interaction is not value-route-safe; such a region
+                        // keeps the conservative single-`decref_point` baseline
+                        // (leak-preserving, never a double-free).
+                        //
+                        // An env cell never reaches here — it routed above, off the box's
+                        // own holders rather than off a retain (module doc).
+                        Some(node)
+                            if info.call_result_regions.contains(&r)
+                                && p.single_holder(r)
+                                && funding.admits(r, node) =>
+                        {
+                            // Record the site for the lowerer's ReturnValue suppression
+                            // ONLY when the funnel is a `-mut` PASS-THROUGH (the result IS
+                            // this container, whose reference the caller already owns). An
+                            // immutable funnel's container is compensated above but its FRESH
+                            // result keeps its ReturnValue retain — the caller's move/reassign
+                            // reference, whose suppression would over-free a result stored
+                            // into a reassigned slot. Pinned by `set-add`/`struct-put`/
+                            // `del-wrapper`/`native-tail-put-*` and the container-compensation
+                            // guardfree fixture.
+                            if funding.container_at(r, node)
+                                && info
+                                    .funnel_passthrough_sites
+                                    .get(&node)
+                                    .is_some_and(|s| s.contains(&r))
+                            {
+                                container_release_sites.insert(node);
+                            }
+                            tail.entry(node).or_default().push(r)
+                        }
+                        Some(_) => {}
+                        // Dead sibling arm (no use at all): head release. Admitted on
+                        // every arm of every branch kind — the arm creates no reference
+                        // to `r`, so the callee's own is the only one in existence here.
+                        None => head.entry(arm_id).or_default().push(r),
+                    }
                 }
             }
         }
