@@ -1,6 +1,6 @@
 # CI and Triage
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-10-15 -->
 
 CI structure, local workflow, and failure diagnosis.
 
@@ -18,26 +18,27 @@ set when the diff moves only the submodule pointer.
 | Detect Changes | ubuntu | Sets `source` from the changed paths | — |
 | QA | ubuntu | The prose checks, then `cargo fmt`, clippy, the macOS cross-check, rustdoc | — |
 | Documentation Build | ubuntu | `make docs` and the Elle doc site, minus the publish | — |
-| Default Build Tests | ubuntu | `doctest`, `smoke-lang`, `smoke-impl` — the default build and its rig | — |
+| Default Build Tests | ubuntu | `doctest`, then each suite pass of the default build and its rig, one step each | — |
 | No-JIT Build Tests | ubuntu | `smoke-nojit` — the language suite on the interpreter alone | — |
 | Boot Image Tests | ubuntu | `smoke-boot-image` — the language suite booted from an image | — |
 | Rust Tests | ubuntu | Integration tests, then property tests | 16 |
-| Thread-Pool I/O Tests | ubuntu | `smoke-pool` — both suites on a build without `uring` and its rig | — |
-| MLIR Tests | ubuntu | `doctest`, `smoke-mlir` — the language suite on the MLIR build, the implementation suite on its rig | — |
+| Thread-Pool I/O Tests | ubuntu | `smoke-pool`, `smoke-pool-impl`, `smoke-pool-producers` — both suites on a build without `uring` and its rig | — |
+| MLIR Tests | ubuntu | `doctest`, `smoke-mlir`, `smoke-mlir-impl`, `smoke-mlir-producers` — the language suite on the MLIR build, the implementation suite on its rig | — |
 | WASM Build | ubuntu | `check-wasm` — the feature compiles, the tier boots | — |
 | Plugin Tests | ubuntu | Builds the `plugins/` submodule, asserts its artifacts, runs its corpus | — |
 | AArch64 Smoke | ubuntu-arm | Each pass of `make smoke`, one step each | — |
 | AArch64 Rust Tests | ubuntu-arm | Integration tests, then property tests | 8 |
 | AArch64 No-Features | ubuntu-arm | `smoke-noffi` — the language suite on a build with no features, under the default build's runner | — |
 | Android Cross-Check | ubuntu | `cargo check` for `aarch64-linux-android` | — |
-| macOS Smoke | macos | clippy, then each pass of `make smoke`, one step each, with the scrub profile | — |
+| macOS Smoke | macos | clippy, then each pass of `make smoke`, one step each, then `smoke-scrub` | — |
 | macOS Rust Tests | macos | Integration tests, then property tests | 8 |
 | All Checks Passed | ubuntu | The one status check branch protection requires | — |
 
 The merge queue ([merge-queue.yml](../../.github/workflows/merge-queue.yml))
-runs `make smoke` alone, with `PROPTEST_CASES=1`. `make smoke` starts with
-`make qa`, so the queue runs QA on the merged result, which no pull-request job
-sees. Its toolchain therefore carries what the `QA` job's does: rustfmt,
+runs `make smoke`, split into steps: `make qa`, then each pass `SMOKE_PASSES`
+names, with `PROPTEST_CASES=1`. So the queue runs QA on the merged result,
+which no pull-request job sees. Its toolchain therefore carries what the `QA`
+job's does: rustfmt,
 clippy, both cross-check targets and LLVM 22. The weekly schedule
 ([weekly.yml](../../.github/workflows/weekly.yml)) runs the whole workspace
 suite on beta and nightly at 128 cases, plus a dependency audit.
@@ -79,7 +80,7 @@ build and each file's child on the no-features binary, `ELLE_NOFFI`, through
 
 The implementation suite runs where the default build runs: `Default Build
 Tests`, `AArch64 Smoke` and `macOS Smoke` each build the rig beside `elle`, and
-each runs `smoke-lang` and `smoke-impl`. `Thread-Pool I/O Tests` runs the
+each runs every suite pass of `make smoke`. `Thread-Pool I/O Tests` runs the
 implementation suite on the pool build's rig too, because some resources of this
 implementation exist only on the pool: a file that counts worker threads reads
 zero on io_uring and gates itself there. `MLIR Tests` runs it on the MLIR
@@ -102,10 +103,32 @@ platform spends and roughly halves the wall clock, which is the trade the merge
 gate cares about.
 
 A Smoke job runs each pass of `make smoke` as a step of its own, not `make
-smoke` itself, so a failed step names the pass that failed. The Makefile names
-the passes once, in `SMOKE_PASSES`. Each pass runs once. A `make smoke` step
-after the job's `doctest` step would run the doctests twice. A Smoke job runs
-no `make qa`: the `QA` job is the QA gate for every platform.
+smoke` itself (§ One step, one pass). The Makefile names the passes once, in
+`SMOKE_PASSES`. Each pass runs once. A `make smoke` step after the job's
+`doctest` step would run the doctests twice. A Smoke job runs no `make qa`: the
+`QA` job is the QA gate for every platform.
+
+### One step, one pass
+
+A make target runs at most one `elle test` pass, and a job runs each such
+target as a step of its own. So a step's time is one pass's time, a red step
+names the pass that failed, and a pass's log starts where its step starts.
+
+A pass deals its files into batches and runs them side by side, and each batch
+prints its own summary. When one target ran four passes, one step held every
+batch summary of all four. The step's time was their sum, and the boundary
+between two passes was one `===` line among hundreds. So each pass is a target
+of its own, and [the rig](../../rig/overview.md) names the ones that run on a
+rig.
+
+What each batch prints is [testing](../testing.md)'s, and what it records
+leaves in the store the job uploads (§ A corpus job's results leave the
+runner).
+
+[workflows.rs](../../tests/integration/workflows.rs) is the standing check
+that no step runs a target of more than one pass, and
+[suites.rs](../../tests/integration/suites.rs) that every suite target runs
+exactly one.
 
 Each job caches under its own key — set explicitly with
 `Swatinem/rust-cache`'s `shared-key` where a job wants a stable one, and taken
@@ -422,7 +445,7 @@ make test
 |---------|---------|--------------|-----|
 | **Documentation site** | `Documentation Build` fails on `./target/release/elle demos/docgen/generate.lisp` | Using `nil?` to check end-of-list. Lists terminate with `EMPTY_LIST`, not `NIL`. | Use `empty?` for list termination checks. Check [generate.lisp](../../demos/docgen/generate.lisp) and [lib](../../demos/docgen/lib). |
 | **Language suite fails** | A corpus job fails `smoke-lang` | A language test answers differently on that build. | Run `./target/release/elle tests/lang/failing.lisp` on the same build. Check the assertion message; a file that passes on one build and fails on another has found a defect in the build that fails. |
-| **Implementation suite fails** | `Default Build Tests` fails `smoke-impl` | An implementation test on the rig, or the language suite under a rig profile. | Run `./target/release/elle-rig tests/impl/failing.lisp`; the file's sidecar sets its mode. For a profile failure, pass the same `--profile`. |
+| **Implementation suite fails** | `Default Build Tests` fails `smoke-impl` or `smoke-eager` | An implementation test on the rig, or a suite file under the eager profile. | Run `./target/release/elle-rig tests/impl/failing.lisp`; the file's sidecar sets its mode. For a profile failure, pass the same `--profile`. |
 | **Boot from an image fails** | `Boot Image Tests` fails and every other corpus job passes | The corpus file answers differently under a hydrated boot, or the image no longer hydrates. | Run `make smoke-boot-image` locally. Read the hydration proof first: a target that fails there never reached the corpus. |
 | **Property tests fail** | `Rust Tests` fails with a shrunk counterexample | The shrunk output shows the *minimal* failing input. | Reproduce with the exact shrunk values as a unit test. Check `proptest-regressions/` files. |
 | **Integration tests fail** | `Rust Tests` fails | Tests use `eval_source()` which runs the full pipeline. | Read the assertion. Check whether the test expects `.unwrap()` (success) or `.is_err()` (error). |

@@ -1,6 +1,6 @@
 # Agent-First Test Runner
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-15 -->
 
 How a run executes: each file compiled, isolated, gated, run on every tier its
 build carries, and recorded honestly.
@@ -460,10 +460,11 @@ enough at each boundary that truncation is self-evident:
   written with the row.
 - **Per result:** rows land incrementally (autocommit), so everything up to the
   kill survives.
-- **At completion only:** the `n_*` tallies are aggregated and `finished_at` is
-  stamped, in the same statement. A run row with `finished_at IS NULL` has
-  therefore not reached its end: its stored counters read zero because they were
-  never written, not because nothing failed.
+- **At completion only:** the `n_*` tallies are aggregated, the run's
+  `wall_ms` is written, and `finished_at` is stamped, in the same statement. A
+  run row with `finished_at IS NULL` has therefore not reached its end: its
+  stored counters read zero because they were never written, not because
+  nothing failed.
 
   `finished_at IS NULL` means "did not finish", which covers *died* and *still
   running* alike. One session DB serves every checkout on the machine, and two
@@ -483,8 +484,10 @@ very next run instead of reading as an all-pass mystery.
 
 A run still in flight is labelled as that: `--summary` reads `STILL RUNNING
 (pid P) — results for N of M selected files so far`, and the next invocation
-prints one line naming the pid instead of the kill warning. Both warnings name
-the worktree of the run they describe, and both summaries name the run's
-commit, so a tally read from a log says which code it describes.
+says nothing about it. The batches of one suite pass share the store, so every
+batch but the first starts beside a live sibling, and a line about each one is
+noise in every CI log. The kill warning names the worktree of the run it
+describes, and both summaries name the run's commit, so a tally read from a log
+says which code it describes.
 Pinned by [truncation.rs](../tests/integration/truncation.rs) and
 [run_identity.rs](../tests/integration/run_identity.rs).

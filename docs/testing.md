@@ -1,6 +1,6 @@
 # Testing
 
-<!-- audited: 2026-10-13 -->
+<!-- audited: 2026-10-15 -->
 
 The two test suites, what each one claims, the builds that run them, and how a
 run is read.
@@ -29,121 +29,63 @@ specification is [docs/test-runner.md](test-runner.md), with
 | Command | What it does |
 |---------|--------------|
 | `make smoke-lang` | The language suite |
-| `make smoke-impl` | The implementation suite on the rig, then both suites under each rig profile |
-| `make smoke` | `make qa`, then both suites, the doctests, the embedding demo, and the surface gate |
+| `make smoke-impl` | The implementation suite on the rig |
+| `make smoke-eager` | Both suites on the rig, every function compiled on its first call |
+| `make smoke-producers` | The files a ledger names, in-process on the rig |
+| `make smoke-charge` | Each file's charge on the runner's heap |
+| `make smoke` | `make qa`, then the five passes above, the doctests, the embedding demo, and the surface gate |
 | `make test` | `make smoke`, then the Rust unit and integration tests |
 | `elle test tests/lang/*.lisp` | Run those files in-process; print a summary; gate on exit code |
 | `elle-rig tests/impl/NAME.lisp` | Run one implementation test with its sidecar |
 | `elle test --summary` | Re-print the last run's summary (no re-run) |
 | `elle test --query 'SQL'` | Run ad-hoc SQL |
 
-A run prints a tally, a line per failure, and what it cost the runner's own
-heap and the heaps its test code ran on — all to stderr:
+A run prints its run line, its tally, and a line per problem, all to stderr:
 
 ```
-elle test · run 7 of 7 · commit a1b2c3d (dirty)
+elle test · run 7 of 7 · commit a1b2c3d (dirty) · 41.2 s
 184 pass · 6 skip · 1 fail · 0 diverge · 1 timeout
 2 problems (query the DB for full detail):
   fail     tests/lang/foo.lisp:12  [process]  expected 42, got 41
   timeout  tests/lang/subprocess.lisp  [process]  child exceeded the 60000 ms budget
-runner heap · objects +9021 · regions +28104 · pages +112 · region-frees +40211 · …
-  objects +4510  regions +14052  pages +56  region-frees +20105  …  tests/lang/a.lisp
-test heap · objects +3 · regions +2 · pages +610 · region-frees +598 · adopts +2 · …
-  objects +2  regions +1  pages +400  region-frees +392  adopts +2  …  tests/lang/keep.lisp
 ```
 
-The commit line names the code the tally describes. A run outside a
-repository prints the run number alone. A run under `elle-rig test` ends the
-line with its build, `· build jit-uring-linux-x86_64`, the build its readings
-were judged as ([docs/ratchet.md](ratchet.md)). The `runner heap` and `test heap`
-blocks are the run's account of what each file cost, on every gauge
-([docs/test-gauges.md](test-gauges.md)).
+The run line names the code the tally describes, and ends with the run's wall
+time. A run outside a repository names no commit. A run under `elle-rig test`
+names its build before the time, `· build jit-uring-linux-x86_64`, the build
+its readings were judged as ([docs/ratchet.md](ratchet.md)).
+
+A run that passed prints its run line and its tally, and nothing else. A
+reading that gates adds its lines ([docs/ratchet.md](ratchet.md)). What each
+file cost each heap, and every reading that passed, stay in the store: a suite
+pass prints one summary per batch ([ci](analysis/ci.md)), and lines that report
+nothing wrong, repeated per batch, bury the lines that do.
 
 You read results from the run itself — never by hand-writing SQLite.
 
 ## A build is an implementation
 
-A build carries one optimizing tier and no flag that chooses another
-([config](config.md)). CI builds the default
-(JIT) build, a build with no JIT, a thread-pool I/O build, an MLIR build, a
-build with no features, and the default build on AArch64 and macOS, and each
-runs `make smoke-lang` ([ci](analysis/ci.md)). A file that passes on one build
-and fails on another has found a defect in the build that fails.
-
-The implementation suite runs on the default build and its rig. It adds what
-no build ships: both suites with every function compiled on its first call,
-and on macOS the language suite with each released page scrubbed. It also runs
-on the thread-pool build's rig, where the worker threads it counts exist, and on
-the MLIR build's rig, the one rig that carries the MLIR tier
-([bins](../bins/overview.md)).
+Every build CI makes runs the language suite, and a file that passes on one
+build and fails on another has found a defect in the build that fails.
+[ci](analysis/ci.md) names the builds and the passes each one runs.
 
 ## The agent-first runner (`elle test`)
 
-The runner compiles and runs files in one process, recording every result into
-a **SQLite DB** plus a filesystem CAS for artifacts. The thesis (see
-[docs/test-cli.md](test-cli.md)): *capture everything once; query forever* —
-so an agent issues SQL against the stored run instead of re-running with
-`--dump`/`--trace`.
+The runner compiles each file as a real program, runs it in a worker thread on
+every tier its build carries, and records every result in a SQLite store in
+the state directory ([docs/test-runner.md](test-runner.md),
+[docs/test-store.md](test-store.md)). An agent then queries the stored run
+instead of re-running it ([docs/test-cli.md](test-cli.md)).
 
-- **The suites are the source of truth, in git.** The DB is a derived index
-  living outside the repo, in the state directory: `$ELLE_STATE`, else
-  `$XDG_STATE_HOME/elle`, else `$HOME/.local/state/elle`
-  ([docs/test-store.md](test-store.md)). Run history
-  is a record, so it does not live with the caches a rebuild regenerates.
-  `--db PATH` moves the database, its CAS, and its scratch files together.
-- **The DB tracks all runs.** Each invocation appends a `run` row; `--summary`
-  shows the *latest* run (`run N of M` makes the history visible).
-
-### How a file is run
-
-The unit is the **file**, compiled the way every real Elle program is — Source →
-Reader → … → Bytecode → VM, with whole-module analysis — not `read`+`eval`'d
-form-by-form. [docs/test-runner.md](test-runner.md) names the tiers a file
-runs on.
-
-Test code is untrusted, so each file runs in a **worker thread** with its own VM,
-bounded by the budget its path earned — `--timeout MS` (default 60000), or
-`--wide-timeout MS` for a path `--wide` names
-([docs/test-cli.md](test-cli.md)); a form that never finishes is recorded
-`timeout`. A `(exit)` inside a test is **trapped** (it would otherwise terminate
-the whole run): `exit 0` is recorded `skip`, any other code `fail`. A worker that
-can't host a thunk (an unsendable FFI/fiber capture) falls back to in-process
-execution.
-
-### A file as its own process
-
-`elle test --isolate 'FLAGS'` runs each path as `elle FLAGS PATH`, one child per
-path, recorded on the `process` tier. The child is the runner's own executable,
-so `elle-rig test --isolate ''` runs each path on the rig, which is how the
-implementation suite runs. Each file then starts, runs as a whole program and
-exits, which is the only shape that covers program teardown, and a fault in
-one file kills one child rather than the run. `--host PROGRAM` runs each child
-under another program instead.
-
-A child that dies on a signal is a `fail` naming the signal and the run
-continues; an exit code is a `fail` naming the code; a child over its budget
-is killed and recorded `timeout`. Its stdout and stderr become assets either
-way ([docs/test-runner.md](test-runner.md)).
+`--isolate 'FLAGS'` runs each path as its own child, recorded on the `process`
+tier, which is how the implementation suite runs on the rig. A file that
+measures prints one `measure` line per reading, and under `elle-rig test` each
+reading is judged against the file's ledger ([docs/ratchet.md](ratchet.md)).
 
 ```sh
 elle test --isolate '' tests/lang/closures.lisp
 target/release/elle-rig test --isolate '' tests/impl/oracle.lisp
 ```
-
-A file that measures something prints one `measure` line per reading
-([docs/ratchet.md](ratchet.md)). Under `elle-rig test` the runner reads those
-lines out of every captured stdout — a form on each tier, an isolated child —
-judges each against the rows the rig's build holds in the file's ledger, and
-lands one `measurement` row per reading. So a leak rate's history across
-commits is a query rather than scrollback ([docs/test-store.md](test-store.md)).
-A run under `elle test` has no build, and records and judges none of them. Run
-the same file directly and it prints the same lines and judges nothing.
-
-That is how the two dashboards, [oracle.lisp](../tests/impl/oracle.lisp) and
-[plumb.lisp](../tests/impl/plumb.lisp), land their rates. Every file a ledger
-names runs in-process under `elle-rig test`, in a pass of its own beside the
-isolated passes, under the wide budget that `WIDE_FAMILIES` names
-([docs/test-runner.md](test-runner.md) says why the rest stays isolated).
 
 ### Statuses
 
@@ -262,24 +204,6 @@ A **timeout** test is the other case, and it keeps its absolute bound. There
 the deadline is the specification: a 50 ms `chan/select` has to return in about
 50 ms, and no ratio can say what that means.
 
-### Per-thread native teardown
-
-An FFI library may register thread-local destructors — libgit2 does, through
-OpenSSL's `pthread_key_create`. If a worker that used such a library `dlclose`d it on
-teardown, glibc would later run the destructor — at worker thread exit — into the
-unmapped code, killing the process with SIGSEGV in `__nptl_deallocate_tsd`.
-
-This is closed by construction: FFI library mappings are owned **process-globally**
-and **never `dlclose`d** ([registry.rs](../src/ffi/registry.rs); the same discipline plugins use),
-so a worker that uses an FFI library and exits is always safe — the destructor runs
-against still-mapped code. No per-worker teardown is required. A program may attach
-an *optional, explicit* ordered teardown to a library with `(ffi/on-unload lib
-"sym")` and run them with `(ffi/run-teardowns)` ([git.lisp](../lib/git.lisp)'s `git:shutdown`, for example);
-these are graceful cleanup the program triggers when its worker threads have
-quiesced, never run automatically and never required for safety. Pinned by
-[ffi_worker.rs](../tests/integration/ffi_worker.rs) (a worker that loads a TLS-destructor fixture and
-exits without teardown exits cleanly).
-
 ## Reading a run
 
 ```sh
@@ -290,25 +214,10 @@ elle test --query \
    JOIN form f ON f.hash = r.form_hash WHERE r.status = 'fail'"
 ```
 
-The schema (`run`, `form`, `result`, `asset`, `measurement`, `gauge`,
-`changed_file`) is documented in
-[docs/test-store.md](test-store.md) (with the v1 implemented-subset
-note — the `run` resource columns are deferred). Each `run` row names the code
-it ran against — commit, dirty flag, tree hash, worktree — and the binary and
-machine that ran it, so a result belongs to something and the killed-run
-warning names the checkout it warns about. Captured stdout/stderr
-live in the CAS at `<db-dir>/cas/<hash>`, referenced by `asset` rows. `--dump`
-artifact capture (the LIR-as-a-hash-lookup path) is currently **omitted** — it
-OOMs the corpus run and does not dedup
-([docs/test-runner.md](test-runner.md)) — so
-today only stdout/stderr assets exist; the LIR of a failing form still needs a
-re-run until that capture is re-enabled.
-
-What a run cost the runner's own heap, and the heaps its test code ran on, is
-recorded per file on every gauge, and the summary names the files that grew
-each heap most. A leak per compiled file used to reach us as an OOM kill and a
-batch size; now it reaches us as a file name and a number
-([docs/test-gauges.md](test-gauges.md)).
+[docs/test-store.md](test-store.md) holds the schema. Each `run` row names the
+code it ran against and the machine that ran it, and each result's stdout and
+stderr sit in the CAS beside the database. What each file cost each heap is a
+`gauge` row on every gauge ([docs/test-gauges.md](test-gauges.md)):
 
 ```sh
 elle test --query \
@@ -318,28 +227,14 @@ elle test --query \
 ```
 
 A form that misses its deadline prints a native backtrace of every thread in
-the runner process to stderr, under `── threads at the deadline ──`. `sys/join`
-abandons a timed-out worker rather than killing it — an OS thread cannot be
-safely killed — so the wedged thread is still parked in whatever call stopped
-it, and this reads its stack while that is still true. It is what separates a
-hang from a slow test, and it is the only account available for a form that
-hangs on one machine and nowhere else: re-running the file cannot stand in for
-it, because the runner puts each form on its own worker thread and a hang that
-needs that thread does not reproduce under a plain run.
+the runner to stderr, under `── threads at the deadline ──`. The runner abandons
+a timed-out worker rather than killing it, so the wedged thread is still parked
+where it stopped. That stack is the only account of a hang that happens on one
+machine alone. The sampler is `sample` on macOS and `eu-stack` on Linux; a box
+with neither prints nothing.
 
-The sampler is `sample` on macOS and `eu-stack` on a Linux box with elfutils. A
-box with neither prints nothing and the run is unaffected; a passing form never
-pays for it.
-
-A run killed mid-flight (OOM, signal) is recorded honestly: its `run` row's
-`finished_at` stays NULL, `--summary` labels it `DID NOT COMPLETE` with the live
-partial tally (computed from `result` rows — the stored counters are written
-only at completion), and the next `elle test` warns about it. An all-pass
-result set from a truncated run is partial coverage, not green
-(see [docs/test-runner.md](test-runner.md)). A run that is still
-working leaves the same NULL, so the views ask whether its process is alive:
-`--summary` then reads `STILL RUNNING (pid P)`, and the next `elle test` prints
-one line naming the pid instead of the kill warning.
+A run that never finished reads as killed or as still running, never as green
+([docs/test-runner.md](test-runner.md)).
 
 ## Correctness the leak and UAF oracles cannot see
 
@@ -390,12 +285,9 @@ see the other, which is why the claim is stated once more over the finished emis
 
 ## The Rust suite
 
-`make test` runs `make smoke`, which starts with `make qa` — `cargo fmt
---check`, the generated indexes, clippy, `make crosscheck`, rustdoc — then
-runs the corpus. `make test` then runs `cargo test --lib` and the integration
-tests. For what kind of Rust test to write and where, see [tests/AGENTS.md](../tests/AGENTS.md) and
-[docs/analysis/testing.md](analysis/testing.md). (`elle test --rust`, which folds
-the cargo suite into the same DB, is specced but not yet implemented.)
+`make test` runs the Rust suite after `make smoke`. For what kind of Rust test
+to write and where, see [tests/AGENTS.md](../tests/AGENTS.md). `elle test
+--rust`, which folds the cargo suite into the same store, is design only.
 
 **Symbol names in assertions.** A name lives in the owning instance's display
 memo, not in a global table ([docs/impl/symbol.md](impl/symbol.md)), and `fmt`
@@ -418,13 +310,5 @@ name needs no table and no formatting at all — use
 
 ## See also
 
-- [docs/spec.md](spec.md) — the two suites, and what the specification holds.
-- [rig/overview.md](../rig/overview.md) — the rig, its sidecars and its profiles.
-- [docs/test-runner.md](test-runner.md) — how a run executes: compilation, isolation, gating, honesty.
-- [docs/test-store.md](test-store.md) — where a run is stored, what it records, and the schema.
-- [docs/test-cli.md](test-cli.md) — why the runner exists, its command line, and what is still design.
 - [docs/test-vision.md](test-vision.md) — the plan that folds every test product into `elle test`.
-- [docs/ratchet.md](ratchet.md) — the design that puts every pinned measurement in one ledger `elle test` judges.
-- [tests/AGENTS.md](../tests/AGENTS.md) — Rust test categories, helpers, fixtures.
-- [docs/analysis/testing.md](analysis/testing.md) — the decision tree.
 - [docs/threads.md](threads.md) — worker threads, `os/spawn`, the scheduler the runner ships into workers.

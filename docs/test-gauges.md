@@ -1,6 +1,6 @@
 # The test runner's heap gauges
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-15 -->
 
 What each file of an `elle test` run cost the runner's own heap, and the heaps its test code ran on.
 
@@ -46,8 +46,9 @@ in this order:
 The first three say how much a heap holds. The rest are the reclamation
 counters, which say how its regions end; [diagnostics](impl/region/diagnostics.md)
 defines each one. The runner keeps the list once, as `heap-gauges` in
-[store.lisp](../src/test/store.lisp). The sampling, the summary and the growers
-query all read that list, so a gauge added there arrives everywhere.
+[store.lisp](../src/test/store.lisp). The runner's own sampling and each
+worker's readings both take that list, so a gauge added there arrives in every
+row.
 
 ## Two heaps
 
@@ -172,7 +173,7 @@ has installed rather than the file: [zmq.lisp](../tests/lang/zmq.lisp) leaves 3 
 libzmq is absent than where its tests run. A file that ran on any tier is
 charged.
 
-`make smoke-impl` runs `--charge` on the rig, in a pass of its own, over the
+`make smoke-charge` runs `--charge` on the rig, in a pass of its own, over the
 language suite and the implementation files with no sidecar. A file with a
 sidecar needs a mode that an in-process run cannot give it. The pass leaves
 out the producers, which have their own pass, and
@@ -188,22 +189,10 @@ too: it carries a reading and the verdict it earned, and a chained delta
 follows what ran before the file, so no row could judge it. A file's charge is
 the reading that can be judged.
 
-## The summary names the top growers
+## Reading the gauges
 
-Every run ends with one block per heap that recorded a row. A block gives the
-run's total on every gauge, then the files that grew that heap most, ranked by
-regions:
-
-```
-runner heap · objects +9021 · regions +28104 · pages +112 · region-frees +40211 · …
-  objects +4510  regions +14052  pages +56  region-frees +20105  …  tests/lang/a.lisp
-test heap · objects +3 · regions +2 · pages +610 · region-frees +598 · adopts +2 · …
-  objects +2  regions +1  pages +400  region-frees +392  adopts +2  …  tests/lang/keep.lisp
-```
-
-Each line carries every gauge in list order; the example cuts them short. The
-list is a reading aid. Which file, on which commit, in which run, on which heap
-is a query over `gauge`:
+No summary prints a gauge ([testing](testing.md)). Which file, on which
+commit, in which run, on which heap is a query over `gauge`:
 
 ```sql
 -- Which files cost the runner the most heap, across every run recorded.

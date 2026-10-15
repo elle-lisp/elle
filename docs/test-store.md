@@ -1,6 +1,6 @@
 # The test runner store
 
-<!-- audited: 2026-10-04 -->
+<!-- audited: 2026-10-15 -->
 
 Where `elle test` keeps a run, what every run and result records, and the
 queries that read them back.
@@ -152,10 +152,11 @@ tree is dirty, a tree hash, the worktree the run ran in, the elle build
 version/profile/host, the build's key (`build`: what the rig's `(elle/build)`
 answers when the runner runs as `elle-rig test`, and NULL otherwise; a ledger
 row belongs to one build, [ratchet](ratchet.md)), the runner's process id, the
-boot fingerprint (§ The boot fingerprint), the full `argv`, and where its
-results ran (`tiers`, [test-runner](test-runner.md)). The design adds wall time, peak RSS and
-user/sys CPU (`getrusage`), and the working-tree files that differ from `HEAD`
-with their content hashes; none of them is captured yet (§ Schema).
+boot fingerprint (§ The boot fingerprint), the full `argv`, where its results
+ran (`tiers`, [test-runner](test-runner.md)), and its wall time from insert to
+completion (`wall_ms`). The design adds peak RSS and user/sys CPU
+(`getrusage`), and the working-tree files that differ from `HEAD` with their
+content hashes; none of them is captured yet (§ Schema).
 
 The code-state columns are what makes a result belong to something. Without
 them a row says a form failed and cannot say against which commit, on which
@@ -313,25 +314,14 @@ run's build that result printed no reading for, against that result. A result th
 failed already says so, and a gated one skipped rather than fell silent, so
 neither is asked for its rows.
 
-A run that recorded any reading says so, tallied by verdict, and names every
-reading that is neither `ok` nor unjudged:
-
-```
-412 readings · 409 ok · 1 regression · 1 stale · 1 missing
-  regression  tests/impl/oracle.lisp  [process]  reduce  objects  1.31 ±0.12 objects/op  pinned 1.002
-  stale  tests/impl/plumb.lisp  [process]  ev-abort  regions  0.0 ±0.03 regions/op  pinned 1
-  missing  tests/impl/oracle.lisp  [process]  fiber-nested  regions
-```
-
-The rest is a query. The summary is a reading aid, and every number in it comes
-out of the table.
+What the summary prints about readings is [ratchet](ratchet.md)'s. Every
+number in it comes out of this table, and the rest is a query.
 
 ## The heap gauges
 
 The runner records what each file cost its own heap and the heaps its test code
 ran on, one `gauge` row per file, gauge and heap. [test-gauges](test-gauges.md)
-owns the gauges, the two heaps, and the summary block that names the top
-growers.
+owns the gauges, the two heaps, and the queries that read them.
 
 ## Schema
 
@@ -350,7 +340,8 @@ CREATE TABLE run (                  -- one row per `elle test` invocation
   n_selected INT,                   -- files + -e forms planned; written at insert
   n_pass INT, n_fail INT, n_skip INT, n_timeout INT,  -- aggregated at completion only
   n_diverge INT,                    -- forms whose tiers disagreed; aggregated at completion
-  wall_ms INT, max_rss_kb INT, cpu_user_ms INT, cpu_sys_ms INT);   -- resource usage; not created yet
+  wall_ms INT,                      -- insert to completion; written at completion
+  max_rss_kb INT, cpu_user_ms INT, cpu_sys_ms INT);   -- resource usage; not created yet
 
 CREATE TABLE changed_file (         -- working tree vs HEAD at run time
   run_id INT REFERENCES run(id), path TEXT, status TEXT, blob_hash TEXT);
@@ -405,13 +396,12 @@ The runner creates `result`, `asset`, `measurement` and `gauge` with the
 columns above, and a session DB written before `result.max_rss_kb` existed
 gains it by `ALTER TABLE`. `run`, `form` and `changed_file` are subsets:
 
-- `run` carries every column above except the resource ones
-  (`wall_ms`/`max_rss_kb`/`cpu_user_ms`/`cpu_sys_ms`), which are deferred. So a
-  resource query is design-only until they land; a `SELECT` of a deferred
-  column errors with `no such column`. A session DB written before the
-  code-state, fingerprint, key, pid or build columns existed gains them by
-  `ALTER TABLE`, with NULL for every run recorded until then. `gauge` gains
-  `heap` the same way.
+- `run` carries every column above except `max_rss_kb`, `cpu_user_ms` and
+  `cpu_sys_ms`, which are deferred. A `SELECT` of a deferred column errors with
+  `no such column`. A session DB written before the code-state, fingerprint,
+  key, pid, build or `wall_ms` columns existed gains them by `ALTER TABLE`,
+  with NULL for every run recorded until then. `gauge` gains `heap` the same
+  way.
 - `form` is written without `line`, `col` and `session`: a form's location and
   an ad-hoc form's session id are deferred, and each reads NULL. The three
   analysis columns are written at scan time (§ What analysis says about a

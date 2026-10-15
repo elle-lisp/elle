@@ -1,6 +1,6 @@
 # The implementation suite
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-15 -->
 
 Elle programs that check this implementation: its gauges, its tiers, its crashes
 and its mechanisms, each run on the rig.
@@ -72,13 +72,10 @@ the gauges they read.
 `make smoke-impl` runs every file here as its own child of `elle-rig test
 --isolate ''`, so each verdict lands in the session store, and each reading is
 judged as the rig's build. The files `tests/ledger` names are the exception:
-they run in-process under `elle-rig test`, in a pass of their own
-([test-runner](../../docs/test-runner.md)). It then runs the suites once more
-under each profile the pass names, less those files. `make smoke-pool` runs the
-files here again on the thread-pool build's rig, `make smoke-mlir` on the MLIR
-build's rig, and `make smoke-wasm` on the `wasm` build's rig. A file that reads
-a resource only one build has gates
-itself on the others. A new file is picked up by being here; there is nothing
-to register.
+`make smoke-producers` runs them in-process under `elle-rig test`
+([test-runner](../../docs/test-runner.md)). [The rig](../../rig/overview.md)
+names the targets that run the suite under a profile and on the other builds'
+rigs. A file that reads a resource only one build has gates itself on the
+others. A new file is picked up by being here; there is nothing to register.
 
 One file at a time, `elle-rig tests/impl/NAME.lisp` runs it with its sidecar.
