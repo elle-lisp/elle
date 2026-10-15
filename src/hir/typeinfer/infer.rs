@@ -34,6 +34,9 @@ pub(super) use collect::*;
 pub(super) use facts::*;
 pub(super) use subject::*;
 
+/// The type the ascent holds for each binding.
+pub(crate) type BindingTypes = HashMap<Binding, TyId>;
+
 /// The inference pass: the program facts one compilation unit yields, and the
 /// type environment the ascent rewrites over them.
 pub(super) struct Infer<'a> {
@@ -62,11 +65,11 @@ pub(super) struct Infer<'a> {
     pub(super) typeof_aliases: HashMap<Binding, Binding>,
 
     // ── the environment: what a pass reads, and what it leaves behind ──
-    binding_types: HashMap<Binding, TyId>,
+    binding_types: BindingTypes,
     pub(super) hir_types: NodeTypes,
     /// Each lambda binding's body type, as the last pass computed it. Every
     /// call reads its result here, a self-recursive call included.
-    lambda_body_type: HashMap<Binding, TyId>,
+    lambda_body_type: BindingTypes,
     pub(super) binding_min_length: HashMap<Binding, usize>,
     /// The join of the values each open block's `break`s carry, which the
     /// block joins with its tail when it closes.
@@ -74,7 +77,7 @@ pub(super) struct Infer<'a> {
     /// This pass's call-site contributions to parameter types, rebuilt every
     /// pass. At pass end the ascent replaces each contributed parameter's type
     /// with its join here, so a call site's Top counts.
-    param_joins: HashMap<Binding, TyId>,
+    param_joins: BindingTypes,
     /// The entries the ascent gave up on. An estimate still moving when the
     /// pass budget ran out is held at Top for the rest of the run, so nothing
     /// reads a proof out of it.
@@ -100,7 +103,7 @@ impl<'a> Infer<'a> {
         // The start is not a proof, and a never-called function's parameters
         // never leave it. `Infer::settle` raises every Bottom left in the node
         // map to Top before the map leaves the pass.
-        let mut binding_types: HashMap<Binding, TyId> = HashMap::new();
+        let mut binding_types = BindingTypes::default();
         for (b, sig) in &lambda_params {
             if value_used.contains(b) {
                 continue;
@@ -122,10 +125,10 @@ impl<'a> Infer<'a> {
             typeof_aliases,
             binding_types,
             hir_types: NodeTypes::default(),
-            lambda_body_type: HashMap::new(),
+            lambda_body_type: BindingTypes::default(),
             binding_min_length: HashMap::new(),
             break_types: HashMap::new(),
-            param_joins: HashMap::new(),
+            param_joins: BindingTypes::default(),
             widened: HashSet::new(),
         }
     }

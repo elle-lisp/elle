@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! The declared floor, and the guard facts a branching form applies to the binding types and then restores.
 //!
 //! docs/impl/typeinfer.md
@@ -74,7 +74,7 @@ pub(crate) struct Narrowed {
 pub(crate) fn narrow_type(
     binding: Binding,
     ty: TyId,
-    binding_types: &mut HashMap<Binding, TyId>,
+    binding_types: &mut BindingTypes,
 ) -> Narrowed {
     let prior = binding_types.insert(binding, ty);
     Narrowed {
@@ -89,7 +89,7 @@ pub(crate) fn narrow_type(
 /// contract checker's flow, not a type — skipped here.
 pub(crate) fn apply_type_facts(
     facts: &[super::super::guard::Fact],
-    binding_types: &mut HashMap<Binding, TyId>,
+    binding_types: &mut BindingTypes,
     interner: &TypeInterner,
 ) -> Vec<Narrowed> {
     let mut saved = Vec::new();
@@ -118,7 +118,7 @@ pub(crate) fn apply_type_facts(
 /// scope, so it takes the join of the prior type and what the write left.
 pub(crate) fn restore_type_facts(
     saved: Vec<Narrowed>,
-    binding_types: &mut HashMap<Binding, TyId>,
+    binding_types: &mut BindingTypes,
     interner: &TypeInterner,
 ) {
     for n in saved.into_iter().rev() {

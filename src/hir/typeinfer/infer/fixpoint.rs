@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! The ascent: passes over the whole tree until the type environment stops moving.
 //!
 //! docs/impl/typeinfer.md
@@ -172,8 +172,8 @@ impl Infer<'_> {
 /// only ever inserted or refined, so a key the later snapshot lacks is not a
 /// move.
 fn moved<'m>(
-    before: &'m HashMap<Binding, TyId>,
-    after: &'m HashMap<Binding, TyId>,
+    before: &'m BindingTypes,
+    after: &'m BindingTypes,
 ) -> impl Iterator<Item = Binding> + 'm {
     after
         .iter()
