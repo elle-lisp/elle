@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! Def-use chains over HIR, and the origin of the value each node produces.
 //!
 //! One forward walk over the tree builds three tables:
@@ -12,6 +12,15 @@ use super::binding::Binding;
 use super::expr::{Hir, HirId, HirKind};
 
 use std::collections::HashMap;
+
+/// The node that defines each binding.
+pub type DefSites = HashMap<Binding, HirId>;
+
+/// The nodes that read each binding, in walk order.
+pub type Uses = HashMap<Binding, Vec<HirId>>;
+
+/// What each node's value is made from.
+pub type ValueOrigins = HashMap<HirId, ValueOrigin>;
 
 /// What a result-position expression produces.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,17 +64,17 @@ impl ValueOrigin {
 
 /// Def-use chain builder. Accumulates results during the walk.
 pub(crate) struct DefUseBuilder {
-    pub def_site: HashMap<Binding, HirId>,
-    pub uses: HashMap<Binding, Vec<HirId>>,
-    pub value_origin: HashMap<HirId, ValueOrigin>,
+    pub def_site: DefSites,
+    pub uses: Uses,
+    pub value_origin: ValueOrigins,
 }
 
 impl DefUseBuilder {
     pub fn new() -> Self {
         DefUseBuilder {
-            def_site: HashMap::new(),
-            uses: HashMap::new(),
-            value_origin: HashMap::new(),
+            def_site: DefSites::default(),
+            uses: Uses::default(),
+            value_origin: ValueOrigins::default(),
         }
     }
 

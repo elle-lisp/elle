@@ -43,7 +43,7 @@ pub(super) fn pin_break_skipped_releases(
     info: &mut RegionInfo,
     hir: &Hir,
     order: &Order,
-    last_use: &HashMap<HirId, HirId>,
+    last_use: &LastUse,
     break_skip_blocks: &[(HirId, Vec<HirId>)],
 ) {
     if break_skip_blocks.is_empty() {

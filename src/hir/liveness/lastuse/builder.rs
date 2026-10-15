@@ -12,7 +12,7 @@ use super::super::*;
 /// `last_use`, `binding_init`, `propagated_inits` and `capture_loop_ext` off
 /// a finished builder.
 pub(super) struct LastUseBuilder<'a> {
-    pub(super) last_use: HashMap<HirId, HirId>,
+    pub(super) last_use: LastUse,
     /// See `LastUseInfo::capture_loop_ext`.
     pub(super) capture_loop_ext: HashMap<Binding, HirId>,
     /// For each binding, the HirIds of its initializers (a Let/Letrec/Loop

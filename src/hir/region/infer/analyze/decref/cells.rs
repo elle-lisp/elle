@@ -17,7 +17,7 @@ pub(super) struct CellPlacement<'a> {
     pub(super) du: &'a DefUseBuilder,
     /// Post-order indices and subtree intervals, so containment is an interval test.
     pub(super) order: &'a Order,
-    pub(super) last_use: &'a HashMap<HirId, HirId>,
+    pub(super) last_use: &'a LastUse,
     pub(super) iter_scopes: &'a [(HirId, u32, u32)],
     pub(super) branches: &'a [super::super::super::arms::ArmSet],
     pub(super) binder_init_sites: &'a HashMap<Binding, Option<HirId>>,

@@ -9,6 +9,10 @@ use super::*;
 mod builder;
 use builder::LastUseBuilder;
 
+/// Each node's effective last use: the node after which the value it produced
+/// is read no more.
+pub type LastUse = HashMap<HirId, HirId>;
+
 /// Compute per-HirId last-use: for each value-producing HirId, the HirId
 /// at which its value is last referenced.
 ///
@@ -26,13 +30,9 @@ use builder::LastUseBuilder;
 ///
 /// Region inference gives every region exactly one `decref_point`, and this
 /// mapping supplies it for allocation HirIds.
-pub fn compute_last_use(
-    hir: &Hir,
-    uses: &HashMap<Binding, Vec<HirId>>,
-    order: &Order,
-) -> LastUseInfo {
+pub fn compute_last_use(hir: &Hir, uses: &crate::hir::defuse::Uses, order: &Order) -> LastUseInfo {
     let mut builder = LastUseBuilder {
-        last_use: HashMap::new(),
+        last_use: LastUse::default(),
         capture_loop_ext: HashMap::new(),
         binding_init: HashMap::new(),
         binding_scope: HashMap::new(),
@@ -80,7 +80,7 @@ pub fn compute_last_use(
     // sequential defs, that is, the stdlib.
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     let compute_chosen = |binding: &Binding,
-                          last_use: &HashMap<HirId, HirId>,
+                          last_use: &LastUse,
                           capture_loop_ext: &HashMap<Binding, HirId>|
      -> Option<HirId> {
         let mut max_effective = uses
@@ -191,7 +191,7 @@ pub fn compute_last_use(
 pub struct LastUseInfo {
     /// Per-node effective last-use: a node's HirId → the HirId at which the
     /// value it produced is last used (after which its region may be freed).
-    pub per_node: HashMap<HirId, HirId>,
+    pub per_node: LastUse,
     /// Bindings captured by a lambda created INSIDE an iterative scope while
     /// bound OUTSIDE it → the outermost enclosing iter-scope HirId the binding
     /// must outlive. Such a binding is re-captured every iteration, so its

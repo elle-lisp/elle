@@ -12,7 +12,7 @@ use super::super::arena::BindingArena;
 use super::super::binding::Binding;
 use super::super::defuse::DefUseBuilder;
 use super::super::expr::{Hir, HirId, HirKind};
-use super::super::liveness::{compute_last_use, compute_order, Order};
+use super::super::liveness::{compute_last_use, compute_order, LastUse, Order};
 use super::super::pattern::HirPattern;
 use super::{
     CallClassification, CellStores, Region, RegionData, RegionInfo, RegionStats, RestCollection,

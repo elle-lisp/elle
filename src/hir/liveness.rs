@@ -161,7 +161,7 @@ impl LivenessAnalyzer {
 
 /// Build the binding index from def-use information.
 pub(crate) fn build_binding_index(
-    def_site: &HashMap<Binding, super::expr::HirId>,
+    def_site: &super::defuse::DefSites,
 ) -> (HashMap<Binding, usize>, Vec<Binding>) {
     let mut index_binding: Vec<Binding> = def_site.keys().copied().collect();
     index_binding.sort_by_key(|b| b.0);

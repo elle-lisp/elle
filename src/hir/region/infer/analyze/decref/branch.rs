@@ -77,7 +77,7 @@ pub(super) fn pin_branch_arm_releases(
     hir: &Hir,
     du: &DefUseBuilder,
     order: &Order,
-    last_use: &HashMap<HirId, HirId>,
+    last_use: &LastUse,
     inference_binding_regions: &HashMap<Binding, Vec<Region>>,
     frame_replacing_tail_calls: &rustc_hash::FxHashSet<HirId>,
 ) {

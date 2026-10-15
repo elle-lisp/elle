@@ -163,7 +163,7 @@ pub(super) fn compute_branch_compensation(
     du: &DefUseBuilder,
     arena: &BindingArena,
     order: &Order,
-    last_use: &HashMap<HirId, HirId>,
+    last_use: &LastUse,
     return_sites: &[(HirId, Vec<Region>)],
     binder_init_sites: &HashMap<crate::hir::binding::Binding, Option<HirId>>,
 ) -> BranchComp {
