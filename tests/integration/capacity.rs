@@ -1,5 +1,5 @@
-// audited: 2026-09-29
-// The corpus sizes a CI runner is given: processes at once, and files per `elle test` process.
+// audited: 2026-10-15
+// The sizes a CI runner is given: corpus processes, files per `elle test` process, and Rust test threads.
 //
 // A wrong job count fails no assertion, so nothing but this file catches one.
 //
@@ -16,7 +16,7 @@
 //
 // docs/analysis/ci.md
 
-use crate::common::make_var;
+use crate::common::{make_var, workflow_files};
 use std::fs;
 use std::path::PathBuf;
 
@@ -92,6 +92,31 @@ fn the_local_default_stays_a_constant() {
         "the local default job count changed to {jobs}. That is a choice about \
          development boxes, not about CI runners — make it deliberately and \
          update docs/analysis/ci.md § \"Runner capacity\", which records 16."
+    );
+}
+
+// The Rust test harness runs one test per processor when `RUST_TEST_THREADS`
+// is unset, so the count tracks the runner as the corpus job count does. The
+// counter-factual is the constant 2 the Rust Tests jobs set: it fit the
+// two-processor runners it was chosen on, and it leaves half of a
+// four-processor runner to the processes the tests start.
+#[test]
+fn no_workflow_sets_a_rust_test_thread_count() {
+    let pinned: Vec<String> = workflow_files()
+        .into_iter()
+        .flat_map(|(path, text)| {
+            text.lines()
+                .filter(|line| !line.trim_start().starts_with('#'))
+                .filter(|line| line.contains("RUST_TEST_THREADS"))
+                .map(|line| format!("{path}: {}", line.trim()))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert!(
+        pinned.is_empty(),
+        "these workflow lines write a test thread count down instead of reading \
+         it from the runner; see docs/analysis/ci.md § \"Runner capacity\":\n  {}",
+        pinned.join("\n  ")
     );
 }
 

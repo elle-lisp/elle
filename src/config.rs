@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-15
 //! Two configurations: `Config` is set once at startup and read anywhere,
 //! `RuntimeConfig` rides on one VM and a running program may change it.
 //!
@@ -18,12 +18,16 @@ static CONFIG: OnceLock<Config> = OnceLock::new();
 /// 3. `$TMP/elle-cache`
 /// 4. No caching
 fn default_cache_dir() -> Option<String> {
-    if let Ok(v) = std::env::var("ELLE_CACHE") {
+    cache_dir_from(|name| std::env::var(name).ok(), &std::env::temp_dir())
+}
+
+/// The default cache directory, reading variables through `var` and taking
+/// `temp` as the platform temp directory.
+fn cache_dir_from(var: impl Fn(&str) -> Option<String>, _temp: &std::path::Path) -> Option<String> {
+    if let Some(v) = var("ELLE_CACHE") {
         return if v.is_empty() { None } else { Some(v) };
     }
-    let base = std::env::var("TMPDIR")
-        .or_else(|_| std::env::var("TMP"))
-        .ok()?;
+    let base = var("TMPDIR").or_else(|| var("TMP"))?;
     Some(format!("{}/elle-cache", base))
 }
 
@@ -186,9 +190,9 @@ pub struct Config {
     /// Skip stdlib loading entirely (primitives only).
     pub no_stdlib: bool,
 
-    /// Disk cache directory (WASM compilation, future uses).
-    /// `None` = caching disabled (explicit `--cache=""`).
-    /// `Some(path)` = cache at that path.
+    /// The cache directory, beneath which the compiled stdlib, boot images and
+    /// compiled WASM modules live. `None` = caching disabled (`--cache=`, or an
+    /// empty `ELLE_CACHE`).
     pub cache: Option<String>,
 
     /// Where a boot image is read and stored (`--boot-image=`). `None` is the
