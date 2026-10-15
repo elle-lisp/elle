@@ -125,7 +125,7 @@ What each batch prints is [testing](../testing.md)'s, and what it records
 leaves in the store the job uploads (§ A corpus job's results leave the
 runner).
 
-[workflows.rs](../../tests/integration/workflows.rs) is the standing check
+[ci_steps.rs](../../tests/integration/ci_steps.rs) is the standing check
 that no step runs a target of more than one pass, and
 [suites.rs](../../tests/integration/suites.rs) that every suite target runs
 exactly one.
