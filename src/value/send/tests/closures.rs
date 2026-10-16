@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! A closure crosses the send boundary with its LIR, closure-valued constants, frame release tables and rest-list layout.
 //!
 //! docs/threads.md
@@ -217,6 +217,56 @@ fn closure_round_trips_preserving_its_rest_list_layout() {
             closure.template.child(0).rest_list_layout(),
             RestListLayout::OneRegion,
             "a nested lambda's code object crosses beside the closure's, layout \
+             and all"
+        );
+    });
+}
+
+// ── the body fragment crosses the boundary ───────────────────────────
+
+#[test]
+fn closure_round_trips_preserving_its_fragment() {
+    // The fragment is the body a graft reads off the closure's code object
+    // (docs/impl/graft.md). It crosses as the bytes the payload holds, and the
+    // receiver writes them back as they stand; nothing decodes them until a
+    // compile grafts the function. The counter-factual is a bundle that drops
+    // the field: the closure runs, and every call to it in a unit the receiver
+    // compiles stays a call.
+    crate::value::arena::with_test_region(|| {
+        let heap_ptr = crate::value::arena::leaked_test_heap();
+        let child =
+            CodeBuilder::new(Vec::new(), Arity::Exact(1), Vec::new()).fragment(vec![5, 6, 7]);
+        let template = CodeBuilder::new(Vec::new(), Arity::Exact(1), Vec::new())
+            .num_locals(1)
+            .num_params(1)
+            .fragment(vec![1, 2, 3])
+            .children(vec![child]);
+        let val = crate::value::heap::alloc(
+            unsafe { &mut *heap_ptr },
+            HeapObject::Closure {
+                closure: Closure::new(
+                    template.build(unsafe { &mut *heap_ptr }),
+                    crate::value::region_slice::RegionSlice::empty(),
+                    SignalBits::EMPTY,
+                ),
+                traits: Value::NIL,
+            },
+        );
+
+        let bundle = SendBundle::from_value(val, unsafe { &*heap_ptr }, None)
+            .expect("a plain closure is sendable");
+        let restored = into_value_in_region(|ctx| bundle.into_value(ctx, None));
+
+        let closure = restored.as_closure().expect("restored value is a closure");
+        assert_eq!(
+            closure.template.fragment(),
+            &[1u8, 2, 3],
+            "the closure's own fragment crosses by send_closure"
+        );
+        assert_eq!(
+            closure.template.child(0).fragment(),
+            &[5u8, 6, 7],
+            "a nested lambda's code object crosses beside the closure's, fragment \
              and all"
         );
     });

@@ -1,3 +1,8 @@
+// audited: 2026-10-14
+//! Pins the lifetime obligation an adopt subtree's root carries: decided by post-dominance over the scope tree, never by counting.
+//!
+//! docs/impl/region/adopt.md
+
 use super::*;
 
 // ── ownership inference: the lifetime obligation is STRUCTURAL, not numeric ──────
@@ -345,5 +350,77 @@ fn adopt_edges_refuses_captured_value_used_after_closure() {
          got {:?}",
         p.0,
         all_adopts,
+    );
+}
+
+/// The one compiled capture cell a single-captured-binding shape mints, and every
+/// capture adopt the map emits.
+fn sole_cell_and_capture_adopts(
+    info: &RegionInfo,
+    edges: &ownership::AdoptEdges,
+) -> (Region, Vec<(Region, Region)>) {
+    let cells: Vec<Region> = info
+        .begin_cell_regions
+        .values()
+        .flatten()
+        .map(|&(_, r)| r)
+        .collect();
+    assert_eq!(
+        cells.len(),
+        1,
+        "precondition: `v` is the one captured top-level binding; cells={cells:?}",
+    );
+    let adopts: Vec<(Region, Region)> = edges.capture.values().flatten().copied().collect();
+    (cells[0], adopts)
+}
+
+#[test]
+fn cell_routed_release_past_the_root_refuses_the_adopt() {
+    // A top-level `v` captured by `thunk` lives in a compiled cell, and its init is a
+    // call result, so the frame releases that result by value THROUGH the cell's slot:
+    // the release loads the cell and unwraps it (region/adopt.md § "A release routed
+    // through a cell is a read of the cell"). `thunk`'s last use is the spawn, so the
+    // closure's region dies there, while `v`'s routed release lands at the end of the
+    // `(def r …)` statement, past it. A cell adopted into the closure would be freed by
+    // the closure's subtree drop before the routed release unwraps it, so the
+    // obligation refuses the adopt: no capture adopt names the cell.
+    //
+    // Counterfactual: the cell's TIGHT last use is the capture, which the closure's
+    // drop post-dominates, so an obligation that reads only the tight use admits the
+    // cell and emits the adopt. The guardfree witness
+    // tests/impl/region-capture-cell-adopt-uaf.lisp then faults at the unwrap.
+    let (_hir, info, edges) = adopt_edges(
+        "(begin (def v (array 1 2 3)) \
+                (def r (let [thunk (fn [] (first v))] \
+                         (let [h (sys/spawn-vm thunk)] (sys/thread-state h)))))",
+    );
+    let (cell, adopts) = sole_cell_and_capture_adopts(&info, &edges);
+    assert!(
+        !adopts.iter().any(|&(member, _)| member == cell),
+        "the cell r{} is read by a release the closure's drop does not post-dominate, so \
+         it must stay Shared; capture adopts={:?}",
+        cell.0,
+        adopts,
+    );
+}
+
+#[test]
+fn cell_routed_release_under_the_root_keeps_the_adopt() {
+    // The bound is a bound, not a blanket refusal: here `thunk` is a top-level binding
+    // whose last use is `(thunk)`, and `v`'s routed release rides the binding chain to
+    // that same call. The closure's drop post-dominates the routed release, so the
+    // cell is adopted into the closure as before.
+    //
+    // Counterfactual: a rule that refused every cell with a value-routed init would
+    // leave the common `def`-then-capture shape Shared and the refusal above vacuous.
+    let (_hir, info, edges) =
+        adopt_edges("(begin (def v (array 1 2 3)) (def thunk (fn [] (first v))) (thunk))");
+    let (cell, adopts) = sole_cell_and_capture_adopts(&info, &edges);
+    assert!(
+        adopts.iter().any(|&(member, _)| member == cell),
+        "the cell r{} is read by no release past the closure's drop, so it keeps its \
+         capture adopt; capture adopts={:?}",
+        cell.0,
+        adopts,
     );
 }

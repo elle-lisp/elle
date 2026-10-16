@@ -1,6 +1,6 @@
-// audited: 2026-09-28
-//! Pins the naming of an inlined call's result: the call's own region, never the
-//! regions the callee's body minted.
+// audited: 2026-10-14
+//! Pins for the region walk's inline of a callee body: the call names its own
+//! result region, and a self call is not inlined.
 //!
 //! docs/impl/region/mechanism.md
 
@@ -12,8 +12,7 @@ use crate::value::SymbolId;
 // The walk inlines a resolvable lambda callee's body so the intrinsics inside it
 // record their edges at this call site. The regions that walk yields are the
 // CALLEE's — minted against the callee's own nodes, remapped per activation — so
-// they must not become the caller's naming for the result. See
-// docs/impl/region/mechanism.md and the end-to-end pin
+// they must not become the caller's naming for the result. The end-to-end pin is
 // tests/impl/region-inline-result-naming.lisp.
 
 /// The HirId of the first `Call` whose callee names `callee`, looking through the
@@ -72,35 +71,44 @@ fn an_inlined_call_result_is_named_by_the_call_node() {
     );
 }
 
+/// The binding named `name`, and the regions it holds.
+fn held_by(hir: &Hir, name: &str, arena: &BindingArena, info: &RegionInfo) -> Vec<Region> {
+    let b = find_binding_by_name(hir, name, arena).expect("the binding");
+    info.binding_source_regions
+        .get(&b)
+        .cloned()
+        .expect("the binding is a holder")
+}
+
+/// Two arms, each binding the result of its own call to one callee. Without the
+/// rule both bindings name the callee's `(list 1 2)` region, and the second arm
+/// is structurally later.
+const TWO_ARMS: &str = "(let [mk (fn () (list 1 2))]
+                          (if (cond_var)
+                            (let [a (mk)] (length a))
+                            (let [b (mk)] (length b))))";
+
 #[test]
-fn a_base_arms_result_is_released_in_the_base_arm() {
-    // The shape the naming rule guards: the recursive arm inlines the same body, so
-    // without the rule its result binding names the BASE arm's result region too —
-    // and, being structurally later, takes that region's one release into an arm
-    // mutually exclusive with the only path that mints it.
-    let (hir, arena, _symbols, info) = analyze_with_class(
-        "(letrec [go (fn (m) (if (%eq m 0) (list 1 2) (go (%sub m 1))))] (go 1))",
-    );
-    let base = call_to(&hir, "list", &arena).expect("a call to list");
-    let r = info
-        .alloc_region
-        .get(&base)
-        .copied()
-        .expect("the base arm's result has a region");
+fn a_call_result_is_released_in_the_arm_that_calls() {
+    // The callee's naming carries the region's one release to the later arm's
+    // use, a path exclusive with the first arm's call. The first arm then
+    // releases nothing.
+    let (hir, arena, _symbols, info) = analyze_with_class(TWO_ARMS);
     let (then_id, _else_id) = first_if_arms(&hir).expect("an If node");
     let order = compute_order(&hir);
-    let low = compute_subtree_low(&hir, &order);
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
-    let d = ord(info
-        .region_data
-        .get(&r)
-        .expect("the base arm's region has a decref point")
-        .decref_point);
-    let (lo, hi) = (low.get(&then_id).copied().unwrap_or(0), ord(then_id));
-    assert!(
-        lo <= d && d <= hi,
-        "the base arm's own result must be released in that arm, not in its sibling"
-    );
+    let (lo, hi) = (order.low(&then_id).unwrap_or(0), ord(then_id));
+    for r in held_by(&hir, "a", &arena, &info) {
+        let d = ord(info
+            .region_data
+            .get(&r)
+            .expect("a's region has a decref point")
+            .decref_point);
+        assert!(
+            lo <= d && d <= hi,
+            "the first arm's call result must be released in that arm, not in its sibling"
+        );
+    }
 }
 
 #[test]
@@ -141,18 +149,59 @@ fn an_inlined_result_region_keeps_one_holder() {
     // holder binding in the sibling arm, and a two-holder region is refused the
     // single-slot value route `region::infer::compensate` needs to place a per-arm
     // release — so the arm the misplacement stranded cannot be compensated either.
-    let (hir, arena, _symbols, info) = analyze_with_class(
-        "(letrec [go (fn (m) (if (%eq m 0) (list 1 2) (go (%sub m 1))))] (go 1))",
+    let (hir, arena, _symbols, info) = analyze_with_class(TWO_ARMS);
+    for name in ["a", "b"] {
+        for r in held_by(&hir, name, &arena, &info) {
+            assert_eq!(
+                holder_count(&info, r),
+                1,
+                "a call result must be held by the binding that names that call alone"
+            );
+        }
+    }
+}
+
+// ── A self call is not inlined ─────────────────────────────────────────
+//
+// A call to the lambda whose body the walk is inside starts a new activation,
+// and the re-walk would name that activation's allocations by this one's
+// regions (docs/impl/region/mechanism.md).
+
+#[test]
+fn a_self_call_passing_a_nested_pair_records_no_cycle_between_the_pairs() {
+    // The outer pair holds the inner one, so one edge runs from the inner
+    // pair's region to the outer's. Inlining the self call re-walks `go`'s body
+    // and stores the argument, the outer pair, into the inner pair's site: an
+    // edge the other way, and a cycle between two regions of ONE activation.
+    // The co-owned group cut then frees both pairs before the call that
+    // receives the outer one.
+    let (hir, info) = analyze_full(
+        "(defn go [lst acc]
+           (if (%pair? lst)
+             (go (%rest lst) (%pair (%first lst) (%pair 0 acc)))
+             acc))
+         (go (list 1 2 3) ())",
     );
-    let base = call_to(&hir, "list", &arena).expect("a call to list");
-    let r = info
-        .alloc_region
-        .get(&base)
-        .copied()
-        .expect("the base arm's result has a region");
-    assert_eq!(
-        holder_count(&info, r),
-        1,
-        "a call result must be held by the binding that names that call alone"
+    let mut pairs = Vec::new();
+    find_all_pairs_helper(&hir, &mut pairs);
+    let [outer, inner] = pairs[..] else {
+        panic!("expected the outer and the inner %pair, found {pairs:?}");
+    };
+    let region = |id: HirId| {
+        info.alloc_region
+            .get(&id)
+            .copied()
+            .expect("each %pair has a region")
+    };
+    let (outer, inner) = (region(outer), region(inner));
+    let edge = |from: Region, to: Region| {
+        info.cross_region_refs
+            .iter()
+            .any(|&(_, f, t)| f == from && t == to)
+    };
+    assert!(edge(inner, outer), "the outer pair holds the inner one");
+    assert!(
+        !edge(outer, inner),
+        "the inner pair must not hold the outer one: the self call is a new activation"
     );
 }

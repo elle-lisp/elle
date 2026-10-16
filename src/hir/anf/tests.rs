@@ -1,8 +1,7 @@
-// audited: 2026-09-22
-// The fixture the ANF pins share: a compile to post-ANF HIR, and the walks that
-// ask whether a given node came out of the pass named.
-//
-// src/hir/anf.rs
+// audited: 2026-10-06
+//! The fixture the ANF tests share: a compile to post-ANF HIR, and the walks that ask whether the pass named a given node.
+//!
+//! docs/impl/anf.md
 
 use super::*;
 use crate::hir::expr::{HirId, HirKind};
@@ -10,9 +9,9 @@ use crate::hir::testkit::HirFixture;
 use crate::hir::BindingArena;
 use crate::symbol::SymbolTable;
 
-/// These tests also call `h`, and want a `cond_var` that reads as true. The
-/// analyzer does not inline letrec-bound closures, so calls to these survive
-/// into HIR as real `Call` nodes — which is what the ANF tests examine.
+/// The fixture's allocating stubs, plus `h`, with a `cond_var` that returns
+/// true. The fixture runs no graft, so a call to a stub survives into HIR as a
+/// real `Call` node, which is what the ANF tests examine.
 const STUBS: &str = "cond_var (fn () true) \
                      f (fn (& args) args) \
                      g (fn (& args) args) \
@@ -25,7 +24,7 @@ fn analyze_anf(source: &str) -> (Hir, BindingArena, SymbolTable) {
 /// Pre-order walk that hands out borrowed references with the
 /// SAME lifetime as the input — unlike `Hir::for_each_child`,
 /// whose `FnMut(&Hir)` is higher-rank and can't let the borrow
-/// escape. We pay the verbosity tax to get correct lifetimes.
+/// escape.
 fn walk_pre<'a, F: FnMut(&'a Hir)>(hir: &'a Hir, f: &mut F) {
     f(hir);
     match &hir.kind {
@@ -48,7 +47,7 @@ fn walk_pre<'a, F: FnMut(&'a Hir)>(hir: &'a Hir, f: &mut F) {
             }
             walk_pre(body, f);
         }
-        HirKind::Lambda { body, .. } => walk_pre(body, f),
+        HirKind::Lambda(lambda) => walk_pre(&lambda.body, f),
         HirKind::If {
             cond,
             then_branch,
@@ -175,8 +174,7 @@ fn find_calls_to<'a>(
     out
 }
 
-/// HirId-based lookup helper.
-#[allow(dead_code)]
+/// The node with id `target`, if the tree holds one.
 fn find_node<'a>(hir: &'a Hir, target: HirId) -> Option<&'a Hir> {
     let mut found: Option<&'a Hir> = None;
     let mut visit = |node: &'a Hir| {

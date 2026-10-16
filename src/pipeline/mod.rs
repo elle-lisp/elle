@@ -21,6 +21,8 @@ pub mod sources;
 pub use analyze::{analyze, analyze_file};
 pub use bootstrap::install_core_exports;
 pub use cache::{BootExports, CompileCtx};
+#[cfg(test)]
+pub(crate) use compile::compile_file_to_typed_fhir;
 pub use compile::{
     compile, compile_barrier_module, compile_file, compile_file_repl, compile_file_to_fhir,
     compile_file_to_lir, compile_whole_module, compile_whole_module_forms, splice_includes,
@@ -35,7 +37,7 @@ pub struct AnalyzeResult {
     /// `is_tail` off an analysis — the linter's non-tail-self-recursion rule, the
     /// `compile/callees` call-graph builder — read a flag the analysis set, not a
     /// default. `regularize` marks again on the compile path, because map fusion
-    /// mints call nodes after this point.
+    /// and the graft mint call nodes after this point.
     pub hir: crate::hir::Hir,
     pub arena: crate::hir::BindingArena,
     /// Accumulated non-fatal analysis errors

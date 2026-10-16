@@ -1,6 +1,6 @@
 # LIR — Low-level IR
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-10-14 -->
 
 LIR is an SSA-form intermediate representation with virtual registers,
 basic blocks, and explicit control flow.
@@ -48,7 +48,9 @@ succeeded or failed. Nothing the lowerer returns points into it.
   lowerer writes.
 - **`begin_function`** stacks a function. A lambda's body is lowered while
   its parent's open block is half built, so the parent's state waits on the
-  stack, untouched, and resumes when the lambda finishes.
+  stack, untouched, and resumes when the lambda finishes. The head also
+  carries what the payload holds and the JIT never reads: the docstring, the
+  origin and the body fragment's bytes.
 - **`emit`** encodes an `InstrRef` into a node at the end of the open block:
   its registers inline, any longer register list and the variant's other
   scalars appended to the function's pool, its constants to the constant
@@ -140,8 +142,10 @@ process.
 A frozen function has two homes, and both hold the same records:
 
 - **`LirCode`** holds the records, the tables and the function's header in
-  `Vec`s. It is plain data: `Send`, and serializable with serde.
-  **`LirOwned`** is a `LirCode` plus its `values: Vec<Value>`.
+  `Vec`s. It is plain data: `Send`, and serializable with serde. It carries
+  the docstring, the origin and the body fragment for the payload, and skips
+  all three when it serializes, because the payload holds them and the JIT
+  reads none. **`LirOwned`** is a `LirCode` plus its `values: Vec<Value>`.
   `finish_function` produces one per function, and a `JitTask` holds one.
 - **`LirBody`** holds them in region pages, as the `lir` field of a code
   payload ([region/template.md](region/template.md)). Every field is a

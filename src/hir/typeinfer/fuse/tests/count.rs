@@ -1,3 +1,8 @@
+// audited: 2026-09-23
+//! The `count` terminal — a guard stage plus a scalar tally.
+//!
+//! docs/impl/dissolution/terminals.md
+
 use super::*;
 
 /// A single `(count pred xs)` dissolves to a **scalar tally** loop: the `count`
@@ -16,7 +21,7 @@ fn single_count_dissolves_to_scalar_tally() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "even?"),
+        predicate_inline(&hir, &arena, &mut rt, "even?"),
         "the predicate must run inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -46,7 +51,8 @@ fn count_of_map_fuses_to_one_scalar_loop() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "even?") && cs.iter().any(|n| n == "*"),
+        predicate_inline(&hir, &arena, &mut rt, "even?")
+            && count_op(&hir, &arena, &mut rt, "*") > 0,
         "both the predicate and the map transform must inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -85,10 +91,10 @@ fn count_of_filter_fuses_to_one_scalar_loop() {
 /// The reorder gate counts the terminal as an op: a lone `count` (length 1)
 /// visits each element left to right and applies its predicate exactly as the
 /// stdlib op does, so it never reorders and fuses even with a NON-reorder-safe
-/// body (`>` routes through `apply`).
+/// body (one that prints, and so signals `:io`).
 #[test]
 fn single_count_with_non_reorder_safe_body_still_fuses() {
-    let (hir, arena, mut rt) = compile("(count (fn [x] (> x 2)) [1 2 3 4])");
+    let (hir, arena, mut rt) = compile("(count (fn [x] (println x) (> x 2)) [1 2 3 4])");
     let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "count"),
@@ -104,7 +110,7 @@ fn single_count_with_non_reorder_safe_body_still_fuses() {
 #[test]
 fn count_over_non_reorder_safe_prefix_fuses_inner_only() {
     let (hir, arena, mut rt) =
-        compile("(count (fn [y] (even? y)) (filter (fn [w] (> w 1)) [1 2 3 4]))");
+        compile("(count (fn [y] (even? y)) (filter (fn [w] (println w) (> w 1)) [1 2 3 4]))");
     let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "count"),
@@ -132,20 +138,22 @@ fn count_over_mutable_array_is_not_fused() {
 }
 
 /// Safety: a user redefinition of `count` shadows the stdlib binding with a
-/// non-primitive one, so it is never rewritten.
+/// non-primitive one, so fusion never rewrites it into a loop.
 #[test]
 fn user_shadowed_count_is_not_fused() {
-    let (hir, arena, mut rt) = compile("(defn count [p c] 0) (count (fn [x] x) [1 2 3])");
-    let cs = callees(&hir, &arena, &mut rt);
-    assert!(
-        cs.iter().any(|n| n == "count"),
-        "a user `count` must not be rewritten; callees were {cs:?}",
+    let (hir, _arena, _rt) = compile("(defn count [p c] 0) (count (fn [x] x) [1 2 3])");
+    // The user's call may graft, and what grafts is the user's body, which
+    // makes no loop.
+    assert_eq!(
+        count_loops(&hir),
+        0,
+        "a user `count` must not become a fused loop"
     );
 }
 
 /// A capturing predicate fuses: the splice is the call site, so `k` is in scope
-/// where the tally's guard lands (docs/impl/dissolution.md § "Captures"). Fails
-/// while the gate refuses a capture: the `count` call and the closure both survive.
+/// where the tally's guard lands. Fails while the gate refuses a capture: the
+/// `count` call and the closure both survive.
 #[test]
 fn capturing_count_predicate_fuses() {
     let (hir, arena, mut rt) = compile("(let [k 2] (count (fn [x] (> x k)) [1 2 3 4]))");
@@ -159,7 +167,8 @@ fn capturing_count_predicate_fuses() {
 
 /// A count whose predicate is a `Var` naming a same-unit `defn` inlines its body,
 /// exactly as a `map`/`fold` argument does — the tally terminal adds no new
-/// requirement on how the function is resolved.
+/// requirement on how the function is resolved. The definition survives, so its
+/// `>` and the inlined copy's are two sites.
 #[test]
 fn named_count_predicate_inlines() {
     let (hir, arena, mut rt) = compile("(defn pos? [x] (> x 0)) (count pos? [1 2 3])");
@@ -168,9 +177,10 @@ fn named_count_predicate_inlines() {
         !cs.iter().any(|n| n == "count"),
         "the `count` dispatch must be gone for a named predicate; callees were {cs:?}",
     );
-    assert!(
-        cs.iter().any(|n| n == ">"),
-        "the named predicate's body must run inline; callees were {cs:?}",
+    assert_eq!(
+        count_op(&hir, &arena, &mut rt, ">"),
+        2,
+        "the definition's > plus the inlined copy; callees were {cs:?}",
     );
     assert_eq!(
         count_callee(&hir, &arena, &mut rt, "@array"),

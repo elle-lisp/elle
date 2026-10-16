@@ -1,13 +1,18 @@
-//! Shared helpers for the regions analysis tests. Free functions only —
-//! every `#[test]` lives in a themed sibling submodule (see `mod.rs`).
+// audited: 2026-10-06
+//! Shared helpers for the region-inference tests: compile a shape, run the solver, find a node.
+//!
+//! docs/impl/region/rules.md
+//!
+//! Free functions only. Every `#[test]` lives in a themed sibling submodule.
 use super::*;
 use crate::value::SymbolId;
 
-/// Compile Elle source to canonical (functionalized) HIR with a fresh per-call
-/// `CompileCtx` (every compile names its instance's compile state explicitly,
-/// threading the compile context as a parameter — docs/impl/region/ctx.md).
+/// Compile Elle source to canonical (functionalized) HIR with a fresh
+/// `CompileCtx` and the graft off. The region solver is the subject, so a call
+/// a test writes reaches it as a call (docs/impl/graft.md).
 pub(super) fn compile_fhir(source: &str, symbols: &mut SymbolTable) -> (Hir, BindingArena) {
     let mut cctx = crate::pipeline::CompileCtx::new();
+    cctx.set_graft(crate::config::GraftPolicy::Off);
     crate::pipeline::compile_file_to_fhir(source, symbols, &mut cctx, "<test>").expect("compile")
 }
 

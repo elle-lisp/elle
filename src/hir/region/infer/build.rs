@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-16
 //! Assembling `RegionInfo` from the walk's outputs, and marking which of its
 //! fields a later post-pass fills.
 //!
@@ -93,6 +93,9 @@ impl RegionInference {
             scope_region: self.scope_region,
             binding_region: self.binding_region,
             binding_source_regions: HashMap::new(),
+            // Populated by the borrow pass in `analyze_regions_with`, which reads
+            // the walk's uncounted read sites. Empty here.
+            binding_borrow_regions: HashMap::new(),
             captured_reassigned_bindings: rustc_hash::FxHashSet::default(),
             frame_held_regions: rustc_hash::FxHashSet::default(),
             value_routed_regions: rustc_hash::FxHashSet::default(),
@@ -144,6 +147,9 @@ impl RegionInference {
             cell_containers: HashMap::new(),
             cell_stored_regions: FxHashSet::default(),
             begin_cell_regions: self.begin_cell_regions,
+            // Populated in `analyze_regions_with` beside `value_routed_regions`,
+            // from the binder init sites the walk holds. Empty here.
+            cell_route_regions: HashMap::new(),
             pattern_rest_regions: self.pattern_rest_regions,
             // Populated by the `region::infer::merge` post-pass in `analyze_regions_with`,
             // after `region_data` decref_points are final (the seed's

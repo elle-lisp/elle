@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-14
 //! Branch compensation's pins, one submodule per subject, and the arm and release
 //! helpers they share.
 //!
@@ -129,14 +129,13 @@ fn binder_routes(
 /// answer to different release routes.
 fn region_release_clears_the_arms(hir: &Hir, info: &RegionInfo, r: Region, arms: &[HirId]) -> bool {
     let order = compute_order(hir);
-    let low = compute_subtree_low(hir, &order);
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     match info.region_data.get(&r) {
         Some(d) => {
             let o = ord(d.decref_point);
             !arms
                 .iter()
-                .any(|&a| low.get(&a).copied().unwrap_or(0) <= o && o <= ord(a))
+                .any(|&a| order.low(&a).unwrap_or(0) <= o && o <= ord(a))
         }
         None => false,
     }
@@ -163,7 +162,7 @@ fn arm_decrefs(
 }
 
 /// The HirIds of every `Return` node inside `[lo, hi]` of the post-order index.
-fn returns_within(hir: &Hir, order: &HashMap<HirId, u32>, lo: u32, hi: u32) -> Vec<HirId> {
+fn returns_within(hir: &Hir, order: &Order, lo: u32, hi: u32) -> Vec<HirId> {
     find_all(hir, |h| matches!(&h.kind, HirKind::Return { .. }))
         .into_iter()
         .filter(|id| {

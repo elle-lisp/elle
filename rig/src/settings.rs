@@ -1,9 +1,9 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! The configuration a file runs under on the rig: read from a sidecar or a profile, and printed back as one.
 //!
 //! rig/overview.md
 
-use elle::config::{Config, JitPolicy, MlirPolicy, WasmPolicy, TRACE_KEYWORDS};
+use elle::config::{Config, GraftPolicy, JitPolicy, MlirPolicy, WasmPolicy, TRACE_KEYWORDS};
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -12,20 +12,22 @@ pub struct Settings {
     jit: JitPolicy,
     mlir: MlirPolicy,
     wasm: WasmPolicy,
+    graft: GraftPolicy,
     trace: BTreeSet<String>,
 }
 
 /// How a read file combines with what is already there. A sidecar and a
-/// profile read alike (rig/overview.md): each tier setting replaces the one
-/// before it, and trace keywords join.
+/// profile read alike (rig/overview.md): each setting but `trace` replaces the
+/// one before it, and trace keywords join.
 impl Settings {
-    /// The settings `config` already carries: the build's tier defaults, and
-    /// whatever `--trace=` the command line named.
+    /// The settings `config` already carries: the build's tier defaults, the
+    /// graft policy, and whatever `--trace=` the command line named.
     pub fn from_config(config: &Config) -> Self {
         Settings {
             jit: config.jit.clone(),
             mlir: config.mlir.clone(),
             wasm: config.wasm.clone(),
+            graft: config.graft,
             trace: config.trace_keywords.iter().cloned().collect(),
         }
     }
@@ -42,6 +44,7 @@ impl Settings {
                 "jit" => self.jit = read_jit(value).map_err(refuse)?,
                 "mlir" => self.mlir = read_mlir(value).map_err(refuse)?,
                 "wasm" => self.wasm = read_wasm(value).map_err(refuse)?,
+                "graft" => self.graft = read_graft(value).map_err(refuse)?,
                 "trace" => self.trace.extend(read_trace(value).map_err(refuse)?),
                 other => return Err(refuse(format!("unknown key `{other}`"))),
             }
@@ -54,6 +57,7 @@ impl Settings {
         config.jit = self.jit;
         config.mlir = self.mlir;
         config.wasm = self.wasm;
+        config.graft = self.graft;
         config.trace_keywords = self.trace.into_iter().collect();
     }
 
@@ -72,6 +76,8 @@ impl Settings {
             };
             out.push_str(&format!("wasm = {wasm}\n"));
         }
+        let graft = self.graft == GraftPolicy::On;
+        out.push_str(&format!("graft = {graft}\n"));
         let trace: Vec<String> = self.trace.iter().map(|kw| format!("\"{kw}\"")).collect();
         out.push_str(&format!("trace = [{}]\n", trace.join(", ")));
         out
@@ -171,4 +177,14 @@ fn read_trace(value: &toml::Value) -> Result<Vec<String>, String> {
             other => Err(format!("`trace`: expected a keyword string, got {other}")),
         })
         .collect()
+}
+
+/// `graft`: `true` grafts every call that qualifies, `false` keeps every call
+/// a call (docs/impl/graft.md).
+fn read_graft(value: &toml::Value) -> Result<GraftPolicy, String> {
+    match value {
+        toml::Value::Boolean(true) => Ok(GraftPolicy::On),
+        toml::Value::Boolean(false) => Ok(GraftPolicy::Off),
+        other => Err(format!("`graft`: expected true or false, got {other}")),
+    }
 }

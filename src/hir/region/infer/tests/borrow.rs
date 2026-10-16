@@ -1,4 +1,12 @@
+// audited: 2026-10-15
+//! The container-read borrow: what keeps a value read out of a container alive, by read form.
+//!
+//! docs/impl/region/rules.md
+//! docs/impl/region/adopt.md
+
 use super::*;
+
+mod chain;
 
 // ── The container-read BORROW ────────────────────────────────────────────────────
 //

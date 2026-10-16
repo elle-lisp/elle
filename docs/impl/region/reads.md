@@ -1,6 +1,6 @@
 # Reads of a 1-slot container
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-16 -->
 
 What a whole-value read of a reassigned binding's container takes, and which binder forms must emit the retain.
 
@@ -42,9 +42,10 @@ so keeps the counted-init route, and
 [region-cell-alias-after.lisp](../../../tests/impl/region-cell-alias-after.lisp) for the measured shape.
 
 An **element** read (`first`/`get`/destructuring) is not a whole-value read and
-needs no counting: an element's region is independently counted by its parent's
-alloc-time scan, so the parent's demise cascades rather than freeing the element
-under the reader.
+takes no counted reference here. The native `first` or `get` takes the
+pass-through retain ([rules.md](rules.md) Rule 5). An opcode read or a pattern
+projection takes none, so the container's release follows the reader instead
+([borrow.md](borrow.md)).
 
 **A branch is a read of whichever arms read.** What obliges the reader is the
 value it ends up holding, not the syntax that selected it: in

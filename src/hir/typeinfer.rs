@@ -1,83 +1,75 @@
-// audited: 2026-09-08
-// docs/impl/typeinfer.md
-// docs/intrinsics.md
-//! Bidirectional type inference and the intrinsic operand proofs.
+// audited: 2026-10-14
+//! Type inference, the fold it drives, and the intrinsic operand proofs.
 //!
-//! Post-functionalize pass that:
-//! 1. Infers types from literals, known return types, and type guards
-//! 2. Propagates types through call sites (forward flow — the ascent in
-//!    `infer/fixpoint.rs`)
-//! 3. Checks every call-position %-intrinsic against its operand contract
-//!    (prove-or-reject; `contract.rs`)
-//! 4. Narrows signals on primitive calls with provably typed args
-//!    (delegates to `narrow.rs`)
-//! 5. Re-propagates signals bottom-up after narrowing
+//! The pass runs on functionalized HIR:
+//! 1. Infer types from literals, known return types, and type guards.
+//! 2. Propagate types through call sites and through the operands a graft
+//!    bound (the ascent in `infer/fixpoint.rs`).
+//! 3. Delete the branches and dispatch arms the inferred types decide, and
+//!    infer again until nothing more goes (`fold.rs`).
+//! 4. Check every call-position `%`-intrinsic against its operand contract
+//!    (`contract.rs`).
+//! 5. Narrow the signals of primitive calls whose operand types rule out the
+//!    error (`narrow.rs`).
+//! 6. Re-propagate signals bottom-up after the narrowing.
 //!
-//! A stdlib wrapper call (`+`, `<`, `not`, …) is NEVER rewritten to its
-//! intrinsic: the wrapper is the programmer's explicit request for the
-//! validating, signaling, polymorphic surface, and substituting the silent
-//! opcode would change both the failure mode and the site's signal profile.
-//! The fast path is spelled `%add` — and proven.
+//! A wrapper call reaches its `%`-op by being grafted before this pass runs
+//! (`graft.rs`). Nothing here rewrites a call by its callee's name.
+//!
+//! docs/impl/typeinfer.md
+//! docs/impl/graft.md
+//! docs/intrinsics.md
 
 use super::arena::BindingArena;
 use super::binding::Binding;
-use super::expr::{Hir, HirId, HirKind, IntrinsicOp};
-use super::types::{TyId, TypeInterner};
+use super::expr::{Hir, HirKind, IntrinsicOp};
+use super::types::{NodeTypes, TyId, TypeInterner};
 use crate::value::SymbolId;
 
 use std::collections::HashMap;
 
 mod contract;
+mod fold;
 mod fuse;
 pub(crate) use fuse::fuse_map_chains;
-pub(crate) use fuse::{FnInlineRegistry, StoredFnInlineRegistry};
+pub(crate) mod graft;
 mod guard;
 mod infer;
 use infer::*;
-mod monomorphize;
-pub use monomorphize::DispatchWrapperRegistry;
-pub(crate) use monomorphize::StoredDispatchRegistry;
 mod prune;
 pub(crate) use prune::prune_typeof_match_arms;
 
-/// Result of type inference — currently just tracks whether the pass
-/// found any immediates for region inference.
+/// What type inference hands the LIR lowerer: the type of every node, with no
+/// Bottom left in the map.
 pub struct TypeInfo {
-    pub hir_types: HashMap<HirId, TyId>,
+    pub hir_types: NodeTypes,
 }
 
-/// Run type inference and stdlib-to-intrinsic rewriting on functionalized HIR.
+/// Run type inference and the fold on functionalized HIR, then check the
+/// operand proofs and narrow the signals over what the fold left.
 ///
-/// `Err` is the intrinsic operand proof obligation firing (see
-/// `contract::check_intrinsic_operand_proofs`): a call-position `%`-intrinsic
-/// whose operands are provably wrong or unprovable. Prove-or-reject is the
-/// language — the check runs on every compile.
-pub fn infer_and_rewrite(
+/// `record` is what the graft bound to the parameters of this unit's
+/// functions, joined into them as call sites.
+///
+/// `Err` names a call-position `%`-intrinsic whose operands are provably wrong
+/// or unprovable (`contract::check_intrinsic_operand_proofs`).
+pub(crate) fn infer_and_rewrite(
     hir: &mut Hir,
     arena: &BindingArena,
-    dispatch_wrappers: &mut DispatchWrapperRegistry,
+    record: &graft::GraftRecord,
 ) -> Result<TypeInfo, String> {
     let interner = TypeInterner::new();
 
-    // The ascent (docs/impl/typeinfer.md): one context collects the unit's
-    // program facts, then iterates the transfer function until the type
-    // environment stops moving.
-    let mut infer = Infer::new(hir, arena);
+    // The ascent: one context collects the unit's program facts, then iterates
+    // the transfer function until the type environment stops moving. The fold
+    // then deletes what those types decide. A deletion can narrow a join, so
+    // the two alternate until a fold deletes nothing.
+    let mut infer = Infer::new(hir, arena, record);
     infer.solve(hir);
-
-    // Collapse container-dispatch wrapper calls (`(put s :x j)` with `s` a proven
-    // concrete container → `(%put-struct-mut s :x j)`) so the multi-arm dispatch and
-    // the container over-keep it strands cease to exist (`monomorphize.rs`; the F1b
-    // close). Runs after the inference fixpoint (types are known) and before the
-    // operand proofs, so each rewritten op is contract-checked by the same proof that
-    // selected it.
-    monomorphize::monomorphize_dispatch_wrappers(
-        hir,
-        &infer.hir_types,
-        arena,
-        &infer.typeof_aliases,
-        dispatch_wrappers,
-    );
+    while fold::fold(hir, &infer.hir_types, arena) {
+        infer = Infer::new(hir, arena, record);
+        infer.solve(hir);
+    }
 
     // The prove-or-reject gate: every call-position %-intrinsic must discharge
     // its operand contract from the (narrowed, per-occurrence) inferred types.
@@ -116,8 +108,8 @@ pub(super) fn unwrap_callee_binding(func: &Hir) -> Option<Binding> {
     }
 }
 
-/// Extract arg count from a Call expression, unwrapping MakeCell if needed.
-/// Returns Some(arg_count) for array/struct constructor calls.
+/// The operand count of a call, looking through a `MakeCell`. The binder reads
+/// it as the length of an array a call builds.
 fn unwrap_to_call(hir: &Hir) -> Option<usize> {
     match &hir.kind {
         HirKind::Call { args, .. } => Some(args.len()),
@@ -126,36 +118,31 @@ fn unwrap_to_call(hir: &Hir) -> Option<usize> {
     }
 }
 
-/// Known return types for callable (stdlib) function calls.
+/// The type a call to a binding the runtime supplies returns.
 ///
-/// Primitives carry their return type in the registry
-/// (`PrimitiveDef::ret`, looked up through `def_by_name` — name and
-/// alias spellings alike), so inference reads the same static tables
-/// `register_primitives` feeds and cannot drift from them. The only
-/// names matched here are stdlib *closures* (defined in stdlib.lisp,
-/// not in any primitive table) whose pass-through typing inference
-/// still wants.
+/// A primitive carries its return type in the registry (`PrimitiveDef::ret`,
+/// looked up through `def_by_symbol`), so inference reads the tables
+/// `register_primitives` feeds. The names matched here are the thaw and
+/// freeze pair, whose result depends on the operand, and the stdlib closures,
+/// which are in no primitive table.
 fn primitive_return_type(sym: SymbolId, arg_types: &[TyId], _interner: &TypeInterner) -> TyId {
     use crate::primitives::def::RetType;
 
     // Recognition is by id, not by a resolved spelling: `SymbolId::of` is a
     // `const fn` over the name's hash, so these are integer compares against
-    // constants and need no symbol table (docs/impl/symbol.md § "Reading a
-    // name, and not reading one"). That matters most for the stdlib closures
-    // below, which are in no primitive table — nothing build-time could hand
-    // back their names.
+    // constants and need no symbol table (docs/impl/symbol.md). The stdlib
+    // closures below are in no primitive table, so nothing built at compile
+    // time could hand back their names.
     const PCT_THAW: SymbolId = SymbolId::of("%thaw");
     const THAW: SymbolId = SymbolId::of("thaw");
     const PCT_FREEZE: SymbolId = SymbolId::of("%freeze");
     const FREEZE: SymbolId = SymbolId::of("freeze");
 
     // %thaw/thaw and %freeze/freeze map a container to its mutable/immutable
-    // twin. The native's own RetType is polymorphic (Unknown), but the result
-    // is a function of the operand — a fact inference can carry. This proves a
-    // mutable-collection literal's type (`@"..."` desugars through `%thaw` of a
-    // string literal), so it can flow into a %-store op's proven container
-    // contract (e.g. `(%string-push @"" "x")`), and types explicit
-    // `thaw`/`freeze` calls on a proven container likewise.
+    // twin. The native's own RetType is Unknown, but the result is a function
+    // of the operand. This types a mutable-collection literal (`@"..."`
+    // desugars through `%thaw` of a string literal), so it can prove a
+    // `%`-store op's container, for example `(%string-push-mut @"" "x")`.
     let arg0 = || arg_types.first().copied().unwrap_or(TypeInterner::TOP);
     match sym {
         PCT_THAW | THAW => return mutable_twin(arg0()),
@@ -212,11 +199,9 @@ fn primitive_return_type(sym: SymbolId, arg_types: &[TyId], _interner: &TypeInte
         // stdlib.lisp closures (not primitives): mutating pass-throughs
         // that return their first argument.
         PUSH | PUT => arg_types.first().copied().unwrap_or(TypeInterner::TOP),
-        // The arithmetic wrappers validate their operands and raise on
-        // anything non-numeric, so on every path that RETURNS the result is a
-        // Number — the same stable-name authority the guard recognition uses
-        // for the predicates. This is what lets `(%lt (- b a) 2)`-style
-        // measurement code prove its operands without a hand guard.
+        // The arithmetic wrappers raise on anything non-numeric, so every
+        // path that returns yields a Number. This types a wrapper call the
+        // graft left a call, such as `(+ a b c)`.
         ADD | SUB | MUL | DIV | REM | MOD | ABS | MIN | MAX | INC | DEC | SUM | PRODUCT => {
             TypeInterner::NUMBER
         }
@@ -230,14 +215,13 @@ fn intrinsic_return_type(
     op: IntrinsicOp,
     args: &[Hir],
     interner: &TypeInterner,
-    hir_types: &HashMap<HirId, TyId>,
+    hir_types: &NodeTypes,
 ) -> TyId {
     match op {
         // Arithmetic, the whole div family included: the join of the arg types
-        // within Number. Every member promotes the same way at run time on every
-        // tier — an integer result only where both operands are integers — so
-        // one rule serves all six, and a remainder in the middle of an int chain
-        // keeps the chain proven.
+        // within Number. On every tier each member gives an integer only where
+        // both operands are integers. So one rule serves all six, and a
+        // remainder in the middle of an int chain keeps the chain proven.
         IntrinsicOp::Add
         | IntrinsicOp::Sub
         | IntrinsicOp::Mul
@@ -291,16 +275,12 @@ fn intrinsic_return_type(
         IntrinsicOp::Int => TypeInterner::INT,
         IntrinsicOp::Float => TypeInterner::FLOAT,
 
-        // Monomorphic array push: the variant pins the result type (the whole point
-        // of monomorphization — the polymorphic %array-push stays Top/FirstArg).
-        // %push-array yields a fresh immutable Array twin; %push-array-mut stores in
-        // place and returns its mutable arg0 (MutableArray).
+        // A monomorphic push or put pins its result type; the polymorphic
+        // %array-push and %put fall to Top below. An immutable variant yields
+        // a fresh immutable container, and a -mut variant stores in place and
+        // returns its mutable arg0.
         IntrinsicOp::PushArray => TypeInterner::ARRAY,
         IntrinsicOp::PushArrayMut => TypeInterner::MUTABLE_ARRAY,
-
-        // Monomorphic put variants: the variant pins the result type (the polymorphic
-        // %put stays Top). Immutable variants yield a fresh immutable twin; -mut stores
-        // in place and returns its mutable arg0.
         IntrinsicOp::PutStruct => TypeInterner::STRUCT,
         IntrinsicOp::PutStructMut => TypeInterner::MUTABLE_STRUCT,
         IntrinsicOp::PutArray => TypeInterner::ARRAY,

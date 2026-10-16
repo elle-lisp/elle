@@ -1,5 +1,5 @@
 (elle/epoch 12)
-# audited: 2026-09-09
+# audited: 2026-09-23
 # The operand proof, end to end.
 #
 # A %-intrinsic whose operands the front end proved are integers emits the
@@ -8,7 +8,8 @@
 #
 # A proven op's result carries a type of its own, so the proof reaches the next
 # op in the chain — and a float operand denies it there. A call's result carries
-# one too, a recursive call included.
+# one too, a recursive call included, and so does a wrapper call over proven
+# ints, which lowers to the op.
 # docs/impl/lir.md
 # docs/intrinsics.md
 
@@ -136,6 +137,35 @@
         "%add over two self-recursive int results emits AddInt")
 (assert (= (fib-int 10) 55) "AddInt computes the recursion")
 (assert (= (fib-int 0) 0) "and the base case returns its argument")
+
+(defn fib-wrap [n]
+  "The wrapper spelling: (- n 1) over an int is an int, so n stays one, and
+   every wrapper call lowers to its op over two proven ints."
+  (when (%not (int? n))
+    (error {:error :type-error :message "fib-wrap: int required"}))
+  (if (< n 2)
+    n
+    (+ (fib-wrap (- n 1)) (fib-wrap (- n 2)))))
+
+# The counter-factual: while (- n 1) typed as a Number and + stayed a call,
+# this body held three wrapper calls and no integer opcode.
+(assert (string/contains? (disasm-text fib-wrap) "AddInt")
+        "+ over two self-recursive int results lowers to AddInt")
+(assert (string/contains? (disasm-text fib-wrap) "SubInt")
+        "- over a proven int and a literal lowers to SubInt")
+(assert (= (fib-wrap 10) 55) "the lowered wrappers compute the recursion")
+
+(defn dec-then-add [x]
+  "The lowered (- x 1) is the %add's operand, and its int result the proof."
+  (when (%not (int? x))
+    (error {:error :type-error :message "dec-then-add: int required"}))
+  (%add (- x 1) 2))
+
+# The counter-factual: a lowered op the rewrite built with no recorded type
+# reads as unknown, and the %add that consumes it keeps the polymorphic Add.
+(assert (string/contains? (disasm-text dec-then-add) "AddInt")
+        "a lowered wrapper's int result proves the op that consumes it")
+(assert (= (dec-then-add 40) 41) "AddInt computes over the lowered result")
 
 # The proof follows the body, not the shape: a base case that returns a float
 # makes the recursive result a Number, which the bitwise contract refuses.

@@ -1,5 +1,5 @@
-// audited: 2026-10-13
-//! The `letrec` binding form analyzer.
+// audited: 2026-10-06
+//! The `letrec` binding form: pre-bind every name, analyze the initializers in order, then settle their signals by fixpoint.
 //!
 //! docs/bindings.md
 //! docs/pipeline.md
@@ -33,15 +33,14 @@ impl<'a> Analyzer<'a> {
         // Pass 1: Classify each binding. Pre-bind ALL names for mutual
         // visibility — simple symbols AND destructure leaf names.
         // Destructure leaf names are pre-bound so that other initializers
-        // (e.g., recursive functions) can reference them.
+        // (for example, recursive functions) can reference them.
         //
-        // Duplicate names are rejected at compile time.
+        // A duplicate definition (the same name and scope set) is a compile
+        // error.
         //
-        // The double-binding problem: analyze_destructure_pattern in pass 2
-        // also calls self.bind() for the same names. To prevent creating
-        // duplicate Binding objects, analyze_destructure_pattern checks
-        // lookup_in_current_scope for the Local scope case, reusing
-        // pre-existing bindings.
+        // Pass 2 hands each pattern's leaf bindings to
+        // analyze_destructure_pattern through `pre_bindings`, so the pattern
+        // reuses them rather than binding the names a second time.
         //
         // Bindings are flat pairs: [name1 value1 name2 value2 ...]
         enum LetrecEntry<'s> {
@@ -123,17 +122,15 @@ impl<'a> Analyzer<'a> {
         // Simple bindings go into the Letrec node's bindings vec.
         // Destructured bindings: the temp binding AND all leaf bindings
         // go into the Letrec bindings vec (leaf bindings initialized to
-        // nil). This ensures the lowerer allocates slots for all bindings
+        // nil). So the lowerer allocates slots for all bindings
         // before lowering any lambda values — lambdas may capture
         // destructured leaf bindings. Destructure nodes in the body then
         // update the leaf binding slots.
         //
         // Seed signal_env for all pre-bound simple bindings with Silent.
-        // Without this, forward-referenced letrec siblings default to
-        // `Signal::unknown()` (the unknown-callee fallback in
-        // get_raw_callee_signal), causing spurious SuspendingCall
-        // instructions. This matches analyze_file_letrec's optimistic
-        // seeding strategy.
+        // Without this, a forward-referenced letrec sibling reads as
+        // Signal::unknown() (the fallback in get_raw_callee_signal), and its
+        // calls lower to spurious SuspendingCall instructions.
         for entry in &entries {
             if let LetrecEntry::Simple(binding, value_syntax) = entry {
                 self.signal_env.insert(*binding, Signal::silent());

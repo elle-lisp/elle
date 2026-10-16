@@ -1,11 +1,13 @@
 (elle/epoch 15)
-# audited: 2026-10-12
+# audited: 2026-10-14
 # Compiled code charges a fiber's fuel where the interpreter does, and pauses where the budget runs out.
 # docs/impl/jit.md
 #
 # The sidecar makes the JIT eager. Each subject is warmed once and the worker
 # drained with `jit/rejections`, so the fueled runs below enter compiled code
-# whatever the timing. Each subject has a twin with the same calls and jumps,
+# whatever the timing. The sidecar also turns the graft off: a call to a
+# function the compiler can see becomes the function's body
+# (docs/impl/graft.md), and a subject nothing calls never compiles. Each subject has a twin with the same calls and jumps,
 # which the JIT refuses because it builds a closure, so the twin runs in the
 # interpreter. Parity with the twin is the claim: one budget, the same pauses.
 #

@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 // What the rig reads from a sidecar and a profile, what it refuses, and what a
 // running file sees.
 // rig/overview.md
@@ -86,6 +86,7 @@ fn a_file_with_no_sidecar_runs_under_the_build_defaults() {
     let dir = Scratch::new("defaults");
     let got = printed(&dir, None, &[]);
     assert!(got.contains(&"jit = 10".to_string()), "got {got:?}");
+    assert!(got.contains(&"graft = true".to_string()), "got {got:?}");
     assert!(got.contains(&"trace = []".to_string()), "got {got:?}");
 }
 
@@ -97,6 +98,16 @@ fn a_threshold_and_eager_read_back_as_written() {
     assert!(got.contains(&"jit = 5".to_string()), "got {got:?}");
     let got = printed(&dir, Some("jit = \"eager\"\n"), &[]);
     assert!(got.contains(&"jit = \"eager\"".to_string()), "got {got:?}");
+}
+
+/// `graft` is a boolean, and reads back as written.
+#[test]
+fn the_graft_setting_reads_back_as_written() {
+    let dir = Scratch::new("graft");
+    let got = printed(&dir, Some("graft = false\n"), &[]);
+    assert!(got.contains(&"graft = false".to_string()), "got {got:?}");
+    let got = printed(&dir, Some("graft = true\n"), &[]);
+    assert!(got.contains(&"graft = true".to_string()), "got {got:?}");
 }
 
 /// What `--print-config` prints is itself a sidecar this build accepts, and
@@ -132,6 +143,13 @@ fn a_value_of_the_wrong_type_is_refused() {
     assert_refused("jit = true\n", "jit");
     assert_refused("jit = \"sometimes\"\n", "jit");
     assert_refused("trace = \"guardfree\"\n", "trace");
+}
+
+/// `graft` takes a boolean, not the words a tier setting takes.
+#[test]
+fn a_graft_value_that_is_not_a_boolean_is_refused() {
+    assert_refused("graft = \"off\"\n", "graft");
+    assert_refused("graft = 0\n", "graft");
 }
 
 /// A count below one names no threshold.
@@ -222,6 +240,16 @@ fn a_profile_replaces_the_tier_and_joins_the_trace() {
     );
 }
 
+/// A profile's `graft` replaces the sidecar's, as its `jit` does.
+#[test]
+fn a_profile_replaces_the_graft_setting() {
+    let dir = Scratch::new("graftprofile");
+    let profile = dir.write("on.toml", "graft = true\n");
+    let profile = profile.display().to_string();
+    let got = printed(&dir, Some("graft = false\n"), &["--profile", &profile]);
+    assert!(got.contains(&"graft = true".to_string()), "got {got:?}");
+}
+
 /// A profile's `wasm` replaces the sidecar's, as its `jit` does. The
 /// counter-factual: a profile that deferred to a sidecar's `wasm = "off"` would
 /// leave that file on the interpreter in the pass that exists to run it whole
@@ -306,6 +334,29 @@ fn a_running_file_reads_the_wasm_policy() {
     assert_eq!(running(Some("wasm = \"off\"\n"), ":wasm"), "off");
     assert_eq!(running(Some("wasm = \"full\"\n"), ":wasm"), "full");
     assert_eq!(running(Some("wasm = 5\n"), ":wasm"), "lazy");
+}
+
+/// A program reads no graft setting, so a running file proves `graft = false`
+/// reached the compile by what its own code holds: the call to `h` stays a
+/// `TailCall`, which the graft would have replaced with `h`'s body.
+#[test]
+fn a_running_file_compiles_under_the_graft_setting() {
+    let keeps_its_call = |sidecar: Option<&str>| {
+        let dir = Scratch::new("graftrun");
+        let path = dir.write(
+            "prog.lisp",
+            "(elle/epoch 14)\n(defn h [a b] (+ a b))\n(defn caller [] (h 1 2))\n\
+             (println (string/contains? (string/join (fn/disasm caller) \" \") \"TailCall\"))\n",
+        );
+        if let Some(body) = sidecar {
+            dir.write("prog.toml", body);
+        }
+        let out = rig(&[path]);
+        assert!(out.status.success(), "stderr:\n{}", stderr(&out));
+        stdout(&out).trim().to_string()
+    };
+    assert_eq!(keeps_its_call(Some("graft = false\n")), "true");
+    assert_eq!(keeps_its_call(None), "false");
 }
 
 #[test]

@@ -213,8 +213,6 @@
 ["read-keys" :regions 0]
 ["read-values" :regions 0]
 ["read-slice" :regions 0]
-["discard-passthrough" :objects 0]
-["discard-closure" :objects 0]
 # The injected abort delivery (probe/abort.lisp).
 ["abort-masked" :objects 0]
 ["abort-escape" :objects 0]

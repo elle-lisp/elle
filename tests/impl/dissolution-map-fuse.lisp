@@ -11,7 +11,7 @@
 # result is asserted.
 #
 # `dbl`/`inc` are named functions with pure bodies and `dbl-let`/`inc-let` have
-# `let` bodies, so each fuses by grafting. `dbl-decl`/`inc-decl` have a `match`
+# `let` bodies, so each fuses by grafting. `dbl-decl`/`inc-decl` have a `block`
 # body, which a fragment cannot close over, so each stays a plain `map` call — the
 # un-fused oracle. Every form must agree.
 
@@ -34,33 +34,33 @@
     (let [b (+ a 0)]
       b)))
 
-# Un-fused oracles: a `match` body cannot close into a fragment, so these run
+# Un-fused oracles: a `block` body cannot close into a fragment, so these run
 # the real stdlib `map`. Same value as `dbl`/`inc`.
 (defn dbl-decl [x]
-  (match x
-    _ (* x 2)))
+  (block :oracle
+    (* x 2)))
 
 (defn inc-decl [x]
-  (match x
-    _ (+ x 1)))
+  (block :oracle
+    (+ x 1)))
 
-# Single map: fused inline lambda == un-fused match-body oracle == literal.
+# Single map: fused inline lambda == un-fused block-body oracle == literal.
 (assert (= (map (fn [x] (* x 2)) [1 2 3]) [2 4 6])
         "single map fuses to the same value")
 (assert (= (map (fn [x] (* x 2)) [1 2 3]) (map dbl-decl [1 2 3]))
-        "fused inline-lambda agrees with the un-fused match-body oracle")
+        "fused inline-lambda agrees with the un-fused block-body oracle")
 
 # Named-fn inlining: a `(map dbl xs)` fuses and agrees with the un-fused oracle.
 (assert (= (map dbl [1 2 3]) [2 4 6]) "named-fn map fuses to the same value")
 (assert (= (map dbl [1 2 3]) (map dbl-decl [1 2 3]))
-        "fused named-fn agrees with the un-fused match-body oracle")
+        "fused named-fn agrees with the un-fused block-body oracle")
 # A named fn is still usable as a first-class value after its inline at a call
 # site (the graft copies it; the definition persists).
 (assert (= (map dbl [1 2 3]) (map (fn [x] (dbl x)) [1 2 3]))
         "the inlined named fn is still callable as a value")
 
 # Let-body named fns fuse (a fragment closes over `let` bindings), and must agree with
-# the un-fused match-body oracle. `inc-let`'s SEQUENTIAL two-binding `let` (the
+# the un-fused block-body oracle. `inc-let`'s SEQUENTIAL two-binding `let` (the
 # second value reads the first) proves the rename rewrites the cross-binding
 # reference to the fresh id.
 (assert (= (map dbl-let [1 2 3]) (map dbl-decl [1 2 3]))
@@ -72,11 +72,11 @@
 
 # Cross-unit named-fn inlining: `dec` is a stdlib `defn` NOT redefined in this
 # file, so `(map dec xs)` inlines a body carried across the compile-unit boundary.
-# `dec-decl` is the un-fused oracle — a `match` body cannot close, so it runs the
+# `dec-decl` is the un-fused oracle — a `block` body cannot close, so it runs the
 # real stdlib `map`; fused and un-fused must agree.
 (defn dec-decl [x]
-  (match x
-    _ (dec x)))
+  (block :oracle
+    (dec x)))
 (assert (= (map dec [1 2 3]) [0 1 2])
         "cross-unit stdlib-fn map fuses to the right value")
 (assert (= (map dec [1 2 3]) (map dec-decl [1 2 3]))
@@ -89,8 +89,8 @@
 # The counter-factual is a compile that never runs — a splice reading the
 # defining unit's arena indexes an arena this unit does not own.
 (defn cfg-label-decl [c]
-  (match c
-    _ (fn/cfg-label c)))
+  (block :oracle
+    (fn/cfg-label c)))
 (assert (= (map fn/cfg-label [{:name "a"} {:doc "d"} {}]) ["a" "d" "anonymous"])
         "a cross-unit let-body stdlib fn fuses to the right value")
 (assert (= (map fn/cfg-label [{:name "a"} {:doc "d"} {}])
@@ -118,11 +118,11 @@
         "map over an aliased Var fuses to the same value")
 (assert (= (let [xs [1 2 3]]
              (map (fn [x] (* x 2)) xs)) (map dbl-decl [1 2 3]))
-        "fused Var-base agrees with the un-fused match-body oracle")
+        "fused Var-base agrees with the un-fused block-body oracle")
 
 # Composition fuses to ONE loop; the interleaved order is unobservable for these
 # pure transforms, and the value matches the staged `map`-of-`map`. The un-fused
-# oracle uses the match-body fns so it runs the real staged stdlib maps.
+# oracle uses the block-body fns so it runs the real staged stdlib maps.
 (assert (= (map (fn [y] (+ y 1)) (map (fn [x] (* x 2)) [1 2 3])) [3 5 7])
         "map-of-map fuses to the same value")
 (assert (= (map (fn [y] (+ y 1)) (map (fn [x] (* x 2)) [1 2 3]))
@@ -176,7 +176,7 @@
 # splice that dissolves the lambda. Two things are asserted at once: the file
 # compiles at all (an uncarried floor would make the spliced `%add` unprovable — a
 # compile error), and the fused value equals the un-fused oracle's. `sq-decl` is
-# that oracle: same declaration and same opcode, but a `match` body cannot close
+# that oracle: same declaration and same opcode, but a `block` body cannot close
 # into a fragment, so it runs the real stdlib `map`.
 (defn sq [x]
   (numeric!)
@@ -184,8 +184,8 @@
 
 (defn sq-decl [x]
   (numeric!)
-  (match x
-    _ (%mul x x)))
+  (block :oracle
+    (%mul x x)))
 
 (assert (= (map (fn [x]
                   (numeric!)
@@ -194,7 +194,7 @@
 (assert (= (map sq [1 2 3]) [1 4 9])
         "a named numeric kernel inlines to the right value")
 (assert (= (map sq [1 2 3]) (map sq-decl [1 2 3]))
-        "the fused numeric kernel agrees with the un-fused match-body oracle")
+        "the fused numeric kernel agrees with the un-fused block-body oracle")
 (assert (= (map sq []) []) "numeric kernel over an empty array fuses to empty")
 
 # The div family carries a second obligation — a provably nonzero divisor — which

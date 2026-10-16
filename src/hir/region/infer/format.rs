@@ -1,4 +1,7 @@
-//! Human-readable region-info dump (`super` = `hir::regions`).
+// audited: 2026-10-16
+//! The human-readable dump of one unit's region inference, which `--dump=regions` prints.
+//!
+//! docs/impl/region/diagnostics.md
 
 use super::*;
 
@@ -62,6 +65,21 @@ pub fn format_regions(
         let mut sources: Vec<_> = info.binding_source_regions.iter().collect();
         sources.sort_by_key(|(b, _)| b.0);
         for (b, regions) in &sources {
+            let name = bname(**b, arena);
+            let rs: Vec<String> = regions.iter().map(|r| format!("r{}", r.0)).collect();
+            writeln!(buf, "  {:<20} → [{}]", name, rs.join(" ")).unwrap();
+        }
+    }
+
+    // The containers a binding's value is read out of with no count. The
+    // binding holds none of them, and each one's release follows its uses
+    // (docs/impl/region/borrow.md).
+    if !info.binding_borrow_regions.is_empty() {
+        writeln!(buf).unwrap();
+        writeln!(buf, ";; ── binding borrow regions ──").unwrap();
+        let mut borrows: Vec<_> = info.binding_borrow_regions.iter().collect();
+        borrows.sort_by_key(|(b, _)| b.0);
+        for (b, regions) in &borrows {
             let name = bname(**b, arena);
             let rs: Vec<String> = regions.iter().map(|r| format!("r{}", r.0)).collect();
             writeln!(buf, "  {:<20} → [{}]", name, rs.join(" ")).unwrap();

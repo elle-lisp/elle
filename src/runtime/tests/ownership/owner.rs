@@ -3,35 +3,41 @@
 //!
 //! docs/impl/region/owner.md
 //! docs/impl/region/adopt.md
+//!
+//! A test whose subject is a producer's result crossing a call compiles with
+//! the graft off, so the transfer cut has a call site to key on
+//! (docs/impl/graft.md). `region_ownership_reclaims_a_grafted_returned_cycle`
+//! covers the producer the graft replaces.
 
 use super::*;
 
-/// End-to-end reclamation of the **capture-back-edge cycle** — the activation-owner cut
-/// (docs/impl/region/owner.md § "Owner nodes" — "The capture-back-edge SCC"; inference
-/// pin `region::infer::tests::adopt::activation_adopts_capture_back_edge_scc`). A Fresh container
-/// `root` holds `m` (store `root ⊇ m`), `m` holds a closure `c` (store `m ⊇ c`), and `c`
-/// captures `m` back (capture `c ⊇ m`) — the m↔c cycle through a closure env. No REGION root
-/// can own it: `m` is captured, so its `decref_point` over-extends past the closure while its
-/// own `DecrefValueRegion` stays live — the owner-aware lifetime obligation refuses (the
-/// refusal `adopt_edges_refuses_captured_store_member_on_lifetime` pins; running 50×
-/// panic-clean guards the over-free a region-root adopt of `m` would cause). The ACTIVATION owns it
-/// instead: both members are `AdoptIntoActivation`'d at the SCC's enclosing scope, their own
-/// decrefs suppressed, and the activation's completion release subtree-drops the cycle —
-/// interior m↔c references reclaiming with the set.
+/// End-to-end reclamation of the **capture-back-edge cycle** — the activation-owner
+/// cut (inference pin
+/// `region::infer::tests::adopt::cuts::activation_adopts_capture_back_edge_scc`). A
+/// Fresh container `root` holds `m` (store `root ⊇ m`), `m` holds a closure `c`
+/// (store `m ⊇ c`), and `c` captures `m` back (capture `c ⊇ m`) — the m↔c cycle
+/// through a closure env. No REGION root can own it: `m` is captured, so its
+/// `decref_point` over-extends past the closure while its own `DecrefValueRegion`
+/// stays live, and the owner-aware lifetime obligation refuses
+/// (`adopt_edges_refuses_captured_store_member_on_lifetime`). The ACTIVATION owns
+/// it instead: both members are `AdoptIntoActivation`'d at the SCC's enclosing
+/// scope, their own decrefs suppressed, and the activation's completion release
+/// subtree-drops the cycle — interior m↔c references reclaiming with the set.
 ///
-/// The leaking discriminator is the built-in counterfactual: per-region RC cannot collect
-/// the m↔c cycle (region/rules.md Rule 8), so a bounded reading beside a leaking
-/// discriminator proves the cut, not the shape, reclaims it. The interior store is a native
-/// funnel `Call` whose containment is funnel-recovered `containment_edges` (the
-/// value-resolved adopt needs no store site).
+/// The trap: a root that adopts `m` frees it at the root's subtree drop, and the
+/// trailing decref-value then reads freed pages. Fifty panic-clean runs guard
+/// that over-free.
+///
+/// The leaking discriminator is the built-in counterfactual: per-region RC cannot
+/// collect the m↔c cycle (docs/impl/region/rules.md), so a bounded reading beside a
+/// leaking discriminator proves the cut, not the shape, reclaims it. The interior
+/// store is a native funnel `Call` whose containment is funnel-recovered
+/// `containment_edges` (the value-resolved adopt needs no store site).
 #[test]
 fn region_ownership_capture_back_edge_cycle_reclaims() {
-    // root ⊇ m (store), m ⊇ c (store), c ⊇ m (capture) — the m↔c cycle through a
-    // closure env, the cycle no region root can own (region/owner.md § "Owner nodes" —
-    // "The capture-back-edge SCC"). Both members are `AdoptIntoActivation`'d and the
-    // activation's completion release subtree-drops the cycle; a broken adopt or a
-    // doubled member release trips a debug generation/decref assert, so completing
-    // panic-clean over 50 runs is itself the soundness half of the pin.
+    // A broken adopt or a doubled member release trips a debug generation/decref
+    // assert, so completing panic-clean over 50 runs is itself the soundness half
+    // of the pin.
     const SUBJECT: &str = "(begin (let [root (@array) m (@array)] \
                             (let [c (fn [] (length m))] \
                               (begin (%array-push m c) (c) (%array-push root m) nil))) \
@@ -52,9 +58,8 @@ fn region_ownership_capture_back_edge_cycle_reclaims() {
 }
 
 /// The capture-back-edge SCC with a park INSIDE the adopt scope, on the two
-/// in-process abandonment routes — the park split end-to-end
-/// (docs/impl/region/owner.md § "Owner nodes" — "The park split"; inference pin
-/// `region::infer::tests::adopt::activation_adopt_sites_ahead_of_park`; the
+/// in-process abandonment routes — the park split end-to-end (inference pin
+/// `region::infer::tests::adopt::cuts::activation_adopt_sites_ahead_of_park`; the
 /// abort route and both heap dimensions ride the `adopt-park-*` oracle family).
 /// The early adopt runs after the members' allocations and before the yield, so
 /// the parked frame carries the members in its activation owner node; the
@@ -102,16 +107,14 @@ fn region_ownership_parked_capture_back_edge_scc_reclaims_on_abandonment() {
 }
 
 /// End-to-end reclamation of the **transferred returned cycle** — the
-/// consuming-activation owner cut (docs/impl/region/owner.md § "Owner nodes" —
-/// "The transferred returned subtree"; inference pin
-/// `region::infer::tests::adopt::transfer_adopts_returned_cycle_to_consumer`). A
-/// producer `mk` builds an a↔b cycle and returns its root; the top-level
-/// consumer discards it. No region root can own it (the root crosses the
-/// return frontier) and per-region RC cannot collect the cycle, so RC alone
-/// leaks it per call. The producer's interior adopt hangs `b` under the
-/// returned root and the consumer's release is replaced by
-/// `AdoptIntoActivation`, so the activation's completion release set-drops the
-/// whole cycle.
+/// consuming-activation owner cut (inference pin
+/// `region::infer::tests::adopt::transfer::transfer_adopts_returned_cycle_to_consumer`).
+/// A producer `mk` builds an a↔b cycle and returns its root; the top-level
+/// consumer discards it. No region root can own it (the root crosses the return
+/// frontier) and per-region RC cannot collect the cycle. The producer's interior
+/// adopt hangs `b` under the returned root, and the consumer's release is
+/// replaced by `AdoptIntoActivation`, so the activation's completion release
+/// set-drops the whole cycle.
 ///
 /// The leaking discriminator is the built-in counterfactual beside the bounded
 /// reading. The interior store is a native funnel `Call` — funnel-recovered
@@ -119,13 +122,37 @@ fn region_ownership_parked_capture_back_edge_scc_reclaims_on_abandonment() {
 /// adopt needs no store opcode).
 #[test]
 fn region_ownership_reclaims_returned_cycle_across_calls() {
-    // A producer `mk` builds an a↔b cycle and returns its root; the top-level consumer
-    // discards it. No region root can own it (the root crosses the return frontier) and
-    // per-region RC cannot collect the cycle, so the transfer cut hangs `b` under the
-    // returned root and replaces the consumer's release with `AdoptIntoActivation`; the
-    // activation's completion release set-drops the whole cycle. A broken adopt or a
-    // doubled release trips a debug generation/decref assert, so 50 panic-clean runs
-    // are the soundness half of the pin.
+    // A broken adopt or a doubled release trips a debug generation/decref assert,
+    // so 50 panic-clean runs are the soundness half of the pin.
+    const SUBJECT: &str = "(def mk (fn [] (let [a (@array) b (@array)] \
+                     (begin (%array-push a b) (%array-push b a) a)))) \
+                   (mk) \
+                   (mk) \
+                   nil";
+    let leak = leak_discriminator();
+    let on = steady_region_growth_ungrafted(SUBJECT);
+    assert!(
+        leak > 0,
+        "gauge live: the refused-cycle discriminator must leak (per-run region growth \
+         {leak}); if 0 the gauge is dead and the bounded assertion below is vacuous",
+    );
+    assert!(
+        on <= 0,
+        "the returned cycle must be reclaimed by the consuming activation's owner-node \
+         release — per-run live-region growth {on} must be <= 0 (the discriminator \
+         leaks {leak})",
+    );
+}
+
+/// The same producer under the graft, so each `(mk)` becomes its body: the cycle
+/// is built inline in the consumer, and the value it hands out is the grafted
+/// body's `let`, not a call's result (docs/impl/graft.md). Grafting must not
+/// cost a program the reclamation the call had.
+///
+/// The counter-factual: the transfer cut keys on a consumer's call site, so the
+/// grafted form had no site to adopt, and each run leaked the two cycle regions.
+#[test]
+fn region_ownership_reclaims_a_grafted_returned_cycle() {
     const SUBJECT: &str = "(def mk (fn [] (let [a (@array) b (@array)] \
                      (begin (%array-push a b) (%array-push b a) a)))) \
                    (mk) \
@@ -140,9 +167,8 @@ fn region_ownership_reclaims_returned_cycle_across_calls() {
     );
     assert!(
         on <= 0,
-        "the returned cycle must be reclaimed by the consuming activation's owner-node \
-         release — per-run live-region growth {on} must be <= 0 (the discriminator \
-         leaks {leak})",
+        "a grafted producer's returned cycle must be reclaimed — per-run live-region \
+         growth {on} must be <= 0 (the discriminator leaks {leak})",
     );
 }
 
@@ -182,16 +208,17 @@ fn region_ownership_reclaims_fiber_terminal_cycle() {
 /// cycle), and either completes (the resumed body's clean break frees node +
 /// members) or is hard-killed mid-park (`fiber/cancel` → the terminal teardown
 /// frees the parked node's members).
+///
+/// This is a SOUNDNESS pin: the transfer adopt and the owner node must ride the
+/// park, the restore and the terminal teardown without double-freeing or
+/// dangling. A broken adopt or a doubled member release trips a debug
+/// generation/decref assert, so completing 50× panic-clean is the pin. The
+/// suspending resume's carrier retain leaves a residue beside the cycle, so the
+/// growth reading proves nothing here. The hand-emitted `activation_owner_node_*`
+/// and `fiber_owner_node_*` tests isolate the reclamation through generation
+/// bumps, and `region_ownership_reclaims_fiber_terminal_cycle` pins the growth.
 #[test]
 fn region_ownership_transfer_adopt_rides_parks_and_fiber_teardown() {
-    // This is a SOUNDNESS pin for the park/resume/cancel/teardown wiring: the transfer
-    // adopt + owner node must ride the park, restore, and terminal teardown WITHOUT
-    // double-freeing or dangling — a broken adopt or a doubled member release trips a
-    // debug generation/decref assert, so completing 50× panic-clean is the pin. The
-    // amount reclaimed is pinned elsewhere: the hand-emitted owner-node tests read it
-    // through generation bumps, and `region_ownership_reclaims_fiber_terminal_cycle`
-    // pins the growth of the non-parked shape.
-
     // Drained to completion: two cycles adopted into the body's activation node, a yield
     // parking the node between them; the resumed body's completion frees node + members.
     let complete = "(def mk (fn [] (let [a (@array) b (@array)] \
@@ -199,7 +226,7 @@ fn region_ownership_transfer_adopt_rides_parks_and_fiber_teardown() {
                     (let [f (fiber/new (fn [] (begin (mk) (emit :yield 0) (mk) nil)) 2)] \
                       (begin (fiber/resume f) (fiber/resume f) nil)) \
                     nil";
-    let _ = steady_region_growth(complete);
+    let _ = steady_region_growth_ungrafted(complete);
 
     // Hard-killed mid-park: the first cycle is adopted, the body parks at the yield, and
     // `fiber/cancel` tears the fiber down — the kill must free the parked activation
@@ -209,7 +236,7 @@ fn region_ownership_transfer_adopt_rides_parks_and_fiber_teardown() {
                   (let [f (fiber/new (fn [] (begin (mk) (emit :yield 0) (mk) nil)) 2)] \
                     (begin (fiber/resume f) (fiber/cancel f :dead) nil)) \
                   nil";
-    let _ = steady_region_growth(cancel);
+    let _ = steady_region_growth_ungrafted(cancel);
 }
 
 /// VM≡JIT parity for the transfer cut: the producer's interior `AdoptRegion`
@@ -226,6 +253,7 @@ fn region_ownership_reclaims_returned_cycle_under_jit() {
     fn growth() -> (i64, bool) {
         let mut rt = Runtime::without_stdlib();
         rt.vm().runtime_config.jit = JitPolicy::Eager;
+        rt.compile().set_graft(crate::config::GraftPolicy::Off);
         let src = "(def mk (fn [] (let [a (@array) b (@array)] \
                      (begin (%array-push a b) (%array-push b a) a)))) \
                    ((fn [] (begin (mk) nil))) \
@@ -266,7 +294,7 @@ fn region_ownership_reclaims_returned_cycle_under_jit() {
     assert!(
         jit_compiled,
         "the consumer wrapper must JIT-compile — an empty jit_cache means a worker \
-         died (e.g. on a missing translate arm)",
+         died (for example, on a missing translate arm)",
     );
     let leak = leak_discriminator();
     assert!(
@@ -335,8 +363,8 @@ fn adopt_into_activation_absorbs_redelivery() {
     );
 }
 
-/// Boundary pin for the capture-adopt admission (region/adopt.md § "The capture
-/// adopt"): the nested-closure-captures-its-encloser family — the only shape family
+/// Boundary pin for the capture-adopt admission (docs/impl/region/adopt.md): the
+/// nested-closure-captures-its-encloser family — the only shape family
 /// whose owner-capture is an UPVALUE and which external uniqueness admits — must NOT be
 /// over-claimed by the forest's capture adopt. The nested closure's region is minted
 /// per CALL of the enclosing closure, so adopting the longer-lived member would free it

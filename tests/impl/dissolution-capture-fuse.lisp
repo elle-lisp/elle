@@ -11,9 +11,8 @@
 # that sees a capture: a shared log tells the staged order (all of the inner op,
 # then all of the outer) from the interleaved one a fused loop would run.
 #
-# The un-fused oracles here are named functions with a `match` body — a
-# binding-introducing form a fragment cannot close over — so each stays a real
-# stdlib call.
+# The un-fused oracle is a named function with a `block` body. A fragment cannot
+# close over a `block`, so a `map` over that function stays a stdlib call.
 
 (defn allocs [thunk]
   (let [before (arena/total-allocs)]
@@ -21,8 +20,8 @@
     (- (arena/total-allocs) before)))
 
 (defn r-mul3 [x]
-  (match x
-    _ (* x 3)))
+  (block :oracle
+    (* x 3)))
 
 (def nums [0 1 2 3 4 5 6 7 8 9])
 

@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-14
 //! VM core tests for runtime invariants and error paths.
 //!
 //! docs/impl/vm.md
@@ -22,9 +22,8 @@ fn test_signal_bits() {
 
 #[test]
 fn test_capture_stack_trace() {
-    use std::collections::HashMap;
     let mut vm = VM::new();
-    let empty_map: HashMap<usize, crate::reader::SourceLoc> = HashMap::new();
+    let empty_map = crate::error::LocationMap::default();
 
     vm.push_call_frame("function_a", 10, empty_map.clone());
     vm.push_call_frame("function_b", 20, empty_map.clone());
@@ -40,9 +39,8 @@ fn test_capture_stack_trace() {
 
 #[test]
 fn test_wrap_error_with_trace() {
-    use std::collections::HashMap;
     let mut vm = VM::new();
-    let empty_map: HashMap<usize, crate::reader::SourceLoc> = HashMap::new();
+    let empty_map = crate::error::LocationMap::default();
 
     vm.push_call_frame("outer", 5, empty_map.clone());
     vm.push_call_frame("inner", 15, empty_map.clone());

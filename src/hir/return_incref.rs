@@ -1,32 +1,20 @@
-// audited: 2026-09-22
-//! Return-ownership wrapping pass for HIR.
+// audited: 2026-10-06
+//! Wraps each tail value of a function body that is not a tail call in `HirKind::Return`, the return mint.
+//!
+//! The pass runs after `mark_tail_calls`, whose `is_tail` flags it reads, and
+//! after `anf_lift`, whose tail values it wraps. `Return` lowers to
+//! `IncrefValueRegion`, which hands the caller one owning reference to
+//! whatever region the result lives in. The caller releases it at the result
+//! binding's `decref_point`. A tail call stays unwrapped: its callee already
+//! retained the result, and a wrapper would move the call out of tail position.
+//!
+//! The walk mirrors `mark_tail_calls`, so both passes agree on tail position.
+//! Two flags carry it. Any node whose child is not its result clears
+//! `in_tail`; only a function boundary clears `tail_blocks`, the set of
+//! blocks a `break` returns through.
 //!
 //! docs/impl/region/mechanism.md
-//!
-//! Runs after `mark_tail_calls` (it reads the `is_tail` flag) and after
-//! `anf_lift` (it wraps the post-ANF tail value). For every function
-//! body, it wraps each tail value that is **not** a tail call in a
-//! `HirKind::Return` marker. `Return` lowers to a `IncrefValueRegion`:
-//! it increfs the region of the result's runtime value, handing the
-//! caller exactly one owning reference to whatever region the result
-//! actually lives in (a fresh callee allocation, a passed-through arg,
-//! or a branch-dependent mix — never named at compile time).
-//!
-//! This is the callee half of the prediction-free calling convention.
-//! The caller balances it with a `DecrefValueRegion` at the result
-//! binding's `decref_point` (see `src/lir/lower`). Tail calls are left
-//! unwrapped: the inner callee already retained its result, that
-//! reference propagates, and wrapping would defeat tail-call
-//! optimization by moving the call out of tail position.
-//!
-//! The traversal mirrors `mark_tail_calls` exactly so that "tail
-//! position" means the same thing in both passes. Two flags carry it and
-//! they are invalidated by different things: `in_tail` by any node whose
-//! child is not its result, `tail_blocks` — which makes a `break`
-//! targeting a tail block a returning position — only by a **function
-//! boundary**, since a break reaches its target's exit label by a jump
-//! that no enclosing construct intercepts (docs/impl/region/mechanism.md
-//! § "A break out of a TAIL block carries the return mint").
+//! docs/impl/region/anchors.md
 
 use std::collections::HashSet;
 
@@ -51,14 +39,14 @@ pub(crate) fn wrap_tail_returns(hir: &mut Hir) {
 }
 
 fn walk(hir: &mut Hir, in_tail: bool, tail_blocks: &HashSet<BlockId>) {
-    // Phase 1: recurse, propagating tail position exactly as
-    // `mark_tail_calls::mark` does. `handled` is true when the arm
-    // already recursed into all children with the right tail-ness.
+    // Phase 1: recurse, propagating tail position as `tailcall::mark` does,
+    // except for `and`/`or`. `handled` is true when the arm already recursed
+    // into all children with the right tail-ness.
     let handled = match &mut hir.kind {
         // A lambda body is a fresh function boundary, always in tail
         // position; no enclosing block is reachable across it.
-        HirKind::Lambda { body, .. } => {
-            walk(body, true, &HashSet::new());
+        HirKind::Lambda(lambda) => {
+            walk(&mut lambda.body, true, &HashSet::new());
             true
         }
         HirKind::If {
@@ -110,20 +98,17 @@ fn walk(hir: &mut Hir, in_tail: bool, tail_blocks: &HashSet<BlockId>) {
             }
             true
         }
-        // `and`/`or` are NOT tail-transparent for the return mint, unlike for
-        // `mark_tail_calls`. A short-circuit value is ANY operand (the first truthy
-        // for `or`, the first falsy for `and`), not just the last — and the lowerer
-        // funnels every operand through one result slot. Pushing `Return` into only
-        // the last operand (as the tail-transparent compounds do) leaves a
-        // short-circuit-returned non-last operand with no `IncrefValueRegion`: its
-        // owned-region decref then fires with no balancing mint, freeing the returned
-        // value under the caller. So walk every operand as NON-tail and let
-        // phase 3 wrap the WHOLE `and`/`or` in `Return`
-        // (`is_wrappable` admits them): the mint lands on the result slot whichever
-        // operand fills it, and `return_sites` extends every operand region's
-        // `decref_point` past that mint. A tail call in the last operand keeps its
-        // `is_tail` flag (set by `mark_tail_calls`) and still TCO-replaces the frame —
-        // the wrapping mint sits in the unreached fall-through, inert on that path.
+        // `and`/`or` are not tail-transparent for the return mint, unlike for
+        // `mark_tail_calls`. Any operand can be the result (the first truthy
+        // for `or`, the first falsy for `and`), and the lowerer funnels every
+        // operand through one result slot. A `Return` in the last operand alone
+        // would leave a short-circuit result with no mint, while its region's
+        // release still fires. So walk every operand as non-tail, and let
+        // phase 3 wrap the whole `and`/`or`: the mint lands on the result slot
+        // whichever operand fills it, and `return_sites` extends every operand
+        // region's `decref_point` past that mint. A tail call in the last
+        // operand keeps its `is_tail` flag and still replaces the frame; the
+        // wrapping mint sits in the fall-through that path never reaches.
         HirKind::And(exprs) | HirKind::Or(exprs) => {
             for e in exprs.iter_mut() {
                 walk(e, false, tail_blocks);
@@ -168,18 +153,10 @@ fn walk(hir: &mut Hir, in_tail: bool, tail_blocks: &HashSet<BlockId>) {
     // lambda bodies (e.g. a lambda bound in a `let` value, or an
     // argument lambda).
     //
-    // `tail_blocks` travels through unchanged, because it and `in_tail` answer
-    // different questions and only a **function boundary** — the `Lambda` arm —
-    // invalidates the second. A `break` reaches its target block's exit label by
-    // a jump, so an enclosing node that is not itself a tail position does not
-    // sever the break's: the pervasive `(fn … (forever … (break v)))` idiom puts a
-    // `Loop` between the tail block and the break, and `v` is still the
-    // function's result. Reset the set here and that `v` is returned with no mint
-    // while the release pinned at the block's exit label still fires, so the
-    // caller reads a freed value (docs/impl/region/mechanism.md § "A break out of
-    // a TAIL block carries the return mint"). `mark_tail_calls` threads the set
-    // through every arm for the same reason, and the two passes must agree on
-    // what "tail position" means or the mint and the release disagree.
+    // `tail_blocks` travels through unchanged: only a function boundary, the
+    // `Lambda` arm, clears it. In `(fn … (forever … (break v)))` a `Loop` sits
+    // between the tail block and the break, and `v` is still the function's
+    // result, so it still needs its mint.
     if !handled {
         hir.for_each_child_mut(|c| walk(c, false, tail_blocks));
     }

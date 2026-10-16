@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-06
 //! Pins adopt-edge emission: which Owned-subtree member each owner adopts, and where a
 //! subtree is refused to Shared.
 //!
@@ -30,8 +30,9 @@
 //!   meet in one.
 //! - `captures` — what a closure may adopt: the suppress ⊆ adopt contract, the
 //!   capture-cell clique, and the re-storable-cell gate.
-//! - `cuts` — where a subtree stops: the activation-owner cut and the
-//!   transferred-returned-subtree cut.
+//! - `cuts` — the activation-owner cut, where a capture-back-edge cycle stops.
+//! - `transfer` — the transferred-returned-subtree cut, where a returned cycle
+//!   stops.
 
 // Re-glob the parent's test imports so each submodule can `use super::*;` and
 // so `super::ownership` — the only `super::IDENT` a test body names — resolves
@@ -43,12 +44,13 @@ mod cuts;
 mod embed;
 mod structural;
 mod subtrees;
+mod transfer;
 
 /// The region of the first (outermost) `Lambda` node in `hir` — the closure region the
 /// combined-shape probes capture into. (Each probe has exactly one closure.)
 fn sole_closure_region(hir: &Hir, info: &RegionInfo) -> Region {
     fn first_lambda(h: &Hir, out: &mut Option<HirId>) {
-        if matches!(&h.kind, HirKind::Lambda { .. }) && out.is_none() {
+        if matches!(&h.kind, HirKind::Lambda(_)) && out.is_none() {
             *out = Some(h.id);
         }
         h.for_each_child(|c| first_lambda(c, out));
@@ -66,9 +68,9 @@ fn sole_closure_region(hir: &Hir, info: &RegionInfo) -> Region {
 /// member's value (from a slot or the env) for the value-resolved adopt?
 fn closure_captures_region(hir: &Hir, info: &RegionInfo, member: Region, closure: Region) -> bool {
     fn walk(h: &Hir, info: &RegionInfo, member: Region, closure: Region, found: &mut bool) {
-        if let HirKind::Lambda { captures, .. } = &h.kind {
+        if let HirKind::Lambda(lambda) = &h.kind {
             if info.alloc_region.get(&h.id) == Some(&closure)
-                && captures.iter().any(|c| {
+                && lambda.captures.iter().any(|c| {
                     info.binding_source_regions
                         .get(&c.binding)
                         .is_some_and(|rs| rs.contains(&member))

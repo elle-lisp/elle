@@ -1,3 +1,8 @@
+// audited: 2026-10-06
+//! Source positions and HIR lookups for the `compile/*` queries and rewrites: name spans, line offsets, named lambdas.
+//!
+//! docs/analysis/agent-reasoning.md
+
 use super::*;
 
 /// Check if a byte can appear in an Elle identifier token.
@@ -8,6 +13,7 @@ pub(crate) fn is_ident_byte(b: u8) -> bool {
             b'(' | b')' | b'[' | b']' | b'{' | b'}' | b'|' | b'#' | b'"' | b'\''
         )
 }
+
 /// Find the first occurrence of `name` as a standalone token in `source[start..end]`.
 /// Returns `(absolute_byte_offset, byte_len)`.
 pub(crate) fn find_name_in_span(
@@ -41,14 +47,14 @@ pub(crate) fn find_name_in_span(
     }
     None
 }
-/// Select the binding named `name` that actually carries symbol-index data (a
+
+/// Select the binding named `name` that carries symbol-index data (a
 /// definition location or usages).
 ///
-/// A file-scope `def` can leave a phantom prebind binding that shares the name
-/// but holds no source info (the analyzer's two-pass file-letrec). The index is
-/// keyed per-binding (`DefId`) now, so a by-name reflection lookup must skip
-/// such phantoms or it lands on an empty entry. Falls back to the first by-name
-/// binding when none carry data, so a name with no span data still resolves.
+/// Several bindings in one arena can share a name, and some of them carry no
+/// source data. The index is keyed per binding (`DefId`), so a by-name lookup
+/// skips those, or it lands on an empty entry. When no binding carries data,
+/// the first binding with the name answers, so the name still resolves.
 pub(crate) fn binding_for_name(
     arena: &BindingArena,
     symbols: &crate::symbol::SymbolTable,
@@ -71,9 +77,9 @@ pub(crate) fn binding_for_name(
     fallback
 }
 
-/// Build binding spans using symbol_index data (line/col → byte offsets).
-/// HIR byte spans are unreliable for macro-expanded code, so we use the
-/// symbol_index which records definition and usage locations correctly.
+/// Build binding spans from symbol-index data (line/col → byte offsets).
+/// HIR byte spans are unreliable for macro-expanded code, and the symbol
+/// index records definition and usage locations correctly.
 pub(crate) fn build_binding_spans(
     _hir: &Hir,
     arena: &BindingArena,
@@ -131,6 +137,7 @@ pub(crate) fn build_binding_spans(
         }
     }
 }
+
 /// Find the Lambda Hir node for a named function definition.
 pub(crate) fn find_named_lambda<'a>(
     hir: &'a Hir,
@@ -142,7 +149,7 @@ pub(crate) fn find_named_lambda<'a>(
         HirKind::Letrec { bindings, body } | HirKind::Let { bindings, body } => {
             for (binding, value) in bindings {
                 if let Some(name) = symbols.name(arena.get(*binding).name) {
-                    if name == target && matches!(value.kind, HirKind::Lambda { .. }) {
+                    if name == target && matches!(value.kind, HirKind::Lambda(_)) {
                         return Some(value);
                     }
                 }
@@ -154,13 +161,13 @@ pub(crate) fn find_named_lambda<'a>(
         }
         HirKind::Define { binding, value } => {
             if let Some(name) = symbols.name(arena.get(*binding).name) {
-                if name == target && matches!(value.kind, HirKind::Lambda { .. }) {
+                if name == target && matches!(value.kind, HirKind::Lambda(_)) {
                     return Some(value);
                 }
             }
             find_named_lambda(value, arena, symbols, target)
         }
-        HirKind::Lambda { body, .. } => find_named_lambda(body, arena, symbols, target),
+        HirKind::Lambda(lambda) => find_named_lambda(&lambda.body, arena, symbols, target),
         HirKind::If {
             cond,
             then_branch,
@@ -247,7 +254,9 @@ pub(crate) fn find_named_lambda<'a>(
         _ => None,
     }
 }
-/// Collect referenced and defined bindings within a byte range of the HIR.
+
+/// Collect the bindings referenced and defined within a byte range of the HIR,
+/// and join into `signal` the signal of every node the range touches.
 pub(crate) fn collect_vars_in_range(
     hir: &Hir,
     start: usize,
@@ -275,19 +284,14 @@ pub(crate) fn collect_vars_in_range(
             }
             collect_vars_in_range(body, start, end, referenced, defined, signal);
         }
-        HirKind::Lambda {
-            params,
-            rest_param,
-            body,
-            ..
-        } => {
-            for p in params {
+        HirKind::Lambda(lambda) => {
+            for p in &lambda.params {
                 defined.insert(*p);
             }
-            if let Some(r) = rest_param {
-                defined.insert(*r);
+            if let Some(r) = lambda.rest_param {
+                defined.insert(r);
             }
-            collect_vars_in_range(body, start, end, referenced, defined, signal);
+            collect_vars_in_range(&lambda.body, start, end, referenced, defined, signal);
         }
         HirKind::Assign { target, value } => {
             referenced.insert(*target);
@@ -363,6 +367,7 @@ pub(crate) fn collect_vars_in_range(
         _ => {}
     }
 }
+
 /// Compute byte offsets for each line start (0-indexed lines).
 pub(crate) fn compute_line_offsets(source: &str) -> Vec<usize> {
     let mut offsets = vec![0];
@@ -373,7 +378,9 @@ pub(crate) fn compute_line_offsets(source: &str) -> Vec<usize> {
     }
     offsets
 }
-/// Find the matching close paren for an open paren at `start`.
+
+/// Find the close paren that matches the open paren at `start`, and return the
+/// byte offset one past it.
 pub(crate) fn find_matching_paren(source: &str, start: usize) -> Option<usize> {
     let bytes = source.as_bytes();
     if start >= bytes.len() || bytes[start] != b'(' {

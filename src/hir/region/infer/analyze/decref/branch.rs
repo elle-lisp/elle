@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-10-14
 //! The branch-arm release window: moving a release that landed inside one arm
 //! onto the branch, where every path arrives.
 //!
@@ -21,8 +21,7 @@ use crate::hir::defuse::DefUseBuilder;
 /// consuming the branch's value, or the branch itself when nothing does — whose
 /// decrefs the lowerer emits after the merge label. Moving the release there is a
 /// placement argument, the one the break window makes: one release still, landing
-/// later (docs/impl/region/mechanism.md § "A release inside one arm is not a
-/// release on the other arms").
+/// later (docs/impl/region/window.md).
 ///
 /// Placement is enough only where this frame **holds the region alone** —
 /// the release fires on arms where none did before, and the other holder within
@@ -35,8 +34,7 @@ use crate::hir::defuse::DefUseBuilder;
 /// arm's `TailCall`, which does precede its callee's mint, owes no edge either — a
 /// callee reaches a value this frame owns as an operand or through its captured
 /// environment and by no other route, so it either counts the region or cannot mint
-/// against it (region/mechanism.md § "The callee's return mint, and why the point
-/// owes it nothing").
+/// against it (docs/impl/region/relocate.md).
 ///
 /// Once a region's `decref_point` leaves the arms, `region::infer::compensate` no
 /// longer finds it inside one, so neither of its per-arm routes fires for that
@@ -68,7 +66,7 @@ use crate::hir::defuse::DefUseBuilder;
 /// release away. The **callee's own** region has no such release standing in for
 /// it: the deferred callee channel does, and that channel is keyed on where the
 /// release sits, so anchoring it at the merge leaves the exiting arm with nothing
-/// (region/mechanism.md § "What the exemption keeps, a channel must still run").
+/// (docs/impl/region/relocate.md).
 ///
 /// The region must also be **live-in** — every allocation and holder-definition
 /// site outside the branch's subtree — so a value born inside an arm keeps its
@@ -78,22 +76,14 @@ pub(super) fn pin_branch_arm_releases(
     info: &mut RegionInfo,
     hir: &Hir,
     du: &DefUseBuilder,
-    order: &HashMap<HirId, u32>,
-    last_use: &HashMap<HirId, HirId>,
+    order: &Order,
+    last_use: &LastUse,
     inference_binding_regions: &HashMap<Binding, Vec<Region>>,
     frame_replacing_tail_calls: &rustc_hash::FxHashSet<HirId>,
 ) {
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
-    let low = compute_subtree_low(hir, order);
     let mut scopes = BranchWindowScopes::default();
-    collect_branch_scopes(
-        hir,
-        info,
-        order,
-        &low,
-        frame_replacing_tail_calls,
-        &mut scopes,
-    );
+    collect_branch_scopes(hir, info, order, frame_replacing_tail_calls, &mut scopes);
     if scopes.branches.is_empty() {
         return;
     }
@@ -129,16 +119,14 @@ pub(super) fn pin_branch_arm_releases(
     }
     // Only regions whose `decref_point` lands inside the branch's arms can move,
     // so index the regions by post-order `decref_point` once and let each branch
-    // binary-search the arm-interval slices. A move writes the region's new ord
-    // straight into the index, which leaves it unsorted, so a branch that moved
-    // anything re-sorts before the next one runs — later branches, processed
-    // innermost-outward, then search an ordered index and see the post-move values.
-    let mut by_dord: Vec<(u32, Region)> = info
-        .region_data
-        .iter()
-        .map(|(&r, d)| (ord(d.decref_point), r))
-        .collect();
-    by_dord.sort_unstable_by_key(|&(o, _)| o);
+    // read the arm intervals as ranges of the index. A move files the region
+    // under its new point, so later branches, processed innermost-outward, see
+    // the post-move values.
+    let mut by_dord: std::collections::BTreeMap<u32, Vec<Region>> =
+        std::collections::BTreeMap::new();
+    for (&r, d) in &info.region_data {
+        by_dord.entry(ord(d.decref_point)).or_default().push(r);
+    }
 
     // ── The admission: the frame must be the region's only holder ────────────
     //
@@ -171,12 +159,12 @@ pub(super) fn pin_branch_arm_releases(
     // one of escape's facets.
     //
     // The **return** facet is no refusal at either placement. At the merge the
-    // release follows whatever mint the taken arm already ran (§ "The return
-    // frontier is per-path"); at an arm's replica, which does precede its callee's
-    // mint, the callee reaches a value this frame owns as an operand or through its
-    // captured environment and by no other route — so it either holds a counted edge
-    // across the gap or cannot mint against the region at all (mechanism.md § "The
-    // callee's return mint, and why the point owes it nothing").
+    // release follows whatever mint the taken arm already ran
+    // (docs/impl/region/compensate.md); at an arm's replica, which does precede its
+    // callee's mint, the callee reaches a value this frame owns as an operand or
+    // through its captured environment and by no other route — so it either holds a
+    // counted edge across the gap or cannot mint against the region at all
+    // (docs/impl/region/relocate.md).
     let frame_held = info.frame_held_regions.clone();
 
     // Snapshotted for the frame-exit narrowing below, which reads it while
@@ -217,9 +205,8 @@ pub(super) fn pin_branch_arm_releases(
         // (`lir::lower::regiondecref::value_release_slot`) rather than reading the
         // region's class: releasing by id is the lowerer's DEFAULT, taken wherever a
         // single point covers every path, so a region a binder recorded a slot for
-        // takes the value route as soon as a point admits it (mechanism.md § "A
-        // release the relocation replicates names a VALUE, and a binder's slot
-        // supplies that name").
+        // takes the value route as soon as a point admits it
+        // (docs/impl/region/relocate.md).
         let arm_exits: Vec<&FrameExit> = scopes
             .frame_exits
             .iter()
@@ -274,8 +261,8 @@ pub(super) fn pin_branch_arm_releases(
             i > 0 && merged_barriers[i - 1].1 > dord
         };
         // Merge the arms' closed intervals (`lo <= dord <= hi`) so each region in
-        // the branch's union is scanned once, then binary-search the `by_dord`
-        // index for each merged interval.
+        // the branch's union is scanned once, then read each merged interval as a
+        // range of the `by_dord` index.
         let mut arm_ivs: Vec<(u32, u32)> = br.arms.iter().map(|a| (a.lo, a.hi)).collect();
         arm_ivs.sort_unstable_by_key(|&(lo, _)| lo);
         let mut merged_arms: Vec<(u32, u32)> = Vec::new();
@@ -290,23 +277,19 @@ pub(super) fn pin_branch_arm_releases(
             }
             merged_arms.push((lo, hi));
         }
-        // Snapshot the branch's candidates before any move: the inner loop mutates
-        // `by_dord` in place (a move raises the entry's ord), so iterating the live
-        // slice would shift not-yet-visited entries across the fixed `end` boundary
-        // and admit regions whose ord falls OUTSIDE the arm union. Collecting the
-        // union's entries once — each region appears in exactly one merged interval —
-        // matches the original per-region pass, which read every `decref_point`
-        // before mutating any of them.
-        let mut candidates: Vec<(u32, Region, usize)> = Vec::new();
+        // Snapshot the branch's candidates before any move: the inner loop refiles
+        // a moved region under its new point, so iterating the live index could
+        // meet a region twice or admit one whose point falls OUTSIDE the arm
+        // union. Collecting the union's entries once — each region appears in
+        // exactly one merged interval — judges every candidate by the
+        // `decref_point` it had before this branch moved anything.
+        let mut candidates: Vec<(u32, Region)> = Vec::new();
         for &(lo, hi) in &merged_arms {
-            let start = by_dord.partition_point(|&(o, _)| o < lo);
-            let end = by_dord.partition_point(|&(o, _)| o <= hi);
-            for (rel, &(o, r)) in by_dord[start..end].iter().enumerate() {
-                candidates.push((o, r, start + rel));
+            for (&o, rs) in by_dord.range(lo..=hi) {
+                candidates.extend(rs.iter().map(|&r| (o, r)));
             }
         }
-        let mut moved = false;
-        for &(dord, r, idx) in &candidates {
+        for &(dord, r) in &candidates {
             if excluded.contains(&r) {
                 continue;
             }
@@ -316,8 +299,8 @@ pub(super) fn pin_branch_arm_releases(
             // A region the exiting arm's call names as its CALLEE is exempt from the
             // relocation, so no replica reaches that arm — and what stands in for the
             // release there is the deferred callee channel, which is keyed on where
-            // the release SITS (`deferred_release_slot`; mechanism.md § "What the
-            // exemption keeps, a channel must still run"). Moving it to the merge
+            // the release SITS (`deferred_release_slot`; docs/impl/region/relocate.md).
+            // Moving it to the merge
             // takes it out of that channel's reach and leaves the arm with nothing,
             // so such a region keeps its in-arm release. An ARGUMENT's exemption is
             // the opposite story — the release the arm never runs IS the ownership
@@ -354,14 +337,25 @@ pub(super) fn pin_branch_arm_releases(
             // reading the region's real lifetime and not this anchor
             // (`RegionData::lifetime_point`).
             info.region_data.get_mut(&r).unwrap().decref_point = anchor;
-            by_dord[idx].0 = anchor_ord;
-            moved = true;
-        }
-        // A move raises a region's `decref_point` in place and so unsorts the
-        // index; restore the order so the next branch's interval searches hold.
-        // Most branches move nothing, and those owe no sort at all.
-        if moved {
-            by_dord.sort_unstable_by_key(|&(o, _)| o);
+            refile(&mut by_dord, r, dord, anchor_ord);
         }
     }
+}
+
+/// Move `r` in the release index from the point it was filed under to `to`.
+fn refile(
+    by_dord: &mut std::collections::BTreeMap<u32, Vec<Region>>,
+    r: Region,
+    from: u32,
+    to: u32,
+) {
+    if let Some(rs) = by_dord.get_mut(&from) {
+        if let Some(i) = rs.iter().position(|&x| x == r) {
+            rs.swap_remove(i);
+        }
+        if rs.is_empty() {
+            by_dord.remove(&from);
+        }
+    }
+    by_dord.entry(to).or_default().push(r);
 }

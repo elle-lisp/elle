@@ -17,6 +17,8 @@
 //! - `frameexit` — the release a frame owes on the way out, by value route or
 //!   by region id, the callee release a tail call defers, and the borrowed
 //!   arguments a tail call names.
+//! - `operand` — what a tail-call operand hands the call, and so which release
+//!   stays behind the call.
 //! - `cellexit` — the same placement for an env cell's box, and the reads
 //!   through the cell a move of its release must not cross.
 //! - `armexit` — the replica each frame-exiting branch arm takes of a release
@@ -44,6 +46,7 @@ mod determinism;
 mod emission;
 mod frameexit;
 mod frametables;
+mod operand;
 mod order;
 mod parkmint;
 mod restpattern;

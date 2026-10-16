@@ -1,17 +1,16 @@
-// audited: 2026-09-09
-// ── Which body tails the closure-cycle merge admits ──────────────────
-//
+// audited: 2026-10-06
 // docs/impl/region/letrec.md
-//
-// A `letrec` body's tail call replaces the frame, which strands the merged
-// arena's binding-scope `DecrefRegion` as dead code. Every such tail must
-// therefore supply a release channel: a MEMBER callee rides the existing
-// stranded-cycle deferral, a NON-member callee rides the explicit arena adopt
-// (`RegionInfo::cycle_tail_release`). What the non-member channel still refuses
-// is a cycle member carried into the call BY-MOVE, whose new activation's
-// owned-parameter release would decref the arena a second time — and that is a
-// claim about a callee which can REPLACE the frame, so a callee the compiler
-// reads as a native is admitted with the members riding in.
+//! Which body tails the closure-cycle merge admits, and which the by-move boundary refuses.
+//!
+//! A `letrec` body's tail call replaces the frame, which strands the merged
+//! arena's binding-scope `DecrefRegion` as dead code. Every such tail must
+//! therefore supply a release channel: a MEMBER callee rides the existing
+//! stranded-cycle deferral, a NON-member callee rides the release its tail call
+//! defers (`RegionInfo::cycle_tail_release`). What the non-member channel still
+//! refuses is a cycle member carried into the call BY-MOVE, whose new
+//! activation's owned-parameter release would decref the arena a second time —
+//! and that is a claim about a callee which can REPLACE the frame, so a callee
+//! the compiler reads as a native is admitted with the members riding in.
 
 use super::*;
 

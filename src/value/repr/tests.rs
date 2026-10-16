@@ -29,3 +29,16 @@ fn symbol_value_round_trips_as_its_name_hash() {
     let back: Value = bincode::deserialize(&bytes).expect("deserializes");
     assert_eq!(back.as_symbol(), Some(id));
 }
+
+/// The empty list is an immediate, and a list pattern with no rest compares
+/// its tail against it, so it lands in a function's constants: the stdlib's `+`
+/// dispatches on `(match args () 0 …)`, and the cache stores that constant.
+///
+/// The counter-factual: the empty list fell through to "unsupported scalar
+/// Value", the cache store failed, and every start compiled the stdlib again.
+#[test]
+fn the_empty_list_round_trips() {
+    let bytes = bincode::serialize(&Value::EMPTY_LIST).expect("the empty list serializes");
+    let back: Value = bincode::deserialize(&bytes).expect("deserializes");
+    assert!(back.is_empty_list(), "came back as {back:?}");
+}

@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-06
 //! `map` and `filter` fuse alone and in any mix over a proven immutable array,
 //! and a callee or base the gate cannot prove stays a plain call.
 //!
@@ -25,7 +25,7 @@ fn single_map_dissolves_the_closure_and_dispatch() {
         "no closure may survive — `f`'s body is spliced inline",
     );
     assert!(
-        cs.iter().any(|n| n == "*"),
+        count_op(&hir, &arena, &mut rt, "*") > 0,
         "`f`'s body op `*` must run inline in the loop; callees were {cs:?}",
     );
     // The loop `map`'s array arm runs: one fresh accumulator, filled and frozen.
@@ -54,7 +54,7 @@ fn composed_maps_fuse_to_one_loop() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "*") && cs.iter().any(|n| n == "+"),
+        count_op(&hir, &arena, &mut rt, "*") > 0 && count_op(&hir, &arena, &mut rt, "+") > 0,
         "both transforms must inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -65,15 +65,17 @@ fn composed_maps_fuse_to_one_loop() {
 }
 
 /// Safety: a user redefinition of `map` shadows the stdlib binding with a
-/// non-primitive one, so it is never rewritten (`fusable_hof_parts` gates on
-/// `is_primitive`). The user's `map` call survives.
+/// non-primitive one, so fusion never rewrites it into a loop
+/// (`fusable_hof_parts` gates on `is_primitive`).
 #[test]
 fn user_shadowed_map_is_not_fused() {
-    let (hir, arena, mut rt) = compile("(defn map [f xs] xs) (map (fn [x] x) [1 2 3])");
-    let cs = callees(&hir, &arena, &mut rt);
-    assert!(
-        cs.iter().any(|n| n == "map"),
-        "a user `map` must not be rewritten; callees were {cs:?}",
+    let (hir, _arena, _rt) = compile("(defn map [f xs] xs) (map (fn [x] x) [1 2 3])");
+    // The user's call may graft, and what grafts is the user's body, which
+    // makes no loop.
+    assert_eq!(
+        count_loops(&hir),
+        0,
+        "a user `map` must not become a fused loop"
     );
 }
 
@@ -84,14 +86,13 @@ fn user_shadowed_map_is_not_fused() {
 /// marked `is_primitive`, every pass that keys on the flag would miss a core HOF.
 /// A user redefinition still shadows with a non-primitive binding.
 ///
-/// The trap: the probes fold over an UNPROVEN collection (a function parameter)
-/// so that the `fold`/`reduce` call survives. Over a proven array the call
-/// dissolves and leaves no callee to inspect.
+/// The probes compile with the graft off, so each call stays a call and its
+/// callee is there to read. A collection nothing proves keeps fusion out.
 #[test]
 fn core_lisp_hof_exports_are_primitive_like_stdlib() {
-    // The binding a `(name …)` call resolves to (the winning shadow).
+    // The binding a call to `name` resolves to (the winning shadow).
     fn callee_is_primitive(src: &str, name: &str) -> bool {
-        let (hir, arena, _rt) = compile(src);
+        let (hir, arena, _rt) = compile_ungrafted(src);
         fn find(h: &Hir, arena: &BindingArena, want: &str) -> Option<bool> {
             if let HirKind::Call { func, .. } = &h.kind {
                 if let Some(b) = super::super::unwrap_callee_binding(func) {
@@ -135,7 +136,7 @@ fn capturing_lambda_fuses() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "+"),
+        count_op(&hir, &arena, &mut rt, "+") > 0,
         "the capturing body must run inline in the loop; callees were {cs:?}",
     );
 }
@@ -168,7 +169,7 @@ fn single_filter_dissolves_to_guarded_push() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == ">"),
+        count_op(&hir, &arena, &mut rt, ">") > 0,
         "the predicate op `>` must run inline; callees were {cs:?}",
     );
     assert!(
@@ -189,8 +190,8 @@ fn single_filter_dissolves_to_guarded_push() {
 /// A `filter`-of-`filter` fuses to a SINGLE loop with the guards nested: no
 /// `filter`, both predicate ops (`even?` and `integer?`) inline, one
 /// accumulator, and two `if`s (one per predicate). The trap: a length-2
-/// composition fuses only over reorder-safe predicates. A variadic `>` routes
-/// through `apply` and is not reorder-safe, so this pin uses `even?`/`integer?`,
+/// composition fuses only over reorder-safe predicates. A predicate that prints
+/// signals `:io` and is not reorder-safe, so this pin uses `even?`/`integer?`,
 /// which carry only `SIG_ERROR`.
 #[test]
 fn composed_filters_fuse_to_one_loop() {
@@ -203,7 +204,8 @@ fn composed_filters_fuse_to_one_loop() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "even?") && cs.iter().any(|n| n == "integer?"),
+        predicate_inline(&hir, &arena, &mut rt, "even?")
+            && predicate_inline(&hir, &arena, &mut rt, "integer?"),
         "both predicates must inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -232,7 +234,7 @@ fn filter_over_var_bound_immutable_array_fuses() {
 }
 
 /// Reorder gate on a MIXED chain: `(map f (filter p xs))` where the predicate
-/// is a variadic `>` (routes through `apply`, so NOT reorder-safe). A mixed
+/// prints (it signals `:io`, so it is NOT reorder-safe). A mixed
 /// chain is length ≥ 2, so it always carries the reorder requirement; the
 /// non-reorder-safe predicate declines the whole composition, and the chain
 /// falls back to fusing only its inner reorder-safe run — the `filter` fuses on
@@ -242,7 +244,7 @@ fn filter_over_var_bound_immutable_array_fuses() {
 #[test]
 fn mixed_chain_with_non_reorder_safe_stage_fuses_inner_only() {
     let (hir, arena, mut rt) =
-        compile("(map (fn [x] (* x 2)) (filter (fn [w] (> w 1)) [1 2 3 4]))");
+        compile("(map (fn [x] (* x 2)) (filter (fn [w] (println w) (> w 1)) [1 2 3 4]))");
     let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "map"),
@@ -254,7 +256,7 @@ fn mixed_chain_with_non_reorder_safe_stage_fuses_inner_only() {
         "the inner `filter` must still fuse on the recursion; callees were {cs:?}",
     );
     assert!(
-        cs.iter().any(|n| n == ">"),
+        count_op(&hir, &arena, &mut rt, ">") > 0,
         "the inner predicate must inline; callees were {cs:?}",
     );
 }
@@ -277,7 +279,8 @@ fn mixed_map_of_filter_reorder_safe_fuses_to_one_loop() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "*") && cs.iter().any(|n| n == "even?"),
+        count_op(&hir, &arena, &mut rt, "*") > 0
+            && predicate_inline(&hir, &arena, &mut rt, "even?"),
         "both the transform and the predicate must inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -307,7 +310,8 @@ fn mixed_filter_of_map_reorder_safe_fuses_to_one_loop() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "*") && cs.iter().any(|n| n == "even?"),
+        count_op(&hir, &arena, &mut rt, "*") > 0
+            && predicate_inline(&hir, &arena, &mut rt, "even?"),
         "both the transform and the predicate must inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -338,9 +342,9 @@ fn mixed_three_stage_tower_fuses_to_one_loop() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "+")
-            && cs.iter().any(|n| n == "even?")
-            && cs.iter().any(|n| n == "*"),
+        count_op(&hir, &arena, &mut rt, "+") > 0
+            && predicate_inline(&hir, &arena, &mut rt, "even?")
+            && count_op(&hir, &arena, &mut rt, "*") > 0,
         "all three stage bodies must inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -384,7 +388,7 @@ fn map_over_var_bound_immutable_array_fuses() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "*"),
+        count_op(&hir, &arena, &mut rt, "*") > 0,
         "`f`'s body op must inline; callees were {cs:?}",
     );
 }

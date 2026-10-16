@@ -1,6 +1,6 @@
 # Images — regions hydrated at load
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-14 -->
 
 Design for image-style persistence: one mechanism, and the two configurations
 it serves.
@@ -11,9 +11,9 @@ dumper, and hydrator throughout, differing only in dependency list and dump
 policy (see *One mechanism, two configurations*). This document owns the design
 argument. Six companions carry the rest:
 
-- [foundations.md](image/foundations.md) — the five representation fixes the
+- [Foundations](image/foundations.md) — the five representation fixes the
   image rests on.
-- [sealing.md](image/sealing.md) — what the body may hold, what the hydrating
+- [Sealing](image/sealing.md) — what the body may hold, what the hydrating
   instance rebuilds, and what fails the dump.
 - [boot.md](image/boot.md) — the boot configuration: its root set, its source
   digest, and the warm cache.
@@ -25,14 +25,14 @@ argument. Six companions carry the rest:
   answered the design's open questions, with their numbers.
 
 This document states the design, not its progress. [plan.md](image/plan.md)
-records what has landed: the warm-cache boot has, and the embedded blob,
-per-worker hydration, compiler-state persistence, the hydrated-region interval
-table and the environment configuration have not.
+records what has landed: the warm-cache boot and the body fragment have, and
+the embedded blob, per-worker hydration, the hydrated-region interval table and
+the environment configuration have not.
 
 ## The problem
 
 Every process start compiles core.lisp, prelude.lisp, and stdlib.lisp — about
-3700 lines — through the full pipeline: read, expand, letrec analysis,
+4300 lines — through the full pipeline: read, expand, letrec analysis,
 regularize, type inference, region inference, lower, emit, execute. Every
 `sys/spawn` worker repeats it on its own heap. The WASM entry repeats it too.
 Nothing persists between runs.
@@ -67,14 +67,14 @@ The hydrated region is not a new kind of memory. It is a `Counted` region
 like any other: pinned for the process's life by the same process-root
 registration that pins stdlib's exports today, released by
 `teardown_process_root_regions` at exit, and freed by the ordinary cascade.
-The lifetime guarantee in [regions/lifetime.md](../regions/lifetime.md) —
-after the program ends, everything frees — holds without amendment. Leak
+The [lifetime guarantee](../regions/lifetime.md) — after the program ends,
+everything frees — holds without amendment. Leak
 accounting, the generation checks, `--trace=scrub`, `--trace=guardfree`, and
 `arena/dump` all see ordinary pages in an ordinary region.
 
 Compaction is where the runtime win comes from. Stdlib boot today produces
 hundreds of regions — one per letrec capture cell plus everything they pin
-(405 measured; [measurements.md](image/measurements.md) item 2 records the
+(405 measured; item 2 of [the measurements](image/measurements.md) records the
 census). The image is **one** region: every internal reference is a self-edge,
 so its edge tables are empty, and all RC traffic against stdlib values lands
 on a single counter.
@@ -95,10 +95,10 @@ policy**:
   layers below do not already provide*.
 - The **boot** configuration is the image with an empty dependency list: its
   root is one struct over the core exports, the stdlib exports and the macro
-  definitions ([boot.md](image/boot.md) owns the shape), its policy is strict
-  — no mutable bindings, in body or side-stream — and it is distributed by the
-  warm cache or the embedded blob, regenerated from sources whenever the
-  fingerprint or the source digest misses.
+  definitions ([booting from an image](image/boot.md) owns the shape). Its
+  policy is strict — no mutable bindings, in body or side-stream — and it is
+  distributed by the warm cache or the embedded blob, regenerated from sources
+  whenever the fingerprint or the source digest misses.
 - The **environment** configuration depends on a boot image: its roots are
   the session's bindings beyond that layer, its policy is user-facing
   (refuse mutables by default, `&allow-mutable` opt-in), and it is a file
@@ -113,8 +113,8 @@ environment-over-boot are simply the two depths this design ships.
 ## The binary lock is the current configuration
 
 An image is a region snapshot, and regions are in the language specification
-([spec](../spec.md) § Images). The fingerprint locks an image to the binary
-layout that dumped it ([format.md](image/format.md) § Fingerprint). That lock
+([spec](../spec.md)). The fingerprint locks an image to the binary layout that
+dumped it ([the image file](image/format.md)). That lock
 solves this implementation's portability problem, and it is the configuration
 the format ships today. It is not a property of an image.
 
@@ -126,7 +126,7 @@ describes.
 
 The HIR fragments an image carries (§ Compiler state is part of the
 environment) are optional data to any other implementation. One that ignores
-them loses cross-unit inlining, and every call stays a call. This
+them grafts and fuses nothing across units, and every call stays a call. This
 implementation still requires them, because its two boot modes must compile
 user code identically.
 
@@ -166,35 +166,40 @@ user code identically.
   immutability, and a clean set that grows as the layout improves beat a
   second code path at equal cost.
 - **A constant-pool region owned by the code object** is rejected for
-  ordinary constants ([region/model.md](region/model.md)); images do not
+  ordinary constants ([the region model](region/model.md)); images do not
   change constant materialization. `MaterializeConst` keeps building fresh
   values per execution — image templates carry the same encoded
   `ConstTemplate` bytes, which are already name-stable.
 
 ## Compiler state is part of the environment
 
-The heap is not the whole boot product. Compiling stdlib also fills
-compile-side registries on `CompileCtx` that later user compiles read:
+The heap is not the whole boot product. A later user compile reads two more
+things the stdlib compile leaves behind:
 
-- `FnInlineRegistry` — per-name HIR fragments of cross-unit-inlineable
-  stdlib functions; user code inlines through it.
-- `DispatchWrapperRegistry` and the signal-projection memo.
+- The body of each stdlib function, as a `LambdaFragment` encoded in the
+  bytes its closure's code payload carries. A user compile grafts a call to a
+  stdlib function from it ([grafting a call](graft.md)), and fusion inlines a
+  named stdlib function from it
+  ([dissolving a named function](dissolution/inline.md)).
+- The signal-projection memo.
 
-An image boot that leaves these empty compiles user code *differently* from
-a source boot — silently worse code, and divergent artifacts for anything
-keyed on compiler output. That is not acceptable: the two boot modes must
-produce identical user-code compiles.
+An image boot that leaves these out compiles user code *differently* from a
+source boot — silently worse code, and divergent artifacts for anything keyed
+on compiler output. That is not acceptable: the two boot modes must produce
+identical user-code compiles.
 
-`FnInlineRegistry` holds `HirFragment`s — HIR bodies closed over their own
-binding tables ([impl/hir.md](hir.md) § "A fragment is closed over its
-bindings") — so the registry is plain data that crosses a process boundary as
-it stands. The image records it the way the stdlib disk cache does, with no
-re-derivation from syntax. The parity test in [plan.md](image/plan.md) is the
-acceptance gate.
+A fragment is an HIR body closed over its own binding table
+([the HIR design](hir.md)), so it is plain data that crosses a process boundary
+as it stands. The payload carries it as bytes, like the docstring, so the
+stdlib disk cache stores it with the payload ([the stdlib cache](stdlib-cache.md))
+and an image maps it with the payload, as it maps the LIR (§ JIT), with no
+re-derivation from syntax. A hydrated closure therefore grafts as a compiled one
+does. The parity test in [the landing plan](image/plan.md) is the acceptance
+gate.
 
 ## Hydration
 
-[format.md](image/format.md) owns the sections this reads.
+[The image file](image/format.md) owns the sections this reads.
 
 1. Validate the fingerprint; on failure, fall back (boot: compile sources;
    environment: report the mismatch).
@@ -238,7 +243,7 @@ instead of `init_stdlib` — a private mapping per worker, not a compile,
 with the clean pages shared between them in the page cache. The WASM
 entry's *host-side* runtime hydrates the same way, but the WASM module
 itself still splices stdlib source into the compiled unit; fixing that tier
-is the separate stdlib-module work described in [wasm.md](wasm.md), not
+is the separate stdlib-module work described in [the WASM backend](wasm.md), not
 this design.
 
 **The hydrator's input is `(fd, offset)`,** never a path. A path source is
@@ -267,7 +272,7 @@ the filesystem where a memfd costs none, and that is the price of the one
 descriptor every platform treats alike.
 
 The offset must sit on a base-page boundary of the descriptor, and a misaligned
-one is refused before anything is mapped ([format.md](image/format.md) owns
+one is refused before anything is mapped ([the image file](image/format.md) owns
 that rule).
 
 **Never rewrite an image file in place.** The atomic temp-file-and-rename
@@ -342,7 +347,7 @@ object index are byte-identical across dumps. The page bytes are assembled
 canonically from a zeroed buffer: headers, cursor gaps, alignment slack,
 and relocation slots stay zero. Every record the dumper writes receives only
 its discriminant byte and the leaf-field extents the layout probes record
-([format.md](image/format.md) § Fingerprint) — an object slot, a struct entry
+([the image file](image/format.md)) — an object slot, a struct entry
 whose key is an enum with padding of its own, and a syntax node, which is a
 struct with a `bool` in it around an enum. A `repr(Rust)` enum copy carries
 uninitialized padding from its construction temporary, so the dumper never
@@ -396,8 +401,9 @@ own for one type.
   boot compiles from source as today, then dumps
   `$ELLE_CACHE/boot/<digest>.image` (written atomically: temp file, rename).
   Subsequent starts hydrate it, so development builds get fast starts from the
-  second run onward. `--boot-image=` opts in; [boot.md](image/boot.md) owns the
-  policy and the two milestones the default waits on.
+  second run onward. `--boot-image=` opts in, and
+  [booting from an image](image/boot.md) owns the policy and the two
+  milestones the default waits on.
 - **Embedded (release):** a Makefile stage builds `elle`, runs
   `elle image dump-boot`, and rebuilds with the blob embedded (path passed
   by env var; `build.rs` declares the rerun-if). The blob is embedded

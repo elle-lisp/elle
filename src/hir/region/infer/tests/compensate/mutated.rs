@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-14
 //! Pins the mutated refusal: only a reassignment of the binding that owns the release
 //! route refuses the window.
 //!
@@ -215,9 +215,8 @@ fn a_value_born_in_an_arms_loop_keeps_its_release_inside_the_loop() {
     })
     .expect("an iterative scope");
     let order = compute_order(&hir);
-    let low = compute_subtree_low(&hir, &order);
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
-    let lo = low.get(&loop_id).copied().unwrap_or(0);
+    let lo = order.low(&loop_id).unwrap_or(0);
     let alloc = find_first(&hir, |h| matches!(&h.kind, HirKind::Call { .. }))
         .and_then(|_| {
             info.alloc_region

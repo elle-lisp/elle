@@ -1,6 +1,6 @@
 # HIR — High-level IR
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-14 -->
 
 The HIR pass converts expanded syntax trees into a typed intermediate
 representation. It resolves bindings, computes captures, and infers
@@ -13,7 +13,7 @@ signal profiles.
 - **`HirKind`** — the node variant: literal, variable reference, call,
   lambda, let, if, begin, etc.
 - **`Binding`** — a resolved variable reference: a `u32` index into a
-  `BindingArena` (in `arena.rs`), which holds the per-binding metadata
+  `BindingArena` ([the arena](../../src/hir/arena.rs)), which holds the per-binding metadata
   (`BindingScope` — `Parameter` or `Local` — plus `is_mutated`,
   `is_captured`, `is_immutable`, `is_primitive`, etc.)
 - **`Signal`** — inferred effect profile: a `SignalBits` set plus a
@@ -28,7 +28,7 @@ another unit, or to a file, means carrying the binding facts it needs — and a
 carrier that hoists a chosen few of them out of `BindingInner` is wrong the day
 someone adds the twelfth field.
 
-An `HirFragment` (`src/hir/fragment.rs`) closes the body over its own table
+An `HirFragment` ([the fragment](../../src/hir/fragment.rs)) closes the body over its own table
 instead. Every `Binding` in a fragment's body is an index into that table, and
 each entry says what the binding is:
 
@@ -45,20 +45,29 @@ could not rebuild: a fragment that exists always rebuilds, and the only thing
 left for `graft` to refuse is a global the host unit cannot name.
 
 The admitted forms are the pure-expression ones (literals, `Var`, `Call`, `if`,
-`cond`, `begin`, `and`/`or`, and a raw `%`-intrinsic) plus `let`. `let` is
-closable because its bindings are introduced in evaluation order: each value is
-rebuilt before its own binding enters the table, so a sequential `let`'s later
-value sees the earlier binding and no value ever refers to itself. `letrec` is
-that same order defeated — its value may name its own binding — and every other
-binding form (`loop`, a `match` pattern, a nested `lambda`) introduces through a
+`cond`, `begin`, `and`/`or`, `emit`, and a raw `%`-intrinsic) plus `let` and
+`match`. `let` is closable because its bindings are introduced in evaluation
+order: each value is rebuilt before its own binding enters the table, so a
+sequential `let`'s later value sees the earlier binding and no value ever refers
+to itself. A `match` arm reads the same way: its pattern's bindings enter the
+table before its guard and body are rebuilt, and no pattern names a binding of
+its own. `letrec` is that order defeated — its value may name its own binding —
+and the other binding forms (`loop`, a nested `lambda`) introduce through a
 route this walk does not model. All of them decline.
 
 Because a fragment holds a `BindingInner` per local rather than a summary of
 one, a `let` binding's mutability and a parameter's `(numeric!)` floor travel
 with it like any other field, and the whole fragment is plain serializable data.
-The stdlib disk cache stores the cross-unit inline registry as fragments
-(`src/compiler/stdlib_cache.rs`), so a cache hit compiles user code to the same
-bytecode a stdlib compile does.
+A function's code payload carries the fragment of its own body as bytes, closed
+before functionalization in the unit that defines it
+([code objects](region/template.md)). The graft
+([grafting a call](graft.md)) and loop fusion
+([named functions](dissolution/inline.md)) read a callee's fragment off the
+value its binding holds, so a body crosses a unit boundary with the function
+itself. The stdlib disk cache stores the bytes with the payload
+([the stdlib cache](stdlib-cache.md)) and a boot image maps them with it
+([booting from an image](image/boot.md)), so a cache hit and an image boot
+compile user code to the same bytecode a stdlib compile does.
 
 ## What analysis does
 
@@ -74,13 +83,14 @@ bytecode a stdlib compile does.
    cell-free and its self-reference resolves to the currently-executing closure
    (`LoadSelf` / a self-call); the lowerer reads this classified fact rather than
    re-deriving the self-edge. It carries no escape authority (see
-   [impl/escape.md](escape.md))
+   [escape analysis](escape.md))
 3. **Signal inference** — interprocedural: traces call chains to
    determine whether a function can yield, error, or is silent
 4. **Tail position marking** — sets `is_tail` on the calls in tail position,
    for TCO. Analysis runs it, so every `AnalyzeResult` carries honest flags:
    the linter and the call-graph builder both read `is_tail` off the analyzed
-   tree, and `regularize` marks again after map fusion introduces new nodes
+   tree, and `regularize` marks again after map fusion and the graft introduce
+   new nodes
 5. **Special form analysis** — `if`, `let`, `begin`, `block`,
    `match`, `fn`, etc. each have dedicated handlers, listed in the special-form
    registry (`src/hir/analyze/forms/registry.rs`)
@@ -97,13 +107,13 @@ owns its rules.
 
 ## Dead binding elimination
 
-`src/hir/dead.rs` removes a `let`/`letrec` binding when two facts hold: the
+[Dead binding elimination](../../src/hir/dead.rs) removes a `let`/`letrec` binding when two facts hold: the
 binding has zero uses, and its initializer is provably effect-free. Removing
 the binding removes the initializer with it, so a dead call to an effect-free
 function never reaches LIR.
 
-The pass runs from `regularize`, after dead-arm pruning and map fusion, and
-before `functionalize`. That altitude is the same one `prune_typeof_match_arms`
+The pass runs from `regularize`, after dead-arm pruning, map fusion and the
+graft, and before `functionalize`. That altitude is the same one `prune_typeof_match_arms`
 uses, for the same reason: the region solver runs after the HIR transforms, so
 a call deleted here never mints a region and strands no release obligation.
 
@@ -153,7 +163,7 @@ termination question: it can only delete calls that provably return.
 `HirKind` is currently a **wide** vocabulary: `functionalize` and `anf_lift`
 normalize a few constructs (`while → loop/recur`, `assign → ssa-let/setcell`,
 captured `var → derefcell`) and ANF names allocating subexpressions, but they
-eliminate almost nothing — the lowerer still matches all ~39 variants, so
+eliminate almost nothing — the lowerer still matches all 37 variants, so
 `cond`, `match`, `and`/`or`, `begin`, `destructure` reach LIR intact. The design
 direction is a real desugaring boundary so the lowerer consumes only the
 irreducible **kernel**:
@@ -219,25 +229,24 @@ comment char and `%` the intrinsic prefix) whose default expansion is exactly
 that `letrec`. Two consequences fall out: the file body stops being special, and
 its heap literals are **ordinary allocations** (`MaterializeConst`) into the file
 body's own per-activation regions, freed by the termination sweep (see
-[region/model.md](region/model.md) — *Constants lower as ordinary allocations*),
+[region/model.md](region/model.md)),
 closing the per-`eval` leak.
 
 ## Files
 
-```text
-src/hir/expr.rs           Hir and HirKind definitions
-src/hir/analyze/mod.rs    Main analysis entry point
-src/hir/analyze/binding.rs  Binding resolution
-src/hir/analyze/forms.rs  Special form handlers
-src/hir/analyze/special.rs  More special forms
-src/hir/tailcall.rs       Tail position marking
-src/hir/dead.rs           Dead binding elimination
-```
+- [Hir and HirKind](../../src/hir/expr.rs) — the node definitions
+- [the analyzer](../../src/hir/analyze/mod.rs) — the analysis entry point
+- [binding resolution](../../src/hir/analyze/binding.rs)
+- [special forms](../../src/hir/analyze/forms.rs), and
+  [more special forms](../../src/hir/analyze/special.rs)
+- [the fragment](../../src/hir/fragment.rs) — a body closed over its bindings
+- [tail marking](../../src/hir/tailcall.rs)
+- [dead binding elimination](../../src/hir/dead.rs)
 
 ---
 
 ## See also
 
-- [impl/lir.md](lir.md) — lowering HIR to LIR
-- [impl/reader.md](reader.md) — parsing before analysis
+- [LIR](lir.md) — lowering HIR to LIR
+- [the reader](reader.md) — parsing before analysis
 - [signals](../signals/index.md) — signal system design

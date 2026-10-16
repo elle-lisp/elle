@@ -1,7 +1,11 @@
-(elle/epoch 14)
-# audited: 2026-10-06
+(elle/epoch 15)
+# audited: 2026-10-14
 # A rest list no cell of which can outlive its head takes one region; one that can keeps a region per cell.
 # docs/impl/region/restlist.md
+#
+# The sidecar turns the graft off: a call to a function the compiler can see
+# becomes the function's body (docs/impl/graft.md), so the calls below would
+# build no rest list and the functions would never compile.
 #
 # The admitted half reads page claims. A callee that only reads its rest list
 # claims the same pages for six arguments as for one. Counterfactual: a list
@@ -59,8 +63,8 @@
   (empty? xs))
 
 (defn same? [& xs]
-  "=, an Immediate primitive, given the list twice."
-  (= xs xs))
+  "identical?, an Immediate primitive, given the list twice."
+  (identical? xs xs))
 
 (defn first-of [& xs]
   "first, which answers an element."
@@ -107,7 +111,8 @@
           (fn [] (held (count-args 1 2 3 4 5 6))))
 (admitted "empty?" none? (fn [] (held (none? 1)))
           (fn [] (held (none? 1 2 3 4 5 6))))
-(admitted "=" same? (fn [] (held (same? 1))) (fn [] (held (same? 1 2 3 4 5 6))))
+(admitted "identical?" same? (fn [] (held (same? 1)))
+          (fn [] (held (same? 1 2 3 4 5 6))))
 (admitted "first" first-of (fn [] (held (first-of 1)))
           (fn [] (held (first-of 1 2 3 4 5 6))))
 (admitted "second" second-of (fn [] (held (second-of 1 2)))

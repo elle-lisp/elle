@@ -1,5 +1,15 @@
-// audited: 2026-10-04
-//! File-scope letrec compilation for top-level forms.
+// audited: 2026-10-06
+//! A file's top-level forms as one letrec: classifying each form, pre-binding its names, and the signal projection the file exports.
+//!
+//! docs/bindings.md
+//! docs/signals/inference.md
+//!
+//! `analyze_file_letrec`, in the `letrec` submodule, analyzes the forms in three
+//! passes. Pass 1 pre-binds every name, so forms may refer to each other in any
+//! order. Pass 2 analyzes the initializers in order. Pass 3 re-analyzes the
+//! lambdas until their signals stop changing. A duplicate name shadows
+//! sequentially: the redefinition's value sees the previous binding, and later
+//! forms see the new one.
 
 use super::*;
 use crate::syntax::{ScopeId, Syntax, SyntaxKind};
@@ -48,12 +58,12 @@ enum PreBound<'s> {
         value_syntax: &'s Syntax,
         immutable: bool,
         /// Pre-created bindings from pass 1, keyed by name.
-        /// Passed to `analyze_destructure_pattern` in pass 2 to
-        /// ensure binding identity matches.
+        /// Passed to `analyze_destructure_pattern` in pass 2, so the
+        /// pattern reuses these bindings.
         leaf_bindings: HashMap<String, Binding>,
-        /// Leaf bindings that were deferred (duplicate names).
-        /// Maps name → (scopes, binding) for registration in Pass 2
-        /// AFTER analyzing the value.
+        /// Leaf bindings that were deferred (duplicate names), each as
+        /// (name, scopes, binding). Pass 2 registers them AFTER analyzing
+        /// the value.
         deferred_leaves: Vec<(String, Vec<ScopeId>, Binding)>,
     },
 }
@@ -61,26 +71,12 @@ enum PreBound<'s> {
 mod letrec;
 
 impl<'a> Analyzer<'a> {
-    /// Analyze a list of top-level forms as a synthetic letrec.
-    ///
-    /// Each form is classified as `Def` (immutable), `Var` (mutable), or
-    /// `Expr` (gensym-named dummy binding). Three-pass analysis:
-    /// - Pass 1: pre-bind all names (enables mutual recursion)
-    /// - Pass 2: analyze initializers sequentially
-    /// - Pass 3: fixpoint loop for signal propagation through mutual recursion
-    ///
-    /// Duplicate names use sequential shadowing: the RHS of a redefinition
-    /// sees the previous binding, and subsequent forms see the new one.
-    ///
-    /// Returns a single `HirKind::Letrec` node. The body is a reference
-    /// to the last binding (the file's return value).
     /// Analyze an internal `(%file-body form…)` node: the body of a whole-module
     /// test thunk. Classifies its forms and runs the SAME `analyze_file_letrec`
-    /// a real file gets, so def/var forward references, mutual recursion, and def
-    /// REDEFINITION (the redefinition's RHS sees the previous binding) behave
-    /// identically to a direct `elle FILE` run rather than fn-body
-    /// internal-define semantics. Inserted by
-    /// `pipeline::compile::whole_module_transform`; never written by users.
+    /// a real file gets. Forward references, mutual recursion and redefinition
+    /// therefore behave as in a direct `elle FILE` run, not as defines in a fn
+    /// body. Inserted by `pipeline::compile::transforms::whole_module_transform`;
+    /// never written by users.
     pub(crate) fn analyze_file_body(
         &mut self,
         items: &[Syntax],
@@ -179,15 +175,9 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    /// Compute a signal projection for a file's return expression.
-    ///
-    /// A signal projection maps keyword field names to the signals of the
-    /// closures they hold. This enables cross-file signal inference: when
-    /// an importing file accesses `module:field`, the analyzer uses the
-    /// projected signal instead of the conservative `Polymorphic` fallback.
-    ///
-    /// The return expression is the last binding's init value. We unwrap
-    /// through Lambda bodies and Begin blocks to find the struct literal.
+    /// Compute a signal projection for a file's return expression, the last
+    /// binding's init value: each keyword field of the struct literal it
+    /// builds, mapped to the signal of the value that field holds.
     pub(crate) fn compute_signal_projection(
         &self,
         hir: &crate::hir::expr::Hir,
@@ -230,7 +220,7 @@ impl<'a> Analyzer<'a> {
                 }
             }
             // Lambda: unwrap body
-            HirKind::Lambda { body, .. } => self.extract_struct_projection(body),
+            HirKind::Lambda(lambda) => self.extract_struct_projection(&lambda.body),
             // Begin: unwrap last expression
             HirKind::Begin(exprs) => exprs.last().and_then(|e| self.extract_struct_projection(e)),
             // Let/Letrec: unwrap body
@@ -266,9 +256,7 @@ impl<'a> Analyzer<'a> {
     fn hir_signal(&self, hir: &crate::hir::expr::Hir) -> Signal {
         use crate::hir::expr::HirKind;
         match &hir.kind {
-            HirKind::Lambda {
-                inferred_signals, ..
-            } => *inferred_signals,
+            HirKind::Lambda(lambda) => lambda.inferred_signals,
             HirKind::Var(binding) => self
                 .signal_env
                 .get(binding)

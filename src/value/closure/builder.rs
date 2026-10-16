@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! `CodeBuilder`: a code object written by hand, for the tests and tools that need one no compile produced.
 //!
 //! docs/impl/region/template.md
@@ -132,6 +132,12 @@ impl CodeBuilder {
     /// The frozen function the JIT promotes this code object from.
     pub fn lir(mut self, lir: crate::lir::LirOwned) -> Self {
         self.parts.lir = Some(lir);
+        self
+    }
+
+    /// The body fragment's bytes a graft decodes (docs/impl/graft.md).
+    pub fn fragment(mut self, bytes: Vec<u8>) -> Self {
+        self.parts.fragment = bytes;
         self
     }
 

@@ -1,15 +1,14 @@
-// audited: 2026-10-12
-//! The core.lisp bootstrap: compile and run the core module before any
-//! compile context exists, and hand its exports to the one being built.
+// audited: 2026-10-06
+//! The core.lisp bootstrap: compile and run the core module before any compile context exists, and hand its exports to the one being built.
 //!
 //! src/pipeline/AGENTS.md
+//! docs/impl/image/boot.md
 //!
 //! core.lisp is the first Elle this process runs, so it compiles through a
 //! bare expander with no prelude macros and an analyzer seeded with the
 //! primitives alone. Its exports reach user code as globals and macro bodies
 //! through the expander core env.
 
-use crate::hir::typeinfer::{DispatchWrapperRegistry, FnInlineRegistry};
 use crate::primitives::def::PrimitiveMeta;
 use crate::signals::Signal;
 use crate::symbol::SymbolTable;
@@ -24,9 +23,9 @@ use super::sources::CORE;
 /// macro bodies resolve through, and by id into `meta`, which user code sees
 /// as globals.
 ///
-/// Both boots end here — a source boot with the struct core.lisp returned, an
-/// image boot with the one its image carries (docs/impl/image/boot.md) — so
-/// neither can register an export the other would not.
+/// Both boots end here: a source boot with the struct core.lisp returned, an
+/// image boot with the one its image carries. So neither can register an
+/// export the other would not.
 pub fn install_core_exports(
     exports_val: crate::value::Value,
     symbols: &mut SymbolTable,
@@ -60,12 +59,13 @@ pub fn install_core_exports(
     }
 }
 
-/// Compile and execute core.lisp, storing exports in the Expander's core_env.
+/// Compile and execute core.lisp, and install its exports with
+/// [`install_core_exports`].
 ///
-/// Runs the full pipeline (read → expand → analyze → lower → emit → execute)
-/// without using a `CompileCtx` (we're inside its construction). The bare
-/// expander has no prelude macros — core.lisp uses only special forms and
-/// %-prefixed intrinsics.
+/// Runs the whole pipeline (read, expand, analyze, regularize, infer regions,
+/// lower, emit, execute) without a `CompileCtx`, because this runs while one
+/// is being built. The bare expander has no prelude macros, so core.lisp uses
+/// only special forms and primitives.
 ///
 /// Answers the export struct, which the boot dump writes into its image.
 pub(super) fn compile_core(
@@ -130,21 +130,14 @@ pub(super) fn compile_core(
         panic!("core.lisp analysis produced {} error(s)", errors.len());
     }
 
-    // core.lisp runs before the instance `CompileCtx` (and its registries) exists,
-    // during `on_vm` construction, so throwaway registries are correct here: it
-    // defines no container-dispatch wrappers (its `concat`/`reverse` fan to helpers,
-    // not single monomorphic-op arms), and its cross-unit-inlineable fns are not
-    // recorded for later units. The cross-unit templates every later unit reads
-    // (`inc`/`dec`) live in `stdlib.lisp`, which compiles through the instance
-    // registries.
     let types = crate::hir::regularize(
         &mut hir,
         &mut arena,
         symbols,
-        &mut DispatchWrapperRegistry::default(),
-        &mut FnInlineRegistry::default(),
+        &prim_values,
+        crate::config::GraftPolicy::On,
     )
-    .expect("core.lisp uses no monomorphic container ops, so the proof obligation holds");
+    .expect("core.lisp's %-intrinsic calls must meet their operand contracts");
 
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(meta);
     let region_info =
@@ -188,18 +181,12 @@ pub(super) fn compile_core(
         .execute_code(closure.template.code(), Some(&env))
         .expect("core.lisp export closure must succeed");
 
-    // Root the core export aggregate, not each entry. `exports_val` is the
-    // struct returned by core.lisp; it references every core export (each was
-    // incref'd into the struct when built), and the per-name `Value`s copied
-    // into `core_env`/`meta` below are aliases into those same regions. Under the
-    // mint-at-return convention this struct survives on the top-level return
-    // mint's +1, which the caller balances at the result's decref_point — so
-    // without a root the struct would be freed there, cascade-freeing the exports
-    // while `core_env` and `meta` still alias them (dangling reads on later
-    // compiles). Registering the struct (and the module closure that produced it)
-    // as process roots keeps the exports live for the process and lets the
-    // teardown sweep reclaim them by RC cascade. One registration each — these
-    // are distinct regions, so no double-decref (R9).
+    // Root the export struct and the module closure that built it, not each
+    // export. The struct holds every export, and the `Value`s that
+    // `install_core_exports` copies into `core_env` and `meta` alias its
+    // regions. Each root takes the one reference its `execute` call returned,
+    // so the exports live for the process and the teardown sweep reclaims them
+    // by cascade. The two are distinct regions, so neither is released twice.
     let heap = unsafe { &mut *vm.heap_ptr };
     crate::value::arena::register_process_root(heap, closure_val, RootRef::Take);
     crate::value::arena::register_process_root(heap, exports_val, RootRef::Take);

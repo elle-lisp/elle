@@ -125,15 +125,15 @@ node's set-drop walks like any other. A shape the spine cannot order — a park 
 members' allocations, or a park and an allocation inside one non-sequential constituent (a
 branch, a call) — refuses at admission (the park-split gate above).
 
-Pinned by `region::infer::tests::adopt::activation_adopts_capture_back_edge_scc`
+Pinned by `region::infer::tests::adopt::cuts::activation_adopts_capture_back_edge_scc`
 (rooted and bare shapes, funnel-recovered stores),
 `…::activation_adopt_sites_ahead_of_park` (the park split: two sites, the early key
 ordered after every member allocation and before the park),
 `…::activation_adopt_refuses_park_between_allocations` (the refusal),
 `…::activation_adopt_excludes_other_mechanisms` (merge/group disjointness), at runtime
 by `runtime::tests::ownership::region_ownership_capture_back_edge_cycle_reclaims`
-(bounded flag-on beside the leaking flag-off counterfactual, panic-clean, on the
-interpreter and under the JIT), and end-to-end by the `adopt-park-*` probe family in
+(bounded beside a leaking discriminator, panic-clean, on the interpreter and under the
+JIT), and end-to-end by the `adopt-park-*` probe family in
 [the concurrent probes](../../../tests/impl/probe/concurrent.lisp): a park inside the
 adopt scope reclaims on the handle-drop, abort, and cancel routes alike, and the `ap-*`
 controls attribute each ingredient.
@@ -191,6 +191,15 @@ hold uncounted borrows; one inadmissible consumer site refuses the whole callee:
   `fiber/resume` (a gated consumer site) or an argument of an `Immediate`-effect native
   (`fiber/status`). `fiber/value` is pass-through — a second route to the terminal subtree —
   and is refused by the use gate.
+- **the inline face** — the same summary applied to a binding's initializer that returns
+  the root itself, with no call between. That is the shape a grafted producer leaves in its
+  caller ([grafting a call](../graft.md)): `(def x (mk))` becomes a binding of `x` to
+  `mk`'s `let`, which builds the cycle and ends in the root. The initializer is the
+  producer, and every binding that holds the root and is bound outside the initializer is
+  a consumer. The consumer gate is the call face's, read at those holders. The root must
+  cross no frontier at all, and it must have such a holder: a root only its producer holds
+  is sole-held, and the region-rooted cuts own it. The consumer release that is replaced
+  is the root's own.
 
 Emission is two-sided. The producer's interior owner edges ride the ordinary adopt maps
 (`owned_adopt_edges` at store/funnel sites, `capture_adopt_edges` at the closure — capture
@@ -207,11 +216,12 @@ only for a discarded returned *cycle*, which the baseline never frees at all. Th
 tier** of the owner lattice is reached structurally, not by a distinct opcode: a consumer
 that parks moves its node into the suspended frame like any activation state, and the
 terminal-fiber teardown gathers parked nodes under the fiber node for one set-drop — the
-transfer runtime below. Pinned by `region::infer::tests::adopt::transfer_adopts_*` (admission,
-the funnel-recovered face; the refusal family) and at runtime by
+transfer runtime below. Pinned by `region::infer::tests::adopt::transfer::transfer_adopts_*`
+(admission on each face, the funnel-recovered edges; the refusal family) and at runtime by
 `runtime::tests::ownership::region_ownership_reclaims_returned_cycle_across_calls`,
-`…_reclaims_fiber_terminal_cycle`, and `…_transfer_adopt_rides_parks_and_fiber_teardown`
-(bounded flag-on beside the leaking flag-off counterfactual, under the JIT too).
+`…_reclaims_a_grafted_returned_cycle`, `…_reclaims_fiber_terminal_cycle`, and
+`…_transfer_adopt_rides_parks_and_fiber_teardown` (bounded beside a leaking
+discriminator, under the JIT too).
 
 **Lifecycle.** The node slot is per-activation state carried beside the region-remap frame:
 `Fiber::activation_dues` parallels `activation_region_maps`, pushed empty on every

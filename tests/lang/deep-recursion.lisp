@@ -1,11 +1,11 @@
-(elle/epoch 14)
-# audited: 2026-09-30
+(elle/epoch 15)
+# audited: 2026-10-14
 # A non-tail recursion 10,000 deep completes, and can park, pause, raise and be
 # squelched at the bottom.
 #
 # Non-tail recursion waits in the fiber, not on the Rust stack
 # (docs/impl/vm.md). None of the recursive calls here is a
-# tail call. The file makes ten recursions at about 8 µs a call in the
+# tail call. The file makes eleven recursions at about 8 µs a call in the
 # interpreter, so this depth keeps it inside the per-file time budget.
 #
 # The compiled tier's hand-off to the interpreter on a low native stack is not
@@ -69,6 +69,9 @@
   (assert (= (fiber/status f) :dead) "the deep fiber finishes"))
 
 ## ── A fuel pause inside the recursion ──────────────────────────────────
+## Each level is a call, and a call charges fuel in JIT code as in the
+## interpreter (docs/runtime.md), so the budget runs out inside the recursion
+## whichever tier runs it.
 (let [f (fiber/new (fn [] (sum-to depth)) |:fuel|)]
   (fiber/set-fuel f 5000)
   (fiber/resume f nil)
@@ -91,7 +94,7 @@
         "recursion runs again after an error unwound 10,000 callers")
 
 ## ── A squelch boundary above the recursion ─────────────────────────────
-(def squelched-dive (squelch (fn [] (dive depth)) :yield))
+(def squelched-dive (squelch :yield (fn [] (dive depth))))
 (let [[ok? err] (protect ((fn [] (squelched-dive))))]
   (assert (not ok?) "a yield 10,000 calls under a squelch boundary is refused")
   (assert (= (get err :error) :signal-violation)

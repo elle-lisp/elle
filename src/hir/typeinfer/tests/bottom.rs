@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-09-23
 // src/hir/AGENTS.md
 // docs/impl/typeinfer.md
 //! Bottom is not a proof: what the ascent refuses to discharge with the lattice
@@ -6,9 +6,9 @@
 //!
 //! `subtype(⊥, b)` holds for every `b`, so a Bottom operand would discharge
 //! every contract row that asks a subtype question. One reject per such row, a
-//! guard and a declaration each refining the start and each meeting a fact that
-//! contradicts it, and the postcondition that closes the whole class: the map
-//! the pass hands out carries no Bottom.
+//! guard and a declaration each refining the start, a declaration its caller
+//! contradicts, and the postcondition that closes the whole class: the map the
+//! pass hands out carries no Bottom.
 
 use super::{compile_result, inferred_types};
 use crate::hir::types::TypeInterner;
@@ -107,33 +107,32 @@ fn a_fact_proves_a_parameter_no_call_site_has_reached() {
 ///
 /// The counter-factual: the declared case compiled, `%bit-and` ran the integer
 /// opcode over the string "str", and the program printed 0.
+///
+/// A guard's contradiction ends differently. The guard decides false for the
+/// type every caller passes, so the fold deletes the branch before the contract
+/// is checked, and no site is left to reject (docs/impl/graft.md).
 #[test]
 fn a_fact_that_contradicts_the_accumulated_type_proves_nothing() {
-    for (src, op) in [
-        // meet(String, Number): a caller contradicts the declaration.
-        (
-            "(defn sq [x] (numeric!) (%bit-and x 1)) (sq \"str\")",
-            "%bit-and",
-        ),
-        // meet(String, Int): the guarded branch of a function only ever called
-        // with a string.
-        (
-            "(defn g [b] (if (%int? b) (%bit-and b 1) 0)) (g \"str\")",
-            "%bit-and",
-        ),
-    ] {
-        let Err(err) = compile_result(src) else {
-            panic!("a fact disjoint from the accumulated type proves nothing: {src}");
-        };
-        assert!(err.contains(op), "the error must name {op}; got: {err}");
-    }
+    // meet(String, Number): a caller contradicts the declaration.
+    let declared = "(defn sq [x] (numeric!) (%bit-and x 1)) (sq \"str\")";
+    let Err(err) = compile_result(declared) else {
+        panic!("a declaration its caller contradicts proves nothing: {declared}");
+    };
+    assert!(
+        err.contains("%bit-and"),
+        "the error must name %bit-and; got: {err}"
+    );
     compile_result("(defn sq [x] (numeric!) (%bit-and x 1)) (sq 7)")
         .expect("an int argument refines the declaration and still proves");
+    // meet(String, Int): the guarded branch of a function only ever called with
+    // a string is deleted rather than rejected.
+    compile_result("(defn g [b] (if (%int? b) (%bit-and b 1) 0)) (g \"str\")")
+        .expect("the branch no string reaches is deleted");
 }
 
 /// The postcondition that closes the class rather than one row of it. Every
 /// consumer downstream of the pass — the operand contracts, the signal
-/// narrowing, the wrapper monomorphization, the LIR operand proof — reads this
+/// narrowing, the fold, the LIR operand proof — reads this
 /// one map, so a map with no Bottom in it leaves none of them a Bottom to read
 /// a proof out of.
 ///

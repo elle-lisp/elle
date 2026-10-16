@@ -14,8 +14,7 @@ use super::*;
 /// interpreter handlers.
 ///
 /// `body` is wrapped in an immediately-invoked lambda `((fn [] body))` whose body
-/// carries the never-mergeable owned shape under the flag (the same shapes the VM
-/// tests above pin). A single compile is re-run: the first run submits the lambda
+/// carries the never-mergeable owned shape (the same shapes the VM tests pin). A single compile is re-run: the first run submits the lambda
 /// for background JIT compilation (eager → hot on its first call), and
 /// `drain_jit_pending` blocks until that compile finishes, so the steady-state
 /// measurement dispatches the lambda through cached native code, not the
@@ -86,12 +85,16 @@ pub(super) fn jit_region_growth(body: &str) -> (i64, bool) {
 /// what makes the receipt exact — `jit_code_for` on its own bytecode answers whether
 /// THIS function ran compiled, where an "is the cache non-empty" test would pass on
 /// any stdlib closure the program happened to warm.
+///
+/// The program compiles with the graft off, so `body`'s call to the driving
+/// closure stays a call and the closure runs (docs/impl/graft.md).
 #[cfg(feature = "jit")]
 fn jit_mid_run_growth(prelude: &str, body: &str, gauge: &str) -> (i64, bool) {
     use crate::config::JitPolicy;
     use crate::pipeline::compile_file_repl;
     let mut rt = Runtime::new();
     rt.vm().runtime_config.jit = JitPolicy::Eager;
+    rt.compile().set_graft(crate::config::GraftPolicy::Off);
     let src = format!(
         "{prelude} (var n 0) \
          (while (%lt n 50) {body} (assign n (%add n 1))) \
@@ -190,7 +193,7 @@ fn region_ownership_defn_module_member_call_under_jit() {
 /// container+value subtree each call (bounded growth) and be panic-clean: a broken
 /// `elle_jit_adopt_region` or subtree drop would free the value early/twice,
 /// tripping a debug generation/decref assert. SOUNDNESS guard (the immutable value
-/// is RC-reclaimable, so there is no flag-off leak counterfactual here).
+/// is RC-reclaimable, so there is no leaking counterfactual here).
 #[cfg(feature = "jit")]
 #[test]
 fn region_ownership_adopt_subtree_drop_under_jit() {
@@ -211,11 +214,10 @@ fn region_ownership_adopt_subtree_drop_under_jit() {
 
 /// VM≡JIT parity for the **interior-cycle adopt**. A container `root` directly
 /// holds `a` and `b`, which reference each other (`a ⊇ b`, `b ⊇ a`). Per-region RC
-/// cannot collect the a↔b cycle (region/rules.md Rule 8), so flag-OFF it leaks
-/// under the JIT exactly as on the VM; under the flag the cut adopts a and b by
-/// root, whose JIT subtree drop reclaims the cycle. The bounded-vs-leaking
-/// counterfactual proves the cut (not the shape) reclaims it, and `jit_compiled`
-/// proves the JIT path actually ran.
+/// cannot collect the a↔b cycle (docs/impl/region/rules.md Rule 8); the cut adopts a
+/// and b by root, whose JIT subtree drop reclaims the cycle. The leaking
+/// discriminator proves the cut, not the shape, reclaims it, and `jit_compiled`
+/// proves the JIT path ran.
 #[cfg(feature = "jit")]
 #[test]
 fn region_ownership_reclaims_interior_cycle_subtree_under_jit() {
@@ -243,9 +245,8 @@ fn region_ownership_reclaims_interior_cycle_subtree_under_jit() {
 
 /// VM≡JIT parity for the **co-owned bare-cycle group**. Two `@array`s pushing each
 /// other (`a ⊇ b`, `b ⊇ a`) with NO container parent — no owner among the members,
-/// reclaimed by one `FreeRegionGroup`. Per-region RC cannot collect it, so flag-OFF
-/// it leaks under the JIT; under the flag the JIT `elle_jit_free_region_group`
-/// helper frees the cycle wholesale. Counterfactual + `jit_compiled` guard as
+/// reclaimed by one `FreeRegionGroup`. Per-region RC cannot collect it; the JIT
+/// `elle_jit_free_region_group` helper frees the cycle wholesale. Counterfactual + `jit_compiled` guard as
 /// above.
 #[cfg(feature = "jit")]
 #[test]

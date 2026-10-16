@@ -1,6 +1,6 @@
 # The language specification
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-06 -->
 
 What the specification of Elle holds, what it leaves to an implementation, and
 how a test says which of the two it checks.
@@ -38,10 +38,10 @@ suite under [tests](../tests/AGENTS.md).
 An implementation test enters at the layer it tests. A Rust test builds its
 call as LIR or bytecode, beneath every optimization. An Elle file runs on
 [the rig](../rig/overview.md), which hosts the same compiler as `elle` and can
-configure it in ways `elle` cannot: the JIT off or eager, a diagnostic mode on.
-The file names that configuration in a sidecar beside it. Nothing in the
-language keeps a shape alive through the optimizer, and no language test needs
-it to.
+configure it in ways `elle` cannot: the JIT off or eager, the graft off, a
+diagnostic mode on. The file names that configuration in a sidecar beside it.
+Nothing in the language keeps a shape alive through the optimizer, and no
+language test needs it to.
 
 ## A build is an implementation
 

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 // A closure and its code object cross the body, field by field and sharing
 // kept.
 // docs/impl/image/sealing.md
@@ -28,7 +28,7 @@ fn full_code(heap: &mut FiberHeap, region: RuntimeRegion) -> (TemplateRef, Value
             .find(|d| d.name == "insert")
             .expect("insert is a canonical primitive"),
     );
-    let mut locations = elle::error::LocationMap::new();
+    let mut locations = elle::error::LocationMap::default();
     locations.insert(0, SourceLoc::new("closure-a.lisp", 3, 9));
     locations.insert(2, SourceLoc::new("closure-b.lisp", 14, 1));
     let code = CodeBuilder::new(

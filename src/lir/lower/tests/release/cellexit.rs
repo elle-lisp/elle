@@ -166,16 +166,20 @@ fn a_cell_release_declines_a_move_across_a_read_through_it() {
 
 #[test]
 fn escaping_holder_env_cell_release_stays_after_the_tail_call() {
-    // The decline face: the closure holding the cell is STORED into an aggregate
-    // before the body tail-calls it, so escape's capture facet marks `c` escaping by a
-    // CONTAINMENT facet and both admissions refuse the box — the aggregate holds the
-    // closure through a hold no seam at the point counts. Only the mutated refusal is
-    // scoped to the value route; a containment facet no edge at the point replaces
-    // still refuses, and the release keeps its place in the dead block.
+    // The decline face: the closure holding the cell is handed to `git`, a `Mixed`
+    // native that stores it uncounted, before the body tail-calls it. So escape's
+    // capture facet marks `c` escaping by a CONTAINMENT facet and both admissions
+    // refuse the box — the native holds the closure through a hold no seam at the
+    // point counts. Only the mutated refusal is scoped to the value route; a
+    // containment facet no edge at the point replaces still refuses, and the
+    // release keeps its place in the dead block.
+    //
+    // The trap: a `%pair` is no such store. It holds the closure by the counted
+    // edge its allocation takes, so a pair of `g` would admit the box.
     let module = compile_to_lir(
-        "(begin (def @sink nil) (def f (fn () (def @c 0) \
+        "(begin (def f (fn () (def @c 0) \
          (let [g (fn () (assign c (%add c 1)) c)] \
-           (begin (assign sink (%pair g nil)) (g))))) \
+           (begin (git g) (g))))) \
          (f))",
     );
     let (at, releases) =

@@ -82,9 +82,10 @@ lowerer emits what `RegionInfo` says. See
   list, which `lower_lambda_expr` writes onto the lambda's `LirHead`
   ([restlist.md](../../../docs/impl/region/restlist.md)).
 
-`with_region_info` ([order.rs](order.rs)) builds two reverse indexes once:
-`increfs_by_site` over `cross_region_refs`, and `decrefs_by_decref_point` over
-`region_data`. After lowering each HIR node, `emit_decrefs_for`
+`with_region_info` ([order.rs](order.rs)) builds three reverse indexes once:
+`increfs_by_site` over `cross_region_refs`, `decrefs_by_decref_point` over
+`region_data`, and `cell_drops_by_demise` over the fn-local 1-slot containers
+(`cell_containers`). After lowering each HIR node, `emit_decrefs_for`
 ([regiondecref.rs](regiondecref.rs)) looks that node up and emits one release
 per region it finds, in the order `order_releases` sorted them into: holder
 before holdee.
@@ -131,8 +132,8 @@ argument lives in its doc comment; this is where to find them.
   [docs/impl/region/relocate.md](../../../docs/impl/region/relocate.md).
 - `begin_branch_arms` / `seal_arm_hoists` / `open_branch_merge`
   ([relocate.rs](relocate.rs)) — a branch merge inherits the relocation points
-  of its arms and of the position the branch was entered at, so a release
-  emitted past the merge is emitted there AND replicated ahead of each arm's
+  of its arms and of the position the branch was entered at. A release emitted
+  past the merge is therefore emitted there AND replicated ahead of each arm's
   `TailCall`. `self_cancelling_run` ([splice.rs](splice.rs)) is what makes that
   count once per path: a value-routed release nil-stamps the slot it read.
   `emit_decref_for_region` ([regiondecref.rs](regiondecref.rs)) takes the value
@@ -156,8 +157,7 @@ region obligations ride on it:
 2. The resume value arrives uncounted, so the lowerer mints the reference the
    body holds it by (`IncrefValueRegion`) unless the frame's return transfer
    already funds one (`RegionInfo::unfunded_resume_values`;
-   [park.md](../../../docs/impl/region/park.md): "A resume
-   value crosses counted, or not at all").
+   [park.md](../../../docs/impl/region/park.md)).
 
 A **dynamic** emit, whose first argument is not a literal keyword set, has no
 `Emit` terminator: it lowers as an ordinary call to the `emit` primitive. In
@@ -180,20 +180,20 @@ target's context in `block_lower_contexts`, lowers the value, stores it into
 the target's `result_slot`, jumps to `exit_label`, and starts an unreachable
 dead-code block. No new bytecode instructions: a break is `StoreLocal` + `Jump`.
 
-Break emits **no** region instruction of its own, and neither does Block. Every
-region the jump affects is anchored by the analysis where the *block's* value is
-consumed — at the `Block` node itself when nothing consumes it, which the lowerer
-emits after the exit label, so it fires on the break path and the fall-through
-path alike. That covers both the value the break carries out and every *other*
-release the jump passes over
+Break emits **no** region instruction of its own, and neither does Block. The
+analysis anchors every region the jump affects where the *block's* value is
+consumed, or at the `Block` node itself when nothing consumes it. The lowerer
+emits that anchor after the exit label, so it fires on the break path and the
+fall-through path alike. That covers both the value the break carries out and
+every *other* release the jump passes over
 ([docs/impl/region/anchors.md](../../../docs/impl/region/anchors.md)).
 
 The one release the anchor cannot carry is the **breaking iteration's own**: a
 region the loop body allocates is minted per iteration, so the block's exit label
 would cover whichever value the slot held last. `lower_break` therefore opens a
-relocation point at the end of the block it leaves, exactly as a frame-replacing
-tail call opens one ahead of its `TailCall`, and a release emitted while that
-block is still open is replicated there (`open_break_exit_hoist`,
+relocation point at the end of the block it leaves, as a frame-replacing tail
+call opens one ahead of its `TailCall`. A release emitted while that block is
+still open is replicated there (`open_break_exit_hoist`,
 [docs/impl/region/replicate.md](../../../docs/impl/region/replicate.md)). Do NOT
 free the value the break CARRIES at that point — it is exempt, because the block
 is about to hand it to its consumer.
@@ -216,19 +216,24 @@ is about to hand it to its consumer.
 
 7. **`capture_locals_mask` is set for locals that need env cells.** Slot i set means locally-defined variable i (0-indexed from the first local after params) needs a cell because it's captured by a nested closure or mutated via `assign`. The VM env builder (`populate_env`), the JIT prologue, and the WASM env builders all consult it to skip `CaptureCell` allocation for non-captured locals. It is a `CaptureMask` ([src/value/capturemask.rs](../../value/capturemask.rs)), unbounded in width: a local at any index is named precisely, so an uncaptured local beyond slot 63 gets a bare-NIL env slot instead of a dead, leaked cell. (`capture_params_mask` is still a `u64` — functions don't approach 64 parameters, and the params path has no `>=64` fallback to leak through.)
 
-8. **Docstring is threaded from HIR.** `LirHead::doc` is copied from `HirKind::Lambda.doc` during lowering, and the emitter writes it into the code payload, where `ClosureTemplate::doc()` reads it. It is never encoded in bytecode.
+8. **Docstring is threaded from HIR.** `LirHead::doc` is copied from `Lambda::doc` during lowering, and the emitter writes it into the code payload, where `ClosureTemplate::doc()` reads it. It is never encoded in bytecode.
 
 ## When to modify
 
 - **Adding a new special form**: Add a case in `lower_expr` ([expr.rs](expr.rs)), implement a `lower_your_form` method
 - **Changing binding lowering**: Update [binding.rs](binding.rs) and [binding/](binding/)
-- **Changing control flow**: Update [control.rs](control.rs) and the files
-  under [control/](control/)
-- **Changing pattern matching**: Update [pattern.rs](pattern.rs) and the files
-  under [pattern/](pattern/)
+- **Changing control flow**: Update [control.rs](control.rs) and
+  [control/](control/) ([shortcircuit.rs](control/shortcircuit.rs),
+  [matcharms.rs](control/matcharms.rs), [call.rs](control/call.rs))
+- **Changing pattern matching**: Update [pattern.rs](pattern.rs) and
+  [pattern/](pattern/) ([ctor.rs](pattern/ctor.rs), [keyed.rs](pattern/keyed.rs),
+  [matching.rs](pattern/matching.rs), [seq.rs](pattern/seq.rs))
+- **Changing closure construction or a lambda body's frame**: Update
+  `lower_lambda_expr` ([lambda/expr.rs](lambda/expr.rs)) or `lower_lambda_body`
+  ([lambda/body.rs](lambda/body.rs)); each takes the analyzer's `&Lambda` whole
 - **Changing region RC emission**: Update [regionemit.rs](regionemit.rs) or [regiondecref.rs](regiondecref.rs); to change *where* a region is released or which regions merge, edit the region solver in [infer.rs](../../hir/region/infer.rs), not the lowerer
 - **Changing tail-call ownership**: Update `tail_arg_is_borrowed` ([control.rs](control.rs)) and `tail_callee_defers_release` ([control/call/defer.rs](control/call/defer.rs))
-- **Adding new bytecode instructions**: Update [expr.rs](expr.rs), [control.rs](control.rs), [binding.rs](binding.rs), or [lambda.rs](lambda.rs) to emit them
+- **Adding new bytecode instructions**: Update [expr.rs](expr.rs), [control.rs](control.rs), [binding.rs](binding.rs), or [lambda/](lambda/) to emit them
 
 ## Common pitfalls
 

@@ -1,21 +1,11 @@
-// audited: 2026-10-05
-// Interprocedural signal tracking: the shared setup for the signal enforcement tests.
+// audited: 2026-10-06
+// Signal inference across function boundaries: what a call to a direct, higher-order, reassigned or unknown callee signals.
+//
 // docs/signals/inference.md
 //
-// These tests verify that signals propagate correctly across function boundaries:
-// - Direct yield has Yields signal
-// - Calling a yielding function propagates Yields signal
-// - Polymorphic signals (like map) resolve based on argument signals
-// - Silent functions remain silent
-// - assign invalidates signal tracking
-// - Unknown callees use Signal::unknown() (sound conservative)
-// - A call to a parameter is polymorphic, and may raise: the compiler cannot
-//   check its argument count
-//
-// This file is a coordinator: it holds the shared `use` imports and free
-// helpers, then `include!`s the themed test subfiles. Each subfile opens with
-// `use super::*;`, so `super::` from a test body resolves to this coordinator's
-// items (setup/analyze/analyze_with_stdlib and the imports below).
+// This file holds the shared imports and helpers, then `include!`s the themed
+// test files. Each opens with `use super::*;`, so `super::` in a test body
+// names the items here.
 
 use elle::hir::HirKind;
 use elle::primitives::register_primitives;
@@ -30,13 +20,10 @@ fn setup() -> (SymbolTable, VM) {
     (symbols, vm)
 }
 
-// Local `analyze` shim preserving the pre-CompileCtx arity. These analyses are
-// the deliberately stdlib-free path the file's tests assume — e.g.
-// `test_signal_polymorphic_with_pure_arg` requires `map` to be an *unknown*
-// global. A fresh per-call `CompileCtx` (primitives + core + prelude, no stdlib)
-// is exactly that environment; signal inference reads only the instance's
-// compile-time metadata, none of which is shared across these independent
-// analyses (the no-ambient-compile-cache model, docs/impl/region/ctx.md).
+// Analyze `source` without the stdlib. The tests assume that environment:
+// `test_signal_unknown_global_call_is_unknown` needs `map` to be an unknown
+// global. A fresh `CompileCtx` per call holds the primitives, core and
+// prelude, and no analysis here shares one.
 fn analyze(
     source: &str,
     symbols: &mut SymbolTable,
@@ -47,10 +34,9 @@ fn analyze(
     elle::pipeline::analyze(source, symbols, vm, &mut cctx, source_name)
 }
 
-// Like `analyze`, but with the stdlib loaded — for tests whose source names
-// stdlib functions (e.g. `number?`, `string?`, defined in stdlib.lisp via
-// `type-of`). Without stdlib those resolve as *unknown* globals; with it they
-// resolve to their definitions and carry their inferred signals.
+// Like `analyze`, but with the stdlib loaded, for a source that names a stdlib
+// function such as `number?`. Without the stdlib that name is an unknown
+// global; with it, the call carries the function's inferred signal.
 fn analyze_with_stdlib(
     source: &str,
     symbols: &mut SymbolTable,

@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-14
 //! Cache the compiled standard library on disk, so a later process
 //! deserializes it instead of running the front end again.
 //!
@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Version tag: bump when the serialized layout changes in an incompatible way.
-const FORMAT_VERSION: u32 = 10;
+const FORMAT_VERSION: u32 = 11;
 
 /// Bytes of payload hash a cache file carries ahead of its `StoredBytecode`.
 const PAYLOAD_HASH_BYTES: usize = 8;
@@ -53,15 +53,6 @@ pub struct StoredBytecode {
     /// compare correctly but print as `#<symbol:hash>`.
     pub names: Vec<(u64, Box<str>)>,
     pub signal_projection: Option<HashMap<String, Signal>>,
-    /// Cross-unit dispatch-wrapper registry (stdlib `push`/`put`/`add`
-    /// monomorphization), snapshotted because the disk cache skips the stdlib
-    /// compile that would otherwise populate it.
-    pub(crate) dispatch_wrappers: crate::hir::typeinfer::StoredDispatchRegistry,
-    /// Cross-unit inline-fn registry (stdlib `inc`/`dec`/… HOF-argument
-    /// inlining), likewise snapshotted. Its entries are `HirFragment`s — bodies
-    /// closed over their own binding tables — so the whole registry crosses,
-    /// and a cache hit compiles user code the way a stdlib compile does.
-    pub(crate) fn_inline: crate::hir::typeinfer::StoredFnInlineRegistry,
 }
 /// Where a runtime caches its compiled stdlib.
 ///
@@ -147,7 +138,6 @@ pub fn try_load(
     cache: &StdlibCache,
     vm: &mut crate::vm::VM,
     symbols: &mut crate::symbol::SymbolTable,
-    cctx: &mut crate::pipeline::CompileCtx,
 ) -> Option<Result<CodeUnit, String>> {
     let path = cache.dir()?.join(cache_key(stdlib_source)?);
     let bytes = std::fs::read(&path).ok()?;
@@ -163,7 +153,7 @@ pub fn try_load(
         Ok(s) => s,
         Err(e) => return Some(Err(format!("cache decode: {e}"))),
     };
-    Some(load_bytecode(stored, vm, symbols, cctx))
+    Some(load_bytecode(stored, vm, symbols))
 }
 
 /// Store the compiled stdlib to the disk cache. Failures are ignored — the
@@ -174,14 +164,13 @@ pub fn try_store(
     unit: &CodeUnit,
     vm: &mut crate::vm::VM,
     symbols: &crate::symbol::SymbolTable,
-    cctx: &mut crate::pipeline::CompileCtx,
 ) {
     let Some(dir) = cache.dir() else { return };
     if let Err(e) = std::fs::create_dir_all(&dir) {
         eprintln!("[stdlib-cache] mkdir failed: {e}");
         return;
     }
-    let stored = match store_bytecode(unit, vm, symbols, cctx) {
+    let stored = match store_bytecode(unit, vm, symbols) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("[stdlib-cache] store failed: {e}");
@@ -257,11 +246,7 @@ pub fn store_bytecode(
     unit: &CodeUnit,
     vm: &mut crate::vm::VM,
     symbols: &crate::symbol::SymbolTable,
-    cctx: &mut crate::pipeline::CompileCtx,
 ) -> Result<StoredBytecode, String> {
-    let (dispatch_wrappers, fn_inline) = cctx.compile_registries_mut();
-    let stored_dispatch = dispatch_wrappers.to_stored(symbols);
-    let stored_fn_inline = fn_inline.to_stored(symbols);
     // The entry thunk is not JIT'd; the nested lambdas carry their own LIR.
     let sent = crate::value::send::serialize_templates(&[unit.entry()], vm.heap(), symbols)?;
     let entry = sent
@@ -275,8 +260,6 @@ pub fn store_bytecode(
         intern_table: sent.intern_table,
         names: sent.names,
         signal_projection: unit.signal_projection().cloned(),
-        dispatch_wrappers: stored_dispatch,
-        fn_inline: stored_fn_inline,
     })
 }
 
@@ -289,7 +272,6 @@ pub fn load_bytecode(
     stored: StoredBytecode,
     vm: &mut crate::vm::VM,
     symbols: &mut crate::symbol::SymbolTable,
-    cctx: &mut crate::pipeline::CompileCtx,
 ) -> Result<CodeUnit, String> {
     if stored.format_version != FORMAT_VERSION {
         return Err(format!(
@@ -319,11 +301,6 @@ pub fn load_bytecode(
     let entry = parts
         .pop()
         .expect("deserialize_templates returns one per input");
-    // Restore the cross-unit registries the skipped stdlib compile would have
-    // populated.
-    let (dispatch_wrappers, fn_inline) = cctx.compile_registries_mut();
-    dispatch_wrappers.restore(stored.dispatch_wrappers, symbols);
-    fn_inline.restore(stored.fn_inline, symbols);
     Ok(CodeUnit::of_parts(code, entry, stored.signal_projection))
 }
 

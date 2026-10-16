@@ -61,9 +61,9 @@ impl<'a> Analyzer<'a> {
         let value_syn = &bindings[1];
         let rest = &bindings[2..];
 
-        // Analyze this single binding using the original (non-sequential)
-        // let machinery: push scope, analyze value in outer scope, create
-        // binding, then analyze inner body (which is the rest of the chain).
+        // Open this binding's scope, and analyze the value before the name is
+        // bound, so the value sees the enclosing binding of the same name. The
+        // rest of the chain is then analyzed inside the scope.
         self.push_scope(false);
 
         let value = self.analyze_expr(value_syn)?;
@@ -167,7 +167,8 @@ impl<'a> Analyzer<'a> {
         let in_function = self.scopes.iter().any(|s| s.is_function);
 
         if in_function {
-            // Inside a function, creates a local binding
+            // Inside a function, reuse the binding `analyze_begin` pre-bound in
+            // this scope, or bind a new local.
             let name_scopes = items[1].scopes.as_slice();
             let binding = if let Some(existing) = self.lookup_in_current_scope(name, name_scopes) {
                 existing
@@ -194,15 +195,12 @@ impl<'a> Analyzer<'a> {
                 value_signal,
             ))
         } else {
-            // At top level, creates a local binding.
-            // Mark as prebound so that needs_capture() returns true when a SIBLING
-            // lambda in the same begin block captures the binding (mutual recursion /
-            // a forward reference) — such a captured immutable local would otherwise be
-            // captured by value (nil) before its initializer runs. `is_prebound` only
-            // forces a cell in combination with `is_captured` (`hir/arena.rs`
-            // `needs_capture`), and a self-edge does not mark the binding captured, so a
-            // *purely* self-recursive top-level binding stays cell-free despite being
-            // prebound; its self-reference resolves to the executing closure.
+            // At top level, bind a new local and mark it prebound. A sibling
+            // lambda in the same `begin` may capture the binding before its
+            // initializer runs, and `needs_capture` then gives it a cell where
+            // capture by value would copy nil. A self-edge does not mark the
+            // binding captured, so a binding only its own lambda names stays
+            // cell-free.
             let name_scopes = items[1].scopes.as_slice();
             let binding = self.bind(name, name_scopes, BindingScope::Local);
             self.arena.get_mut(binding).is_prebound = true;

@@ -1,14 +1,15 @@
-//! What counts as a branch **arm**.
+// audited: 2026-10-14
+//! What counts as a branch arm: a program region at most one of which runs per execution.
 //!
-//! An arm is a program region at most one of which runs per execution — not a
-//! syntactic arm body. For an `If` and a `Match` the two coincide. For the
-//! short-circuiting forms they do not: a `cond`'s clause TESTS are conditional
-//! positions exactly as its bodies are (test *k* runs only where tests 0..*k*-1
-//! all failed), and an `and`/`or` tail is a conditional position with no sibling
-//! body at all. Reading those forms syntactically leaves a release whose last use
-//! is a later test outside every arm — which is exactly where the polymorphic
-//! entry point puts it (docs/impl/region/mechanism.md § "An arm is a conditional
-//! position, not a syntactic arm body").
+//! docs/impl/region/window.md
+//!
+//! An arm is not a syntactic arm body. For an `If` and a `Match` the two
+//! coincide. For the short-circuiting forms they do not: a `cond`'s clause TESTS
+//! are conditional positions exactly as its bodies are (test *k* runs only where
+//! tests 0..*k*-1 all failed), and an `and`/`or` tail is a conditional position
+//! with no sibling body at all. Reading those forms syntactically leaves a
+//! release whose last use is a later test outside every arm, which is exactly
+//! where the polymorphic entry point puts it.
 //!
 //! The arms are read off the nested-`If` each form is equivalent to:
 //!
@@ -29,9 +30,8 @@
 //! (`super::analyze::decref`) and per-arm branch compensation
 //! ([`super::compensate`]).
 
-use std::collections::HashMap;
-
 use crate::hir::expr::{Hir, HirId, HirKind};
+use crate::hir::liveness::Order;
 
 /// One arm: the node whose head hosts a compensating release, and the post-order
 /// interval of the span it covers. For a syntactic arm the interval is that
@@ -57,13 +57,9 @@ pub(super) struct ArmSet {
 /// The branches `hir` itself contributes — none for a node that is not a branch.
 /// Callers walk the tree themselves, since each collects different scopes
 /// alongside.
-pub(super) fn branch_arms(
-    hir: &Hir,
-    order: &HashMap<HirId, u32>,
-    low: &HashMap<HirId, u32>,
-) -> Vec<ArmSet> {
+pub(super) fn branch_arms(hir: &Hir, order: &Order) -> Vec<ArmSet> {
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
-    let lo = |id: HirId| low.get(&id).copied().unwrap_or(0);
+    let lo = |id: HirId| order.low(&id).unwrap_or(0);
     let arm = |h: &Hir| Arm {
         id: h.id,
         lo: lo(h.id),

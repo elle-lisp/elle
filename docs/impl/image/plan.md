@@ -1,33 +1,34 @@
 # Landing order and test plan
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-14 -->
 
 What lands in which order, and the pins each milestone must land with.
 
-[image.md](../image.md) owns the design, [foundations.md](foundations.md) the
-five representation fixes below, [boot.md](boot.md) the boot configuration, and
-[measurements.md](measurements.md) the experiments that answered the design's
+[The image design](../image.md) owns the argument,
+[the foundations](foundations.md) the five representation fixes below,
+[booting from an image](boot.md) the boot configuration, and
+[the measurements](measurements.md) the experiments that answered the design's
 open questions.
 
 ## Landing order
 
 Foundations first — each lands green on the existing corpus with no image
 code, and each deletes image machinery
-([foundations.md](foundations.md) argues all five):
+([the foundations](foundations.md) argue all five):
 
 1. **symbol** — landed. Stable content-addressed symbol identity
-   ([symbol.md](../symbol.md)); deleted the symbol remap pass, the
+   ([symbols](../symbol.md)); deleted the symbol remap pass, the
    sorted-container re-sort hazard, the `symbol_names` maps, and `send`'s
    re-interning.
 2. **struct** — landed. Region-native immutable struct payloads and keys
-   ([values.md](../values.md) § "Struct keys"); deleted the per-probe key
+   ([values](../values.md) § "Struct keys"); deleted the per-probe key
    allocation and the owned-key arms the dumper would have had to encode.
 3. **template** — landed. The blueprint / payload / header split
-   ([region/template.md](../region/template.md)); deleted the per-creation
+   ([code objects](../region/template.md)); deleted the per-creation
    blueprint clone, the `HashMap` location map, and the `Rc`-shared template
    variant that no image could dump.
 4. **syntax** — landed. The region-native syntax tree
-   ([syntax.md](../syntax.md)); deleted the side-stream syntax codec this
+   ([the syntax tree](../syntax.md)); deleted the side-stream syntax codec this
    design would otherwise have needed, the `Box<Syntax>` inside
    `HeapObject::Syntax`, and the retained lambda tree on every closure
    template.
@@ -76,31 +77,35 @@ Then the image milestones:
    - closures and closure templates in the body: the payload crosses whole
      and shared, the header hydrates without its blueprint, and the code
      objects a `MakeClosure` indexes cross as the payload's child table
-     ([sealing.md](sealing.md) § "A child code object crosses as a header"),
+     ([sealing](sealing.md) § "A child code object crosses as a header"),
      with the defining span on the payload so `meta/origin` answers after a
      boot from image;
    - cell snapping — a compiled forward cell crosses as its content when its
      binding is never assigned, an assigned binding fails the dump by name,
-     and a run-time cell still refuses ([sealing.md](sealing.md));
+     and a run-time cell still refuses ([sealing](sealing.md));
    - dump-boot — the root struct over the core exports, the stdlib exports and
      the macro definitions, the source digest beside them, `elle image
      dump-boot`, and the install path a fresh instance boots through
-     ([boot.md](boot.md)); the two boots share the export-registration tails,
-     and the corpus under image boot is the gate;
+     ([booting from an image](boot.md)); the two boots share the
+     export-registration tails, and the corpus under image boot is the gate;
    - the warm cache — `--boot-image=`, the digest-keyed file, the atomic store
-     and the prune. Opt-in rather than default: a hydrating instance still
-     loses cross-unit inlining, and [boot.md](boot.md) argues the default
-     waits on it;
+     and the prune. Opt-in rather than default: a `sys/spawn` worker still
+     boots its stdlib from source, and [boot.md](boot.md) argues the default
+     waits on per-worker hydration;
    - the tier half of the parity gate — the **lir** foundation carries a
      function's LIR in the payload, so a hot stdlib function reaches the JIT
-     under an image boot as under a source boot.
+     under an image boot as under a source boot;
+   - the compile half of the parity gate — the payload carries the body
+     fragment as bytes ([region/template.md](../region/template.md)), so a
+     hydrated closure grafts as a compiled one does
+     ([graft.md](../graft.md)) and a user file compiles to the same
+     instruction stream under both boots.
 
    Still to land: the embedded blob, per-worker hydration for `sys/spawn`,
-   compiler-state persistence, the hydrated-region interval table, and the
-   bytecode half of the parity gate. The interval table keeps `region_of_ptr`
-   off the probe ladder ([image.md](../image.md) § "Pointer resolution must not
-   regress"); the regression it prevents needs a region the size of stdlib to
-   show.
+   and the hydrated-region interval table. The interval table keeps
+   `region_of_ptr` off the probe ladder ([image.md](../image.md) § "Pointer
+   resolution must not regress"); the regression it prevents needs a region
+   the size of stdlib to show.
 8. **environment** — `image/save` and `image/load`, manifest deltas over
    boot, mutable side-stream.
 
@@ -266,13 +271,13 @@ Then the image milestones:
   the watermark the image records — which for a boot graph is one, because a
   prelude template carries the prelude scope alone, so the raise itself is
   pinned separately. A fresh instance prints a hydrated stdlib closure's name
-  and answers
-  `meta/origin` with the file it was written in, both out of the image's
-  tables. An image whose source digest is not this binary's is refused by its
+  and answers `meta/origin` with the file it was written in, both out of the
+  image's tables. An image whose source digest is not this binary's is refused by its
   own name, not the fingerprint's, and the instance boots from source instead.
   The counter-factual is an instance that answers with the previous library. A
-  process holding a user signal bit fails the boot dump, naming the signal. Two dumps of one boot state write one file, which is determinism at
-  the scale where a code payload's padding can leak. Hygiene: an image-booted
+  process holding a user signal bit fails the boot dump, naming the signal.
+  Two dumps of one boot state write one file, which is determinism at the
+  scale where a code payload's padding can leak. Hygiene: an image-booted
   instance tears down to the residue a source-booted one leaves, the whole boot
   graph released through one root registration. Boot from image running the
   full smoke corpus identically to source boot is dump-boot's gate.
@@ -282,9 +287,16 @@ Then the image milestones:
   stores, and the start after that hits. A store prunes the superseded file and
   leaves the kept one, and the default policy neither reads a directory nor
   writes one.
-- Compile parity: compile the same user file under image boot and source
-  boot and assert byte-identical bytecode — the acceptance gate for the
-  persisted compiler state (inline fragments, dispatch wrappers).
+- Compile parity: a call to a stdlib function grafts under image boot as
+  under source boot, and the same user file compiles to the same instruction
+  stream under both — the acceptance gate for the body fragment a hydrated
+  payload carries. The comparison reads each code object's opcodes and length
+  rather than its bytes. A static region id in an operand comes from a
+  process-wide mint ([the region model](../region/model.md)), which a stdlib
+  compile advances and a hydration does not, so the two boots' operands
+  differ in one process while their instructions agree.
+  `a_call_to_a_stdlib_function_grafts_under_either_boot` and
+  `the_two_boots_emit_one_bytecode_for_a_user_file` pin the two.
 - Tier parity: a hot stdlib function reaches the JIT under image boot
   exactly as under source boot — the hydrated payload's own LIR feeds
   `submit_jit_task` and the compiled result executes.

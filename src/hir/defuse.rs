@@ -1,25 +1,36 @@
-//! Def-use chains and value origin analysis for functional HIR.
+// audited: 2026-10-14
+//! Def-use chains over HIR, and the origin of the value each node produces.
 //!
-//! Single forward pass over the HIR tree builds:
-//! - `def_site`: where each binding is defined (HirId)
-//! - `uses`: where each binding is used (`Vec<HirId>`)
-//! - `value_origin`: what each result-position expression produces
+//! One forward walk over the tree builds three tables:
+//! - `def_site`: the node that defines each binding
+//! - `uses`: the nodes that read each binding
+//! - `value_origin`: what each node's value is made from
+//!
+//! docs/impl/hir.md
 
 use super::binding::Binding;
 use super::expr::{Hir, HirId, HirKind};
 
-use std::collections::HashMap;
+/// The node that defines each binding.
+pub type DefSites = rustc_hash::FxHashMap<Binding, HirId>;
+
+/// The nodes that read each binding, in walk order.
+pub type Uses = rustc_hash::FxHashMap<Binding, Vec<HirId>>;
+
+/// What each node's value is made from.
+pub type ValueOrigins = rustc_hash::FxHashMap<HirId, ValueOrigin>;
 
 /// What a result-position expression produces.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValueOrigin {
-    /// nil, bool, int, float, keyword, empty-list
+    /// An immediate value, or no value at this position (`break`, `recur`)
     Immediate,
     /// Reference to another binding
     Binding(Binding),
-    /// Opaque function call result
+    /// Opaque result of a call or an `eval`
     CallResult,
-    /// Lambda, string literal, quote, MakeCell
+    /// A lambda, string literal, compound or heap quote, `MakeCell`, or
+    /// allocating intrinsic
     Allocation,
     /// deref-cell (value unknown statically)
     CellDeref,
@@ -51,17 +62,17 @@ impl ValueOrigin {
 
 /// Def-use chain builder. Accumulates results during the walk.
 pub(crate) struct DefUseBuilder {
-    pub def_site: HashMap<Binding, HirId>,
-    pub uses: HashMap<Binding, Vec<HirId>>,
-    pub value_origin: HashMap<HirId, ValueOrigin>,
+    pub def_site: DefSites,
+    pub uses: Uses,
+    pub value_origin: ValueOrigins,
 }
 
 impl DefUseBuilder {
     pub fn new() -> Self {
         DefUseBuilder {
-            def_site: HashMap::new(),
-            uses: HashMap::new(),
-            value_origin: HashMap::new(),
+            def_site: DefSites::default(),
+            uses: Uses::default(),
+            value_origin: ValueOrigins::default(),
         }
     }
 
@@ -103,8 +114,8 @@ impl DefUseBuilder {
 
             // Allocations
             HirKind::String(_) | HirKind::QuoteConst(_) => ValueOrigin::Allocation,
-            // `Quote` now holds an immediate (`'5`, `'foo`) or — only on the
-            // macro-hygiene path — a pre-baked heap (syntax-object) Value.
+            // `Quote` holds an immediate (`'5`, `'foo`) or, on the
+            // macro-hygiene path alone, a pre-baked heap syntax object.
             HirKind::Quote(v) => {
                 if v.is_heap() {
                     ValueOrigin::Allocation
@@ -112,34 +123,21 @@ impl DefUseBuilder {
                     ValueOrigin::Immediate
                 }
             }
-            HirKind::Lambda {
-                params,
-                rest_param,
-                captures,
-                body,
-                ..
-            } => {
-                // Record parameter defs
-                for p in params {
+            HirKind::Lambda(lambda) => {
+                for p in &lambda.params {
                     self.record_def(*p, hir.id);
                 }
-                if let Some(rp) = rest_param {
-                    self.record_def(*rp, hir.id);
+                if let Some(rp) = lambda.rest_param {
+                    self.record_def(rp, hir.id);
                 }
-                // Captures generate uses of outer bindings at the lambda's HirId. A
-                // self-edge (a `Recursive` capture) is a genuine use too: the
-                // self-reference re-enters the *executing closure* (`LoadSelf` / a
-                // self-call), which borrows the closure — so the closure's region must
-                // live through the whole recursion. Recording it keeps the
-                // self-recursive binding's region alive to its enclosing letrec/def
-                // scope; because the dominant recursive body is a frame-replacing tail
-                // call, that scope-end release is stranded as dead code and supplied
-                // once by the tail-call deferred release (`lir/lower/control/call.rs`).
-                for cap in captures {
+                // Each capture is a use of the outer binding at the lambda's
+                // HirId. A `Recursive` capture counts too: the self-reference
+                // borrows the executing closure, so the closure's region must
+                // live through the whole recursion.
+                for cap in &lambda.captures {
                     self.record_use(cap.binding, hir.id);
                 }
-                // Walk body recursively
-                self.walk(body);
+                self.walk(&lambda.body);
                 ValueOrigin::Allocation
             }
 
@@ -164,7 +162,7 @@ impl DefUseBuilder {
             HirKind::SetCell { cell, value } => {
                 self.walk(cell);
                 self.walk(value);
-                // SetCell returns the value written — but we model it conservatively
+                // SetCell returns the value it writes.
                 self.origin_of(value.id)
             }
 
@@ -280,7 +278,8 @@ impl DefUseBuilder {
                     self.record_def(*b, hir.id);
                 }
                 self.walk(body);
-                // Loop result is the body when condition fails (typically nil)
+                // The loop's value is the body's value on the path that does
+                // not recur.
                 self.origin_of(body.id)
             }
 
@@ -292,7 +291,8 @@ impl DefUseBuilder {
                 ValueOrigin::Immediate
             }
 
-            // Assign (should be rare after functionalize, but handle structurally)
+            // Assign defines its target. Dead-binding elimination walks the
+            // tree before functionalize, where assignments are common.
             HirKind::Assign { target, value } => {
                 self.walk(value);
                 self.record_def(*target, hir.id);
@@ -346,7 +346,7 @@ impl DefUseBuilder {
                 self.origin_of(body.id)
             }
 
-            // While (should be eliminated, but handle structurally)
+            // While: functionalize removes it, but the walk may run earlier.
             HirKind::While { cond, body } => {
                 self.walk(cond);
                 self.walk(body);

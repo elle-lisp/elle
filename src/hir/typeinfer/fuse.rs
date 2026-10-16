@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-14
 //! HOF-chain loop fusion: a higher-order call over a proven array becomes one loop
 //! with its function's body spliced in.
 //!
@@ -9,14 +9,14 @@
 //! `drop-while`, `mapcat`) under an optional scalar terminal (`fold`/`reduce`,
 //! `count`, `any?`, `all?`, `find`, `find-index`), over one proven base, fuses to
 //! a single loop. The loop is *surface* HIR — plain `while`/`push`/`freeze` — and
-//! the pass runs in `regularize` before `functionalize`, so every later pass
+//! the pass runs in `regularize` before the graft and `functionalize`, so every later pass
 //! lowers it exactly as it lowers the stdlib op's own body. The pass never builds
 //! a `loop`/`recur` or a capture cell by hand.
 //!
 //! A function argument is a call-site lambda literal, which the rewrite moves and
 //! which may capture when its op is alone in the chain (`captures_locals`), or a
-//! named function whose body a fragment carries: this unit's, by binding, or an
-//! earlier unit's, by name through the registry. A chain of two or more ops
+//! named function whose body a fragment carries: this unit's, by binding, or
+//! another unit's, on its function value's code payload. A chain of two or more ops
 //! interleaves its functions' calls, so each must pass `reorder_safe` and capture
 //! nothing. Only the chain's innermost op may end the walk early; every other
 //! early exit gates its own stage.
@@ -35,66 +35,65 @@ use crate::hir::expr::{CallArg, Hir, HirKind};
 use crate::primitives::def::RetType;
 use crate::signals::{Signal, SIG_ERROR};
 use crate::value::SymbolId;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 
-// The pass in reading order: `Ops` resolves the stdlib bindings the fused loop
-// is built from; `chain` recognizes a fusable HOF chain and validates it;
-// `collect` closes this unit's inlineable function bodies into fragments and
-// `registry` holds the ones earlier units left; `build` emits the loop.
+// The pass in reading order: `Ops` resolves the bindings the fused loop calls;
+// `chain` recognizes a fusable HOF chain and validates it; `resolve` finds the
+// body a function argument names; `build` emits the loop.
 mod build;
 mod chain;
-mod collect;
 mod ops;
-mod registry;
+mod resolve;
 
 // Glob-imported so each submodule's own `use super::*` reaches the others:
-// the five split parts form one pass and refer to each other freely.
+// the four split parts form one pass and refer to each other freely.
 use build::*;
 use chain::*;
-use collect::*;
 use ops::*;
-use registry::*;
+use resolve::*;
 
-pub(crate) use registry::{FnInlineRegistry, StoredFnInlineRegistry};
+pub(in crate::hir::typeinfer) use chain::classify_base;
 
-/// Fuse every qualifying HOF chain into an inlined index-walk loop. Runs on
-/// surface HIR, before functionalize (see the module doc). `registry` is the
-/// per-instance cross-unit function-inline registry: this unit's inlineable
-/// functions are recorded into it (so later units can inline them) and its earlier
-/// entries — the `<stdlib>` compile's `inc`/`dec`/… — are consulted here.
+/// Fuse every qualifying HOF chain into an inlined index-walk loop. A function
+/// argument that names a function reaches its body through `unit`, this unit's
+/// closed functions, or through the fragment on the code payload of the value
+/// `values` holds for a binding the runtime supplies, which `memo` decodes once
+/// per compile.
 pub(crate) fn fuse_map_chains(
     hir: &mut Hir,
     arena: &mut BindingArena,
-    registry: &mut FnInlineRegistry,
+    unit: &super::graft::UnitFns,
+    values: &HashMap<Binding, crate::value::Value>,
+    memo: &super::graft::FragmentMemo,
 ) {
-    // The sound `binding → type-of keyword` proof dead-arm pruning already
-    // computes (`prune::concrete_init_keywords`). A `map`'s base collection may be
-    // a `Var` alias of an immutable array, not only a call-site literal; this map
-    // is what proves the alias `array`. Built once over the pre-rewrite tree — the
-    // base-var bindings live in enclosing `let`s that fusion never mutates, so the
-    // proof stays valid as inner map calls collapse. A collected fragment reads it
-    // too, for the array proof a `mapcat` asks of its function.
+    // The `binding → type-of keyword` proof dead-arm pruning computes. A base
+    // collection may be a `Var` alias of a proven array, not only a call-site
+    // literal, and this map is what proves the alias. It is built once over the
+    // pre-rewrite tree: the base bindings live in enclosing `let`s that fusion
+    // never mutates, so the proof stays valid as inner chains collapse.
     let bases = concrete_init_keywords(hir, arena);
-    // Close this unit's inlineable functions into fragments: by `Binding` for a
-    // `Var` naming one here, and by NAME into the registry so later units can
-    // reach them (docs/impl/dissolution/inline.md). Done over the pre-rewrite
-    // tree, and BEFORE `Ops::resolve` below: during the `<stdlib>` compile the
-    // loop-scaffold primitives are not yet `is_primitive`, so `Ops::resolve` fails
-    // and fusion is inert here — but the stdlib is exactly where the `inc`/`dec`
-    // fragments that later units inline are defined, so the recording must not
-    // sit behind that gate.
-    let mut collector = Collector::new(arena, &bases);
-    collector.walk(hir, registry);
-    let templates = collector.templates;
     let Some(ops) = Ops::resolve(arena) else {
         return;
     };
-    // This unit's primitives by name, so a fragment's free globals — recorded by
-    // name, since a `Binding` means nothing outside the arena that minted it —
-    // resolve to this arena's bindings. `bind_primitives` binds each
-    // primitive/stdlib-export once, so first-wins is exact, and the map is the
-    // same one `monomorphize.rs` builds for the dispatch registry.
+    let prim_by_name = primitives_by_name(arena);
+    let fns = FnResolver {
+        unit,
+        values,
+        memo,
+        prim_by_name: &prim_by_name,
+    };
+    rewrite(hir, arena, &ops, &bases, &fns);
+}
+
+/// This unit's primitives by name, so a fragment's free globals resolve to
+/// this arena's bindings. A fragment records a global by name, because a
+/// `Binding` means nothing outside the arena that minted it. `bind_primitives`
+/// binds each primitive and stdlib export once, so the first binding found is
+/// the only one.
+pub(in crate::hir::typeinfer) fn primitives_by_name(
+    arena: &BindingArena,
+) -> FxHashMap<SymbolId, Binding> {
     let mut prim_by_name: FxHashMap<SymbolId, Binding> = FxHashMap::default();
     for i in 0..arena.len() as u32 {
         let b = Binding(i);
@@ -103,22 +102,13 @@ pub(crate) fn fuse_map_chains(
             prim_by_name.entry(bi.name).or_insert(b);
         }
     }
-    let fns = FnResolver {
-        templates: &templates,
-        registry,
-        prim_by_name: &prim_by_name,
-    };
-    rewrite(hir, arena, &ops, &bases, &fns);
+    prim_by_name
 }
 
-/// Pre-order walk: try to fuse a HOF chain rooted at `hir` (consuming the whole
-/// chain, including its inner HOF calls); whether or not it fused, recurse into
-/// the resulting node's children (which fuses nested HOFs in the spliced lambda
-/// bodies or the base array's elements). A chain of pipeline stages under
-/// an optional outermost scalar terminal, over the same proven base, fuses to one
-/// loop; the recursion still reaches HOFs nested inside a spliced lambda body or a
-/// declined chain's inner run (a chain declined by the reorder gate, say, whose
-/// inner run then fuses on its own).
+/// Pre-order walk: fuse the chain rooted at `hir` when the gate admits it,
+/// consuming its inner op calls, then recurse into the children of whatever
+/// node stands there. The recursion reaches an op inside a spliced body or a
+/// base expression, and the inner run of a chain the gate declined.
 fn rewrite(
     hir: &mut Hir,
     arena: &mut BindingArena,

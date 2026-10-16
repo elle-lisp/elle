@@ -21,7 +21,7 @@ fn named_map_fn_inlines() {
         "the `map` dispatch must be gone when the fn is a named defn; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &mut rt, "*"),
+        count_op(&hir, &arena, &mut rt, "*"),
         2,
         "`dbl`'s body op appears twice — the surviving definition plus the \
              inlined copy; callees were {cs:?}",
@@ -46,11 +46,11 @@ fn named_fold_fn_inlines() {
     let (hir, arena, mut rt) = compile("(defn mul [a b] (* a b)) (fold mul 1 [1 2 3])");
     let cs = callees(&hir, &arena, &mut rt);
     assert!(
-        !cs.iter().any(|n| n == "fold"),
+        !fold_stays_a_call(&cs),
         "the `fold` dispatch must be gone for a named combinator; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &mut rt, "*"),
+        count_op(&hir, &arena, &mut rt, "*"),
         2,
         "`mul`'s body op appears twice (definition + inlined); callees were {cs:?}",
     );
@@ -74,7 +74,7 @@ fn named_fn_composition_fuses_to_one_loop() {
         "both `map` dispatches must be gone; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &mut rt, "*"),
+        count_op(&hir, &arena, &mut rt, "*"),
         3,
         "definition + two inlined copies of `dbl`; callees were {cs:?}",
     );
@@ -99,7 +99,7 @@ fn named_fn_with_let_body_inlines() {
         "a named fn with a `let` body must inline; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &mut rt, "*"),
+        count_op(&hir, &arena, &mut rt, "*"),
         2,
         "`g`'s `*` appears twice — the surviving definition plus the inlined \
              copy; callees were {cs:?}",
@@ -111,19 +111,18 @@ fn named_fn_with_let_body_inlines() {
     );
 }
 
-/// Decline: a named function whose body introduces a binding through a form a
-/// fragment cannot close over (a `match` pattern — `let` is admitted, but a
-/// `match` binding is not) stays a plain `map` call, so the definition's own
-/// pattern bindings are never duplicated. The admitted forms are a positive list
-/// of pure-expression forms plus `let`; anything else declines
-/// correct-by-construction.
+/// Decline: a named function whose body holds a form a fragment cannot close
+/// over (a `block` — `let` and `match` are admitted, but a `block` is not)
+/// stays a plain `map` call, so the definition's own body is never duplicated.
+/// The admitted forms are a positive list of pure-expression forms plus `let`
+/// and `match`; anything else declines correct-by-construction.
 #[test]
-fn named_fn_with_match_body_declines() {
-    let (hir, arena, mut rt) = compile("(defn g [x] (match x _ (* x 2))) (map g [1 2 3])");
+fn named_fn_with_block_body_declines() {
+    let (hir, arena, mut rt) = compile("(defn g [x] (block :g (* x 2))) (map g [1 2 3])");
     let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "map"),
-        "a named fn with a `match` body must not inline; callees were {cs:?}",
+        "a named fn with a `block` body must not inline; callees were {cs:?}",
     );
 }
 
@@ -143,7 +142,7 @@ fn named_let_body_fn_composition_fuses_to_one_loop() {
         "both `map` dispatches must be gone; callees were {cs:?}",
     );
     assert_eq!(
-        count_callee(&hir, &arena, &mut rt, "*"),
+        count_op(&hir, &arena, &mut rt, "*"),
         3,
         "definition + two inlined copies of `g`'s `*`; callees were {cs:?}",
     );
@@ -202,7 +201,7 @@ fn named_map_cross_unit_stdlib_fn_inlines() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert_eq!(
-        count_callee(&hir, &arena, &mut rt, "-"),
+        count_op(&hir, &arena, &mut rt, "-"),
         1,
         "`dec`'s body op `-` is spliced in exactly once — the definition stays in \
              the stdlib unit, so there is no surviving copy; callees were {cs:?}",

@@ -1,6 +1,6 @@
 # The tool producers
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-14 -->
 
 Producers that drive a tool outside Elle, parse the counts it prints, and
 report each count as a reading.
@@ -25,7 +25,7 @@ and runs each one on both paths a boot takes to the standard library:
 | `boot and exit` | `(+ 1 2)`: the boot, the standard library and the teardown |
 | `a fiber yields and resumes` | one fiber, resumed to its yield and then to its end |
 | `a file read through the I/O backend` | a `slurp` of `Cargo.toml` |
-| `a function the JIT compiles` | a function called 100 times, under `--trace=syncjit`, which the program asserts is compiled |
+| `a function the JIT compiles` | a recursive function called 100 times, under `--trace=syncjit`, which the program asserts is compiled. It is recursive so the graft keeps its call: a function the graft unrolls is never called, and never compiled |
 
 | Path | The flag | What the boot does |
 |------|----------|--------------------|

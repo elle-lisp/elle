@@ -25,7 +25,7 @@ fn single_drop_while_dissolves_to_a_flag_gated_push() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "even?"),
+        predicate_inline(&hir, &arena, &mut rt, "even?"),
         "the predicate must run inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -63,7 +63,8 @@ fn map_over_drop_while_fuses_to_one_loop() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "even?") && cs.iter().any(|n| n == "*"),
+        predicate_inline(&hir, &arena, &mut rt, "even?")
+            && count_op(&hir, &arena, &mut rt, "*") > 0,
         "both the predicate and the transform must inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -197,8 +198,12 @@ fn drop_while_erroring_bodies_fuse() {
             !cs.iter().any(|n| n == "drop-while" || n == "map"),
             "an erroring body is reorder-safe and must fuse in {src}; callees were {cs:?}",
         );
+        let runs_inline = match inline {
+            "zero?" => predicate_inline(&hir, &arena, &mut rt, inline),
+            op => cs.iter().any(|n| n == op),
+        };
         assert!(
-            cs.iter().any(|n| n == inline),
+            runs_inline,
             "the erroring body must run inline in {src}; callees were {cs:?}",
         );
     }
@@ -269,14 +274,16 @@ fn drop_while_over_mutable_array_is_not_fused() {
 }
 
 /// Safety: a user redefinition shadows the stdlib binding with a non-primitive one,
-/// so it is never rewritten.
+/// so fusion never rewrites it into a loop.
 #[test]
 fn user_shadowed_drop_while_is_not_fused() {
-    let (hir, arena, mut rt) = compile("(defn drop-while [p c] c) (drop-while (fn [x] x) [1 2 3])");
-    let cs = callees(&hir, &arena, &mut rt);
-    assert!(
-        cs.iter().any(|n| n == "drop-while"),
-        "a user `drop-while` must not be rewritten; callees were {cs:?}",
+    let (hir, _arena, _rt) = compile("(defn drop-while [p c] c) (drop-while (fn [x] x) [1 2 3])");
+    // The user's call may graft, and what grafts is the user's body, which
+    // makes no loop.
+    assert_eq!(
+        count_loops(&hir),
+        0,
+        "a user `drop-while` must not become a fused loop"
     );
 }
 
@@ -296,17 +303,20 @@ fn capturing_drop_while_predicate_fuses() {
 
 /// A `drop-while` whose predicate is a `Var` naming a same-unit `defn` inlines its
 /// body, exactly as a `map`/`filter` argument does — the stage puts no new
-/// requirement on how the function is resolved.
+/// requirement on how the function is resolved. The predicate compares with `>`,
+/// which the loop scaffold never emits, so its two sites are the surviving
+/// definition and the inlined copy.
 #[test]
 fn named_drop_while_predicate_inlines() {
-    let (hir, arena, mut rt) = compile("(defn small? [x] (< x 3)) (drop-while small? [1 2 5])");
+    let (hir, arena, mut rt) = compile("(defn big? [x] (> x 3)) (drop-while big? [5 4 1])");
     let cs = callees(&hir, &arena, &mut rt);
     assert!(
         !cs.iter().any(|n| n == "drop-while"),
         "the dispatch must be gone for a named predicate; callees were {cs:?}",
     );
-    assert!(
-        cs.iter().any(|n| n == "<"),
-        "the named predicate's body must run inline; callees were {cs:?}",
+    assert_eq!(
+        count_op(&hir, &arena, &mut rt, ">"),
+        2,
+        "the definition's > plus the inlined copy; callees were {cs:?}",
     );
 }

@@ -64,8 +64,10 @@ The `map` dispatch (a cross-unit stdlib call whose `cond` selects the array arm)
 is gone too. The emitted form is *surface* HIR — the same shape `map`'s body has
 before functionalization — so every downstream pass (functionalize, ANF, region
 inference, the lowerer) consumes it exactly as it consumes `map`'s own body: the
-`while` becomes a `loop`/`recur`, `push` monomorphizes to `%push-array-mut` on
-the proven `@array` accumulator, and the result is one frozen array.
+`while` becomes a `loop`/`recur`. The graft replaces the `push` call with
+`push`'s body, and after inference the fold keeps the one arm the accumulator's
+proven `@array` type selects, `%push-array-mut` ([grafting a call](graft.md)).
+The result is one frozen array.
 
 Signals on the synthesized helper calls (`get`/`push`/`freeze`/`<`/
 `length`/`@array`) and on the synthesized `if`/`let` scaffolding are set to the
@@ -146,8 +148,8 @@ right, applying `f`/`p` identically to the stdlib op). The gate:
   - a **`Var` referencing a same-compile-unit function** whose initializer is such
     a lambda (a top-level `(defn f …)` or a `let`/`def`-bound `(fn …)`), inlined
     by cloning;
-  - a **stdlib `defn`** such as `inc`, whose body a registry carries across the
-    compile-unit boundary.
+  - a **stdlib `defn`** such as `inc`, whose body its function value carries
+    across the compile-unit boundary.
 
   [Inline](dissolution/inline.md) owns the two named forms. Each is a
   **non-capturing** template: its body names the scope it was defined in, not the
@@ -171,8 +173,8 @@ predecessor's survivors/mapped values, a `map` on its predecessor's survivors);
 only the *interleaving* of the two lambdas' calls differs, which the gate makes
 unobservable. This is why a mixed chain is gated identically to a homogeneous one:
 a mixed chain is always length ≥ 2, so it always carries the reorder requirement,
-and a non-reorder-safe stage (a variadic comparison like `>`, which routes through
-`apply`) declines the whole composition — the chain then falls back to fusing only
+and a non-reorder-safe stage (a predicate that prints, which signals `:io`)
+declines the whole composition — the chain then falls back to fusing only
 its inner reorder-safe run. A **capture** is a second cross-element channel and
 carries no signal at all, so a composition additionally requires every lambda to be
 non-capturing (§ "Captures"). Reordering is otherwise observable only through a
@@ -294,7 +296,9 @@ pre-order recursion still fuses its inner run.
 ## Where it runs
 
 In `regularize` ([src/hir/regularize.rs](../../src/hir/regularize.rs)), after dead-arm pruning and **before**
-`functionalize`, on surface HIR. Running pre-functionalize is what lets the pass
+the graft and `functionalize`, on surface HIR. The graft runs after it so that a
+fused loop's spliced bodies and its scaffold calls are grafted too. Running
+pre-functionalize is what lets the pass
 emit ordinary `while`/`push`/`freeze` HIR and hand the loop lowering to the same
 machinery that lowers `map`'s own body — the pass never constructs a
 `loop`/`recur` or a capture cell by hand. The proven-immutable-array fact it
@@ -308,11 +312,11 @@ Dissolution is one mechanism keyed on proven-owned-non-escaping inputs, not a
 per-function hand-rewrite. The production `zip` was hand-fused once for an RSS
 win; that is exactly the manual gap-bridging this pass exists to replace. The
 pass fires structurally on *any* `(map f xs)` matching the gate — it enumerates
-no user function and hand-writes no composition. It mirrors the container-
-dispatch monomorphization ([src/hir/typeinfer/monomorphize.rs](../../src/hir/typeinfer/monomorphize.rs)): recognize a
-proven-type call across the compile-unit boundary and collapse it to the direct
-form the proof selects, so the general dispatch and everything it strands cease
-to exist.
+no user function and hand-writes no composition. The graft
+([grafting a call](graft.md)) does the same for a single call: it replaces the
+call with its callee's body and keeps only the path the operands' proven types
+select. The general dispatch then ceases to exist, and so does everything it
+strands.
 
 ## The gauge
 

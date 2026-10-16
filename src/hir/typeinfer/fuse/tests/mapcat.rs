@@ -34,7 +34,7 @@ fn single_mapcat_dissolves_to_a_nested_walk() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "*"),
+        count_op(&hir, &arena, &mut rt, "*") > 0,
         "the function's body op must run inline; callees were {cs:?}",
     );
     assert_eq!(count_loops(&hir), 2, "the base walk, and the fan-out's own");
@@ -74,7 +74,7 @@ fn map_over_mapcat_fuses_to_one_loop() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "*") && cs.iter().any(|n| n == "+"),
+        count_op(&hir, &arena, &mut rt, "*") > 0 && count_op(&hir, &arena, &mut rt, "+") > 0,
         "both bodies must inline; callees were {cs:?}",
     );
     assert_eq!(count_loops(&hir), 2, "one pair of loops, not two pairs");
@@ -274,14 +274,16 @@ fn lone_mapcat_over_mutable_array_fuses() {
 }
 
 /// Safety: a user redefinition shadows the stdlib binding with a non-primitive one,
-/// so it is never rewritten.
+/// so fusion never rewrites it into a loop.
 #[test]
 fn user_shadowed_mapcat_is_not_fused() {
-    let (hir, arena, mut rt) = compile("(defn mapcat [f c] c) (mapcat (fn [x] [x]) [1 2 3])");
-    let cs = callees(&hir, &arena, &mut rt);
-    assert!(
-        cs.iter().any(|n| n == "mapcat"),
-        "a user `mapcat` must not be rewritten; callees were {cs:?}",
+    let (hir, _arena, _rt) = compile("(defn mapcat [f c] c) (mapcat (fn [x] [x]) [1 2 3])");
+    // The user's call may graft, and what grafts is the user's body, which
+    // makes no loop.
+    assert_eq!(
+        count_loops(&hir),
+        0,
+        "a user `mapcat` must not become a fused loop"
     );
 }
 

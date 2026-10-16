@@ -1,6 +1,5 @@
-// audited: 2026-09-28
-//! Where the solver places a release around a loop: once per activation for a
-//! cell, once per iteration for what the body allocates.
+// audited: 2026-10-14
+//! Release placement around loops and sibling top-level forms, and the tail region of a closure inlined in a loop.
 //!
 //! docs/impl/region/cells.md
 //! docs/impl/region/anchors.md
@@ -43,7 +42,7 @@ fn begin_capture_cell_region_extends_to_binding_last_use_across_sibling_forms() 
                 HirKind::Define { binding, .. } => {
                     *binding == target && arena.get(*binding).needs_capture()
                 }
-                HirKind::Lambda { .. } => false,
+                HirKind::Lambda(_) => false,
                 _ => {
                     let mut found = false;
                     h.for_each_child(|c| {
@@ -199,7 +198,6 @@ fn env_cell_release_in_loop_hoisted_past_loop() {
         out
     }
     let order = crate::hir::liveness::compute_order(&hir);
-    let low = crate::hir::liveness::compute_subtree_low(&hir, &order);
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     let whiles = find_iter_scopes(&hir);
     assert!(
@@ -222,7 +220,7 @@ fn env_cell_release_in_loop_hoisted_past_loop() {
     // magnitude (which ANF makes meaningless — see compute_order).
     let dord = ord(cell_decref);
     let strictly_inside = whiles.iter().find(|&&w| {
-        let lo = low.get(&w).copied().unwrap_or(0);
+        let lo = order.low(&w).unwrap_or(0);
         dord >= lo && dord <= ord(w) && cell_decref != w
     });
     assert!(
@@ -308,7 +306,6 @@ fn match_pattern_binding_keeps_scrutinee_release_inside_the_loop() {
         .expect("the %pair scrutinee must have an alloc_region");
 
     let order = crate::hir::liveness::compute_order(&hir);
-    let low = crate::hir::liveness::compute_subtree_low(&hir, &order);
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     let decref = info
         .region_data
@@ -321,12 +318,12 @@ fn match_pattern_binding_keeps_scrutinee_release_inside_the_loop() {
     // inside the loop's subtree, never AT the loop node (the post-loop emission
     // point, where one release would cover every iteration) nor past it.
     let enclosing = loops.iter().copied().find(|&l| {
-        let lo = low.get(&l).copied().unwrap_or(0);
+        let lo = order.low(&l).unwrap_or(0);
         let alloc = ord(pair_id);
         alloc >= lo && alloc <= ord(l)
     });
     let enclosing = enclosing.expect("the %pair must sit inside a loop body");
-    let lo = low.get(&enclosing).copied().unwrap_or(0);
+    let lo = order.low(&enclosing).unwrap_or(0);
     assert!(
         dord >= lo && dord < ord(enclosing),
         "the scrutinee's region r{} (allocated by the %pair @{} inside the loop \
@@ -393,8 +390,8 @@ fn loop_local_closure_tail_alloc_region_matches_return_frontier() {
     // For each Lambda, record (lambda id, body-tail id, whether the tail is a
     // %pair allocation). Owned Copy data only — no escaping HIR references.
     fn collect_lambda_tails(h: &Hir, out: &mut Vec<(HirId, HirId, bool)>) {
-        if let HirKind::Lambda { body, .. } = &h.kind {
-            let t = tail_expr(body);
+        if let HirKind::Lambda(lambda) = &h.kind {
+            let t = tail_expr(&lambda.body);
             let is_pair = matches!(
                 &t.kind,
                 HirKind::Intrinsic {

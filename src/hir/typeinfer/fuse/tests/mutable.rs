@@ -23,7 +23,7 @@ fn single_map_over_mutable_array_fuses_unfrozen() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "*"),
+        count_op(&hir, &arena, &mut rt, "*") > 0,
         "the transform op must inline; callees were {cs:?}",
     );
     assert!(
@@ -73,13 +73,14 @@ fn single_filter_over_mutable_array_fuses_unfrozen() {
 /// Safety: a `fold` over a mutable `@array` base is NOT fused. `fold` first
 /// snapshots its input (`trait/elements` copies a mutable array) and walks the
 /// copy; a fused fold would walk the LIVE base, so a mutating combinator would
-/// diverge from the stdlib fold. The `fold` call survives.
+/// diverge from the stdlib fold. The `fold` runs as a call: its own, or its
+/// grafted driver's.
 #[test]
 fn fold_over_mutable_array_is_not_fused() {
     let (hir, arena, mut rt) = compile("(fold (fn [a x] (+ a x)) 0 @[1 2 3])");
     let cs = callees(&hir, &arena, &mut rt);
     assert!(
-        cs.iter().any(|n| n == "fold"),
+        fold_stays_a_call(&cs),
         "a fold over a mutable base must not fuse; callees were {cs:?}",
     );
     assert!(count_lambdas(&hir) >= 1, "the fold closure must survive");
@@ -104,7 +105,7 @@ fn composition_over_mutable_array_fuses_inner_only() {
     );
     assert_eq!(count_lambdas(&hir), 1, "only the outer closure survives");
     assert!(
-        cs.iter().any(|n| n == "*"),
+        count_op(&hir, &arena, &mut rt, "*") > 0,
         "the inner transform still inlines on the recursion; callees were {cs:?}",
     );
 }

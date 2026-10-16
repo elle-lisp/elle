@@ -1,8 +1,7 @@
-// audited: 2026-09-09
-// src/hir/AGENTS.md
-// docs/intrinsics.md
-//! Discharging one call-position site: its op's contract row, against the
-//! operand types the inference proved.
+// audited: 2026-10-14
+//! Discharging one call-position site: its op's contract row, against the operand types the inference proved.
+//!
+//! docs/intrinsics.md
 //!
 //! A row that holds lets the site lower silently. A row that does not is a
 //! compile error naming the op, the operand, and what was inferred there. The
@@ -18,7 +17,7 @@ use super::*;
 /// every settled Bottom to Top before it hands this map over
 /// (`Infer::settle`), and the assertion is what keeps that true of a later
 /// producer of one.
-fn ty_of(h: &Hir, hir_types: &HashMap<HirId, TyId>) -> TyId {
+fn ty_of(h: &Hir, hir_types: &NodeTypes) -> TyId {
     let ty = hir_types.get(&h.id).copied().unwrap_or(TypeInterner::TOP);
     debug_assert_ne!(
         ty,
@@ -56,7 +55,7 @@ pub(super) fn check_op(
     op: IntrinsicOp,
     args: &[&Hir],
     site: &Hir,
-    hir_types: &HashMap<HirId, TyId>,
+    hir_types: &NodeTypes,
     interner: &TypeInterner,
     env: &NonzeroEnv,
 ) -> Result<(), String> {

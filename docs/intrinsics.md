@@ -1,21 +1,25 @@
 # Intrinsics
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-06 -->
 
 Intrinsics are silent bytecode operations prefixed with `%`. A `%`-intrinsic
 in **call position** is a compile-time type-checked request for the fast
 instruction: the compiler either **proves** the call satisfies the op's
 soundness contract and lowers it, or **rejects** the program with a compile
 error carrying the call's span. There is no runtime validation in call
-position and no unchecked dialect. Two gaps let misuse through today: code
-compiled by `eval` skips the proof (#1240), and a `(numeric!)` parameter is
-never checked against its callers (#1238).
+position and no unchecked dialect. Three gaps let misuse through today: code
+compiled by `eval` skips the proof (#1240), a `(numeric!)` parameter is never
+checked against its callers (#1238), and a site after a statement certain to
+raise is not checked. Only a resume of that raise reaches the site
+([grafting a call](impl/graft.md)).
 
 ## When to use intrinsics
 
 Use intrinsics when:
-- Writing **hot loops** where rest-arg allocation from variadic stdlib
-  wrappers would inflate arena counts or slow execution.
+- Writing **hot loops** that must never keep a runtime check. A wrapper call
+  over proven operands dissolves to its op (see Lowering), but a wrapper
+  whose proof is missing keeps its guards, with no warning. An intrinsic
+  whose proof is missing is a compile error.
 - Writing code that must be **GPU-eligible** (`%`-intrinsics lower to
   SPIR-V/MLIR; stdlib wrappers do not).
 - Writing a **`(silent!)`** function, whose ceiling rejects the `:error` the
@@ -70,10 +74,10 @@ instruction trusts its operands to satisfy — not only a type:
 | `%length` `%get` `%has?` `%put` `%put-struct[-mut]` `%put-array[-mut]` `%del` `%del-struct[-mut]` `%add-set[-mut]` `%del-set[-mut]` `%pop` `%pop-string` `%pop-bytes` `%array-push` `%push-array[-mut]` `%string-push` `%string-push-mut` `%bytes-push` `%freeze` `%thaw` | container of the op's family (with an index/key the family accepts) |
 | `%eq` `%ne` `%identical?` `%not` `%pair` `%type-of` and the type predicates | none — total on every value |
 
-The authoritative per-op table is `check_intrinsic_operand_proofs`
-(`src/hir/typeinfer/`), each row pinned by a test; this table is the
-consumer view. Note `%not` is truthiness negation, total on any value —
-it needs no proof, exactly like `%eq`.
+The authoritative per-op table is `check_intrinsic_operand_proofs` in
+[the contract check](../src/hir/typeinfer/contract.rs), each row pinned by a
+test; this table is the consumer view. Note `%not` is truthiness negation,
+total on any value — it needs no proof, exactly like `%eq`.
 
 ### What counts as proof
 
@@ -83,20 +87,25 @@ Inference discharges contracts from:
 - **primitive return types** flowing forward (`(%length (->array c))`);
 - **a called function's return type** — a call to a function this unit
   defines carries what that function's body was proven to return, a
-  recursive call included (see [impl/typeinfer.md](impl/typeinfer.md));
+  recursive call included (see [type inference](impl/typeinfer.md));
 - **`match (type-of x)` keyword arms** — inside a `:@array` arm, `x` *is* a
   mutable array, authoritatively;
 - **diverging type guards** — after
   `(when (%not (number? b)) (error …))`, `b` is a Number in everything
   that follows; predicate spellings (`(number? b)`) and intrinsic
   spellings (`(%int? b)`) both count, and the raise diverges wherever the
-  taken branch evaluates it, inside a `let` binding too;
+  taken branch evaluates it, inside a `let` binding too. A predicate
+  spelling counts only when it names the language's predicate: a parameter
+  named `number?` holds whatever the caller passed, and proves nothing;
 - **nonzero facts** for the div family — a nonzero literal divisor, or a
   diverging zero guard: after `(when (= d 0) (error …))`, `d` is provably
   nonzero;
 - **the result of a proven `%`-intrinsic** — each op's result type is a
   function of its operand types (see below), so one guard proves a whole
   chain of them;
+- **a grafted call's body** — a call to a known function becomes that
+  function's body (see Lowering), and the body is typed where it stands, so
+  `(- n 1)` over an int `n` is the int its `%sub` returns;
 - **a `(numeric!)` declaration** — it floors *every parameter of the
   enclosing function* at Number, so a whole numeric kernel proves at once
   without a per-parameter guard. The same declaration asserts that the
@@ -141,7 +150,7 @@ the fact once, visibly, and the compiler holds it.
 no proven call sites, so `(defn f [x] (%mul x x))` alone is a compile error,
 whatever other forms follow it. "Nothing reaches this parameter" is a claim
 about reachability, and no contract row asks that question (see
-[impl/typeinfer.md](impl/typeinfer.md)).
+[type inference](impl/typeinfer.md)).
 
 ```lisp
 (assert (string/contains? (rejects "(defn f [x] (%mul x x))") "not a proven number"))
@@ -223,29 +232,56 @@ One lowering per op; which one is a fixed property of the op, not a mode:
   cross-region edges and gives the result its call-result region. `%pop`
   rides here so its moved-out element carries that call-result accounting.
 
-A **wrapper** call lowers to its intrinsic where inference proves the
-operands. Elsewhere it keeps its validating, signaling, polymorphic meaning.
-The container wrappers do this today:
-[monomorphize.rs](../src/hir/typeinfer/monomorphize.rs) rewrites
-`(put s :x 1)` on a proven `@struct` to `%put-struct-mut`. The arithmetic and
-comparison wrappers do not yet, so `(+ a b)` stays a call even over proven
-ints (#1237).
+A **wrapper** call dissolves where inference proves its operands. The compiler
+grafts the body of every known function in place of a call to it, the stdlib
+wrappers included, and after inference it deletes the guards and dispatch arms
+the operand types decide ([grafting a call](impl/graft.md)). Over proven
+operands, what survives is the one op the wrapper's body reaches, and the
+operand proofs check it like an op the programmer wrote. Over unproven
+operands the guards survive, and the call keeps its validating, signaling,
+polymorphic meaning.
 
 ```lisp
 (defn fhir [src] (get (compile/dumps src "<doc>") :fhir))
 
-(assert (string/contains? (fhir "(defn g [] (let [s @{}] (put s :x 1) s))\n(g)")
-                          "%put-struct-mut"))
+(defn occurrences [text part]
+  "How many times part occurs in text."
+  (- (length (string/split text part)) 1))
 
-# #1237: this assertion flips when + lowers on proven operands.
-(assert (not (string/contains?
-               (fhir "(defn h [a b]
-                        (when (%not (%int? a)) (error :x))
-                        (when (%not (%int? b)) (error :y))
-                        (+ a b))
-                      (h 1 2)")
-               "%add")))
+# put on a proven @struct keeps the one arm the container's type selects.
+(def stored (fhir "(defn g [] (let [s @{}] (put s :x 1) s))\n(g)"))
+(assert (string/contains? stored "%put-struct-mut"))
+(assert (= 0 (occurrences stored "put#")) "the call to put is gone")
+# Every caller passes an int, so both operands are proven and only %add is left.
+(def proven (fhir "(defn h [a b] (+ a b))\n(h 1 2)"))
+(assert (< 0 (occurrences proven "(%add ")))
+(assert (= 0 (occurrences proven "(emit ")) "no guard is left to raise")
+# One caller passes a string, so nothing proves a, and the guards stay.
+(def guarded (fhir "(defn h [a b] (+ a b))\n(h 1 2)\n(h \"s\" 2)"))
+(assert (< 0 (occurrences guarded "(emit ")) "the guards raise at run time")
 ```
+
+The dissolution changes no result. On two numbers the wrapper's guards cannot
+fire, and its body computes what the op computes: the `+` wrapper sums from its
+first operand rather than from `0`, so `-0.0` survives both spellings. The
+site's signal narrows to silent, because the deleted guards were the only
+errors the body could raise.
+
+```lisp
+(defn plus [a b] (+ a b))
+(assert (= (string (+ -0.0 -0.0)) "-0.0") "the dissolved +")
+(assert (= (string (plus ;[-0.0 -0.0])) "-0.0")
+        "a spliced call is not grafted, so nothing proves a or b")
+```
+
+A comparison dissolves to its op only over two numbers. `%eq` also compares
+two strings, and `%lt` orders them, but the WASM tier compares their payload
+words instead of their contents (#1268). So each comparison wrapper tests for
+two numbers before it reaches the op, and compares anything else through the
+op as a value. A call to `+`, `-` or `*` with three or more operands stays a
+call: the general arm of each holds a `letrec` walker, which does not graft. A
+comparison's general arm grafts, and compares the operands past the first pair
+through `apply`.
 
 ## Intrinsics as callable values
 
@@ -275,13 +311,13 @@ tier:
 (assert (= (+ 9223372036854775807 1) -9223372036854775808) "wraps")
 ```
 
-Wrapping follows from the intrinsic design. `%add` is signal-free, and the
-design lowers `+` to `%add` wherever both operands are proven ints (#1237). A
-type proof cannot exclude overflow, so if overflow were an error the lowering
+Wrapping follows from the intrinsic design. `%add` is signal-free, and `+`
+dissolves to `%add` wherever both operands are proven numbers (see Lowering). A
+type proof cannot exclude overflow, so if overflow were an error the dissolution
 would change observable behavior. Wrapping is
 the one semantics the VM instruction, the JIT, and the GPU tiers all agree
 on. Code that needs overflow detection should check its own ranges (see
-`abs` in [src/stdlib.lisp](../src/stdlib.lisp) for the pattern).
+`abs` in [the standard library](../src/stdlib.lisp) for the pattern).
 
 Integer division and remainder by zero are errors in the stdlib wrappers;
 `(/ i64-min -1)` and `(rem i64-min -1)` wrap (to `i64-min` and `0`).
@@ -404,17 +440,19 @@ Integer division and remainder by zero are errors in the stdlib wrappers;
 ## Relationship to stdlib
 
 The stdlib wrappers (`+`, `-`, `*`, `/`, `rem`, `mod`, `<`, `>`, `<=`,
-`>=`, `not`, `pair`, `push`, `put`, …) are Elle functions defined in
-[src/stdlib.lisp](../src/stdlib.lisp). They:
+`>=`, `=`, `not`, `pair`, `push`, `put`, …) are Elle functions defined in
+[the standard library](../src/stdlib.lisp). They:
 
 1. Validate argument types at runtime and accept polymorphic inputs
 2. Handle variadic arguments (e.g. `(+ 1 2 3)`)
 3. Emit `:error` on type mismatches (catchable, propagates through fibers)
 4. Check division by zero before dividing
-5. Allocate rest-arg lists for variadic dispatch
+5. Allocate a rest list for a variadic call that is not grafted
 
 Internally the wrappers use `%`-intrinsics on operands their own guards
 have proven — the guard that raises the wrapper's `:error` is the same
 fact that discharges the intrinsic's contract on the fall-through path.
 That is the intended shape for user code too: validate at the boundary,
-compute with intrinsics inside.
+compute with intrinsics inside. It is also what lets a grafted wrapper
+dissolve: the proof the guard would have made is already in hand, so the
+guard goes and the op stays.

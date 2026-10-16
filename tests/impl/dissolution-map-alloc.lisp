@@ -12,8 +12,8 @@
 #
 # Each assertion compares FUSED (inline lambdas over a proven immutable array)
 # against an UN-FUSED reference computing the identical value through a named
-# function with a `match` body. That body introduces a binding a fragment cannot
-# close over, so the call stays the real stdlib op: a per-element indirect call
+# function with a `block` body. A fragment cannot close over a `block`, so
+# the call stays the real stdlib op: a per-element indirect call
 # through a closure value and, in a composition, the staged intermediate array.
 # Two shapes are NOT valid references here. A named fn with a whitelisted body
 # inlines, and so does an inline lambda that CAPTURES a free variable — the splice
@@ -30,17 +30,17 @@
 
 (def base [0 1 2 3 4 5 6 7 8 9])
 
-# The un-fused oracles: same value, `match` body, so each cannot close into a fragment
+# The un-fused oracles: same value, `block` body, so each cannot close into a fragment
 # and runs the real stdlib op.
 (defn r-mul3 [x]
-  (match x
-    _ (* x 3)))
+  (block :oracle
+    (* x 3)))
 (defn r-inc [y]
-  (match y
-    _ (+ y 1)))
+  (block :oracle
+    (+ y 1)))
 (defn r-dec1 [z]
-  (match z
-    _ (- z 1)))
+  (block :oracle
+    (- z 1)))
 
 # ── Composition: the intermediate collection is gone ──────────────────
 # `(map g (map f xs))` fused is one loop; the un-fused reference runs both stdlib
@@ -129,17 +129,17 @@
 # A `(numeric!)`-declared raw-`%`-intrinsic body fuses, so the numeric kernel — the
 # shape a SIMD/GPU realization tier consumes — becomes one index-walk loop with the
 # opcode inline and no per-element closure. The un-fused reference is the same
-# kernel with the same declaration and the same opcode behind a `match` body,
+# kernel with the same declaration and the same opcode behind a `block` body,
 # which a fragment cannot close over. Composed, the fused form also sheds the
 # intermediate array, so its saving is strictly larger.
 (defn k-mul3 [x]
   (numeric!)
-  (match x
-    _ (%mul x 3)))
+  (block :oracle
+    (%mul x 3)))
 (defn k-inc [y]
   (numeric!)
-  (match y
-    _ (%add y 1)))
+  (block :oracle
+    (%add y 1)))
 
 (def k1-fused
   (allocs (fn []

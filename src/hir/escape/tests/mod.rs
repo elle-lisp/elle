@@ -1,23 +1,31 @@
-//! Tests for the escape analysis (`super` = `hir::escape`).
+// audited: 2026-10-06
+//! The escape analysis tests (`super` = `hir::escape`), and the fixtures they compile through.
+//!
+//! docs/impl/escape.md
+//!
+//! One module per question: `capture` for the capture facet, `containment` for
+//! which stores hand a value to an uncounted holder, and `flow` for value flow
+//! through bindings and calls.
 
 use super::*;
 use crate::hir::{Hir, HirId, HirKind};
 
 /// Compile a source file to canonical (functionalized) HIR for the escape
-/// tests, threading a fresh per-call `CompileCtx`. Every compile names its
-/// instance's compile state explicitly, threading the compile context as a
-/// parameter (docs/impl/region/ctx.md).
+/// tests, under a fresh `CompileCtx` with the graft off. Escape analysis is
+/// the subject, so a call a test writes reaches it as a call
+/// (docs/impl/graft.md).
 fn compile_fhir(
     src: &str,
     symbols: &mut crate::symbol::SymbolTable,
 ) -> (Hir, crate::hir::BindingArena) {
     let mut cctx = crate::pipeline::CompileCtx::new();
+    cctx.set_graft(crate::config::GraftPolicy::Off);
     crate::pipeline::compile_file_to_fhir(src, symbols, &mut cctx, "<test>").expect("compile")
 }
 
 /// Compile a source to canonical HIR *and* the real `CallClassification` the
 /// lowerer feeds the live analysis — built from the same interned symbol table
-/// via `cached_primitive_meta`, so the declared native effects (`chan/send`'s
+/// by `build_primitive_meta`, so the declared native effects (`chan/send`'s
 /// `Sends`, …) reach both `analyze_escape` and the solver. Tests run under this
 /// classification, never the empty default, so they exercise what actually runs.
 fn compile_with_cc(
@@ -37,7 +45,7 @@ fn compile_with_cc(
 /// Compile a source under the real classification and return its
 /// `EscapeInfo` alongside the HIR and arena — the fixture every spec test
 /// reads. Escape is the **authority**; these tests assert its four-facet spec
-/// directly (`docs/impl/escape.md`), never agreement with any other analysis.
+/// directly, never agreement with any other analysis.
 fn escape_of(src: &str) -> (Hir, BindingArena, EscapeInfo) {
     let mut symbols = crate::symbol::SymbolTable::new();
     let (hir, arena) = compile_fhir(src, &mut symbols);
@@ -74,12 +82,12 @@ fn assert_binding_escape(src: &str, expect: &[(&str, bool, bool)]) {
     }
 }
 
-/// Every lambda in a compiled program (post-order), paired with the bindings
+/// Every lambda in a compiled program (pre-order), paired with the bindings
 /// it captures. Shared by the capture-facet tests.
 fn lambdas_with_captures(hir: &Hir) -> Vec<(HirId, Vec<Binding>)> {
     fn walk(h: &Hir, out: &mut Vec<(HirId, Vec<Binding>)>) {
-        if let HirKind::Lambda { captures, .. } = &h.kind {
-            out.push((h.id, captures.iter().map(|c| c.binding).collect()));
+        if let HirKind::Lambda(lambda) = &h.kind {
+            out.push((h.id, lambda.captures.iter().map(|c| c.binding).collect()));
         }
         h.for_each_child(|c| walk(c, out));
     }
@@ -109,4 +117,5 @@ fn bindings_named(hir: &Hir, arena: &BindingArena, wanted: &[&str]) -> Vec<Bindi
 }
 
 mod capture;
+mod containment;
 mod flow;

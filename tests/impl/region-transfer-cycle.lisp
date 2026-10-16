@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 14)
+# audited: 2026-10-06
 # A cycle a producer returns across the return or fiber frontier stays whole for a reading consumer and frees nothing live.
 # docs/impl/region/owner.md
 #
@@ -8,7 +8,9 @@
 # consuming activation the cycle's owner. The `returned-cycle` probe in
 # tests/impl/probe/direct.lisp pins the reclaim rate; this file pins value
 # correctness. The sidecar arms guardfree, so a release that frees a member a
-# live frame still holds faults at the read.
+# live frame still holds faults at the read. It also turns the graft off, so
+# each producer stays a call that hands its cycle across the frontier.
+# region-cycle-scope-value-uaf.lisp holds the shape a graft leaves.
 
 (defn cyc-mk []
   (let [a @[]

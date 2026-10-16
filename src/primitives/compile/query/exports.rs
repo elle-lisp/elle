@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-06
 //! `compile/exports` — the module surface read statically off an analysis.
 //!
 //! docs/analysis/portrait.md
@@ -12,9 +12,7 @@ use crate::value::{TableKey, Value};
 
 /// `(compile/exports analysis)` → `{:constructor <record|nil> :exports {..}}`,
 /// or nil when the file's return expression is not an export struct.
-///
-/// docs/analysis/portrait.md is the specification; the record shape is pinned
-/// by tests/lang/compile-exports.lisp.
+/// tests/lang/compile-exports.lisp pins the record shape.
 pub(in crate::primitives::compile) fn prim_compile_exports(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -165,11 +163,11 @@ impl<'a> Walk<'a> {
                     }
                     expr = exprs.last()?;
                 }
-                HirKind::Lambda { body, .. } => {
+                HirKind::Lambda(lambda) => {
                     if self.constructor.is_none() {
                         self.constructor = Some(self.lambda_record(expr));
                     }
-                    expr = body;
+                    expr = &lambda.body;
                 }
                 HirKind::If { then_branch, .. } => {
                     // One representative branch; a module whose surface
@@ -205,7 +203,7 @@ impl<'a> Walk<'a> {
         self.seen.clear();
         loop {
             match &expr.kind {
-                HirKind::Lambda { .. } => return self.lambda_record(expr),
+                HirKind::Lambda(_) => return self.lambda_record(expr),
                 HirKind::Var(binding) => {
                     if !self.seen.insert(*binding) {
                         return ExportRecord::Value;
@@ -223,22 +221,13 @@ impl<'a> Walk<'a> {
     /// The declared shape of one `Lambda` node. `params` holds required,
     /// then optional, then the collector binding when one exists.
     fn lambda_record(&self, hir: &'a Hir) -> ExportRecord {
-        let HirKind::Lambda {
-            params,
-            num_required,
-            rest_param,
-            vararg_kind,
-            inferred_signals,
-            doc,
-            ..
-        } = &hir.kind
-        else {
+        let Some(lambda) = hir.kind.as_lambda() else {
             return ExportRecord::Value;
         };
-        let fixed = params.len() - usize::from(rest_param.is_some());
-        let (rest, named_keys) = match rest_param {
+        let fixed = lambda.params.len() - usize::from(lambda.rest_param.is_some());
+        let (rest, named_keys) = match lambda.rest_param {
             None => ("none", Vec::new()),
-            Some(_) => match vararg_kind {
+            Some(_) => match &lambda.vararg_kind {
                 VarargKind::List => ("list", Vec::new()),
                 VarargKind::Struct => ("keys", Vec::new()),
                 VarargKind::StrictStruct(keys) => {
@@ -248,7 +237,7 @@ impl<'a> Walk<'a> {
                 }
             },
         };
-        let names = params[..fixed]
+        let names = lambda.params[..fixed]
             .iter()
             .map(|b| {
                 let sym = self.handle.arena.get(*b).name;
@@ -261,13 +250,13 @@ impl<'a> Walk<'a> {
             })
             .collect();
         ExportRecord::Fn {
-            required: *num_required,
-            optional: fixed - num_required,
+            required: lambda.num_required,
+            optional: fixed - lambda.num_required,
             rest,
             named_keys,
             params: names,
-            signals: *inferred_signals,
-            doc: doc.as_ref().map(|d| d.to_string()),
+            signals: lambda.inferred_signals,
+            doc: lambda.doc.as_ref().map(|d| d.to_string()),
             line: (hir.span.line > 0).then_some(hir.span.line),
             col: (hir.span.line > 0).then_some(hir.span.col),
         }

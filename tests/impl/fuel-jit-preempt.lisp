@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-12
+# audited: 2026-10-14
 # A compiled fiber body keeps its operand-stack values across a fuel preemption and a refuel.
 # docs/impl/jit.md
 #
@@ -26,6 +26,10 @@
 ## that the body compiled, because an interpreted body passes every check here
 ## without reaching the compiled spill.
 ##
+## The second trap: the budget has to run out inside the body. Each scenario's
+## first check reads that the fiber paused, so a body that finishes inside its
+## budget fails there.
+##
 ## Fibers use |:fuel :error| so a corruption-induced runtime error is caught by
 ## the fiber (recorded as its value) rather than propagating to the runner.
 
@@ -38,9 +42,6 @@
       (println "  FAIL:" name)
       (assign failures (+ failures 1)))))
 
-# Warm BODY once (eager JIT submits it) then drain synchronously so its compiled
-# code is in the JIT cache before the fueled run — the fiber over the same
-# template then runs as JIT with no background-compile race.
 (defn force-jit [body]
   (body)
   (jit/rejections)

@@ -1,14 +1,13 @@
-// audited: 2026-09-09
-// src/hir/AGENTS.md
-// docs/impl/typeinfer.md
-//! The ascent: passes over the whole tree until the type environment stops
-//! moving, each one reading strictly more than the last.
+// audited: 2026-10-14
+//! The ascent: passes over the whole tree until the type environment stops moving.
+//!
+//! docs/impl/typeinfer.md
 
 use super::*;
 
 /// How many passes one ascent may take. Information travels one call at a time
 /// in walk order, so the count a program needs is the depth of its call chains
-/// rather than their size; the whole corpus settles in six or fewer.
+/// rather than their size.
 pub(in crate::hir::typeinfer) const MAX_ITERS: usize = 10;
 
 impl Infer<'_> {
@@ -30,17 +29,16 @@ impl Infer<'_> {
     /// Raise every Bottom the ascent settled on to Top, so the node map this
     /// pass hands out carries none.
     ///
-    /// Bottom is the start, and `subtype(⊥, b)` holds for every `b` — so a
+    /// Bottom is the start, and `subtype(⊥, b)` holds for every `b`, so a
     /// Bottom operand discharges every contract row that asks a subtype
-    /// question. What a settled Bottom records is that nothing contributed to
-    /// the entry: the parameters of a function this unit never calls, or the
-    /// body type of a cycle with no base case. Neither says what type a value
-    /// arriving at the site has, and Top is the answer that proves nothing
-    /// (docs/impl/typeinfer.md § "Bottom is not a proof").
+    /// question. A settled Bottom records only that nothing contributed to the
+    /// entry: the parameters of a function this unit never calls, or the body
+    /// type of a cycle with no base case. Top is the answer that proves
+    /// nothing.
     ///
     /// One raise serves every consumer, because they all read this one map: the
-    /// operand contracts, the signal narrowing, the wrapper monomorphization,
-    /// and the LIR operand proof.
+    /// fold, the operand contracts, the signal narrowing, and the LIR operand
+    /// proof.
     fn settle(&mut self) {
         for ty in self.hir_types.values_mut() {
             if *ty == TypeInterner::BOTTOM {
@@ -53,9 +51,9 @@ impl Infer<'_> {
     /// convergence; `Some` names every binding the last pass was still moving.
     ///
     /// Convergence is judged on the whole type environment, not the root node's
-    /// type: a call site visited late in a pass joins into a callee parameter
-    /// whose occurrences were recorded earlier, so the refinement only reaches
-    /// them on the next pass.
+    /// type. A call site visited late in a pass joins into a callee parameter
+    /// whose occurrences the pass already typed, and they see it only on the
+    /// next pass.
     fn ascend(&mut self, hir: &Hir) -> Option<Vec<Binding>> {
         let mut moving = Vec::new();
         for _ in 0..MAX_ITERS {
@@ -80,9 +78,9 @@ impl Infer<'_> {
     /// whether that pinned anything new.
     ///
     /// An ascent that ran out of budget left the environment BELOW the least
-    /// fixpoint, which is the side that proves things that are not true: an
-    /// entry still at Bottom discharges every subtype contract that asks about
-    /// it. Top is above the fixpoint, so a pinned entry proves nothing. Pinning
+    /// fixpoint, which is the side that proves things that are not true. An
+    /// entry still at Bottom discharges every subtype contract that asks
+    /// about it. Top is above the fixpoint, so a pinned entry proves nothing. Pinning
     /// also freezes the entry, so each round pins strictly more than the last
     /// and the widening terminates.
     fn widen(&mut self, moving: Vec<Binding>) -> bool {
@@ -113,6 +111,7 @@ impl Infer<'_> {
         self.param_joins.clear();
         let ty = self.infer(hir);
         self.hir_types.insert(hir.id, ty);
+        self.join_grafted_operands();
         for (param, joined) in std::mem::take(&mut self.param_joins) {
             if self.mutated.contains(&param) {
                 continue;
@@ -131,12 +130,50 @@ impl Infer<'_> {
     }
 }
 
+impl Infer<'_> {
+    /// Join what each graft bound to a parameter of this unit's functions into
+    /// that parameter, as the call the graft replaced would have joined it.
+    ///
+    /// An operand written in place of the parameter is read at each occurrence
+    /// this pass typed, so a guard around the call site narrows it as it
+    /// narrowed the call's operand. A graft whose occurrences are all gone, or
+    /// whose `let` a pass deleted, reads the binding's own type, or Top.
+    fn join_grafted_operands(&mut self) {
+        let record = self.record;
+        for c in record.contributions() {
+            if self.value_used.contains(&c.function)
+                || !self.lambda_params.contains_key(&c.function)
+            {
+                continue;
+            }
+            let binding_type = |b: &Binding| {
+                self.binding_types
+                    .get(b)
+                    .copied()
+                    .unwrap_or(TypeInterner::TOP)
+            };
+            let ty = match &c.operand {
+                Operand::Type(t) => *t,
+                Operand::Local(b) => binding_type(b),
+                Operand::Occurrences(ids, b) => {
+                    let mut seen = ids.iter().filter_map(|id| self.hir_types.get(id).copied());
+                    match seen.next() {
+                        Some(first) => seen.fold(first, |acc, t| self.interner.join(acc, t)),
+                        None => binding_type(b),
+                    }
+                }
+            };
+            self.join_param(c.param, ty);
+        }
+    }
+}
+
 /// The keys whose type differs between two snapshots of one map. An entry is
 /// only ever inserted or refined, so a key the later snapshot lacks is not a
 /// move.
 fn moved<'m>(
-    before: &'m HashMap<Binding, TyId>,
-    after: &'m HashMap<Binding, TyId>,
+    before: &'m BindingTypes,
+    after: &'m BindingTypes,
 ) -> impl Iterator<Item = Binding> + 'm {
     after
         .iter()

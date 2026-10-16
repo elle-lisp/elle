@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-10-14
 //! The structural facts the branch-arm window reads off one compilation unit,
 //! all as post-order indices so containment is an interval test.
 //!
@@ -14,7 +14,7 @@ use super::super::super::*;
 /// can ever load its slot. It is therefore not an anchor for the branch-arm
 /// window's live-in premise: an arm that introduces one has not given birth to the
 /// value, and the region the branch received is still the branch's to release
-/// (region/mechanism.md § "The boundaries").
+/// (docs/impl/region/window.md).
 ///
 /// The descent looks through `DerefCell`, the wrapper functionalization puts
 /// around a read of a `needs_capture` binding, for the same reason the tail
@@ -100,8 +100,8 @@ pub(super) struct FrameExit {
     /// the callee through. This is the half of `TailExitHoist::exempt` no
     /// owned-parameter release stands in for: the relocation leaves such a release
     /// where it sits, and the deferred callee channel runs it from there
-    /// (`deferred_release_slot`, `TailExitHoist::exempt`; mechanism.md § "What the
-    /// exemption keeps, a channel must still run").
+    /// (`deferred_release_slot`, `TailExitHoist::exempt`;
+    /// docs/impl/region/relocate.md).
     pub(super) callee: rustc_hash::FxHashSet<Region>,
 }
 
@@ -109,13 +109,12 @@ pub(super) struct FrameExit {
 pub(super) fn collect_branch_scopes(
     hir: &Hir,
     info: &RegionInfo,
-    order: &HashMap<HirId, u32>,
-    low: &HashMap<HirId, u32>,
+    order: &Order,
     frame_replacing_tail_calls: &rustc_hash::FxHashSet<HirId>,
     out: &mut BranchWindowScopes,
 ) {
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
-    let lo = |id: HirId| low.get(&id).copied().unwrap_or(0);
+    let lo = |id: HirId| order.low(&id).unwrap_or(0);
     match &hir.kind {
         HirKind::While { .. } | HirKind::Loop { .. } => {
             out.barriers.push((lo(hir.id), ord(hir.id)))
@@ -137,8 +136,6 @@ pub(super) fn collect_branch_scopes(
         }
         _ => {}
     }
-    out.branches.extend(branch_arms(hir, order, low));
-    hir.for_each_child(|c| {
-        collect_branch_scopes(c, info, order, low, frame_replacing_tail_calls, out)
-    });
+    out.branches.extend(branch_arms(hir, order));
+    hir.for_each_child(|c| collect_branch_scopes(c, info, order, frame_replacing_tail_calls, out));
 }

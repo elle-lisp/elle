@@ -45,8 +45,8 @@
 //!   bindings, *not* the raw arena index (the arena also holds compile-time-env
 //!   stdlib bindings whose count shifts every program's indices when the prelude
 //!   grows). Unreferenced stdlib names and primitives are dropped.
-//! - Register operands stay raw (`v<n>`): `Reg` is a per-function counter reset
-//!   per `lower`, already run-stable.
+//! - Register operands stay raw (`v<n>`): `Reg` is a counter that restarts in
+//!   every function, already run-stable.
 //!
 //! The region info handed in is computed with the real `PrimitiveClassification`
 //! (see `render_all`) — not the bare `analyze_regions` — so the facts match what
@@ -91,11 +91,11 @@ pub fn escape_module(
         .map(|(i, b)| (*b, i))
         .collect();
     // Per-binding DISPLAY name, with the gensym counter normalized away. A
-    // gensym name is `<prefix><GENSYM_COUNTER>` (src/primitives/meta.rs) — that
+    // gensym name is `<prefix><GENSYM_COUNTER>` (src/primitives/meta.rs). That
     // trailing global counter leaks the process-wide allocation history into the
-    // name (`G26` here, `G12` there), so it is renumbered to a first-appearance
+    // name (`G26` here, `G12` there). So it is renumbered to a first-appearance
     // index per base (`G26 G27` → `G#0 G#1`), keyed off the deterministic walk
-    // order so two contexts that mint different raw counters still render
+    // order. Two contexts that mint different raw counters then render
     // identically. Names without a trailing-digit suffix (`x`, `down`, `~`) are
     // left verbatim. Hygiene does not depend on the counter (it is carried by
     // scopes), so this is display-only.
@@ -360,19 +360,14 @@ fn collect_norm(
                 note(*b, order, seen);
             }
         }
-        HirKind::Lambda {
-            params,
-            rest_param,
-            captures,
-            ..
-        } => {
-            for p in params {
+        HirKind::Lambda(lambda) => {
+            for p in &lambda.params {
                 note(*p, order, seen);
             }
-            if let Some(rp) = rest_param {
-                note(*rp, order, seen);
+            if let Some(rp) = lambda.rest_param {
+                note(rp, order, seen);
             }
-            for c in captures {
+            for c in &lambda.captures {
                 note(c.binding, order, seen);
             }
         }
@@ -393,18 +388,16 @@ struct LamInfo {
 }
 
 fn collect_lambdas(hir: &Hir, out: &mut Vec<LamInfo>) {
-    if let HirKind::Lambda {
-        params,
-        rest_param,
-        captures,
-        ..
-    } = &hir.kind
-    {
+    if let Some(lambda) = hir.kind.as_lambda() {
         out.push(LamInfo {
             id: hir.id,
-            params: params.clone(),
-            rest: *rest_param,
-            caps: captures.iter().map(|c| (c.binding, c.kind)).collect(),
+            params: lambda.params.clone(),
+            rest: lambda.rest_param,
+            caps: lambda
+                .captures
+                .iter()
+                .map(|c| (c.binding, c.kind))
+                .collect(),
         });
     }
     hir.for_each_child(|c| collect_lambdas(c, out));

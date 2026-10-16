@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-06
 //! Deciding whether a HOF call heads a chain the pass may fuse, and with which
 //! terminal and result arm.
 //!
@@ -12,7 +12,7 @@ mod recognize;
 mod take;
 
 pub(super) use kinds::*;
-pub(super) use recognize::*;
+pub(in crate::hir::typeinfer) use recognize::*;
 pub(super) use take::*;
 
 /// A validated fusable chain, ready for `take_chain`: which op heads it (a scalar

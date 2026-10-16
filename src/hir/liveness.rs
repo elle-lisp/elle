@@ -1,11 +1,15 @@
-//! Liveness analysis for functional HIR.
+// audited: 2026-10-14
+//! Liveness over functional HIR, and the structural execution order every liveness and region decision compares.
 //!
-//! Computes which bindings are live after each HIR node. Not CFG-based —
-//! computed structurally on the HIR tree with fixpoint iteration for loops.
+//! docs/impl/region/anchors.md
+//! docs/impl/region/adopt.md
+//
+// The analysis walks the HIR tree, not a CFG, and iterates a loop to a fixpoint.
 
 use super::binding::Binding;
 use super::expr::{Hir, HirId, HirKind};
 
+use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 
 mod lastuse;
@@ -157,7 +161,7 @@ impl LivenessAnalyzer {
 
 /// Build the binding index from def-use information.
 pub(crate) fn build_binding_index(
-    def_site: &HashMap<Binding, super::expr::HirId>,
+    def_site: &super::defuse::DefSites,
 ) -> (HashMap<Binding, usize>, Vec<Binding>) {
     let mut index_binding: Vec<Binding> = def_site.keys().copied().collect();
     index_binding.sort_by_key(|b| b.0);
@@ -169,89 +173,88 @@ pub(crate) fn build_binding_index(
     (binding_index, index_binding)
 }
 
-/// Compute per-HirId last-use: for each value-producing HirId, the HirId
-/// at which its value is last referenced.
+/// Number every node of `hir` in post-order, and record the interval of
+/// post-order indices its subtree covers.
 ///
-/// For an allocation `A`:
-/// - If `A` is bound to some binding `b` (i.e., `A` is a binding's init),
-///   `last_use[A]` is the maximum "effective HirId" over all `Var(b)`
-///   references. The effective HirId of a `Var(b)` is the immediate
-///   parent expression's HirId when the parent *consumes* the value
-///   (Call, Emit, Define, Assign, SetCell, MakeCell, Intrinsic, etc.);
-///   otherwise it is the `Var(b)` HirId itself.
-/// - If `A` has no binding (inline allocation passed as an argument or
-///   value child of a consumer), `last_use[A]` is the consumer's HirId.
-/// - If `A` is bound but the binding has no uses anywhere,
-///   `last_use[A] = A` (decref immediately after the alloc).
+/// A `HirId` is an identity, not a position. ANF gives the bindings it adds
+/// fresh ids from the end of the counter, so a binding inside a loop body can
+/// carry a larger id than the loop. Liveness and region inference therefore
+/// compare these indices, never `HirId` magnitudes, and `HirId` does not
+/// implement `Ord`.
 ///
-/// The plan's region-inference invariant requires every region to have
-/// exactly one `decref_point` HirId; this function produces that mapping for
-/// allocation HirIds.
-/// Assign every HIR node an explicit structural execution-order index.
+/// The index puts an ancestor after its descendants and a later sibling after
+/// an earlier one. The interval `[low, index]` of a node covers exactly its
+/// subtree, so containment is a range test. A preceding sibling of a loop and a
+/// descendant of the loop both rank below the loop, and only the descendant
+/// ranks at or above the loop's `low`.
 ///
-/// `HirId` is an *identity* — a global allocation counter — not an
-/// order. Earlier code leaned on the accident that HIR construction
-/// happened to assign ids "outer-after-inner" (a post-order: a node's
-/// id greater than all its descendants', a later sibling's greater than
-/// an earlier's) and compared `HirId` magnitudes to answer both
-/// ordering ("which use is last?") and scope-containment ("is this
-/// binding inside the loop?") questions. The ANF lift
-/// (`src/hir/anf.rs`) breaks that accident: it appends synthetic `let`
-/// bindings with fresh ids drawn from the end of the counter, so a
-/// binding bound *inside* a loop body can carry an id *larger* than the
-/// loop. Comparing magnitudes then misclassifies it as bound outside —
-/// the closure-in-loop phantom-region trap.
-///
-/// This recomputes a real post-order index over the *current*
-/// (post-ANF) tree, so `order[ancestor] > order[descendant]` and
-/// `order[later_sibling] > order[earlier_sibling]` hold by construction
-/// regardless of how the HirIds were assigned. All ordering and
-/// containment logic in liveness and region inference compares these
-/// indices; `HirId` stays pure identity (it does not even implement
-/// `Ord`). Built on `Hir::for_each_child` so the child enumeration is
-/// identical to every other analysis walk.
-pub fn compute_order(hir: &Hir) -> HashMap<HirId, u32> {
-    fn visit(h: &Hir, order: &mut HashMap<HirId, u32>, next: &mut u32) {
-        h.for_each_child(|c| visit(c, order, next));
-        order.insert(h.id, *next);
+/// One walk over `Hir::for_each_child` computes both, once per unit, so every
+/// pass reads one numbering and enumerates children as every other walk does.
+pub fn compute_order(hir: &Hir) -> Order {
+    // The first node the walk numbers inside a subtree is the subtree's lowest,
+    // so a node's `low` is the counter as the walk enters it. An id the tree
+    // holds at several places keeps the place the walk numbers last.
+    fn visit(h: &Hir, at: &mut FxHashMap<HirId, Place>, next: &mut u32) {
+        let low = *next;
+        h.for_each_child(|c| visit(c, at, next));
+        at.insert(h.id, Place { index: *next, low });
         *next += 1;
     }
-    let mut order = HashMap::new();
+    let mut at = FxHashMap::default();
     let mut next = 0;
-    visit(hir, &mut order, &mut next);
-    order
+    visit(hir, &mut at, &mut next);
+    Order { at }
 }
 
-/// Subtree low-watermark: for each node, the minimum `compute_order`
-/// index over the node and all its descendants. With `order` (the node's
-/// own index, the maximum in its subtree by post-order construction),
-/// this gives each node the contiguous post-order interval
-/// `[low[N], order[N]]` covering exactly its subtree. Containment is then
-/// a range test: node `X` is inside `N`'s subtree iff
-/// `low[N] <= order[X] <= order[N]`.
-///
-/// This is what distinguishes a *descendant* of a loop (its scope node is
-/// inside the loop body) from a *preceding sibling* of a loop (a `def`
-/// bound earlier in the same body): both have `order < order[loop]`, but
-/// only the descendant has `order >= low[loop]`. The plain `order`
-/// comparison cannot tell them apart, which is why a `def`-bound closure
-/// referenced inside a loop was misclassified as bound-inside and freed
-/// per iteration (`loop-def-closure-uaf.lisp`).
-pub fn compute_subtree_low(hir: &Hir, order: &HashMap<HirId, u32>) -> HashMap<HirId, u32> {
-    fn visit(h: &Hir, order: &HashMap<HirId, u32>, low: &mut HashMap<HirId, u32>) -> u32 {
-        let mut m = order.get(&h.id).copied().unwrap_or(u32::MAX);
-        h.for_each_child(|c| {
-            let cl = visit(c, order, low);
-            if cl < m {
-                m = cl;
-            }
-        });
-        low.insert(h.id, m);
-        m
+/// The numbering `compute_order` builds: each node's post-order index, and the
+/// lowest index in its subtree.
+#[derive(Debug, Default)]
+pub struct Order {
+    at: FxHashMap<HirId, Place>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Place {
+    index: u32,
+    low: u32,
+}
+
+impl Order {
+    /// The node's post-order index.
+    pub fn get(&self, id: &HirId) -> Option<&u32> {
+        self.at.get(id).map(|p| &p.index)
     }
-    let mut low = HashMap::new();
-    visit(hir, order, &mut low);
-    low
+
+    /// The lowest post-order index in the node's subtree, which is the node's
+    /// own index when it has no children.
+    pub fn low(&self, id: &HirId) -> Option<u32> {
+        self.at.get(id).map(|p| p.low)
+    }
+
+    /// Whether the walk numbered the node.
+    pub fn contains_key(&self, id: &HirId) -> bool {
+        self.at.contains_key(id)
+    }
+
+    /// An order over nodes with no children, for a test that needs chosen
+    /// indices rather than a tree's.
+    #[cfg(test)]
+    pub fn from_indices(pairs: impl IntoIterator<Item = (HirId, u32)>) -> Order {
+        let at = pairs
+            .into_iter()
+            .map(|(id, index)| (id, Place { index, low: index }))
+            .collect();
+        Order { at }
+    }
+}
+
+impl std::ops::Index<&HirId> for Order {
+    type Output = u32;
+
+    fn index(&self, id: &HirId) -> &u32 {
+        self.get(id)
+            .unwrap_or_else(|| panic!("@{} is not in the numbered tree", id.0))
+    }
 }
 
 #[cfg(test)]

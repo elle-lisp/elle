@@ -1,6 +1,7 @@
-//! Pretty-print HIR as s-expressions.
+// audited: 2026-10-06
+//! Pretty-prints HIR as s-expressions, for the `--dump=fhir` view of the functionalized HIR.
 //!
-//! Used by `--dump=fhir` to show the functionalized HIR before lowering.
+//! docs/impl/hir.md
 
 use super::arena::BindingArena;
 use super::binding::Binding;
@@ -21,7 +22,7 @@ fn binding_name(b: Binding, arena: &BindingArena, symbols: Option<&SymbolTable>)
         .and_then(|s| s.name(sym))
         .map(|n| n.to_string())
         .unwrap_or_else(|| format!("_{}", b.0));
-    // Append binding ID to disambiguate SSA versions
+    // Append the binding index, so two bindings of one name stay distinct.
     format!("{}#{}", base, b.0)
 }
 
@@ -89,28 +90,22 @@ fn write_hir(
             buf.push(')');
         }
 
-        HirKind::Lambda {
-            params,
-            rest_param,
-            captures,
-            body,
-            ..
-        } => {
+        HirKind::Lambda(lambda) => {
             buf.push_str("(fn [");
-            for (i, p) in params.iter().enumerate() {
+            for (i, p) in lambda.params.iter().enumerate() {
                 if i > 0 {
                     buf.push(' ');
                 }
                 buf.push_str(&binding_name(*p, arena, symbols));
             }
-            if let Some(rp) = rest_param {
+            if let Some(rp) = lambda.rest_param {
                 buf.push_str(" & ");
-                buf.push_str(&binding_name(*rp, arena, symbols));
+                buf.push_str(&binding_name(rp, arena, symbols));
             }
             buf.push(']');
-            if !captures.is_empty() {
+            if !lambda.captures.is_empty() {
                 buf.push_str(" ;captures=[");
-                for (i, c) in captures.iter().enumerate() {
+                for (i, c) in lambda.captures.iter().enumerate() {
                     if i > 0 {
                         buf.push_str(", ");
                     }
@@ -120,7 +115,7 @@ fn write_hir(
             }
             buf.push('\n');
             indent(buf, depth + 1);
-            write_hir(buf, body, arena, symbols, depth + 1);
+            write_hir(buf, &lambda.body, arena, symbols, depth + 1);
             buf.push(')');
         }
 

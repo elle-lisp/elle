@@ -1,6 +1,6 @@
 # Sealing
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-14 -->
 
 What an image's body may hold, what the hydrating instance rebuilds for itself,
 and what fails the dump.
@@ -52,8 +52,11 @@ value walk, and two headers over one payload keep one payload copy.
 
 Everything a code object answers is therefore identical after hydration:
 bytecode, constants, arity, signal, masks, locations, the region tables, the
-defining span `meta/origin` reports, the child table, and the LIR the JIT
-promotes from. The SPIR-V a `(git f)` compiled is not part of the code object;
+defining span `meta/origin` reports, the child table, the LIR the JIT
+promotes from, and the body fragment a graft reads. The fragment is bytes, so
+it copies as the docstring does, and a compile that grafts a hydrated closure
+decodes it where it would decode a compiled one's
+([graft.md](../graft.md)). The SPIR-V a `(git f)` compiled is not part of the code object;
 it lives in a cache on the VM, and the GPU path recompiles in a fresh process
 (§ "What the body refuses").
 

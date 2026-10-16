@@ -1,3 +1,8 @@
+// audited: 2026-10-06
+//! The value-position bodies of the arithmetic, comparison, logic, conversion, pair and bitwise `%`-intrinsics.
+//!
+//! docs/intrinsics.md
+
 use super::*;
 
 pub(super) fn prim_add(
@@ -83,24 +88,17 @@ pub(super) fn prim_mod(
 
 // ── Comparison ──────────────────────────────────────────────────────
 
+/// `%eq` called as a value compares exactly as the `Eq` opcode does: numerically
+/// at every depth, so `(= [1] [1.0])` is true and a NaN equals nothing. The
+/// stdlib `=` reaches it for every pair that is not two numbers.
 pub(super) fn prim_eq(
     _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    let a = &args[0];
-    let b = &args[1];
-    if *a == *b {
-        return (SIG_OK, Value::TRUE);
-    }
-    if a.is_number() && b.is_number() {
-        if let (Some(x), Some(y)) = (a.as_int(), b.as_int()) {
-            return (SIG_OK, Value::bool(x == y));
-        }
-        if let (Some(x), Some(y)) = (a.as_number(), b.as_number()) {
-            return (SIG_OK, Value::bool(x == y));
-        }
-    }
-    (SIG_OK, Value::FALSE)
+    (
+        SIG_OK,
+        Value::bool(arithmetic::values_eq(&args[0], &args[1])),
+    )
 }
 
 pub(super) fn prim_ne(
@@ -334,5 +332,3 @@ pub(super) fn prim_shr(
         _ => type_err2("%shr", "integer", &args[0], &args[1], ctx),
     }
 }
-
-// ── Type predicates ─────────────────────────────────────────────────

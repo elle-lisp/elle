@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-14
 //! What a payload carries: the tables and masks a header reads out of it.
 //! docs/impl/region/template.md
 
@@ -24,7 +24,7 @@ fn built(bytes: usize, arity: Arity, fill: impl FnOnce(CodeBuilder) -> CodeBuild
 /// search, so an unsorted table would answer wrongly rather than slowly.
 #[test]
 fn the_location_table_is_ascending_and_answers_by_offset() {
-    let mut map = LocationMap::new();
+    let mut map = LocationMap::default();
     map.insert(40, SourceLoc::new("b.lisp", 4, 1));
     map.insert(10, SourceLoc::new("a.lisp", 1, 2));
     map.insert(30, SourceLoc::new("a.lisp", 3, 3));
@@ -56,7 +56,7 @@ fn the_location_table_is_ascending_and_answers_by_offset() {
 /// a file must share one region string, not carry a copy each.
 #[test]
 fn file_names_are_interned_once_per_payload() {
-    let mut map = LocationMap::new();
+    let mut map = LocationMap::default();
     map.insert(10, SourceLoc::new("same.lisp", 1, 1));
     map.insert(20, SourceLoc::new("same.lisp", 2, 1));
     map.insert(30, SourceLoc::new("other.lisp", 3, 1));
@@ -81,7 +81,7 @@ fn file_names_are_interned_once_per_payload() {
 /// label must not depend on which entry the builder happened to visit first.
 #[test]
 fn the_display_label_is_the_smallest_offset_location() {
-    let mut map = LocationMap::new();
+    let mut map = LocationMap::default();
     map.insert(99, SourceLoc::new("late.lisp", 9, 9));
     map.insert(7, SourceLoc::new("early.lisp", 1, 1));
 
@@ -242,7 +242,8 @@ fn every_payload_record_is_exactly_its_fields() {
         size_of::<CodePayload>(),
         fields!(p; bytecode, constants, locations, files, name, doc, region_table, merged_slots,
             frame_release_slots, frame_release_regions, capture_locals, strict_keys, children,
-            lir, capture_params_mask, signal_bits, origin, arity, signal_propagates, num_locals,
+            fragment, lir, capture_params_mask, signal_bits, origin, arity, signal_propagates,
+            num_locals,
             num_captures, num_params, wasm_func_idx, has_origin, has_lir, has_wasm_idx, vararg,
             rest_list, has_name, has_doc, pad)
     );

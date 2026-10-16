@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-10-14
 //! Where a cell's release lands: the env cell's box, and the node a 1-slot
 //! container's content drop must cover.
 //!
@@ -15,17 +15,16 @@ use crate::hir::region::{PinDecref, ProgramOrder};
 pub(super) struct CellPlacement<'a> {
     pub(super) hir: &'a Hir,
     pub(super) du: &'a DefUseBuilder,
-    pub(super) order: &'a HashMap<HirId, u32>,
-    pub(super) last_use: &'a HashMap<HirId, HirId>,
-    /// Post-order subtree low ends, so containment is an interval test.
-    pub(super) subtree_low: &'a HashMap<HirId, u32>,
+    /// Post-order indices and subtree intervals, so containment is an interval test.
+    pub(super) order: &'a Order,
+    pub(super) last_use: &'a LastUse,
     pub(super) iter_scopes: &'a [(HirId, u32, u32)],
     pub(super) branches: &'a [super::super::super::arms::ArmSet],
     pub(super) binder_init_sites: &'a HashMap<Binding, Option<HirId>>,
 }
 
 /// Give every 1-slot container the point its content drop is emitted at
-/// (docs/impl/region/bindings.md § "Where the content drop lands"). A cell that
+/// (docs/impl/region/bindings.md). A cell that
 /// emits no content drop — a forwarding link, a module-scope cell — gets the
 /// same point, which the uncounted-read and return extensions read as where the
 /// cell stops protecting a borrow.
@@ -72,7 +71,7 @@ pub(super) fn place_content_drops(info: &mut RegionInfo, p: &CellPlacement) {
         .collect();
     for (b, c) in info.cell_containers.iter_mut() {
         let store_ords: Vec<u32> = c.stores.sites().map(ord).collect();
-        let covering = innermost_covering(p.hir, p.order, p.subtree_low, &store_ords);
+        let covering = innermost_covering(p.hir, p.order, &store_ords);
         let latest =
             p.du.uses
                 .get(b)
@@ -144,17 +143,15 @@ fn hoist_past_partial_paths(seed: HirId, b: Binding, p: &CellPlacement) -> HirId
 /// cell-demise hoist needs the arm intervals alone.
 pub(super) fn collect_branch_arm_sets(
     hir: &Hir,
-    order: &HashMap<HirId, u32>,
-    low: &HashMap<HirId, u32>,
+    order: &Order,
     out: &mut Vec<super::super::super::arms::ArmSet>,
 ) {
-    out.extend(super::super::super::arms::branch_arms(hir, order, low));
-    hir.for_each_child(|c| collect_branch_arm_sets(c, order, low, out));
+    out.extend(super::super::super::arms::branch_arms(hir, order));
+    hir.for_each_child(|c| collect_branch_arm_sets(c, order, out));
 }
 
 /// Clamp each env cell's box release to at-or-after every release routed THROUGH
-/// that cell (docs/impl/region/cells.md § "A cell's release lands at or after
-/// every release routed through that cell").
+/// that cell (docs/impl/region/cells.md).
 ///
 /// A captured binding's init value and the box that holds it are addressed by one
 /// env index. The value's `DecrefValueRegion` loads the box RAW and lets
@@ -190,7 +187,7 @@ pub(super) fn collect_branch_arm_sets(
 /// once per activation whatever drew it inward.
 pub(super) fn pin_cell_release_after_routed_releases(
     info: &mut RegionInfo,
-    order: &HashMap<HirId, u32>,
+    order: &Order,
     iter_scopes: &[(HirId, u32, u32)],
     inference_binding_regions: &HashMap<Binding, Vec<Region>>,
     binder_init_sites: &HashMap<Binding, Option<HirId>>,
@@ -241,7 +238,7 @@ pub(super) fn pin_cell_release_after_routed_releases(
 pub(super) fn post_loop_placement(
     at: HirId,
     iter_scopes: &[(HirId, u32, u32)],
-    order: &HashMap<HirId, u32>,
+    order: &Order,
 ) -> Option<HirId> {
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     let at_ord = ord(at);
@@ -258,21 +255,15 @@ pub(super) fn post_loop_placement(
 /// A 1-slot container's content drop must run once on every path any store ran
 /// on, and the stores' LCA is the nearest node that qualifies: it contains them
 /// all, so a post-order index puts it after each, and it is a single node rather
-/// than one position per arm (docs/impl/region/bindings.md § "Where the content
-/// drop lands"). One store answers itself, which is the placement a straight-line
+/// than one position per arm (docs/impl/region/bindings.md). One store answers itself, which is the placement a straight-line
 /// cell already had.
 ///
 /// The LCA is inside the same lambda the stores are, which the cell's own scope
 /// node is not: a `(var u nil)` at the head of a function body has the `Lambda`
 /// for a scope node, and the lowerer runs that node's releases in the ENCLOSING
 /// function, where the cell has no slot at all.
-pub(super) fn innermost_covering(
-    hir: &Hir,
-    order: &HashMap<HirId, u32>,
-    low: &HashMap<HirId, u32>,
-    sites: &[u32],
-) -> Option<HirId> {
-    let lo = low.get(&hir.id).copied().unwrap_or(0);
+pub(super) fn innermost_covering(hir: &Hir, order: &Order, sites: &[u32]) -> Option<HirId> {
+    let lo = order.low(&hir.id).unwrap_or(0);
     let hi = order.get(&hir.id).copied().unwrap_or(0);
     if !sites.iter().all(|&s| lo <= s && s <= hi) {
         return None;
@@ -280,7 +271,7 @@ pub(super) fn innermost_covering(
     let mut inner = None;
     hir.for_each_child(|c| {
         if inner.is_none() {
-            inner = innermost_covering(c, order, low, sites);
+            inner = innermost_covering(c, order, sites);
         }
     });
     inner.or(Some(hir.id))
@@ -289,18 +280,13 @@ pub(super) fn innermost_covering(
 /// Collect every iterative-scope node (`While` or `Loop` — `while` lowers to
 /// either) with its post-order subtree interval `[low, order]`, so containment
 /// of a HirId is an interval test (`low <= ord(x) <= order`; see
-/// `compute_subtree_low`). Used by the env-cell release hoist to find the
+/// `compute_order`). Used by the env-cell release hoist to find the
 /// outermost loop enclosing a cell-release region's `decref_point`.
-pub(super) fn collect_iter_scopes(
-    hir: &Hir,
-    order: &HashMap<HirId, u32>,
-    low: &HashMap<HirId, u32>,
-    out: &mut Vec<(HirId, u32, u32)>,
-) {
+pub(super) fn collect_iter_scopes(hir: &Hir, order: &Order, out: &mut Vec<(HirId, u32, u32)>) {
     if matches!(&hir.kind, HirKind::While { .. } | HirKind::Loop { .. }) {
-        let lo = low.get(&hir.id).copied().unwrap_or(0);
+        let lo = order.low(&hir.id).unwrap_or(0);
         let hi = order.get(&hir.id).copied().unwrap_or(0);
         out.push((hir.id, lo, hi));
     }
-    hir.for_each_child(|c| collect_iter_scopes(c, order, low, out));
+    hir.for_each_child(|c| collect_iter_scopes(c, order, out));
 }

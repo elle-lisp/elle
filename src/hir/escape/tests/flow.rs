@@ -1,3 +1,7 @@
+// audited: 2026-10-06
+// docs/impl/escape.md
+//! What a return, a store, a capture and a call carry out of an activation.
+
 use super::*;
 
 #[test]

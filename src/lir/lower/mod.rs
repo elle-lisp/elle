@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-14
 //! HIR to LIR lowering: the `Lowerer` and the state one function's lowering
 //! carries. The passes themselves live in the sibling modules named below.
 //!
@@ -370,7 +370,7 @@ pub struct Lowerer<'a> {
     /// for one decision: whether an operation's operands are proven integers,
     /// which every backend spends (docs/impl/lir.md). Empty until
     /// `with_type_info`, which reads as proving nothing.
-    hir_types: HashMap<HirId, crate::hir::types::TyId>,
+    hir_types: crate::hir::types::NodeTypes,
 }
 
 impl<'a> Lowerer<'a> {

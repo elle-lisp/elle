@@ -1,10 +1,10 @@
-// audited: 2026-09-22
+// audited: 2026-10-16
 //! What funds a `tail` compensating release.
 //!
 //! The retain on the very node the release is keyed to, and the return frontier
 //! an unfunded release must otherwise respect.
 //!
-//! docs/impl/region/mechanism.md
+//! docs/impl/region/compensate.md
 
 use super::super::*;
 use crate::hir::region::Region;
@@ -24,10 +24,11 @@ use crate::hir::region::Region;
 /// Site-keyed, not mere membership: the retain and the decref must be the SAME
 /// node, on one mutually-exclusive arm.
 pub(super) struct TailFunding {
-    /// The stored value of a `put`/`set`/`push`. The store raises the value's RC
-    /// (compile-time `IncrefRegion`, unchecked: `cross_region_refs` source =
-    /// value; or the runtime mutable-store funnel, checked: `funnel_store_sites`),
-    /// so the live container reference keeps RC ≥ 1 after the per-arm decref.
+    /// The stored value of a `put`/`set`/`push` or a `%pair`. The store raises the
+    /// value's RC (a compile-time `IncrefRegion` or a `%pair`'s allocation scan,
+    /// unchecked: `cross_region_refs` source = value; or the runtime
+    /// mutable-store funnel, checked: `funnel_store_sites`), so the live
+    /// container reference keeps RC ≥ 1 after the per-arm decref.
     ///
     /// The byte-copy dual joins it: a `%string-push`/`%bytes-push` funnel copies
     /// the value's bytes and touches neither its incref nor its decref, so the
@@ -118,8 +119,7 @@ impl TailFunding {
     /// The return mint doubles as the per-path return-frontier admission — it IS
     /// the hand-over — while the store and container retains say nothing about
     /// whether this arm also returns the value, so they keep the frontier
-    /// exclusion (docs/impl/region/mechanism.md § "The return frontier is
-    /// per-path").
+    /// exclusion (docs/impl/region/compensate.md).
     ///
     /// The container case: `node` is a monomorphic funnel whose container (arg0)
     /// is `r`. A `-mut` funnel returns the container pass-through; an immutable

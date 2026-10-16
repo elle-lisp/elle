@@ -1,3 +1,7 @@
+// audited: 2026-10-06
+// docs/impl/region/letrec.md
+//! Where the closure-cycle merge stops: a returned cycle, a handed-out member, and a fiber crossing.
+
 use super::*;
 
 #[test]
@@ -125,7 +129,7 @@ fn merge_admits_returned_cycle_on_non_member_tail() {
     // explicit slot, since no member deferral covers it.
     assert!(
         !info.cycle_tail_release.is_empty(),
-        "the non-member tail must be recorded as an arena adopt site, or a closure \
+        "the non-member tail must carry a deferred release, or a closure \
          callee's frame replacement strands the binding-scope drop; \
          cycle_tail_release={:?}",
         info.cycle_tail_release,

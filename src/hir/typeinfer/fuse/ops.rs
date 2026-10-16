@@ -1,9 +1,14 @@
+// audited: 2026-10-06
+//! The stdlib and primitive bindings a fused loop's scaffold calls, resolved once per unit by name.
+//!
+//! docs/impl/dissolution.md
+
 use super::*;
 
-/// The stdlib/primitive ops the fused loop is built from, resolved once to this
-/// unit's bindings by name (every one is an `is_primitive` global bound by
-/// `bind_primitives`). If any is absent — an impossible stdlib, but cheap to
-/// guard — fusion declines and every `map` call is left intact.
+/// The ops the fused loop is built from, each an `is_primitive` binding that
+/// `bind_primitives` made in this unit. While the stdlib itself compiles, `push`
+/// and `<` are file-scope siblings rather than primitives, so `resolve` finds
+/// no binding for them and fusion leaves every chain a plain call.
 pub(super) struct Ops {
     /// `(@array)` — the fresh mutable accumulator.
     pub(super) at_array: Binding,
@@ -11,7 +16,9 @@ pub(super) struct Ops {
     pub(super) length: Binding,
     /// `(get coll i)`.
     pub(super) get: Binding,
-    /// `(push acc elem)` — monomorphizes to `%push-array-mut` on the `@array` acc.
+    /// `(push acc elem)`. The graft replaces the call with `push`'s body, and
+    /// the fold keeps the one arm the accumulator's proven `@array` type
+    /// selects, `%push-array-mut`.
     pub(super) push: Binding,
     /// `(freeze acc)` — the immutable result.
     pub(super) freeze: Binding,
@@ -23,11 +30,10 @@ pub(super) struct Ops {
 
 impl Ops {
     pub(super) fn resolve(arena: &BindingArena) -> Option<Ops> {
-        // Id → the first `is_primitive` binding for it (each global is bound
-        // once by `bind_primitives`, so first-wins is exact). Keyed by id, not
-        // spelling: `push`, `<` and `freeze` reach the arena as stdlib exports,
-        // which are in no primitive table, and no instance memo is in scope
-        // here (docs/impl/symbol.md § "Reading a name, and not reading one").
+        // The first `is_primitive` binding for each name's id. `bind_primitives`
+        // binds each global once, so the first is the only one. `push` and `<`
+        // are stdlib exports, which no primitive table holds, so the arena is
+        // where to find them.
         let mut prim: HashMap<SymbolId, Binding> = HashMap::new();
         for i in 0..arena.len() as u32 {
             let b = Binding(i);

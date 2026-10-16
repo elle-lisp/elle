@@ -1,26 +1,27 @@
-//! Dataflow analysis facade for functional HIR.
+// audited: 2026-10-14
+//! The dataflow facade: def-use chains, value origins, liveness and last use in one `DataflowInfo`.
 //!
-//! Combines def-use chains, value origin analysis, and liveness into
-//! a single `DataflowInfo` struct.
+//! docs/impl/hir.md
 
 use super::arena::BindingArena;
 use super::binding::Binding;
-use super::defuse::{DefUseBuilder, ValueOrigin};
-use super::expr::{Hir, HirId};
+use super::defuse::{DefSites, DefUseBuilder, Uses, ValueOrigin, ValueOrigins};
+use super::expr::HirId;
 use super::liveness::{
-    build_binding_index, compute_last_use, compute_order, BitSet, LivenessAnalyzer,
+    build_binding_index, compute_last_use, compute_order, BitSet, LastUse, LivenessAnalyzer,
 };
+use super::Hir;
 
 use std::collections::HashMap;
 
 /// Combined dataflow analysis results for a functionalized HIR tree.
 pub struct DataflowInfo {
     /// Where each binding is defined
-    pub def_site: HashMap<Binding, HirId>,
+    pub def_site: DefSites,
     /// Where each binding is used
-    pub uses: HashMap<Binding, Vec<HirId>>,
+    pub uses: Uses,
     /// What each result-position expression produces
-    pub value_origin: HashMap<HirId, ValueOrigin>,
+    pub value_origin: ValueOrigins,
     /// Which bindings are live after each node
     pub live_out: HashMap<HirId, BitSet>,
     /// Binding → dense bit index
@@ -30,7 +31,7 @@ pub struct DataflowInfo {
     /// HirId where the value produced by `alloc_hir_id` is last used.
     /// Equals `alloc_hir_id` itself if the allocation has no use anywhere.
     /// Populated by the per-HirId last-use extension of liveness analysis.
-    pub last_use: HashMap<HirId, HirId>,
+    pub last_use: LastUse,
 }
 
 /// Run the complete dataflow analysis on a functionalized HIR tree.

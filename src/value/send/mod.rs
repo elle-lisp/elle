@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-14
 //! SendValue wrapper for thread-safe value transmission
 //!
 //! docs/threads.md
@@ -84,6 +84,9 @@ pub struct SendableClosure {
     pub frame_release_slots: Vec<u16>,
     /// Slot-routed release regions (`ClosureTemplate::frame_release_regions`).
     pub frame_release_regions: Vec<u32>,
+    /// The body fragment's bytes, as the payload holds them, so a later
+    /// compile grafts the rebuilt function (docs/impl/stdlib-cache.md).
+    pub fragment: Vec<u8>,
 }
 
 /// A thread-safe wrapper around Value that deep-copies heap data.

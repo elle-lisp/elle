@@ -1,18 +1,19 @@
-//! Type-aware signal narrowing and re-propagation.
+// audited: 2026-10-14
+//! Signal narrowing: drops `:error` from a primitive call whose argument types rule the error out.
 //!
-//! After type inference, strips SIG_ERROR from calls to known primitives
-//! when argument types prove the error path is unreachable. Then
-//! recomputes parent signals bottom-up so narrowed leaves propagate.
+//! After type inference, `narrow_signals` strips SIG_ERROR from those calls.
+//! `repropagate_signals` then recomputes parent signals bottom-up, so a
+//! narrowed leaf reaches its ancestors.
+//!
+//! docs/impl/typeinfer.md
 
 use super::arena::BindingArena;
 use super::binding::Binding;
-use super::expr::{CallArg, Hir, HirId, HirKind};
-use super::types::{TyId, TypeInterner};
+use super::expr::{CallArg, Hir, HirKind};
+use super::types::{NodeTypes, TyId, TypeInterner};
 use crate::signals::Signal;
 use crate::value::fiber::SignalBits;
 use crate::value::SymbolId;
-
-use std::collections::HashMap;
 
 /// Strip SIG_ERROR from calls to known primitives when argument types
 /// prove the error path is unreachable.
@@ -20,8 +21,8 @@ pub(super) fn narrow_signals(
     hir: &mut Hir,
     interner: &TypeInterner,
     arena: &BindingArena,
-    hir_types: &HashMap<HirId, TyId>,
-    binding_min_length: &HashMap<Binding, usize>,
+    hir_types: &NodeTypes,
+    binding_min_length: &rustc_hash::FxHashMap<Binding, usize>,
 ) {
     // Try to narrow this node
     if let HirKind::Call { func, args, .. } = &hir.kind {
@@ -64,11 +65,10 @@ fn should_narrow_error(
     args: &[CallArg],
     interner: &TypeInterner,
     _arena: &BindingArena,
-    binding_min_length: &HashMap<Binding, usize>,
+    binding_min_length: &rustc_hash::FxHashMap<Binding, usize>,
 ) -> bool {
     // Const patterns over the name's hash rather than a resolved spelling:
-    // recognition is identity, so it needs no symbol table (docs/impl/symbol.md
-    // § "Reading a name, and not reading one").
+    // recognition is identity, so it needs no symbol table (docs/impl/symbol.md).
     const PTR_P: SymbolId = SymbolId::of("ptr?");
     const POINTER_P: SymbolId = SymbolId::of("pointer?");
     const TYPE: SymbolId = SymbolId::of("type");
@@ -156,7 +156,7 @@ fn extract_literal_int(hir: &Hir) -> Option<i64> {
 
 fn extract_target_min_length(
     hir: &Hir,
-    binding_min_length: &HashMap<Binding, usize>,
+    binding_min_length: &rustc_hash::FxHashMap<Binding, usize>,
 ) -> Option<usize> {
     match &hir.kind {
         HirKind::Var(b) => binding_min_length.get(b).copied(),
@@ -178,8 +178,8 @@ fn extract_target_min_length(
 pub(super) fn repropagate_signals(hir: &mut Hir) {
     match &mut hir.kind {
         // Lambda: separate signal scope — recurse inside but don't propagate
-        HirKind::Lambda { body, .. } => {
-            repropagate_signals(body);
+        HirKind::Lambda(lambda) => {
+            repropagate_signals(&mut lambda.body);
         }
 
         // Call: preserve narrowed signal, combine with child signals
@@ -207,7 +207,7 @@ pub(super) fn repropagate_signals(hir: &mut Hir) {
             repropagate_signals(env);
         }
 
-        // Intrinsic: already silent — just recurse
+        // Intrinsic: keep the node's own signal, and recurse
         HirKind::Intrinsic { args, .. } => {
             for arg in args.iter_mut() {
                 repropagate_signals(arg);

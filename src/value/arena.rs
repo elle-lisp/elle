@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-10-14
 //! Arena allocation layer.
 //!
 //! docs/impl/region/rules.md
@@ -101,6 +101,13 @@ pub fn region_of(heap: &FiberHeap, val: Value) -> Option<RuntimeRegion> {
     if !val.is_heap() {
         return None;
     }
+    #[cfg(debug_assertions)]
+    if let Some(reason) = val.malformed_reason() {
+        panic!(
+            "region_of: a malformed value reached the RC funnel — {reason}: tag=0x{:x} payload=0x{:x}",
+            val.tag, val.payload
+        );
+    }
     let ptr = val.as_heap_ptr()?;
     let rid = heap.region_of_ptr(ptr);
     RuntimeRegion::new(rid)
@@ -119,6 +126,12 @@ pub fn region_of(heap: &FiberHeap, val: Value) -> Option<RuntimeRegion> {
 /// value. Unwrap one level so retain/release reach the wrapped value.
 pub fn result_region_of(heap: &FiberHeap, val: Value) -> Option<RuntimeRegion> {
     if val.is_capture_cell() {
+        // The unwrap reads the cell's page. A debug build classifies the cell
+        // itself first, so a cell whose region was freed panics as a stale
+        // deref of the cell (docs/impl/region/generations.md) rather than as
+        // a malformed inner value read off a recycled page.
+        #[cfg(debug_assertions)]
+        let _ = region_of(heap, val);
         if let Some(cell) = val.as_capture_cell_raw() {
             return region_of(heap, *cell.borrow());
         }

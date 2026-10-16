@@ -1,9 +1,9 @@
-// audited: 2026-09-21
-//! HIR-based symbol extraction for IDE features
+// audited: 2026-10-06
+//! Builds the `SymbolIndex` of an analyzed tree, for the language server's hover, completion and rename.
 //!
-//! Extracts symbol information from analyzed HIR trees to build a
-//! SymbolIndex for Language Server Protocol features (hover, completion,
-//! go-to-definition, find-references, rename).
+//! The index also serves go-to-definition and find-references.
+//!
+//! src/symbols/AGENTS.md
 
 use crate::hir::binding::Binding;
 use crate::hir::expr::{Hir, HirKind};
@@ -29,18 +29,15 @@ pub fn extract_symbols_from_hir(
 /// parameter count. A shape with optionals or a collector answers `None` —
 /// `compile/exports` carries the full shape.
 fn exact_arity(value: &Hir) -> Option<usize> {
-    if let HirKind::Lambda {
-        params,
-        num_required,
-        rest_param: None,
-        ..
-    } = &value.kind
-    {
-        if *num_required == params.len() {
-            return Some(params.len());
-        }
-    }
-    None
+    let lambda = value.kind.as_lambda()?;
+    let exact = lambda.rest_param.is_none() && lambda.num_required == lambda.params.len();
+    exact.then_some(lambda.params.len())
+}
+
+/// The docstring of `value`, when it is a lambda that has one.
+fn lambda_doc(value: &Hir) -> Option<String> {
+    let doc = value.kind.as_lambda()?.doc.as_ref()?;
+    Some(doc.to_string())
 }
 
 struct HirSymbolExtractor<'a> {
@@ -144,19 +141,12 @@ impl<'a> HirSymbolExtractor<'a> {
             }
 
             HirKind::Define { binding, value } => {
-                let kind = if matches!(value.kind, HirKind::Lambda { .. }) {
+                let kind = if matches!(value.kind, HirKind::Lambda(_)) {
                     SymbolKind::Function
                 } else {
                     SymbolKind::Variable
                 };
-                let doc_string = if let HirKind::Lambda {
-                    doc: Some(doc_val), ..
-                } = &value.kind
-                {
-                    Some(doc_val.to_string())
-                } else {
-                    None
-                };
+                let doc_string = lambda_doc(value);
                 self.record_definition(*binding, kind, &hir.span, index, symbols);
                 if let Some(def) = index.definitions.get_mut(&binding.def_id()) {
                     if let Some(doc_str) = doc_string {
@@ -197,18 +187,15 @@ impl<'a> HirSymbolExtractor<'a> {
 
             HirKind::Letrec { bindings, body } => {
                 for (binding_id, init) in bindings {
-                    let kind = if matches!(init.kind, HirKind::Lambda { .. }) {
+                    let kind = if matches!(init.kind, HirKind::Lambda(_)) {
                         SymbolKind::Function
                     } else {
                         SymbolKind::Variable
                     };
                     self.record_definition(*binding_id, kind, &init.span, index, symbols);
                     if let Some(def) = index.definitions.get_mut(&binding_id.def_id()) {
-                        if let HirKind::Lambda {
-                            doc: Some(doc_val), ..
-                        } = &init.kind
-                        {
-                            def.documentation = Some(doc_val.to_string());
+                        if let Some(doc_str) = lambda_doc(init) {
+                            def.documentation = Some(doc_str);
                         }
                         def.arity = exact_arity(init);
                     }
@@ -217,11 +204,11 @@ impl<'a> HirSymbolExtractor<'a> {
                 self.walk(body, index, symbols);
             }
 
-            HirKind::Lambda { params, body, .. } => {
-                for param in params {
+            HirKind::Lambda(lambda) => {
+                for param in &lambda.params {
                     self.record_definition(*param, SymbolKind::Variable, &hir.span, index, symbols);
                 }
-                self.walk(body, index, symbols);
+                self.walk(&lambda.body, index, symbols);
             }
 
             HirKind::If {

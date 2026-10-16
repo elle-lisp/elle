@@ -1,6 +1,6 @@
 # Debugging and introspection
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-14 -->
 
 The primitives a program uses to print its values, inspect a closure, and time its own work.
 
@@ -45,7 +45,11 @@ native primitive such as `clock/monotonic` is not a closure.
 
 The VM counts a closure's calls only while the JIT is on, or under `--wasm=N`.
 An `mlir` or `wasm` build starts with the JIT off ([config](../config.md)), so
-there `call-count` answers `0` for a closure the program has called.
+there `call-count` answers `0` for a closure the program has called. A call
+the compiler can see becomes the callee's body
+([grafting a call](../impl/graft.md)), so the VM counts no call for it. A
+call through `apply`, or through a binding the compiler cannot resolve to the
+function, reaches the closure and is counted.
 
 ```lisp
 (defn add [a b]
@@ -69,10 +73,10 @@ there `call-count` answers `0` for a closure the program has called.
     (fn [] (+ a b))))
 (assert (= (fn/captures sum-of-two) 2) "sum-of-two captures a and b")
 (assert (> (fn/bytecode-size add) 0))
-(add 1 2)
-(add 3 4)
+(apply add [1 2])
+(apply add [3 4])
 (assert (= (call-count add) (if (vm/config :jit) 2 0))
-        "the VM counted both calls, if the JIT is on")
+        "the VM counted both calls through apply, if the JIT is on")
 (assert (= (call-count 42) 0) "a value that is not a closure counts no calls")
 ```
 

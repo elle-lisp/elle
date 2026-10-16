@@ -1,3 +1,8 @@
+// audited: 2026-10-06
+//! The `letrec*` rules the analyzer enforces: duplicates by binding identity, use before initialization, and self-edge captures.
+//!
+//! docs/bindings.md
+
 use super::*;
 
 #[test]
@@ -25,8 +30,7 @@ fn letrec_duplicate_same_identity_errors() {
 #[test]
 fn letrec_hygiene_distinct_scopes_resolve_to_their_own() {
     // (letrec [x{3} 1  x{} 2] <body>) — a macro-template binder x{3} and a
-    // user binder x{} are distinct identities (docs/bindings.md "Duplicates
-    // are judged by binding identity"): no duplicate error, and each
+    // user binder x{} are distinct identities: no duplicate error, and each
     // reference resolves to its own binder by scope-subset matching.
     let make = |body: Syntax| {
         make_list(vec![
@@ -77,8 +81,7 @@ fn letrec_hygiene_distinct_scopes_resolve_to_their_own() {
 
 #[test]
 fn fn_body_duplicate_def_errors() {
-    // ((fn [] (def x 1) (def x 2) x)) — a fn body is a letrec* context
-    // (docs/bindings.md "Function bodies are an implicit letrec"): the
+    // ((fn [] (def x 1) (def x 2) x)) — a fn body is a letrec* context: the
     // same-identity duplicate is rejected like an explicit letrec's.
     let mut symbols = SymbolTable::new();
     let mut arena = BindingArena::new();
@@ -116,11 +119,11 @@ fn fn_body_hygiene_distinct_scopes_allowed() {
         make_symbol("x"),
     ]);
     let result = analyzer.analyze(&syntax).unwrap();
-    let HirKind::Lambda { body, .. } = &result.hir.kind else {
+    let HirKind::Lambda(lambda) = &result.hir.kind else {
         panic!("expected Lambda, got {:?}", result.hir.kind);
     };
-    let HirKind::Begin(exprs) = &body.kind else {
-        panic!("expected Begin body, got {:?}", body.kind);
+    let HirKind::Begin(exprs) = &lambda.body.kind else {
+        panic!("expected Begin body, got {:?}", lambda.body.kind);
     };
     let HirKind::Define {
         binding: user_def, ..
@@ -137,7 +140,7 @@ fn fn_body_hygiene_distinct_scopes_allowed() {
 #[test]
 fn letrec_use_before_init_errors() {
     // (letrec [a b b 7] a) — b's value is read before its initializer has
-    // run (docs/bindings.md "Use before initialization is an error").
+    // run.
     let mut symbols = SymbolTable::new();
     let mut arena = BindingArena::new();
     let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
@@ -183,7 +186,7 @@ fn letrec_backward_dep_ok() {
 #[test]
 fn letrec_forward_ref_through_lambda_ok() {
     // (letrec [a (fn [] b) b 7] (a)) — the lambda defers the use of b
-    // until after every initializer has run (docs/bindings.md).
+    // until after every initializer has run.
     let mut symbols = SymbolTable::new();
     let mut arena = BindingArena::new();
     let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
@@ -227,10 +230,11 @@ fn letrec_self_reference_classifies_recursive() {
         panic!("expected Letrec, got {:?}", result.hir.kind);
     };
     let (loop_b, loop_lambda) = &bindings[0];
-    let HirKind::Lambda { captures, .. } = &loop_lambda.kind else {
+    let HirKind::Lambda(lambda) = &loop_lambda.kind else {
         panic!("expected Lambda init, got {:?}", loop_lambda.kind);
     };
-    let self_cap = captures
+    let self_cap = lambda
+        .captures
         .iter()
         .find(|c| c.binding == *loop_b)
         .expect("loop's initializer lambda must capture its own binding (the self-edge)");
@@ -277,16 +281,16 @@ fn letrec_mutual_sibling_is_not_recursive() {
     let HirKind::Letrec { bindings, .. } = &result.hir.kind else {
         panic!("expected Letrec, got {:?}", result.hir.kind);
     };
-    let (ev_b, ev_lambda_hir) = &bindings[0];
+    let (_, ev_lambda_hir) = &bindings[0];
     let (od_b, _) = &bindings[1];
-    let HirKind::Lambda { captures, .. } = &ev_lambda_hir.kind else {
+    let HirKind::Lambda(lambda) = &ev_lambda_hir.kind else {
         panic!("expected Lambda init, got {:?}", ev_lambda_hir.kind);
     };
     assert!(
-        captures.iter().any(|c| c.binding == *od_b),
+        lambda.captures.iter().any(|c| c.binding == *od_b),
         "ev's lambda must capture its sibling od",
     );
-    for c in captures {
+    for c in &lambda.captures {
         assert!(
             !matches!(c.kind, CaptureKind::Recursive { .. }),
             "a purely-mutual member has only sibling captures, none Recursive: binding \
@@ -295,7 +299,6 @@ fn letrec_mutual_sibling_is_not_recursive() {
             c.kind,
         );
     }
-    let _ = ev_b;
 }
 
 #[test]
@@ -335,12 +338,9 @@ fn nested_lambda_reference_to_outer_binding_is_not_recursive() {
 
     // Walk to the innermost (zero-param) lambda `g` and read its captures.
     fn find_g_captures(h: &Hir) -> Option<Vec<crate::hir::CaptureInfo>> {
-        if let HirKind::Lambda {
-            params, captures, ..
-        } = &h.kind
-        {
-            if params.is_empty() {
-                return Some(captures.clone());
+        if let Some(lambda) = h.kind.as_lambda() {
+            if lambda.params.is_empty() {
+                return Some(lambda.captures.clone());
             }
         }
         let mut found = None;

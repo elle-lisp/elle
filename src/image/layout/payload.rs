@@ -1,11 +1,11 @@
-// audited: 2026-10-12
+// audited: 2026-10-14
 //! The code-payload half of the layout probe: where a `CodePayload` keeps
 //! each field, and the writer that assembles one.
 //!
 //! docs/impl/image/format.md
 //! docs/impl/image/sealing.md
 //!
-//! A payload is the widest record the dumper writes: thirteen slice headers,
+//! A payload is the widest record the dumper writes: fourteen slice headers,
 //! an LIR body (lir.rs), an arity record, a span, and a tail of scalars and
 //! flags. The record is exactly its fields, every pad a named field the
 //! payload's writer sets to zero (docs/impl/region/template.md). The dumper
@@ -23,11 +23,11 @@ use crate::value::region_slice::RegionSlice;
 
 use super::lir::write_canonical_lir;
 
-/// Where a payload keeps each field: the thirteen slice headers by name, and
+/// Where a payload keeps each field: the fourteen slice headers by name, and
 /// the scalar tail. Measured once; the fingerprint records the result.
 pub(crate) struct PayloadOffsets {
     /// `(name, offset)` per `RegionSlice` field, in declaration order.
-    pub slices: [(&'static str, usize); 13],
+    pub slices: [(&'static str, usize); 14],
     /// Where the LIR body starts, which lir.rs assembles field by field.
     pub lir: usize,
     pub capture_params_mask: usize,
@@ -78,6 +78,7 @@ pub(crate) fn payload_offsets() -> &'static PayloadOffsets {
             ("capture_locals", offset_of!(CodePayload, capture_locals)),
             ("strict_keys", offset_of!(CodePayload, strict_keys)),
             ("children", offset_of!(CodePayload, children)),
+            ("fragment", offset_of!(CodePayload, fragment)),
         ],
         lir: offset_of!(CodePayload, lir),
         capture_params_mask: offset_of!(CodePayload, capture_params_mask),
@@ -187,6 +188,12 @@ pub(crate) fn fingerprint_component() -> String {
         off.rest_list,
         off.has_name,
         off.has_doc,
+    ));
+    // The fragment's bytes have a serde shape no offset describes, so the
+    // encoding is named beside the slice (docs/impl/image/format.md).
+    out.push_str(&format!(
+        ",fragment-encoding={}",
+        crate::hir::fragment::FRAGMENT_ENCODING
     ));
     out
 }

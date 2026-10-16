@@ -1,3 +1,6 @@
+// audited: 2026-10-06
+//! The liveness transfer function: the bindings live before each HIR node, given the bindings live after it.
+
 use super::*;
 
 impl LivenessAnalyzer {
@@ -78,14 +81,14 @@ impl LivenessAnalyzer {
                 self.analyze(cond, &live_cond_after)
             }
 
-            HirKind::Lambda { captures, body, .. } => {
+            HirKind::Lambda(lambda) => {
                 // Lambda body is a separate liveness scope
                 let body_live_after = self.empty_set();
-                self.analyze(body, &body_live_after);
+                self.analyze(&lambda.body, &body_live_after);
 
                 // The lambda node generates uses for its captures
                 let mut live = live_after.clone();
-                for cap in captures {
+                for cap in &lambda.captures {
                     if let Some(&idx) = self.binding_index.get(&cap.binding) {
                         live.set(idx);
                     }
@@ -122,8 +125,8 @@ impl LivenessAnalyzer {
 
             HirKind::Recur { args } => {
                 // Recur generates uses of its args — they flow to loop bindings.
-                // The actual binding happens at the loop node. Here we just
-                // ensure the args are live.
+                // The actual binding happens at the loop node. Here the args
+                // only become live.
                 let mut live = live_after.clone();
                 for a in args.iter().rev() {
                     live = self.analyze(a, &live);
@@ -137,8 +140,8 @@ impl LivenessAnalyzer {
             }
 
             HirKind::And(exprs) | HirKind::Or(exprs) => {
-                // Short-circuit: any expr could be the last one evaluated.
-                // Conservative: union of live-in from each suffix.
+                // Right to left, each operand's live-out is the live-in of
+                // the operand after it; the last operand's is `live_after`.
                 let mut live = live_after.clone();
                 for e in exprs.iter().rev() {
                     let live_e = self.analyze(e, &live);

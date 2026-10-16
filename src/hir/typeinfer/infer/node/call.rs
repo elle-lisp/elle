@@ -1,8 +1,7 @@
-// audited: 2026-09-08
-// src/hir/AGENTS.md
-// docs/impl/typeinfer.md
-//! What a call proves: the arguments it forwards to the callee's parameters,
-//! and the type its own result carries away.
+// audited: 2026-10-06
+//! What a call proves: the operand types it forwards to the callee's parameters, and its result's type.
+//!
+//! docs/impl/typeinfer.md
 
 use super::*;
 use crate::hir::expr::CallArg;
@@ -22,50 +21,55 @@ impl Infer<'_> {
             })
             .collect();
 
-        // Forward arg types to callee params.
-        // Handle both Var(b) and DerefCell { Var(b) } (letrec recursive calls).
-        // Forwarding is a complete proof only for a callee used EXCLUSIVELY
-        // in call position — a single value-position use (stored, passed,
-        // returned, exported) means invisible callers exist, so the joins
-        // must not prove its parameters.
+        // Forward the operand types to the callee's parameters. The callee is
+        // a `Var(b)` or, for a letrec recursive call, a `DerefCell { Var(b) }`.
+        // Forwarding proves a parameter only when every use of the callee is
+        // in call position. One value-position use (stored, passed, returned,
+        // exported) means callers this unit cannot see.
         let callee_binding = unwrap_callee_binding(func);
         if let Some(callee_binding) = callee_binding {
-            if let Some(params) = self
+            if let Some(sig) = self
                 .lambda_params
                 .get(&callee_binding)
                 .filter(|_| !self.value_used.contains(&callee_binding))
             {
-                for (i, param) in params.iter().enumerate() {
-                    if let Some(&arg_ty) = arg_types.get(i) {
-                        // Top contributes honestly: an unknown-typed call
-                        // site makes the parameter unprovable (the ascent
-                        // REPLACES the binding type from this map at pass
-                        // end, so recursion converges from below instead
-                        // of needing a Top skip).
-                        let old = self
-                            .param_joins
-                            .get(param)
-                            .copied()
-                            .unwrap_or(TypeInterner::BOTTOM);
-                        let joined = self.interner.join(old, arg_ty);
-                        self.param_joins.insert(*param, joined);
-                    }
+                // An unknown operand contributes Top, which leaves the
+                // parameter unproven. A spliced operand spreads into positions
+                // nobody can count, so every parameter from its position on is
+                // unknown. A fixed parameter with no operand is an `&opt` one
+                // bound to nil.
+                let spliced_at = args.iter().position(|a| a.spliced).unwrap_or(args.len());
+                let contributions: Vec<(Binding, TyId)> = sig
+                    .fixed
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| {
+                        let ty = if i >= spliced_at {
+                            TypeInterner::TOP
+                        } else {
+                            arg_types.get(i).copied().unwrap_or(TypeInterner::NIL)
+                        };
+                        (*p, ty)
+                    })
+                    .chain(sig.rest.map(|(rest, collects_list)| {
+                        let ty = if !collects_list || spliced_at < args.len() {
+                            TypeInterner::TOP
+                        } else if args.len() > sig.fixed.len() {
+                            TypeInterner::PAIR
+                        } else {
+                            TypeInterner::EMPTY_LIST
+                        };
+                        (rest, ty)
+                    }))
+                    .collect();
+                for (param, ty) in contributions {
+                    self.join_param(param, ty);
                 }
             }
-            // Return type = whatever the callee's body returns, as the
-            // previous pass left it.
-            //
-            // A SELF-recursive call takes no exception here: it reads the map
-            // every other call reads. On the first pass the callee's own body
-            // has not been walked yet, so the map holds no entry for it, and
-            // BOTTOM is exactly what the recursive contribution to a
-            // return-type join is worth — the base cases. Every later pass
-            // reads the estimate the pass before it computed, which is Kleene
-            // iteration from below and converges on the least fixpoint
-            // (docs/impl/typeinfer.md § "What a call contributes").
-            //
-            // For unknown callees (primitives, imports) TOP, to avoid unsound
-            // rewrites.
+            // The result is the callee's body type, as the previous pass left
+            // it. A self-recursive call reads the same map. On the first pass
+            // the callee's body has no entry yet, and the Bottom it reads is
+            // what the recursive contribution to a return-type join is worth.
             if self.lambda_params.contains_key(&callee_binding) {
                 return self
                     .lambda_body_type
@@ -74,14 +78,30 @@ impl Infer<'_> {
                     .unwrap_or(TypeInterner::BOTTOM);
             }
 
-            // Primitive return type inference for unresolved callees
-            let callee_sym = self.arena.get(callee_binding).name;
-            let prim_ty = primitive_return_type(callee_sym, &arg_types, &self.interner);
-            if prim_ty != TypeInterner::TOP {
-                return prim_ty;
+            // The primitive tables and the stdlib rows answer for the binding
+            // the runtime supplies under a name, never for a parameter or a
+            // local that shares the name. Any other callee's result is Top.
+            let callee = self.arena.get(callee_binding);
+            if callee.is_primitive && callee.is_immutable && !callee.is_mutated {
+                let prim_ty = primitive_return_type(callee.name, &arg_types, &self.interner);
+                if prim_ty != TypeInterner::TOP {
+                    return prim_ty;
+                }
             }
         }
 
         TypeInterner::TOP
+    }
+
+    /// Join one call site's contribution into a parameter's type for this
+    /// pass.
+    pub(in crate::hir::typeinfer::infer) fn join_param(&mut self, param: Binding, ty: TyId) {
+        let old = self
+            .param_joins
+            .get(&param)
+            .copied()
+            .unwrap_or(TypeInterner::BOTTOM);
+        let joined = self.interner.join(old, ty);
+        self.param_joins.insert(param, joined);
     }
 }

@@ -1,47 +1,38 @@
-// audited: 2026-10-04
-//! SSA conversion: eliminate Assign, convert While to Loop/Recur,
-//! explicit cell ops for CaptureCell bindings.
+// audited: 2026-10-06
+//! SSA conversion: `assign` becomes a fresh binding where it can, `while` a `Loop`, and cell reads and writes explicit.
 //!
 //! docs/impl/hir.md
+//! docs/impl/escape.md
 //!
-//! Transforms imperative HIR (with While/Assign) into functional HIR
-//! (with Loop/Recur, let-chains, and explicit cell operations). This is
-//! the foundation for region inference and type inference.
-//!
-//! The transform handles three patterns:
+//! Region inference and type inference run on the functional HIR this pass
+//! leaves. The transform handles three patterns:
 //!
 //! 1. **While + Assign → Loop/Recur:** mutable bindings assigned in a
 //!    while body become loop parameters; assigns become recur arguments.
 //!
-//! 2. **Sequential Assign in Begin → Define of fresh SSA binding:**
-//!    `(assign x val)` in a begin sequence becomes `(define x' val)`,
-//!    renaming subsequent uses of x to x'.
+//! 2. **Sequential Assign in Begin → Let of a fresh SSA binding:**
+//!    `(assign x val)` in a begin sequence becomes a `let` of a fresh `x'`
+//!    around the rest of the sequence, which reads `x'` in place of `x`.
 //!
-//! 3. **CaptureCell bindings → explicit cell ops:** bindings that
-//!    `needs_capture()` get explicit DerefCell (for reads) and SetCell
-//!    (for writes) in the HIR. The binding itself holds a cell; mutation
-//!    goes through set-cell!, reading through deref-cell.
+//! 3. **Cell bindings → explicit cell ops:** a binding that
+//!    `needs_capture()` holds a cell, so its reads become `DerefCell` and its
+//!    writes become `SetCell`.
 //!
-//! Cell insertion is a **structural** decision (`needs_capture` = captured ∧
-//! mutable/prebound), NOT an escape question: a captured *mutable* binding needs
-//! a shared cell so mutations cross the closure boundary even when the capturing
-//! closure is called in place and never escapes. So this consumer reads
-//! `needs_capture()` (the structural-only role the capture flag has left), not the
-//! authoritative escape analysis (`hir::escape`) — routing it through escape would
-//! drop the cell for a captured-mutable non-escaping binding and silently lose the
-//! shared mutation.
+//! Cell insertion reads `needs_capture()`, a structural fact, and never the
+//! escape analysis: a captured mutable binding needs a shared cell even when
+//! the capturing closure never escapes.
 //!
 //! **Branch phi-insertion:** Assigns inside if/cond/match arms in Begin
-//! sequences get proper phi-insertion — condition temps bound once,
-//! phi-selects via nested Ifs (cond) or duplicated match (match).
-//! Non-Begin contexts use assign_preserved to keep assigns as runtime
-//! slot mutations.
+//! sequences get phi-insertion: condition temps bound once, and phi-selects
+//! via nested Ifs (cond) or a duplicated match (match). Outside a Begin,
+//! `assign_preserved` keeps assigns as runtime slot mutations.
 
 use super::arena::BindingArena;
 use super::binding::Binding;
-use super::expr::{CallArg, Hir, HirKind};
+use super::expr::{CallArg, Hir, HirId, HirKind};
 use super::pattern::HirPattern;
 use crate::signals::Signal;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::{BTreeSet, HashMap};
 
 /// Run the functionalize transform on a HIR tree.
@@ -50,17 +41,35 @@ use std::collections::{BTreeSet, HashMap};
 /// Loop/Recur. CaptureCell bindings get explicit DerefCell/SetCell
 /// ops. Modifies the arena to create fresh bindings for SSA versions.
 pub fn functionalize(hir: &mut Hir, arena: &mut BindingArena) {
+    functionalize_tracking(hir, arena, &FxHashSet::default());
+}
+
+/// [`functionalize`], answering for each `Var` node id in `tracked` the ids
+/// of the nodes rebuilt from it — several when a branch's subtree was
+/// duplicated. The graft names the occurrences whose types a later pass reads
+/// by id, and the rebuild gives every node a fresh one.
+pub fn functionalize_tracking(
+    hir: &mut Hir,
+    arena: &mut BindingArena,
+    tracked: &FxHashSet<HirId>,
+) -> FxHashMap<HirId, Vec<HirId>> {
     let mut ctx = FnCtx {
         arena,
         renames: HashMap::new(),
         cell_bindings: BTreeSet::new(),
         assign_preserved: BTreeSet::new(),
+        tracked,
+        moved: FxHashMap::default(),
     };
     *hir = ctx.transform(hir);
+    ctx.moved
 }
 
 struct FnCtx<'a> {
     arena: &'a mut BindingArena,
+    /// The `Var` node ids whose rebuilt ids `moved` reports.
+    tracked: &'a FxHashSet<HirId>,
+    moved: FxHashMap<HirId, Vec<HirId>>,
     renames: HashMap<Binding, Binding>,
     /// Bindings that have been wrapped in cells (needs_capture).
     /// References to these must go through DerefCell, assigns through SetCell.
@@ -69,10 +78,10 @@ struct FnCtx<'a> {
     /// parameters (threaded via Recur) and outer-scope variables assigned
     /// inside a loop body (maintained via slot mutation by the lowerer).
     /// This is a one-way door: once a binding is slot-mutated, no nested
-    /// construct may fork a fresh SSA version of it — in particular a
-    /// nested while must not promote it to its own loop parameter, since
-    /// the fork's post-loop rename escapes the enclosing branch arm and
-    /// paths that skip the nested loop would read an uninitialized slot.
+    /// construct may fork a fresh SSA version of it. In particular, a nested
+    /// while must not promote it to its own loop parameter. The fork's
+    /// post-loop rename would escape the enclosing branch arm, and a path that
+    /// skips the nested loop would read an uninitialized slot.
     assign_preserved: BTreeSet<Binding>,
 }
 

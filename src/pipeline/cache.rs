@@ -1,17 +1,19 @@
-// audited: 2026-10-07
-// src/pipeline/AGENTS.md
-//! `CompileCtx`: one instance's compile-time state.
+// audited: 2026-10-06
+//! `CompileCtx`, one instance's compile-time state, and `BootExports`, the export structs its boot left.
 //!
-//! A macro-expansion VM, the prelude/core `Expander`, the `PrimitiveMeta`
-//! (primitives + host primitives + core.lisp + stdlib exports + REPL value
-//! bindings), and the file→signal projection map.
+//! src/pipeline/AGENTS.md
+//! docs/impl/image/boot.md
+//! docs/impl/region/rules.md
 //!
-//! This is owned by the instance's `RuntimeCore` (a sibling of the `VM` and
-//! `SymbolTable`) and threaded explicitly through the pipeline: two embedded Elle
-//! instances on one thread each own their own `CompileCtx`, so instance A's stdlib
-//! exports and REPL `def`s are invisible to instance B.
+//! The state is a macro-expansion VM, the prelude and core `Expander`, the
+//! `PrimitiveMeta` (primitives, host primitives, core.lisp and stdlib exports,
+//! REPL value bindings), and the map from an imported file to its signal projection.
+//!
+//! The instance's `RuntimeCore` owns it beside the `VM` and the `SymbolTable`,
+//! and the pipeline takes it as a parameter. Two embedded Elle instances on one
+//! thread each own a `CompileCtx`, so neither sees the other's stdlib exports
+//! or REPL `def`s.
 
-use crate::hir::typeinfer::{DispatchWrapperRegistry, FnInlineRegistry};
 use crate::primitives::def::PrimitiveMeta;
 use crate::primitives::{build_primitive_meta, register_primitives};
 use crate::signals::Signal;
@@ -25,9 +27,9 @@ use super::bootstrap::{compile_core, install_core_exports};
 
 /// The two export structs a boot leaves behind: core.lisp's and stdlib.lisp's.
 ///
-/// Both are process roots already, so holding them costs nothing; the boot
-/// dump is what reads them, because they are the root set an image carries
-/// (docs/impl/image/boot.md). Nil until the boot that produces each one runs.
+/// Both are process roots already, so holding them costs nothing. The boot
+/// dump reads them, because they are the root set an image carries. Each is
+/// nil until the boot that produces it runs.
 #[derive(Debug, Clone, Copy)]
 pub struct BootExports {
     pub core: crate::value::Value,
@@ -50,9 +52,9 @@ impl Default for BootExports {
 /// - The macro-expansion VM's fiber is always reset between uses.
 /// - The `Expander` is cloned for each pipeline call (independent expansion
 ///   state); its `eval_meta` (an `Rc`) is a cheap pointer-bump clone.
-/// - Primitive registration order is deterministic (`ALL_TABLES`), so the
-///   `SymbolId`s baked into `meta` match any `SymbolTable` that interned the
-///   primitives in the same order — including the owning instance's table.
+/// - A `SymbolId` is its name's hash, so the ids that the setup's throwaway
+///   `SymbolTable` baked into `meta` name the same symbols in the owning
+///   instance's table.
 pub struct CompileCtx {
     /// VM with primitives registered, used only to evaluate macro bodies.
     /// Fiber always reset between uses.
@@ -71,21 +73,10 @@ pub struct CompileCtx {
     /// literal string argument. Per-instance, though projections are in fact
     /// deterministic from file content (an instance never shares one).
     projections: HashMap<String, Option<HashMap<String, Signal>>>,
-    /// Container-dispatch wrappers collected across every compile in this
-    /// instance, keyed by name. Populated when `stdlib.lisp` compiles (its
-    /// `push`/`put`), consumed by every later unit so a user→stdlib wrapper call
-    /// monomorphizes as an intra-unit one does (`monomorphize.rs`).
-    /// Compile-time-only state: it drives an HIR rewrite and never reaches the VM.
-    dispatch_wrappers: DispatchWrapperRegistry,
-    /// Cross-unit-inlineable function templates collected across every compile in
-    /// this instance, keyed by name. Populated when `stdlib.lisp` compiles (its
-    /// `inc`/`dec`/… bodies), consumed by every later unit so a user→stdlib
-    /// `(map inc xs)` inlines the stdlib body as a same-unit named fn would
-    /// (`fuse.rs`). Like
-    /// `dispatch_wrappers`, compile-time-only state that never reaches the VM.
-    fn_inline: FnInlineRegistry,
     /// The core and stdlib export aggregates this instance booted with.
     exports: BootExports,
+    /// Whether a unit compiled here grafts its calls (docs/impl/graft.md).
+    graft: crate::config::GraftPolicy,
 }
 
 impl CompileCtx {
@@ -126,6 +117,18 @@ impl CompileCtx {
         self.vm.set_unicode_generation(gen);
     }
 
+    /// Whether the units this context compiles from now on graft their calls
+    /// (docs/impl/graft.md). The owning `Runtime` sets it after its boot, so the
+    /// boot's own units always graft.
+    pub(crate) fn set_graft(&mut self, graft: crate::config::GraftPolicy) {
+        self.graft = graft;
+    }
+
+    /// Whether the units this context compiles graft their calls.
+    pub(crate) fn graft(&self) -> crate::config::GraftPolicy {
+        self.graft
+    }
+
     /// Shared compile-context construction over an already-built macro VM
     /// (standalone or instance-heap-sharing).
     fn on_vm(mut vm: VM) -> Self {
@@ -149,27 +152,26 @@ impl CompileCtx {
             .load_prelude(&mut init_symbols, &mut vm)
             .expect("prelude loading must succeed");
         crate::phase!(boot, "boot", t, "prelude");
-        // `init_symbols` is a throwaway used only for this setup; `expand` pointed
-        // the macro VM at it. Reset to null so the dropped table is never reached
-        // — the next `expand` (a real compile) re-points the VM at the instance's
-        // table (docs/impl/region/ctx.md § "Symbols").
+        // `init_symbols` is a throwaway used only for this setup, and `expand`
+        // pointed the macro VM at it. Reset the pointer to null so nothing reaches
+        // the dropped table. The next `expand`, a real compile, points the VM at
+        // the instance's table.
         vm.set_symbols(std::ptr::null_mut());
         CompileCtx {
             vm,
             expander,
             meta,
             projections: HashMap::new(),
-            dispatch_wrappers: DispatchWrapperRegistry::default(),
-            fn_inline: FnInlineRegistry::default(),
             exports: BootExports {
                 core,
                 ..BootExports::default()
             },
+            graft: crate::config::GraftPolicy::On,
         }
     }
 
     /// Build a compile context out of a hydrated boot image instead of
-    /// compiling core.lisp and prelude.lisp (docs/impl/image/boot.md).
+    /// compiling core.lisp and prelude.lisp.
     ///
     /// The primitives still register on the macro VM, because a native-fn is a
     /// process-local id no image carries; everything else is installed from the
@@ -199,26 +201,12 @@ impl CompileCtx {
             expander,
             meta,
             projections: HashMap::new(),
-            dispatch_wrappers: DispatchWrapperRegistry::default(),
-            fn_inline: FnInlineRegistry::default(),
             exports: BootExports {
                 core: boot.core_exports(),
                 ..BootExports::default()
             },
+            graft: crate::config::GraftPolicy::On,
         }
-    }
-
-    /// The instance's two cross-unit compile registries, borrowed together (they
-    /// are disjoint fields, so one accessor yields both `&mut` without aliasing —
-    /// `regularize` needs both, and two separate accessor calls would each borrow
-    /// all of `self`). The `<stdlib>` compile populates both; later user compiles
-    /// consult them. `dispatch_wrappers` drives container-dispatch monomorphization
-    /// (`monomorphize.rs`); `fn_inline` drives cross-unit HOF-argument inlining
-    /// (`fuse.rs`).
-    pub fn compile_registries_mut(
-        &mut self,
-    ) -> (&mut DispatchWrapperRegistry, &mut FnInlineRegistry) {
-        (&mut self.dispatch_wrappers, &mut self.fn_inline)
     }
 
     /// Run `f` with the macro-expansion VM (fiber reset), a clone of the
@@ -230,7 +218,7 @@ impl CompileCtx {
     /// already pointed at it. Taking it here rather than leaving it to the
     /// caller is what keeps an expansion from allocating into the instance's
     /// process-root template arena, which nothing would ever reclaim
-    /// (docs/impl/syntax.md § "Where a node lives").
+    /// (docs/impl/syntax.md).
     pub fn with_macro_expansion<F, R>(&mut self, arena: crate::syntax::SyntaxArena, f: F) -> R
     where
         F: FnOnce(&mut VM, Expander, PrimitiveMeta) -> R,
@@ -256,9 +244,9 @@ impl CompileCtx {
     }
 
     /// Every globally-bound callable's `SymbolId`: Rust primitives, core.lisp
-    /// exports, and stdlib exports (e.g. `+`, which is a stdlib closure over the
-    /// `%add` intrinsic, not a primitive — so it is absent from `vm.docs`). The
-    /// LSP uses this as the authoritative builtin-completion name set.
+    /// exports, and stdlib exports. The last include names absent from
+    /// `vm.docs`, for example `+`, a stdlib closure over the `%add` intrinsic.
+    /// The LSP uses this as the authoritative builtin-completion name set.
     pub fn global_function_ids(&self) -> impl Iterator<Item = crate::value::SymbolId> + '_ {
         self.meta.functions.keys().copied()
     }
@@ -274,22 +262,20 @@ impl CompileCtx {
 
     /// This instance's macro table: every prelude macro, plus whatever the
     /// REPL and later compiles defined. The boot dump reads it, and so does
-    /// the pin that a hydrated table carries the same entries
-    /// (docs/impl/image/boot.md).
+    /// the pin that a hydrated table carries the same entries.
     pub(crate) fn macros(&self) -> &HashMap<String, crate::syntax::MacroDef> {
         self.expander.macros()
     }
 
     /// The next hygiene scope id this instance's expander will mint. Read by
-    /// the pin that an image boot mints the scopes a source boot would
-    /// (docs/impl/image/boot.md).
+    /// the pin that an image boot mints the scopes a source boot would.
     #[cfg(test)]
     pub(crate) fn scope_counter(&self) -> u32 {
         self.expander.scope_counter()
     }
 
-    /// The core and stdlib export aggregates this instance booted with — the
-    /// root set a boot image carries (docs/impl/image/boot.md).
+    /// The core and stdlib export aggregates this instance booted with, the
+    /// root set a boot image carries.
     pub(crate) fn boot_exports(&self) -> BootExports {
         self.exports
     }
@@ -314,21 +300,18 @@ impl CompileCtx {
 
     /// Register a REPL `def` binding so subsequent compilations resolve it.
     ///
-    /// A REPL `def` value outlives the line that produced it — later lines
-    /// resolve it from `meta`. Under the mint-at-return convention the top-level
-    /// return mint's +1 is balanced by the caller's decref at the result's
-    /// decref_point, so without a root the value would be freed at the end of its
-    /// line; register the value's region as a process root to keep it live for
-    /// the session and release it by RC at teardown.
+    /// A REPL `def` value outlives the line that produced it, because later
+    /// lines resolve it from `meta`. So the value's region becomes a process
+    /// root, which keeps it live for the session and releases it by RC at
+    /// teardown.
     ///
-    /// `funding` says which reference that root is made of
-    /// (docs/impl/region/rules.md § "The program value is the host's to
-    /// release"): a caller holding the value's own reference hands it over with
-    /// `RootRef::Take`, and one registering a value it reaches through another
-    /// (a leaf of a destructuring `def`) asks for `RootRef::Mint`. A minted root
-    /// funds itself per registration, so two leaves that share one region mint
-    /// two references against the sweep's two decrefs. A taken root does not:
-    /// the caller holds one reference, so it registers the region once (R9).
+    /// `funding` says which reference that root is made of. A caller holding
+    /// the value's own reference hands it over with `RootRef::Take`. A caller
+    /// registering a value it reaches through another, such as a leaf of a
+    /// destructuring `def`, asks for `RootRef::Mint`. A minted root funds
+    /// itself per registration, so two leaves that share one region mint two
+    /// references against the sweep's two decrefs. A taken root does not: the
+    /// caller holds one reference, so it registers the region once.
     pub fn register_repl_binding(
         &mut self,
         heap: &mut crate::value::fiberheap::FiberHeap,
@@ -423,11 +406,11 @@ impl CompileCtx {
         }
 
         let source = std::fs::read_to_string(resolved_path).ok()?;
-        // The probe compiles in the CALLER's memo: the memo is per-instance
-        // (docs/impl/symbol.md § "The display memo"), so a throwaway table
-        // here would drop every name the module's quoted data carries, and a
-        // transformer cached on the shared expander during this compile would
-        // outlive the table it learned into. The `each` and probe tests in
+        // The probe compiles in the CALLER's memo, which is per-instance
+        // (docs/impl/symbol.md). A throwaway table here would drop every name
+        // the module's quoted data carries. A transformer cached on the shared
+        // expander during this compile would also outlive the table it learned
+        // into. The `each` and probe tests in
         // tests/integration/projection.rs pin both halves. A cache hit skips
         // the stdlib compile that would otherwise warm every transformer, so
         // the probe is often the first expansion on that path too.

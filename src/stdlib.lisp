@@ -324,49 +324,100 @@
 
 ## ── Arithmetic ────────────────────────────────────────────────────────
 
+## Each arithmetic wrapper dispatches on its rest list, so a call's operand
+## count picks the arm before the call runs: a call with two operands grafts to
+## two number guards and one %-op, which proven operands dissolve to the op
+## alone (docs/impl/graft.md). The general arm keeps its letrec walker.
+
 (defn + [& args]
   "Sum all arguments. Returns 0 for no arguments."
-  (letrec [go (fn [acc xs]
-                (if (empty? xs)
-                  acc
-                  (let [b (first xs)]
-                    (when (%not (number? b))
-                      (error {:error :type-error
-                              :message (string "+: expected number, got "
-                              (type b))}))
-                    (go (%add acc b) (rest xs)))))]
-    (go 0 args)))
+  (match args
+    () 0
+    (a b)
+      (begin
+        (when (%not (number? a))
+          (error {:error :type-error
+                  :message (string "+: expected number, got " (type a))}))
+        (when (%not (number? b))
+          (error {:error :type-error
+                  :message (string "+: expected number, got " (type b))}))
+        (%add a b))
+    _
+      (letrec [go (fn [acc xs]
+                    (if (empty? xs)
+                      acc
+                      (let [b (first xs)]
+                        (when (%not (number? b))
+                          (error {:error :type-error
+                                  :message (string "+: expected number, got "
+                                  (type b))}))
+                        (go (%add acc b) (rest xs)))))]
+        # The sum starts from the first operand, not from 0: 0 + -0.0 is
+        # 0.0, so starting from 0 loses a negative zero that %add keeps.
+        (let [x (first args)]
+          (when (%not (number? x))
+            (error {:error :type-error
+                    :message (string "+: expected number, got " (type x))}))
+          (go x (rest args))))))
 
 (defn - [x & args]
   "Subtract arguments left-to-right. Single arg negates."
-  (when (%not (number? x))
-    (error {:error :type-error
-            :message (string "-: expected number, got " (type x))}))
-  (if (empty? args)
-    (%sub x)
-    (letrec [go (fn [acc xs]
-                  (if (empty? xs)
-                    acc
-                    (let [b (first xs)]
-                      (when (%not (number? b))
-                        (error {:error :type-error
-                                :message (string "-: expected number, got "
-                                (type b))}))
-                      (go (%sub acc b) (rest xs)))))]
-      (go x args))))
+  (match args
+    ()
+      (begin
+        (when (%not (number? x))
+          (error {:error :type-error
+                  :message (string "-: expected number, got " (type x))}))
+        (%sub x))
+    (b)
+      (begin
+        (when (%not (number? x))
+          (error {:error :type-error
+                  :message (string "-: expected number, got " (type x))}))
+        (when (%not (number? b))
+          (error {:error :type-error
+                  :message (string "-: expected number, got " (type b))}))
+        (%sub x b))
+    _
+      (begin
+        (when (%not (number? x))
+          (error {:error :type-error
+                  :message (string "-: expected number, got " (type x))}))
+        (letrec [go (fn [acc xs]
+                      (if (empty? xs)
+                        acc
+                        (let [b (first xs)]
+                          (when (%not (number? b))
+                            (error {:error :type-error
+                                    :message (string "-: expected number, got "
+                                    (type b))}))
+                          (go (%sub acc b) (rest xs)))))]
+          (go x args)))))
 
 (defn * [& args]
   "Multiply all arguments. Returns 1 for no arguments."
-  (letrec [go (fn [acc xs]
-                (if (empty? xs)
-                  acc
-                  (let [b (first xs)]
-                    (when (%not (number? b))
-                      (error {:error :type-error
-                              :message (string "*: expected number, got "
-                              (type b))}))
-                    (go (%mul acc b) (rest xs)))))]
-    (go 1 args)))
+  (match args
+    () 1
+    (a b)
+      (begin
+        (when (%not (number? a))
+          (error {:error :type-error
+                  :message (string "*: expected number, got " (type a))}))
+        (when (%not (number? b))
+          (error {:error :type-error
+                  :message (string "*: expected number, got " (type b))}))
+        (%mul a b))
+    _
+      (letrec [go (fn [acc xs]
+                    (if (empty? xs)
+                      acc
+                      (let [b (first xs)]
+                        (when (%not (number? b))
+                          (error {:error :type-error
+                                  :message (string "*: expected number, got "
+                                  (type b))}))
+                        (go (%mul acc b) (rest xs)))))]
+        (go 1 args))))
 
 ## The div-family wrappers dispatch the divisor on type-of: an INTEGER divisor
 ## is zero-guarded (the guard's fall-through proves it nonzero, which is what
@@ -495,31 +546,92 @@
   "Compare one check-comparable-validated pair for >=. Internal."
   (if (and (number? a) (number? b)) (%ge a b) (dynamic-ge a b)))
 
+## A comparison of two operands tests for two numbers before anything else, so
+## a grafted call over proven numbers dissolves to the op alone. The number test
+## stays until the WASM tier compares strings by content (#1268).
+
 (defn < [a b & more]
   "Test strictly ascending order. Works on numbers, strings, and keywords."
-  (check-comparable :< a b)
-  (if (empty? more) (lt-pair a b) (and (lt-pair a b) (apply < b more))))
+  (match more
+    ()
+      (if (and (number? a) (number? b))
+        (%lt a b)
+        (begin
+          (check-comparable :< a b)
+          (dynamic-lt a b)))
+    _
+      (begin
+        (check-comparable :< a b)
+        (and (lt-pair a b) (apply < b more)))))
 
 (defn > [a b & more]
   "Test strictly descending order. Works on numbers, strings, and keywords."
-  (check-comparable :> a b)
-  (if (empty? more) (gt-pair a b) (and (gt-pair a b) (apply > b more))))
+  (match more
+    ()
+      (if (and (number? a) (number? b))
+        (%gt a b)
+        (begin
+          (check-comparable :> a b)
+          (dynamic-gt a b)))
+    _
+      (begin
+        (check-comparable :> a b)
+        (and (gt-pair a b) (apply > b more)))))
 
 (defn <= [a b & more]
   "Test non-descending order. Works on numbers, strings, and keywords."
-  (check-comparable :<= a b)
-  (if (empty? more) (le-pair a b) (and (le-pair a b) (apply <= b more))))
+  (match more
+    ()
+      (if (and (number? a) (number? b))
+        (%le a b)
+        (begin
+          (check-comparable :<= a b)
+          (dynamic-le a b)))
+    _
+      (begin
+        (check-comparable :<= a b)
+        (and (le-pair a b) (apply <= b more)))))
 
 (defn >= [a b & more]
   "Test non-ascending order. Works on numbers, strings, and keywords."
-  (check-comparable :>= a b)
-  (if (empty? more) (ge-pair a b) (and (ge-pair a b) (apply >= b more))))
+  (match more
+    ()
+      (if (and (number? a) (number? b))
+        (%ge a b)
+        (begin
+          (check-comparable :>= a b)
+          (dynamic-ge a b)))
+    _
+      (begin
+        (check-comparable :>= a b)
+        (and (ge-pair a b) (apply >= b more)))))
+
+## Equality takes every value, so it validates nothing: two numbers compare
+## through the silent opcode, and anything else through the op called as a
+## value, which compares collections element by element.
+
+(def dynamic-eq %eq)
+
+(defn eq-pair [a b]
+  "Compare one pair for =. Internal."
+  (if (and (number? a) (number? b)) (%eq a b) (dynamic-eq a b)))
+
+(defn = [a b & more]
+  "Test equality of values. Numeric-aware at every depth: (= 1 1.0) and (= [1] [1.0]) are true; IEEE NaN is never equal, even inside collections. Chained: (= a b c) means all are equal."
+  (match more
+    ()
+      (if (and (number? a) (number? b)) (%eq a b) (dynamic-eq a b))
+    _ (and (eq-pair a b) (apply = b more))))
+
+(def eq? =)
 
 ## ── Logic and pairs ──────────────────────────────────────────────────
 
 (defn not [x & more]
   "Logical NOT. Single arg: (not x). Multiple args: (not a b c) = (and (not a) (not b) (not c))."
-  (if (empty? more) (%not x) (if x false (apply not more))))
+  (match more
+    () (%not x)
+    _ (if x false (apply not more))))
 
 (defn pair [a b]
   "Construct a pair with head and tail."
@@ -566,18 +678,16 @@
 
 (defn put [coll key & rest]
   "Associate key with val in coll. For sets, (put s val) delegates to add."
-  (if (empty? rest)
-    (add coll key)
-    (if (%gt (length rest) 1)
-      (error {:error :arity-error
-              :message "put: too many arguments (expected 2 or 3)"})
-      (let [val (first rest)]
-        (match (type-of coll)
-          :array (%put-array coll key val)
-          :@array (%put-array-mut coll key val)
-          :struct (%put-struct coll key val)
-          :@struct (%put-struct-mut coll key val)
-          _ (dynamic-put coll key val))))))
+  (match rest
+    () (add coll key)
+    (val) (match (type-of coll)
+            :array (%put-array coll key val)
+            :@array (%put-array-mut coll key val)
+            :struct (%put-struct coll key val)
+            :@struct (%put-struct-mut coll key val)
+            _ (dynamic-put coll key val))
+    _ (error {:error :arity-error
+              :message "put: too many arguments (expected 2 or 3)"})))
 
 ## Set add is set-only, so — like `push` — the `_` arm ERRORS rather than
 ## delegating to a polymorphic fallback native. The two container arms route to
@@ -3012,6 +3122,10 @@
 ## ── Module export closure ───────────────────────────────────────────
 ## Last expression: a closure returning a struct of all exports.
 ## Called by init_stdlib to register stdlib functions as primitives.
+##
+## A later unit grafts a wrapper's body by resolving the names that body uses
+## among these exports, so every helper a wrapper's body names is exported:
+## the dynamic-* ops, check-comparable and the *-pair comparisons.
 
 (fn []
   {:+ +
@@ -3024,7 +3138,21 @@
    :> >
    :<= <=
    :>= >=
+   := =
+   :eq? eq?
    :not not
+   :dynamic-lt dynamic-lt
+   :dynamic-gt dynamic-gt
+   :dynamic-le dynamic-le
+   :dynamic-ge dynamic-ge
+   :dynamic-eq dynamic-eq
+   :dynamic-put dynamic-put
+   :check-comparable check-comparable
+   :lt-pair lt-pair
+   :gt-pair gt-pair
+   :le-pair le-pair
+   :ge-pair ge-pair
+   :eq-pair eq-pair
    :pair pair
    :push push
    :put put

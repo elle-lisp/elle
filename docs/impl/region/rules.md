@@ -1,17 +1,16 @@
 # Region rules — the implementor's correctness obligations
 
-<!-- audited: 2026-10-13 -->
+<!-- audited: 2026-10-16 -->
 
 The exhaustive correctness contract the compiler and runtime must uphold for
 regions.
 
-Read this file before you touch the region code. The RC-instruction mechanism these
-rules constrain — value/slot resolution, coalescing, self-edge elimination, and
-the equivalence oracle — is in [mechanism.md](mechanism.md).
-For the consumer-facing model — how to write Elle that is sympathetic to the
-memory system — see [docs/regions.md](../../regions.md) and the
-[docs/regions/](../../regions/) series. The semantics (Tofte–Talpin for immutable
-values, reference counting for mutation) and the cycles that still leak are in
+Read this file before you touch the region code. The RC-instruction mechanism
+these rules constrain is in [mechanism.md](mechanism.md). The consumer-facing
+model, how to write Elle that is sympathetic to the memory system, is in
+[docs/regions.md](../../regions.md) and the [docs/regions/](../../regions/)
+series. The semantics (Tofte–Talpin for immutable values, reference counting for
+mutation) and the cycles that still leak are in
 [regions/semantics.md](../../regions/semantics.md).
 
 ## There are exactly two measures: correct, then optimal
@@ -19,8 +18,7 @@ values, reference counting for mutation) and the cycles that still leak are in
 A region implementation is **correct** iff it never reads freed memory and
 never frees live memory. That means no use-after-free, no double-free, no
 dangling pointer, and (the dual we hold ourselves to) no value leaked past the
-point its last reference dies. There is no third state and no spectrum. Code is not
-"conservative" or "aggressive"; it is correct or it is broken.
+point its last reference dies. There is no third state.
 
 Everything else — how many physical regions exist, how aggressively the solver
 merges, peak RSS, mmap churn — is **optimization**. Optimization may never buy
@@ -69,10 +67,10 @@ is a correctness defect, not a tuning knob.
      A branch-union region whose `decref_point` lands on a call node is NOT
      that call's own result region (`alloc_region[hir] ≠ r`) and keeps the
      slot path.
-   - *Transparent nodes* (`MakeCell`/`DerefCell`/`SetCell`, and non-allocating
-     intrinsics `%get`/`%put`/`%length`/`%type-of`): emit no RC-raising
-     instruction, so the solver must assign no region and pass the child's
-     regions through instead.
+   - *Transparent nodes* (`MakeCell`/`DerefCell`/`SetCell`, and the borrowing
+     reads `%get`/`%first`/`%rest`): emit no RC-raising instruction, so the
+     solver assigns no region. A cell node and `%get` pass their child's
+     regions through, and every read's result is a borrow (Rule 4).
 
 3. **Values are born in the right region.** The allocation instruction targets
    the solver-assigned region directly. Never allocate into a short-lived region
@@ -111,15 +109,15 @@ is a correctness defect, not a tuning knob.
 
    A third class is a *borrowing node*: an **uncounted** container element
    read (the `%get`/`%first`/`%rest` opcodes). It hands back a value that
-   still lives **inside the container**: its own region for a pair's car, an
-   interior member's for an `@array` element. It raises no count on that
-   value, so the container's lifetime is the borrow's only protection. The
-   container is used for as long as the read's RESULT is. Its regions extend
-   to where that result is last used, not to the read.
+   still lives **inside the container** and raises no count on it, so the
+   container's lifetime is the borrow's only protection. The container's
+   regions extend to the borrow's last use: the read's consumer, and every
+   use of each name the borrow reaches. Such a name holds no reference, so it
+   is no holder of the container ([borrow.md](borrow.md)).
 
    Anchored at the read, the container's free-time cascade drops the element's
-   last count, and the reader derefs a freed page
-   ([region-container-read-borrow-uaf.lisp](../../../tests/impl/region-container-read-borrow-uaf.lisp)).
+   last count, and the reader derefs a freed page ([one read](../../../tests/impl/region-container-read-borrow-uaf.lisp),
+   [a chain of reads](../../../tests/impl/region-borrow-chain-uaf.lisp)).
    The **native** `get`/`first`/`rest` call is not this class. Its dispatch
    takes the Rule 5 pass-through retain, so the reader holds its own reference
    and the container is free to die. What that retain cannot survive is
@@ -303,10 +301,12 @@ is a correctness defect, not a tuning knob.
    trampoline truncates it to the frame base before installing the callee
    (`trampoline_loop`, [execute.rs](../../../src/vm/execute.rs)). The
    caller's locals are dead there: every owned value was released at its last
-   use or moved into the callee. Any slot left un-truncated would surface as
-   the callee's stale read. That turns a scope-end release into an over-free
-   of a region the frame owns no reference to. Pinned by
-   `runtime::tests::ownership::frame`.
+   use or moved into the callee. A slot left un-truncated would surface as the
+   callee's stale read, and turn a scope-end release into an over-free of a
+   region the frame owns no reference to. The same replacement empties the
+   activation's region map: an entry left there is the caller's, and a
+   slot-resolved release or a merged allocation in the callee would reach it
+   ([merging.md](merging.md)). Pinned by `runtime::tests::ownership::frame`.
 
 6. **No commingling.** Objects from different regions never share a page —
    otherwise freeing one region cannot munmap its pages while another's objects

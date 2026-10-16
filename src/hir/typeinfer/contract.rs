@@ -1,3 +1,4 @@
+// audited: 2026-10-14
 //! The intrinsic operand proofs: prove-or-reject, per docs/intrinsics.md.
 //!
 //! A `%`-intrinsic in call position is a compile-time type-checked request for
@@ -61,11 +62,17 @@ impl NonzeroEnv {
     }
 }
 
+/// Does `op`'s lowering trust anything about its operands? An op total on
+/// every value has nothing to prove, so a site of it is never rejected.
+pub(super) fn has_obligation(op: IntrinsicOp) -> bool {
+    !matches!(op_contract(op), Contract::Total)
+}
+
 /// Check every call-position `%`-intrinsic in the tree against its contract.
 /// Walks in evaluation order, carrying the nonzero-divisor facts.
 pub(super) fn check_intrinsic_operand_proofs(
     hir: &Hir,
-    hir_types: &HashMap<HirId, TyId>,
+    hir_types: &NodeTypes,
     arena: &BindingArena,
 ) -> Result<(), String> {
     let interner = TypeInterner::new();

@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-10-16
 //! `RegionInfo`: what region inference produces for a compilation unit — the
 //! per-allocation and per-scope assignments, and the lowerer's cuts.
 //!
@@ -52,6 +52,13 @@ pub struct RegionInfo {
     ///
     /// docs/impl/region/bindings.md
     pub binding_source_regions: HashMap<Binding, Vec<Region>>,
+    /// Binding → the container regions its value is borrowed out of, by an
+    /// uncounted read whose result reaches the binding. The container's
+    /// release extends over the binding's uses. The binding holds no
+    /// reference, so no holder count reads this map.
+    ///
+    /// docs/impl/region/borrow.md
+    pub binding_borrow_regions: HashMap<Binding, Vec<Region>>,
     /// Captured (`needs_capture`) bindings some `assign` reassigns. The lowerer
     /// drops such a binding's init reference off its own register rather than
     /// through the cell slot. Membership is a fact about the binding, not about
@@ -63,7 +70,9 @@ pub struct RegionInfo {
     pub live_regions: FxHashSet<Region>,
     /// `(store_site, source_region, target_region)` — a value in `source` is
     /// stored into a structure in `target`. The lowerer emits
-    /// `IncrefRegion(source)` at the site; the runtime cascade balances it.
+    /// `IncrefRegion(source)` at the site, unless the site's own allocation
+    /// counts the reference (`alloc_counts_edge`). The target's cascade
+    /// releases either count.
     ///
     /// docs/impl/region/mechanism.md
     pub cross_region_refs: Vec<(HirId, Region, Region)>,
@@ -266,6 +275,14 @@ pub struct RegionInfo {
     ///
     /// docs/impl/region/cells.md
     pub begin_cell_regions: HashMap<HirId, Vec<(Binding, Region)>>,
+    /// Compiled capture-cell region → the region whose value-routed release
+    /// loads that cell and unwraps it to the content: the cell binding's
+    /// call-result init. The adopt obligation bounds the routed release by the
+    /// closure's drop, and the lowerer orders it ahead of the cell's own
+    /// release. A literal init and a captured reassigned binding record none.
+    ///
+    /// docs/impl/region/adopt.md
+    pub cell_route_regions: HashMap<Region, Region>,
     /// `Destructure`/`Match` HirId → one entry per collection the node's
     /// pattern BUILDS and binds a name to. Each region is phantom, is in
     /// `call_result_regions`, and is pinned to the node keying it. A collection
@@ -382,6 +399,7 @@ impl RegionInfo {
             scope_region: HashMap::new(),
             binding_region: HashMap::new(),
             binding_source_regions: HashMap::new(),
+            binding_borrow_regions: HashMap::new(),
             captured_reassigned_bindings: FxHashSet::default(),
             frame_held_regions: FxHashSet::default(),
             value_routed_regions: FxHashSet::default(),
@@ -421,6 +439,7 @@ impl RegionInfo {
             cell_containers: HashMap::new(),
             cell_stored_regions: FxHashSet::default(),
             begin_cell_regions: HashMap::new(),
+            cell_route_regions: HashMap::new(),
             pattern_rest_regions: HashMap::new(),
             merged_parent: HashMap::new(),
             closure_cycle_members: FxHashSet::default(),

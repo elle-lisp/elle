@@ -1,5 +1,7 @@
-// audited: 2026-09-21
-//! Analysis pipeline: source -> HIR (no bytecode generation).
+// audited: 2026-10-06
+//! The entry points that analyze one form or a whole file to HIR, for the linter, the LSP and compile/analyze.
+//!
+//! docs/pipeline.md
 
 use super::AnalyzeResult;
 use super::CompileCtx;
@@ -9,8 +11,8 @@ use crate::symbol::SymbolTable;
 use crate::syntax::Span;
 use crate::vm::VM;
 
-/// Analyze source code without generating bytecode.
-/// Used by linter and LSP which need HIR but not bytecode.
+/// Analyze one form to HIR and mark its tail calls. Nothing is regularized
+/// or lowered.
 pub fn analyze(
     source: &str,
     symbols: &mut SymbolTable,
@@ -56,10 +58,8 @@ fn analyze_in_arena(
     Ok(AnalyzeResult { hir, arena, errors })
 }
 
-/// Analyze a file as a single synthetic letrec (no bytecode).
-///
-/// Used by linter and LSP for file-level analysis. Primitives are
-/// pre-bound as immutable Global bindings.
+/// Analyze a file as one letrec to HIR and mark its tail calls. Nothing is
+/// regularized or lowered.
 pub fn analyze_file(
     source: &str,
     symbols: &mut SymbolTable,
@@ -83,9 +83,10 @@ fn analyze_file_in_arena(
 ) -> Result<AnalyzeResult, String> {
     let mut syntaxes = read_syntax_all(arena, source, source_name)?;
 
-    // The compile front end consumes the epoch and versioning declarations
-    // and migrates old-epoch syntax; analysis must see the same file the
-    // compiler would, or the linter and portrait diverge from it.
+    // Strip the epoch and version declarations and migrate old-epoch syntax,
+    // as the compile front end does, so the linter and the portrait read the
+    // forms the compiler reads. Unlike the front end, this checks no lexicon,
+    // stamps no file scope, splices no include and binds no `core_env`.
     let source_epoch = crate::epoch::extract_epoch(&mut syntaxes)?;
     crate::pipeline::directives::extract_semver_directives(&mut syntaxes)?;
     if let Some(epoch) = source_epoch {

@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-06
+# audited: 2026-10-14
 # A compiled callee's error parks its frame, so a restart answers the raising call inside it.
 # docs/impl/jit.md
 #
@@ -7,7 +7,9 @@
 # the compiled code runs from the second call on. So each callee is warmed by
 # one non-tail call before its case, and `jit?` confirms the compile; a tail
 # call is not counted. tests/lang/fiber-restart.lisp holds the same cases,
-# where the callee runs in the interpreter.
+# where the callee runs in the interpreter. The sidecar also turns the graft
+# off: a call to a function the compiler can see becomes the function's body
+# (docs/impl/graft.md), and a callee nothing calls never compiles.
 #
 # The counter-factual is a compiled frame that unwinds on an error: the restart
 # answers the interpreted body's call to the callee, and the frames between

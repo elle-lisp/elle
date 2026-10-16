@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-16
 //! The region-inference pipeline: the walk, then every post-pass that decides
 //! where a release lands. The order is the point — each pass reads answers the
 //! ones before it settled.
@@ -144,6 +144,14 @@ pub fn analyze_regions_with(
         &postdom,
     );
 
+    // Where each uncounted read's borrow reaches (docs/impl/region/borrow.md).
+    // After the reassign gate, whose overwrite sites say which `assign` counts
+    // its store, and before every pass that reads how long a region is read.
+    let mut borrows = super::borrow::compute_borrows(hir, &info, arena);
+    info.uncounted_read_sites
+        .extend(std::mem::take(&mut borrows.reads));
+    info.binding_borrow_regions = std::mem::take(&mut borrows.bindings);
+
     let last_use_info = compute_last_use(hir, &du.uses, &order);
 
     // Escape's answer to the COUNT question, projected onto regions: which regions
@@ -175,6 +183,30 @@ pub fn analyze_regions_with(
     info.value_routed_regions =
         super::escape::value_routed_regions(arena, &info, &reassigns.binder_init_sites);
 
+    // Which compiled capture cells a value-routed release reads through: a
+    // celled binding whose binder recorded a call-result init against the slot
+    // the cell sits in (docs/impl/region/adopt.md). Only a call result takes the
+    // value route, and a captured reassigned binding's binder drops the init off
+    // its own register instead. Read here, beside the other route mirror, for
+    // the same reason: `binder_init_sites` is in scope.
+    let cell_routes: Vec<(Region, Region)> = info
+        .begin_cell_regions
+        .values()
+        .flatten()
+        .filter(|(b, _)| !info.captured_reassigned_bindings.contains(b))
+        .filter_map(|&(b, cell_region)| {
+            let super::escape::Route::Binder(Some(r)) =
+                super::escape::binder_route(b, arena, &info, &[], &reassigns.binder_init_sites)
+            else {
+                return None;
+            };
+            info.call_result_regions
+                .contains(&r)
+                .then_some((cell_region, r))
+        })
+        .collect();
+    info.cell_route_regions.extend(cell_routes);
+
     // Populate and extend every region's `decref_point`: alloc/cell seeds,
     // binding-chain extension, env-cell loop hoist, the return/destructure/
     // break consuming-and-transferring-node pins, and the two re-anchoring
@@ -192,6 +224,7 @@ pub fn analyze_regions_with(
         &break_skip_blocks,
         &frame_replacing_tail_calls,
         &reassigns.binder_init_sites,
+        &borrows,
     );
     let last_use = &last_use_info.per_node;
 

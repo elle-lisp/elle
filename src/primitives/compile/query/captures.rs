@@ -1,3 +1,8 @@
+// audited: 2026-10-06
+//! `compile/captures` and `compile/captured-by`: what a named function captures, and who captures a name.
+//!
+//! docs/analysis/portrait.md
+
 use super::*;
 use crate::primitives::ctx::NativeCtx;
 
@@ -44,17 +49,16 @@ pub(crate) fn find_lambda_captures(
     target: &str,
     ctx: &mut NativeCtx,
 ) -> Option<Vec<Value>> {
-    // The `.or_else(|| recurse(..))` chains of the region-threaded form are
-    // rewritten as sequential `if let Some` returns: each recursive call takes
-    // `&mut ctx` and must drop that borrow before the next call takes it, which
-    // a closure chain (two live `&mut ctx` captures) would not allow.
+    // Each arm returns through sequential `if let Some` rather than an
+    // `.or_else` chain: every recursive call takes `&mut ctx`, and a chain of
+    // closures would hold two live borrows of it.
     match &hir.kind {
         HirKind::Letrec { bindings, body } | HirKind::Let { bindings, body } => {
             for (binding, value) in bindings {
                 if let Some(name) = symbols.name(arena.get(*binding).name) {
                     if name == target {
-                        if let HirKind::Lambda { captures, .. } = &value.kind {
-                            return Some(captures_to_values(captures, arena, symbols, ctx));
+                        if let HirKind::Lambda(lambda) = &value.kind {
+                            return Some(captures_to_values(&lambda.captures, arena, symbols, ctx));
                         }
                     }
                 }
@@ -67,14 +71,14 @@ pub(crate) fn find_lambda_captures(
         HirKind::Define { binding, value } => {
             if let Some(name) = symbols.name(arena.get(*binding).name) {
                 if name == target {
-                    if let HirKind::Lambda { captures, .. } = &value.kind {
-                        return Some(captures_to_values(captures, arena, symbols, ctx));
+                    if let HirKind::Lambda(lambda) = &value.kind {
+                        return Some(captures_to_values(&lambda.captures, arena, symbols, ctx));
                     }
                 }
             }
             find_lambda_captures(value, arena, symbols, target, ctx)
         }
-        HirKind::Lambda { body, .. } => find_lambda_captures(body, arena, symbols, target, ctx),
+        HirKind::Lambda(lambda) => find_lambda_captures(&lambda.body, arena, symbols, target, ctx),
         HirKind::If {
             cond,
             then_branch,
@@ -198,9 +202,8 @@ pub(crate) fn captures_to_values(
                 fields.insert(kw("name"), name_val);
             }
             let kind = match cap.kind {
-                // A `Recursive` self-edge is reported like a `Local` capture, keyed on the
-                // binding's actual cell status: `lbox` when it keeps a cell (a sibling also
-                // captures it), `value` when it is cell-free (captured only by itself).
+                // A `Recursive` self-edge is reported like a `Local` capture: `lbox`
+                // when the binding keeps a cell, `value` when it is cell-free.
                 crate::hir::CaptureKind::Local | crate::hir::CaptureKind::Recursive { .. } => {
                     if inner.needs_capture() {
                         "lbox"
@@ -241,7 +244,7 @@ pub(crate) fn prim_compile_captured_by(
     }
     let symbols = unsafe { &*symbols_ptr };
 
-    // Find all lambdas whose captures include a binding named `name`.
+    // Find every bound lambda whose captures include a binding named `name`.
     let mut results = Vec::new();
     find_capturers(
         &handle.hir,
@@ -265,8 +268,8 @@ pub(crate) fn find_capturers(
     match &hir.kind {
         HirKind::Letrec { bindings, body } | HirKind::Let { bindings, body } => {
             for (binding, value) in bindings {
-                if let HirKind::Lambda { captures, .. } = &value.kind {
-                    for cap in captures {
+                if let HirKind::Lambda(lambda) = &value.kind {
+                    for cap in &lambda.captures {
                         if let Some(cap_name) = symbols.name(arena.get(cap.binding).name) {
                             if cap_name == target {
                                 let mut fields = BTreeMap::new();
@@ -286,8 +289,8 @@ pub(crate) fn find_capturers(
             find_capturers(body, arena, symbols, target, results, ctx);
         }
         HirKind::Define { binding, value } => {
-            if let HirKind::Lambda { captures, .. } = &value.kind {
-                for cap in captures {
+            if let HirKind::Lambda(lambda) = &value.kind {
+                for cap in &lambda.captures {
                     if let Some(cap_name) = symbols.name(arena.get(cap.binding).name) {
                         if cap_name == target {
                             let mut fields = BTreeMap::new();
@@ -304,7 +307,9 @@ pub(crate) fn find_capturers(
             }
             find_capturers(value, arena, symbols, target, results, ctx);
         }
-        HirKind::Lambda { body, .. } => find_capturers(body, arena, symbols, target, results, ctx),
+        HirKind::Lambda(lambda) => {
+            find_capturers(&lambda.body, arena, symbols, target, results, ctx)
+        }
         HirKind::If {
             cond,
             then_branch,

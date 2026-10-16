@@ -1,6 +1,6 @@
 # The image file
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-14 -->
 
 The byte layout of an image, and the fingerprint that decides whether this
 binary may map it.
@@ -189,6 +189,15 @@ so a build that renumbers either set reads every body instruction as a
 different one, and no layout probe can see that. A `prim_id` needs no entry,
 because a primitive travels by name (§ "A primitive travels by name, for the
 same reason").
+
+The fragment encoding is an input for the same reason. A payload's body
+fragment is the bytes `bincode` wrote for a `LambdaFragment`
+([region/template.md](../region/template.md)), and a build whose fragment
+types changed shape reads those bytes as another body, or as none. No layout
+probe sees a serde shape, so `FRAGMENT_ENCODING` names it, and the payload's
+fingerprint component records the number. An image written under another
+encoding falls back to a source boot rather than grafting a body it cannot
+read.
 
 The three boot sources are not fingerprint inputs. An image built before
 somebody edited stdlib.lisp has a layout this binary can map and a library it

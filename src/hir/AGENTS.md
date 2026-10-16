@@ -1,15 +1,15 @@
 # hir
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-14 -->
 
-High-level Intermediate Representation: the analyzed program, with bindings
-resolved, captures computed and signals inferred, and the passes over it.
+The analyzed program, with bindings resolved, captures computed and signals
+inferred, and the passes over it.
 
 ## Responsibility
 
-Analyze expanded Syntax into HIR, then transform HIR for lowering:
-dead-binding elimination, tail marking, functionalization, ANF, type
-inference, and region and escape analysis.
+Analyze expanded Syntax into HIR, then transform HIR for lowering: loop
+fusion, the graft, dead-binding elimination, tail marking, functionalization,
+ANF, type inference and the fold, and region and escape analysis.
 
 - Resolve all variable references to `Binding` (arena indices)
 - Compute closure captures
@@ -30,6 +30,7 @@ Does NOT:
 |------|---------|
 | `Hir` | Expression node with kind, span, signal, and a unique `HirId` |
 | `HirKind` | Expression variants (literals, control flow, etc.) |
+| `Lambda` | A function literal: parameters, captures, body, call signal, in [expr/lambda.rs](expr/lambda.rs). `HirKind::Lambda` holds it boxed. Build it with `Lambda::new` and its setters; rebuild it with `with_body`; reach it with `HirKind::as_lambda` or `as_lambda_mut` |
 | `Binding` | `u32` index into `BindingArena` — 4 bytes, Copy, identity by integer equality |
 | `BindingArena` | Owns all `BindingInner` values for a compilation unit |
 | `BindingInner` | Binding metadata: name, scope, and the analysis flags in [arena.rs](arena.rs) |
@@ -99,7 +100,7 @@ Lowerer (&BindingArena) — read-only access to binding metadata
    Box<Hir> }`. `yield` is a prelude macro that expands to
    `(emit :yield val)`.
 
-5. **Captures are computed per-fn.** Each `HirKind::Lambda` carries its
+5. **Captures are computed per-fn.** Each `Lambda` carries its
    own `Vec<CaptureInfo>` listing what it captures and how.
 
 6. **Empty lists become `HirKind::EmptyList`, not `HirKind::Nil`.** The
@@ -156,7 +157,7 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     handler reaches the symbol table through the driving VM's `symbols_ptr`
     and caches the Expander on the VM.
 
-15. **A docstring is a leading string literal.** `HirKind::Lambda` has a
+15. **A docstring is a leading string literal.** `Lambda` has a
     `doc: Option<Rc<str>>` field. The analyzer takes a leading string literal
     as the docstring only when the body has two or more forms. The lowerer
     copies it to `LirHead::doc`, and the emitter writes it into the code
@@ -181,7 +182,7 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     compile error. All synthesized nodes carry the literal's span.
 
 18. **A lambda's source location is captured for `meta/origin`.**
-    `HirKind::Lambda` has an `origin: Option<Span>` field, set in
+    `Lambda` has an `origin: Option<Span>` field, set in
     `analyze_lambda` from the form's span. The lowerer copies it to
     `LirHead::origin`, and the emitter writes it into the code payload.
     `(meta/origin f)` reads it through `ClosureTemplate::origin()`.
@@ -218,8 +219,8 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     and `analyze_file` run `mark_tail_calls` before returning, so `is_tail`
     is a fact on the analyzed tree rather than a default. The linter's
     non-tail-self-recursion rule and the `compile/callees` call graph both
-    read it there. `regularize` marks again, because map fusion mints call
-    nodes after that point.
+    read it there. `regularize` marks again, because map fusion and the graft
+    mint call nodes after that point.
 
 24. **A dead binding takes its initializer with it.** `hir::dead` removes a
     `let`/`letrec` binding with zero uses whose initializer is provably
@@ -235,4 +236,27 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     own table — a `BindingInner` per binding the body introduces, a
     `SymbolId` per free global — and `graft` re-hosts it in any arena.
     Nothing may hoist selected `BindingInner` fields beside a body instead.
-    See [docs/impl/hir.md](../../docs/impl/hir.md).
+    A function's own code payload carries the fragment of its body as bytes,
+    so a later unit reaches the body through the function value. See
+    [docs/impl/hir.md](../../docs/impl/hir.md).
+
+26. **A call to a known function becomes its body.** The graft replaces a
+    call whose callee is an immutable, non-recursive function binding with
+    the callee's fragment, at the call's arity: a same-unit function's from
+    the tree, another unit's from its value. It records the operand it bound
+    to each parameter, and inference joins that record into the parameter
+    as it joins a call site, so the definition keeps its proofs. In a
+    function nothing live reaches, only a call whose body holds no op with a
+    proof obligation grafts. The graft runs in
+    `regularize` after map fusion and before dead-binding elimination, and
+    it reads no name. Under `GraftPolicy::Off`, `regularize` skips the graft
+    and every call stays a call. See
+    [grafting a call](../../docs/impl/graft.md).
+
+27. **After inference, the fold deletes what the types decide.** A condition,
+    a `cond` clause, an `and` or `or` operand, or a `(type-of x)` dispatch
+    whose answer the recorded types settle loses its dead side. A raise keeps
+    the statements after it, because a resume reaches them, and the operand
+    contracts skip a site there. The fold and the inference ascent alternate
+    until a fold changes nothing, and the operand contracts run on what the
+    last fold left.

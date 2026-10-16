@@ -1,6 +1,6 @@
 # Elle
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-14 -->
 
 A Lisp whose compiler infers what each function does and where each value dies,
 and runs on those facts.
@@ -14,9 +14,15 @@ never. Elle uses them for four things: typed control flow, capability
 sandboxing, cooperative concurrency, and memory management with no garbage
 collector.
 
+None of it asks the programmer for annotations. Languages with this much
+control, speed or soundness ask for lifetimes, types and `async` markers, and
+an Elle program writes none of them. The few declarations Elle has, such as
+`(silent!)` and `(immutable!)`, state a fact the compiler then checks. They
+guard a program; they never enable one.
+
 This file explains those ideas, what works today, and what we are building
-toward. Elle is under active development. Its syntax changes between
-[epochs](docs/epochs.md), and its performance is not yet a focus. The
+toward. Elle is under active development, and its syntax changes between
+[epochs](docs/epochs.md). The
 [open issues](https://github.com/elle-lisp/elle/issues) list what is broken.
 
 ## Contents
@@ -93,8 +99,8 @@ called, and that check may raise:
 (assert (first bounded))                       # f is bounded, so it compiles
 ```
 
-[docs/signals/](docs/signals/index.md) covers inference, user signals, and the
-protocol.
+The [signal documents](docs/signals/index.md) cover inference, user signals,
+and the protocol.
 
 ## Capabilities flow down
 
@@ -120,8 +126,8 @@ its own call site:
 ```
 
 A child inherits every restriction its parent carries, and threads inherit
-them too. [docs/signals/capabilities.md](docs/signals/capabilities.md) states
-what a denial confines, and what it does not.
+them too. The [capability document](docs/signals/capabilities.md) states what
+a denial confines, and what it does not.
 
 ## Fibers
 
@@ -145,10 +151,10 @@ Structured concurrency sits on top of the scheduler:
 (assert (= (get page :users) [:ada :grace]))
 ```
 
-Janet's fibers are the model we started from. [lib/process.lisp](lib/process.lisp)
-builds Erlang-style processes from the same fibers, in Elle alone: mailboxes,
-links, monitors, GenServers and supervisors. See
-[docs/concurrency.md](docs/concurrency.md) and [docs/processes.md](docs/processes.md).
+Janet's fibers are the model we started from. The
+[process library](lib/process.lisp) builds Erlang-style processes from the same
+fibers, in Elle alone: mailboxes, links, monitors, GenServers and supervisors.
+See [concurrency](docs/concurrency.md) and [processes](docs/processes.md).
 
 ## Memory without a collector
 
@@ -187,16 +193,18 @@ and the bytes stay in the pages where they were born:
 (assert (> (- (arena/bytes) before) 100000))
 ```
 
-A value that crosses to another thread is deep-copied, where it could move with
-its regions instead ([#1247](https://github.com/elle-lisp/elle/issues/1247)).
+I/O follows the same design. A read hands the kernel a buffer in the caller's
+region, and a write hands the kernel its payload in the pages where it lives,
+so neither one copies. A value that crosses to another thread is deep-copied,
+where it could move with its regions instead ([#1247](https://github.com/elle-lisp/elle/issues/1247)).
 
 Freed pages return to a small per-thread cache, and pages past that cache go
 back to the operating system at once. So a long-running program's resident
 memory falls when its live data falls.
 
 This is where most of the current work goes. The project measures leaks with
-gauges ([tests/impl/oracle.lisp](tests/impl/oracle.lisp)) and closes them one
-class at a time. Two costs remain visible today:
+[gauges](tests/impl/oracle.lisp) and closes them one class at a time. Two costs
+remain visible today:
 
 - A region owns at least one 4 KiB page. A value that keeps a region of its own
   (for example, each element a loop pushes into an `@array`) therefore costs
@@ -205,8 +213,8 @@ class at a time. Two costs remain visible today:
 - The region table grows to the largest number of regions alive at once, and
   does not shrink.
 
-[docs/regions.md](docs/regions.md) is the model to write code against, and
-[docs/impl/memory.md](docs/impl/memory.md) is the implementor's map.
+Write code against the [region model](docs/regions.md). The
+[memory map](docs/impl/memory.md) is the implementor's guide.
 
 ## Images
 
@@ -216,19 +224,21 @@ maps its pages privately and rewrites its pointers in one pass. No value is
 decoded, and pages that nothing touches are never read from disk.
 
 The boot image holds the whole standard library as one region. From a warm
-image, Elle starts in under 10 ms with 12 MB resident. Loading the library from
-the default bytecode cache takes 40 ms and 39 MB, and compiling it from source
-takes 230 ms and 100 MB. Try the image with a cache directory:
+image, Elle starts in under 10 ms with 13 MB resident. Loading the library from
+the default bytecode cache takes 45 ms and 45 MB, and compiling it from source
+takes 270 ms and 100 MB. Try the image with a cache directory:
 
 ```sh
 elle --boot-image=$HOME/.cache/elle script.lisp
 ```
 
-The boot image is opt-in for now. A closure loaded from an image carries no
-LIR yet, so the JIT cannot compile the library's functions. Saving and loading
+The boot image is opt-in for now. A closure loaded from an image carries its
+LIR and the body a graft reads, so the library compiles on the JIT and a call
+to `+` becomes its body under either boot. A thread a program spawns still
+compiles its library from source. Saving and loading
 a user session as an image comes next, and then [fleet](docs/impl/fleet.md):
-running a function on other machines by shipping its image.
-[docs/impl/image.md](docs/impl/image.md) holds the design.
+running a function on other machines by shipping its image. The
+[image design](docs/impl/image.md) holds the details.
 
 ## Hygienic macros
 
@@ -246,43 +256,48 @@ macro introduces cannot capture a name at its call site:
 (assert (= [x y tmp] [2 1 100]))   # the macro's tmp is not the caller's tmp
 ```
 
-See [docs/macros.md](docs/macros.md).
+The [macro guide](docs/macros.md) covers the rest.
 
 ## Epochs
 
 A breaking change to the language gets an epoch number. A file can declare the
 epoch it was written for with `(elle/epoch N)`, and the compiler migrates older
 syntax before it expands macros. `elle rewrite` applies the same migration to
-the source file. See [docs/epochs.md](docs/epochs.md).
+the source file. See [epochs](docs/epochs.md).
+
+A library declares its own version the same way, with `(elle/version "X.Y.Z")`,
+and `elle semver` checks that a release's version bump matches its change of
+surface ([versioning](docs/versioning.md)).
 
 ## Where Elle is going
 
 - **Region merging.** Collapse regions that die together, so a collection and
   its elements share pages. This removes most of the per-value page cost.
-- **Performance.** Performance has not been a focus since the memory rewrite.
-  Today `+`, `-` and `<` are variadic library functions that the JIT cannot
-  compile. Plain numeric code runs 100 to 2,000 times slower than Janet or Lua,
-  and code written with `%` [intrinsics](docs/intrinsics.md) about 4 to 50 times
-  slower. Type inference and [dissolution](docs/impl/dissolution.md) are the
-  way back. Dissolution already fuses chains of `map`, `filter` and `fold` over
-  proven arrays into single loops. The plan lowers proven calls to intrinsics
-  and VM instructions, and restores the JIT's speed.
+- **Performance.** A call to a function the compiler can see becomes that
+  function's body, and the guards the proven types decide are deleted
+  ([grafting a call](docs/impl/graft.md)). So `(+ a b)` over proven integers is
+  one VM instruction, and the JIT compiles the function around it. On a release
+  build, a recursive `fib` of 32 takes 0.18 s, where Janet takes 0.17 s and Lua
+  0.13 s. With the JIT off it takes 2.9 s. A call to `+` with three operands
+  still reaches the variadic library function, which the JIT cannot compile.
+  [Dissolution](docs/impl/dissolution.md) already fuses chains of `map`,
+  `filter` and `fold` over proven arrays into single loops.
 - **Ownership in place of counting.** Extend the ownership forest, in the
   direction of Project Verona's regions, so fewer mutable stores need a
   reference count.
 - **Heterogeneous execution.** Lower dissolved kernels through MLIR
   automatically, keep device data in region-based device pools, and migrate
-  regions between host and GPU. This replaces today's hand-driven Vulkan path
-  ([docs/impl/gpu.md](docs/impl/gpu.md)).
+  regions between host and GPU. This replaces today's
+  [hand-driven Vulkan path](docs/impl/gpu.md).
 - **Environment images and fleet**, described under [Images](#images).
 - **WASM.** The WebAssembly backend was set aside during the memory rewrite.
-  Under `--wasm=full` it frees no memory and fails about half of the
-  language suite ([docs/impl/wasm.md](docs/impl/wasm.md)).
+  Under `--wasm=full` it frees no memory and
+  [fails about half of the language suite](docs/impl/wasm.md).
 
 ## Using Elle
 
-Build with a stable Rust toolchain. [INSTALL.md](INSTALL.md) lists the system
-libraries.
+Build with a stable Rust toolchain. The [install guide](INSTALL.md) lists the
+system libraries.
 
 ```sh
 cargo build --release -p elle
@@ -292,25 +307,26 @@ cargo build --release -p elle
 ./target/release/elle                   # start the REPL
 ```
 
-Read [QUICKSTART.md](QUICKSTART.md) before you write Elle. It lists the traps:
+Read the [quickstart](QUICKSTART.md) before you write Elle. It lists the traps:
 `nil` is not `()`, `#` starts a comment, and `assign` mutates while `set` builds
-a set. [docs/coming-from.md](docs/coming-from.md) maps Elle onto the language
-you know.
+a set. [Coming from another language](docs/coming-from.md) maps Elle onto the
+language you know.
 
 The tools ship in the same binary: `elle fmt` formats source, `elle lint` runs
 the compiler's diagnostics, `elle lsp` serves an editor over the Language
 Server Protocol, and `elle rewrite` migrates source between epochs.
 
-The standard library ([docs/libraries.md](docs/libraries.md)) and the Rust
-plugins ([docs/plugins.md](docs/plugins.md)) are written against the same
-primitives. The plugins and the MCP server live in submodules:
+The [standard library](docs/libraries.md) and the
+[Rust plugins](docs/plugins.md) are written against the same primitives. The
+plugins and the MCP server live in submodules:
 
 ```sh
 git submodule update --init plugins mcp
 ```
 
-[CONTRIBUTING.md](CONTRIBUTING.md) describes how to work on Elle and which
-tests to run. The full `make smoke` takes about 30 minutes on a release build.
+The [contributing guide](CONTRIBUTING.md) describes how to work on Elle and
+which tests to run. The full `make smoke` takes about 30 minutes on a release
+build.
 
 ## License
 

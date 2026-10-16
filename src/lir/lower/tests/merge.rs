@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-16
 //! Pins the lowerer's slot-resolved RC instructions: coalesced mints, the merge's shared slot, and their counters.
 //!
 //! docs/impl/region/mechanism.md
@@ -177,9 +177,9 @@ fn param_return_stays_value_resolved() {
 //       every region through `merged_root`;
 //   (2) carry ONE `DecrefRegion` — the root's; the non-root child's own demise is
 //       suppressed (only the root's drop frees the shared region);
-//   (3) drop the now-intra-region `child→parent` store edge's `IncrefRegion`
-//       (self-edge elimination: the cascade skips self-references, so keeping
-//       it leaks);
+//   (3) emit no `IncrefRegion` for the now-intra-region `child→parent` store
+//       edge (self-edge elimination: the cascade skips self-references, so an
+//       incref leaks; a `%pair` edge takes none merged or not);
 //   (4) record the shared slot in `merged_slots` for runtime mint-or-reuse.
 //
 // The canonical shape is the discarded nested literal `(begin (%pair (%pair 1 2) 3)
@@ -187,9 +187,9 @@ fn param_return_stays_value_resolved() {
 // fire on. `%pair` compiles as the `Pair` intrinsic (lowered to `InstrRef::List`)
 // on every compile, so the seed always has sites to merge.
 //
-// Each pin fails against a lowerer that ignores the merge: it allocates child and
-// parent on DISTINCT slots, emits TWO `DecrefRegion`s, KEEPS the self-edge
-// `IncrefRegion`, and records NO `merged_slots`.
+// Pins (1), (2) and (4) fail against a lowerer that ignores the merge: it
+// allocates child and parent on DISTINCT slots, emits TWO `DecrefRegion`s, and
+// records NO `merged_slots`. Pin (3) fails against one that increfs the edge.
 
 #[test]
 fn merge_flip_child_and_parent_share_one_slot() {
@@ -233,9 +233,9 @@ fn merge_flip_emits_one_decref_for_the_merged_pair() {
 
 #[test]
 fn merge_flip_drops_the_self_edge_incref() {
-    // (3) The `child→parent` store edge is intra-region post-merge, so its
-    // `IncrefRegion` is dropped (self-edge elimination). Counterfactual: unmerged, the edge
-    // emits one `IncrefRegion` on the child slot → one incref over the pair-slot set.
+    // (3) The `child→parent` store edge is intra-region post-merge, so it takes no
+    // `IncrefRegion` (self-edge elimination). Counterfactual: an edge that took its
+    // incref emits one on the shared slot → one incref over the pair-slot set.
     let module = compile_to_lir(BUILDER_IDIOM);
     let slots: std::collections::HashSet<StaticRegion> =
         builder_pair_slots(&module).into_iter().collect();
@@ -299,6 +299,46 @@ fn merge_flip_inert_without_a_merge() {
     assert_eq!(
         decrefs, 1,
         "the lone discarded %pair keeps its one ordinary DecrefRegion"
+    );
+}
+
+#[test]
+fn an_unmerged_pair_edge_takes_no_static_incref() {
+    // `outer` holds `inner` in its cdr, and `inner` is read after `outer`'s last
+    // use, so the merge seed refuses the nest and the edge stays cross-region.
+    // `handle_list` allocates `outer` through `alloc_obj`, whose scan counts the
+    // reference to `inner`; the cascade at `outer`'s free releases that count.
+    // `face` is called, so the inline re-walk records the edge a second time.
+    //
+    // The counter-factual: the edge's static `IncrefRegion`, once per record,
+    // counts the scanned reference again with no release to match, and `inner`
+    // leaks once per call.
+    let module = compile_to_lir(
+        "(begin (def face (fn (i) (let [inner (%pair i ()) outer (%pair i inner)] \
+                                     (begin (%first outer) (%first inner))))) \
+                (face 1))",
+    );
+    let face = module
+        .closures
+        .iter()
+        .find(|f| func_count(f, |i| matches!(i, InstrRef::List { .. })) == 2)
+        .expect("a closure allocating both pairs");
+    let mut slots = Vec::new();
+    for b in face.view().blocks() {
+        for i in b.instrs() {
+            if let InstrRef::List { region, .. } = i {
+                slots.push(region);
+            }
+        }
+    }
+    assert!(
+        slots.len() == 2 && slots[0] != slots[1],
+        "precondition: the nest stays unmerged, one slot per pair; got {slots:?}",
+    );
+    assert_eq!(
+        func_count(face, |i| matches!(i, InstrRef::IncrefRegion { .. })),
+        0,
+        "the %pair edge took a static IncrefRegion beside the allocation scan's count",
     );
 }
 

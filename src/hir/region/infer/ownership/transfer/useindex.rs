@@ -1,6 +1,11 @@
-//! Per-unit facts the producer/consumer gates read: every `Var` occurrence
-//! classified by use form, each call site's innermost enclosing Lambda, and
-//! each binding's inits — built in one structural walk over the HIR.
+// audited: 2026-10-06
+//! The per-unit use index the transfer cut's gates read, built in one structural walk over the HIR.
+//!
+//! docs/impl/region/owner.md
+//!
+//! The index records every `Var` occurrence classified by use form, each call
+//! site's innermost enclosing `Lambda`, each binding's inits, and the bindings each
+//! call's value is bound to.
 
 use super::*;
 
@@ -25,18 +30,16 @@ pub(super) enum UseForm {
     Other,
 }
 
-/// Per-unit facts the gates read repeatedly: every `Var` occurrence classified
-/// by use form, each call site's innermost enclosing Lambda, and each
-/// binding's inits. Child nodes are stored as `*const Hir` — the established
-/// idiom for keeping HIR references across a `for_each_child` walk (the tree
-/// outlives the analysis; see `RegionInference::binding_lambda`).
+/// Per-unit facts the gates read repeatedly. Child nodes are stored as
+/// `*const Hir`, as `RegionInference::binding_lambda` stores them, so the index
+/// carries no lifetime. The tree outlives the analysis.
 pub(super) struct UseIndex {
     /// Binding → its classified occurrences, in structural walk order.
     pub uses: FxHashMap<Binding, Vec<UseForm>>,
     /// Binding → EVERY init expression a Let/Letrec/Define/Destructure gives
-    /// it, in walk order. A binding is a producer / fiber-body candidate only
-    /// when it has exactly one init and that init is a Lambda — a sibling
-    /// re-def or a destructure target has no stable binding→lambda identity.
+    /// it, in walk order. A sibling re-def or a destructure target has no stable
+    /// binding→lambda identity, so [`UseIndex::sole_lambda_init`] requires
+    /// exactly one init.
     pub inits: FxHashMap<Binding, Vec<*const Hir>>,
     /// Call-node → innermost enclosing Lambda HirId (`None` = the top level).
     pub enclosing: FxHashMap<HirId, Option<HirId>>,
@@ -160,11 +163,11 @@ impl UseIndex {
                         }
                     }
                 }
-                HirKind::Lambda { body, .. } => {
+                HirKind::Lambda(lambda) => {
                     // A capture is not a Var occurrence; only the body's reads
                     // count (captured bindings are gated separately through
                     // the structural capture sets).
-                    walk(body, arena, cc, Some(h.id), ix);
+                    walk(&lambda.body, arena, cc, Some(h.id), ix);
                 }
                 HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
                     for (b, init) in bindings {
@@ -222,7 +225,7 @@ impl UseIndex {
         match self.inits.get(&b).map(|v| v.as_slice()) {
             Some([l]) => {
                 let l = unwrap_cell(unsafe { &**l });
-                matches!(l.kind, HirKind::Lambda { .. }).then_some(l)
+                matches!(l.kind, HirKind::Lambda(_)).then_some(l)
             }
             _ => None,
         }

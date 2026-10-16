@@ -1,23 +1,44 @@
+// audited: 2026-10-14
+//! The per-node last use: where the value each node produces is last read, solved to a fixpoint over binding chains.
+//!
+//! docs/impl/region/anchors.md
+//! docs/impl/region/cells.md
+
 use super::*;
 
 mod builder;
 use builder::LastUseBuilder;
 
-pub fn compute_last_use(
-    hir: &Hir,
-    uses: &HashMap<Binding, Vec<HirId>>,
-    order: &HashMap<HirId, u32>,
-) -> LastUseInfo {
-    let low = compute_subtree_low(hir, order);
+/// Each node's effective last use: the node after which the value it produced
+/// is read no more.
+pub type LastUse = rustc_hash::FxHashMap<HirId, HirId>;
+
+/// Compute per-HirId last-use: for each value-producing HirId, the HirId
+/// at which its value is last referenced.
+///
+/// For an allocation `A`:
+/// - If `A` is bound to some binding `b` (that is, `A` is a binding's init),
+///   `last_use[A]` is the latest "effective HirId" over all `Var(b)`
+///   references. The effective HirId of a `Var(b)` is the immediate
+///   parent expression's HirId when the parent *consumes* the value
+///   (Call, Emit, Define, Assign, SetCell, MakeCell, Intrinsic, etc.);
+///   otherwise it is the `Var(b)` HirId itself.
+/// - If `A` has no binding (inline allocation passed as an argument or
+///   value child of a consumer), `last_use[A]` is the consumer's HirId.
+/// - If `A` is bound but the binding has no uses anywhere,
+///   `last_use[A] = A` (decref immediately after the alloc).
+///
+/// Region inference gives every region exactly one `decref_point`, and this
+/// mapping supplies it for allocation HirIds.
+pub fn compute_last_use(hir: &Hir, uses: &crate::hir::defuse::Uses, order: &Order) -> LastUseInfo {
     let mut builder = LastUseBuilder {
-        last_use: HashMap::new(),
+        last_use: LastUse::default(),
         capture_loop_ext: HashMap::new(),
         binding_init: HashMap::new(),
         binding_scope: HashMap::new(),
         propagated_inits: rustc_hash::FxHashSet::default(),
         iter_scope_stack: Vec::new(),
         order,
-        low: &low,
     };
     // The root has no parent; parent_consumes=false is the conservative
     // default (the root's value is the program's result, no further use).
@@ -39,8 +60,7 @@ pub fn compute_last_use(
     // must live until the `(u1)` call, reached only through u1's override).
     // The override equations must be solved to a fixpoint independent of the
     // hash-iteration order, or a chain resolves only to a random prefix and a
-    // capture cell is released too early — a use-after-free with
-    // nondeterministic codegen (region-capture-cell-noreassign-uaf.lisp).
+    // capture cell is released too early.
     //
     // Solve the override equations to their fixpoint in two phases, both
     // independent of hash iteration order:
@@ -57,10 +77,10 @@ pub fn compute_last_use(
     // chaotic re-evaluation converges to the unique least fixpoint regardless
     // of processing order — and without the per-round full-map clone that
     // makes a round-based sweep quadratic on a file letrec's chain of
-    // sequential defs (i.e. the stdlib).
+    // sequential defs, that is, the stdlib.
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     let compute_chosen = |binding: &Binding,
-                          last_use: &HashMap<HirId, HirId>,
+                          last_use: &LastUse,
                           capture_loop_ext: &HashMap<Binding, HirId>|
      -> Option<HirId> {
         let mut max_effective = uses
@@ -99,9 +119,8 @@ pub fn compute_last_use(
     // what frees an unused `let`'s allocation promptly. For a `Define` the value
     // is also the form's value, so it dies wherever the `def` does and the walk
     // already recorded that; narrowing past it would free the value under the
-    // expression the `def` was handed to (docs/impl/region/mechanism.md § "A
-    // binder's init release lands after the slot store"). A use, when there is
-    // one, still wins — the fallback is a floor, not a replacement.
+    // expression the `def` was handed to (docs/impl/region/anchors.md). A use,
+    // when there is one, still wins — the fallback is a floor, not a replacement.
     let mut staged: HashMap<HirId, HirId> = HashMap::new();
     for (binding, init_ids) in &builder.binding_init {
         let chosen = compute_chosen(binding, &builder.last_use, &builder.capture_loop_ext);
@@ -172,7 +191,7 @@ pub fn compute_last_use(
 pub struct LastUseInfo {
     /// Per-node effective last-use: a node's HirId → the HirId at which the
     /// value it produced is last used (after which its region may be freed).
-    pub per_node: HashMap<HirId, HirId>,
+    pub per_node: LastUse,
     /// Bindings captured by a lambda created INSIDE an iterative scope while
     /// bound OUTSIDE it → the outermost enclosing iter-scope HirId the binding
     /// must outlive. Such a binding is re-captured every iteration, so its

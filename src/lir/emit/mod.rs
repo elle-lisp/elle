@@ -1,8 +1,10 @@
-// audited: 2026-10-12
-// docs/impl/bytecode.md
-//! Converts register-based LIR to stack-based bytecode, simulating the operand
-//! stack to find where each register's value sits. `edge` emits the block
-//! terminators, `stack` holds the simulation, `instr` the instructions.
+// audited: 2026-10-14
+//! Converts register-based LIR to stack-based bytecode, simulating the operand stack to find each register's value.
+//!
+//! docs/impl/bytecode.md
+//!
+//! `edge` emits the block terminators, `stack` holds the simulation, `instr`
+//! the instructions.
 
 mod edge;
 mod stack;
@@ -11,7 +13,7 @@ use super::code::{BlockRef, ConstRef, FrozenModule, InstrRef, LirOwned, LirView}
 use super::types::*;
 use crate::compiler::bytecode::{Bytecode, Instruction};
 use crate::value::Value;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::rc::Rc;
 
 /// What emitting one function produces: its bytecode, and the metadata only
@@ -30,22 +32,22 @@ pub struct Emitter {
     /// Output bytecode
     bytecode: Bytecode,
     /// Map from Label to bytecode offset
-    label_offsets: HashMap<Label, usize>,
+    label_offsets: FxHashMap<Label, usize>,
     /// Pending jumps that need patching (instruction position, target label)
     pending_jumps: Vec<(usize, Label)>,
     /// Stack simulation: which register's value is at each stack position
     stack: Vec<Reg>,
     /// Register to stack position mapping (for finding values)
-    reg_to_stack: HashMap<Reg, usize>,
+    reg_to_stack: FxHashMap<Reg, usize>,
     /// The simulation a block still ahead of the cursor starts from, keyed by
     /// its label. A `Jump` saves it for its target, a `Branch` for both
     /// targets, and an `Emit` for its resume block.
-    yield_stack_state: HashMap<Label, (Vec<Reg>, HashMap<Reg, usize>)>,
+    yield_stack_state: FxHashMap<Label, (Vec<Reg>, FxHashMap<Reg, usize>)>,
     /// Operand depth each already-emitted block started at, keyed by label.
     /// `yield_stack_state` answers the same question for a block still ahead of
     /// the cursor, but `emit_block` consumes that entry — so this is what a back
     /// edge into a loop header has left to trim against (`edge_depth`).
-    block_entry_depth: HashMap<Label, usize>,
+    block_entry_depth: FxHashMap<Label, usize>,
     /// Yield point metadata collected during emission.
     yield_points: Vec<YieldPointInfo>,
     /// Call site metadata collected during emission.
@@ -69,7 +71,7 @@ pub struct Emitter {
     arena: crate::value::CodeArena,
     /// The header over each closure's payload, once a `MakeClosure` has
     /// written it, so a lambda two sites build is one code object.
-    lambda_headers: HashMap<ClosureId, Value>,
+    lambda_headers: FxHashMap<ClosureId, Value>,
 }
 
 mod instr;
@@ -80,12 +82,12 @@ impl Emitter {
         Emitter {
             arena,
             bytecode: Bytecode::new(),
-            label_offsets: HashMap::new(),
+            label_offsets: FxHashMap::default(),
             pending_jumps: Vec::new(),
             stack: Vec::new(),
-            reg_to_stack: HashMap::new(),
-            yield_stack_state: HashMap::new(),
-            block_entry_depth: HashMap::new(),
+            reg_to_stack: FxHashMap::default(),
+            yield_stack_state: FxHashMap::default(),
+            block_entry_depth: FxHashMap::default(),
             yield_points: Vec::new(),
             call_sites: Vec::new(),
             charge_sites: Vec::new(),
@@ -93,7 +95,7 @@ impl Emitter {
             current_func_num_locals: 0,
             compiled_closures: None,
             closure_lir_funcs: None,
-            lambda_headers: HashMap::new(),
+            lambda_headers: FxHashMap::default(),
         }
     }
 

@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-10-14
 //! Structural position over the scope tree: subtree ancestry, loop enclosure,
 //! and the post-dominance the single-drop lifetime obligation needs.
 //!
@@ -8,16 +8,15 @@
 //! point — the parent/root's `DecrefRegion`, fired at its `decref_point` after
 //! that node's whole subtree executes (post-order). For that single drop to be
 //! sound it must come **after** the member's last use on every path, with no
-//! re-execution of the use afterward (docs/impl/region/adopt.md § "The lifetime obligation
-//! the root carries").
+//! re-execution of the use afterward (docs/impl/region/adopt.md).
 //!
 //! Domination is **structural, never numeric**: a smaller `compute_order` index
 //! does *not* imply post-domination once a branch arm or a loop back-edge sits
 //! between the use and the drop. This predicate decides it over the scope tree via
-//! post-order subtree intervals (`[low[N], order[N]]`, `compute_subtree_low`) —
+//! post-order subtree intervals (`[low[N], order[N]]`, `compute_order`) —
 //! structural ancestry and control-flow enclosure are interval tests — not by
-//! comparing indices. The `ord(member) <= ord(root)` comparison the two call sites
-//! used to gate on now survives only as their `#[cfg(debug_assertions)]` shadow.
+//! comparing indices. The call sites keep an `ord(member) <= ord(root)` comparison
+//! only as a `#[cfg(debug_assertions)]` shadow.
 
 use super::*;
 
@@ -56,17 +55,15 @@ struct Ctrl {
 /// compilation unit, built once and reused for every member check (the call
 /// sites loop over many members per subtree / per pair site).
 pub(super) struct PostDom<'a> {
-    order: &'a HashMap<HirId, u32>,
-    low: HashMap<HirId, u32>,
+    order: &'a Order,
     ctrl: Vec<Ctrl>,
 }
 
 impl<'a> PostDom<'a> {
-    pub(super) fn new(hir: &Hir, order: &'a HashMap<HirId, u32>) -> Self {
-        let low = compute_subtree_low(hir, order);
+    pub(super) fn new(hir: &Hir, order: &'a Order) -> Self {
         let mut ctrl = Vec::new();
-        collect_ctrl(hir, order, &low, &mut ctrl);
-        PostDom { order, low, ctrl }
+        collect_ctrl(hir, order, &mut ctrl);
+        PostDom { order, ctrl }
     }
 
     /// This node's post-order execution index.
@@ -89,9 +86,9 @@ impl<'a> PostDom<'a> {
     }
 
     /// Is `inner` inside `outer`'s post-order subtree interval — i.e. is `outer`
-    /// a structural ancestor of `inner` (`compute_subtree_low`)?
+    /// a structural ancestor of `inner` (`compute_order`)?
     pub(super) fn in_subtree(&self, inner: HirId, outer: HirId) -> bool {
-        let lo = self.low.get(&outer).copied().unwrap_or(0);
+        let lo = self.order.low(&outer).unwrap_or(0);
         let oi = self.ord(inner);
         oi >= lo && oi <= self.ord(outer)
     }
@@ -148,12 +145,7 @@ impl<'a> PostDom<'a> {
 
 /// Collect every control-flow node (`If`/`Cond`/`Match`/`While`/`Loop`/`And`/`Or`)
 /// with its post-order subtree interval and whether it is iterative.
-fn collect_ctrl(
-    hir: &Hir,
-    order: &HashMap<HirId, u32>,
-    low: &HashMap<HirId, u32>,
-    out: &mut Vec<Ctrl>,
-) {
+fn collect_ctrl(hir: &Hir, order: &Order, out: &mut Vec<Ctrl>) {
     let is_loop = matches!(&hir.kind, HirKind::While { .. } | HirKind::Loop { .. });
     let is_ctrl = is_loop
         || matches!(
@@ -166,10 +158,10 @@ fn collect_ctrl(
         );
     if is_ctrl {
         out.push(Ctrl {
-            lo: low.get(&hir.id).copied().unwrap_or(0),
+            lo: order.low(&hir.id).unwrap_or(0),
             hi: order.get(&hir.id).copied().unwrap_or(0),
             is_loop,
         });
     }
-    hir.for_each_child(|c| collect_ctrl(c, order, low, out));
+    hir.for_each_child(|c| collect_ctrl(c, order, out));
 }

@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-06
 //! Recognizing the calls a chain is made of, the functions they may splice, and
 //! the array base the chain walks.
 //!
@@ -6,13 +6,13 @@
 //! docs/impl/dissolution/inline.md
 
 use super::*;
+use crate::hir::Lambda;
 
-/// A recognized `(map <f> …)` / `(map-indexed <f> …)` / `(filter <f> …)` /
-/// `(take-while <f> …)` / `(drop-while <f> …)` / `(mapcat <f> …)` call: the HOF
-/// kind, the function argument, and the collection argument (both borrowed).
-/// `None` when `hir` is not a call to one of those canonical stdlib ops with
-/// exactly two non-spliced arguments (a user redefinition shadows the name with a
-/// non-primitive binding and is excluded).
+/// A recognized pipeline-op call — `map`, `map-indexed`, `filter`, `take-while`,
+/// `drop-while` or `mapcat` — as the op, its function argument and its collection
+/// argument. `None` when `hir` is not a call to one of those canonical stdlib ops
+/// with exactly two non-spliced arguments. A user redefinition shadows the name
+/// with a binding that is not `is_primitive`, and is excluded.
 pub(in crate::hir::typeinfer::fuse) fn fusable_hof_parts<'a>(
     hir: &'a Hir,
     arena: &BindingArena,
@@ -32,14 +32,12 @@ pub(in crate::hir::typeinfer::fuse) fn fusable_hof_parts<'a>(
     Some((hof, &args[0].expr, &args[1].expr))
 }
 
-/// A recognized `(fold <lambda> <init> <coll>)` / `(reduce …)` call: the 2-param
-/// combinator lambda, the seed `init`, and the collection (all borrowed). `None`
-/// when `hir` is not a call to the canonical stdlib `fold`/`reduce` with exactly
-/// three non-spliced arguments. `reduce` is `(def reduce fold)` — the same
-/// left-fold, recognized by either name. A user redefinition shadows the name with
-/// a non-primitive binding and is excluded (the `is_primitive` gate, as for
-/// `map`/`filter`). A `fold` is a terminal, like a `count` or a search: its scalar
-/// result is not a collection, so nothing chains over it.
+/// A recognized `(fold f init coll)` or `(reduce …)` call: the function
+/// argument, the seed and the collection. `None` when `hir` is not a call to
+/// the canonical stdlib `fold` or `reduce` with exactly three non-spliced
+/// arguments. `reduce` is `(def reduce fold)`, so either name reads the same
+/// left fold. A user redefinition shadows the name with a binding that is not
+/// `is_primitive`, and is excluded.
 pub(in crate::hir::typeinfer::fuse) fn fusable_fold_parts<'a>(
     hir: &'a Hir,
     arena: &BindingArena,
@@ -61,13 +59,11 @@ pub(in crate::hir::typeinfer::fuse) fn fusable_fold_parts<'a>(
     Some((&args[0].expr, &args[1].expr, &args[2].expr))
 }
 
-/// A recognized `(count <pred> <coll>)` call: the 1-parameter predicate and the
-/// collection (both borrowed). `None` when `hir` is not a call to the canonical
-/// stdlib `count` with exactly two non-spliced arguments; a user redefinition
-/// shadows the name with a non-primitive binding and is excluded, as for
-/// `map`/`filter`.
+/// A recognized `(count pred coll)` call: the predicate and the collection.
+/// `None` when `hir` is not a call to the canonical stdlib `count` with exactly
+/// two non-spliced arguments, or when a user redefinition shadows the name.
 ///
-/// `count` shares `filter`'s two-argument shape but produces a NUMBER, so it is a
+/// `count` takes `filter`'s two arguments but produces a number, so it is a
 /// terminal rather than a stage: `Hof::from_symbol` never answers for it, and
 /// `validate_chain` asks this before the pipeline walk starts.
 pub(in crate::hir::typeinfer::fuse) fn fusable_count_parts<'a>(
@@ -88,13 +84,13 @@ pub(in crate::hir::typeinfer::fuse) fn fusable_count_parts<'a>(
     Some((&args[0].expr, &args[1].expr))
 }
 
-/// A recognized `(any? <pred> <coll>)` / `(all? …)` / `(find …)` /
-/// `(find-index …)` call: which search it is, the 1-parameter predicate, and the
-/// collection. `None` when `hir` is not a call to one of the four canonical stdlib
-/// searches with exactly two non-spliced arguments; a user redefinition shadows the
-/// name with a non-primitive binding and is excluded, as for `map`/`filter`.
+/// A recognized `(any? pred coll)`, `(all? …)`, `(find …)` or `(find-index …)`
+/// call: which search it is, the predicate and the collection. `None` when
+/// `hir` is not a call to one of the four canonical stdlib searches with
+/// exactly two non-spliced arguments, or when a user redefinition shadows the
+/// name.
 ///
-/// A search shares `filter`'s two-argument shape but produces a SCALAR, so it is a
+/// A search takes `filter`'s two arguments but produces a scalar, so it is a
 /// terminal rather than a stage: `Hof::from_symbol` never answers for one, and
 /// `validate_chain` asks this before the pipeline walk starts.
 pub(in crate::hir::typeinfer::fuse) fn fusable_search_parts<'a>(
@@ -116,39 +112,26 @@ pub(in crate::hir::typeinfer::fuse) fn fusable_search_parts<'a>(
     Some((search, &args[0].expr, &args[1].expr))
 }
 
-/// The parameters and body of a lambda that qualifies for inlining, or `None`. A
-/// qualifying lambda has exactly `arity` fixed parameters (no rest) — one for an
-/// element function, two for a `fold` combinator or a `map-indexed`'s
-/// position-and-element function — unmutated parameters, and **no nested lambda**
-/// in its body (so retyping a parameter to a plain local cannot disturb a capture
-/// of it). A raw `%`-intrinsic in the body is
-/// admitted only under the lambda's own `(numeric!)` declaration
-/// (`body_disqualifies`). These bounds keep the splice a straight
-/// `(let [param elem] body)` per parameter with no substitution or cell reasoning.
-///
-/// A **capture** is admitted: the rewrite moves the literal out of the call and
-/// splices its body where that call stood, so every free variable it reads is bound
-/// by an enclosing scope of the splice and resolves from the enclosing function with
-/// no rename. The exception is a **self-reference** (`CaptureKind::Recursive`),
-/// which names the executing closure rather than a binding the frame holds — and
-/// fusion removes the closure it would name. What a capture does cost is the composition gate, which `validate_chain`
-/// asks separately (`captures_locals`).
+/// The parameters and body of a lambda literal that qualifies for splicing, or
+/// `None`. It takes exactly `arity` fixed parameters and no rest list, mutates
+/// none of them, and does not refer to itself (`CaptureKind::Recursive`): the
+/// self-reference names the closure that fusion removes. Its body passes
+/// `body_disqualifies`. Every other capture is admitted, because the body is
+/// spliced where the literal was written, and `captures_locals` answers the
+/// composition gate separately.
 pub(in crate::hir::typeinfer::fuse) fn qualifies_lambda<'a>(
     lam: &'a Hir,
     arena: &BindingArena,
     arity: usize,
 ) -> Option<(&'a [Binding], &'a Hir)> {
-    let HirKind::Lambda {
+    let Lambda {
         params,
         rest_param,
         captures,
         body,
         assert_numeric,
         ..
-    } = &lam.kind
-    else {
-        return None;
-    };
+    } = lam.kind.as_lambda()?;
     if rest_param.is_some() || params.len() != arity {
         return None;
     }
@@ -164,39 +147,28 @@ pub(in crate::hir::typeinfer::fuse) fn qualifies_lambda<'a>(
     Some((params, body))
 }
 
-/// Does this function argument read a binding through a **capture** — a name the
-/// closure would have carried in its environment, rather than one of its own
-/// parameters or a constant the lowerer folds in? Only a call-site lambda literal
-/// can answer yes: a fragment refuses a capture outright, its body naming the
-/// scope its function was DEFINED in.
-///
-/// A capture is a cross-element channel the reorder gate cannot see — a mutable
-/// local two bodies share, or a mutable value an immutable local names, neither of
-/// which raises a signal — so a chain that interleaves two lambdas' calls declines
-/// on it.
+/// Does this function argument capture a binding? Only a lambda literal can: a
+/// fragment does not close over a body that names an enclosing runtime local.
 pub(in crate::hir::typeinfer::fuse) fn captures_locals(lam: &Hir) -> bool {
-    matches!(&lam.kind, HirKind::Lambda { captures, .. } if !captures.is_empty())
+    matches!(lam.kind.as_lambda(), Some(lambda) if !lambda.captures.is_empty())
 }
 
-/// Does a lambda body disqualify it from inlining? Two structural hazards, both
-/// detected in one walk:
+/// Does a lambda body disqualify it from splicing? It does when it holds either
+/// of these:
 ///
-/// - **A nested lambda** — retyping the parameter to a plain local (the splice)
-///   could disturb a capture of it, and a per-element closure is not the kernel
-///   this fusion targets.
-/// - **A call-position `%`-intrinsic without a `(numeric!)` declaration**
-///   (`declared_numeric == false`) — a raw intrinsic carries an operand proof
-///   obligation (docs/intrinsics.md) that a parameter discharges only through
-///   the declaration, which floors every parameter at Number. Under a declaration
-///   the floor is carried onto the spliced parameter binding, so the site proves
-///   in the loop exactly as it did in the function; with no declaration there is
-///   nothing to carry and the body stays a plain call. Ordinary numeric kernels written with the
-///   stdlib wrappers (`+`/`*`) are plain calls here and never reach this gate.
+/// - **A nested lambda.** The splice turns a parameter into a plain local,
+///   which could disturb a capture of it, and a closure per element is not the
+///   kernel this fusion targets.
+/// - **A call-position `%`-intrinsic without `(numeric!)`**
+///   (`declared_numeric == false`). Only the declaration's floor on the
+///   parameters proves the intrinsic's operands, and the floor travels with the
+///   parameter binding into the loop. A kernel written with the stdlib wrappers,
+///   such as `+`, holds plain calls here, because the graft runs after fusion.
 pub(in crate::hir::typeinfer::fuse) fn body_disqualifies(
     hir: &Hir,
     declared_numeric: bool,
 ) -> bool {
-    if matches!(hir.kind, HirKind::Lambda { .. })
+    if matches!(hir.kind, HirKind::Lambda(_))
         || (!declared_numeric && matches!(hir.kind, HirKind::Intrinsic { .. }))
     {
         return true;
@@ -206,13 +178,13 @@ pub(in crate::hir::typeinfer::fuse) fn body_disqualifies(
     found
 }
 
-/// The proven array-ness of a fused chain's base — the fact that selects the
-/// terminal's result arm (frozen vs unfrozen), mirroring the stdlib op's own
-/// `(if (mutable? coll) acc (freeze acc))`.
+/// The proven array-ness of a fused chain's base: the fact that selects the
+/// terminal's result arm, frozen or unfrozen, as the stdlib op's own
+/// `(if (mutable? coll) acc (freeze acc))` does.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(in crate::hir::typeinfer::fuse) enum BaseKind {
-    /// A proven immutable `array` — the result is frozen. Admits every terminal
-    /// and composition (the base cannot be mutated, so an interleaved live walk
+pub(in crate::hir::typeinfer) enum BaseKind {
+    /// A proven immutable `array` — the result is frozen. Admits `fold` and
+    /// compositions (the base cannot be mutated, so an interleaved live walk
     /// preserves the value).
     Immutable,
     /// A proven mutable `@array` — the result is the accumulator unfrozen. Fuses
@@ -220,24 +192,19 @@ pub(in crate::hir::typeinfer::fuse) enum BaseKind {
     Mutable,
 }
 
-/// Classify `expr` as a statically-proven array base, or `None`. Two proven
-/// forms, each carrying its mutability:
+/// Classify `expr` as a proven array base, or `None`:
 ///
-/// - **A call-site array producer** — a call to a primitive whose declared
-///   `RetType` is `Array` (an `[ … ]` literal → the `array` primitive, `->array`,
-///   …) → `Immutable`, or `MutableArray` (a `@[ … ]` literal → `@array`, `thaw`,
-///   …) → `Mutable`.
-/// - **A `Var` alias of one** — a binding whose initializer resolves through the
-///   shared init proof (`bases`, built by `prune::concrete_init_keywords`) to the
-///   `array` (→ `Immutable`) or `@array` (→ `Mutable`) keyword, following
-///   immutable/unmutated/single-init alias chains to a fixpoint.
+/// - **A call to an unshadowed primitive** whose declared `RetType` is `Array`
+///   (the `array` call an `[ … ]` literal makes, or `->array`) is `Immutable`.
+///   One whose `RetType` is `MutableArray` (the `@array` call a `@[ … ]`
+///   literal makes) is `Mutable`.
+/// - **A `Var`** is what `bases` maps its binding to: `array` is `Immutable`
+///   and `@array` is `Mutable`. `prune::concrete_init_keywords` builds that
+///   map, following immutable, unmutated, single-init alias chains.
 ///
-/// The alias proof is the SAME one dead-arm pruning trusts to delete a match arm,
-/// so reading it here carries the identical soundness guarantee: the keyword is
-/// the value's concrete container type, so `@array` is genuinely mutable at the
-/// call site (`freeze` copies to a new immutable value, never mutating its input
-/// in place, so a proven-`@array` binding is mutable at every use).
-pub(in crate::hir::typeinfer::fuse) fn classify_base(
+/// `freeze` copies into a new value and never changes its input, so a binding
+/// proven `@array` is mutable at every use.
+pub(in crate::hir::typeinfer) fn classify_base(
     expr: &Hir,
     arena: &BindingArena,
     bases: &FxHashMap<Binding, &'static str>,

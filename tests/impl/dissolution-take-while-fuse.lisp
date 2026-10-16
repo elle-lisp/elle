@@ -10,19 +10,18 @@
 # the loop condition or by the stage — are in src/hir/typeinfer/fuse/tests/take.rs.
 #
 # The cross-check reference applies the same ops through named functions with a
-# `match` body — a binding-introducing form a fragment cannot close over —
-# so they stay plain staged calls and mint what the fused form does not. Same
-# value.
+# `block` body. A fragment cannot close over a `block`, so those stay plain staged
+# calls and mint what the fused form does not. Same value.
 
 (defn evp [x]
-  (match x
-    _ (even? x)))
+  (block :oracle
+    (even? x)))
 (defn nump [x]
-  (match x
-    _ (number? x)))
+  (block :oracle
+    (number? x)))
 (defn t2 [x]
-  (match x
-    _ (* x 2)))
+  (block :oracle
+    (* x 2)))
 
 # ── the leading run ────────────────────────────────────────────────────
 (assert (= (->list (take-while (fn [x] (even? x)) [2 4 5 6 8])) (list 2 4))

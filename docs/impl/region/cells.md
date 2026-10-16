@@ -1,6 +1,6 @@
 # Capture cells
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-14 -->
 
 How a captured binding's cell is realized, what a read through one borrows, and where the cell's own release lands.
 
@@ -253,3 +253,7 @@ nothing. A captured reassigned binding records no slot for its init either, so
 the clamp skips it. The clamp is a maximum like every other pin, so it only moves
 the box release later, and it applies the once-per-activation hoist above to the
 point it produces.
+
+An adopted cell has no release of its own, so the clamp cannot order it. The
+lifetime obligation bounds the routed release there instead, and refuses the
+adopt where the closure's drop comes first ([adopt.md](adopt.md)).

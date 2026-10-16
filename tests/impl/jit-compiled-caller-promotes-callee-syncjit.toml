@@ -1,2 +1,3 @@
 jit = "eager"
+graft = false
 trace = ["syncjit"]

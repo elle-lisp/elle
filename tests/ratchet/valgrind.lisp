@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-06
+(elle/epoch 15)
+# audited: 2026-10-14
 # Four programs under memcheck on both stdlib paths: lost bytes and error
 # contexts, read against the rows of tests/ledger/valgrind.lisp.
 # tests/ratchet/overview.md
@@ -22,6 +22,10 @@
 
 # Each program's subject on each path is spelled whole, so every row of the
 # ledger names a literal here (tests/integration/ledgers.rs).
+#
+# The JIT program's function is recursive, so the graft keeps its call. A
+# call to a function the compiler can see becomes that function's body, and
+# a function nothing calls is never compiled, so `jit?` answers false.
 (def programs
   [{:compiled "boot and exit, stdlib compiled"
     :cached "boot and exit, stdlib cached"
@@ -38,7 +42,7 @@
    {:compiled "a function the JIT compiles, stdlib compiled"
     :cached "a function the JIT compiles, stdlib cached"
     :flags ["--trace=syncjit"]
-    :source "(defn step [x] (+ x 1)) (def @acc 0) (repeat 100 (assign acc (step acc))) (assert (jit? step) \"the JIT compiled step\")"}])
+    :source "(defn step [x n] (if (= n 0) x (step (+ x 1) (- n 1)))) (def @acc 0) (repeat 100 (assign acc (step acc 1))) (assert (jit? step) \"the JIT compiled step\")"}])
 
 (defn line-with [lines marker]
   "The first of LINES that holds MARKER, or nil."

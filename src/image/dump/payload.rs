@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-14
 //! The code-payload half of emit: the relocation slots and backing bytes a payload names, its LIR body's included.
 //!
 //! docs/impl/image.md
@@ -57,6 +57,7 @@ impl Emitted {
         self.raw(&p.frame_release_regions, at, backings)?;
         self.raw(&p.capture_locals, at, backings)?;
         self.bytes_slices(&p.strict_keys, at, backings)?;
+        self.raw(&p.fragment, at, backings)?;
         self.lir(&p.lir, at, backings)
     }
 

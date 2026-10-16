@@ -26,7 +26,7 @@ fn single_map_indexed_dissolves_to_an_indexed_push() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "*"),
+        count_op(&hir, &arena, &mut rt, "*") > 0,
         "the function's body op must run inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -69,7 +69,7 @@ fn map_over_map_indexed_fuses_to_one_loop() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "*"),
+        count_op(&hir, &arena, &mut rt, "*") > 0,
         "the indexed body must inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -203,15 +203,17 @@ fn map_indexed_over_mutable_array_is_not_fused() {
 }
 
 /// Safety: a user redefinition shadows the stdlib binding with a non-primitive one,
-/// so it is never rewritten.
+/// so fusion never rewrites it into a loop.
 #[test]
 fn user_shadowed_map_indexed_is_not_fused() {
-    let (hir, arena, mut rt) =
+    let (hir, _arena, _rt) =
         compile("(defn map-indexed [f c] c) (map-indexed (fn [i x] x) [1 2 3])");
-    let cs = callees(&hir, &arena, &mut rt);
-    assert!(
-        cs.iter().any(|n| n == "map-indexed"),
-        "a user `map-indexed` must not be rewritten; callees were {cs:?}",
+    // The user's call may graft, and what grafts is the user's body, which
+    // makes no loop.
+    assert_eq!(
+        count_loops(&hir),
+        0,
+        "a user `map-indexed` must not become a fused loop"
     );
 }
 
@@ -245,7 +247,8 @@ fn wrong_arity_map_indexed_fn_is_not_fused() {
 
 /// A `map-indexed` whose function is a `Var` naming a same-unit `defn` inlines its
 /// body by cloning, exactly as a two-parameter `fold` combinator does — the stage puts
-/// no new requirement on how the function is resolved.
+/// no new requirement on how the function is resolved. The definition survives the
+/// clone, so its `*` and the inlined copy's are two sites.
 #[test]
 fn named_map_indexed_fn_inlines() {
     let (hir, arena, mut rt) = compile("(defn scale [i x] (* i x)) (map-indexed scale [10 20 30])");
@@ -254,8 +257,9 @@ fn named_map_indexed_fn_inlines() {
         !cs.iter().any(|n| n == "map-indexed"),
         "the dispatch must be gone for a named function; callees were {cs:?}",
     );
-    assert!(
-        cs.iter().any(|n| n == "*"),
-        "the named function's body must run inline; callees were {cs:?}",
+    assert_eq!(
+        count_op(&hir, &arena, &mut rt, "*"),
+        2,
+        "the definition's * plus the inlined copy; callees were {cs:?}",
     );
 }

@@ -1,7 +1,11 @@
 (elle/epoch 15)
-# audited: 2026-10-06
+# audited: 2026-10-14
 # A compiled emit of :halt takes no delivery retain, so a halted fiber strands nothing.
 # docs/impl/region/park.md
+#
+# The sidecar turns the graft off: a call to a function the compiler can see
+# becomes the function's body (docs/impl/graft.md), and `body` nothing calls
+# never compiles.
 #
 # A halted fiber is promoted to :dead and never resumed, so the delivery a
 # suspending emit retains for has no consumer. The interpreter's `Emit` handler

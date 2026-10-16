@@ -13,15 +13,15 @@
 # walk's length. The declines below pin the three shortening stages it refuses.
 #
 # The cross-check reference applies the same ops through named functions with a
-# `match` body — a binding-introducing form a fragment cannot close over — so
-# they stay plain staged calls and mint what the fused form does not. Same value.
+# `block` body. A fragment cannot close over a `block`, so those stay plain staged
+# calls and mint what the fused form does not. Same value.
 
 (defn mi [i x]
-  (match x
-    _ (* i x)))
+  (block :oracle
+    (* i x)))
 (defn t1 [x]
-  (match x
-    _ (+ x 1)))
+  (block :oracle
+    (+ x 1)))
 
 # ── the position is the element's index ────────────────────────────────
 (assert (= (->list (map-indexed (fn [i x] (* i x)) [10 20 30])) (list 0 20 60))

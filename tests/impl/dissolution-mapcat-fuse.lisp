@@ -13,24 +13,24 @@
 # the function's body proving an ARRAY result; the declines below pin that gate.
 #
 # The cross-check reference applies the same ops through named functions with a
-# `match` body — a binding-introducing form a fragment cannot close over — so
-# they stay plain staged calls and mint what the fused form does not. Same value.
+# `block` body. A fragment cannot close over a `block`, so those stay plain staged
+# calls and mint what the fused form does not. Same value.
 
 (defn mc [x]
-  (match x
-    _ [x (* x 10)]))
+  (block :oracle
+    [x (* x 10)]))
 (defn t1 [x]
-  (match x
-    _ (+ x 1)))
+  (block :oracle
+    (+ x 1)))
 (defn p1 [x]
-  (match x
-    _ (odd? x)))
+  (block :oracle
+    (odd? x)))
 (defn tri [x]
-  (match x
-    _ [x x x]))
+  (block :oracle
+    [x x x]))
 (defn p2 [x]
-  (match x
-    _ (even? x)))
+  (block :oracle
+    (even? x)))
 
 # ── the fan-out ────────────────────────────────────────────────────────
 (assert (= (->list (mapcat (fn [x] [x (* x 10)]) [1 2 3])) (list 1 10 2 20 3 30))

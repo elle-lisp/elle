@@ -21,7 +21,7 @@ fn single_any_dissolves_to_sentinel_loop() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "even?"),
+        predicate_inline(&hir, &arena, &mut rt, "even?"),
         "the predicate must run inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -59,7 +59,7 @@ fn single_all_dissolves_to_sentinel_loop() {
     );
     assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
     assert!(
-        cs.iter().any(|n| n == "even?"),
+        predicate_inline(&hir, &arena, &mut rt, "even?"),
         "the predicate must run inline; callees were {cs:?}",
     );
     assert_eq!(
@@ -140,7 +140,8 @@ fn search_over_a_map_prefix_fuses_to_one_loop() {
              callees were {cs:?}",
         );
         assert!(
-            cs.iter().any(|n| n == "even?") && cs.iter().any(|n| n == "*"),
+            predicate_inline(&hir, &arena, &mut rt, "even?")
+                && count_op(&hir, &arena, &mut rt, "*") > 0,
             "both the predicate and the map transform must inline for {src}; \
              callees were {cs:?}",
         );
@@ -226,12 +227,13 @@ fn search_prefix_with_erroring_predicate_fuses() {
 }
 
 /// A search over a prefix is a composition, so it carries the reorder gate like
-/// every other terminal: a non-reorder-safe body (`>` routes through `apply`)
-/// declines the whole chain, and the pre-order recursion still fuses the inner
-/// `map`.
+/// every other terminal: a non-reorder-safe body (one that prints, and so
+/// signals `:io`) declines the whole chain, and the pre-order recursion still
+/// fuses the inner `map`.
 #[test]
 fn search_over_non_reorder_safe_prefix_fuses_inner_only() {
-    let (hir, arena, mut rt) = compile("(any? (fn [y] (> y 9)) (map (fn [x] (* x 3)) [1 2 3 4]))");
+    let (hir, arena, mut rt) =
+        compile("(any? (fn [y] (println y) (> y 9)) (map (fn [x] (* x 3)) [1 2 3 4]))");
     let cs = callees(&hir, &arena, &mut rt);
     assert!(
         cs.iter().any(|n| n == "any?"),
@@ -280,14 +282,16 @@ fn search_over_mutable_array_is_not_fused() {
 }
 
 /// Safety: a user redefinition of a search name shadows the stdlib binding with a
-/// non-primitive one, so it is never rewritten.
+/// non-primitive one, so fusion never rewrites it into a loop.
 #[test]
 fn user_shadowed_search_is_not_fused() {
-    let (hir, arena, mut rt) = compile("(defn find [p c] nil) (find (fn [x] x) [1 2 3])");
-    let cs = callees(&hir, &arena, &mut rt);
-    assert!(
-        cs.iter().any(|n| n == "find"),
-        "a user `find` must not be rewritten; callees were {cs:?}",
+    let (hir, _arena, _rt) = compile("(defn find [p c] nil) (find (fn [x] x) [1 2 3])");
+    // The user's call may graft, and what grafts is the user's body, which
+    // makes no loop.
+    assert_eq!(
+        count_loops(&hir),
+        0,
+        "a user `find` must not become a fused loop"
     );
 }
 
@@ -307,7 +311,8 @@ fn capturing_search_predicate_fuses() {
 
 /// A search whose predicate is a `Var` naming a same-unit `defn` inlines its body,
 /// and a `Var`-bound immutable array base fuses — the search terminal adds no new
-/// requirement to either proof.
+/// requirement to either proof. The definition survives, so its `>` and the
+/// inlined copy's are two sites.
 #[test]
 fn named_search_predicate_and_var_base_fuse() {
     let (hir, arena, mut rt) = compile("(defn pos? [x] (> x 0)) (let [xs [1 2 3]] (all? pos? xs))");
@@ -316,9 +321,10 @@ fn named_search_predicate_and_var_base_fuse() {
         !cs.iter().any(|n| n == "all?"),
         "a named predicate over a Var-bound base must fuse; callees were {cs:?}",
     );
-    assert!(
-        cs.iter().any(|n| n == ">"),
-        "the named predicate's body must run inline; callees were {cs:?}",
+    assert_eq!(
+        count_op(&hir, &arena, &mut rt, ">"),
+        2,
+        "the definition's > plus the inlined copy; callees were {cs:?}",
     );
     assert_eq!(
         count_callee(&hir, &arena, &mut rt, "@array"),

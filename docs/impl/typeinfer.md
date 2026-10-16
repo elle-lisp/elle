@@ -5,9 +5,10 @@
 Where the types come from: an ascent from below whose limit is the least
 fixpoint, and what each kind of call contributes to it.
 
-[intrinsics.md](../intrinsics.md) says what each `%`-intrinsic contract needs.
+[The intrinsics reference](../intrinsics.md) says what each `%`-intrinsic contract needs.
 This file says where the types that discharge it are computed, and what happens
-when the computation does not settle. The pass is [typeinfer/](../../src/hir/typeinfer).
+when the computation does not settle. The pass is
+[type inference](../../src/hir/typeinfer.rs).
 
 ## The ascent
 
@@ -23,6 +24,10 @@ through then contributes nothing on the way up, rather than pinning the
 parameter at Top. A parameter whose callers are not all visible is left absent,
 and an absent entry reads as Top.
 
+A call the graft replaced with the callee's body still counts as a call site.
+The graft records the operand it bound to each parameter, and the join reads
+that record as it reads a call's operand ([grafting a call](graft.md)).
+
 A pass re-derives; it never accumulates. Each parameter's type is **replaced**
 at pass end by that pass's complete join over the call sites, and each lambda's
 body type is replaced by what its body computed on that pass. A join that only
@@ -34,6 +39,36 @@ estimate rises, and the limit of the ascent is the least fixpoint.
 
 ## What a call contributes
 
+A call contributes to its callee's parameters first. Each operand joins into
+the parameter in its position. A parameter the call gives no operand, an `&opt`
+one, receives nil. The rest parameter receives the list of the operands past the
+fixed ones, which is the empty list or a pair. A spliced operand spreads into
+positions nobody can count, so every parameter from its position on receives
+unknown.
+
+```lisp
+(defn rejected? [src]
+  "Whether the file front end rejects src."
+  (not (first (protect (compile/whole-module src "<doc>")))))
+
+(assert (rejected? "(defn f [a & more] (%bit-and more 1)) (f 1 2)")
+        "more is the list of the extra operands, not the int among them")
+(assert (rejected? "(defn f [a &opt b] (%bit-and b 1)) (f 1 2) (f 1)")
+        "the second call leaves b nil")
+(assert (rejected? "(defn f [a b] (%bit-and b 1)) (f ;[1 \"s\"] 2)")
+        "b is the string the splice spreads, not the 2 written after it")
+```
+
+A row below that names a primitive or a stdlib function reads the binding the
+runtime supplies under that name. A parameter or a local with the same name is
+an unknown function, and its call's type is Top:
+
+```lisp
+(assert (rejected? "(defn h [length s] (%bit-and (length s) 1))
+                    (h (fn [s] \"x\") \"abc\")")
+        "a parameter named length is not the primitive")
+```
+
 | Callee | The call's type |
 |---|---|
 | a lambda binding this unit writes | Top (§ "A written binding's result is Top") |
@@ -41,7 +76,8 @@ estimate rises, and the limit of the ascent is the least fixpoint.
 | `thaw` or `freeze`, or its `%` twin | the argument's mutable or immutable twin container type |
 | a registered primitive | its declared `RetType`, read from the primitive tables |
 | the stdlib `push` or `put` | the first argument's type, which it returns |
-| a stdlib arithmetic wrapper (`+`, `abs`, `min`, `floor`, …) | Number — the wrapper raises on everything else |
+| a function the graft replaced with its body | no call is left: the body is typed where it stands ([grafting a call](graft.md)) |
+| a stdlib arithmetic wrapper that stays a call, such as `(+ a b c)` | Number — the wrapper raises on everything else |
 | anything else | Top |
 
 **A self-recursive call is a call.** It reads the body-type map that every
@@ -66,7 +102,66 @@ body is Int again. Nothing moves, and the ascent is over.
 
 The proof the second pass adds is what the backends spend: an `%add` of two
 proven ints carries `:int` into LIR, which is `AddInt` on the bytecode tier and
-a tag-check-free fast path on the JIT ([lir.md](lir.md)).
+a tag-check-free fast path on the JIT ([LIR](lir.md)).
+
+The wrapper spelling settles the same way. Every wrapper call in `fib-w` is
+grafted, so `(- n 1)` is the body of `-`, whose `%sub` over an int `n` and a
+literal is an int. The recursive call passes an int and `n` stays one. The fold
+then deletes every guard over the proven operands, and each wrapper call ends
+as its op ([grafting a call](graft.md)):
+
+```lisp
+(defn fib-w [n]
+  (if (< n 2) n (+ (fib-w (- n 1)) (fib-w (- n 2)))))
+(assert (= (fib-w 10) 55) "the dissolved wrappers compute the recursion")
+```
+
+The example compiles `fib-w` again from source to read its LIR. Handing
+`fib-w` itself to an inspector would use it as a value, and a binding used as
+a value proves nothing about its parameters (§ "What still does not prove"):
+
+```lisp
+(def fib-w-lir
+  (get (compile/dumps "(defn fib-w [n]
+                         (if (< n 2) n (+ (fib-w (- n 1)) (fib-w (- n 2)))))
+                       (fib-w 10)" "<doc>") :lir))
+(assert (any? (fn [line] (and (string/contains? line " + ")
+                              (string/contains? line ":int")))
+              (string/split fib-w-lir "\n"))
+        "the dissolved + adds two proven ints")
+```
+
+## What a branch and a block leave
+
+A guard's fact holds inside the branch it governs. When the branch ends, the
+binding takes back the type it had before the fact, unless the branch wrote the
+binding. Then the binding takes the join of that type and what the write left,
+because the write outlives the branch. A `(type-of x)` arm's override ends the
+same way. So the code after a loop reads what the loop body wrote:
+
+```lisp
+(defn walk [& xs]
+  "Whether a loop of at most ten turns walks xs to its end."
+  (def @cur xs)
+  (def @n 0)
+  (while (and (pair? cur) (< n 10))
+    (assign n (+ n 1))
+    (assign cur (rest cur)))
+  (if (pair? cur) :stopped :walked))
+(assert (= (walk 1 2 3) :walked) "cur is the empty list the body wrote")
+```
+
+A `block` evaluates to its tail, or to the value of a `break` that names it. So
+its type joins the tail's type with the type of every such `break` value. A
+`break` leaves no value where it stands, so its own type is Bottom:
+
+```lisp
+(defn pick [x]
+  "Which kind of value the block hands back."
+  (let [v (block :b (when (> x 0) (break :b "s")) 1)]
+    (if (int? v) :int :other)))
+(assert (= (pick 5) :other) "v joins the string the break carries")
+```
 
 ## An exhausted budget widens
 
@@ -110,12 +205,12 @@ no Bottom: at the ascent's limit, every Bottom left in the node map settles to
 Top, which is above the fixpoint and proves nothing.
 
 That one rule covers every consumer, because they all read that one map — the
-operand contracts ([contract.rs](../../src/hir/typeinfer/contract.rs)), the signal narrowing
-([narrow.rs](../../src/hir/narrow.rs)), the wrapper monomorphization
-([monomorphize.rs](../../src/hir/typeinfer/monomorphize.rs)), and the LIR operand proof
-([intrinsic.rs](../../src/lir/lower/expr/intrinsic.rs)). The last two ask with equality, so a
-Bottom proves nothing there. The first two ask with `subtype`, where a Bottom
-would prove every row.
+operand contracts ([the contract check](../../src/hir/typeinfer/contract.rs)),
+the signal narrowing ([narrowing](../../src/hir/narrow.rs)), the fold
+([grafting a call](graft.md)), and the LIR operand proof
+([intrinsic lowering](../../src/lir/lower/expr/intrinsic.rs)). The last asks
+with equality, so a Bottom proves nothing there. The first three ask with
+`subtype`, where a Bottom would prove every row and decide every type test.
 
 A definition is therefore checked where it is written. `f` below is a compile
 error whether or not a later form calls it, and whether or not any form follows
@@ -155,11 +250,27 @@ meeting with it, and a floor that returns something below itself is not a
 floor.
 
 A Bottom the meet **produces** is the opposite fact — the accumulated type and
-the fact are disjoint, so no value reaches the site the fact governs.
-`meet(String, Number)` is ⊥ for a caller passing a string to a declared-numeric
-parameter, and `meet(String, Int)` is ⊥ inside the `(%int? x)` branch of a
-function only ever called with a string. Both are left alone, so those sites
-reject rather than compute.
+the fact are disjoint. The two producers end differently:
+
+- `meet(String, Number)` is ⊥ for a caller passing a string to a
+  declared-numeric parameter. The declaration types the binding whatever it
+  receives, so the floor gives Number there rather than ⊥. That holds where the
+  function is entered and where a graft binds the parameter with a `let`. A
+  site that needs more than a Number, such as an int, rejects.
+- `meet(String, Int)` is ⊥ inside the `(%int? x)` branch of a function only
+  ever called with a string. No value reaches the site the fact governs. The
+  fold decides that test false and deletes the branch before the contract is
+  checked, so the site is gone rather than rejected
+  ([grafting a call](graft.md)).
+
+```lisp
+(assert (not (compiles? "(defn sq [x] (numeric!) (%bit-and x 1)) (sq \"str\")"))
+        "a string caller leaves x a Number, which proves no int")
+(assert (compiles? "(defn sq [x] (numeric!) (%mul x x)) (sq \"str\")")
+        "the declaration proves the grafted %mul, as it proves the call's")
+(assert (compiles? "(defn g [b] (if (%int? b) (%bit-and b 1) 0)) (g \"str\")")
+        "the branch no value reaches is deleted")
+```
 
 ## A written binding's result is Top
 
@@ -217,6 +328,16 @@ The pass has no flow, so it cannot order the write against a call:
   passed to a higher-order function, returned, exported — means callers this
   unit cannot enumerate, so the call-site join over the visible ones proves
   nothing about the parameters.
+- **A destructured binding.** A file-level `(def [lo hi] …)` binds `lo` and
+  `hi` to a `nil` placeholder, and a `destructure` form writes them
+  afterwards. The pass does not follow the value into the pattern, so each
+  binding the pattern writes is unknown, never the placeholder's Nil. A Nil
+  there would let the fold decide `(+ lo hi)`'s number guard certain to raise.
+
+```lisp
+(def [lo hi] [1 2])
+(assert (= (+ lo hi) 3) "lo and hi are what the pattern wrote")
+```
 
 ## Pinning tests
 
@@ -245,7 +366,16 @@ The pass has no flow, so it cannot order the write against a call:
   loop that rewrites its own callee between two turns, the branch a Bottom would
   have joined away, and two controls — the unwritten binding, and the
   SSA-renamed function-local write that still proves.
+- `hir::typeinfer::tests::destructure::*` — a read of a destructured binding,
+  from a `def` and from a `var`, is never typed by its `nil` placeholder.
+- `hir::typeinfer::tests::branch::*` — a write inside a guarded branch or a
+  `(type-of x)` arm outlives the branch, and a block's type joins the values
+  of the `break`s that name it.
+- `hir::typeinfer::tests::graft::*` and `hir::typeinfer::tests::fold::*` —
+  what the graft replaces and what the fold decides, pinned in
+  [grafting a call](graft.md).
 - [typed-int-ops.lisp](../../tests/impl/typed-int-ops.lisp) — the implementation-suite peer: a
-  self-recursive integer `fib` emits `AddInt` and computes with it, a float
-  base case is refused at compile time, and a reassigned local lambda binding
-  is refused where its unreassigned twin emits `AddInt`.
+  self-recursive integer `fib` emits `AddInt` and computes with it, in the
+  intrinsic spelling and in the wrapper spelling. A float base case is refused
+  at compile time, and a reassigned local lambda binding is refused where its
+  unreassigned twin emits `AddInt`.

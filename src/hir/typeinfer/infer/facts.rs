@@ -1,8 +1,9 @@
-// audited: 2026-09-28
-// src/hir/AGENTS.md
-// docs/impl/typeinfer.md
-//! The declared floor, and the guard-derived narrowing facts a branching form
-//! applies to the binding environment and then restores.
+// audited: 2026-10-14
+//! The declared floor, and the guard facts a branching form applies to the binding types and then restores.
+//!
+//! docs/impl/typeinfer.md
+//! docs/intrinsics.md
+//! docs/impl/dissolution/inline.md
 
 use super::super::*;
 
@@ -10,14 +11,13 @@ use super::super::*;
 /// a type guard's narrowing, or a `(numeric!)` declaration's floor.
 ///
 /// A fact meeting the ascent's start IS the fact. `meet(⊥, fact)` is ⊥, so
-/// meeting there would erase a proof that owes nothing to a call site: a guard
+/// meeting there would erase a proof that owes nothing to a call site. A guard
 /// holds in the branch it governs, and a declaration holds through the body,
-/// whether or not this unit calls the enclosing function
-/// (docs/impl/typeinfer.md).
+/// whether or not this unit calls the enclosing function.
 ///
-/// A Bottom the meet PRODUCES is the opposite reading — the accumulated type
-/// and the fact are disjoint, so no value reaches the site the fact governs —
-/// and it is left alone, because it proves nothing either.
+/// A Bottom the meet PRODUCES is the opposite reading: the accumulated type
+/// and the fact are disjoint, so no value reaches the site the fact governs.
+/// It is left alone, because it proves nothing either.
 ///
 /// The two are one `TyId`, so a Bottom an enclosing disjoint fact produced
 /// reads here as the start and the fact re-proves the binding. That costs
@@ -31,67 +31,107 @@ fn refine(interner: &TypeInterner, accumulated: TyId, fact: TyId) -> TyId {
 }
 
 /// Apply a binding's `(numeric!)` declaration to a type it is being bound with.
-/// The declaration floors the binding at Number — callers may refine it to
-/// Int/Float, never widen past the declared contract — which is what discharges a
-/// `%`-intrinsic's operand contract in the declaring function's body
-/// (docs/intrinsics.md).
+/// The declaration floors the binding at Number. Callers may refine it to Int
+/// or Float, never widen it past Number, and the floor discharges a
+/// `%`-intrinsic's operand contract in the declaring function's body.
 ///
-/// The floor is applied wherever a declared binding is BOUND: at lambda entry, at
-/// the call-site parameter join, and at a `let` init — the last being the form a
-/// spliced kernel parameter takes once HOF fusion has dissolved its lambda
-/// (docs/impl/dissolution/inline.md). It is deliberately NOT
-/// applied at an `assign`: a mutated binding has flow the per-pass recomputation
-/// cannot see, so it never receives proofs.
+/// The floor applies wherever a declared binding is bound: at lambda entry, at
+/// the call-site parameter join, and at a `let` init. The `let` is the form a
+/// spliced kernel parameter takes once HOF fusion has dissolved its lambda,
+/// and the form a grafted parameter takes. The floor does not apply at an
+/// `assign`: a mutated binding has flow the per-pass recomputation cannot see,
+/// so it never receives proofs.
+///
+/// The declaration types the binding whatever it receives. A type disjoint from
+/// Number, such as a string operand, meets the floor at Bottom, and the floor
+/// gives Number there instead. Lambda entry reaches the same answer, because it
+/// reads that Bottom as the Kleene start.
 pub(crate) fn declared_floor(
     binding: Binding,
     ty: TyId,
     arena: &BindingArena,
     interner: &TypeInterner,
 ) -> TyId {
-    if arena.get(binding).declared_numeric {
-        refine(interner, ty, TypeInterner::NUMBER)
-    } else {
-        ty
+    if !arena.get(binding).declared_numeric {
+        return ty;
+    }
+    match refine(interner, ty, TypeInterner::NUMBER) {
+        TypeInterner::BOTTOM => TypeInterner::NUMBER,
+        floored => floored,
     }
 }
 
-/// Apply the `TypeIs` facts to the binding environment, returning the saved
-/// prior entries for `restore_type_facts`. `Nonzero` facts are the contract
-/// checker's flow, not a type — skipped here.
+/// One binding a fact narrowed: what it held before, and what the fact gave
+/// it, so the end of the fact's scope can tell whether the scope wrote it.
+pub(crate) struct Narrowed {
+    binding: Binding,
+    prior: Option<TyId>,
+    narrowed: TyId,
+}
+
+/// Give `binding` the type `ty` for the scope a fact governs, saving what
+/// `restore_type_facts` needs to end that scope.
+pub(crate) fn narrow_type(
+    binding: Binding,
+    ty: TyId,
+    binding_types: &mut BindingTypes,
+) -> Narrowed {
+    let prior = binding_types.insert(binding, ty);
+    Narrowed {
+        binding,
+        prior,
+        narrowed: ty,
+    }
+}
+
+/// Apply the `TypeIs` facts to the binding environment, returning what
+/// `restore_type_facts` needs to end their scope. `Nonzero` facts are the
+/// contract checker's flow, not a type — skipped here.
 pub(crate) fn apply_type_facts(
     facts: &[super::super::guard::Fact],
-    binding_types: &mut HashMap<Binding, TyId>,
+    binding_types: &mut BindingTypes,
     interner: &TypeInterner,
-) -> Vec<(Binding, Option<TyId>)> {
+) -> Vec<Narrowed> {
     let mut saved = Vec::new();
     for fact in facts {
         let super::super::guard::Fact::TypeIs(binding, narrow_ty) = fact else {
             continue;
         };
-        saved.push((*binding, binding_types.get(binding).copied()));
         let old = binding_types
             .get(binding)
             .copied()
             .unwrap_or(TypeInterner::TOP);
-        binding_types.insert(*binding, refine(interner, old, *narrow_ty));
+        saved.push(narrow_type(
+            *binding,
+            refine(interner, old, *narrow_ty),
+            binding_types,
+        ));
     }
     saved
 }
 
-/// Undo `apply_type_facts`, in reverse so a twice-narrowed binding restores
-/// its original entry.
+/// End the scope of the facts `saved` records, in reverse so a twice-narrowed
+/// binding ends at its original entry.
+///
+/// A binding the scope did not write takes back its prior type. A binding it
+/// wrote holds something the fact never governed, and the write outlives the
+/// scope, so it takes the join of the prior type and what the write left.
 pub(crate) fn restore_type_facts(
-    saved: Vec<(Binding, Option<TyId>)>,
-    binding_types: &mut HashMap<Binding, TyId>,
+    saved: Vec<Narrowed>,
+    binding_types: &mut BindingTypes,
+    interner: &TypeInterner,
 ) {
-    for (binding, prior) in saved.into_iter().rev() {
-        match prior {
-            Some(ty) => {
-                binding_types.insert(binding, ty);
-            }
-            None => {
-                binding_types.remove(&binding);
-            }
+    for n in saved.into_iter().rev() {
+        let current = binding_types.get(&n.binding).copied();
+        if current == Some(n.narrowed) {
+            match n.prior {
+                Some(ty) => binding_types.insert(n.binding, ty),
+                None => binding_types.remove(&n.binding),
+            };
+            continue;
         }
+        let written = current.unwrap_or(TypeInterner::TOP);
+        let prior = n.prior.unwrap_or(TypeInterner::TOP);
+        binding_types.insert(n.binding, interner.join(prior, written));
     }
 }
