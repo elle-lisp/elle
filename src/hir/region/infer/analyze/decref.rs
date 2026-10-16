@@ -1,12 +1,14 @@
-// audited: 2026-10-14
+// audited: 2026-10-16
 //! `decref_point` population: the ordered passes that decide, for each region,
 //! the program point its release is emitted at.
 //!
 //! docs/impl/region/anchors.md
+//! docs/impl/region/borrow.md
 //!
 //! For each region `r`, `decref_point` is the structurally-latest program point
 //! at which any value resolved to `r` is last used. These passes seed it from
-//! per-HirId last-use analysis, then extend it through binding chains, hoist
+//! per-HirId last-use analysis, then extend it through binding chains and the
+//! names a borrow reaches, hoist
 //! env-cell releases past loops, and pin returned/destructured values to their
 //! consuming node. The inline comments explain the WHY of each pass.
 
@@ -48,6 +50,7 @@ pub(super) fn populate_decref_points(
     break_skip_blocks: &[(HirId, Vec<HirId>)],
     frame_replacing_tail_calls: &rustc_hash::FxHashSet<HirId>,
     binder_init_sites: &HashMap<Binding, Option<HirId>>,
+    borrows: &super::super::borrow::Borrows,
 ) {
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     let porder = ProgramOrder::new(order);
@@ -182,11 +185,7 @@ pub(super) fn populate_decref_points(
         .flat_map(|c| c.stores.iter())
         .map(|s| (s.site, s.value_regions.clone()))
         .collect();
-    for (b, regions) in inference_binding_regions {
-        if regions.is_empty() {
-            continue;
-        }
-        let names_a_cell = info.cell_containers.contains_key(b);
+    let binding_last_use_at = |b: &Binding| -> Option<HirId> {
         let mut max_use = binding_uses
             .get(b)
             .into_iter()
@@ -203,7 +202,14 @@ pub(super) fn populate_decref_points(
                 max_use = Some(ext);
             }
         }
-        if let Some(lu) = max_use {
+        max_use
+    };
+    for (b, regions) in inference_binding_regions {
+        if regions.is_empty() {
+            continue;
+        }
+        let names_a_cell = info.cell_containers.contains_key(b);
+        if let Some(lu) = binding_last_use_at(b) {
             for &r in regions {
                 // A 1-slot container's stored values do NOT ride a CELL
                 // binding's uses: such a binding names the slot, not any one
@@ -228,15 +234,31 @@ pub(super) fn populate_decref_points(
                 // use, not the lambda's structural position), so it is the tight
                 // value the obligation needs. Max-by-order across a region's holder
                 // bindings: a shared region must outlive every holder.
-                info.binding_last_use
-                    .entry(r)
-                    .and_modify(|cur| {
-                        if ord(lu) > ord(*cur) {
-                            *cur = lu;
-                        }
-                    })
-                    .or_insert(lu);
+                note_last_use(&mut info.binding_last_use, r, lu, ord);
             }
+        }
+    }
+
+    // Extend each BORROWED container's regions over the uses of every name the
+    // borrow reaches. Such a name holds no reference, so it is absent from the
+    // holder chain above, and its uses are read here instead
+    // (docs/impl/region/borrow.md). The tight last use the ownership obligation
+    // reads takes them too: the subtree drop must not free the container under
+    // a borrower. A 1-slot container that holds the borrowed value by a counted
+    // reference of its own covers it from the store on, which the read pin
+    // below states.
+    for (b, regions) in &info.binding_borrow_regions {
+        let Some(lu) = binding_last_use_at(b) else {
+            continue;
+        };
+        for &r in regions {
+            if cell_drop_point
+                .get(&r)
+                .is_none_or(|&drop| porder.is_after(lu, drop))
+            {
+                info.region_data.pin_to(r, lu, porder);
+            }
+            note_last_use(&mut info.binding_last_use, r, lu, ord);
         }
     }
 
@@ -286,10 +308,11 @@ pub(super) fn populate_decref_points(
     // and raises no count on it, so the container's lifetime is the borrow's only
     // protection: its last use is the READER's, not the read's. Anchored at the read, the
     // container's free-time cascade drops the element's last count and the reader derefs
-    // a freed page. `last_use` at the read site is exactly "where the read's result is
-    // last used" — the binding chain resolves it through a named result, the enclosing
-    // consumer when ANF leaves the read unnamed in operand position, which is the case no
-    // other pass covers (docs/impl/region/rules.md Rule 4, the borrowing node).
+    // a freed page. `last_use` at the read site is the read's consumer, where an operand
+    // read's result is last used. A bound result is read again through its names, which
+    // the borrow pins above carry. A read's containers include the borrow its operand
+    // carries, so a read out of a borrowed name extends the first container too
+    // (docs/impl/region/borrow.md).
     //
     // A NATIVE read is absent here on purpose: its dispatch takes the Rule 5 pass-through
     // retain, so the reader holds its own counted reference and extending the container
@@ -378,8 +401,9 @@ pub(super) fn populate_decref_points(
     // read frees the source under the extraction. Bites exactly when no
     // destructured binding is used afterwards — the `&named`-param
     // prologue with unused params (docs/impl/region/rules.md Rule 4;
-    // pinned by tests/impl/region-named-param-uaf.lisp).
-    for (destructure_id, regions) in destructure_sites {
+    // pinned by tests/impl/region-named-param-uaf.lisp). A borrowed value's
+    // containers take the same pin, for the same read.
+    for (destructure_id, regions) in destructure_sites.iter().chain(&borrows.destructures) {
         info.region_data
             .pin_all_to(regions.iter().copied(), *destructure_id, porder);
     }
@@ -404,8 +428,10 @@ pub(super) fn populate_decref_points(
     // after it — after the exit label for the block itself. A binding that names
     // the block's value extends further through the ordinary binding chain,
     // and every extension is a max, so the latest wins
-    // (docs/impl/region/anchors.md; tests/impl/region-break-transfer.lisp).
-    for (block_id, regions) in break_sites {
+    // (docs/impl/region/anchors.md; tests/impl/region-break-transfer.lisp). The
+    // borrow a break carries takes the same pin: the block hands it on with the
+    // value (docs/impl/region/borrow.md).
+    for (block_id, regions) in break_sites.iter().chain(&borrows.blocks) {
         let lu = last_use.get(block_id).copied().unwrap_or(*block_id);
         info.region_data
             .pin_all_to(regions.iter().copied(), lu, porder);
@@ -438,4 +464,21 @@ pub(super) fn populate_decref_points(
         inference_binding_regions,
         binder_init_sites,
     );
+}
+
+/// Raise `r`'s tight last use to `lu` where `lu` falls later.
+fn note_last_use(
+    tight: &mut HashMap<Region, HirId>,
+    r: Region,
+    lu: HirId,
+    ord: impl Fn(HirId) -> u32,
+) {
+    tight
+        .entry(r)
+        .and_modify(|cur| {
+            if ord(lu) > ord(*cur) {
+                *cur = lu;
+            }
+        })
+        .or_insert(lu);
 }

@@ -70,7 +70,9 @@ pub struct RegionInfo {
     pub live_regions: FxHashSet<Region>,
     /// `(store_site, source_region, target_region)` — a value in `source` is
     /// stored into a structure in `target`. The lowerer emits
-    /// `IncrefRegion(source)` at the site; the runtime cascade balances it.
+    /// `IncrefRegion(source)` at the site, unless the site's own allocation
+    /// counts the reference (`alloc_counts_edge`). The target's cascade
+    /// releases either count.
     ///
     /// docs/impl/region/mechanism.md
     pub cross_region_refs: Vec<(HirId, Region, Region)>,

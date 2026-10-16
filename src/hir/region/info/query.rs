@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-16
 //! The queries over [`RegionInfo`]: what a binding holds, what an operand hands a call, and where a merge sends a region.
 //!
 //! docs/impl/region/merging.md
@@ -43,10 +43,11 @@ impl RegionInfo {
     /// regions its evaluation merely used along the way.
     ///
     /// Each node in a value-producing position contributes its own
-    /// `alloc_region` and, for a `Var`, its binding's source regions,
-    /// canonicalized through the merge forest. The descent stops at a `Call`,
-    /// at a `Lambda` and at an allocating `%`-`Intrinsic` (`%pair`, `%freeze`,
-    /// `%thaw`), whose values each hold their operands by a count of their own.
+    /// `alloc_region` and, for a `Var`, its binding's source regions and the
+    /// containers the binding borrows out of, canonicalized through the merge
+    /// forest. The descent stops at a `Call`, at a `Lambda` and at an
+    /// allocating `%`-`Intrinsic` (`%pair`, `%freeze`, `%thaw`), whose values
+    /// each hold their operands by a count of their own.
     /// It passes through everything else, a non-allocating `%`-op included,
     /// such as `%first`, whose result borrows its operand's region. Descending
     /// an unrecognized node over-approximates, the leak-preserving direction.
@@ -58,7 +59,9 @@ impl RegionInfo {
             out.insert(self.merged_root(r));
         }
         if let HirKind::Var(b) = &h.kind {
-            for &r in self.binding_source_regions.get(b).into_iter().flatten() {
+            let held = self.binding_source_regions.get(b).into_iter().flatten();
+            let borrowed = self.binding_borrow_regions.get(b).into_iter().flatten();
+            for &r in held.chain(borrowed) {
                 out.insert(self.merged_root(r));
             }
         }
@@ -151,6 +154,16 @@ impl RegionInfo {
     /// docs/impl/region/mechanism.md
     pub fn is_merge_self_edge(&self, source: Region, target: Region) -> bool {
         self.merged_root(source) == self.merged_root(target)
+    }
+
+    /// True when the store edge at `site` targets the object allocated at that
+    /// very site: a `%pair`'s car or cdr. The allocation's scan counts the
+    /// reference itself (`alloc_obj`), so the edge takes no `IncrefRegion`. The
+    /// merge seed reads the same test as the builder idiom's store.
+    ///
+    /// docs/impl/region/mechanism.md
+    pub fn alloc_counts_edge(&self, site: HirId, target: Region) -> bool {
+        self.alloc_region.get(&site) == Some(&target)
     }
 
     /// How the `&` rest list of the lambda at `lambda` is built: in one region

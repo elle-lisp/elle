@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-16
 //! What a node emits for the references its own stores take.
 //!
 //! docs/impl/region/mechanism.md
@@ -187,6 +187,14 @@ impl<'a> Lowerer<'a> {
                         src.0, dst.0, hir_id, self.current_span
                     );
                 }
+                continue;
+            }
+            // A `%pair` car or cdr edge. The allocation at this very site counts
+            // the reference in its scan (`alloc_obj`), and the target's cascade
+            // releases that count, so an `IncrefRegion` here would be a second
+            // count with no release (docs/impl/region/mechanism.md). Asked after
+            // the self-edge, which the instrument above counts.
+            if self.region_info.alloc_counts_edge(hir_id, dst) {
                 continue;
             }
             let region_id = self.static_slot(src);

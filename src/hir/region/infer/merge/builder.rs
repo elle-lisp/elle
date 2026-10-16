@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-16
 //! The builder-idiom merge seed: a freshly built child aggregate merged into the parent `%pair` it is stored into.
 //!
 //! docs/impl/region/merging.md
@@ -22,7 +22,7 @@ pub(crate) fn compute_merges(
     order: &Order,
 ) -> HashMap<Region, Region> {
     // The `%pair` intrinsic nodes — the canonical immutable aggregate-store sites.
-    // (Together with `alloc_region[site] == dst` below, this uniquely selects a
+    // (Together with `alloc_counts_edge` below, this uniquely selects a
     // pair's own car/cdr store edges out of `cross_region_refs`; push/put/set-cell
     // and clique edges target something other than the site's own allocation.)
     let mut pair_sites: FxHashSet<HirId> = FxHashSet::default();
@@ -119,7 +119,7 @@ pub(crate) fn compute_merges(
         //     the aggregate freshly allocated AT that site, and not a clique site.
         if child == parent
             || !pair_sites.contains(&site)
-            || info.alloc_region.get(&site) != Some(&parent)
+            || !info.alloc_counts_edge(site, parent)
             || info.hard_edge_sites.contains(&site)
         {
             continue;

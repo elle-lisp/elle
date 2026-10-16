@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-16
 //! The region-inference pipeline: the walk, then every post-pass that decides
 //! where a release lands. The order is the point — each pass reads answers the
 //! ones before it settled.
@@ -144,6 +144,14 @@ pub fn analyze_regions_with(
         &postdom,
     );
 
+    // Where each uncounted read's borrow reaches (docs/impl/region/borrow.md).
+    // After the reassign gate, whose overwrite sites say which `assign` counts
+    // its store, and before every pass that reads how long a region is read.
+    let mut borrows = super::borrow::compute_borrows(hir, &info, arena);
+    info.uncounted_read_sites
+        .extend(std::mem::take(&mut borrows.reads));
+    info.binding_borrow_regions = std::mem::take(&mut borrows.bindings);
+
     let last_use_info = compute_last_use(hir, &du.uses, &order);
 
     // Escape's answer to the COUNT question, projected onto regions: which regions
@@ -216,6 +224,7 @@ pub fn analyze_regions_with(
         &break_skip_blocks,
         &frame_replacing_tail_calls,
         &reassigns.binder_init_sites,
+        &borrows,
     );
     let last_use = &last_use_info.per_node;
 

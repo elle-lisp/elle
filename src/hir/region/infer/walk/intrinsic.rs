@@ -1,3 +1,9 @@
+// audited: 2026-10-16
+//! The region walk's `%`-intrinsic arm: the edges a storing op records, the container a read borrows, the region an op mints.
+//!
+//! docs/impl/region/model.md
+//! docs/impl/region/borrow.md
+
 use super::*;
 
 impl RegionInference {
@@ -8,9 +14,7 @@ impl RegionInference {
         let arg_regions: Vec<Vec<Region>> = args.iter().map(|a| self.walk(a)).collect();
 
         // %array-push(coll, val): val flows into coll. The monomorphic
-        // %push-array / %push-array-mut share this type-blind edge for now;
-        // the precise Fresh-vs-funnel split (funnel_store_edges) is a later
-        // slice.
+        // %push-array / %push-array-mut share this type-blind edge.
         if matches!(
             *op,
             crate::hir::expr::IntrinsicOp::Push
@@ -41,8 +45,7 @@ impl RegionInference {
             }
         }
         // %put(obj, key, val): val flows into obj. Monomorphic %put-struct /
-        // %put-array (+ -mut) share this type-blind edge for now; the precise
-        // split is the funnel_store_edges slice.
+        // %put-array (+ -mut) share this type-blind edge.
         if matches!(
             *op,
             crate::hir::expr::IntrinsicOp::Put
@@ -66,12 +69,10 @@ impl RegionInference {
         // this inline opcode raises NO count on it (the native read's dispatch takes the
         // Rule 5 pass-through retain; an opcode has no dispatch). So arg 0's own lifetime
         // is what keeps the borrow alive, and arg 0 is in use for as long as the read's
-        // RESULT is: record its regions so `analyze::decref` extends their `decref_point`
-        // to the read's last use (region/rules.md Rule 4, the borrowing node). This is the
-        // half a binding chain does NOT cover — ANF leaves a read in operand position
-        // unnamed, so nothing else carries arg 0's regions past the read, and the
-        // container's free-time cascade then drops the borrowed element's last count under
-        // its reader (`region_container_read_borrow_uaf`).
+        // RESULT is. Record its regions as the read's container. The borrow pass carries
+        // them to every name the result reaches, and `analyze::decref` extends their
+        // `decref_point` to the read's consumer and to those names' uses
+        // (docs/impl/region/borrow.md).
         if matches!(
             op,
             IntrinsicOp::Get | IntrinsicOp::First | IntrinsicOp::Rest
@@ -83,9 +84,11 @@ impl RegionInference {
                 }
             }
         }
-        // %get is region-transparent: it borrows an existing value
-        // out of arg 0's region — no allocation, no new region. The
-        // result lives in arg 0's region(s).
+        // %get mints no region, and hands back arg 0's regions as well as the
+        // borrow: the name it binds holds the container. A store of its result
+        // then records an edge out of the container, which the ownership cut's
+        // external-uniqueness test reads (docs/impl/region/borrow.md).
+        // `%first` and `%rest` fall through to the non-allocating arm below.
         if matches!(op, IntrinsicOp::Get) {
             return arg_regions.into_iter().next().unwrap_or_default();
         }
@@ -130,8 +133,11 @@ impl RegionInference {
 
         if op.allocates() {
             let result_r = self.alloc_here(hir.id);
-            // %pair: car and cdr are stored inside the Pair.
-            // Edge from each arg's regions to the pair's region.
+            // %pair: car and cdr are stored inside the Pair. Edge from each
+            // arg's regions to the pair's region. The allocation's scan counts
+            // each such reference, so the edge is containment for the merge seed
+            // and the ownership forest, and takes no static incref
+            // (docs/impl/region/mechanism.md).
             if *op == IntrinsicOp::Pair {
                 for ars in &arg_regions {
                     for &r in ars {

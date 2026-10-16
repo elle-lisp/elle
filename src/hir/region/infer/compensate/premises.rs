@@ -1,9 +1,10 @@
-// audited: 2026-09-22
+// audited: 2026-10-16
 //! What branch compensation knows about a region before it looks at any arm.
 //!
 //! Where it is used, where it is born, who holds it, and what taints its route.
 //!
-//! docs/impl/region/mechanism.md
+//! docs/impl/region/compensate.md
+//! docs/impl/region/borrow.md
 
 use super::super::*;
 use crate::hir::region::Region;
@@ -12,8 +13,9 @@ use crate::hir::region::Region;
 /// over the holder bindings and the allocation map.
 pub(super) struct Premises {
     /// Region → its use HirIds, unioned over every holder binding so an aliased
-    /// region sees all uses. A region with no recorded use cannot be analyzed —
-    /// nothing says where it dies — and the caller skips it.
+    /// region sees all uses, and over every name a borrow out of it reaches. A
+    /// region with no recorded use cannot be analyzed — nothing says where it
+    /// dies — and the caller skips it.
     pub(super) uses: HashMap<Region, Vec<HirId>>,
     /// Region → the HirIds the **live-in** premise is asked of: its allocation
     /// sites, plus the def site of the binder its release would ROUTE through.
@@ -54,8 +56,7 @@ pub(super) struct Premises {
     /// a box `populate_env` mints once per activation, that an `assign` never
     /// repoints (it writes the cell's content), and that a capturer holds by the
     /// funnel's counted `closure ⊇ cell` edge rather than through this frame's
-    /// slot (docs/impl/region/mechanism.md § "A compensating release of an env
-    /// cell names the box, not the holder's slot").
+    /// slot (docs/impl/region/compensate.md).
     pub(super) tainted: std::collections::HashSet<Region>,
 }
 
@@ -88,9 +89,8 @@ impl Premises {
             // A holder's DEF site anchors the live-in premise only where that
             // holder could be the release's ROUTE — the slot a value-routed
             // release loads is the allocating binder's, so only that binder's def
-            // says where the slot is written (docs/impl/region/mechanism.md § "A
-            // region's release route belongs to ONE binding"). An alias, a
-            // functionalization version, or a phi merely names a value born
+            // says where the slot is written (docs/impl/region/window.md). An
+            // alias, a functionalization version, or a phi merely names a value born
             // elsewhere; anchoring its def would read the value as born inside
             // whatever arm the naming sits in. An env CELL's release names the box
             // at the holder's env index rather than a value slot, so the holder's
@@ -119,6 +119,17 @@ impl Premises {
                 }
                 if unsafe_holder && !info.cell_release_regions.contains(&r) {
                     tainted.insert(r);
+                }
+            }
+        }
+        // A borrowed name reads its container's pages for as long as it is used,
+        // so its uses are the container's uses: an arm that reads only the name
+        // is no dead arm. The name holds no reference, so it counts as no holder,
+        // anchors nothing and taints nothing (docs/impl/region/borrow.md).
+        for (b, regions) in &info.binding_borrow_regions {
+            if let Some(us) = du.uses.get(b) {
+                for &r in regions {
+                    uses.entry(r).or_default().extend(us.iter().copied());
                 }
             }
         }

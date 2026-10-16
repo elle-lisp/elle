@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-16
 //! Tofte-Talpin region inference for functional HIR: the walk's state, and how it mints a region.
 //!
 //! docs/impl/region/model.md
@@ -273,8 +273,8 @@ struct RegionInference {
     /// Binding → Lambda HIR node for inlining at Call sites.
     /// Populated when a Let or Letrec binds a Lambda. Inlining lets
     /// the walk see intrinsics (push/put/pair) inside known lambda
-    /// bodies and emit the corresponding cross-region edges at the call
-    /// site.
+    /// bodies and record their cross-region edges over the call's
+    /// arguments, keyed at the intrinsics' own sites.
     binding_lambda: HashMap<Binding, *const Hir>,
     /// Inline nesting depth. `try_inline_call` stops at four levels.
     inline_depth: u32,
@@ -379,8 +379,9 @@ impl RegionInference {
     /// Every structural visit produces a new region — no merging at this layer.
     ///
     /// IDEMPOTENT UNDER INLINED RE-WALK. `try_inline_call` re-walks an
-    /// inlinable callee's body to discover cross-region edges at the call site
-    /// (`inline_depth > 0`); the body's HIR nodes are then visited a SECOND time
+    /// inlinable callee's body to discover the cross-region edges it records
+    /// over the call's arguments (`inline_depth > 0`); the body's HIR nodes are
+    /// then visited a SECOND time
     /// with the SAME ids as the structural walk. The structural walk OWNS
     /// `alloc_region`. A fresh mint here during a re-walk would OVERWRITE the
     /// structural entry with a region parented in the caller's context. The
@@ -407,6 +408,7 @@ impl RegionInference {
 
 mod analyze;
 mod arms;
+mod borrow;
 mod build;
 mod capture;
 mod compensate;
