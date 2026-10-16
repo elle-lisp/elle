@@ -224,7 +224,6 @@
     block19: DecrefValueRegion v442
     block19: DecrefValueRegion v445
     block19: DecrefValueRegion v451
-    block19: IncrefRegion s16
     block19: DecrefRegion s16
     block19: DecrefValueRegion v464
     block22: DecrefValueRegion v488
