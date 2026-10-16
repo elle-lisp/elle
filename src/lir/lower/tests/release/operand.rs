@@ -59,8 +59,8 @@ fn an_accumulator_a_pair_holds_is_released_before_the_tail_call() {
 
 /// The slot the first `%first` in `func` reads its pair from, and every
 /// release of that slot that precedes a `TailCall` on some path: one in a
-/// block's run before its own `TailCall`, or one in the entry block, which
-/// branches to every call.
+/// block's run before its own `TailCall`, or one anywhere in an entry block
+/// that makes no call, since it branches to every call.
 fn read_container_released_before_a_tail_call(func: &LirOwned) -> (Option<u16>, Vec<usize>) {
     let mut container = None;
     for b in func.view().blocks() {
@@ -82,13 +82,10 @@ fn read_container_released_before_a_tail_call(func: &LirOwned) -> (Option<u16>, 
     };
     let mut early = Vec::new();
     for (n, b) in func.view().blocks().enumerate() {
-        let cut = if n == 0 {
-            usize::MAX
-        } else {
-            match tail_call_at(&b) {
-                Some(at) => at,
-                None => continue,
-            }
+        let cut = match tail_call_at(&b) {
+            Some(at) => at,
+            None if n == 0 => usize::MAX,
+            None => continue,
         };
         for (idx, s) in value_releases(b.instrs()) {
             if s == slot && idx < cut {
