@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-16
 //! `RegionInfo`: what region inference produces for a compilation unit — the
 //! per-allocation and per-scope assignments, and the lowerer's cuts.
 //!
@@ -52,6 +52,13 @@ pub struct RegionInfo {
     ///
     /// docs/impl/region/bindings.md
     pub binding_source_regions: HashMap<Binding, Vec<Region>>,
+    /// Binding → the container regions its value is borrowed out of, by an
+    /// uncounted read whose result reaches the binding. The container's
+    /// release extends over the binding's uses. The binding holds no
+    /// reference, so no holder count reads this map.
+    ///
+    /// docs/impl/region/borrow.md
+    pub binding_borrow_regions: HashMap<Binding, Vec<Region>>,
     /// Captured (`needs_capture`) bindings some `assign` reassigns. The lowerer
     /// drops such a binding's init reference off its own register rather than
     /// through the cell slot. Membership is a fact about the binding, not about
@@ -390,6 +397,7 @@ impl RegionInfo {
             scope_region: HashMap::new(),
             binding_region: HashMap::new(),
             binding_source_regions: HashMap::new(),
+            binding_borrow_regions: HashMap::new(),
             captured_reassigned_bindings: FxHashSet::default(),
             frame_held_regions: FxHashSet::default(),
             value_routed_regions: FxHashSet::default(),

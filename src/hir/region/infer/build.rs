@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-16
 //! Assembling `RegionInfo` from the walk's outputs, and marking which of its
 //! fields a later post-pass fills.
 //!
@@ -93,6 +93,9 @@ impl RegionInference {
             scope_region: self.scope_region,
             binding_region: self.binding_region,
             binding_source_regions: HashMap::new(),
+            // Populated by the borrow pass in `analyze_regions_with`, which reads
+            // the walk's uncounted read sites. Empty here.
+            binding_borrow_regions: HashMap::new(),
             captured_reassigned_bindings: rustc_hash::FxHashSet::default(),
             frame_held_regions: rustc_hash::FxHashSet::default(),
             value_routed_regions: rustc_hash::FxHashSet::default(),
