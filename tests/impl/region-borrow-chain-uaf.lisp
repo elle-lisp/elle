@@ -1,18 +1,19 @@
 (elle/epoch 15)
-# audited: 2026-10-15
-# A value read out of a pair stays live for as long as each name it is bound to, through a wrapper and through a second read.
-# docs/impl/region/rules.md
+# audited: 2026-10-16
+# A value read out of a pair stays live for as long as each name it reaches, through a wrapper, a branch, a pattern or a second read.
+# docs/impl/region/borrow.md
 #
 # The sidecar arms guardfree, keeps the JIT off and turns the graft off: each
 # face is written as the graft would leave it, so the shape reaches the region
 # solver as written, and a stale read faults at its deref.
 #
-# Every face binds the result of a `%first` or `%rest` opcode read and reads the
-# name after the pair's own last mention. The opcode raises no count, so the
-# pair's region is the borrowed value's only protection.
+# Every face hands the result of a `%first` or `%rest` opcode read on to a
+# name, or to a second read, and reads it after the pair's own last mention.
+# The opcode raises no count, so the pair's region is the borrowed value's only
+# protection.
 #
-# The counter-factual: with the bound name holding no region, the pair is
-# released at the binder, and the reader derefs a freed page. A plain `let`
+# The counter-factual: with the name holding nothing, the pair is released at
+# the read's own consumer, and the reader derefs a freed page. A plain `let`
 # around the read can hide that, because its body happens to outlast the reader;
 # the `begin` wrapper and the second read do not.
 #
@@ -62,6 +63,58 @@
       (let [q (%first p)]
         (length q)))))
 
+# The second read is an operand, so no name carries its result.
+(defn operand-rest [i]
+  (let [xs (%pair i (%pair i (%pair (string "s" i) ())))]
+    (let [p (%rest xs)]
+      (when (%not (%pair? p))
+        (error {:error :type-error :message "operand-rest: pair expected"}))
+      (length (first (%rest p))))))
+
+# Each arm of a branch reads out of its own pair.
+(defn arm-first [i]
+  (let [xs (%pair (string "s" i) ())
+        ys (%pair (string "t" i) ())]
+    (let [t (let [u (if (< i 0)
+                      (begin
+                        nil
+                        (%first ys))
+                      (begin
+                        nil
+                        (%first xs)))]
+              u)]
+      (length t))))
+
+# A `break` hands the read to its block.
+(defn break-first [i]
+  (let [xs (%pair (string "s" i) ())]
+    (let [t (let [p (begin
+                      nil
+                      (block :b
+                        (break :b (%first xs))))]
+              p)]
+      (length t))))
+
+# A pattern binds a name out of a borrowed scrutinee.
+(defn match-first [i]
+  (let [xs (%pair (%pair (string "s" i) ()) ())]
+    (let [t (%first xs)]
+      (let [y (match t
+                (h . tl) h
+                _ nil)]
+        (length y)))))
+
+# A destructure of a borrowed value reads its fields after the value's own
+# last read.
+(defn destructure-first [i]
+  (let [xs (%pair (%pair (string "s" i) (%pair i ())) ())]
+    (let [t (let [p (begin
+                      nil
+                      (%first xs))]
+              p)]
+      (let [(a b) t]
+        (length a)))))
+
 (defn churn [n]
   (def @i 0)
   (while (< i n)
@@ -71,6 +124,11 @@
     (assert (= (tail-first i) want) "tail-first reads its borrow")
     (assert (= (chain-rest i) want) "chain-rest reads its borrow")
     (assert (= (chain-first i) want) "chain-first reads its borrow")
+    (assert (= (operand-rest i) want) "operand-rest reads its borrow")
+    (assert (= (arm-first i) want) "arm-first reads its borrow")
+    (assert (= (break-first i) want) "break-first reads its borrow")
+    (assert (= (match-first i) want) "match-first reads its borrow")
+    (assert (= (destructure-first i) want) "destructure-first reads its borrow")
     (assign i (+ i 1))))
 
 # Churn region ids so a freed page is recycled onto a live region.
