@@ -115,6 +115,26 @@
       (let [(a b) t]
         (length a)))))
 
+# A pattern whose value is the read itself, with no name read. The read's own
+# last use narrows to the read, and the extraction comes after it.
+(defn destructure-read [i]
+  (let [xs (%pair (%pair (string "s" i) (%pair i ())) ())]
+    (def (a b) (%first xs))
+    (length (string "s" i))))
+
+# A closure captures the pair, so the ownership forest may hand the pair to the
+# closure's subtree, which frees it with the closure. The borrow is read after
+# the closure's last call.
+(defn capture-first [i]
+  (let [xs (%pair (string "s" i) ())
+        f (fn [] (%pair? xs))
+        t (let [p (begin
+                    nil
+                    (%first xs))]
+            p)]
+    (f)
+    (length t)))
+
 (defn churn [n]
   (def @i 0)
   (while (< i n)
@@ -129,6 +149,8 @@
     (assert (= (break-first i) want) "break-first reads its borrow")
     (assert (= (match-first i) want) "match-first reads its borrow")
     (assert (= (destructure-first i) want) "destructure-first reads its borrow")
+    (assert (= (destructure-read i) want) "destructure-read extracts its borrow")
+    (assert (= (capture-first i) want) "capture-first reads its borrow")
     (assign i (+ i 1))))
 
 # Churn region ids so a freed page is recycled onto a live region.

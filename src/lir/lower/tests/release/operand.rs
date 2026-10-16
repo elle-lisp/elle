@@ -113,6 +113,11 @@ fn a_container_a_tail_callee_is_read_out_of_stays_behind_the_call() {
         "(begin (def pick (fn (fns c) (let [g (begin nil (%first fns))] \
                                         (if c (g 1) (length fns))))) \
                 (pick (f 1) true))",
+        // A `def` encloses no branch, so the release lands in the arm that
+        // reads `fns` itself, and the arm that calls `g` must not read as dead.
+        "(begin (def pick (fn (fns c) (begin (def g (%first fns)) \
+                                            (if c (g 1) (length fns))))) \
+                (pick (f 1) true))",
     ] {
         let module = compile_to_lir(source);
         let pick = module

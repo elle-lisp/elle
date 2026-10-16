@@ -23,8 +23,18 @@
             (%first fns))]
     (if c (g 1) (length fns))))
 
+# A `def` encloses no branch, so the pair's release lands in the arm that reads
+# `fns` itself. The arm that calls `g` reads the pair only through `g`, and must
+# not take a release at its head as an arm that never reads the pair.
+(defn pick-def [fns c]
+  (def g (%first fns))
+  (if c (g 1) (length fns)))
+
 (defn outer [i c]
   (pick (%pair (fn [x] (string "v" x i)) ()) c))
+
+(defn outer-def [i c]
+  (pick-def (%pair (fn [x] (string "v" x i)) ()) c))
 
 (defn churn [n]
   (def @i 0)
@@ -32,6 +42,9 @@
     (assert (= (outer i true) (string "v" 1 i))
             "the call enters the borrowed closure")
     (assert (= (outer i false) 1) "the other arm reads the pair")
+    (assert (= (outer-def i true) (string "v" 1 i))
+            "the call enters the def-bound closure")
+    (assert (= (outer-def i false) 1) "the other arm reads the pair")
     (assign i (+ i 1))))
 
 # Churn region ids so a freed page is recycled onto a live region.

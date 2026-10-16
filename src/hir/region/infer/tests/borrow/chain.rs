@@ -69,6 +69,31 @@ const BLOCK_BREAK: &str = "(defn face [i] \
        (let [t (let [p (begin nil (block :b (break :b (%first xs))))] p)] \
          (string (length t)))))";
 
+/// A tail block a `break` leaves with a borrow, beside a frame-replacing tail
+/// call. That call keeps the break window from re-anchoring what the jump
+/// passes over, so the block's own pin is all that carries the borrow out.
+const TAIL_BLOCK_BREAK: &str = "(defn face [i c g] \
+     (let [xs (%pair (string \"s\" i) ())] \
+       (block :b (when c (break :b (%first xs))) (g 1))))";
+
+/// A `def` destructure whose value is the read itself. The read is the
+/// pattern's init, and with no name read the init's last use narrows to the
+/// read, so the read's own pin stops short of the extraction.
+const DESTRUCTURE_READ: &str = "(defn face [i] \
+     (let [xs (%pair (%pair (string \"s\" i) (%pair i ())) ())] \
+       (def (a b) (%first xs)) \
+       nil))";
+
+/// A container a closure captures, read through a borrow after the closure's
+/// last call. The capture lets the ownership forest adopt the container into
+/// the closure's subtree, which frees it at the closure's drop.
+const CAPTURED_CONTAINER: &str = "(defn face [i] \
+     (let [xs (%pair (string \"s\" i) ()) \
+           f (fn [] (%pair? xs)) \
+           t (let [p (begin nil (%first xs))] p)] \
+       (f) \
+       (length t)))";
+
 /// A name a `match` pattern binds out of a borrowed scrutinee, handed on as
 /// the match's value. `t` itself is last used at the `match`, so only the
 /// pattern carries the borrow to `y`.
@@ -212,6 +237,53 @@ fn borrow_a_break_carries_keeps_its_container_past_the_reader() {
 }
 
 #[test]
+fn borrow_a_break_carries_out_of_a_tail_block_keeps_its_container_past_the_block() {
+    // The jump leaves the block, so a release at the `break` or before it is
+    // passed over on the path that breaks. The block's value is the borrow, so
+    // `xs` is released no earlier than the block.
+    let (hir, arena, info) = pipeline(TAIL_BLOCK_BREAK);
+    let site = find_first(&hir, |h| matches!(h.kind, HirKind::Block { .. }))
+        .expect("the shape has a block");
+    assert_container_released_after(&hir, &arena, &info, "xs", site, "the block");
+}
+
+#[test]
+fn a_borrower_bounds_the_tight_last_use_the_ownership_obligation_reads() {
+    // A capture-adopted member is freed by its owner's drop alone, and the
+    // obligation bounds that drop by the member's tight last use. A borrower's
+    // read of the member's pages is a use of it.
+    //
+    // The counter-factual: the tight last use counts the holders only, so it
+    // ends at the closure. The obligation admits the adopt, the closure's drop
+    // frees `xs`, and `length` reads the freed car through `t`.
+    let (hir, arena, info) = pipeline(CAPTURED_CONTAINER);
+    let order = compute_order(&hir);
+    let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
+    let reader = *find_calls_to_primitive(&hir, "length", &arena)
+        .last()
+        .expect("the shape has a `length` call");
+    let xs = find_binding_by_name(&hir, "xs", &arena).expect("binding `xs`");
+    for r in info
+        .binding_source_regions
+        .get(&xs)
+        .expect("`xs` holds a region")
+    {
+        let tight = info
+            .binding_last_use
+            .get(r)
+            .unwrap_or_else(|| panic!("`xs`'s region r{} has a tight last use", r.0));
+        assert!(
+            ord(*tight) >= ord(reader),
+            "`xs`'s region r{} has its tight last use at @{}, ahead of the `length` \
+             call @{} that reads through the borrow",
+            r.0,
+            ord(*tight),
+            ord(reader),
+        );
+    }
+}
+
+#[test]
 fn match_projection_of_a_borrow_keeps_its_container_past_the_reader() {
     assert_container_outlives_reader(MATCH_PATTERN, "xs", "length");
 }
@@ -221,10 +293,12 @@ fn destructure_of_a_borrow_keeps_its_container_to_the_extraction() {
     // The names `a` and `b` are never read, so the value's own last use
     // narrows to the value itself. The `destructure` node reads the fields
     // after it, and `xs` must still be live there.
-    let (hir, arena, info) = pipeline(DESTRUCTURE_UNUSED);
-    let site = find_first(&hir, |h| matches!(h.kind, HirKind::Destructure { .. }))
-        .expect("the shape has a destructure");
-    assert_container_released_after(&hir, &arena, &info, "xs", site, "the destructure");
+    for source in [DESTRUCTURE_UNUSED, DESTRUCTURE_READ] {
+        let (hir, arena, info) = pipeline(source);
+        let site = find_first(&hir, |h| matches!(h.kind, HirKind::Destructure { .. }))
+            .expect("the shape has a destructure");
+        assert_container_released_after(&hir, &arena, &info, "xs", site, "the destructure");
+    }
 }
 
 #[test]
