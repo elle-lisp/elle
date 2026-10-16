@@ -9,6 +9,7 @@ Up: [..](../AGENTS.md)
 - [adopt.md](adopt.md) — **Ownership adopts and the root's lifetime obligation** The owner edges no store site names, the capture and funnel adopts, and the lifetime obligation a root's single demise must meet.
 - [anchors.md](anchors.md) — **Where a release is anchored** Where the solver anchors a release: what each binding form pins, and what a `break` does to the releases its jump passes over.
 - [bindings.md](bindings.md) — **Reassigned mutable bindings are 1-slot containers** Implementation-facing: how the solver and lowerer handle a binding that is reassigned over its lifetime.
+- [borrow.md](borrow.md) — **A borrowing read's result** How long a value read out of a container without a count keeps the container, and why a name bound to that value is no holder.
 - [cells.md](cells.md) — **Capture cells** How a captured binding's cell is realized, what a read through one borrows, and where the cell's own release lands.
 - [clique.md](clique.md) — **What a region-effect declaration buys** What the solver derives from a declared `RegionEffect`.
 - [compensate.md](compensate.md) — **Per-arm compensation** The releases a branch adds one per arm, each funded by a retain on its own node.

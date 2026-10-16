@@ -1,6 +1,6 @@
 # Region rules — the implementor's correctness obligations
 
-<!-- audited: 2026-10-15 -->
+<!-- audited: 2026-10-16 -->
 
 The exhaustive correctness contract the compiler and runtime must uphold for
 regions.
@@ -69,8 +69,8 @@ is a correctness defect, not a tuning knob.
      slot path.
    - *Transparent nodes* (`MakeCell`/`DerefCell`/`SetCell`, and the borrowing
      reads `%get`/`%first`/`%rest`): emit no RC-raising instruction, so the
-     solver must assign no region and pass the child's regions through instead.
-     A borrowing read passes its container's regions (Rule 4).
+     solver assigns no region. A cell node and `%get` pass their child's
+     regions through, and every read's result is a borrow (Rule 4).
 
 3. **Values are born in the right region.** The allocation instruction targets
    the solver-assigned region directly. Never allocate into a short-lived region
@@ -111,9 +111,9 @@ is a correctness defect, not a tuning knob.
    read (the `%get`/`%first`/`%rest` opcodes). It hands back a value that
    still lives **inside the container** and raises no count on it, so the
    container's lifetime is the borrow's only protection. The container's
-   regions extend to the RESULT's last use: an operand read's consumer. A
-   bound result carries them (Rule 2), so they reach every use of each name
-   the result flows to through a `begin`, a `let`, or a second read.
+   regions extend to the borrow's last use: the read's consumer, and every
+   use of each name the borrow reaches. Such a name holds no reference, so it
+   is no holder of the container ([borrow.md](borrow.md)).
 
    Anchored at the read, the container's free-time cascade drops the element's
    last count, and the reader derefs a freed page ([one read](../../../tests/impl/region-container-read-borrow-uaf.lisp),

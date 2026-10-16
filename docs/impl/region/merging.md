@@ -1,6 +1,6 @@
 # Merging
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-16 -->
 
 Merging puts two solver regions in one physical region, freed by one `DecrefRegion`, when the two values share a lifetime.
 
@@ -25,8 +25,8 @@ aggregate-store edge `(site, c, p)` in `cross_region_refs` satisfies all of:
 1. **It is a `%pair` car/cdr store.** `site` is a `Pair` intrinsic node and
    `alloc_region[site] == p` — the edge's target is the aggregate freshly
    allocated *at that very site*. This is what distinguishes the immutable
-   aggregate store (whose sole compile-time `IncrefRegion` is balanced by the
-   aggregate's free-time cascade) from the cases that must **never** seed a merge:
+   aggregate store (whose one reference the pair's allocation scan counts and
+   its free-time cascade releases) from the cases that must **never** seed a merge:
    a may-store **clique** edge (`hard_edge_sites` — runtime-counted by the
    target's content scan), a `SetCell` edge (its target is the cell's binding
    region, not an alloc at the site), and a mutable/conditional `%put`/
@@ -91,13 +91,13 @@ construction:
   last member is built. Emitting the child's own drop — which after
   canonicalization names the same root slot — would free the shared region at the
   child's earlier `decref_point`, under the still-live parent (a use-after-free).
-- **The merged `child → parent` store edge is dropped.** Once both endpoints
-  resolve to one slot the edge is an intra-region `R → R` self-edge whose
-  `IncrefRegion(R)` the free-time cascade never balances (it skips self-references;
-  [mechanism.md](mechanism.md)). `emit_increfs_for` drops it. A merge
-  *without* this drop leaks `R`; a child drop *without* the merge frees early —
-  the two move together, which is why allocation-canonicalization, child-decref
-  suppression, and self-edge elimination are one mechanism, not three.
+- **The merged `child → parent` store edge takes no count.** A `%pair` edge
+  takes no static incref merged or not, because the pair's allocation scan
+  counts the field ([mechanism.md](mechanism.md)). Once both endpoints share
+  one region the field is no longer cross-region, so the scan counts nothing
+  and the cascade releases nothing. A child drop *without* the merge frees
+  early, which is why allocation-canonicalization and child-decref
+  suppression are one mechanism, not two.
 
 The whole mechanism is keyed on `RegionInfo::merged_parent` being non-empty.
 `%pair` lowers as a `Pair` intrinsic node, so the seed predicate sees every
@@ -145,10 +145,9 @@ then free the pairs the callee had just built there.
 
 Mint-or-reuse is what keeps the merge tree in **one** physical region; it is not
 what makes it leak-free. Even a tier that minted fresh for every member (a child
-`R_c`, a parent `R_p`) would not leak the child: the parent object references the
-child, so the parent's free-time cascade decrefs `R_c` to zero — exactly the edge
-the self-edge elimination removed at compile time is supplied at runtime by the
-cascade across `R_p → R_c`. So a wiring gap in one tier costs region *count*
+`R_c`, a parent `R_p`) would not leak the child: the parent's allocation scan
+counts its reference to `R_c`, and the parent's free-time cascade releases that
+count, taking `R_c` to zero. So a wiring gap in one tier costs region *count*
 (VM/JIT divergence), never correctness. The win mint-or-reuse buys is the
 collapse to one region: fewer page mints, better locality — the down-payment on
 the forest's owned-subtree drop.

@@ -1,6 +1,6 @@
 # A release past a frame-replacing tail call
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-16 -->
 
 Every release the lowerer emits after a `TailCall` is dead on the closure path,
 and what it costs to move one ahead of that call.
@@ -54,8 +54,8 @@ Two readings are therefore both required.
 region named by the callee, an operand's own value, the call's own result, or
 its deferred channels (`deferred_release_slot`) keeps its place in the dead
 fall-through. There the ownership move and the deferred callee release own it.
-The exemption is read over `alloc_region` and `binding_source_regions`, and
-again over the emitted instructions. ANF is free to rewrite an operand into a
+The exemption is read over `alloc_region`, `binding_source_regions` and
+`binding_borrow_regions`, and again over the emitted instructions. ANF is free to rewrite an operand into a
 synthetic binding the syntax walk does not connect back to the call.
 
 **What an operand names is its VALUE, not its syntax.** The reading descends
@@ -79,9 +79,11 @@ node too. Its result lives in the region it mints, and that result holds each
 operand by the counted edge the allocation takes. Every other inline `%`-opcode
 mints no region. Its heap result (`%first`/`%rest`/`%get`) is an uncounted
 borrow living *in* its operand's region, so the operand is the value-producing
-leaf and the descent continues through it. The closure-cycle merge's by-move
-boundary reads the same question the same way, for the same reason
-([cycletail.md](cycletail.md)).
+leaf and the descent continues through it. A name bound to such a result hands
+the call the borrow it carries ([borrow.md](borrow.md)), so the reading takes
+that borrow's containers along with the name's own regions. The closure-cycle
+merge's by-move boundary reads the same question the same way, for the same
+reason ([cycletail.md](cycletail.md)).
 
 The difference shows in a recursion that threads an accumulator. In
 `(step (%add i 1) n (%pair i acc))`, the call receives the new pair, and the pair

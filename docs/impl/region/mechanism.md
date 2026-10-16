@@ -1,6 +1,6 @@
 # The mechanism
 
-<!-- audited: 2026-10-13 -->
+<!-- audited: 2026-10-16 -->
 
 The RC-instruction machinery the [rules](rules.md) constrain: how each
 instruction names its region, and when a static slot may stand in. Two nets keep
@@ -53,11 +53,12 @@ static region of the callee is never named in the caller.
 
 That holds however much of the callee this compilation can see. The walk
 **inlines** a resolvable lambda callee's body (`region::infer::walk::inline`),
-so the intrinsics buried inside it record their cross-region edges at *this*
-call site. That is the whole reason the inline exists. The regions that walk
-yields are the callee's, minted against the callee's own nodes and remapped to
-fresh physical regions per activation. So they are discarded: the caller's
-binding for the result holds `call_r`, exactly as it does for an opaque callee.
+so the intrinsics buried inside it record cross-region edges over *this* call's
+arguments, keyed at their own sites in the callee body. That is the whole reason
+the inline exists. The regions that walk yields are the callee's, minted against
+the callee's own nodes and remapped to fresh physical regions per activation. So
+they are discarded: the caller's binding for the result holds `call_r`, exactly
+as it does for an opaque callee.
 
 Letting them through instead makes the caller a nominal holder of a region it never
 allocates, and the `decref_point` machinery reads that fiction as fact:
@@ -324,28 +325,48 @@ is not knowable at compile time:
 | runtime mutable-store traffic | the `push_with_incref` funnel counts at the store site (the TT gap is dynamic) |
 | ownership-forest ops (`AdoptRegion`, `FreeRegionGroup`, `AdoptIntoActivation`) | a forest member is a runtime fact (a call-result / cross-activation region); `AdoptIntoActivation`'s parent — the activation's pages-less owner node — has no slot at all ([owner nodes](owner.md)) |
 
-## Self-edge elimination
+## A `%pair` edge takes no static incref
 
 `emit_increfs_for` emits one `IncrefRegion(source)` per cross-region store edge
 `(site, source, target)` — a value in `source` stored into a structure in
 `target` — balanced by `target`'s free-time cascade at `DecrefRegion(target)`.
-The cascade **skips self-references**
+
+A `%pair` car or cdr edge takes none. Its target is the pair allocated at that
+very site (`RegionInfo::alloc_counts_edge`), and the allocation counts the
+reference itself: `handle_list` allocates through `alloc_obj`, whose scan
+increfs each cross-region field and records the edge the cascade decrefs. A
+static `IncrefRegion` would count that one reference twice against one
+release, and leak the source once per pair built. The edge stays in
+`cross_region_refs`, because the merge seed and the ownership forest read it
+as containment. The callee-inline re-walk records a known callee's own `%pair`
+edges a second time, at the same sites, and those take no incref either.
+
+A merged pair hides the count, because one region holds both ends. So does a
+call result in the car, whose slot-resolved incref names a slot nothing
+populates. [region-pair-edge-leak.lisp](../../../tests/impl/region-pair-edge-leak.lisp)
+pins the rate on a nest the merge seed refuses.
+
+## Self-edge elimination
+
+The free-time cascade **skips self-references**
 ([introspect.rs](../../../src/value/fiberheap/regionpool/introspect.rs) decrefs a
 referenced region only when `rid != own_id`). So a `source == target` self-edge
 `R→R` has no balancing decref: keeping its `IncrefRegion(R)` **leaks** `R`.
 Eliminating a self-edge is therefore the sound transform — the compiler-side
-mirror of the cascade's own `own_id` self-skip. It is the *only* redundant case:
+mirror of the cascade's own `own_id` self-skip. Among the edges that take an
+incref, it is the *only* redundant case:
 
-- **alias edges** — `(%pair x x)` and repeated-arg shapes emit N edges into a
-  *distinct* target; the cascade finds N references and decrefs N times, so all N
+- **alias edges** — a repeated stored value emits N edges into a *distinct*
+  target; the cascade finds N references and decrefs N times, so all N
   increfs are required. Collapsing them is an over-collapse UAF.
 - **may-store clique edges** — over-approximations whose balancing decref is the
   target's runtime content scan (per *actual* store, not per emitted edge).
   Eliminating them trades a known leak for a possible UAF.
 
-A self-edge appears only when a region **merge** collapses a store edge's source
-and target into one region (a value merged into the aggregate it is stored into);
-see [merging](merging.md). The compiler detects one with
+A self-edge appears only when a region **merge** puts a store edge's source and
+target in one region; see [merging](merging.md). The `%pair` edge a merge
+collapses is one, and it takes no incref either way (above). The compiler
+detects one with
 `RegionInfo::is_merge_self_edge` — `merged_root(source) == merged_root(target)`
 over the merge forest — which is exactly the slot coincidence the merged
 allocation resolves to (`static_slot` canonicalizes through that forest). When
@@ -355,10 +376,10 @@ must-keep classes above by construction. The merge seed never collapses an
 escaping alias (it is not sole-held) nor a clique edge (it is not a `%pair`
 immutable store), so their endpoints keep distinct merge roots.
 
-This elimination is half of one mechanism with the merge's allocation
-canonicalization and child-decref suppression ([merging](merging.md)). A
-self-edge dropped without the merge frees early, and a merge without the drop
-leaks, so neither side is emitted without the other.
+This elimination belongs with the merge's allocation canonicalization and
+child-decref suppression ([merging](merging.md)). A merge that kept the
+increment would leak its region, so the elimination fires wherever the merge
+forest puts an edge's two ends in one region.
 
 Its correctness net is not a per-edge runtime assert: once both endpoints share
 a slot, a slot-vs-slot check is a tautology. The net is the compile-time
