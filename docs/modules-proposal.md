@@ -1,8 +1,8 @@
 # Modules: a proposal
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-16 -->
 
-The module system Elle is building toward: compiled once per instance, linked across files, and shipped as images.
+The module system Elle is building toward: one pure form per file, evaluated once per instance, linked across files, shipped as images.
 
 [modules.md](modules.md) describes the module system as it is. This document
 states the design it becomes, and the argument for each part. Five parts are
@@ -10,10 +10,11 @@ implemented: [sound signals](#silent-is-sound),
 [the raw primitives](#the-raw-primitives-are-raw),
 [contained expansion](#expansion-is-contained),
 [deterministic expansion](#expansion-is-deterministic) and
-[one compile per file](#one-compile-per-file).
+[one compile per file](#one-compile-per-file). The shape a module takes is
+decided: [one pure form](#a-module-is-one-pure-form).
 [solver.md](impl/solver.md) owns the cross-file signal solver that linking
-uses. The decisions that belong to the language's owner are
-listed under [Open decisions](#open-decisions).
+uses. The decisions that still belong to the language's owner are listed under
+[Open decisions](#open-decisions).
 
 ## Contents
 
@@ -25,11 +26,11 @@ listed under [Open decisions](#open-decisions).
 - [Expansion is contained](#expansion-is-contained)
 - [Expansion is deterministic](#expansion-is-deterministic)
 - [One compile per file](#one-compile-per-file)
-- [The module shape](#the-module-shape)
-- [A top level does not suspend](#a-top-level-does-not-suspend)
-- [What is shared is pure](#what-is-shared-is-pure)
+- [A module is one pure form](#a-module-is-one-pure-form)
+- [How the form is held pure](#how-the-form-is-held-pure)
+- [A module's form does not suspend](#a-modules-form-does-not-suspend)
 - [Linking](#linking)
-- [Images and exported macros](#images-and-exported-macros)
+- [Images](#images)
 - [Rejected alternatives](#rejected-alternatives)
 - [Open decisions](#open-decisions)
 - [Measuring](#measuring)
@@ -57,10 +58,10 @@ transformer fails because the macro VM has no compile context.
 declaration order, process-wide: `:alpha` is bit 32 or 33 depending on which
 declaration ran first. Compiled code carries the bit number.
 
-**The standard library already has the shape.** 85 of the 86 files in
+**The standard library is close to the shape.** 85 of the 86 files in
 [lib/](../lib/) end in a `(fn …)` that builds the export struct; `lua.lisp` is
 the exception, and it does not compile (#1217). What sits outside that lambda
-is what any sharing rule has to settle:
+is what moves into it under [the shape](#a-module-is-one-pure-form):
 
 | File | Top level outside the lambda |
 |------|------------------------------|
@@ -78,54 +79,30 @@ included, is a possible raise. Signals describe control flow and nothing else.
 
 **Silent** means the inferred signal is empty and the inference is sound.
 
-**Pure** means silent, reading no ambient state, and changing no state that
-outlives the evaluation. Signals decide only the first part. `sys/env`,
-`sys/args`, `sys/pid` and `backend?` transfer no control, so they are silent,
-and they are still ambient reads. Assigning a captured binding, reading a
-mutable binding, and mutating a shared container are silent too. Purity needs
-an analysis of its own beside signal inference.
+**Pure** means silent apart from `:error`, reading no ambient state, and
+changing no state that outlives the evaluation. Signals decide only the first
+part. Today `sys/env`, `sys/args`, `sys/pid` and `backend?` transfer no
+control, so they are silent, and they are still ambient reads. Assigning a
+captured binding, reading a mutable binding, and mutating a shared container
+are silent too.
 
 **Deterministic** means the same inputs give the same output, a raise included.
-A deterministic expression may raise, so it is weaker than pure. A cache needs
-determinism. Moving code to another point in time needs more, because a moved
-raise happens at a different time, or happens where it never did.
+A compile is deterministic in its key and reads files, so determinism is
+weaker than purity. A cache needs determinism.
 
-**Hoisting** moves a binding out of a module's lambda to the file's top level,
-so it is computed once when the file loads instead of on every call. The
-example runs: both shapes answer the same, and the proposal is that the
-compiler turns the first into the second.
-
-```lisp
-(defn build-huffman-table [] {})
-(defn lookup [table s level] s)
-
-# Today: the table is built on every call.
-(def before (fn [&named level]
-              (def table (build-huffman-table))
-              (defn encode [s] (lookup table s level))
-              {:encode encode}))
-
-# Proposed: the compiler hoists the table to the file's top level.
-(def table (build-huffman-table))
-(def after (fn [&named level]
-             (defn encode [s] (lookup table s level))
-             {:encode encode}))
-
-(assert (= ((get (before) :encode) "x") ((get (after) :encode) "x")))
-```
-
-A binding may move only when it reads nothing bound inside the lambda, it is
-deterministic, and it allocates nothing mutable. A hoisted `@[]` is shared by
-every instance. Whether a hoisted binding may also raise is an
-[open decision](#open-decisions): a raise that moves to load time fails the
-import instead of the call. Hoisting is not inlining. Inlining puts an imported
-closure's body at a call site in another file.
+**Instantiation** is a call of the function a module's value holds. It may be
+impure: it imports other modules, loads libraries and allocates state.
 
 ## Principles
 
 **A raw primitive does one thing and assumes nothing.** `import-file` and
 `include-file` load the file their argument names. `import` and `include`
 resolve a spec, and the rules they follow are Elle code a program may replace.
+
+**A user could build it.** The runtime compiles a file, evaluates a form under
+a capability mask, and keeps caches a program cannot see. Resolution, `import`
+and the wiring of dependencies are Elle code over those, so a user reasons
+about them as about any other code.
 
 **A check is enforced, not trusted.** Where a property can be checked at run
 time, it is checked there too. Capabilities already work this way.
@@ -175,12 +152,13 @@ standard library. It shows a user how to build a module system, and a user
 may replace it. Two costs follow:
 
 - A macro is not a value, so `import` cannot be handed to `map`.
-- The compiler does not assume what `import` resolves to. A literal
-  `import-file` is the one dependency it knows before anything runs, and
+- `(import spec)` expands to `(import-file (import/resolve spec dir))`, so the
+  path is computed when the code runs. A literal `import-file` is the one
+  dependency the compiler knows before anything runs, and
   [linking](#linking) inherits that limit.
 
-`include` keeps one copy of the rules by calling `import/resolve` at compile
-time.
+`include` keeps one copy of the rules: the compiler, not a macro, calls
+`import/resolve` while it compiles, and records the path it answers.
 
 **The search visits neither the working directory nor the writer's
 directory.** A spec that starts with `./` or `../` names a file relative to
@@ -231,8 +209,7 @@ expansion-time gensym names come from its own tag and its own count
 A user signal's bit still follows declaration order, so a compile takes the
 declarations as an input. Within one process a bit never changes, and an
 in-instance cache needs nothing more. Code that crosses processes needs the
-signal's name instead, and [module images](#images-and-exported-macros) are the
-first such code.
+signal's name instead, and [module images](#images) are the first such code.
 
 The compile inputs:
 
@@ -243,13 +220,12 @@ The compile inputs:
 | The epoch and the Unicode generation | Migration rules and string semantics |
 | The binary's build identity and the primitive table | Codegen, primitive ids, the prelude and stdlib, the registries the stdlib compile fills, and the expansion budget |
 | The bindings an embedder registers | Every compile in the instance resolves them, as it resolves a primitive |
-| The macro environment | Prelude, plus the unit's own macros; plus the macros of every literal import once modules export them |
+| The macro environment | The prelude, the unit's own macros, and the macros of its includes |
 | The REPL layer, for a REPL line | The macros and definitions earlier lines made |
 | The `env` struct an `eval` takes | Its entries bind as immutable names |
 | The capabilities the compiling fiber withholds | A macro that calls a denied primitive fails the compile |
 | The `elle test` transforms | The runner wraps each test form before analysis |
 | The resolved path of every literal `import-file` and every `include` | The writer's directory and the search paths decide which file a path names |
-| The facts of every literal import | Linking reads them to solve the file's signals |
 | User signal declarations | Bit numbers, until signals relocate by name |
 
 This table is what the key of [one compile per file](#one-compile-per-file)
@@ -267,152 +243,152 @@ a module gets the new code.
 
 The key is a digest of the inputs in the table above that can change within an
 instance: the file's text, its path, the capabilities the compiling fiber
-withholds, and each include's resolved path and text. A lookup resolves every
-include again. A host that registers a binding or a primitive empties the store,
-and [pipeline.md](pipeline.md) says why no other input needs a place in the key.
+withholds, and each include's resolved path and text. A lookup reads the file
+and resolves and reads every include again, so a hit reads what a miss reads. A
+host that registers a binding or a primitive empties the store, and
+[pipeline.md](pipeline.md) says why no other input needs a place in the key.
 
-A file's compile reads none of its imports, so no import is in its key yet.
-Once a call into another file uses the linked signal, an importer's key
-includes the keys of its literal imports. The store then keeps each file's
-facts beside its bytecode, not the signals solved from them. A file solved with
-its imports left open is sound but loose ([solver.md](impl/solver.md)), and
-linking closes it.
+A file's compile reads none of its imports, so no import is in its key. An
+import runs when the code that holds it runs, and reads its file then.
 
-Every import still runs the kept code, so module meaning does not change.
+Today every import runs the kept code, so module meaning has not changed. The
+[shape](#a-module-is-one-pure-form) below changes it.
 
-## The module shape
+## A module is one pure form
 
-This is where module meaning changes. Three shapes are on the table:
+A module file holds one form, after its `(elle/epoch N)` line, which the
+reader consumes. `import/load-file` evaluates the form once per instance and
+keeps its value. Every later load of the file returns that value while its
+compile inputs match, and an [image](#images) can carry it. The runtime adds
+nothing else: it caches and hydrates.
 
-| Shape | Top level | Instantiation | Purity check |
-|-------|-----------|---------------|--------------|
-| (a) Today: an implicit letrec, any value | runs on every import | not separate | none |
-| (b) An implicit letrec that must return a lambda | pure; evaluated once and shared | the lambda call; may be impure | needed |
-| (c) A single `(fn …)` expression | a closure with an empty environment | the lambda call; may be impure | deferred to hoisting |
+No implicit letrec remains. A module with several definitions wraps them in
+`letrec`, `let`, `fn` or a struct literal. `defmacro` already works inside a
+body. `include` splices only at a file's top level today, so it must splice
+into the body that holds it.
 
-Shape (b) splits link time from instantiation. Impurity moves into the lambda,
-so a stateful or effectful module stays possible: it opens its library, reads
-its environment and allocates its state when called. Within an instance, (b)
-evaluates the top level once; across processes, the speed comes from
-[module images](#images-and-exported-macros).
+The form may build any value. Pure work it does outside a lambda runs once per
+instance, and every importer shares the result. Effects and dependencies go
+inside a function the value holds, and instantiation runs them:
 
-Shape (c) is pure by construction, because a lambda literal is a value. A
-function body is already an implicit letrec, so the letrec moves inside the
-lambda instead of disappearing. Four costs follow:
+```lisp
+# lib/x.lisp, as one form:
+# (letrec [table (build-table)]            # pure: built once per instance
+#   (fn [&named level]                     # instantiation: may be impure
+#     (def b64 ((import "std/base64")))    # a dependency, imported when called
+#     {:encode (fn [s] (b64:encode (lookup table s level)))}))
+```
 
-- Work that every instance could share is repeated on each call until the
-  compiler hoists it.
-- Hoisting needs the purity analysis below, so (c) moves the check into the
-  compiler rather than removing it.
-- `include` is spliced only at a file's top level today, so it would have to
-  work inside the body.
-- All module code moves into a function body, which infers less than a file
-  ([where it stands](#where-the-module-system-stands)). So (c) needs
-  [linking](#linking) first, or a fixpoint over function bodies. The solver
-  solves a body's definitions jointly, forward and mutual references included.
+[lib/git.lisp](../lib/git.lisp) has this shape today: its lambda imports
+`std/git/core`, and the core's lambda loads `libgit2.so`. A module with no
+dependency and no effect may return its struct directly.
 
-Both (b) and (c) change identity. Today every import makes new closures,
-parameters and trait tables. Under (b) the top level is shared by every
-importer in an instance, as plugins already are, so one parameter or trait
-table exists per instance. Under (c) nothing is shared until hoisting shares
-it.
+The rule binds what `import/load-file` loads. A program that `elle` runs keeps
+many forms and may be impure, as the files under [tests/lang](../tests/lang)
+are.
 
-Either shape moves the impure top levels in the table above into their
-lambdas. [captures.rs](../tests/integration/file_scope/captures.rs) imports a
-module that keeps a counter at its top level twice, and checks that the two
-counters are independent. The purity check rejects that fixture under (b).
-Once the counter moves inside the lambda, the assertion holds unchanged.
+Four consequences follow:
 
-The lambda rule makes one mistake common. `(def b (import "std/base64"))`
-followed by `(b:encode "x")` reports "get: expected collection …, got
-closure". That case needs an error of its own.
+- **Identity.** Whatever the form builds exists once per instance, a parameter
+  or a trait table included. A module that wants one per importer builds it in
+  the function it returns.
+- **Plugins.** `import/load-plugin` signals `:ffi`, so a pure form cannot load
+  a plugin. A module loads one in the function it returns, or takes it as a
+  parameter, as [modules.md](modules.md) shows. No rule names plugins.
+- **Raises.** A raise in the form is deterministic, so it fails every load of
+  the file while the inputs match.
+- **Migration.** The top levels in the
+  [table](#where-the-module-system-stands) move into their functions.
+  [captures.rs](../tests/integration/file_scope/captures.rs) imports a module
+  that keeps a counter at its top level twice, and checks that the two
+  counters are independent. That fixture moves its counter into a function,
+  and the assertion holds unchanged.
 
-## A top level does not suspend
+A module that returns a function and one that returns a struct look alike at
+the import. `(def b (import "std/base64"))` followed by `(b:encode "x")`
+reports "get: expected collection …, got closure" when the module returns a
+function. That case needs an error of its own.
 
-A loader runs a module's top level on the current fiber and refuses a
-suspension, because it cannot hold one ([park.md](impl/region/park.md)). A top
-level that runs `ev/sleep` or `port/read-all` fails with `import/load-file:
-unexpected signal`. The lambda a module returns is an ordinary closure, and it may suspend
-when called directly and inside `ev/spawn`. So a module is already
-asynchronous where its work runs.
+All module code moves into a body, which infers less than a file
+([where it stands](#where-the-module-system-stands)). The solver solves a
+body's definitions jointly, forward and mutual references included
+([solver.md](impl/solver.md)), so it lands before the shape.
 
-The top level needs no rule of its own. Shape (b) makes it pure, shape (c)
-makes it one lambda literal, and neither suspends. Three reasons keep it from
-suspending:
+## How the form is held pure
 
-1. The set of imports in progress belongs to the VM, not to a fiber. A
-   suspended top level would keep its mark, so a second fiber importing the
-   same file would get "circular dependency".
-2. Under (b), a shared top level that runs interleaved with other fibers could
-   build a different value on each run.
-3. An asynchronous read buys little. The file read and path resolution block
-   briefly, and the compile is the cost: 0.29 s for `std/http2` at `8fe781a03`,
-   all of it CPU on the one scheduler thread. One compile per file pays it once
-   per instance, and linking removes the runtime compile for a literal import. `lib/`, `tests/`, `demos/` and
-   `tools/` hold 317 literal specs and 15 computed ones.
+`import/load-file` evaluates the form in a fiber that withholds every
+capability. A form that loads a library, reads a file or prints is denied, and
+the load fails naming the primitive. A user could write the same evaluation
+with `fiber/new` and `:deny`.
 
-## What is shared is pure
+Two parts need more than that fiber:
 
-Under (b), the top level must be pure. Signals answer whether it can raise.
-A second analysis answers whether it reads ambient state or changes shared
-state:
+- **Ambient reads gain a capability bit.** `sys/env`, `sys/args`, `sys/pid`,
+  the clocks, `backend?` and the other primitives an expansion refuses carry a
+  mark today, and no bit. Each gains one, so the fiber's mask denies them, and
+  `:deny` withholds them from any fiber.
+- **No mutable state reaches the value.** A mutable container in the value, or
+  a closure that assigns a binding the form made, would be shared by every
+  importer. The loader walks the value and refuses both. The walk enforces at
+  run time what an analysis may report earlier. `lib/aws.lisp` assigns its
+  top-level `@sigv4-mod` inside its lambda, so the binding moves inside too.
 
-- Read the mark an expansion refuses. It names the primitives that read or
-  change process state: the environment, the arguments, the pid, the clock,
-  configuration, and identity hashes.
-- Reject a top level that assigns a captured binding, mutates a container it
-  did not allocate, or lets a mutable allocation escape into the value.
-- Reject a lambda that assigns a binding of the top level. `lib/aws.lisp`
-  allocates its mutable binding at the top level and assigns it inside the
-  lambda, so under (b) a second instantiation would overwrite the first's.
-- Enforce it at run time as well, by evaluating the top level in a fiber that
-  withholds every capability. That catches the effects that carry a bit. The
-  ambient reads carry none, so the mark covers them, as it does for an
-  expansion. Whether they gain a bit instead is an
-  [open decision](#open-decisions).
+A raise is allowed: a raise is deterministic, and a cache tolerates it.
 
-Literal imports at the top level need a rule of their own. Once imports link,
-a literal import of a pure module is a dependency, not an effect. A top level
-that calls an imported lambda is pure only if that lambda's body is.
+The form imports nothing. An import reads a file, on a hit too, because the
+store reads the file and its includes to check the key. A program that denies
+`:fs` sees the same denial whether or not the file was cached before.
 
-The check reads sound signals, and it needs a decided shape.
+## A module's form does not suspend
+
+A loader runs a module's form on the current fiber and refuses a suspension,
+because it cannot hold one ([park.md](impl/region/park.md)). A pure form
+signals nothing but `:error`, so it never suspends. The function a module's
+value holds is an ordinary closure, and it may suspend when called directly
+and inside `ev/spawn`. So a module is already asynchronous where its work runs.
+
+An asynchronous read would buy little. The file read and path resolution block
+briefly, and the compile is the cost: 0.29 s for `std/http2` at `8fe781a03`,
+all of it CPU on the one scheduler thread. One compile per file pays it once
+per instance. `lib/`, `tests/`, `demos/` and `tools/` hold 317 literal specs
+and 15 computed ones.
 
 ## Linking
 
-Treat `((import-file "literal"))` as a dependency the compiler knows before
-anything runs:
+A call through `module:field` takes every bit today (#1232). Linking gives it
+the signal solved in the module's file:
 
-- The export shape becomes part of the rule: the lambda's body ends in a
-  struct literal. `compile/exports`, the semver surface and IDE completion then
-  work for every module.
 - Signals cross files as facts, not as a per-field summary. Each file states
   its signals over free variables: its own parameters, captured parameters,
   fields of parameters, and the exports of its imports. Linking joins the files
   through their literal imports and solves the whole graph at once
   ([solver.md](impl/solver.md)).
-- A call through `module:field` uses the solved signal, which closes #1232.
-  A map from field to signal cannot hold that answer: it has no way to say
+- A map from field to signal cannot hold the answer: it has no way to say
   "field `:connect` of parameter 0". The `propagates` mask in `Signal` becomes
   the special case where every free variable is one of the function's own
   parameters.
+- A struct literal at the end of a module's value is what linking reads
+  precisely, and `compile/exports`, the semver surface and IDE completion read
+  it the same way. A module whose value is built another way still works, and
+  a call through it takes every bit. No rule requires the literal.
 - A cycle between function bodies is legal, and its files solve jointly. A
-  cycle of top-level imports is an instantiation cycle, and the runtime check
-  reports it by name.
+  cycle of imports during instantiation reaches the loader, which names it.
 - A closure that captures no instantiation argument can be inlined into its
   importer, as stdlib bodies already are.
 - The WASM backend links an imported module in ahead of time, instead of
   running it on the host VM (#924).
-- Under shape (c), hoisting gives back the sharing that (b) writes by hand.
 
-Linking needs the purity check under (b), and sound signals under either
-shape. It gives a module value an image can carry.
+An import runs inside the function a module returns, and `import` computes its
+path when it runs. So the compiler sees a literal spec, and the file that spec
+names is known only at run time. When linking joins the files is the open
+decision [Linking through import](#open-decisions).
 
-## Images and exported macros
+## Images
 
-A pure, linked module value can be saved as an image and mapped at load
+A module's value is pure, so it can be saved as an image and mapped at load
 ([image.md](impl/image.md)). A module image is a configuration of the image
 mechanism, layered over the boot image as an environment image is. Its digest
-is the compile-input table above, with each literal import's digest folded in.
+is the compile-input table above.
 
 The rules images already state carry over:
 
@@ -433,12 +409,32 @@ and refuses the dump. Relocation by name replaces both.
 only. Module images wait on the environment configuration
 ([plan.md](impl/image/plan.md)).
 
-A module whose top level is pure can be evaluated while its importer compiles.
-Its macros can then be exported as values, and they join the macro environment
-in the compile-input table. That removes the [warts](warts.md) entry saying a
-macro cannot be exported, and leaves `include` without its main use.
-
 ## Rejected alternatives
+
+**A file as an implicit letrec of any value.** This is the shape today: the
+top level runs on every import, and nothing it builds is shared. A rule a
+reader cannot see decides the file's scope, and its value cannot be cached.
+
+**An implicit letrec that must return a lambda.** The lambda was where
+impurity went. A pure form may hold a lambda already, so requiring one buys
+nothing, and the implicit letrec stays a rule a reader cannot see.
+
+**Hoisting.** The compiler would move pure bindings out of a module's lambda
+to share them. One pure form lets the author write that sharing, and a pass
+the program cannot see would decide what the author can write.
+
+**A loader that loads a module's literal imports before its form runs.** The
+form would then receive values instead of reading files. The same
+`import-file` would mean one thing in a module and another in a program.
+
+**A compile-time import.** A new form, like `include`, would read another
+module and evaluate its form while the importer compiles. A compile would
+then run code from other files, a special case no user could build. It would
+also bring back compile-time recursion between files (#1323).
+
+**A declaration of dependencies.** A module's value would name its imports as
+data, and the loader would apply the module to their values. A function that
+imports when called gives the same result without a protocol.
 
 **A disk cache of compiled code beside each source file.** Key a file's
 bytecode on its compile inputs, store it, and load it in the next process. The
@@ -465,19 +461,17 @@ pure instead, and `include` stays the one read a compile records.
 
 ## Open decisions
 
-- **The module shape**: (a), (b) or (c).
-- **Identity under (b)**: whether one parameter and trait table per instance
-  is the intended meaning.
-- **Raises at a shared top level**: whether a top level, or a hoisted
-  binding, may raise `:error`. A cache tolerates it. A hoisted raise fails
-  the import instead of the call.
-- **Ambient reads**: whether `sys/env`, `sys/args`, `sys/pid`, the clock and
-  `backend?` gain a capability bit, so the run-time purity check covers them.
-- **Linking through `import`**: how `((import "std/x"))` becomes a dependency
-  the compiler knows, now that `import` is a macro over a resolver a program
-  may replace.
-- **Plugins**: whether `(import "plugin/x")` keeps returning a struct while a
-  source module returns a lambda.
+- **Linking through import**: how a call through an imported module gets its
+  solved signal, now that an import runs at instantiation and `import`
+  computes its path when it runs.
+- **Exported macros**: a macro exported as a value would join its importer's
+  macro environment, so the importer's compile would evaluate another module.
+  That is the compile-time import rejected above. `include` stays the way to
+  share macros, and [warts.md](warts.md) keeps its entry.
+- **Native libraries**: how a native library's init runs once per instance,
+  and whether `ffi/on-unload` keeps one teardown for each library and symbol.
+  [lib/git/core.lisp](../lib/git/core.lisp) registers its teardown again on
+  every instantiation.
 
 ## Measuring
 
