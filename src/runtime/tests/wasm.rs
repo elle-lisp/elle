@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-20
 //! A tiered WASM module and a tiered WASM rejection each pin the code region their key's payload lives in.
 //!
 //! docs/impl/wasm.md
@@ -62,13 +62,15 @@ fn a_tiered_wasm_module_pins_its_code_region() {
 
 /// A closure the tier refused is keyed the same way, so it pins the same way.
 ///
-/// The tier refuses a tail call, and `(+ a 1)` in tail position is one. The
-/// tier is on from the first call, so the program's own call meets it.
+/// The tier refuses a tail call, and `(+ a 1)` in tail position is one while
+/// the graft is off, which keeps the call to `+` a call (docs/impl/graft.md).
+/// The tier is on from the first call, so the program's own call meets it.
 #[test]
 fn a_tiered_wasm_rejection_pins_its_code_region() {
     let mut rt = Runtime::new();
     rt.vm().runtime_config.wasm = crate::config::WasmPolicy::Lazy { threshold: 0 };
     rt.vm().wasm_tier = Some(crate::wasm::lazy::WasmTier::new().expect("a tier starts"));
+    rt.compile().set_graft(crate::config::GraftPolicy::Off);
     let f = run(&mut rt, "(defn refused [a] (+ a 1)) (refused 1) refused");
     let key = f
         .as_closure()
