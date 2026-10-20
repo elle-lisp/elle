@@ -1,6 +1,6 @@
 # The audit queue
 
-<!-- audited: 2026-10-19 -->
+<!-- audited: 2026-10-20 -->
 
 Every file carries the day it last met the documentation policy, and the queue
 names what to read next by what a stale file costs.
@@ -81,6 +81,7 @@ all, which is the correct answer for a file whose staleness costs nothing.
 | `scripts/audit --policy` | every file stamped before the policy's own stamp |
 | `scripts/audit --counts` | the unstamped files, the files stamped before the policy, and the files stamped with a deviation, as three counts |
 | `scripts/audit --sources` | every queued file that is not a document, one path per line |
+| `scripts/audit --documents` | every queued document, one path per line |
 | `scripts/audit --root DIR` | treat DIR as the repository root |
 
 `make audit` runs the first form, and `make qa` runs `make audit` before its
@@ -142,7 +143,7 @@ call site. Nobody reads these three that way:
 A reading budget over hundreds of lines of recipe, thousands of lines of
 definitions, or nearly ninety variants of one enum measures a distance no reader
 travels. So none of the three is on the size ledger either: the size producer
-reads the queue's own list of sources ([the tool producers](../../tests/ratchet/overview.md)).
+reads the queue's own lists ([the tool producers](../../tests/ratchet/overview.md)).
 The enum cannot be split without nesting variants into a sub-enum, which
 rewrites every match over it ([src/lir/AGENTS.md](../../src/lir/AGENTS.md)).
 
@@ -154,13 +155,14 @@ Exempting the name rather than the marker would drop every hand-written index
 out of the queue, the root one included. The root index is the most-read
 document in the repository, and the costliest place for a stale claim to sit.
 
-The eligibility test lives in one function, and the staged gate, the tree walk
-and `--sources` all call it. Two copies would disagree about what is exempt,
+The eligibility test lives in one function, and the staged gate, the tree walk,
+`--sources` and `--documents` all call it. Two copies would disagree about what is exempt,
 and the disagreement would show up as a commit that the gate passed and the
 queue reports as unaudited forever.
 
 `--sources` prints the queued files that are not documents, one path per line,
-sorted. It reads no stamp, so a source with none is listed like any other.
+sorted, and `--documents` prints the queued `.md` files the same way. Neither
+reads a stamp, so a file with none is listed like any other.
 
 ## The policy's own stamp is the floor
 
@@ -215,13 +217,11 @@ A deviation stamp is exempt too. It claims the content and names the issue that
 tracks the rule it breaks, so a check that failed it would only repeat the
 issue. The third count keeps those files from growing in number unseen.
 
-The size of a source is not among these checks. Every source is on the size
-ledger, stamped or not ([the documentation policy](../../DOCUMENTATION.md)), so
-a document's 500 lines is the one size the prose checks read.
+Size is not among these checks. Every source and every document is on the size
+ledger, stamped or not ([the documentation policy](../../DOCUMENTATION.md)).
 
-This is the hedge against a stamp applied without an audit. Confirming the line
-count no longer discharges the claim, because the line count was never the
-reader's job. What is left to attest is the part that takes reading the file:
+This is the hedge against a stamp applied without an audit. Confirming the size
+no longer discharges the claim, because the size was never the reader's job. What is left to attest is the part that takes reading the file:
 whether it is still true, whether it earns its length, and whether it holds
 something that belongs elsewhere.
 

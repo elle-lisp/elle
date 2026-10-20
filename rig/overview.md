@@ -86,7 +86,8 @@ elle-rig -e '(println (elle/build))'
 The rig registers `(elle/tokens text)` beside `(elle/build)`, on the same two
 runtimes. It answers how many tokens `text` costs a reader in the `o200k_base`
 encoding. The text is read as ordinary text, so the spelling of a special token
-counts as the text it is. The size producer prices each source with it
+counts as the text it is. The size producer prices each source and each
+document with it
 ([the tool producers](../tests/ratchet/overview.md)), and `elle` has no such
 primitive.
 

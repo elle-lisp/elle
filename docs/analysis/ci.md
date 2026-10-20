@@ -1,6 +1,6 @@
 # CI and Triage
 
-<!-- audited: 2026-10-19 -->
+<!-- audited: 2026-10-20 -->
 
 CI structure, local workflow, and failure diagnosis.
 
@@ -64,9 +64,9 @@ runs first, runs always, and gates every other job.
 ### Each build is an implementation
 
 The corpus jobs differ in the build they make, not in flags they pass. A build
-carries one optimizing tier and one I/O backend ([config](../config.md)
-§ Builds), and every build runs the language suite with no flag
-([spec](../spec.md) § A build is an implementation). So the job list above is
+carries one optimizing tier and one I/O backend ([config](../config.md)),
+and every build runs the language suite with no flag ([spec](../spec.md)).
+So the job list above is
 the implementation matrix. It holds the default build, a build with no JIT, a
 thread-pool build, an MLIR build, a build with no features, and the default
 build on AArch64 and macOS. A language test that passes on one and fails on
@@ -461,8 +461,8 @@ make test
 | **Boot from an image fails** | `Boot Image Tests` fails and every other corpus job passes | The corpus file answers differently under a hydrated boot, or the image no longer hydrates. | Run `make smoke-boot-image` locally. Read the hydration proof first: a target that fails there never reached the corpus. |
 | **Property tests fail** | `Rust Tests` fails with a shrunk counterexample | The shrunk output shows the *minimal* failing input. | Reproduce with the exact shrunk values as a unit test. Check the files under `tests/proptest-regressions/`. |
 | **Integration tests fail** | `Rust Tests` fails | Tests use `eval_source()` which runs the full pipeline. | Read the assertion. Check whether the test expects `.unwrap()` (success) or `.is_err()` (error). |
-| **Prose** | `QA` fails on `make prose` | A stamped file breaks a rule a machine can check: a call-out over 140 characters, a broken link, a bare filename, banned wording, or a document past 500 lines. | Run `make prose` and repair the file the message names ([DOCUMENTATION.md](../../DOCUMENTATION.md)). |
-| **Source size** | `Default Build Tests` fails `smoke-producers` on a row of [size.lisp](../../tests/ratchet/size.lisp) | A source grew past its bucket, a source new to the ledger raised the excess, or a source shrank and left its row stale or missing. | Shed the growth or split the file ([DOCUMENTATION.md](../../DOCUMENTATION.md)). Re-pin a stale row with `elle-rig test --repin tests/ratchet/size.lisp`, and delete a missing one. |
+| **Prose** | `QA` fails on `make prose` | A stamped file breaks a rule a machine can check: a call-out over 140 characters, a broken link, a bare filename, or banned wording. | Run `make prose` and repair the file the message names ([DOCUMENTATION.md](../../DOCUMENTATION.md)). |
+| **File size** | `Default Build Tests` fails `smoke-producers` on a row of [size.lisp](../../tests/ratchet/size.lisp) | A source or a document grew past its bucket, a file new to the ledger raised the excess, or a file shrank and left its row stale or missing. | Shed the growth or split the file ([DOCUMENTATION.md](../../DOCUMENTATION.md)). Re-pin a stale row with `elle-rig test --repin tests/ratchet/size.lisp`, and delete a missing one. |
 | **Clippy** | `QA` fails on the clippy step | Any Rust warning. CI runs with `-D warnings`. | Run `cargo clippy --workspace --all-targets -- -D warnings` locally. |
 | **Formatting** | `QA` fails on `cargo fmt --check` | Unformatted Rust code. | Run `cargo fmt`. |
 | **Rustdoc** | `QA` fails on the `cargo doc` step | Broken intra-doc links or malformed doc comments. CI documents private items, so a link into a `pub(crate)` item counts. A `#[cfg(test)]` item is absent from a doc build — gate it `#[cfg(any(test, doc))]` if the docs link to it. | Run `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items` locally. |

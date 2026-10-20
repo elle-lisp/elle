@@ -1,6 +1,6 @@
 # Where subject-mixing begins, and the source cap it sets (2026-10-19)
 
-<!-- audited: 2026-10-19 -->
+<!-- audited: 2026-10-20 -->
 
 The share of Elle's sources that do more than one job, by size, and the
 2,500-token cap read off it.
@@ -129,13 +129,13 @@ cap at 2,500 tokens catches 35.
 
 The ratchet holds every ledgered source to its 500-token bucket until it is
 split, so on the day the cap moves a quarter of the sources cannot grow past
-where they stand. Summed over the buckets, the excess the ledger pins is 923,000
+where they stand. Summed over their buckets, the sources' excess is 923,000
 tokens.
 
 ## What this does not measure
 
-- **Documents.** A document has no one-subject proxy yet, so its cap stays at
-  500 lines.
+- **Documents.** A document has no one-subject proxy yet, so this report reads
+  no document cap off the tree.
 - **The proxy itself.** A source can mix subjects under one document, and this
   count does not see that.
 - **The scripts.** Three files is no curve, so the scripts take the cap of the

@@ -1,6 +1,6 @@
 # The tool producers
 
-<!-- audited: 2026-10-19 -->
+<!-- audited: 2026-10-20 -->
 
 Producers that drive a tool outside Elle, parse the counts it prints, and
 report each count as a reading.
@@ -64,24 +64,24 @@ memcheck runs a program at a fraction of its native speed.
 
 ## The size ledger
 
-[size.lisp](size.lisp) reads every source over the cap
-[the documentation policy](../../DOCUMENTATION.md) states:
+[size.lisp](size.lisp) reads every source and every document over the cap
+[the documentation policy](../../DOCUMENTATION.md) states for its kind:
 
 | Subject | Axis | Value |
 |---------|------|-------|
-| a source's path | `tokens` | its tokens, rounded up to the next multiple of 500 |
-| `the excess the work sheds` | `tokens` | each source's reading less the cap, summed over the sources that are not tables |
+| a file's path | `tokens` | its tokens, rounded up to the next multiple of 500 |
+| `the excess the work sheds` | `tokens` | each file's reading less its cap, summed over the files that are not tables |
 | `the excess tables carry` | `tokens` | the same sum over the tables |
 
-A source is a line of `scripts/audit --sources`, so the size ledger and the
-audit queue agree on what is exempt ([the audit queue](../../docs/impl/audit.md)).
-A source's tokens are `(elle/tokens text)` over its whole text
-([the rig](../../rig/overview.md)). A source at the cap or under it reads
-nothing, and a document is no source.
+A source is a line of `scripts/audit --sources`, and a document a line of
+`scripts/audit --documents`, so the size ledger and the audit queue agree on
+what is exempt ([the audit queue](../../docs/impl/audit.md)). A file's tokens
+are `(elle/tokens text)` over its whole text ([the rig](../../rig/overview.md)).
+A file at its cap or under it reads nothing.
 
 The rows are in `tests/ledger/size-*.lisp`, split so that each file stays under
 the cap. A row's subject is a path rather than a literal in the producer, so
-[ledgers.rs](../integration/ledgers.rs) holds each one to a source the tree
+[ledgers.rs](../integration/ledgers.rs) holds each one to a file the tree
 tracks.
 
 The producer's `tables` list admits a table, each entry a path and the rows it

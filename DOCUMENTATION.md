@@ -1,6 +1,6 @@
 # Documentation policy
 
-<!-- audited: 2026-10-19 -->
+<!-- audited: 2026-10-20 -->
 
 Every document and every source file says what is true now, names the document
 that governs it, and carries the day it last met these rules.
@@ -43,8 +43,7 @@ cannot decide:
 2. The content earns the time it takes to read.
 3. Nothing here belongs in another file.
 
-Confirming the line count and stamping is the failure this list exists to
-prevent. A file can sit inside every limit and still describe an interface that
+Confirming the size and stamping is the failure this list exists to prevent. A file can sit inside every limit and still describe an interface that
 changed a year ago.
 
 **A false stamp is worse than none.** An unstamped file waits in the queue for
@@ -162,8 +161,8 @@ a target.
 ## Documents
 
 - Name files and directories in lowercase, one word where the word exists.
-- Keep a source file under the token cap the repository's own section states,
-  and a document under 500 lines. Where a repository allows an exception, its
+- Keep a source file and a document each under the token cap the repository's
+  own section states for its kind. Where a repository allows an exception, its
   own section names the ledger that records it.
 - A size ledger only goes down. Never thin the comments to fit.
 
@@ -173,11 +172,11 @@ file can then be edited from. So a long file is a question rather than a
 verdict: does this hold more than one subject? Usually it does, and splitting it
 is the answer. Sometimes the number is wrong for that file.
 
-A source's cap is in tokens, because a token is what a reader pays, and what a
-line costs in tokens varies twofold by kind. The cap sits where sources
-start to name three governing documents more often: past it, more than one
-source in twenty does. A document's cap stays in lines until a document has a
-one-subject proxy of its own.
+A cap is in tokens, because a token is what a reader pays, and what a line
+costs in tokens varies twofold by kind. A source's cap sits where sources start
+to name three governing documents more often: past it, more than one source in
+twenty does. A document has no such proxy yet, so its cap is a reading budget
+set by hand.
 
 ### The remedies, in order
 
@@ -366,14 +365,16 @@ that carries this file. These rules belong to this one.
   that is not a document: a `.rs` or `.lisp` file, or a script under `scripts/`.
   [The cap report](docs/analysis/budget.md) reads the figure off this tree, and
   `make budget` prints the curve it reads.
-- [The size producer](tests/ratchet/size.lisp) reads every source over the cap
-  at its 500-token bucket, rounded up. The rows of `tests/ledger/size-*.lisp`
-  are the size ledger, and [the ratchet](docs/ratchet.md) judges each reading
+- A document's cap here is 4,000 tokens. A document is a `.md` file the audit
+  queue walks.
+- [The size producer](tests/ratchet/size.lisp) reads every file over its cap at
+  its 500-token bucket, rounded up. The rows of `tests/ledger/size-*.lisp` are
+  the size ledger, and [the ratchet](docs/ratchet.md) judges each reading
   against its row in both directions.
-- A source past its row is a `regression`, which the remedies above answer, and
-  a source a whole bucket under its row is `stale`. A source back under the cap
-  leaves its row `missing`, so delete the row.
-- One more row pins the excess over the cap: each bucket less the cap, summed.
+- A file past its row is a `regression`, which the remedies above answer, and a
+  file a whole bucket under its row is `stale`. A file back under its cap leaves
+  its row `missing`, so delete the row.
+- One more row pins the excess: each bucket less its file's cap, summed.
   `elle-rig test --repin` adopts the row of a source new to the ledger, and the
   excess then reads as a `regression`, which it refuses.
 - The size producer holds the list a table is admitted to, because the runner
@@ -382,9 +383,8 @@ that carries this file. These rules belong to this one.
 - [The prose checks](tests/prose.rs) hold every stamped file to the rules a
   machine decides here. Every link resolves, no document is named in a bare
   code span, and every call-out is present and under 140 characters.
-- The same checks find no banned register, every document a source header
-  names, and every document under 500 lines. A file stamped with a deviation is
-  exempt from all of them. The stamp claims sentence length and repeated
+- The same checks find no banned register, and every document a source header
+  names. A file stamped with a deviation is exempt from all of them. The stamp claims sentence length and repeated
   sentences by hand.
 - [The audit queue](docs/impl/audit.md) owns `scripts/audit`: the queue, the
   commit gate, and the three files exempt by name. `scripts/audit --counts`
