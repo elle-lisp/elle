@@ -18,6 +18,8 @@
 
 #[path = "prose/read.rs"]
 mod read;
+#[path = "prose/sections.rs"]
+mod sections;
 
 use read::{callout, code_spans, header_doc_paths, links_in, repo_root, source_callout, stamped};
 
