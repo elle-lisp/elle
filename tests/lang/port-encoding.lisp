@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-20
 # A raw socket port reads bytes by default, and reads text when opened with :encoding :text.
 # docs/io.md
 #
@@ -100,32 +100,28 @@
   (assert (string/contains? err:message ":encoding must be")
           (concat "4b: error mentions :encoding (" err:message ")")))
 
-# ── 5. Redis guard fires on a text-mode port ─────────────────────────
-# Use a real Redis if available so we exercise the guard on the actual
-# (redis:with) path; otherwise skip — the guard is unit-tested via the
-# explicit (redis:require-binary-port) below.
+# ── 5. The Redis client refuses a text-mode port ─────────────────────
+# A connection reads its replies through a framer, which counts bytes, so
+# redis:connection refuses a text port before any wire byte is parsed under
+# grapheme semantics. No server is needed: the refusal is at construction.
+# The counter-factual is a client that took the port as it came and read a
+# bulk string's length as a grapheme count.
 (def redis ((import-file "lib/redis.lisp")))
 
-(let [[ok? _] (protect (redis:with "127.0.0.1" 6379 (fn [] (redis:ping))))]
-  (when ok?
-    # Build a text-mode TCP connection and prove redis:require-binary-port
-    # rejects it — this catches "I opened the port the wrong way" before
-    # any wire byte is parsed under grapheme semantics.
-    (let [bogus-listener (tcp/listen "127.0.0.1" 0)
-          bogus-port (let [p (port/path bogus-listener)]
-                       (parse-int (slice p (+ 1 (string/find p ":")))))
-          _accept-f (ev/spawn (fn []
-                                (protect (port/close (tcp/accept bogus-listener)))))
-          text-port (tcp/connect "127.0.0.1" bogus-port :encoding :text)]
-      (defer
-        (begin
-          (protect (port/close text-port))
-          (protect (port/close bogus-listener)))
-        (let [[g-ok g-err] (protect (redis:require-binary-port text-port "test"))]
-          (assert (not g-ok) "5a: guard rejects text port")
-          (assert (= :wrong-port-encoding (get g-err :reason))
-                  "5b: reason is :wrong-port-encoding")
-          (assert (string/contains? (get g-err :message) "binary port")
-                  "5c: message mentions binary port"))))))
+(let [bogus-listener (tcp/listen "127.0.0.1" 0)
+      bogus-port (let [p (port/path bogus-listener)]
+                   (parse-int (slice p (+ 1 (string/find p ":")))))
+      _accept-f (ev/spawn (fn []
+                            (protect (port/close (tcp/accept bogus-listener)))))
+      text-port (tcp/connect "127.0.0.1" bogus-port :encoding :text)]
+  (defer
+    (begin
+      (protect (port/close text-port))
+      (protect (port/close bogus-listener)))
+    (let [[g-ok g-err] (protect (redis:connection text-port))]
+      (assert (not g-ok) "5a: a text port is refused")
+      (assert (= :text-port (get g-err :reason)) "5b: reason is :text-port")
+      (assert (string/contains? (get g-err :message) "port/open-bytes")
+              "5c: the message says how to open a binary port"))))
 
 (println "port-encoding: all tests passed")
