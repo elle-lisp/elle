@@ -1,6 +1,6 @@
 # The audit queue
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-10-19 -->
 
 Every file carries the day it last met the documentation policy, and the queue
 names what to read next by what a stale file costs.
@@ -16,9 +16,15 @@ an HTML comment under the title.
 
 The date is ISO 8601. A file with no stamp has never been audited.
 
-A file that breaks a rule carries no stamp until the rule is met. Nothing
-records a deviation and keeps the stamp: the stamp is what removes a file from
-the queue, and a file with a standing violation is what the queue is for.
+A file that breaks a rule with no issue behind it carries no stamp. A file that
+cannot meet a rule yet carries a deviation stamp, which names the issue that
+tracks the rule it breaks:
+
+```
+// audited: 2026-10-19 (#1400)
+```
+
+The queue reads the date of either form the same way.
 
 ## Enforcement
 
@@ -26,8 +32,8 @@ the queue, and a file with a standing violation is what the queue is for.
 today. It runs from `.githooks/pre-commit`, beside the formatter.
 
 The gate asks one question: you changed this file today, so did you read it and
-hold it to the policy? Touching a file is the moment its cost is already paid —
-the file is open, its subject is loaded, and the reader is the person best
+hold it to the policy? Touching a file is the moment its cost is already paid.
+The file is open, its subject is loaded, and the reader is the person best
 placed to notice that a paragraph has gone wrong.
 
 The gate cannot ask whether the audit was honest. It makes the claim explicit
@@ -73,7 +79,8 @@ all, which is the correct answer for a file whose staleness costs nothing.
 | `scripts/audit --all` | every file, costliest first |
 | `scripts/audit --staged` | fail when a staged file carries no stamp for today |
 | `scripts/audit --policy` | every file stamped before the policy's own stamp |
-| `scripts/audit --counts` | the unstamped files and the files stamped before the policy, as two counts |
+| `scripts/audit --counts` | the unstamped files, the files stamped before the policy, and the files stamped with a deviation, as three counts |
+| `scripts/audit --sources` | every queued file that is not a document, one path per line |
 | `scripts/audit --root DIR` | treat DIR as the repository root |
 
 `make audit` runs the first form, and `make qa` runs `make audit` before its
@@ -134,27 +141,26 @@ call site. Nobody reads these three that way:
 
 A reading budget over hundreds of lines of recipe, thousands of lines of
 definitions, or nearly ninety variants of one enum measures a distance no reader
-travels.
-
-Leaving any of them queued also deadlocks it. The gate demands today's stamp on
-a staged file, and the policy forbids a stamp over a standing violation. All
-three files are past the 500-line cap. So every change to one of them fails the
-gate, and stamping it fails the budget check in
-[the prose checks](../../tests/prose.rs) instead. The enum cannot be split without nesting variants into a sub-enum,
-which rewrites every match over it ([src/lir/AGENTS.md](../../src/lir/AGENTS.md)).
+travels. So none of the three is on the size ledger either: the size producer
+reads the queue's own list of sources ([the tool producers](../../tests/ratchet/overview.md)).
+The enum cannot be split without nesting variants into a sub-enum, which
+rewrites every match over it ([src/lir/AGENTS.md](../../src/lir/AGENTS.md)).
 
 The exemption names the standard library's path, never its extension. Every
 other `.lisp` file stays queued: [the core](../../src/core.lisp), [the
 prelude](../../src/prelude.lisp), and every module under `lib/`.
 
 Exempting the name rather than the marker would drop every hand-written index
-out of the queue, including the root one, which is the most-read document in
-the repository and the costliest place for a stale claim to sit.
+out of the queue, the root one included. The root index is the most-read
+document in the repository, and the costliest place for a stale claim to sit.
 
-The eligibility test lives in one function, and the staged gate and the tree
-walk both call it. Two copies would disagree about what is exempt, and the
-disagreement would show up as a commit that the gate passed and the queue
-reports as unaudited forever.
+The eligibility test lives in one function, and the staged gate, the tree walk
+and `--sources` all call it. Two copies would disagree about what is exempt,
+and the disagreement would show up as a commit that the gate passed and the
+queue reports as unaudited forever.
+
+`--sources` prints the queued files that are not documents, one path per line,
+sorted. It reads no stamp, so a source with none is listed like any other.
 
 ## The policy's own stamp is the floor
 
@@ -162,16 +168,17 @@ reports as unaudited forever.
 and changing a rule stamps it with that day. `--policy` lists every file
 stamped before it, which is the count of what a policy change has not reached.
 
-A policy change therefore returns most of the tree to the queue at once. That
-is why the queue is an order and not a work list to finish: the cost ranking
-brings back the files where a stale rule is read most often, and leaves the
-rest at the bottom.
+A policy change therefore returns most of the tree to the queue at once, so the
+queue is an order and not a work list to finish. The cost ranking brings back
+the files where a stale rule is read most often, and leaves the rest at the
+bottom.
 
 ## The counts are on the ratchet
 
-`scripts/audit --counts` prints two lines, `unstamped N` and `before-policy N`.
-The first counts the files with no stamp, and the second the files whose stamp
-is older than the policy's. No file is in both.
+`scripts/audit --counts` prints three lines: `unstamped N`, `before-policy N`
+and `deviation N`. The first counts the files with no stamp, the second the
+plain stamps older than the policy's, and the third the deviation stamps of any
+date. No file is in two of them.
 [tests/ratchet/audit.lisp](../../tests/ratchet/audit.lisp) reads each count,
 and [its ledger](../../tests/ledger/audit.lisp) pins each one
 ([the ratchet](../ratchet.md)).
@@ -183,8 +190,9 @@ walk that started a pipeline per file took most of a minute over 2,600 files on
 a macOS runner. So the eligibility test and the stamp read use shell builtins
 alone.
 
-A pin is two-sided. A commit that stamps a file in either count lowers that
-count, and the producer pass then fails on a `stale` pin. Re-pin it in the same
+A pin is two-sided. A commit that stamps a file in the first two counts, or
+repairs a deviation, lowers that count, and the producer pass then fails on a
+`stale` pin. Re-pin it in the same
 pull request with `elle-rig test --repin tests/ratchet/audit.lisp`, so the
 ledger's diff shows how far the change moved the queue.
 
@@ -203,6 +211,14 @@ has claimed nothing and is exempt; a stamped one has claimed to meet the
 policy, so a violation in it is a false claim and fails the build. Coverage
 grows as the tree comes into policy, and it needs no flag day.
 
+A deviation stamp is exempt too. It claims the content and names the issue that
+tracks the rule it breaks, so a check that failed it would only repeat the
+issue. The third count keeps those files from growing in number unseen.
+
+The size of a source is not among these checks. Every source is on the size
+ledger, stamped or not ([the documentation policy](../../DOCUMENTATION.md)), so
+a document's 500 lines is the one size the prose checks read.
+
 This is the hedge against a stamp applied without an audit. Confirming the line
 count no longer discharges the claim, because the line count was never the
 reader's job. What is left to attest is the part that takes reading the file:
@@ -220,6 +236,7 @@ A stamp records that a file met the policy on a day. Applying the policy to a
 file that violates it means fixing the violation, not recording the reading.
 
 So an audit that finds a stale paragraph rewrites it, in the same change. A
-fresh stamp over a standing violation is a false claim, and it is worse than no
-stamp: it removes the file from the queue that would have brought somebody back
-to it.
+fresh plain stamp over a standing violation is a false claim, and it is worse
+than no stamp: it removes the file from the queue that would have brought
+somebody back to it. A violation the change cannot repair gets an issue, and
+the file gets the deviation stamp that names it.

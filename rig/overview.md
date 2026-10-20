@@ -1,15 +1,15 @@
 # The rig
 
-<!-- audited: 2026-10-15 -->
+<!-- audited: 2026-10-19 -->
 
 `elle-rig` hosts the same compiler and runtime as `elle`, and configures them
 in ways a user build cannot.
 
 The implementation suite runs on the rig ([spec](../docs/spec.md)). A user
 build has one runtime per build: no flag chooses a tier, and no flag turns the
-JIT off. An implementation test sometimes needs exactly that — the interpreter
-alone, every function compiled on its first call, every call kept a call, the
-use-after-free oracle armed — and the rig is where those settings live. The rig
+JIT off. An implementation test sometimes needs exactly that: the interpreter
+alone, every function compiled on its first call, every call kept a call, or
+the use-after-free oracle armed. The rig is where those settings live. The rig
 is a second executable over the `elle` library, so a program that runs under
 `elle` runs under the rig unchanged. Nothing in a user build accepts a rig setting, so none
 reaches user documentation.
@@ -69,14 +69,27 @@ primitive of each, and the primitive answers the build's key as a string:
 
 The parts are joined by `-`, so the default build on Linux x86_64 answers
 `jit-uring-linux-x86_64`. Each rig feature turns on the `elle` feature of the
-same name, and every recipe that builds a rig builds it with the features of
-the `elle` beside it, so the rig's features are its build's. `elle` has no such
+same name. Every recipe that builds a rig builds it with the features of the
+`elle` beside it, so the rig's features are its build's. `elle` has no such
 primitive. A run gets a build by running as `elle-rig test`, and the ratchet
 judges a reading against the rows of that build alone
 ([ratchet](../docs/ratchet.md)).
 
 ```sh
 elle-rig -e '(println (elle/build))'
+```
+
+## The token count
+
+The rig registers `(elle/tokens text)` beside `(elle/build)`, on the same two
+runtimes. It answers how many tokens `text` costs a reader in the `o200k_base`
+encoding. The text is read as ordinary text, so the spelling of a special token
+counts as the text it is. The size producer prices each source with it
+([the tool producers](../tests/ratchet/overview.md)), and `elle` has no such
+primitive.
+
+```sh
+elle-rig -e '(println (elle/tokens "hello world"))'
 ```
 
 ## The sidecar
@@ -100,9 +113,9 @@ trace = ["guardfree"]
 | `graft` | `true` or `false` | `false` keeps every call a call in each unit the program compiles; the stdlib keeps the grafts its boot made ([grafting a call](../docs/impl/graft.md)) |
 | `trace` | an array of trace keywords | The build's trace keywords (`TRACE_KEYWORDS`), `guardfree` and `scrub` among them |
 
-The rig refuses a sidecar and runs nothing when the sidecar has a key the rig
-does not know, a value of the wrong type, a threshold below one, or a trace
-keyword the build does not know (`TRACE_KEYWORDS`). It refuses an `mlir` key in
+The rig refuses a sidecar, and runs nothing, when the sidecar holds a key the
+rig does not know or a value of the wrong type. It refuses a threshold below
+one, and a trace keyword the build does not know (`TRACE_KEYWORDS`). It refuses an `mlir` key in
 a build with no MLIR tier, and a `wasm` key in a build with no WebAssembly
 backend. It refuses a file that is not TOML the same way. The refusal names the
 key, the value, or the sidecar's file. A misspelled key that the rig ignored

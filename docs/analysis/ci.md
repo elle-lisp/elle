@@ -1,6 +1,6 @@
 # CI and Triage
 
-<!-- audited: 2026-10-15 -->
+<!-- audited: 2026-10-19 -->
 
 CI structure, local workflow, and failure diagnosis.
 
@@ -67,7 +67,7 @@ The corpus jobs differ in the build they make, not in flags they pass. A build
 carries one optimizing tier and one I/O backend ([config](../config.md)
 § Builds), and every build runs the language suite with no flag
 ([spec](../spec.md) § A build is an implementation). So the job list above is
-the implementation matrix: the default build, a build with no JIT, a
+the implementation matrix. It holds the default build, a build with no JIT, a
 thread-pool build, an MLIR build, a build with no features, and the default
 build on AArch64 and macOS. A language test that passes on one and fails on
 another has found a defect in the build that fails.
@@ -82,7 +82,7 @@ The implementation suite runs where the default build runs: `Default Build
 Tests`, `AArch64 Smoke` and `macOS Smoke` each build the rig beside `elle`, and
 each runs every suite pass of `make smoke`. `Thread-Pool I/O Tests` runs the
 implementation suite on the pool build's rig too, because some resources of this
-implementation exist only on the pool: a file that counts worker threads reads
+implementation exist only on the pool. A file that counts worker threads reads
 zero on io_uring and gates itself there. `MLIR Tests` runs it on the MLIR
 build's rig, the one rig that carries the MLIR tier.
 [workflows.rs](../../tests/integration/workflows.rs) is the standing check that
@@ -167,8 +167,8 @@ runs, so a pool-only defect fails on a Linux runner before it reaches the Mac.
 
 The rule is one such job per I/O backend. `Thread-Pool I/O Tests` covers the
 pool and `Default Build Tests` covers io_uring, so finding a region defect never
-depends on the macOS runner — the slowest box in the workflow, and the one
-whose failures read as flaky timeouts (§ "Runner capacity").
+depends on the macOS runner. That runner is the slowest box in the workflow,
+and its failures read as flaky timeouts (§ "Runner capacity").
 [workflows.rs](../../tests/integration/workflows.rs) is the standing check that
 both backends keep a job.
 
@@ -248,11 +248,11 @@ the heap one runner holds. An implementation pass runs each file as its own
 child, so there a batch bounds only how many files one runner records.
 
 The default is 25 files. `macOS Smoke` and `AArch64 Smoke` use 10. That choice
-was measured when a batch ran all its files inside the runner process: a
+was measured when a batch ran all its files inside the runner process. A
 25-file batch stalled on macOS, where
 [region-eval-return-leak](../../tests/impl/region-eval-return-leak.lisp) hit
-its deadline with `join: deadline exceeded`, and the same run passed on Linux
-and AArch64. The smaller batch shortened the macOS job's wall clock a great
+its deadline with `join: deadline exceeded`. The same run passed on Linux and
+AArch64. The smaller batch shortened the macOS job's wall clock a great
 deal. Measure again before you change it.
 
 AArch64 Smoke takes the same batch to shorten its wall clock too. It never
@@ -312,9 +312,9 @@ headless runner, not about what compiles.
 #### What the runner has to install
 
 Two plugins in the portable set are not pure Rust, and neither says so in its
-own `Cargo.toml`. The system libraries arrive several crates deep:
+own `Cargo.toml`. The system libraries arrive several crates deep.
 `elle-oxigraph` reaches `oxrocksdb-sys`, which runs bindgen over vendored
-RocksDB and needs libclang; `elle-plotters` reaches `font-kit`, which needs
+RocksDB and needs libclang. `elle-plotters` reaches `font-kit`, which needs
 fontconfig through pkg-config and pulls the freetype, expat and png headers
 behind it.
 
@@ -356,7 +356,7 @@ assertion before the corpus for the same reason.
 The assertion names the portable set, not every plugin, because the two lists
 answer different questions. Compiling is what the job builds all of them for.
 Asserting an artifact matters where a corpus file would otherwise report
-success over a plugin that never built, and `elle-vulkan`, `elle-egui` and
+success over a plugin that never built. `elle-vulkan`, `elle-egui` and
 `elle-wayland` need a GPU or a display before they can do anything a corpus
 file could assert.
 
@@ -461,7 +461,8 @@ make test
 | **Boot from an image fails** | `Boot Image Tests` fails and every other corpus job passes | The corpus file answers differently under a hydrated boot, or the image no longer hydrates. | Run `make smoke-boot-image` locally. Read the hydration proof first: a target that fails there never reached the corpus. |
 | **Property tests fail** | `Rust Tests` fails with a shrunk counterexample | The shrunk output shows the *minimal* failing input. | Reproduce with the exact shrunk values as a unit test. Check the files under `tests/proptest-regressions/`. |
 | **Integration tests fail** | `Rust Tests` fails | Tests use `eval_source()` which runs the full pipeline. | Read the assertion. Check whether the test expects `.unwrap()` (success) or `.is_err()` (error). |
-| **Prose** | `QA` fails on `make prose` | A stamped file breaks a rule a machine can check: a call-out over 140 characters, a broken link, a bare filename, banned wording, or a file past 500 lines. | Run `make prose` and repair the file the message names ([DOCUMENTATION.md](../../DOCUMENTATION.md)). |
+| **Prose** | `QA` fails on `make prose` | A stamped file breaks a rule a machine can check: a call-out over 140 characters, a broken link, a bare filename, banned wording, or a document past 500 lines. | Run `make prose` and repair the file the message names ([DOCUMENTATION.md](../../DOCUMENTATION.md)). |
+| **Source size** | `Default Build Tests` fails `smoke-producers` on a row of [size.lisp](../../tests/ratchet/size.lisp) | A source grew past its bucket, a source new to the ledger raised the excess, or a source shrank and left its row stale or missing. | Shed the growth or split the file ([DOCUMENTATION.md](../../DOCUMENTATION.md)). Re-pin a stale row with `elle-rig test --repin tests/ratchet/size.lisp`, and delete a missing one. |
 | **Clippy** | `QA` fails on the clippy step | Any Rust warning. CI runs with `-D warnings`. | Run `cargo clippy --workspace --all-targets -- -D warnings` locally. |
 | **Formatting** | `QA` fails on `cargo fmt --check` | Unformatted Rust code. | Run `cargo fmt`. |
 | **Rustdoc** | `QA` fails on the `cargo doc` step | Broken intra-doc links or malformed doc comments. CI documents private items, so a link into a `pub(crate)` item counts. A `#[cfg(test)]` item is absent from a doc build — gate it `#[cfg(any(test, doc))]` if the docs link to it. | Run `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items` locally. |

@@ -1,6 +1,6 @@
 # lir
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-10-19 -->
 
 The LIR's two forms, the registers each instruction reads and writes, and the emitter that turns LIR into stack bytecode.
 
@@ -13,11 +13,11 @@ operand proof, heap literals and `LoadSelf`.
 
 ## Size
 
-[code/instr.rs](code/instr.rs) is past the 500-line reading budget, so it
-carries no audit stamp and is exempt from the audit queue by name
+[code/instr.rs](code/instr.rs) is far past the size cap, so it carries no
+audit stamp and is exempt by name from the audit queue and the size ledger
 ([docs/impl/audit.md](../../docs/impl/audit.md)). The file is one enum,
-`InstrRef`, with a doc comment per variant, and Rust gives no way to split one;
-bringing it inside the budget means nesting a group of variants into a sub-enum,
+`InstrRef`, with a doc comment per variant, and Rust gives no way to split one.
+Bringing it inside the cap means nesting a group of variants into a sub-enum,
 which rewrites every exhaustive match in the crate. That is its own change, not
 a rider on whatever touches the file next.
 
@@ -34,7 +34,7 @@ The working form, which the lowerer builds ([build/](build/mod.rs)):
 | Type | Purpose |
 |------|---------|
 | `LirBuilder` | Builds one unit's functions in a working region it frees when dropped: a stack of functions under construction, each block's nodes in a `RegionVec`, the splices the relocation makes, and `finish_function`, which freezes a function into a `LirOwned` |
-| `LirHead` | The header of the function under construction: name, arity, signal, slot and capture counts, capture masks, docstring, origin, region table, merge set and release tables |
+| `LirHead` | The header of the function under construction: name, arity, signal, slot and capture counts, capture masks, docstring, origin, region table, merge set, release tables, and the body fragment a graft reads |
 | `RegionVec` | A slice that grows in the working region: push, truncate, and insert at an index |
 | `Lowerer` | HIR → LIR, answering a `FrozenModule` ([lower/AGENTS.md](lower/AGENTS.md)) |
 
@@ -116,8 +116,8 @@ which operands are uses.
 
 `testkit::LirFixture` ([testkit.rs](testkit.rs), `#[cfg(test)]`) assembles a
 frozen function instruction by instruction, for the unit tests of every reader
-of LIR: the emitter, the JIT, the WASM backend, the MLIR and SPIR-V tiers, and
-the cross-thread send path. It mirrors `hir::testkit`
+of LIR. Those readers are the emitter, the JIT, the WASM backend, the MLIR and
+SPIR-V tiers, and the cross-thread send path. It mirrors `hir::testkit`
 ([src/hir/testkit.rs](../hir/testkit.rs)), which does the same job for the
 front-end passes. A test outside the crate builds through `LirBuilder` itself.
 
@@ -152,8 +152,8 @@ The remaining setters — `name`, `signal`, `num_captures`, `num_locals`,
 `closure_id`, `yield_points` — write the like-named field. A frozen function's
 fields are read-only, so a test sets them through the fixture.
 `emitted_sites` instead fills the yield points, call sites and charge sites
-from an emission of the built function, so a backend test whose subject is not
-that metadata gets the sites a lowered function would carry.
+from an emission of the built function. A backend test whose subject is not
+that metadata then gets the sites a lowered function would carry.
 
 ## Data flow
 
@@ -218,10 +218,10 @@ break that, because labels are allocated in creation order.
    the `1` in `(+ 1 (emit :yield 2) 3)`, survives into the resume block.
 
 4. **Yield, call-site and charge-site metadata come from emission.** The
-   emitter records a `YieldPointInfo` at each `Terminator::Emit`, a
+   emitter records a `YieldPointInfo` at each `Terminator::Emit`, and a
+   `ChargeSiteInfo` at each instruction that charges fuel. It records a
    `CallSiteInfo` at each call, each `TailCall`, and each instruction that may
-   raise (`Op::may_raise`, [code/raise.rs](code/raise.rs)), and a
-   `ChargeSiteInfo` at each instruction that charges fuel.
+   raise (`Op::may_raise`, [code/raise.rs](code/raise.rs)).
    `PayloadParts::lambda` hands all three to the code payload's LIR body beside
    the frozen records, and the JIT reads the payload's.
 
@@ -289,7 +289,7 @@ emission order.
 The VM addresses local `n` as `frame_base + n` on the operand stack, so the
 entry block reserves `num_locals` positions and operands stack above them
 (`Emitter::emit_block`). A path that pops one operand too many falls through
-that floor and destroys a live local; the damage shows up much later, as a
+that floor and destroys a live local. The damage shows up much later, as a
 `LoadLocal` of a high slot indexing past the end of the stack.
 
 The emitter simulates the operand stack per block. A block inherits its
@@ -307,9 +307,9 @@ then consumed. Orphans are dead, so popping them is free.
 
 But the pops are per-edge, and only `Terminator::Jump` performs them, so they
 must be **bounded by the target's already-fixed depth**. Popping past it
-splits the paths: the branch edge into the merge leaves the orphan, the jump
-edge removes it, and the merge's successors — which inherited the branch's
-simulation — pop it a second time on the path that already did. Two pops, one
+splits the paths. The branch edge into the merge leaves the orphan, and the
+jump edge removes it. The merge's successors inherited the branch's simulation,
+so they pop it a second time on the path that already did. Two pops, one
 value, and the second one lands in the reserved local region. This is why
 `Terminator::Jump` trims a forward edge only down to the target's recorded
 depth (`yield_stack_state`) rather than to the first live value.
@@ -320,13 +320,13 @@ The orphan trim cannot meet the rule at a back edge. It stops at the first live
 cell, so an orphan the block left *under* a live one survives the jump.
 Straight-line code absorbs that residue; a loop accumulates it. The header runs
 again a cell or two deeper each time, and the activation's operand stack grows
-for as long as the loop does — an unbounded leak that no region gauge sees,
-because the cells are a `Fiber`'s own `SmallVec` rather than heap objects.
+for as long as the loop does. No region gauge sees that unbounded leak, because
+the cells are a `Fiber`'s own `SmallVec` rather than heap objects.
 
 A back edge is the one edge that may trim to the target's depth outright, so
-`Terminator::Jump` uses `pop_to` there: the target was emitted before this edge
-existed, its simulation names only cells below that depth, and it therefore
-reads nothing this block pushed. Every surplus cell goes, orphan and live alike,
+`Terminator::Jump` uses `pop_to` there. The target was emitted before this edge
+existed, and its simulation names only cells below that depth, so it reads
+nothing this block pushed. Every surplus cell goes, orphan and live alike,
 and the header meets the same stack shape on every pass.
 
 A forward merge keeps the orphan trim, because the same argument does not hold

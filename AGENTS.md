@@ -1,6 +1,6 @@
 # Elle
 
-<!-- audited: 2026-10-11 -->
+<!-- audited: 2026-10-19 -->
 
 Elle is a Lisp. Source text becomes bytecode; bytecode runs on a VM.
 
@@ -282,8 +282,8 @@ Full list: [`docs/warts.md`](docs/warts.md).
 
 ## Conventions
 
-- [DOCUMENTATION.md](DOCUMENTATION.md) holds the naming and size rules. The
-  exception it defers to: dispatch tables run to 800 lines.
+- [DOCUMENTATION.md](DOCUMENTATION.md) holds the naming and size rules, and
+  names the ledger that records each source over the cap.
 - `make doctest` runs [README.md](README.md), [QUICKSTART.md](QUICKSTART.md),
   [INSTALL.md](INSTALL.md) and every `.md` under `lib/` and `docs/` as a
   program, so a claim inside a ` ```lisp ` fence is executed on every build. No other fence holds Elle code
