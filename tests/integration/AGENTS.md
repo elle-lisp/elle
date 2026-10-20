@@ -1,6 +1,6 @@
 # tests/integration
 
-<!-- audited: 2026-10-15 -->
+<!-- audited: 2026-10-20 -->
 
 Full-pipeline integration tests: end-to-end behavior verification.
 
@@ -28,7 +28,7 @@ check the repository rather than the language:
 
 | Group | Files |
 |-------|-------|
-| The documents and their policy | [agents.rs](agents.rs), [audit.rs](audit.rs), [audit_report.rs](audit_report.rs), [audit_counts.rs](audit_counts.rs), [paths.rs](paths.rs), [bytecode_doc.rs](bytecode_doc.rs), [doctest.rs](doctest.rs), [doctest_scope.rs](doctest_scope.rs), [rustsource.rs](rustsource.rs), [joined_comments.rs](joined_comments.rs) |
+| The documents and their policy | [agents.rs](agents.rs), [audit.rs](audit.rs), [audit_report.rs](audit_report.rs), [audit_counts.rs](audit_counts.rs), [audit_sources.rs](audit_sources.rs), [paths.rs](paths.rs), [bytecode_doc.rs](bytecode_doc.rs), [doctest.rs](doctest.rs), [doctest_scope.rs](doctest_scope.rs), [rustsource.rs](rustsource.rs), [joined_comments.rs](joined_comments.rs) |
 | CI, the suites and the test runner | [workflows.rs](workflows.rs), [ci_steps.rs](ci_steps.rs), [runner_summary.rs](runner_summary.rs), [qa_gate.rs](qa_gate.rs), [crosscheck.rs](crosscheck.rs), [change_filter.rs](change_filter.rs), [run_artifacts.rs](run_artifacts.rs), [suites.rs](suites.rs), [variants.rs](variants.rs), [bins.rs](bins.rs), [deps.rs](deps.rs), [toolchains.rs](toolchains.rs), [corpus_targets.rs](corpus_targets.rs), [plugins.rs](plugins.rs), [runner_budget.rs](runner_budget.rs), [capacity.rs](capacity.rs), [ci_profile.rs](ci_profile.rs), [profiles.rs](profiles.rs), [truncation.rs](truncation.rs), [runner_exit_trap.rs](runner_exit_trap.rs), [timeout_capture.rs](timeout_capture.rs), [runner_gauges.rs](runner_gauges.rs), [runner_cost.rs](runner_cost.rs), [runner_file_error.rs](runner_file_error.rs), [measurements.rs](measurements.rs), [ratchet.rs](ratchet.rs), [ledgers.rs](ledgers.rs), [isolation.rs](isolation.rs), [state_dir.rs](state_dir.rs), [run_identity.rs](run_identity.rs), [import.rs](import.rs), [form_profile.rs](form_profile.rs), [boot_fingerprint.rs](boot_fingerprint.rs) |
 | CLI surfaces | [argv_cli.rs](argv_cli.rs), [dump_cli.rs](dump_cli.rs), [tier_cli.rs](tier_cli.rs), [trace_cli.rs](trace_cli.rs), [version.rs](version.rs), [dispatch.rs](dispatch.rs), [repl_exit_codes.rs](repl_exit_codes.rs) |
 
@@ -104,7 +104,7 @@ let out = std::process::Command::new(env!("CARGO_BIN_EXE_elle"))
   `_cli.rs`.
 - Test functions: a sentence naming the claim the body proves
   (`a_hot_function_compiles_with_no_flag_at_all`). The older `test_` prefix
-  survives in about a fifth of the suite and says nothing a reader needs.
+  survives in about two fifths of the suite and says nothing a reader needs.
 - Property test names describe the invariant, not the implementation.
 
 ## Registration

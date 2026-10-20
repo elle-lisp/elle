@@ -1,6 +1,6 @@
 # Threads
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-20 -->
 
 OS threads for CPU-bound work. For I/O-bound concurrency, prefer
 `ev/spawn` / `ev/join` (see [concurrency.md](concurrency.md)).
@@ -36,10 +36,20 @@ the process, so a signal that a worker declares is registered in every thread:
         "the spawning thread sees the signal the worker declared")
 ```
 
-A worker does inherit one thing: the spawning fiber's withheld
-capabilities. A thread cannot reach what the fiber that spawned it could
-not — see [capabilities](signals/capabilities.md) for what a denial in a
-worker does, since a worker has no parent to mediate it.
+A worker inherits four things from the instance that spawns it, and nothing
+else:
+
+| What | Why |
+|------|-----|
+| The spawning fiber's withheld capabilities | [Capabilities](signals/capabilities.md) |
+| The stdlib cache directory | [Stdlib cache](impl/stdlib-cache.md) |
+| The Unicode generation | A program has one set of string semantics, whichever VM computes a length |
+| The primitives the host registered on the instance ([embedding](embedding.md)) | Code the worker compiles names what code compiled on the instance names |
+
+A worker passes each of the four on to the workers it spawns. A closure
+compiled on the instance already carries a host primitive it calls, so without
+the fourth a worker could call that primitive and could not name it in an
+`eval`.
 
 ### Two worker environments: `sys/spawn` vs `sys/spawn-vm`
 
@@ -52,7 +62,7 @@ references are baked in at compile time and ride along in the bundle).
 
 | Primitive | Worker has | `eval` can resolve | Cost |
 |-----------|-----------|--------------------|------|
-| `sys/spawn-vm` | primitives + `%`-intrinsics | special forms, primitives, intrinsics | cheap |
+| `sys/spawn-vm` | primitives, the host's primitives and `%`-intrinsics | special forms, primitives, intrinsics | cheap |
 | `sys/spawn` | the above **+ the standard library** | special forms, primitives, intrinsics, **stdlib** (`+`, `map`, …) | `init_stdlib` per spawn |
 
 **Special forms** (`if`, `fn`, `begin`/`do`, `def`/`var`, `let`, `quote`, …) are

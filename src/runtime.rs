@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-20
 //! The process runtime: one compile-and-run lifecycle and one teardown sweep, shared by every entry path.
 //!
 //! docs/impl/region/rules.md
@@ -240,14 +240,11 @@ impl Runtime {
     }
 
     /// Register a host primitive on this instance: compiled code and `eval`
-    /// resolve it as a built-in, and `doc` answers for it (docs/embedding.md).
+    /// resolve it as a built-in, `doc` answers for it, and so do the workers
+    /// the instance spawns (docs/embedding.md).
     pub fn register_primitive(&mut self, def: &'static crate::primitives::def::PrimitiveDef) {
-        let doc = crate::primitives::def::Doc::of(def);
         let (vm, symbols, cctx) = self.parts();
-        cctx.register_primitive(symbols, def);
-        for name in std::iter::once(&def.name).chain(def.aliases) {
-            vm.docs.insert((*name).to_string(), doc.clone());
-        }
+        vm.register_host_primitive(symbols, cctx, def);
     }
 
     /// The compile context and this instance's heap as disjoint borrows — the

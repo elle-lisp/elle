@@ -19,6 +19,7 @@ path = "../../rig/src/main.rs"
 
 [dependencies]
 elle = { path = "../..", default-features = false }
+tiktoken-rs = "0.12"
 toml = "0.9"
 
 # The rig's features (rig/Cargo.toml), with this build's tier on.

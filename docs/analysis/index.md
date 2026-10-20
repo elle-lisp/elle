@@ -1,8 +1,9 @@
 # Analysis
 
-<!-- audited: 2026-09-26 -->
+<!-- audited: 2026-10-19 -->
 
-Meta-analysis tools: testing, debugging, and semantic portraits.
+Meta-analysis tools: testing, CI, debugging, semantic portraits, and the report
+behind the source cap.
 
 | File | Content |
 |------|---------|
@@ -12,3 +13,4 @@ Meta-analysis tools: testing, debugging, and semantic portraits.
 | [debugging](debugging.md) | Introspection primitives, time API |
 | [portrait](portrait.md) | Semantic portraits, compile/analyze |
 | [agent-reasoning](agent-reasoning.md) | Portrait and SPARQL queries in an agent's refactoring workflow |
+| [budget](budget.md) | Where sources start to mix subjects, and the 2,500-token cap read off it |

@@ -1,13 +1,14 @@
-// audited: 2026-10-06
+// audited: 2026-10-20
 // The audit queue and its commit gate.
 //
 // docs/impl/audit.md
 //
-// scripts/audit answers two questions: did the files this commit stages carry
-// today's stamp, and what should be read next. The second is the one with a
-// wrong obvious answer — sorting by stamp age puts recently-read files at the
-// back and never-audited-but-harmless leaves at the front, which is close to
-// backwards. These tests pin the cost ordering so that cannot regress to age.
+// Two of the questions scripts/audit answers are here: did the files this
+// commit stages carry today's stamp, and what should be read next. The
+// second has a wrong obvious answer. Sorting by stamp age puts recently-read
+// files at the back and never-audited-but-harmless leaves at the front, which
+// is close to backwards. These tests pin the cost ordering so that cannot
+// regress to age.
 
 use std::fs;
 use std::path::PathBuf;
@@ -240,9 +241,9 @@ fn the_gate_and_the_queue_agree_on_what_is_exempt() {
 
 #[test]
 fn the_makefile_is_exempt_from_the_queue_and_from_the_gate() {
-    // The trap: the Makefile is past the 500-line reading budget and there is
-    // nothing to split out of it, so a stamp on it fails prose.rs while no
-    // stamp on it fails the gate. Queued, it is a file no commit can touch.
+    // The trap: the Makefile is read through `make help`, one `##` line at a
+    // time, so a reading budget over it measures a distance no reader travels.
+    // Queued, it is debt no audit can pay.
     //
     // The counter-factual: exempt it from the gate alone and the queue reports
     // it as unaudited forever, which is the disagreement the shared
@@ -270,9 +271,9 @@ fn the_makefile_is_exempt_from_the_queue_and_from_the_gate() {
 
 #[test]
 fn the_standard_library_is_exempt_from_the_queue_and_from_the_gate() {
-    // The trap: src/stdlib.lisp is past the 500-line reading budget, so a
-    // stamp on it fails prose.rs while no stamp on it fails the gate. Queued,
-    // it is a file no commit can touch.
+    // The trap: src/stdlib.lisp is read through `(doc name)`, one docstring
+    // at a time, so a reading budget over it measures a distance no reader
+    // travels. Queued, it is debt no audit can pay.
     //
     // The counter-factual: exempt `*.lisp` or `src/*` and the other preludes
     // leave the queue with it, silently. They sit beside it and each fits the
@@ -302,9 +303,8 @@ fn the_standard_library_is_exempt_from_the_queue_and_from_the_gate() {
 
 #[test]
 fn the_lir_instruction_enum_is_exempt_from_the_queue_and_from_the_gate() {
-    // The trap: src/lir/code/instr.rs is one enum past the 500-line reading
-    // budget, and Rust gives no way to split an enum, so a stamp on it fails
-    // prose.rs while no stamp on it fails the gate.
+    // The trap: src/lir/code/instr.rs is one enum far past the size cap, and
+    // Rust gives no way to split an enum. Queued, it is debt no audit can pay.
     //
     // The counter-factual: exempt `src/lir/code/*` or `*.rs` and the files
     // beside it leave the queue with it. They each fit the budget and are read

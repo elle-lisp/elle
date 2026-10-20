@@ -1,6 +1,6 @@
 # The ratchet
 
-<!-- audited: 2026-10-15 -->
+<!-- audited: 2026-10-19 -->
 
 One library measures, one committed ledger holds every bound, and the runner
 judges, records and re-pins; nothing else carries a number.
@@ -59,9 +59,9 @@ A measurement is a fact. A bound is a claim. The two never live in one file.
 
 A producer imports the instrument, drives its shapes, and prints one line per
 reading. It judges nothing. Under `elle-rig test` the runner reads the lines
-back, judges each against the rows of its own build, adds the rows no producer
-answered, records every reading, and offers to move the ledger to what was
-read.
+back and judges each against the rows of its own build. It adds the rows no
+producer answered, records every reading, and offers to move the ledger to what
+was read.
 
 ### The reading line
 
@@ -89,11 +89,11 @@ mechanism `SKIP (gated):` uses today ([test-runner](test-runner.md)).
 
 ### The ledger
 
-The ledger is a directory of Elle data files, `tests/ledger/`, each under the
-reading budget. A file opens with the epoch declaration every Elle file
-carries, then the producer it answers for as
+The ledger is a directory of Elle data files, `tests/ledger/`, each a source
+the size cap holds like any other. A file opens with the epoch declaration
+every Elle file carries, then the producer it answers for as
 `(producer "tests/impl/plumb.lisp")`, then one row per line. A producer whose
-rows outgrow the budget spreads them over several files that name it, and the
+rows outgrow the cap spreads them over several files that name it, and the
 runner reads them as one ledger. A (subject, axis) row of one build appears in
 one file only.
 
@@ -266,7 +266,7 @@ A subject read on several tiers moves to the worst of its readings, so the
 new pin holds on every tier. The tool moves rows of the run's build alone. An
 `unledgered` reading of a growth class, which is the instrument's own
 live-growth row, is adopted as a growth floor at the floor the instrument
-named; every other `unledgered` reading is adopted as a pin at its value. A
+named. Every other `unledgered` reading is adopted as a pin at its value. A
 build whose ledger holds no row of its own has every reading adopted, which is
 how a build joins the ratchet. A reading adopted on a build other than the
 reference build is adopted as a `:build` row. A producer with no ledger file
@@ -318,7 +318,7 @@ A sink of pairs keeps the free list drained, so the id counter climbs.
 The producers proposed here are the ones the design has to specify because
 nothing else does: each reads a number no test reads today. A test that
 already measures joins the ratchet by importing the instrument and committing
-its ledger, and needs no paragraph here; what it reads is that test's header,
+its ledger, and needs no paragraph here. What it reads is that test's header,
 and why its rows are what they are is its ledger's comments.
 
 **Rust tests** can print the same line, and nothing collects it until
@@ -348,7 +348,7 @@ gauges, the audit queue, valgrind and the first residue tests are in.
 5. **The residue tests, the runner's own gauges, the audit queue, valgrind.**
    One producer per pull request, each with its ledger. A residue test
    replaces its window helper with `rate` or `delta`, its ceiling with a row,
-   and its gauge-live gate with the instrument's live-growth row; a gauge it
+   and its gauge-live gate with the instrument's live-growth row. A gauge it
    kept for its own sake is a growth floor. The counter-factual is the ledger
    itself: committed ahead of the producer, every row of it is `missing` until
    the producer reads it.

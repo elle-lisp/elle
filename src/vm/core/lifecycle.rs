@@ -1,4 +1,4 @@
-// audited: 2026-10-07
+// audited: 2026-10-20
 //! Building a VM over a heap it owns or shares, and resetting one for reuse.
 //!
 //! docs/impl/vm.md
@@ -52,6 +52,30 @@ impl VM {
         self.stdlib_cache = cache;
     }
 
+    /// The primitives the host registered on this VM's instance, in order —
+    /// what a `sys/spawn` worker inherits.
+    pub(crate) fn host_primitives(&self) -> &[&'static crate::primitives::def::PrimitiveDef] {
+        &self.host_primitives
+    }
+
+    /// Register a host primitive on this VM's instance, whose symbol table and
+    /// compile context `symbols` and `cctx` are. Compiled code and `eval`
+    /// resolve it as a built-in, `doc` answers for it, and a worker this VM
+    /// spawns inherits it (docs/threads.md).
+    pub(crate) fn register_host_primitive(
+        &mut self,
+        symbols: &mut crate::symbol::SymbolTable,
+        cctx: &mut crate::pipeline::CompileCtx,
+        def: &'static crate::primitives::def::PrimitiveDef,
+    ) {
+        cctx.register_primitive(symbols, def);
+        let doc = Doc::of(def);
+        for name in std::iter::once(&def.name).chain(def.aliases) {
+            self.docs.insert((*name).to_string(), doc.clone());
+        }
+        self.host_primitives.push(def);
+    }
+
     /// Build a VM pointing at an externally-owned heap (`RuntimeCore`'s
     /// `Box<FiberHeap>`), the coexistence-correct constructor: the program VM and
     /// its instance's macro-expansion VM share this one heap, so core.lisp and
@@ -93,6 +117,7 @@ impl VM {
             runtime_config: rc,
             unicode_generation: crate::config::get().unicode_generation(),
             stdlib_cache: crate::compiler::stdlib_cache::StdlibCache::default(),
+            host_primitives: Vec::new(),
             heap_ptr,
             compile_ctx_ptr: std::ptr::null_mut(),
             symbols_ptr: std::ptr::null_mut(),
@@ -147,7 +172,7 @@ impl VM {
 
     /// Reset the VM's fiber and transient state for reuse.
     ///
-    /// Preserves: docs, ffi, jit_cache, spirv_cache, eval_expander, env_cache,
+    /// Preserves: docs, the host primitives, ffi, jit_cache, spirv_cache, eval_expander, env_cache,
     /// tail_call_env_cache, and the heap, which the VM points at but never owns.
     /// Resets: the fiber, the pending call state, the error location, the active
     /// tier, the closure call counts, the JIT rejections, and the set of modules

@@ -1,8 +1,9 @@
-// audited: 2026-10-06
+// audited: 2026-10-20
 // The embedding surface from a host's side: register a primitive, run source,
-// read the value back, step the scheduler.
+// read the value back, step the scheduler, and reach a worker.
 //
 // docs/embedding.md
+// docs/threads.md
 
 use elle::primitives::def::{PrimitiveDef, RegionEffect};
 use elle::runtime::Runtime;
@@ -61,6 +62,60 @@ fn test_custom_primitive_registration() {
     let (vm, symbols, cctx) = rt.parts();
     let result = eval_all("(host/add-ten 32)", symbols, vm, cctx, "<test>").unwrap();
     assert_eq!(result.as_int().unwrap(), 42);
+}
+
+// ── A registered primitive reaches the instance's workers ───────────
+
+/// What `src` answers on an instance with `host/add-ten` registered through
+/// `Runtime::register_primitive`, or the error it raised.
+fn on_registered(src: &str) -> Result<i64, String> {
+    let mut rt = Runtime::new();
+    rt.register_primitive(&HOST_ADD_TEN);
+    let (vm, symbols, cctx) = rt.parts();
+    eval_all(src, symbols, vm, cctx, "<test>").map(|v| v.as_int().expect("an integer"))
+}
+
+#[test]
+fn a_registered_primitive_resolves_in_compiled_code_and_in_eval() {
+    assert_eq!(on_registered("(host/add-ten 32)"), Ok(42));
+    assert_eq!(on_registered("(eval '(host/add-ten 32))"), Ok(42));
+}
+
+#[test]
+fn code_a_worker_compiles_names_the_primitives_its_instance_registered() {
+    // The counter-factual: a worker built with the core primitives alone runs
+    // a closure that calls `host/add-ten`, because the call rides in the
+    // closure's constants, and fails on an `eval` that names it. The test
+    // runner compiles each file in a worker, so its files never saw the rig's
+    // primitives.
+    assert_eq!(
+        on_registered("(sys/join (sys/spawn (fn [] (host/add-ten 32))))"),
+        Ok(42),
+        "a compiled call crosses in the closure"
+    );
+    assert_eq!(
+        on_registered("(sys/join (sys/spawn (fn [] (eval '(host/add-ten 32)))))"),
+        Ok(42),
+        "the heavy worker resolves the name"
+    );
+    assert_eq!(
+        on_registered("(sys/join (sys/spawn-vm (fn [] (eval '(host/add-ten 32)))))"),
+        Ok(42),
+        "and so does the light worker"
+    );
+}
+
+#[test]
+fn a_worker_passes_the_primitives_on_to_the_workers_it_spawns() {
+    // The counter-factual: a worker that registers what it inherited but
+    // records none of it hands its own workers the core primitives alone.
+    assert_eq!(
+        on_registered(
+            "(sys/join (sys/spawn (fn [] \
+               (ev/run (fn [] (sys/join (sys/spawn (fn [] (eval '(host/add-ten 32))))))))))"
+        ),
+        Ok(42)
+    );
 }
 
 // ── Scheduled execution with I/O ────────────────────────────────────

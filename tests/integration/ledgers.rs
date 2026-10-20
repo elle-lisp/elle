@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-20
 // The committed ledgers: each producer has one, each row names a subject its
 // producer reads, and no row is in two files.
 //
@@ -27,6 +27,34 @@ struct Ledger {
 /// The producer the runner reads each file's charge for; its subjects are
 /// files, not string literals in a source (docs/test-gauges.md).
 const RUNNER: &str = "elle test";
+
+/// The size producer, whose subjects are the files it reads over their caps as
+/// well as the literals of its totals (tests/ratchet/overview.md).
+const SIZE: &str = "tests/ratchet/size.lisp";
+
+/// The files the size producer reads: `scripts/audit --sources`, then
+/// `scripts/audit --documents`.
+fn priced() -> Vec<String> {
+    let mut files = Vec::new();
+    for flag in ["--sources", "--documents"] {
+        let out = std::process::Command::new(repo_root().join("scripts/audit"))
+            .arg(flag)
+            .current_dir(repo_root())
+            .output()
+            .unwrap_or_else(|e| panic!("run scripts/audit {flag}: {e}"));
+        assert!(
+            out.status.success(),
+            "scripts/audit {flag} failed:\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        files.extend(
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .map(str::to_string),
+        );
+    }
+    files
+}
 
 /// The string literal opening at `text`'s first byte, unescaped.
 fn string_literal(text: &str) -> Option<String> {
@@ -134,6 +162,7 @@ const PRODUCERS: &[&str] = &[
     "tests/impl/resource.lisp",
     "tests/ratchet/audit.lisp",
     "tests/ratchet/valgrind.lisp",
+    SIZE,
     RUNNER,
 ];
 
@@ -156,6 +185,7 @@ fn every_ledger_row_names_a_subject_its_producer_reads() {
     // instrument, not the producer.
     let mut stale = Vec::new();
     let charged = crate::common::charge_files();
+    let priced = priced();
     for ledger in ledgers() {
         if ledger.producer == RUNNER {
             for subject in &ledger.subjects {
@@ -171,6 +201,10 @@ fn every_ledger_row_names_a_subject_its_producer_reads() {
         let source = producer_source(&repo_root().join(&ledger.producer));
         for subject in &ledger.subjects {
             if subject.ends_with(" gauge (live-growth)") {
+                continue;
+            }
+            // A size row names a file the tree tracks, or one of the totals.
+            if ledger.producer == SIZE && priced.contains(subject) {
                 continue;
             }
             let literal = format!("\"{}\"", subject.replace('\\', "\\\\").replace('"', "\\\""));

@@ -8,8 +8,9 @@ Up: [..](../AGENTS.md)
 
 - [README.md](README.md) — **Code Analysis and Semantic Understanding (more...)**
 - [agent-reasoning.md](agent-reasoning.md) — **Agent Reasoning in Elle** Elle is designed to be easily reasoned about by AI coding assistants.
+- [budget.md](budget.md) — **Where subject-mixing begins, and the source cap it sets (2026-10-19)** The share of Elle's sources that do more than one job, by size, and the 2,500-token cap read off it.
 - [ci.md](ci.md) — **CI and Triage** CI structure, local workflow, and failure diagnosis.
 - [debugging.md](debugging.md) — **Debugging and introspection** The primitives a program uses to print its values, inspect a closure, and time its own work.
-- [index.md](index.md) — **Analysis** Meta-analysis tools: testing, debugging, and semantic portraits.
+- [index.md](index.md) — **Analysis** Meta-analysis tools: testing, CI, debugging, semantic portraits, and the report behind the source cap.
 - [portrait.md](portrait.md) — **Portrait** A portrait reports what the compiler knows about code without running it: signals, captures, calls and lint advisories.
 - [testing.md](testing.md) — **Testing Strategy** Which *kind* of test to write, and where it belongs.
