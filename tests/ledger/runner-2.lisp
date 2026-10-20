@@ -126,7 +126,7 @@
 ["tests/lang/port-deadline.lisp" :objects 1147]
 ["tests/lang/port-edge-cases.lisp" :objects 749]
 ["tests/lang/port-encoding.lisp" :objects 629]
-["tests/lang/port-longline.lisp" :objects 269]
+["tests/lang/port-longline.lisp" :objects 492]
 ["tests/lang/port-read-exact.lisp" :objects 879]
 ["tests/lang/port-read-timeout.lisp" :objects 517]
 ["tests/lang/port-shortread-framing.lisp" :objects 303]
