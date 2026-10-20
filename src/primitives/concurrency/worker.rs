@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-20
 //! The `sys/spawn` worker: stack sizing, the fresh VM it stands up, and the
 //! completion channel it answers on.
 //!
@@ -124,6 +124,9 @@ pub(super) fn spawn_closure_impl(
     // creator's (docs/signals/capabilities.md). The capability gate reads the
     // worker VM's root fiber, which starts with nothing withheld.
     let withheld = ctx.withheld();
+    // The worker registers the primitives the host registered on this instance,
+    // so code it compiles names what code compiled here names (docs/threads.md).
+    let host_primitives = ctx.vm().host_primitives().to_vec();
 
     // Size the worker's stack to the main thread's (see `worker_stack_size`):
     // the worker compiles arbitrary Elle, and the frontend recurses deep — the
@@ -204,6 +207,11 @@ pub(super) fn spawn_closure_impl(
                         &mut compile,
                         &stdlib_cache,
                     );
+                }
+                // After the stdlib, as `Runtime` registers them after its boot.
+                // The worker's VM records each, so its own workers inherit them.
+                for def in host_primitives {
+                    vm.register_host_primitive(&mut symbols, &mut compile, def);
                 }
 
                 // Arm the guardfree oracle on THIS worker's thread. `GUARD_ARMED`

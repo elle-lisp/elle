@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-20
 //! What this build of Elle is: its version, its epoch, the cargo profile it
 //! was compiled under, and the fingerprint of the binary itself.
 //!
@@ -157,19 +157,6 @@ pub(crate) fn prim_boot_fingerprint(
     }
 }
 
-/// Get package information
-pub(crate) fn prim_package_info(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    _args: &[Value],
-) -> (SignalBits, Value) {
-    let items = vec![
-        ctx.string("Elle"),
-        ctx.string(env!("CARGO_PKG_VERSION")),
-        ctx.string("A Lisp interpreter with bytecode compilation"),
-    ];
-    (SIG_OK, ctx.list(items))
-}
-
 // Declarative primitive definitions for package operations
 primitive! {
     "elle/version" => prim_package_version {
@@ -206,13 +193,6 @@ primitive! {
         // The hash is an integer and nil is an immediate, so the result never
         // reaches the heap (docs/impl/region/effects.md).
         effect: RegionEffect::Immediate,
-    }
-    "elle/info" => prim_package_info {
-        doc: "Get package information (name, version, description)",
-        category: "elle",
-        example: "(elle/info)",
-        aliases: &["pkg/info", "package-info"],
-        effect: RegionEffect::Fresh,
     }
 }
 

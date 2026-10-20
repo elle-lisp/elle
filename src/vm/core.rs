@@ -1,4 +1,4 @@
-// audited: 2026-10-07
+// audited: 2026-10-20
 //! The `VM` struct — the per-instance state a running program reaches — and the
 //! accessors that reborrow the allocations it points at.
 //!
@@ -87,6 +87,10 @@ pub struct VM {
     /// through `ctx.vm()`, so this is how it inherits the directory its parent
     /// was given instead of falling back to the process-wide one.
     pub(crate) stdlib_cache: crate::compiler::stdlib_cache::StdlibCache,
+    /// The primitives the host registered on this instance, in order. A
+    /// `sys/spawn` worker registers each on the instance it builds, so code the
+    /// worker compiles names them as code compiled here does (docs/threads.md).
+    pub(crate) host_primitives: Vec<&'static crate::primitives::def::PrimitiveDef>,
     /// Pointer to this instance's heap. The VM does not own it: a `RuntimeCore`
     /// owns it as a sibling `Box<FiberHeap>` (`VM::new_with_heap`), or — for a bare
     /// VM with no `RuntimeCore` — it is a privately leaked heap (`VM::new`). Either
