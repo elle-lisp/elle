@@ -1,6 +1,6 @@
 # The rig
 
-<!-- audited: 2026-10-19 -->
+<!-- audited: 2026-10-20 -->
 
 `elle-rig` hosts the same compiler and runtime as `elle`, and configures them
 in ways a user build cannot.
@@ -58,7 +58,9 @@ runs under the rig unchanged. A subcommand reads no sidecar and no profile.
 
 The rig builds its own runtimes: the one a program runs on, and the one
 `elle-rig test` runs the test runner on. It registers `(elle/build)` as a
-primitive of each, and the primitive answers the build's key as a string:
+primitive of each. A worker that either runtime spawns inherits the rig's
+primitives ([threads](../docs/threads.md)), so a file the runner compiles in a
+worker calls them too. The primitive answers the build's key as a string:
 
 | Part | Values | Read from |
 |------|--------|-----------|
