@@ -1,8 +1,8 @@
-// audited: 2026-10-12
+// audited: 2026-10-19
 // The gate that keeps the `plugins/` submodule compiling, and the build of the
 // plugins that the language suite loads.
 //
-// docs/analysis/ci.md
+// docs/analysis/plugins.md
 //
 // The submodule is a separate cargo workspace whose crates take `elle-plugin`
 // by path, so a changed `elle_api!` declaration moves the SDK and the plugin
@@ -10,7 +10,8 @@
 // Tests` job existed, nothing in CI checked the submodule out: #997 changed six
 // declarations, stopped 17 plugins from compiling at about 90 call sites, and
 // every gate stayed green (#1023). The argument, and why the ABI version guard
-// cannot stand in for the job, are in docs/analysis/ci.md § "The plugins job".
+// cannot stand in for the job, are in docs/analysis/plugins.md § "The plugins
+// job".
 //
 // These tests cover the halves the job cannot check for itself: that every
 // plugin is inside the workspace the job compiles, that the list of artifacts
@@ -49,7 +50,7 @@ fn run_make(target: &str, overrides: &[&str]) -> (bool, String) {
 /// The plugins the artifact assertion must not demand. `make plugins-all`
 /// compiles them and `make plugins` does not build them, so a `plugins-verify`
 /// that named them would fail every portable build.
-/// docs/analysis/ci.md § "The plugins job" owns the split.
+/// docs/analysis/plugins.md § "The plugins job" owns the split.
 const NOT_PORTABLE: &[&str] = &["polars", "arrow", "vulkan", "egui", "wayland"];
 
 /// The package name a plugin directory declares, or `None` when the directory
@@ -216,7 +217,7 @@ fn the_demanded_artifacts_describe_the_submodule() {
         assert!(
             !artifacts.contains(&path.as_str()),
             "the assertion demands `{path}`, which the portable build does not \
-             produce; see docs/analysis/ci.md § \"The plugins job\""
+             produce; see docs/analysis/plugins.md § \"The plugins job\""
         );
     }
 }
@@ -288,7 +289,7 @@ fn plugins_the_language_suite_imports() -> BTreeSet<String> {
 // fails, and the suite jobs build only what `SUITE_PLUGINS` names. A plugin
 // missing from that list is built by no suite job, so its file skips on every
 // build and the run stays green. A name the suite no longer imports costs every
-// suite job a build for nothing. docs/analysis/ci.md owns the argument.
+// suite job a build for nothing. docs/analysis/plugins.md owns the argument.
 //
 // The counter-factual: this was the state of websocket.lisp, whose loopback
 // test ran in no suite job because no suite job built `plugin/hash`.
@@ -397,7 +398,7 @@ fn command_lines(step: &str) -> String {
 // fails, and a document gates a plugin example the same way, so a job that
 // never built the plugin skips them and stays green. The plugins live in the
 // `plugins/` submodule, which a job has to check out before it can build
-// them. The argument is in docs/analysis/ci.md.
+// them. The argument is in docs/analysis/plugins.md.
 //
 // The counter-factual: this was every suite job before the step existed, and
 // the loopback test in websocket.lisp ran nowhere. Drop the step from one job,

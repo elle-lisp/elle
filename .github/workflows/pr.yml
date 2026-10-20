@@ -190,9 +190,9 @@ jobs:
         run: make smoke-producers
       # A suite file or a document that imports a plugin gates itself when the
       # import fails, so every job that runs either builds the plugins the
-      # language suite loads first. See docs/analysis/ci.md § "The plugins the
-      # language suite loads". Named, not `submodules: true`, for the reason the
-      # `plugins` job gives.
+      # language suite loads first. See docs/analysis/plugins.md § "The plugins
+      # the language suite loads". Named, not `submodules: true`, for the reason
+      # the `plugins` job gives.
       - name: Check out the plugins submodule
         run: git submodule update --init plugins
       - name: make suite-plugins
@@ -461,13 +461,13 @@ jobs:
   # because the break above is a compile error: five plugins sit outside the
   # `PORTABLE` list, and a job that skipped them would leave the hole open for
   # them. They need nothing extra on this runner — each opens its system library
-  # with dlopen rather than the linker. See docs/analysis/ci.md § "Why the job
-  # builds every plugin, not the portable set".
+  # with dlopen rather than the linker. See docs/analysis/plugins.md § "Why the
+  # job builds every plugin, not the portable set".
   #
   # `make smoke-plugins` then asserts every portable artifact and runs the
   # corpus. Without the assertion the corpus reports success over a plugin that
-  # never built — see docs/analysis/ci.md § "Why the job asserts its build
-  # output".
+  # never built — see docs/analysis/plugins.md § "Why the job asserts its
+  # build output".
   plugins:
     name: Plugin Tests
     needs: [changes, qa]
@@ -491,8 +491,8 @@ jobs:
       # headers behind it. elle-oxigraph reaches oxrocksdb-sys, which runs
       # bindgen over vendored RocksDB.
       #
-      # See docs/analysis/ci.md § "What the runner has to install" for how to
-      # find this set, which is not by reading manifests.
+      # See docs/analysis/plugins.md § "What the runner has to install" for how
+      # to find this set, which is not by reading manifests.
       - name: Install GNU parallel and the plugin build dependencies
         run: |
           sudo apt-get update

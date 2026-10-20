@@ -170,8 +170,8 @@ PORTABLE_SO   = $(foreach p,$(PORTABLE_PKGS),target/release/lib$(subst -,_,$(p))
 # plugins/tests/*.lisp imports its `.so` under `protect` and exits 0 when the
 # import fails, so a plugin that did not build makes its own test report
 # success. Asserting the build output separately means the tests never have to
-# be the thing that detects a missing plugin. See docs/analysis/ci.md § "The
-# plugins job".
+# be the thing that detects a missing plugin. See docs/analysis/plugins.md §
+# "The plugins job".
 #
 # The empty list is a failure, not a vacuous pass: it is what a tree whose
 # `plugins/` submodule was never checked out looks like.
@@ -633,9 +633,9 @@ myplugin:  ## Build the plugin the literate documents load
 # The plugins the language suite imports. A suite file gates itself when its
 # import fails, so a build without them skips those files and stays green; every
 # suite job therefore builds them before its first suite step
-# (docs/analysis/ci.md). They land in this build's own target directory, where
-# `plugin/X` resolves, and the assertion after the build is what reports one
-# that did not build. tests/integration/plugins.rs pins the list against the
+# (docs/analysis/plugins.md). They land in this build's own target directory,
+# where `plugin/X` resolves, and the assertion after the build is what reports
+# one that did not build. tests/integration/plugins.rs pins the list against the
 # suite's imports.
 SUITE_PLUGINS   := hash random crypto
 SUITE_PLUGIN_SO  = $(foreach p,$(SUITE_PLUGINS),$(CARGO_OUT)/libelle_$(p).$(if $(filter Darwin,$(HOST_OS)),dylib,so))
