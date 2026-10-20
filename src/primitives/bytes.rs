@@ -334,7 +334,7 @@ fn find_bytes(hay: &[u8], needle: &[u8]) -> Option<usize> {
     }
 }
 
-/// (bytes/find haystack needle [offset]) → int | nil
+/// (bytes/find haystack needle \[offset\]) → int | nil
 ///
 /// A byte index, where `string/find` answers a grapheme index. An offset past
 /// the end, or below zero, answers nil rather than an error, as a needle that
