@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-20
 // The meta and runtime primitives: gensym, package metadata, import-file,
 // thread spawn, sleep, trace, the clocks, and memory usage.
 //
@@ -55,15 +55,21 @@ fn test_package_manager() {
         }
         _ => panic!("Expected string"),
     }
+}
 
-    // Test package-info
-    let info_fn = get_primitive(&meta, &mut symbols, "package-info");
-    let result = call_primitive(&info_fn, &[]).unwrap();
-    assert!(result.is_list());
-
-    // Should be (name version description)
-    let vec = result.list_to_vec().unwrap();
-    assert_eq!(vec.len(), 3);
+#[test]
+fn the_package_answers_its_version_and_no_list_that_repeats_it() {
+    // The counter-factual: `elle/info` answered a list of the name, the version
+    // and a description, so the version had two primitives that could drift
+    // apart, and the description a third home beside the README.
+    let (_vm, mut symbols, meta) = setup();
+    for name in ["elle/info", "pkg/info", "package-info"] {
+        let id = symbols.intern(name);
+        assert!(
+            !meta.functions.contains_key(&id),
+            "{name} is no primitive; elle/version answers the version"
+        );
+    }
 }
 
 #[test]
