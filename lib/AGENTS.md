@@ -6,6 +6,7 @@ Up: [..](../AGENTS.md)
 
 ## Documents
 
+- [framing.md](framing.md) — **framing** A record cursor over any byte source, answering lines, delimited records and exact counts as views of one chunk.
 - [http.md](http.md) — **http** HTTP/1.1 client and server over TCP in pure Elle, with HTTPS and compression as opt-in module arguments.
 - [http2.md](http2.md) — **http2** HTTP/2 client and server (RFC 9113 + RFC 7541), over TLS with ALPN or as cleartext h2c.
 - [irc.md](irc.md) — **irc** IRCv3 client with capability negotiation, SASL PLAIN and message tags, over plain TCP or TLS.

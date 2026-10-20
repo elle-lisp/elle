@@ -1,6 +1,6 @@
 # Libraries
 
-<!-- audited: 2026-10-04 -->
+<!-- audited: 2026-10-20 -->
 
 Elle ships with libraries in `lib/`. All follow the closure-as-module
 pattern and are imported via `(import "std/<name>")`.
@@ -75,6 +75,7 @@ pattern and are imported via `(import "std/<name>")`.
 | cli | `((import "std/cli"))` | CLI argument parsing |
 | compress | `((import "std/compress"))` | Gzip, zlib, deflate, zstd (FFI to libz + libzstd) |
 | git | `((import "std/git"))` | Git repository operations (FFI to libgit2) |
+| framing | `((import "std/framing"))` | Lines, delimited records and exact counts over any byte source, each a view of one chunk. See [framing.md](../lib/framing.md) |
 | glob | `((import "std/glob"))` | Filesystem glob pattern matching |
 | semver | `((import "std/semver"))` | Semantic version parsing and comparison |
 | semver/arbitrate | `((import "std/semver/arbitrate"))` | Old-test arbitration of compat claims |

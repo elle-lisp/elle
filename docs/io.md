@@ -1,6 +1,6 @@
 # I/O
 
-<!-- audited: 2026-10-19 -->
+<!-- audited: 2026-10-20 -->
 
 All I/O in Elle is async — reads and writes yield to the scheduler. User
 code runs inside the async scheduler automatically.
@@ -229,6 +229,10 @@ from the kernel, so there would be nothing left to read them again.
       (assert (= "next" (port/read-line r)) "and the read after it is the next line")
       (port/close r))))
 ```
+
+A program with records of its own framing, lines and then a body by its length,
+cuts them from one chunk of a binary port with [framing](../lib/framing.md).
+Each record is a view of the chunk.
 
 On a text port `port/read-exact` counts grapheme clusters, and a cluster has no
 upper bound in bytes: one emoji built from four people and three joiners is 25
