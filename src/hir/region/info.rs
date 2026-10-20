@@ -144,6 +144,13 @@ pub struct RegionInfo {
     /// docs/impl/region/effects.md
     /// docs/impl/region/adopt.md
     pub containment_edges: Vec<(HirId, Region, Region)>,
+    /// Embed edges `(call site, argument, result)` for the ownership inference:
+    /// a `Fresh` native's declared embed, `result ⊇ arg`. The forest counts an
+    /// embed against external uniqueness and builds no subtree from it. Driving
+    /// no `IncrefRegion`: the alloc-scan counts the embedding.
+    ///
+    /// docs/impl/region/effects.md
+    pub embed_edges: Vec<(HirId, Region, Region)>,
     /// Funnel-store call site → the regions of the heap values stored there.
     /// Recorded even where the container's type is statically unknown, which
     /// `containment_edges` needs. Read by the branch compensation.
@@ -421,6 +428,7 @@ impl RegionInfo {
             fresh_result_regions: FxHashSet::default(),
             fiber_result_regions: FxHashSet::default(),
             containment_edges: Vec::new(),
+            embed_edges: Vec::new(),
             funnel_store_sites: HashMap::new(),
             funnel_bytecopy_value_sites: HashMap::new(),
             funnel_container_sites: HashMap::new(),

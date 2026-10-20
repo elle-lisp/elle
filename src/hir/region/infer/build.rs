@@ -1,4 +1,4 @@
-// audited: 2026-10-16
+// audited: 2026-10-20
 //! Assembling `RegionInfo` from the walk's outputs, and marking which of its
 //! fields a later post-pass fills.
 //!
@@ -124,6 +124,7 @@ impl RegionInference {
             fresh_result_regions: self.fresh_result_regions,
             fiber_result_regions: self.fiber_result_regions,
             containment_edges,
+            embed_edges: Vec::new(),
             funnel_store_sites: self.funnel_store_sites,
             funnel_bytecopy_value_sites: self.funnel_bytecopy_value_sites,
             funnel_container_sites: self.funnel_container_sites,
