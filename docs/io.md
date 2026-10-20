@@ -1,6 +1,6 @@
 # I/O
 
-<!-- audited: 2026-09-30 -->
+<!-- audited: 2026-10-19 -->
 
 All I/O in Elle is async — reads and writes yield to the scheduler. User
 code runs inside the async scheduler automatically.
@@ -147,7 +147,7 @@ with `port/close`.
 | `(port/open path mode)` | open a file; `mode` is `:read`, `:write`, `:append` or `:read-write` |
 | `(port/read p n)` | read up to `n` bytes; `nil` at EOF |
 | `(port/read-exact p n)` | read exactly `n` units; `nil` if EOF comes first |
-| `(port/read-line p)` | read to the next newline, without it; `nil` at EOF |
+| `(port/read-line p)` | read to the next newline, without it, whatever the line's length; `nil` at EOF |
 | `(port/read-all p)` | read everything that remains |
 | `(port/write p data)` | write all of a string or bytes |
 | `(port/flush p)` | flush buffers |
@@ -210,12 +210,25 @@ whichever port held the number before it. The pinning test is
 [io.lisp](../tests/lang/io.lisp) § "a recycled descriptor number carries no remainder".
 
 What a read reserves before it runs is not a bound on what it answers with.
-`port/read-line` reserves 64 KiB, which covers every real protocol line; a line
-longer than that is answered in pieces, and reading on gives the next piece
-until the newline arrives. No byte is dropped to make an answer fit — the
-backend has already taken those bytes from the kernel, so there would be
-nothing left to read them again. [port-longline.lisp](../tests/lang/port-longline.lisp)
-pins it on each backend.
+`port/read-line` reserves 64 KiB, and a line that fits is answered from that
+buffer in place. A longer line is read on until its newline arrives, and
+answered whole: one call, one line, however long. A caller never sees a piece
+of a line, so a newline-delimited protocol with no bound on its line length,
+JSON-RPC over a socket for instance, reads each message with one call. No byte
+is dropped to make an answer fit — the backend has already taken those bytes
+from the kernel, so there would be nothing left to read them again.
+[port-longline.lisp](../tests/lang/port-longline.lisp) pins it on each backend.
+
+```lisp
+(with-temp-dir dir
+  (let [path (path/join dir "long.txt")
+        long (string/repeat "x" 70000)]
+    (file/write path (string long "\nnext\n"))
+    (let [r (port/open path :read)]
+      (assert (= long (port/read-line r)) "a line past 64 KiB is one answer")
+      (assert (= "next" (port/read-line r)) "and the read after it is the next line")
+      (port/close r))))
+```
 
 On a text port `port/read-exact` counts grapheme clusters, and a cluster has no
 upper bound in bytes: one emoji built from four people and three joiners is 25

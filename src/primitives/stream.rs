@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-10-19
 //! Stream primitives — yield SIG_IO with IoRequest descriptors.
 //!
 //! docs/io.md
@@ -221,7 +221,8 @@ primitive! {
     "port/read-line" => prim_stream_read_line {
         signal: Signal::io_yields_errors(),
         arity: Arity::AtLeast(1),
-        doc: "Read one line from port. Returns a string, or nil at EOF.",
+        doc: "Read one line from port, however long it is. Returns the line \
+              as a string without its newline, or nil at EOF.",
         params: &["port"],
         category: "port",
         example: "(port/read-line (port/open \"file.txt\" :read))",
