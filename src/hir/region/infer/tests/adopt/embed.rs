@@ -197,9 +197,10 @@ fn view_source_outside_the_container_stays_shared() {
     //
     // The counter-factual: with the embed edge absent, `s` is an externally-unique
     // singleton on RC either way, so nothing changes here — the escaping twin in
-    // tests/impl/region-view-owner-uaf.lisp is where the absent edge faults. With the
-    // embed read as a containment edge, `s` joins `c`'s subtree and the whole subtree
-    // refuses: the first assertion fails.
+    // tests/impl/region-view-owner-uaf.lisp is where the absent edge shows, as a
+    // drop-time rescue of the wrongly adopted source. With the embed read as a
+    // containment edge, `s` joins `c`'s subtree and the whole subtree refuses: the
+    // first assertion fails.
     let src = "(let [s \"abcdefgh\" c (@array) v (slice s 2 6)] \
                  (begin (%array-push c v) (length c) (length s)))";
     let (hir, info, edges) = adopt_edges(src);

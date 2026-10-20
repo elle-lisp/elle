@@ -1,7 +1,8 @@
 (elle/epoch 15)
 # audited: 2026-10-20
-# A container owns a view as a member and releases the source once, and never frees a source under an escaping view.
+# A container owns a view as a member and releases the source once, and never adopts the source of an escaping view.
 # docs/impl/region/effects.md
+# docs/impl/region/diagnostics.md
 #
 # The sidecar arms guardfree, so a read of a freed payload faults.
 #
@@ -13,11 +14,14 @@
 # that owns the source of an escaping view never adopts the source: the edge
 # leaves the container's subtree.
 #
-# The counter-factual, by shape. With the embed edge dropped from the
-# uniqueness scan, the escaping shapes adopt the source into the container and
-# free it under the view, a fault at the read. With the source released twice
-# at the container's drop, the owning shapes fault at the read after the
-# container dies.
+# The counter-factual, by shape. With the source released twice at the
+# container's drop, the owning shapes fault at the read after the container
+# dies. With the embed edge dropped from the uniqueness scan, the forest
+# adopts the source into the container in the escaping shapes. The read does
+# not fault there: the view's recorded edge into the source makes the source
+# externally referenced at the container's drop, and the drop-time rescue
+# returns it to Counted. The rescue is the symptom, so these shapes pin
+# `arena/rescues` unchanged across the call.
 
 # A container owns the string view; the source outlives the container.
 (let [s (string/repeat "ab" 2048)]
@@ -46,8 +50,11 @@
     (push c s)
     v))
 
+(def rescues-before-string-view (arena/rescues))
 (assert (= (string-view-of-owned 2048) "abab")
         "a string view outlives the container that owned its source")
+(assert (= (arena/rescues) rescues-before-string-view)
+        "the container never adopts the source of an escaping string view, so its drop rescues nothing")
 
 # A container owns the bytes source; the view escapes the container's scope.
 (defn bytes-view-of-owned [n]
@@ -57,8 +64,11 @@
     (push c b)
     v))
 
+(def rescues-before-bytes-view (arena/rescues))
 (assert (= (bytes-view-of-owned 4096) (bytes 122 122 122 122))
         "a bytes view outlives the container that owned its source")
+(assert (= (arena/rescues) rescues-before-bytes-view)
+        "the container never adopts the source of an escaping bytes view, so its drop rescues nothing")
 
 # A container owns the source and a string over it; the string escapes.
 (defn string-over-owned [n]
@@ -68,7 +78,10 @@
     (push c b)
     t))
 
+(def rescues-before-string-over (arena/rescues))
 (assert (= (string-over-owned 4096) "qqq")
         "a string over owned bytes outlives the container")
+(assert (= (arena/rescues) rescues-before-string-over)
+        "the container never adopts the source of an escaping string, so its drop rescues nothing")
 
 (println "region-view-owner-uaf: ok")
