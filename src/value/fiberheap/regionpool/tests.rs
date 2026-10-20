@@ -1,6 +1,6 @@
-// audited: 2026-09-14
+// audited: 2026-10-20
 //! Unit tests for one region's pages: dual-ended layout, geometric growth,
-//! teardown, and the masked walk that finds a page base.
+//! teardown, the masked walk that finds a page base, and the cross-region scan.
 //!
 //! docs/impl/region/model.md
 //! docs/impl/region/generations.md
@@ -407,5 +407,62 @@ fn a_slice_header_written_mid_page_cannot_forge_a_page_base() {
         "a pointer past a slice header resolved to a forged mid-page base \
          (got 0x{rid:x}) instead of region 42 — the slice header left the four \
          bytes a size_tag occupies standing",
+    );
+}
+
+/// A string or bytes whose payload lies in another region's pages holds that
+/// region: the scan reports the backing's region, as it does a shared closure
+/// env (docs/impl/values.md).
+///
+/// The trap: the scan's string and bytes arms once enumerated nothing, which
+/// is right for an inline payload and frees a view's source under it.
+#[test]
+fn a_slice_backing_in_another_region_is_a_cross_region_reference() {
+    let mut pool = PagePool::default();
+    let mut source = pool_for(7);
+    let mut holder = pool_for(9);
+    let backing = source.alloc_region_slice(b"a line of bytes", &mut pool);
+    let inline = holder.alloc_region_slice(b"inline", &mut pool);
+    let valid =
+        |rid: u32, ptr: *const ()| (rid == 7 && source.owns(ptr)) || (rid == 9 && holder.owns(ptr));
+    let refs_of = |obj: &HeapObject| {
+        let mut refs = Vec::new();
+        RegionPool::find_object_cross_refs(obj, 9, base_page(), &valid, &mut refs);
+        refs
+    };
+
+    // A view two bytes into the source's payload, held in region 9.
+    let view = unsafe { RegionSlice::from_raw(backing.as_ptr().add(2), 4) };
+    assert_eq!(
+        refs_of(&HeapObject::LBytes {
+            data: view,
+            traits: Value::NIL
+        }),
+        vec![7],
+        "a bytes view must hold its source's region"
+    );
+    assert_eq!(
+        refs_of(&HeapObject::LString {
+            s: view,
+            traits: Value::NIL
+        }),
+        vec![7],
+        "a string view must hold its source's region"
+    );
+    assert!(
+        refs_of(&HeapObject::LBytes {
+            data: inline,
+            traits: Value::NIL
+        })
+        .is_empty(),
+        "an inline payload is a self-edge and holds nothing"
+    );
+    assert!(
+        refs_of(&HeapObject::LBytes {
+            data: RegionSlice::empty(),
+            traits: Value::NIL
+        })
+        .is_empty(),
+        "an empty payload has no page to resolve"
     );
 }

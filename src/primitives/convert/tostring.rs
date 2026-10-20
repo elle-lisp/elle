@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-20
 //! `string`: any value to a string, and several values concatenated into one.
 //!
 //! docs/strings.md
@@ -324,3 +324,6 @@ fn prim_to_string_single(
     };
     (SIG_OK, ctx.string(repr))
 }
+
+#[cfg(test)]
+mod tests;

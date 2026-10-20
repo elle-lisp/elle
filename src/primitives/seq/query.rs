@@ -1,4 +1,8 @@
+// audited: 2026-10-20
 //! Read-only seq accessors: first, rest, last, nth, reverse, slice, sort.
+//!
+//! docs/bytes.md
+//! docs/strings.md
 //!
 //! These never mutate their argument in place (except `sort` of an @array,
 //! which is genuinely a query-shaped in-place sort kept here with its
@@ -335,3 +339,6 @@ pub fn seq_sort(val: &Value, ctx: &mut NativeCtx) -> Result<Value, Value> {
         ),
     ))
 }
+
+#[cfg(test)]
+mod tests;
