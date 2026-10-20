@@ -1,6 +1,6 @@
 # http
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-20 -->
 
 The submodules behind [http.lisp](../http.lisp): URLs, transports, the wire format, chunked bodies and server-sent events.
 
@@ -11,7 +11,7 @@ how the module divides. Each file's header says what it exports, and
 | File | Purpose |
 |------|---------|
 | [url.lisp](url.lisp) | URL parsing and query-string encoding |
-| [transport.lisp](transport.lisp) | The TCP and TLS transports that every wire helper reads and writes |
+| [transport.lisp](transport.lisp) | The TCP and TLS transports, each a [framer](../framing.md) over its connection, that every wire helper reads and writes |
 | [chunked.lisp](chunked.lisp) | Chunked transfer encoding, read and write |
 | [wire.lisp](wire.lisp) | Header lines, request and status lines, bodies, reason phrases |
 | [sse.lisp](sse.lisp) | Server-sent events: the client streams and the response builder |
