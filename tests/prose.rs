@@ -12,7 +12,7 @@
 // the policy, so a violation in it is a false claim and fails the build.
 // Coverage grows as the tree comes into policy, with no flag day.
 //
-// This exists so that the stamp cannot be discharged by counting lines. What
+// This exists so that the stamp cannot be discharged by measuring size. What
 // a build can decide, a build decides; what is left for the reader to attest
 // is whether the content is true, earns its length, and belongs here.
 
@@ -32,45 +32,6 @@ fn examined(n: usize, what: &str) {
         n > 0,
         "the {what} sweep examined no files, so it proved nothing"
     );
-}
-
-/// What a stamped file owes the reading budget the prose checks hold: a line
-/// naming it when it is a document past 500 lines, and nothing otherwise. A
-/// source's size is the size ledger's (DOCUMENTATION.md).
-fn over_budget(rel: &str, text: &str) -> Option<String> {
-    let n = text.lines().count();
-    (n > 500).then(|| format!("{rel}: {n} lines"))
-}
-
-#[test]
-fn every_stamped_document_is_within_the_reading_budget() {
-    let mut over = Vec::new();
-    let mut seen = 0;
-    for (rel, text) in stamped() {
-        seen += 1;
-        over.extend(over_budget(&rel, &text));
-    }
-    examined(seen, "reading budget");
-    assert!(
-        over.is_empty(),
-        "stamped documents past the 500-line reading budget: {over:#?}"
-    );
-}
-
-#[test]
-fn a_source_past_500_lines_owes_the_prose_checks_nothing() {
-    // The counter-factual: hold a source to 500 lines here and a stamped
-    // source under the token cap fails on its line count, while one over the
-    // cap is already on the size ledger. Either way the line count is the
-    // wrong unit for a source.
-    let long = "x\n".repeat(600);
-    assert_eq!(over_budget("src/long.rs", &long), None);
-    assert_eq!(over_budget("lib/long.lisp", &long), None);
-    assert_eq!(
-        over_budget("docs/long.md", &long),
-        Some("docs/long.md: 600 lines".to_string())
-    );
-    assert_eq!(over_budget("docs/short.md", "x\n"), None);
 }
 
 #[test]

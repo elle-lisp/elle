@@ -35,7 +35,7 @@
 ["src/rewrite/run.rs" :tokens 3500]
 ["src/rewrite/run/tests.rs" :tokens 4000]
 ["src/runtime/core.rs" :tokens 3000]
-["src/runtime.rs" :tokens 4000]
+["src/runtime.rs" :tokens 3500]
 ["src/runtime/tests/lifecycle.rs" :tokens 3000]
 ["src/runtime/tests/ownership/anode.rs" :tokens 3500]
 ["src/runtime/tests/ownership/fnode/discard.rs" :tokens 3500]
