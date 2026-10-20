@@ -221,16 +221,17 @@ pub struct PrimitiveDef {
     /// The 0-based argument indices this primitive EMBEDS into its fresh result —
     /// meaningful only with [`RegionEffect::Fresh`]. The result's region holds a
     /// reference to each listed argument's region (as `%pair` embeds its car/cdr), so
-    /// the region walk records `result ⊇ arg` in `RegionInfo::containment_edges` for
-    /// each: the compile-time analog of the runtime alloc-scan
-    /// (`find_object_cross_refs`) that counts the same embedding at allocation. Without
-    /// it the ownership forest cannot see a captured value flow OUT through an escaping
-    /// result and would fold it into the capturing closure's Owned subtree
-    /// (docs/impl/region/effects.md; docs/impl/region/adopt.md, the side-field
-    /// embed analog). Empty (the default) for a `Fresh`
-    /// native that embeds none of its arguments (`popn`), which is exactly why `Fresh`
-    /// alone cannot carry the fact. `with-traits` is the canonical declarant (`&[1]` —
-    /// its `traits` side-field embeds the arg-1 table into the cloned result).
+    /// the region walk records `result ⊇ arg` in `RegionInfo::embed_edges` for each:
+    /// the compile-time analog of the runtime alloc-scan (`find_object_cross_refs`)
+    /// that counts the same embedding at allocation. The ownership forest counts the
+    /// edge against external uniqueness and builds no subtree from it. Without it the
+    /// forest cannot see a captured value flow OUT through an escaping result and
+    /// would fold it into the capturing closure's Owned subtree
+    /// (docs/impl/region/effects.md). Empty (the default) for a `Fresh` native that
+    /// embeds none of its arguments (`popn`), which is exactly why `Fresh` alone
+    /// cannot carry the fact. `with-traits` declares `&[1]` — its `traits` side-field
+    /// embeds the arg-1 table into the cloned result — and `slice` and `string`
+    /// declare `&[0]`, the source their view lies over.
     pub embeds: &'static [usize],
     /// Statically known return type, for type inference. See [`RetType`].
     pub ret: RetType,

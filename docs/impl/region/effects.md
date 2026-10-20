@@ -27,11 +27,19 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   (the captured-trait-table-into-an-escaping-value shape). `Fresh` alone is too
   vague — `popn` is `Fresh` yet embeds none of its args — so a `Fresh` native
   that embeds an argument names it in `PrimitiveDef::embeds`, and the region walk
-  records a `result ⊇ arg` containment edge (no `IncrefRegion`; the alloc-scan
-  already counts the RC) for the forest to read (`with-traits`'s `&[1]` — its
-  `traits` side-field embed; `slice`'s and `string`'s `&[0]` — the view a
-  slice-backed result keeps over its argument's pages,
-  [values](../values.md)). (An immediate result — e.g. a nil
+  records an **embed edge** `result ⊇ arg` in `RegionInfo::embed_edges`
+  (`with-traits`'s `&[1]` — its `traits` side-field; `slice`'s and `string`'s
+  `&[0]` — the view a slice-backed result keeps over its argument's pages,
+  [values](../values.md)). The edge drives no `IncrefRegion`: the alloc-scan
+  counts the embedding. The forest reads the edge one way only. It counts
+  against external uniqueness, so a subtree that holds the argument and not
+  the result stays Shared. It builds no subtree: an embed is neither a funnel
+  store, a cell store nor a capture, so the forest has no site at which to
+  adopt the argument into the result, and a member with no emittable owner
+  edge refuses its whole subtree. A container that owns the result owns it as
+  an ordinary member. The container's drop reclaims the result, and the drop's
+  cascade releases the result's recorded edge to its Shared source
+  ([ownership](ownership.md)). (An immediate result — e.g. a nil
   error-path return — is always permitted; the claim constrains the heap
   case. Same for the variants below. Note:
   `Fresh` therefore does NOT mean "no new holder of the argument's

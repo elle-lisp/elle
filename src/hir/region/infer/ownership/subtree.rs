@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-20
 //! The ownership cuts that free a whole subtree under one root, and a rootless cycle as one group.
 //!
 //! docs/impl/region/ownership.md
@@ -35,11 +35,19 @@ use rustc_hash::{FxHashMap, FxHashSet};
 /// re-derived here from the HIR. They are eligible (a capture is a genuine containment, not a may-store) and
 /// — like every edge — count against external uniqueness.
 ///
-/// And the **funnel-store containment** (`RegionInfo::containment_edges`): a value
-/// stored into a mutable retaining container (`@array`/`@struct`) by a `Funnel` op,
-/// recovered from the container's `RetType` on the production native-call path where the
-/// funnel records no `cross_region_refs` edge (module doc, source 3). Eligible (genuine
-/// containment) and counted against external uniqueness, exactly like the capture edges.
+/// And the **funnel-store and cell containment** (`RegionInfo::containment_edges`): a
+/// value stored into a mutable retaining container (`@array`/`@struct`) by a `Funnel`
+/// op, recovered from the container's `RetType` on the production native-call path
+/// where the funnel records no `cross_region_refs` edge (module doc, source 3), and a
+/// compiled capture cell's content. Eligible (genuine containment) and counted against
+/// external uniqueness, exactly like the capture edges.
+///
+/// The **embed edges** (`RegionInfo::embed_edges`, a `Fresh` native's declared
+/// `result ⊇ arg`) are read one way only: they count against external uniqueness and
+/// build no subtree. There is no site at which the result could adopt the argument,
+/// so a subtree built through the edge would refuse at the single-owner filter and
+/// take every container holding the result down with it
+/// (docs/impl/region/effects.md).
 ///
 /// ## When a subtree is Owned — external uniqueness
 ///
@@ -54,7 +62,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 ///    member means subtree drop could free a value that outlives `S` or whose identity
 ///    the compiler cannot bound → refuse.
 /// 2. **Nothing outside `S` references into `S`.** No edge `(_, source, target)` — over
-///    *all* `cross_region_refs`, hard edges included — has `source ∈ S` and
+///    every edge kind: *all* `cross_region_refs`, hard edges included, the capture
+///    edges, the containment edges and the embed edges — has `source ∈ S` and
 ///    `target ∉ S`. Such an edge is an outside container holding a reference to an
 ///    interior region; subtree-dropping `S` would dangle it. (The root's own single
 ///    reference is the activation/binding that sole-holds it, which is not a

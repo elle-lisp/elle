@@ -1,3 +1,8 @@
+// audited: 2026-10-20
+//! The containment graph, the candidate set and the capture edges every ownership pass reads, built once per compile.
+//!
+//! docs/impl/region/ownership.md
+
 use super::super::*;
 use super::capture::capture_containment_edges;
 use super::seeds::compute_shared_seeds;
@@ -11,9 +16,10 @@ use rustc_hash::{FxHashMap, FxHashSet};
 /// construction — a divergence between them would be an ownership-soundness bug.
 pub(in crate::hir::region::infer) struct OwnershipInputs {
     /// `parent → children` over ELIGIBLE containment edges (non-hard `cross_region_refs`
-    /// stores + capture + funnel-recovered containment): a parent contains each child
-    /// (`target ⊇ source`). A `hard_edge_site` may-store does not build the subtree (it
-    /// still counts against external uniqueness — see [`Self::outside_ref_in`]).
+    /// stores + capture + funnel-recovered and cell containment): a parent contains each
+    /// child (`target ⊇ source`). A `hard_edge_site` may-store and an embed edge do not
+    /// build the subtree (each still counts against external uniqueness — see
+    /// [`Self::outside_ref_in`]).
     children_of: FxHashMap<Region, Vec<Region>>,
     /// Every region that is some parent's child — i.e. not a top container.
     pub(super) contained: FxHashSet<Region>,
@@ -25,8 +31,8 @@ pub(in crate::hir::region::infer) struct OwnershipInputs {
     /// candidate region set both walks iterate.
     pub(super) alloc_regions: FxHashSet<Region>,
     /// `source → targets` over ALL edges the external-uniqueness scan reads (every
-    /// `cross_region_refs` store — hard edges INCLUDED — plus the capture and funnel
-    /// containment edges). Indexing by source once lets [`Self::outside_ref_in`] examine
+    /// `cross_region_refs` store — hard edges INCLUDED — plus the capture edges, the
+    /// containment edges and the embed edges). Indexing by source once lets [`Self::outside_ref_in`] examine
     /// only the edges leaving a subtree's own members, instead of re-scanning every edge in
     /// the compilation unit per candidate subtree (which was O(subtrees × edges), quadratic
     /// on the whole-stdlib letrec).
@@ -323,7 +329,7 @@ impl OwnershipInputs {
     }
 
     /// External-uniqueness failure: some edge — over ALL `cross_region_refs` (hard edges
-    /// included), the capture edges, and the funnel containment — has its source INSIDE
+    /// included), the capture edges, the containment edges and the embed edges — has its source INSIDE
     /// `set` and its target OUTSIDE it (an outside container holding an interior region,
     /// which freeing `set` as a unit would dangle). Reads the source-indexed `out_edges_by_src`
     /// so only edges LEAVING `set`'s own members are examined (not every edge in the unit).

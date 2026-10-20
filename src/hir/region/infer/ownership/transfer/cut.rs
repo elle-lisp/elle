@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-20
 //! The facts every face of the transfer cut reads, gathered once per unit.
 //!
 //! docs/impl/region/owner.md
@@ -114,7 +114,8 @@ impl<'a> Cut<'a> {
     }
 
     /// Whether `r` is touched by any edge of any kind, in either role. Hard
-    /// may-stores count: a may-holder may hold.
+    /// may-stores count: a may-holder may hold. Embed edges count: a fresh
+    /// result holds what it embeds.
     pub(super) fn in_any_edge(&self, r: Region) -> bool {
         let info = self.info;
         info.cross_region_refs

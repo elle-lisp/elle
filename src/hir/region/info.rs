@@ -1,4 +1,4 @@
-// audited: 2026-10-16
+// audited: 2026-10-20
 //! `RegionInfo`: what region inference produces for a compilation unit — the
 //! per-allocation and per-scope assignments, and the lowerer's cuts.
 //!
@@ -136,10 +136,13 @@ pub struct RegionInfo {
     pub fiber_result_regions: FxHashSet<Region>,
     /// Containment edges for the ownership inference, from two sources: a
     /// `Funnel` store into a mutable retaining container (`container ⊇ value`)
-    /// and a `Fresh` native's declared embed (`result ⊇ arg`). Site-keyed as
-    /// `cross_region_refs` is, and driving no `IncrefRegion`.
+    /// and a compiled capture cell's store (`cell ⊇ content`). Site-keyed as
+    /// `cross_region_refs` is, and driving no `IncrefRegion`. Each builds the
+    /// subtree and counts against external uniqueness. A `Fresh` native's
+    /// declared embed is not here: it is an `embed_edges` entry.
     ///
     /// docs/impl/region/effects.md
+    /// docs/impl/region/adopt.md
     pub containment_edges: Vec<(HirId, Region, Region)>,
     /// Funnel-store call site → the regions of the heap values stored there.
     /// Recorded even where the container's type is statically unknown, which
