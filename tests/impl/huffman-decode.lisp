@@ -1,11 +1,11 @@
-(elle/epoch 14)
-# audited: 2026-10-06
+(elle/epoch 15)
+# audited: 2026-10-20
 # The pages one HPACK Huffman decode claims, for a value of short codes and a value of long ones.
 # lib/http2/overview.md
 #
-# Each interpreted loop step claims pages, so the pages a decode claims
-# track the loop steps it runs: one per bit for a decoder that walks the
-# trie, one per code for a decoder that reads a table. The page gauge is
+# A loop step that allocates nothing claims no page, so the pages a decode
+# claims are those of the values it builds, whatever the count of codes or
+# bits it walks (docs/regions/performance.md). The page gauge is
 # deterministic, so a reading is exact and the ledger pins it in
 # tests/ledger/huffman-decode.lisp.
 #
