@@ -1,10 +1,11 @@
-// audited: 2026-10-05
+// audited: 2026-10-20
 //! The rig's entry point: answer a subcommand, or read the sidecar and the profile, build the runtime, and run the program on it.
 //!
 //! rig/overview.md
 
 mod build;
 mod settings;
+mod tokens;
 
 use settings::Settings;
 use std::path::Path;
@@ -69,6 +70,7 @@ fn main() {
         let test = elle::program::Test::prepare(args[1..].to_vec());
         let mut rt = elle::runtime::Runtime::new();
         build::register(&mut rt);
+        tokens::register(&mut rt);
         std::process::exit(test.drive(&mut rt));
     }
     // elle's other subcommands answer here as they do under `elle`, before any
@@ -84,6 +86,7 @@ fn main() {
         println!("Usage: elle-rig [--profile PATH] [--print-config] [elle flags] [file] [args...]");
         println!("See rig/overview.md; every flag `elle --help` lists applies here too.");
         println!("(elle/build) answers the key of the build this rig is.");
+        println!("(elle/tokens TEXT) answers what TEXT costs a reader in tokens.");
         return;
     }
     if config.version {
@@ -118,6 +121,7 @@ fn main() {
     }
     let mut rt = elle::program::runtime();
     build::register(&mut rt);
+    tokens::register(&mut rt);
     std::process::exit(program.drive(&mut rt));
 }
 

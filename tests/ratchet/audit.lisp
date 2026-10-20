@@ -1,8 +1,8 @@
-(elle/epoch 14)
-# audited: 2026-10-05
-# The audit queue's two counts, read against the rows of
-# tests/ledger/audit.lisp: the files with no stamp, and the files stamped
-# before the policy.
+(elle/epoch 15)
+# audited: 2026-10-20
+# The audit queue's three counts, read against the rows of
+# tests/ledger/audit.lisp: the files with no stamp, the files stamped before
+# the policy, and the files stamped with a deviation.
 # docs/impl/audit.md
 #
 # The script walks the files git tracks under the working directory, which is
@@ -26,3 +26,4 @@
 
 (r:read "unstamped files" :files (count-of "unstamped"))
 (r:read "files stamped before the policy" :files (count-of "before-policy"))
+(r:read "files stamped with a deviation" :files (count-of "deviation"))

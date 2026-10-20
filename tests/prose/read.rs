@@ -45,7 +45,14 @@ pub fn stamped() -> Vec<(String, String)> {
 /// stamp in its first eight lines. A deviation stamp, `audited: <date> (#N)`,
 /// names the issue behind a rule the file breaks, so it claims none of them.
 pub fn claims(text: &str) -> bool {
-    text.lines().take(8).any(|l| l.contains("audited: "))
+    text.lines()
+        .take(8)
+        .any(|l| match l.split_once("audited: ") {
+            Some((_, rest)) => !rest
+                .trim_start_matches(|c: char| c.is_ascii_digit() || c == '-')
+                .starts_with(" (#"),
+            None => false,
+        })
 }
 
 /// Document paths named in one header comment line.
