@@ -1,4 +1,4 @@
-// audited: 2026-10-15
+// audited: 2026-10-20
 // Registers every integration test file, which is what makes one run.
 //
 // tests/AGENTS.md
@@ -213,6 +213,9 @@ mod audit_report {
 }
 mod audit_counts {
     include!("audit_counts.rs");
+}
+mod audit_sources {
+    include!("audit_sources.rs");
 }
 mod rustsource {
     include!("rustsource.rs");

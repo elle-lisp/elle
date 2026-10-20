@@ -1,5 +1,5 @@
-// audited: 2026-10-05
-// What the rig's tests share: a scratch directory, a run of the rig binary, and the ratchet's scratch producer.
+// audited: 2026-10-20
+// What the rig's tests share: a scratch directory and tree, a run of the rig binary, and the ratchet's scratch producer.
 // rig/overview.md
 
 #![allow(dead_code)]
@@ -25,9 +25,14 @@ impl Scratch {
         Scratch(dir)
     }
 
-    /// Write `body` to `name` in the directory and answer its path.
+    /// Write `body` to `name` in the directory, creating the directories it
+    /// names, and answer its path.
     pub fn write(&self, name: &str, body: &str) -> PathBuf {
         let path = self.0.join(name);
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)
+                .unwrap_or_else(|e| panic!("create {name}'s directory: {e}"));
+        }
         std::fs::write(&path, body).unwrap_or_else(|e| panic!("write {name}: {e}"));
         path
     }
@@ -63,4 +68,29 @@ pub fn stderr(out: &Output) -> String {
 /// `key = value` line at a time.
 pub fn lines(out: &Output) -> Vec<String> {
     stdout(out).lines().map(|l| l.trim().to_string()).collect()
+}
+
+/// The repository the rig sits in.
+pub fn repo() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("the rig sits in the repository")
+        .to_path_buf()
+}
+
+/// A scratch tree whose `scripts/audit` runs the repository's own over the
+/// tree, which is how a tool lists the tree's sources. The wrapper is two
+/// lines, so it is a source under any cap and names no document.
+pub fn audited_tree(tag: &str) -> Scratch {
+    use std::os::unix::fs::PermissionsExt;
+    let t = Scratch::new(tag);
+    let body = format!(
+        "#!/bin/sh\nexec '{}' --root '{}' \"$@\"\n",
+        repo().join("scripts/audit").display(),
+        t.path().display()
+    );
+    let path = t.write("scripts/audit", &body);
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+        .expect("make scripts/audit executable");
+    t
 }

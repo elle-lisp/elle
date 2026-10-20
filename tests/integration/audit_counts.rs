@@ -1,5 +1,5 @@
-// audited: 2026-10-08
-// The audit queue's two counts, the walk over the files git tracks, and the processes it starts.
+// audited: 2026-10-20
+// The audit queue's three counts, the walk over the files git tracks, and the processes it starts.
 //
 // docs/impl/audit.md
 //
@@ -74,8 +74,30 @@ fn counts_names_the_unstamped_files_and_the_files_stamped_before_the_policy() {
 
     assert_eq!(
         audit(t.path(), &["--counts"]),
-        "unstamped 2\nbefore-policy 1\n",
+        "unstamped 2\nbefore-policy 1\ndeviation 0\n",
         "two files carry no stamp and one predates the policy; no file is in both"
+    );
+}
+
+#[test]
+fn counts_names_the_files_stamped_with_a_deviation_whatever_their_date() {
+    // The counter-factual: read a deviation stamp by its date alone and the
+    // old one joins the files before the policy, the new one passes as plain,
+    // and the count of files that knowingly break a rule reads zero.
+    let t = ScratchDir::new("audit-deviation");
+    write(t.path(), "DOCUMENTATION.md", &doc(Some("2026-06-01")));
+    write(t.path(), "old.md", &doc(Some("2026-05-01 (#12)")));
+    write(
+        t.path(),
+        "new.rs",
+        "// audited: 2026-06-02 (#34)\nfn f() {}\n",
+    );
+    write(t.path(), "plain.md", &doc(Some("2026-06-02")));
+
+    assert_eq!(
+        audit(t.path(), &["--counts"]),
+        "unstamped 0\nbefore-policy 0\ndeviation 2\n",
+        "both deviation stamps count once, in the third count alone"
     );
 }
 
@@ -98,7 +120,7 @@ fn the_walk_lists_only_the_files_git_tracks() {
     );
     assert_eq!(
         audit(t.path(), &["--counts"]),
-        "unstamped 1\nbefore-policy 0\n",
+        "unstamped 1\nbefore-policy 0\ndeviation 0\n",
         "and so do the counts"
     );
 }
@@ -116,7 +138,7 @@ fn a_tree_inside_another_repository_has_every_file_walked() {
 
     assert_eq!(
         audit(&t.path().join("inner"), &["--counts"]),
-        "unstamped 1\nbefore-policy 0\n",
+        "unstamped 1\nbefore-policy 0\ndeviation 0\n",
         "a root below the top of a work tree walks every file under it"
     );
 }
@@ -180,7 +202,7 @@ fn processes_for(files: usize) -> usize {
     );
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
-        format!("unstamped {}\nbefore-policy 0\n", files / 2),
+        format!("unstamped {}\nbefore-policy 0\ndeviation 0\n", files / 2),
         "the shims change no count"
     );
     std::fs::read_to_string(&log)

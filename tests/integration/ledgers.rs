@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-20
 // The committed ledgers: each producer has one, each row names a subject its
 // producer reads, and no row is in two files.
 //
@@ -27,6 +27,28 @@ struct Ledger {
 /// The producer the runner reads each file's charge for; its subjects are
 /// files, not string literals in a source (docs/test-gauges.md).
 const RUNNER: &str = "elle test";
+
+/// The size producer, whose subjects are the sources it reads over the cap as
+/// well as the literals of its totals (tests/ratchet/overview.md).
+const SIZE: &str = "tests/ratchet/size.lisp";
+
+/// The sources the size producer reads: `scripts/audit --sources`.
+fn sources() -> Vec<String> {
+    let out = std::process::Command::new(repo_root().join("scripts/audit"))
+        .arg("--sources")
+        .current_dir(repo_root())
+        .output()
+        .expect("run scripts/audit --sources");
+    assert!(
+        out.status.success(),
+        "scripts/audit --sources failed:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::to_string)
+        .collect()
+}
 
 /// The string literal opening at `text`'s first byte, unescaped.
 fn string_literal(text: &str) -> Option<String> {
@@ -134,6 +156,7 @@ const PRODUCERS: &[&str] = &[
     "tests/impl/resource.lisp",
     "tests/ratchet/audit.lisp",
     "tests/ratchet/valgrind.lisp",
+    SIZE,
     RUNNER,
 ];
 
@@ -156,6 +179,7 @@ fn every_ledger_row_names_a_subject_its_producer_reads() {
     // instrument, not the producer.
     let mut stale = Vec::new();
     let charged = crate::common::charge_files();
+    let sources = sources();
     for ledger in ledgers() {
         if ledger.producer == RUNNER {
             for subject in &ledger.subjects {
@@ -171,6 +195,10 @@ fn every_ledger_row_names_a_subject_its_producer_reads() {
         let source = producer_source(&repo_root().join(&ledger.producer));
         for subject in &ledger.subjects {
             if subject.ends_with(" gauge (live-growth)") {
+                continue;
+            }
+            // A size row names a source the tree tracks, or one of the totals.
+            if ledger.producer == SIZE && sources.contains(subject) {
                 continue;
             }
             let literal = format!("\"{}\"", subject.replace('\\', "\\\\").replace('"', "\\\""));
