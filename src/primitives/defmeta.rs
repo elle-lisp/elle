@@ -1,8 +1,8 @@
-// audited: 2026-10-05
+// audited: 2026-10-20
 //! What a primitive carries beyond its call behavior: the `Doc` a lookup
 //! shows, and the `PrimitiveMeta` maps the pipeline threads.
 //!
-//! src/primitives/AGENTS.md
+//! docs/cookbook/primitives.md
 
 use crate::primitives::def::{PrimitiveDef, RegionEffect, RetType};
 use crate::signals::Signal;

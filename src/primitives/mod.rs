@@ -1,7 +1,7 @@
-// audited: 2026-09-21
+// audited: 2026-10-20
 // The primitives module tree: every primitive table, the definition and
 // registration types, and the shared argument and access helpers.
-// src/primitives/AGENTS.md
+// src/primitives/overview.md
 #[macro_use]
 pub mod arg;
 #[macro_use]

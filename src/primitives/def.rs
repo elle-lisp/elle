@@ -1,7 +1,7 @@
-// audited: 2026-09-29
+// audited: 2026-10-20
 //! Primitive definition type for declarative registration.
 //!
-//! src/primitives/AGENTS.md
+//! docs/cookbook/primitives.md
 //! docs/impl/region/effects.md
 //!
 //! Each primitive module exports a `static PRIMITIVES: &[PrimitiveDef]`
@@ -207,7 +207,7 @@ pub struct PrimitiveDef {
     /// Module/category (for example "math", "string", "file").
     /// Empty string for core (unprefixed) primitives.
     pub category: &'static str,
-    /// Runnable example in Elle syntax. Picked up by elle-doc.
+    /// Runnable example in Elle syntax. The documentation site shows it.
     /// Empty string if no example.
     pub example: &'static str,
     /// Aliases — additional names that resolve to the same function.
