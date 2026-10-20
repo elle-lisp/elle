@@ -113,3 +113,32 @@ fn the_curve_bins_each_source_and_counts_the_ones_naming_three_documents() {
     );
     assert_eq!(stdout(&out), CURVE);
 }
+
+#[test]
+fn make_budget_runs_the_release_rig_whatever_elle_names() {
+    // The counter-factual: a recipe that ran `$(ELLE_RIG)` followed `ELLE`,
+    // which names the debug build outside CI, and the curve took minutes.
+    let out = Command::new("make")
+        .args(["--dry-run", "budget", "ELLE=./target/debug/elle"])
+        .current_dir(repo())
+        .output()
+        .expect("spawn make");
+    assert!(
+        out.status.success(),
+        "make --dry-run budget:\n{}",
+        stderr(&out)
+    );
+    let recipe = stdout(&out);
+    assert!(
+        recipe.contains("cargo build --release -p elle-rig"),
+        "the recipe builds the release rig:\n{recipe}"
+    );
+    assert!(
+        recipe.contains("./target/release/elle-rig tools/budget.lisp"),
+        "and runs the tool on it:\n{recipe}"
+    );
+    assert!(
+        !recipe.contains("target/debug"),
+        "and touches no debug build:\n{recipe}"
+    );
+}
