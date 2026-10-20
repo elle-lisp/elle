@@ -1,5 +1,7 @@
 # Strings
 
+<!-- audited: 2026-10-20 -->
+
 Strings are immutable sequences of grapheme clusters. All string operations
 use the `string/` prefix. `@"..."` creates a mutable string.
 
@@ -12,6 +14,10 @@ use the `string/` prefix. `@"..."` creates a mutable string.
 (get "hello" -1)                   # => "o" (negative indexes)
 (slice "hello" 1 4)                # => "ell"
 ```
+
+`slice` counts graphemes, and on an immutable string it answers a string over
+the source's own bytes: no byte is copied, and the source stays alive as long
+as the slice does ([bytes](bytes.md)). A slice of an `@string` is a copy.
 
 Grapheme count and byte count differ for multi-byte characters:
 
@@ -48,7 +54,8 @@ Grapheme count and byte count differ for multi-byte characters:
 
 `string/find` returns the grapheme index of the first occurrence, or `nil`
 if the substring is not found. An optional third argument sets the start
-offset. `string/index-of` is an alias.
+offset. `string/index-of` is an alias. `bytes/find` answers a byte index
+instead, and takes a string on either side ([bytes](bytes.md)).
 
 ## Transformation
 
@@ -93,6 +100,10 @@ produce empty strings in the result. The delimiter cannot be empty.
 (string 42)                        # => "42"
 (string :foo)                      # => "foo" (no colon)
 ```
+
+`string` of a string is a copy. `string` of immutable bytes checks the bytes
+as UTF-8 and answers a string over the same bytes, without a copy
+([bytes](bytes.md)).
 
 ## Unicode version
 

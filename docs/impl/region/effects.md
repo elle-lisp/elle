@@ -1,6 +1,6 @@
 # Native region effects: declared, not guessed
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-20 -->
 
 How each primitive declares its region behavior, and what each `RegionEffect`
 variant claims.
@@ -29,7 +29,9 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   that embeds an argument names it in `PrimitiveDef::embeds`, and the region walk
   records a `result ⊇ arg` containment edge (no `IncrefRegion`; the alloc-scan
   already counts the RC) for the forest to read (`with-traits`'s `&[1]` — its
-  `traits` side-field embed). (An immediate result — e.g. a nil
+  `traits` side-field embed; `slice`'s and `string`'s `&[0]` — the view a
+  slice-backed result keeps over its argument's pages,
+  [values](../values.md)). (An immediate result — e.g. a nil
   error-path return — is always permitted; the claim constrains the heap
   case. Same for the variants below. Note:
   `Fresh` therefore does NOT mean "no new holder of the argument's

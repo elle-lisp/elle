@@ -1,6 +1,6 @@
 # Values
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-20 -->
 
 Every Elle value is a 16-byte tagged union: an 8-byte tag and an 8-byte
 payload.
@@ -122,6 +122,19 @@ inline in their region's pages via `RegionSlice<T>` — a `(ptr, len)` view into
 region-owned bytes, usually adjacent to the containing `HeapObject` header. This
 avoids inner `Vec` or `Box<str>` allocations for the common case. Mutable types
 use `Rc<RefCell<...>>` for cross-fiber live-update semantics.
+
+A `slice` of an immutable string or bytes, and a `string` built over immutable
+bytes, is a **view**: a header in the call's own region whose `RegionSlice`
+points into the source's pages. The alloc-time scan
+([introspect.rs](../../src/value/fiberheap/regionpool/introspect.rs)) treats
+the backing of a string or bytes that lies in another region as a cross-region
+reference, exactly as it treats a shared closure env, so the view's region
+holds the source's region and the free-time cascade releases it. Both
+primitives declare `Fresh` with `embeds: &[0]`, so the ownership forest sees
+the containment ([effects](region/effects.md)). The payload copies that
+remain are the ones a backing in another region cannot serve: `with-traits`
+clones into its own region, `send` and the image dumper copy the bytes, and a
+slice of a mutable value copies because a `Vec` can move.
 
 ### Trait tables
 
