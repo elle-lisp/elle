@@ -1,6 +1,6 @@
 // audited: 2026-10-20
-//! Unit tests for one region's pages: dual-ended layout, geometric growth,
-//! teardown, the masked walk that finds a page base, and the cross-region scan.
+//! Unit tests for one region's pages: dual-ended layout, growth, teardown,
+//! the walk that finds a page base, and the cross-region scan.
 //!
 //! docs/impl/region/model.md
 //! docs/impl/region/generations.md
