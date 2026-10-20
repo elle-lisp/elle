@@ -1,6 +1,6 @@
 # tests/common
 
-<!-- audited: 2026-10-15 -->
+<!-- audited: 2026-10-19 -->
 
 Shared test helpers for the Elle test suite.
 
@@ -115,9 +115,9 @@ This is safe because:
 |------|---------|
 | [mod.rs](mod.rs) | the evals (`eval_source`, `eval_source_bare`, `eval_source_unscheduled`, `eval_reuse`, `eval_reuse_bare`), `setup`, `proptest_cases`, `paint_stack`, and `ScratchDir`; it re-exports the readers of `repo.rs`, `makefile.rs`, `passes.rs`, `workflows.rs` and `store.rs` |
 | [repo.rs](repo.rs) | the Makefile readers (`make_var`, `make_dry_run`, `make_dry_run_with`, `make_expand`, `makefile`), the suite readers (`repo_root`, `suite`, `suite_files`, `declared_deadline`, `wide_patterns`), and `source_files`, the tree walk a policy sweep reads |
-| [makefile.rs](makefile.rs) | the Makefile's rules (`makefile_rules`), the targets whose recipe runs one suite pass (`suite_targets`), and every target that reaches one (`recording_targets`), for `run_artifacts.rs`, `suites.rs`, `corpus_targets.rs`, `ci_steps.rs` and `doctest.rs` |
-| [passes.rs](passes.rs) | the suite passes a target runs (`Pass`, `passes`, `the_pass`), what `make smoke` names (`smoke_passes`), the two suites as sets (`lang_files`, `impl_files`), and `assert_plain_language_pass`, for `suites.rs` and `variants.rs` |
-| [workflows.rs](workflows.rs) | the workflow readers (`workflow_files`, `workflow_jobs`, `job_steps`, `step_lines`, `runs_target`) |
+| [makefile.rs](makefile.rs) | the Makefile's rules (`makefile_rules`), the targets whose recipe runs one suite pass (`suite_targets`), and every target that reaches one (`recording_targets`), for `run_artifacts.rs`, `suites.rs`, `corpus_targets.rs`, `ci_steps.rs`, `plugins.rs` and `doctest.rs` |
+| [passes.rs](passes.rs) | the suite passes a target runs (`Pass`, `passes`, `the_pass`), what `make smoke` names (`smoke_passes`), the two suites as sets (`lang_files`, `impl_files`), and `assert_plain_language_pass`, for `suites.rs`, `variants.rs` and `plugins.rs` |
+| [workflows.rs](workflows.rs) | the workflow readers (`workflow_files`, `workflow_jobs`, `job_steps`, `step_lines`, `runs_target`, `make_steps`) |
 | [documents.rs](documents.rs) | the documents `make doctest` runs (`doctest_documents`) and the documents it must run (`covered_documents`), for `doctest.rs` and `doctest_scope.rs` |
 | [store.rs](store.rs) | the session-store readers (`query`, `scalar`), for the tests that drive `elle test` and read back what it recorded |
 
@@ -164,10 +164,12 @@ a job that runs it. **`job_steps(body)`** splits a job into its steps, at the
 `- ` that opens each. **`runs_target(body, target)`** asks whether a job runs one
 make target, and not a longer one it prefixes. **`step_lines(body)`** answers
 the lines of a job that run something, every line but a step's `name:`.
+**`make_steps(body)`** answers each `make TARGET VAR=VALUE…` a run line starts,
+as the target and its variables.
 `workflows.rs` asks what the gate waits for, `ci_steps.rs` what each step
-runs, `run_artifacts.rs` what a suite job leaves behind, and `toolchains.rs`
-what a job's toolchain carries. So the reading lives here rather than in each
-of them.
+runs, `run_artifacts.rs` what a suite job leaves behind, `toolchains.rs` what a
+job's toolchain carries, and `plugins.rs` whether a suite job builds the suite
+plugins first. So the reading lives here rather than in each of them.
 
 ### Reading a session store
 

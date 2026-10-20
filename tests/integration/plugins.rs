@@ -20,7 +20,10 @@
 // `SUITE_PLUGINS`, the plugins every suite job builds, and check that every
 // suite job builds them before its first suite step.
 
-use crate::common::{job_steps, make_expand, runs_target, suite, workflow_files, workflow_jobs};
+use crate::common::{
+    job_steps, lang_files, make_expand, make_steps, passes, recording_targets, runs_target,
+    step_lines, suite, workflow_files, workflow_jobs,
+};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
@@ -366,32 +369,22 @@ fn the_suite_plugin_assertion_fails_on_a_missing_plugin() {
     );
 }
 
-/// The make targets that run the language suite or the documents, in any
-/// workflow: each build's suite target, the boot-image pass, `make smoke`,
-/// which runs both, and `make doctest`.
-const SUITE_OR_DOCTEST: &[&str] = &[
-    "smoke",
-    "smoke-lang",
-    "smoke-nojit",
-    "smoke-pool",
-    "smoke-mlir",
-    "smoke-noffi",
-    "smoke-boot-image",
-    "doctest",
-];
-
-/// A step's command lines: every line but its `name:`, which spells the
-/// command it labels.
-fn command_lines(step: &str) -> String {
-    step.lines()
-        .filter(|line| {
-            !line
-                .trim_start()
-                .trim_start_matches("- ")
-                .starts_with("name:")
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+/// Does this step run a language-suite file or the documents? It runs `make
+/// doctest`, or a target with a pass that deals out a file of the language
+/// suite, as `make --dry-run` spells the pass.
+fn runs_language_suite(step: &str, recording: &BTreeSet<String>, lang: &BTreeSet<String>) -> bool {
+    make_steps(step).into_iter().any(|(target, vars)| {
+        if target == "doctest" {
+            return true;
+        }
+        if !recording.contains(&target) {
+            return false;
+        }
+        let vars: Vec<&str> = vars.iter().map(String::as_str).collect();
+        passes(&target, &vars)
+            .iter()
+            .any(|pass| !pass.files.is_disjoint(lang))
+    })
 }
 
 // A language-suite file that imports a plugin gates itself when the import
@@ -400,18 +393,28 @@ fn command_lines(step: &str) -> String {
 // `plugins/` submodule, which a job has to check out before it can build
 // them. The argument is in docs/analysis/plugins.md.
 //
+// The trap: the language suite runs in more targets than the ones named for
+// it. `make smoke-eager`, `make smoke-charge` and `make smoke-scrub` run its
+// files too, so a list of target names misses a job whose first suite step is
+// one of those. The test reads each pass's files off `make --dry-run` instead.
+//
 // The counter-factual: this was every suite job before the step existed, and
 // the loopback test in websocket.lisp ran nowhere. Drop the step from one job,
 // and that build skips every plugin test with nothing going red.
 #[test]
 fn every_suite_job_builds_the_suite_plugins_before_its_first_suite_step() {
+    let recording = recording_targets();
+    let lang = lang_files();
     let mut checked: Vec<String> = Vec::new();
     for (file, text) in workflow_files() {
         for (name, body) in workflow_jobs(&text) {
-            let steps: Vec<String> = job_steps(&body).iter().map(|s| command_lines(s)).collect();
+            let steps: Vec<String> = job_steps(&body)
+                .iter()
+                .map(|s| step_lines(s).join("\n"))
+                .collect();
             let Some(first) = steps
                 .iter()
-                .position(|s| SUITE_OR_DOCTEST.iter().any(|t| runs_target(s, t)))
+                .position(|s| runs_language_suite(s, &recording, &lang))
             else {
                 continue;
             };
