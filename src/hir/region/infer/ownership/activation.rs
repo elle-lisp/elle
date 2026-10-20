@@ -186,6 +186,11 @@ pub(in crate::hir::region::infer) fn compute_activation_adopts(
                     changed = true;
                 }
             }
+            for &(_site, s, d) in &info.embed_edges {
+                if hull.contains(&s) && hull.insert(d) {
+                    changed = true;
+                }
+            }
         }
         if hull
             .iter()

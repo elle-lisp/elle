@@ -88,6 +88,14 @@ impl RegionInference {
             .filter(|(_, src, _)| live_regions.contains(src))
             .collect();
 
+        // A `Fresh` native's declared embed, filtered the same way: an embedded
+        // argument that resolves to a phantom owns no allocation.
+        let embed_edges: Vec<(HirId, Region, Region)> = self
+            .embed_edges
+            .into_iter()
+            .filter(|(_, src, _)| live_regions.contains(src))
+            .collect();
+
         RegionInfo {
             alloc_region: self.alloc_region,
             scope_region: self.scope_region,
@@ -124,7 +132,7 @@ impl RegionInference {
             fresh_result_regions: self.fresh_result_regions,
             fiber_result_regions: self.fiber_result_regions,
             containment_edges,
-            embed_edges: Vec::new(),
+            embed_edges,
             funnel_store_sites: self.funnel_store_sites,
             funnel_bytecopy_value_sites: self.funnel_bytecopy_value_sites,
             funnel_container_sites: self.funnel_container_sites,

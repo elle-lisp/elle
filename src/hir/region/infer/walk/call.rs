@@ -167,7 +167,7 @@ impl RegionInference {
                     if let Some(embedded_regions) = arg_regions.get(i) {
                         for &v in embedded_regions {
                             if v != call_r {
-                                self.containment_edges.push((hir.id, v, call_r));
+                                self.embed_edges.push((hir.id, v, call_r));
                             }
                         }
                     }

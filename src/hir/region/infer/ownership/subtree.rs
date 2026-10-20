@@ -246,6 +246,7 @@ pub(in crate::hir::region::infer) fn compute_owned_region_groups(
             .cross_region_refs
             .iter()
             .chain(&info.containment_edges)
+            .chain(&info.embed_edges)
             .filter(|&&(_, src, dst)| scc.contains(&src) && scc.contains(&dst))
             .all(|(site, _, _)| info.alloc_region.get(site).is_none_or(released_inside));
         if !within_scc_results_inside {

@@ -122,6 +122,11 @@ pub(in crate::hir::region::infer) fn ownership_inputs(
     for &(_site, src, dst) in &info.containment_edges {
         out_edges_by_src.entry(src).or_default().push(dst);
     }
+    // An embed edge counts against external uniqueness alone: it is absent from
+    // `children_of` and `contained` above, so it builds no subtree.
+    for &(_site, src, dst) in &info.embed_edges {
+        out_edges_by_src.entry(src).or_default().push(dst);
+    }
     let (comp_id, comp_members) = compute_sccs(&children_of, &alloc_regions);
     OwnershipInputs {
         children_of,

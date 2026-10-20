@@ -147,6 +147,12 @@ struct RegionInference {
     /// `embed_edges`, because the forest reads it differently. See
     /// `RegionInfo::containment_edges`.
     containment_edges: Vec<(HirId, Region, Region)>,
+    /// Embed edges `(call site, argument, result)`: a `Fresh` native's declared
+    /// `result ⊇ arg` (`call_embeds`), recorded by the `Fresh` arm in
+    /// `walk_call`. Kept apart from `containment_edges` because the forest reads
+    /// an embed one way only: against external uniqueness, building no subtree.
+    /// See `RegionInfo::embed_edges`.
+    embed_edges: Vec<(HirId, Region, Region)>,
     /// Retaining funnel-store call site (`%put`/`%array-push`/…) → the regions of
     /// the value stored there, its last argument, less the container's own
     /// regions. The runtime funnel increfs it, so a value stored at such a site has its RC
@@ -326,6 +332,7 @@ impl RegionInference {
             fiber_result_regions: rustc_hash::FxHashSet::default(),
             mutable_container_regions: rustc_hash::FxHashSet::default(),
             containment_edges: Vec::new(),
+            embed_edges: Vec::new(),
             funnel_store_sites: HashMap::new(),
             funnel_bytecopy_value_sites: HashMap::new(),
             emit_payload_regions: HashMap::new(),

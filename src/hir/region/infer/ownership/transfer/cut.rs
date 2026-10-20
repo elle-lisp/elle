@@ -129,6 +129,7 @@ impl<'a> Cut<'a> {
             || info
                 .containment_edges
                 .iter()
+                .chain(&info.embed_edges)
                 .any(|&(_, s, d)| s == r || d == r)
     }
 
