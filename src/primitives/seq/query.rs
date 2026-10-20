@@ -254,8 +254,51 @@ pub fn seq_reverse(val: &Value, ctx: &mut NativeCtx) -> Result<Value, Value> {
     Err(seq_type_error("reverse", val, ctx))
 }
 
+/// The byte range of graphemes `start..end` of `text`, each index resolved
+/// over the grapheme count as `resolve_slice_index` resolves it. Two passes
+/// and no allocation: a count, then a walk to the two boundaries.
+fn grapheme_byte_range(
+    text: &str,
+    start: i64,
+    end: i64,
+    gen: crate::segment::Generation,
+) -> (usize, usize) {
+    let count = crate::segment::graphemes(text, gen).count();
+    let s = resolve_slice_index(start, count);
+    let e = resolve_slice_index(end, count);
+    if s >= e {
+        return (0, 0);
+    }
+    let (mut from, mut to) = (text.len(), text.len());
+    let mut at = 0;
+    for (i, g) in crate::segment::graphemes(text, gen).enumerate() {
+        if i == s {
+            from = at;
+        }
+        if i == e {
+            to = at;
+            break;
+        }
+        at += g.len();
+    }
+    (from, to)
+}
+
 /// Slice a sequence from start to end (type-preserving).
+///
+/// An immutable string or bytes answers a view over its own payload, and the
+/// region walk keeps the source alive under it (docs/impl/values.md). A
+/// mutable one copies, because its `Vec` can move under a view.
 pub fn seq_slice(val: &Value, start: i64, end: i64, ctx: &mut NativeCtx) -> Result<Value, Value> {
+    if let Some(b) = val.as_bytes() {
+        let s = resolve_slice_index(start, b.len());
+        let e = resolve_slice_index(end, b.len());
+        return Ok(ctx.bytes_view(if s >= e { &[] } else { &b[s..e] }));
+    }
+    if let Some(text) = val.as_str() {
+        let (from, to) = grapheme_byte_range(text, start, end, ctx.unicode_generation());
+        return Ok(ctx.string_view(&text[from..to]));
+    }
     if let Some(r) = with_raw_bytes(val, |b, m| {
         let s = resolve_slice_index(start, b.len());
         let e = resolve_slice_index(end, b.len());

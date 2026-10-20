@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-20
 //! What a region pool can say about itself: its live objects and pages, and the cross-region references it holds.
 //!
 //! docs/impl/region/model.md
@@ -223,10 +223,25 @@ impl RegionPool {
             HeapObject::Parameter { default, .. } => {
                 check(default);
             }
+            // A string or bytes payload usually lies in its own region's pages,
+            // where the backing resolves to `own_id` and is filtered as a
+            // self-edge. A view's payload lies in its SOURCE's pages: `slice`
+            // and `string` answer a header in the call's region over the
+            // argument's bytes (docs/impl/values.md), and the backing is the
+            // edge that keeps the source alive, exactly as the Closure arm's
+            // env backing is. An empty payload is skipped: its pointer is
+            // dangling, not a page.
+            HeapObject::LString { s: backing, .. } | HeapObject::LBytes { data: backing, .. } => {
+                if !backing.is_empty() {
+                    let value = Value::from_heap_ptr(
+                        backing.as_ptr() as *const (),
+                        crate::value::repr::TAG_BYTES,
+                    );
+                    check(&value);
+                }
+            }
             // Non-container types: no Value references to track.
-            HeapObject::LString { .. }
-            | HeapObject::LStringMut { .. }
-            | HeapObject::LBytes { .. }
+            HeapObject::LStringMut { .. }
             | HeapObject::LBytesMut { .. }
             | HeapObject::Float(_)
             | HeapObject::LibHandle(_) => {}

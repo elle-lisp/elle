@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-20
 //! `RegionSlice`: a `(ptr, len)` view into data owned by a region.
 //!
 //! docs/impl/region/model.md
@@ -27,8 +27,11 @@
 //! slice-backed immutables would read freed pages once the source died
 //! (tests/impl/region-withtraits-slice-uaf.lisp). The rule for
 //! clones: copy the payload into the clone's own region
-//! (`arena::alloc_region_slice`); only the closure-env share pays the
-//! explicit-edge price instead.
+//! (`arena::alloc_region_slice`). Two shares pay the explicit-edge price
+//! instead: the closure-env share, and the view that `slice` and `string`
+//! answer over an immutable string or bytes, whose backing the string and
+//! bytes arms of `find_object_cross_refs` record (docs/impl/values.md,
+//! tests/impl/region-bytes-view-uaf.lisp).
 //!
 //! # Lifetime
 //!

@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-20
 //! The type conversion primitives: number to integer or float, string to number, and any value to string.
 //!
 //! docs/types.md
@@ -63,7 +63,9 @@ primitive! {
         ret: RetType::String,
         signal: Signal::errors(),
         arity: Arity::AtLeast(0),
-        doc: "Convert values to string. Multiple arguments are concatenated.",
+        doc: "Convert values to string. Multiple arguments are concatenated. \
+              Immutable bytes decode in place: the string lies over the same \
+              bytes, and bytes that are not UTF-8 raise :encoding-error.",
         params: &["values"],
         category: "conversion",
         example: "(string \"count: \" 42) #=> \"count: 42\"",
@@ -75,6 +77,10 @@ primitive! {
         // never balances — one leaked region per heap arg
         // (tests/impl/region-string-concat-leak.lisp). `Fresh` is the truthful effect.
         effect: RegionEffect::Fresh,
+        // Over immutable bytes the fresh header is a view into arg 0's pages,
+        // counted by the alloc scan; the embed lets the ownership forest see
+        // the result hold that region (docs/impl/region/effects.md).
+        embeds: &[0],
     }
     "number->string" => prim_number_to_string {
         ret: RetType::String,
