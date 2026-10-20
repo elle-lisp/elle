@@ -152,8 +152,11 @@ agents-check:  ## Fail when a committed AGENTS.md is stale
 prose:  ## Hold every stamped file to the checkable parts of DOCUMENTATION.md
 	cargo test --test prose
 
-budget: elle-rig  ## Print the curve the source cap is read off (docs/analysis/budget.md)
-	@$(ELLE_RIG) tools/budget.lisp
+# The release rig whatever ELLE names: a debug rig takes minutes to price every
+# source (tools/overview.md).
+budget:  ## Print the curve the source cap is read off (docs/analysis/budget.md)
+	cargo build --release -p elle-rig
+	@./target/release/elle-rig tools/budget.lisp
 
 # ARGS is what the profiled elle runs; DEPTH and TOP shape the ranking
 # (tools/pageclaims/overview.md). Needs valgrind. The elle that runs the tool
