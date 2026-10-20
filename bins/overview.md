@@ -1,6 +1,6 @@
 # The variant binaries
 
-<!-- audited: 2026-10-15 -->
+<!-- audited: 2026-10-20 -->
 
 Two packages that build the WASM and MLIR builds as binaries of their own, each beside the rig of the same build.
 
@@ -31,8 +31,9 @@ Outside the root workspace, a variant's features reach no build but its own.
 Each package names two binaries over the sources the root builds:
 [src/main.rs](../src/main.rs) as `elle-wasm` or `elle-mlir`, and
 [rig/src/main.rs](../rig/src/main.rs) as `elle-rig-wasm` or `elle-rig-mlir`.
-It depends on `elle` by path with the default features off, and on `toml`, the
-crate the rig reads a sidecar with.
+It depends on `elle` by path with the default features off, and on the two
+crates the rig uses: `toml`, which reads a sidecar, and `tiktoken-rs`, which
+counts the tokens of `(elle/tokens text)`.
 
 It declares the rig's five features, `jit`, `ffi`, `uring`, `mlir` and `wasm`
 ([rig](../rig/overview.md)), and turns its own tier on by default. The rig and
