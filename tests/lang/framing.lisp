@@ -253,7 +253,8 @@
              (strings-of (stream/collect (framing:records f "END"))))
           "records yields each until record and ends at EOF"))
 (let [f (framing:open "1\n2\n3\n4\n")
-      doubled (stream/map (fn [l] (* 2 (int (string l)))) (framing:lines f))]
+      doubled (stream/map (fn [l] (* 2 (parse-int (string l))))
+                          (framing:lines f))]
   (assert (= (list 2 4 6) (stream/collect (stream/take 3 doubled)))
           "lines composes with stream/map and stream/take"))
 (with-temp-dir dir
