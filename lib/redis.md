@@ -2,10 +2,11 @@
 
 <!-- audited: 2026-10-20 -->
 
-Redis client speaking RESP2 over TCP, in one file of pure Elle with no plugin behind it.
+Redis client speaking RESP2 over TCP, in pure Elle with no plugin behind it.
 
 The export struct at the bottom of [redis.lisp](redis.lisp) lists every
 command, and `doc` on a command bound to a name carries its arguments.
+[redis/overview.md](redis/overview.md) says which file defines each.
 
 ```lisp
 (def redis ((import "std/redis")))
