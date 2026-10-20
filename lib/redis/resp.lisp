@@ -1,12 +1,14 @@
 (elle/epoch 15)
 # audited: 2026-10-20
-## The RESP2 codec: encode a command, read a reply from a port, and open and guard the port a reply is read from.
+## The RESP2 codec: encode a command, read a reply from a connection, and the connection a reply is read from.
 ## lib/redis/overview.md
 ##
 ## Loaded via: (def resp ((import "std/redis/resp")))
 ##
-## Exports: {:encode :read :read-raw :ok? :bool :connect :close
-##           :require-binary-port :test}
+## Exports: {:encode :read :read-raw :ok? :bool :connection :connect :close
+##           :test}
+
+(def framing ((import "std/framing")))
 
 ## ── RESP2 encoder ─────────────────────────────────────────────────────
 
@@ -22,10 +24,16 @@
 
 ## ── RESP2 decoder ─────────────────────────────────────────────────────
 
-(defn resp-read [port]
-  "Read a single RESP2 reply from port. Signals on error replies.
-   Returns Elle values: string, integer, array, or nil."
-  (let [line (port/read-line port)]
+(defn read-reply-line [conn]
+  "The next line of conn's reply stream as a string, or nil at the end."
+  (let [line (framing:line conn:framer)]
+    (when line (string line))))
+
+(defn resp-read [conn]
+  "Read a single RESP2 reply from conn. Signals on error replies.
+   Returns Elle values: string, integer, array, or nil. A bulk string is
+   a view of the framer's chunk."
+  (let [line (read-reply-line conn)]
     (when (nil? line)
       (error {:error :redis-error
               :reason :unexpected-eof
@@ -50,7 +58,7 @@
           (let [len (parse-int body)]
             (if (= len -1)
               nil
-              (let [data (port/read-exact port (+ len 2))]
+              (let [data (framing:exact conn:framer (+ len 2))]
                 (when (nil? data)
                   (error {:error :redis-error
                           :reason :unexpected-eof
@@ -66,7 +74,7 @@
               (block (def result @[])
                 (def @i 0)
                 (while (< i count)
-                  (push result (resp-read port))
+                  (push result (resp-read conn))
                   (assign i (+ i 1)))
                 (freeze result))))
         (error {:error :redis-error
@@ -74,10 +82,10 @@
                 :prefix prefix
                 :message (string "unexpected RESP prefix: " prefix)})))))
 
-(defn resp-read-raw [port]
+(defn resp-read-raw [conn]
   "Read a RESP2 reply, returning errors as structs instead of signaling.
    Used for pipelining where one bad reply shouldn't corrupt state."
-  (let [[ok? val] (protect (resp-read port))]
+  (let [[ok? val] (protect (resp-read conn))]
     (if ok? val val)))
 
 ## ── Reply conversions ─────────────────────────────────────────────────
@@ -90,31 +98,22 @@
   "Convert integer 0/1 replies to boolean."
   (= val 1))
 
-## ── The port ──────────────────────────────────────────────────────────
+## ── The connection ────────────────────────────────────────────────────
 
-(defn require-binary-port [port where]
-  "RESP is a byte-framed protocol: bulk-string lengths are byte counts,
-   `\\r\\n` terminators are exact bytes.  A text-mode port would
-   grapheme-count port/read-exact and lossy-decode bulk payloads,
-   silently corrupting framing.  Fail loudly instead."
-  (when (not (= :binary (port/encoding port)))
-    (error {:error :redis-error
-            :reason :wrong-port-encoding
-            :where where
-            :encoding (port/encoding port)
-            :message (string where ": redis requires a binary port (got "
-                             (port/encoding port)
-                             "); open the connection with :encoding :binary "
-                             "(or use tcp/connect's default, or port/open-bytes "
-                             "for file-port test stand-ins)")})))
+(defn redis-connection [port &named @size]
+  "A connection {:port :framer} over a binary port the caller opened.
+   :size is the framer's chunk, 65536 unless given. RESP is byte-framed,
+   so a text port is refused."
+  (default size 65536)
+  {:port port :framer (framing:open port :size size)})
 
 (defn redis-connect [host port]
-  "Connect to Redis via TCP. Returns the raw TCP port."
-  (tcp/connect host port))
+  "Connect to Redis via TCP. Returns a connection {:port :framer}."
+  (redis-connection (tcp/connect host port)))
 
-(defn redis-close [port]
+(defn redis-close [conn]
   "Close a Redis connection."
-  (port/close port))
+  (port/close conn:port))
 
 ## ── Internal self-tests (RESP encoding/decoding, no Redis needed) ─────
 
@@ -126,14 +125,15 @@
   (with-temp-dir dir
                  (defn with-resp-fixture [name payload thunk]
                    "Spit payload into a scratch file under dir, open it as a binary
-       read port (RESP framing is byte-exact), and run (thunk port).
-       The port is closed even when an assert inside thunk fails."
+       read port (RESP framing is byte-exact), and run (thunk conn) over a
+       connection on it. The port is closed even when an assert inside
+       thunk fails."
                    (let [path (path/join dir name)]
                      (spit path payload)
                      (let [p (port/open-bytes path :read)]
                        (defer
                          (port/close p)
-                         (thunk p)))))
+                         (thunk (redis-connection p))))))
 
                  # resp-encode
                  (assert (= (resp-encode "PING") "*1\r\n$4\r\nPING\r\n")
@@ -245,7 +245,7 @@
    :read-raw resp-read-raw
    :ok? resp-ok?
    :bool resp-bool
+   :connection redis-connection
    :connect redis-connect
    :close redis-close
-   :require-binary-port require-binary-port
    :test run-internal-tests})

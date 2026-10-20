@@ -1,6 +1,6 @@
 (elle/epoch 15)
 # audited: 2026-10-20
-## The ambient connection: *redis-port* and the lock beside it, cmd, with, manager, pipeline, and pub/sub over a port.
+## The ambient connection: *redis-conn* and the lock beside it, cmd, with, manager, pipeline, and pub/sub over a connection.
 ## lib/redis/overview.md
 ##
 ## Loaded via: (def connection ((import "std/redis/connection") :resp resp))
@@ -19,11 +19,11 @@
 
 (def sync ((import "std/sync")))
 
-## ── Parameter for ambient port access ─────────────────────────────────
+## ── Parameter for ambient connection access ───────────────────────────
 
-(def *redis-port* (parameter nil))
+(def *redis-conn* (parameter nil))
 
-## Mutex paired with *redis-port*.  Bound by redis-with so concurrent
+## Mutex paired with *redis-conn*.  Bound by redis-with so concurrent
 ## fibers sharing one connection cannot interleave writes/reads on
 ## the wire.  Nil means "no lock needed" — callers that own the
 ## connection from a single fiber leave the parameter unbound.
@@ -42,27 +42,38 @@
           ((get lk :release))
           (thunk))))))
 
+(defn require-connection [conn where]
+  "Replies are read through the connection's framer, so a command needs
+   a connection from redis:connect or redis:connection; a bare port, or
+   nothing, is refused loudly."
+  (when (nil? conn)
+    (error {:error :redis-error
+            :reason :no-connection
+            :message "no active Redis connection"}))
+  (unless (and (struct? conn) (not (nil? (get conn :framer))))
+    (error {:error :redis-error
+            :reason :not-a-connection
+            :where where
+            :value conn
+            :message (string where ": expected a connection from "
+                             "redis:connect or redis:connection")})))
+
 (fn [&named resp]
   (def resp-encode resp:encode)
   (def resp-read resp:read)
   (def resp-read-raw resp:read-raw)
   (def resp-ok? resp:ok?)
-  (def require-binary-port resp:require-binary-port)
   (def redis-connect resp:connect)
   (def redis-close resp:close)
 
   (defn redis-cmd [& args]
-    "Send a command on the current Redis port and read the reply."
-    (let [port (*redis-port*)]
-      (when (nil? port)
-        (error {:error :redis-error
-                :reason :no-connection
-                :message "no active Redis connection"}))
-      (require-binary-port port "redis-cmd")
+    "Send a command on the current Redis connection and read the reply."
+    (let [conn (*redis-conn*)]
+      (require-connection conn "redis-cmd")
       (with-redis-lock (fn []
-                         (port/write port (apply resp-encode args))
-                         (port/flush port)
-                         (resp-read port)))))
+                         (port/write conn:port (apply resp-encode args))
+                         (port/flush conn:port)
+                         (resp-read conn)))))
 
   (defn redis-auth [& args]
     "AUTH [username] password — authenticate with Redis.
@@ -80,9 +91,9 @@
   (defn redis-manager [host port &named terminal? max-retries]
     "Create a manager fiber that owns a Redis connection.
      Reconnects on non-terminal errors; crashes on terminal ones.
-     Returns a struct {:run run :port-param *redis-port*}
+     Returns a struct {:run run :conn-param param}
      where run is a function that takes a thunk and executes it
-     with the managed connection."
+     with the managed connection bound to param."
     (let [is-terminal (or terminal? default-terminal?)
           retries (or max-retries 3)
           param (parameter nil)]
@@ -91,7 +102,7 @@
         (def @conn (redis-connect host port))
         (def @attempts 0)
         (defer
-          (port/close conn)
+          (redis-close conn)
           (def @result nil)
           (def @done false)
           (while (not done)
@@ -106,15 +117,15 @@
                   (begin
                     (assign attempts (+ attempts 1))
                     (when (>= attempts retries) (error val))  # Reconnect
-                    (let [[close-ok? _] (protect (port/close conn))])
+                    (let [[close-ok? _] (protect (redis-close conn))])
                     (assign conn (redis-connect host port)))))))))
 
-      {:run run-with-manager :port-param param}))
+      {:run run-with-manager :conn-param param}))
 
   ## ── Client — simplified connection for direct use ─────────────────────
 
   (defn redis-with [host port thunk]
-    "Open a Redis connection, run thunk with *redis-port* and *redis-lock*
+    "Open a Redis connection, run thunk with *redis-conn* and *redis-lock*
      bound, close on exit.  The lock serialises wire access across fibers
      sharing the connection — without it, an h2 server that dispatches
      handler fibers under (redis:with ...) sees its concurrent redis-cmd
@@ -122,56 +133,56 @@
     (let [conn (redis-connect host port)
           lk (sync:make-lock)]
       (defer
-        (port/close conn)
-        (parameterize ((*redis-port* conn)
+        (redis-close conn)
+        (parameterize ((*redis-conn* conn)
                        (*redis-lock* lk))
           (thunk)))))
 
   ## ── Pub/Sub ───────────────────────────────────────────────────────────
 
-  (defn redis-subscribe [port & channels]
-    "Send SUBSCRIBE command on port. Returns the port (now in sub mode)."
-    (port/write port (apply resp-encode (pair "SUBSCRIBE" channels)))
-    (port/flush port)  # Read the subscription confirmations
+  (defn redis-subscribe [conn & channels]
+    "Send SUBSCRIBE command on conn. Returns conn (now in sub mode)."
+    (port/write conn:port (apply resp-encode (pair "SUBSCRIBE" channels)))
+    (port/flush conn:port)  # Read the subscription confirmations
     (each ch in channels
-      (resp-read port))
-    port)
+      (resp-read conn))
+    conn)
 
-  (defn redis-recv [port]
-    "Read next pub/sub message from a subscribed port.
+  (defn redis-recv [conn]
+    "Read next pub/sub message from a subscribed connection.
      Returns {:channel string :data string} or nil on EOF."
-    (let [[ok? msg] (protect (resp-read port))]
+    (let [[ok? msg] (protect (resp-read conn))]
       (if (not ok?)
         nil
         (if (and (array? msg) (>= (length msg) 3) (= (get msg 0) "message"))
           {"channel" (get msg 1) "data" (get msg 2)}
           nil))))
 
-  (defn redis-unsubscribe [port & channels]
-    "Send UNSUBSCRIBE command on port."
-    (port/write port (apply resp-encode (pair "UNSUBSCRIBE" channels)))
-    (port/flush port)  # Read the unsubscription confirmations
+  (defn redis-unsubscribe [conn & channels]
+    "Send UNSUBSCRIBE command on conn."
+    (port/write conn:port (apply resp-encode (pair "UNSUBSCRIBE" channels)))
+    (port/flush conn:port)  # Read the unsubscription confirmations
     (each ch in channels
-      (resp-read port)))
+      (resp-read conn)))
 
   (defn redis-publish [channel message]
     "PUBLISH channel message — returns number of receivers."
     (redis-cmd "PUBLISH" channel message))
 
-  (defn redis-psubscribe [port & patterns]
-    "Send PSUBSCRIBE command on port."
-    (port/write port (apply resp-encode (pair "PSUBSCRIBE" patterns)))
-    (port/flush port)
+  (defn redis-psubscribe [conn & patterns]
+    "Send PSUBSCRIBE command on conn."
+    (port/write conn:port (apply resp-encode (pair "PSUBSCRIBE" patterns)))
+    (port/flush conn:port)
     (each p in patterns
-      (resp-read port))
-    port)
+      (resp-read conn))
+    conn)
 
-  (defn redis-punsubscribe [port & patterns]
-    "Send PUNSUBSCRIBE command on port."
-    (port/write port (apply resp-encode (pair "PUNSUBSCRIBE" patterns)))
-    (port/flush port)
+  (defn redis-punsubscribe [conn & patterns]
+    "Send PUNSUBSCRIBE command on conn."
+    (port/write conn:port (apply resp-encode (pair "PUNSUBSCRIBE" patterns)))
+    (port/flush conn:port)
     (each p in patterns
-      (resp-read port)))
+      (resp-read conn)))
 
   ## ── Pipelining ────────────────────────────────────────────────────────
 
@@ -185,21 +196,17 @@
      (when bound), so concurrent fibers serialise here instead of
      interleaving on the wire — without the lock, fiber A's bulk-string
      payloads can land where fiber B expects its next length prefix."
-    (let [port (*redis-port*)]
-      (when (nil? port)
-        (error {:error :redis-error
-                :reason :no-connection
-                :message "no active Redis connection"}))
-      (require-binary-port port "redis-pipeline")
+    (let [conn (*redis-conn*)]
+      (require-connection conn "redis-pipeline")
       (with-redis-lock (fn []
                          # Send all commands
                          (each cmd in commands
-                           (port/write port (apply resp-encode cmd)))
-                         (port/flush port)
+                           (port/write conn:port (apply resp-encode cmd)))
+                         (port/flush conn:port)
                          # Read all replies
                          (def results @[])
                          (each cmd in commands
-                           (push results (resp-read-raw port)))
+                           (push results (resp-read-raw conn)))
                          (freeze results)))))
 
   {:cmd redis-cmd

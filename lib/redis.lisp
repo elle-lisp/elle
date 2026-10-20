@@ -8,8 +8,10 @@
 ## Usage:      (redis:set "key" "value")
 ##             (redis:get "key")
 ##
-## Connection model: bare TCP port, no wrapper struct.
-## Error model: manager fiber owns the port, reconnects on transient errors.
+## Connection model: {:port :framer}, the TCP port written and the
+## std/framing framer that answers the replies (lib/redis.md).
+## Error model: manager fiber owns the connection, reconnects on transient
+## errors.
 ## Protocol: RESP2 over TCP.
 
 ## ── Submodules ────────────────────────────────────────────────────────
@@ -25,6 +27,7 @@
 
 (fn []
   {# Connection
+   :connection resp:connection
    :connect resp:connect
    :close resp:close
    :with connection:with
@@ -155,10 +158,6 @@
    :resp-encode resp:encode
    :resp-read resp:read
    :resp-read-raw resp:read-raw
-
-   # Port-encoding guard (callable by users who want to assert their
-   # port up front, e.g. when wrapping their own redis connection).
-   :require-binary-port resp:require-binary-port
 
    # Internal tests
    :test resp:test})
