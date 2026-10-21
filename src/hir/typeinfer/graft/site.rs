@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-20
 //! One graft: the arm a call's operand count selects, its operands bound in order, the body in the call's place.
 //!
 //! docs/impl/graft.md
@@ -143,11 +143,16 @@ impl<'a> Grafter<'a> {
         operands: Vec<Hir>,
         binder: &mut Binder<'_>,
     ) {
-        let mut operands = operands.into_iter();
+        // Each operand is judged against the operands after it: a later one
+        // is evaluated before the body reads an operand written in place.
+        let direct: Vec<bool> = (0..operands.len())
+            .map(|i| self.is_direct(&operands[i], &operands[i + 1..]))
+            .collect();
+        let mut operands = operands.into_iter().zip(direct);
         for (i, &index) in arm.params.iter().enumerate() {
-            let operand = operands.next().expect("select checked the operand count");
+            let (operand, direct) = operands.next().expect("select checked the operand count");
             let param = binder.host[index as usize];
-            let read = if self.is_direct(&operand) && !self.arena.get(param).declared_numeric {
+            let read = if direct && !self.arena.get(param).declared_numeric {
                 let read = match &operand.kind {
                     HirKind::Var(b) => Operand::Occurrences(Vec::new(), *b),
                     _ => Operand::Type(literal_type(&operand)),
@@ -166,8 +171,8 @@ impl<'a> Grafter<'a> {
 
         // The extra operands, each evaluated once, in order, before the body.
         let extras: Vec<Hir> = operands
-            .map(|op| {
-                if self.is_direct(&op) {
+            .map(|(op, direct)| {
+                if direct {
                     return op;
                 }
                 let temp = self.arena.gensym();
@@ -204,10 +209,14 @@ impl<'a> Grafter<'a> {
         }
     }
 
-    /// Is this operand written in place of its parameter? An immediate literal
-    /// or a binding nothing writes is; anything else is bound by a
-    /// `let`, so it is evaluated once and where the call evaluated it.
-    fn is_direct(&self, operand: &Hir) -> bool {
+    /// Is this operand written in place of its parameter? It is when it holds
+    /// one value from the call to the body's last read of it: an immediate
+    /// literal, a binding nothing writes, or a written binding that no closure
+    /// captures and none of the operands `later` writes. A closed body holds
+    /// no `assign` and no lambda, so nothing else can write a binding between
+    /// the call and a read. Anything else is bound by a `let`, so it is
+    /// evaluated once and where the call evaluated it.
+    fn is_direct(&self, operand: &Hir, later: &[Hir]) -> bool {
         match &operand.kind {
             HirKind::Nil
             | HirKind::EmptyList
@@ -215,10 +224,13 @@ impl<'a> Grafter<'a> {
             | HirKind::Int(_)
             | HirKind::Float(_)
             | HirKind::Keyword(_) => true,
-            // A binding nothing writes holds one value for the whole body: a
-            // `match` pattern's variable is one, though nothing marks it
-            // immutable.
-            HirKind::Var(b) => !self.arena.get(*b).is_mutated,
+            // The test is on writes, not on immutability: a `match` pattern's
+            // variable is never marked immutable.
+            HirKind::Var(b) => {
+                let inner = self.arena.get(*b);
+                !inner.is_mutated
+                    || (!inner.closure_may_write() && !later.iter().any(|h| writes(h, *b)))
+            }
             _ => false,
         }
     }
@@ -306,6 +318,19 @@ fn substitute(
         return;
     }
     h.for_each_child_mut(|c| substitute(c, direct, written));
+}
+
+/// Does `h` write `b` anywhere inside it? An `assign` to it does, and so does
+/// a store into its cell. A lambda inside `h` that writes it has captured it,
+/// which `closure_may_write` already answers for.
+fn writes(h: &Hir, b: Binding) -> bool {
+    let mut found = match &h.kind {
+        HirKind::Assign { target, .. } => *target == b,
+        HirKind::SetCell { cell, .. } => matches!(cell.kind, HirKind::Var(c) if c == b),
+        _ => false,
+    };
+    h.for_each_child(|c| found |= writes(c, b));
+    found
 }
 
 /// Every binding a body reads.
