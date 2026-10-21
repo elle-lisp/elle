@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-20
 //! The ergonomic `ctx.*` allocation surface: one constructor per heap type,
 //! each born on the ctx's heap in the ctx's own region.
 //! docs/impl/region/ctx.md
@@ -72,6 +72,13 @@ ctx_ctors! {
     zeroed_bytes (len: usize);
     /// Allocate the concatenation of `parts` as bytes into the call's region.
     joined_bytes (parts: &[&[u8]]);
+    /// A bytes header in the call's region over `backing`, with no copy: a
+    /// view (docs/impl/values.md). `backing` must be the payload of a string
+    /// or bytes resident in a region of this heap.
+    bytes_view (backing: &[u8]);
+    /// A string header in the call's region over `backing`, a view as
+    /// `bytes_view` is.
+    string_view (backing: &str);
     /// Allocate mutable `@bytes` into the call's region.
     bytes_mut (data: Vec<u8>);
     /// Allocate a syntax object into the call's region.

@@ -1,4 +1,4 @@
-//! audited: 2026-09-30
+// audited: 2026-10-20
 //! A write read from its payload, a remainder given back to its port, and a
 //! teardown that waits for a worker.
 //!
@@ -28,7 +28,7 @@ fn fill_send_buffer(fd: RawFd) -> usize {
 }
 
 /// Write every byte of `bytes` to `fd`.
-fn write_all(fd: RawFd, bytes: &[u8]) {
+pub(super) fn write_all(fd: RawFd, bytes: &[u8]) {
     let mut sent = 0usize;
     while sent < bytes.len() {
         let n = unsafe {
@@ -62,7 +62,7 @@ fn read_exactly(fd: RawFd, n: usize) -> Vec<u8> {
 }
 
 /// Wait for the completion filed under `id`, discarding any other.
-fn completion_for(backend: &AsyncBackend, id: SubmissionId) -> Completion {
+pub(super) fn completion_for(backend: &AsyncBackend, id: SubmissionId) -> Completion {
     for _ in 0..200 {
         let mut found = None;
         for c in backend.wait(TICK).unwrap() {
@@ -80,7 +80,7 @@ fn completion_for(backend: &AsyncBackend, id: SubmissionId) -> Completion {
 }
 
 /// Submit `op` on `port` with `timeout`, on behalf of no fiber.
-fn submit(
+pub(super) fn submit(
     backend: &AsyncBackend,
     op: PortOp,
     port: Value,
@@ -96,7 +96,7 @@ fn submit(
 }
 
 /// The bytes a completed read answered with.
-fn answered_bytes(c: Completion, what: &str) -> Vec<u8> {
+pub(super) fn answered_bytes(c: Completion, what: &str) -> Vec<u8> {
     let bytes = match &c.result {
         Ok(v) => v
             .as_bytes()

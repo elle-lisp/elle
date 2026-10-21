@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-10-20
 //! Call-classification input to region inference.
 //!
 //! Which calls return immediates, and the per-primitive region effects and
@@ -43,12 +43,12 @@ pub struct CallClassification {
     pub ret_types: rustc_hash::FxHashMap<SymbolId, crate::primitives::def::RetType>,
     /// Primitive SymbolId → the 0-based argument indices the callee EMBEDS into its
     /// fresh result ([`crate::primitives::def::PrimitiveDef::embeds`]). The region
-    /// walk's `Fresh` arm records a `result ⊇ arg` containment edge
-    /// (`RegionInfo::containment_edges`) for each, so the ownership forest sees a value
+    /// walk's `Fresh` arm records an embed edge `result ⊇ arg`
+    /// (`RegionInfo::embed_edges`) for each, so the ownership forest sees a value
     /// the fresh result keeps a reference to — a captured trait table `with-traits`
-    /// embeds into an escaping value — and refuses to adopt it. Empty by default (the
-    /// walk records no embed edges); only the real primitive classification
-    /// (`PrimitiveClassification::new`) fills it.
+    /// embeds into an escaping value, the source a `slice` views — and refuses to
+    /// adopt it. Empty by default (the walk records no embed edges); only the real
+    /// primitive classification (`PrimitiveClassification::new`) fills it.
     pub embeds: rustc_hash::FxHashMap<SymbolId, &'static [usize]>,
     /// Letrec-bound Bindings whose lambda bodies return immediates.
     /// Populated by the callee fixpoint pre-pass.

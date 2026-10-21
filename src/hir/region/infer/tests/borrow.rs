@@ -1,4 +1,4 @@
-// audited: 2026-10-15
+// audited: 2026-10-20
 //! The container-read borrow: what keeps a value read out of a container alive, by read form.
 //!
 //! docs/impl/region/rules.md
@@ -339,7 +339,7 @@ fn fresh_call_result_records_no_alias() {
     // lives in the call's own minted region — the claim the effects oracle checks on
     // every debug run — so it can hand back neither `c` nor anything inside it, and no
     // alias edge is recorded. A `Fresh` native that references an argument declares that
-    // separately (`embeds` → a containment edge), which is a different relation.
+    // separately (`embeds` → an embed edge), which is a different relation.
     let (hir, arena, _symbols, info) = analyze_with_class(
         "(let [c (@array) r (string \"s\")] \
            (begin (%array-push c r) (length (string \"t\" c))))",

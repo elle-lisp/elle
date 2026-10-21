@@ -1,6 +1,6 @@
 # Region representation — id-spaces, per-execution model, layout
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-20 -->
 
 Implementation-facing. How the compiler and runtime represent regions: the two
 id-spaces, the per-activation physical-region model, the page layout, and how an
@@ -311,7 +311,12 @@ the payload under the live clone (the with-traits UAF — a clone of `[1 2 3]`
 captured by a spawned closure read freed pages in the send serializer;
 [region-withtraits-slice-uaf.lisp](../../../tests/impl/region-withtraits-slice-uaf.lisp)). It also falsifies the operation's
 `Fresh` declaration, which claims the whole result lives in the call's own
-region. The one sanctioned alias is the closure-env share (`squelch`/`attune`),
-which pays for itself with an explicit backing edge in the free-cascade scan's
-Closure arm.
+region. Two aliases are sanctioned, and each pays for itself with an explicit
+backing edge in the free-cascade scan: the closure-env share
+(`squelch`/`attune`), in the scan's Closure arm, and the byte view that `slice`
+and `string` answer over an immutable string or bytes, in its string and bytes
+arms ([values](../values.md)). A view's header is born in the call's own
+region, so its `Fresh` declaration holds, and it names its source in
+`embeds` so the ownership forest sees the containment
+([effects](effects.md)).
 

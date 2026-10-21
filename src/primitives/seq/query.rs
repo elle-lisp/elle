@@ -1,4 +1,5 @@
-//! Read-only seq accessors: first, rest, last, nth, reverse, slice, sort.
+// audited: 2026-10-20
+//! Read-only seq accessors: first, rest, last, nth, reverse, sort.
 //!
 //! These never mutate their argument in place (except `sort` of an @array,
 //! which is genuinely a query-shaped in-place sort kept here with its
@@ -6,7 +7,7 @@
 //! sequence — an @array in yields an @array out — via the `make_*` builders.
 
 use super::*;
-use crate::primitives::access::{resolve_index, resolve_slice_index};
+use crate::primitives::access::resolve_index;
 
 /// Get the first element of a sequence.
 pub fn seq_first(val: &Value, ctx: &mut NativeCtx) -> Result<Value, Value> {
@@ -248,62 +249,6 @@ pub fn seq_reverse(val: &Value, ctx: &mut NativeCtx) -> Result<Value, Value> {
         return Ok(r);
     }
     Err(seq_type_error("reverse", val, ctx))
-}
-
-/// Slice a sequence from start to end (type-preserving).
-pub fn seq_slice(val: &Value, start: i64, end: i64, ctx: &mut NativeCtx) -> Result<Value, Value> {
-    if let Some(r) = with_raw_bytes(val, |b, m| {
-        let s = resolve_slice_index(start, b.len());
-        let e = resolve_slice_index(end, b.len());
-        if s >= e {
-            make_bytes(vec![], m, ctx)
-        } else {
-            make_bytes(b[s..e].to_vec(), m, ctx)
-        }
-    }) {
-        return Ok(r);
-    }
-    if let Some(r) = with_array(val, |elems, m| {
-        let s = resolve_slice_index(start, elems.len());
-        let e = resolve_slice_index(end, elems.len());
-        if s >= e {
-            make_array(vec![], m, ctx)
-        } else {
-            make_array(elems[s..e].to_vec(), m, ctx)
-        }
-    }) {
-        return Ok(r);
-    }
-    let gen = ctx.unicode_generation();
-    if let Some(r) = with_text(val, |str_val, m| {
-        let graphemes: Vec<&str> = crate::segment::graphemes(str_val, gen).collect();
-        let s = resolve_slice_index(start, graphemes.len()).min(graphemes.len());
-        let e = resolve_slice_index(end, graphemes.len()).min(graphemes.len());
-        if s >= e {
-            make_string(String::new(), m, ctx)
-        } else {
-            make_string(graphemes[s..e].concat(), m, ctx)
-        }
-    }) {
-        return Ok(r);
-    }
-    // Lists
-    if val.is_empty_list() || val.is_pair() {
-        let elems = val
-            .list_to_vec()
-            .map_err(|e| ctx.error("type-error", e.to_string()))?;
-        let s = resolve_slice_index(start, elems.len());
-        let e = resolve_slice_index(end, elems.len());
-        if s >= e {
-            return Ok(Value::EMPTY_LIST);
-        }
-        let mut result = Value::EMPTY_LIST;
-        for v in elems[s..e].iter().rev() {
-            result = ctx.pair(*v, result);
-        }
-        return Ok(result);
-    }
-    Err(seq_type_error("slice", val, ctx))
 }
 
 /// Sort a sequence (type-preserving).

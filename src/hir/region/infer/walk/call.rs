@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-20
 //! The region walk at a call: the call-result region, the callee inline, and the edges
 //! and sites the callee's declared effect records.
 //!
@@ -147,26 +147,27 @@ impl RegionInference {
                 // argument outside the result).
                 self.fresh_result_regions.insert(call_r);
 
-                // Record `result ⊇ arg` containment for each argument the native
+                // Record the embed edge `result ⊇ arg` for each argument the native
                 // EMBEDS into its fresh result (`call_embeds` — the per-primitive
                 // embed declaration; `with-traits` embeds arg 1, the trait table,
-                // into the cloned result's `traits` side-field). This is the
-                // compile-time analog of the runtime alloc-scan
-                // (`find_object_cross_refs`, which enumerates the `traits`
-                // side-field) that counts the same embedding at allocation:
-                // without it the ownership forest cannot see a captured value flow
-                // OUT through an escaping result and would fold it into the
-                // capturing closure's Owned subtree, freeing it under the escaped
-                // result's still-live reference. The edge feeds only
-                // `region::infer::ownership` (`containment_edges`), never an
-                // `IncrefRegion` (the alloc-scan counts the embedding at runtime)
-                // — it changes no release, exactly like the funnel-recovered
-                // containment.
+                // into the cloned result's `traits` side-field, and `slice` embeds
+                // arg 0, the source its view lies over). This is the compile-time
+                // analog of the runtime alloc-scan (`find_object_cross_refs`),
+                // which counts the same embedding at allocation: without it the
+                // ownership forest cannot see a captured value flow OUT through an
+                // escaping result and would fold it into the capturing closure's
+                // Owned subtree, freeing it under the escaped result's still-live
+                // reference. The edge feeds only `region::infer::ownership`
+                // (`embed_edges`), never an `IncrefRegion` (the alloc-scan counts
+                // the embedding at runtime), so it changes no release. The forest
+                // counts it against external uniqueness and builds no subtree from
+                // it: there is no site at which to adopt the argument into the
+                // result (docs/impl/region/effects.md).
                 for &i in self.call_embeds(func) {
                     if let Some(embedded_regions) = arg_regions.get(i) {
                         for &v in embedded_regions {
                             if v != call_r {
-                                self.containment_edges.push((hir.id, v, call_r));
+                                self.embed_edges.push((hir.id, v, call_r));
                             }
                         }
                     }

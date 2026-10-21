@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-28
+(elle/epoch 15)
+# audited: 2026-10-20
 ## The HTTP/1.1 wire format: header lines, request and status lines, bodies, and reason phrases.
 ## lib/http/overview.md
 ##
@@ -12,7 +12,7 @@
 ##           :build-request-headers :test}
 
 (fn [&named transport chunked]
-  (def t-read transport:read)
+  (def t-exact transport:exact)
   (def t-read-line transport:read-line)
   (def t-write transport:write)
   (def t-flush transport:flush)
@@ -120,24 +120,14 @@
   ## ── Bodies ───────────────────────────────────────────────────────────
 
   (defn read-fixed-body [t n]
-    "Read exactly n bytes from transport and return as a string.
-     Loops on short reads."
-    (if (= n 0)
-      ""
-      (begin
-        (def @remaining n)
-        (def @buf (@bytes))
-        (while (pos? remaining)
-          (let [chunk (t-read t remaining)]
-            (when (nil? chunk)
-              (error {:error :http-error
-                      :reason :unexpected-eof
-                      :phase :body
-                      :message "unexpected EOF reading body"}))
-            (let [b (if (bytes? chunk) chunk (bytes chunk))]
-              (append buf b)
-              (assign remaining (- remaining (length b))))))
-        (string (freeze buf)))))
+    "Read exactly n bytes from transport and return them as a string."
+    (let [body (t-exact t n)]
+      (when (nil? body)
+        (error {:error :http-error
+                :reason :unexpected-eof
+                :phase :body
+                :message "unexpected EOF reading body"}))
+      (string body)))
 
   (defn read-body [t headers]
     "Read request/response body from transport.

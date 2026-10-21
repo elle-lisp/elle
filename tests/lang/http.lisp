@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-20
 # The public API of std/http parses URLs, builds requests and responses, and serves over loopback.
 # lib/http.md
 #
@@ -127,9 +127,6 @@
    :read (fn [conn n]
            (push-log :read conn n)
            nil)
-   :read-line (fn [conn]
-                (push-log :read-line conn)
-                nil)
    :write (fn [conn data]
             (push-log :write conn data)
             (length data))
@@ -137,7 +134,7 @@
 
 (def https-http ((import "std/http") :tls fake-tls))
 
-# The fake TLS plugin returns nil from read-line, which the wire-format
+# The fake TLS plugin returns nil from read, which the wire-format
 # code treats as EOF and surfaces as malformed input. That's fine — we
 # just want to confirm the TLS path is taken, not that the full handshake
 # succeeds.
@@ -151,46 +148,40 @@
 (assert (= (get (first tls-log) 2) 443)
         "tls:connect received the default https port 443")
 
-# Parity: tls-transport's read-line must strip trailing newlines so the
-# wire-format helpers behave identically whether the underlying pipe is
-# TCP or TLS. We simulate a full HTTP/1.1 response from a TLS peer that
-# emits lines with CRLF intact (which is what the real tls:read-line
-# does), and verify the parser doesn't choke.
+# The TLS transport reads the whole response through tls:read, which answers
+# whatever the record layer holds: a status line split across reads, a body
+# in pieces. The transport cuts the records out of those reads itself. The
+# counter-factual is a transport that asks the TLS module for lines: the
+# module below has no :read-line, so such a transport cannot answer the
+# status line.
 
 (def canned-response
-  ["HTTP/1.1 200 OK\r\n" "Content-Type: text/plain\r\n" "Content-Length: 5\r\n"
-   "\r\n"])
+  "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nhello")
 (def canned-cursor @[0])
 
-(defn canned-read-line [conn]
-  "Fake tls:read-line: returns the next response line with CRLF intact."
-  (let [i (get canned-cursor 0)]
-    (put canned-cursor 0 (inc i))
-    (when (< i (length canned-response)) (get canned-response i))))
-
-(def canned-body-cursor @[0])
-
 (defn canned-read [conn n]
-  "Fake tls:read: dribble out the body one chunk at a time."
-  (let [i (get canned-body-cursor 0)
-        body "hello"]
-    (when (< i (length body))
-      (let [end (min (length body) (+ i n))]
-        (put canned-body-cursor 0 end)
-        (bytes (slice body i end))))))
+  "Fake tls:read: dribble the response out three bytes at a time, whatever
+   n asks for."
+  (let [i (get canned-cursor 0)
+        all (bytes canned-response)]
+    (when (< i (length all))
+      (let [end (min (length all) (+ i 3))]
+        (put canned-cursor 0 end)
+        (slice all i end)))))
 
-(def line-strip-tls
+(def dribble-tls
   {:connect (fn [host port] :canned)
    :read canned-read
-   :read-line canned-read-line
    :write (fn [conn data] (length data))
    :close (fn [conn] nil)})
 
-(def line-strip-http ((import "std/http") :tls line-strip-tls))
-(let [resp (line-strip-http:get "https://example.com/")]
+(def dribble-http ((import "std/http") :tls dribble-tls))
+(let [resp (dribble-http:get "https://example.com/")]
   (assert (= resp:status 200)
-          "tls-transport: read-line stripping yields parseable status")
-  (assert (= resp:body "hello") "tls-transport: full https response round-trips"))
+          "tls-transport: a status line split across reads parses")
+  (assert (= (get resp:headers :content-type) "text/plain")
+          "tls-transport: headers split across reads parse")
+  (assert (= resp:body "hello") "tls-transport: the body by its length"))
 
 # ============================================================================
 # :compress — raw helpers exposed via http module

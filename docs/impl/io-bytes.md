@@ -1,6 +1,6 @@
 # Where a stream operation's bytes live
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-19 -->
 
 A read lands in the caller's region and a write leaves from the payload's, and the operation holds both while the kernel works.
 
@@ -64,9 +64,15 @@ its `Birthplace`, exactly as `read-all` does. Clamping to the buffer would
 drop the bytes past it. The port has already taken those bytes from the kernel,
 so nothing would be left to read them again.
 
-A `read-line` whose buffer fills with no newline answers with the full buffer.
-Reading on gives the next piece. Both backends answer this way, so a line longer
-than 64 KiB arrives in the same pieces on either one.
+A `read-line` whose buffer fills with no newline goes the same way. Its bytes
+move to a `Vec`, the port's remainder on the ring and the worker's own on the
+pool, and the read goes on into the buffer until the newline or the end of the
+stream arrives. The completion joins the parts and cuts the line from the join,
+so one call answers one line however long it is. Both backends answer this way,
+so a line longer than 64 KiB is one answer on either one. Answering with the
+full buffer instead would hand the caller a piece it cannot tell from a line:
+`read-line` drops the newline from every answer, so nothing marks a piece as
+one.
 
 The submission answers from the remainder alone whenever it can, using
 `frame::line_end` and `frame::exact_end`. The completion cuts with the same

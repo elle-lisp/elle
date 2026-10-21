@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-28
+(elle/epoch 15)
+# audited: 2026-10-20
 ## Server-sent events: the client streams, the event parser, and the response builder.
 ## lib/http/overview.md
 ##
@@ -12,7 +12,7 @@
 (fn [&named url transport wire chunked]
   (def parse-url url:parse-url)
   (def open-transport transport:open)
-  (def t-read transport:read)
+  (def t-exact transport:exact)
   (def t-read-line transport:read-line)
   (def t-write transport:write)
   (def t-flush transport:flush)
@@ -87,18 +87,13 @@
                 (when (or (nil? line) (empty? line)) (break))))
             (unless (empty? buf) (on-line buf))
             (break :chunks))
-          (def @remaining size)
-          (while (pos? remaining)
-            (let [data (t-read t remaining)]
-              (when (nil? data)
-                (error {:error :http-error
-                        :reason :unexpected-eof
-                        :phase :chunk-data
-                        :message "unexpected EOF reading chunk data"}))
-              (let* [b (if (bytes? data) data (bytes data))
-                     s (string b)]
-                (assign buf (string buf s))
-                (assign remaining (- remaining (length b))))))
+          (let [data (t-exact t size)]
+            (when (nil? data)
+              (error {:error :http-error
+                      :reason :unexpected-eof
+                      :phase :chunk-data
+                      :message "unexpected EOF reading chunk data"}))
+            (assign buf (string buf (string data))))
           (t-read-line t)  # consume trailing CRLF after chunk data
           (assign buf (sse-drain-buffered-lines buf on-line))))))
 

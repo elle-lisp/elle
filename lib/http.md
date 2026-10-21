@@ -1,6 +1,6 @@
 # http
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-20 -->
 
 HTTP/1.1 client and server over TCP in pure Elle, with HTTPS and compression as opt-in module arguments.
 
@@ -40,10 +40,13 @@ server:  tcp/listen → serve → forever:
 ```
 
 Every wire helper works on a **transport**, a struct of closures
-`{:read :read-line :write :flush :close}`. `tcp-transport` and
-`tls-transport` build one, and the parsed URL's scheme picks which. So
-the chunked reader, the body reader and the header code are written once
-and serve both schemes. A session from `http:connect` carries
+`{:read-line :exact :write :flush :close}` over one
+[framer](framing.md) and one sink. `tcp-transport` and `tls-transport`
+build one, and the parsed URL's scheme picks which. So the chunked reader,
+the body reader and the header code are written once and serve both
+schemes. The framer holds the connection's unread bytes, so a connection
+is read through its transport alone, and a line or a body is a view of
+the chunk the framer holds. A session from `http:connect` carries
 `:transport`, not a bare port.
 
 ## Struct shapes

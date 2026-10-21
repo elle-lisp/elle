@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-20
 //! The bytes and @bytes primitives: construct binary data, render it as hex, and slice a sequence.
 //!
 //! docs/bytes.md
@@ -10,6 +10,8 @@ use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::Value;
+
+pub(crate) mod find;
 
 /// Create immutable bytes from integer arguments, or from a single string/keyword.
 ///
@@ -338,10 +340,15 @@ primitive! {
     "slice" => prim_slice {
         signal: Signal::errors(),
         arity: Arity::Range(2, 3),
-        doc: "Slice a sequence from start to end index. If end is omitted, slice to end of sequence. Returns same type as input.",
+        doc: "Slice a sequence from start to end index. If end is omitted, slice to end of sequence. Returns same type as input. An immutable string or bytes answers a view over the source's own bytes, with no copy; the source stays alive as long as the slice does.",
         params: &["coll", "start", "end?"],
         category: "bytes",
         example: "(slice [1 2 3 4 5] 1 3)\n(slice \"hello\" 1)",
         effect: RegionEffect::Fresh,
+        // Over an immutable string or bytes the fresh header is a view into
+        // arg 0's pages, counted by the alloc scan; the embed lets the
+        // ownership forest see the result hold that region
+        // (docs/impl/region/effects.md).
+        embeds: &[0],
     }
 }

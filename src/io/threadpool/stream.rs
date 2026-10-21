@@ -1,4 +1,4 @@
-//! audited: 2026-09-23
+//! audited: 2026-10-20
 //! The byte-stream operations a worker runs: the four reads, the write, and
 //! the flush.
 //!
@@ -147,31 +147,53 @@ pub(super) fn read_exact(
     landing.finish(extra)
 }
 
-/// Read until a newline arrives, the buffer is full, or the stream ends.
+/// How much of a line one read asks for. A page at most, so the bytes past the
+/// newline that go back to the port stay few.
+const LINE_CHUNK: usize = 4096;
+
+/// Read until a newline arrives or the stream ends, however long the line.
 ///
-/// Each read asks for a page at most, so the bytes past the newline that go
-/// back to the port stay few. A full buffer with no newline answers as it is:
-/// a piece of a longer line, which the next read goes on from.
+/// A line that fits the buffer lands there. One that outgrows it goes on into
+/// a `Vec` of the worker's own, which the completion joins to the buffer's
+/// bytes and cuts the line from (docs/impl/io-bytes.md § "When the answer
+/// outgrows the buffer").
 pub(super) fn read_line(bound: OpBound, fd: RawFd, mut landing: Landing) -> (i32, Vec<u8>) {
     let lent = landing.filled().len();
-    while !landing.is_full() {
-        let before = landing.filled().len();
-        let (dst, room) = landing.spare();
-        match take_into(&bound, fd, dst, room.min(4096)) {
-            Took::Bytes(n) => landing.advance(n),
+    let mut extra: Vec<u8> = Vec::new();
+    loop {
+        // What this operation itself took from the descriptor.
+        let taken = landing.filled().len() - lent + extra.len();
+        let (took, newline) = if landing.is_full() {
+            let at = extra.len();
+            extra.resize(at + LINE_CHUNK, 0);
+            let took = take_into(&bound, fd, extra[at..].as_mut_ptr(), LINE_CHUNK);
+            extra.truncate(at + if let Took::Bytes(n) = took { n } else { 0 });
+            (took, extra[at..].contains(&b'\n'))
+        } else {
+            let before = landing.filled().len();
+            let (dst, room) = landing.spare();
+            let took = take_into(&bound, fd, dst, room.min(LINE_CHUNK));
+            if let Took::Bytes(n) = took {
+                landing.advance(n);
+            }
+            (took, landing.filled()[before..].contains(&b'\n'))
+        };
+        match took {
+            Took::Bytes(_) if newline => break,
+            Took::Bytes(_) => {}
             Took::End => break,
+            // An error after this read took some bytes surfaces what arrived,
+            // which the completion reads as a stream that ended mid-line. A
+            // stop or a timeout discards it.
             Took::Ends(code)
-                if code != -libc::ECANCELED && code != -libc::ETIMEDOUT && before > lent =>
+                if code != -libc::ECANCELED && code != -libc::ETIMEDOUT && taken > 0 =>
             {
                 break
             }
             Took::Ends(code) => return (code, Vec::new()),
         }
-        if landing.filled()[before..].contains(&b'\n') {
-            break;
-        }
     }
-    landing.finish(Vec::new())
+    landing.finish(extra)
 }
 
 /// Read until EOF, into an accumulation this worker owns.

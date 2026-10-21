@@ -1,17 +1,20 @@
-// audited: 2026-10-06
-//! Pins a `Fresh` native's embed declaration: an embedded capture that escapes through the result stays out of every Owned subtree.
+// audited: 2026-10-20
+//! Pins a `Fresh` native's embed declaration: a captured table embedded into an escaping result stays out of every Owned subtree.
 //!
 //! docs/impl/region/adopt.md
 //! docs/impl/region/effects.md
 //!
 //! A `Fresh` native whose result EMBEDS an argument declares which args it embeds
 //! (`PrimitiveDef::embeds`). The walk's `Fresh` arm then records `result ⊇ arg` in
-//! `containment_edges` — the compile-time analog of the runtime alloc-scan
-//! (`find_object_cross_refs`) that counts the same embedding. Without it the forest
-//! cannot see a captured value flow OUT through an escaping result, so it folds the
-//! value into the capturing closure's Owned subtree. `with-traits` is the canonical
-//! embedder: it clones its arg-0 value with the arg-1 struct attached as the `traits`
-//! side-field, so it embeds arg 1 (`embeds: &[1]`).
+//! `embed_edges` — the compile-time analog of the runtime alloc-scan
+//! (`find_object_cross_refs`) that counts the same embedding. The forest counts the
+//! edge against external uniqueness and builds no subtree from it. Without the edge
+//! the forest cannot see a captured value flow OUT through an escaping result, so it
+//! folds the value into the capturing closure's Owned subtree. With the edge read as a
+//! containment edge, the argument joins the subtree of every container holding the
+//! result, and the single-owner filter refuses the whole subtree. `with-traits` embeds
+//! arg 1, the `traits` side-field (`embeds: &[1]`); `string` and `slice` embed arg 0,
+//! the source their view lies over (`embeds: &[0]`).
 
 use super::*;
 
@@ -52,7 +55,7 @@ fn with_traits_embed_refuses_adopt_of_captured_escaping_table() {
     //
     // `with-traits` is a `Fresh` NATIVE that embeds arg 1 (the table) into the fresh
     // result's `traits` side-field — declared by `PrimitiveDef::embeds = &[1]`. The walk
-    // records the containment edge `result ⊇ table`, so external uniqueness sees the
+    // records the embed edge `result ⊇ table`, so external uniqueness sees the
     // table referenced from OUTSIDE make's subtree (by the escaping result region) and
     // REFUSES to fold it in: the table stays Shared (per-region RC), reclaimed under the
     // live result's reference.
@@ -100,19 +103,15 @@ fn with_traits_embed_refuses_adopt_of_captured_escaping_table() {
         tbl.0,
         owned,
     );
-    // The mechanism: the walk records the with-traits FRESH result ⊇ the table region.
-    let (_, embed_src, result) = info
-        .containment_edges
-        .iter()
-        .copied()
-        .find(|&(_, src, _)| src == tbl)
-        .unwrap_or_else(|| {
-            panic!(
-                "with-traits (Fresh, embeds arg 1) must record `result ⊇ table` for the \
-                 captured table r{}; containment={:?}",
-                tbl.0, info.containment_edges,
-            )
-        });
+    // The mechanism: the walk records the with-traits FRESH result ⊇ the table region
+    // as an embed edge, and as nothing else.
+    let &(embed_src, result) = embeds_of(&info, tbl).first().unwrap_or_else(|| {
+        panic!(
+            "with-traits (Fresh, embeds arg 1) must record `result ⊇ table` for the \
+             captured table r{} in embed_edges; got {:?}",
+            tbl.0, info.embed_edges,
+        )
+    });
     assert_eq!(embed_src, tbl, "the embed's contained member is the table");
     assert_ne!(
         result, tbl,
@@ -122,5 +121,10 @@ fn with_traits_embed_refuses_adopt_of_captured_escaping_table() {
         info.fresh_result_regions.contains(&result),
         "the embed container r{} is the with-traits FRESH result",
         result.0,
+    );
+    assert!(
+        !info.containment_edges.iter().any(|&(_, src, _)| src == tbl),
+        "an embed is not a containment edge; containment={:?}",
+        info.containment_edges,
     );
 }

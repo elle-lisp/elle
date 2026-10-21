@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-20
 //! Region-and-heap-explicit value construction, one constructor per heap type.
 //!
 //! docs/impl/region/ctx.md
@@ -23,6 +23,9 @@ use crate::primitives::traitregistry::default_traits_for;
 use crate::value::heap::{ExternalObject, HeapObject, HeapTag, Pair, TableKey};
 use crate::value::FiberHeap;
 use crate::value::Value;
+
+mod view;
+pub(crate) use view::{bytes_view, string_view};
 
 /// Allocate a string (bytes inline in the arena) into `region` on `heap`.
 #[inline]
@@ -248,7 +251,8 @@ pub(crate) fn joined_bytes(heap: &mut FiberHeap, parts: &[&[u8]], region: Runtim
     lbytes(heap, slice, region)
 }
 
-/// The `LBytes` object over a slice already allocated in `region`.
+/// The `LBytes` object in `region` over `data`: a slice already allocated in
+/// `region`, or a view's slice into another value's payload.
 #[inline]
 fn lbytes(
     heap: &mut FiberHeap,

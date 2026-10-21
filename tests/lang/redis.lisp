@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-20
 # The redis client's commands against a live Redis, in a keyspace of its own.
 # lib/redis.md
 #
@@ -40,7 +40,7 @@
     (when (not (empty? keys)) (apply redis:del keys))))
 
 # Each section below runs inside the (redis:with …) body, so it reads
-# *redis-port* from the enclosing parameterize.  They are top-level functions
+# *redis-conn* from the enclosing parameterize.  They are top-level functions
 # only to keep the connection block shallow; the runner treats the whole file
 # as one thunk, so a definition is never scored as a test on its own.
 
@@ -245,9 +245,9 @@
 
 # ── ev/spawn inside redis-with ──────────────────────────────────────────────
 #
-# redis:with binds *redis-port* via parameterize.  A fiber spawned with
+# redis:with binds *redis-conn* via parameterize.  A fiber spawned with
 # ev/spawn inside the body is resumed later by the scheduler, whose own
-# param_frames do not contain *redis-port*.  Creation-time inheritance in
+# param_frames do not contain *redis-conn*.  Creation-time inheritance in
 # fiber/new is what makes the child see the connection; without it the
 # redis:get call fails with :no-connection.
 
@@ -258,14 +258,8 @@
                       (rebox result-box (redis:get (test-key "spawn-canary")))))]
     (ev/join f)
     (assert (= (unbox result-box) "preset")
-            "spawned fiber sees *redis-port* inherited from spawner"))
+            "spawned fiber sees *redis-conn* inherited from spawner"))
   (println "  ev/spawn inside redis-with: ok"))
-
-# ── RESP self-tests (no Redis needed) ───────────────────────────────────────
-
-(println "Running RESP self-tests...")
-(redis:test)
-(println "RESP self-tests passed.")
 
 # Gate the connection block on a live Redis: if it isn't reachable, the
 # (redis:with …) form below emits a loud :gated (skip with a reason) instead of

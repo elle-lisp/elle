@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-20
 # A trait table a captured value embeds in an escaping result stays Shared, so no subtree drop frees it.
 # docs/impl/region/effects.md
 #
@@ -22,14 +22,15 @@
 #   `with-traits` declares `RegionEffect::Fresh` AND `embeds: &[1]`: the table is EMBEDDED
 #   into the fresh result and alloc-scan counted (Rule 5), exactly like `%pair` embedding
 #   its car/cdr — an embedding constructor is `Fresh`, not `Stores`. The ownership forest
-#   learns containment from `cross_region_refs` (intrinsic stores), capture edges, the
-#   funnel-recovered `containment_edges` (mutable-container `%put`), AND — via the embed
-#   declaration — a `Fresh` native's `result ⊇ arg` embed (`call_embeds`, recorded by the
-#   walk's `Fresh` arm into `containment_edges`), the compile-time analog of the runtime
-#   `find_object_cross_refs`/`traits()` alloc-scan. So the forest sees `result ⊇ shared-tbl`;
-#   the result escapes `make`, so the captured `shared-tbl` is referenced from OUTSIDE make's
-#   subtree — external uniqueness refuses to capture-adopt it, and it stays Shared, reclaimed
-#   by per-region RC under `a`'s live `traits` reference.
+#   builds its subtrees from `cross_region_refs` (intrinsic stores), capture edges and the
+#   funnel-recovered `containment_edges` (mutable-container `%put`). The embed declaration
+#   adds a `Fresh` native's `result ⊇ arg` embed (`call_embeds`, recorded by the walk's
+#   `Fresh` arm into `embed_edges`), the compile-time analog of the runtime
+#   `find_object_cross_refs`/`traits()` alloc-scan, which the forest counts against external
+#   uniqueness alone. So the forest sees `result ⊇ shared-tbl`; the result escapes `make`, so
+#   the captured `shared-tbl` is referenced from OUTSIDE make's subtree — external uniqueness
+#   refuses to capture-adopt it, and it stays Shared, reclaimed by per-region RC under `a`'s
+#   live `traits` reference.
 #
 #   Drop the embed declaration and the forest never sees `result ⊇ shared-tbl`: it judges the
 #   captured `shared-tbl` externally unique to `make`, capture-adopts it into `make`'s subtree,

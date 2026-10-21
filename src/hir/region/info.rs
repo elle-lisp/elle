@@ -1,4 +1,4 @@
-// audited: 2026-10-16
+// audited: 2026-10-20
 //! `RegionInfo`: what region inference produces for a compilation unit — the
 //! per-allocation and per-scope assignments, and the lowerer's cuts.
 //!
@@ -136,11 +136,21 @@ pub struct RegionInfo {
     pub fiber_result_regions: FxHashSet<Region>,
     /// Containment edges for the ownership inference, from two sources: a
     /// `Funnel` store into a mutable retaining container (`container ⊇ value`)
-    /// and a `Fresh` native's declared embed (`result ⊇ arg`). Site-keyed as
-    /// `cross_region_refs` is, and driving no `IncrefRegion`.
+    /// and a compiled capture cell's store (`cell ⊇ content`). Site-keyed as
+    /// `cross_region_refs` is, and driving no `IncrefRegion`. Each builds the
+    /// subtree and counts against external uniqueness. A `Fresh` native's
+    /// declared embed is not here: it is an `embed_edges` entry.
     ///
     /// docs/impl/region/effects.md
+    /// docs/impl/region/adopt.md
     pub containment_edges: Vec<(HirId, Region, Region)>,
+    /// Embed edges `(call site, argument, result)` for the ownership inference:
+    /// a `Fresh` native's declared embed, `result ⊇ arg`. The forest counts an
+    /// embed against external uniqueness and builds no subtree from it. Driving
+    /// no `IncrefRegion`: the alloc-scan counts the embedding.
+    ///
+    /// docs/impl/region/effects.md
+    pub embed_edges: Vec<(HirId, Region, Region)>,
     /// Funnel-store call site → the regions of the heap values stored there.
     /// Recorded even where the container's type is statically unknown, which
     /// `containment_edges` needs. Read by the branch compensation.
@@ -418,6 +428,7 @@ impl RegionInfo {
             fresh_result_regions: FxHashSet::default(),
             fiber_result_regions: FxHashSet::default(),
             containment_edges: Vec::new(),
+            embed_edges: Vec::new(),
             funnel_store_sites: HashMap::new(),
             funnel_bytecopy_value_sites: HashMap::new(),
             funnel_container_sites: HashMap::new(),

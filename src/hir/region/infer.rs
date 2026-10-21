@@ -1,4 +1,4 @@
-// audited: 2026-10-16
+// audited: 2026-10-20
 //! Tofte-Talpin region inference for functional HIR: the walk's state, and how it mints a region.
 //!
 //! docs/impl/region/model.md
@@ -138,14 +138,21 @@ struct RegionInference {
     mutable_container_regions: rustc_hash::FxHashSet<Region>,
     /// Structural containment edges `(site, contained, container)` for the ownership
     /// inference. A `Funnel` store into a mutable retaining container gives
-    /// `container ⊇ value`, recovered from the container's `RetType`. A `Fresh`
-    /// native's declared **embed** gives `result ⊇ embedded_arg`, from `call_embeds`,
-    /// for example `with-traits`'s trait side-field. Both are site-keyed exactly like
-    /// `cross_region_refs`, so the forest can hang a value-resolved `AdoptRegion` on the
-    /// call (the funnel store face). Neither drives an `IncrefRegion`: the funnel
-    /// counts the store at runtime, and the alloc-scan counts the embedding. See
+    /// `container ⊇ value`, recovered from the container's `RetType`. A compiled
+    /// capture cell's store gives `cell ⊇ content` (`record_cell_content_edges`).
+    /// Both are site-keyed exactly like `cross_region_refs`, so the forest can hang
+    /// a value-resolved adopt on the site. Neither drives an `IncrefRegion`: the
+    /// funnel counts the store at runtime, and the alloc-scan over the cell counts
+    /// its content. A `Fresh` native's declared embed is recorded apart, in
+    /// `embed_edges`, because the forest reads it differently. See
     /// `RegionInfo::containment_edges`.
     containment_edges: Vec<(HirId, Region, Region)>,
+    /// Embed edges `(call site, argument, result)`: a `Fresh` native's declared
+    /// `result ⊇ arg` (`call_embeds`), recorded by the `Fresh` arm in
+    /// `walk_call`. Kept apart from `containment_edges` because the forest reads
+    /// an embed one way only: against external uniqueness, building no subtree.
+    /// See `RegionInfo::embed_edges`.
+    embed_edges: Vec<(HirId, Region, Region)>,
     /// Retaining funnel-store call site (`%put`/`%array-push`/…) → the regions of
     /// the value stored there, its last argument, less the container's own
     /// regions. The runtime funnel increfs it, so a value stored at such a site has its RC
@@ -325,6 +332,7 @@ impl RegionInference {
             fiber_result_regions: rustc_hash::FxHashSet::default(),
             mutable_container_regions: rustc_hash::FxHashSet::default(),
             containment_edges: Vec::new(),
+            embed_edges: Vec::new(),
             funnel_store_sites: HashMap::new(),
             funnel_bytecopy_value_sites: HashMap::new(),
             emit_payload_regions: HashMap::new(),

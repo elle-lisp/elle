@@ -1,9 +1,9 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-20
 # Concurrent fibers' redis pipelines on one connection never interleave their RESP framing.
 # lib/redis.md
 #
-# Background: redis:with binds *redis-port* via parameterize.  When the
+# Background: redis:with binds *redis-conn* via parameterize.  When the
 # enclosing program spawns concurrent fibers (e.g., http2:serve handler
 # fibers), every fiber sees the same port.  Without a mutex, pipelines
 # from different fibers can interleave writes and reads — the RESP

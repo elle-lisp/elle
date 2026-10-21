@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-20
 //! The activation-owner cut: a capture-back-edge SCC, adopted into the executing activation's owner node.
 //!
 //! docs/impl/region/owner.md
@@ -55,7 +55,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 ///    invariant held at the emit level, so the runtime's one-adoption assert
 ///    stays unreachable.
 /// 4. **The hull.** Every region referencing INTO the SCC, transitively over ALL
-///    edge kinds (hard may-store edges included — a may-holder is a holder),
+///    edge kinds (hard may-store edges included — a may-holder is a holder — and
+///    embed edges included — a fresh result holds what it embeds),
 ///    must itself be ownable: the members free at the activation's completion,
 ///    so every holder must provably die within the activation. A holder that
 ///    returns, crosses a fiber frontier, or has runtime-determined lifetime
@@ -181,6 +182,11 @@ pub(in crate::hir::region::infer) fn compute_activation_adopts(
                 }
             }
             for &(_site, s, d) in &info.containment_edges {
+                if hull.contains(&s) && hull.insert(d) {
+                    changed = true;
+                }
+            }
+            for &(_site, s, d) in &info.embed_edges {
                 if hull.contains(&s) && hull.insert(d) {
                     changed = true;
                 }

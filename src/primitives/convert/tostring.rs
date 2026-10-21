@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-20
 //! `string`: any value to a string, and several values concatenated into one.
 //!
 //! docs/strings.md
@@ -153,10 +153,12 @@ fn prim_to_string_single(
         };
     }
 
-    // bytes (immutable): UTF-8 decode to immutable string
+    // Immutable bytes: checked as UTF-8 and answered in place, a string header
+    // over the same payload (docs/impl/values.md). The declaration names the
+    // embed, so the forest sees the result hold its argument's region.
     if let Some(b) = val.as_bytes() {
         return match std::str::from_utf8(b) {
-            Ok(s) => (SIG_OK, ctx.string(s)),
+            Ok(s) => (SIG_OK, ctx.string_view(s)),
             Err(e) => (
                 SIG_ERROR,
                 ctx.error("encoding-error", format!("string: invalid UTF-8: {}", e)),
@@ -324,3 +326,6 @@ fn prim_to_string_single(
     };
     (SIG_OK, ctx.string(repr))
 }
+
+#[cfg(test)]
+mod tests;

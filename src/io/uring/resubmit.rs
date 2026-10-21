@@ -1,4 +1,4 @@
-//! audited: 2026-09-23
+//! audited: 2026-10-20
 //! What a live operation does after a CQE: complete, or go out again for the
 //! rest of its bytes.
 //!
@@ -162,24 +162,19 @@ fn after_read(
         *filled = k;
         return Next::Again(read_into(id, fd, &buffer, k, room.min(MAX_READ_CHUNK)));
     }
-    if clusters {
-        // The buffer is full and the clusters are wider than it reserved. Its
-        // bytes join the port's remainder, where a cancel leaves them for the
-        // next read, and the buffer serves as a chunk from here on; the
-        // completion builds the answer outside it (docs/impl/io-bytes.md
-        // § "When the answer outgrows the buffer").
-        crate::io::types::fd_state_mut(fd_states, port_key)
-            .buffer
-            .extend_from_slice(&bytes[..k]);
-        lent.clear();
-        *filled = 0;
-        return Next::Again(read_into(id, fd, &buffer, 0, cap.min(MAX_READ_CHUNK)));
-    }
-    // A line longer than its buffer answers with the full buffer; reading on
-    // gives the next piece. Abandoning the operation here instead would leave
-    // the fiber that asked parked with no completion coming.
-    *filled = k;
-    complete(0)
+    // The buffer is full and the answer is not in it yet: a line whose newline
+    // has not arrived, or clusters wider than the reservation. Its bytes join
+    // the port's remainder, where a cancel leaves them for the next read, and
+    // the buffer serves as a chunk from here on; the completion builds the
+    // answer outside it (docs/impl/io-bytes.md § "When the answer outgrows the
+    // buffer"). Only the byte-counted reads never arrive here: each reserves
+    // exactly what it answers with.
+    crate::io::types::fd_state_mut(fd_states, port_key)
+        .buffer
+        .extend_from_slice(&bytes[..k]);
+    lent.clear();
+    *filled = 0;
+    Next::Again(read_into(id, fd, &buffer, 0, cap.min(MAX_READ_CHUNK)))
 }
 
 /// A `read-all` CQE: account the bytes the kernel put in the accumulation and

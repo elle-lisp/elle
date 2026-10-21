@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-28
+(elle/epoch 15)
+# audited: 2026-10-20
 ## HTTP/1.1 chunked transfer encoding: reading a chunked body and writing one.
 ## lib/http/overview.md
 ##
@@ -10,7 +10,7 @@
 ##           :test}
 
 (fn [&named transport]
-  (def t-read transport:read)
+  (def t-exact transport:exact)
   (def t-read-line transport:read-line)
   (def t-write transport:write)
   (def t-flush transport:flush)
@@ -36,7 +36,7 @@
     "Read an HTTP/1.1 Transfer-Encoding: chunked body from transport.
      Reads chunks until the terminating 0-chunk, discards chunk extensions
      and trailers, returns the reassembled body as a string."
-    (def @buf (@bytes))
+    (def parts @[])
     (block :chunks
       (forever
         (let [size (chunk-size (t-read-line t))]
@@ -46,20 +46,18 @@
               (let [line (t-read-line t)]
                 (when (or (nil? line) (empty? line)) (break))))
             (break :chunks nil))
-          (def @remaining size)
-          (while (pos? remaining)
-            (let [chunk (t-read t remaining)]
-              (when (nil? chunk)
-                (error {:error :http-error
-                        :reason :unexpected-eof
-                        :phase :chunk-data
-                        :message "unexpected EOF reading chunk data"}))
-              (let [b (if (bytes? chunk) chunk (bytes chunk))]
-                (append buf b)
-                (assign remaining (- remaining (length b))))))
+          (let [data (t-exact t size)]
+            (when (nil? data)
+              (error {:error :http-error
+                      :reason :unexpected-eof
+                      :phase :chunk-data
+                      :message "unexpected EOF reading chunk data"}))
+            (push parts data))
           # Consume the CRLF that terminates the chunk data.
           (t-read-line t))))
-    (string (freeze buf)))
+    (if (empty? parts)
+      ""
+      (string (apply concat (freeze parts)))))
 
   (defn chunked? [headers]
     "True when headers indicate Transfer-Encoding: chunked."

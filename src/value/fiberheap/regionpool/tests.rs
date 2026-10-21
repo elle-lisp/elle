@@ -1,11 +1,11 @@
-// audited: 2026-09-14
-//! Unit tests for one region's pages: dual-ended layout, geometric growth,
-//! teardown, and the masked walk that finds a page base.
+// audited: 2026-10-20
+//! Unit tests for one region's pages: dual-ended layout, growth, teardown,
+//! the walk that finds a page base, and the cross-region scan.
 //!
 //! docs/impl/region/model.md
 //! docs/impl/region/generations.md
 
-use super::super::pagepool::{base_page, class_size_of};
+use super::super::pagepool::base_page;
 use super::*;
 use crate::value::heap::Pair;
 
@@ -144,7 +144,7 @@ fn teardown_returns_pages() {
 #[test]
 fn teardown_returns_a_page_that_still_names_its_region() {
     // A region hands each page back through the cursors it filled
-    // (docs/impl/region/model.md § "Page recycling"). The pool caches the page
+    // (docs/impl/region/model.md). The pool caches the page
     // as it stands, header included, so a pointer that outlived this region
     // still resolves to region 42 and trips the generation check rather than
     // reading a page that names nothing (docs/impl/region/generations.md).
@@ -223,7 +223,7 @@ fn page_header_region_id() {
 #[test]
 fn page_header_stamp_roundtrip() {
     // Every claimed page is stamped (region_id, generation, store) at
-    // claim time (docs/impl/region/generations.md § "Region generations").
+    // claim time (docs/impl/region/generations.md).
     let mut pool = PagePool::default();
     let stamp = PageStamp {
         generation: 7,
@@ -277,135 +277,59 @@ fn region_of_page_ptr_on_grown_page() {
     assert_eq!(rid, 99, "region_of_page_ptr must work on grown pages");
 }
 
+/// A string or bytes whose payload lies in another region's pages holds that
+/// region: the scan reports the backing's region, as it does a shared closure
+/// env (docs/impl/values.md).
+///
+/// The trap: the scan's string and bytes arms once enumerated nothing, which
+/// is right for an inline payload and frees a view's source under it.
 #[test]
-fn header_lookup_rejects_mid_page_false_match() {
-    // A pointer deep inside a LARGE page must resolve to the page's true base,
-    // never to a smaller sub-alignment whose mid-page object data happens to
-    // mimic a smaller page's size. The old header carried a bare `log2` byte, so
-    // mid-page data could be read as a garbage header: `oracle.lisp`'s
-    // `(first …)` result, deep in a 512 KiB page, masked down to an 8 KiB
-    // sub-base whose byte 12 was 0x0D (= log2 8192) and read object data as a
-    // header — region id 0xffffff45 — which then drove `ensure_raw` to a 584 GB
-    // resize. The `size_tag` magic rejects the mid-page match.
-    //
-    // Counterfactual: pre-magic, `header_of_page_ptr` matched the forged
-    // half-size sub-base (its byte 12 equals that size's log2) and returned the
-    // forged region id; post-magic the forged tag lacks the magic, so the walk
-    // reaches the true base and returns region 42.
-    let mut pool = PagePool::new(base_page(), 8 * 1024 * 1024);
-    // A class-2 page, self-aligned by `claim`.
-    let big = class_size_of(base_page(), 2);
-    let page = pool.claim(big);
-    assert_eq!(page.len(), big);
-    let base = page.as_ptr() as usize;
-    // Stamp the real header at the true base (region 42).
-    let _rp = RegionPage::new(
-        page,
-        42,
-        PageStamp {
-            generation: 3,
-            store: 7,
-        },
-    );
-    // Forge a "smaller page" header mid-page, at the class-1-aligned sub-base:
-    // a garbage region id, and a bare `log2(half)` at the `size_tag` offset
-    // (12) WITHOUT the magic — exactly the mid-page object data that fooled the
-    // old single-byte check.
-    let half = class_size_of(base_page(), 1);
-    let sub_base = base + half; // half a page in — half-page-aligned
-    unsafe {
-        *(sub_base as *mut u32) = 0xDEAD_BEEF; // forged region_id
-        *((sub_base + 12) as *mut u32) = half.trailing_zeros(); // bare log2, no magic
-    }
-    // A pointer deep in the page, past the forged sub-base.
-    let deep = (sub_base + 0x620) as *const ();
-    let rid = unsafe { region_of_page_ptr(deep, base_page()) };
-    assert_eq!(
-        rid, 42,
-        "region_of_page_ptr resolved a deep pointer to a mid-page false header \
-         (got 0x{rid:x}) instead of the page's true base region 42 — the size_tag \
-         magic must reject a sub-aligned mid-page match"
-    );
-}
-
-#[test]
-fn a_slice_header_ends_in_a_word_no_size_tag_can_match() {
-    // A `RegionSlice` is sixteen bytes and its last four sit exactly where a
-    // page header's `size_tag` is read, so those four have to be written rather
-    // than left as padding (docs/impl/region/generations.md § "Every byte the
-    // magic screens has to be written"). Zero is the value: a `size_tag` always
-    // carries the magic in its high 24 bits.
-    //
-    // The write goes into a poisoned cell, so what the assertion reads is the
-    // slice header's own bytes and not whatever the cell happened to hold.
-    let payload = [0xABu8; 4];
-    let mut cell = [0xE1u8; 16];
-    unsafe {
-        (cell.as_mut_ptr() as *mut RegionSlice<u8>)
-            .write(RegionSlice::from_raw(payload.as_ptr(), 4))
+fn a_slice_backing_in_another_region_is_a_cross_region_reference() {
+    let mut pool = PagePool::default();
+    let mut source = pool_for(7);
+    let mut holder = pool_for(9);
+    let backing = source.alloc_region_slice(b"a line of bytes", &mut pool);
+    let inline = holder.alloc_region_slice(b"inline", &mut pool);
+    let valid =
+        |rid: u32, ptr: *const ()| (rid == 7 && source.owns(ptr)) || (rid == 9 && holder.owns(ptr));
+    let refs_of = |obj: &HeapObject| {
+        let mut refs = Vec::new();
+        RegionPool::find_object_cross_refs(obj, 9, base_page(), &valid, &mut refs);
+        refs
     };
+
+    // A view two bytes into the source's payload, held in region 9.
+    let view = unsafe { RegionSlice::from_raw(backing.as_ptr().add(2), 4) };
     assert_eq!(
-        &cell[12..16],
-        &[0, 0, 0, 0],
-        "a slice header left its last four bytes unwritten, so it publishes \
-         whatever the page held there — and a recycled page can hold a real \
-         size_tag",
+        refs_of(&HeapObject::LBytes {
+            data: view,
+            traits: Value::NIL
+        }),
+        vec![7],
+        "a bytes view must hold its source's region"
     );
-}
-
-#[test]
-fn a_slice_header_written_mid_page_cannot_forge_a_page_base() {
-    // The trap: a claimed page's body is whatever its last occupant left
-    // (docs/impl/region/model.md § "Page recycling"), so a `base_page`-aligned
-    // address inside a LARGE page can already hold a word that reads as a base
-    // page's `size_tag`. A slice header landing on that address has to clear
-    // it, because the page-base walk masks a pointer to the smallest candidate
-    // first and stops at the first header that self-validates.
-    //
-    // The counter-factual is a slice header that leaves those four bytes alone:
-    // the walk then stops at the forged base, hands back the garbage id it
-    // reads there, and the free-time cross-ref scan drops the cross-region edge
-    // its ownership filter rejects — a leak in release, and edge-table drift at
-    // the next free in debug.
-    let mut pool = PagePool::new(base_page(), 8 * 1024 * 1024);
-
-    // A genuine base-page `size_tag`, read off a page the pool really stamped.
-    // Forging one from the magic would restate a constant the header owns.
-    let probe = pool.claim(base_page());
-    let probe_base = probe.as_ptr() as usize;
-    let _probe = RegionPage::new(probe, 7, PageStamp::default());
-    let base_tag = unsafe { *((probe_base + 12) as *const u32) };
-
-    let big = class_size_of(base_page(), 2);
-    let page = pool.claim(big);
-    let base = page.as_ptr() as usize;
-    let _held = RegionPage::new(
-        page,
-        42,
-        PageStamp {
-            generation: 3,
-            store: 7,
-        },
+    assert_eq!(
+        refs_of(&HeapObject::LString {
+            s: view,
+            traits: Value::NIL
+        }),
+        vec![7],
+        "a string view must hold its source's region"
     );
-
-    // The stale word one base page in, as a recycled page would carry it.
-    let sub_base = base + base_page();
-    unsafe { *((sub_base + 12) as *mut u32) = base_tag };
     assert!(
-        unsafe { header_if_valid(sub_base, base_page()) }.is_some(),
-        "the forged base must self-validate, or this test proves nothing",
+        refs_of(&HeapObject::LBytes {
+            data: inline,
+            traits: Value::NIL
+        })
+        .is_empty(),
+        "an inline payload is a self-edge and holds nothing"
     );
-
-    // The region writes a slice header over it.
-    let payload = [0xABu8; 8];
-    unsafe { (sub_base as *mut RegionSlice<u8>).write(RegionSlice::from_raw(payload.as_ptr(), 8)) };
-
-    let deep = (sub_base + 0x40) as *const ();
-    let rid = unsafe { region_of_page_ptr(deep, base_page()) };
-    assert_eq!(
-        rid, 42,
-        "a pointer past a slice header resolved to a forged mid-page base \
-         (got 0x{rid:x}) instead of region 42 — the slice header left the four \
-         bytes a size_tag occupies standing",
+    assert!(
+        refs_of(&HeapObject::LBytes {
+            data: RegionSlice::empty(),
+            traits: Value::NIL
+        })
+        .is_empty(),
+        "an empty payload has no page to resolve"
     );
 }

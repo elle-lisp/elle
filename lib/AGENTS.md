@@ -6,13 +6,14 @@ Up: [..](../AGENTS.md)
 
 ## Documents
 
+- [framing.md](framing.md) — **framing** A record cursor over any byte source, answering lines, delimited records and exact counts as views of one chunk.
 - [http.md](http.md) — **http** HTTP/1.1 client and server over TCP in pure Elle, with HTTPS and compression as opt-in module arguments.
 - [http2.md](http2.md) — **http2** HTTP/2 client and server (RFC 9113 + RFC 7541), over TLS with ALPN or as cleartext h2c.
 - [irc.md](irc.md) — **irc** IRCv3 client with capability negotiation, SASL PLAIN and message tags, over plain TCP or TLS.
 - [overview.md](overview.md) — **lib** Reusable Elle modules, one closure each: `(import "std/name")` gives you the closure, and calling it returns the struct of exports.
 - [process.md](process.md) — **process** Erlang-style processes on fibers: message passing, links, monitors, timers, named registration, and OTP-shaped behaviors above them.
 - [ratchet.md](ratchet.md) — **ratchet** Measure a shape and print one reading line per subject, for the runner to judge against the committed ledger.
-- [redis.md](redis.md) — **redis** Redis client speaking RESP2 over TCP, in one file of pure Elle with no plugin behind it.
+- [redis.md](redis.md) — **redis** Redis client speaking RESP2 over TCP, in pure Elle with no plugin behind it.
 - [tls.md](tls.md) — **tls** TLS 1.2 and 1.3 client and server: the `elle-tls` plugin runs the state machine, and Elle code moves every byte.
 
 ## Directories
@@ -26,5 +27,6 @@ Up: [..](../AGENTS.md)
 - [process/](process/AGENTS.md) — The submodules behind [process.lisp](../process.lisp): the scheduler in four parts, the primitives, and one file per behavior.
 - [ratchet/](ratchet/AGENTS.md) — (empty)
 - [rdf/](rdf/AGENTS.md) — (empty)
+- [redis/](redis/AGENTS.md) — The submodules behind [redis.lisp](../redis.lisp): the RESP codec and its connection, the ambient connection, and the command wrappers.
 - [sdl3/](sdl3/AGENTS.md) — (empty)
 - [semver/](semver/AGENTS.md) — (empty)
