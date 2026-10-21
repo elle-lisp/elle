@@ -1,6 +1,6 @@
 # subprocess
 
-<!-- audited: 2026-09-30 -->
+<!-- audited: 2026-10-20 -->
 
 Spawning OS child processes, and the `subprocess` value every later call takes.
 
@@ -10,13 +10,14 @@ Up: [..](../AGENTS.md)
 
 | File | Contains |
 |------|----------|
-| `subprocess.rs` | The module root: `sys/exit`, `sys/trap-exit!`, `sys/halt`, `sys/args`, `sys/argv`, `sys/pid`, `sys/env`, and the primitive table for everything below |
-| `subprocess/exec.rs` | `subprocess/exec`, the options it parses and the sequence widening its args take |
-| `subprocess/handle.rs` | The `subprocess` value: its boundary check, its key set, and `wait`/`kill`/`pid`/`exit`/`rusage`/`subprocess?` |
-| `subprocess/tests.rs` | `subprocess/kill` against a recorded exit status, and the boundary every primitive refuses through |
+| [subprocess.rs](../subprocess.rs) | The module root: `sys/exit`, `sys/trap-exit!`, `sys/halt`, `sys/args`, `sys/argv`, `sys/pid`, `sys/env`, and the primitive table for everything below |
+| [exec.rs](exec.rs) | `subprocess/exec`, the options it parses and the sequence widening its args take |
+| [handle.rs](handle.rs) | The `subprocess` value: its boundary check, its key set, and `wait`/`kill`/`pid`/`exit`/`rusage`/`subprocess?` |
+| [tests.rs](tests.rs) | `subprocess/kill` against a recorded exit status, and the boundary every primitive refuses through |
 
-The type itself is `ProcessHandle` in `src/io/request/process.rs`, beside the
-exit record it carries; this module is the surface over it.
+The type itself is `ProcessHandle` in
+[src/io/request/process.rs](../../io/request/process.rs), beside the exit record
+it carries; this module is the surface over it.
 
 ## The subprocess value
 
@@ -99,7 +100,8 @@ A subprocess answers `get`, `has?`, `keys` and `values` over a closed key set �
 rather than sorted. An unknown key reads as `nil`, or as the default `get` was
 given.
 
-Those four primitives live in `access/getop.rs` and `lstruct.rs`, not here, so
+Those four primitives live in [getop.rs](../access/getop.rs) and
+[lstruct.rs](../lstruct.rs), not here, so
 each dispatches to a reader this module owns rather than duplicating the key
 set. `put`, `del` and `merge` refuse a subprocess: it reports what a child is
 doing and is not a place to write fields.
@@ -123,7 +125,7 @@ Nothing here declares an effect for the reads that answer a port, because
 nothing here performs one: `get` and `values` hand back the port `Value` the
 handle carries, and both already declare what they declare for a struct — `get`
 is `Funnel`, a container read whose result is interior to its argument
-(docs/impl/region/clique.md § "Hard edges"). A subprocess is one more container
+([clique.md](../../../docs/impl/region/clique.md)). A subprocess is one more container
 they read, not a new effect.
 
 That the ports need no count of their own is a property of how they are minted,
