@@ -19,7 +19,7 @@
 ["docs/impl/image/measurements.md" :tokens 6000]
 ["docs/impl/image/plan.md" :tokens 5000]
 ["docs/impl/io-inflight.md" :tokens 5500]
-["docs/impl/jit.md" :tokens 5500]
+["docs/impl/jit.md" :tokens 5000]
 ["docs/impl/lir.md" :tokens 4500]
 ["docs/impl/memory.md" :tokens 6500]
 ["docs/impl/region/adopt.md" :tokens 6500]
