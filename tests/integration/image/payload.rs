@@ -18,11 +18,17 @@ const GRAFTED: &str = "(def image-frag-global (%pair 40 2))\n\
 
 /// A function whose body mints a compiled capture cell. Inside a lambda only
 /// a local function a sibling captures gets one, so the body holds two that
-/// call each other. The body holds lambdas, so it closes into no fragment, and
-/// the cell's name lives only in the LIR and the bytecode.
+/// each name the other.
+///
+/// Two traps. A fragment carries the name its function was bound to, which is
+/// also the name of that binding's cell, so the cell's function takes `&opt`
+/// and closes into no fragment. And neither local calls the other: a call
+/// through a forward cell infers `Signal::unknown()`, which carries every user
+/// signal bit. The dump refuses such a closure in any process that declared a
+/// signal, and this binary shares one signal registry with every other test.
 const CELLED: &str = "(defn image-cell-fn []\n\
-                        (defn image-cell-name [n] (if (%eq n 0) 0 (image-cell-other n)))\n\
-                        (defn image-cell-other [n] (image-cell-name 0))\n\
+                        (defn image-cell-name [&opt n] image-cell-other)\n\
+                        (defn image-cell-other [] image-cell-name)\n\
                         image-cell-name)\n\
                       image-cell-fn";
 

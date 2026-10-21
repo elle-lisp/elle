@@ -64,13 +64,17 @@ fn a_closures_fragment_names_cross_in_the_bundle() {
 // only a local function a sibling captures gets a compiled cell, so the body
 // holds two that call each other. The counter-factual is a bundle that spells
 // only the values it walks.
+//
+// The trap: a fragment carries the name its function was bound to, which is
+// also the name of that binding's cell. So the cell's function takes `&opt`
+// and closes into no fragment, or the fragment would spell the name instead.
 #[test]
 fn a_capture_cells_name_crosses_in_the_bundle() {
     use crate::lir::{InstrRef, LirView};
 
     let bundle = sent(
         "(defn send-cell-fn []\n\
-           (defn send-cell-name [n] (if (%eq n 0) 0 (send-cell-other n)))\n\
+           (defn send-cell-name [&opt n] (if (%eq n 0) 0 (send-cell-other n)))\n\
            (defn send-cell-other [n] (send-cell-name 0))\n\
            send-cell-name)\n\
          send-cell-fn",
