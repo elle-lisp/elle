@@ -1,6 +1,6 @@
 # Threads
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-21 -->
 
 OS threads for CPU-bound work. For I/O-bound concurrency, prefer
 `ev/spawn` / `ev/join` (see [concurrency.md](concurrency.md)).
@@ -165,9 +165,9 @@ region page pools hold from the OS across every thread.
 #### A worker has no scheduler
 
 Neither worker starts a scheduler. Wrap the body in `(ev/run …)` if it does
-I/O, and that includes `file/read` and `file/write` ([io](io.md)). The closure
-carries its reference to `ev/run`, so a light worker can call it too. An I/O
-call outside one ends the worker with a `:thread-error`.
+I/O, and that includes `file/read` and `file/write` ([files](io/files.md)).
+The closure carries its reference to `ev/run`, so a light worker can call it
+too. An I/O call outside one ends the worker with a `:thread-error`.
 
 ```lisp
 (let [[ok? err] (protect (sys/join (sys/spawn (fn [] (ev/sleep 0) :slept))))]

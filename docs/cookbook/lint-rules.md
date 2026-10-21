@@ -1,6 +1,6 @@
 # Adding a New Lint Rule
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-21 -->
 
 Linting operates on HIR trees. Rules live in [src/lint/rules.rs](../../src/lint/rules.rs); the
 tree walker lives in [src/hir/lint.rs](../../src/hir/lint.rs).

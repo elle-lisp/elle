@@ -1,6 +1,6 @@
 # Traits
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-21 -->
 
 Every heap-allocated value carries a `traits` field — a pointer to a
 trait table (struct or @struct). Collection and sequence types get a

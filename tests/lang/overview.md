@@ -1,11 +1,11 @@
 # The language suite
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-10-21 -->
 
 One self-contained Elle program per subject, each asserting what the language
 promises and exiting non-zero when an assertion fails.
 
-A file here is a language test ([spec](../../docs/spec.md) § Two suites). Its
+A file here is a language test ([spec](../../docs/spec.md)). Its
 claim holds for every correct implementation of Elle, whatever its tiers,
 footprint or optimizations. Every build that CI makes runs every file here and
 must pass it.
@@ -14,14 +14,20 @@ must pass it.
 
 A file is a whole program. It asserts with `(assert expr msg)`, which signals
 `:failed-assertion` and exits 1, so a file that runs to the end has passed. It
-carries no harness, no setup, and no dependency on another file.
+depends on no other test file.
+
+When several files of one subject share helpers, the helpers live in a
+directory named for the subject, and each file splices them in with
+`include-file`. The suite runs only the files directly under `tests/lang`, so
+a helper never runs as a test, and `elle tests/lang/NAME.lisp` still runs a
+file on its own. [gun/check.lisp](gun/check.lisp) is one.
 
 Name the file for its subject, and keep one subject per file. The directory is
 its own index: `ls tests/lang` names every subject the language suite covers.
 
 A file asserts values, errors, signals, fiber states, and whether a program
 compiles. It does not call an implementation extension
-([spec](../../docs/spec.md) § Three categories of surface):
+([spec](../../docs/spec.md)):
 
 - no gauge — `arena/*`, `fn/bytecode-size`, `arena/page-claims`;
 - no tier — `jit?`, `jit/rejections`, `compile/run-on`, `vm/tier`,
@@ -37,7 +43,8 @@ tree.
 ## Shape
 
 ```lisp
-(elle/epoch 13)
+(elle/epoch 15)
+# audited: 2026-10-21
 # What this file pins, and the trap or counter-factual behind it.
 
 (assert (= (+ 1 2) 3) "addition")
@@ -58,9 +65,11 @@ One file at a time, `elle tests/lang/NAME.lisp` runs it as a plain program.
 
 ## Invariants
 
-1. **A file is self-contained.** It asserts directly and runs on its own.
+1. **A file runs on its own.** It asserts directly, and splices in nothing but
+   its subject's helpers.
 2. **Exit 0 is pass, 1 is fail.**
-3. **A file is deterministic.** No clock, no randomness, no dependence on how
-   fast a background thread happens to be.
+3. **A file is deterministic.** Its verdict does not depend on how fast the
+   machine runs or how its threads are scheduled. A clock it reads bounds a
+   wait from below, and never times an exact duration.
 4. **A file tests what the language does**, never how this implementation does
    it. The same file must pass on every build.

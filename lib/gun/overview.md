@@ -1,15 +1,14 @@
 # gun
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-21 -->
 
-The submodules behind [gun.lisp](../gun.lisp): states, values, fields, HAM, the graph, stores, SEA, the core and the mesh.
+The submodules behind [gun.lisp](../gun.lisp): states, values, fields, HAM, the graph, stores, SEA, the core, chains and the mesh.
 
 [gun.md](../gun.md) holds what a caller of the module sees, and
 [chains.md](chains.md) holds the functions that read and write a database.
-[mesh.md](mesh.md) holds the peer protocol, and [sea.md](sea.md) holds the
-rules of user spaces and encryption. This file holds how the module divides.
-Each file's header says what it exports, and `(doc name)` carries a function's
-arguments.
+[mesh.md](mesh.md) holds the peers, and [sea.md](sea.md) holds user spaces
+and encryption. This file holds how the module divides. Each file's header
+says what it exports, and `(doc name)` carries a function's arguments.
 
 | File | Purpose |
 |------|---------|
@@ -23,7 +22,11 @@ arguments.
 | [sea.lisp](sea.lisp) | The rules of [sea.md](sea.md): key pairs, user spaces, signing, the content node, admission and encryption |
 | [core.lisp](core.lisp) | One database: its graph, store, clock, lock, subscriptions and peers; loading, the chain walk, the merges and notify |
 | [peer.lisp](peer.lisp) | One WebSocket connection: the hello, the reader fiber, the send lock, and close with the latch it opens |
-| [mesh.lisp](mesh.lisp) | The rules of [mesh.md](mesh.md): fetch, forward, acks, deferral, resync, redial and close |
+| [wait.lisp](wait.lisp) | A wait: the peers a get or a put went to, and the latch that opens when they answered |
+| [mesh.lisp](mesh.lisp) | The rules of [mesh.md](mesh.md): fetch, forward, acks, deferral and resync |
+| [join.lisp](join.lisp) | Serving, dialing, the keepers that redial, and close |
+| [chain.lisp](chain.lisp) | A chain: the soul and keys it names, `get`, `map`, `soul` and `once` |
+| [write.lisp](write.lisp) | The writes through a chain: `put`, `set`, `put-content` and `unset` |
 
 A submodule takes the submodules it needs as arguments, so loading one by hand
 follows the order [gun.lisp](../gun.lisp) uses. The exception is
@@ -40,7 +43,12 @@ for itself:
 (def sea ((import "std/gun/sea") :value value))
 (def core ((import "std/gun/core") :state state :value value :graph graph :sea sea))
 (def peer ((import "std/gun/peer") :wire wire))
-(def mesh ((import "std/gun/mesh") :core core :wire wire :peer peer))
+(def wait ((import "std/gun/wait")))
+(def mesh ((import "std/gun/mesh") :core core :wire wire :wait wait))
+(def join ((import "std/gun/join") :core core :peer peer :mesh mesh))
+(def chain ((import "std/gun/chain") :value value :graph graph :core core :mesh mesh))
+(def write ((import "std/gun/write") :value value :graph graph :core core :sea sea
+                                     :mesh mesh :chain chain))
 (assert (= (value:encode (value:link "users/alice")) "l:users/alice"))
 (assert (= (graph:child-soul "x" "a/b") "x/a%2Fb"))
 (assert (= (sea:space-of "~ab/c") "~ab"))

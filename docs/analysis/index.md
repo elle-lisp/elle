@@ -1,6 +1,6 @@
 # Analysis
 
-<!-- audited: 2026-10-19 -->
+<!-- audited: 2026-10-21 -->
 
 Meta-analysis tools: testing, CI, debugging, semantic portraits, and the report
 behind the source cap.

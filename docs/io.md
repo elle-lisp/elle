@@ -1,33 +1,28 @@
 # I/O
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-21 -->
 
 All I/O in Elle is async: each call yields to the scheduler, and other fibers
 run until it completes. User code runs inside the async scheduler
 automatically. A call that cannot block runs on the scheduler's thread and
 returns at once. The `file/` functions that only read or change a file's
 metadata are of this kind; the ones that move a file's contents are not.
-"Files by path" below lists both.
+[Files](io/files.md) lists both.
 
 ## I/O backend
 
-A Linux build with the `uring` feature uses `io_uring` for all I/O: reads,
-writes, TCP, timers, subprocess pipes. Operations are submitted to the kernel's
-submission queue and completed without syscalls or threads — the kernel
-handles multiplexing directly. A single-threaded event loop drains any
-ready completions, then blocks on the completion queue (waiting for at
-least one completion) and resumes the waiting fiber.
+A Linux build with the `uring` feature uses `io_uring` for port reads and
+writes, TCP, timers and subprocess pipes. Operations are submitted to the
+kernel's submission queue and completed without syscalls or threads — the
+kernel handles multiplexing directly. A single-threaded event loop drains the
+ready completions, then blocks on the completion queue until one arrives, and
+resumes the waiting fiber.
 
 Every other build ([config](config.md)) uses a thread-pool backend that
 provides the same abstraction. Blocking I/O operations run on background
-threads; the event loop collects results and resumes fibers identically. User code
-sees no difference — the same `port/open`, `port/read-line`, `ev/spawn`
-API works on both backends.
-
-Both backends are syscall-free from the fiber's perspective: the fiber
-yields `:io`, the scheduler submits the operation, and the fiber resumes
-with the result. io_uring creates no thread per operation; the thread pool
-is shared across all fibers.
+threads; the event loop collects results and resumes fibers identically. User
+code sees no difference: `port/open`, `port/read-line` and `ev/spawn` work the
+same on both backends.
 
 Whatever cannot lift to io_uring — `getaddrinfo`, an arbitrary `Task`
 closure, blocking stdin reads, and everything on the thread-pool backend —
@@ -210,8 +205,8 @@ The remainder belongs to the port that produced it, not to its descriptor
 *number*. A closed descriptor's number goes straight back to the OS — and a
 port dropped without `port/close` still closes its descriptor — so the next
 `port/open` can be handed that number. It starts with an empty remainder,
-whichever port held the number before it. The pinning test is
-[io.lisp](../tests/lang/io.lisp) § "a recycled descriptor number carries no remainder".
+whichever port held the number before it. [io.lisp](../tests/lang/io.lisp)
+pins it.
 
 What a read reserves before it runs is not a bound on what it answers with.
 `port/read-line` reserves 64 KiB, and a line that fits is answered from that
@@ -278,20 +273,13 @@ A stream is a fiber. Each of these closes the port when the stream ends.
 
 ### Closing `*stdin*`
 
-`(port/close *stdin*)` is supported and does what you'd expect:
-
-- Any in-flight `(port/read-line *stdin*)` / `(port/read …)` /
-  `(port/read-all *stdin*)` is cancelled. The waiting fiber resumes
-  with an `:io-error` whose message is `stdin closed`.
-- The dedicated stdin worker thread (which sits on `read(2)` against
-  fd 0) is signalled via an internal self-pipe, returns from its
-  syscall, drains any further pending requests as cancelled, and
-  exits cleanly. No leaked OS thread.
-- Subsequent stdin reads error from the `port is closed` check
-  in `AsyncBackend::submit`.
-- The OS file descriptor for stdin is *not* itself closed (the
-  stdio ports never owned it). This matches the existing
-  `*stdout*` / `*stderr*` close semantics.
+`(port/close *stdin*)` cancels every read of stdin in flight, and each waiting
+fiber resumes with an `:io-error` whose message is `stdin closed`. The stdin
+worker thread, which waits in `read(2)` on fd 0, wakes through an internal
+self-pipe, cancels the requests still queued, and exits. A later read of stdin
+raises from the `port is closed` check in `AsyncBackend::submit`. Descriptor 0
+itself stays open, because the stdio ports never owned it, as with `*stdout*`
+and `*stderr*`.
 
 ## Output
 
@@ -318,83 +306,6 @@ cancellation.
 See [subprocess.md](subprocess.md) for the type, its reads, and what a kill
 answers.
 
-## Temporary files
-
-`file/mktempdir` creates a uniquely-named directory under the platform
-temp root and returns its path. The root is the runtime's native temp
-location — `TMPDIR` on Unix (the per-user folder on macOS), `%TEMP%` on
-Windows — so scripts never hardcode `/tmp`; point `TMPDIR` at a tmpfs
-such as `/dev/shm` to keep scratch I/O in RAM. Uniqueness is made in
-the runtime (pid + counter, retried on collision), so concurrent
-processes cannot race each other to the same name the way fixed
-scratch filenames do.
-
-`with-temp-dir` scopes one to a body and deletes it on the way out —
-recursively, error or not. `file/delete-dir-all` is the underlying
-recursive delete (`file/delete-dir` only removes empty directories).
-
-```lisp
-(with-temp-dir dir
-  (file/write (path/join dir "scratch.txt") "data")
-  (assert (= (file/read (path/join dir "scratch.txt")) "data")))
-```
-
-## Files by path
-
-`file/read`, `file/lines`, `file/write`, `file/append`, `file/copy` and
-`file/sync` move a file's contents. Each runs on the I/O thread pool on every
-platform, so other fibers run while it waits for the disk. Each needs both the
-`:fs` and the `:io` capability, as `port/open` does. A failure raises
-`:io-error`, and its `:path` names the file. `(doc name)` gives each one's
-arguments and answer.
-
-```lisp
-(with-temp-dir dir
-  (let [log (path/join dir "log")]
-    (assert (= (file/write log "one\n") true))
-    (file/append log "two\n")
-    (file/copy log (path/join dir "copy"))
-    (assert (= (file/read (path/join dir "copy")) "one\ntwo\n"))
-    (assert (= (file/lines log) (list "one" "two")))
-    (let [[ok? err] (protect (file/read (path/join dir "missing")))]
-      (assert (= (get err :error) :io-error))
-      (assert (= (get err :path) (path/join dir "missing"))))))
-```
-
-A worker runs each of these but `file/sync` through blocking system calls,
-which nothing can interrupt. `ev/timeout` and a cancel discard the answer, and
-the worker runs on to the end of the call. On a fifo, a read waits for a
-writer, and a write waits for a reader.
-
-`file/stat`, `file/lstat`, `file/size`, `file/ls`, `file/mkdir`,
-`file/mkdir-all`, `file/delete`, `file/delete-dir`, `file/delete-dir-all`,
-`file/rename` and `file/mktempdir` only read or change metadata. They run on
-the scheduler's thread, return at once, and need `:fs` alone.
-
-### Syncing to storage
-
-`(file/sync path)` flushes the file or directory at `path` to stable storage,
-as `fsync(2)` does, and answers nil. It opens `path` for reading, so a path
-that does not exist, or that the process cannot read, raises `:io-error`. A
-path that names neither a file nor a directory, such as a fifo, raises
-`:io-error` at once.
-
-A rename is durable only after its directory is synced too:
-
-```lisp
-(with-temp-dir dir
-  (let [tmp (path/join dir "state.tmp")
-        final (path/join dir "state")]
-    (file/write tmp "v2")
-    (assert (nil? (file/sync tmp)) "sync the new contents first")
-    (file/rename tmp final)
-    (assert (nil? (file/sync dir)) "then the directory that holds the rename")
-    (assert (= (file/read final) "v2"))
-    (let [[ok? err] (protect (file/sync (path/join dir "missing")))]
-      (assert (not ok?))
-      (assert (= (get err :error) :io-error)))))
-```
-
 ## System args and environment
 
 ```lisp
@@ -411,6 +322,7 @@ A rename is durable only after its directory is synced too:
 ## See also
 
 - [io/timeout.md](io/timeout.md) — the `:timeout` and `:deadline` bounds, and how a waiting call ends
+- [io/files.md](io/files.md) — the `file/` functions by path, temporary directories and `file/sync`
 - [subprocess.md](subprocess.md) — the subprocess type, its reads, kill and wait
 - [behaviors.md](behaviors.md) — supervised subprocesses, GenServer, actors
 - [concurrency.md](concurrency.md) — ev/spawn, ev/join, parallel I/O

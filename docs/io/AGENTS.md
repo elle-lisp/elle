@@ -6,4 +6,5 @@ Up: [..](../AGENTS.md)
 
 ## Documents
 
+- [files.md](files.md) — **Files** The `file/` functions that take a path: which move contents on the I/O pool, which touch only metadata, temporary directories, and sync.
 - [timeout.md](timeout.md) — **I/O deadlines** How long a port call, an accept, a connect or a wait may take, and how each one ends when nothing arrives.

@@ -1,6 +1,6 @@
 # lib
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-21 -->
 
 Reusable Elle modules, one closure each: `(import "std/name")` gives you the closure, and calling it returns the struct of exports.
 
@@ -39,7 +39,7 @@ This table lists the modules with a guide here, and their neighbours.
 | [redis/](redis/AGENTS.md) | Redis submodules: resp, connection, keyspace, collections, zset, server | [redis/overview.md](redis/overview.md) |
 | [framing.lisp](framing.lisp) | Lines, delimited records and exact counts over any byte source | [framing.md](framing.md) |
 | [gun.lisp](gun.lisp) | Graph database in the shape of GUN: HAM merge, memory and Redis stores, a WebSocket peer mesh, signed user spaces and encryption | [gun.md](gun.md) |
-| [gun/](gun/AGENTS.md) | gun submodules: state, value, field, ham, graph, store, wire, sea, core, peer, mesh | [gun/overview.md](gun/overview.md) |
+| [gun/](gun/AGENTS.md) | gun submodules: state, value, field, ham, graph, store, wire, sea, core, peer, wait, mesh, join, chain, write | [gun/overview.md](gun/overview.md) |
 | [dns.lisp](dns.lisp) | DNS client (RFC 1035) | |
 | [dns/wire.lisp](dns/wire.lisp) | The DNS wire codec: names, queries, responses | |
 | [aws.lisp](aws.lisp) | AWS client: SigV4 signing, HTTPS, service dispatch | [aws/](aws/AGENTS.md) |

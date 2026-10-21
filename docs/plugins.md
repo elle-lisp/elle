@@ -1,6 +1,6 @@
 # Plugins
 
-<!-- audited: 2026-10-19 -->
+<!-- audited: 2026-10-21 -->
 
 Elle ships with Rust plugins and pure Elle standard library modules.
 Plugins are cdylib crates loaded at runtime via `import`. Standard modules

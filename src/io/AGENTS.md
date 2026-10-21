@@ -1,6 +1,6 @@
 # I/O Module
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-21 -->
 
 ## Purpose
 
@@ -27,6 +27,7 @@ to a backend for execution.
 | [request/process.rs](request/process.rs) | `ProcessHandle` and `ExitRecord` — the `subprocess` value and the record its status is kept in |
 | `request/{buffer,socket,file}.rs` | In-place buffer edits a completion makes, the socket request shapes, and `FileOp`, an operation on a file by its path. |
 | [completion.rs](completion.rs) | `process_raw_completion` — converts raw CQE/thread results to `Completion` |
+| `completion/{port,file}.rs` | The completion of an operation on a port, and of an operation on a file by its path. |
 | [frame.rs](frame.rs) | Where a read's answer ends in the bytes it owns, and how a port's remainder joins it |
 | [landing.rs](landing.rs) | Where a stream operation's bytes land: the remainder a read borrows, a write's payload by address, and what a pool worker is handed of both. See [where a stream operation's bytes live](../../docs/impl/io-bytes.md). |
 | [watch.rs](watch.rs) | `FsWatcher` — inotify (Linux) or kqueue (macOS), for `watch` and `watch-next` |
@@ -59,9 +60,8 @@ Stream primitive → (SIG_IO, IoRequest) → Scheduler → io/submit → AsyncBa
 `IoOp` has 16 variants. Every operation that names an existing port is one
 `PortOp` under `IoOp::Port`, so the port guard runs once for all of them:
 
-**`PortOp` (10):** `ReadLine`, `Read { count }`, `ReadExact { count }`,
-`ReadAll`, `Write { data }`, `Flush`, `Accept`, `SendTo { addr, port_num,
-data }`, `RecvFrom { count, result }`, `Shutdown { how }`
+**`PortOp` (10):** `ReadLine`, `Read`, `ReadExact`, `ReadAll`, `Write`, `Flush`,
+`Accept`, `SendTo`, `RecvFrom`, `Shutdown`
 
 **File position:** `Seek { offset: i64, whence: i32 }`, `Tell`
 
@@ -488,7 +488,7 @@ The ports and the handle are built at the completion's `Birthplace` — one regi
 11. **Dispatch-before-port-guard:** `Spawn` and `ProcessWait` must be dispatched before the `as_external::<Port>()` guard. `Spawn` has `Value::NIL` as its port field; `ProcessWait` has a `ProcessHandle` in the port field (not a `Port`).
 12. **ProcessWait siginfo lifetime:** The `siginfo_t` buffer in `PendingOp::ProcessWait` is heap-allocated via `Box::into_raw` and must remain valid until the CQE arrives. Completion processing reclaims it via `Box::from_raw`, and so does `PendingOp::retire`. The fast path (a status already on the handle) never inserts a `PendingOp::ProcessWait`, so the buffer is only allocated for truly pending operations.
 13. **IORING_OP_WAITID requirement:** Linux 6.7+; older kernels return `-EINVAL` in the CQE. The thread-pool backend reaps the child itself, asking with `WNOHANG` and pacing the asks under the operation's bound.
-14. **Open and the file operations run on the thread pool, on every platform.** An `open(2)` of a fifo waits for the other end, and a wait is only answerable where the worker holds it: `IORING_OP_OPENAT` blocks an io-wq thread that a linked timeout marks cancelled but cannot retract. One implementation is also one answer — the fifo behavior in [io](../../docs/io.md) is the same whichever platform is underneath. A sync opens its path with `O_NONBLOCK`, so a fifo answers `EINVAL` at once rather than parking the worker until a writer arrives. The other file operations run through blocking `std::fs` calls, which nothing interrupts: on a fifo they hold their worker until the other end opens, and they say so with `Bounds::uninterruptible`. They hold no scheduler, so other fibers run meanwhile. Pinned by [openfile.rs](../../src/io/threadpool/tests/openfile.rs), [file.rs](../../src/io/threadpool/tests/file.rs), [file-sync.lisp](../../tests/lang/file-sync.lisp) and [file-content.lisp](../../tests/lang/file-content.lisp).
+14. **Open and the file operations run on the thread pool, on every platform.** An `open(2)` of a fifo waits for the other end, and a wait is only answerable where the worker holds it: `IORING_OP_OPENAT` blocks an io-wq thread that a linked timeout marks cancelled but cannot retract. One implementation is also one answer — the fifo behavior in [files](../../docs/io/files.md) is the same whichever platform is underneath. A sync opens its path with `O_NONBLOCK`, so a fifo answers `EINVAL` at once rather than parking the worker until a writer arrives. The other file operations run through blocking `std::fs` calls, which nothing interrupts: on a fifo they hold their worker until the other end opens, and they say so with `Bounds::uninterruptible`. They hold no scheduler, so other fibers run meanwhile. Pinned by [openfile.rs](../../src/io/threadpool/tests/openfile.rs), [file.rs](../../src/io/threadpool/tests/file.rs), [file-sync.lisp](../../tests/lang/file-sync.lisp) and [file-content.lisp](../../tests/lang/file-content.lisp).
 15. **Seek/Tell are immediate completions.** `IoOp::Seek` and `IoOp::Tell` are never submitted to io_uring or the thread pool. They call `libc::lseek(2)` synchronously in the backend's submit/execute path and return an immediate completion. `PoolOp` has no `Seek` or `Tell` variant.
 16. **Task dispatch:** `IoOp::Task` is dispatched before the port guard (it is portless). There is no io_uring equivalent for an arbitrary closure, so a `Task` always runs on the thread pool (feeding the `CompletionHub`) on every platform. The `TaskFn` closure is taken exactly once via `RefCell<Option<...>>`; double-take returns an error.
 17. **One submission, one pending entry, one id.** `submit_op` files the

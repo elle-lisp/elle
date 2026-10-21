@@ -1,6 +1,6 @@
 # An operation in flight
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-21 -->
 
 What a submitted I/O operation holds and owns, and how it ends when the fiber that asked is gone.
 
@@ -63,8 +63,8 @@ root it recorded, not of the region it started from.
 An operand really does arrive `Owned`. A connection accepted inside a process
 and handed to a per-connection `ev/spawn` is adopted into that activation's
 subtree, and `handle-io-forward` then submits a write on it for the child
-scheduler. [process-io.lisp](../../tests/lang/process-io.lisp) § 10 is that program, and the retain on
-the port's own region there holds nothing at all.
+scheduler. [process-io.lisp](../../tests/lang/process-io.lisp) runs that program, and the retain
+on the port's own region there holds nothing at all.
 
 Retaining the root keeps the whole subtree for the operation's lifetime, which
 is more than the operand needs. The list of operands makes the same trade: one
@@ -91,8 +91,7 @@ free without them. Draining first, while every region is still there, leaves
 that destructor a hold that reaches nothing.
 
 The same order is what lets a drain assemble a completion at teardown: the
-values it reads are still allocated. That is why the WASM tier drained here
-before there was a hold to release, and the rule now covers both. A pool worker
+values it reads are still allocated. A pool worker
 that reads into a buffer or writes from a payload is waited for in the same
 drain, because its bytes land in the regions the sweep frees
 ([where a stream operation's bytes live](io-bytes.md)).

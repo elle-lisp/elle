@@ -1,6 +1,6 @@
 # Capability enforcement
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-21 -->
 
 Capabilities flow down. A fiber's parent decides what the fiber is
 permitted to do. Operations the fiber can't perform become signals the
@@ -128,7 +128,7 @@ the `:fs` bit on it, a fiber denied `:fs` alone could open a port on any
 path and read it, which is the same authority `file/read` grants. The
 `file/` calls that move a file's contents — `file/read`, `file/lines`,
 `file/write`, `file/append`, `file/copy` and `file/sync` — run through the
-scheduler too, and carry both for the same reason ([io](../io.md)).
+scheduler too, and carry both for the same reason ([files](../io/files.md)).
 
 A primitive carries `:fs` when its implementation resolves a filesystem
 path, decided by reading the implementation and not the name. `path/join`,

@@ -1,6 +1,6 @@
 # gun
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-21 -->
 
 A graph database in the shape of GUN: HAM merges on a memory or Redis store, WebSocket peers, signed user spaces and encryption.
 
@@ -8,24 +8,26 @@ The export struct at the bottom of [gun.lisp](gun.lisp) lists what the module
 offers, and `(doc name)` carries each function's arguments.
 [gun/overview.md](gun/overview.md) lists the submodules behind it, and
 [gun/chains.md](gun/chains.md) holds the functions that read and write a
-database. This file holds the data model, the merge rule, the store layout and
-the invariants.
+database. This file holds loading, the data model, the merge rule, the store
+layout and the invariants.
 
 The design follows [GUN](https://gun.eco/) and its HAM conflict rule. It does
 not speak GUN's wire format. Databases join over WebSocket, and
-[gun/mesh.md](gun/mesh.md) holds the peer protocol. User spaces and
-encryption follow GUN's SEA, and [gun/sea.md](gun/sea.md) holds their rules.
+[gun/mesh.md](gun/mesh.md) holds the peer functions and the protocol behind
+them. User spaces and encryption follow GUN's SEA, and
+[gun/sea.md](gun/sea.md) holds their functions and rules.
 
 ## Loading
 
 Called with no argument, the module has the memory store only, no mesh and
 no user spaces. `gun:redis-store` then raises
 `{:error :gun-error :reason :redis-not-configured}`. `gun:serve`,
-`gun:connect`, and `gun:open` given `:peers`, raise `:mesh-not-configured`. `gun:pair`, `gun:user`,
-`gun:secret`, `gun:encrypt` and `gun:decrypt` raise `:sea-not-configured`,
-and so does a chain that reaches a soul starting with `~`. The content node
-`#` needs `:crypto` alone. Without it, `gun:content-key`, `gun:put-content`
-and a chain that reaches `#` raise `:sea-not-configured`.
+`gun:connect`, and `gun:open` given `:peers`, raise `:mesh-not-configured`.
+`gun:pair`, `gun:user`, `gun:secret`, `gun:encrypt` and `gun:decrypt` raise
+`:sea-not-configured`, and so does a chain that reaches a soul starting with
+`~`. The content node `#` needs `:crypto` alone. Without it,
+`gun:content-key`, `gun:put-content` and a chain that reaches `#` raise
+`:sea-not-configured`.
 
 The Redis store needs the `std/redis` module as `:redis`. The mesh needs the
 `std/websocket` module as `:websocket`, built from the plugins that
@@ -166,8 +168,7 @@ memory store share it:
 
 `gun:redis-store` keeps each node in one Redis hash named `<prefix>:<soul>`.
 Each hash field is a key of the node, and its value is the state in decimal, a
-space, and the encoding. A signed field puts its signature in hex between the
-state and the encoding:
+space, and the encoding:
 
 ```text
 HGETALL app:users/alice
@@ -176,6 +177,8 @@ HGETALL app:users/alice
 3) "boss"
 4) "117425205471346688 l:users/bob"
 ```
+
+[gun/sea.md](gun/sea.md) gives the text of a signed field.
 
 `std/redis` holds its connection in a parameter that only `redis:with` binds.
 A Redis store therefore works inside the caller's `redis:with`, and so do
@@ -188,139 +191,6 @@ fibers spawned there, which inherit the binding:
         gun ((import "std/gun") :redis redis)]
     (redis:with "127.0.0.1" 6379
       (fn [] (body gun (gun:open :store (gun:redis-store :prefix prefix)))))))
-```
-
-## Peers
-
-`gun:serve` accepts peers on a TCP listener until the listener closes, so run
-it in its own fiber. `gun:connect` dials a peer at a `ws://` URL. It returns
-when each side has registered the other, and answers a function that closes the
-connection. `gun:peers` answers the ids of the connected peers. A write on
-either side reaches the other, so given the module that `gun-with-mesh` builds,
-this function answers `{"text" "hello"}`:
-
-```lisp
-(defn peers-example [mesh-gun]
-  "Join two databases over loopback, write on one, and read on the other."
-  (let [listener (tcp/listen "127.0.0.1" 0)
-        at (port/path listener)
-        url (string "ws://127.0.0.1:"
-                    (parse-int (slice at (+ 1 (string/find at ":")))) "/gun")
-        server (mesh-gun:open)
-        client (mesh-gun:open)]
-    (ev/spawn (fn [] (mesh-gun:serve server listener)))
-    (let [hang-up (mesh-gun:connect client url)]
-      (defer
-        (begin
-          (hang-up)
-          (port/close listener))
-        (mesh-gun:put (mesh-gun:get client "note") {:text "hello"} :ack 5)
-        (mesh-gun:once (mesh-gun:get server "note"))))))
-```
-
-`gun:open` takes `:peers`, a list of `ws://` URLs, and keeps the database
-joined to each one. For each URL it starts a **keeper**, a fiber that dials
-the URL, and dials again each time the connection ends. `gun:open` returns at
-once, so a read before the first connection answers from local data. When a
-connection arrives, resync pulls every soul the database has loaded, and the
-`gun:on` functions whose values changed are called.
-
-A dial that fails gives its error to `:on-error`, and the keeper waits before
-it dials again. `:redial [min max]` sets that wait in seconds, and defaults to
-`[0.1 30]`. The wait starts at `min`, doubles after each failed dial up to
-`max`, and goes back to `min` after a dial that succeeds. A `:redial` that is
-not two positive numbers, with `min` no more than `max`, raises
-`{:error :gun-error :reason :invalid-redial}`.
-
-`gun:close` ends every keeper and closes every connected peer. It also closes
-each peer that `gun:serve` registers after that, so close the listener too.
-Local reads and writes still work, and a second `gun:close` does nothing.
-After it, `gun:connect` raises `{:error :gun-error :reason :closed}`. A keeper
-is a background fiber, and the end of the program ends it as it ends every
-other. A program calls `gun:close` to end its keepers sooner:
-
-```lisp
-(let [db (gun:open)
-      cfg (gun:get db "cfg")]
-  (gun:put cfg {:theme "dark"})
-  (gun:close db)
-  (gun:close db)
-  (assert (empty? (gun:peers db)))
-  (gun:put cfg {:font "mono"})
-  (assert (= (gun:once cfg) {"theme" "dark" "font" "mono"})))
-(let [[ok? err] (protect (gun:open :redial [5 1]))]
-  (assert (= (get err :reason) :invalid-redial)))
-```
-
-Every peer keeps every write it hears, and forwards what it accepted to its
-other peers. The first read that reaches a soul asks the peers for it, and
-waits for their answers for `:wait` seconds at most. `gun:open` takes `:wait`,
-which defaults to 1.
-
-`gun:put` and `gun:set` return when the write has landed locally. Given
-`:ack seconds`, they also wait for the first peer to ack. They raise
-`{:error :gun-error :reason :no-ack}` when no peer acks in time, and
-`:peer-error` when the peer's merge failed. The write has landed locally in
-both cases.
-
-A write that comes from a peer has no caller to raise to. So an error that
-handling it raises goes to the function `gun:open` takes as `:on-error`, with
-the error as its one argument. The default writes a line to stderr.
-
-## User spaces
-
-A user is a key pair. `gun:pair` makes one from a random seed, and
-`(gun:pair seed)` rebuilds the pair of a 32-byte seed. A pair is a struct of
-`:seed`, which the user keeps secret, and the public keys `:pub` and `:epub`
-in hex.
-
-The soul `~<pub>` and every soul below it form the **space** of that pair.
-Every field in a space carries a signature by the pair, and a database refuses
-a field in a space without a valid one. So only the pair can write its space,
-and everybody can read it and check it. `gun:user` answers the chain at the
-root of a pair's space, and writes through it are signed. Given the module
-that `gun-with-sea` builds, this function answers `{"name" "Alice"}`:
-
-```lisp
-(defn user-example [sea-gun]
-  "Write in a user space, and read it back through a chain without the pair."
-  (let [db (sea-gun:open)
-        alice (sea-gun:pair)]
-    (sea-gun:put (sea-gun:get (sea-gun:user db alice) "profile")
-                 {:name "Alice"})
-    (sea-gun:once (sea-gun:get (sea-gun:get db (string "~" alice:pub))
-                               "profile"))))
-```
-
-A write into a space through a chain without its pair raises
-`{:error :gun-error :reason :unsigned}`, and writes nothing.
-[gun/sea.md](gun/sea.md) holds the signed text and what each entry point does
-with a field that fails.
-
-## Encryption
-
-`gun:encrypt` seals a value under a 32-byte key and answers bytes, which a
-`put` stores like any other value. `gun:decrypt` opens the bytes under the same
-key and answers the value. It raises `:decrypt-failed` for a wrong key or
-changed bytes. `gun:secret` answers the key that two pairs share: each side
-passes its own pair and the other side's `:epub`. A user publishes `:epub` in
-its own space, so nobody else can replace it. Given the module that
-`gun-with-sea` builds, this function answers `"for Bob"`:
-
-```lisp
-(defn secret-example [sea-gun]
-  "Alice publishes her epub, encrypts a note for Bob, and Bob decrypts it."
-  (let [db (sea-gun:open)
-        alice (sea-gun:pair)
-        bob (sea-gun:pair)
-        me (sea-gun:user db alice)]
-    (sea-gun:put (sea-gun:get me "epub") alice:epub)
-    (sea-gun:put (sea-gun:get me "note")
-                 (sea-gun:encrypt (sea-gun:secret alice bob:epub) "for Bob"))
-    (let [space (sea-gun:get db (string "~" alice:pub))
-          epub (sea-gun:once (sea-gun:get space "epub"))]
-      (sea-gun:decrypt (sea-gun:secret bob epub)
-                       (sea-gun:once (sea-gun:get space "note"))))))
 ```
 
 ## Invariants
@@ -345,12 +215,18 @@ its own space, so nobody else can replace it. Given the module that
 
 ## Running tests
 
-The memory store, maps and the peer messages need nothing outside the
-process:
+Each `tests/lang/gun*.lisp` file runs on its own. The files that test the
+states, values, the graph, the memory store, chains, maps and the peer
+messages need nothing outside the process:
 
 ```bash
+elle tests/lang/gun-state.lisp
+elle tests/lang/gun-value.lisp
+elle tests/lang/gun-graph.lisp
+elle tests/lang/gun-store.lisp
 elle tests/lang/gun.lisp
 elle tests/lang/gun-map.lisp
+elle tests/lang/gun-link.lisp
 elle tests/lang/gun-wire.lisp
 ```
 
@@ -359,24 +235,31 @@ databases over loopback. `make suite-plugins` builds both:
 
 ```bash
 elle tests/lang/gun-mesh.lisp
+elle tests/lang/gun-mesh-reads.lisp
+elle tests/lang/gun-mesh-errors.lisp
 elle tests/lang/gun-sync.lisp
+elle tests/lang/gun-walks.lisp
 elle tests/lang/gun-redial.lisp
 ```
 
 User spaces and encryption need the `plugin/crypto` and `plugin/random`
-plugins, and the content node needs `plugin/crypto`. The last file also joins
-databases over loopback, so it needs `plugin/hash` too.
+plugins, and the content node needs `plugin/crypto`. The last two files also
+join databases over loopback, so they need `plugin/hash` too.
 `make suite-plugins` builds all three:
 
 ```bash
 elle tests/lang/gun-sea.lisp
+elle tests/lang/gun-sea-admission.lisp
+elle tests/lang/gun-seal.lisp
 elle tests/lang/gun-content.lisp
+elle tests/lang/gun-content-refused.lisp
 elle tests/lang/gun-sea-mesh.lisp
+elle tests/lang/gun-sea-forged.lisp
 ```
 
 The Redis store needs Redis on 127.0.0.1:6379. The file also joins two
 Redis-backed databases and writes in a user space, so it needs the plugins
-of the two files above:
+of the files above:
 
 ```bash
 elle tests/lang/gun-redis.lisp

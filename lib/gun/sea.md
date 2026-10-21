@@ -1,14 +1,15 @@
 # sea
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-21 -->
 
 The SEA rules of std/gun: key pairs, user spaces that only their key writes, the signed text, the content node, admission, and encryption.
 
-[gun.md](../gun.md) holds what a caller sees: `gun:pair`, `gun:user`,
-`gun:secret`, `gun:encrypt` and `gun:decrypt`, and
-[chains.md](chains.md) holds `gun:content-key` and `gun:put-content`. This
-file holds the rules behind them, and [sea.lisp](sea.lisp) holds the code. The primitives come from
-the crypto plugin, whose
+[gun.md](../gun.md) holds the data model, and the `:crypto` and `:random`
+that the module needs for any of this. This file holds what `gun:pair`,
+`gun:user`, `gun:secret`, `gun:encrypt` and `gun:decrypt` do, and the rules
+behind them. [chains.md](chains.md) holds `gun:content-key` and
+`gun:put-content`, and [sea.lisp](sea.lisp) holds the code. The primitives
+come from the crypto plugin, whose
 [README](https://github.com/elle-lisp/plugins/blob/main/crypto/README.md)
 gives their arguments and failures.
 
@@ -43,6 +44,31 @@ and `gun:set` through such a chain sign each field they write into the
 signer's space. A field they write into another space stays unsigned, so
 admission refuses it. `gun:set` in a space gives the new node the soul
 `~<pub>/<uuid>`, so the node stays in the space. `gun:user` writes nothing.
+
+So only the pair can write its space, and everybody can read it and check it.
+Given a module loaded with `:crypto` and `:random`, this function answers
+`{"name" "Alice"}`:
+
+```lisp
+(defn user-example [sea-gun]
+  "Write in a user space, and read it back through a chain without the pair."
+  (let [db (sea-gun:open)
+        alice (sea-gun:pair)]
+    (sea-gun:put (sea-gun:get (sea-gun:user db alice) "profile")
+                 {:name "Alice"})
+    (sea-gun:once (sea-gun:get (sea-gun:get db (string "~" alice:pub))
+                               "profile"))))
+
+(defn sea-gun []
+  "The gun module with :crypto and :random, or nil without both plugins."
+  (let [[crypto-ok? crypto] (protect (import "plugin/crypto"))
+        [random-ok? random] (protect (import "plugin/random"))]
+    (when (and crypto-ok? random-ok?)
+      ((import "std/gun") :crypto crypto :random random))))
+
+(when-let [g (sea-gun)]
+  (assert (= (user-example g) {"name" "Alice"})))
+```
 
 ## Signatures
 
@@ -142,4 +168,22 @@ value of their own and can be put anywhere.
   or a plaintext that does not decode raise `:decrypt-failed`.
 
 A user publishes an encryption key by putting its `epub` in its own space,
-where nobody else can replace it. [gun.md](../gun.md) shows the put.
+where nobody else can replace it. Given the module that `sea-gun` builds
+above, this function answers `"for Bob"`:
+
+```lisp
+(defn secret-example [g]
+  "Alice publishes her epub, encrypts a note for Bob, and Bob decrypts it."
+  (let [db (g:open)
+        alice (g:pair)
+        bob (g:pair)
+        me (g:user db alice)]
+    (g:put (g:get me "epub") alice:epub)
+    (g:put (g:get me "note") (g:encrypt (g:secret alice bob:epub) "for Bob"))
+    (let [space (g:get db (string "~" alice:pub))
+          epub (g:once (g:get space "epub"))]
+      (g:decrypt (g:secret bob epub) (g:once (g:get space "note"))))))
+
+(when-let [g (sea-gun)]
+  (assert (= (secret-example g) "for Bob")))
+```

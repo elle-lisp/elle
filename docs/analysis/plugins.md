@@ -1,6 +1,6 @@
 # The plugins submodule in CI
 
-<!-- audited: 2026-10-19 -->
+<!-- audited: 2026-10-21 -->
 
 How CI compiles the `plugins/` submodule, asserts what it built, and builds the plugins the language suite loads.
 
@@ -9,7 +9,8 @@ How CI compiles the `plugins/` submodule, asserts what it built, and builds the 
 The `plugins/` submodule is a separate cargo workspace. Every plugin in it
 takes `elle-plugin` by path, so a rebuild moves the plugin and the SDK
 together: a changed `elle_api!` declaration either compiles at every call site
-or does not, and a job that never checks the submodule out sees neither.
+or does not. A job that never checks the submodule out compiles none of it,
+so a source break in a plugin reaches no gate.
 
 The ABI version guard does not close that gap. It compares `ABI_VERSION` when
 a plugin loads, so it catches a stale `.so` built against an older SDK. A
@@ -119,7 +120,7 @@ same way, so the doctest steps come after the build too.
 `SUITE_PLUGINS` names what the language suite imports and nothing more, because
 each name costs every suite job a build. The implementation suite's GPU files
 import `plugin/vulkan`, which needs a GPU, so no job builds it for them.
-[plugins.rs](../../tests/integration/plugins.rs) is the standing check on all
-three claims: every plugin a language-suite file imports is in `SUITE_PLUGINS`,
-the assertion fails on a missing artifact, and every job that runs the language
-suite, in every workflow, builds them first.
+[suite_plugins.rs](../../tests/integration/suite_plugins.rs) is the standing
+check on all three claims: every plugin a language-suite file imports is in
+`SUITE_PLUGINS`, the assertion fails on a missing artifact, and every job that
+runs the language suite, in every workflow, builds them first.
