@@ -391,6 +391,6 @@ reasoning patterns.
 | [special.rs](../src/hir/analyze/forms/special.rs) | Qualified symbol desugaring (`a:b` → `(get a :b)`) |
 | [lexer.rs](../src/reader/lexer.rs) | Qualified symbol lexing (`a:b` as a single token) |
 | [compile.rs](../src/pipeline/compile.rs) | `compile_file`: file-as-letrec compilation |
-| [module_cli.rs](../tests/integration/module_cli.rs) | A cycle of literal imports, run as a program and analyzed |
+| [cycle.rs](../tests/integration/module_cli/cycle.rs) | A cycle of literal imports, run as a program and analyzed |
 | [modules.lisp](../tests/lang/modules.lisp) | Behavioral tests for module patterns |
 | [modules/](../tests/modules) | Module fixtures (formatter, counter, test) |
