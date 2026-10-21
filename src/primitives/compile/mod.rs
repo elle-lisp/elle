@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-21
 //! Compiler-as-library primitives: analyze Elle source and query the results.
 //!
 //! docs/analysis/portrait.md
@@ -61,105 +61,8 @@ pub(crate) use spans::*;
 mod callgraph;
 pub(crate) use callgraph::*;
 
-// ── Helper ─────────────────────────────────────────────────────────────
-
-pub(super) fn kw(name: &str) -> TableKey {
-    TableKey::keyword(name)
-}
-
-// ── Analysis handle ────────────────────────────────────────────────────
-
-/// (byte_offset, byte_len) of a name token in source text.
-pub(super) type NameSpan = (usize, usize);
-
-/// Opaque handle wrapping the result of `analyze_file`.
-///
-/// Stored as `ctx.external("analysis", AnalysisHandle)`.  Query
-/// primitives downcast the External to access the fields.
-pub struct AnalysisHandle {
-    pub hir: Hir,
-    pub arena: BindingArena,
-    pub symbol_index: SymbolIndex,
-    pub diagnostics: Vec<Diagnostic>,
-    /// Function name → Signal, built eagerly.
-    pub signal_map: HashMap<String, Signal>,
-    /// Function name → `Vec<CallEdge>`, built eagerly.
-    pub call_graph: CallGraphData,
-    /// Original source text.
-    pub source: String,
-    /// Binding → all source locations where the binding's name appears.
-    pub binding_spans: HashMap<Binding, Vec<NameSpan>>,
-}
-
-#[derive(Debug, Clone)]
-pub struct CallEdge {
-    pub callee: String,
-    pub line: u32,
-    pub col: u32,
-    pub is_tail: bool,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct CallGraphData {
-    /// caller name → outgoing edges
-    pub edges: HashMap<String, Vec<CallEdge>>,
-    /// callee name → caller names
-    pub reverse: HashMap<String, Vec<String>>,
-    /// Functions with no callers.
-    pub roots: Vec<String>,
-    /// Functions that call no user-defined functions.
-    pub leaves: Vec<String>,
-}
-
-// ── Extract the handle from an argument ────────────────────────────────
-
-pub(super) fn get_handle<'a>(
-    args: &'a [Value],
-    name: &str,
-    ctx: &mut NativeCtx,
-) -> Result<&'a AnalysisHandle, (SignalBits, Value)> {
-    match args[0].as_external::<AnalysisHandle>() {
-        Some(h) => Ok(h),
-        None => Err((
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                format!(
-                    "{}: expected analysis handle, got {}",
-                    name,
-                    args[0].type_name()
-                ),
-            ),
-        )),
-    }
-}
-
-/// Resolve a keyword argument to a function name string.
-pub(super) fn resolve_name(
-    args: &[Value],
-    idx: usize,
-    prim_name: &str,
-    ctx: &mut NativeCtx,
-) -> Result<String, (SignalBits, Value)> {
-    // Accept keyword or string.
-    if let Some(name) = ctx.keyword_spelling(args[idx]) {
-        return Ok(name.to_string());
-    }
-    if let Some(name) = args[idx].with_string(|s| s.to_string()) {
-        return Ok(name);
-    }
-    Err((
-        SIG_ERROR,
-        ctx.error(
-            "type-error",
-            format!(
-                "{}: expected keyword or string for function name, got {}",
-                prim_name,
-                args[idx].type_name()
-            ),
-        ),
-    ))
-}
+mod handle;
+pub(crate) use handle::*;
 
 // ── Registration ───────────────────────────────────────────────────────
 
@@ -359,7 +262,7 @@ primitive! {
     "compile/barrier-module" => prim_compile_barrier_module {
         signal: Signal::query_errors(),
         arity: Arity::Exact(2),
-        doc: "Compile a file (SOURCE, NAME) in the per-form fault-barrier test mode: whole-module analysis (epoch + shared bindings), then return a mutable array of [index thunk] pairs — one 0-arg thunk per test (expression) form, each capturing the file's shared bindings. def/var forms run eagerly as setup. Signals on a compile failure or a def-initializer fault. Powers `elle test` (src/test).",
+        doc: "Compile a file (SOURCE, NAME) in the per-form fault-barrier test mode. It runs whole-module analysis (epoch + shared bindings), then returns a mutable array of [index thunk] pairs: one 0-arg thunk per test (expression) form, each capturing the file's shared bindings. def/var forms run eagerly as setup. Signals on a compile failure or a def-initializer fault. Powers `elle test` (src/test).",
         params: &["source", "name"],
         category: "compile",
         example: r#"(compile/barrier-module "(assert (= 1 1) \"ok\")" "<eval>")"#,
@@ -375,7 +278,7 @@ primitive! {
     "compile/whole-module" => prim_compile_whole_module {
         signal: Signal::query_errors(),
         arity: Arity::Exact(2),
-        doc: "Compile a file (SOURCE, NAME) as ONE whole-file thunk (legacy multi-form test mode): whole-module analysis (epoch + letrec bindings), then return a mutable array with a single [0 thunk] pair whose 0-arg thunk runs every top-level form (def/var and expressions alike) in source order. Unlike compile/barrier-module it does not hoist def/var eagerly or slice expressions per form — so an imperative script runs in order, in isolation, matching a direct file run. Signals on a compile failure. Powers `elle test` for multi-form files (src/test).",
+        doc: "Compile a file (SOURCE, NAME) as ONE whole-file thunk (legacy multi-form test mode). It runs whole-module analysis (epoch + letrec bindings), then returns a mutable array with a single [0 thunk] pair. Its 0-arg thunk runs every top-level form (def/var and expressions alike) in source order. Unlike compile/barrier-module it does not hoist def/var eagerly or slice expressions per form — so an imperative script runs in order, in isolation, matching a direct file run. Signals on a compile failure. Powers `elle test` for multi-form files (src/test).",
         params: &["source", "name"],
         category: "compile",
         example: r#"(compile/whole-module "(def x 1)\n(assert (= x 1) \"ok\")" "<eval>")"#,
@@ -417,7 +320,7 @@ primitive! {
         category: "compile",
         example: r#"(compile/dumps "(+ 1 2)" "<eval>")"#,
         // Both arguments are copied out to `&str` and the artifacts are rendered
-        // into fresh strings, so nothing is stored; the struct is minted by the
+        // into fresh strings, so nothing is stored. The struct is minted by the
         // query dispatch rather than in this call's own region, so the result is
         // unbounded. `Opaque` — the table's clean face, pinned at 0 by
         // tests/impl/region-compile-clique-leak.lisp.
