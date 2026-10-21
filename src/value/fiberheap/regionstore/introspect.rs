@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-21
 //! Read-only introspection: counts, byte totals, cross-ref/edge dumps, and the
 //! generation accessor. These back the `arena/*` diagnostics and the free-time
 //! equivalence oracle's comparison views; none mutate reclamation state. The
@@ -21,7 +21,7 @@ impl RegionStore {
 
     /// The recorded outgoing edges of a region as `(target, count)` pairs,
     /// sorted by target id: the test view of `RegionEntry::outgoing`. It is the
-    /// § "The outgoing edge table" recorded view, distinct from the
+    /// recorded view of docs/impl/region/ownership.md, distinct from the
     /// `cross_ref_edges` content scan, so a test can pin the two equal. Empty for
     /// an absent region.
     #[cfg(test)]
@@ -71,11 +71,11 @@ impl RegionStore {
 
     /// Sum of live objects across every active region. The
     /// `FiberHeap::alloc_count` running counter is incremented at alloc and
-    /// decremented only on the decref/decref_if_present paths. This reads the
-    /// current per-region object counts directly instead, so it tracks ALL
-    /// reclamation, including a group free (`free_region_group`), which does not
-    /// flow through `decref_region`. That makes it the trustworthy basis for
-    /// `arena/count`.
+    /// decremented only on the decref, decref-if-present and mint-scope paths.
+    /// This reads the current per-region object counts directly instead, so it
+    /// tracks ALL reclamation, including a group free (`free_region_group`),
+    /// which does not flow through `decref_region`. That makes it the
+    /// trustworthy basis for `arena/count`.
     pub fn total_obj_count(&self) -> usize {
         self.regions
             .iter()
@@ -128,10 +128,10 @@ impl RegionStore {
     ///
     /// The *id* dimension, which the object, byte, and page gauges cannot show.
     /// A minted id that never allocates holds none of what they count, yet keeps
-    /// its id out of circulation forever (docs/impl/region/model.md § "Physical
-    /// id recycling"). A mint that finds `free_physical` empty raises this;
-    /// a mint that recycles leaves it alone. So a steady-state loop holds it
-    /// flat, and every unit of growth is an id that did not come back.
+    /// its id out of circulation forever (docs/impl/region/model.md). A mint
+    /// that finds `free_physical` empty raises this; a mint that recycles leaves
+    /// it alone. So a steady-state loop holds it flat, and every unit of growth
+    /// is an id that did not come back.
     ///
     /// This leads [`Self::region_table_len`], which only moves when an id is made
     /// *live*: stranded ids are never materialized, so they inflate the table
@@ -149,7 +149,7 @@ impl RegionStore {
     }
 
     /// Every live object across every active region, in region-id order.
-    /// Drives the post-boot heap census (value/fiberheap/census.rs).
+    /// Drives the post-boot heap census (src/value/fiberheap/census.rs).
     pub(crate) fn live_objects(&self) -> impl Iterator<Item = &HeapObject> {
         self.regions
             .iter()
@@ -255,8 +255,7 @@ impl RegionStore {
     /// filed. So quiesce each backend BEFORE the id-ordered free sweep, while
     /// every value is still there. The drain then never reads, or releases, what
     /// an earlier region in the same sweep already freed
-    /// (docs/impl/io-inflight.md § "A hold is let go while its store is still
-    /// there").
+    /// (docs/impl/io-inflight.md).
     pub fn collect_external_data(&self, type_name: &str) -> Vec<std::rc::Rc<dyn std::any::Any>> {
         let mut out = Vec::new();
         for slot in self.regions.iter() {

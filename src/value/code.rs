@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-20
 // docs/impl/region/template.md
 //! The template-derived execution context.
 //!
@@ -75,7 +75,7 @@ impl Code {
     }
 
     /// The static region slots this function's allocations SHARE after a
-    /// builder-idiom merge (docs/impl/region/merging.md § Merging). The alloc
+    /// builder-idiom merge (docs/impl/region/merging.md). The alloc
     /// dispatch consults it through `runtime_region_for_alloc_slot_maybe_merged`:
     /// a slot here mint-or-reuses (child mints, parent reuses) instead of always
     /// minting. Empty unless a merge fired (a nested `%pair` literal seeding the
@@ -86,13 +86,12 @@ impl Code {
     }
 
     /// The local slots this function's **value-routed** releases read, ascending
-    /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
-    /// still owes"). A value route is `LoadLocal s; DecrefValueRegion;
-    /// StoreLocal s nil`, so the slot is the release's whole identity and the nil
-    /// stamp records that it ran. An error exit walks these slots and releases
-    /// what each still holds — the releases the abandoned frame owed and can no
-    /// longer reach. Empty for a body with no value route, so the walk is then a
-    /// single length check.
+    /// (docs/impl/region/unwind.md). A value route is `LoadLocal s;
+    /// DecrefValueRegion; StoreLocal s nil`, so the slot is the release's whole
+    /// identity and the nil stamp records that it ran. An error exit walks these
+    /// slots and releases what each still holds — the releases the abandoned
+    /// frame owed and can no longer reach. Empty for a body with no value route,
+    /// so the walk is then a single length check.
     #[inline]
     pub fn frame_release_slots(&self) -> &[u16] {
         self.template.frame_release_slots()
@@ -100,10 +99,10 @@ impl Code {
 
     /// The static region slots this function's **slot-routed** releases name,
     /// ascending — the `DecrefRegion` half of [`Self::frame_release_slots`]
-    /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
-    /// still owes"). That route's receipt is the activation region map: the alloc
-    /// mints the mapping and the release takes it, so a slot still mapped when the
-    /// frame is abandoned is a release that did not run.
+    /// (docs/impl/region/unwind.md). That route's receipt is the activation
+    /// region map: the alloc mints the mapping and the release takes it, so a
+    /// slot still mapped when the frame is abandoned is a release that did not
+    /// run.
     #[inline]
     pub fn frame_release_regions(&self) -> &[u32] {
         self.template.frame_release_regions()

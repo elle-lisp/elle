@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-21
 //! Reference counting: the incref/decref pair and the bookkeeping half of a
 //! free. The free cascade walks the content-edge tables kept here, rather than
 //! scanning pages.
@@ -72,19 +72,18 @@ impl RegionStore {
         // Direct decrefs (not from cascade) must hit a region that
         // was actually allocated. A miss here means one of two things. Either
         // the solver assigned a region id that no instruction
-        // alloc_in_region'd (docs/impl/region/rules.md § "Every region must
-        // correspond to a real allocation"), or a double-free. Cascade decrefs
-        // are exempt because a single region may be referenced
-        // multiple times by another's contents and may have already
-        // been freed by an earlier cascade visit.
+        // alloc_in_region'd (Rule 2 of docs/impl/region/rules.md), or a
+        // double-free. Cascade decrefs are exempt because a single region may
+        // be referenced multiple times by another's contents and may have
+        // already been freed by an earlier cascade visit.
         let direct = from_cascade.is_none();
         // The same violation as a NUMBER, for the build the assert below is
-        // compiled out of (docs/impl/region/diagnostics.md § the
-        // `arena/over-frees` bullet). The dashboards run in release, where a rate
-        // is ratcheted on every landing, and a rate cannot see a release that ran
-        // twice — the heap it leaves is smaller, not larger. The counter is read
-        // there; the assert stays, because a debug run should still abort at the
-        // violation and name the id.
+        // compiled out of (`arena/over-frees`, docs/impl/region/diagnostics.md).
+        // The dashboards run in release, where a rate is ratcheted on every
+        // landing, and a rate cannot see a release that ran twice — the heap it
+        // leaves is smaller, not larger. The counter is read there; the assert
+        // stays, because a debug run should still abort at the violation and
+        // name the id.
         if direct && (idx >= self.regions.len() || self.regions[idx].is_none()) {
             self.over_frees = self.over_frees.saturating_add(1);
         }
@@ -92,8 +91,7 @@ impl RegionStore {
             from_cascade.is_some() || (idx < self.regions.len() && self.regions[idx].is_some()),
             "DecrefRegion({id}) but region was never alloc_in_region'd \
              (or already freed) — phantom region or double-free; \
-             see docs/impl/region/rules.md § 'Every region must correspond to a \
-             real allocation'",
+             see Rule 2 of docs/impl/region/rules.md",
         );
         if idx >= self.regions.len() {
             return false;
@@ -104,9 +102,9 @@ impl RegionStore {
         // borrow ends first.
         let (freed, over_free) = match self.regions[idx].as_mut() {
             None => (false, false),
-            // owned ⇒ RC frozen (docs/impl/region/ownership.md § "The runtime: a
-            // reclamation typestate"): an `Owned` region has no count to
-            // decrement — it is reclaimed only by its owner's subtree drop. Both a
+            // owned ⇒ RC frozen (docs/impl/region/ownership.md): an `Owned`
+            // region has no count to decrement — it is reclaimed only by its
+            // owner's subtree drop. Both a
             // direct decref and a cascade decref (the owner's free-time content
             // scan hitting an interior child) land here and no-op; the subtree
             // drop frees the child explicitly. The no-op is *structural* (the
@@ -166,18 +164,16 @@ impl RegionStore {
     /// Free a region — tolerant of "never alloc'd" callers.
     ///
     /// This is the entry point for runtime and macro callers that reserve a
-    /// region id without necessarily allocating into it: the per-expansion
-    /// transient in `expand_macro_call`, the per-compilation syntax arena in
-    /// `pipeline::compile::with_syntax_arena`, and the embedding API. The
-    /// block may end without producing any heap value, and then there is no
-    /// slot in the store. That is a legitimate pattern, so this path silently
+    /// region id without necessarily allocating into it: a unit's syntax
+    /// working arena in `pipeline::compile::with_syntax_arena`, the prelude's in
+    /// `Expander::load_prelude`, and the process roots at teardown. The block
+    /// may end without producing any heap value, and then there is no slot in
+    /// the store. That is a legitimate pattern, so this path silently
     /// skips when the slot is absent.
     ///
-    /// For the bytecode `DecrefRegion` path — the one the regions
-    /// audit covers — use `decref`, which asserts the slot exists
-    /// (debug builds only). The split keeps the strict invariant on
-    /// the path it applies to without breaking the tolerant runtime
-    /// pattern.
+    /// For the bytecode `DecrefRegion` path, use `decref`, which asserts the
+    /// slot exists (debug builds only). The split keeps the strict invariant on
+    /// the path it applies to without breaking the tolerant runtime pattern.
     pub fn decref_if_present(&mut self, id: RuntimeRegion) -> usize {
         let idx = id.get() as usize;
         if idx >= self.regions.len() || self.regions[idx].is_none() {
@@ -186,11 +182,9 @@ impl RegionStore {
         self.decref(id)
     }
     /// Record one outgoing content edge `src → dst` into `src`'s edge table
-    /// (docs/impl/region/ownership.md § "The outgoing edge table"), mirrored into
-    /// `dst`'s `incoming` table (§ "The incoming edge table and the external-
-    /// reference rescue") in the same call so the two ledgers cannot drift
-    /// independently. Applies the same
-    /// filter `find_object_cross_refs` applies — a reserved target (0/1) or a
+    /// (docs/impl/region/ownership.md), mirrored into `dst`'s `incoming` table in
+    /// the same call so the two ledgers cannot drift independently. Applies the
+    /// same filter `find_object_cross_refs` applies — a reserved target (0/1) or a
     /// self-edge (`dst == src`) records nothing — so the recorded table stays
     /// scan-equivalent, which the free-time oracle asserts. `src` must already
     /// exist (the alloc funnel `ensure_raw`s it; the mutable-store seam and the
@@ -223,8 +217,7 @@ impl RegionStore {
                     false,
                     "record_outgoing({src} → {dst}): the target has no entry, so the \
                      incoming mirror cannot be maintained — an edge to a region no live \
-                     value can reside in (docs/impl/region/ownership.md § 'The incoming \
-                     edge table and the external-reference rescue')"
+                     value can reside in (docs/impl/region/ownership.md)"
                 ),
             }
         }
@@ -260,8 +253,7 @@ impl RegionStore {
                     debug_assert!(
                         false,
                         "unrecord_outgoing({src} → {dst}): no recorded edge to remove — \
-                         outgoing-edge accounting drift (docs/impl/region/ownership.md \
-                         § 'The outgoing edge table')"
+                         outgoing-edge accounting drift (docs/impl/region/ownership.md)"
                     );
                     false
                 }
@@ -293,16 +285,14 @@ impl RegionStore {
                         *c == count,
                         "unmirror_incoming({src} → {dst}): removing {count} from a mirror \
                          of {c} — incoming-edge accounting drift \
-                         (docs/impl/region/ownership.md § 'The incoming edge table and \
-                         the external-reference rescue')"
+                         (docs/impl/region/ownership.md)"
                     );
                     entry.incoming.remove(&src);
                 }
                 None => debug_assert!(
                     false,
                     "unmirror_incoming({src} → {dst}): no mirrored edge to remove — \
-                     incoming-edge accounting drift (docs/impl/region/ownership.md \
-                     § 'The incoming edge table and the external-reference rescue')"
+                     incoming-edge accounting drift (docs/impl/region/ownership.md)"
                 ),
             }
         }
@@ -326,8 +316,8 @@ impl RegionStore {
             // Record the outgoing edge in the SAME loop that increfs it, so the
             // alloc-path table is scan-equivalent by construction. `refs` is the
             // very output of `find_object_cross_refs`, the function the free-time
-            // oracle scans with (docs/impl/region/ownership.md § "The outgoing
-            // edge table"). The reserved/self filter lives in `record_outgoing`.
+            // oracle scans with (docs/impl/region/ownership.md). The
+            // reserved/self filter lives in `record_outgoing`.
             self.record_outgoing(own_id, rid);
         }
     }

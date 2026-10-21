@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-20
 //! What one activation owes the region system when it ends.
 //!
 //! Two obligations, one life. The **owner node** is the pages-less forest root
@@ -6,8 +6,7 @@
 //! releases a frame-replacing tail call stranded, which the new activation took
 //! over. Both must reach the activation's normal completion across however many
 //! parks it takes on the way, and both must be discharged where the activation
-//! is abandoned instead (docs/impl/region/owner.md § "A deferred tail-call
-//! release has the node's life").
+//! is abandoned instead (docs/impl/region/owner.md).
 //!
 //! Carrying them as one record is what makes the move discipline enforceable:
 //! every site that takes the slot, parks it in a `BytecodeFrame`, restores it,
