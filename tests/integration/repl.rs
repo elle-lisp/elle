@@ -1,5 +1,5 @@
-// audited: 2026-10-13
-// The REPL fed through a pipe: one form at a time, what a line binds, and what a file a line imports cannot see.
+// audited: 2026-10-21
+// The REPL fed through a pipe: one form at a time, what a line binds, and the errors a session survives.
 // docs/pipeline.md
 
 use std::io::Write;
@@ -194,51 +194,6 @@ fn defmacro_redefinition() {
     assert!(out.contains("⟹ 12"), "redefined: {}", out);
 }
 
-/// A macro typed at the prompt reaches later lines, and not a file a line
-/// imports: the file expands against the prelude and its own macros, as it
-/// would from any program. The counter-factual merged REPL macros into the
-/// instance's expander, so the import expanded `rmac` and answered 43.
-#[test]
-fn a_repl_macro_does_not_reach_an_imported_file() {
-    let dir = tempfile::tempdir().expect("scratch dir");
-    std::fs::write(dir.path().join("m.lisp"), "(+ (rmac) 1)\n").expect("write m.lisp");
-    let (out, err, _) = elle_in(
-        dir.path(),
-        "(defmacro rmac [] 42)\n(rmac)\n(import-file \"m.lisp\")\n",
-    );
-    assert!(out.contains("⟹ 42"), "a later line expands rmac: {out}");
-    assert!(
-        !out.contains("⟹ 43"),
-        "the import must not expand rmac: {out}"
-    );
-    assert!(
-        err.contains("undefined variable: rmac"),
-        "the import compiles without the REPL macro: {err}"
-    );
-}
-
-/// A `def` typed at the prompt reaches later lines, and not a file a line
-/// imports. The counter-factual registered REPL bindings with the instance,
-/// so the import resolved `rdef` and answered 43.
-#[test]
-fn a_repl_def_does_not_reach_an_imported_file() {
-    let dir = tempfile::tempdir().expect("scratch dir");
-    std::fs::write(dir.path().join("m.lisp"), "(+ rdef 2)\n").expect("write m.lisp");
-    let (out, err, _) = elle_in(
-        dir.path(),
-        "(def rdef 41)\n(+ rdef 1)\n(import-file \"m.lisp\")\n",
-    );
-    assert!(out.contains("⟹ 42"), "a later line resolves rdef: {out}");
-    assert!(
-        !out.contains("⟹ 43"),
-        "the import must not resolve rdef: {out}"
-    );
-    assert!(
-        err.contains("undefined variable: rdef"),
-        "the import compiles without the REPL binding: {err}"
-    );
-}
-
 #[test]
 fn defmacro_uses_def() {
     let (out, _, code) = elle(
@@ -246,72 +201,6 @@ fn defmacro_uses_def() {
     );
     assert_eq!(code, 0);
     assert!(out.contains("⟹ 105"), "macro using def: {}", out);
-}
-
-// ── Forward references and mutual recursion ─────────────────────────
-
-#[test]
-fn forward_reference_across_lines() {
-    let (out, _, code) = elle("(defn foo [] (bar))\n(defn bar [] 42)\n(foo)\n");
-    assert_eq!(code, 0, "stdout: {}\n", out);
-    assert!(out.contains("⟹ 42"), "forward ref result: {}", out);
-}
-
-#[test]
-fn mutual_recursion_across_lines() {
-    let (out, _, code) = elle(
-        "(defn ping [n] (if (= n 0) :done (pong (- n 1))))\n\
-         (defn pong [n] (if (= n 0) :done (ping (- n 1))))\n\
-         (ping 10)\n",
-    );
-    assert_eq!(code, 0, "stdout: {}\n", out);
-    assert!(out.contains("⟹ :done"), "mutual recursion: {}", out);
-}
-
-#[test]
-fn forward_reference_same_line() {
-    let (out, _, code) = elle("(defn foo [] (bar)) (defn bar [] 42) (foo)\n");
-    assert_eq!(code, 0, "stdout: {}\n", out);
-    assert!(out.contains("⟹ 42"), "forward ref same line: {}", out);
-}
-
-#[test]
-fn three_way_mutual_recursion() {
-    // a(5) → b(4) → c(3) → a(2) → b(1) → c(0) → :c
-    let (out, _, code) = elle(
-        "(defn a [n] (if (= n 0) :a (b (- n 1))))\n\
-         (defn b [n] (if (= n 0) :b (c (- n 1))))\n\
-         (defn c [n] (if (= n 0) :c (a (- n 1))))\n\
-         (a 5)\n",
-    );
-    assert_eq!(code, 0, "stdout: {}\n", out);
-    assert!(out.contains("⟹ :c"), "three-way mutual recursion: {}", out);
-}
-
-#[test]
-fn deferred_then_resolved_by_later_def() {
-    // foo references bar which doesn't exist yet; bar is defined later;
-    // foo should be resolved and callable.
-    let (out, _, code) = elle(
-        "(defn foo [x] (bar x))\n\
-         (defn bar [x] (* x 10))\n\
-         (foo 3)\n",
-    );
-    assert_eq!(code, 0, "stdout: {}\n", out);
-    assert!(out.contains("⟹ 30"), "deferred resolution: {}", out);
-}
-
-#[test]
-fn chained_forward_references() {
-    // foo → bar → baz, all defined in forward order
-    let (out, _, code) = elle(
-        "(defn foo [] (bar))\n\
-         (defn bar [] (baz))\n\
-         (defn baz [] 99)\n\
-         (foo)\n",
-    );
-    assert_eq!(code, 0, "stdout: {}\n", out);
-    assert!(out.contains("⟹ 99"), "chained forward refs: {}", out);
 }
 
 // ── Error handling ───────────────────────────────────────────────────
@@ -335,4 +224,12 @@ fn error_does_not_poison_session() {
     let (out, err, _) = elle("bad-symbol\n(+ 1 2)\n");
     assert!(err.contains("undefined"), "error: {}", err);
     assert!(out.contains("⟹ 3"), "recovery: {}", out);
+}
+
+mod imports {
+    include!("repl/imports.rs");
+}
+
+mod forward {
+    include!("repl/forward.rs");
 }
