@@ -21,6 +21,7 @@
 (def keyspace ((import "std/redis/keyspace") :connection connection :resp resp))
 (def collections
   ((import "std/redis/collections") :connection connection :resp resp))
+(def zset ((import "std/redis/zset") :connection connection))
 (def server ((import "std/redis/server") :connection connection :resp resp))
 
 ## ── Exports ───────────────────────────────────────────────────────────
@@ -105,20 +106,20 @@
    :sdiff collections:sdiff
 
    # Commands — Sorted Set
-   :zadd collections:zadd
-   :zscore collections:zscore
-   :zrank collections:zrank
-   :zrange collections:zrange
-   :zrangebyscore collections:zrangebyscore
-   :zrem collections:zrem
-   :zcard collections:zcard
-   :zincrby collections:zincrby
-   :zcount collections:zcount
-   :zrevrange collections:zrevrange
-   :zrevrangebyscore collections:zrevrangebyscore
-   :zrange-withscores collections:zrange-withscores
-   :zrangebyscore-withscores collections:zrangebyscore-withscores
-   :zrevrange-withscores collections:zrevrange-withscores
+   :zadd zset:zadd
+   :zscore zset:zscore
+   :zrank zset:zrank
+   :zrange zset:zrange
+   :zrangebyscore zset:zrangebyscore
+   :zrem zset:zrem
+   :zcard zset:zcard
+   :zincrby zset:zincrby
+   :zcount zset:zcount
+   :zrevrange zset:zrevrange
+   :zrevrangebyscore zset:zrevrangebyscore
+   :zrange-withscores zset:zrange-withscores
+   :zrangebyscore-withscores zset:zrangebyscore-withscores
+   :zrevrange-withscores zset:zrevrange-withscores
 
    # Commands — Server
    :ping server:ping

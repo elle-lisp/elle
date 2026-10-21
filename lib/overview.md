@@ -36,7 +36,7 @@ This table lists the modules with a guide here, and their neighbours.
 | [grpc.lisp](grpc.lisp) | gRPC client over HTTP/2 with length-prefixed framing | |
 | [tls.lisp](tls.lisp) | TLS 1.2/1.3 client and server, with ALPN | [tls.md](tls.md) |
 | [redis.lisp](redis.lisp) | Redis client (RESP2) over TCP | [redis.md](redis.md) |
-| [redis/](redis/AGENTS.md) | Redis submodules: resp, connection, keyspace, collections, server | [redis/overview.md](redis/overview.md) |
+| [redis/](redis/AGENTS.md) | Redis submodules: resp, connection, keyspace, collections, zset, server | [redis/overview.md](redis/overview.md) |
 | [framing.lisp](framing.lisp) | Lines, delimited records and exact counts over any byte source | [framing.md](framing.md) |
 | [dns.lisp](dns.lisp) | DNS client (RFC 1035) | |
 | [dns/wire.lisp](dns/wire.lisp) | The DNS wire codec: names, queries, responses | |
