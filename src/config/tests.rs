@@ -1,6 +1,6 @@
 // audited: 2026-10-20
-//! Pins the configuration: per-instance trace cells, the tier a build starts, the
-//! refused flags, the cache directory, the page size and the boot-image policy.
+//! Pins the configuration: trace cells, the starting tier, the refused flags,
+//! the cache directory, the page size and the boot-image policy.
 //!
 //! docs/config.md
 //! docs/impl/image/boot.md
