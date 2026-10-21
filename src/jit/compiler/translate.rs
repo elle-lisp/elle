@@ -1,8 +1,9 @@
-// audited: 2026-10-12
+// audited: 2026-10-20
 // docs/impl/jit.md
-//! The prologue: what a compiled function does with its six parameters before
-//! the first LIR block runs.
+//! The prologue a compiled function runs on its six parameters, then the walk
+//! that translates each LIR block and seals it.
 
+use super::seal::Unsealed;
 use super::*;
 
 impl JitCompiler {
@@ -336,6 +337,12 @@ impl JitCompiler {
 
         translator.loop_header = Some(loop_header);
 
+        // Seal each LIR block once every jump into it is in.
+        let mut unsealed = Unsealed::new(lir);
+        for label in unsealed.ready() {
+            builder.seal_block(block_map[&label]);
+        }
+
         // Translate LIR blocks
         for (position, bb) in lir.blocks().enumerate() {
             let cl_block = block_map[&bb.label()];
@@ -356,6 +363,9 @@ impl JitCompiler {
 
             if !block_terminated {
                 translator.translate_terminator(&mut builder, &bb.terminator(), &block_map)?;
+            }
+            for label in unsealed.translated(&bb.terminator()) {
+                builder.seal_block(block_map[&label]);
             }
         }
 
@@ -390,6 +400,7 @@ impl JitCompiler {
             }
         }
 
+        // The loop header, which every self tail call jumps to.
         builder.seal_all_blocks();
         finalize_function(builder, translator.module);
 

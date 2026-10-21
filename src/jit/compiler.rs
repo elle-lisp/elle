@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-20
 // docs/impl/jit.md
 //! `JitCompiler`: the Cranelift module a compile owns, and the two entry points
 //! that drive one frozen function through it.
@@ -41,6 +41,7 @@ pub struct JitCompiler {
     helpers: RuntimeHelpers,
 }
 
+mod seal;
 mod translate;
 
 impl JitCompiler {
