@@ -1,4 +1,4 @@
-// audited: 2026-09-22
+// audited: 2026-10-20
 //! The store's feeder: a name that merely carries a value into a reassigned
 //! binding's store, which the gate's holder index must not count.
 //!
@@ -11,8 +11,7 @@ use crate::hir::defuse::DefUseBuilder;
 
 /// The store's **feeders**: the bindings that merely carry a value INTO a
 /// reassigned binding's store, and which the holder index must therefore not
-/// count (docs/impl/region/bindings.md § "What the cell donates it must hold
-/// alone; what it counts it need not").
+/// count (docs/impl/region/bindings.md).
 ///
 /// Judged once per binding, against every store that takes a region the binding
 /// holds. Two facts decide it, and the gate's two questions need different

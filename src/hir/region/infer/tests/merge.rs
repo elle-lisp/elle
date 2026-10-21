@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-10-20
 // The merge test suite's shared helpers, and the split of its submodules by what forces a collapse.
 // docs/impl/region/merging.md
 // docs/impl/region/letrec.md
@@ -6,7 +6,7 @@
 // When two regions collapse into one, split by what forces the collapse:
 //
 // - `seed` — the builder-idiom child→parent merge, where the merge starts.
-// - `selfedge` — the self-edge elimination predicate (transform 2).
+// - `selfedge` — the self-edge elimination predicate.
 // - `recursion` — the letrec closure-cycle merge: which recursion shapes
 //   collapse, and where the single release fires.
 // - `tailgate` — which letrec body tails carry the merged arena's release, and
@@ -95,8 +95,8 @@ fn analyze_cycle_with_effects(
 /// that scope minted. Where [`letrec_binding_node`] finds a `letrec`'s node from
 /// the syntax, this finds a `defn` run's `Begin` from the cells themselves — the
 /// run has no node of its own to name, and one scope holding every member's cell
-/// is what the merge requires (docs/impl/region/letrec.md § "One binding, one
-/// cell"). `None` when no scope minted a cell for `name`.
+/// is what the merge requires (docs/impl/region/letrec.md). `None` when no scope
+/// minted a cell for `name`.
 fn cell_scope_of(
     arena: &BindingArena,
     symbols: &SymbolTable,
@@ -113,8 +113,7 @@ fn cell_scope_of(
         .map(|(&scope, cells)| (scope, cells.iter().map(|&(_, r)| r).collect()))
 }
 
-/// The forward-cell regions of the in-lambda `ev`/`od` letrec, and the merged root
-/// they collapse onto (the SCC closure of least program order).
+/// The forward-cell regions of the in-lambda `ev`/`od` letrec.
 fn ev_od_cells(
     hir: &Hir,
     arena: &BindingArena,

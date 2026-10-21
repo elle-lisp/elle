@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-20
 //! Pins the lifetime obligation an adopt subtree's root carries: decided by post-dominance over the scope tree, never by counting.
 //!
 //! docs/impl/region/adopt.md
@@ -10,7 +10,7 @@ use super::*;
 // The root's single decref subtree-drops every member, so it must post-dominate every
 // member's last use. That is decided by structural post-dominance over the scope tree
 // (`region::infer::postdom::drop_post_dominates`, `EmitMode::Adopt`), NOT by a numeric
-// `ord(member) <= ord(root)` (region/adopt.md § "The lifetime obligation the root carries"):
+// `ord(member) <= ord(root)` (docs/impl/region/adopt.md):
 // across a branch arm or a loop back-edge, post-order index is not a post-dominance
 // proxy. These two pins exercise the cases where the numeric test admits but structural
 // post-dominance refuses — both straight-line-admitted by the old `ord` compare, both
@@ -378,8 +378,8 @@ fn sole_cell_and_capture_adopts(
 fn cell_routed_release_past_the_root_refuses_the_adopt() {
     // A top-level `v` captured by `thunk` lives in a compiled cell, and its init is a
     // call result, so the frame releases that result by value THROUGH the cell's slot:
-    // the release loads the cell and unwraps it (region/adopt.md § "A release routed
-    // through a cell is a read of the cell"). `thunk`'s last use is the spawn, so the
+    // the release loads the cell and unwraps it (docs/impl/region/adopt.md). `thunk`'s
+    // last use is the spawn, so the
     // closure's region dies there, while `v`'s routed release lands at the end of the
     // `(def r …)` statement, past it. A cell adopted into the closure would be freed by
     // the closure's subtree drop before the routed release unwraps it, so the

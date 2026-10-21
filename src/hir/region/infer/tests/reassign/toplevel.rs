@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-10-20
 //! The module-scope half of the gate: what the cell donates, what it counts, and what each records.
 //!
 //! docs/impl/region/bindings.md
@@ -22,8 +22,8 @@ fn module_scope_cell(assign: &str) -> (Hir, RegionInfo) {
 /// A fresh local allocation stored into a module-scope cell is DONATED: the
 /// stored region's ordinary decref is suppressed, the site emits no
 /// incref-on-store, and the cell records no container
-/// (docs/impl/region/bindings.md § "Module scope"). The control the counted
-/// store below is measured against.
+/// (docs/impl/region/bindings.md). The control the counted store below is
+/// measured against.
 #[test]
 fn toplevel_fresh_allocation_store_is_donated() {
     let (hir, info) = module_scope_cell("(assign s (%pair i 7))");
@@ -55,7 +55,7 @@ fn toplevel_fresh_allocation_store_is_donated() {
 /// ordinary decref — the producer's release, which the container entry pins to
 /// the store site — and the cell records a container with no content drop,
 /// its final content being the file-letrec teardown's
-/// (docs/impl/region/bindings.md § "Module scope").
+/// (docs/impl/region/bindings.md).
 ///
 /// The counter-factual is the leak this pins: with the stored region in
 /// `suppressed_decref_regions` beside the counted store, the cell's reference

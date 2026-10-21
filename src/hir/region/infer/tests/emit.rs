@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-20
 //! Where a yielded value's release lands, and which `Emit` sites yield a payload
 //! their own body releases nowhere.
 //!
@@ -147,7 +147,7 @@ fn own_parameter_yield_payload_is_not_borrowed() {
 //
 // The resume value arrives on the resumer's reference, so the frame mints one of
 // its own exactly where a binding's release will give one back
-// (docs/impl/region/park.md § "A resume value crosses counted, or not at all").
+// (docs/impl/region/park.md).
 
 #[test]
 fn a_bound_resume_value_is_minted_though_it_is_returned() {
@@ -188,8 +188,8 @@ fn a_returning_tail_resume_value_is_not_minted() {
 // A first argument the compiler cannot read as a keyword set falls through to the
 // `emit` primitive, so the park is an ordinary call and there is no `Emit` node to
 // key on. The walk records the payload argument's regions against the CALL, so the
-// borrowed-payload reading covers both shapes (docs/impl/region/park.md
-// § "What yields is the emit OPERATION, not the `Emit` node"). Both need the real
+// borrowed-payload reading covers both shapes (docs/impl/region/park.md). Both
+// need the real
 // classification: `emit_natives` is empty under the default one.
 
 #[test]
@@ -301,8 +301,7 @@ fn funnel_containment_recorded_for_push() {
 
 #[test]
 fn capture_records_no_cross_region_edge() {
-    // RC double-counting fix: a closure capturing a heap value must
-    // NOT record a static cross-region edge (the lowerer turns each
+    // A closure capturing a heap value must NOT record a static cross-region edge (the lowerer turns each
     // edge into an IncrefRegion). The runtime auto-incref over the
     // Closure env already pins the captured region —
     // `incref_cross_region_refs`/`find_object_cross_refs` covers

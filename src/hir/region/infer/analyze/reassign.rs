@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-10-20
 //! The mutable-reassign 1-slot-container gate: the questions asked of each
 //! reassigned binding, and what a yes records.
 //!
@@ -8,9 +8,9 @@
 //!
 //! docs/impl/region/bindings.md
 
-// `super` is `hir::region::infer::analyze`; `super::super` reaches the sibling
-// `hir::regions` items (`RegionHolders`, `RegionInfo`, `Binding`, …) the
-// original block saw through `use super::*` at the analyze root.
+// `super` is `hir::region::infer::analyze`; `super::super` reaches the
+// `hir::region::infer` items (`RegionHolders`, `RegionInfo`, `Binding`, …) this
+// gate reads.
 use super::super::holders::RegionHolders;
 use super::super::*;
 use crate::hir::defuse::DefUseBuilder;
@@ -42,14 +42,12 @@ struct LocalVerdict {
     /// extensions the region already carries, so an alias's own reads move it
     /// later and refuse nothing; what it cannot survive is N stores against one
     /// producer reference, which a name bound outside the loop that stores it
-    /// produces (docs/impl/region/bindings.md § "The store-site pin asks only
-    /// that the store run once per binding of the name it reads").
+    /// produces (docs/impl/region/bindings.md).
     stored_pinnable: bool,
     /// Every region the model would SUPPRESS — the init, which the cell takes
     /// uncounted — has no other holder, so the donation is available. Where it
     /// is not, the cell counts its init instead and suppresses nothing
-    /// (docs/impl/region/bindings.md § "What the cell donates it must hold
-    /// alone; what it counts it need not").
+    /// (docs/impl/region/bindings.md).
     donates_init: bool,
     /// Where the chain's binder stores the init value — the one position the
     /// counted-init retain can take. `None` leaves donate-or-refuse.
@@ -66,8 +64,7 @@ impl LocalVerdict {
     /// the cell's own reference is the counted store's. The order that keeps the
     /// pair exact is the lowerer's: the mint precedes the `Return` node's own
     /// releases, and the content drop is one of them
-    /// (docs/impl/region/bindings.md § "Returned fn-local reassigned mutables —
-    /// the return claims the MINT's reference, not the cell's").
+    /// (docs/impl/region/bindings.md).
     fn is_cell(&self) -> bool {
         self.takes_model()
     }
@@ -110,9 +107,8 @@ pub(super) fn apply_reassign_containers(
     // A read binding that merely carries a value INTO a store is the store's
     // FEEDER, not a second holder of that value: nothing reads it after the
     // store, so the donation's sole-held question has nothing to protect
-    // (docs/impl/region/bindings.md § "What the cell donates it must hold alone;
-    // what it counts it need not"). The everyday one is the element name `each`
-    // binds.
+    // (docs/impl/region/bindings.md). The everyday one is the element name
+    // `each` binds.
     let feeders = Feeders::collect(du, info, inference_binding_regions, reassigns, pd);
     let holds = |b: Binding| -> bool { is_read(b) && !feeders.contains(b) };
     // The STORE-SITE PIN's index carries the ONE holder it cannot survive: a name
@@ -120,8 +116,7 @@ pub(super) fn apply_reassign_containers(
     // producer reference the pin would release N times. Every other second name
     // refuses the pin nothing — the pin is a maximum over the extensions the
     // region already carries, an alias's own reads among them, so a later read
-    // moves it later (docs/impl/region/bindings.md § "The store-site pin asks
-    // only that the store run once per binding of the name it reads").
+    // moves it later (docs/impl/region/bindings.md).
     let pins = |b: Binding| -> bool { is_read(b) && feeders.over_feeds(b) };
     let next = reassigns.forwarding_edges();
     let aliases = Reassigns::forwarded_init_aliases(&next);
@@ -166,10 +161,8 @@ pub(super) fn apply_reassign_containers(
     //
     // The gate is the INIT's discharge — donated where sole-held, counted at
     // the chain source's binder otherwise (see the verdicts below and
-    // docs/impl/region/bindings.md "Reassigned mutable bindings are 1-slot
-    // containers"). Whether the content is returned decides nothing
-    // (§ "Returned fn-local reassigned mutables"). Distinct
-    // mechanism: a `@`-mutable PARAMETER (a captured cell the callee owns)
+    // docs/impl/region/bindings.md). Whether the content is returned decides
+    // nothing. Distinct mechanism: a `@`-mutable PARAMETER (a captured cell the callee owns)
     // reassigned then moved into a tail call is released by the callee's own cell
     // `DecrefCellRegion`, and the tail move's borrowed-arg retain must order ahead
     // of that release's cascade — enforced in `lower_call` (pinned by
@@ -234,11 +227,9 @@ pub(super) fn apply_reassign_containers(
         // stored values — is what the model PINS back to a store site, and the
         // pin is a maximum over every extension the region carries, an alias's
         // own reads included, so a second name refuses nothing there
-        // (docs/impl/region/bindings.md § "The store-site pin asks only that the
-        // store run once per binding of the name it reads"). What the model
-        // would SUPPRESS, which is the donation's business: an aliased init
-        // costs the donation, not the model (§ "What the cell donates it must
-        // hold alone; what it counts it need not"). A binding-source region
+        // (docs/impl/region/bindings.md). What the model would SUPPRESS, which
+        // is the donation's business: an aliased init costs the donation, not
+        // the model. A binding-source region
         // that is ALSO stored is the one shape the two questions cannot split —
         // the suppression loop skips `kept`, so a donation granted over the
         // overlap would leave the define's uncounted store with no reference
@@ -276,8 +267,7 @@ pub(super) fn apply_reassign_containers(
     // gate refuses keeps the unsuppressed baseline, where each value's ordinary
     // decref releases the producer's reference, and the next link's
     // drop-on-overwrite would then release it a second time. So a chain is
-    // admitted or declined whole (docs/impl/region/bindings.md § "A chain of
-    // forwarding edges hands one reference along, so the fold follows it whole").
+    // admitted or declined whole (docs/impl/region/bindings.md).
     //
     // Donation is a whole-chain answer for the same reason: the init region is
     // the one every link's source set shares, and the suppression is keyed by
@@ -324,8 +314,7 @@ pub(super) fn apply_reassign_containers(
             // channel too. A binding whose content the frame RETURNS is no
             // different: the `Return`'s mint is the caller's reference and the
             // content drop, which the lowerer emits after that mint at the same
-            // node, is the cell's (docs/impl/region/bindings.md § "Returned
-            // fn-local reassigned mutables").
+            // node, is the cell's (docs/impl/region/bindings.md).
             for s in stores.sites() {
                 info.drop_on_overwrite_sites.insert(s);
             }
@@ -368,7 +357,7 @@ pub(super) fn apply_reassign_containers(
             // of one reference at the Return — the second frees the caller's
             // minted reference before the caller's read (the
             // loop-reassigned-return double-free,
-            // `region_capture_cell_string_accum_uaf`). A single-assign cell
+            // `region-capture-cell-string-accum-uaf.lisp`). A single-assign cell
             // coalesces its binding and assign-value regions
             // (`binding_regs == regions`), so this suppresses nothing there.
             //
@@ -378,8 +367,7 @@ pub(super) fn apply_reassign_containers(
             // source's binder instead — balanced by the same drop-on-overwrite
             // that balances every later store — and suppresses nothing, leaving
             // the alias the ordinary decref that releases the producer's
-            // reference (docs/impl/region/bindings.md § "What the cell donates
-            // it must hold alone; what it counts it need not").
+            // reference (docs/impl/region/bindings.md).
             if donates_init {
                 for &r in binding_regs {
                     if !kept.contains(&r) {

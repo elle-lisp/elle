@@ -1,5 +1,5 @@
-// audited: 2026-09-09
-// ── Which recursion shapes the closure-cycle merge collapses ─────────
+// audited: 2026-10-20
+// Which recursion shapes the closure-cycle merge collapses, and where its one release fires.
 //
 // docs/impl/region/letrec.md
 //
@@ -87,8 +87,7 @@ fn merge_collapses_mutual_recursion_letrec_closure_cycle() {
 
 #[test]
 fn merge_mutual_recursion_cycle_drops_at_binding_scope_not_enclosing() {
-    // PROMPTNESS (docs/impl/region/adopt.md § The lifetime obligation the root
-    // carries; the §9 promptness ledger). The merged cycle's single `DecrefRegion`
+    // PROMPTNESS (docs/impl/region/letrec.md). The merged cycle's single `DecrefRegion`
     // must fire at the cycle's BINDING SCOPE — the `letrec` that prebinds its
     // capture cells — not at that scope's enclosing post-dominator. Exercised on
     // MUTUAL recursion (ping/pong), which is what the merge serves: a pure
@@ -305,7 +304,7 @@ fn merge_collapses_self_and_sibling_captured_member_cell() {
 //
 // A run of local `defn`s in one body prebinds the same forward cells a `letrec`
 // does, so it is the same cell↔closure cycle and takes the same merge
-// (docs/impl/region/letrec.md § "The binder form does not decide the shape").
+// (docs/impl/region/letrec.md).
 // These two drive the reading from the spec: the bare mutual pair, and the
 // closure-as-module factory ordinary code writes it as.
 
@@ -384,8 +383,8 @@ fn merge_collapses_defn_run_closure_cycle_in_lambda() {
 fn merge_collapses_defn_module_factory_cycle() {
     // The closure-as-module factory: a constructor that defines a set of mutually
     // recursive helpers over its own mutable state and hands back a struct of
-    // them. This is the async scheduler's shape, and the cycle it forms is what
-    // held every program's whole teardown residue (elle-lisp/elle#1081).
+    // them. This is the async scheduler's shape, and unmerged, the cycle it forms
+    // holds every program's whole teardown residue.
     //
     // Two things distinguish it from the bare pair above and must not refuse it.
     // The members CAPTURE a mutable table, which is a cross-region reference out

@@ -22,11 +22,11 @@ mod chain;
 //   - A NATIVE read takes the Rule 5 pass-through retain, which the RC baseline honours —
 //     so no lifetime extension — but ADOPTION freezes the member's RC and leaves that
 //     retain inert. `counted_read_aliases` therefore drives the ownership cut's refusal
-//     (adopt.md § "The lifetime obligation the root carries") and the lowerer's release
+//     (docs/impl/region/adopt.md) and the lowerer's release
 //     order at a shared point.
 //
 // These pins are written from that definition; the runtime witness is
-// `region_container_read_borrow_uaf`.
+// `region-container-read-borrow-uaf.lisp`.
 
 /// The container regions recorded for the UNCOUNTED (opcode) read at `site`.
 fn uncounted_containers(info: &RegionInfo, site: HirId) -> Vec<Region> {
@@ -56,7 +56,7 @@ fn opcode_read_extends_container_decref_to_the_reader() {
     // Counterfactual: with the read treated as an ordinary use, `region_data[c].
     // decref_point` IS the `%get` node — the container's free-time cascade then drops the
     // element's last count and `length` derefs a freed page (the cascade face of
-    // `region_container_read_borrow_uaf`). This assertion was RED before the borrow pin.
+    // `region-container-read-borrow-uaf.lisp`). This assertion was RED before the borrow pin.
     let (hir, arena, _symbols, info) = analyze_with_class(
         "(let [c (@array) r (string \"s\")] (begin (%array-push c r) (length (%get c 0))))",
     );
@@ -111,7 +111,7 @@ fn native_read_alias_outliving_the_container_refuses_the_adopt() {
     // Counterfactual: with only the member obligation, every member's own `decref_point`
     // sits before `c`'s release and the subtree reads admissible — the alias is invisible
     // to it, and the adopt is emitted (the subtree-drop face of
-    // `region_container_read_borrow_uaf`). This assertion was RED before the alias
+    // `region-container-read-borrow-uaf.lisp`). This assertion was RED before the alias
     // obligation.
     let (_, info, edges) = adopt_edges(
         "(let [c (@array) r (string \"s\")] \
@@ -209,7 +209,7 @@ fn nested_read_alias_refuses_the_adopt_transitively() {
     // Counterfactual: a one-level check admits this subtree — the inner alias passes and
     // the outer alias's container is the inner alias, not a member — and the outer read's
     // result is freed under its reader (the nested face of
-    // `region_container_read_borrow_uaf`).
+    // `region-container-read-borrow-uaf.lisp`).
     let (_, info, edges) = adopt_edges(
         "(let [inner (@array) s (string \"s\") c (@array)] \
            (begin (%array-push inner s) (%array-push c inner) \
@@ -240,7 +240,7 @@ fn nested_read_alias_refuses_the_adopt_transitively() {
 // arg0 in place or a fresh copy, so it propagates a read on into arg0's subtree while
 // owing no bound of its own — which makes reachability and boundedness two properties, not
 // one. These pins are written from that rule; the runtime witness is
-// `region_call_result_alias_uaf`.
+// `region-call-result-alias-uaf.lisp`.
 
 /// The `(result, argument)` pairs recorded for the opaque call at `site`.
 fn result_aliases(info: &RegionInfo, site: HirId) -> Vec<(Region, Region)> {
@@ -262,7 +262,7 @@ fn opaque_call_result_refuses_the_adopt() {
     // Counterfactual: with the alias set closed only over READS, the opaque call is
     // invisible — every member's own `decref_point` sits before `c`'s release and the
     // adopt is emitted, so `c`'s release subtree-drops the element the result still names
-    // (the call face of `region_call_result_alias_uaf`). This assertion was RED before the
+    // (the call face of `region-call-result-alias-uaf.lisp`). This assertion was RED before the
     // opaque-result alias.
     let (_, info, edges) = adopt_edges(
         "(fn [h] (let [c (@array) r (string \"s\")] \
@@ -372,7 +372,7 @@ fn read_out_of_a_funnel_result_refuses_the_adopt() {
     //
     // Counterfactual: with the funnel result left out of the closure entirely, the
     // read's container is reachable from no member and the subtree is admitted — the
-    // funnel face of `region_call_result_alias_uaf`. And with reachability allowed to
+    // funnel face of `region-call-result-alias-uaf.lisp`. And with reachability allowed to
     // CONSUME the read's own bound (one set instead of two), the funnel edge claims the
     // alias first and the read's bound is never recorded, which admits it just the same.
     let (_, info, edges) = adopt_edges(

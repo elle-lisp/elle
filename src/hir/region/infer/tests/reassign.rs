@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-10-20
 //! The mutable-reassign 1-slot-container gate, one file per question it decides.
 //!
 //! docs/impl/region/bindings.md
@@ -58,8 +58,7 @@ fn heap_carrying_reassign(hir: &Hir, info: &RegionInfo) -> (Binding, Vec<HirId>)
 /// trailing read spliced in by the caller. Every shape below is the same chain:
 /// functionalization gives the source name one version per loop and initializes
 /// each from the previous, so the middle version carries a cell of its own
-/// (docs/impl/region/bindings.md § "A chain of forwarding edges hands one
-/// reference along, so the fold follows it whole").
+/// (docs/impl/region/bindings.md).
 fn two_loop_chain(between: &str, tail: &str) -> (Hir, RegionInfo) {
     let (hir, _, info) = pipeline(&format!(
         "(def @h (fn (n)\n\

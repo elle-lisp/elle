@@ -1,7 +1,10 @@
-//! Call-classification queries: read-only lookups over `call_class` that tell
-//! the walk what a callee does — returns an immediate, declares a region
-//! effect, funnels a retained store, has a known return type, or embeds args
-//! into its fresh result. All share the unshadowed-immutable-primitive guard.
+// audited: 2026-10-20
+//! What the walk asks of a callee: its region effect, its return type, and which store or read it is.
+//!
+//! Each query is a read-only lookup over `call_class`, and each answers only
+//! for a callee that is an unshadowed, immutable primitive binding.
+//!
+//! docs/impl/region/effects.md
 
 use super::*;
 
@@ -35,8 +38,7 @@ impl RegionInference {
     /// What reads this is the branch-arm release window: a tail call to a native
     /// pushes no bytecode frame, so the dispatch loop falls through to the
     /// enclosing branch's merge label, while a tail call to a closure REPLACES
-    /// the frame and never arrives there (docs/impl/region/mechanism.md § "A
-    /// release inside one arm is not a release on the other arms"). The `is_tail`
+    /// the frame and never arrives there (docs/impl/region/window.md). The `is_tail`
     /// flag alone cannot tell the two apart, and the native-tail dispatch arm is
     /// exactly the shape the window exists to cover.
     pub(super) fn is_native_callee(&self, func: &Hir) -> bool {
@@ -52,9 +54,8 @@ impl RegionInference {
         }
     }
 
-    /// The callee's declared `RegionEffect` (docs/impl/region/effects.md "Native
-    /// region effects"), when the callee is an immutable, unshadowed
-    /// binding naming a declared primitive. `None` for unknown callees —
+    /// The callee's declared `RegionEffect` (docs/impl/region/effects.md), when
+    /// the callee is an immutable, unshadowed binding naming a declared primitive. `None` for unknown callees —
     /// the caller must treat that as `Mixed` (the full arg clique).
     pub(super) fn call_effect(&self, func: &Hir) -> Option<crate::primitives::def::RegionEffect> {
         if let HirKind::Var(binding) = &func.kind {
@@ -89,7 +90,7 @@ impl RegionInference {
     /// non-fresh moved-out element is escape-retained IN-BODY? Under the same
     /// unshadowed-immutable-primitive condition as `call_effect`. The walk records
     /// such a call site so the lowerer suppresses the redundant tail ReturnValue
-    /// retain over the moved-out element (`region_pop_tail_moves_out_uaf`). A
+    /// retain over the moved-out element (`region-pop-tail-moves-out-uaf.lisp`). A
     /// moves-out native with a fresh result (`@string`/`@bytes` pop) is absent from
     /// the set (it keeps its tail retain).
     pub(super) fn call_moves_out_passthrough(&self, func: &Hir) -> bool {
@@ -126,7 +127,7 @@ impl RegionInference {
     /// regardless of effect? Under the same unshadowed-immutable-primitive condition as
     /// `call_effect`. The walk records such a call's container arg0 as a
     /// `funnel_container_sites` site so the compensation releases the `pop` wrapper's
-    /// stranded owned-param container per-arm — the F1b container strand. Distinct from
+    /// stranded owned-param container per-arm. Distinct from
     /// `call_moves_out_passthrough` (the element tail-retain suppression), which is
     /// the PassThrough subset.
     pub(super) fn call_moves_out(&self, func: &Hir) -> bool {
@@ -148,8 +149,9 @@ impl RegionInference {
     /// its element from the container (and from its Owned subtree), handing the caller
     /// its own reference, so the container is not borrowed from and pinning its release
     /// to the popped element's reader would only over-keep it. The walk records a
-    /// borrowing read's container so the container outlives the reader
-    /// (`RegionInfo::container_read_sites`; region/rules.md Rule 4, the borrowing node).
+    /// borrowing read's `(alias, container)` pair (`RegionInfo::counted_read_aliases`),
+    /// so the ownership cut adopts no member the alias may still name
+    /// (docs/impl/region/adopt.md).
     pub(super) fn is_container_read_borrow(&self, func: &Hir) -> bool {
         if let HirKind::Var(binding) = &func.kind {
             let bi = self.arena().get(*binding);
@@ -165,12 +167,11 @@ impl RegionInference {
 
     /// Is the callee the **emit primitive** — the callee a dynamic `emit` falls
     /// through to when its first argument is not a literal keyword set
-    /// (docs/signals/emit.md § "Dynamic emit")? Under the same
-    /// unshadowed-immutable-primitive condition as `call_effect`. Such a call parks
-    /// and yields exactly as the `Emit` terminator does, so the walk records its
-    /// payload argument's regions the same way and the borrowed-payload reading
-    /// covers both shapes (docs/impl/region/owner.md § "What yields is the emit
-    /// OPERATION, not the `Emit` node").
+    /// (docs/signals/emit.md)? Under the same unshadowed-immutable-primitive
+    /// condition as `call_effect`. Such a call parks and yields exactly as the
+    /// `Emit` terminator does, so the walk records its payload argument's regions
+    /// the same way and the borrowed-payload reading covers both shapes
+    /// (docs/impl/region/park.md).
     pub(super) fn is_emit_native(&self, func: &Hir) -> bool {
         if let HirKind::Var(binding) = &func.kind {
             let bi = self.arena().get(*binding);
@@ -189,7 +190,7 @@ impl RegionInference {
     /// [`Stores`](crate::primitives::def::RegionEffect::Stores) and
     /// [`Sends`](crate::primitives::def::RegionEffect::Sends) all carry that claim, and
     /// the declaration oracle checks it after every native call in a debug build
-    /// (docs/impl/region/effects.md § "The declaration oracle"). `Immediate` returns no
+    /// (docs/impl/region/clique.md). `Immediate` returns no
     /// region at all — excluded by `call_returns_immediate` at the recording site, so it
     /// is not repeated here.
     ///
@@ -200,7 +201,7 @@ impl RegionInference {
     /// every non-primitive callee — which is under no claim whatsoever, and which
     /// `call_effect` reports as `None` alongside a shadowed or computed callee. The
     /// ownership forest must treat such a result as an alias into the argument's subtree
-    /// (region/adopt.md § "The lifetime obligation the root carries").
+    /// (docs/impl/region/adopt.md).
     pub(super) fn result_may_alias_args(&self, func: &Hir) -> bool {
         use crate::primitives::def::RegionEffect;
         !matches!(

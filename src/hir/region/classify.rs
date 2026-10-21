@@ -29,7 +29,7 @@ pub struct CallClassification {
     /// Intrinsic SymbolIds (BinOp, CmpOp, etc.) — return immediates.
     pub intrinsic_ops: FxHashSet<SymbolId>,
     /// Primitive SymbolId → declared `RegionEffect` from `PrimitiveDef`
-    /// (docs/impl/region/effects.md "Native region effects"). Keys the opaque-call
+    /// (docs/impl/region/effects.md). Keys the opaque-call
     /// arg clique (`Mixed`/absent → full mutual clique; `Stores` →
     /// directed edges from the listed args; the rest → no edges) and the
     /// immediate-result classification (`Immediate` → no result region).
@@ -76,7 +76,7 @@ pub struct CallClassification {
     /// PASS-THROUGH element removed from a container (`%pop`/`%pop-array*`): the
     /// native body escape-retains the moved-out element in place (before releasing
     /// the container), so in TAIL position the lowerer's extra ReturnValue retain
-    /// double-counts and over-frees it (`region_pop_tail_moves_out_uaf`). The walk
+    /// double-counts and over-frees it (`region-pop-tail-moves-out-uaf.lisp`). The walk
     /// records these sites (`moves_out_release_sites`) so the lowerer suppresses
     /// that redundant retain. Restricted to the `PassThrough` subset of moves-out
     /// natives: a fresh grapheme (`@string` pop) / immediate byte is NOT
@@ -98,7 +98,7 @@ pub struct CallClassification {
     /// container-contents** flow edge: a value stored into a container and then read
     /// back out and escaped must not be adopted into the container's Owned subtree
     /// (else the container's subtree drop frees a value that flows out — the
-    /// container-read-escape face, pinned by `region_container_read_escape_uaf`).
+    /// container-read-escape face, pinned by `region-container-read-escape-uaf.lisp`).
     /// Populated by `PrimitiveClassification::new`.
     pub container_read_funnels: FxHashSet<SymbolId>,
     /// The SymbolId of `fiber/new`, when the symbol table carries it — the
@@ -112,11 +112,10 @@ pub struct CallClassification {
     pub fiber_resume: Option<SymbolId>,
     /// The SymbolIds the **emit primitive** answers to. A first argument the
     /// compiler cannot read as a keyword set compiles to an ordinary call on it
-    /// rather than to the `Emit` terminator (docs/signals/emit.md § "Dynamic
-    /// emit"), and such a call parks and yields exactly as the terminator does —
-    /// so the borrowed-payload reading must recognize it structurally
-    /// (docs/impl/region/park.md § "What yields is the emit OPERATION, not the
-    /// `Emit` node"). A set rather than one id because the primitive is reachable
+    /// rather than to the `Emit` terminator (docs/signals/emit.md), and such a
+    /// call parks and yields exactly as the terminator does — so the
+    /// borrowed-payload reading must recognize it structurally
+    /// (docs/impl/region/park.md). A set rather than one id because the primitive is reachable
     /// under its canonical name and its alias, and ordinary code uses the alias.
     /// Empty under the default classification, which disables the reading.
     pub emit_natives: FxHashSet<SymbolId>,
