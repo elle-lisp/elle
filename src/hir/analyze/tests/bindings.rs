@@ -1,5 +1,5 @@
 // audited: 2026-10-21
-//! The `letrec*` rules the analyzer enforces: duplicates by binding identity, use before initialization, and self-edge captures; and which `assign` marks a closure as the writer.
+//! The `letrec*` rules the analyzer enforces, and which `assign` makes a closure a writer.
 //!
 //! docs/bindings.md
 //! docs/impl/graft/operands.md
