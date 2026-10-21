@@ -307,6 +307,9 @@ mod containers {
 mod names {
     include!("image/names.rs");
 }
+mod payload {
+    include!("image/payload.rs");
+}
 mod closures {
     include!("image/closures.rs");
 }
