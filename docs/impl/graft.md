@@ -1,6 +1,6 @@
 # Grafting a call
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-20 -->
 
 A call into another unit's function becomes that function's body, and the proven types delete every branch its operands cannot take.
 
@@ -170,14 +170,46 @@ even when no call to it is left:
 ### Operands and parameters
 
 The graft binds each parameter to its operand in the order the operands are
-written, so the evaluation order of the call is kept. An operand that is an
-immediate literal, or a `Var` naming a binding nothing writes, replaces the
-parameter directly in the body. Such a binding holds one value for the whole
-body. The test is that nothing writes it, not that it is immutable, because a
-`match` pattern's variable is never marked immutable. Every other operand is
-bound by a `let` to a fresh local first. The direct replacement matters for the
-fold: a guard in the grafted body then tests the caller's own binding, and its
-fact narrows that binding.
+written, so the evaluation order of the call is kept. An operand replaces the
+parameter directly in the body when it holds one value from the call to the
+last read the body makes of it:
+
+- an immediate literal;
+- a `Var` naming a binding nothing writes. The test is that nothing writes it,
+  not that it is immutable, because a `match` pattern's variable is never
+  marked immutable;
+- a `Var` naming a written binding that no closure captures, when no operand
+  after it writes the binding. A closed body holds no `assign` and no lambda,
+  so only a closure that captured the binding, or a later operand, could write
+  it between the call and a read.
+
+Every other operand is bound by a `let` to a fresh local first. The direct
+replacement matters for the fold: a guard in the grafted body then tests the
+caller's own binding, and its fact narrows that binding. It matters for a loop
+too: a counter written in place reaches the op as itself, where a `let` costs
+a store and a load on every iteration.
+
+```lisp
+# A loop counter is a written binding no closure captures, so each op reads it
+# as itself, and the loop compiles to what its intrinsic spelling compiles to.
+(def counted (fhir "(defn w [b] (var i 0) (while (< i b) (assign i (+ i 1))) i) (w 5)"))
+(assert (< 0 (occurrences counted "(%lt i#")) "the comparison reads the counter itself")
+(assert (< 0 (occurrences counted "(%add i#")) "and so does the increment")
+
+# A closure that captured the binding may write it from inside the body, so
+# the operand keeps the value it had at the call.
+(var i 0)
+(defn bump [] (assign i (%add i 1)))
+(defn after-bump [x] (bump) x)
+(assert (= (after-bump i) 0) "x is what i held at the call, not what bump left")
+
+# A later operand may write it too.
+(defn add2 [x y] (%add x y))
+(defn later []
+  (var k 1)
+  (add2 k (begin (assign k 10) 1)))
+(assert (= (later) 2) "k is read before the second operand writes it")
+```
 
 A parameter a `(numeric!)` declaration floors is always bound by a `let`. The
 floor is a fact about the parameter's binding, and the `let` carries that
@@ -408,9 +440,11 @@ still runs, and deletes what the types decide around the calls that stay.
   keeps the call. A user binding named `+` never reaches the stdlib body, a
   recursive function stays a call, a `(numeric!)` parameter keeps its floor in
   the graft, and a function the program defines grafts while its definition
-  still proves its parameters. Under `GraftPolicy::Off` every call stays a
-  call, to a function the program defines and to the stdlib, and the stdlib
-  keeps its own grafts. A body the program defines keeps its own lines where
+  still proves its parameters. A written local or parameter no closure
+  captures is written in place, while a captured one, and one a later operand
+  writes, keep the value they held at the call. Under `GraftPolicy::Off`
+  every call stays a call, to a function the program defines and to the
+  stdlib, and the stdlib keeps its own grafts. A body the program defines keeps its own lines where
   it grafts, and a stdlib body takes the line of the call.
 - `hir::typeinfer::tests::live::*` — which lambdas the graft reaches. In a
   function nothing calls, a call whose body holds an op to prove stays a call,
@@ -445,8 +479,9 @@ still runs, and deletes what the types decide around the calls that stay.
   reaches goes without the binding the rest of the program reads, a deletion
   narrows a join, and a guard narrows through the wrappers it is written with.
 - [the wrapper corpus test](../../tests/impl/wrapper-lowering.lisp) — each
-  wrapper over two proven numbers leaves no `Emit` in the disassembly, and over
-  unproven operands it keeps its guards.
+  wrapper over two proven numbers leaves no `Emit` in the disassembly, over
+  unproven operands it keeps its guards, and a counting loop over the wrappers
+  disassembles to the bytecode of the same loop over the intrinsics.
 - [the graft-off corpus test](../../tests/impl/graft-off.lisp) — under
   `graft = false`, a call to a function the file defines and a call to `+`
   each stay a call in the disassembly.

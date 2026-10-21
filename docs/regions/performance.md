@@ -61,9 +61,8 @@ guards stay, and they allocate nothing either.
 
 So a loop that allocates nothing claims no page per iteration, however it
 spells its counting, its comparisons, its bit operations and its reads. A
-counting loop over `<` and `+` still takes about twice the time of the same
-loop over `%lt` and `%add`, because the graft binds a written operand with a
-`let` and the loop pays that `let` on every use (#1405).
+counting loop over `<` and `+` whose bound is proven an int compiles to the
+bytecode of the same loop over `%lt` and `%add`, so it takes the same time.
 [region-loop-pages.lisp](../../tests/impl/region-loop-pages.lisp) pins the
 pages such loops claim per iteration at zero, and the time the wrapper
 spelling takes against the intrinsic one.
