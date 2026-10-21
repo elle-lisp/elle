@@ -1,15 +1,15 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! `CompileCtx`, one instance's compile-time state, and `BootExports`, the export structs its boot left.
 //!
 //! src/pipeline/AGENTS.md
 //! docs/impl/image/boot.md
 //! docs/impl/graft.md
 //!
-//! The state is a macro-expansion VM, the prelude and core `Expander`, the
-//! `PrimitiveMeta` (primitives, core.lisp and stdlib exports, host bindings),
-//! the REPL layer, the capabilities the fiber a compile runs for withholds,
-//! the store of the units loaded files compiled to, and whether a unit grafts
-//! its calls.
+//! The state is a macro-expansion VM, the prelude and core `Expander`, and the
+//! `PrimitiveMeta` (primitives, core.lisp and stdlib exports, host bindings).
+//! It holds the REPL layer, and the capabilities the fiber a compile runs for
+//! withholds. It holds the store of the units loaded files compiled to, and
+//! whether a unit grafts its calls.
 //!
 //! The instance's `RuntimeCore` owns it beside the `VM` and the `SymbolTable`,
 //! and the pipeline takes it as a parameter. Two embedded Elle instances on one

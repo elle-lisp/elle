@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The stdlib and primitive bindings a fused loop's scaffold calls, resolved once per unit by name.
 //!
 //! docs/impl/dissolution.md

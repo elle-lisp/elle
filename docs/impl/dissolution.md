@@ -1,6 +1,6 @@
 # Dissolution — HOF loop fusion
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-21 -->
 
 The pass that turns a higher-order call over a proven array into a loop with the
 function's body spliced in.
@@ -164,7 +164,7 @@ element left to right and applies `f`/`p` as the stdlib op does. The gate:
     below says what that costs the composition gate.
   - a **`Var` referencing a same-compile-unit function** whose initializer is
     such a lambda (a top-level `(defn f …)` or a `let`/`def`-bound `(fn …)`),
-    inlined by cloning;
+    whose fragment each call site grafts;
   - a **stdlib `defn`** such as `inc`, whose body its function value carries
     across the compile-unit boundary.
 
@@ -182,9 +182,9 @@ element left to right and applies `f`/`p` as the stdlib op does. The gate:
 A **composition** is a chain of length ≥ 2, homogeneous *or* mixed. For one,
 the pass also requires each lambda body to be free of **sequencing effects**: no
 yield, I/O, emit, FFI, or halt (`reorder_safe`). Composition interleaves the
-per-element work (`f x0; g …; f x1; g …`, or `p x0; q …; p x1; q …`), where the
-stdlib runs all of the first op and then all of the second. So it reorders that
-work.
+per-element work: `f x0; g …; f x1; g …`, or `p x0; q …; p x1; q …`. The stdlib
+runs all of the first op and then all of the second, so composition reorders
+that work.
 
 The *value* is unchanged either way. Each stage still runs on exactly the
 elements it would have: the outer op on the inner's outputs, left to right. A
@@ -199,8 +199,8 @@ that prints, which signals `:io`. The chain then falls back to fusing only its
 inner reorder-safe run.
 
 A **capture** is a second cross-element channel, and it carries no signal at
-all. A composition therefore also requires every lambda to be non-capturing
-(§ "Captures"). Otherwise, reordering is observable only through a sequencing
+all. A composition therefore also requires every lambda to be non-capturing,
+as the section on captures explains. Otherwise, reordering is observable only through a sequencing
 effect, which is a non-capturing lambda's only cross-element channel. A body
 with none reorders unobservably.
 
@@ -249,7 +249,7 @@ array arm captures `len` once (`mapcat`'s through the `each` macro's own indexed
 arm) and reads `coll` live.
 
 So the value is preserved even when the lambda mutates the base through an
-alias, a global or a capture of the base's own binding (§ "Captures"). A
+alias, a global or a capture of the base's own binding. A
 `mapcat`'s inner walk reads its function's result the same way, so it matches
 there too. The three excluded shapes break the match:
 
@@ -299,16 +299,16 @@ The one capture kind that declines is the **self-reference**
 enclosing frame holds, and fusion removes the closure it would name.
 
 The two **template** paths cannot have this fact, which is why the refusal belongs to
-the clone rather than to the splice. A named function's body names the scope it was
-*defined* in, and the call site need not sit inside that scope. So `fn_fragment`
-refuses a body that names an enclosing runtime local, and the cross-unit
-collector admits only free variables that are genuine globals
+the fragment rather than to the splice. A named function's body names the scope it was
+*defined* in, and the call site need not sit inside that scope. So the fragment's
+close refuses a body that names an enclosing runtime local, and a fragment is
+admitted only when every free global resolves in the consuming unit
 ([inline](dissolution/inline.md)).
 
 ### A capture is a second cross-element channel
 
-What a capture costs is the **composition** gate. The reorder argument (§ "When it is
-legal — the gate") rests on one premise: a non-capturing lambda's only cross-element
+What a capture costs is the **composition** gate. The reorder argument in the gate
+above rests on one premise: a non-capturing lambda's only cross-element
 channel is a sequencing effect. Interleaving `f x0; g …; f x1; g …` is unobservable
 when each body reads only its parameters and globals. A captured binding is a second
 such channel, and it raises no signal to gate it with: a mutable local two bodies
@@ -356,8 +356,8 @@ Three instruments pin it:
 
 - **Structure.** The unit tests under
   [src/hir/typeinfer/fuse/tests](../../src/hir/typeinfer/fuse/tests), one module
-  per op, compile a form and assert on the HIR the pass emits: the callee gone,
-  the body inline, one accumulator, and every decline the gate owes.
+  per op, compile a form and assert on the HIR the pass emits. They assert the
+  callee gone, the body inline, one accumulator, and every decline the gate owes.
 - **Realization.** Each `dissolution-*.lisp` file in
   [tests/impl](../../tests/impl/overview.md) weighs a fused form against an
   un-fused reference that computes the same value, by `arena/total-allocs`. The

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! Tail call marking: sets `is_tail` on each `Call` whose result the enclosing lambda returns unchanged.
 //!
 //! Tail position is defined recursively:
@@ -150,7 +150,7 @@ fn mark(hir: &mut Hir, in_tail: bool, tail_blocks: &HashSet<BlockId>) {
         }
 
         // Break: value is in tail position if the target block is in
-        // tail_blocks (i.e., the block itself is in tail position).
+        // tail_blocks, that is, if the block itself is in tail position.
         HirKind::Break { block_id, value } => {
             let break_in_tail = tail_blocks.contains(block_id);
             mark(value, break_in_tail, tail_blocks);

@@ -1,27 +1,30 @@
-// audited: 2026-10-06
-// docs/impl/region/owner.md
-// docs/impl/region/relocate.md
+// audited: 2026-10-21
 //! VM≡JIT parity for the ownership forest: what each cut still reclaims when the
 //! function that owes the release runs compiled.
+//!
+//! docs/impl/region/owner.md
+//! docs/impl/region/relocate.md
 
 use super::*;
 
-/// VM≡JIT parity for the landed ownership ops (the `AdoptRegion`/`FreeRegionGroup`
-/// emit modes): the SAME never-mergeable shapes the VM tests above pin, but the
-/// reclaiming function runs through the JIT — so the `elle_jit_adopt_region` /
+/// VM≡JIT parity for the ownership ops (the `AdoptRegion`/`FreeRegionGroup` emit
+/// modes). The never-mergeable shapes the VM tests in the sibling modules pin run
+/// here with the reclaiming function compiled. So the `elle_jit_adopt_region` /
 /// `elle_jit_free_region_group` helpers and their translate arms
-/// (`src/jit/translate/instr/predicates.rs`) carry the ops, mirroring the
+/// (src/jit/translate/instr/predicates.rs) carry the ops, mirroring the
 /// interpreter handlers.
 ///
 /// `body` is wrapped in an immediately-invoked lambda `((fn [] body))` whose body
-/// carries the never-mergeable owned shape (the same shapes the VM tests pin). A single compile is re-run: the first run submits the lambda
-/// for background JIT compilation (eager → hot on its first call), and
-/// `drain_jit_pending` blocks until that compile finishes, so the steady-state
-/// measurement dispatches the lambda through cached native code, not the
-/// interpreter. An inline lambda (not a `def`-bound `f`) is used deliberately —
-/// a fresh REPL compile renumbers global slots, so a separate `(f)` compile would
-/// mis-resolve a `def`-bound `f` (see `self_recursive_loop_reclaims_per_call_no_stdlib`) — and
-/// re-running the same program keeps the closure-template bytecode pointer stable,
+/// carries the never-mergeable owned shape. A single compile is re-run. The first
+/// run submits the lambda for background JIT compilation (eager → hot on its first
+/// call), and `drain_jit_pending` blocks until that compile finishes. So the
+/// steady-state measurement dispatches the lambda through cached native code, not
+/// the interpreter.
+///
+/// The lambda is inline rather than a `def`-bound `f` on purpose. A fresh REPL
+/// compile renumbers global slots, so a separate `(f)` compile would mis-resolve a
+/// `def`-bound `f` (see `self_recursive_loop_reclaims_per_call_no_stdlib`).
+/// Re-running the same program keeps the closure-template bytecode pointer stable,
 /// so hotness accumulates onto the cached compile.
 ///
 /// Returns `(per_run_region_delta, jit_compiled)`. `jit_compiled` guards against a
@@ -74,17 +77,17 @@ pub(super) fn jit_region_growth(body: &str) -> (i64, bool) {
 /// it was.
 ///
 /// The program is compiled once and run twice. The first run calls `body` 250
-/// times, which submits every closure it reaches for background compilation;
-/// `drain_jit_pending` then blocks until those finish, so the second run — the one
-/// whose mid-run delta is returned — dispatches through cached native code. Re-running
+/// times, which submits every closure it reaches for background compilation.
+/// `drain_jit_pending` then blocks until those finish, so the second run, whose
+/// mid-run delta is returned, dispatches through cached native code. Re-running
 /// the same bytecode is what keeps the closure templates' pointers stable, so the
 /// cache keyed by them still hits after the `def`s rebuild their closures.
 ///
 /// The program's last form must be `[delta caller]`: the gauge delta, and the very
-/// closure whose compiled body the reading is about. Handing that closure back is
-/// what makes the receipt exact — `jit_code_for` on its own bytecode answers whether
-/// THIS function ran compiled, where an "is the cache non-empty" test would pass on
-/// any stdlib closure the program happened to warm.
+/// closure whose compiled body the reading is about. Handing that closure back
+/// makes the receipt exact: `jit_code_for` on its own bytecode answers whether
+/// THIS function ran compiled. An "is the cache non-empty" test would pass on any
+/// stdlib closure the program happened to warm.
 ///
 /// The program compiles with the graft off, so `body`'s call to the driving
 /// closure stays a call and the closure runs (docs/impl/graft.md).
@@ -138,18 +141,16 @@ fn jit_mid_run_growth(prelude: &str, body: &str, gauge: &str) -> (i64, bool) {
 ///
 /// The factory itself carries a `MakeClosure` and so never compiles; the caller
 /// does, and its tail call into the member is where the tiers can disagree. That
-/// call strands the merged cycle arena's release, and the compiled tier has to hand
-/// the deferral to the activation that runs the member, its own having popped its
-/// region-remap frame at the tail-call sentinel
-/// (docs/impl/region/relocate.md § "A channel built in compiled code hands its
-/// release forward").
+/// call strands the merged cycle arena's release. The compiled tier has to hand
+/// the deferral to the activation that runs the member, because its own popped its
+/// region-remap frame at the tail-call sentinel (docs/impl/region/relocate.md).
 ///
 /// The counter-factual: with the hand-off missing, the caller's activation records
-/// nothing, no clean break ever runs the arena's decref, and each call strands the
-/// cycle's two closures, its two forward cells and the table they capture — two
-/// regions per call, which is a growth of ~400 over the measured window. The VM
+/// nothing, and no clean break ever runs the arena's decref. Each call then strands
+/// the cycle's two closures, its two forward cells and the table they capture. That
+/// is two regions per call, a growth of ~400 over the measured window. The VM
 /// reading of the same driver is
-/// `selfrec::region_ownership_reclaims_defn_module_factory_per_call`, so a
+/// `selfrec::cycle::region_ownership_reclaims_defn_module_factory_per_call`, so a
 /// regression that reads bounded there and open here is exactly the tier gap.
 #[cfg(feature = "jit")]
 #[test]
@@ -202,7 +203,7 @@ fn region_ownership_adopt_subtree_drop_under_jit() {
     assert!(
         jit_compiled,
         "the lambda must JIT-compile for this to test the JIT adopt path (empty \
-         jit_cache means the background worker died — e.g. on a missing AdoptRegion \
+         jit_cache means the background worker died, for example on a missing AdoptRegion \
          translate arm)",
     );
     assert!(
@@ -214,7 +215,7 @@ fn region_ownership_adopt_subtree_drop_under_jit() {
 
 /// VM≡JIT parity for the **interior-cycle adopt**. A container `root` directly
 /// holds `a` and `b`, which reference each other (`a ⊇ b`, `b ⊇ a`). Per-region RC
-/// cannot collect the a↔b cycle (docs/impl/region/rules.md Rule 8); the cut adopts a
+/// cannot collect the a↔b cycle (docs/impl/region/rules.md); the cut adopts a
 /// and b by root, whose JIT subtree drop reclaims the cycle. The leaking
 /// discriminator proves the cut, not the shape, reclaims it, and `jit_compiled`
 /// proves the JIT path ran.
@@ -246,8 +247,8 @@ fn region_ownership_reclaims_interior_cycle_subtree_under_jit() {
 /// VM≡JIT parity for the **co-owned bare-cycle group**. Two `@array`s pushing each
 /// other (`a ⊇ b`, `b ⊇ a`) with NO container parent — no owner among the members,
 /// reclaimed by one `FreeRegionGroup`. Per-region RC cannot collect it; the JIT
-/// `elle_jit_free_region_group` helper frees the cycle wholesale. Counterfactual + `jit_compiled` guard as
-/// above.
+/// `elle_jit_free_region_group` helper frees the cycle wholesale. The
+/// counterfactual and the `jit_compiled` guard are as above.
 #[cfg(feature = "jit")]
 #[test]
 fn region_ownership_reclaims_bare_cycle_group_under_jit() {
@@ -274,28 +275,29 @@ fn region_ownership_reclaims_bare_cycle_group_under_jit() {
 
 /// The per-call cost of a self-recursive local closure: it is **cell-free**. A
 /// binding referenced only by its own initializer lambda is captured solely by a
-/// self-edge, which does not mark it captured (`hir/arena.rs` `mark_captured`), so it
-/// has `needs_capture() == false` — no forward cell. Its self-reference resolves to
-/// the executing closure (`LoadSelf` / a self-call), never a cell load. So a RETAINED
-/// self-recursive `loop` pins exactly TWO region objects per call — the closure and
-/// its one-entry env — the SAME as a foreign-capturing closure of equal capture
-/// arity (one captured upvalue, not itself, likewise cell-free). Their object-count
+/// self-edge, which does not mark it captured (`mark_captured` in
+/// src/hir/arena.rs). So it has `needs_capture() == false`, and no forward cell.
+/// Its self-reference resolves to the executing closure (`LoadSelf` / a
+/// self-call), never a cell load. A RETAINED self-recursive `loop` therefore pins
+/// exactly TWO region objects per call, the closure and its one-entry env. That is
+/// the SAME as a foreign-capturing closure of equal capture arity: one captured
+/// upvalue, not itself, likewise cell-free. Their object-count
 /// gap is therefore ~0: no per-call forward cell distinguishes them.
 ///
 /// This gauges that cell-free baseline so any regression that reintroduces a per-call
-/// cell for pure self-recursion is a visible, loud failure. Made observable by
-/// RETAINING every closure in a program-lifetime `%pair` CHAIN — each new pair links
-/// the last, so every closure stays reachable — then reading object-count growth
-/// (`arena/count`) across 200 retained builds, sampled mid-run by the program exactly
-/// as `reassign_toplevel_prior_release_is_bounded` samples its gauge. The returned
+/// cell for pure self-recursion is a visible, loud failure. The test RETAINS every
+/// closure in a program-lifetime `%pair` CHAIN, where each new pair links the last,
+/// so every closure stays reachable. It then reads object-count growth
+/// (`arena/count`) across 200 retained builds, sampled mid-run by the program
+/// exactly as `reassign_toplevel_prior_release_is_bounded` samples its gauge. The returned
 /// closure escapes via return, so it is the caller that holds it.
 ///
 /// The retain route decides the reading, and must stay a chain rather than a push into a
 /// container. A `%pair` records a COUNTED cross-region edge to the closure, so the
 /// closure's region stays in the active accounting `arena/count` sums. A container
 /// store instead lets the ownership forest ADOPT the stored region as a member of the
-/// container's subtree, and an Owned member carries no count — it leaves the sums
-/// entirely (retained values, invisible objects). A control retained that way reads
+/// container's subtree. An Owned member carries no count, so it leaves the sums
+/// entirely: retained values, invisible objects. A control retained that way reads
 /// as *shrinking*, and the gap below stops measuring cells at all.
 ///
 /// Each retained build therefore pins THREE objects per call — the closure, its
@@ -328,10 +330,10 @@ fn self_recursive_loop_is_cell_free() {
     let for_obj = retained_growth(for_prelude, for_body, "arena/count");
     // Gauge-live discriminator: the chain accumulator retains every prior pair by
     // REFERENCE (each new pair links the last), so the object count must grow ~1
-    // per call. A pushed fresh pair cannot serve here — nor can it retain the
-    // closures above, for the same reason: the `%array-push` funnel store-adopts
-    // the pushed region, and an Owned member leaves the active accounting
-    // `arena/count` sums — retained values, invisible objects.
+    // per call. A pushed fresh pair cannot serve here, nor can it retain the
+    // closures above. The `%array-push` funnel store-adopts the pushed region, and
+    // an Owned member leaves the active accounting `arena/count` sums: retained
+    // values, invisible objects.
     let pair_obj = mid_run_discriminator(Runtime::without_stdlib(), "arena/count");
     let rec_reg = retained_growth(rec_prelude, rec_body, "arena/region-count");
     let for_reg = retained_growth(for_prelude, for_body, "arena/region-count");
@@ -367,9 +369,9 @@ fn self_recursive_loop_is_cell_free() {
          got {rec_obj}",
     );
 
-    // Region growth matches between the shapes too (the closure and its env share one
-    // region, and the retaining pair adds one), so a per-call cell would show as an
-    // extra REGION as well as an extra object.
+    // Region growth matches between the shapes too. The closure and its env share
+    // one region, and the retaining pair adds one, so a per-call cell would show as
+    // an extra REGION as well as an extra object.
     assert!(
         (rec_reg - for_reg).abs() < 50,
         "region growth must match between the self-recursive and foreign-capture \

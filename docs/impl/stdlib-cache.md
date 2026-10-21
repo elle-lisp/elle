@@ -159,7 +159,7 @@ struct StoredBytecode {
 
 Nothing a later compile reads rides beside the code objects. Each payload
 carries the fragment of its own body as bytes, and the cache stores those bytes
-with the payload (§ "The body fragment must be preserved").
+with the payload, as a section below describes.
 
 ### Why serialize the unit's entry header?
 

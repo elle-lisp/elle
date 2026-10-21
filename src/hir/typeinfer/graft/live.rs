@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! Which lambdas live code reaches: inside any other lambda, only a body with no op to prove grafts.
 //!
 //! docs/impl/graft.md

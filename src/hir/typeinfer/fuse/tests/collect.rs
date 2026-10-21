@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! `map` and `filter` fuse alone and in any mix over a proven immutable array,
 //! and a callee or base the gate cannot prove stays a plain call.
 //!
@@ -235,10 +235,10 @@ fn filter_over_var_bound_immutable_array_fuses() {
 
 /// Reorder gate on a MIXED chain: `(map f (filter p xs))` where the predicate
 /// prints (it signals `:io`, so it is NOT reorder-safe). A mixed
-/// chain is length ≥ 2, so it always carries the reorder requirement; the
+/// chain is length ≥ 2, so it always carries the reorder requirement. The
 /// non-reorder-safe predicate declines the whole composition, and the chain
-/// falls back to fusing only its inner reorder-safe run — the `filter` fuses on
-/// the pre-order recursion and the outer `map` stays a plain call over the fused
+/// falls back to fusing only its inner reorder-safe run. The `filter` fuses on
+/// the pre-order recursion, and the outer `map` stays a plain call over the fused
 /// loop, beside `map`'s surviving lambda `f` (tests/impl/call-arg-across-loop.lisp
 /// pins that argument order at runtime).
 #[test]
@@ -261,9 +261,9 @@ fn mixed_chain_with_non_reorder_safe_stage_fuses_inner_only() {
     );
 }
 
-/// A reorder-safe MIXED `(map f (filter p xs))` fuses to a SINGLE loop: both the
-/// `map` and `filter` dispatches are gone, both body ops (`*` and `even?`) run
-/// inline, there is exactly ONE accumulator (the intermediate survivor array
+/// A reorder-safe MIXED `(map f (filter p xs))` fuses to a SINGLE loop. Both the
+/// `map` and `filter` dispatches are gone, and both body ops (`*` and `even?`)
+/// run inline. There is exactly ONE accumulator (the intermediate survivor array
 /// between the `filter` and the `map` is gone), and one guard `if` (the filter
 /// stage). `even?` carries only `SIG_ERROR` and `*` is silent, so both are
 /// reorder-safe and the length-2 composition fuses. Fusing only the inner run
@@ -295,9 +295,9 @@ fn mixed_map_of_filter_reorder_safe_fuses_to_one_loop() {
 }
 
 /// A reorder-safe MIXED `(filter q (map g xs))` fuses to a SINGLE loop with the
-/// map stage transforming first and the guard testing the transformed value: no
-/// `map`/`filter` dispatch, both ops (`*` and `even?`) inline, one accumulator
-/// (no intermediate mapped array), one guard `if`. Fusing only the inner run
+/// map stage transforming first and the guard testing the transformed value.
+/// No `map`/`filter` dispatch remains, both ops (`*` and `even?`) run inline, and
+/// there is one accumulator (no intermediate mapped array) and one guard `if`. Fusing only the inner run
 /// would leave the outer `filter` a plain call over the fused map.
 #[test]
 fn mixed_filter_of_map_reorder_safe_fuses_to_one_loop() {

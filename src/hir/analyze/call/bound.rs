@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-21
 //! The check of a parameter bound at a call whose argument's signal the
 //! compiler knows.
 //!

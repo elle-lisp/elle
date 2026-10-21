@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The region-inference unit tests, one module per subject the solver decides.
 //!
 //! docs/impl/region/rules.md

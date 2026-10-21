@@ -5,7 +5,7 @@
 //! docs/impl/image/verifier.md
 //!
 //! This pass runs after relocation, in every build, and reads object shells
-//! only — an extent is checked from the `ptr` and `len` in the shell, never by
+//! only. It checks an extent from the `ptr` and `len` in the shell, never by
 //! touching the bytes behind it, so the clean pages a hydration never faults
 //! in stay clean. The shells are already resident: relocation wrote a pointer
 //! slot in every object that has one.
@@ -139,9 +139,9 @@ fn page_of(pages: &[MappedPage], off: usize) -> Result<&MappedPage, ImageError> 
 /// The object's own bytes must carry the discriminant the index claims.
 ///
 /// This is a byte compare against the layout probe rather than a read of the
-/// enum: reading a `HeapObject` whose discriminant is not one this build
-/// emits has no defined answer, and a corrupt index is exactly where such a
-/// byte comes from.
+/// enum. Reading a `HeapObject` whose discriminant is not one this build emits
+/// has no defined answer, and a corrupt index is exactly where such a byte
+/// comes from.
 fn discriminant(base: usize, off: usize, tag: HeapTag) -> Result<(), ImageError> {
     let want = layout::variant_layout(tag)
         .ok_or_else(|| ImageError::Corrupt(format!("{tag:?} is not a dumpable variant")))?;

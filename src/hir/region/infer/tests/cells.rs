@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! Capture cells: when a scope mints one, what a cell contains, and where its release lands.
 //!
 //! docs/impl/region/cells.md
@@ -19,15 +19,15 @@ mod frameheld;
 // in `regionstore.decref` catches it.
 //
 // The trap: functionalize's synthetic phi-merge let introduces a Begin
-// wrapper, and neither it nor the file-scope Letrec has a captured binding
-// when a `var` is never captured, so an unconditional mint makes a phantom
-// for each.
+// wrapper. When a `var` is never captured, neither that wrapper nor the
+// file-scope Letrec has a captured binding, so an unconditional mint makes a
+// phantom for each.
 
 #[test]
 fn begin_with_no_captured_binding_has_no_alloc_region() {
-    // `(do (var x 0) (if true (assign x 42) (assign x 99)) x)` — the
-    // var x is never captured by a closure, so `needs_capture()` is
-    // false for every binding reachable from any Begin in this tree.
+    // `(do (var x 0) (if true (assign x 42) (assign x 99)) x)`: no closure
+    // captures the var x. So `needs_capture()` is false for every binding
+    // reachable from any Begin in this tree.
     // The lowerer will not emit MakeCaptureCell for any Begin here;
     // the regions walker must not assign an alloc_region to any Begin.
     let (hir, _arena, info) = pipeline("(do (var x 0) (if true (assign x 42) (assign x 99)) x)");

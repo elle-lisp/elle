@@ -1,6 +1,7 @@
-(elle/epoch 14)
-# audited: 2026-10-06
+(elle/epoch 15)
+# audited: 2026-10-21
 # A cycle a producer returns across the return or fiber frontier stays whole for a reading consumer and frees nothing live.
+#
 # docs/impl/region/owner.md
 #
 # A producer hands an a<->b cycle across the return (or fiber-terminal)
@@ -10,7 +11,7 @@
 # correctness. The sidecar arms guardfree, so a release that frees a member a
 # live frame still holds faults at the read. It also turns the graft off, so
 # each producer stays a call that hands its cycle across the frontier.
-# region-cycle-scope-value-uaf.lisp holds the shape a graft leaves.
+# tests/impl/region-cycle-scope-value-uaf.lisp holds the shape a graft leaves.
 
 (defn cyc-mk []
   (let [a @[]

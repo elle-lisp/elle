@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! `compile/extract` and `compile/parallelize`, which read a named function's HIR to move code or to check it.
 //!
 //! docs/analysis/agent-reasoning.md

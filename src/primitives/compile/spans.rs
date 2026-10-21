@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! Source positions and HIR lookups for the `compile/*` queries and rewrites: name spans, line offsets, named lambdas.
 //!
 //! docs/analysis/agent-reasoning.md

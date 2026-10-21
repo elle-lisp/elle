@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The region walk's dispatch: the source regions each HIR node yields, and its literal, lambda, scope and branch arms.
 //!
 //! docs/impl/region/model.md
@@ -75,7 +75,7 @@ impl RegionInference {
                 // callee releases it at the param's true last use. Mint a
                 // placeholder region per such param and register it in
                 // `call_result_regions`, mirroring the opaque-Call treatment
-                // (docs/impl/region/rules.md Rule 2). The lowerer emits a
+                // (docs/impl/region/rules.md). The lowerer emits a
                 // value-based `DecrefValueRegion` that reads the param's slot
                 // at `decref_point`, releasing the arg's *runtime* region.
                 //

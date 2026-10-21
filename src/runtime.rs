@@ -136,7 +136,7 @@ impl Runtime {
     }
 
     /// Where this instance's stdlib came from. A cache that silently never hits
-    /// still yields a working runtime, so a test that only checks behaviour
+    /// still yields a working runtime, so a test that only checks behavior
     /// cannot tell the two apart — this is what it asserts on instead.
     pub fn stdlib_source(&self) -> crate::primitives::module_init::StdlibSource {
         self.stdlib_source
@@ -191,9 +191,9 @@ impl Runtime {
         self.core.parts()
     }
 
-    /// Register a host primitive on this instance: compiled code and `eval`
-    /// resolve it as a built-in, `doc` answers for it at run time and in a
-    /// macro body, and so do the workers the instance spawns
+    /// Register a host primitive on this instance. Compiled code and `eval`
+    /// resolve it as a built-in, and `doc` answers for it at run time and in a
+    /// macro body. The workers the instance spawns inherit all of that
     /// (docs/embedding.md).
     pub fn register_primitive(&mut self, def: &'static crate::primitives::def::PrimitiveDef) {
         let (vm, symbols, cctx) = self.parts();

@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-10-21
 //! Runtime tests for the ownership forest, one submodule per cut family, over the growth harnesses shared here.
 //!
 //! docs/impl/region/ownership.md
@@ -43,7 +43,7 @@ pub(super) fn child_fiber(
     (handle, fiber_value)
 }
 
-/// Compile `src` once (isolating runtime region behaviour from compile scratch),
+/// Compile `src` once (isolating runtime region behavior from compile scratch),
 /// warm up, then run the same bytecode 50 times, returning the net live-region
 /// count delta. The shared steady-state harness every discarded-shape reclamation
 /// pin below uses — the ownership forest is unconditional, so there is no flag to
@@ -150,7 +150,7 @@ pub(super) fn mid_run_discriminator(rt: Runtime, gauge: &str) -> i64 {
 /// a new one has to be chosen.
 ///
 /// A single `@array` that holds itself is no discriminator: a reference from a
-/// region to itself is counted nowhere (docs/impl/region/rules.md, Rule 5), so
+/// region to itself is counted nowhere (docs/impl/region/rules.md), so
 /// the array frees at its last release.
 pub(super) const LEAK_DISCRIMINATOR: &str =
     "(begin (let [a (@array)] (%array-push a (fiber/new (fn [] a) 0)) nil) nil)";

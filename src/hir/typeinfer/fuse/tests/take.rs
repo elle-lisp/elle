@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-21
 //! The `take-while` stage fuses to a guarded push, whose early exit ends the walk
 //! only where it is the innermost op. It declines over an undecidable emptiness.
 //!
@@ -7,9 +7,9 @@
 use super::*;
 
 /// A single `(take-while pred xs)` dissolves to a guarded push under an early-exit
-/// sentinel: the `take-while` dispatch is gone, no closure survives (neither the
-/// predicate nor the self-recursive walker its own array arm binds in a `letrec`),
-/// the predicate runs inline, and the loop condition reads the `more` sentinel the
+/// sentinel. The `take-while` dispatch is gone, and no closure survives: neither the
+/// predicate nor the self-recursive walker its own array arm binds in a `letrec`.
+/// The predicate runs inline, and the loop condition reads the `more` sentinel the
 /// rejecting element clears. The accumulator is returned **unfrozen** — the stdlib
 /// array arm has no `(if (mutable? coll) acc (freeze acc))`.
 #[test]
@@ -82,9 +82,9 @@ fn map_over_take_while_fuses_to_one_loop() {
     );
 }
 
-/// A `take-while` with a `map` **prefix** may not end the walk: the staged form
+/// A `take-while` with a `map` **prefix** may not end the walk. The staged form
 /// runs the transform over the whole input, so the fused loop keeps the bare range
-/// test and the sentinel gates the `take-while`'s own stage instead.
+/// test, and the sentinel gates the `take-while`'s own stage instead.
 #[test]
 fn take_while_over_map_prefix_keeps_the_walk_exhaustive() {
     let (hir, arena, mut rt) =
@@ -166,7 +166,7 @@ fn search_over_take_while_gates_its_own_stage() {
 
 /// A `filter` inner to a `take-while` declines the whole chain. `len` decides the
 /// emptiness of the BASE, and the fused Collect form answers an empty base with
-/// `()` because the stdlib op's `(empty? coll)` clause precedes its array arm — but
+/// `()` because the stdlib op's `(empty? coll)` clause precedes its array arm. But
 /// a filter can hand an empty collection on from a non-empty base, where the staged
 /// `take-while` answers `()` and the loop its accumulator. The inner `filter` still
 /// fuses on the recursion.

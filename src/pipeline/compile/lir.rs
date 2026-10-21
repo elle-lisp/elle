@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! Compile a file to frozen LIR, for the WASM backend and the dumps.
 //!
 //! src/pipeline/AGENTS.md

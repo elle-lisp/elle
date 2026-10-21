@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! Discharging one call-position site: its op's contract row, against the operand types the inference proved.
 //!
 //! docs/intrinsics.md
@@ -43,7 +43,7 @@ fn proven_nonzero(h: &Hir, env: &NonzeroEnv) -> bool {
 fn reject(site: &Hir, op: IntrinsicOp, detail: String) -> Result<(), String> {
     Err(format!(
         "{}: {}: {} — a %-intrinsic in call position must prove its operands \
-         (docs/intrinsics.md § The contract: prove or reject); use the stdlib \
+         (docs/intrinsics.md); use the stdlib \
          wrapper for dynamic types",
         site.span,
         op.name(),
@@ -89,7 +89,7 @@ pub(super) fn check_op(
                     ),
                 );
             }
-            // The div opcodes' one undefined zero case is int÷int: with either
+            // The div opcodes' one undefined zero case is int÷int. With either
             // operand a proven Float the whole computation is IEEE-defined
             // (±inf/NaN) on every tier, so the nonzero obligation applies only
             // when no operand is proven Float.
@@ -190,9 +190,9 @@ pub(super) fn check_op(
                 }
             } else if STRUCT_FAMILY.contains(&c) {
                 // The key must be proven hashable (`TableKey::from_value`'s
-                // domain): a float or mutable container can never BE a struct
-                // key, and the surface `get` reports that as a :type-error —
-                // so the silent opcode may only lower over a proven key.
+                // domain). A float or mutable container can never BE a struct
+                // key, and the surface `get` reports that as a :type-error. So
+                // the silent opcode may only lower over a proven key.
                 const HASHABLE_KEYS: &[TyId] = &[
                     TypeInterner::NIL,
                     TypeInterner::BOOL,
@@ -209,7 +209,9 @@ pub(super) fn check_op(
                         site,
                         op,
                         format!(
-                            "a struct key must be a proven hashable                              (nil/bool/int/keyword/symbol/string/array;                              inferred: {})",
+                            "a struct key must be a proven hashable \
+                             (nil/bool/int/keyword/symbol/string/array; \
+                             inferred: {})",
                             TypeInterner::describe(key)
                         ),
                     )

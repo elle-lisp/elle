@@ -24,8 +24,8 @@ reclamation they can reason about — while paying **neither** cost those system
 charge:
 
 - **no runtime cost** — no tracing or scanning collector and, by construction,
-  no heap walk to reclaim: reclamation is driven by a per-region recorded
-  outgoing-edge table (O(edges)), never by walking heap contents
+  no heap walk to reclaim. A per-region recorded outgoing-edge table drives
+  reclamation (O(edges)), never a walk of heap contents
   ([the ownership forest](region/ownership.md));
 - **no annotation cost** — no `iso`/`mut`/region annotations, no hand-written
   lifetimes or borrows.
@@ -266,8 +266,9 @@ unconditionally.
 [The settled invariants](region/settled.md) lists the invariants the system
 upholds, one line each, with the spec that owns each argument. They cover every
 cycle-and-transfer class of the ownership forest, where each release lands, who
-owns a value at a boundary, and the 1-slot container model. They read closed in the oracle and are regression-pinned on the
-interpreter and the JIT; build on them, do not re-litigate them.
+owns a value at a boundary, and the 1-slot container model. They read closed
+in the oracle and are regression-pinned on the interpreter and the JIT; build
+on them, do not re-litigate them.
 
 ## The leak roots
 
@@ -361,10 +362,10 @@ probe that reads it as growth is measuring an over-keep.
 Leak-freedom has two failure modes: a region no mechanism reclaims (the
 F-classes above), and a region freed before its true last use (a UAF). The
 forest runs unconditionally, so `--trace=guardfree` under the full stdlib is
-the soundness gate; any over-free is a first-class defect pinned by a
-guardfree test (the `region-*-uaf` files in
-[the implementation suite](../../tests/impl/overview.md), each arming guardfree in
-its sidecar). This axis is orthogonal to the leak
+the soundness gate. Any over-free is a first-class defect pinned by a
+guardfree test: the `region-*-uaf` files in
+[the implementation suite](../../tests/impl/overview.md), each arming guardfree
+in its sidecar. This axis is orthogonal to the leak
 burndown — closing a leak class does not close it, and it does not close a
 leak class.
 

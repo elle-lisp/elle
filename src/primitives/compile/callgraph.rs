@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The signal map and the call graph that `compile/analyze` builds from the analyzed HIR.
 //!
 //! docs/analysis/portrait.md

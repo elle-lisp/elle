@@ -48,26 +48,25 @@ impl VM {
     /// Run a compiled unit's entry function at the root.
     ///
     /// A unit compiled on another heap runs from a copy on this VM's heap
-    /// (docs/impl/region/template.md § "A unit runs on the heap it was
-    /// compiled on"). The copy is held for the run, because the entry's `Code`
-    /// takes no reference of its own.
+    /// (docs/impl/region/template.md). The copy is held for the run, because
+    /// the entry's `Code` takes no reference of its own.
     pub fn execute(&mut self, unit: &CodeUnit) -> Result<Value, String> {
         let unit = unit.on_heap(self.heap());
         self.execute_code(unit.entry().code(), None)
     }
 
     /// Mint a fresh `RuntimeRegion` from the activation's heap for a VM-produced
-    /// *result* value: the result is the operation's own value (rc=1 after its
+    /// *result* value. The result is the operation's own value (rc=1 after its
     /// single allocation), freed value-based by the consumer's `DecrefValueRegion`
     /// at the result's last use — the native-call result discipline. A *fresh*
     /// mint, never a region a tail-call is already freeing (a result born there
     /// would be freed under its reader).
     ///
-    /// Test-only: the VM error/result chokepoint ([`escaping_error`],
+    /// Test-only. The VM error/result chokepoint ([`escaping_error`],
     /// [`set_error`], [`error_extra`], [`escaping_match_fail`]) builds through an
     /// `Alloc::new(self.heap())`, which mints+owns exactly such a fresh region
-    /// and exposes the `ctx.*` allocation surface; this bare mint exists only for
-    /// the pin tests that assert the contract.
+    /// and exposes the `ctx.*` allocation surface. This bare mint exists only
+    /// for the pin tests that assert the contract.
     ///
     /// [`escaping_error`]: Self::escaping_error
     /// [`set_error`]: Self::set_error
@@ -91,8 +90,8 @@ impl VM {
     /// freed value-based by the consumer's `DecrefValueRegion`. Same name as
     /// [`Alloc::error_extra`](crate::primitives::ctx::Alloc::error_extra)
     /// so `rich_error!` is uniform over `ctx` and `self`. The `extra` field
-    /// values must be born in the same region — immediates (keywords/ints) or
-    /// pass-throughs (incref'd by `alloc`'s content scan); a VM site has no
+    /// values must be born in the same region: immediates (keywords/ints) or
+    /// pass-throughs (incref'd by `alloc`'s content scan). A VM site has no
     /// `string` of its own to misplace. Its callers are a tier's refusal and an
     /// expansion's refusal of an ambient primitive.
     pub(crate) fn error_extra(
@@ -182,15 +181,14 @@ impl VM {
         let mut current_env = closure_env.cloned().unwrap_or(empty_env);
 
         // Install the executing-closure register for this body, bracketed
-        // (save/restore) so a re-entrant driver — a native that loads a module
-        // via `execute` mid-activation — restores the outer
-        // activation's register on return, exactly as
-        // `execute_bytecode_saving_stack` brackets a closure body. The register
-        // arrives through the one-shot `pending_entry_closure`: an entrant that
-        // runs a CLOSURE's body through this raw entry (the spawned-worker body,
-        // the stdlib exports call) sets it just before; a raw top-level/module
-        // body sets nothing and runs untracked (NIL — no self-reference can
-        // occur in non-closure bytecode).
+        // (save/restore). A re-entrant driver — a native that loads a module via
+        // `execute` mid-activation — then restores the outer activation's
+        // register on return, exactly as `execute_bytecode_saving_stack`
+        // brackets a closure body. The register arrives through the one-shot
+        // `pending_entry_closure`. An entrant that runs a CLOSURE's body through
+        // this raw entry (the spawned-worker body, the stdlib exports call) sets
+        // it just before. A raw top-level/module body sets nothing and runs
+        // untracked (NIL — no self-reference can occur in non-closure bytecode).
         let saved_closure = self.fiber.current_closure;
         let entering = std::mem::replace(&mut self.pending_entry_closure, Value::NIL);
         #[cfg(debug_assertions)]
@@ -198,15 +196,15 @@ impl VM {
         self.fiber.current_closure = entering;
 
         // Whether THIS invocation is the true root driver (the fiber's base
-        // activation frame). A top-level body runs directly on the base slot —
-        // this entry pushes no activation frame — so an `AdoptIntoActivation` it
-        // executes mints the owner node in the BASE slot, and a top-level tail
-        // call records its deferred release there, neither of which any
-        // trampoline clean break ever reaches; the root driver discharges them
-        // itself at the program's completion (below). A RE-ENTRANT execute_code
-        // (a native loading a module mid-activation) runs in its caller's
-        // activation (depth > 1), whose dues belong to that caller's own
-        // completion release — they must not be touched here.
+        // activation frame). A top-level body runs directly on the base slot,
+        // because this entry pushes no activation frame. So an
+        // `AdoptIntoActivation` it executes mints the owner node in the BASE
+        // slot, and a top-level tail call records its deferred release there.
+        // No trampoline clean break ever reaches either, so the root driver
+        // discharges them itself at the program's completion (below). A
+        // RE-ENTRANT execute_code (a native loading a module mid-activation) runs
+        // in its caller's activation (depth > 1). Those dues belong to that
+        // caller's own completion release, and must not be touched here.
         let at_root = self.fiber.activation_dues.len() == 1;
         // Where a refused park truncates the `parameterize` frames to.
         let depth = self.fiber.param_depth();
@@ -266,11 +264,11 @@ impl VM {
                 bits = self.handle_sig_switch();
             } else {
                 // Everything that is not an error, a halt, or the switch
-                // trampoline arrives here with no handler left to run, and one
-                // report answers for all of it: `:yield` is not privileged
-                // among the bits that reach the root (docs/signals/protocol.md).
-                // The keywords are what the author of
-                // the emitting call can act on; the mask alone is not. The
+                // trampoline arrives here with no handler left to run. One
+                // report answers for all of it, because `:yield` is not
+                // privileged among the bits that reach the root
+                // (docs/signals/protocol.md). The keywords are what the author
+                // of the emitting call can act on; the mask alone is not. The
                 // root driver cannot hold the park, so it refuses it.
                 self.reclaim_root_dues(&current_code);
                 self.refuse_hosted_park(bits, depth);
@@ -280,13 +278,13 @@ impl VM {
                 ));
             }
         };
-        // The root activation's clean break: discharge the base slot's dues —
-        // the owner node (one tolerant decref → subtree drop over node +
-        // adopted members) and whatever a top-level tail call deferred — at the
-        // program's completion, the root counterpart of `trampoline_loop`'s
-        // normal-break release (docs/impl/region/owner.md). Runs
-        // on every root exit — a finished program has no resumable state at this
-        // boundary, so an error exit releases identically.
+        // The root activation's clean break: discharge the base slot's dues at
+        // the program's completion. They are the owner node (one tolerant decref
+        // → subtree drop over node + adopted members) and whatever a top-level
+        // tail call deferred. This is the root counterpart of
+        // `trampoline_loop`'s normal-break release (docs/impl/region/owner.md).
+        // It runs on every root exit: a finished program has no resumable state
+        // at this boundary, so an error exit releases identically.
         if at_root {
             self.release_activation_dues();
         }

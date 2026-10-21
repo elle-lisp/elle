@@ -1,6 +1,7 @@
-(elle/epoch 14)
-# audited: 2026-10-06
+(elle/epoch 15)
+# audited: 2026-10-21
 # A function compiles once its calls reach the threshold the run started with, and stays interpreted below it.
+#
 # docs/config.md
 #
 # The sidecar keeps every call a call, so the loops below reach their functions

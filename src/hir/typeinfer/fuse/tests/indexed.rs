@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-21
 //! The `map-indexed` stage fuses to a `map`'s push with the walk's index bound
 //! beside the element. It declines inner stages that change the walk's length.
 //!
@@ -6,10 +6,10 @@
 
 use super::*;
 
-/// A single `(map-indexed f xs)` dissolves to a `map`'s indexed push: the dispatch is
-/// gone, no closure survives (neither the function nor the self-recursive walker its
-/// array arm binds in a `letrec`), the body runs inline, and the accumulator is
-/// returned **unfrozen** — the stdlib array arm has no
+/// A single `(map-indexed f xs)` dissolves to a `map`'s indexed push. The dispatch is
+/// gone, and no closure survives: neither the function nor the self-recursive walker
+/// its array arm binds in a `letrec`. The body runs inline, and the accumulator is
+/// returned **unfrozen**, because the stdlib array arm has no
 /// `(if (mutable? coll) acc (freeze acc))`.
 ///
 /// The two `if`s are the whole emitted shape: the loop's, and the empty-base `()`
@@ -153,9 +153,9 @@ fn map_indexed_inner_to_an_untyped_arm_fuses() {
     }
 }
 
-/// The complement, and the reason a `map-indexed`'s position is the base index: every
-/// stage that could RENUMBER what reaches it is a stage that changes the walk's length, and
-/// the emptiness rule already refuses each one inner to an untyped array arm. So the
+/// The complement, and the reason a `map-indexed`'s position is the base index. Every
+/// stage that could RENUMBER what reaches it is a stage that changes the walk's length.
+/// The emptiness rule already refuses each one inner to an untyped array arm. So the
 /// chain declines whole and the inner op still fuses on the recursion — no survivor
 /// count is ever owed.
 #[test]
@@ -245,10 +245,10 @@ fn wrong_arity_map_indexed_fn_is_not_fused() {
     );
 }
 
-/// A `map-indexed` whose function is a `Var` naming a same-unit `defn` inlines its
-/// body by cloning, exactly as a two-parameter `fold` combinator does — the stage puts
-/// no new requirement on how the function is resolved. The definition survives the
-/// clone, so its `*` and the inlined copy's are two sites.
+/// A `map-indexed` whose function is a `Var` naming a same-unit `defn` inlines a
+/// copy of its body, exactly as a two-parameter `fold` combinator does. The stage
+/// puts no new requirement on how the function is resolved. The definition
+/// survives, so its `*` and the inlined copy's are two sites.
 #[test]
 fn named_map_indexed_fn_inlines() {
     let (hir, arena, mut rt) = compile("(defn scale [i x] (* i x)) (map-indexed scale [10 20 30])");

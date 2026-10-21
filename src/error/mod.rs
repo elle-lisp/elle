@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! The crate's one error type, the source locations it carries, and the map from bytecode offset to location.
 //!
 //! src/error/AGENTS.md

@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-21
 //! Analyzes a `fn` form: binds its parameters, analyzes its body, and infers the signal a call to it emits.
 //!
 //! docs/functions.md

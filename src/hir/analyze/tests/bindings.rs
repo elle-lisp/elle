@@ -209,9 +209,10 @@ fn letrec_self_reference_classifies_recursive() {
     use crate::hir::CaptureKind;
 
     // (letrec [loop (fn [m] (loop m))] (loop 3)) — `loop`'s initializer lambda
-    // references the binding `loop` across the lambda boundary: a SELF-edge in the
-    // enclosing SCC, classified `CaptureKind::Recursive` (carrying the SCC binding
-    // identity), distinct from a sibling/foreign `Local`/`Capture`.
+    // references the binding `loop` across the lambda boundary. That is a
+    // SELF-edge in the enclosing SCC, classified `CaptureKind::Recursive`
+    // (carrying the SCC binding identity), distinct from a sibling/foreign
+    // `Local`/`Capture`.
     let mut symbols = SymbolTable::new();
     let mut arena = BindingArena::new();
     let mut analyzer = Analyzer::new(&mut symbols, &mut arena);

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! Pins adopt-edge emission for combined subtrees: store, capture and deep nesting threaded through one owner assignment.
 //!
 //! docs/impl/region/adopt.md
@@ -7,10 +7,9 @@
 //! star, a lone local capture). These probe the modes COMBINED in one
 //! externally-unique subtree, where `compute_adopt_edges`'s owner assignment must
 //! thread store edges and re-derived capture edges through the same `containers_of`
-//! graph. Each assertion is written from the spec ("Both feed owner assignment … each
-//! member adopted by its actual parent") — a member's owner is the root when it has a
-//! direct root edge, else its unique interior container, whether the edge is a store
-//! or a capture.
+//! graph. Each assertion follows the actual-parent rule on `compute_adopt_edges`. A
+//! member's owner is the root when it has a direct root edge, else its unique interior
+//! container, whether the edge is a store or a capture.
 
 use super::*;
 
@@ -30,9 +29,9 @@ fn all_pair_regions(hir: &Hir, info: &RegionInfo) -> Vec<Region> {
 fn adopt_edges_chains_store_and_capture_in_one_subtree() {
     // Combined probe: a Fresh container `root` holds a local capturing closure `c`, and
     // `c` captures the pair `p`. One externally-unique Owned subtree {root, c, p} chains
-    // the two emit modes — `c` is adopted by `root` through a STORE edge
-    // (`%array-push root c` funnel-records the containment edge `root ⊇ c`),
-    // and `p` is adopted by `c` through a re-derived CAPTURE edge `c ⊇ p`. The owner
+    // the two emit modes. `root` adopts `c` through a STORE edge: `%array-push root c`
+    // funnel-records the containment edge `root ⊇ c`. `c` adopts `p` through a
+    // re-derived CAPTURE edge `c ⊇ p`. The owner
     // assignment must thread both kinds: `c`'s actual parent is the root (direct store
     // edge), `p`'s actual parent is the non-root container `c`. The root's recursive
     // subtree drop then reclaims the whole chain.
@@ -200,9 +199,9 @@ fn adopt_edges_refuses_nested_capture_on_lifetime_overextension() {
     // owning closure's last CALL. For a NESTED capture the owning closure
     // is itself captured, so its "last call" is already the over-extended one-step-past
     // position, and the bound cascades one structural step PER nesting level. Measured here:
-    // the root `c1` dies at its `decref_point`, but `p`'s tight last-use lands one step LATER
-    // (`p`'s owner `c2` is captured by `c1`, so `c2`'s last-call bound is already at `c1`'s
-    // death, and `p` inherits one step past that). The obligation `member_dp ≤ root_dp` then
+    // the root `c1` dies at its `decref_point`, but `p`'s tight last-use lands one step
+    // LATER. `p`'s owner `c2` is captured by `c1`, so `c2`'s last-call bound is already at
+    // `c1`'s death, and `p` inherits one step past that. The obligation `member_dp ≤ root_dp` then
     // cannot prove `p` dies before the root, so it refuses — sound, since adopting would risk
     // freeing `p` under a still-live reference the analysis cannot rule out.
     //
@@ -215,9 +214,9 @@ fn adopt_edges_refuses_nested_capture_on_lifetime_overextension() {
                       nil)";
     let (hir, info, edges) = adopt_edges(src);
     let p = sole_pair_region(&hir, &info);
-    // (1) The subtree is admitted as externally unique — the refusal is at the adopt stage,
-    // not the subtree stage (so a change that admits it belongs in `compute_adopt_edges` or
-    // the last-use, not the external-uniqueness walk).
+    // (1) The subtree is admitted as externally unique, so the refusal is at the adopt
+    // stage, not the subtree stage. A change that admits it belongs in
+    // `compute_adopt_edges` or the last-use, not the external-uniqueness walk.
     let (_, _, owned) = owned_subtrees_with_effects(src);
     let root = owned
         .iter()
@@ -322,9 +321,9 @@ fn adopt_edges_capture_root_with_store_child() {
 #[test]
 fn adopt_edges_refuses_captured_store_member_on_lifetime() {
     // Boundary pin: a sound conservative refusal by the owner-aware lifetime
-    // obligation. A two-level subtree whose interior cycle back-edge
-    // is a CAPTURE: `root` holds `m` (store `root ⊇ m`), `m` holds a closure `c` (store
-    // `m ⊇ c`), and `c` captures `m` back (capture `c ⊇ m`) — the m↔c reference cycle. The
+    // obligation, over a two-level subtree whose interior cycle back-edge is a CAPTURE.
+    // `root` holds `m` (store `root ⊇ m`), `m` holds a closure `c` (store `m ⊇ c`), and
+    // `c` captures `m` back (capture `c ⊇ m`): the m↔c reference cycle. The
     // subtree {root, m, c} is admitted as externally unique, and `m`'s owner is the root
     // (its direct store edge, preferred over the capture container `c`).
     //
@@ -338,8 +337,8 @@ fn adopt_edges_refuses_captured_store_member_on_lifetime() {
     // in src/runtime/tests/ownership/owner.rs).
     //
     // The owner-aware obligation bounds a store-adopted member by its STRUCTURAL
-    // `decref_point` (where its live decref fires), not the tight last-use, so `m`'s
-    // over-extension refuses the subtree — no REGION root owns it, and none should. The
+    // release point (where its live decref fires), not the tight last-use. So `m`'s
+    // over-extension refuses the subtree: no REGION root owns it, and none should. The
     // m↔c SCC itself is claimed by the ACTIVATION cut
     // instead (`activation_adopts_capture_back_edge_scc`), whose owner-node release
     // post-dominates the whole activation. The `(c)` call is present so `c` is genuinely

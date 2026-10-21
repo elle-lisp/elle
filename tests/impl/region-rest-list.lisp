@@ -1,22 +1,23 @@
 (elle/epoch 15)
-# audited: 2026-10-14
+# audited: 2026-10-21
 # A rest list no cell of which can outlive its head takes one region; one that can keeps a region per cell.
+#
 # docs/impl/region/restlist.md
 #
-# The sidecar turns the graft off: a call to a function the compiler can see
-# becomes the function's body (docs/impl/graft.md), so the calls below would
-# build no rest list and the functions would never compile.
+# The sidecar turns the graft off. Under the graft, a call to a function the
+# compiler can see becomes the function's body (docs/impl/graft.md), so the
+# calls below would build no rest list and the functions would never compile.
 #
 # The admitted half reads page claims. A callee that only reads its rest list
 # claims the same pages for six arguments as for one. Counterfactual: a list
-# built one region per cell claims a page per argument, so six arguments cost
-# five pages more than one.
+# built one region per cell would claim a page per argument, so six arguments
+# would cost five pages more than one.
 #
 # The refused half reads the live object count. When a callee keeps a tail of
 # its rest list, the head cell is freed when the call ends, so the caller holds
 # one object fewer than when the callee keeps the whole list. Counterfactual: a
-# gate that admits the shape builds the head into the tail's region, and the
-# two counts read the same.
+# gate that admitted the shape would build the head into the tail's region, and
+# the two counts would read the same.
 #
 # Each half runs on the interpreter, before the JIT threshold, and again once
 # the function is compiled. The sidecar compiles on the VM thread, so `jit?`

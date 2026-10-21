@@ -1,6 +1,6 @@
 # The frame-held admission
 
-<!-- audited: 2026-09-25 -->
+<!-- audited: 2026-10-21 -->
 
 Which regions a frame holds alone, so a release may fire on a path where none
 fired before without dropping another holder to zero.
@@ -134,9 +134,9 @@ conservative baseline, as a region with no holder binding does.
 The shape this closes is the owned parameter a frame receives, hands to another
 fiber on one path, and reaches the end of on every other.
 `wake-select-waiters` takes the completed fiber by tail-call move from
-`complete-fiber`, and resumes a select waiter with it. Its release sat inside
-the arm that finds a waiter, and a program with no select outstanding never
-runs that arm. Without the window, every `ev/spawn` / `ev/join` pair would
+`complete-fiber`, and resumes a select waiter with it. Without the window, its
+release sits inside the arm that finds a waiter, and a program with no select
+outstanding never runs that arm. Every `ev/spawn` / `ev/join` pair would then
 strand the fiber, the closure it was made from, and the `[ok? value]` pair the
 join delivered.
 

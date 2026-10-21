@@ -1,13 +1,14 @@
-(elle/epoch 14)
-# audited: 2026-10-06
+(elle/epoch 15)
+# audited: 2026-10-21
 # Under graft = false a call stays a call, to a function the file defines and to
 # a stdlib wrapper, while the stdlib keeps the grafts its boot made.
+#
+# docs/impl/graft.md
 #
 # The counter-factual: under the graft, caller's (h 1 2) becomes an AddInt over
 # two constants and plus's (+ a b) becomes the wrapper's guards around an Add, so
 # neither body holds a TailCall. Had the setting reached the boot, not= would
 # call not instead of holding the Not that not's body reaches.
-# docs/impl/graft.md
 
 (defn disasm-text [f]
   "The disassembly of f's bytecode, as one string."

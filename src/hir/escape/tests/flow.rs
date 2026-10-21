@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! What a return, a store, a capture and a call carry out of an activation.
 //!
 //! docs/impl/escape.md
@@ -177,16 +177,16 @@ fn return_facet_is_narrower_than_full_escape() {
 }
 
 /// An `assign` / `set-cell!` in **tail position** returns the value it stores,
-/// so the target cell escapes via return — even when the stored value is a
-/// fresh, *atomless* result, the case a plain value-descent misses. `return_atoms`
-/// seeds the target; without that seed the cell is under-marked, a reassign-gate
-/// UAF risk (the gate would suppress the decref of a value that is in fact
-/// returned).
+/// so the target cell escapes via return. That holds even when the stored
+/// value is a fresh, *atomless* result, the case a plain value-descent misses.
+/// `return_atoms` seeds the target; without that seed the cell is under-marked,
+/// a reassign-gate UAF risk (the gate would suppress the decref of a value that
+/// is in fact returned).
 ///
-/// Shape: a captured-cell setter `(fn (v) (assign c v))` — functionalize keeps
+/// Shape: a captured-cell setter `(fn (v) (assign c v))`. Functionalize keeps
 /// the assign as a `SetCell` at the closure's tail (the setter returns the
-/// stored value), the one shape where a bare store survives at a tail (a
-/// straight-line fn-local reassign is rewritten to a value-discarding let).
+/// stored value). That is the one shape where a bare store survives at a tail:
+/// a straight-line fn-local reassign is rewritten to a value-discarding let.
 /// Asserts on the store TARGET directly (a `Binding` field / `Var` cell, not a
 /// readable `Var`, so it is found by walking for `Assign`/`SetCell`).
 #[test]
@@ -272,10 +272,10 @@ fn return_escape_spec() {
 /// into a freshly-allocated aggregate (`%pair`, an uncounted compile-time store)
 /// escapes its activation but is NOT returned; the store *target* (the container)
 /// is not a source and does not escape. A MUTABLE-container store (`%array-push`/
-/// `%put`) is different: it compiles as a `Funnel` native call whose store is
-/// runtime-counted (the funnel increfs the stored value; the container's
-/// free-time cascade balances it), so there is no uncounted store for the caller
-/// to account for and escape seeds NOTHING — neither the value nor the container.
+/// `%put`) is different. It compiles as a `Funnel` native call whose store is
+/// runtime-counted: the funnel increfs the stored value, and the container's
+/// free-time cascade balances it. So there is no uncounted store for the caller
+/// to account for, and escape seeds NOTHING — neither the value nor the container.
 #[test]
 fn store_escape_spec() {
     // a let-local heap value stored into a pair: `s` escapes via the STORE, not
@@ -312,9 +312,9 @@ fn store_escape_spec() {
 
 /// The store facet is keyed on the declared `RegionEffect`, so a native's
 /// declaration is a claim about escape and not only about the may-store clique.
-/// `Mixed`/`Unknown` seeds every argument here; the read-only trait dispatchers
+/// `Mixed`/`Unknown` seeds every argument here. The read-only trait dispatchers
 /// declare `Opaque` and seed nothing, which is their whole cost at one heap
-/// argument — the clique is over PAIRS of arguments and is empty either way
+/// argument: the clique is over PAIRS of arguments and is empty either way
 /// (docs/impl/region/effects.md; docs/impl/escape.md).
 #[test]
 fn a_sequence_read_does_not_seed_the_store_facet() {
@@ -343,8 +343,8 @@ fn a_sequence_read_does_not_seed_the_store_facet() {
 /// walk, so neither call creates a holder and neither argument is a store-facet
 /// seed: the child-chain wiring is `Opaque` too (docs/impl/region/effects.md).
 /// The counter-factual is `Mixed` on `fiber/propagate`, and this seed is the only
-/// thing that catches it: `Mixed` reads true on the result side
-/// (the SIG_PROPAGATE payload IS arg0) and the declaration oracle exempts a
+/// thing that catches it. `Mixed` reads true on the result side (the
+/// SIG_PROPAGATE payload IS arg0), and the declaration oracle exempts a
 /// signal-carrying return, so no result check can. What it costs is `defer`'s
 /// success path, which names its fiber in the arm this call does not take.
 #[test]
@@ -358,7 +358,7 @@ fn a_fiber_graph_write_does_not_seed_the_store_facet() {
 }
 
 /// `import/load-file` copies its path out to a Rust `String` to read the file and
-/// stores no argument; what it re-enters the VM to produce makes only the RESULT
+/// stores no argument. What it re-enters the VM to produce makes only the RESULT
 /// unbounded, which is `Opaque`'s half of the declaration and seeds nothing
 /// (the VM re-entry rule, docs/impl/region/effects.md). The path is
 /// read through a binding so the call keeps its opaque projection — a literal
@@ -373,11 +373,11 @@ fn import_load_file_does_not_seed_the_store_facet() {
 
 /// Container-read escape (the read-result → container-contents flow edge). A value
 /// stored into a container and then read back OUT (`first`/`rest`/`get`/`pop`) and
-/// ESCAPED must be marked escaping too: the ownership forest would otherwise adopt it
+/// ESCAPED must be marked escaping too. Otherwise the ownership forest adopts it
 /// into the container's Owned subtree (a `%array-push` records `content ⊇ container`),
-/// and the container's scope-exit subtree drop would then free a value that flows out
-/// (`region-container-read-escape-uaf.lisp`, the UAF face; the `store-wrapper`
-/// oracle probe, the leak face).
+/// and the container's scope-exit subtree drop frees a value that flows out.
+/// tests/impl/region-container-read-escape-uaf.lisp pins the use-after-free face,
+/// and the `store-wrapper` probe in tests/impl/probe/direct.lisp the leak face.
 ///
 /// The mark is PRECISE, not "every read escapes": the container's stored contents are
 /// pulled into a facet ONLY when the read result itself reaches that facet, through the
@@ -386,8 +386,8 @@ fn import_load_file_does_not_seed_the_store_facet() {
 #[test]
 fn container_read_escape_spec() {
     // Pushed into a LOCAL container, read back out, and RETURNED: `v` escapes via the
-    // read-through (the returned read result pulls the container's contents into the
-    // return facet), so its region is a Shared seed and adoption is refused.
+    // read-through, because the returned read result pulls the container's contents
+    // into the return facet. So its region is a Shared seed and adoption is refused.
     assert_binding_escape(
         "(def f (fn (v) (let [a @[]] (%array-push a v) (first a)))) (f (list 1 2))",
         &[("v", true, true)],

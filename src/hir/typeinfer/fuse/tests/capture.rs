@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-10-21
 //! Chains whose lambda literal CAPTURES an enclosing local.
 //!
 //! The per-op modules pin that each op fuses a capturing literal (the splice is the
@@ -11,9 +11,9 @@
 use super::*;
 
 /// A capture reaching two function levels out fuses. The inner lambda's capture of
-/// `k` propagates to the enclosing `(fn [] …)`'s own capture list, so after the
-/// splice the read resolves from that lambda exactly as any other name it holds —
-/// which is why the splice needs no rename however far out the binding lives.
+/// `k` propagates to the enclosing `(fn [] …)`'s own capture list. So after the
+/// splice the read resolves from that lambda exactly as any other name it holds,
+/// and the splice needs no rename however far out the binding lives.
 /// Fails while a capture declines: the `map` dispatch and the closure both survive.
 #[test]
 fn a_capture_from_two_function_levels_out_fuses() {
@@ -105,7 +105,7 @@ fn a_capturing_terminal_declines_over_a_prefix() {
 }
 
 /// Safety: the inner op of a declined composition fuses even when IT is the
-/// capturing one — the decline is about the chain, and the recursion retries the
+/// capturing one. The decline is about the chain, and the recursion retries the
 /// inner call as a chain of one, which carries no reorder requirement. The outer
 /// `map` survives with a fused loop underneath it.
 #[test]

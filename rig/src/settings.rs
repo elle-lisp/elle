@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The configuration a file runs under on the rig: read from a sidecar or a profile, and printed back as one.
 //!
 //! rig/overview.md

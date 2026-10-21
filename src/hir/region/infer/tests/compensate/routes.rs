@@ -1,13 +1,13 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! Pins the per-arm compensation routes: `head` on a dead sibling arm, `tail` after a
 //! used arm's read, none on the arm that returns.
 //!
 //! docs/impl/region/compensate.md
 //!
 //! A returned region is the caller's to free only on the paths that hand it over.
-//! On a sibling arm that never uses the value no return mint fires, the caller
-//! receives nothing, and the callee still holds the only reference — so that arm
-//! owes a compensating release even though escape marks the region returnable.
+//! On a sibling arm that never uses the value no return mint fires, and the caller
+//! receives nothing. The callee still holds the only reference, so that arm owes a
+//! compensating release even though escape marks the region returnable.
 //! tests/impl/region-return-arm-escape-leak.lisp pins it end to end.
 
 use super::*;
@@ -29,9 +29,9 @@ fn the_match_arm_that_uses_the_value_takes_no_head_compensation() {
 
 #[test]
 fn the_walk_base_case_releases_at_its_return() {
-    // `(if (%eq i 0) xs (begin (git xs) (go (%sub i 1) (%pair xs 1))))` — both
-    // arms use `xs`, so the recursive arm's later use takes the `decref_point` and
-    // the base case is left with a return mint and no release. The release belongs
+    // `(if (%eq i 0) xs (begin (git xs) (go (%sub i 1) (%pair xs 1))))`: both arms
+    // use `xs`, so the recursive arm's later use takes the `decref_point`. The base
+    // case is left with a return mint and no release. The release belongs
     // at the base case's `Return`, where the mint has already raised the count.
     //
     // The recursive arm also hands `xs` to `git`, a `Mixed` native that stores it

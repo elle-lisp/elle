@@ -1,8 +1,9 @@
-// audited: 2026-10-20
-// src/hir/AGENTS.md
-// docs/impl/graft.md
+// audited: 2026-10-21
 //! Which calls become their callee's body: a known, non-recursive function at
 //! an arity its body closes for, and nothing else.
+//!
+//! src/hir/AGENTS.md
+//! docs/impl/graft.md
 //!
 //! These compile against a booted runtime, because most of the callees are
 //! stdlib closures: without the stdlib a source's `+` names nothing.
@@ -215,7 +216,7 @@ fn a_numeric_parameter_keeps_its_floor_against_an_operand_it_contradicts() {
     compile_booted(src).unwrap_or_else(|e| panic!("{src} must compile: {e}"));
 }
 
-/// The issue's own program. `fib` calls itself, so it stays a call, and every
+/// The wrapper-spelled `fib`. It calls itself, so it stays a call, and every
 /// wrapper in its body grafts over an int `n` and dissolves.
 #[test]
 fn the_wrapper_spelled_fib_holds_no_wrapper_call_and_no_guard() {
@@ -335,9 +336,9 @@ fn a_grafted_body_of_the_unit_keeps_its_own_lines() {
 /// came from. Here `(+ a 1)` grafts in `h`'s definition, and again in the copy
 /// of `h` grafted at line 3, which keeps `h`'s own line 2.
 ///
-/// The counter-factual is either wrong reading: the call's span stamped on the
-/// copy of `h` puts its guards on line 3, and the stdlib's own spans put them
-/// on the lines of `+` in the stdlib.
+/// The counter-factual is either wrong reading. The call's span stamped on the
+/// copy of `h` puts its guards on line 3. The stdlib's own spans put them on the
+/// lines of `+` in the stdlib.
 #[test]
 fn a_grafted_stdlib_body_takes_the_line_of_its_call() {
     let src = "(defn h [a]\n  (+ a 1))\n(h :k)";

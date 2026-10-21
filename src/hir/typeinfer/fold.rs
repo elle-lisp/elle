@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! The fold: after inference, delete the branches and dispatch arms the inferred types decide.
 //!
 //! A decided `if` becomes its taken branch. A `(match (type-of x) …)` whose

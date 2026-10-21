@@ -1,6 +1,7 @@
-// audited: 2026-10-06
-// docs/impl/region/owner.md
+// audited: 2026-10-21
 //! The transferred-returned-subtree cut: a producer's returned cycle, adopted by the activation that consumes it.
+//!
+//! docs/impl/region/owner.md
 
 use super::*;
 
@@ -8,8 +9,8 @@ use super::*;
 //
 // A producer builds an externally-unique cyclic subtree and returns its root;
 // the consumer discards it. No region root can own it and per-region RC cannot
-// collect the cycle, so `compute_transfer_adopts` claims it for the CONSUMING
-// activation's owner node: the producer's interior owner edges merge into the
+// collect the cycle. So `compute_transfer_adopts` claims it for the CONSUMING
+// activation's owner node. The producer's interior owner edges merge into the
 // ordinary adopt maps, and each consumer's release lands in
 // `RegionInfo::transfer_adopt_regions`, which the lowerer replaces with
 // `AdoptIntoActivation`. The producer is a lambda on the call and fiber faces,
@@ -122,7 +123,7 @@ fn transfer_adopt_refuses_unsafe_shapes() {
         // allowance (an extraction alias could outlive the node's horizon).
         // The read feeds a branch condition so it cannot be eliminated; the
         // `%type-of` match arm proves `r`'s container family for the `%get`
-        // (prove-or-reject, typeinfer/contract.rs).
+        // (prove-or-reject, src/hir/typeinfer/contract.rs).
         "(begin (let [mk (fn [] (let [a (@array) b (@array)] \
            (begin (%array-push a b) (%array-push b a) a)))] \
            (let [r (mk)] (match (%type-of r) :@array (if (%get r 0) 1 2) _ 2))) \
@@ -183,9 +184,9 @@ fn transfer_adopt_refuses_unsafe_shapes() {
 /// initializer is the producer and the binding is the consumer, and the root's
 /// own release is the one the lowerer replaces with `AdoptIntoActivation`.
 ///
-/// The counter-factual: no face admitted the shape. The root has two holders,
-/// the `let`'s own binding and the consumer's, so the subtree and group cuts
-/// refuse it too, and the a↔b cycle leaked two regions per run.
+/// The counter-factual: without the inline face no cut admits the shape. The
+/// root has two holders, the `let`'s own binding and the consumer's, so the
+/// subtree and group cuts refuse it, and the a↔b cycle leaks two regions per run.
 #[test]
 fn transfer_adopts_inline_returned_cycle() {
     let (_, info) = analyze_full(

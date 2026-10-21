@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! What the fold deletes after inference: a guard, a `cond` clause, an `and` or `or` operand, or a dispatch arm the types decide.
 //!
 //! docs/impl/graft.md
