@@ -15,13 +15,14 @@ left unmeasured.
 and [plan.md](plan.md) the order everything lands in.
 
 1. **Boot-time attribution — dispatched, value proposition confirmed.**
-   `--trace=boot,compile` (landed with this design; pinned by
-   `tests/integration/trace_boot.rs`) attributes a warm release-build boot
-   of a trivial script (~545 ms total): stdlib frontend compile ~494 ms
-   (91%), of which region inference ~216 ms, expand ~95 ms, analyze
-   ~75 ms, emit ~74 ms, lower ~18 ms; core ~8 ms; prelude, registration,
-   and meta build ~2 ms combined; stdlib *execute* ~1.4 ms; ~38 ms of
-   process/VM setup and teardown remain. The image removes everything but
+   `--trace=boot,compile` (pinned by
+   [trace_boot.rs](../../../tests/integration/trace_boot.rs)) attributes a
+   warm release-build boot of a trivial script, ~545 ms in total. The stdlib
+   frontend compile takes ~494 ms (91%): region inference ~216 ms, expand
+   ~95 ms, analyze ~75 ms, emit ~74 ms, lower ~18 ms. Core takes ~8 ms;
+   prelude, registration and meta build ~2 ms combined; stdlib *execute*
+   ~1.4 ms. Process/VM setup and teardown take the remaining ~38 ms. The
+   image removes everything but
    that ~38 ms floor and the 1.4 ms execute — roughly a 10× boot. Region
    inference alone is 44% of the stdlib compile, an independent
    optimization target for the fallback path.
@@ -52,27 +53,30 @@ and [plan.md](plan.md) the order everything lands in.
    so the boot image is dumpable. The default traitsets have since become
    immutable structs ([traits.md](../../traits.md)). The census now counts them
    among the sealed `LStruct`s, and its unsealed leaves are the three ports
-   alone. The dumper still never copies a default traitset. Relocation load:
-   1,258 heap-pointer slots + 350 `RegionSlice` ptrs + 684 primitive slots ≈
-   2,300 relocation entries.
+   alone. The dumper still never copies a default traitset
+   ([sealing.md](sealing.md)). Relocation load: 1,258 heap-pointer slots + 350
+   `RegionSlice` ptrs + 684 primitive slots ≈ 2,300 relocation entries.
 
    Most of the payload is source locations. The template foundation moved a
-   code object's data into region pages, so what the census now measures
-   includes the location tables — 16 bytes an entry over an interned file
-   table, where the `HashMap<usize, SourceLoc>` they replaced held a `String`
-   per entry on the Rust heap, invisible here and several times larger. Every
-   boot closure already referenced a region-resident template object, so that
-   foundation rewrote the representation rather than the sharing structure:
-   the census's `shared-templates` counter, which measured how many closures
+   code object's data into region pages, so the census now measures the
+   location tables too. An entry costs 16 bytes over an interned file table.
+   The `HashMap<usize, SourceLoc>` they replaced held a `String` per entry on
+   the Rust heap, invisible here and several times larger. Every boot closure
+   already referenced a region-resident template object, so that foundation
+   rewrote the representation rather than the sharing structure. The
+   census's `shared-templates` counter, which measured how many closures
    still held an `Rc` blueprint, retired with that variant.
 3. **The store spike — dispatched, mechanism proven.** `src/image` dumps
    and hydrates data-only graphs (pairs, strings, bytes, arrays, floats,
-   portable immediates) end to end, pinned by `tests/integration/image.rs`
-   against [plan.md](plan.md): round-trip equality in a fresh
-   heap, sharing preservation, corrupted-fingerprint fallback with no leaked
-   region or mapping, double hydration with independent address sets,
-   rename-over-a-live-mapping, teardown to baseline, and file-backed release
-   as `munmap` (never cached — also pinned at the pool in `pagepool/tests.rs`).
+   portable immediates) end to end.
+   [image.rs](../../../tests/integration/image.rs) pins it against the test
+   plan in [plan.md](plan.md). The pins cover round-trip equality in a fresh
+   heap, sharing preservation, and corrupted-fingerprint fallback with no
+   leaked region or mapping. They cover double hydration with independent
+   address sets, rename-over-a-live-mapping, teardown to baseline, and
+   file-backed release as `munmap`, never cached, which
+   [pagepool/tests.rs](../../../src/value/fiberheap/pagepool/tests.rs) also
+   pins at the pool.
    The pool interplay reduced to one field: `MmapPage` carries a `file_backed`
    flag the release path checks. Two findings: relocation slots and targets
    collapse to region-relative offsets (recorded in [format.md](format.md)),
@@ -112,7 +116,7 @@ and [plan.md](plan.md) the order everything lands in.
    `intern_primitive_names` and its five call sites, and the `CompileCtx`
    registration-order invariant (including the bullet in
    [pipeline.md](../../pipeline.md)). The audit also found two live
-   cross-table id holes that stable ids close: `send` shipped
+   cross-table id holes that stable ids close. `send` shipped
    `LirConst::Symbol` inside the live `LirFunction` verbatim, so worker-side
    JIT re-emission pooled sender-space ids; and `TableKey::Symbol` keys inside
    sent structs cross untranslated. The symbol milestone landed a regression
@@ -121,10 +125,10 @@ and [plan.md](plan.md) the order everything lands in.
    prototype node ran the expander's hot operations head to head against
    the Rust-heap tree, allocating through the real region store
    (`FiberHeap::alloc_region_slice_in_region`). The node is 56 bytes to
-   `Syntax`'s 112: kind tag, packed span over an interned file id, scope
-   set inline (capacity 4 plus an overflow slice), string payloads and
-   child slices as `RegionSlice`, symbols as stable hashes (the symbol
-   foundation lands first). Corpus: the parsed prelude + stdlib trees
+   `Syntax`'s 112. It holds a kind tag, a packed span over an interned file
+   id, and a scope set inline (capacity 4 plus an overflow slice). String
+   payloads and child slices are `RegionSlice`s, and symbols are stable
+   hashes (the symbol foundation lands first). Corpus: the parsed prelude + stdlib trees
    (230 forms, 13,332 nodes), 20 rounds per op, in-place walks mutating
    uniquely owned trees through the child slices:
 
@@ -139,24 +143,24 @@ and [plan.md](plan.md) the order everything lands in.
    Region mint + free measures ~6 ns, so per-expansion transient regions
    are noise. The no-inline-capacity fallback — regrow the scope slice on
    every add — costs 8 ns per visit, so scope storage is not a parity risk
-   in either form. The op mix is measured, not assumed: counters on
+   in either form. The op mix is measured, not assumed. Counters sat on
    `Syntax::clone`, the constructors, `map_scope_recursive`, and the
-   converters (dumped at the `--trace=compile` expand/analyze marks)
-   showed the stdlib expand phase (84.5 ms warm release) deep-clones
+   converters, dumped at the `--trace=compile` expand/analyze marks. They
+   showed the stdlib expand phase (84.5 ms warm release) deep-cloning
    **464,089** nodes against 46,746 built and 24,718 from `from_value`,
-   across 1,532 expansions; analysis clones another 143,298. A 300-defn
+   across 1,532 expansions. Analysis clones another 143,298. A 300-defn
    macro-heavy user file amplified the same shape: 992,170 clones in a
-   206 ms expand, ~254 clones per expansion — a large share being the
-   per-call `MacroDef` template deep clone, which pointer-shared immutable
-   region trees delete outright. perf agrees: `Syntax::clone` +
+   206 ms expand, ~254 clones per expansion. A large share is the per-call
+   `MacroDef` template deep clone, which pointer-shared immutable region
+   trees delete outright. perf agrees: `Syntax::clone` +
    `drop_in_place<Syntax>` is ~10% of the whole boot. Scope sets are tiny
    everywhere: every one of the ~430k measured scope ops ended with ≤3
    scopes. Counts × per-op deltas put tree ops near half of an
-   expansion-heavy expand phase and ~4× cheaper in regions, so the
+   expansion-heavy expand phase, and ~4× cheaper in regions. So the
    migration is projected to make expansion-heavy compiles roughly a
-   third *faster* — and even a fully immutable working tree meets the
-   bar, since a full stamp-copy (37 ns) undercuts the Rust tree's
-   in-place walk (40 ns). The boundary-only split is dead; no measured
+   third *faster*. Even a fully immutable working tree meets the bar,
+   since a full stamp-copy (37 ns) undercuts the Rust tree's in-place
+   walk (40 ns). The boundary-only split is dead; no measured
    deal-breaker exists. One condition binds the migration: keep in-place
    mutation legal on uniquely owned working trees (stamped copies and
    conversion results — the ownership discipline the hygiene flip already
@@ -165,19 +169,18 @@ and [plan.md](plan.md) the order everything lands in.
    node from `read_syntax_all` output and running stamp/flip/add/build/
    teardown against `stamp_scope`/`flip_scope_recursive`. The shipped node
    differs from the prototype in two ways [syntax.md](../syntax.md) argues
-   for: it carries a symbol's spelling as a region string rather than a
-   hash, and its scope set has no inline capacity (the prototype measured
-   the difference at 8 ns per visit). It is 64 bytes, not 56.
+   for. It carries a symbol's spelling as a region string rather than a
+   hash. Its scope set has no inline capacity, which the prototype measured
+   at 8 ns per visit. It is 64 bytes, not 56.
 6. **Fingerprint strength — dispatched, probes landed.** Size/align probes
-   do not pin field offsets; the fingerprint now records, per dumpable
-   variant, the discriminant byte and every leaf field's offset and length
-   (`src/image/layout`), so the two-stage embed build cannot pass the
-   fingerprint with a shifted layout. Mechanism finding: `offset_of!`
-   cannot name an enum variant's field on stable Rust (E0658,
-   rust-lang/rust#120141), so the probes construct one exemplar per variant
-   and measure each field's address against the object's base, with
-   `offset_of!` covering the nested structs (`Pair`, `Value`,
-   `RegionSlice`). Measured layout (rustc 1.95, x86-64): `HeapObject` is
+   do not pin field offsets. The fingerprint records, per dumpable variant,
+   the discriminant byte and every leaf field's offset and length
+   ([layout](../../../src/image/layout/mod.rs)). So the two-stage embed build
+   cannot pass the fingerprint with a shifted layout. Mechanism finding:
+   `offset_of!` cannot name an enum variant's field on stable Rust (E0658,
+   rust-lang/rust#120141). So the probes construct one exemplar per variant
+   and measure each field's address against the object's base, and
+   `offset_of!` covers the nested structs (`Pair`, `Value`, `RegionSlice`). Measured layout (rustc 1.95, x86-64): `HeapObject` is
    128 bytes, align 8. The by-value `ClosureTemplate` variant used to set
    that size at 288 bytes, making a `Float` slot ~95% padding; the template
    foundation reduced the variant to a payload slice plus a blueprint
@@ -188,10 +191,10 @@ and [plan.md](plan.md) the order everything lands in.
    first word is its `HeapTag` ([values.md](../values.md)), and the probes
    read that word.
    Extents are recorded per leaf field, never per variant field, because a
-   variant field is not always one run of meaningful bytes: a `Parameter`'s
-   `id` is four bytes in a word-aligned slot, and a `RegionSlice` is a
-   pointer, a `u32` length, and the zero word behind it that keeps a slice
-   header from reading as a page header
+   variant field is not always one run of meaningful bytes. A `Parameter`'s
+   `id` is four bytes in a word-aligned slot. A `RegionSlice` is a pointer, a
+   `u32` length, and the zero word behind it that keeps a slice header from
+   reading as a page header
    ([region/generations.md](../region/generations.md)).
    The probes verify themselves on first use — distinct
    discriminant bytes, zero upper discriminant bytes, disjoint in-bounds
@@ -261,7 +264,7 @@ and [plan.md](plan.md) the order everything lands in.
    So the premise is wrong as stated — every operation is faster, and the
    read-side ratios are the locality a 48-byte node buys over a 104-byte one.
    The premise was right about the *size* of the prize. Build plus teardown
-   over the whole corpus is 2.28 ms against 1.59 ms, and a cold boot spends
+   over the whole corpus is 2.28 ms against 1.59 ms. A cold boot spends
    ~201 ms compiling those three sources (item 1), so the saving is a third of
    one percent of the compile it belongs to. Region inference, at 44% of that
    compile, is where the compile-path money is.
@@ -272,10 +275,10 @@ and [plan.md](plan.md) the order everything lands in.
    one costs a per-variant match the region node does not need.
 
    What the experiment decided is the cost question, and only that. The port is
-   ordered as a foundation on other grounds — one representation, one
+   ordered as a foundation on other grounds, which
+   [foundations.md](foundations.md) argues. They are one representation, one
    portability rule, an image whose save and load need no mechanism of their
-   own, and allocation the region gauges can see
-   ([foundations.md](foundations.md) argues them). What these numbers add is
+   own, and allocation the region gauges can see. What these numbers add is
    that none of it has to be paid for.
 
    The prototype is not the whole port. The shipped passes mutate LIR in place
