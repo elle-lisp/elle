@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-06
+(elle/epoch 15)
+# audited: 2026-10-20
 # A wrapper call over two proven numbers dissolves to its %-op, and a call over
 # unproven operands keeps the wrapper's guards.
 #
@@ -40,3 +40,27 @@
           (string name " over two proven numbers keeps no guard"))
   (assert (string/contains? (disasm-text unproven) "Emit")
           (string name " over unproven operands keeps its guards")))
+
+# ── A counting loop over the wrappers is the loop over the intrinsics ──
+
+# The counter is a written local no closure captures, so the graft writes it
+# in place of each wrapper's parameter, and once the guards fold the body is
+# the intrinsic one: the two functions disassemble alike.
+#
+# The counter-factual: a let per use, which bound the counter to the wrapper's
+# parameter on every iteration and cost a store and a load the intrinsic loop
+# never paid.
+(defn count-ops [b]
+  (when (%not (%int? b)) (error :b-not-int))
+  (var i 0)
+  (while (%lt i b) (assign i (%add i 1)))
+  i)
+
+(defn count-wrappers [b]
+  (when (%not (%int? b)) (error :b-not-int))
+  (var i 0)
+  (while (< i b) (assign i (+ i 1)))
+  i)
+
+(assert (= (disasm-text count-wrappers) (disasm-text count-ops))
+        "the wrapper loop disassembles to the intrinsic loop")

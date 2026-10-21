@@ -10,6 +10,6 @@
 ["counting over a captured cell" :pages 0]
 ["a CRC-32 step per iteration" :pages 0]
 ["a struct read per iteration" :pages 0]
-# The wrapper loop pays the let the graft writes for a written operand (#1405),
-# and the machine decides the rest; the graft off reads about 18.
-["counting over wrappers against %-ops" :time 1.9 :slack 0.5]
+# The two loops compile to one bytecode, so the ratio is 1 and the machine
+# decides the rest; a let per use reads about 1.9, and the graft off about 18.
+["counting over wrappers against %-ops" :time 1 :slack 0.5]
