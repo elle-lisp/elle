@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-20
 //! The ambient environment a compilation starts from: the primitives, and what
 //! `begin-for-syntax` or the core library exports.
 //!
@@ -44,7 +44,7 @@ impl Analyzer<'_> {
     /// arity, and whether it collects keyword arguments. A stdlib or core
     /// export reaches the analyzer as a value, not as a lambda it analyzed, so
     /// without these a call to one could not be checked and would carry
-    /// `:error` (docs/signals/inference.md, "What raises").
+    /// `:error` (docs/signals/inference.md).
     fn record_closure_facts(&mut self, binding: Binding, value: Value) {
         let Some(closure) = value.as_closure() else {
             return;
@@ -84,9 +84,9 @@ impl Analyzer<'_> {
     /// whose bindings here are the *canonical* definitions user code calls — they
     /// deliberately override any earlier `meta` entry (a core.lisp closure may
     /// share its name with a native), so this binding must win *and* be recognizable to
-    /// passes that key on `is_primitive` (loop fusion, dispatch monomorphization),
-    /// exactly as stdlib exports are. Without the flag a core HOF is invisible to
-    /// those passes even though it is as canonical as `map`/`filter`. Passed false
+    /// passes that key on `is_primitive` (loop fusion, dead-binding elimination, the
+    /// fold), exactly as stdlib exports are. Without the flag a core HOF is invisible
+    /// to those passes even though it is as canonical as `map`/`filter`. Passed false
     /// for genuine compile-time / REPL envs, where a binding is a user value that
     /// must *not* be treated as a canonical primitive.
     pub fn bind_compile_time_env(

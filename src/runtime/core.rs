@@ -128,7 +128,7 @@ pub struct RuntimeCore {
     compile: Box<CompileCtx>,
     /// This instance's region store. The program VM and the `CompileCtx`'s
     /// macro-expansion VM both point their `heap_ptr` here, so an instance is one
-    /// heap. Two coexisting instances own two distinct heaps (tls.md).
+    /// heap. Two coexisting instances own two distinct heaps.
     heap: Box<crate::value::fiberheap::FiberHeap>,
     /// Kept resident for the core's life (primitive signal/arity metadata).
     _meta: crate::primitives::def::PrimitiveMeta,
@@ -329,8 +329,7 @@ impl RuntimeCore {
     /// allocation and reference-count operation reads through. This is the
     /// core-owned `Box<FiberHeap>` that the VM's `heap_ptr` aliases; reaching it
     /// directly keeps the borrow disjoint from a `&mut VM`. Two embedded instances
-    /// on one thread each get their own (tls.md § Acceptance criterion); a shared
-    /// per-thread heap is the coexistence defect this axis removes.
+    /// on one thread each get their own.
     pub fn heap(&mut self) -> &mut crate::value::fiberheap::FiberHeap {
         &mut self.heap
     }

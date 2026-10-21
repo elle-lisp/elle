@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-20
 //! A named function's body reaches a fused loop by graft, from this compile unit
 //! or across one. A body the fragment cannot close stays a plain call.
 //!
@@ -183,14 +183,14 @@ fn named_non_lambda_var_declines() {
 }
 
 /// Cross-unit named-function inlining: `dec` is a stdlib `(defn dec [x] (- x 1))`
-/// — its body lives in the `<stdlib>` compile unit, NOT this one. Carried across
-/// the compile-unit boundary through the persistent registry, `(map dec [1 2 3])`
-/// fuses: the `map` dispatch is gone and `dec`'s body op `-` is spliced into the
-/// loop. `-` is the clean discriminator (the scaffold compares with `<` and
-/// advances by the `%add` intrinsic) and appears exactly ONCE — unlike a
-/// same-unit named fn, the definition does NOT persist in this unit, so there is
-/// no second, surviving copy. Without the registry, `map` survives and no `-`
-/// appears at all, `dec`'s body not being in this tree.
+/// — its body lives in the `<stdlib>` compile unit, NOT this one. Read from the
+/// fragment on `dec`'s code payload, `(map dec [1 2 3])` fuses: the `map`
+/// dispatch is gone and `dec`'s body op `-` is spliced into the loop. `-` is the
+/// clean discriminator (the scaffold compares with `<` and advances by the
+/// `%add` intrinsic) and appears exactly ONCE — unlike a same-unit named fn, the
+/// definition does NOT persist in this unit, so there is no second, surviving
+/// copy. Without the fragment, `map` survives and no `-` appears at all, `dec`'s
+/// body not being in this tree.
 #[test]
 fn named_map_cross_unit_stdlib_fn_inlines() {
     let (hir, arena, mut rt) = compile("(map dec [1 2 3])");
@@ -219,8 +219,8 @@ fn named_map_cross_unit_stdlib_fn_inlines() {
 
 /// Safety: a stdlib fn whose body does not close into a fragment is not inlined
 /// cross-unit either — one gate serves both paths. `distinct`'s body holds a
-/// `letrec`, which a fragment cannot represent, so it is never recorded and
-/// `(map distinct …)` stays a plain `map` call.
+/// `letrec`, which a fragment cannot represent, so its code payload carries no
+/// fragment and `(map distinct …)` stays a plain `map` call.
 #[test]
 fn cross_unit_non_inlineable_stdlib_fn_declines() {
     let (hir, arena, mut rt) = compile("(map distinct [[1] [2]])");

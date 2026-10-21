@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-20
 // The boot configuration end to end: an image dumped from a booted instance,
 // and a fresh instance that answers out of it.
 // docs/impl/image/boot.md
@@ -59,8 +59,8 @@ const LAYERS: [(&str, i64); 4] = [
     ("(when true 42)", 42),
 ];
 
-// § Test plan, "Boot": an instance that hydrated a boot image answers a stdlib
-// call, a core call and a prelude macro expansion as a source-booted one does.
+// An instance that hydrated a boot image answers a stdlib call, a core call
+// and a prelude macro expansion as a source-booted one does.
 // It also reports that it booted from the image, because behaviour alone
 // cannot tell the two apart — a warm cache that silently never hits yields a
 // working runtime and would pass every assertion below.
@@ -84,15 +84,14 @@ fn an_image_booted_instance_answers_as_a_source_booted_one() {
     }
 }
 
-// § Test plan, "Boot": a fresh instance prints a hydrated stdlib closure's
-// name and answers `meta/origin` with the file it was written in, both out of
-// the image's tables.
+// A fresh instance answers `meta/origin` for a hydrated stdlib closure with
+// the file it was written in, out of the image's tables.
 //
 // The counter-factual is the stdlib disk cache beside it, which drops the
 // defining span outright (docs/impl/stdlib-cache.md): a cache-hit boot answers
 // nil here. So this assertion distinguishes an image boot from the other
 // skip-the-front-end path, and it exercises the file table at boot scale,
-// where every span in 2900 lines of library names one file.
+// where every span in the library names one file.
 #[test]
 fn a_hydrated_stdlib_closure_reports_where_it_was_written() {
     let dir = crate::common::ScratchDir::new("image-boot-origin");
@@ -117,7 +116,7 @@ fn a_hydrated_stdlib_closure_reports_where_it_was_written() {
     }
 }
 
-// § Test plan, "Boot": a macro the boot never expanded still expands after
+// A macro the boot never expanded still expands after
 // hydration, which is the lazy transformer fill working over a hydrated
 // template. `->` threads its argument through each form, so a wrong expansion
 // answers a number rather than failing to compile.
@@ -142,7 +141,7 @@ fn a_macro_expands_after_an_image_boot() {
     );
 }
 
-// § Test plan, "Boot": an image whose source digest is not this binary's is
+// An image whose source digest is not this binary's is
 // refused by its own name, not the fingerprint's.
 //
 // The counter-factual is an instance that answers with the previous library:
@@ -175,7 +174,7 @@ fn an_image_from_other_sources_is_refused_by_its_digest() {
     }
 }
 
-// § Test plan, "Boot": the instance boots from source instead, rather than
+// An instance whose image is refused boots from source instead, rather than
 // answering with the image's library. The refusal above is the diagnosis; this
 // is the behaviour it buys.
 #[test]
@@ -200,10 +199,10 @@ fn a_refused_image_falls_back_to_a_source_boot() {
     );
 }
 
-// § Test plan, "Boot": two dumps of one boot state write one file. This is
-// determinism at the scale where a code payload's padding can leak — 200
-// closure templates and their constants, against the handful the small graphs
-// carry (docs/impl/image/plan.md § Determinism owns the mechanism).
+// Two dumps of one boot state write one file. This is determinism at the scale
+// where a code payload's padding can leak: every closure template of the
+// library and its constants, against the handful the small graphs carry
+// (docs/impl/image/plan.md owns the mechanism).
 #[test]
 fn two_dumps_of_one_boot_state_write_one_file() {
     let dir = crate::common::ScratchDir::new("image-boot-determinism");
@@ -230,15 +229,9 @@ fn two_dumps_of_one_boot_state_write_one_file() {
     assert_eq!(diff, 0, "two boot dumps differ at {diff} offsets");
 }
 
-// § Test plan, "Compile parity": a boot image's static-region watermark is
-// the mark its boot left, so a compile between two boot dumps changes neither
-// file. The program below names no function and defines no macro, so the
-// boot state the two dumps read is one state.
-//
-// The trap is the inline registry: it records every function a unit binds to
-// a name, a `let`-bound lambda included, and the next boot dump carries it.
-// A program that binds one changes the `:compiler` bytes, and the two files
-// differ for a reason that has nothing to do with the watermark.
+// A boot image's static-region watermark is the mark its boot left, so a
+// compile between two boot dumps changes neither file. The program below
+// defines nothing, so the boot state the two dumps read is one state.
 //
 // The counter-factual is the live counter. The compile mints slots for its
 // closure and its array, so a dump that read the counter as it ran would write

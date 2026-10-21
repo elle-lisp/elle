@@ -1,6 +1,6 @@
 # Foundations
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-20 -->
 
 Five representation fixes the image needs: each pays at runtime today, and each
 deletes image machinery.
@@ -43,7 +43,7 @@ Rust heap memory: `String` owned a `String` and `Array` owned a
 `Vec<TableKey>`. The payload is now `RegionSlice<(TableKey, Value)>` and both
 key arms hold a `Value` pointing at a region-resident string or array, as
 arrays and strings already did. `TableKey` is `Copy` and sealed;
-[values.md](../values.md) § "Struct keys" owns the key model — a borrowed probe
+[values.md](../values.md) owns the key model — a borrowed probe
 key, an interned stored key, and an owning `SendKey` for `send` and the disk
 cache. Payoff now: immutable structs allocate nothing on the Rust heap, and a
 `get` probe builds its key without allocating. Payoff for images: structs are
@@ -87,19 +87,19 @@ representation.
 
 Syntax is a region-native immutable tree instead: nodes and child slices
 inline in region pages, `Copy` POD with no `Drop`, spans and hygiene scopes as
-plain fields ([syntax.md](../syntax.md) owns the model). Macro templates, the
-syntax a `Value` wraps, and inline-fn syntax are body data, demand-paged like
-everything else, and `HeapObject::Syntax` owns its tree inline rather than
-through a `Box` no image could seal around.
+plain fields ([syntax.md](../syntax.md) owns the model). Macro templates and
+the syntax a `Value` wraps are body data, demand-paged like everything else,
+and `HeapObject::Syntax` owns its tree inline rather than through a `Box` no
+image could seal around.
 
 The tree is region-native everywhere, not only at the value boundary — the
 expander's working tree included. A mutable Rust tree in the compiler beside a
 region-native form at the boundary would be two representations of one datum:
 conversion seams, double maintenance, and a standing invitation for the two to
 drift. The bar is **parity**, since expansion is compile-path-hot and the
-fallback compile pays it too; [measurements.md](measurements.md) item 5
-measured the prototype at 2–5× faster than a Rust-heap tree on every
-expansion-hot operation, so the boundary-only split never had a case.
+fallback compile pays it too; [measurements.md](measurements.md) measured the
+prototype at 2–5× faster than a Rust-heap tree on every expansion-hot
+operation, so the boundary-only split never had a case.
 
 Hygiene scope ids minted by the expander remain process-local counters; the
 image records a scope watermark so a fresh expander mints above every scope
@@ -109,14 +109,13 @@ baked into persisted syntax.
 
 A code payload carries its function's LIR as region-native records, and the
 JIT, the other backends, `send`, introspection and the image all read it there
-([lir.md](../lir.md) § "The frozen form"). The emitter writes each payload into
-its compile unit's code region, so no compile-time blueprint holds a second
-copy. The lowerer builds the same records in a working region from the start
-([lir.md](../lir.md) § "The working form"), so no Rust-heap form of LIR is left.
+([lir.md](../lir.md)). The emitter writes each payload into its compile unit's
+code region, so no compile-time blueprint holds a second copy. The lowerer
+builds the same records in a working region from the start, so no Rust-heap
+form of LIR is left.
 
 Four things the port buys. None is a compile-time number;
-[measurements.md](measurements.md) item 7 measured those, and they are real but
-small.
+[measurements.md](measurements.md) measured those, and they are real but small.
 
 - **Save and load become the mechanism the image already has.** Body-resident
   LIR dumps in the dumper's own walk and arrives with the mapping. The
@@ -142,14 +141,14 @@ a copy either way. And the lowerer splices into blocks it has already
 finished, which a fixed-extent slice cannot take. Syntax met that wall and
 answered it by copying as it stamps ([syntax.md](../syntax.md)). LIR answers it
 with a slice that grows in its own region, `RegionVec`, which
-[measurements.md](measurements.md) item 8 measured at parity before the
-lowerer moved onto it.
+[measurements.md](measurements.md) measured at parity before the lowerer moved
+onto it.
 
 ### The shape
 
-The node [measurements.md](measurements.md) item 7 prototyped is the shape, and
-[lir.md](../lir.md) § "The frozen form" owns its details. An instruction is a
-48-byte `repr(C)` record with no implicit padding, and its variable-length
+The node [measurements.md](measurements.md) prototyped is the shape, and
+[lir.md](../lir.md) owns its details. An instruction is a 48-byte `repr(C)`
+record with no implicit padding, and its variable-length
 operands sit in one pool per function, named by index. A function refers to its
 own parts by index everywhere, so only its top-level slices are pointers. An
 instruction page therefore carries no relocation slot and stays clean in an
