@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-20
 //! Pins adopt-edge emission: which Owned-subtree member each owner adopts, and where a
 //! subtree is refused to Shared.
 //!
@@ -26,6 +26,8 @@
 //!   tree rather than by counting.
 //! - `embed` — a `Fresh` native's embed declaration, which keeps an embedded capture out
 //!   of the capturing closure's subtree.
+//! - `view` — a container owns the `string` or `slice` view it holds, and the view's
+//!   source stays out of its subtree.
 //! - `subtrees` — which members a subtree contains when store, capture and deep nesting
 //!   meet in one.
 //! - `captures` — what a closure may adopt: the suppress ⊆ adopt contract, the
@@ -45,6 +47,7 @@ mod embed;
 mod structural;
 mod subtrees;
 mod transfer;
+mod view;
 
 /// The region of the first (outermost) `Lambda` node in `hir` — the closure region the
 /// combined-shape probes capture into. (Each probe has exactly one closure.)
@@ -84,4 +87,13 @@ fn closure_captures_region(hir: &Hir, info: &RegionInfo, member: Region, closure
     let mut found = false;
     walk(hir, info, member, closure, &mut found);
     found
+}
+
+/// The `(argument, result)` pairs of every embed edge whose argument is `arg`.
+fn embeds_of(info: &RegionInfo, arg: Region) -> Vec<(Region, Region)> {
+    info.embed_edges
+        .iter()
+        .filter(|&&(_, src, _)| src == arg)
+        .map(|&(_, src, dst)| (src, dst))
+        .collect()
 }

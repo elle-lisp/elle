@@ -131,8 +131,10 @@ long time bounds that with a smaller `:size`.
 ```
 
 `line` answers what `port/read-line` answers on the same input, as bytes.
-[framing.lisp](../tests/lang/framing.lisp) pins the parity, and the records
+[framing.lisp](../tests/lang/framing.lisp) pins the parity, and the lines
 under every chunk size and every source kind.
+[framing-records.lisp](../tests/lang/framing-records.lisp) pins the other
+calls, with every delimiter and count straddling a chunk edge.
 
 ## Invariants
 
