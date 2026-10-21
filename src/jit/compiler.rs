@@ -1,7 +1,7 @@
 // audited: 2026-10-20
 // docs/impl/jit.md
-//! `JitCompiler`: the Cranelift module a compile owns, the flag that abandons
-//! it, and the two entry points that drive one frozen function through it.
+//! `JitCompiler`: a compile's Cranelift module, the flag that abandons it,
+//! and the two entry points that drive a frozen function through it.
 //!
 //! `compile` produces native code and the `JitCode` that keeps it alive, and
 //! refuses the two shapes `LirView::jit_refusal` names; those refusals are
