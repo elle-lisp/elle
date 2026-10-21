@@ -1,9 +1,9 @@
-// audited: 2026-10-12
+// audited: 2026-10-21
 //! The abstract value of an expression: what the extractor knows a callee, an argument or an export may be.
 //!
 //! docs/impl/solver.md
 
-use super::{literal_mask, AVal, Extractor};
+use super::{AVal, Extractor};
 use crate::model::{bit_positions, VarId, VarKey};
 use crate::visit::resolve;
 use elle::hir::{Binding, BindingScope, Hir, HirKind};
@@ -161,5 +161,24 @@ impl<'a> Extractor<'a> {
             }
             _ => self.model.unknown(),
         }
+    }
+}
+
+/// The bits a literal keyword or keyword-set mask names.
+fn literal_mask(hir: &Hir) -> Option<u64> {
+    let reg = elle::signals::registry::global_registry().lock().unwrap();
+    match &hir.kind {
+        HirKind::Keyword(k) => reg.to_signal_bits(k).map(|b| b.raw()),
+        HirKind::Call { args, .. } => {
+            let mut mask = 0u64;
+            for a in args {
+                match &a.expr.kind {
+                    HirKind::Keyword(k) => mask |= reg.to_signal_bits(k)?.raw(),
+                    _ => return None,
+                }
+            }
+            Some(mask)
+        }
+        _ => None,
     }
 }
