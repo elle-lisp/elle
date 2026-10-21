@@ -1,6 +1,7 @@
-(elle/epoch 14)
-# audited: 2026-10-06
+(elle/epoch 15)
+# audited: 2026-10-21
 # A call made for effect whose callee returns a fresh value from its tail releases that value.
+#
 # docs/impl/region/mechanism.md
 #
 # Two callees: `ret-first`, whose tail is the native pass-through `first`, and

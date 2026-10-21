@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-21
 //! Compare the solver's least model with the analyzer's inferred signals, and print what the run found.
 //!
 //! docs/impl/solver.md

@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-21
 //! The `escape` dump kind: an id-normalized snapshot of the escape facts and the region
 //! instructions they drive.
 //!
@@ -292,7 +292,7 @@ fn blabel(
 /// the unit's count and the unit's tag while an expansion runs (`G0-1f2e3d4c`),
 /// the process's count at run time (`G26`). Strip the count, and the tag with
 /// it, and renumber per base by first appearance over `order` (the deterministic
-/// walk), so the label depends neither on the unit's text nor on how many
+/// walk). Then the label depends neither on the unit's text nor on how many
 /// gensyms the process minted before this compile. Names with no trailing digit
 /// run are kept verbatim (`x`, `down`, the synthetic `~`).
 fn build_name_labels(

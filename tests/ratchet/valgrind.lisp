@@ -1,7 +1,8 @@
 (elle/epoch 15)
-# audited: 2026-10-20
+# audited: 2026-10-21
 # Four programs under memcheck on both stdlib paths: lost bytes and error
 # contexts, read against the rows of tests/ledger/valgrind.lisp.
+#
 # tests/ratchet/overview.md
 
 (def r ((import "std/ratchet")))
@@ -23,9 +24,9 @@
 # Each program's subject on each path is spelled whole, so every row of the
 # ledger names a literal here (tests/integration/ledgers.rs).
 #
-# The JIT program's function is recursive, so the graft keeps its call. A
-# call to a function the compiler can see becomes that function's body, and
-# a function nothing calls is never compiled, so `jit?` answers false.
+# The JIT program's function is recursive, so the graft keeps its call. Under
+# the graft, a call to a function the compiler can see becomes that function's
+# body. A function nothing calls is never compiled, so `jit?` would answer false.
 (def programs
   [{:compiled "boot and exit, stdlib compiled"
     :cached "boot and exit, stdlib cached"

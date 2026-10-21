@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-21
 //! What the analyzer records about a lambda for its callers, and how a form
 //! that can raise reports itself.
 //!
@@ -11,11 +11,11 @@ use crate::value::fiber::SignalBits;
 impl<'a> Analyzer<'a> {
     /// Report `bits` as a signal the enclosing function raises on its own.
     ///
-    /// A node's signal reaches its parents by `combine`, but a lambda's
-    /// inferred signal is built from its sources, not from its body's signal,
-    /// so a form that may raise reports here as well: a direct `emit`, a
-    /// `match` with no total arm, and every construct in
-    /// docs/signals/inference.md "What raises".
+    /// A node's signal reaches its parents by `combine`. A lambda's inferred
+    /// signal is built from its sources, not from its body's signal, so a form
+    /// that may raise reports here as well. Such forms are a direct `emit`, a
+    /// `match` with no total arm, and every construct that
+    /// docs/signals/inference.md lists as raising.
     pub(crate) fn add_inherent_bits(&mut self, bits: SignalBits) {
         self.current_signal_sources.direct_bits =
             self.current_signal_sources.direct_bits.union(bits);
@@ -50,9 +50,10 @@ impl<'a> Analyzer<'a> {
     }
 
     /// Seed what a binding's lambda initializer promises before the lambda is
-    /// analyzed, so a call that precedes it in a letrec reads the right facts:
-    /// a silent signal the fixpoint raises, the arity the parameter list
-    /// states, and whether the lambda collects keyword arguments.
+    /// analyzed, so a call that precedes it in a letrec reads the right facts.
+    /// The facts are a silent signal the fixpoint raises, the arity the
+    /// parameter list states, and whether the lambda collects keyword
+    /// arguments.
     pub(crate) fn seed_lambda_facts(&mut self, binding: Binding, value_syntax: &Syntax) {
         let Some(list) = value_syntax.as_list() else {
             return;

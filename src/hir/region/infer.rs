@@ -387,9 +387,8 @@ impl RegionInference {
     ///
     /// IDEMPOTENT UNDER INLINED RE-WALK. `try_inline_call` re-walks an
     /// inlinable callee's body to discover the cross-region edges it records
-    /// over the call's arguments (`inline_depth > 0`); the body's HIR nodes are
-    /// then visited a SECOND time
-    /// with the SAME ids as the structural walk. The structural walk OWNS
+    /// over the call's arguments (`inline_depth > 0`). The body's HIR nodes are
+    /// then visited a SECOND time with the SAME ids as the structural walk. The structural walk OWNS
     /// `alloc_region`. A fresh mint here during a re-walk would OVERWRITE the
     /// structural entry with a region parented in the caller's context. The
     /// ownership and compensation passes read escape's return frontier projected

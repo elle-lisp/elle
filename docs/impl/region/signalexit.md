@@ -82,7 +82,7 @@ both of them this position's. One is a payload the body ALLOCATED, whose
 owned-argument release sits in the block. The other is the second name of a
 payload that reaches the call twice, as `(emit s s)` does. The first occurrence
 moves the frame's reference, and the second takes a retain of its own
-([rules.md](rules.md) Rule 5). A restart runs those same releases at the replay,
+([rules.md](rules.md)). A restart runs those same releases at the replay,
 so the accounting is the same either way.
 
 **Every OTHER release in that block stays.** They divide in two, and neither

@@ -88,7 +88,7 @@ impl<'a> Lowerer<'a> {
 
     /// Seed `immutable_values` with primitive binding→value pairs.
     ///
-    /// Primitive bindings are `BindingScope::Local` with `mark_immutable()`.
+    /// Primitive bindings are immutable `BindingScope::Local` bindings.
     /// The lowerer never allocates slots for them — instead, `lower_var`
     /// checks `immutable_values` first and emits `ValueConst` for any
     /// binding with a known constant value.

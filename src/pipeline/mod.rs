@@ -1,13 +1,15 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! The compilation pipeline's entry points: source text to bytecode, or to HIR
 //! for a reader that wants the analysis alone.
 //!
 //! src/pipeline/AGENTS.md
 //!
-//! Each stage lives beside this file: the compile-context type an instance
-//! threads through every call (`cache`), the core.lisp bootstrap that builds
-//! one (`bootstrap`), the three sources a boot compiles (`sources`), and the
-//! three surfaces over them — `compile`, `analyze` and `eval`.
+//! Each stage lives beside this file:
+//!
+//! - `cache`: the compile-context type an instance threads through every call.
+//! - `bootstrap`: the core.lisp bootstrap that builds one.
+//! - `sources`: the three sources a boot compiles.
+//! - `compile`, `analyze` and `eval`: the three surfaces over them.
 
 mod analyze;
 mod bootstrap;

@@ -1,14 +1,15 @@
-// audited: 2026-09-23
-// src/hir/AGENTS.md
-// docs/impl/typeinfer.md
+// audited: 2026-10-21
 //! Bottom is not a proof: what the ascent refuses to discharge with the lattice
 //! element it starts from, and what it still discharges.
 //!
+//! src/hir/AGENTS.md
+//! docs/impl/typeinfer.md
+//!
 //! `subtype(⊥, b)` holds for every `b`, so a Bottom operand would discharge
-//! every contract row that asks a subtype question. One reject per such row, a
-//! guard and a declaration each refining the start, a declaration its caller
-//! contradicts, and the postcondition that closes the whole class: the map the
-//! pass hands out carries no Bottom.
+//! every contract row that asks a subtype question. The module holds one reject
+//! per such row. A guard and a declaration each refine the start, and a
+//! declaration meets a caller that contradicts it. The postcondition closes the
+//! whole class: the map the pass hands out carries no Bottom.
 
 use super::{compile_result, inferred_types};
 use crate::hir::types::TypeInterner;
@@ -38,8 +39,8 @@ fn a_never_called_function_proves_nothing_about_its_parameters() {
 
 /// Both spellings of one definition answer the same. A definition alone in a
 /// file is that file's result, so its binding reads in value position and its
-/// parameters read as Top; a form after it leaves the binding unused, which is
-/// where the Kleene start used to survive to the gate.
+/// parameters read as Top. A form after it leaves the binding unused, which is
+/// where the Kleene start would survive to the gate.
 ///
 /// The counter-factual: the trailing `1` decided whether the same function
 /// compiled, and nothing in the source said so.
@@ -67,7 +68,7 @@ fn a_total_op_still_compiles_in_a_never_called_function() {
 }
 
 /// The other producer of a settled Bottom, and the one that owes nothing to how
-/// a recursive call is typed: a cycle with no base case returns from nowhere, so
+/// a recursive call is typed. A cycle with no base case returns from nowhere, so
 /// its body type is the start and stays there. A site reading that result has no
 /// proof, whatever the ascent decides about self-calls.
 ///
@@ -83,13 +84,13 @@ fn a_call_that_never_returns_proves_nothing_about_its_result() {
 }
 
 /// A fact meeting the Kleene start IS the fact. A guard and a `(numeric!)`
-/// declaration are both proofs about a binding that owe nothing to a call site,
-/// and both reach the environment by meeting with what the ascent accumulated —
+/// declaration are both proofs about a binding that owe nothing to a call site.
+/// Both reach the environment by meeting with what the ascent accumulated,
 /// where `meet(⊥, fact)` is ⊥, which erases them.
 ///
-/// The over-rejection guard for the rejections above. While Bottom discharged
-/// every row the erasure cost nothing and nothing found it; refusing Bottom is
-/// what makes these three sites depend on the fact.
+/// The over-rejection guard for the rejections above. If Bottom discharged
+/// every row, the erasure would cost nothing and nothing would find it. Refusing
+/// Bottom is what makes these three sites depend on the fact.
 #[test]
 fn a_fact_proves_a_parameter_no_call_site_has_reached() {
     compile_result("(defn sq [x] (numeric!) (%mul x x)) 1")
@@ -102,8 +103,8 @@ fn a_fact_proves_a_parameter_no_call_site_has_reached() {
 
 /// The soundness half of the same rule, and what keeps the two Bottoms apart. A
 /// Bottom the meet PRODUCES says the accumulated type and the fact are
-/// disjoint, so no value reaches the site the fact governs — the opposite of a
-/// start nothing has contributed to, and not a proof either.
+/// disjoint, so no value reaches the site the fact governs. That is the
+/// opposite of a start nothing has contributed to, and not a proof either.
 ///
 /// The counter-factual: the declared case compiled, `%bit-and` ran the integer
 /// opcode over the string "str", and the program printed 0.
@@ -131,10 +132,9 @@ fn a_fact_that_contradicts_the_accumulated_type_proves_nothing() {
 }
 
 /// The postcondition that closes the class rather than one row of it. Every
-/// consumer downstream of the pass — the operand contracts, the signal
-/// narrowing, the fold, the LIR operand proof — reads this
-/// one map, so a map with no Bottom in it leaves none of them a Bottom to read
-/// a proof out of.
+/// consumer downstream of the pass reads this one map: the operand contracts,
+/// the signal narrowing, the fold, and the LIR operand proof. So a map with no
+/// Bottom in it leaves none of them a Bottom to read a proof out of.
 ///
 /// The program compiles: `%eq` is total, so the uncalled function survives the
 /// gate and its parameter occurrences reach the map.

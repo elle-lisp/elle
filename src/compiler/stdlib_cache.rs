@@ -16,7 +16,7 @@ const PAYLOAD_HASH_BYTES: usize = 8;
 /// Hash of a cache file's payload, stored in its prefix and re-checked on load.
 ///
 /// `bincode` reports that bytes *decoded*, never that they are the bytes this
-/// binary wrote: eight flipped bytes decode "successfully" and arrive at the VM
+/// binary wrote. Eight flipped bytes decode "successfully" and arrive at the VM
 /// as instructions, and a flip deeper in a payload is absorbed into stdlib and
 /// reported as a hit. The prefix is what distinguishes the two.
 ///
@@ -55,9 +55,10 @@ pub struct StoredBytecode {
 ///
 /// This is a construction parameter, not process-global state. A `Runtime` is
 /// built per instance and the suite builds many of them across threads, so the
-/// directory has to travel with the instance that uses it: a global would make
-/// one test's cache visible to every other test running beside it, and the
-/// runtime that wrote it indistinguishable from the runtime that read it.
+/// directory has to travel with the instance that uses it. A global would make
+/// one test's cache visible to every other test running beside it. It would
+/// also make the runtime that wrote it indistinguishable from the runtime that
+/// read it.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum StdlibCache {
     /// The process-wide choice: `stdlib-cache` beneath the `--cache=<dir>`
@@ -221,9 +222,9 @@ fn prune_superseded(dir: &std::path::Path, keep: &std::path::Path) {
 
 /// Serialize a compiled stdlib unit into the cache format.
 ///
-/// The unit's entry code object — arity `Exact(0)`, run as a thunk — goes
-/// through the send module's template path, which carries the entry pool, the
-/// child table, the nested lambdas' LIR and the region-release tables
+/// The unit's entry code object, of arity `Exact(0)` and run as a thunk, goes
+/// through the send module's template path. That path carries the entry pool,
+/// the child table, the nested lambdas' LIR and the region-release tables
 /// uniformly.
 pub fn store_bytecode(
     unit: &CodeUnit,

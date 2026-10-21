@@ -1,9 +1,10 @@
 (elle/epoch 15)
-# audited: 2026-10-16
+# audited: 2026-10-21
 # A value read out of a pair stays live for as long as each name it reaches, through a wrapper, a branch, a pattern or a second read.
+#
 # docs/impl/region/borrow.md
 #
-# The sidecar arms guardfree, keeps the JIT off and turns the graft off: each
+# The sidecar arms guardfree, keeps the JIT off and turns the graft off. Each
 # face is written as the graft would leave it, so the shape reaches the region
 # solver as written, and a stale read faults at its deref.
 #
@@ -12,13 +13,13 @@
 # The opcode raises no count, so the pair's region is the borrowed value's only
 # protection.
 #
-# The counter-factual: with the name holding nothing, the pair is released at
-# the read's own consumer, and the reader derefs a freed page. A plain `let`
+# The counter-factual: with the name holding nothing, the pair would be released
+# at the read's own consumer, and the reader would deref a freed page. A plain `let`
 # around the read can hide that, because its body happens to outlast the reader;
 # the `begin` wrapper and the second read do not.
 #
-# DISTINCT FROM region-container-read-borrow-uaf.lisp, whose opcode read sits in
-# operand position with its result unnamed.
+# DISTINCT FROM tests/impl/region-container-read-borrow-uaf.lisp, whose opcode
+# read sits in operand position with its result unnamed.
 
 # The read is the tail of a statement wrapper around the init.
 (defn begin-rest [i]

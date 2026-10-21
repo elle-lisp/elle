@@ -12,12 +12,12 @@ use rustc_hash::{FxHashMap, FxHashSet};
 mod scope;
 pub(in crate::hir::region::infer) use scope::innermost_enclosing_scope;
 
-/// The externally-unique Owned subtrees of a compilation unit — the consumer of
+/// The externally-unique Owned subtrees of a compilation unit, the consumer of
 /// `compute_shared_seeds`. Maps each Owned **root** region to the
 /// full set of regions in its subtree (the root included). A region absent from every
 /// value here is Shared (the conservative baseline: per-region RC, always legal).
 ///
-/// ## What a subtree is — the containment graph, read outward
+/// ## What a subtree is: the containment graph, read outward
 ///
 /// The edges are `RegionInfo::cross_region_refs`. Each `(site, source, target)`
 /// means a value in `source` is stored into a structure in `target`. So at runtime
@@ -55,7 +55,7 @@ pub(in crate::hir::region::infer) use scope::innermost_enclosing_scope;
 /// take every container holding the result down with it
 /// (docs/impl/region/effects.md).
 ///
-/// ## When a subtree is Owned — external uniqueness
+/// ## When a subtree is Owned: external uniqueness
 ///
 /// `S = {r} ∪ Reach(r)` is externally unique, and therefore Owned, iff:
 ///
@@ -94,9 +94,9 @@ pub(in crate::hir::region::infer) fn compute_owned_subtrees(
 ) -> FxHashMap<Region, FxHashSet<Region>> {
     let mut owned: FxHashMap<Region, FxHashSet<Region>> = FxHashMap::default();
     for &r in &inputs.alloc_regions {
-        // Candidate root: a sole-held, non-frontier TOP container (not the child of any
-        // eligible edge — a rootless cycle, whose members are all `contained`, is the
-        // co-owned-cycle walk's job, `compute_owned_region_groups`).
+        // Candidate root: a sole-held, non-frontier TOP container, the child of no
+        // eligible edge. A rootless cycle, whose members are all `contained`, is the
+        // co-owned-cycle walk's job (`compute_owned_region_groups`).
         if inputs.not_ownable(info, r) || !inputs.sole_held(r) || inputs.contained.contains(&r) {
             continue;
         }
@@ -160,18 +160,15 @@ pub(in crate::hir::region::infer) fn compute_owned_region_groups(
     info: &RegionInfo,
     order: &Order,
 ) -> HashMap<HirId, Vec<Region>> {
-    // Closure regions — refused below: the group free is the STORE-ONLY-cycle mechanism, and
-    // a closure-involving cycle belongs to a different owner. A `letrec` cell↔closure clique
-    // goes to the closure-cycle MERGE (which collapses it to one arena); a capture-back-edge
-    // SCC to the activation cut. The group free resolves members with `result_region_of`
-    // (which unwraps a `CaptureCell`), so it cannot name a cell member's own region — the
-    // boundary this refusal draws (`closure_regions` doc).
+    // Closure regions, refused below. The group free is the STORE-ONLY-cycle
+    // mechanism, and a closure-involving cycle belongs to a different owner
+    // (`closure_regions`).
     let closure_regs = closure_regions(hir, info);
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
-    // Region → its allocation HirId — the structural site whose enclosing scope frees the
-    // group, and (below) the program-order key for a deterministic member emit-order. A
+    // Region → its allocation HirId: the structural site whose enclosing scope frees
+    // the group, and the program-order key for a deterministic member emit-order. A
     // real allocation (`alloc_region`) or a pre-allocated capture cell (keyed by its
-    // `Begin`); unique-per-alloc, so the inversion is well-defined.
+    // `Begin`). Each is unique per allocation, so the inversion is well-defined.
     let mut region_alloc_hir: FxHashMap<Region, HirId> = FxHashMap::default();
     for (&hid, &reg) in &info.alloc_region {
         region_alloc_hir.insert(reg, hid);
@@ -188,10 +185,10 @@ pub(in crate::hir::region::infer) fn compute_owned_region_groups(
             continue;
         }
         // The SCC of `r`: the regions mutually reachable with it (`r ∈ reach(m)` and
-        // `m ∈ reach(r)`). Read from the one shared Tarjan pass (`scc_of`). Size ≥ 2 is a
-        // genuine cycle; a lone region (no self-edge) has SCC `{r}` and is skipped. Which
-        // member of an SCC the iteration reaches first is irrelevant — the SCC set, and
-        // everything derived from it, is the same.
+        // `m ∈ reach(r)`), from the one shared Tarjan pass (`scc_of`). Size ≥ 2 is a
+        // genuine cycle; a lone region (no self-edge) has SCC `{r}` and is skipped. The
+        // member the iteration reaches first does not matter, because the SCC set and
+        // everything derived from it are the same.
         let scc = inputs.scc_of(r);
         if scc.len() < 2 {
             continue;
@@ -203,14 +200,10 @@ pub(in crate::hir::region::infer) fn compute_owned_region_groups(
         {
             continue;
         }
-        // Refuse a closure-involving cycle: the group free is the store-only-cycle
-        // instrument, and it resolves each member with `result_region_of` (which unwraps a
-        // `CaptureCell`), so it cannot name a cell member's own region. A mergeable `letrec`
-        // cell↔closure clique is collapsed by the closure-cycle MERGE (`region::infer::merge`, run
-        // before this pass, resolving through `merged_root`) and never reaches the group walk;
-        // a capture-back-edge SCC is claimed by the activation cut. What lands here and is
-        // refused is the residual closure cycle no other cut owns — it stays Shared (the
-        // always-legal baseline). See `closure_regions` for the mechanism boundary.
+        // Refuse a closure-involving cycle (`closure_regions` draws the boundary). The
+        // closure-cycle MERGE runs before this pass and collapses a mergeable `letrec`
+        // clique, and the activation cut claims a capture-back-edge SCC. What lands
+        // here is the residual closure cycle no other cut owns, and it stays Shared.
         if scc.iter().any(|&m| closure_regs.contains(&m)) {
             continue;
         }
@@ -268,8 +261,8 @@ pub(in crate::hir::region::infer) fn compute_owned_region_groups(
         for &m in scc {
             claimed.insert(m);
         }
-        // Merge into the drop-site entry (two independent cycles sharing one enclosing
-        // scope free together — sound, all dead at scope exit). Sorted once below.
+        // Merge into the drop-site entry. Two independent cycles sharing one enclosing
+        // scope free together, which is sound, because all are dead at scope exit.
         groups
             .entry(drop_site)
             .or_default()

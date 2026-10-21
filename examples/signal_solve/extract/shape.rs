@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The shape of the value a module file returns, and the exports its struct literal names.
 //!
 //! docs/impl/solver.md

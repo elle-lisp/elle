@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! Visit a HIR node's direct children, and find the `.lisp` files a file's literal imports name.
 //!
 //! docs/impl/solver.md

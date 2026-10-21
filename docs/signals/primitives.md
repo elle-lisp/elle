@@ -1,6 +1,6 @@
 # Fiber Primitives
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-21 -->
 
 User-facing fiber operations and patterns.
 
@@ -339,18 +339,19 @@ resume it, and the resume value answers the call.
 
 #### Handlers that suspend
 
-The handlers an abort reaches are ordinary code, so they can suspend: a
-`defer` cleanup that writes to a port emits `:io`, and so does a `protect`
-body that continues into an I/O call after it captures the error. The
+The handlers an abort reaches are ordinary code, so they can suspend. A
+`defer` cleanup that writes to a port emits `:io`. So does a `protect` body
+that continues into an I/O call after it captures the error. The
 abort then returns that signal, and the fiber stays `:paused` with the
 request in `fiber/value` — the same result `fiber/resume` gives for the
 same call. The next resume continues the handler from where it stopped.
 
 The rule holds at every depth. A fiber parked at `(fiber/resume child)`
-runs its own continuation only after the child's handler finishes, so a
+runs its own continuation only after the child's handler finishes. So a
 `defer` inside a `defer` still runs the inner body before the outer
-cleanup. [tests/lang/unwind-suspend.lisp](../../tests/lang/unwind-suspend.lisp) pins the four shapes —
-`protect`, `try`, `defer`, and one `defer` inside another.
+cleanup. [tests/lang/unwind-suspend.lisp](../../tests/lang/unwind-suspend.lisp)
+pins the four shapes: `protect`, `try`, `defer`, and one `defer` inside
+another.
 
 ### Aliases
 
@@ -395,7 +396,7 @@ sequenceDiagram
 
     Note over VM: Step 4: Execute
     VM->>Child: execute(vm) [runs child's bytecode]
-    Child-->>VM: SignalBits (e.g., SIG_YIELD)
+    Child-->>VM: SignalBits (SIG_YIELD, for example)
 
     Note over VM: Step 5: Update child status
     alt SIG_OK

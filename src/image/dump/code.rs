@@ -86,9 +86,9 @@ pub(super) fn copy_payload(
 }
 
 /// Copy a payload's LIR body. The records are plain data and copy as they
-/// stand; the values its `ValueConst`s load go through the value walk, which
-/// the constant pool's copy has already taken them through; the file table
-/// is spellings, copied like a string's bytes (docs/impl/image/sealing.md).
+/// stand. The values its `ValueConst`s load go through the value walk, which
+/// the constant pool's copy has already taken them through. The file table is
+/// spellings, copied like a string's bytes (docs/impl/image/sealing.md).
 fn copy_lir(
     heap: &mut FiberHeap,
     region: RuntimeRegion,

@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! The bytecode and FHIR compile entry points, and the lowering they share.
 //!
 //! src/pipeline/AGENTS.md
@@ -75,9 +75,6 @@ fn compile_inner(
     cctx: &mut CompileCtx,
     source_name: &str,
 ) -> Result<CodeUnit, String> {
-    // Ensure caller's SymbolTable has primitive names interned so that
-    // SymbolIds match the compile context's PrimitiveMeta.
-
     // Phase 1: Parse to Syntax
     let syntax = read_syntax(arena, source, source_name)?;
     let unit = UnitTag::of(source_name, std::slice::from_ref(&syntax));
@@ -298,8 +295,8 @@ fn compile_file_inner(
 /// The file is compiled ONCE through the whole-module `analyze_file_letrec`
 /// path (so binding resolution, capture analysis, signal inference, and epoch
 /// migration all apply across the file). The returned module, when executed,
-/// evaluates the file's `def`/`var` forms eagerly — establishing the shared
-/// bindings every test form can see (including forward references) — and returns
+/// evaluates the file's `def`/`var` forms eagerly. That establishes the shared
+/// bindings every test form can see, forward references included. It returns
 /// a mutable array of `[index thunk]` pairs, one 0-arg thunk per test
 /// (expression) form, each capturing that shared environment.
 ///

@@ -112,7 +112,7 @@ identical read of an *uncaptured* local, where no wrapper stands between, gets
 the same value. A wrapper treated as the consumer ends the cell's life at the
 load, one node ahead of the reader, which then derefs a page the cell's free
 cascade already reclaimed. This is the env-cell statement of the rule
-[rules.md](rules.md) Rule 4 makes for container reads, and `uncounted_read_sites`
+[rules.md](rules.md) makes for container reads, and `uncounted_read_sites`
 uses the same mechanism for `%get`/`%first`/`%rest`.
 
 The hazard is latent: a freed page keeps its bytes, so the stale read returns
@@ -232,7 +232,7 @@ therefore has to emit the value release first.
 
 Where the two land on one `decref_point`, the release order already says so: a
 `DecrefValueRegion` that unwraps a cell reads deepest and sorts ahead of the
-`DecrefCellRegion` that frees the page ([rules.md](rules.md) Rule 4). Across two
+`DecrefCellRegion` that frees the page ([rules.md](rules.md)). Across two
 points nothing does, and the two points do diverge. Both regions ride the
 binding's uses through the binding-chain extension, so they start together. The
 value region then takes a second, later bound from its **allocation site's**

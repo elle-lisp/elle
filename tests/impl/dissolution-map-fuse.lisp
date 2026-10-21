@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-21
 # A fused `map` — over a literal, an alias or a mutable base, with an inline,
 # named or cross-unit function — computes exactly what the un-fused `map` does.
 #
@@ -7,8 +7,9 @@
 # docs/impl/dissolution/inline.md
 #
 # The codegen pins — the closure and dispatch gone — are in
-# src/hir/typeinfer/fuse/tests/collect.rs and named.rs; here only the observable
-# result is asserted.
+# src/hir/typeinfer/fuse/tests/collect.rs and
+# src/hir/typeinfer/fuse/tests/named.rs. Here only the observable result is
+# asserted.
 #
 # `dbl`/`inc` are named functions with pure bodies and `dbl-let`/`inc-let` have
 # `let` bodies, so each fuses by grafting. `dbl-decl`/`inc-decl` have a `block`

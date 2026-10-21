@@ -241,8 +241,8 @@ pub struct Lowerer<'a> {
     /// Tofte-Talpin region inference results. Scope decisions use region
     /// assignments instead of syntactic escape analysis.
     region_info: RegionInfo,
-    /// Authoritative escape facts (`src/hir/escape.rs`), computed once at the
-    /// top of `lower`. `tail_callee_defers_release` (`control/call/defer.rs`)
+    /// Authoritative escape facts (src/hir/escape.rs), computed once at the
+    /// top of `lower`. `tail_callee_defers_release` (src/lir/lower/control/call/defer.rs)
     /// reads them for the escape half of the deferral decision; region-locality
     /// stays a region fact. `tail_arg_is_borrowed` does NOT read them: it is a
     /// structural ownership-location test, and escape over-marks owned tail
@@ -327,7 +327,7 @@ pub struct Lowerer<'a> {
     /// now-populated slot.
     deferred_decref_points: rustc_hash::FxHashSet<HirId>,
     /// Tail-call HirIds whose result a `Return` mint already covers, so
-    /// `lower_call`'s post-`TailCall` fall-through retain must stand down: the
+    /// `lower_call`'s post-`TailCall` fall-through retain must stand down. The
     /// return mint is emitted exactly once per returned value
     /// (docs/impl/region/mechanism.md).
     ///

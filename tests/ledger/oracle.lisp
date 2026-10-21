@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-30
+(elle/epoch 15)
+# audited: 2026-10-21
 # The ledger of tests/impl/oracle.lisp, the region leak dashboard: one row per probe and axis, every control pinned at 0.
 (producer "tests/impl/oracle.lisp")
 # The instrument's live-growth row per gauge the oracle reads, and the
@@ -11,7 +11,7 @@
 ["bytes gauge (live-growth)" :bytes :floor 1000 :class :growth]
 ["sub-integer (1-in-3 retain)" :objects :floor 0.28 :class :growth]
 ["bounded (immutable struct, dropped)" :objects 0]
-# The direct-loop rows (probe/direct.lisp).
+# The direct-loop rows (tests/impl/probe/direct.lisp).
 ["discard-struct" :objects 0]
 ["string-alloc" :objects 0]
 ["pair" :objects 0]
@@ -97,7 +97,7 @@
 ["fresh-env-cell" :objects 0 :root :f5]
 ["env-cell-read-arm" :objects 0]
 ["shared-env-cell" :objects 0]
-# The rows whose drive crosses a fiber (probe/concurrent.lisp). A park family
+# The rows whose drive crosses a fiber (tests/impl/probe/concurrent.lisp). A park family
 # is read on the region count too, the dimension a pages-less owner node or an
 # emptied entry moves.
 ["closure-while" :objects 0]
@@ -167,7 +167,7 @@
 ["module-cell-read-window" :objects 0]
 ["module-cell-heap-init" :objects 0]
 # Tail-call rotation, the letrec-local closures, and the scheduler round trip
-# (probe/tailcall.lisp).
+# (tests/impl/probe/tailcall.lisp).
 ["recur-struct" :objects 0]
 ["recur-string" :objects 0]
 ["recur-mutual" :objects 0]
@@ -187,7 +187,7 @@
 ["recur-local-self-yield" :objects 0]
 ["recur-local-self-send" :objects 0]
 ["spawn-join" :objects 0]
-# The stdlib, native-tail and read/copy classes (probe/stdlib.lisp). The
+# The stdlib, native-tail and read/copy classes (tests/impl/probe/stdlib.lisp). The
 # native-tail and read rows are read on the region count, the dimension a
 # fresh-result region with few contents moves.
 ["stdlib-concat" :objects 0]
@@ -213,7 +213,7 @@
 ["read-keys" :regions 0]
 ["read-values" :regions 0]
 ["read-slice" :regions 0]
-# The injected abort delivery (probe/abort.lisp).
+# The injected abort delivery (tests/impl/probe/abort.lisp).
 ["abort-masked" :objects 0]
 ["abort-escape" :objects 0]
 ["abort-caught" :objects 0]
@@ -229,7 +229,7 @@
 ["abort-mask-caught-bound" :objects 0]
 ["refuse-tail-result" :objects 0]
 ["refuse-tail-discarded" :objects 0]
-# The physical-id dimension and the mutable-store funnel (probe/store.lisp).
+# The physical-id dimension and the mutable-store funnel (tests/impl/probe/store.lisp).
 ["id-const-compare" :ids 0]
 ["id-immediate-result" :ids 0]
 ["id-borrowed-index" :ids 0]
@@ -243,7 +243,7 @@
 ["set-del-wrapper" :objects 0 :root :f1b]
 ["raw-del" :objects 0 :root :f5]
 ["raw-del-immediate" :objects 0 :root :f5]
-# Fiber-internal yielding loops and the channel round trip (probe/yield.lisp).
+# Fiber-internal yielding loops and the channel round trip (tests/impl/probe/yield.lisp).
 ["yield-struct" :objects 0]
 ["yield-string" :objects 0]
 ["yield-closure" :objects 0]
@@ -254,7 +254,7 @@
 ["yield-spawn" :objects 0]
 ["chan-send-recv" :objects 0]
 # Persistent containers, the returned accumulator, the walk's element and the
-# captured accumulator (probe/container.lisp).
+# captured accumulator (tests/impl/probe/container.lisp).
 ["put-overwrite" :objects 0]
 ["set-array" :objects 0]
 ["put-struct" :objects 0]
@@ -273,7 +273,7 @@
 ["capture-acc-while" :objects 0]
 ["thread-acc-param" :objects 0]
 # Discarded call results, break escapes, the branch-arm window and the
-# frame-exit rows (probe/branch.lisp).
+# frame-exit rows (tests/impl/probe/branch.lisp).
 ["branch-call" :objects 0]
 ["push-slot-source" :objects 0]
 ["put-slot-source" :objects 0]
@@ -307,7 +307,7 @@
 ["break-value-lit" :objects 0]
 ["break-skipped" :objects 0]
 ["break-skipped-nobreak" :objects 0]
-# Thunk-run native results and the byte gauge (probe/native.lisp).
+# Thunk-run native results and the byte gauge (tests/impl/probe/native.lisp).
 ["import-result" :objects 0]
 ["allocs-result" :objects 0]
 ["string-bytes" :bytes 0]

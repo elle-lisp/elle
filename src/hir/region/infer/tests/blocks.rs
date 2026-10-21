@@ -2,6 +2,8 @@
 // docs/impl/region/anchors.md
 //! `block`/`break`: where a release the break jumps over is anchored, and where that window stops.
 //!
+//! docs/impl/region/anchors.md
+//!
 //! A branch tests `u`, a parameter of a function nothing calls, and not a
 //! literal. The fold decides a test over a proven operand at compile time and
 //! keeps only the branch it selects, so the `break` or the code after it would
@@ -19,12 +21,11 @@ use super::*;
 //
 // `break` lowers to a store into the block's result slot plus a jump to the
 // block's exit label, so control leaves the body before any release the lowerer
-// placed at a `decref_point` inside it. The broken value must therefore be
-// anchored the way the block's own tail value is — at the `Block` node (the
-// first point both the break path and the fall-through path reach) or later,
-// and its regions must flow out of the block so a binding naming the block's
-// value extends the release past its own uses.
-// See docs/impl/region/anchors.md.
+// placed at a `decref_point` inside it. So the broken value must be anchored the
+// way the block's own tail value is: at the `Block` node or later. That node is the
+// first point both the break path and the fall-through path reach. Its regions must
+// flow out of the block, so a binding naming the block's value extends the release
+// past its own uses.
 
 /// The HirId of the first `Block` node in the tree, outermost-first.
 fn first_block(hir: &Hir) -> Option<HirId> {
@@ -145,15 +146,17 @@ fn break_value_region_outlives_a_later_read_of_the_block_result() {
 // ── the regions the break jumps OVER ─────────────────────────────────
 //
 // The same jump that strands the broken value strands every other release the
-// lowerer placed between the break site and the exit label — those regions have
-// no consumer to be handed to, so they simply never die. They are re-anchored to
-// the same point the broken value takes, `last_use[block]`, which both paths
-// reach. Three boundaries stop the hoist: a nested loop (the value is
-// re-allocated per iteration, so one release cannot cover N), a nested lambda
-// (its releases run in another activation, against another frame's slots), and a
-// frame-replacing exit in the body (which leaves the anchor unreached on the
-// fall-through path).
-// See docs/impl/region/anchors.md.
+// lowerer placed between the break site and the exit label. Those regions have no
+// consumer to hand them to, so they never die. They are re-anchored to the point
+// the broken value takes, `last_use[block]`, which both paths reach. Three
+// boundaries stop the hoist:
+//
+// - a nested loop: the value is re-allocated per iteration, so one release cannot
+//   cover N;
+// - a nested lambda: its releases run in another activation, against another
+//   frame's slots;
+// - a frame-replacing exit in the body, which leaves the anchor unreached on the
+//   fall-through path.
 
 /// The HirId of the first `While`/`Loop` node, outermost-first.
 fn first_loop(hir: &Hir) -> Option<HirId> {
@@ -199,7 +202,7 @@ fn first_string_call_decref_point(hir: &Hir, arena: &BindingArena, info: &Region
 
 #[test]
 fn a_release_the_break_jumps_over_is_pinned_to_the_block() {
-    // `x` is NOT the broken value — the break carries `1` — but its release sits
+    // `x` is NOT the broken value: the break carries `1`. But its release sits
     // after the break site inside the body, so the jump to the exit label passes
     // over it and it never runs at all.
     let (hir, arena, info) = pipeline(
@@ -334,7 +337,7 @@ fn a_lambda_nested_in_the_block_keeps_its_own_activations_release() {
 fn a_frame_replacing_exit_in_the_body_refuses_the_window() {
     // The hoist's premise is that the block's exit label is a point EVERY path
     // reaches. A tail call in the body replaces the frame, so the fall-through
-    // path leaves through the callee instead of arriving at the exit label — a
+    // path leaves through the callee instead of arriving at the exit label. A
     // release moved there would be dead on exactly the path that used to run it.
     let (hir, arena, info) = pipeline(
         "(defn g [n] n) \

@@ -9,12 +9,12 @@
 use super::*;
 
 impl<'a> Lowerer<'a> {
-    /// Does this tail call's callee CLOSURE die at the call node — that is, is it a
+    /// Does this tail call's callee CLOSURE die at the call node? That is, is it a
     /// per-call local closure whose `DecrefRegion` the solver placed here, which
     /// the frame-replacing `TailCall` then strands as dead code? If so, the new
     /// activation must TAKE OVER that release (run it when it completes) to
-    /// supply the missing decref — a deferred decref on a still-`Counted` region,
-    /// never an ownership-forest adoption.
+    /// supply the missing decref. It is a deferred decref on a still-`Counted`
+    /// region, never an ownership-forest adoption.
     ///
     /// Asked in two layers. The **binding-keyed channels** come first: a callee the
     /// enclosing letrec or `def` marked stranded owns a release that this call's
@@ -26,11 +26,12 @@ impl<'a> Lowerer<'a> {
     /// - **region-locality** (a region fact): the callee's region demises at this
     ///   call's `decref_point` (this node) AND its decref is one the frame owns
     ///   (not in `suppressed_decref_regions`). A program-root callee (a top-level
-    ///   `defn`) or a primitive has no per-call region here, and a suppressed
-    ///   region's decref is owned by the store path (never stamped as an ordinary
-    ///   alloc) — deferring either's release decrements an RC the frame never raised (a
-    ///   phantom `DecrefRegion` / use-after-free). `EscapeInfo` cannot express
-    ///   "has an owned per-call region here", so this stays a region fact.
+    ///   `defn`) or a primitive has no per-call region here. The store path owns a
+    ///   suppressed region's decref, which was never stamped as an ordinary
+    ///   alloc. Deferring either's release decrements an RC the frame never
+    ///   raised: a phantom `DecrefRegion`, or a use-after-free. `EscapeInfo`
+    ///   cannot express "has an owned per-call region here", so this stays a
+    ///   region fact.
     /// - **escape** (the authoritative analysis): the release is deferred only when
     ///   it does NOT escape its definition (`EscapeInfo::lambda_escapes_definition`
     ///   / `binding_escapes_activation`). An escaping closure outlives the call and
@@ -50,10 +51,10 @@ impl<'a> Lowerer<'a> {
         //   binding;
         // - a literal-lambda callee (`((fn [] …))`) reaches here as the `Let`
         //   the normalizer bound it under, its body the binding `Var`.
-        // Without the resolution neither shape ever matches, its per-call
-        // closure region never defers, and every such tail call leaks the
-        // closure + template (the `protect`-body shape: the fiber wrapper's
-        // tail call to its literal body closure).
+        // Without the resolution neither shape ever matches, and its per-call
+        // closure region never defers. Every such tail call then leaks the
+        // closure and its template. The `protect` body is that shape: the fiber
+        // wrapper's tail call to its literal body closure.
         let mut func = func;
         loop {
             func = match &func.kind {
@@ -125,19 +126,19 @@ impl<'a> Lowerer<'a> {
                 return true;
             }
             // A letrec closure-cycle merge member the enclosing letrec's BODY
-            // tail-calls: the merged arena's binding-scope DecrefRegion is dead
-            // past this frame-replacing TailCall, so the deferred release supplies
-            // it once at the recursion's normal completion — the mutual
-            // twin of the stranded-self deferral above. Honoured only through a
-            // NON-upvalue reference: in the letrec's own function the binding is
-            // a plain stack-slot local, while a nested closure reads it as an
-            // upvalue — and a nested closure's activation completes before later
-            // uses of the arena, so deferring there would free it early.
+            // tail-calls. The merged arena's binding-scope DecrefRegion is dead past
+            // this frame-replacing TailCall, so the deferred release supplies it
+            // once at the recursion's normal completion. This is the mutual twin of
+            // the stranded-self deferral above. It is honoured only through a
+            // NON-upvalue reference. In the letrec's own function the binding is a
+            // plain stack-slot local, while a nested closure reads it as an upvalue.
+            // A nested closure's activation completes before later uses of the
+            // arena, so deferring there would free it early.
             //
             // The escape gate is the FIBER frontier alone. The return facet is funded
-            // as on the self path above: this deferral also runs at the recursion's
+            // as on the self path above. This deferral also runs at the recursion's
             // normal completion, after the `Return` mint that funds the caller's
-            // reference, and the merge collapses a returned member's region onto the
+            // reference. The merge collapses a returned member's region onto the
             // arena, so that mint raises the arena's own count. The merge
             // admits a returned cycle only where the arena's release runs after that
             // mint (docs/impl/region/letrec.md). A member reaches this
@@ -157,7 +158,7 @@ impl<'a> Lowerer<'a> {
             // deferral reaches it.
             //
             // The escape gate is the FIBER frontier alone, by the same ordering
-            // argument the two channels above make: this deferral is a decref that
+            // argument the two channels above make. This deferral is a decref that
             // runs at the callee's normal completion, AFTER the `Return` mint that
             // funds the caller's reference, so the return facet needs no bridge.
             // Only a fiber crossing hands the closure to a holder the compiler did
@@ -168,40 +169,27 @@ impl<'a> Lowerer<'a> {
                 return !self.escape_info.escapes_fiber(*b);
             }
         }
-        // Any other reference to a closure-cycle merge member never defers: the
-        // merged arena is released exactly once by the merge's own channel (the
-        // binding-scope DecrefRegion, or the stranded-cycle deferral above), so a
-        // second deferred release — an interior sibling rotation (`ev` tail-calling `od`,
-        // whose region demises at that in-body call node and would otherwise
-        // pass `dies_here` below), or a nested-closure call — would release the
-        // still-live arena a second time (a double-free on a non-tail letrec
-        // body, where the binding-scope drop fires live).
+        // Any other reference to a closure-cycle merge member never defers. The
+        // merge's own channel releases the merged arena exactly once: the
+        // binding-scope DecrefRegion, or the stranded-cycle deferral above. A
+        // second deferred release would release the still-live arena a second
+        // time, a double-free on a non-tail letrec body where the binding-scope
+        // drop fires live. The second release could come from an interior sibling
+        // rotation (`ev` tail-calling `od`, whose region demises at that in-body
+        // call node and would pass `dies_here` below), or from a nested-closure call.
         if func_regions
             .iter()
             .any(|r| self.region_info.closure_cycle_members.contains(r))
         {
             return false;
         }
-        // Region-locality (a region fact, not escape): the callee must have a
-        // per-call region that demises at THIS node AND whose decref the frame
-        // actually owns. A program-root callee (top-level `defn`) or a primitive
-        // has no per-call region here, and a SUPPRESSED region's decref is owned
-        // by the store path (the reassign-gate / container model) and was never
-        // stamped as an ordinary alloc — deferring either's release decrements an RC the
-        // frame never raised (a phantom `DecrefRegion` panic / use-after-free).
-        // `EscapeInfo` cannot express "has an owned per-call region here", so this
-        // stays a region fact.
+        // Region-locality, then escape: the two facts the doc comment names.
         let Some(dying) = self.decrefs_by_decref_point.get(&call_id) else {
             return false;
         };
         let dies_here = func_regions
             .iter()
             .any(|r| dying.contains(r) && !self.region_info.suppressed_decref_regions.contains(r));
-        // Escape is read from the authoritative analysis: among those owned
-        // per-call callees, defer only one that does NOT escape its definition —
-        // an escaping closure outlives the call and must not be freed by the new
-        // activation. This escape refinement is a distinct responsibility from
-        // the region-level suppression proxy.
         let escapes = match &func.kind {
             HirKind::Var(b) => self.escape_info.binding_escapes_activation(*b),
             _ => self.escape_info.lambda_escapes_definition(func.id),

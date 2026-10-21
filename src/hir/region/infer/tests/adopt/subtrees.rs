@@ -7,10 +7,9 @@
 //! star, a lone local capture). These probe the modes COMBINED in one
 //! externally-unique subtree, where `compute_adopt_edges`'s owner assignment must
 //! thread store edges and re-derived capture edges through the same `containers_of`
-//! graph. Each assertion is written from the spec ("Both feed owner assignment … each
-//! member adopted by its actual parent") — a member's owner is the root when it has a
-//! direct root edge, else its unique interior container, whether the edge is a store
-//! or a capture.
+//! graph. Each assertion follows the actual-parent rule on `compute_adopt_edges`. A
+//! member's owner is the root when it has a direct root edge, else its unique interior
+//! container, whether the edge is a store or a capture.
 
 use super::structural::sole_cell_and_capture_adopts;
 use super::*;
@@ -31,9 +30,9 @@ fn all_pair_regions(hir: &Hir, info: &RegionInfo) -> Vec<Region> {
 fn adopt_edges_chains_store_and_capture_in_one_subtree() {
     // Combined probe: a Fresh container `root` holds a local capturing closure `c`, and
     // `c` captures the pair `p`. One externally-unique Owned subtree {root, c, p} chains
-    // the two emit modes — `c` is adopted by `root` through a STORE edge
-    // (`%array-push root c` funnel-records the containment edge `root ⊇ c`),
-    // and `p` is adopted by `c` through a re-derived CAPTURE edge `c ⊇ p`. The owner
+    // the two emit modes. `root` adopts `c` through a STORE edge: `%array-push root c`
+    // funnel-records the containment edge `root ⊇ c`. `c` adopts `p` through a
+    // re-derived CAPTURE edge `c ⊇ p`. The owner
     // assignment must thread both kinds: `c`'s actual parent is the root (direct store
     // edge), `p`'s actual parent is the non-root container `c`. The root's recursive
     // subtree drop then reclaims the whole chain.

@@ -1,6 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-15
+# audited: 2026-10-21
 # A pair walked by a grafted helper stays live for as long as the name its walk is bound to.
+#
 # docs/impl/region/rules.md
 # docs/impl/graft.md
 #
@@ -14,9 +15,9 @@
 # borrow out of the next. Nothing counts the borrowed tail, so the walked
 # list's region must outlive `t`, the name the last call's value is bound to.
 #
-# The counter-factual: with the bound names holding no region, the list is
-# released once the innermost call's value is bound, and reading `t` derefs a
-# freed page.
+# The counter-factual: with the bound names holding no region, the list would be
+# released once the innermost call's value is bound, and reading `t` would deref
+# a freed page.
 
 (defn step [p]
   (when (%not (%pair? p))

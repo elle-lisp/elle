@@ -158,7 +158,7 @@ impl<'a> Lowerer<'a> {
 
         if let Some(&slot) = self.binding_to_slot.get(target) {
             if self.in_lambda && is_upvalue && needs_capture {
-                // For LBox upvalues, use StoreCapture (updates cell) + LoadCapture (unwraps)
+                // For a cell-held upvalue, StoreCapture updates the cell and LoadCapture unwraps it
                 self.emit(InstrRef::StoreCapture {
                     index: slot,
                     src: value_reg,

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The capture edges the ownership forest reads, and the closure regions the co-owned group cut refuses.
 //!
 //! docs/impl/region/adopt.md

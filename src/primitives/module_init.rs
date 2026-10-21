@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-21
 //! Loading the standard library into one runtime: obtain its compiled unit,
 //! run it, and register what it exports.
 //!
@@ -41,7 +41,7 @@ pub fn init_stdlib(
     //
     // One fork, two arms, one tail. A rejected file falls into the compiling
     // arm along with a plain absence, so it is *replaced* rather than left to
-    // be rejected again by every later start; and the execute → exports tail
+    // be rejected again by every later start. The execute → exports tail
     // exists once, so the two paths cannot drift apart.
     //
     // Both arms mark `stdlib-compile`: the boot mark attributes the cost of
@@ -150,10 +150,10 @@ fn call_closure(vm: &mut VM, closure_val: Value) -> Value {
         .as_closure()
         .unwrap_or_else(|| panic!("stdlib last expression is not a closure: {}", closure_val));
     let env = Rc::new(build_closure_call_env(closure, &[]));
-    // The body being run is a closure's — hand it its executing-closure
+    // The body being run is a closure's. Hand it its executing-closure
     // register via the one-shot, and enter through `execute_code` with the
-    // template's own `Code` (sharing its bytecode `Rc`, which the dispatch-entry
-    // invariant compares by identity).
+    // template's own `Code`. That shares its bytecode `Rc`, which the
+    // dispatch-entry invariant compares by identity.
     vm.pending_entry_closure = closure_val;
     match vm.execute_code(closure.template.code(), Some(&env)) {
         Ok(v) => v,
@@ -163,8 +163,8 @@ fn call_closure(vm: &mut VM, closure_val: Value) -> Value {
 /// Build the local environment for calling a closure with the given args.
 ///
 /// Layout: `[captures..., params..., locals...]` — matches `populate_env`
-/// (`src/vm/env.rs`).  `LoadUpvalue` indexes the env from zero, so the
-/// captures must come first; any local slots reserved by the closure
+/// (`src/vm/env.rs`). `LoadUpvalue` indexes the env from zero, so the
+/// captures must come first. Any local slots reserved by the closure
 /// (including ANF-lifted temporaries) sit at the tail of the buffer and
 /// are filled by the runtime as the body executes.
 pub fn build_closure_call_env(closure: &crate::value::Closure, args: &[Value]) -> Vec<Value> {

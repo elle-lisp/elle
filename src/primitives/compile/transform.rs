@@ -1,11 +1,11 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The `compile/*` primitives that change a program or run one.
-//!
-//! Rename, extract, parallelize, add-handler, apply-rules, the forced-tier
-//! call, the dumps, and the module compiles the test runner drives.
 //!
 //! docs/analysis/agent-reasoning.md
 //! docs/test-runner.md
+//!
+//! Rename, extract, parallelize, add-handler, apply-rules, the forced-tier
+//! call, the dumps, and the module compiles the test runner drives.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -440,9 +440,9 @@ pub(super) fn prim_compile_whole_module_syntax(
 // ── compile/dumps ────────────────────────────────────────────────────────
 
 /// `(compile/dumps source name)` — compile a module once through the real file
-/// front-end and return a struct mapping each available dump kind to its
-/// rendered text: `{:ast … :fhir … :defuse … :regions … :hir … :lir … :cfg …
-/// :dfa … :jit … :escape …}`. These are the artifacts `elle --dump=KIND`
+/// front-end. Return a struct mapping each available dump kind to its rendered
+/// text: `{:ast … :fhir … :defuse … :regions … :hir … :lir … :cfg … :dfa … :jit
+/// … :escape …}`. These are the artifacts `elle --dump=KIND`
 /// prints, returned in-process instead of printed before exit. A stage that
 /// fails to compile or yields nothing is omitted from the struct.
 ///

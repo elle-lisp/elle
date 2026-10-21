@@ -1,6 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-16
+# audited: 2026-10-21
 # A closure read out of a pair stays live while a tail call enters it through the name it is bound to.
+#
 # docs/impl/region/borrow.md
 # docs/impl/region/relocate.md
 #
@@ -10,12 +11,12 @@
 # `outer` moves a fresh pair into `pick`, so `pick`'s frame holds the pair's
 # only reference. `g` is the pair's car, read with no count, and `pick`
 # tail-calls it. The pair's count is all that keeps the closure alive, so no
-# release of the pair may run ahead of the call: not the solver's, not the
-# relocation's carried ahead of the `TailCall`, and not a compensating release
+# release of the pair may run ahead of the call. That rules out the solver's,
+# the relocation's carried ahead of the `TailCall`, and a compensating release
 # at the head of the arm that makes the call.
 #
-# The counter-factual: with `g` naming no region, each of those releases frees
-# the pair, and its cascade frees the closure the call then enters.
+# The counter-factual: with `g` naming no region, each of those releases would
+# free the pair, and its cascade would free the closure the call then enters.
 
 (defn pick [fns c]
   (let [g (begin

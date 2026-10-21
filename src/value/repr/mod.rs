@@ -1,18 +1,21 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! The 16-byte tagged-union `Value`: its tags, its immediate predicates, and its scalar serde.
 //!
-//! Every value is exactly 16 bytes:
-//!   tag:     u64 — type discriminant (TAG_* constants below)
-//!   payload: u64 — type-specific data:
-//!                  integers:  i64 reinterpreted as u64
-//!                  floats:    f64::to_bits()
-//!                  symbols:   u64 FNV-1a hash of the name
-//!                  keywords:  u64 FNV-1a hash of the name
-//!                  native fn: u32 prim_id
-//!                  cpointer:  usize address
-//!                  heap:      *const () pointer to HeapObject
-//!
 //! docs/impl/values.md
+//!
+//! Every value is exactly 16 bytes:
+//!
+//! ```text
+//! tag:     u64 — type discriminant (TAG_* constants below)
+//! payload: u64 — type-specific data:
+//!                integers:  i64 reinterpreted as u64
+//!                floats:    f64::to_bits()
+//!                symbols:   u64 FNV-1a hash of the name
+//!                keywords:  u64 FNV-1a hash of the name
+//!                native fn: u32 prim_id
+//!                cpointer:  usize address
+//!                heap:      *const () pointer to HeapObject
+//! ```
 
 mod accessors;
 mod constructors;
@@ -200,7 +203,7 @@ impl Value {
     }
 
     /// Check if this value is truthy (everything except nil and false).
-    /// UNDEFINED should never appear in user-visible evaluation - debug_assert catches leaks.
+    /// A debug build asserts that UNDEFINED never reaches this check.
     #[inline]
     pub fn is_truthy(&self) -> bool {
         debug_assert!(
@@ -213,11 +216,11 @@ impl Value {
     /// The reason these bits cannot be a live `Value`, or `None` when they can.
     ///
     /// A conservative structural check for the park/resume tripwires
-    /// (`elle_jit_yield`, `resume_suspended`): the tag must not exceed the
-    /// largest `TAG_*` constant, and a heap tag must carry an 8-byte-aligned
+    /// (`elle_jit_yield`, `resume_suspended`). The tag must not exceed the
+    /// largest `TAG_*` constant. A heap tag must carry an 8-byte-aligned
     /// payload above the first page, where no mapping ever lands. A permutation
-    /// of valid values passes — this catches torn or zeroed slots, and a slot a
-    /// freed page's recycled bytes spell, not misplaced ones.
+    /// of valid values passes. The check catches torn or zeroed slots, and a
+    /// slot a freed page's recycled bytes spell, not misplaced ones.
     pub fn malformed_reason(&self) -> Option<&'static str> {
         if self.tag > TAG_CLOSURE_TEMPLATE {
             return Some("tag out of range");
@@ -316,16 +319,16 @@ impl Value {
 // Scalar serialization (used by the stdlib compilation cache)
 // =============================================================================
 //
-// The cache serializes `Value` constants in `Bytecode`/`ClosureTemplate` pools
-// and in LIR `ValueConst` operands. After `convert_lir_for_send`, the values
-// that reach this path are non-heap scalars (int, float, bool, nil, the empty
-// list, symbol, keyword) and native-fn immediates. A symbol and a keyword carry their name's hash
-// (docs/impl/symbol.md), which is the same in every process, so the payload
-// travels as it stands; only the spelling needs the bundle's name table. Every
-// malformed input must come back as a serde error, never a panic: the cache
-// layer converts errors into a miss and recompiles, and `ScalarPayload`'s
-// single derived enum tag makes an out-of-range discriminant a native bincode
-// error.
+// The cache serializes a code object's pool and the values its LIR
+// `ValueConst`s load as `SendValue`s, so the send walk has already copied out
+// every heap value. The values that reach this path are scalars (int, float,
+// bool, nil, the empty list, symbol, keyword) and native-fn immediates. A
+// symbol and a keyword carry their name's hash, which is the same in every
+// process. The payload travels as it stands, and only the spelling needs the
+// bundle's name table. Every malformed input must come back as a serde error,
+// never a panic, because the cache layer turns an error into a miss and
+// recompiles. `ScalarPayload`'s single derived enum tag makes an out-of-range
+// discriminant a native bincode error.
 impl serde::Serialize for Value {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         use serde::ser::Error;

@@ -1,14 +1,16 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The source-collection walks: what atoms and allocation sites a region-transparent expression flows to.
 //!
 //! docs/impl/escape.md
 //!
 //! Every walk here descends the same positions, [`for_each_tail`], so their
-//! results line up facet for facet. `tail_sources` is the value-flow result set
-//! (mirroring the region solver's `walk`); `return_atoms` adds the
-//! assign/set-cell target seeding needed at a tail; `record_frontier_sites` is
-//! the atomless region-level half; `tail_pair_operands` names what a `%pair` the
-//! expression may be holds.
+//! results line up facet for facet.
+//!
+//! - `tail_sources` is the value-flow result set, mirroring the region
+//!   solver's `walk`.
+//! - `return_atoms` adds the assign/set-cell target seeding needed at a tail.
+//! - `record_frontier_sites` is the atomless region-level half.
+//! - `tail_pair_operands` names what a `%pair` the expression may be holds.
 
 use rustc_hash::FxHashSet;
 
@@ -196,9 +198,9 @@ pub(in crate::hir::escape) fn record_frontier_sites(
     }
     match &hir.kind {
         // A lambda's closure region, a call's result region, an allocating
-        // intrinsic's region, and the fresh allocations with no atom: a string or
-        // quoted-compound literal, an `Eval` result, or an `Emit`'s — what the
-        // resumer handed back. A non-allocating intrinsic returns an immediate,
+        // intrinsic's region, and the fresh allocations with no atom. Those are
+        // a string or quoted-compound literal, an `Eval` result, or an `Emit`'s,
+        // which is what the resumer handed back. A non-allocating intrinsic returns an immediate,
         // absent from `alloc_region`, so recording it is harmless.
         HirKind::Lambda { .. }
         | HirKind::Call { .. }

@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-21
 //! A body holding a raw `%`-intrinsic fuses only under `(numeric!)`, whose
 //! parameter floor travels with the binding into the loop.
 //!
@@ -7,11 +7,11 @@
 use super::*;
 
 /// A raw call-position `%`-intrinsic body fuses under a `(numeric!)`
-/// declaration. The declaration floors the parameter at Number — the sole proof
-/// that discharges `(%add x 1)`'s prove-or-reject obligation — and it is
-/// recorded on the parameter BINDING, so it survives the splice that dissolves
-/// the lambda: the `map` dispatch is gone, no closure survives, and the `%add`
-/// opcode runs inline in the loop over the let-bound element.
+/// declaration. The declaration floors the parameter at Number, the sole proof
+/// that discharges `(%add x 1)`'s prove-or-reject obligation. It is recorded on
+/// the parameter BINDING, so it survives the splice that dissolves the lambda.
+/// The `map` dispatch is gone, no closure survives, and the `%add` opcode runs
+/// inline in the loop over the let-bound element.
 ///
 /// The trap: that the compile succeeds is half the assertion. `compile` panics
 /// on a compile error, which is what a floor scoped to the lambda node would
@@ -54,8 +54,8 @@ fn undeclared_intrinsic_body_declines() {
 }
 
 /// The div family fuses too: `%div`'s contract adds a provably-nonzero divisor
-/// on top of the Number floor, and here that fact is the literal `2` — part of
-/// the body, so it survives the splice untouched. The carried floor supplies
+/// on top of the Number floor. Here that fact is the literal `2`, part of the
+/// body, so it survives the splice untouched. The carried floor supplies
 /// the other operand. (An unproven divisor would fail the compile, which
 /// `compile`'s expect would surface.)
 #[test]
@@ -118,10 +118,10 @@ fn numeric_declared_intrinsic_predicate_filter_fuses() {
     assert!(count_ifs(&hir) >= 1, "the guarded push must be present");
 }
 
-/// A NAMED same-unit numeric kernel inlines: the clone mints fresh parameter
-/// bindings, so the declaration must be copied onto them — a clone that dropped
-/// it would splice an unproven `%mul` and fail the compile. `%mul` appears
-/// TWICE: the surviving definition plus the inlined copy.
+/// A NAMED same-unit numeric kernel inlines: the graft mints fresh parameter
+/// bindings from the fragment, which carries the declaration — a graft that
+/// dropped it would splice an unproven `%mul` and fail the compile. `%mul`
+/// appears TWICE: the surviving definition plus the inlined copy.
 #[test]
 fn numeric_declared_intrinsic_named_fn_inlines() {
     let (hir, arena, mut rt) = compile("(defn sq [x] (numeric!) (%mul x x)) (map sq [1 2 3])");

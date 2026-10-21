@@ -16,8 +16,8 @@ completion the dispatch loop continues into that block and runs it
 callee never arrives there.
 
 For a region the call's own **arguments** name, that is precisely the intent. It
-is the ownership transfer the calling convention rests on ([rules.md](rules.md)
-Rule 5, move-on-tail-call). The caller does not incref a moved argument, and the
+is the ownership transfer the calling convention rests on, the Rule 5
+move-on-tail-call ([rules.md](rules.md)). The caller does not incref a moved argument, and the
 release it never runs *is* the reference the callee's owned-param release
 consumes. The callee's own region has the same story through a different
 channel: the new activation takes over its release (`defer_callee_release`,
@@ -86,7 +86,7 @@ against the region's release ROUTE. The exemption stands only where the call
 passes the very slot that route loads. A **retained alias** is reconsidered the
 same way. It is a `let`, `letrec` or `def` binding that renames a borrowed value
 (`borrowed_alias_bindings`), so the call mints it a reference of its own and the
-callee's release consumes that mint ([rules.md](rules.md) Rule 5). The call
+callee's release consumes that mint ([rules.md](rules.md)). The call
 moves none of the frame's references through such an argument. Each region it
 names keeps its exemption only where another operand passes that region's route
 slot.
@@ -121,7 +121,7 @@ argument as one the call does not move.
 Nothing then takes the release over, and the relocation carries it ahead of the
 call: `(let [[x y & r] a] (length r))` releases the collection two instructions
 before `length` derefs it. The failure is a use-after-free rather than the leak
-the leaf reading was written to close, so the two cases need different answers,
+the leaf reading closes, so the two cases need different answers,
 and one comparison cannot give both.
 
 The answer is to ask whether the name reaches a collection the destructure
@@ -315,7 +315,7 @@ stays where the lowerer put it.
 Reading the window is enough, because the clamp already fixed the emission
 order. It puts the cell's `decref_point` at or after the value release's. Where
 both land on one point, the release order sorts the deepest read first
-([rules.md](rules.md) Rule 4). So a value release that reads through the cell
+([rules.md](rules.md)). So a value release that reads through the cell
 is already in the window when the cell release asks to move.
 
 Declining strands the box on the closure path. That is the bounded,

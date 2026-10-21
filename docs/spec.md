@@ -1,6 +1,6 @@
 # The language specification
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-21 -->
 
 What the specification of Elle holds, what it leaves to an implementation, and
 how a test says which of the two it checks.
@@ -50,10 +50,10 @@ program cannot choose another. The JIT is the tier of the default build; an
 `mlir` build carries MLIR instead, and a `wasm` build carries WebAssembly
 ([config](config.md) owns the rules).
 
-CI builds several implementations and runs the language suite on each:
-the default build, a build with no JIT, a build on the thread-pool I/O backend,
-an MLIR build, a build with no features, and the default build on AArch64 and
-macOS. Every build must give the same verdict on every language test. A
+CI builds several implementations and runs the language suite on each. They
+are the default build, a build with no JIT, a build on the thread-pool I/O
+backend, an MLIR build, a build with no features, and the default build on
+AArch64 and macOS. Every build must give the same verdict on every language test. A
 disagreement is a defect in the build that disagrees
 ([ci](analysis/ci.md) lists the jobs).
 

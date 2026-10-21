@@ -1,6 +1,7 @@
-(elle/epoch 14)
-# audited: 2026-10-06
+(elle/epoch 15)
+# audited: 2026-10-21
 # A cycle whose member is its scope's value stays live for the consumer that reads it after the scope.
+#
 # docs/impl/region/ownership.md
 #
 # The sidecar arms guardfree.
@@ -8,7 +9,7 @@
 # `a` and `b` hold each other, and the `let` that builds them answers `a`. A
 # rootless cycle frees as one group at the innermost scope enclosing its
 # allocations, which is that `let`, and the `let` ends before the consumer
-# reads `a`. A group freed there frees `a` under the read, which guardfree
+# reads `a`. A group freed there would free `a` under the read, which guardfree
 # turns into a fault. The cycle stays on per-region RC instead.
 
 (def at-top-level

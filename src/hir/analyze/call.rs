@@ -51,10 +51,10 @@ impl<'a> Analyzer<'a> {
             self.check_bounds_at_call(&func, &args, span)?;
         }
 
-        // What the call checks at run time, and raises on: the count when no
-        // arity checked it above, which a splice or an unknown callee leaves
-        // open, the spliced value's shape, and the keyword arguments when the
-        // callee collects `&keys` or `&named`. A callee whose arity is known
+        // What the call checks at run time, and raises on. It checks the count
+        // when no arity checked it above, which a splice or an unknown callee
+        // leaves open. It checks the spliced value's shape, and the keyword
+        // arguments when the callee collects `&keys` or `&named`. A callee whose arity is known
         // and which collects no keywords is checked above, so its call cannot
         // fail.
         let count_checked = !has_splice && self.get_callee_arity(&func).is_some();

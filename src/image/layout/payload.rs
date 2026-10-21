@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! The code-payload half of the layout probe: where a `CodePayload` keeps
 //! each field, and the writer that assembles one.
 //!
@@ -6,7 +6,7 @@
 //! docs/impl/image/sealing.md
 //!
 //! A payload is the widest record the dumper writes: fourteen slice headers,
-//! an LIR body (lir.rs), an arity record, a span, and a tail of scalars and
+//! an LIR body (the `lir` module), an arity record, a span, and a tail of scalars and
 //! flags. The record is exactly its fields, every pad a named field the
 //! payload's writer sets to zero (docs/impl/region/template.md). The dumper
 //! assembles it from these offsets all the same, like an object slot, so a pad
@@ -28,7 +28,7 @@ use super::lir::write_canonical_lir;
 pub(crate) struct PayloadOffsets {
     /// `(name, offset)` per `RegionSlice` field, in declaration order.
     pub slices: [(&'static str, usize); 14],
-    /// Where the LIR body starts, which lir.rs assembles field by field.
+    /// Where the LIR body starts, which the `lir` module assembles field by field.
     pub lir: usize,
     pub capture_params_mask: usize,
     pub signal_bits: usize,
@@ -127,7 +127,7 @@ pub(crate) fn write_canonical_payload(p: &CodePayload, dst: &mut [u8]) {
     raw(p, dst, off.capture_params_mask, 8);
     raw(p, dst, off.signal_bits, 8);
     // A span is five `u32`s with nothing between them, so it copies whole —
-    // the same reading of the same type the syntax probe makes (syntax.rs).
+    // the same reading of the same type the `syntax` probe makes.
     raw(p, dst, off.origin, size_of::<Span>());
     raw(p, dst, off.arity_min, 4);
     raw(p, dst, off.arity_max, 4);

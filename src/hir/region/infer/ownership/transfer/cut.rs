@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! The facts every face of the transfer cut reads, gathered once per unit.
 //!
 //! docs/impl/region/owner.md

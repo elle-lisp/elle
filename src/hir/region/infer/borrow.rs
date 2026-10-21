@@ -1,4 +1,4 @@
-// audited: 2026-10-16
+// audited: 2026-10-21
 //! The borrow pass: the containers each name's value is read out of with no count, carried to every name the value reaches.
 //!
 //! docs/impl/region/borrow.md

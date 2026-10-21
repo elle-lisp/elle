@@ -115,9 +115,9 @@ Five mechanisms decide who owns a reference across a tail call. Each one's
 argument lives in its doc comment; this is where to find them.
 
 - `tail_arg_is_borrowed` ([control.rs](control.rs)) — a tail-call argument is
-  borrowed when any value-producing leaf of it is a captured upvalue (inside a
-  lambda), a binding a pattern bound to a borrowed subview of its scrutinee
-  (`destructure_alias_bindings`), or a heap constant. A `let`, `letrec` or `def`
+  borrowed when any value-producing leaf of it is borrowed. A borrowed leaf is a
+  captured upvalue (inside a lambda), a binding a pattern bound to a borrowed
+  subview of its scrutinee (`destructure_alias_bindings`), or a heap constant. A `let`, `letrec` or `def`
   binding whose initializer passes the same test is such a leaf too, unless its
   binder took a counted reference (`borrowed_alias_bindings`). A `let` or
   `begin` argument is read at what its body ends in. An immutable
@@ -236,7 +236,7 @@ is about to hand it to its consumer.
 
 5. **`capture_params_mask` is set for mutable parameters.** Bit i set means parameter i needs a cell at call time. The analyzer refuses a function with more than 64 parameters ([functions.md](../../../docs/functions.md)), so every parameter has a bit. With immutable-by-default params, only `@`-prefixed params can be mutated, so this mask is typically 0.
 
-6. **`capture_locals_mask` is set for locals that need env cells.** Slot i set means locally-defined variable i (0-indexed from the first local after params) needs a cell because it's captured by a nested closure or mutated via `assign`. The VM env builder (`populate_env`), the JIT prologue, and the WASM env builders all consult it to skip `CaptureCell` allocation for non-captured locals. It is a `CaptureMask` ([src/value/capturemask.rs](../../value/capturemask.rs)), unbounded in width: a local at any index is named precisely, so an uncaptured local beyond slot 63 gets a bare-NIL env slot instead of a dead, leaked cell.
+6. **`capture_locals_mask` is set for locals that need env cells.** Slot i set means locally-defined variable i (0-indexed from the first local after params) needs a cell. A nested closure captures it, or `assign` mutates it. The VM env builder (`populate_env`), the JIT prologue, and the WASM env builders all consult it to skip `CaptureCell` allocation for non-captured locals. It is a `CaptureMask` ([src/value/capturemask.rs](../../value/capturemask.rs)), unbounded in width: a local at any index is named precisely, so an uncaptured local beyond slot 63 gets a bare-NIL env slot instead of a dead, leaked cell.
 
 7. **Docstring is threaded from HIR.** `LirHead::doc` is copied from `Lambda::doc` during lowering, and the emitter writes it into the code payload, where `ClosureTemplate::doc()` reads it. It is never encoded in bytecode.
 

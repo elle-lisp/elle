@@ -1,5 +1,6 @@
 // audited: 2026-11-18
 //! What a payload carries: the tables and masks a header reads out of it.
+//!
 //! docs/impl/region/template.md
 
 use super::*;
@@ -192,7 +193,7 @@ fn the_region_table_holds_static_region_slots() {
 }
 
 /// A payload is copied whole into its code region, so every byte of the record
-/// has to be written: a pad the compiler chose publishes whatever the writer's
+/// has to be written. A pad the compiler chose publishes whatever the writer's
 /// stack held, and the page-base walk reads a page's bytes wherever they came
 /// from (docs/impl/region/generations.md). One set of parts written over two
 /// differently painted stacks must therefore give one set of bytes.

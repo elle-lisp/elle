@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-21
 //! The core.lisp bootstrap: compile and run the core module before any compile context exists, and hand its exports to the one being built.
 //!
 //! src/pipeline/AGENTS.md

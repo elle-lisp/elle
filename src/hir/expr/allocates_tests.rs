@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-21
 //! Which HIR node kinds `Hir::allocates` counts as producing a fresh heap value at their own id.
 //!
 //! docs/impl/anf.md

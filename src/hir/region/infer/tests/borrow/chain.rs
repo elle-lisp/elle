@@ -1,4 +1,4 @@
-// audited: 2026-10-16
+// audited: 2026-10-21
 //! A borrowing read's container outlives each name its result reaches, and no such name holds it.
 //!
 //! docs/impl/region/borrow.md

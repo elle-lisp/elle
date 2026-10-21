@@ -104,9 +104,9 @@ pub(crate) fn compute_closure_cycle_merges(
     let mut succ: FxHashMap<Region, FxHashSet<Region>> = FxHashMap::default();
     collect_closure_capture_edges(hir, info, &closure_regs, &mut succ);
 
-    // closure region → its prebound capture cell (via `begin_cell_regions` and the
-    // binding's source closure region); and every member region → its allocation HirId
-    // (a closure's lambda, a cell's `Begin`/`Letrec`) for gate 4 and the root order.
+    // Closure region → its prebound capture cell, through `begin_cell_regions` and
+    // the binding's source closure region. Member region → its allocation HirId (a
+    // closure's lambda, a cell's `Begin`/`Letrec`), for gate 4 and the root order.
     let mut cell_of: FxHashMap<Region, Region> = FxHashMap::default();
     let mut alloc_hir: FxHashMap<Region, HirId> = FxHashMap::default();
     let mut reassigned_cells: FxHashSet<Region> = FxHashSet::default();

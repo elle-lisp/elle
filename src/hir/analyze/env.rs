@@ -1,11 +1,11 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! The ambient environment a compilation starts from: the primitives, and what
 //! `begin-for-syntax` or the core library exports.
 //!
 //! docs/impl/hir.md
 //!
 //! Both bind a name to a compile-time constant VALUE, which is what the lowerer
-//! emits as `LoadConst` instead of a global lookup. Both therefore record from the
+//! emits as `ValueConst` instead of a global lookup. Both therefore record from the
 //! value, never from the name: the core env's whole purpose is to bind a bytecode
 //! closure over a name a native also answers to.
 
@@ -16,11 +16,11 @@ impl Analyzer<'_> {
     /// analyzer's initial scope.
     ///
     /// Called before `analyze_file_letrec` so that primitives are in scope
-    /// during file analysis. Primitives are `BindingScope::Local` with
-    /// `mark_immutable()` set. File-level `def` bindings shadow primitives
+    /// during file analysis. Primitives are immutable
+    /// `BindingScope::Local` bindings. File-level `def` bindings shadow primitives
     /// because `analyze_file_letrec` pushes a new scope.
     ///
-    /// The lowerer uses `immutable_values` to emit `LoadConst` for these
+    /// The lowerer uses `immutable_values` to emit `ValueConst` for these
     /// bindings — the `NativeFn` values are baked into the constant pool.
     /// No slot allocation is needed.
     pub fn bind_primitives(&mut self, meta: &PrimitiveMeta) {
@@ -65,7 +65,7 @@ impl Analyzer<'_> {
     /// Return the primitive binding→value map for the lowerer.
     ///
     /// The lowerer seeds its `immutable_values` from this so that
-    /// primitive references compile to `LoadConst`.
+    /// primitive references compile to `ValueConst`.
     pub fn primitive_values(&self) -> &HashMap<Binding, Value> {
         &self.primitive_values
     }
@@ -74,7 +74,7 @@ impl Analyzer<'_> {
     /// current scope as immutable local bindings backed by constant values.
     ///
     /// Called from `eval_syntax` after `bind_primitives` so that compile-time
-    /// names are visible in macro body analysis. The Lowerer emits `LoadConst`
+    /// names are visible in macro body analysis. The Lowerer emits `ValueConst`
     /// for these bindings (same mechanism as primitive functions).
     ///
     /// `env`: map from name string to Value, from `Expander.compile_time_env`.

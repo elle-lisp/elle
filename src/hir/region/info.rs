@@ -324,13 +324,13 @@ pub struct RegionInfo {
     /// The admission any mechanism owes when it makes a release fire where none
     /// fired before.
     ///
-    /// docs/impl/region/relocate.md
+    /// docs/impl/region/held.md
     pub frame_held_regions: rustc_hash::FxHashSet<Region>,
     /// Regions a value-routed release can NAME — the analysis-side mirror of
     /// the slot `value_release_slot` would load. The conservative reading of
     /// the emitter's refusals.
     ///
-    /// docs/impl/region/relocate.md
+    /// docs/impl/region/replicate.md
     pub value_routed_regions: rustc_hash::FxHashSet<Region>,
     /// Frame-replacing tail-call HirId → [`TailCalleeFacts`]. Populated only
     /// where the callee resolves to a lambda this compilation can see; every

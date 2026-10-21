@@ -21,9 +21,9 @@ mod frameheld;
 // in `regionstore.decref` catches it.
 //
 // The trap: functionalize's synthetic phi-merge let introduces a Begin
-// wrapper, and neither it nor the file-scope Letrec has a captured binding
-// when a `var` is never captured, so an unconditional mint makes a phantom
-// for each.
+// wrapper. When a `var` is never captured, neither that wrapper nor the
+// file-scope Letrec has a captured binding, so an unconditional mint makes a
+// phantom for each.
 
 #[test]
 fn begin_with_no_captured_binding_has_no_alloc_region() {
