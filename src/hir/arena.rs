@@ -1,16 +1,18 @@
 // audited: 2026-10-21
 // docs/impl/hir.md
-//! Arena-backed binding storage for the compilation pipeline.
+//! The binding record the compilation pipeline keeps per binding, and its arena.
 //!
-//! `BindingArena` owns all `BindingInner` values for a compilation unit.
-//! It is created by the pipeline entry point, borrowed mutably by the
+//! `BindingArena` (store.rs) owns all `BindingInner` values for a compilation
+//! unit. It is created by the pipeline entry point, borrowed mutably by the
 //! `Analyzer`, and borrowed immutably by the `Lowerer`.
 //!
 //! `BindingInner` and `BindingScope` are compile-time-only data and do not
 //! belong in the runtime value system.
 
-use super::binding::Binding;
 use crate::value::SymbolId;
+
+mod store;
+pub use store::BindingArena;
 
 /// Where a binding lives at runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -247,76 +249,5 @@ impl BindingInner {
     pub fn compiled_forward_cell(&self, init_is_lambda: bool, in_lambda: bool) -> bool {
         self.needs_capture()
             && (!in_lambda || (init_is_lambda && self.is_immutable && !self.is_mutated))
-    }
-}
-
-/// Arena for compile-time bindings.
-///
-/// Bindings are allocated during analysis (`&mut self`) and read during
-/// lowering (`&self`). The arena is dropped at the end of the compilation
-/// unit — no leaks.
-///
-/// A `Binding(u32)` index is only valid for the arena that created it.
-#[derive(Debug)]
-pub struct BindingArena {
-    bindings: Vec<BindingInner>,
-}
-
-impl BindingArena {
-    /// Create an empty arena.
-    pub fn new() -> Self {
-        Self {
-            bindings: Vec::new(),
-        }
-    }
-
-    /// Allocate a new binding. Analysis phase only.
-    pub fn alloc(&mut self, name: SymbolId, scope: BindingScope) -> Binding {
-        self.alloc_from(BindingInner::new(name, scope))
-    }
-
-    /// Allocate a binding from ready-made metadata. The graft of an
-    /// [`HirFragment`](crate::hir::fragment::HirFragment) enters here: the
-    /// fragment holds a whole `BindingInner` per binding its body introduces,
-    /// so re-hosting reproduces the binding rather than describing it again.
-    pub fn alloc_from(&mut self, inner: BindingInner) -> Binding {
-        let index = self.bindings.len() as u32;
-        self.bindings.push(inner);
-        Binding(index)
-    }
-
-    /// Allocate a synthetic binding with no source-level identity.
-    /// Used by compiler passes that need temporaries (for example, phi-insertion
-    /// condition bindings). The name is set to `SymbolId::SYNTHETIC`.
-    pub fn gensym(&mut self) -> Binding {
-        let b = self.alloc(SymbolId::SYNTHETIC, BindingScope::Local);
-        self.get_mut(b).is_synthetic = true;
-        b
-    }
-
-    /// Read-only access. Available in both analysis and lowering phases.
-    pub fn get(&self, binding: Binding) -> &BindingInner {
-        &self.bindings[binding.0 as usize]
-    }
-
-    /// Mutable access. Analysis phase only (requires `&mut self`).
-    pub fn get_mut(&mut self, binding: Binding) -> &mut BindingInner {
-        &mut self.bindings[binding.0 as usize]
-    }
-
-    /// Number of bindings in the arena.
-    pub fn len(&self) -> usize {
-        self.bindings.len()
-    }
-
-    /// Returns true if the arena contains no bindings.
-    pub fn is_empty(&self) -> bool {
-        self.bindings.is_empty()
-    }
-}
-
-impl Default for BindingArena {
-    fn default() -> Self {
-        Self::new()
     }
 }
