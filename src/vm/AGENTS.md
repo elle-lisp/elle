@@ -38,7 +38,6 @@ A compiled unit (CodeUnit)
 execute()        ← public API: copies a unit compiled on another heap,
     │              then runs its entry header
     ▼
-    ▼
 execute_code()   ← tail-call and SIG_SWITCH trampolines, returns Result<Value, String>
     │
     ▼
@@ -99,7 +98,7 @@ call, emit and closure handlers, and the signal handlers they call take the
 - `execute_bytecode_from_ip` / `execute_bytecode_saving_stack` take a `&Code`
 - `TailCallInfo` carries the tail callee's `Code`, env `Rc`, the callee closure
   value (installed as `fiber.current_closure` on the frame replacement), and its
-  boundary, its squelch mask and whether its function is silent — tail calls
+  boundary, its squelch mask and whether its function is silent. Tail calls
   clone the `Rc`s (cheap), not the `Vec`s (expensive).
   The releases the call strands are NOT carried here: `tail_call_inner` records
   them on the activation's own `ActivationDues`, which outlives whoever consumes
@@ -189,8 +188,8 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
    at runtime. See `VM::set_error` in [mod.rs](mod.rs) and
    `Fiber::set_error_in` in [fiber.rs](../value/fiber.rs).
    A handler that raises pushes one `Value::NIL` in place of its result, and
-   the post-handler error exit pops it, so an error park holds nothing in the
-   raising call's result position and a restart's resume value lands there.
+   the post-handler error exit pops it. So an error park holds nothing in the
+   raising call's result position, and a restart's resume value lands there.
    An instruction with no result (`CheckSignalBound`, `PushParamFrame`) pushes
    no placeholder, and its park takes no resume value
    ([vm.md](../../docs/impl/vm.md)).
@@ -204,7 +203,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `kill_word` | `*const AtomicU64` | Where `kill`'s word lives, for compiled code to load through the VM pointer |
 | `expansion_budget` | `ExpansionBudget` | The budget of the expansion running on this VM, spent by every fiber it runs; unmetered while none runs ([runtime.md](../../docs/runtime.md)) |
 | `expansion_unit` | `Option<Unit>` | The unit whose expansion runs code on this VM, lent by `at_expansion`; `gensym` names its symbols after it, and counts across the process while it is `None` ([macros.md](../../docs/macros.md)) |
-| `heap_ptr` | `*mut FiberHeap` | This instance's single heap, owned by `RuntimeCore` (or privately leaked for a bare VM). All fibers share it; reach it via `heap()` |
+| `heap_ptr` | `*mut FiberHeap` | This instance's single heap, which every fiber shares (The heap, below); reach it via `heap()` |
 | `current_fiber_handle` | `Option<FiberHandle>` | Handle for current fiber (`None` for root) |
 | `current_fiber_value` | `Option<Value>` | Cached Value for current fiber (`None` for root) |
 | `jit_cache` | `FxHashMap<*const u8, JitCacheEntry>` | JIT code cache; each entry's `CodePin` holds the region its key's payload lives in ([jit.md](../../docs/impl/jit.md)). Write via `install_jit_code`, read via `jit_code_for` |
@@ -231,7 +230,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `signal` | `Option<(SignalBits, Value)>` | Signal from execution (errors, yields) |
 | `error_loc` | `Option<(Value, SourceLoc)>` | The parked `SIG_ERROR` payload and where it was raised. Parked by `absorbs`, read back by `fiber/propagate` so a re-raised error keeps its raising form |
 | `suspended` | `Option<Vec<SuspendedFrame>>` | Suspended execution frames (for yield/signal resumption) |
-| `delivery` | `Delivery` | The delivery ledger: how the current park's delivery references are funded — the raise-minted payload, the bodyless payload (a denial's struct, an io op's request) whose release the displacing install owes, the park whose delivery retain no reader has consumed, and whether the resume value owes a mint. Method-only surface ([park.md](../../docs/impl/region/park.md)) |
+| `delivery` | `Delivery` | The delivery ledger: how the current park's delivery references are funded. Method-only surface ([park.md](../../docs/impl/region/park.md)) |
 | `mask` | `SignalBits` | Which of this fiber's signals its parent catches |
 | `param_frames` | `Vec<Vec<(u32, Value)>>` | Parameter binding frames (stack of frames, each frame a vec of (param id, value) pairs) |
 | `parent` | `Option<WeakFiberHandle>` | Weak back-pointer to parent fiber |
@@ -255,7 +254,7 @@ parameter frames). Each re-entry nests on the Rust stack, so it halts with
 | `import/load-file`, `import/load-syntax` | [modules.rs](../primitives/modules.rs) | Run a module's body |
 | The test-setup loader | [modules.rs](signal/modules.rs) | Runs a test file's setup module |
 | A fiber's first resume | [resume.rs](fiber/resume.rs) | Runs a new fiber's body |
-| `arena/allocs` SIG_QUERY handler | [config.rs](signal/config.rs) | Runs a thunk to measure its allocations |
+| `arena/allocs` SIG_QUERY handler | [allocs.rs](signal/allocs.rs) | Runs a thunk to measure its allocations |
 | `compile/run-on :bytecode` | [bytecode.rs](run_on/bytecode.rs) | Runs a closure on the bytecode tier |
 | The tail-call sentinel | [jit.rs](run_on/jit.rs), [jit_entry.rs](jit_entry.rs) | Finishes a tail call a compiled callee handed back |
 | `call_transformer`, `run_at_expansion` | [expansion.rs](expansion.rs) | Macro transformers and `begin-for-syntax` definitions, under the expansion fuel budget, with the unit they expand lent to `gensym` |
@@ -316,8 +315,7 @@ Key methods:
 - `with_child_fiber` ([child.rs](fiber/child.rs)): Shared swap protocol for
   fiber resume and abort. Swaps the child fiber into `vm.fiber`, wires the
   parent/child chain, runs the body, then swaps back. No heap swap is
-  involved: all fibers (including root) share the VM's single heap, reached
-  via `vm.heap_ptr`.
+  involved.
 
 ## The heap
 
@@ -356,16 +354,6 @@ child. The baseline is a counted holder of every heap value in it
 abandons it truncates the stack. An error parks the frames that pushed them,
 so a raise truncates nothing, and a restart runs on with every binding in
 force. Each host and boundary records the depth at its entry as a
-`ParamDepth`, and the discard chokepoint truncates to it where a `squelch`
+`ParamDepth`. The discard chokepoint truncates to it where a `squelch`
 boundary, a broken proof, a refusing host or a host's error ends a park
 (`discard_suspended_frames`).
-
-## Truthiness
-
-The VM evaluates truthiness via `Value::is_truthy()`:
-- `Value::NIL` → falsy
-- `Value::FALSE` → falsy
-- Everything else (including `Value::EMPTY_LIST`, `Value::int(0)`) → truthy
-
-The `Instruction::Nil` pushes `Value::NIL` (falsy).
-The `Instruction::EmptyList` pushes `Value::EMPTY_LIST` (truthy).
