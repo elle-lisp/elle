@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! What the layout probe answers for: the probed set, what canonical bytes
 //! keep and drop, and what the fingerprint names.
 //!
@@ -22,6 +22,28 @@ fn probes_cover_exactly_the_dumpable_set() {
     assert!(!dumpable(HeapTag::LArrayMut));
     assert!(dumpable(HeapTag::Closure));
     assert!(dumpable(HeapTag::ClosureTemplate));
+}
+
+// An object's first word is its `HeapTag`, in every build: `HeapObject` is
+// `repr(u64)` and each variant's discriminant is its tag
+// (docs/impl/values.md).
+//
+// The trap: a `repr(Rust)` enum lets rustc choose where the tag lives, and the
+// choice moves with the variants a build's features change. With `ffi`, every
+// payload started at byte 8 and the probe passed; without it, rustc hid the
+// tag in a niche of the syntax node and laid a string's slice pointer over
+// byte 0. The probe then panicked on every start of that build. The
+// counter-factual is that `repr(Rust)` layout: its discriminant bytes follow
+// rustc's own numbering, not the tags'.
+#[test]
+fn every_probed_discriminant_is_its_heap_tag() {
+    for layout in HeapObject::layouts() {
+        assert_eq!(
+            layout.disc, layout.tag as u8,
+            "{:?}: the object's first byte is {}, not its heap tag",
+            layout.tag, layout.disc
+        );
+    }
 }
 
 // Every key an immutable struct can hold is probed, because a struct the
@@ -71,7 +93,7 @@ fn clean_and_poisoned<T: Probed>(tag: T::Tag) -> (Vec<u8>, Vec<u8>) {
 
 // Canonicalization masks construction residue: an object whose padding
 // bytes are deliberately poisoned canonicalizes to the same bytes as a
-// clean twin. The trap this guards: `repr(Rust)` enum copies carry
+// clean twin. The trap this guards: enum copies carry
 // uninitialized padding from their construction temporaries, so any
 // slot byte outside the probed extents can differ between two
 // identical constructions.
