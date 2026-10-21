@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-20
+# audited: 2026-10-21
 # The size ledger of tests/ratchet/size.lisp, part 4: each source over the cap at its 500-token bucket.
 (producer "tests/ratchet/size.lisp")
 ["src/primitives/modules.rs" :tokens 4000]
@@ -33,8 +33,7 @@
 ["src/rewrite/run/edits.rs" :tokens 4000]
 ["src/rewrite/run.rs" :tokens 3500]
 ["src/rewrite/run/tests.rs" :tokens 4000]
-["src/runtime/core.rs" :tokens 3000]
-["src/runtime.rs" :tokens 3500]
+["src/runtime.rs" :tokens 3000]
 ["src/runtime/tests/lifecycle.rs" :tokens 3000]
 ["src/runtime/tests/ownership/anode.rs" :tokens 3500]
 ["src/runtime/tests/ownership/fnode/discard.rs" :tokens 3500]
@@ -81,13 +80,12 @@
 ["src/value/fiberheap/mod.rs" :tokens 3500]
 ["src/value/fiberheap/pagepool.rs" :tokens 3500]
 ["src/value/fiberheap/pagepool/tests.rs" :tokens 4000]
-["src/value/fiberheap/regionpool/introspect.rs" :tokens 3500]
+["src/value/fiberheap/regionpool/introspect.rs" :tokens 3000]
 ["src/value/fiberheap/regionpool/introspect/tests.rs" :tokens 4000]
 ["src/value/fiberheap/regionpool.rs" :tokens 3500]
 ["src/value/fiberheap/regionpool/tests.rs" :tokens 3000]
 ["src/value/fiberheap/region.rs" :tokens 4500]
-["src/value/fiberheap/regionstore/alloc.rs" :tokens 3000]
-["src/value/fiberheap/regionstore/free.rs" :tokens 5000]
+["src/value/fiberheap/regionstore/free.rs" :tokens 4500]
 ["src/value/fiberheap/regionstore/introspect.rs" :tokens 3000]
 ["src/value/fiberheap/regionstore/ownership.rs" :tokens 3000]
 ["src/value/fiberheap/regionstore/refcount.rs" :tokens 4000]
