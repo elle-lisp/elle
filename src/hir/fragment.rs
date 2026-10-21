@@ -32,7 +32,7 @@ pub use names::FragmentName;
 /// Move it when the fragment types change shape: the image fingerprint records
 /// it, so an image written under another encoding falls back to a source boot
 /// rather than reading those bytes as another body (docs/impl/image/format.md).
-pub const FRAGMENT_ENCODING: u32 = 1;
+pub const FRAGMENT_ENCODING: u32 = 2;
 
 /// What a fragment-local `Binding` stands for.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

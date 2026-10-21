@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 // docs/impl/hir.md
 //! Arena-backed binding storage for the compilation pipeline.
 //!
@@ -38,13 +38,20 @@ pub struct BindingInner {
     /// Whether this binding is captured by a nested closure. **Module-private**:
     /// the lexical-capture proxy has NO escape authority (docs/impl/escape.md), so
     /// no consumer may name it for an escape or reachability decision. Written
-    /// through `mark_captured`; read by two lexical consumers, `needs_capture()`
-    /// for cell layout and `closure_may_write()`. Escape's capture facet
+    /// through `mark_captured`; read by one lexical consumer, `needs_capture()`
+    /// for cell layout. Escape's capture facet
     /// is flow-true (transitive `lambda_captures` propagation from genuine frontier
     /// seeds, never this proxy), and the region solver's reachability questions read
     /// the HIR capture-graph (`region::infer::escape::captured_bindings`); neither reads
     /// this field, and there is no getter through which they could.
     is_captured: bool,
+    /// Whether an `assign` to this binding sits in a lambda nested in the
+    /// binding's scope, so a closure can write it. A closure that captures the
+    /// binding and only reads it leaves this false: capture is a mention, and
+    /// only an `assign` is a write. Written through `mark_written_by_closure`
+    /// and read through [`closure_may_write`](Self::closure_may_write), the
+    /// question the graft asks (docs/impl/graft/operands.md).
+    is_written_by_closure: bool,
     /// Whether this binding is immutable (def)
     pub is_immutable: bool,
     /// Whether this binding was pre-created before its initializer runs
@@ -114,6 +121,7 @@ impl BindingInner {
             scope,
             is_mutated: false,
             is_captured: false,
+            is_written_by_closure: false,
             is_immutable: false,
             is_prebound: false,
             init_pending: false,
@@ -193,11 +201,21 @@ impl BindingInner {
         self.is_restorable_capture_cell() || self.is_mutated
     }
 
-    /// May a closure write this binding? Only one that captured it can. The
-    /// graft asks before it writes an operand in place of a parameter
+    /// May a closure write this binding? Only one holding an `assign` to it
+    /// can, and the analyzer recorded whether any does. The graft asks before
+    /// it writes an operand in place of a parameter
     /// (docs/impl/graft/operands.md).
     pub fn closure_may_write(&self) -> bool {
-        self.is_captured && self.is_mutated
+        self.is_written_by_closure
+    }
+
+    /// Record an `assign` to this binding from a lambda the binding does not
+    /// belong to. The analyzer's sole writer (`analyze_assign`), called when
+    /// the target resolves across a function boundary. A setter keeps the
+    /// field module-private, so the fact is read only through
+    /// [`closure_may_write`](Self::closure_may_write).
+    pub(in crate::hir) fn mark_written_by_closure(&mut self) {
+        self.is_written_by_closure = true;
     }
 
     /// Mark this binding as captured by a nested closure. The analyzer's sole

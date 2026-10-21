@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-21
 //! Binding forms: `let`, `def` and `var`, and `assign`.
 //!
 //! docs/bindings.md
@@ -282,8 +282,15 @@ impl<'a> Analyzer<'a> {
             ));
         }
 
-        // Mark as mutated
-        self.arena.get_mut(target).is_mutated = true;
+        // Mark as mutated, and as written by a closure when this `assign`
+        // sits in a lambda the binding does not belong to. Assignment is
+        // lexical, so no other route can write a binding from a closure.
+        let from_closure = !self.is_binding_in_current_scope(target);
+        let inner = self.arena.get_mut(target);
+        inner.is_mutated = true;
+        if from_closure {
+            inner.mark_written_by_closure();
+        }
 
         // Invalidate signal and arity tracking for this binding since it's being mutated
         // The binding's signal and arity are now uncertain
