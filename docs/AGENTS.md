@@ -40,7 +40,7 @@ Up: [..](../AGENTS.md)
 - [named-args.md](named-args.md) — **Named Arguments** Elle supports optional positional parameters, named keyword parameters, and collected keyword arguments.
 - [parameters.md](parameters.md) — **Dynamic Parameters** Dynamic parameters are fiber-local variables with scoped rebinding.
 - [philosophy.md](philosophy.md) — **Design Philosophy** Why Elle infers signals instead of asking for them, and the gap that leaves between what the compiler knows and what a reader sees.
-- [pipeline.md](pipeline.md) — **Compilation pipeline** Which VM each entry point expands macros on, and how signal inference settles over the mutual recursion of a letrec.
+- [pipeline.md](pipeline.md) — **Compilation pipeline** Which VM each entry point expands macros on, what a loader keeps a compile under, and how signal inference settles over a letrec.
 - [plugins.md](plugins.md) — **Plugins** Elle ships with Rust plugins and pure Elle standard library modules.
 - [posix-signals.md](posix-signals.md) — **POSIX signals** Elle programs can send POSIX signals to other processes and observe signals delivered to themselves.
 - [process-scheduler.md](process-scheduler.md) — **Process scheduler** How a process scheduler runs sub-fibers, forwards its I/O to the scheduler it runs in, and nests.
@@ -77,5 +77,6 @@ Up: [..](../AGENTS.md)
 - [debugger/](debugger/AGENTS.md) — Debugger: what a paused fiber shows, Debugger: how a fiber comes to pause, Debugger: recording and replay
 - [impl/](impl/AGENTS.md) — The generated index, The ANF lift, The region roadmap, The audit queue, Bytecode, Cranelift, Differential Tier Testing, Dissolution — HOF loop fusion, Escape analysis — the authoritative true-escape pass, Fleet — adhoc distributed execution over images, GPU Compute, Grafting a call, HIR — High-level IR, Images — regions hydrated at load, Where a stream operation's bytes live, Descriptors and workers, An operation in flight, JIT fuel, The JIT code map, JIT, Lexicon: epoch-aware lexing, LIR — Low-level IR, The region memory model, MLIR Backend, Reader, Self-recursion: the executing-closure mechanism (no cell), The signal solver, SPIR-V Backend, Standard Library Disk Cache, Symbols and keywords — identity is the name hash, Syntax — a region-native immutable tree, Type inference: the ascent, and what a call proves, Values, VM, WASM Backend
 - [io/](io/AGENTS.md) — Files, I/O deadlines
+- [modules-proposal/](modules-proposal/AGENTS.md) — Modules: how a file compiles, Modules: one pure form
 - [regions/](regions/AGENTS.md) — Value lifetime, constants, and teardown — the guarantees, Region performance — merging and the cost model, Region semantics — the model you write against
 - [signals/](signals/AGENTS.md) — Authority, Capability enforcement, Signal Design, emit, Fiber Architecture, Signals, Signal Inference, Signals and JIT, Mediation, Fiber Primitives, Signal Protocol, Signal Questions, Signal Recovery

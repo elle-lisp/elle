@@ -1,7 +1,6 @@
-// audited: 2026-10-20
-// The embedding surface from a host's side: register a binding or a primitive,
-// run source and files, read values back, step the scheduler, and reach a
-// worker.
+// audited: 2026-10-21
+// Embedding from a host's side: register a binding or a primitive, run code,
+// read values back, step the scheduler, and reach a worker.
 //
 // docs/embedding.md
 // docs/threads.md
@@ -15,9 +14,9 @@ use elle::{compile_file, eval_all, Value};
 
 // Every test drives one `Runtime` (elle::runtime), the per-instance owner of the
 // heap, VM, symbol table, and per-instance `CompileCtx`. `rt.parts()` hands out
-// the disjoint borrows the pipeline threads; the host registers a custom
-// primitive binding into *this* instance's `CompileCtx` (no shared compile
-// cache), and `Runtime` has already pointed the VM at its own symbol table and
+// the disjoint borrows the pipeline threads. The host registers a custom
+// primitive binding into *this* instance's `CompileCtx`, with no shared compile
+// cache. `Runtime` has already pointed the VM at its own symbol table and
 // `CompileCtx`.
 
 // ── Custom primitive registration ───────────────────────────────────

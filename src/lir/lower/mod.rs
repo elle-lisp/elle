@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! HIR to LIR lowering: the `Lowerer` and the state one function's lowering
 //! carries. The passes themselves live in the sibling modules named below.
 //!
@@ -55,9 +55,9 @@ struct LoopLowerContext {
 
 /// Tracks an active block during lowering so `break` can find its
 /// result register and exit label. A `break` emits no region instruction of its
-/// own: both the value it carries and every release its jump passes over are
-/// anchored on the BLOCK by the solver, which the lowerer emits after the exit
-/// label (docs/impl/region/anchors.md).
+/// own. The solver anchors on the BLOCK both the value it carries and every
+/// release its jump passes over, and the lowerer emits that anchor after the
+/// exit label (docs/impl/region/anchors.md).
 struct BlockLowerContext {
     block_id: BlockId,
     #[allow(dead_code)]
@@ -90,7 +90,7 @@ pub struct Lowerer<'a> {
     in_lambda: bool,
     /// Number of captured variables (for lambda context)
     num_captures: u16,
-    /// Number of parameters allocated as locals (non-LBox, non-captured params).
+    /// Number of parameters allocated as locals (stack-held, non-captured params).
     /// Used by allocate_slot to compute capture_locals_mask offsets.
     num_local_params: u16,
     /// Set of bindings that are upvalues (captures/parameters in lambda)
@@ -242,8 +242,8 @@ pub struct Lowerer<'a> {
     /// Tofte-Talpin region inference results. Scope decisions use region
     /// assignments instead of syntactic escape analysis.
     region_info: RegionInfo,
-    /// Authoritative escape facts (`src/hir/escape.rs`), computed once at the
-    /// top of `lower`. `tail_callee_defers_release` (`control/call/defer.rs`)
+    /// Authoritative escape facts (src/hir/escape.rs), computed once at the
+    /// top of `lower`. `tail_callee_defers_release` (src/lir/lower/control/call/defer.rs)
     /// reads them for the escape half of the deferral decision; region-locality
     /// stays a region fact. `tail_arg_is_borrowed` does NOT read them: it is a
     /// structural ownership-location test, and escape over-marks owned tail
@@ -291,10 +291,10 @@ pub struct Lowerer<'a> {
     /// the decref so passthrough calls (whose result lives in a
     /// different region) skip.
     ///
-    /// After the ANF lift (`src/hir/anf.rs`) every allocating
-    /// expression in a consumer position is bound to a synthetic
-    /// `Let`, so the binding-slot path covers the Call result directly —
-    /// no separate stash-and-reload slot at the Call site.
+    /// After the ANF lift (src/hir/anf.rs), every allocating expression in a
+    /// consumer position is bound to a synthetic `Let`. So the binding-slot
+    /// path covers the Call result directly, with no separate stash-and-reload
+    /// slot at the Call site.
     region_to_slot: HashMap<crate::hir::region::Region, ValueSlot>,
     /// Stack slots (this function's local index space) owned by a fn-local
     /// reassigned mutable binding (`RegionInfo::reassigned_local_bindings`).
@@ -303,7 +303,7 @@ pub struct Lowerer<'a> {
     /// nil-stamp whose slot is in this set. `allocate_slot` never reuses a slot,
     /// so such a slot holds the reassigned binding's own live value for the
     /// binding's whole scope. Nil-stamping it mid-scope would zero a live value
-    /// (region-capture-cell-loop-uaf.lisp).
+    /// (tests/impl/region-capture-cell-loop-uaf.lisp).
     reassigned_local_slots: rustc_hash::FxHashSet<u16>,
     /// Static region slots the lowerer has stamped onto at least one
     /// instruction through `emit_alloc_in`: the regions the runtime will have a
@@ -326,7 +326,7 @@ pub struct Lowerer<'a> {
     /// now-populated slot.
     deferred_decref_points: rustc_hash::FxHashSet<HirId>,
     /// Tail-call HirIds whose result a `Return` mint already covers, so
-    /// `lower_call`'s post-`TailCall` fall-through retain must stand down: the
+    /// `lower_call`'s post-`TailCall` fall-through retain must stand down. The
     /// return mint is emitted exactly once per returned value
     /// (docs/impl/region/mechanism.md).
     ///

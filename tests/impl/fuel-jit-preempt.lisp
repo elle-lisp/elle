@@ -1,6 +1,7 @@
 (elle/epoch 15)
 # audited: 2026-10-22
 # A compiled fiber body keeps its operand-stack values across a fuel preemption and a refuel.
+#
 # docs/impl/jit-fuel.md
 #
 # The sidecar makes the JIT eager, so a body compiles on its first call.

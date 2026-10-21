@@ -241,7 +241,8 @@ fn a_wasm_closure_refuses_the_dump() {
 }
 
 // A run-time capture cell in an env still refuses: it records no binding, so
-// the snapping rule has nothing to snap it as (snapping.rs owns the snaps).
+// the snapping rule has nothing to snap it as
+// (tests/integration/image/snapping.rs owns the snaps).
 #[test]
 fn an_env_capture_cell_refuses_the_dump() {
     let dir = crate::common::ScratchDir::new("image-closure-cell");

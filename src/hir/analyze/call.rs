@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-21
 //! Call analysis: the compile-time arity check, and the signal each call raises
 //! across function boundaries.
 //!
@@ -48,10 +48,10 @@ impl<'a> Analyzer<'a> {
             self.check_bounds_at_call(&func, &args, span)?;
         }
 
-        // What the call checks at run time, and raises on: the count when no
-        // arity checked it above, which a splice or an unknown callee leaves
-        // open, the spliced value's shape, and the keyword arguments when the
-        // callee collects `&keys` or `&named`. A callee whose arity is known
+        // What the call checks at run time, and raises on. It checks the count
+        // when no arity checked it above, which a splice or an unknown callee
+        // leaves open. It checks the spliced value's shape, and the keyword
+        // arguments when the callee collects `&keys` or `&named`. A callee whose arity is known
         // and which collects no keywords is checked above, so its call cannot
         // fail.
         let count_checked = !has_splice && self.get_callee_arity(&func).is_some();
@@ -156,9 +156,9 @@ impl<'a> Analyzer<'a> {
             HirKind::Lambda(lambda) => Some(lambda.arity()),
             HirKind::Var(binding) => {
                 // The arity env covers primitives (`bind_primitives`) and
-                // bindings initialized with a lambda (`record_lambda_call`). A user shadow
-                // is a new binding, so it carries its own arity or none — never
-                // the primitive's.
+                // bindings initialized with a lambda (`record_lambda_facts`). A
+                // user shadow is a new binding, so it carries its own arity or
+                // none — never the primitive's.
                 self.arity_env.get(binding).copied()
             }
             _ => None,

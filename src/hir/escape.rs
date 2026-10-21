@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-21
 //! Escape analysis over the canonical (functionalized + ANF) HIR: the one authority on
 //! whether a value outlives its activation.
 //!

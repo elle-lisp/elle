@@ -1,6 +1,6 @@
 # pipeline
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-21 -->
 
 The compilation entry points, from source text to bytecode, LIR, HIR or a value, and the compile context they share.
 
@@ -93,7 +93,7 @@ and `cctx`. `analyze`, `analyze_file` and `eval` expand on that VM, while
 
 `CompileCtx` holds the macro VM, the expander, the compile metadata, the REPL
 layer, the capabilities the fiber a compile runs for withholds, the boot
-exports, the store, and the graft policy. Its methods fall into seven groups:
+exports, the store, and the graft policy. Its methods fall into six groups:
 
 - **Build**: `new`, `new_with_heap` (the macro VM shares the instance heap),
   and `from_boot_image` (crate-internal).
@@ -102,7 +102,8 @@ exports, the store, and the graft policy. Its methods fall into seven groups:
   owning `Runtime` calls `set_graft` after its boot, so the boot's own units
   always graft ([grafting a call](../../docs/impl/graft.md)). `on_behalf_of`
   runs a compile with the capabilities a fiber withholds, and `withheld`
-  reads them.
+  reads them. `set_unicode_generation` selects the Unicode generation before
+  any compile runs, and `unicode_generation` reads it.
 - **Expand**: `with_macro_expansion` runs a closure on the macro VM, and
   `expander_and_meta` answers the clones alone. Both take the unit's syntax
   arena and its tag, and hand out clones of the expander and the compile
@@ -112,13 +113,17 @@ exports, the store, and the graft policy. Its methods fall into seven groups:
   compile in the instance. `register_stdlib_exports` installs the standard
   library's exports. `register_repl_binding` and `register_repl_macros` reach
   later REPL lines alone. Each registration that every compile sees empties
-  the store.
+  the store. The crate-internal `set_stdlib_exports` records the stdlib
+  export struct, which a boot image carries as a root.
 - **Look up**: `lookup_stdlib_value`, `global_function_ids`, `meta`,
-  `primitive_meta` and `core_env`.
-- **Store**: `compile_file_stored` keeps each loaded file's unit while its
-  compile inputs match ([docs/pipeline.md](../../docs/pipeline.md)).
+  `primitive_meta`, `core_env`, `heap_ptr`, and the crate-internal `macros`
+  and `boot_exports`.
 - **Tear down**: `release` empties the store, and drops the references the
   cached macro transformers hold, the REPL layer's among them.
+
+The free function `compile_file_stored` reaches the store. It keeps each
+loaded file's unit while its compile inputs match
+([docs/pipeline.md](../../docs/pipeline.md)).
 
 ## Data flow
 
@@ -209,7 +214,7 @@ The other entry points leave this path:
 - [vm/signal/modules.rs](../vm/signal/modules.rs) — the three test-runner
   entry points, for `compile/barrier-module`, `compile/whole-module` and
   `compile/whole-module-syntax`
-- [dump/mod.rs](../dump/mod.rs) —
+- [dump/mod.rs](../dump/mod.rs) and [program/dump.rs](../program/dump.rs) —
   `compile_file_to_fhir` and `compile_file_to_lir`, for `--dump`
 - [wasm/mod.rs](../wasm/mod.rs) — `splice_includes` and `compile_file_to_lir`
 - [primitives/concurrency/worker.rs](../primitives/concurrency/worker.rs) — a

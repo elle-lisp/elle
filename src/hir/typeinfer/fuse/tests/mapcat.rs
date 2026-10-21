@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-21
 //! The `mapcat` stage fuses to a second walk inside the element statement, only
 //! over a function whose result is a proven array.
 //!
@@ -16,8 +16,8 @@ fn count_loops(h: &Hir) -> usize {
     n
 }
 
-/// A single `(mapcat f xs)` dissolves to a nested index walk: the `mapcat` dispatch is
-/// gone, no closure survives, the function's body runs inline, and the accumulator is
+/// A single `(mapcat f xs)` dissolves to a nested index walk. The `mapcat` dispatch is
+/// gone, no closure survives, and the function's body runs inline. The accumulator is
 /// filled from a SECOND loop over the array that body returns. Two `loop`s, two
 /// `length` reads and two `get`s are the signature — one of each per level — against
 /// the one of each every other stage emits.
@@ -130,7 +130,7 @@ fn count_over_mapcat_fuses_to_one_scalar_loop() {
 }
 
 /// A `find-index` over a `mapcat` must answer a position in the FLAT collection, so
-/// the pipeline carries a survivor count: one base element becomes a run of any
+/// the pipeline carries a survivor count. One base element becomes a run of any
 /// length, which renumbers exactly as a `filter`'s survivors do. The count is bumped
 /// by the search's own gate stage, so the fused form emits one more `%add` than the
 /// two index walks need.
@@ -303,8 +303,8 @@ fn capturing_mapcat_fn_fuses() {
 }
 
 /// A `mapcat` whose function is a `Var` naming a same-unit `defn` grafts its
-/// body, and the array proof — run where the body's bindings are readable, and
-/// carried on the fragment — admits it exactly as a literal's does.
+/// body. The array proof runs where the body's bindings are readable, rides on
+/// the fragment, and admits it exactly as a literal's does.
 #[test]
 fn named_mapcat_fn_inlines() {
     let (hir, arena, mut rt) = compile("(defn pairup [x] [x (* x 10)]) (mapcat pairup [1 2 3])");

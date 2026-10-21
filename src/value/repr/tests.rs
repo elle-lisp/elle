@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-21
 //! A scalar `Value` decodes from its wire form to itself or to an error, never to a panic or to another value.
 //!
 //! docs/impl/stdlib-cache.md
@@ -31,11 +31,12 @@ fn symbol_value_round_trips_as_its_name_hash() {
 }
 
 /// The empty list is an immediate, and a list pattern with no rest compares
-/// its tail against it, so it lands in a function's constants: the stdlib's `+`
-/// dispatches on `(match args () 0 …)`, and the cache stores that constant.
+/// its tail against it, so it lands in a function's constants. The stdlib's
+/// `+` dispatches on `(match args () 0 …)`, and the cache stores that constant.
 ///
-/// The counter-factual: the empty list fell through to "unsupported scalar
-/// Value", the cache store failed, and every start compiled the stdlib again.
+/// The counter-factual: without its own arm, the empty list would fall through
+/// to "unsupported scalar Value". The cache store would fail, and every start
+/// would compile the stdlib again.
 #[test]
 fn the_empty_list_round_trips() {
     let bytes = bincode::serialize(&Value::EMPTY_LIST).expect("the empty list serializes");

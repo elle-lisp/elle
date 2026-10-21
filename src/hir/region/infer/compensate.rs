@@ -1,29 +1,33 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! Branch-compensation decref placement: free a region on the arms where it dies.
 //!
-//! The region solver gives every region ONE `decref_point` — the textually-last
-//! of its uses. When that point sits inside a conditional arm, a path that takes a
-//! DIFFERENT arm reaches the merge without freeing the region — a per-execution
-//! leak (pinned by `oracle.lisp`'s branch and `put`/`set` probes). This pass
-//! frees the region on those sibling arms, in one of two ways depending on whether
-//! the sibling USES the region:
+//! docs/impl/region/compensate.md
+//! docs/impl/region/window.md
+//!
+//! The region solver gives every region ONE `decref_point`, the textually-last of
+//! its uses. When that point sits inside a conditional arm, a path that takes a
+//! DIFFERENT arm reaches the merge without freeing the region. That is a
+//! per-execution leak (pinned by `oracle.lisp`'s branch and `put`/`set` probes).
+//! This pass frees the region on those sibling arms, in one of two ways,
+//! depending on whether the sibling USES the region:
 //!
 //!  - **dead sibling arm** (no use of `r`): a COMPENSATING release at the arm's
 //!    HEAD (`head`). A post-dominator hoist would plug the leak but free `r` LATER
-//!    than its true last use on the used arm (an over-keep), and is unsound when an
-//!    arm tail-calls — there is no post-branch merge to hoist to, control has
-//!    already left the function. The arm head precedes that arm's tail call, so the
-//!    release fires before control leaves; the arm has no use of `r`, so head and
-//!    the used arm's in-arm decref sit on mutually exclusive paths.
+//!    than its true last use on the used arm, an over-keep. It is also unsound
+//!    when an arm tail-calls: there is no post-branch merge to hoist to, because
+//!    control has already left the function. The arm head precedes that arm's
+//!    tail call, so the release fires before control leaves. The arm has no use
+//!    of `r`, so head and the used arm's in-arm decref sit on mutually exclusive
+//!    paths.
 //!  - **used sibling arm** (uses `r`, but the `decref_point` is in a DIFFERENT
 //!    arm): a release AFTER `r`'s last use within that arm (`tail`, keyed by that
 //!    last-use node and emitted through `emit_decrefs_for`). A head release here
-//!    would precede the arm's own use of `r` — a use-after-free. This is the
+//!    would precede the arm's own use of `r`, a use-after-free. This is the
 //!    every-arm-uses-it shape stdlib `put`/`set` take: `(match (type-of coll) …)`
 //!    passes the stored value to a different store intrinsic in each arm.
 //!
 //! A `tail` release of a VALUE is admitted only where a retain on the SAME node
-//! funds it, so the per-arm decref provably cannot drop a live value to zero; an
+//! funds it. So the per-arm decref provably cannot drop a live value to zero. An
 //! env cell's box needs no such retain. Which retains count is [`admit`], and
 //! what each region's premises are is [`premises`].
 //!
@@ -35,51 +39,52 @@
 //!    binder's def site) is OUTSIDE `C`'s subtree, so `r` is allocated before `C`
 //!    and enters every arm live with RC ≥ 1;
 //!  - **loop-invariant guard**: no `While`/`Loop` encloses `C` but not `r`'s
-//!    allocation — otherwise `r` is allocated once outside the loop and a
-//!    per-iteration arm free would reclaim it mid-loop (a use-after-free, the same
-//!    hazard the `Var` iter-scope extension in `liveness/lastuse.rs` guards). When
-//!    the alloc IS inside the loop with `C`, the per-iteration free is correct.
+//!    allocation. Otherwise `r` is allocated once outside the loop, and a
+//!    per-iteration arm free would reclaim it mid-loop. That is a use-after-free,
+//!    the same hazard the `Var` iter-scope extension in `liveness/lastuse.rs`
+//!    guards. When the alloc IS inside the loop with `C`, the per-iteration free
+//!    is correct.
 //!
-//! An **env cell** — a `cell_release_regions` member — takes BOTH routes, and every
+//! An **env cell**, a `cell_release_regions` member, takes BOTH routes. Every
 //! refusal that would decline one is a claim about the *value* its holder binding
 //! names rather than about the box. Its release names the cell BOX, through
-//! `LoadCaptureRaw` + `DecrefCellRegion`: a box `populate_env` mints once per
-//! activation, which an `assign` never repoints (it writes the content), and which a
-//! capturer reaches through the counted `closure ⊇ cell` edge the funnel took. So
-//! the two slot-route taints — a MUTATED holder, a CAPTURED holder — miss it, and so
-//! do the `tail` route's own two gates: the RETURN frontier withholds a region the
-//! caller now holds a reference to, and what a return hands over is the content;
-//! the same-node RETAIN buys the knowledge that the arm's use named every
-//! reference, which the box's holders supply outright, no use of the binding ever
-//! yielding the box (docs/impl/region/compensate.md). What the `tail` route still owes
-//! is placement, so the box's per-arm release is read off the same pins the global
+//! `LoadCaptureRaw` + `DecrefCellRegion`. `populate_env` mints that box once per
+//! activation, an `assign` never repoints it (it writes the content), and a
+//! capturer reaches it through the counted `closure ⊇ cell` edge the funnel took.
+//! So the two slot-route taints, a MUTATED holder and a CAPTURED holder, miss it.
+//! So do the `tail` route's own two gates. The RETURN frontier withholds a region
+//! the caller now holds a reference to, and what a return hands over is the
+//! content. The same-node RETAIN buys the knowledge that the arm's use named
+//! every reference. The box's holders supply that outright, because no use of
+//! the binding ever yields the box. What the `tail` route still owes is
+//! placement. So the box's per-arm release is read off the same pins the global
 //! `decref_point` is: the arm's uses, AND the arm's uncounted opcode-read borrows
 //! out of the cell, whose reader the release must post-date.
 //!
-//! A compiled FORWARD cell is a different region and is refused by both routes — its
-//! holder binding is captured by construction, so the capture taint reaches it, and
-//! its release is a `DecrefRegion` by static slot rather than a box load.
+//! A compiled FORWARD cell is a different region, and both routes refuse it. Its
+//! holder binding is captured by construction, so the capture taint reaches it.
+//! Its release is a `DecrefRegion` by static slot rather than a box load.
 //!
-//! Both routes read the **arm structure**, never the branch's arity or kind: an
-//! `If`'s two arms and a `Match`'s N arms are alike mutually exclusive, and at most
-//! one body runs per execution. Every premise above is stated over one arm and its
-//! siblings, so a `Match` arm is admitted by the identical argument (a `Match` with
-//! no matching arm runs no body at all — the compensation simply does not fire,
-//! which is the leak-preserving direction). What counts as an arm is
-//! [`super::arms`]: the short-circuiting forms (`cond`, `and`, `or`) contribute
-//! the arms of their nested-`If` equivalent, one branch per conditional level, so
+//! Both routes read the **arm structure**, never the branch's arity or kind. An
+//! `If`'s two arms and a `Match`'s N arms are alike mutually exclusive, and at
+//! most one body runs per execution. Every premise above is stated over one arm
+//! and its siblings. So a `Match` arm is admitted by the identical argument. A
+//! `Match` with no matching arm runs no body at all, and the compensation simply
+//! does not fire, the leak-preserving direction. What counts as an arm is
+//! [`super::arms`]. The short-circuiting forms (`cond`, `and`, `or`) contribute
+//! the arms of their nested-`If` equivalent, one branch per conditional level. So
 //! a clause test is an arm exactly as a clause body is. The levels of one form
-//! partition the paths — the compensating side of level *k* is disjoint from every
-//! other level's — so a path takes one compensating release or the region's own
+//! partition the paths: the compensating side of level *k* is disjoint from every
+//! other level's. So a path takes one compensating release or the region's own
 //! `decref_point`, never both.
 //!
 //! This pass sees only the regions the **branch-arm release window** declined
-//! (`analyze/decref.rs`, docs/impl/region/window.md). Where that window applies it moves the
-//! region's single `decref_point` out of the arms entirely, so no arm's slice of
-//! the release index below holds it and neither route fires — one anchored
-//! release replaces the per-arm ones. The two partition the obligation: the window answers "does this
-//! frame hold the region alone" with escape and needs no count argument;
-//! everything escape cannot clear arrives here, where the count argument is the
+//! (`analyze/decref.rs`). Where that window applies, it moves the region's single
+//! `decref_point` out of the arms entirely. Then no arm's slice of the release
+//! index below holds it, and neither route fires: one anchored release replaces
+//! the per-arm ones. The two partition the obligation. The window answers "does
+//! this frame hold the region alone" with escape and needs no count argument.
+//! Everything escape cannot clear arrives here, where the count argument is the
 //! retain.
 
 use super::arms::ArmSet;
@@ -114,25 +119,26 @@ struct IterScope {
     hi: u32,
 }
 
-/// The node an env cell's per-arm release takes instead of `at`, so that it
-/// fires once per execution of the arm rather than once per iteration of a loop
-/// inside it: the outermost `While`/`Loop` that encloses `at` and is itself
-/// contained in the arm, which the lowerer emits after the loop.
+/// The node an env cell's per-arm release takes instead of `at`. With it the
+/// release fires once per execution of the arm rather than once per iteration
+/// of a loop inside it. The node is the outermost `While`/`Loop` that encloses
+/// `at` and is itself contained in the arm, which the lowerer emits after the
+/// loop.
 ///
 /// This is the per-arm analogue of the global `decref_point`'s
 /// `post_loop_placement` (`analyze/decref.rs`), and it exists for the same
-/// reason: `populate_env` mints the box once per activation, so a release
-/// anchored at an in-loop use frees it on the first iteration and the next
+/// reason. `populate_env` mints the box once per activation. So a release
+/// anchored at an in-loop use frees it on the first iteration, and the next
 /// iteration reads a recycled cell (docs/impl/region/cells.md).
 ///
-/// The loop must lie INSIDE the arm — a loop enclosing the whole branch is not a
+/// The loop must lie INSIDE the arm. A loop enclosing the whole branch is not a
 /// point this arm can host, and no such loop reaches here. One that encloses the
 /// branch but not the cell's allocation is refused by the loop-invariant guard.
 /// One that encloses both is kept out by the env-cell loop hoist
-/// (`post_loop_placement`, `analyze/decref.rs`): the cell's global `decref_point`
-/// already sits at the outermost enclosing loop, outside every arm of a branch
-/// inside it, so `arm_of_d` finds nothing. `None` when `at` is in no such loop,
-/// or is already at or past the loop's own node.
+/// (`post_loop_placement`, `analyze/decref.rs`). The cell's global
+/// `decref_point` already sits at the outermost enclosing loop, outside every
+/// arm of a branch inside it, so `arm_of_d` finds nothing. `None` when `at` is
+/// in no such loop, or is already at or past the loop's own node.
 fn arm_post_loop_placement(
     at: HirId,
     loops: &[IterScope],
@@ -152,9 +158,9 @@ fn arm_post_loop_placement(
 
 /// Compute the per-arm compensating decrefs (`head` + `tail`). See the module doc
 /// for the soundness conditions. `last_use` maps each use HirId to its consuming
-/// (decref-safe) node — the same `compute_last_use` result `decref_point` is
-/// computed from, so a `tail` release placed at an arm's max last-use node is the
-/// per-arm analogue of the global `decref_point` and is decref-safe by symmetry.
+/// (decref-safe) node. It is the same `compute_last_use` result `decref_point` is
+/// computed from. So a `tail` release placed at an arm's max last-use node is the
+/// per-arm analogue of the global `decref_point`, and decref-safe by symmetry.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn compute_branch_compensation(
     hir: &Hir,
@@ -226,11 +232,11 @@ pub(super) fn compute_branch_compensation(
                     continue;
                 }
                 // loop-invariant guard: no loop encloses C but not r's allocation.
-                // Asked of the ALLOCATION sites where the region has any — a holder
+                // Asked of the ALLOCATION sites where the region has any. A holder
                 // defined outside the loop (a cell the loop stores into) says
-                // nothing about where the value is born, and the per-iteration
-                // release is correct exactly when every birth is per-iteration. A
-                // region with no recorded allocation (an env cell's phantom, a
+                // nothing about where the value is born. The per-iteration release
+                // is correct exactly when every birth is per-iteration. A region
+                // with no recorded allocation (an env cell's phantom, a
                 // parameter's content) falls back to the anchor set, which is then
                 // the only birth reading there is.
                 let allocs = p.allocs.get(&r).unwrap_or(anchors);
@@ -252,9 +258,9 @@ pub(super) fn compute_branch_compensation(
                     // `decref_point` is a max over, restricted to this arm: each in-arm
                     // use's consuming node, plus the reader of each in-arm uncounted
                     // opcode read that borrows out of the cell. A candidate landing
-                    // OUTSIDE the arm is not a point this arm can host — ANF may float a
-                    // consumer past its own arm — and the arm is then declined by both
-                    // routes rather than approximated: the `head` release would precede
+                    // OUTSIDE the arm is not a point this arm can host, because ANF may
+                    // float a consumer past its own arm. Both routes then decline the
+                    // arm rather than approximate it. The `head` release would precede
                     // the very use that candidate came from.
                     if info.cell_release_regions.contains(&r) {
                         let in_arm = |id: HirId| {
@@ -294,10 +300,10 @@ pub(super) fn compute_branch_compensation(
                         continue;
                     }
                     // r's last-use nodes for uses within this sibling arm. Both the use
-                    // AND its consuming (last-use) node must lie inside the arm: the
-                    // decref is emitted at the node (through `emit_decrefs_for`), so a
+                    // AND its consuming (last-use) node must lie inside the arm. The
+                    // decref is emitted at the node (through `emit_decrefs_for`). So a
                     // node OUTSIDE the arm would not be mutually exclusive with the
-                    // `decref_point` arm — a double-free on the shared path. (ANF can
+                    // `decref_point` arm, a double-free on the shared path. (ANF can
                     // float a use's consumer past its own arm; filter on the node, not
                     // just the use.)
                     let arm_last_use = uses
@@ -318,15 +324,15 @@ pub(super) fn compute_branch_compensation(
                         // fires AFTER that node), never at the arm head (which precedes
                         // the use). `d` is in a different arm, so `node != d`.
                         //
-                        // Restricted to `call_result_regions` — a per-call value whose
-                        // release is the value-route (`LoadLocal` slot + `DecrefValueRegion`
-                        // off the slot that still holds it in this arm), the exact target
-                        // class (a fresh string / struct stored in each arm). A
-                        // non-call-result region releases by static slot
-                        // (`DecrefRegion`, which CLEARS the activation slot), whose
-                        // cross-arm interaction is not value-route-safe; such a region
-                        // keeps the conservative single-`decref_point` baseline
-                        // (leak-preserving, never a double-free).
+                        // Restricted to `call_result_regions`: a per-call value whose
+                        // release is the value-route (`LoadLocal` slot +
+                        // `DecrefValueRegion` off the slot that still holds it in this
+                        // arm). That is the exact target class, a fresh string or
+                        // struct stored in each arm. A non-call-result region releases
+                        // by static slot (`DecrefRegion`, which CLEARS the activation
+                        // slot), whose cross-arm interaction is not value-route-safe.
+                        // Such a region keeps the conservative single-`decref_point`
+                        // baseline (leak-preserving, never a double-free).
                         //
                         // An env cell never reaches here — it routed above, off the box's
                         // own holders rather than off a retain (module doc).
@@ -338,10 +344,10 @@ pub(super) fn compute_branch_compensation(
                             // Record the site for the lowerer's ReturnValue suppression
                             // ONLY when the funnel is a `-mut` PASS-THROUGH (the result IS
                             // this container, whose reference the caller already owns). An
-                            // immutable funnel's container is compensated above but its FRESH
-                            // result keeps its ReturnValue retain — the caller's move/reassign
-                            // reference, whose suppression would over-free a result stored
-                            // into a reassigned slot. Pinned by `set-add`/`struct-put`/
+                            // immutable funnel's container is compensated above, but its
+                            // FRESH result keeps its ReturnValue retain. That retain is the
+                            // caller's move/reassign reference, whose suppression would
+                            // over-free a result stored into a reassigned slot. Pinned by `set-add`/`struct-put`/
                             // `del-wrapper`/`native-tail-put-*` and the container-compensation
                             // guardfree fixture.
                             if funding.container_at(r, node)

@@ -1,13 +1,12 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! The intrinsic operand proofs: prove-or-reject, per docs/intrinsics.md.
 //!
 //! A `%`-intrinsic in call position is a compile-time type-checked request for
 //! the fast lowering. Each op carries a soundness contract derived from what
-//! its lowering actually trusts (the opcode handlers in `src/vm/` — wrong
-//! operands there compute garbage, never a catchable error), and every
-//! call-position use must discharge it from the inferred operand types:
-//! proven ⇒ the site lowers and is silent; provably wrong **or unprovable** ⇒
-//! compile error. Value-position uses are the registered `NativeFn`, which
+//! its lowering actually trusts: the opcode handlers in `src/vm/`, where wrong
+//! operands compute garbage, never a catchable error. Every call-position use
+//! must discharge it from the inferred operand types. Proven ⇒ the site lowers
+//! and is silent; provably wrong **or unprovable** ⇒ compile error. Value-position uses are the registered `NativeFn`, which
 //! validates at runtime — nothing to prove there.
 //!
 //! Call-position sites appear in two HIR shapes, checked identically: the

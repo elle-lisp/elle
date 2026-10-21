@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! What a call proves: the operand types it forwards to the callee's parameters, and its result's type.
 //!
 //! docs/impl/typeinfer.md

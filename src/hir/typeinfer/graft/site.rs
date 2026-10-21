@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! One graft: the arm a call's operand count selects, its operands bound in order, the body in the call's place.
 //!
 //! docs/impl/graft.md

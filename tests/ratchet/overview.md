@@ -6,8 +6,9 @@ Producers that drive a tool outside Elle, parse the counts it prints, and
 report each count as a reading.
 
 Each file here is a producer ([ratchet](../../docs/ratchet.md)). A ledger
-under `tests/ledger` names it, and it runs in-process under `elle-rig test`.
-What it checks is a tool's report, so neither suite directory holds it.
+under [tests/ledger](../ledger) names it, and it runs in-process under
+`elle-rig test`. What it checks is a tool's report, so neither suite directory
+holds it.
 
 The audit and size producers read the tree alone, so `make tree-producers`
 runs them on the release rig, and `make qa` runs that target
@@ -83,8 +84,8 @@ what is exempt ([the audit queue](../../docs/impl/audit.md)). A file's tokens
 are `(elle/tokens text)` over its whole text ([the rig](../../rig/overview.md)).
 A file at its cap or under it reads nothing.
 
-The rows are in `tests/ledger/size-*.lisp`, split so that each file stays under
-the cap. A row's subject is a path rather than a literal in the producer, so
+The rows are in the `size-*.lisp` files under [tests/ledger](../ledger), split
+so that each file stays under the cap. A row's subject is a path rather than a literal in the producer, so
 [ledgers.rs](../integration/ledgers.rs) holds each one to a file the tree
 tracks.
 

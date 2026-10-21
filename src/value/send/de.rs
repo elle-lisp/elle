@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! Deserializing a `SendBundle`: every received value is rebuilt on the
 //! receiving heap, in the call's region.
 //!
@@ -22,9 +22,9 @@ pub(super) fn recv_traits(
     }
 }
 
-/// Reconstruct a standard-stream port value of the given kind. Only the three
-/// stdio kinds are ever serialized (see the `"port"` arm in `from_value_inner`);
-/// any other kind falls back to stdout defensively (unreachable in practice).
+/// Reconstruct a standard-stream port value of the given kind. The `"port"` arm
+/// in `from_value_inner` serializes the three stdio kinds alone, so the stdout
+/// fallback for any other kind never runs.
 pub(super) fn stdio_port_value(
     kind: crate::port::PortKind,
     ctx: &mut crate::primitives::ctx::Alloc,
@@ -56,9 +56,9 @@ pub(super) struct DeserContext<'a, 'h> {
     closures: Vec<Option<SendableClosure>>,
     /// Reconstruction state per intern table index.
     pub(super) states: Vec<ReconState>,
-    /// Deferred fixups: (LBox Value that holds a NIL placeholder, intern index).
-    /// After all closures are built, each LBox's RefCell is overwritten with
-    /// the actual closure value.
+    /// Deferred fixups: (an LBox or capture cell that holds a NIL placeholder,
+    /// intern index). After all closures are built, each cell's RefCell is
+    /// overwritten with the actual closure value.
     pub(super) fixups: Vec<(Value, usize)>,
     /// The allocation capability every reconstructed heap object is born
     /// through — the receiving thread's per-call ctx.
@@ -370,8 +370,7 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) ->
             // The code object lands in the closure's own region: its payload,
             // its children's payloads and their headers, and the header the
             // closure references. Every edge among them is a self-edge, and the
-            // rebuilt constants the payloads name live there too
-            // (docs/impl/region/template.md).
+            // rebuilt constants the payloads name live there too.
             let code = ctx.ctx.code_arena();
             let parts = parts_from_sendable(sc, ctx, code);
             let template = code.header(code.write(parts));

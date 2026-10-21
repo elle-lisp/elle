@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The fiber face: a fiber whose body's terminal value is a summarized subtree, handed back by each completing resume.
 //!
 //! docs/impl/region/owner.md

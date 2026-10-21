@@ -123,11 +123,11 @@ the format ships today. It is not a property of an image.
 A snapshot becomes portable once the code layer is in the specification: a
 specified instruction set, a validator, and a rule for which compiled code
 keeps loading. Until then an image hydrates only into a binary whose layout
-agrees with the dumper's, and every other binary falls back as § Hydration
-describes.
+agrees with the dumper's, and every other binary falls back as the hydration
+steps below describe.
 
-The HIR fragments an image carries (§ Compiler state is part of the
-environment) are optional data to any other implementation. One that ignores
+The HIR fragments an image carries, which a later section describes, are
+optional data to any other implementation. One that ignores
 them grafts and fuses nothing across units, and every call stays a call. This
 implementation still requires them, because its two boot modes must compile
 user code identically.
@@ -227,7 +227,8 @@ the acceptance gate.
 8. Decode side-stream mutable bindings (present only when the dump policy
    permitted them) through the existing `SendValue` deserializer into
    ordinary regions, rooted like REPL bindings. A function's LIR needs no step
-   here: it is body data, mapped with everything else (§ JIT).
+   here: it is body data, mapped with everything else, as the JIT section
+   explains.
 
 An environment image hydrates on top of a boot image and relocates its
 cross-image slots against the boot region's hydrated pages. References
@@ -281,7 +282,7 @@ dumps racing for one path, from two processes or two threads, each rename a
 whole file. A sealed memfd is immune by construction.
 
 **An image is code — trust it like a shared library.** Hydration installs
-raw memory and executes whatever the templates say; the verifier
+raw memory and executes whatever the templates say. The verifier
 bounds-checks pointers and tags, but it is a drift detector, not a sandbox.
 Hydrate only images from sources you would `dlopen`. A network-retrieved
 image deserves the same policy as a network-retrieved `.so`.
@@ -344,8 +345,8 @@ writes the image. The spine reserves each copy before it fills it, exactly as
 a closure does, so a cycle that re-enters a pair closes onto the one copy.
 What hangs off the spine still recurses, and so does every other nesting.
 
-The root set is defined once, in *One mechanism, two configurations*: the
-bindings the dependency stack does not already provide. For the boot
+The root set is defined once, above: the bindings the dependency stack does
+not already provide. For the boot
 configuration that is everything boot pins as process roots today; for an
 environment dump it is the session's delta.
 
@@ -454,6 +455,12 @@ the currency"). An image whose objects hold no pointers at all is the one case
 that pays a fault per page. Neither the boot nor the environment configuration
 produces one.
 
-The verifier is a drift detector, not a sandbox (§ Hydration). Format drift
+The shells themselves are already resident. Relocation writes a pointer slot
+in every object that has one, so the frames this walk reads are the frames it
+just dirtied. An image whose objects hold no pointers at all is the one case
+that pays a fault per page, and it is not a case the boot or environment
+configurations produce.
+
+The verifier is a drift detector, not a sandbox. Format drift
 fails loudly at load rather than as a torn read later, and a truncated or
 scrambled file is refused by name instead of mapped.

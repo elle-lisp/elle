@@ -1,6 +1,6 @@
 # Per-arm compensation
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-21 -->
 
 The releases a branch adds one per arm, each funded by a retain on its own node.
 The head route takes an arm that never names the region, the tail route one that
@@ -20,19 +20,19 @@ refuse the ordinary shapes:
 - The **live-in anchors** are the region's allocation sites plus the route
   binder's def, where the slot is written. An alias's or a functionalization
   version's def says nothing about where the value was born. Anchoring that def
-  read a value stored inside an arm as born there, and refused the sibling-arm
-  release. An env cell keeps its holder's def as an anchor, because its release
+  would read a value stored inside an arm as born there, and refuse the
+  sibling-arm release. An env cell keeps its holder's def as an anchor, because its release
   names the box at the holder's env index, minted where the holder is bound.
 - The **loop-invariant guard** asks the allocation sites alone. A cell the loop
-  stores into is defined outside the loop, and reading its def as a birth
-  refused the per-iteration release exactly where it is correct. A region with
+  stores into is defined outside the loop. Reading its def as a birth would
+  refuse the per-iteration release exactly where it is correct. A region with
   no recorded allocation falls back to its anchors, the only birth reading
   there is.
 
-The conditional accumulate demanded all three at once. It is a loop that names
+The conditional accumulate needs all three at once. It is a loop that names
 each element, then stores it into an outer 1-slot container in one arm of a
-`when`. Its element release sat in the storing arm and leaked on every other
-path ([region-cell-aliased-store.lisp](../../../tests/impl/region-cell-aliased-store.lisp)).
+`when`. Read per holder, its element release sits in the storing arm and leaks
+on every other path ([region-cell-aliased-store.lisp](../../../tests/impl/region-cell-aliased-store.lisp)).
 An aliased stored value takes the counted store of
 [the 1-slot container](bindings.md).
 
@@ -70,7 +70,7 @@ them mentions how many arms the branch has, or whether it is an `If` or a
 `Match`. So a dead `Match` arm is admitted by the identical argument. The
 dominant polymorphic shape is exactly a `Match`: `(match (type-of x) …)` reaches
 an arm that never touches a value whose single `decref_point` sits in a sibling.
-Keying the admission on the branch kind held that whole family to fiber
+Keying the admission on the branch kind would hold that whole family to fiber
 teardown. A `Match` that matches *no* arm runs no body, so nothing fires, which
 leaks and never over-frees.
 
@@ -108,8 +108,7 @@ The **used** sibling arm is the residual, and its guard is not negotiable. A
 release there is admitted only where a retain on the same node funds it: the
 store, the `-mut` container, or the return mint above. The one other admission
 is a release that names an env cell box, whose holders are known without a
-retain (§ "A compensating release of an env cell names the box, not the
-holder's slot").
+retain, as the next section says.
 
 The tempting generalization says "the arm's last-use node is decref-safe by
 symmetry with the global `decref_point`, so release there unconditionally".
@@ -192,7 +191,7 @@ What the route still owes is placement. The box's per-arm release is a max over
 the same pins the global `decref_point` is, restricted to this arm. The first
 pin is each in-arm use's consuming node. The second is the reader of each
 in-arm uncounted opcode read that borrows out of the cell
-(`uncounted_read_sites`; [rules.md](rules.md) Rule 4's borrowing node), because
+(`uncounted_read_sites`, the borrowing node of [rules.md](rules.md)), because
 the box's cascade drops the cell's one reference to its *content*.
 
 A candidate that lands outside the arm is a point this arm cannot host, since

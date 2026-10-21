@@ -130,7 +130,7 @@ Lowerer (&BindingArena) — read-only access to binding metadata
 
 11. **Binding forms destructure strictly.** `def`, `var`, `let`, `letrec`,
     required parameters and `&keys` patterns signal `:type-error` on a
-    missing element, a missing key, or a wrong type, so a strict
+    missing element, a missing key, or a wrong type. So a strict
     `Destructure` carries `:error` and adds it to the enclosing function's
     signal. `&opt` and `&named` parameters bind `nil` instead.
 
@@ -153,7 +153,7 @@ Lowerer (&BindingArena) — read-only access to binding metadata
 14. **`Eval` compiles and executes a datum at runtime.**
     `HirKind::Eval { expr: Box<Hir>, env: Box<Hir> }` is produced for
     `(eval expr)` or `(eval expr env)`. The node's signal is `:error`, and
-    the enclosing function's inferred signal includes it: the VM handler
+    the enclosing function's inferred signal includes it. The VM handler
     holds no park of the code it runs, so a yield, an I/O request or a halt
     inside it comes back as an `:eval-error`. Not in tail position. The VM
     handler reaches the symbol table through the driving VM's `symbols_ptr`
@@ -247,8 +247,8 @@ Lowerer (&BindingArena) — read-only access to binding metadata
 
 26. **A call to a known function becomes its body.** The graft replaces a
     call whose callee is an immutable, non-recursive function binding with
-    the callee's fragment, at the call's arity: a same-unit function's from
-    the tree, another unit's from its value. It records the operand it bound
+    the callee's fragment, at the call's arity. It reads a same-unit
+    function's fragment from the tree, and another unit's from its value. It records the operand it bound
     to each parameter, and inference joins that record into the parameter
     as it joins a call site, so the definition keeps its proofs. In a
     function nothing live reaches, only a call whose body holds no op with a

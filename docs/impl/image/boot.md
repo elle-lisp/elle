@@ -25,7 +25,7 @@ without running the front end again:
   macro bodies through `eval_meta`.
 
 The primitives are the fourth part of a booted instance, and they are the one
-part every process already rebuilds for itself: a native-fn is an immediate
+part every process already rebuilds for itself. A native-fn is an immediate
 whose id hydration remaps by name ([the image file](format.md)).
 
 The [foundations](foundations.md) sealed all three: exports are

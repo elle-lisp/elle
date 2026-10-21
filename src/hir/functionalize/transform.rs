@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The functionalize transform's main walk: one arm per `HirKind`, delegating `begin`, `while` and branches.
 //!
 //! docs/impl/hir.md
@@ -122,9 +122,9 @@ impl<'a> FnCtx<'a> {
             HirKind::Letrec { bindings, body } => {
                 // Pre-register cell bindings so that forward references
                 // within the letrec body see them as cell-wrapped.
-                // Letrec inits are NOT wrapped in MakeCell — the lowerer
+                // Letrec inits are NOT wrapped in MakeCell. The lowerer
                 // handles two-pass cell init (create cell in pass 1, store
-                // value into existing cell in pass 2) so that forward
+                // value into existing cell in pass 2), so that forward
                 // references through closures see the shared cell.
                 //
                 // Also mark mutated bindings as cell-backed even when not

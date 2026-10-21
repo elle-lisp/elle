@@ -1,6 +1,6 @@
 # LIR — Low-level IR
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-21 -->
 
 LIR is an SSA-form intermediate representation with virtual registers,
 basic blocks, and explicit control flow.
@@ -37,9 +37,9 @@ succeeded or failed. Nothing the lowerer returns points into it.
   bumps its data down from the top of a page, so nothing can be appended to an
   extent already written. A full `RegionVec` claims an extent twice the size
   and copies into it, and the old extent is dead until the working region is
-  freed. [measurements.md](image/measurements.md) item 8 measured the shape:
-  it holds parity with a `Vec` per block, and the bytes that growth leaves
-  behind last only as long as the compile.
+  freed. [measurements.md](image/measurements.md) measured the shape. It holds
+  parity with a `Vec` per block, and the bytes that growth leaves behind last
+  only as long as the compile.
 - **The function under construction** — a `RegionVec` of nodes per block,
   and the function's pool, constants, template bytes, values and file table,
   each a `RegionVec` too. Its header is **`LirHead`**: the name, arity,
@@ -51,18 +51,17 @@ succeeded or failed. Nothing the lowerer returns points into it.
   stack, untouched, and resumes when the lambda finishes. The head also
   carries what the payload holds and the JIT never reads: the docstring, the
   origin and the body fragment's bytes.
-- **`emit`** encodes an `InstrRef` into a node at the end of the open block:
-  its registers inline, any longer register list and the variant's other
-  scalars appended to the function's pool, its constants to the constant
-  table. **`terminate`** sets the open block's exit, and a block never
+- **`emit`** encodes an `InstrRef` into a node at the end of the open block.
+  Its registers go inline. Any longer register list and the variant's other
+  scalars go to the function's pool, and its constants to the constant table. **`terminate`** sets the open block's exit, and a block never
   terminated exits `Unreachable`. **`finish_block`** closes it.
 - **A splice moves nodes.** The relocation
   ([lower/AGENTS.md](../../src/lir/lower/AGENTS.md)) emits a release run at
-  the end of the open block, takes the run back out, and inserts it ahead of
-  a tail call: in the open block, or in a block already finished. Only the
-  48-byte nodes move. Each
-  node's pool words stay where `emit` wrote them, and a node names its pool
-  run by offset, so the move cannot disturb an operand.
+  the end of the open block and takes the run back out. It inserts the run
+  ahead of a tail call, in the open block or in a block already finished.
+  Only the 48-byte nodes move. Each node's pool words stay where `emit` wrote
+  them, and a node names its pool run by offset, so the move cannot disturb an
+  operand.
 - **The lowerer reads its own nodes back** as `InstrRef`, decoded against the
   function's tables exactly as a reader decodes a frozen node. The relocation's
   questions about a run — what slot it loads, whether it stamps the slot nil
@@ -110,10 +109,10 @@ Freezing writes these records ([src/lir/code/](../../src/lir/code/mod.rs)):
 - **`Op`** — one opcode byte per `InstrRef` variant, matched exhaustively, so
   a new variant cannot be encoded until it has an opcode.
 - **`Node`** — one instruction in 48 bytes of plain data with no implicit
-  padding: the span (`start`, `end`, `line`, `col`, and a `file` index into the
-  function's own file table), `dst`, `region`, `aux`, the first two register
-  uses, an `extra` offset into the pool, the use count, the opcode and a flag
-  byte. Every byte is written, so a copy of a node is a copy of its meaning.
+  padding. It holds the span (`start`, `end`, `line`, `col`, and a `file`
+  index into the function's own file table), `dst`, `region` and `aux`. It
+  holds the first two register uses, an `extra` offset into the pool, the use
+  count, the opcode and a flag byte. Every byte is written, so a copy of a node is a copy of its meaning.
 - **`BlockRec`** — a label, the block's range of nodes, the terminator's
   fields and span, and an explicit zero pad.
 - **`ConstRec`** — a kind byte, an explicit seven-byte pad, and 64 bits.
@@ -159,10 +158,10 @@ A frozen function has two homes, and both hold the same records:
 A body carries only what LIR alone knows: the closure id, the entry label, the
 register count, the capture and local-parameter counts, and the sites. The
 header fields the two share are the payload's, and a view over a payload reads
-every one of them off that one record: the name, the docstring, the origin, the
-arity, the signal, the local and parameter counts, the capture masks, the
-vararg kind, the rest-list layout, the region table, the merge set and the two
-release tables. Freezing records the merge set and the release tables
+every one of them off that one record. They are the name, the docstring, the
+origin, the arity, the signal, the local and parameter counts, and the capture
+masks. They are also the vararg kind, the rest-list layout, the region table,
+the merge set and the two release tables. Freezing records the merge set and the release tables
 ascending, so a `LirCode`'s tables and a payload's agree on order as well as
 content.
 
@@ -170,9 +169,10 @@ content.
 of a frozen function and answers its blocks, its instructions, its terminators,
 its header and its tables. `LirView::to_owned` copies everything the view reads
 into a `LirOwned`, which is how a function leaves a payload for another thread.
-A node decodes into the `InstrRef` it was encoded from, field for field: a
-register list as `&'a [Reg]`, a template as `TemplateBytes<'a>`, a tail call's
-stash slots as `Slots<'a>`, and a `StructRest`'s keys as `ConstList<'a>`.
+A node decodes into the `InstrRef` it was encoded from, field for field. A
+register list decodes as `&'a [Reg]`, a template as `TemplateBytes<'a>`, a tail
+call's stash slots as `Slots<'a>`, and a `StructRest`'s keys as
+`ConstList<'a>`.
 
 Decoding is safe Rust over slices. A corrupt index panics where it is read,
 and never reads outside the function's own records.
@@ -214,10 +214,10 @@ Lowerer ──► LirBuilder: the working form, in a working region
 ```
 
 Freezing runs once per compiled function, as the lowerer finishes it, and
-always before emission. The yield points, call sites and charge sites are
-the one part only emission can supply, so the emitter
-writes them into the payload's body beside the frozen records, at the
-`MakeClosure` that builds the lambda ([region/template.md](region/template.md)).
+always before emission. The yield points, call sites and charge sites are the
+one part only emission can supply. So the emitter writes them into the
+payload's body beside the frozen records, at the `MakeClosure` that builds the
+lambda ([region/template.md](region/template.md)).
 Every reader of a code object reads the body.
 
 ## The operand proof
@@ -250,7 +250,7 @@ comparison still emits the polymorphic opcode. Those handlers already read their
 operands as integers and do no better with the proof.
 
 A division keeps its zero test on every tier. The contract does prove the divisor
-nonzero wherever both operands are proven integers, but `OperandProof` names the
+nonzero wherever both operands are proven integers. But `OperandProof` names the
 operand type and says nothing about a value, and a trapping `sdiv` is the wrong
 place to spend a reading it does not carry.
 
@@ -260,23 +260,23 @@ cannot decide says `Unproven` and each backend does what it did before.
 ## Heap literals are allocations
 
 A heap literal is an ordinary allocation, **not** a pre-baked `Value`. The
-constant pool stores only the literal's immutable *template* — a
-recursive `ConstTemplate` (string bytes, or a quoted list, array or nested
-structure) as compile-time data, encoded inline in the (reclaimable) bytecode
-and held as a `Box<ConstTemplate>` by `JitCode`.
-`MaterializeConst` reads that template and allocates a fresh heap value every time
-it runs into **its own** region — the solver gives each literal its own
-`region: StaticRegion` (`alloc_here`) and `decref_point` exactly like `List`/
-`MakeArrayMut`/`MakeClosure`, resolved per activation to a fresh physical region
-and allocated into that explicit region (`alloc_in_region`). A quoted aggregate's whole
-structure shares that one region. Normal escape RC keeps any escaped copy alive
+constant pool stores only the literal's immutable *template*: a recursive
+`ConstTemplate` (string bytes, or a quoted list, array or nested structure).
+The template is compile-time data, encoded inline in the (reclaimable)
+bytecode and held as a `Box<ConstTemplate>` by `JitCode`.
+`MaterializeConst` reads that template and allocates a fresh heap value into
+**its own** region every time it runs. The solver gives each literal its own
+`region: StaticRegion` (`alloc_here`) and `decref_point`, exactly like `List`/
+`MakeArrayMut`/`MakeClosure`. Each activation resolves that region to a fresh
+physical region and allocates into it (`alloc_in_region`). A quoted
+aggregate's whole structure shares that one region. Normal escape RC keeps any escaped copy alive
 past its `decref_point`. Only immediates (numbers, bools, nil, interned
 keyword/symbol) remain as plain pool constants loaded by `Const`/`ValueConst`.
 
-A template carries symbols **by name**, not by interned id. The id would in fact
-survive a `sys/spawn` boundary now that it is the name's hash
-([symbol.md](symbol.md)), but the name is what makes the template readable and
-self-describing; `materialize` interns it, which records the spelling for
+A template carries symbols **by name**, not by interned id. The id would
+survive a `sys/spawn` boundary, because it is the name's hash
+([symbol.md](symbol.md)). But the name is what makes the template readable and
+self-describing. `materialize` interns it, which records the spelling for
 display and returns that same id.
 
 [region/model.md](region/model.md) says why a code-object-lifetime
@@ -287,10 +287,10 @@ display and returns that same id.
 A closure that references itself in **value** position — passed to a
 higher-order call, returned, or stored, then invoked later — lowers that
 reference to `LoadSelf { dst }`. The op takes no operand and pushes the
-**currently-executing closure**: the runtime holds the executing closure in a
-per-activation register (`current_closure`, [fiber.rs](../../src/value/fiber.rs)), and the JIT
-receives that same closure value as a compiled-body parameter, so `LoadSelf`
-reads it directly rather than naming a capture slot. The value it yields is the
+**currently-executing closure**. The runtime holds the executing closure in a
+per-activation register (`current_closure`, [fiber.rs](../../src/value/fiber.rs)).
+The JIT receives that same closure value as a compiled-body parameter. So
+`LoadSelf` reads it directly rather than naming a capture slot. The value it yields is the
 closure itself, so an invocation of that value recurses correctly
 ([selfrec.rs](../../src/runtime/tests/selfrec.rs),
 [recur-as-value.lisp](../../tests/lang/recur-as-value.lisp),

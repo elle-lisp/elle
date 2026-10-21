@@ -1,5 +1,5 @@
-// audited: 2026-10-14
-//! SendValue wrapper for thread-safe value transmission
+// audited: 2026-10-21
+//! `SendValue` and `SendBundle`: a value deep-copied so it can cross to another thread.
 //!
 //! docs/threads.md
 //!
@@ -176,13 +176,13 @@ pub enum SendValue {
         std::sync::Arc<crate::primitives::chan::WakeList>,
     ),
 
-    /// Dynamic parameter (Racket-style). The global `id` is preserved across the
-    /// boundary — parameter resolution is by id (`vm::parameters`), so even if a
-    /// parameter is reachable from the graph more than once and deep-copied into
-    /// distinct heap objects, every copy resolves identically. `default`/`traits`
+    /// Dynamic parameter (Racket-style). The global `id` crosses the boundary
+    /// unchanged, and parameter resolution is by id (`vm::parameters`). A
+    /// parameter reachable more than once deep-copies into distinct heap
+    /// objects, and every copy still resolves identically. `default`/`traits`
     /// are sent recursively (so a parameter is sendable iff they are). This is
     /// what lets a closure that closes over `*stdout*`/`*stderr*` (anything using
-    /// `println`) cross `os/spawn`.
+    /// `println`) cross `sys/spawn`.
     Parameter {
         id: u32,
         default: Box<SendValue>,
@@ -372,9 +372,9 @@ impl SendBundle {
 
     /// Reconstruct a `Value` from this bundle.
     ///
-    /// Mutually recursive closures are handled via LBox fixups: if a closure's
-    /// env contains an LBox wrapping a not-yet-built closure, the LBox is
-    /// allocated with a NIL placeholder and updated after all closures are built.
+    /// Mutually recursive closures are handled via cell fixups. When a closure's
+    /// env holds an LBox or capture cell wrapping a closure not yet built, the
+    /// cell starts with a NIL placeholder, updated after all closures are built.
     ///
     /// `symbols` is the receiving instance's display memo; the bundle's name
     /// table replays into it (a learning site, so a cross-instance hash
@@ -394,7 +394,7 @@ impl SendBundle {
 
         let result = into_value_inner(self.root, &mut dctx);
 
-        // Fixup pass: patch LBox cells that were given NIL placeholders.
+        // Fixup pass: patch the cells that were given NIL placeholders.
         for (lbox_val, idx) in &dctx.fixups {
             let closure_val = match dctx.states[*idx] {
                 ReconState::Done(v) => v,
@@ -415,8 +415,8 @@ impl SendBundle {
 /// A serialized set of code objects — what `SendBundle` is to a value, this is
 /// to a unit's code (the stdlib compilation cache stores one).
 ///
-/// A struct rather than a tuple because `templates` and `intern_table` have the
-/// same type: as positional arguments they are swappable at every call site
+/// A struct rather than a tuple, because `templates` and `intern_table` have the
+/// same type. As positional arguments they are swappable at every call site
 /// with no compile error, and a swap would resolve every `Ref(idx)` against the
 /// wrong table.
 pub(crate) struct SendTemplates {

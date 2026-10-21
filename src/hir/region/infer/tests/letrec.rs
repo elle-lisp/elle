@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The letrec walk unions what each init contributes to a binding's regions, so a placeholder init never erases a destructure's.
 //!
 //! docs/impl/region/rules.md
@@ -12,10 +12,10 @@ use super::*;
 /// walk must UNION per-init contributions rather than overwrite: the
 /// `r = nil` init contributes no regions, so a blind insert would replace
 /// the destructure's `binding_regions[r]` with `[]`. That would leave the
-/// list's region's `decref_point` at the
-/// destructure's id (the post-pass that extends `decref_point` via
-/// binding uses skips `r` when its regions are empty), and a consumer that
-/// traverses the list reads a freed page.
+/// list's region's `decref_point` at the destructure's id, because the
+/// post-pass that extends `decref_point` through binding uses skips `r` when
+/// its regions are empty. A consumer that traverses the list then reads a
+/// freed page.
 ///
 /// This test pins the analysis invariant directly: after region
 /// inference, every destructured binding's `binding_source_regions`

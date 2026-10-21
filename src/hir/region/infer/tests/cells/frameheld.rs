@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! A forward cell is frame-held exactly as its binding is, on every facet that admits and the one that refuses.
 //!
 //! docs/impl/region/relocate.md

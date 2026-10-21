@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-06
+(elle/epoch 15)
+# audited: 2026-10-21
 # A rest pattern's collection is built, not read out, so its region takes a release.
 #
 # docs/impl/region/anchors.md
@@ -7,20 +7,20 @@
 # Every other name a pattern binds is a projection of the scrutinee — an
 # uncounted read that owes no release. A rest name is the one that is not:
 # `[a b & r]` and `{:k v & r}` BUILD a fresh collection in a region the opcode
-# mints, so the borrowing reading leaves that region with nobody to release it.
+# mints. The borrowing reading would leave that region with nobody to release it.
 #
 # THE TRAP the (a)/(c)/(e) rows guard. The rate does not depend on the rest
 # name being READ. An unread name has no uses for the binding chain to extend a
 # release over, so the placeholder needs a base pin of its own — the destructure
-# node. Without it the most common shape, an unread rest name, is the one the
-# release misses.
+# node. Without it the most common shape, an unread rest name, would be the one
+# the release misses.
 #
 # THE COUNTER-FACTUAL the controls catch. The rate is flat in the scrutinee's
 # length and the same for a pattern that binds the same names flatly, so an
 # object-count match with the copy-scratch family proves nothing. (k) binds all
-# five elements with no rest and (l) takes a LIST rest, whose cons tail is a
-# borrow of the scrutinee and allocates nothing: both already read zero, so a
-# subject's rate is the built collection and nothing else.
+# five elements with no rest. (l) takes a LIST rest, whose cons tail is a borrow
+# of the scrutinee and allocates nothing. Both already read zero, so a subject's
+# rate is the built collection and nothing else.
 #
 # THE BOUNDARY the (u) and (w) rows hold. A holder that is an operand of the
 # body's frame-replacing tail call keeps its collection's exemption, and a
@@ -35,13 +35,13 @@
 # the wildcard rest, where the cheaper answer applies and no build is emitted —
 # a row that reads the full rate there says the build came back.
 #
-# THE TRAP the sidecar dodges. A call to a function the compiler can see
-# becomes the function's body (docs/impl/graft.md), which removes the call the
+# THE TRAP the sidecar dodges. Under the graft, a call to a function the compiler
+# can see becomes the function's body (docs/impl/graft.md), which removes the call the
 # (o), (p) and (u) rows are about. The sidecar turns the graft off.
 #
 # This file is the LEAK gauge — an `arena/region-count` delta over a fixed
 # window, BOUNDED for every subject. The soundness complement is
-# region-rest-pattern-slice-uaf.lisp.
+# tests/impl/region-rest-pattern-slice-uaf.lisp.
 
 (def window 400)
 
@@ -157,7 +157,7 @@
 
 # (q) a NESTED rest sub-pattern. `& [p q]` builds a collection no single name
 # holds, and the names it binds project that collection rather than the
-# scrutinee, so the placeholder is keyed on the sub-pattern and unioned into
+# scrutinee. So the placeholder is keyed on the sub-pattern and unioned into
 # both of them.
 (defn q-nested-rest-unread []
   (let [[x & [p q]] arr]
@@ -211,7 +211,8 @@
 # baselines ────────────────────────────────────────────────────────────────────
 #
 # The two shapes the release does not reach, stated as rows so a change that
-# reaches one of them fails here and sends the author to anchors.md.
+# reaches one of them fails here and sends the author to
+# docs/impl/region/anchors.md.
 
 # (u) a name the inner pattern bound, as an operand of the body's
 # frame-replacing tail call. The call receives an element, and the caller holds
@@ -225,8 +226,8 @@
     (take-one p)))
 
 # (w) a nested rest in a `match`. The decision tree loads each name by walking
-# its own access path and re-runs the `Slice` step on every path through the
-# rest, so the count is a fact about the tree rather than about the pattern.
+# its own access path, and re-runs the `Slice` step on every path through the
+# rest. So the count is a fact about the tree rather than about the pattern.
 (defn w-match-nested-rest []
   (match arr
     [x y z & [p q]] x))
@@ -387,8 +388,9 @@
         (concat "a bare wildcard rest strands the collection its type check "
                 "builds, delta=" (number->string d-y)))
 # The baselines read the FULL rate — one region per iteration at least. A row
-# that drops below it means the shape is covered now, which anchors.md says it
-# is not; repair the document and move the row up to a subject.
+# that drops below it means the shape is covered now, which
+# docs/impl/region/anchors.md says it is not. Repair the document and move the
+# row up to a subject.
 (assert (>= d-u window)
         (concat "baseline: a nested rest name is an operand of the body's tail "
                 "call, delta=" (number->string d-u)))

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The transfer function: one node's type, given the environment the ascent has built so far.
 //!
 //! The binding forms, the branching forms and the call rules are each a

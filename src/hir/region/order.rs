@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! Program order over HIR nodes, and the pin rule the `decref_point` passes apply against it.
 //!
 //! docs/impl/region/anchors.md

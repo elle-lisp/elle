@@ -1,6 +1,6 @@
 # Grafting a call
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-21 -->
 
 A call into another unit's function becomes that function's body, and the proven types delete every branch its operands cannot take.
 
@@ -155,9 +155,9 @@ grafts the same body under a source boot, a cache hit and an image boot.
 A function this unit defines keeps its definition, and its parameters take their
 types from the calls this unit makes to it ([type inference](typeinfer.md)).
 Grafting a call removes it from the tree, so the graft records what the call
-would have contributed. For each parameter it notes the operand it bound: the
-caller's binding when the operand was a `Var` nothing writes, the literal's type
-when it was an immediate literal, or the fresh local the `let` bound. The ascent
+would have contributed. For each parameter it notes the operand it bound. That
+is the caller's binding for a `Var` nothing writes, and the literal's type for an
+immediate literal. Any other operand leaves the fresh local the `let` bound. The ascent
 joins those records into the parameter's type exactly as it joins a call site's
 operand. So a definition every caller passes ints to still proves `%mul x x`,
 even when no call to it is left:
@@ -376,32 +376,34 @@ still runs, and deletes what the types decide around the calls that stay.
   never reaches the stdlib body, a recursive function stays a call, and a
   function the program defines grafts while its definition still proves its
   parameters. Under `GraftPolicy::Off` every call stays a call, to a function
-  the program defines and to the stdlib, and the stdlib keeps its own grafts. A body the program defines keeps its own lines where
-  it grafts, and a stdlib body takes the line of the call.
+  the program defines and to the stdlib, and the stdlib keeps its own grafts.
+  A body the program defines keeps its own lines where it grafts, and a stdlib
+  body takes the line of the call.
 - `hir::typeinfer::tests::live::*` — which lambdas the graft reaches. In a
-  function nothing calls, a call whose body holds an op to prove stays a call,
-  a predicate of this unit grafts and its guard narrows, and so does a
+  function nothing calls, a call whose body holds an op to prove stays a call.
+  There a predicate of this unit grafts and its guard narrows, and so does a
   one-operand negation of this unit. The stdlib source followed by a program
   compiles as one unit.
 - [the error-location tests](../../tests/integration/error_reporting.rs) — an
   error raised in a grafted body of the program is reported at the raising
   form.
-- `hir::typeinfer::tests::fold::*` — what the fold decides: a guard over a
-  proven operand, a `type-of` dispatch over a proven container in the program
-  and in the stdlib, a certain raise that keeps what follows it, a resume that
-  runs the statement after a raise, a guard that contradicts its operand, a
-  deletion that narrows a join, a guard that proves through a grafted
-  predicate and through a graft's `let`, a dead arm that binds a hoisted cell,
-  and the error bit a dissolved body loses. It also pins a `cond` clause and
-  the `and` and `or` operands a decided test removes, a block its own
-  `break` leaves, which proves nothing after it, and the literal statement a
-  decided guard leaves, which goes.
+- `hir::typeinfer::tests::fold::*` — what the fold decides. It pins a guard
+  over a proven operand, and a `type-of` dispatch over a proven container in
+  the program and in the stdlib. It pins a certain raise that keeps what
+  follows it, a resume that runs the statement after a raise, and a guard that
+  contradicts its operand. It pins a deletion that narrows a join, and a guard
+  that proves through a grafted predicate and through a graft's `let`. It pins
+  a dead arm that binds a hoisted cell, and the error bit a dissolved body
+  loses. It also pins a `cond` clause and the `and` and `or` operands a
+  decided test removes, and a block its own `break` leaves, which proves
+  nothing after it. It pins the literal statement a decided guard leaves,
+  which goes.
 - `hir::typeinfer::tests::graft::a_payloads_fragment_decodes_once_per_compile`
   — two lookups of one stdlib function in one compile hand out one fragment.
 - `value::closure::tests::payload` — the payload record is exactly its
   fields, the fragment among them.
-- `lir::emit::tests::a_nested_lambdas_payload_carries_its_fragment` — the
-  bytes the lowerer put on the function's head reach its payload.
+- `lir::emit::tests::payload::a_nested_lambdas_payload_carries_its_fragment`
+  — the bytes the lowerer put on the function's head reach its payload.
 - `compiler::stdlib_cache::tests::fragment` — a stdlib restored from the disk
   cache grafts as a compiled one does, and the stored form carries the bytes.
 - `image::boot::tests::a_call_to_a_stdlib_function_grafts_under_either_boot`
@@ -409,7 +411,7 @@ still runs, and deletes what the types decide around the calls that stay.
   closure grafts as a compiled one does, and a user file compiles to one
   bytecode under both boots.
 - [the graft corpus test](../../tests/impl/graft.lisp) — a branch no value
-  reaches goes without the binding the rest of the program reads, a deletion
+  reaches goes without the binding the rest of the program reads. A deletion
   narrows a join, and a guard narrows through the wrappers it is written with.
 - [the wrapper corpus test](../../tests/impl/wrapper-lowering.lisp) — each
   wrapper over two proven numbers leaves no `Emit` in the disassembly, and over

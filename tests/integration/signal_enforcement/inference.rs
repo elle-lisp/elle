@@ -1,5 +1,6 @@
-// audited: 2026-10-05
+// audited: 2026-10-21
 // Signal inference through parameters, and the letrec fixpoint's convergence.
+//
 // docs/signals/inference.md
 // docs/pipeline.md
 
@@ -80,8 +81,9 @@ fn test_polymorphic_inference_my_map() {
 }
 
 // A mutual cycle must converge to the same signal a self-recursive function
-// with the same body converges to. The counter-factual: a loop that stops
-// before the cycle settles reports foo as silent, because the seed is silent.
+// with the same body converges to. The counter-factual: a loop that stopped
+// before the cycle settles would report foo as silent, because the seed is
+// silent.
 #[test]
 fn test_mutual_recursion_signal_converges() {
     let (mut symbols, mut vm) = setup();

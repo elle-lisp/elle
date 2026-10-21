@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! Builds the `SymbolIndex` of an analyzed tree, for the language server's hover, completion and rename.
 //!
 //! The index also serves go-to-definition and find-references.

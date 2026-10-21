@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-21
 # A capturing lambda literal fuses at every op and computes the stdlib op's value,
 # and a chain of two or more capturing ops keeps the staged call order.
 #
@@ -8,7 +8,7 @@
 # The codegen pins — the dispatch gone, the body inline, where the capture reaches
 # from — are in src/hir/typeinfer/fuse/tests/capture.rs. This file checks values,
 # call order and allocation counts. The order check below is the one instrument
-# that sees a capture: a shared log tells the staged order (all of the inner op,
+# that sees a capture. A shared log tells the staged order (all of the inner op,
 # then all of the outer) from the interleaved one a fused loop would run.
 #
 # The un-fused oracle is a named function with a `block` body. A fragment cannot
@@ -76,8 +76,8 @@
 
 # ── a MUTABLE capture is read live, per element ────────────────────────
 # The capture cells the binding, and the spliced read unwraps that cell exactly as
-# every other read of it does — so a value the body itself assigns is visible to the
-# next element, as it was through the closure.
+# every other read of it does. So a value the body itself assigns is visible to the
+# next element, as it is through the closure.
 (assert (= (let [@run 0]
              (map (fn [x]
                     (assign run (+ run x))

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! Fusion tests, by what the chain is made of.
 //!
 //! The shared helpers live here; each submodule takes one shape of chain.
@@ -10,8 +10,8 @@ use crate::hir::expr::{Hir, HirKind};
 
 /// Compile a source form to functionalized HIR against a full stdlib.
 ///
-/// The `Runtime` comes back with the HIR because it owns the display memo, and
-/// most of the names these tests assert on — `map`, `*`, `push` — are stdlib
+/// The `Runtime` comes back with the HIR because it owns the display memo. Most
+/// of the names these tests assert on, such as `map`, `*` and `push`, are stdlib
 /// exports that no build-time table can spell (docs/impl/symbol.md). Hold it
 /// for as long as you want to read a callee's name.
 fn compile(src: &str) -> (Hir, BindingArena, crate::runtime::Runtime) {
@@ -72,9 +72,9 @@ fn count_lambdas(h: &Hir) -> usize {
 /// Count the `if` nodes that branch the pipeline — a fused `filter` emits one
 /// guarded push per predicate stage; a fused `map` emits none.
 ///
-/// A stage body's stdlib calls are grafted, and a wrapper over an element whose
-/// type is not proven keeps its raising guards: `(when (%not (number? b)) (error
-/// …))` is an `if` with an `emit` on one side. Those belong to the stage's op,
+/// A stage body's stdlib calls are grafted. A wrapper over an element whose type
+/// is not proven keeps its raising guards: `(when (%not (number? b)) (error …))`
+/// is an `if` with an `emit` on one side. Those belong to the stage's op,
 /// not to the loop's shape, so they are not counted.
 fn count_ifs(h: &Hir) -> usize {
     let branches = match &h.kind {

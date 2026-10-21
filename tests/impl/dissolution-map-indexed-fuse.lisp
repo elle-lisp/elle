@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-21
 # A fused `map-indexed`, lone, in a chain or under a terminal, hands its function
 # the same positions and computes exactly what the staged stdlib ops compute.
 #
@@ -48,7 +48,7 @@
 
 # ── the two facts map-indexed's own array arm decides ──────────────────
 # Its array arm returns the accumulator with no `(if (mutable? coll) …)` test, so the
-# result is MUTABLE even over an immutable base — and its `(empty? coll)` clause
+# result is MUTABLE even over an immutable base. Its `(empty? coll)` clause
 # precedes that arm, so an empty input answers with the empty LIST. Fusion reproduces
 # both: a rewrite may not change a value.
 (assert (mutable? (map-indexed (fn [i x] (* i x)) [10 20 30]))

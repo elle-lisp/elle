@@ -37,10 +37,10 @@ impl Drop for Scratch {
 }
 
 /// Each macro this instance holds, with whether its transformer cache is
-/// filled. The pair is the whole of what the image has to carry: a name with
-/// no entry is a macro the hydrated instance cannot expand, and a filled cache
-/// that arrives empty is a transformer compiled in some later expansion
-/// context instead of the real one.
+/// filled. The pair is the whole of what the image has to carry. A name with no
+/// entry is a macro the hydrated instance cannot expand. A filled cache that
+/// arrives empty is a transformer compiled in some later expansion context
+/// instead of the real one.
 fn macro_shape(rt: &mut Runtime) -> BTreeSet<(String, bool)> {
     rt.compile()
         .macros()
@@ -54,9 +54,9 @@ fn macro_shape(rt: &mut Runtime) -> BTreeSet<(String, bool)> {
 // the table an image boot installs carries the same names with the same split
 // as the source boot it was dumped from.
 //
-// The counter-factual is a dump that drops the caches: every name still
-// arrives, every macro still expands, and each one silently recompiles its
-// transformer in the first expansion context that asks — which is the
+// The counter-factual is a dump that drops the caches. Every name still
+// arrives and every macro still expands. But each one silently recompiles its
+// transformer in the first expansion context that asks, which is the
 // mis-scoping the lazy fill exists to avoid.
 #[test]
 fn the_macro_table_crosses_with_its_filled_transformers() {

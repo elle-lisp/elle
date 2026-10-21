@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The fixture the ANF tests share: a compile to post-ANF HIR, and the walks that ask whether the pass named a given node.
 //!
 //! docs/impl/anf.md
@@ -187,7 +187,7 @@ fn find_node<'a>(hir: &'a Hir, target: HirId) -> Option<&'a Hir> {
 }
 
 /// True if `hir` is `(let [b e] (var b))` — the ANF wrap shape — or, at a
-/// returning position, `(let [b e] (return (var b)))`: `wrap_tail_returns`
+/// returning position, `(let [b e] (return (var b)))`. `wrap_tail_returns`
 /// runs inside `anf_lift` and marks the wrap's body as the returned value.
 fn is_anf_wrap(hir: &Hir) -> bool {
     if let HirKind::Let { bindings, body } = &hir.kind {
@@ -215,8 +215,8 @@ fn anf_wrap_init(hir: &Hir) -> &Hir {
 
 /// The id of every node an ANF wrap names, anywhere in the tree. A position
 /// test that reads the shape from the outside in has to know which form the
-/// front end left around the node; this asks the one question the naming rule
-/// is about — did this node get a binding of its own?
+/// front end left around the node. This asks the one question the naming rule
+/// is about: did this node get a binding of its own?
 fn named_node_ids(hir: &Hir) -> Vec<HirId> {
     let mut out = Vec::new();
     let mut visit = |node: &Hir| {

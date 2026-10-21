@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! The ascent: passes over the whole tree until the type environment stops moving.
 //!
 //! docs/impl/typeinfer.md

@@ -1,6 +1,6 @@
 # The implementation suite
 
-<!-- audited: 2026-10-15 -->
+<!-- audited: 2026-10-21 -->
 
 Elle programs that check this implementation: its gauges, its tiers, its crashes
 and its mechanisms, each run on the rig.
@@ -33,8 +33,8 @@ tree, and [tests/lang](../lang/overview.md) holds the other suite.
 ## The sidecar
 
 A file that needs a mode names it in a TOML file beside it with the same stem:
-`region-tail-move-toplevel-uaf.toml` beside
-`region-tail-move-toplevel-uaf.lisp`. The rig reads it before it compiles the
+[region-tail-move-toplevel-uaf.toml](region-tail-move-toplevel-uaf.toml) beside
+[region-tail-move-toplevel-uaf.lisp](region-tail-move-toplevel-uaf.lisp). The rig reads it before it compiles the
 file ([rig](../../rig/overview.md) owns the keys). A file with no sidecar runs
 under the defaults of the build.
 
@@ -50,21 +50,21 @@ The sidecar says what the file needs; the file's header comment says why.
 The suite runs the files at the top of this directory. The directories under it
 hold what those files read, and the suite runs none of them:
 
-- `probe/` holds the oracle's rows, one module per shape family, which
+- [probe](probe) holds the oracle's rows, one module per shape family, which
   [oracle.lisp](oracle.lisp) includes.
-- `tailexit/` holds the tail-exit ledgers, which
+- [tailexit](tailexit) holds the tail-exit ledgers, which
   [region-tail-frame-exit-uaf.lisp](region-tail-frame-exit-uaf.lisp)
   includes.
-- `profiles/` holds the rig profiles, each of which a pass applies to every
-  file it runs.
+- [profiles](profiles) holds the rig profiles, each of which a pass applies to
+  every file it runs.
 
 ## The dashboards
 
 [oracle.lisp](oracle.lisp) measures the leak rate of each residual class, and
 [plumb.lisp](plumb.lisp) measures the I/O leak rates. Each drives a shape
-under the ratchet's gauges and prints one reading per subject, which the
-runner judges against the row its ledger under `tests/ledger` holds for the
-run's build ([ratchet](../../docs/ratchet.md)).
+under the ratchet's gauges and prints one reading per subject. The runner judges
+each reading against the row its ledger under [tests/ledger](../ledger) holds
+for the run's build ([ratchet](../../docs/ratchet.md)).
 [docs/impl/region/diagnostics.md](../../docs/impl/region/diagnostics.md) owns
 the gauges they read.
 
@@ -72,7 +72,7 @@ the gauges they read.
 
 `make smoke-impl` runs every file here as its own child of `elle-rig test
 --isolate ''`, so each verdict lands in the session store, and each reading is
-judged as the rig's build. The files `tests/ledger` names are the exception:
+judged as the rig's build. The files [tests/ledger](../ledger) names are the exception:
 `make smoke-producers` runs them in-process under `elle-rig test`
 ([test-runner](../../docs/test-runner.md)). [The rig](../../rig/overview.md)
 names the targets that run the suite under a profile and on the other builds'

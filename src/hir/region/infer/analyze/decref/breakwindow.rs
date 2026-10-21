@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! The releases a `break` jumps over, re-anchored onto the block it leaves.
 //!
 //! docs/impl/region/anchors.md
@@ -8,37 +8,38 @@ use super::super::super::*;
 /// Re-anchor every release a `break` jumps over onto the block it leaves.
 ///
 /// The break pin in `populate_decref_points` covers the value the break CARRIES.
-/// Every other region whose release sits in the same window — inside the
-/// block's body, at or after the break site, before the exit label — is passed
-/// over by the identical jump, and has no consumer to be handed to: the release
-/// is emitted into unreachable code and the region is held to fiber teardown.
-/// Re-anchoring to `last_use[block]` — the first point both the break path and
-/// the fall-through path reach, the same anchor the broken value takes — is
-/// enough, and needs no release at the break site: moving a release LATER can
-/// only over-keep (docs/impl/region/anchors.md).
+/// Another region's release may sit in the same window: inside the block's body,
+/// at or after the break site, before the exit label. The identical jump passes
+/// over it, and it has no consumer to be handed to. So the release is emitted
+/// into unreachable code, and the region is held to fiber teardown.
+/// Re-anchoring to `last_use[block]` is enough. That is the first point both the
+/// break path and the fall-through path reach, the same anchor the broken value
+/// takes. It needs no release at the break site, because moving a release LATER
+/// can only over-keep (docs/impl/region/anchors.md).
 ///
 /// The window is read off the structural order: a node's releases are skipped
 /// exactly when its post-order index is at or above the break's. That covers the
 /// break node itself (`lower_break` terminates with the jump, so its own decrefs
-/// land in the dead block after it) and every enclosing `let`/`begin`, whose
-/// releases the lowerer emits after the body.
+/// land in the dead block after it). It also covers every enclosing
+/// `let`/`begin`, whose releases the lowerer emits after the body.
 ///
-/// Two scopes bound the window, both because a release inside them must run a
-/// different number of times than the block's exit label is reached: a nested
-/// `While`/`Loop` (a loop-body value is re-allocated per iteration, so one
-/// release cannot cover N) and a nested `Lambda` (its releases run in another
-/// activation, against another frame's slots). Inside either, the release stays
-/// where it is — still skipped on the break path, an over-keep bounded by one
-/// iteration / one call, never a mis-free.
+/// Two scopes bound the window. A release inside either must run a different
+/// number of times than the block's exit label is reached. A nested
+/// `While`/`Loop` re-allocates a loop-body value per iteration, so one release
+/// cannot cover N. A nested `Lambda` runs its releases in another activation,
+/// against another frame's slots. Inside either, the release stays where it
+/// is. It is still skipped on the break path, an over-keep bounded by one
+/// iteration or one call, never a mis-free.
 ///
 /// A third condition guards the anchor itself: the exit label has to be a point
 /// every path actually **reaches**. A frame-replacing exit on the block's
-/// fall-through — a `Call` in tail position, which the lowerer emits as
-/// `TailCall` — leaves through the callee instead of arriving there, so a release
-/// moved to the anchor would be dead on exactly the path that used to run it
-/// (trading one leak for another). Such a block declines the window whole. A
-/// `Return` is not such an exit, and neither is a tail call inside a targeting
-/// break's own value (see `BreakWindowScopes::frame_exits` and the check below).
+/// fall-through is a `Call` in tail position, which the lowerer emits as
+/// `TailCall`. It leaves through the callee instead of arriving there. So a
+/// release moved to the anchor would be dead on exactly the path that used to
+/// run it, trading one leak for another. Such a block declines the window
+/// whole. A `Return` is not such an exit, and neither is a tail call inside a
+/// targeting break's own value (see `BreakWindowScopes::frame_exits` and the
+/// check below).
 pub(super) fn pin_break_skipped_releases(
     info: &mut RegionInfo,
     hir: &Hir,
@@ -96,11 +97,10 @@ pub(super) fn pin_break_skipped_releases(
             .filter(|&(lo, hi)| block_lo <= lo && hi < block_hi)
             .collect();
         // A frame exit inside a targeting break's own VALUE does not refuse the
-        // window: that break already jumps over every release in it, so on that
+        // window. That break already jumps over every release in it, so on that
         // path there is nothing left for the exit to strand
-        // (docs/impl/region/anchors.md, the third boundary). Only an exit on a
-        // path that would otherwise ARRIVE at the release — the block's
-        // fall-through — does.
+        // (docs/impl/region/anchors.md). Only an exit on a path that would
+        // otherwise ARRIVE at the release, the block's fall-through, refuses it.
         let break_values: Vec<(u32, u32)> = sites
             .iter()
             .map(|s| (order.low(s).unwrap_or(0), ord(*s)))
@@ -129,12 +129,11 @@ pub(super) fn pin_break_skipped_releases(
             {
                 continue;
             }
-            // A loop barrier is about the COUNT: it holds back a region the loop
+            // A loop barrier is about the COUNT. It holds back a region the loop
             // body allocates, which is re-allocated per iteration and so needs
-            // its release per iteration. A region allocated outside — a
-            // parameter above all, which has no allocation site here at all — is
-            // one per activation, and one release at the anchor covers it
-            // exactly once.
+            // its release per iteration. A region allocated outside is one per
+            // activation, and one release at the anchor covers it exactly once.
+            // A parameter is the main case, with no allocation site here at all.
             if inner_loops.iter().any(|&(lo, hi)| {
                 lo <= dord
                     && dord <= hi
@@ -154,9 +153,10 @@ pub(super) fn pin_break_skipped_releases(
 #[derive(Default)]
 struct BreakWindowScopes {
     /// Subtree intervals of the iterative scopes (`While`/`Loop`). A release
-    /// inside one is held back only for a region that scope ALLOCATES, which is
-    /// re-allocated per iteration and so needs its release per iteration; a
-    /// region the loop merely reads is one per activation and hoists.
+    /// inside one is held back only for a region that scope ALLOCATES. Such a
+    /// region is re-allocated per iteration and so needs its release per
+    /// iteration. A region the loop merely reads is one per activation and
+    /// hoists.
     loops: Vec<(u32, u32)>,
     /// Subtree intervals of the `Lambda`s: both an unconditional barrier (the
     /// body runs in its own activation, against its own frame's slots) and the
@@ -167,8 +167,7 @@ struct BreakWindowScopes {
     /// block's window means the block's exit label is not a point every path
     /// reaches.
     ///
-    /// A `Return` node is deliberately NOT one (docs/impl/region/anchors.md, the
-    /// third boundary):
+    /// A `Return` node is deliberately NOT one (docs/impl/region/anchors.md).
     /// `lower_return` emits the return mint and no control flow, so control falls
     /// through it to the exit label like any other value.
     frame_exits: Vec<u32>,

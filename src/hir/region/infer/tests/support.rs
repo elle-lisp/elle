@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! Region-ownership test helpers: compile a shape and re-run one ownership walk on its `RegionInfo`.
 //!
 //! docs/impl/region/adopt.md
@@ -29,12 +29,12 @@ fn restore_pre_ownership_view(info: &mut RegionInfo) {
     }
 }
 
-/// Every `%pair` car/cdr store edge `(child, parent)` in the program — the
+/// Every `%pair` car/cdr store edge `(child, parent)` in the program: the
 /// immutable-aggregate-store edges the merge seed considers. An edge is one such
 /// store iff its site is a `Pair` intrinsic AND the edge target is the region
-/// freshly allocated at that site (`alloc_region[site]`), which uniquely picks the
-/// pair's own car/cdr stores out of `cross_region_refs` (push/put/set-cell/clique
-/// edges target something other than the site's own allocation).
+/// freshly allocated at that site (`alloc_region[site]`). That picks the pair's own
+/// car/cdr stores out of `cross_region_refs`, because push/put/set-cell/clique
+/// edges target something other than the site's own allocation.
 pub(super) fn pair_store_edges(hir: &Hir, info: &RegionInfo) -> Vec<(Region, Region)> {
     let mut pair_sites = Vec::new();
     find_all_pairs_helper(hir, &mut pair_sites);
@@ -60,10 +60,11 @@ pub(super) fn shared_seeds(source: &str) -> (Hir, RegionInfo, rustc_hash::FxHash
 }
 
 /// Like `shared_seeds`, but threads the REAL primitive `CallClassification` (the
-/// declared `RegionEffect`s) into both region inference and escape. Required for the
-/// fiber **send** facet: its seed fires only when the solver resolves `chan/send` to
-/// its declared `Sends` effect — the default empty classification `shared_seeds` uses
-/// treats every call as an opaque user fn (no effect), so a send would not seed.
+/// declared `RegionEffect`s) into both region inference and escape. The fiber
+/// **send** facet needs it: its seed fires only when the solver resolves
+/// `chan/send` to its declared `Sends` effect. The default empty classification
+/// `shared_seeds` uses treats every call as an opaque user fn (no effect), so a send
+/// would not seed.
 pub(super) fn shared_seeds_with_effects(
     source: &str,
 ) -> (Hir, RegionInfo, rustc_hash::FxHashSet<Region>) {
@@ -113,12 +114,12 @@ pub(super) fn owned_subtrees(
 }
 
 /// Like `owned_subtrees`, threading the REAL primitive `CallClassification` so declared
-/// `RegionEffect`s reach inference — required for shapes whose ownability depends on a
-/// declared effect: `@array`/`array` resolving to `Fresh` (a freshly-built container is
-/// then an Owned candidate; the default empty effects would refuse it as an opaque
-/// call-result), and the may-store-clique negative (`has?` resolving to its declared
-/// `Mixed`, recording the hard clique that defeats external uniqueness —
-/// `owned_subtree_refuses_may_store_clique`).
+/// `RegionEffect`s reach inference. Shapes whose ownability depends on a declared
+/// effect need it. `@array`/`array` resolve to `Fresh`, so a freshly-built container
+/// is an Owned candidate; the default empty effects would refuse it as an opaque
+/// call-result. In the may-store-clique negative, `git` resolves to its declared
+/// `Mixed` and records the hard clique that defeats external uniqueness
+/// (`owned_subtree_refuses_may_store_clique`).
 pub(super) fn owned_subtrees_with_effects(
     source: &str,
 ) -> (
@@ -225,9 +226,9 @@ pub(super) fn analyze_full(source: &str) -> (Hir, RegionInfo) {
     (hir, info)
 }
 
-/// The container **root** (the region that is the TARGET of a containment edge but
-/// never a SOURCE — a top container holds members; it is held by nothing) and the
-/// **member** regions (the edge sources) of a discarded shared-container subtree.
+/// The container **root** and the **member** regions of a discarded shared-container
+/// subtree. The root is the TARGET of a containment edge but never a SOURCE: a top
+/// container holds members, and nothing holds it. The members are the edge sources.
 /// Reads the funnel-recovered `containment_edges`: a `%`-store is an opaque `Funnel`
 /// native call recording NO `cross_region_refs` edge, so containment reaches the
 /// ownership walks only through this site-keyed map.
