@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-20
 //! A short-circuit operand is an arm: a release past the merge is replicated ahead of the last operand's tail call.
 //!
 //! docs/impl/region/replicate.md
@@ -8,8 +8,7 @@
 // on it, so the done block is a merge reached through every operand's block. Only
 // the LAST operand inherits tail position, so it is the only arm that can carry a
 // frame-replacing tail call — and a release the enclosing scope emits past the
-// merge is skipped on every call that reaches that arm
-// (docs/impl/region/replicate.md § "A short-circuit operand is an arm").
+// merge is skipped on every call that reaches that arm.
 //
 // These pin the PLACEMENT. The counts are the same either way, so only position
 // tells a replicated release from a stranded one.

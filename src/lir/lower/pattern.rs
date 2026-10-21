@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-20
 //! Lowering a compiled decision tree to blocks: bindings, guards, arm bodies, and the switch that chooses between them.
 //!
 //! src/lir/lower/AGENTS.md
@@ -248,9 +248,9 @@ impl<'a> Lowerer<'a> {
                 });
                 self.terminate(Terminator::Jump(done_label));
                 // This arm's relocation point, sealed for the done block to
-                // inherit (docs/impl/region/mechanism.md § "The relocation point
-                // outlives the block"). An or-pattern's later cases jump to this
-                // same body, so the point is sealed once, with the body.
+                // inherit (docs/impl/region/replicate.md). An or-pattern's later
+                // cases jump to this same body, so the point is sealed once, with
+                // the body.
                 self.seal_arm_hoists();
                 self.finish_block();
                 Ok(())

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-20
 //! Each branch arm that leaves through a tail call takes a replica of a release emitted past the merge.
 //!
 //! docs/impl/region/mechanism.md
@@ -115,8 +115,7 @@ fn a_letrec_closure_under_a_branch_tail_is_replicated_into_every_arm() {
     // at a merge no path arrives at. A replica counts once only where the run
     // nil-stamps the slot it read, which this region's DEFAULT release by region id
     // does not — so it takes the value route of the slot its `letrec` binder
-    // recorded (docs/impl/region/mechanism.md § "Self-cancelling is a property of
-    // the ROUTE, not of the region's class").
+    // recorded (docs/impl/region/replicate.md).
     let module = compile_to_lir(
         "(begin (def s (fn () 0)) (def s2 (fn () 1)) \
          (def f (fn (n t) \
@@ -168,8 +167,8 @@ fn stranded_param_release_is_replicated_into_every_branch_arm() {
     // The release lands past the MERGE, which each arm leaves through a
     // frame-replacing tail call — so the merge copy alone reaches neither path.
     // The merge's inherited relocation points put a copy ahead of each arm's
-    // `TailCall` (docs/impl/region/mechanism.md § "The relocation point outlives
-    // the block"; the `tail-frame-exit-arms` probe). `x` is the first parameter,
+    // `TailCall` (docs/impl/region/replicate.md; the `tail-frame-exit-arms` probe).
+    // `x` is the first parameter,
     // hence local slot 0.
     let module = compile_to_lir(
         "(begin (def s (fn () 0)) (def s2 (fn () 1)) \

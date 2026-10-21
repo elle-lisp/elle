@@ -1,7 +1,7 @@
-// audited: 2026-10-06
+// audited: 2026-10-20
 //! An env cell's box release past a frame-replacing tail call: carried ahead, compensated per arm, never across a read.
 //!
-//! docs/impl/region/mechanism.md
+//! docs/impl/region/relocate.md
 //! docs/impl/region/cells.md
 
 use super::*;
@@ -68,8 +68,7 @@ fn reassigned_env_cell_release_precedes_the_frame_replacing_tail_call() {
     // hoisted even though `c` is REASSIGNED: the mutated refusal is compensation's
     // release-ROUTE one, and this release names the box (`LoadCaptureRaw`), which
     // an `assign` never repoints — it writes the cell's content
-    // (docs/impl/region/mechanism.md § "A mutated holder poisons its value route,
-    // not its cell box"; the `fresh-env-cell` probe).
+    // (docs/impl/region/window.md; the `fresh-env-cell` probe).
     let module = compile_to_lir(
         "(begin (def f (fn () (def @c 0) \
          (let [g (fn () (assign c (%add c 1)) c)] (g)))) (f))",
@@ -135,8 +134,7 @@ fn a_cell_release_declines_a_move_across_a_read_through_it() {
     // `DecrefValueRegion` keeps its place in the dead block. The env CELL is
     // admitted on the binding's own verdict and moves ahead of the call. That value
     // release loads the box RAW and unwraps it, so it reads the page the cell
-    // release frees (docs/impl/region/mechanism.md § "A move that crosses a read
-    // through the cell it frees is declined").
+    // release frees (docs/impl/region/relocate.md).
     //
     // The counter-factual: asserting only that some cell release precedes the
     // `TailCall` passes on this witness while the box is freed under its own
@@ -199,7 +197,7 @@ fn yielded_holder_env_cell_release_precedes_the_frame_replacing_tail_call() {
     // the resume value's own mint coming back — so the crossing is not the uncounted
     // second holder the admission guards against, and the box's release is hoisted
     // ahead of the `TailCall` like any other
-    // (docs/impl/region/mechanism.md § "A fiber crossing is a counted holder too").
+    // (docs/impl/region/held.md).
     let module = compile_to_lir(
         "(begin (def f (fn () (def @c 0) \
          (let [g (fn () (assign c (%add c 1)) c)] (begin (emit :yield g) (g))))) \
@@ -222,8 +220,7 @@ fn a_falling_through_arm_head_releases_the_env_cell_its_sibling_relocated() {
     // nothing. That arm names `c` nowhere, so branch compensation's head route
     // covers it; the two are mutually exclusive by arm structure, which is what a
     // cell release needs because it leaves no nil-stamp to make a replica no-op
-    // (docs/impl/region/mechanism.md § "A compensating release of an env cell names
-    // the box, not the holder's slot").
+    // (docs/impl/region/compensate.md).
     let module = compile_to_lir(
         "(begin (def f (fn (t) (def @c 0) \
          (let [g (fn () (assign c (%add c 1)) c)] (if t (g) 0)))) (f false))",
@@ -256,8 +253,7 @@ fn a_reading_arm_tail_releases_the_env_cell_its_sibling_relocated() {
     // takes the `tail` route instead: one `DecrefCellRegion` after its
     // `LoadCapture`. The route's same-node retain is a claim about the value the
     // holder names; the box's own holders are the frame's env slot and the
-    // capturer's counted edge (docs/impl/region/mechanism.md § "A compensating
-    // release of an env cell names the box, not the holder's slot").
+    // capturer's counted edge (docs/impl/region/compensate.md).
     let module = compile_to_lir(
         "(begin (def f (fn (n t) (def @c n) \
          (let [g (fn () c)] (if t c (g))))) (f 1 true))",

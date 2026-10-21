@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-20
 //! Lowering a tail call: the frame-replacing `TailCall`, the relocation point it opens, and what its native fall-through owes.
 //!
 //! docs/impl/region/relocate.md
@@ -36,10 +36,9 @@ impl<'a> Lowerer<'a> {
         // pure-moving it hands the callee a reference the caller never
         // owned, and the callee's owned-param release over-frees it,
         // draining the capture RC to a premature free
-        // (region-tail-move-borrow-uaf.lisp; the `<stdlib>:1759` async
-        // scheduler UAF — its `pending`/`runnable`/`fiber-io` @structs
-        // are captured upvalues forwarded into `put`/`del`/... tail
-        // calls). Hand the callee one fresh owning reference, the
+        // (region-tail-move-borrow-uaf.lisp; the async scheduler's
+        // `pending`/`runnable`/`fiber-io` @structs are captured upvalues
+        // forwarded into `put`/`del`/... tail calls). Hand the callee one fresh owning reference, the
         // tail-position mirror of the non-tail `CallArgument` incref
         // (`push_param`, `own_params`); the callee's release then
         // balances this incref and leaves the env's capture-ref intact.
@@ -47,8 +46,8 @@ impl<'a> Lowerer<'a> {
         // fall-through consumes the retain instead (the
         // `borrowed_arg_slots` releases below) — one consumer on
         // either path.
-        // The incref itself was already emitted per-arg in the
-        // arg-lowering loop above (it MUST precede the later arg/func
+        // The incref itself was already emitted per-arg in
+        // `lower_call`'s argument loop (it MUST precede the later arg/func
         // pushes so the emitter need not `DupN` the value to the top);
         // see that loop's comment for the stack-layout reasoning.
 
@@ -94,9 +93,7 @@ impl<'a> Lowerer<'a> {
             // The borrowed-argument retains this call minted, so a
             // SIGNAL exit — which reaches neither the callee's
             // owned-param release nor the fall-through block below —
-            // can consume them itself
-            // (docs/impl/region/mechanism.md § "What the fall-through
-            // owes, a signal exit owes too").
+            // can consume them itself (docs/impl/region/signalexit.md).
             borrowed_arg_slots: Slots::new(&stash),
         });
         // From here the block runs only on the NATIVE fall-through: a
@@ -109,8 +106,7 @@ impl<'a> Lowerer<'a> {
         // release the ENCLOSING scopes emit into this block afterwards does
         // not: it is the frame's own reference, stranded once per call.
         // Open the relocation point that carries those releases back ahead
-        // of the frame replacement (docs/impl/region/mechanism.md § "A
-        // release past a frame-replacing tail call is not a release").
+        // of the frame replacement (docs/impl/region/relocate.md).
         if let Some(call_id) = self.current_hir_id {
             self.open_tail_exit_hoist(call_id, func, args, &operands);
         }
@@ -118,7 +114,7 @@ impl<'a> Lowerer<'a> {
         // tail-position mirror of `lower_return`'s `IncrefValueRegion`.
         // A native/collection tail call pushes NO bytecode frame: on
         // normal completion the dispatch loop pushes the result and runs
-        // this post-`TailCall` block (`tail_call_inner`, src/vm/call.rs)
+        // this post-`TailCall` block (`tail_call_inner`, src/vm/call/inner/tail.rs)
         // before the enclosing lambda's `Return`. The native already
         // applied ONE pass-through retain (`dispatch_native_call`), which
         // the caller's `DecrefValueRegion` consumes — so WITHOUT a second
@@ -161,7 +157,7 @@ impl<'a> Lowerer<'a> {
         // own pass-through retain (`def.moves_out`) — so that in-body retain is
         // the caller's single owning reference. A second ReturnValue retain
         // here double-counts and frees the element under a live reference
-        // (`region_pop_tail_moves_out_uaf`). Recorded only for the PassThrough
+        // (`region-pop-tail-moves-out-uaf.lisp`). Recorded only for the PassThrough
         // subset (`moves_out_release_sites`), so a FRESH-result moves-out pop
         // (`@string` grapheme / `@bytes` int) is absent and KEEPS its retain.
         let moves_out_here = self
@@ -171,7 +167,7 @@ impl<'a> Lowerer<'a> {
         // tail-calls a non-member out of a merged arena), and the merge admitted
         // it on the premise that SOME mint stands between the native's result and
         // the binding-scope `DecrefRegion` emitted after this body
-        // (docs/impl/region/letrec.md § The frontier gate). The two suppressions
+        // (docs/impl/region/letrec.md). The two suppressions
         // below hand that role to a retain the native already took, which the
         // premise does not read — so the merge must never have admitted a site
         // wearing them. It cannot today (a container site needs a `Match`-armed

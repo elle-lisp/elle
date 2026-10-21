@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-20
 //! HIR to LIR lowering: the `Lowerer` and the state one function's lowering
 //! carries. The passes themselves live in the sibling modules named below.
 //!
@@ -201,8 +201,7 @@ pub struct Lowerer<'a> {
     /// region would leak. `tail_callee_defers_release` routes a tail call to such
     /// a binding through the activation's own deferred set (`ActivationDues`).
     /// That frees the region exactly once at whichever end the activation
-    /// reaches (docs/impl/region/owner.md § "A deferred tail-call release has the
-    /// node's life"). Gating on the tail-call body keeps the deferral from
+    /// reaches (docs/impl/region/owner.md). Gating on the tail-call body keeps the deferral from
     /// double-freeing a self-recursive closure whose `DecrefRegion` fires live
     /// instead, in a non-tail body.
     stranded_self_bindings: rustc_hash::FxHashSet<Binding>,
@@ -260,8 +259,7 @@ pub struct Lowerer<'a> {
     /// names. So `emit_increfs_for` can classify a post-merge intra-region
     /// self-edge (`is_merge_self_edge(source, target)`) and DROP it. A merged
     /// `source→target` store edge is intra-region, so the self-skipping cascade
-    /// would never balance its incref (docs/impl/region/mechanism.md
-    /// § "Self-edge elimination").
+    /// would never balance its incref (docs/impl/region/mechanism.md).
     increfs_by_site: HashMap<HirId, Vec<(crate::hir::region::Region, crate::hir::region::Region)>>,
     /// `region_data` indexed by `decref_point` HirId — regions whose demise
     /// lands at that node. Built once in `with_region_info` so
@@ -270,8 +268,7 @@ pub struct Lowerer<'a> {
     decrefs_by_decref_point: HashMap<HirId, Vec<crate::hir::region::Region>>,
     /// `RegionInfo::cell_containers` indexed by demise node — the fn-local
     /// 1-slot containers whose current content is dropped when that scope
-    /// exits (docs/impl/region/bindings.md § "Reassigned mutable bindings are
-    /// 1-slot containers"). Empty when the unit has no such cell.
+    /// exits (docs/impl/region/bindings.md). Empty when the unit has no such cell.
     cell_drops_by_demise: HashMap<HirId, Vec<Binding>>,
     /// Current HIR node being lowered. Set at the top of `lower_expr`.
     /// Used by `alloc_region_id()` to look up the region for allocations.
@@ -331,7 +328,7 @@ pub struct Lowerer<'a> {
     /// Tail-call HirIds whose result a `Return` mint already covers, so
     /// `lower_call`'s post-`TailCall` fall-through retain must stand down: the
     /// return mint is emitted exactly once per returned value
-    /// (docs/impl/region/mechanism.md § "The return mint is emitted exactly once").
+    /// (docs/impl/region/mechanism.md).
     ///
     /// The shape is ANF's canonical wrap of a tail call in a non-propagating tail
     /// position, `(let [t (f …)] (return t))`, built for a tail call nested in a
@@ -361,8 +358,7 @@ pub struct Lowerer<'a> {
     /// ahead of a branch arm's `TailCall`. Such a release must name a VALUE, so
     /// that the copy a path reaches second loads the `nil` the first stamped and
     /// no-ops. `emit_decref_for_region` reads this to take the value route for a
-    /// region it would otherwise release by id (docs/impl/region/replicate.md §
-    /// "Self-cancelling is a property of the ROUTE, not of the region's class").
+    /// region it would otherwise release by id (docs/impl/region/replicate.md).
     /// False everywhere else, where one point covers every path and one
     /// instruction does.
     replicating_release: bool,
