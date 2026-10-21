@@ -86,10 +86,8 @@ fn an_instance_hydrates_a_valid_blob_and_stores_nothing() {
         BootSource::Image,
         "the runtime did not hydrate the blob it was given"
     );
-    let (vm, symbols, cctx) = rt.parts();
-    let three = elle::pipeline::eval_all("(+ 1 2)", symbols, vm, cctx, "<blob>").expect("eval");
     assert_eq!(
-        three.as_int(),
+        eval(&mut rt, "(+ 1 2)").as_int(),
         Some(3),
         "the hydrated stdlib answered wrongly"
     );

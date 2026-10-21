@@ -20,8 +20,17 @@ use elle::image::ImageError;
 use elle::runtime::Runtime;
 use elle::value::Value;
 
+/// Evaluate `source` in `rt` and answer its value.
+fn eval(rt: &mut Runtime, source: &str) -> Value {
+    let (vm, symbols, cctx) = rt.parts();
+    elle::pipeline::eval_all(source, symbols, vm, cctx, "<image-boot>").expect("eval")
+}
+
 mod boot {
     include!("image_boot/boot.rs");
+}
+mod determinism {
+    include!("image_boot/determinism.rs");
 }
 mod warm {
     include!("image_boot/warm.rs");
