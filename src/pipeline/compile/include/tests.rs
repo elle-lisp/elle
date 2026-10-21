@@ -1,7 +1,7 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! Splicing an include re-reads the forms it renders, and the round trip keeps each literal's type.
 //!
-//! docs/modules.md
+//! docs/include.md
 
 use super::*;
 
@@ -19,11 +19,11 @@ fn count_7(s: &Syntax, ints: &mut usize, floats: &mut usize) {
 
 /// `splice_includes` re-stringifies each top-level form through `Syntax`
 /// Display and re-reads it. An integral-valued float literal must survive as
-/// a float: a `Float(7.0)` that Display renders as `7` re-reads as `Int(7)`,
-/// silently changing `(type-of 7.0)`'s answer from :float to :integer. This
-/// is the source of the WASM full-module float-literal corruption (only user
-/// code is spliced, so only user integral floats break; stdlib is verbatim).
-/// The end-to-end pins live in `tests/wasm_smoke` (float arithmetic).
+/// a float: a `Float(7.0)` that Display rendered as `7` would re-read as
+/// `Int(7)`, and `(type-of 7.0)` would answer :integer. Only user code is
+/// spliced, so the WASM full-module build would compute with the wrong type
+/// while the stdlib stayed correct. tests/wasm_smoke runs float arithmetic end
+/// to end.
 #[test]
 fn splice_includes_preserves_integral_float() {
     let mut cctx = CompileCtx::new();

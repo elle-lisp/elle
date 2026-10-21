@@ -6,7 +6,7 @@
 ## docs/test-runner.md
 ##
 ## Each acceptance test splices this file with the top-level
-## `include-file` directive (docs/modules.md). The implementation suite runs
+## `include-file` directive (docs/include.md). The implementation suite runs
 ## only the files it names, so this file never runs as a test itself.
 
 (def elle
