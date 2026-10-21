@@ -1,12 +1,12 @@
 // audited: 2026-10-20
 // docs/impl/jit.md
-//! When the translator seals a block, read off the values a translation
-//! builds, and a loop that still compiles to the right answer.
+//! When the translator seals a block, read off the block parameters a
+//! translation builds, and a loop that still compiles to the right answer.
 
 use super::*;
 use crate::hir::region::StaticRegion;
 use crate::lir::{CmpOp, ConstRef};
-use cranelift_codegen::ir::{Function, UserFuncName};
+use cranelift_codegen::ir::{Function, UserFuncName, ValueDef};
 
 /// fn() of `locals` locals: `blocks` blocks in a chain, each calling the
 /// function itself. The function may yield, so each call parks on a signal,
@@ -39,35 +39,41 @@ fn chain(blocks: u32, locals: u16) -> LirOwned {
     fixture.emitted_sites().build()
 }
 
-/// How many values translating `lir` creates. A block parameter the seal
+/// How many block parameters translating `lir` builds. A parameter the seal
 /// finds redundant becomes an alias, which keeps its entry, so the count
 /// holds every parameter the translation built, not only the ones it kept.
-fn values_built(lir: &LirOwned) -> usize {
+fn parameters_built(lir: &LirOwned) -> usize {
     let mut compiler = JitCompiler::new().expect("Failed to create compiler");
     let mut func =
         Function::with_name_signature(UserFuncName::user(0, 0), compiler.make_jit_signature());
     compiler
         .translate_function(&lir.view(), &mut func)
         .expect("Failed to translate");
-    func.dfg.num_values()
+    let dfg = &func.dfg;
+    dfg.values()
+        .filter(|v| dfg.value_is_alias(*v) || matches!(dfg.value_def(*v), ValueDef::Param(..)))
+        .count()
 }
 
 #[test]
-fn a_local_costs_the_same_values_however_many_blocks_read_it() {
+fn a_local_costs_the_same_parameters_however_many_blocks_read_it() {
     // Trap: the IR a translation leaves is the same whenever the blocks are
     // sealed, because the seal removes every parameter its predecessors agree
     // on. Only the values the translation built show the parameters it made.
+    // The count takes the parameters alone: each spill stores every local
+    // through a `stack_addr`, so the spill code grows with blocks times locals.
     //
     // Counter-factual: a translator that seals every block at the end gives
     // each block a parameter for each local its spills read. That costs time
     // and memory in proportion to blocks times locals, and this count grows
     // with the chain.
     let locals = 32;
-    let cost = |blocks| values_built(&chain(blocks, locals)) - values_built(&chain(blocks, 0));
+    let cost =
+        |blocks| parameters_built(&chain(blocks, locals)) - parameters_built(&chain(blocks, 0));
     let (short, long) = (cost(4), cost(64));
     assert_eq!(
         long, short,
-        "{locals} locals cost {short} values across 4 blocks and {long} across 64"
+        "{locals} locals cost {short} parameters across 4 blocks and {long} across 64"
     );
 }
 
