@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-21
 //! Per-region storage with dual-ended page layout.
 //!
 //! docs/impl/region/model.md
@@ -18,7 +18,8 @@
 //!
 //! The 16-byte page header — the region id, the `(generation, store)` stamp,
 //! and the self-validating size tag — lives in `header.rs` beside the masked
-//! walk that reads it from a pointer.
+//! walk that reads it from a pointer. `image.rs` adopts a hydrated image's pages
+//! and reports the layouts a dump copies.
 //!
 //! No per-slot free list — regions are freed in bulk only.
 
@@ -32,10 +33,12 @@ use crate::value::region_slice::RegionSlice;
 use crate::value::Value;
 
 mod header;
+mod image;
 
 #[cfg(test)]
 pub(crate) use header::header_if_valid;
 pub(crate) use header::{header_of_page_ptr, region_of_page_ptr, PageStamp, HEADER_SIZE};
+pub(crate) use image::PageLayout;
 
 /// Upper bound on a region's geometrically-growing page size.
 ///
@@ -108,7 +111,7 @@ impl RegionPage {
     /// Hand this page back to the pool along with the spans this region wrote.
     /// This is the only route a region page takes out of a region, so the
     /// cursors that describe it can never be read off a different page
-    /// (docs/impl/region/model.md § "Page recycling").
+    /// (docs/impl/region/model.md).
     ///
     /// The object span starts *after* the header, so the page keeps the
     /// `(region_id, generation, store)` stamp written at claim while it waits
@@ -129,15 +132,6 @@ impl RegionPage {
     }
 }
 
-/// One page's byte layout, as [`RegionPool::page_layouts`] reports it.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct PageLayout {
-    pub base: usize,
-    pub len: usize,
-    pub obj_cursor: usize,
-    pub data_cursor: usize,
-}
-
 /// The pages a hydrated image mapped: the interval they tile, and how many of
 /// the pool's pages, from the first, lie in it.
 struct ImageSpan {
@@ -150,9 +144,9 @@ pub(crate) struct RegionPool {
     pages: Vec<RegionPage>,
     region_id: u32,
     /// The `(generation, store)` stamp written into every page header this
-    /// pool claims (docs/impl/region/generations.md § "Region generations"). Fixed for the
-    /// pool's lifetime: a region is created at one generation, by one
-    /// store, and freed whole.
+    /// pool claims (docs/impl/region/generations.md). Fixed for the pool's
+    /// lifetime: a region is created at one generation, by one store, and freed
+    /// whole.
     stamp: PageStamp,
     /// Number of HeapObject slots allocated.
     obj_count: usize,
@@ -310,94 +304,6 @@ impl RegionPool {
         let freed = self.obj_count;
         self.obj_count = 0;
         freed
-    }
-
-    /// The address interval a hydrated image's pages tile, or `None` for a
-    /// region that hydrated nothing.
-    #[cfg(test)]
-    pub(crate) fn image_interval(&self) -> Option<Range<usize>> {
-        self.image.as_ref().map(|s| s.interval.clone())
-    }
-
-    /// Whether `addr` lies in the interval a hydrated image's pages tile.
-    #[inline]
-    pub(crate) fn image_contains(&self, addr: usize) -> bool {
-        self.image
-            .as_ref()
-            .is_some_and(|s| s.interval.contains(&addr))
-    }
-
-    /// Byte layout of every page this region owns, in claim order. The image
-    /// dumper reads these to copy page bytes and bound the meaningful spans
-    /// (docs/impl/image.md § Dumping).
-    pub(crate) fn page_layouts(&self) -> Vec<PageLayout> {
-        self.pages
-            .iter()
-            .map(|p| PageLayout {
-                base: p.page.as_ptr() as usize,
-                len: p.page.len(),
-                obj_cursor: p.obj_cursor,
-                data_cursor: p.data_cursor,
-            })
-            .collect()
-    }
-
-    /// Adopt a hydrated image's pages (docs/impl/image.md § Hydration steps
-    /// 3–5), each with the cursors the image's page table recorded. Each header
-    /// takes this region's identity, so later allocation into this region and
-    /// the release spans both see the true layout. The pages tile one interval,
-    /// which the pool records as its image.
-    pub(crate) fn adopt_image(&mut self, pages: Vec<(MmapPage, usize, usize)>) {
-        debug_assert!(
-            self.pages.is_empty() && self.image.is_none(),
-            "an image is adopted into a fresh pool"
-        );
-        let mut interval: Option<Range<usize>> = None;
-        for (page, obj_cursor, data_cursor) in pages {
-            debug_assert!(
-                HEADER_SIZE <= obj_cursor && obj_cursor <= data_cursor && data_cursor <= page.len(),
-                "hydrated page cursors out of order: {obj_cursor}..{data_cursor} in {}",
-                page.len(),
-            );
-            let base = page.as_ptr() as usize;
-            let end = base + page.len();
-            interval = Some(match interval {
-                None => base..end,
-                Some(i) => i.start.min(base)..i.end.max(end),
-            });
-            let mut rp = RegionPage::new(page, self.region_id, self.stamp);
-            rp.obj_cursor = obj_cursor;
-            rp.data_cursor = data_cursor;
-            self.pages.push(rp);
-        }
-        if let Some(interval) = interval {
-            debug_assert_eq!(
-                interval.len(),
-                self.allocated_bytes(),
-                "hydrated pages leave a gap in their interval"
-            );
-            self.image = Some(ImageSpan {
-                interval,
-                pages: self.pages.len(),
-            });
-        }
-    }
-
-    /// Rebuild the object bookkeeping from an image's object index
-    /// (docs/impl/image.md § Hydration step 5): route each object to `dtors`
-    /// or `ref_objs` by the same predicates the alloc path uses, and count it.
-    pub(crate) fn install_object_index(
-        &mut self,
-        objects: &[(*mut HeapObject, crate::value::heap::HeapTag)],
-    ) {
-        for &(ptr, tag) in objects {
-            if needs_drop(tag) {
-                self.dtors.push(ptr);
-            } else if holds_value_refs(tag) {
-                self.ref_objs.push(ptr);
-            }
-        }
-        self.obj_count += objects.len();
     }
 
     /// Add a new page from the pool.
