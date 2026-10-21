@@ -345,6 +345,9 @@ impl JitCompiler {
 
         // Translate LIR blocks
         for (position, bb) in lir.blocks().enumerate() {
+            if self.abandon.is_set() {
+                return Err(JitError::Abandoned);
+            }
             let cl_block = block_map[&bb.label()];
             builder.switch_to_block(cl_block);
             translator.current_block = position;

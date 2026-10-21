@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-20
 // docs/impl/jit.md
 //! The background JIT worker: the thread Cranelift runs on, and the task and
 //! result that cross to it.
@@ -7,10 +7,10 @@
 //! function while its native code is generated. When compilation finishes, the
 //! next call picks the code up from the cache.
 
+use crate::jit::compiler::Abandon;
 use crate::jit::{JitCode, JitCompiler, JitError};
 use crate::lir::{LirOwned, LirView};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 /// Cumulative Cranelift compilation time (ns) and task count across the
 /// process, readable by embedders for profiling.
@@ -48,8 +48,9 @@ pub(crate) struct JitWorker {
     tx: crossbeam_channel::Sender<JitTask>,
     rx: crossbeam_channel::Receiver<JitResult>,
     /// Set when the owning VM drops this worker. The thread reads it before
-    /// each compile, and discards the rest of its queue once it is set.
-    dropped: Arc<AtomicBool>,
+    /// each task and the compile reads it as it runs, so once it is set the
+    /// thread delivers nothing more.
+    abandon: Abandon,
     #[allow(dead_code)]
     handle: std::thread::JoinHandle<()>,
 }
@@ -59,8 +60,8 @@ impl JitWorker {
     pub fn new() -> Self {
         let (task_tx, task_rx) = crossbeam_channel::unbounded::<JitTask>();
         let (result_tx, result_rx) = crossbeam_channel::unbounded::<JitResult>();
-        let dropped = Arc::new(AtomicBool::new(false));
-        let owner_gone = Arc::clone(&dropped);
+        let abandon = Abandon::default();
+        let owner_gone = abandon.clone();
 
         let handle = std::thread::Builder::new()
             .name("elle-jit".into())
@@ -68,15 +69,19 @@ impl JitWorker {
                 crate::io::sigfd::mask_all_signals_on_this_thread();
 
                 while let Ok(task) = task_rx.recv() {
-                    if owner_gone.load(Ordering::Acquire) {
+                    if owner_gone.is_set() {
                         break;
                     }
                     let key = task.bytecode_key;
                     let t0 = std::time::Instant::now();
-                    let result = match JitCompiler::new() {
-                        Ok(compiler) => compiler.compile(&task.lir.view()),
-                        Err(e) => Err(e),
-                    };
+                    let result = JitCompiler::new().and_then(|compiler| {
+                        compiler
+                            .abandoned_by(owner_gone.clone())
+                            .compile(&task.lir.view())
+                    });
+                    if let Err(JitError::Abandoned) = result {
+                        break;
+                    }
                     JIT_COMPILE_NS.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
                     JIT_COMPILE_TASKS.fetch_add(1, Ordering::Relaxed);
                     let _ = result_tx.send(JitResult {
@@ -90,7 +95,7 @@ impl JitWorker {
         JitWorker {
             tx: task_tx,
             rx: result_rx,
-            dropped,
+            abandon,
             handle,
         }
     }
@@ -116,12 +121,12 @@ impl JitWorker {
     }
 }
 
-/// The queue ends with the VM that owns it (docs/impl/jit.md). The drop does
-/// not join the thread: the compile in progress finishes on its own, and the
-/// VM does not wait for it.
+/// The queue and the compile in progress end with the VM that owns them
+/// (docs/impl/jit.md). The drop does not join the thread, so the VM does not
+/// wait for a compile that is inside Cranelift's backend.
 impl Drop for JitWorker {
     fn drop(&mut self) {
-        self.dropped.store(true, Ordering::Release);
+        self.abandon.set();
     }
 }
 
