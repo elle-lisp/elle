@@ -1,12 +1,12 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! The process runtime: one compile-and-run lifecycle and one teardown sweep, shared by every entry path.
 //!
 //! docs/impl/region/rules.md
 //! docs/impl/image/boot.md
 //!
-//! A [`Runtime`] owns a [`RuntimeCore`], which holds the VM, the symbol table
-//! and the compile context, and points the VM at the other two. It boots them,
-//! from the boot image or from source. On `Drop` or an explicit
+//! A [`Runtime`] owns a [`RuntimeCore`], which holds the heap, the VM, the
+//! symbol table and the compile context, and points the VM at the other three.
+//! It boots them, from the boot image or from source. On `Drop` or an explicit
 //! [`Runtime::teardown`] it runs the process teardown sweep that
 //! docs/impl/region/rules.md specifies:
 //!
@@ -23,21 +23,22 @@
 //! world returns to its pre-`main` state. Only the native-fn primitives
 //! persist, and they are immediates that occupy no region.
 
+mod boot;
 mod core;
 
-pub use core::{BootCaches, RuntimeCore, WorkerBoot};
+pub use boot::{BootCaches, WorkerBoot};
+pub use core::RuntimeCore;
 
 use crate::compiler::stdlib_cache::StdlibCache;
 use crate::image::boot::{BootImage, BootSource};
 use crate::pipeline::CompileCtx;
 use crate::symbol::SymbolTable;
 use crate::vm::VM;
-pub(crate) use core::{BootFrom, Booted};
+pub(crate) use boot::{BootFrom, Booted};
 
-/// The observable result of a teardown sweep, the sweep's second property in
-/// docs/impl/region/rules.md. The standing target is
-/// `live_regions == 0`; a non-zero value is the current set of open leaks — the
-/// remaining work, not a tuning knob.
+/// The observable result of a teardown sweep (docs/impl/region/rules.md). The
+/// standing target is `live_regions == 0`; a non-zero value is the current set
+/// of open leaks — the remaining work, not a tuning knob.
 #[derive(Debug, Clone)]
 pub struct TeardownReport {
     /// Number of live regions after the sweep. Zero is the end-state; anything
@@ -117,7 +118,7 @@ impl Runtime {
         // under the process's policy (docs/impl/graft.md).
         core.compile().set_graft(crate::config::get().graft);
 
-        // The post-boot heap census (docs/impl/image/measurements.md, item 2):
+        // The post-boot heap census (docs/impl/image/measurements.md):
         // at this point every live object is boot state, the graph a boot
         // image must dump.
         if crate::trace::census() {
