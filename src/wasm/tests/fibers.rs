@@ -1,14 +1,13 @@
-// audited: 2026-09-06
+// audited: 2026-10-20
 // docs/impl/wasm.md
 //! Suspension that crosses the host: the scheduler, and `protect`/`defer`
 //! around a body that parks.
 //!
 //! A fiber whose body suspends is driven by the host resume chain, and the
 //! nested fiber `protect` and `defer` build must be re-driven when its own
-//! suspension propagates through the resumer — see src/wasm/AGENTS.md §
-//! "Uncaught-suspend propagation + re-drive". Each test below is a shape that
-//! returned a wrong value — not an error — when one of those handoffs was
-//! missing.
+//! suspension propagates through the resumer (src/wasm/AGENTS.md). Each
+//! test below is a shape that returns a wrong value — not an error — when one
+//! of those handoffs is missing.
 
 use super::*;
 
@@ -32,7 +31,7 @@ fn wasm_full_wait_via_call_resumes_continuation() {
     // call (`ev/join`, whose signal narrows to SIG_WAIT without SIG_YIELD) must
     // resume into the code after the call. The LIR must mark a SIG_WAIT call as
     // suspending (a CPS continuation frame); keyed off SIG_YIELD alone, the
-    // continuation `(+ x 2)` was dropped and the fiber returned the wait result.
+    // continuation `(+ x 2)` is dropped and the fiber returns the wait result.
     assert_eq!(
         eval_with_stdlib(
             "(ev/join (ev/spawn (fn [] (let [x (ev/join (ev/spawn (fn [] 1)))] (+ x 2)))))"
@@ -46,8 +45,8 @@ fn wasm_full_wait_via_call_resumes_continuation() {
 fn wasm_full_scheduler_resumes_joined_fiber() {
     // The motivating case: `ev/join` emits a `:wait` struct the compiled
     // scheduler dispatches with struct application; the child's value must flow
-    // back through `handle-join` to the joiner. Before the collection fallback,
-    // `handle-wait`'s `(request :op)` errored and the join never resumed.
+    // back through `handle-join` to the joiner. Without the collection fallback,
+    // `handle-wait`'s `(request :op)` errors and the join never resumes.
     assert_eq!(
         eval_with_stdlib("(ev/join (ev/spawn (fn () 42)))"),
         "42",
@@ -64,8 +63,8 @@ fn wasm_full_protect_around_suspending_join_returns_value() {
     // resume path must PROPAGATE that uncaught wait through the resumer (so the
     // scheduler catches it) and RE-DRIVE `f` on the resumer's resume, so the
     // single `(fiber/resume f)` only returns once `f` completes. Parking `f` and
-    // returning signal 0 (the old behavior) made `protect` read the raw
-    // wait-request struct instead of the body's value.
+    // returning signal 0 instead makes `protect` read the raw wait-request
+    // struct instead of the body's value.
     assert_eq!(
         eval_with_stdlib("(protect (ev/join (ev/spawn (fn [] (+ 10 20)))))"),
         "[true 30]",
@@ -77,8 +76,8 @@ fn wasm_full_protect_around_suspending_join_returns_value() {
 fn wasm_full_protect_around_suspending_join_captures_error() {
     // The child errors; `ev/join` re-raises it inside `f`, whose mask catches
     // SIG_ERROR, so `f` ends non-`:dead` holding the error. `protect` reports
-    // `[false error]`. Before the fix the wait never propagated, so `protect`
-    // returned the raw `:join` request as if it were the error payload.
+    // `[false error]`. A wait that does not propagate leaves `protect` returning
+    // the raw `:join` request as if it were the error payload.
     assert_eq!(
         eval_with_stdlib("(protect (ev/join (ev/spawn (fn [] (error {:e 1})))))"),
         "[false {:e 1}]",
@@ -88,9 +87,8 @@ fn wasm_full_protect_around_suspending_join_captures_error() {
 
 #[test]
 fn wasm_full_protect_around_direct_error_unaffected() {
-    // Regression guard: a direct (non-suspending) error inside `protect` is
-    // caught by `f`'s mask exactly as before — the suspend-propagation fix must
-    // not disturb the already-correct error path.
+    // A direct (non-suspending) error inside `protect` is caught by `f`'s mask;
+    // the suspend propagation must leave that error path alone.
     assert_eq!(
         eval_with_stdlib("(protect (error {:e 2}))"),
         "[false {:e 2}]",
