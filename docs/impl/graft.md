@@ -262,7 +262,11 @@ the two mutabilities of a string or an array apart.
 
 Every form in that grammar is free of effects, so a decided condition is removed
 whole. An `if` becomes its taken branch. A `(match (type-of x) …)` whose live
-arm is decided becomes that arm's body.
+arm is decided becomes that arm's body. A `when` guard that decides false
+becomes the `nil` of its untaken side, and a sequence drops such a statement:
+an immediate literal before the tail has no effect and no reader. A sequence
+left with its tail alone becomes the tail, so a grafted wrapper whose guards
+both go is its op and nothing else.
 
 A `cond` loses each clause whose test decides false. A clause whose test
 decides true becomes the `cond`'s else, and the clauses after it go. An `and`
@@ -305,8 +309,9 @@ the block. Such a `break` leaves the block for the statement after it:
 The guard narrowing reads this: a statement after a guard whose branch
 diverges knows the guard's condition was false ([type inference](typeinfer.md)).
 
-The fold deletes no statement from a sequence. A raise does not end its
-sequence, because an `:error` signal is resumable. A parent fiber that catches
+The fold deletes no statement that runs from a sequence, only a literal a
+decided guard left behind. A raise does not end its sequence, because an
+`:error` signal is resumable. A parent fiber that catches
 the error can resume the child, and the child continues with the statement
 after the raise ([fiber primitives](../signals/primitives.md)):
 
@@ -461,8 +466,9 @@ still runs, and deletes what the types decide around the calls that stay.
   deletion that narrows a join, a guard that proves through a grafted
   predicate and through a graft's `let`, a dead arm that binds a hoisted cell,
   and the error bit a dissolved body loses. It also pins a `cond` clause and
-  the `and` and `or` operands a decided test removes, and a block its own
-  `break` leaves, which proves nothing after it.
+  the `and` and `or` operands a decided test removes, a block its own
+  `break` leaves, which proves nothing after it, and the literal statement a
+  decided guard leaves, which goes.
 - `hir::typeinfer::tests::graft::a_payloads_fragment_decodes_once_per_compile`
   — two lookups of one stdlib function in one compile hand out one fragment.
 - `value::closure::tests::payload` — the payload record is exactly its
