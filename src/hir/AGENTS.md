@@ -60,7 +60,8 @@ Syntax (expanded)
     ▼
 Analyzer (&mut BindingArena)
     ├─► resolve variables → Binding (u32 index into BindingArena)
-    ├─► track mutations → arena.get_mut(b).is_mutated = true
+    ├─► track mutations → arena.get_mut(b).is_mutated = true, and whether a
+    │   nested lambda is the writer
     ├─► track captures → marked by scope lookup + CaptureInfo
     └─► infer signals → Signal
     │
