@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-20
 //! What the fold deletes after inference: a guard, a `cond` clause, an `and` or `or` operand, or a dispatch arm the types decide.
 //!
 //! docs/impl/graft.md
@@ -27,6 +27,52 @@ fn a_guard_over_a_proven_operand_is_deleted() {
     let src = "(defn g [b] (when (%not (%int? b)) (error :x)) (%mul 2 b)) (g 5)";
     let (hir, _) = compiled(src);
     assert_eq!(count_emits(&hir), 0, "{src}: the guard is gone");
+}
+
+/// How many statements before a sequence's tail are immediate literals, which
+/// is what a decided guard leaves where it stood.
+fn count_literal_statements(h: &Hir) -> usize {
+    let mut n = 0;
+    if let HirKind::Begin(items) = &h.kind {
+        n += items
+            .iter()
+            .take(items.len().saturating_sub(1))
+            .filter(|i| {
+                matches!(
+                    i.kind,
+                    HirKind::Nil
+                        | HirKind::EmptyList
+                        | HirKind::Bool(_)
+                        | HirKind::Int(_)
+                        | HirKind::Float(_)
+                        | HirKind::Keyword(_)
+                )
+            })
+            .count();
+    }
+    h.for_each_child(|c| n += count_literal_statements(c));
+    n
+}
+
+/// The `nil` a decided guard leaves is a statement with no effect and no
+/// reader, so it goes, and a sequence left with its tail alone is the tail.
+/// The counter-factual is that `nil` kept as a statement, which the lowerer
+/// stored and popped on every run, so a wrapper whose guards both went still
+/// cost two stores per call.
+#[test]
+fn a_decided_guard_leaves_no_statement_behind() {
+    for src in [
+        "(defn g [b] (when (%not (%int? b)) (error :x)) (%mul 2 b)) (g 5)",
+        "(defn h [a b] (+ a b)) (h 1 2)",
+    ] {
+        let (hir, _) = compiled(src);
+        assert_eq!(count_emits(&hir), 0, "{src}: every guard is gone");
+        assert_eq!(
+            count_literal_statements(&hir),
+            0,
+            "{src}: no guard left a literal statement behind"
+        );
+    }
 }
 
 /// Every caller of `myp` passes a `@struct`, so the dispatch in the grafted
