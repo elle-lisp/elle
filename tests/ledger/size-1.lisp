@@ -2,7 +2,7 @@
 # audited: 2026-10-21
 # The size ledger of tests/ratchet/size.lisp, part 1: each source over the cap at its 500-token bucket.
 (producer "tests/ratchet/size.lisp")
-["the excess the work sheds" :tokens 1034500]
+["the excess the work sheds" :tokens 1022500]
 ["the excess tables carry" :tokens 0]
 ["benches/benchmarks.rs" :tokens 3500]
 ["demos/conway/conway.lisp" :tokens 3000]
@@ -41,7 +41,6 @@
 ["lib/process/waits.lisp" :tokens 3500]
 ["lib/ratchet/ledger.lisp" :tokens 3500]
 ["lib/raylib.lisp" :tokens 14500]
-["lib/redis.lisp" :tokens 9500]
 ["lib/sdl3/device.lisp" :tokens 3500]
 ["lib/sdl3/texture.lisp" :tokens 4000]
 ["lib/sdl3/window.lisp" :tokens 4000]
