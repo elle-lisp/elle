@@ -1,12 +1,13 @@
 # Modules
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-21 -->
 
 Elle's modules: three raw loaders, the `import-file` form over them, an `import` macro in Elle, and conventions built from closures.
 
 There is no module syntax, no export declaration, and no visibility modifier.
 [modules-proposal.md](modules-proposal.md) describes the module system this
-one is becoming.
+one is becoming. A module runs after its importer has expanded, so its macros
+never reach the importer; [include.md](include.md) shares macros between files.
 
 
 ## Loading a file: import-file
@@ -48,9 +49,9 @@ path resolves against the working directory. Code calls `import-file` or
 `import/load-file` reads the file as UTF-8 source. It compiles the file, runs
 it on the current fiber, and returns the file's last expression. The file runs
 as a single letrec. Every call runs the file again, and the instance compiles
-it once while its compile inputs stay the same (§ "A load runs the file again"
-below). A file's definitions reach no other compile, so what an earlier load
-defined never changes how a later file compiles.
+it once while its compile inputs stay the same. A file's definitions reach no
+other compile, so what an earlier load defined never changes how a later file
+compiles.
 
 A loader compiles on behalf of the fiber that calls it. The file's macros
 expand without the capabilities that fiber withholds and without the effect
@@ -195,33 +196,19 @@ lexical scope, not from access modifiers.
 ## Parametric modules
 
 The closure can accept arguments, which makes the module configurable at
-import time:
+import time. Each call to the closure captures its own configuration, so two
+calls with different arguments produce independent instances.
+[formatter.lisp](../tests/modules/formatter.lisp) takes `:prefix`, `:suffix`
+and `:separator`:
 
 ```lisp
-# formatter.lisp
-# (fn [&named @prefix @suffix @separator]
-#   (default prefix "")
-#   (default suffix "")
-#   (default separator ", ")
-#   (defn wrap [s] (string prefix s suffix))
-#   (defn join [items] (string/join (map string items) separator))
-#   {:wrap wrap :join join})
-```
-
-```lisp
-# (let [fmt ((import "./formatter") :prefix "[" :suffix "]" :separator " | ")]
-#   (fmt:wrap "hello")          # => "[hello]"
-#   (fmt:join [1 2 3]))         # => "1 | 2 | 3"
-```
-
-Each call to the closure captures its own configuration. Two imports with
-different arguments produce independent instances:
-
-```lisp
-# (let [parens  ((import "./formatter") :prefix "(" :suffix ")")
-#       angles  ((import "./formatter") :prefix "<" :suffix ">")]
-#   (parens:wrap "x")           # => "(x)"
-#   (angles:wrap "x"))          # => "<x>"
+(def formatter (import "../tests/modules/formatter"))
+(def fmt (formatter :prefix "[" :suffix "]" :separator " | "))
+(assert (= "[hello]" (fmt:wrap "hello")))
+(assert (= "1 | 2 | 3" (fmt:join [1 2 3])))
+(def parens (formatter :prefix "(" :suffix ")"))
+(def angles (formatter :prefix "<" :suffix ">"))
+(assert (= ["(x)" "<x>"] [(parens:wrap "x") (angles:wrap "x")]))
 ```
 
 This is ML's functor pattern without any dedicated syntax.
@@ -263,20 +250,16 @@ works with a mock plugin in a test.
 
 ### Qualified (namespaced)
 
-Bind the whole module, and access a field with `mod:name`:
-
-```lisp
-# (def portrait ((import "std/portrait")))
-# (portrait:function analysis :my-fn)
-```
+Bind the whole module, and access a field with `mod:name`, as `fmt:wrap` does
+above.
 
 ### Destructured (flat)
 
 Pull specific names into scope:
 
 ```lisp
-# (def {:parse parse :pretty pretty} ((import "./json") :pretty-indent 4))
-# (pretty (parse input))
+(def {:wrap angle-wrap} (formatter :prefix "<" :suffix ">"))
+(assert (= "<y>" (angle-wrap "y")))
 ```
 
 ### Side-effect only
@@ -290,9 +273,6 @@ scope:
 # (import "./helpers")
 # (double 21)                   # error: undefined variable: double
 ```
-
-The only way to use a file's definitions is to have the file return them
-explicitly (the closure pattern) and bind the result.
 
 ### Plugin (shared object)
 
@@ -308,65 +288,6 @@ not know their names. The plugin that `make doctest` builds shows both:
 ```
 
 
-## Compile-time inclusion
-
-`import` loads a module when it runs: it compiles and runs a file, and returns
-a value. So a macro defined in an imported file is not available to the
-importing file's compiler. By the time the import runs, expansion is finished.
-
-`include` and `include-file` splice a file's source forms into the including
-file at compile time, before macro expansion:
-
-```lisp
-# (include-file "macros.lisp")      — relative to the including file
-# (include "./macros")              — resolved by import/resolve
-```
-
-### How it works
-
-When a file compile meets an `include` or `include-file` form at the top level,
-it:
-
-1. Reads and parses the target file, keeping the included file's source
-   locations
-2. Splices the parsed forms into the current file's form list at that position
-3. Continues expanding: included `defmacro` forms register in the expander,
-   `def`/`defn` forms enter the file's letrec, and everything else expands
-   normally
-
-The included forms become part of the including file as if they were written
-inline. Error messages and stack traces point back to the original file and
-line.
-
-### include vs include-file
-
-| Form | Resolution | Parallel to |
-|------|-----------|-------------|
-| `(include-file "path")` | Relative to the including file's directory | `import-file` |
-| `(include "spec")` | `import/resolve`, given the including file's directory | `import` |
-
-The compiler calls the standard library's `import/resolve` to resolve an
-`include`, so `include` and `import` share one set of rules.
-
-### When to use include vs import
-
-Use `import` when you want a module boundary: encapsulation, parameters,
-independent state. The imported file runs in its own scope and returns a value.
-
-Use `include` when you want definitions spliced into the current file's scope,
-mostly to share macro definitions across files. An included file has no
-encapsulation: every definition becomes part of the including file's letrec.
-
-### Circular inclusion
-
-The compiler detects a circular include. It tracks which files it has included,
-the root file among them, and fails when a file appears twice:
-
-```text
-main.lisp:3:1: include: circular dependency on 'macros.lisp'
-```
-
-
 ## Why this works
 
 **No new concepts.** Modules are closures. Exports are structs. Configuration
@@ -374,25 +295,8 @@ is keyword arguments. Namespacing is struct field access. A programmer who
 understands closures, structs, and destructuring already understands the
 module system.
 
-**Parametric by default.** A module that accepts configuration is a closure
-that takes arguments. There is no functor syntax and no module-type
-declaration.
-
-**Encapsulation from scope.** If a binding is not in the returned struct, it
-is not accessible. No `private` keyword is needed.
-
-**Selective import.** Destructuring gives you exactly the names you want,
-with renaming: `(def {:parse my-parse} ((import "./json")))`.
-
 **First-class modules.** A module is a value. Store it in a variable, pass
 it to a function, put it in a data structure, return it from another module.
-
-**Uniform native and Elle treatment.** `.so` plugins and `.lisp` files both go
-through `import` and both return values.
-
-**Replaceable resolution.** `import` is a macro and `import/resolve` a
-function, both written in Elle. A program that wants another module system
-writes its own over `import-file` and the loaders.
 
 
 ## Architectural constraints
@@ -446,16 +350,12 @@ loads file A, the second load of A raises an error that names the cycle:
 import/load-file: circular dependency: /home/me/a.lisp -> /home/me/b.lisp -> /home/me/a.lisp
 ```
 
-Every way out of a load releases its mark, so a file that failed — a compile
-error, a read failure, an error it raised — reports that same failure again
-when it is loaded once more, and only a load that is still in progress reads
-as a cycle.
+Every way out of a load releases its mark. A file that failed, by a compile
+error, a read failure or an error it raised, reports that failure again on the
+next load. Only a load still in progress reads as a cycle.
 
 A cycle of literal `import-file` forms reaches the same check. Compiling a file
 never compiles a file it imports, so nothing recurses at compile time.
-
-**Why**: Loading happens at run time, so the check runs when a load re-enters
-a file that is still loading.
 
 ### No signal crosses a file boundary
 
@@ -491,8 +391,6 @@ reasoning patterns.
 | [special.rs](../src/hir/analyze/forms/special.rs) | Qualified symbol desugaring (`a:b` → `(get a :b)`) |
 | [lexer.rs](../src/reader/lexer.rs) | Qualified symbol lexing (`a:b` as a single token) |
 | [compile.rs](../src/pipeline/compile.rs) | `compile_file`: file-as-letrec compilation |
-| [include.rs](../src/pipeline/compile/include.rs) | `include` and `include-file` resolution and splicing, and the circular include check |
 | [module_cli.rs](../tests/integration/module_cli.rs) | A cycle of literal imports, run as a program and analyzed |
 | [modules.lisp](../tests/lang/modules.lisp) | Behavioral tests for module patterns |
-| [include.lisp](../tests/lang/include.lisp) | Behavioral tests for compile-time inclusion |
 | [modules/](../tests/modules) | Module fixtures (formatter, counter, test) |

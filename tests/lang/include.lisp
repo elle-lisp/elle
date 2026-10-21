@@ -1,7 +1,8 @@
 (elle/epoch 15)
 # audited: 2026-10-21
 # include and include-file splice a file's macros and definitions into the including file.
-# docs/modules.md
+# docs/include.md
+#
 
 # ── include-file with relative path ──────────────────────────────────────────
 

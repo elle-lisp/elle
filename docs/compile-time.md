@@ -1,6 +1,6 @@
 # Compile-Time Operations
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-21 -->
 
 The forms that act at compile time, and the `compile/*` API that reads the
 compiler's model from running code.
@@ -12,12 +12,10 @@ code runs (see [pipeline.md](pipeline.md)). It then exposes that work two ways:
   resolved during expansion/analysis and emit no runtime code (or emit
   annotations the later stages consume).
 - **A `compile/*` API that *queries and transforms* the compile-time model from
-  ordinary runtime code** — the reflective "superpower" the
-  [README](../README.md) describes.
+  ordinary runtime code**, as the [README](../README.md) shows.
 
-This page is the single index of all of them. Deep dives live in the linked
-topic docs; this catalog is the map. Its examples run as one program under
-`make doctest`.
+This page indexes all of them, and the linked topic documents own each one. Its
+examples run as one program under `make doctest`.
 
 ## Timing at a glance
 
@@ -49,18 +47,19 @@ Three prefixes/suffixes signal *when* an operation acts:
   members bend the rule. `(unicode!)` with no arguments is a query, not an
   assertion, and folds to the selected Unicode version array. `gate!` is a
   prelude macro whose test runs at run time.
-- **`%name` — an intrinsic.** Compile-time proven against its operand contract,
-  then lowered to a single VM instruction (storing ops to the native funnel
-  call) — no runtime validation, no signal emission, no rest-arg allocation;
-  an unproven call is a compile error. See [intrinsics.md](intrinsics.md).
+- **`%name` — an intrinsic.** The compiler proves each call against the
+  operand contract and lowers it to a single VM instruction, or a storing op
+  to the native funnel call. It carries no runtime validation, no signal and no
+  rest-arg allocation, and an unproven call is a compile error. See
+  [intrinsics.md](intrinsics.md).
 - **`compile/name` — a reflective op over the compile-time model**, callable
   from normal runtime code. See [analysis/portrait.md](analysis/portrait.md).
 
 ## Macro expansion
 
 Macros are defined with `defmacro` (alias `define-macro`) and expand **between
-the reader and the analyzer** — arguments arrive quoted, the body is compiled and
-run on the VM, and the result is converted back to syntax. Expansion is hygienic
+the reader and the analyzer**. The arguments arrive quoted, the body is compiled
+and run on the VM, and the result is converted back to syntax. Expansion is hygienic
 via sets-of-scopes. Two expand-time introspection forms exist: `(macro? name)`
 answers whether `name` names a macro, and `(expand-macro 'form)` expands a form
 written with the `'` reader prefix and hands the expansion back as data.
@@ -92,9 +91,9 @@ Signals are inferred at compile time and flow up from callee to caller (see
 | `(yield value)` | a macro for `(emit :yield value)` |
 
 `bound`, `silent!`, `attune!`, and `emit` are **special forms** analyzed during
-signal inference. `squelch` and the runtime `attune` are **runtime wrappers** that
-intercept a closure's signals after the fact while also narrowing the inferred
-signal at compile time — see [signals/](signals/) for the full model and the
+signal inference. `squelch` and the runtime `attune` are **runtime wrappers**:
+they intercept a closure's signals after the fact, and narrow the inferred
+signal at compile time. [signals/](signals/) owns the full model and the
 spec-first argument order `squelch` and `attune` share.
 
 ```lisp
@@ -215,11 +214,8 @@ construction; `environment` desugars to a struct of the in-scope bindings.
 | `(import-file path)` | the file `path` names, relative to the writer's directory, loaded when the form runs |
 | `(include-file path)`, `(include spec)` | the forms of a file, spliced in before expansion |
 
-The compiler fixes `meta/location` from the form's source location. A form a
-macro builds carries the location of the macro call, which is how the `import`
-macro learns the directory of the file that calls it. With a literal path,
-`import-file` names its file at compile time. [modules.md](modules.md) owns all
-three.
+[modules.md](modules.md) owns `meta/location` and `import-file`, and
+[include.md](include.md) owns the two include forms.
 
 ```lisp
 (assert (= "compile-time.md" (path/filename (get (meta/location) :file))))
@@ -285,12 +281,10 @@ tier tests this implementation ([spec.md](spec.md),
 
 ## Intrinsics
 
-`%`-prefixed operations, compile-time prove-or-reject: the compiler proves each
-call's operands against the op's soundness contract, and proven operands lower
-to one VM instruction (storing ops to the native funnel call); an unproven call
-is a compile error. In value position an intrinsic is its registered `NativeFn`,
-which validates at runtime when called dynamically. The complete list and the
-trade-offs: [intrinsics.md](intrinsics.md).
+A `%`-prefixed call is proven or rejected at compile time, as the naming
+conventions above say. In value position an intrinsic is its registered
+`NativeFn`, which validates at runtime when called dynamically. The complete
+list and the trade-offs: [intrinsics.md](intrinsics.md).
 
 ## Runtime reflection (for contrast — *not* compile-time)
 

@@ -1,7 +1,7 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! `include` and `include-file`: resolve each to its file, and splice the file's forms in.
 //!
-//! docs/modules.md
+//! docs/include.md
 //! src/pipeline/AGENTS.md
 
 use super::*;
