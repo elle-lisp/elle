@@ -1,4 +1,4 @@
-// audited: 2026-10-07
+// audited: 2026-10-20
 // docs/impl/jit.md
 //! Cranelift JIT compilation of LIR functions, and the types every stage of it
 //! shares.
@@ -68,8 +68,7 @@ use std::fmt;
 /// each helper reaching its own instance's VM. The compiled function's prologue
 /// (`compiler/translate.rs`) builds a `JitCtx` in a stack slot — holding the
 /// driving VM, its 4th entry parameter — and the intrinsic emit sites thread its
-/// address to each helper, which resolves the VM from it (docs/impl/region/ctx.md
-/// "JIT intrinsic helpers reach the VM through a JitCtx").
+/// address to each helper, which resolves the VM from it (docs/impl/region/ctx.md).
 ///
 /// `#[repr(C)]` with the VM at offset 0 so the prologue's raw `stack_store` of the
 /// `vm` pointer lands on the `vm` field; the heap axis extends this bundle with a
@@ -108,8 +107,7 @@ impl JitCtx {
 /// callee closure's own region, and the merged closure-cycle arena's static slot
 /// (see `InstrRef::TailCall`). A frame-replacing tail call strands both releases,
 /// and the activation that runs the callee takes them over
-/// (docs/impl/region/relocate.md § "A channel built in compiled code hands its
-/// release forward").
+/// (docs/impl/region/relocate.md).
 ///
 /// Both are `u32` at the C ABI and neither is the other, so they cross as one
 /// named pair rather than as two bare arguments a call site could swap.
@@ -154,6 +152,8 @@ pub enum JitError {
     CompilationFailed(String),
     /// Invalid LIR structure
     InvalidLir(String),
+    /// The VM that asked for the compile dropped its worker first.
+    Abandoned,
 }
 
 impl fmt::Display for JitError {
@@ -165,6 +165,7 @@ impl fmt::Display for JitError {
             JitError::Polymorphic => write!(f, "JIT: function has polymorphic signal"),
             JitError::CompilationFailed(msg) => write!(f, "JIT compilation failed: {}", msg),
             JitError::InvalidLir(msg) => write!(f, "JIT: invalid LIR: {}", msg),
+            JitError::Abandoned => write!(f, "JIT: the VM that asked for the compile is gone"),
         }
     }
 }
@@ -183,7 +184,7 @@ pub struct JitRejectionInfo {
     /// negative cache holds, and more only if something re-submitted it.
     pub attempts: usize,
     /// Pin on the code region of the code object whose bytecode this
-    /// rejection is keyed by (docs/impl/jit.md § "Cache identity"): while the
+    /// rejection is keyed by (docs/impl/jit.md): while the
     /// entry lives, the address cannot be reused by a different function, so
     /// the negative cache can never wrongly block a new function from
     /// compiling, and the attempt count can never pass to one.

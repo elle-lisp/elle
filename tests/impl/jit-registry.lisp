@@ -1,22 +1,12 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-20
 # Each compiled function's entry address and name are in the JIT code-address registry.
-# docs/impl/jit.md
+# docs/impl/jit-map.md
 #
-# A native thread photograph names every frame it can symbolize; a JIT frame
-# shows only `??? (in <unknown binary>)`, because the code lives in an
-# anonymous Cranelift mapping. The registry is the missing symbol table: each
-# successful compile records its entry address and function name, and
-# `(vm/query "jit/map" nil)` renders the table for the reader holding such a
-# photograph. The test runner prints it beside the photograph when a form
-# misses its deadline.
-#
-# A compiled function's registry label is its declared name when one exists,
-# else its source location — and binder names reach closure payloads
-# (docs/functions.md), so the probe's defn name identifies
-# it below. With the JIT off (a sidecar, or a build without the JIT tier)
-# nothing compiles here and the map may be empty; the render is a string either
-# way.
+# Binder names reach closure payloads (docs/functions.md), so the probe is
+# labeled by its defn name below. With the JIT off (a sidecar, or a build
+# without the JIT tier) nothing compiles here and the map may be empty; the
+# render is a string either way.
 
 (defn registry-probe [x]
   (if x x 1))
@@ -37,12 +27,8 @@
     (assert (string/contains? m "registry-probe")
             "jit/map: a compiled function's name appears in the registry")))
 
-# The peek beside the map (docs/impl/jit.md): the map names the function a
-# sampled frame belongs to, and the peek shows a window of instruction words
-# around the frame's address — each line prefixed with its own address, wide
-# enough to carry a LoadExtName call-target literal past a parked PC. An
-# address outside every registered block — including one from a photograph
-# whose module is gone — answers nil rather than faulting.
+# Each line of the peek window names its own address, and an address outside
+# every registered block answers nil rather than faulting.
 (let [m (vm/query "jit/map" nil)]
   (when (and (vm/query "jit?" registry-probe) (> (length m) 0))
     (let* [line (get (string/split m "\n") 0)

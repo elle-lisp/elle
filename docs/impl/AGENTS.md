@@ -23,6 +23,7 @@ Up: [..](../AGENTS.md)
 - [io-bytes.md](io-bytes.md) — **Where a stream operation's bytes live** A read lands in the caller's region and a write leaves from the payload's, and the operation holds both while the kernel works.
 - [io-descriptor.md](io-descriptor.md) — **Descriptors and workers** What a `port/close` retires, how it wakes the operations still holding the descriptor, and how the thread pool reuses a worker.
 - [io-inflight.md](io-inflight.md) — **An operation in flight** What a submitted I/O operation holds and owns, and how it ends when the fiber that asked is gone.
+- [jit-map.md](jit-map.md) — **The JIT code map** A table of every compiled function's entry address and name, for a reader who holds a native stack with JIT frames in it.
 - [jit.md](jit.md) — **JIT** The JIT compiles hot functions from LIR to native code using Cranelift.
 - [lexicon.md](lexicon.md) — **Lexicon: epoch-aware lexing** An epoch selects the lexer rules that tokenize a file, so a breaking change can reach below the syntax tree to the tokens themselves.
 - [lir.md](lir.md) — **LIR — Low-level IR** LIR is an SSA-form intermediate representation with virtual registers, basic blocks, and explicit control flow.

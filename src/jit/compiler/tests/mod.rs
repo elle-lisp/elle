@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-20
 // docs/impl/jit.md
 //! What the solo-compilation gate accepts and rejects, and what the compiled
 //! entry it produces records about itself.
@@ -13,6 +13,7 @@ mod clif;
 mod exits;
 mod makeclosure;
 mod regions;
+mod seal;
 mod stores;
 
 /// fn(x) -> x, before it freezes, so a test can set one more field first.

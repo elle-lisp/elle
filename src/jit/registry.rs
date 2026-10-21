@@ -1,11 +1,12 @@
+// audited: 2026-10-20
+// docs/impl/jit-map.md
 //! The process-global JIT code-address registry.
 //!
 //! Native samplers cannot name JIT frames: the code lives in anonymous
 //! Cranelift mappings, so a thread photograph shows `??? (in <unknown
 //! binary>)` exactly where the answer is. Every successful compile records
 //! its entry address and function name here, and `(vm/query "jit/map" nil)`
-//! renders the table for the reader holding such a photograph. See
-//! docs/impl/jit.md § "The code-address registry".
+//! renders the table for the reader holding such a photograph.
 //!
 //! One table for the whole process, fed from every VM's compile paths (the
 //! background `elle-jit` workers and the synchronous tier probes alike).
@@ -62,11 +63,10 @@ fn resident(addr: usize, len: usize) -> bool {
 
 /// A window of 32-bit words around `addr` — the instructions a sampled PC
 /// is parked on plus their neighborhood, read beside the photograph the
-/// address came from (docs/impl/jit.md § "The code-address registry"). The
-/// window runs from 16 bytes before `addr` (clamped to the nearest
-/// registered entry) to 48 bytes after, sized so a PC parked just before an
-/// AArch64 `LoadExtName` sequence still shows the 8-byte call-target
-/// literal that follows its branch. Rendered four words per
+/// address came from. The window runs from 16 bytes before `addr` (clamped
+/// to the nearest registered entry) to 48 bytes after, sized so a PC parked
+/// just before an AArch64 `LoadExtName` sequence still shows the 8-byte
+/// call-target literal that follows its branch. Rendered four words per
 /// `0x<addr>: 0x<w0> 0x<w1> 0x<w2> 0x<w3>` line; a line whose page is gone
 /// renders `(unmapped)`. `None` when the address precedes every entry, sits
 /// more than `PEEK_SPAN` past its nearest one, or its own 16 bytes are gone.

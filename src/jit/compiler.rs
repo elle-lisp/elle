@@ -1,7 +1,7 @@
-// audited: 2026-10-12
+// audited: 2026-10-20
 // docs/impl/jit.md
-//! `JitCompiler`: the Cranelift module a compile owns, and the two entry points
-//! that drive one frozen function through it.
+//! `JitCompiler`: a compile's Cranelift module, the flag that abandons it,
+//! and the two entry points that drive a frozen function through it.
 //!
 //! `compile` produces native code and the `JitCode` that keeps it alive, and
 //! refuses the two shapes `LirView::jit_refusal` names; those refusals are
@@ -9,6 +9,8 @@
 //! Cranelift IR, for diagnostics, and renders whatever it is handed.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::types::{I32, I64};
@@ -34,13 +36,31 @@ use super::JitError;
 #[allow(clippy::vec_box)] // the Box stable-address is the point (see `JitCode`)
 type TranslatedConsts = Vec<Box<crate::value::ConstTemplate>>;
 
+/// Set once the VM that asked for a compile has dropped its worker, and read
+/// by the compile at each point where it can stop (docs/impl/jit.md).
+#[derive(Clone, Default)]
+pub(crate) struct Abandon(Arc<AtomicBool>);
+
+impl Abandon {
+    pub(crate) fn set(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    pub(crate) fn is_set(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+}
+
 /// JIT compiler that translates frozen LIR to native code
 pub struct JitCompiler {
     module: JITModule,
     /// Runtime helper function IDs
     helpers: RuntimeHelpers,
+    /// The drop of the worker this compile runs for, or a flag nothing sets.
+    abandon: Abandon,
 }
 
+mod seal;
 mod translate;
 
 impl JitCompiler {
@@ -75,7 +95,17 @@ impl JitCompiler {
         // Declare runtime helper functions
         let helpers = vtable::declare_helpers(&mut module)?;
 
-        Ok(JitCompiler { module, helpers })
+        Ok(JitCompiler {
+            module,
+            helpers,
+            abandon: Abandon::default(),
+        })
+    }
+
+    /// Stop this compile with `JitError::Abandoned` once `abandon` is set.
+    pub(crate) fn abandoned_by(mut self, abandon: Abandon) -> Self {
+        self.abandon = abandon;
+        self
     }
 
     /// Build the standard JIT function signature.
@@ -123,6 +153,10 @@ impl JitCompiler {
 
         // Translate LIR to Cranelift IR
         let templates = self.translate_function(lir, &mut ctx.func)?;
+        // The backend cannot be interrupted, so this is the last place to stop.
+        if self.abandon.is_set() {
+            return Err(JitError::Abandoned);
+        }
 
         // Compile the function
         self.module
