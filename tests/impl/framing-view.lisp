@@ -44,4 +44,39 @@
 (println "  1. a line inside the chunk is a view of it")
 
 (assert (nil? (framing:line f)) "the source ends after its one chunk")
+
+# A framer starts with nothing in hand, so its first record comes after a
+# fill, as does every record that starts a chunk. One such copy hides in the
+# cache or in the spare room of a page the program already holds, so the
+# section above passes over it on one layout and fails on another. Sixteen
+# framers over one chunk each answer their first line here: sixteen copies
+# claim 16 MiB, more than the cache and any spare room can hide.
+
+(defn served-once [data]
+  "A source answering data once, then nil."
+  (def @done false)
+  (fn [n]
+    (if done
+      nil
+      (begin
+        (assign done true)
+        data))))
+
+(def two-lines (bytes (string/repeat line-text 2)))
+(def framers
+  (map (fn [_] (framing:open (served-once two-lines) :size (* 16 mib)))
+       (range 16)))
+
+(let [before (arena/bytes)
+      firsts (map (fn [g] (framing:line g)) framers)
+      after (arena/bytes)
+      grew (- after before)]
+  (assert (= 16 (length firsts))
+          "every first line is held while the gauge is read")
+  (each l in firsts
+    (assert (= (dec mib) (length l)) "each first line is 1 MiB less its newline"))
+  (assert (< grew mib)
+          (string "the first line after a fill claims no page for its payload: grew "
+                  grew)))
+(println "  2. the first line after a fill is a view of the chunk")
 (println "framing-view: ok")
