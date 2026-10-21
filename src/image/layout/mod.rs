@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-21
 //! Layout probes for the records the dumper writes into page bytes: each
 //! variant's discriminant byte and the byte extents of its leaf fields.
 //!
@@ -10,7 +10,8 @@
 //! measured against the record's base address. The probe verifies its own
 //! assumptions on first use and panics on violation, so a compiler that moves
 //! a discriminant or reorders fields fails loudly before any image is written
-//! or trusted.
+//! or trusted. `HeapObject` is `repr(u64)`, so its tag is its first word in
+//! every build; the other two records leave the layout to rustc.
 //!
 //! Three records carry a discriminant into the body, so three are probed: the
 //! `HeapObject` an object slot holds, the `TableKey` a struct entry begins
@@ -70,7 +71,7 @@ pub(crate) struct VariantLayout<Tag: 'static> {
     pub fields: Vec<FieldExtent>,
 }
 
-/// A `repr(Rust)` enum the dumper writes into page bytes.
+/// An enum the dumper writes into page bytes.
 ///
 /// The probe is written once against this trait, because the records it
 /// measures differ only in which variants they have and how a variant's
@@ -91,9 +92,9 @@ pub(crate) trait Probed: Sized + 'static {
     /// above the first is zero, which is what lets a reader compare the
     /// span byte-wise against `disc` and zeros.
     ///
-    /// It is a property of the record, not a constant: a `HeapObject` aligns
-    /// its first field to a word, while a `TableKey` puts a `bool` payload in
-    /// the very next byte.
+    /// It is a property of the record, not a constant: a `HeapObject`'s
+    /// discriminant is a whole word, while a `TableKey` puts a `bool` payload
+    /// in the very next byte.
     const DISC_BYTES: usize;
 
     /// The probed layouts, behind this record's own `OnceLock`.

@@ -1,4 +1,7 @@
+// audited: 2026-10-21
 //! Value accessors for extracting typed data from Values.
+//!
+//! docs/impl/values.md
 
 use std::any::Any;
 
@@ -136,12 +139,12 @@ impl Value {
                 {
                     let mut cache = cif_cache.borrow_mut();
                     if cache.is_none() {
-                        *cache = Some(crate::ffi::call::prepare_cif(sig));
+                        *cache = Some(Box::new(crate::ffi::call::prepare_cif(sig)));
                     }
                 }
                 // Return a Ref to the cached CIF
                 Some(std::cell::Ref::map(cif_cache.borrow(), |opt| {
-                    opt.as_ref().unwrap()
+                    opt.as_deref().unwrap()
                 }))
             }
             _ => None,
@@ -209,7 +212,7 @@ impl Value {
 
     /// The allocation-free cons-list walk shared by `list_to_vec` and
     /// `list_to_vec_in`. Handles a syntax-wrapped `nil`/empty list reached as a
-    /// list tail (e.g. from `letrec` in macros).
+    /// list tail (for example from `letrec` in macros).
     fn cons_list_to_vec(&self) -> Result<Vec<Value>, &'static str> {
         let mut result = Vec::new();
         let mut current = *self;
