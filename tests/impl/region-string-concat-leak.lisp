@@ -1,21 +1,21 @@
-(elle/epoch 12)
-# Counterfactual for the `string` concat region leak.
+(elle/epoch 15)
+# audited: 2026-10-20
+# `string` declares `Fresh`, so a multi-argument call leaks no region per heap argument.
+# docs/impl/region/effects.md
+# docs/impl/escape.md
 #
 # `string` (the variadic to-string / concat primitive, `prim_to_string` in
-# `src/primitives/convert.rs`) READS its arguments and returns a FRESH string; it
-# never STORES them into a longer-lived structure. It was mis-declared
-# `RegionEffect::Mixed`, which the escape analysis reads as "may store every heap
-# argument" (the full mutual clique — docs/impl/escape.md § "Native `Mixed`/`Unknown`
-# clique"). The solver then emits an escape-incref on each heap arg that the native
-# never balances, so every multi-arg `(string …)` call leaks ONE region per heap
-# argument — measured here in regions (`arena/region-count`), deterministically.
+# src/primitives/convert/tostring.rs) READS its arguments and returns a FRESH
+# string; it never STORES them into a longer-lived structure. Every path
+# allocates in the call's own region, the one-argument string case included, so
+# the declaration oracle's `Fresh` check holds and the native marks no argument
+# escaping.
 #
-# The fix declares `string` `RegionEffect::Fresh` and makes the 1-arg-already-string
-# case return a fresh copy (so the declaration oracle's Fresh check — result lives in
-# the call's own region — holds on every path). A `Fresh` native marks no arg
-# escaping, so the clique increfs disappear and the leak goes to zero.
-#
-# RED before the fix (rate ~1 region per heap arg); GREEN after.
+# The counter-factual is a `Mixed` declaration, which the escape analysis reads
+# as "may store every heap argument" (the full mutual clique). The solver then
+# emits an escape-incref on each heap argument that the native never balances,
+# so every multi-argument `(string …)` call leaks ONE region per heap argument —
+# measured here in regions (`arena/region-count`), deterministically.
 
 (defn region-delta [f iters]
   (def before (arena/region-count))
@@ -37,7 +37,7 @@
   (let [s (string "x" "y" "z")]
     0))  # 3 heap args
 
-# ── Correctness: concatenation still yields the right value (GREEN throughout) ──
+# ── Correctness: concatenation yields the right value ───────────────────────
 (assert (= (string "a-" 42) "a-42") "string concatenates literal and int")
 (assert (= (string "x" "y" "z") "xyz") "string concatenates literals")
 (assert (= (string "only") "only") "single string arg round-trips by value")

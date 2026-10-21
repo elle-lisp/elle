@@ -1,9 +1,11 @@
-(elle/epoch 12)
-# A fn-local 1-slot container whose INIT value carries a second name. The cell
-# cannot take that value by donation — the alias holds the producer's reference
-# and reads through it after the loop — so it counts the init instead, and keeps
-# the rest of the container model with it (docs/impl/region/bindings.md § "What
-# the cell donates it must hold alone; what it counts it need not").
+(elle/epoch 15)
+# audited: 2026-10-20
+# A fn-local 1-slot container whose init carries a second name counts the init and keeps the store-site pin.
+# docs/impl/region/bindings.md
+#
+# The cell cannot take that value by donation — the alias holds the producer's
+# reference and reads through it after the loop — so it counts the init instead,
+# and keeps the rest of the container model with it.
 #
 # What the model is worth here is the STORE-SITE PIN. Without it each stored
 # value's producer release rides the cell binding's uses out past the loop, so a

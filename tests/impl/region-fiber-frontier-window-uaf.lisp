@@ -1,23 +1,24 @@
-(elle/epoch 12)
-# Soundness complement of region-fiber-frontier-window.lisp: admitting the fiber
-# facet must not free anything early.
+(elle/epoch 15)
+# audited: 2026-10-20
+# Admitting the fiber facet frees nothing early: the soundness face of region-fiber-frontier-window.lisp.
+# docs/impl/region/held.md
+# docs/impl/region/park.md
 #
 # The admission rests on one fact — every seam that hands a value to another fiber
 # counts a reference of its own, so the crossing leaves a COUNTED holder rather
-# than the uncounted borrow the frame-held question guards against
-# (docs/impl/region/mechanism.md § "A fiber crossing is a counted holder too").
-# Going out, the park's `EmitEscape` retain is that reference. Coming back, the
-# resume value's own mint is (docs/impl/region/owner.md § "A resume value crosses
-# counted, or not at all"): the resumer pushes the value onto the parked frame's
-# stack and takes nothing for it, so without the mint the body reads the resumer's
-# reference — fine while the resume is still running, and a dangling read the
-# moment the body parks again holding the value and the resumer moves on.
+# than the uncounted borrow the frame-held question guards against. Going out,
+# the park's `EmitEscape` retain is that reference. Coming back, the resume
+# value's own mint is that reference, because the resumer pushes the value onto
+# the parked frame's stack and takes nothing for it. Without the mint the body
+# reads the resumer's reference — fine while the resume is still running, and a
+# dangling read the moment the body parks again holding the value and the
+# resumer moves on.
 #
 # So each witness below drives a delivered or emitted value across a point where
 # the OTHER side has already released: a body that keeps the value past a further
 # park, two bodies that keep the same value, a resumer that reads what it was
 # yielded after the emitting body ran on, and a value delivered from inside a
-# branch arm whose release the window now anchors at the merge. Beside them is the
+# branch arm whose release the window anchors at the merge. Beside them is the
 # refusal the admission must still make — a subject a containment facet carries to
 # a holder nothing counts — which must keep its in-arm release.
 #
@@ -71,7 +72,7 @@
       (length (first got)))))
 
 # The delivery sits in a BRANCH ARM, so the subject's one release is anchored at
-# the merge the window now admits. The arm that delivers must leave the receiver's
+# the merge the window admits. The arm that delivers must leave the receiver's
 # count standing; the arm that does not must still release. Both are driven.
 (defn arm-deliver (w v t)
   (match t
@@ -99,7 +100,7 @@
     _ 0)
   (length (first (get sink (%sub (length sink) 1)))))
 
-# ── control: the same reads with no crossing — correct now ────────────────────
+# ── control: the same reads with no crossing ──────────────────────────────────
 (defn c-plain (v)
   (length (first v)))
 

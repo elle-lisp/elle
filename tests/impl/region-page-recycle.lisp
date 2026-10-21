@@ -1,8 +1,9 @@
-(elle/epoch 14)
-# audited: 2026-10-05
-# What a call costs in PAGES — the third heap dimension
-# (docs/impl/region/model.md § "Page recycling"; docs/regions/performance.md
-# § "A call into a variadic stdlib operator allocates").
+(elle/epoch 15)
+# audited: 2026-10-20
+# What a call costs in PAGES, the heap dimension the object and region gauges cannot see.
+# docs/impl/region/model.md
+# docs/regions/performance.md
+# docs/impl/region/restlist.md
 #
 # Regions never share pages (Rule 6), so a shape's page count is not its object
 # count: three regions holding one object each own three pages. `arena/count`
@@ -13,12 +14,13 @@
 # tests/ledger/region-page-recycle.lisp. Three groups:
 #
 #   - the free shapes (0 pages): an intrinsic, a fixed-arity call, and a
-#     variadic call whose rest list is empty.
-#   - the rest-list shapes: a variadic callee collects its rest arguments into
-#     a cons chain, and every cons is born in its own region, which owns a
-#     page. So the count is the number of rest arguments.
-#   - the stdlib arithmetic wrappers, which are variadic Elle functions with a
-#     `letrec` in the body: the rest conses plus the closure.
+#     comparison wrapper whose two-operand arm the compiler grafts.
+#   - the rest-list shapes: a variadic callee that takes no tail of its rest
+#     list keeps the whole list in one region, so it costs one page whatever its
+#     length.
+#   - the stdlib arithmetic wrappers: a two-operand call grafts and claims
+#     nothing, and a call the graft declines builds a rest list its `letrec`
+#     walker may keep a tail of — one page per cons — plus the closure.
 #
 # The operands are literals, as ordinary code writes them; each probe takes the
 # op's index and leaves it unread.
@@ -50,11 +52,11 @@
 (page-rate "fixed-arity call" (fn [j] (nop 1)))
 (page-rate "(< a b)" (fn [j] (< 1 2)))
 
-# the rest-list shapes: one page per rest argument ─────────────────────────────
+# the rest-list shapes: one page for the whole list ────────────────────────────
 (page-rate "(vnop 1)" (fn [j] (vnop 1)))
 (page-rate "(vnop 1 2)" (fn [j] (vnop 1 2)))
 
-# the arithmetic wrappers: the rest conses plus the body's letrec closure ──────
+# the arithmetic wrappers: grafted, or the rest conses plus the closure ───────
 (page-rate "(+ a b)" (fn [j] (+ 1 2)))
 (page-rate "(+ a b c)" (fn [j] (+ 1 2 3)))
 (page-rate "(* a b)" (fn [j] (* 2 3)))

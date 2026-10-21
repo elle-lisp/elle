@@ -1,7 +1,7 @@
-(elle/epoch 12)
-# A squelch boundary abandons frames the same way an error does
-# (docs/impl/region/mechanism.md § "A squelch boundary abandons frames the same
-# way, so it runs the same walk").
+(elle/epoch 15)
+# audited: 2026-10-20
+# A squelch boundary abandons frames the same way an error does, so it runs the same release walk.
+# docs/impl/region/unwind.md
 #
 # A `squelch`/`attune` boundary raises a `signal-violation` the abandoned
 # activation never catches. So the frames between the emitting site and the
@@ -16,7 +16,7 @@
 # tables the emitter recorded, off each frame's own `Code`. Every subject below
 # reaches the boundary through a park, so what it gauges is the chain; the
 # chokepoint itself is driven directly by
-# `runtime::tests::ownership::discard_runs_the_abandoned_frames_release_tables`.
+# `runtime::tests::ownership::fnode::discard::discard_runs_the_abandoned_frames_release_tables`.
 #
 # This file is the LEAK gauge — `arena/count` and `arena/region-count` deltas
 # over a fixed window, BOUNDED for every subject. The soundness complement is
@@ -42,11 +42,11 @@
 # (a) ONE pending value, held by the frame that emits. Its release sits past
 # the emit, which the boundary never returns from.
 (def one-body
-  (squelch (fn []
-             (let [s (string "x" 1)]
-               (begin
-                 (emit :yield 1)
-                 s))) :yield))
+  (squelch :yield (fn []
+                    (let [s (string "x" 1)]
+                      (begin
+                        (emit :yield 1)
+                        s)))))
 
 (defn one-pending []
   (try
@@ -55,14 +55,14 @@
 
 # (b) TWO of them: the rate is per pending value, not per frame.
 (def two-body
-  (squelch (fn []
-             (let [s (string "x" 1)
-                   t (string "y" 2)]
-               (begin
-                 (emit :yield 1)
-                 (get s 0)
-                 (get t 0)
-                 s))) :yield))
+  (squelch :yield (fn []
+                    (let [s (string "x" 1)
+                          t (string "y" 2)]
+                      (begin
+                        (emit :yield 1)
+                        (get s 0)
+                        (get t 0)
+                        s)))))
 
 (defn two-pending []
   (try
@@ -75,11 +75,11 @@
   (emit :yield 1))
 
 (def enclosing-body
-  (squelch (fn []
-             (let [s (string "x" 1)]
-               (begin
-                 (yielder)
-                 s))) :yield))
+  (squelch :yield (fn []
+                    (let [s (string "x" 1)]
+                      (begin
+                        (yielder)
+                        s)))))
 
 (defn enclosing []
   (try
@@ -103,15 +103,15 @@
 
 # controls ─────────────────────────────────────────────────────────────────────
 
-# (e) a violation with NOTHING pending. Bounded before this mechanism and
-# after it, so a regression here is the discard running a release no frame
-# ever owed. It is also what isolates the boundary's own `signal-violation`
+# (e) a violation with NOTHING pending. It is bounded whether or not the walk
+# runs, so a regression here is the discard running a release no frame ever
+# owed. It is also what isolates the boundary's own `signal-violation`
 # error, which every subject above builds too.
 (def none-body
-  (squelch (fn []
-             (begin
-               (emit :yield 1)
-               7)) :yield))
+  (squelch :yield (fn []
+                    (begin
+                      (emit :yield 1)
+                      7))))
 
 (defn nothing-pending []
   (try
@@ -122,9 +122,9 @@
 # this pins that the subjects measure the abandoned release and not the body's
 # own scratch.
 (def clean-body
-  (squelch (fn []
-             (let [s (string "x" 1)]
-               s)) :yield))
+  (squelch :yield (fn []
+                    (let [s (string "x" 1)]
+                      s))))
 
 (defn no-violation []
   (try
@@ -132,7 +132,7 @@
     (catch e nil)))
 
 # (g) the CATCHING frame's own value: it is not abandoned, so its release runs
-# where it always did. A regression here is the walk reaching past the frames
+# in place. A regression here is the walk reaching past the frames
 # the boundary actually abandons.
 (defn catching []
   (let [c (string "c" 1)]

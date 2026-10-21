@@ -1,8 +1,10 @@
-(elle/epoch 13)
-# audited: 2026-10-06
+(elle/epoch 15)
+# audited: 2026-10-20
 # The stdlib per-call classes: transform scratch, the zip tower, the native-tail store family, and the read/copy primitives.
-#
 # docs/impl/region/diagnostics.md
+# docs/impl/region/relocate.md
+# docs/impl/region/replicate.md
+#
 # ── Stdlib / native-tail / discarded-tail leak classes ────────────────
 # Three more leak classes read in the one dashboard (leak state read in one
 # place), each row at 0.
@@ -31,9 +33,8 @@
 # window anchors where every arm reaches it. And `core-fold-step`'s own accumulator
 # is a returned parameter the recursive arm hands its callee only through the
 # COMBINER's result — a point the callee cannot reach it at, which is exactly where
-# no funding edge is owed (docs/impl/region/mechanism.md § "The callee's return
-# mint, and why the point owes it nothing"), so each displaced accumulator is freed
-# per step instead of stranded.
+# no funding edge is owed (docs/impl/region/relocate.md), so each displaced
+# accumulator is freed per step instead of stranded.
 (r:drive "stdlib-concat" (r:stmt-run (fn [] (concat "a" "b"))))
 (r:drive "stdlib-fold"
          (r:stmt-run (fn [] (fold (fn [_ b] b) nil (list "x" "y")))))
@@ -49,11 +50,10 @@
 # The trap is a placement one. Each of the tower's helpers is a cell-free
 # self-recursive `letrec` closure whose demise the binder carries out to the
 # `Letrec` node, and every stdlib entry point the tower calls dispatches through a
-# branch whose arms tail-call out — so that release was emitted at a merge label no arm
+# branch whose arms tail-call out — so that release is emitted at a merge label no arm
 # arrives at. The frame-exit relocation replicates it ahead of each arm's `TailCall`,
 # which needs the closure's VALUE route, the slot its `letrec` binder recorded
-# (docs/impl/region/mechanism.md § "Self-cancelling is a property of the ROUTE, not of
-# the region's class"). One row holds on both tiers: the layers' arg-position
+# (docs/impl/region/replicate.md). One row holds on both tiers: the layers' arg-position
 # closure-call results ride no retain that one tier holds and the other does not.
 (defn zip-tower [& colls]
   (letrec [to-list (fn (c)

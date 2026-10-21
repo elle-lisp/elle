@@ -1,20 +1,9 @@
-//! audited: 2026-09-23
+// audited: 2026-10-20
 //! A value read out of an env cell must outlive the reader that consumes it.
 //!
-//! A `def` inside a function body that a nested lambda captures is materialized
-//! as a per-value env cell, and the enclosing function then reads the value back
-//! through a `DerefCell` wrapper rather than out of a local slot. That read is an
-//! uncounted borrow — the value stays the cell's content and the load raises no
-//! count on it — so the cell's own lifetime is what keeps the borrow alive. The
-//! cell holds its content by the counted reference `StoreCapture` took when it
-//! stored the value (`capture_store_with_rebind`), so releasing the cell drops
-//! that reference and can reclaim exactly what was borrowed out of it
-//! (docs/impl/region/cells.md § "A read through an env cell is an uncounted
-//! borrow").
-//!
-//! Every shape below reads such a binding and hands the result to a further
-//! consumer, so a release placed at the load rather than at the reader frees the
-//! value under its own reader.
+//! Every shape below reads a captured binding back through its env cell and
+//! hands the result to a further consumer, so a release placed at the load
+//! rather than at the reader frees the value under its own reader.
 //!
 //! The shapes run with `--trace=scrub` armed, and that is the whole point of
 //! this file. A freed page keeps its bytes, so the stale read returns the right
@@ -28,6 +17,9 @@
 //! This file is its OWN test binary because `config::init` is process-global:
 //! arming scrub inside the shared integration binary would blank pages for every
 //! other test in it.
+//!
+//! docs/impl/region/cells.md
+//! docs/impl/region/diagnostics.md
 
 use elle::{init_stdlib, register_primitives, SymbolTable, VM};
 
@@ -144,8 +136,7 @@ fn a_cell_read_outlives_its_reader() {
             "under --trace=scrub, {name} answered {got} instead of {want} — the \
              env cell was released at the load rather than at the reader that \
              consumes the borrow, so the cell's free cascade reclaimed the \
-             value under its own reader (docs/impl/region/cells.md § \"A read \
-             through an env cell is an uncounted borrow\")",
+             value under its own reader (docs/impl/region/cells.md)",
         );
     }
 }

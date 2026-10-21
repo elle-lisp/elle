@@ -1,8 +1,9 @@
-(elle/epoch 12)
-# audited: 2026-09-08
+(elle/epoch 15)
+# audited: 2026-10-20
 # The witnesses a tail call reaches in its OWN block: what the move must not free, and the counted edges that hold each one.
-#
 # docs/impl/region/relocate.md
+# docs/impl/region/replicate.md
+#
 # ── witnesses: a value the tail callee reaches survives the hoisted release ────
 
 # (a) the argument is MOVED into the frame-replacing tail call and read there.
@@ -30,7 +31,7 @@
     (g x)))
 
 # (d) the tail callee reaches the value through its CAPTURED environment — the
-# shape the close exists for. The capture's incref is what the hoisted release
+# shape the admission exists for. The capture's incref is what the hoisted release
 # must be balanced against, so the walker's read must still see live pages.
 (defn d-captured (i)
   (let [src (list (string "d" i) i)]
@@ -262,12 +263,11 @@
 # its own callee, so the scope-end release is replicated ahead of each arm's
 # `TailCall` — and replication needs the closure's VALUE route, which loads the
 # slot the `letrec` binder recorded and frees the region that value lives in
-# (docs/impl/region/mechanism.md § "Self-cancelling is a property of the ROUTE, not
-# of the region's class"). The closure captures a caller-owned list, so the free
-# cascades along the funnel's counted edge and must drop that edge alone: the
-# caller hands ONE list to both arms and reads it afterwards, so an over-cascade
-# faults on the second call or on the final read. Exactly one release must run per
-# path, or the second call walks a recycled page.
+# (docs/impl/region/replicate.md). The closure captures a caller-owned list, so
+# the free cascades along the funnel's counted edge and must drop that edge
+# alone: the caller hands ONE list to both arms and reads it afterwards, so an
+# over-cascade faults on the second call or on the final read. Exactly one
+# release must run per path, or the second call walks a recycled page.
 (defn e17-sink (n)
   n)
 (defn e17-arm (v t)
@@ -281,14 +281,13 @@
     (%add n (%add m (length (first v))))))
 
 # (e18) the merge a branch inherits from its ENTRY rather than from its arms
-# (docs/impl/region/mechanism.md § "A merge inherits what covered the branch's
-# ENTRY as well"). Functionalization inserts a second branch to merge the two
-# versions of the mutable this arm reassigns, so the scrutinee's release is
-# emitted past it and replicated ahead of the arm's `TailCall`. The scrutinee is a
-# pair built around a list the CALLER owns, so freeing it cascades one decref
-# along the funnel's counted edge — which must drop that edge and no more. The
-# caller drives both arms with one list and reads it afterwards, so an
-# over-cascade faults on the second call or on the final read.
+# (docs/impl/region/replicate.md). Functionalization inserts a second branch to
+# merge the two versions of the mutable this arm reassigns, so the scrutinee's
+# release is emitted past it and replicated ahead of the arm's `TailCall`. The
+# scrutinee is a pair built around a list the CALLER owns, so freeing it
+# cascades one decref along the funnel's counted edge — which must drop that edge
+# and no more. The caller drives both arms with one list and reads it afterwards,
+# so an over-cascade faults on the second call or on the final read.
 (defn e18-pair (v)
   [v 1])
 (defn e18-arm (v t)

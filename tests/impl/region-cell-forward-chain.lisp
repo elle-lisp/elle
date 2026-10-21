@@ -1,11 +1,13 @@
-(elle/epoch 12)
-# Two sequential loops over ONE reassigned mutable. Functionalization splits the
-# source name into one version per loop and initializes each from the previous
-# one, so the forwarding edge is a CHAIN: `last#2 <- last#1 <- last#0`. The
-# middle version carries a 1-slot cell of its own, and the reference the chain
-# forwards has exactly one holder at a time — the cell that received it last
-# (docs/impl/region/bindings.md § "A chain of forwarding edges hands one
-# reference along, so the fold follows it whole").
+(elle/epoch 15)
+# audited: 2026-10-20
+# Two sequential loops over one reassigned mutable hand one reference along a forwarding chain.
+# docs/impl/region/bindings.md
+#
+# Functionalization splits the source name into one version per loop and
+# initializes each from the previous one, so the forwarding edge is a CHAIN:
+# `last#2 <- last#1 <- last#0`. The middle version carries a 1-slot cell of its
+# own, and the reference the chain forwards has exactly one holder at a time —
+# the cell that received it last.
 #
 # Three faces, and the shape needs all three because the two failure modes point
 # opposite ways. Releasing the forwarded reference twice frees a live value;

@@ -1,18 +1,20 @@
-(elle/epoch 12)
-# Counterfactual for the mediated-denial park's stranded payload region.
+(elle/epoch 15)
+# audited: 2026-10-20
+# The resume past a mediated capability denial releases the payload region the VM built for it.
+# docs/impl/region/park.md
 #
 # A fiber that calls a withheld primitive parks the `{:error :capability-denied
 # …}` payload the VM builds in its place, and the parent mediates: it reads the
 # payload, decides, and resumes the fiber with a stand-in result. That park has
 # no body reference — the denied primitive never ran, so the replayed frame's
 # result release targets the parent's resume value — and the resume owes the
-# payload's region one decref (docs/impl/region/owner.md § "Park/unpark
-# symmetry", "A park with no body reference owes one release at the resume").
+# payload's region one decref.
 #
-# Baseline stranded two regions per mediated call, growing without bound in any
-# loop that mediates. The counter-factual is the region count over a fixed loop:
-# a correct runtime keeps it flat, and the discard face — a denial the parent
-# never resumes past — was already flat, so the growth belongs to the resume.
+# The counter-factual is the region count over a fixed loop. A resume that skips
+# the decref strands two regions per mediated call, without bound in any loop
+# that mediates; a correct runtime keeps the count flat. The discard face — a
+# denial the parent never resumes past — reads flat either way, so the growth
+# belongs to the resume.
 
 # A mediated denial in CALL position: `let` keeps the denied call
 # mid-activation, so the interpreter denies through `handle_capability_denial`.
@@ -35,7 +37,7 @@
 
 # The control: the parent reads the payload and drops the fiber without
 # resuming past the denial. `release_discarded_signal` runs the same single
-# decref there, so this face was never the leak.
+# decref there, so this face reads flat either way.
 (defn discard-denial []
   (let [f (fiber/new (fn []
                        (let [r (file/read "/no/such/path")]
@@ -44,8 +46,8 @@
     (get (fiber/value f) :error)))
 
 # The second control: an ordinary park resumed the same way. Its payload IS
-# body-owned, so nothing here may release it — this is the shape the fix must
-# leave alone.
+# body-owned, so nothing here may release it — this is the shape the release
+# must leave alone.
 (defn mediate-yield []
   (let [f (fiber/new (fn []
                        (let [r (emit :yield {:a 1})]

@@ -1,12 +1,12 @@
-(elle/epoch 12)
-# audited: 2026-09-21
-# Soundness complement of region-cell-aliased-store.lisp: the counted store's
-# pin never runs ahead of a second name's read
-# (docs/impl/region/bindings.md § "An aliased stored value takes the counted
-# store"). The pin rule is a maximum over the alias's own binding-chain
-# extension, so every read below must see a live value however the arms
-# interleave — armed under --trace=guardfree, where a pin that lands early is a
-# deterministic fault at the read.
+(elle/epoch 15)
+# audited: 2026-10-20
+# The counted store's pin never runs ahead of a second name's read: the soundness face of region-cell-aliased-store.lisp.
+# docs/impl/region/compensate.md
+#
+# The pin rule is a maximum over the alias's own binding-chain extension, so
+# every read below must see a live value however the arms interleave — armed
+# under --trace=guardfree, where a pin that lands early is a deterministic fault
+# at the read.
 #
 # Each face runs past a priming loop so region ids recycle: a released page
 # that is read again then carries a different generation and detonates.
@@ -88,11 +88,10 @@
 
 # ── 5. each's list walk under a destructuring pattern ───────────────────
 # The pattern names alias the entry the cursor walk borrows, and the store
-# into `u` is the same counted store as everywhere above. With the per-holder
-# premises this shape's element release loaded a slot the walk had repointed,
-# freeing a live entry under its reader — a deterministic stale-generation
-# fault at the `(get u 0)` read once region ids recycled, conditional and
-# unconditional store alike.
+# into `u` is the same counted store as everywhere above. An element release that
+# loads a slot the walk has repointed frees a live entry under its reader — a
+# deterministic stale-generation fault at the `(get u 0)` read once region ids
+# recycle, conditional and unconditional store alike.
 (defn keep-last-of-pairs []
   (let [xs (list [[1] [2]] [[3] [4]])]
     (let [@u nil]

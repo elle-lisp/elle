@@ -1,16 +1,17 @@
-(elle/epoch 12)
-# Soundness complement of region-sequence-read-effect.lisp: declaring the
-# sequence reads `Opaque` must not free anything early.
+(elle/epoch 15)
+# audited: 2026-10-20
+# Declaring the sequence reads `Opaque` frees nothing early: the soundness face of region-sequence-read-effect.lisp.
+# docs/impl/region/effects.md
+# docs/impl/escape.md
 #
 # The declaration says two things and no more: the result may live anywhere (so
 # the walk keeps recording `result ⊒ each argument`, and a borrowing read keeps
 # its tighter `(alias, container)` record), and no argument is stored uncounted
 # (so escape seeds nothing on its store facet). What that withdraws is the false
 # store facet, and with it the refusal it forced on every mechanism gated on
-# `frame_held_regions` — the branch-arm release window among them
-# (docs/impl/region/effects.md § `Opaque`; docs/impl/escape.md).
+# `frame_held_regions` — the branch-arm release window among them.
 #
-# So the hazards are the ones the withdrawn refusal used to mask. A read hands
+# So the hazards are the ones a store-facet refusal masks. A read hands
 # back a value living INSIDE its argument, so the argument must outlive the
 # reader; a genuine escape of either the argument or the read's result must still
 # refuse the window; and a value read out of a container and handed across a
@@ -28,7 +29,7 @@
             _ (rest v))]
     (length r)))
 
-# (b) the subject is read again after the branch. The window now moves `v`'s
+# (b) the subject is read again after the branch. The window moves `v`'s
 # release to the merge, which must still land behind this second read.
 (defn w-subject-after (v t)
   (match t
@@ -80,7 +81,7 @@
             _ v)]
     (%add (length r) (length v))))
 
-# ── controls: the same reads with no branch — correct now ────────────────────
+# ── controls: the same reads with no branch ──────────────────────────────────
 (defn c-plain (v)
   (length (first v)))
 

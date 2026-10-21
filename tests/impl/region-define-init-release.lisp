@@ -1,7 +1,10 @@
-(elle/epoch 12)
+(elle/epoch 15)
+# audited: 2026-10-20
+# A `def` nothing reads releases its heap init after the slot store, and a consuming `def` keeps it.
+# docs/impl/region/anchors.md
+#
 # A `def` evaluates to what it bound, so its initializer is not consumed by the
-# binder (docs/impl/region/mechanism.md § "A binder's init release lands after the
-# slot store").
+# binder.
 #
 # Every other binding form's value is its BODY, so an init nothing reads is dead at
 # the init itself and the last-use narrowing says so — that is what makes an unused

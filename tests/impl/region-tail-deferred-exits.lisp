@@ -1,7 +1,8 @@
-(elle/epoch 12)
-# A deferred tail-call release has the activation owner node's life
-# (docs/impl/region/owner.md § "A deferred tail-call release has the node's
-# life").
+(elle/epoch 15)
+# audited: 2026-10-20
+# A deferred tail-call release has the activation owner node's life, so every exit of the activation runs it.
+# docs/impl/region/owner.md
+# docs/impl/region/unwind.md
 #
 # A frame-replacing tail call strands the release the lowerer emitted past the
 # `TailCall` — the callee closure's own per-call region — and the new activation
@@ -76,12 +77,12 @@
 # (d) a SQUELCH boundary: the yield violates the mask, so the boundary raises a
 # signal-violation the abandoned activation never catches.
 (def squelched-tail
-  (squelch (fn []
-             (let [s (string "x" 1)]
-               ((fn []
-                  (begin
-                    (emit :yield 1)
-                    s))))) :yield))
+  (squelch :yield (fn []
+                    (let [s (string "x" 1)]
+                      ((fn []
+                         (begin
+                           (emit :yield 1)
+                           s)))))))
 
 (defn sq-tail []
   (try
@@ -128,23 +129,22 @@
   nil)
 
 (def squelched-nontail
-  (squelch (fn []
-             (let [s (string "x" 1)]
-               (begin
-                 ((fn []
-                    (begin
-                      (emit :yield 1)
-                      s)))
-                 s))) :yield))
+  (squelch :yield (fn []
+                    (let [s (string "x" 1)]
+                      (begin
+                        ((fn []
+                           (begin
+                             (emit :yield 1)
+                             s)))
+                        s)))))
 
 (defn sq-nontail []
   (try
     (squelched-nontail)
     (catch e nil)))
 
-# (e) the clean break itself: the same tail call with no signal at all. Bounded
-# before this mechanism and after it — a regression here is the deferred release
-# failing to run where it always did.
+# (e) the clean break itself: the same tail call with no signal at all. A
+# regression here is the deferred release failing to run on the ordinary path.
 (defn clean-tail []
   (let [s (string "x" 1)]
     ((fn [] s))))
@@ -170,10 +170,10 @@
 
 # The trap: a subject that leaves by a signal carries TWO mechanisms, and only
 # the deferred set is this file's. The other is the release table the same exit
-# runs (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
-# still owes"), which every control reaches too. So each subject is read against
-# its OWN control rather than against 0, with one window's slack for allocator
-# noise — a reading that stays right whichever of the two moves.
+# runs (docs/impl/region/unwind.md), which every control reaches too. So each
+# subject is read against its OWN control rather than against 0, with one
+# window's slack for allocator noise — a reading that stays right whichever of
+# the two moves.
 (def slack 50)
 
 (assert (%lt d-clean slack)

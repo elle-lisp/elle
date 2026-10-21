@@ -1,10 +1,11 @@
-(elle/epoch 12)
-# A branch inside a loop stores into ONE reassigned mutable from both of its
-# arms, so the cell records two store sites and each arm allocates the value it
-# stores. Each stored value's producer reference is discharged at the store that
-# took THAT value — the cell's own counted reference keeps the value from there
-# on (docs/impl/region/bindings.md § "The store site is the store that took THAT
-# value").
+(elle/epoch 15)
+# audited: 2026-10-20
+# A loop branch that stores into one mutable from both arms discharges each value at the store that took it.
+# docs/impl/region/bindings.md
+#
+# The cell records two store sites, and each arm allocates the value it stores.
+# Each stored value's producer reference is discharged at the store that took
+# THAT value — the cell's own counted reference keeps the value from there on.
 #
 # Pinning both values at the cell's LAST store instead puts the first arm's
 # release inside the SECOND arm, which the first arm's path does not reach. An

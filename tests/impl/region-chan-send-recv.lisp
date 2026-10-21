@@ -1,25 +1,25 @@
-(elle/epoch 12)
-# Channel send/recv — the genuinely-Shared (class 7) incoming-count shape.
+(elle/epoch 15)
+# audited: 2026-10-20
+# A channel message is a Shared region: the send counts it into the buffer and the receive releases it.
+# docs/impl/region/effects.md
+# docs/impl/region/adopt.md
 #
 # `chan/send` is the sole `RegionEffect::Sends` declarant: its message crosses the
 # fiber frontier (it rides the channel buffer, by pointer, to whatever fiber
-# receives it), so the message can never be Owned by a bounded activation and stays
-# on the incoming-count (per-region RC) path — the always-Shared class
-# (docs/impl/region/adopt.md § "Why this is hybrid"). The send seam increfs the
-# message's region at the enqueue to keep it alive in the channel buffer until
-# received (docs/impl/region/effects.md § `Sends`) — "a store into a Shared region
-# bumps its count". Receiving the message removes it from the buffer, so its region's
-# incoming count must be lowered — "an overwrite/drop lowers it"
-# (region/ownership.md § class 7, the Shared incoming-count refinement). `chan/recv`,
-# `chan/try-select`, and `chan/wait-ready`'s fast path each carry that release.
+# receives it), so the message can never be Owned by a bounded activation and
+# stays on the per-region RC baseline. The send seam increfs the message's region
+# at the enqueue to keep it alive in the channel buffer until received. Receiving
+# the message removes it from the buffer, so its region's count must be lowered:
+# `chan/recv`, `chan/try-select`, and `chan/wait-ready`'s fast path each carry
+# that release.
 #
-# Without the receive-side release the message region leaks one per send/recv cycle —
-# unbounded RSS for a long-running producer/consumer loop. This asserts the cycle
-# reclaims: region growth over a large send/recv loop is bounded, measured beside a
-# known-live-growth discriminator so a dead/stubbed gauge cannot paint it green.
-# The correctness half (the received value is intact, not a freed-page read) is the
-# assertions on the recv results, and `--trace=guardfree` over this file is the UAF
-# gate (a premature release would fault there, not here).
+# Without the receive-side release the message region leaks one per send/recv
+# cycle — unbounded RSS for a long-running producer/consumer loop. This asserts
+# the cycle reclaims: region growth over a large send/recv loop is bounded,
+# measured beside a known-live-growth discriminator so a dead/stubbed gauge
+# cannot paint it green. The correctness half (the received value is intact, not
+# a freed-page read) is the assertions on the recv results; run this file under
+# `--trace=guardfree` and a premature release faults at the read.
 
 (defn delta [thunk n]
   # One warmup run absorbs the one-time channel/setup regions, then measure the

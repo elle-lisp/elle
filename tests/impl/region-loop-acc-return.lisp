@@ -1,11 +1,13 @@
-(elle/epoch 12)
+(elle/epoch 15)
+# audited: 2026-10-20
+# A returned fn-local accumulator keeps the 1-slot-container model: the return claims the mint, not the cell.
+# docs/impl/region/bindings.md
+#
 # A function accumulates into a fn-local mutable across a `while` and hands the
 # final content back. The cell takes a COUNTED reference of its own at every
 # store, so each value the loop displaces dies at the overwrite and the last one
 # leaves with the caller: the `Return` mints the caller's reference and the
-# cell's content drop, emitted after that mint, releases the cell's
-# (docs/impl/region/bindings.md § "Returned fn-local reassigned mutables — the
-# return claims the MINT's reference, not the cell's").
+# cell's content drop, emitted after that mint, releases the cell's.
 #
 # Withholding the container half from a returned binding leaves each stored
 # value protected only by its producer's reference, whose one release rides the

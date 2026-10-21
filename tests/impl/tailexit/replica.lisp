@@ -1,8 +1,10 @@
-(elle/epoch 12)
-# audited: 2026-09-08
+(elle/epoch 15)
+# audited: 2026-10-20
 # The witnesses a REPLICA reaches: a branch arm, a forward cell no binding names, and a region an argument only used.
-#
 # docs/impl/region/replicate.md
+# docs/impl/region/relocate.md
+# docs/impl/region/cycletail.md
+#
 # ── the per-arm face: a branch merge inherits its arms' relocation points ─────
 # A release emitted past the merge is replicated ahead of each arm's `TailCall`
 # and still emitted at the merge, so both obligations are re-asked per point and
@@ -18,7 +20,7 @@
   (i-arm-moved (list (string "i" i) i) true))
 
 # (j) the arm's tail callee reaches the value through its CAPTURED environment —
-# the admission, now asked of a replica rather than of an in-block move.
+# the admission, asked of a replica rather than of an in-block move.
 (defn j-arm-captured (v t)
   (let [g (fn () (length (first v)))]
     (if t (g) 0)))
@@ -41,9 +43,8 @@
 # each operand stores its value into the result slot, and every operand but the
 # last branches on that value — to the done block where the answer is settled, to
 # the next operand otherwise. So the done block is a merge reached through every
-# operand's block, and the operands are its arms
-# (docs/impl/region/replicate.md § "A short-circuit operand is an arm"). Only the
-# LAST operand inherits tail position, so it is the only arm that can carry a
+# operand's block, and the operands are its arms (docs/impl/region/replicate.md).
+# Only the LAST operand inherits tail position, so it is the only arm that can carry a
 # frame-replacing tail call, and the replica the merge sends into it owes exactly
 # what the rows above owe — re-asked here because the arms are found by a
 # different route.
@@ -114,14 +115,14 @@
 
 # ── the forward-cell face: a region no binding names ──────────────────────────
 # A prebound FORWARD CELL is reached through its binding's verdict rather than its
-# own, because a binding names the closure region its cell points AT (see
-# docs/impl/region/mechanism.md § "A compiled capture cell is frame-held exactly as
-# its binding is"). The relocated release drops the frame's slot reference; what
-# must stand is the counted `closure ⊇ cell` edge the capturer's env took, since
-# every later `DerefCell` that dispatches the sibling resolves through the cell.
+# own, because a binding names the closure region its cell points AT
+# (docs/impl/region/relocate.md). The relocated release drops the frame's slot
+# reference; what must stand is the counted `closure ⊇ cell` edge the capturer's
+# env took, since every later `DerefCell` that dispatches the sibling resolves
+# through the cell.
 
 # (l) the sibling is reached through the cell on every step of the recursion, and
-# reads a heap value of its own. The cell's release now fires ahead of the letrec
+# reads a heap value of its own. The cell's release fires ahead of the letrec
 # body's tail call, so a release that reached zero recycles the cell under the very
 # read that dispatches `helper`.
 (defn l-fwd (i)
@@ -171,11 +172,10 @@
 # (s) the SIBLING captures the self-recursive member and the letrec body tail-calls
 # the sibling, so ONE tail call carries both deferred channels — the merged arena's
 # `deferred_release_slot` and the sibling's own `defer_callee_release`
-# (docs/impl/region/letrec.md § "The arena channel and the callee channel are
-# independent"). Each drops a different frame reference; running either twice takes
-# a live region to zero and recycles its pages under the next call's walk. `go`
-# reads a heap value of its own on every step, and reaches it through the cell the
-# arena holds.
+# (docs/impl/region/cycletail.md). Each drops a different frame reference;
+# running either twice takes a live region to zero and recycles its pages under
+# the next call's walk. `go` reads a heap value of its own on every step, and
+# reaches it through the cell the arena holds.
 (defn s-sib (i)
   (let [src (list (string "s" i) i)]
     (letrec [go (fn (k)
@@ -191,11 +191,11 @@
 # (t) the letrec body tail-calls the CAPTURED sibling rather than the capturer, so
 # the callee's own region is the one the relocation must leave alone and the
 # deferral is what runs its release — at the callee's normal completion, never
-# before the frame it replaces has run (docs/impl/region/mechanism.md § "What the
-# exemption keeps, a channel must still run"). `helper` reads a heap value through
-# its OWN environment on the far side of the frame replacement, so a release that
-# fired ahead of the `TailCall` recycles the pages that read resolves through, and
-# one that ran twice recycles them under the caller.
+# before the frame it replaces has run (docs/impl/region/relocate.md). `helper`
+# reads a heap value through its OWN environment on the far side of the frame
+# replacement, so a release that fired ahead of the `TailCall` recycles the
+# pages that read resolves through, and one that ran twice recycles them under
+# the caller.
 (defn t-member (i)
   (let [src (list (string "t" i) i)]
     (letrec [helper (fn (k)
@@ -207,10 +207,10 @@
   (t-member i))
 
 # ── the operand-value face: what an argument's evaluation merely USED ─────────
-# The exemption reads an operand's VALUE, not its syntax (docs/impl/region/mechanism.md
-# § "What an operand names is its VALUE, not its syntax"), so a region reached only
-# inside an argument's own nested call is no longer exempt and its release does fire
-# ahead of the `TailCall`. Three ways the value can still live in such a region, each
+# The exemption reads an operand's VALUE, not its syntax
+# (docs/impl/region/relocate.md), so a region reached only inside an argument's
+# own nested call is not exempt and its release does fire ahead of the
+# `TailCall`. Three ways the value can still live in such a region, each
 # with a different reference standing between the relocated release and the callee's
 # read.
 
