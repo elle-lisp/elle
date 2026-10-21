@@ -1,26 +1,12 @@
 # Coming from Other Languages
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-10-21 -->
 
 Quick orientation for programmers arriving from specific languages.
 
 Each section highlights the key differences and maps familiar concepts to
 their Elle equivalents. The fence under each table runs the Elle column's
 claims as assertions. All of the fences run as one program, top to bottom.
-
-## Contents
-
-- [Python](#python)
-- [JavaScript / TypeScript](#javascript--typescript)
-- [Rust](#rust)
-- [Go](#go)
-- [Clojure](#clojure)
-- [Common Lisp / Scheme](#common-lisp--scheme)
-- [Erlang / Elixir](#erlang--elixir)
-- [Janet](#janet)
-- [C](#c)
-
----
 
 ## Python
 
@@ -139,9 +125,9 @@ handling, the compilation pipeline.
 
 **Watch out for:**
 - No static types — type errors are runtime errors.
-- No borrow checker and no moves — a value lives in its region until the
-  compiler's analysis says it dies, and a store, a return or a yield
-  hands over the same value rather than a copy.
+- No borrow checker and no moves. A value lives in its region until the
+  compiler's analysis says it dies. A store, a return or a yield hands over
+  the same value rather than a copy.
 - `@` prefix means mutable, not dereference.
 
 ## Go
@@ -378,7 +364,7 @@ memory management (when you need it), pointer arithmetic.
 | `int x = 5;` | `(def @x 5)` | Dynamic typing |
 | `malloc/free` | `(ffi/malloc n)` / `(ffi/free p)` | For FFI only |
 | `struct` | `{:field val}` | No field declarations |
-| `#include` | `(include-file "file.lisp")` | Compile-time splice ([modules.md](modules.md)) |
+| `#include` | `(include-file "file.lisp")` | Compile-time splice ([include.md](include.md)) |
 | `printf` | `(println ...)` | `string/format` for formatting |
 | `dlopen` | `(ffi/native "lib.so")` | `(ffi/native nil)` is the running process |
 | Function pointer | `(ffi/callback sig fn)` | |
