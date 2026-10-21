@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-20
 // src/hir/AGENTS.md
 // docs/impl/typeinfer.md
 //! The inference pass's unit tests, and the helpers they compile through and
@@ -12,8 +12,9 @@
 //! `destructure` for what a destructuring write proves, `branch` for what a
 //! branch's write and a block's `break` leave behind, `prune` for dead-arm
 //! removal, `contract` for prove-or-reject, `graft` for which calls become
-//! their callee's body, `live` for which lambdas the graft reaches, `fold`
-//! for what the recorded types then delete.
+//! their callee's body, `operand` for which operands a graft writes in place,
+//! `live` for which lambdas the graft reaches, `fold` for what the recorded
+//! types then delete.
 
 use super::TypeInfo;
 use crate::hir::types::TyId;
@@ -30,6 +31,7 @@ mod graft;
 mod live;
 mod mutation;
 mod narrow;
+mod operand;
 mod prune;
 mod recursion;
 mod rettype;
@@ -117,6 +119,11 @@ fn compile_booted(src: &str) -> Result<(Hir, BindingArena), String> {
     let mut rt = crate::runtime::Runtime::new();
     let (_vm, symbols, cctx) = rt.parts();
     crate::pipeline::compile_file_to_fhir(src, symbols, cctx, "<test>")
+}
+
+/// [`compile_booted`], for a source the test expects to compile.
+fn compiled(src: &str) -> (Hir, BindingArena) {
+    compile_booted(src).unwrap_or_else(|e| panic!("{src} must compile: {e}"))
 }
 
 /// Compile and run `src` on a runtime with the stdlib loaded, answering the

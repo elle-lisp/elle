@@ -5,13 +5,11 @@
 //!
 //! What it keeps: the statements after a raise, which a resume reaches.
 
-use super::{compile_booted, count_calls_to, count_emits, count_intrinsics, count_ops, run_booted};
-use crate::hir::{BindingArena, Hir, HirKind};
+use super::{
+    compile_booted, compiled, count_calls_to, count_emits, count_intrinsics, count_ops, run_booted,
+};
+use crate::hir::{Hir, HirKind};
 use crate::value::Value;
-
-fn compiled(src: &str) -> (Hir, BindingArena) {
-    compile_booted(src).unwrap_or_else(|e| panic!("{src} must compile: {e}"))
-}
 
 /// A user-written container dispatch, the shape of the stdlib's `put`.
 const MYP: &str = "(def dynamic-put %put) \

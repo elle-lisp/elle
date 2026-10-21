@@ -38,9 +38,8 @@ pub struct BindingInner {
     /// Whether this binding is captured by a nested closure. **Module-private**:
     /// the lexical-capture proxy has NO escape authority (docs/impl/escape.md), so
     /// no consumer may name it for an escape or reachability decision. Written
-    /// through `mark_captured`; read by two lexical consumers — `needs_capture()`,
-    /// for cell layout, and `closure_may_write()`, for which code can write the
-    /// binding. Escape's capture facet
+    /// through `mark_captured`; read by two lexical consumers, `needs_capture()`
+    /// for cell layout and `closure_may_write()`. Escape's capture facet
     /// is flow-true (transitive `lambda_captures` propagation from genuine frontier
     /// seeds, never this proxy), and the region solver's reachability questions read
     /// the HIR capture-graph (`region::infer::escape::captured_bindings`); neither reads
@@ -194,12 +193,9 @@ impl BindingInner {
         self.is_restorable_capture_cell() || self.is_mutated
     }
 
-    /// May a closure write this binding? A closure that captured it may, so
-    /// after a call the binding may hold what the call left. A written binding
-    /// no closure captures is written only by an `assign` in its own function.
-    /// The graft asks this before it writes a written operand in place of a
-    /// parameter (docs/impl/graft.md). A lexical question, not an escape one:
-    /// a closure can write only a binding it lexically captured.
+    /// May a closure write this binding? Only one that captured it can. The
+    /// graft asks before it writes an operand in place of a parameter
+    /// (docs/impl/graft/operands.md).
     pub fn closure_may_write(&self) -> bool {
         self.is_captured && self.is_mutated
     }
