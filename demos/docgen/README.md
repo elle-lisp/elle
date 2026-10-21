@@ -1,6 +1,6 @@
 # Documentation site generator
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-21 -->
 
 An Elle program that renders the repository's markdown documents and an API reference as a static HTML site.
 
@@ -61,6 +61,7 @@ page's `.html` file.
 | [lib/markdown.lisp](lib/markdown.lisp) | Markdown to HTML: `parse`, `format-inline`, `html-escape` |
 | [lib/css.lisp](lib/css.lisp) | The stylesheet, as one string |
 | [lib/api.lisp](lib/api.lisp) | The API pages. It takes the site's helpers and paths, and answers one renderer for each page |
+| [lib/profiles.lisp](lib/profiles.lisp) | The `stdlib` and `libraries` pages, which show signals. [lib/api.lisp](lib/api.lisp) answers their renderers |
 | [docs/site.json](docs/site.json) | The site's structure |
 
 The markdown parser reads headings, code fences, tables, unordered lists,
