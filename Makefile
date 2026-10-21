@@ -1,5 +1,6 @@
 .PHONY: all elle elle-rig boot-blob docs docgen smoke test qa crosscheck clean space help \
        smoke-lang smoke-impl smoke-eager smoke-producers smoke-charge smoke-scrub \
+       tree-producers \
        smoke-boot-image smoke-nojit smoke-pool smoke-pool-impl smoke-pool-producers \
        smoke-mlir smoke-mlir-impl smoke-mlir-producers smoke-noffi \
        smoke-wasm smoke-wasm-impl smoke-wasm-full \
@@ -49,6 +50,10 @@ CARGO_OUT = target/$(if $(findstring --release,$(CARGO_PROFILE)),release,debug)
 # The rig sits beside the `elle` it is built with (rig/overview.md), so it
 # follows `ELLE` unless named.
 ELLE_RIG ?= $(dir $(ELLE))elle-rig
+
+# The release rig whatever `ELLE` names: a debug rig takes minutes to price
+# every source (tools/overview.md).
+RELEASE_RIG := ./target/release/elle-rig
 
 # The WASM and MLIR builds, each with its rig: binaries of their own beside
 # `elle`, which stays the default build (bins/overview.md).
@@ -210,11 +215,9 @@ agents-check:  ## Fail when a committed AGENTS.md is stale
 prose:  ## Hold every stamped file to the checkable parts of DOCUMENTATION.md
 	cargo test --test prose
 
-# The release rig whatever ELLE names: a debug rig takes minutes to price every
-# source (tools/overview.md).
 budget:  ## Print the curve the source cap is read off (docs/analysis/budget.md)
 	cargo build --release -p elle-rig
-	@./target/release/elle-rig tools/budget.lisp
+	@$(RELEASE_RIG) tools/budget.lisp
 
 # ARGS is what the profiled elle runs; DEPTH and TOP shape the ranking
 # (tools/pageclaims/overview.md). Needs valgrind. The elle that runs the tool
@@ -278,6 +281,12 @@ IMPL_FILES := $(sort $(wildcard tests/impl/*.lisp))
 # stays the one list. The runner's own producer, `elle test`, is no file.
 PRODUCER_FILES      := $(sort $(shell sed -n 's/^(producer "\(.*\.lisp\)")$$/\1/p' tests/ledger/*.lisp))
 ISOLATED_IMPL_FILES := $(filter-out $(PRODUCER_FILES),$(IMPL_FILES))
+
+# The producers that read the tree and not the build. They read the same on
+# every build, so `qa` judges them once, and no build's producer pass runs
+# them again (docs/analysis/ci.md).
+TREE_PRODUCERS  := tests/ratchet/audit.lisp tests/ratchet/size.lisp
+BUILD_PRODUCERS := $(filter-out $(TREE_PRODUCERS),$(PRODUCER_FILES))
 
 # The charge pass reads what each file's second run in-process costs the
 # runner's heap (docs/test-gauges.md). It runs the language suite and the
@@ -428,9 +437,14 @@ smoke-eager: elle elle-rig  ## Both suites on the rig, every function compiled o
 	@echo "=== both suites, every function compiled on its first call ==="
 	$(call RUN_SUITE,$(LANG_FILES) $(ISOLATED_IMPL_FILES),--isolate '--profile $(EAGER_PROFILE)',$(ELLE_RIG))
 
-smoke-producers: elle elle-rig  ## The files a ledger names, in-process on the rig
+smoke-producers: elle elle-rig  ## The build's producers, in-process on the rig
 	@echo "=== the producers, in-process on the rig ==="
-	$(call RUN_SUITE,$(PRODUCER_FILES),,$(ELLE_RIG))
+	$(call RUN_SUITE,$(BUILD_PRODUCERS),,$(ELLE_RIG))
+
+tree-producers:  ## The audit and size ledgers, in-process on the release rig
+	cargo build --release -p elle-rig
+	@echo "=== the tree's producers, in-process on the release rig ==="
+	$(call RUN_SUITE,$(TREE_PRODUCERS),,$(RELEASE_RIG))
 
 smoke-charge: elle elle-rig  ## Each file's charge on the runner's heap, in-process on the rig
 	@echo "=== each file's charge on the runner's heap, in-process on the rig ==="
@@ -532,7 +546,7 @@ smoke-pool-impl: elle-pool  ## The implementation suite on the thread-pool build
 
 smoke-pool-producers: elle-pool  ## The producers, in-process on the thread-pool build's rig
 	@echo "=== the producers, in-process on the thread-pool build's rig ==="
-	$(call RUN_SUITE,$(PRODUCER_FILES),,$(ELLE_RIG))
+	$(call RUN_SUITE,$(BUILD_PRODUCERS),,$(ELLE_RIG))
 
 elle-mlir:  ## Build elle-mlir and elle-rig-mlir, the MLIR build (for smoke-mlir)
 	@echo "=== build elle and its rig with MLIR ==="
@@ -551,7 +565,7 @@ smoke-mlir-impl: elle-mlir  ## The implementation suite on the MLIR build's rig
 
 smoke-mlir-producers: elle-mlir  ## The producers, in-process on the MLIR build's rig
 	@echo "=== the producers, in-process on the MLIR build's rig ==="
-	$(call RUN_SUITE,$(PRODUCER_FILES),,$(ELLE_RIG_MLIR))
+	$(call RUN_SUITE,$(BUILD_PRODUCERS),,$(ELLE_RIG_MLIR))
 
 # The no-features binary is copied beside the build, and the default build then
 # rebuilt in its place, with its blob, so the runner is always a build that has
@@ -677,8 +691,9 @@ embedding: elle  ## Build + run embedding demos (Rust + C hosts)
 # The passes run in a sub-make that starts only once `qa` has finished, whatever
 # `-j` says; as prerequisites beside `qa`, `make -j` would start them together.
 # A platform's Smoke job runs each pass as a step of its own, and no `qa`
-# (docs/analysis/ci.md).
-SMOKE_PASSES := smoke-lang smoke-impl smoke-eager smoke-producers smoke-charge \
+# (docs/analysis/ci.md). The producer pass leads: it is short, and a stale
+# ledger row fails it.
+SMOKE_PASSES := smoke-producers smoke-lang smoke-impl smoke-eager smoke-charge \
                 doctest embedding semver-check
 
 smoke: qa  ## qa, then both suites, the doctests, the embedding demo and the surface gate
@@ -698,8 +713,9 @@ smoke: qa  ## qa, then both suites, the doctests, the embedding demo and the sur
 # `MLIR_SYS_220_PREFIX` in the environment (docs/impl/mlir.md).
 #
 # `prose` comes first: it fails most often and reports in seconds, and the QA
-# job runs it before anything else (docs/analysis/ci.md).
-qa: prose audit agents-check crosscheck  ## The PR gate's QA job, locally (~2min, no smoke): prose, rustfmt, indexes, clippy, rustdoc, doctests
+# job runs it before anything else (docs/analysis/ci.md). `tree-producers`
+# builds the release rig, so it follows the checks that take seconds.
+qa: prose audit agents-check tree-producers crosscheck  ## The PR gate's QA job, locally (no smoke): prose, the tree's ledgers, rustfmt, indexes, clippy, rustdoc, doctests
 	cargo fmt --check
 	cargo clippy --workspace --all-targets --all-features -- -D warnings
 	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --document-private-items
