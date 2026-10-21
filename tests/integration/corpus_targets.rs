@@ -124,8 +124,7 @@ fn assert_qa_before_the_suites(target: &str) {
     );
 }
 
-// `qa` takes about two minutes and the suites about thirty. The
-// counter-factual: `test` lists `smoke` first, so a formatting or clippy
+// The counter-factual: `test` lists `smoke` first, so a formatting or clippy
 // failure surfaces half an hour into the run, after suites it has nothing to
 // do with.
 #[test]

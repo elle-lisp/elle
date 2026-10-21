@@ -1,6 +1,6 @@
 # Testing Strategy
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-10-21 -->
 
 Which *kind* of test to write, and where it belongs.
 
@@ -13,18 +13,16 @@ Which *kind* of test to write, and where it belongs.
 
 ## Test execution order
 
-`make test` gates in this order; fail fast, cheapest first:
+`make test` gates in this order, cheapest first, so a formatting or clippy
+failure stops the gate before the suites start:
 
 | Step | What | Purpose |
 |------|------|---------|
-| 1 | `make qa` | The prose checks, rustfmt, clippy, the macOS and Android cross-checks, rustdoc, and the Rust doctests |
-| 2 | `make smoke` | The language suite, the implementation suite on the rig, the doctests, the embedding demo and the surface gate |
+| 1 | `make qa` | The PR gate's QA job ([testing](../testing.md)) |
+| 2 | `make smoke` | The suite passes and the checks [testing](../testing.md) lists for it |
 | 3 | `cargo test --workspace --lib --all-features` | The unit tests, inline beside the code they test |
-| 4 | `cargo test --test '*' -- --skip property` | The integration tests and the standalone test binaries |
-| 5 | `cargo test -p elle-rig` | The rig's own tests |
-
-`qa` takes about two minutes and `smoke` about thirty, so a formatting or
-clippy failure stops the gate before the suites start.
+| 4 | `cargo test --test '*' --profile ci -- --skip property` | The integration tests and the standalone test binaries |
+| 5 | `cargo test -p elle-rig --profile ci` | The rig's own tests |
 
 `make test` runs one build. The other builds that must pass the language suite
 are CI jobs ([ci](ci.md)); run one locally by building it and running `make

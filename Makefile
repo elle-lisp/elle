@@ -248,12 +248,6 @@ semver-check: elle  ## Verify every versioned library surface against its commit
 
 # ── Test ────────────────────────────────────────────────────────────
 
-# Approximate runtimes (for guidance — vary by machine):
-#   make smoke    ~30min release: qa, both suites, doctests, embedding, the surface gate
-#   make qa       ~2min: the PR gate's QA job (prose, rustfmt, indexes, clippy, crosscheck, rustdoc)
-#   make test     smoke + the Rust unit, integration and rig tests
-#   cargo test    ~60min full suite (unit + integration + property)
-#
 # `make test` exists to predict the PR gate, so it runs what the gate runs. A
 # target the workflow requires and `make test` skips is a failure a branch can
 # only discover in CI.
@@ -685,8 +679,8 @@ embedding: elle  ## Build + run embedding demos (Rust + C hosts)
 
 # What a contributor runs before a push and what the merge queue runs: `qa`,
 # then both suites on this build, the documents, the embedding demo and the
-# surface gate. `qa` takes about two minutes and the passes about thirty, so a
-# formatting or clippy failure stops the gate before the suites start.
+# surface gate. `qa` costs a fraction of the passes, so a formatting or clippy
+# failure stops the gate before the suites start.
 #
 # The passes run in a sub-make that starts only once `qa` has finished, whatever
 # `-j` says; as prerequisites beside `qa`, `make -j` would start them together.
@@ -715,7 +709,7 @@ smoke: qa  ## qa, then both suites, the doctests, the embedding demo and the sur
 # `prose` comes first: it fails most often and reports in seconds, and the QA
 # job runs it before anything else (docs/analysis/ci.md). `tree-producers`
 # builds the release rig, so it follows the checks that take seconds.
-qa: prose audit agents-check tree-producers crosscheck  ## The PR gate's QA job, locally (no smoke): prose, the tree's ledgers, rustfmt, indexes, clippy, rustdoc, doctests
+qa: prose audit agents-check tree-producers crosscheck  ## The PR gate's QA job and the Android cross-check, locally (docs/testing.md)
 	cargo fmt --check
 	cargo clippy --workspace --all-targets --all-features -- -D warnings
 	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --document-private-items

@@ -16,7 +16,7 @@ set when the diff moves only the submodule pointer.
 | Job | Runner | What | Proptest cases |
 |-----|--------|------|----------------|
 | Detect Changes | ubuntu | Sets `source` from the changed paths | — |
-| QA | ubuntu | The prose checks, `cargo fmt`, the indexes, the tree's ledgers, then clippy, the macOS cross-check, rustdoc | — |
+| QA | ubuntu | The prose checks, `cargo fmt`, the indexes, the tree's ledgers, then clippy, the macOS cross-check, rustdoc, the Rust doctests | — |
 | Documentation Build | ubuntu | `make docs` and the Elle doc site, minus the publish | — |
 | Default Build Tests | ubuntu | The producer pass, `doctest`, then each other suite pass of the default build and its rig, one step each | — |
 | No-JIT Build Tests | ubuntu | `smoke-nojit` — the language suite on the interpreter alone | — |

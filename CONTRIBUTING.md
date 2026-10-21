@@ -1,6 +1,6 @@
 # Contributing to Elle
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-21 -->
 
 How to work on Elle: the test policy that keeps main green, the order of work,
 and what a change has to carry before we can take it.
@@ -14,9 +14,9 @@ queue runs `make smoke`, QA included, on the merged result before a commit
 lands.
 
 This is the "not rocket science rule of software engineering": maintain
-a repository of code that always passes all tests. It is successfully
-practiced by the Rust compiler, the Linux kernel, and many other
-projects. There is nothing novel about it.
+a repository of code that always passes all tests. The Rust compiler, the
+Linux kernel, and many other projects practice it. There is nothing novel
+about it.
 
 ### What this means for branches
 
@@ -40,7 +40,7 @@ out main, rebuilding, running the test, checking out the branch again,
 know: main passes the tests.
 
 This is expensive, risky (stash conflicts, dirty working trees), and
-pointless. Main is green. That is proven by CI on every merge. Do not
+pointless. Main is green. CI proves it on every merge. Do not
 spend tokens and wall-clock time confirming a known fact. When a test
 fails on your branch, your branch broke it. Fix it.
 
@@ -83,36 +83,19 @@ constraint**:
 3. **Run the tests after every change.** Not at the end. Not after
    "one more thing." After every change. The tests are the compass.
 
-The goal is not to solve the bug in one pass. The goal is that every
-session leaves the codebase better defended than it was before. Bugs
-have fewer places to live. Incorrect assumptions become asserts. The
-search space shrinks. Eventually the bug has nowhere left to hide.
+Every session leaves the codebase better defended than it was before,
+whether or not it fixes the bug. Bugs have fewer places to live.
+Incorrect assumptions become asserts. The search space shrinks.
+Eventually the bug has nowhere left to hide.
 
 This is not optional. If you spent a session debugging and added zero
 tests and zero assertions, the session was wasted.
 
 ## Running tests
 
-| Command | Runtime | What it does |
-|---------|---------|-------------|
-| `cargo test -p elle --lib` | ~1.5min | Rust unit tests — the fast inner loop |
-| `make qa` | ~2min | The PR gate's QA job, locally: rustfmt, the generated indexes, workspace clippy, the cross-checks, rustdoc |
-| `make smoke` | ~30min release | qa, then the language suite, the implementation suite on the rig, doctests, embedding, the semver surface gate |
-| `make test` | smoke + ~5min | smoke, then the unit and integration tests |
-| `make crosscheck` | ~2min | Clippy over the macOS arms and `cargo check` over the Android arms of `cfg(target_os)`, which a Linux build never compiles |
-
-Pass the release binaries to anything that runs a suite — the debug default
-takes hours rather than ~30 minutes:
-
-```sh
-make smoke ELLE=./target/release/elle ELLE_RIG=./target/release/elle-rig CARGO_PROFILE=--release
-```
-
-Never read a batched suite's exit status through a pipe: `make smoke-lang |
-tail` reports `tail`'s exit, not the suite's.
-
-See [AGENTS.md](AGENTS.md) and [docs/testing.md](docs/testing.md) for
-test organization, helpers, and how to add tests.
+[AGENTS.md](AGENTS.md) lists the test commands, what each one costs, and how to
+run a suite on the release binaries. [docs/testing.md](docs/testing.md) covers
+the two suites and how to add a test.
 
 ## Plugins and the stable ABI
 
@@ -178,7 +161,7 @@ the moment the PR merges, nobody can find it again, and until then it stands
 between the reviewer and the change they came to read. A defect worth recording
 is worth a number; a defect not worth a number is not worth writing down.
 
-The same rule covers every neighbouring temptation: work you considered and
+The same rule covers every neighboring temptation: work you considered and
 skipped, follow-ups you plan, adjacent shapes you measured and left alone,
 caveats about code the change does not touch. If a reviewer needs one of them
 to judge THIS change, state it in one sentence where it bears on the change and

@@ -34,6 +34,7 @@ specification is [docs/test-runner.md](test-runner.md), with
 | `make smoke-producers` | The files a ledger names, less the two `make tree-producers` runs, in-process on the rig |
 | `make smoke-charge` | Each file's charge on the runner's heap |
 | `make tree-producers` | The audit and size ledgers on the release rig; `make qa` runs it |
+| `make qa` | The `QA` job ([ci](analysis/ci.md)) and the Android cross-check: about two minutes, and two more when the release rig needs a build |
 | `make smoke` | `make qa`, then the five `smoke-` passes above, the doctests, the embedding demo, and the surface gate |
 | `make test` | `make smoke`, then the Rust unit and integration tests |
 | `elle test tests/lang/*.lisp` | Run those files in-process; print a summary; gate on exit code |
