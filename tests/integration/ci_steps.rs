@@ -1,4 +1,4 @@
-// audited: 2026-10-15
+// audited: 2026-10-21
 // A CI step runs one make target, and a make target runs at most one `elle test` pass.
 //
 // docs/analysis/ci.md
@@ -11,6 +11,14 @@ use crate::common::{
     passes, recording_targets, runs_target, smoke_passes, step_lines, workflow_files,
     workflow_jobs as jobs,
 };
+use std::collections::BTreeSet;
+
+/// The targets that run one build's producer pass.
+const PRODUCER_PASSES: [&str; 3] = [
+    "smoke-producers",
+    "smoke-pool-producers",
+    "smoke-mlir-producers",
+];
 
 /// The pull-request workflow's text.
 fn pr_workflow() -> String {
@@ -186,4 +194,56 @@ fn each_platform_smoke_job_runs_every_pass_of_make_smoke_once() {
             assert_eq!(n, 1, "job `{job}` runs `make {pass}` {n} times");
         }
     }
+}
+
+// A job runs its build's producer pass right after the build, before every
+// other pass and the doctests: the pass is short, and a stale ledger row fails
+// it as surely as a broken file fails a suite (docs/analysis/ci.md). `qa` and
+// the tree's producers come before it in the merge queue, and both are QA.
+//
+// The counter-factual: the default build's job ran its producers after three
+// suite passes, so a stale row failed ten minutes into the job.
+#[test]
+fn every_job_runs_its_producer_pass_before_its_other_passes() {
+    let mut later: BTreeSet<String> = recording_targets();
+    later.extend(smoke_passes());
+    for early in ["qa", "tree-producers"].into_iter().chain(PRODUCER_PASSES) {
+        later.remove(early);
+    }
+    let mut checked = 0;
+    for (path, text) in workflow_files() {
+        for (job, body) in jobs(&text) {
+            let steps: Vec<String> = make_steps(&body).into_iter().map(|(t, _)| t).collect();
+            let Some(at) = steps
+                .iter()
+                .position(|t| PRODUCER_PASSES.contains(&t.as_str()))
+            else {
+                continue;
+            };
+            checked += 1;
+            let before: Vec<&String> = steps[..at].iter().filter(|t| later.contains(*t)).collect();
+            assert!(
+                before.is_empty(),
+                "{path} job `{job}` runs {before:?} before `make {}`",
+                steps[at]
+            );
+        }
+    }
+    assert!(
+        checked >= 6,
+        "found {checked} jobs running a producer pass; the parse is broken, not the workflows"
+    );
+}
+
+// `make smoke` runs its passes in `SMOKE_PASSES` order, so the producer pass
+// leads there too, as it leads every job. The counter-factual: a local `make
+// smoke` reaches a stale row half an hour after it starts.
+#[test]
+fn make_smoke_runs_the_producer_pass_first() {
+    let passes = smoke_passes();
+    assert_eq!(
+        passes.first().map(String::as_str),
+        Some("smoke-producers"),
+        "`SMOKE_PASSES` does not lead with the producer pass: {passes:?}"
+    );
 }

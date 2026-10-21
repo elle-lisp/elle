@@ -1,13 +1,16 @@
-// audited: 2026-10-12
-// QA runs on every pull request, runs the prose checks first, and every other
-// job waits for it to pass.
+// audited: 2026-10-21
+// QA runs on every pull request, runs the prose checks first, judges the tree's
+// ledgers, and every other job waits for it.
 //
 // docs/analysis/ci.md
 //
 // QA fails in minutes, and the rest of the matrix takes up to an hour. A job
 // that starts beside QA spends that hour on a change QA has already refused.
 
-use crate::common::{make_dry_run, repo_root, workflow_jobs as jobs};
+use crate::common::{
+    assert_rig_runs, make_dry_run, repo_root, the_pass, workflow_jobs as jobs, TREE_PRODUCERS,
+};
+use std::collections::BTreeSet;
 
 /// The QA job, as `.github/workflows/pr.yml` names it.
 const QA: &str = "qa";
@@ -153,5 +156,40 @@ fn make_qa_runs_the_prose_checks_first() {
     assert!(
         first.starts_with("cargo test --test prose"),
         "`make qa` does not run the prose checks first; its first command is:\n  {first}"
+    );
+}
+
+// The audit and size producers read the tree and not the build, so `make
+// tree-producers` judges them on the release rig, in-process and in a pass of
+// their own, under both JIT policies (docs/analysis/ci.md). The counter-factual:
+// they rode the default build's producer pass, its seventh step, and a stamp
+// that moved an audit count failed there ten minutes after QA had passed.
+#[test]
+fn make_tree_producers_judges_the_tree_ledgers_on_the_release_rig() {
+    let pass = the_pass("tree-producers");
+    let want: BTreeSet<String> = TREE_PRODUCERS.iter().map(|p| p.to_string()).collect();
+    assert_eq!(
+        pass.files, want,
+        "`make tree-producers` runs the tree's producers alone"
+    );
+    assert_eq!(pass.isolate(), None, "and runs them in-process");
+    assert_rig_runs(&pass, "RELEASE_RIG", "the tree's producer pass");
+    let recipe = make_dry_run("tree-producers").expect("`make --dry-run tree-producers` succeeds");
+    assert!(
+        recipe.contains("cargo build --release -p elle-rig"),
+        "`make tree-producers` runs a release rig it never builds:\n{recipe}"
+    );
+}
+
+// QA is the gate every other job waits for, so the tree's ledgers fail it, and
+// `make qa` runs what the job runs. The counter-factual: the job judged neither
+// ledger, and every suite job started over a stale row.
+#[test]
+fn the_qa_job_judges_the_tree_ledgers() {
+    let text = workflow_text();
+    let steps = runs(&qa_body(&text));
+    assert!(
+        steps.iter().any(|s| s == "make tree-producers"),
+        "the `{QA}` job never runs `make tree-producers`: {steps:?}"
     );
 }
