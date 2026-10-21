@@ -1,8 +1,9 @@
-// audited: 2026-10-14
-// A function the cache restores carries its body's fragment, so a later compile
-// grafts it as it grafts a compiled one.
-// docs/impl/stdlib-cache.md
-// docs/impl/graft.md
+// audited: 2026-10-21
+//! A function the cache restores carries its body's fragment, so a later compile
+//! grafts it as it grafts a compiled one.
+//!
+//! docs/impl/stdlib-cache.md
+//! docs/impl/graft.md
 
 use super::super::*;
 use crate::hir::testkit::count_calls_to;
@@ -21,7 +22,7 @@ fn plus_calls(rt: &mut Runtime, src: &str) -> usize {
 /// second restores it from the file the first wrote. Both must graft `+`.
 ///
 /// The counter-factual: a restore that drops the fragment leaves the second
-/// runtime's `+` a closure with no body to read, so its call stays a call, and a
+/// runtime's `+` a closure with no body to read. Its call stays a call, and a
 /// cache hit compiles user code differently from a cache miss.
 #[test]
 fn a_restored_function_grafts_as_a_compiled_one_does() {

@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! Pins the mutated refusal: only a reassignment of the binding that owns the release
 //! route refuses the window.
 //!
@@ -8,10 +8,10 @@ use super::*;
 
 // ── The mutated refusal is about the route, and one binding owns it ──
 //
-// `region_to_slot` is keyed on a region's allocation site, so the slot a
+// `region_to_slot` is keyed on a region's allocation site. So the slot a
 // value-routed release loads belongs to the binding whose init allocated the
-// region — or, where nothing in this body allocates it, to the parameter the
-// lambda prologue recorded. Every other holder names the same value through a slot
+// region. Where nothing in this body allocates it, the slot belongs to the
+// parameter the lambda prologue recorded. Every other holder names the same value through a slot
 // no release reads, so the mutated question is asked of the route's binding alone
 // (docs/impl/region/window.md). The pins below are the admissions and the refusals
 // they keep.
@@ -73,10 +73,10 @@ fn a_reassigned_destructured_name_refuses_nothing() {
 #[test]
 fn a_reassigned_parameter_has_no_route_but_its_box() {
     // The parameter half of the same reading, and why the prologue's own set is
-    // empty in practice: `needs_capture` at parameter scope IS `is_mutated`, so a
-    // reassigned parameter is celled, and the one region it names is that cell's —
-    // released by naming the BOX, which `populate_env` mints once per activation
-    // and no `assign` repoints. So the prologue records no poisonable route, and
+    // empty in practice. `needs_capture` at parameter scope IS `is_mutated`, so a
+    // reassigned parameter is celled, and the one region it names is that cell's.
+    // That region is released by naming the BOX, which `populate_env` mints once
+    // per activation and no `assign` repoints. So the prologue records no poisonable route, and
     // the call result the body assigns into the parameter keeps its own.
     let (hir, arena, _symbols, info) =
         analyze_with_class("(fn (t @p) (begin (assign p (rest p)) (if t (length p) 0)))");
@@ -116,8 +116,8 @@ fn a_reassigned_parameter_has_no_route_but_its_box() {
 fn a_cursor_an_arm_walks_does_not_refuse_the_live_in_release() {
     // The everyday `each` over a list: the type dispatch receives the cons chain,
     // and the arm that walks it opens by binding a reassigned cursor from it. The
-    // cursor's init merely NAMES `xs`, so it allocates nothing and records no slot
-    // — `xs`'s own untainted slot is still the release's one route, and the window
+    // cursor's init merely NAMES `xs`, so it allocates nothing and records no slot.
+    // `xs`'s own untainted slot is still the release's one route, and the window
     // must anchor the release where every arm reaches it.
     let (hir, arena, _symbols, info) = analyze_with_class(
         "(fn (t xs) (if t (length xs) \
@@ -188,8 +188,8 @@ fn a_reassigned_allocating_binder_refuses_its_own_release() {
 #[test]
 fn a_value_allocated_in_an_arm_keeps_its_in_arm_release() {
     // The boundary the reading above preserves, and the one the premise exists
-    // for: `x`'s allocation IS the arm, so its slot was never stored on the path
-    // that skips the arm and a release at the merge would free whatever it finds.
+    // for. `x`'s allocation IS the arm, so its slot was never stored on the path
+    // that skips the arm, and a release at the merge would free whatever it finds.
     let (hir, arena, _symbols, info) =
         analyze_with_class("(fn (t) (if t (let [x (list 1 2 3)] (length x)) 0))");
     let (then_id, else_id) = first_if_arms(&hir).expect("an If node");

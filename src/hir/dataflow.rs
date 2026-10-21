@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! The dataflow facade: def-use chains, value origins, liveness and last use in one `DataflowInfo`.
 //!
 //! docs/impl/hir.md

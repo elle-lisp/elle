@@ -116,17 +116,19 @@
 # allocations, one difference: which construct carries the accumulator, so the
 # pair prices the rewrite a programmer would otherwise have to make.
 #
-# The returned binding takes the 1-slot-container model, so each value the loop
-# displaces dies at the overwrite and the final content leaves with the caller —
-# the `Return`'s mint pays for the caller's reference and the cell's content drop,
-# emitted after that mint, releases the cell's. Withhold the container half and
-# each stored value is protected only by its producer's one release, which the
-# returned-region extension drags out to the `Return`: it names whatever the
-# producer's ANF slot holds LAST and every earlier value is stranded, one region
-# per trip. Neither probe cares whether the accumulated values are
-# self-referential (a cons chain and a fresh string per iteration read alike), and
-# neither is about closure capture — a helper closing over the accumulator, or
-# over a mutable input container, is the `capture-acc-*` pair below.
+# The returned binding takes the 1-slot-container model. Each value the loop
+# displaces dies at the overwrite, and the final content leaves with the caller.
+# The `Return`'s mint pays for the caller's reference, and the cell's content
+# drop, emitted after that mint, releases the cell's. Without the container half,
+# each stored value would be protected only by its producer's one release. The
+# returned-region extension would drag that release out to the `Return`, where it
+# names whatever the producer's ANF slot holds LAST. Every earlier value would
+# strand, one region per trip.
+#
+# Neither probe cares whether the accumulated values are self-referential: a cons
+# chain and a fresh string per iteration read alike. Neither is about closure
+# capture either. A helper closing over the accumulator, or over a mutable input
+# container, is the `capture-acc-*` pair below.
 (defn loop-acc-return-shape [n]
   (def @acc ())
   (def @i 0)
@@ -145,8 +147,8 @@
 # ── The walk's element, stored through a name of the walk's own ────────
 # `loop-acc-return` above accumulates a value its own body allocated. A walk
 # stores something else: an ELEMENT of a collection, and it arrives through a
-# name the walk binds — `each` expands to `(let [p (get items idx)] BODY)`. That
-# name is the store's FEEDER, so the cell keeps the container model and each
+# name the walk binds. `each` expands to `(let [p (get seq idx)] BODY)`. That
+# name is the store's FEEDER, so the cell keeps the container model, and each
 # element's producer reference dies at the store that took it
 # (docs/impl/region/bindings.md).
 #
@@ -176,11 +178,11 @@
 # Every container probe above drives its accumulator from a bare `while` in the
 # same scope. The everyday builder does not: it names the walk, and that helper
 # CAPTURES the mutable accumulator it fills. Both realizations are here, because
-# they take different region paths — `capture-acc-letrec` closes a local
-# `letrec` helper over `out` (a capture cell plus a closure per call),
-# `capture-acc-while` closes a plain `let`-bound `fn` over it — and both must be
-# bounded on the SAME terms as the uncaptured form, or a builder is only
-# leak-free when its author threads the accumulator through parameters instead.
+# they take different region paths. `capture-acc-letrec` closes a local `letrec`
+# helper over `out`, a capture cell plus a closure per call. `capture-acc-while`
+# closes a plain `let`-bound `fn` over it. Both must be bounded on the SAME terms
+# as the uncaptured form. Otherwise a builder would be leak-free only when its
+# author threads the accumulator through parameters instead.
 # `thread-acc-param` is that parameter-threaded alternative, kept beside them as
 # the discriminator: were the captured forms to regress, this one would stay at 0
 # and the difference would be exactly the cost of the rewrite. Controls at 0. The

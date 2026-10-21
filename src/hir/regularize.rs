@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! The post-analysis HIR regularization sequence, in the one order every compile entry runs it.
 //!
 //! docs/impl/graft.md

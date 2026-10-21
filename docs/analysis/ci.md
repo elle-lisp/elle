@@ -75,13 +75,12 @@ runs first, runs always, and gates every other job.
 ### Each build is an implementation
 
 The corpus jobs differ in the build they make, not in flags they pass. A build
-carries one optimizing tier and one I/O backend ([config](../config.md)),
-and every build runs the language suite with no flag ([spec](../spec.md)).
-So the job list above is
-the implementation matrix. It holds the default build, a build with no JIT, a
-thread-pool build, an MLIR build, a build with no features, and the default
-build on AArch64 and macOS. A language test that passes on one and fails on
-another has found a defect in the build that fails.
+carries one optimizing tier and one I/O backend ([config](../config.md)), and
+every build runs the language suite with no flag ([spec](../spec.md)). So the
+job list above is the implementation matrix. It holds the default build, a
+build with no JIT, a thread-pool build, an MLIR build, a build with no
+features, and the default build on AArch64 and macOS. A language test that
+passes on one and fails on another has found a defect in the build that fails.
 
 The build with no features cannot host the runner: the runner's store reaches
 SQLite and zstd through FFI. So `smoke-noffi` runs `elle test` on the default
@@ -114,7 +113,7 @@ platform spends and roughly halves the wall clock, which is the trade the merge
 gate cares about.
 
 A Smoke job runs each pass of `make smoke` as a step of its own, not `make
-smoke` itself (§ One step, one pass). The Makefile names the passes once, in
+smoke` itself, for the reason the next section gives. The Makefile names the passes once, in
 `SMOKE_PASSES`. Each pass runs once. A `make smoke` step after the job's
 `doctest` step would run the doctests twice. A Smoke job runs no `make qa`: the
 `QA` job is the QA gate for every platform.
@@ -129,9 +128,9 @@ A pass deals its files into batches and runs them side by side, and each batch
 prints its own summary. Each pass is a target of its own, and
 [the rig](../../rig/overview.md) names the ones that run on a rig.
 
-What each batch prints is [testing](../testing.md)'s, and what it records
-leaves in the store the job uploads (§ A corpus job's results leave the
-runner).
+[Testing](../testing.md) describes what each batch prints. What a batch
+records leaves the runner in the store the job uploads, as a later section
+describes.
 
 A job runs its build's producer pass right after the build, before `doctest`
 and every other pass. The pass is short, and a stale ledger row fails it as
@@ -182,8 +181,8 @@ runs, so a pool-only defect fails on a Linux runner before it reaches the Mac.
 
 The rule is one such job per I/O backend. `Thread-Pool I/O Tests` covers the
 pool and `Default Build Tests` covers io_uring, so finding a region defect never
-depends on the macOS runner. That runner is the slowest box in the workflow,
-and its failures read as flaky timeouts (§ "Runner capacity").
+depends on the macOS runner. That runner is the slowest box in the workflow, and
+its failures read as flaky timeouts, as the runner capacity section explains.
 [workflows.rs](../../tests/integration/workflows.rs) is the standing check that
 both backends keep a job.
 

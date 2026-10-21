@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! The transferred-returned-subtree cut: a producer's returned cycle, owned by the activation that consumes it.
 //!
 //! docs/impl/region/owner.md

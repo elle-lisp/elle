@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-21
 //! Walk one file's analyzed HIR and emit the facts the solver reads.
 //!
 //! docs/impl/solver.md
@@ -331,9 +331,9 @@ impl<'a> Extractor<'a> {
     }
 }
 
-/// The primitives a collection literal or a qualified name calls: the
+/// The primitives a collection literal or a qualified name calls. The
 /// analyzer's `analyze_collection_literal`, `meta/location` and the `a:b`
-/// desugaring build these calls without charging their signal, and report
+/// desugaring build these calls without charging their signal. They report
 /// what the form may raise as the enclosing function's own bits.
 const UNCHARGED: &[&str] = &[
     "array", "@array", "bytes", "@bytes", "struct", "@struct", "get",

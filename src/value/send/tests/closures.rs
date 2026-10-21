@@ -36,8 +36,8 @@ fn make_test_closure(
 /// A closure's LIR crosses with the values its `ValueConst`s load — a closure
 /// and a heap list here — and the worker's JIT compiles what arrives. The
 /// counter-factual is a sender that cannot carry one of the two and drops the
-/// LIR: the closure still runs on the interpreter with the right answer, so
-/// only the arriving LIR and its compile can tell.
+/// LIR. The closure would still run on the interpreter with the right answer,
+/// so only the arriving LIR and its compile can tell.
 #[test]
 fn a_closure_crosses_with_its_lir_and_the_values_it_loads() {
     crate::value::arena::with_test_region(|| {
@@ -119,8 +119,8 @@ fn closure_round_trips_preserving_frame_release_tables() {
     // `frame_release_slots`/`frame_release_regions` are the table an error
     // exit walks to run the releases the abandoned frame still owed
     // (docs/impl/region/mechanism.md). A closure keeps its body across the
-    // boundary, so it keeps that obligation: reconstruct it with empty tables and every
-    // region an erroring worker frame owed is stranded.
+    // boundary, so it keeps that obligation. Reconstructed with empty tables,
+    // it would strand every region an erroring worker frame owed.
     crate::value::arena::with_test_region(|| {
         let heap_ptr = crate::value::arena::leaked_test_heap();
         let child = CodeBuilder::new(Vec::new(), Arity::Exact(0), Vec::new())

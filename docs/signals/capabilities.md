@@ -32,9 +32,9 @@ can't do. They're independent:
 
 The table reads the same for every capability. A mask catches a signal
 when the two share **any** bit, so naming a capability in the mask catches
-the operations that raise it — `:exec` catches subprocess requests, `:fs`
-catches the filesystem denials, `:io` catches scheduler requests. There is
-no bit a mask must name before another bit takes effect.
+the operations that raise it. `:exec` catches subprocess requests, `:fs`
+catches the filesystem denials, and `:io` catches scheduler requests. There
+is no bit a mask must name before another bit takes effect.
 
 Naming a capability catches the operation whether or not you also deny it.
 Denial changes what the child is *allowed* to do; the mask changes what
@@ -251,8 +251,8 @@ capability space that is NOT withheld:
 
 ## Reading a body against its mask and deny set
 
-A `fiber/new` call can show both directions at once. When its body is a
-function literal and its mask and `:deny` set are literal keywords or sets,
+A `fiber/new` call can show both directions at once. Its body may be a
+function literal, and its mask and `:deny` set literal keywords or sets. Then
 the compiler knows the signals the body may raise, the signals its parent
 catches, and the capabilities its parent withholds. The linter then gives two
 hints:

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! Lowering's basic shapes, the ownership forest's adopts, `LoadSelf`, and the compiled forward cells a binder mints.
 //!
 //! docs/impl/lir.md
@@ -30,7 +30,7 @@ fn test_lower_if() {
         make_span(),
     );
     let func = lowerer.lower(&hir).unwrap();
-    // If now creates multiple blocks: entry, then, else, merge
+    // An If lowers to four blocks: entry, then, else, merge
     assert_eq!(func.entry.view().block_count(), 4);
     // Entry block should have a Branch terminator
     assert!(matches!(

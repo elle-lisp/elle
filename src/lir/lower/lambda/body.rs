@@ -77,7 +77,7 @@ impl<'a> Lowerer<'a> {
         let saved_function_params = self.current_function_params.take();
         // The self-recursive binding of THIS lambda body: the binding this lambda
         // captures as `CaptureKind::Recursive` (a same-binding self-edge, classified
-        // in `hir/analyze/scopes.rs`). A reference to it inside the body — in value OR
+        // in src/hir/analyze/scopes.rs). A reference to it inside the body — in value OR
         // call position — resolves to the executing closure via `LoadSelf` / a
         // self-call (`lower_var`), never a cell load. Read directly from the classified
         // fact, independent of whether the binding also keeps a cell for a sibling
@@ -223,13 +223,13 @@ impl<'a> Lowerer<'a> {
         // entry, so without this its moved-in arg would leak. No return mint
         // precedes this release: an unused param is never the return value.
         //
-        // A param the body's tail call MOVES is released by the callee instead,
-        // and that is why the release goes through the relocation wrapper rather
-        // than straight out: when the body ends in a frame-replacing tail call
-        // this emission point is dead, so the release is carried back ahead of
-        // the `TailCall` for every param the call does not name — an unused param
-        // is by definition not one of its arguments, but the exemption is what
-        // keeps a param used ONLY as such an argument out of the hoist
+        // A param the body's tail call MOVES is released by the callee instead.
+        // So the release goes through the relocation wrapper rather than straight
+        // out. When the body ends in a frame-replacing tail call, this emission
+        // point is dead, so the release is carried back ahead of the `TailCall`
+        // for every param the call does not name. An unused param is by
+        // definition not one of its arguments. The exemption is what keeps a
+        // param used ONLY as such an argument out of the hoist
         // (docs/impl/region/mechanism.md).
         //
         // The nil stamp makes the release SELF-CANCELLING, so it can be

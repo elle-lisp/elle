@@ -1,6 +1,6 @@
 # Type inference: the ascent, and what a call proves
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-21 -->
 
 Where the types come from: an ascent from below whose limit is the least
 fixpoint, and what each kind of call contributes to it.
@@ -100,7 +100,7 @@ Pass 1 reads Bottom for both self-calls, so the `%add` is Bottom and the body
 is `Int ⊔ ⊥ = Int`. Pass 2 reads Int for both, so the `%add` is Int and the
 body is Int again. Nothing moves, and the ascent is over.
 
-The proof the second pass adds is what the backends spend: an `%add` of two
+The proof the second pass adds is what the backends spend. An `%add` of two
 proven ints carries `:int` into LIR, which is `AddInt` on the bytecode tier and
 a tag-check-free fast path on the JIT ([LIR](lir.md)).
 
@@ -189,9 +189,9 @@ prove-or-reject rejects that site.
 
 Widening treats an unsettled entry, and a settled Bottom needs the same answer
 for the same reason. `subtype(⊥, b)` holds for every `b`, so a Bottom operand
-discharges every contract row that asks a subtype question — Numbers,
-DivFamily, Ints, Ordered, and the `%get` index — and the silent opcode lowers
-over a value of any type.
+discharges every contract row that asks a subtype question. Those rows are
+Numbers, DivFamily, Ints, Ordered, and the `%get` index, and the silent opcode
+then lowers over a value of any type.
 
 Two different facts wear that one lattice element:
 
@@ -204,9 +204,10 @@ Neither says what type a value arriving at the site has. So the pass hands out
 no Bottom: at the ascent's limit, every Bottom left in the node map settles to
 Top, which is above the fixpoint and proves nothing.
 
-That one rule covers every consumer, because they all read that one map — the
-operand contracts ([the contract check](../../src/hir/typeinfer/contract.rs)),
-the signal narrowing ([narrowing](../../src/hir/narrow.rs)), the fold
+That one rule covers every consumer, because they all read that one map. The
+consumers are the operand contracts
+([the contract check](../../src/hir/typeinfer/contract.rs)), the signal
+narrowing ([narrowing](../../src/hir/narrow.rs)), the fold
 ([grafting a call](graft.md)), and the LIR operand proof
 ([intrinsic lowering](../../src/lir/lower/expr/intrinsic.rs)). The last asks
 with equality, so a Bottom proves nothing there. The first three ask with
@@ -298,7 +299,7 @@ merge, so nothing records a body type for it and a call already reads Top.
 
 Recording Top is what the join needs, and recording nothing is not enough. An
 absent entry reads as Bottom, and a Bottom no later pass raises joins away at
-the first branch it meets — `(if c (f 0) 1)` joins it with Int and hands the
+the first branch it meets. `(if c (f 0) 1)` joins it with Int and hands the
 site an Int proof. `settle` never sees it, because the join has already
 replaced it (§ "Bottom is not a proof").
 
@@ -346,7 +347,7 @@ The pass has no flow, so it cannot order the write against a call:
 - `…::a_self_recursive_result_proves_a_callee_parameter` — the same result
   carried one call further, into the parameters of a helper that adds it.
 - `…::a_float_base_case_does_not_prove_an_int_recursive_result` — the
-  over-narrowing guard, and the soundness half: a self-call read as Bottom on
+  over-narrowing guard, and the soundness half. A self-call read as Bottom on
   every pass would type the `%add` of a float base case Int, and let a bitwise
   op read a float's payload.
 - `…::a_three_member_recursion_proves_through_the_cycle` and
@@ -355,17 +356,17 @@ The pass has no flow, so it cannot order the write against a call:
 - `…::a_chain_deeper_than_the_budget_proves_nothing` — the widening: eleven
   functions in reverse walk order outrun the ten passes, and the site that
   reads the unsettled entry is rejected rather than compiled.
-- `hir::typeinfer::tests::bottom::*` — Bottom is not a proof: one rejection per
-  contract row that asks a subtype question, a guard and a `(numeric!)`
-  declaration each refining the Kleene start and each meeting a fact that
-  contradicts it, and the postcondition that the map the pass hands out carries
-  no Bottom.
+- `hir::typeinfer::tests::bottom::*` — Bottom is not a proof. The module holds
+  one rejection per contract row that asks a subtype question. A guard and a
+  `(numeric!)` declaration each refine the Kleene start, and each meets a fact
+  that contradicts it. The postcondition: the map the pass hands out carries no
+  Bottom.
 - `hir::typeinfer::tests::mutation::*` — a written lambda binding proves nothing
-  about its result: the write after the call and the write before it, the write
-  reached from inside another function, a write that stores the same type, the
-  loop that rewrites its own callee between two turns, the branch a Bottom would
-  have joined away, and two controls — the unwritten binding, and the
-  SSA-renamed function-local write that still proves.
+  about its result. The module covers the write after the call and the write
+  before it, the write reached from inside another function, and a write that
+  stores the same type. It covers the loop that rewrites its own callee between
+  two turns, and the branch a Bottom would have joined away. Two controls
+  prove: the unwritten binding, and the SSA-renamed function-local write.
 - `hir::typeinfer::tests::destructure::*` — a read of a destructured binding,
   from a `def` and from a `var`, is never typed by its `nil` placeholder.
 - `hir::typeinfer::tests::branch::*` — a write inside a guarded branch or a

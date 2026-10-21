@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! The container-read borrow: what keeps a value read out of a container alive, by read form.
 //!
 //! docs/impl/region/rules.md
@@ -11,22 +11,20 @@ mod chain;
 // ── The container-read BORROW ────────────────────────────────────────────────────
 //
 // A value read out of a container with `get`/`first`/`rest` still lives INSIDE that
-// container — a pair's car in the pair's own region, an `@array` element in the member
+// container: a pair's car in the pair's own region, an `@array` element in the member
 // region the container holds. What keeps that borrow alive splits by read form, so the
 // walk records the two separately:
 //
-//   - An OPCODE read (`%get`/`%first`/`%rest`) raises no count at all, so the container's
-//     own lifetime is the borrow's only protection: `uncounted_read_sites` drives the
-//     `decref_point` extension to the read's last use (region/rules.md Rule 4, the
-//     borrowing node).
-//   - A NATIVE read takes the Rule 5 pass-through retain, which the RC baseline honours —
-//     so no lifetime extension — but ADOPTION freezes the member's RC and leaves that
-//     retain inert. `counted_read_aliases` therefore drives the ownership cut's refusal
-//     (docs/impl/region/adopt.md) and the lowerer's release
-//     order at a shared point.
+// - An OPCODE read (`%get`/`%first`/`%rest`) raises no count at all, so the container's
+//   own lifetime is the borrow's only protection. `uncounted_read_sites` drives the
+//   `decref_point` extension to the read's last use (docs/impl/region/rules.md).
+// - A NATIVE read takes the Rule 5 pass-through retain, which the RC baseline honours,
+//   so it needs no lifetime extension. But ADOPTION freezes the member's RC and leaves
+//   that retain inert. So `counted_read_aliases` drives the ownership cut's refusal
+//   (docs/impl/region/adopt.md) and the lowerer's release order at a shared point.
 //
 // These pins are written from that definition; the runtime witness is
-// `region-container-read-borrow-uaf.lisp`.
+// `tests/impl/region-container-read-borrow-uaf.lisp`.
 
 /// The container regions recorded for the UNCOUNTED (opcode) read at `site`.
 fn uncounted_containers(info: &RegionInfo, site: HirId) -> Vec<Region> {
@@ -48,15 +46,15 @@ fn counted_aliases(info: &RegionInfo, site: HirId) -> Vec<(Region, Region)> {
 #[test]
 fn opcode_read_extends_container_decref_to_the_reader() {
     // `(length (%get c 0))`: the `%get` opcode borrows out of `c` without minting a
-    // region of its own, and ANF leaves its result unnamed (an operand of the enclosing
-    // call), so no binding chain covers it. `c`'s last MENTION is the read, but `c` is
+    // region of its own. ANF leaves its result unnamed, as an operand of the enclosing
+    // call, so no binding chain covers it. `c`'s last MENTION is the read, but `c` is
     // still holding the value `length` derefs, so its release must land at the `length`
     // call, not at the `%get`.
     //
     // Counterfactual: with the read treated as an ordinary use, `region_data[c].
-    // decref_point` IS the `%get` node — the container's free-time cascade then drops the
+    // decref_point` IS the `%get` node. The container's free-time cascade then drops the
     // element's last count and `length` derefs a freed page (the cascade face of
-    // `region-container-read-borrow-uaf.lisp`). This assertion was RED before the borrow pin.
+    // `tests/impl/region-container-read-borrow-uaf.lisp`).
     let (hir, arena, _symbols, info) = analyze_with_class(
         "(let [c (@array) r (string \"s\")] (begin (%array-push c r) (length (%get c 0))))",
     );
@@ -103,16 +101,15 @@ fn opcode_read_extends_container_decref_to_the_reader() {
 fn native_read_alias_outliving_the_container_refuses_the_adopt() {
     // The NATIVE `get` borrow: `x` holds a fresh call-result placeholder region that
     // statically relates to nothing in `c`, and it is read AFTER `c`'s own last mention.
-    // Under RC that is safe — the read's pass-through retain (Rule 5) hands `x` its own
-    // counted reference — but adoption FREEZES the pushed element's RC, so the retain is
-    // inert and `c`'s release would subtree-drop the element `x` still names. The subtree
+    // Under RC that is safe: the read's pass-through retain (Rule 5) hands `x` its own
+    // counted reference. But adoption FREEZES the pushed element's RC, so the retain is
+    // inert, and `c`'s release would subtree-drop the element `x` still names. The subtree
     // must therefore stay Shared, where the retain is live again.
     //
     // Counterfactual: with only the member obligation, every member's own `decref_point`
-    // sits before `c`'s release and the subtree reads admissible — the alias is invisible
+    // sits before `c`'s release and the subtree reads admissible. The alias is invisible
     // to it, and the adopt is emitted (the subtree-drop face of
-    // `region-container-read-borrow-uaf.lisp`). This assertion was RED before the alias
-    // obligation.
+    // `tests/impl/region-container-read-borrow-uaf.lisp`).
     let (_, info, edges) = adopt_edges(
         "(let [c (@array) r (string \"s\")] \
            (begin (%array-push c r) (let [x (get c 0)] (length x))))",
@@ -206,10 +203,10 @@ fn nested_read_alias_refuses_the_adopt_transitively() {
     // transitive, so the obligation closes the read edges over the member set instead of
     // stopping at the first level.
     //
-    // Counterfactual: a one-level check admits this subtree — the inner alias passes and
-    // the outer alias's container is the inner alias, not a member — and the outer read's
-    // result is freed under its reader (the nested face of
-    // `region-container-read-borrow-uaf.lisp`).
+    // Counterfactual: a one-level check admits this subtree, because the inner alias passes
+    // and the outer alias's container is the inner alias, not a member. The outer read's
+    // result is then freed under its reader (the nested face of
+    // `tests/impl/region-container-read-borrow-uaf.lisp`).
     let (_, info, edges) = adopt_edges(
         "(let [inner (@array) s (string \"s\") c (@array)] \
            (begin (%array-push inner s) (%array-push c inner) \
@@ -232,15 +229,14 @@ fn nested_read_alias_refuses_the_adopt_transitively() {
 // ── The opaque-call result alias ─────────────────────────────────────────────────
 //
 // The read edges above are recorded where the walk can SEE the container. A call hides
-// it: a callee may hand back an argument itself, or a value it read out of one, and the
-// caller's call-result placeholder then names a region inside the argument's subtree
+// it. A callee may hand back an argument itself, or a value it read out of one. The
+// caller's call-result placeholder then names a region inside the argument's subtree,
 // while relating to no member statically. Only a declaration that the heap result lives
 // in the call's OWN region rules that out (`Fresh`/`Stores`/`Sends`, checked by the
 // effects oracle) or that it is an immediate. A `Funnel` is the middle case: its result is
-// arg0 in place or a fresh copy, so it propagates a read on into arg0's subtree while
-// owing no bound of its own — which makes reachability and boundedness two properties, not
-// one. These pins are written from that rule; the runtime witness is
-// `region-call-result-alias-uaf.lisp`.
+// arg0 in place or a fresh copy. So it propagates a read on into arg0's subtree while
+// owing no bound of its own, which makes reachability and boundedness two properties. These pins are written from that rule; the runtime witness is
+// `tests/impl/region-call-result-alias-uaf.lisp`.
 
 /// The `(result, argument)` pairs recorded for the opaque call at `site`.
 fn result_aliases(info: &RegionInfo, site: HirId) -> Vec<(Region, Region)> {
@@ -260,10 +256,9 @@ fn opaque_call_result_refuses_the_adopt() {
     // where the pass-through retain is live again.
     //
     // Counterfactual: with the alias set closed only over READS, the opaque call is
-    // invisible — every member's own `decref_point` sits before `c`'s release and the
-    // adopt is emitted, so `c`'s release subtree-drops the element the result still names
-    // (the call face of `region-call-result-alias-uaf.lisp`). This assertion was RED before the
-    // opaque-result alias.
+    // invisible. Every member's own `decref_point` sits before `c`'s release and the
+    // adopt is emitted. So `c`'s release subtree-drops the element the result still names
+    // (the call face of `tests/impl/region-call-result-alias-uaf.lisp`).
     let (_, info, edges) = adopt_edges(
         "(fn [h] (let [c (@array) r (string \"s\")] \
            (begin (%array-push c r) (let [x (h c)] (length x)))))",
@@ -290,8 +285,8 @@ fn read_out_of_an_opaque_call_result_refuses_the_adopt() {
     // must close together over the member set.
     //
     // Counterfactual: closing the read edges without the call edge leaves the read's
-    // container unreachable from the members, so the subtree is admitted and the read
-    // result is freed under its reader — the minimal form of the stdlib
+    // container unreachable from the members. So the subtree is admitted and the read
+    // result is freed under its reader. This is the minimal form of the stdlib
     // `(first (concat a @[1 2]))` witness.
     let (_, info, edges) = adopt_edges(
         "(fn [h] (let [c (@array) r (string \"s\")] \
@@ -336,8 +331,8 @@ fn opaque_call_result_bounded_by_the_container_keeps_the_adopt() {
 #[test]
 fn fresh_call_result_records_no_alias() {
     // The declaration is the whole gate. `(string "s" c)` is `Fresh`: its heap result
-    // lives in the call's own minted region — the claim the effects oracle checks on
-    // every debug run — so it can hand back neither `c` nor anything inside it, and no
+    // lives in the call's own minted region, the claim the effects oracle checks on
+    // every debug run. So it can hand back neither `c` nor anything inside it, and no
     // alias edge is recorded. A `Fresh` native that references an argument declares that
     // separately (`embeds` → an embed edge), which is a different relation.
     let (hir, arena, _symbols, info) = analyze_with_class(
@@ -364,15 +359,15 @@ fn fresh_call_result_records_no_alias() {
 #[test]
 fn read_out_of_a_funnel_result_refuses_the_adopt() {
     // A `Funnel` result is arg0 in place or a fresh copy of it, so it needs no lifetime
-    // bound of its own — bounding it would refuse every mutable-store subtree over its
-    // own trailing discarded store result. What it still carries is REACHABILITY: `(get
-    // (%put a :j 5) :k)` reads out of the funnel's result, which IS `a`, so the read's
-    // alias names the element `a`'s drop reclaims even though its recorded container is
-    // the funnel's placeholder.
+    // bound of its own. Bounding it would refuse every mutable-store subtree over its own
+    // trailing discarded store result. What it still carries is REACHABILITY. `(get
+    // (%put a :j 5) :k)` reads out of the funnel's result, which IS `a`. So the read's
+    // alias names the element `a`'s drop reclaims, though its recorded container is the
+    // funnel's placeholder.
     //
     // Counterfactual: with the funnel result left out of the closure entirely, the
     // read's container is reachable from no member and the subtree is admitted — the
-    // funnel face of `region-call-result-alias-uaf.lisp`. And with reachability allowed to
+    // funnel face of `tests/impl/region-call-result-alias-uaf.lisp`. And with reachability allowed to
     // CONSUME the read's own bound (one set instead of two), the funnel edge claims the
     // alias first and the read's bound is never recorded, which admits it just the same.
     let (_, info, edges) = adopt_edges(
@@ -430,9 +425,9 @@ fn container_read_is_not_recorded_as_a_result_alias() {
 
 #[test]
 fn read_bounded_by_the_container_keeps_the_adopt() {
-    // The alias obligation is a bound, not a blanket refusal: when the read's result dies
-    // BEFORE the container's own release — here `c` is used again after the read — the
-    // root's drop post-dominates the alias and the subtree is still adopted, so the
+    // The alias obligation is a bound, not a blanket refusal. Here the read's result dies
+    // BEFORE the container's own release, because `c` is used again after the read. So
+    // the root's drop post-dominates the alias and the subtree is still adopted, and the
     // element reclaims by subtree drop. Without this pin the alias check could be written
     // as "any read refuses" and nothing would notice the reclamation it traded away.
     let (_, info, edges) = adopt_edges(

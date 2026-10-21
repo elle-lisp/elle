@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-21
 //! The signal fixpoint: re-analyze lambda initializers until the signals they read stop changing.
 //!
 //! docs/pipeline.md

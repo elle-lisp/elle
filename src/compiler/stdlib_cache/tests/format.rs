@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! What the serialized stdlib carries across, and the one thing a restored code object loses.
 //!
 //! docs/impl/stdlib-cache.md
@@ -86,10 +86,10 @@ fn bytecode_roundtrip_preserves_lir_and_closures() {
 /// `map` splices that body into the emitted loop, leaving no call to it at all.
 ///
 /// The trap: the two paths' instruction streams are not byte-identical even
-/// for `(+ 1 2)`, because bytecode operands carry ids from a process-global
-/// mint counter that the stdlib compile advances and a cache hit does not.
-/// So the claim is asserted where it lives — in the rewritten HIR — with the
-/// stream lengths as corroboration.
+/// for `(+ 1 2)`. Bytecode operands carry ids from a process-global mint
+/// counter, which the stdlib compile advances and a cache hit does not. So the
+/// claim is asserted where it lives, in the rewritten HIR, with the stream
+/// lengths as corroboration.
 #[test]
 fn a_cache_hit_inlines_the_stdlib_bodies_a_stdlib_compile_inlines() {
     use crate::hir::{BindingArena, Hir, HirKind};
@@ -142,7 +142,7 @@ fn a_cache_hit_inlines_the_stdlib_bodies_a_stdlib_compile_inlines() {
 
     assert_eq!(
         compiled_calls, 0,
-        "the stdlib compile records the fragment, so the `map` fuses and \
+        "the stdlib compile carries the fragment, so the `map` fuses and \
          the call to `{INLINED}` is gone"
     );
     assert_eq!(
@@ -235,15 +235,15 @@ fn a_stored_code_object_carries_its_fragment_bytes() {
     assert_eq!(decoded.fixed(), 1, "inc2 takes one parameter");
 }
 
-/// A payload's origin does not cross the cache — a restore rebuilds code
-/// objects from the stored form, which carries no field for it — and
-/// `(meta/origin f)`, its only reader, reports a closure's source
-/// location from it. So a stdlib closure has an origin on the compiled
-/// path and none on the cached one. Nothing in the tree depends on that;
-/// it is pinned here rather than left to be rediscovered as a surprise.
+/// A payload's origin does not cross the cache. A restore rebuilds code
+/// objects from the stored form, which carries no field for it.
+/// `(meta/origin f)`, its only reader, reports a closure's source location
+/// from it. So a stdlib closure has an origin on the compiled path and none on
+/// the cached one. Nothing in the tree depends on that; it is pinned here
+/// rather than left to be rediscovered as a surprise.
 ///
-/// The second half is what bounds it: a closure the hit runtime compiles
-/// itself still knows where it came from, so the loss stays with the values
+/// The second half is what bounds it. A closure the hit runtime compiles
+/// itself still knows where it came from. So the loss stays with the values
 /// the cache restored and does not reach user code.
 #[test]
 fn a_cached_stdlib_closure_has_no_origin_but_user_code_keeps_its_own() {

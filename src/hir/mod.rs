@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! HIR: the tree the analyzer builds from expanded Syntax, and the passes that prepare it for lowering.
 //!
 //! docs/impl/hir.md

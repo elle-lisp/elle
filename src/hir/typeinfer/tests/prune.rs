@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-21
 //! Type-directed dead-arm pruning: a `(match (type-of x) …)` over a statically
 //! known scrutinee keeps its live arm and loses the rest.
 //!
@@ -43,11 +43,11 @@ fn has_keyword_arm(hir: &Hir, kw: &str) -> bool {
 // which runs under the full stdlib.
 
 /// Type-directed dead-arm pruning. A `(match (type-of a) …)` whose scrutinee `a`
-/// is a literal array has every off-array arm provably unreachable, so `prune.rs`
-/// removes them before region inference — otherwise `a` is referenced (and its
-/// release point computed) inside a dead arm, leaking its region (the
-/// `each`-over-collection over-keep the `each` macro otherwise hits per op, pinned
-/// end-to-end by the oracle's `each-array` probe). The
+/// is a literal array has every off-array arm provably unreachable, so the
+/// `prune` module removes them before region inference. Otherwise `a` is
+/// referenced (and its release point computed) inside a dead arm, leaking its
+/// region. That is the `each`-over-collection over-keep the `each` macro hits per
+/// op, pinned end-to-end by the oracle's `each-array` probe. The
 /// off-type arms (`:fiber`, `:set`, `:struct`) must be gone, and the live
 /// `:array` arm's body kept. The `match` itself may go too: once `a` is proven
 /// an array, the fold leaves the live arm's body in its place.
@@ -120,8 +120,8 @@ fn typeof_match_prunes_through_a_primitive_rettype_alias() {
 
 /// Soundness boundary — under-pruning is the safe direction. When the
 /// scrutinee's concrete type is NOT statically known (a bare parameter, whose
-/// runtime type varies by call site), NO arm is pruned: every dispatch arm
-/// survives so a value of any runtime type reaches its correct arm. Over-pruning
+/// runtime type varies by call site), NO arm is pruned. Every dispatch arm
+/// survives, so a value of any runtime type reaches its correct arm. Over-pruning
 /// a live arm would be a use-after-free (its release computed as if dead) or a
 /// wrong/`:match-error` dispatch.
 ///
@@ -153,11 +153,11 @@ fn typeof_match_keeps_all_arms_for_an_unknown_scrutinee() {
 }
 
 /// A user binding that shadows a primitive constructor must NOT be read as that
-/// primitive's `RetType`: `(def array …)` here returns a fiber, not an array, so
+/// primitive's `RetType`. `(def array …)` here returns a fiber, not an array, so
 /// the scrutinee's type is unknown and no arm prunes. The gate is `is_primitive`
-/// (set only by `bind_primitives`), so a same-named user binding is excluded —
-/// reading its name's `RetType` would be an unsound prune (→ a UAF on the live
-/// `:fiber` path, which is the arm actually taken at runtime here).
+/// (set only by `bind_primitives`), so a same-named user binding is excluded.
+/// Reading its name's `RetType` would be an unsound prune: a UAF on the live
+/// `:fiber` path, which is the arm actually taken at runtime here.
 #[test]
 fn typeof_match_does_not_prune_through_a_user_shadowed_constructor() {
     let mut symbols = SymbolTable::new();

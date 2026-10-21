@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! `LirCode` and `LirOwned`: a frozen function's records in `Vec`s, and the values its instructions load.
 //!
 //! docs/impl/lir.md

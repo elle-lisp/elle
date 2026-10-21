@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The per-unit use index the transfer cut's gates read, built in one structural walk over the HIR.
 //!
 //! docs/impl/region/owner.md
@@ -98,10 +98,10 @@ impl UseIndex {
 
         /// Walk an argument expression and return the binding its value
         /// position consumes: a bare `Var`, or the tail `Var` of an ANF
-        /// producer wrapper (whose inits and non-tail statements are walked
-        /// normally — only the tail read itself is classified by the caller
-        /// instead of recorded as `Other`). `None` for any other tail, which
-        /// is walked in full.
+        /// producer wrapper. The wrapper's inits and non-tail statements are
+        /// walked normally. Only the tail read itself goes to the caller to
+        /// classify, instead of being recorded as `Other`. `None` for any other
+        /// tail, which is walked in full.
         fn arg_value_binding(
             h: &Hir,
             arena: &BindingArena,
@@ -175,10 +175,10 @@ impl UseIndex {
                         walk(init, arena, cc, lambda, ix);
                     }
                     // The ANF producer wrapper's self-tail read
-                    // (`(let [t e] t)`) is pure value flow — the position the
-                    // LET occupies is what consumes the value (an arg position
-                    // classifies it through `arg_value_binding`; a statement
-                    // discards it; a returned value is a region-level seed).
+                    // (`(let [t e] t)`) is pure value flow. The position the LET
+                    // occupies consumes the value: an arg position classifies it
+                    // through `arg_value_binding`, a statement discards it, and a
+                    // returned value is a region-level seed.
                     // Recording it as a read would mark every ANF-named value
                     // `Other` and refuse everything.
                     if let (1, HirKind::Var(v)) = (bindings.len(), &body.kind) {

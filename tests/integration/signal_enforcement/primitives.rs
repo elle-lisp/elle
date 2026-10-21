@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 // The signal of a primitive or intrinsic call, of a lambda body, and of a call through an unknown callee.
 //
 // docs/signals/inference.md
@@ -6,7 +6,7 @@
 use super::*;
 
 // ============================================================================
-// 7. PRIMITIVE SIGNAL TESTS
+// PRIMITIVE SIGNAL TESTS
 // ============================================================================
 
 #[test]
@@ -70,7 +70,7 @@ fn test_signal_of_primitive_and_intrinsic_calls() {
 }
 
 // ============================================================================
-// 8. LAMBDA BODY SIGNAL TRACKING
+// LAMBDA BODY SIGNAL TRACKING
 // ============================================================================
 
 #[test]
@@ -104,7 +104,7 @@ fn test_lambda_body_signal_nested_yield() {
 }
 
 // ============================================================================
-// 9. UNKNOWN CALLEE SOUNDNESS TESTS
+// UNKNOWN CALLEE SOUNDNESS TESTS
 // ============================================================================
 
 #[test]

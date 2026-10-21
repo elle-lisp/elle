@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! The ownership-forest passes: the adopt edges, then the transfer, co-owned-cycle and activation-owner cuts.
 //!
 //! docs/impl/region/ownership.md
@@ -28,28 +28,30 @@ pub(super) fn apply_ownership(
     // containment edges as `AdoptRegion` sites (with the lifetime obligation and
     // merge-overlap filters applied). Runs LAST, after the final `region_data`
     // (its lifetime filter reads `decref_point`) and after the merge seed (so it
-    // can exclude merge participants). This is unconditional — the ownership
-    // forest is how the language runs, not an opt-in dialect; a subtree the inference cannot prove externally unique
-    // simply stays Shared (the always-legal per-region-RC baseline), so no adopt
-    // edge is emitted for it and its emission is the RC baseline by construction.
-    // The containment graph + candidate set + re-derived capture edges every ownership
-    // pass reads. Built ONCE here and threaded by reference: its inputs derive only from
-    // `info`/`escape`/`arena` fields that are NOT mutated across the ownership passes (the
-    // one field that IS — `suppressed_decref_regions` — is read live through
-    // `OwnershipInputs::not_ownable(info, r)` at query time, never cached here), so one
-    // build serves all four passes.
+    // can exclude merge participants). A subtree the inference cannot prove
+    // externally unique simply stays Shared, the always-legal per-region-RC
+    // baseline. No adopt edge is emitted for it, so its emission is the RC
+    // baseline by construction.
+    //
+    // The containment graph, the candidate set and the re-derived capture edges
+    // are what every ownership pass reads. They are built ONCE here and threaded
+    // by reference. Their inputs derive only from `info`/`escape`/`arena` fields
+    // that are NOT mutated across the ownership passes. The one field that IS,
+    // `suppressed_decref_regions`, is read live through
+    // `OwnershipInputs::not_ownable(info, r)` at query time and never cached
+    // here. So one build serves all four passes.
     let inputs = super::super::ownership::ownership_inputs(hir, info, escape_info, arena);
     let mut adopt = super::super::ownership::compute_adopt_edges(&inputs, hir, info, arena, order);
     // The transferred-returned-subtree cut (docs/impl/region/owner.md): a producer's
     // externally-unique returned cycle is owned by its CONSUMING activation. Its
-    // interior owner edges merge into the ordinary adopt maps here — BEFORE the
-    // capture-suppression loop below, so a transfer capture member rides the same
-    // suppress ⊆ adopt contract — and each consumer site's call-result region lands
-    // in `transfer_adopt_regions`, whose release the lowerer replaces with
-    // `AdoptIntoActivation` (regiondecref.rs). Disjoint from the maps' existing
-    // entries by construction: a subtree containing the returned root is refused by
-    // the seed-poisoned subtree walk, and a transfer member reached from any outside
-    // container fails external uniqueness.
+    // interior owner edges merge into the ordinary adopt maps here, BEFORE the
+    // capture-suppression loop below. So a transfer capture member rides the same
+    // suppress ⊆ adopt contract. Each consumer site's call-result region lands in
+    // `transfer_adopt_regions`, whose release the lowerer replaces with
+    // `AdoptIntoActivation` (regiondecref.rs). The cut is disjoint from the maps'
+    // existing entries by construction. The seed-poisoned subtree walk refuses a
+    // subtree containing the returned root, and a transfer member reached from
+    // any outside container fails external uniqueness.
     let transfer = super::super::ownership::compute_transfer_adopts(
         &inputs,
         hir,
@@ -68,13 +70,14 @@ pub(super) fn apply_ownership(
     info.transfer_adopt_regions = transfer.result_regions;
     // A capture-adopted member is reclaimed solely by its closure's subtree drop, so
     // suppress its own compiler decref. A STORE-adopted member needs no such
-    // suppression: the lifetime obligation bounds a store member's `decref_point` at or
-    // below the root's drop (its decref hits the still-frozen region — a no-op), but a
-    // captured member's `decref_point` is the over-extended structural position one
-    // step past the closure (the over-keep the TIGHT obligation admits past), so its
-    // unsuppressed decref would fire AFTER the subtree drop freed it — a direct decref
-    // of an absent region, tripping the `regionstore` phantom/double-free assert.
-    // Collected from `adopt.capture` before the maps move into `info`.
+    // suppression. The lifetime obligation bounds a store member's `decref_point`
+    // at or below the root's drop, so its decref hits the still-frozen region and
+    // does nothing. A captured member's `decref_point` is instead the
+    // over-extended structural position one step past the closure, the over-keep
+    // the TIGHT obligation admits past. Its unsuppressed decref would fire AFTER
+    // the subtree drop freed it. That is a direct decref of an absent region,
+    // which trips the `regionstore` phantom/double-free assert. Collected from
+    // `adopt.capture` before the maps move into `info`.
     for edges in adopt.capture.values() {
         for &(member, _closure) in edges {
             info.suppressed_decref_regions.insert(member);
@@ -96,15 +99,15 @@ pub(super) fn apply_ownership(
     info.owned_group_members = groups.values().flatten().copied().collect();
     info.owned_region_groups = groups;
 
-    // The activation-owner cut: a capture-back-edge SCC — a container captured by a
-    // closure it holds, the cycle no region root can own — is adopted into the
+    // The activation-owner cut. A capture-back-edge SCC is a container captured by
+    // a closure it holds, the cycle no region root can own. It is adopted into the
     // executing activation's owner node and freed by its completion release
     // (docs/impl/region/owner.md).
     // Runs LAST among the ownership passes: its disjointness gate reads the merge,
-    // adopt, and group claims above. Each member's own compiler decref is suppressed
-    // — the node's release is the members' sole demise (the suppress ⊆ adopt
-    // contract) — and every decref-emit site re-checks `suppressed_decref_regions`,
-    // so no other release path can reach a member.
+    // adopt, and group claims above. Each member's own compiler decref is
+    // suppressed, because the node's release is the members' sole demise (the
+    // suppress ⊆ adopt contract). Every decref-emit site re-checks
+    // `suppressed_decref_regions`, so no other release path can reach a member.
     let activation = super::super::ownership::compute_activation_adopts(&inputs, hir, info, order);
     for members in activation.values() {
         for &m in members {

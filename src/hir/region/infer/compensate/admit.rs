@@ -1,4 +1,4 @@
-// audited: 2026-10-16
+// audited: 2026-10-21
 //! What funds a `tail` compensating release.
 //!
 //! The retain on the very node the release is keyed to, and the return frontier
@@ -14,8 +14,8 @@ use crate::hir::region::Region;
 ///
 /// A `tail` per-arm decref is sound only at a node whose own instructions raise
 /// the value's RC on the same path. The retain is what makes the release
-/// provably non-zeroing: it releases the value's OWN owning reference — the
-/// temp/arg reference the single `decref_point` frees on just one arm — and can
+/// provably non-zeroing. The release frees the value's OWN owning reference, the
+/// temp/arg reference the single `decref_point` frees on just one arm. So it can
 /// never drop a live value to zero. A node that merely READS the value (a
 /// closure CALLED there, a pass-through whose result co-locates in the same
 /// region) has no such guard and keeps the conservative single-`decref_point`
@@ -25,32 +25,32 @@ use crate::hir::region::Region;
 /// node, on one mutually-exclusive arm.
 pub(super) struct TailFunding {
     /// The stored value of a `put`/`set`/`push` or a `%pair`. The store raises the
-    /// value's RC (a compile-time `IncrefRegion` or a `%pair`'s allocation scan,
-    /// unchecked: `cross_region_refs` source = value; or the runtime
-    /// mutable-store funnel, checked: `funnel_store_sites`), so the live
-    /// container reference keeps RC ≥ 1 after the per-arm decref.
+    /// value's RC. That is a compile-time `IncrefRegion` or a `%pair`'s allocation
+    /// scan (unchecked: `cross_region_refs` source = value), or the runtime
+    /// mutable-store funnel (checked: `funnel_store_sites`). So the live container
+    /// reference keeps RC ≥ 1 after the per-arm decref.
     ///
-    /// The byte-copy dual joins it: a `%string-push`/`%bytes-push` funnel copies
-    /// the value's bytes and touches neither its incref nor its decref, so the
-    /// wrapper's stranded `val` per-arm release is the value's TRUE last use —
-    /// sound at the same sites (and `%del`'s in-body decref is excluded upstream,
-    /// so no double-free reaches here).
+    /// The byte-copy dual joins it. A `%string-push`/`%bytes-push` funnel copies
+    /// the value's bytes and touches neither its incref nor its decref. So the
+    /// wrapper's stranded `val` per-arm release is the value's TRUE last use, and
+    /// sound at the same sites. `%del`'s in-body decref is excluded upstream, so
+    /// no double-free reaches here.
     store_value_at_site: HashMap<HirId, std::collections::HashSet<Region>>,
     /// The `-mut` funnel's CONTAINER (arg0). Such a funnel returns its container
-    /// pass-through, so a dispatch wrapper's mutable arm hands the container back
-    /// and never releases the owned-param reference it holds — a leak on the
-    /// container's own region, and by the outgoing-edge cascade on every heap
+    /// pass-through. So a dispatch wrapper's mutable arm hands the container back
+    /// and never releases the owned-param reference it holds. That leaks the
+    /// container's own region, and, by the outgoing-edge cascade, every heap
     /// member stored into it. The funnel's `pass_through_retain` raised the
-    /// RETURNED value's RC, so a per-arm decref here releases only that stranded
+    /// RETURNED value's RC. So a per-arm decref here releases only that stranded
     /// owned-param reference: the exact dual of the stored-value guard.
     container_at_site: HashMap<HirId, std::collections::HashSet<Region>>,
     /// The `Return` mint, and the one guard that admits a RETURN-ESCAPING region
-    /// to the `tail` route: `lower_return` mints the caller's owning reference
-    /// before the node's own releases, so a per-arm decref keyed here releases
+    /// to the `tail` route. `lower_return` mints the caller's owning reference
+    /// before the node's own releases. So a per-arm decref keyed here releases
     /// the callee's reference and leaves the caller's. This is the base case of a
-    /// walk (`(if (= i 0) xs (go … xs))`), whose returning arm loses the
-    /// `decref_point` max to the recursive arm's later use and is otherwise left
-    /// with a mint and no release at all.
+    /// walk (`(if (= i 0) xs (go … xs))`). Its returning arm loses the
+    /// `decref_point` max to the recursive arm's later use. Without this guard
+    /// that arm is left with a mint and no release at all.
     return_mint_at_site: HashMap<HirId, std::collections::HashSet<Region>>,
     /// The regions a return hands to the caller, who frees them.
     tail_regions: rustc_hash::FxHashSet<Region>,
@@ -116,9 +116,9 @@ impl TailFunding {
 
     /// Is a `tail` release of `r` at `node` funded by a retain on that same node?
     ///
-    /// The return mint doubles as the per-path return-frontier admission — it IS
-    /// the hand-over — while the store and container retains say nothing about
-    /// whether this arm also returns the value, so they keep the frontier
+    /// The return mint doubles as the per-path return-frontier admission, because
+    /// it IS the hand-over. The store and container retains say nothing about
+    /// whether this arm also returns the value. So they keep the frontier
     /// exclusion (docs/impl/region/compensate.md).
     ///
     /// The container case: `node` is a monomorphic funnel whose container (arg0)

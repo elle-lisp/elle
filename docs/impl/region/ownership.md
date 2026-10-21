@@ -1,31 +1,30 @@
 # Adoption and subtree drop (the ownership forest)
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-21 -->
 
 Adoption links regions into a parent→child tree, so a whole subtree frees as a
 unit when its root frees.
 
 Merging *collapses* two regions onto one physical id; **adoption** keeps them
-distinct but **links** them, so a whole subtree
-frees as a unit when its root frees. Where merging is the tight single-edge case
-(one child stored once into one coincident-lifetime parent), adoption is the
-general case — a multi-region externally-unique component, including a mutable
-retaining container and the values funnelled into it, a closure and its captures,
-and the interior reference cycles that the per-region RC cascade cannot collect
-([rules.md](rules.md) Rule 8). The compile-time analysis that classifies a region
-**Owned** (adopted, freed by subtree drop) vs **Shared** (the per-region RC
-baseline) is `region::infer::ownership`; the lowerer emits `AdoptRegion{parent, child}`
-for each interior edge (and `FreeRegionGroup` for a rootless co-owned cycle).
-Both ops are realized on the **interpreter and the
-JIT** — the `elle_jit_adopt_region` / `elle_jit_free_region_group` helpers
+distinct but **links** them. Merging is the tight single-edge case: one child
+stored once into one coincident-lifetime parent. Adoption is the general case, a
+multi-region externally-unique component. That includes a mutable retaining
+container and the values funnelled into it, a closure and its captures, and the
+interior reference cycles the per-region RC cascade cannot collect
+([rules.md](rules.md)).
+
+`region::infer::ownership` classifies a region **Owned** (adopted, freed by
+subtree drop) or **Shared** (the per-region RC baseline). The lowerer emits
+`AdoptRegion{parent, child}` for each interior edge, and `FreeRegionGroup` for a
+rootless co-owned cycle. Both ops run on the **interpreter and the JIT**. The
+`elle_jit_adopt_region` / `elle_jit_free_region_group` helpers
 ([src/jit/dispatch/region.rs](../../../src/jit/dispatch/region.rs)) mirror the
-interpreter's `handle_adopt_region` /
-`handle_free_region_group` line-for-line, so the same program reclaims identically
-on either tier. The MLIR tier compiles no function that carries them, and the WASM tier
-treats them as no-ops, since its arena boundary reclaims. This document is the **runtime
-substrate** those emit modes drive — the `RegionStore` primitives, pinned by
-`regionstore::tests::adopt` and the cross-tier `runtime::tests::ownership`
-`*_under_jit` pins.
+interpreter's `handle_adopt_region` / `handle_free_region_group`, so a program
+reclaims identically on either tier. The MLIR tier compiles no function that
+carries them, and the WASM tier treats them as no-ops, since its arena boundary
+reclaims. This document is the **runtime substrate** those emit modes drive: the
+`RegionStore` primitives, pinned by `regionstore::tests::adopt` and the
+cross-tier `runtime::tests::ownership` `*_under_jit` pins.
 
 ## The runtime: a reclamation typestate and `owned_children`
 
@@ -33,60 +32,58 @@ Each `RegionEntry` carries, besides its pool, a **reclamation mode** and an
 `owned_children: Vec<RuntimeRegion>`. The mode is a typestate, not an
 `(rc, owner)` pair: a region is either `Counted(u32)` — a Shared/baseline region
 reclaimed by its own reference count — **or** `Owned(owner)` — reclaimed *only* by
-`owner`'s subtree drop. The two are mutually exclusive variants, so **owned-and-RC'd**
-— a region carrying both a live count *and* an owner, where the count could
-independently free a region the owner will also subtree-drop (a double-free) — is
-*unrepresentable by construction*: an `Owned` region has no `u32` to decrement at
-all. This is the move-only encoding of the ownership right — adoption *moves* the
-region from `Counted` into `Owned`, **consuming** its count, and freeing *consumes*
-the entry — so a region is reclaimed exactly one way, decided once and thereafter
-not expressible the other way.
+`owner`'s subtree drop. The two variants are mutually exclusive. A region with a
+live count *and* an owner, whose count could free what the owner will also
+subtree-drop, is therefore *unrepresentable*: an `Owned` region has no `u32` to
+decrement. Adoption *moves* the region from `Counted` into `Owned`,
+**consuming** its count, and freeing *consumes* the entry. So a region is
+reclaimed exactly one way, decided once.
 
 - **`adopt_region(parent, child)`** transitions `child` from `Counted` to
   `Owned(parent)` — consuming its count — and pushes `child` into
   `parent.owned_children`. No incref: an interior ownership edge is **not**
   reference-counted (the subtree frees as a unit), the runtime twin of the lowerer
-  suppressing the interior store edge's `IncrefRegion` (the self-edge elimination
-  [merging.md](merging.md) describes, generalized). A region is adopted **at most once** — a second adoption
+  suppressing the interior store edge's `IncrefRegion` ([merging.md](merging.md)).
+  A region is adopted **at most once** — a second adoption
   would mean two owners and is a debug-asserted bug (the inference adopts each member
   once).
-- A **`decref` of an `Owned` region is a no-op** — there is no count to decrement, so
-  the no-op is *structural*, not a guard the decref path must remember to apply. This
-  is what makes the interior containment edge safe to leave un-suppressed at runtime:
-  when the owner frees, its free-time cascade scans its contents and decrefs the
-  interior child, but that decref finds an `Owned` region and no-ops, and the subtree
-  drop below frees it explicitly. (So, as with mint-or-reuse, a missed interior-edge
-  suppression costs nothing — the `Owned` mode absorbs it.) A **store-adopted** member
-  keeps its **own** compiler-emitted decref too (unlike a capture-adopted member, whose
-  decref is suppressed); that decref is likewise a structural no-op **provided it fires
-  while the member is still `Owned`**, that is, **before** the root's subtree drop. The
-  emit guarantees that ordering even when member and root share a `decref_point` node
-  ([adopt.md](adopt.md)): the member's release is sorted ahead
-  of the root's, so it lands on the frozen `Owned` region and no-ops, and the root's
-  later drop reclaims the member exactly once.
+- A **`decref` of an `Owned` region is a no-op**. There is no count to
+  decrement, so the no-op is *structural*, not a guard the decref path must
+  remember. The interior containment edge is therefore safe to leave
+  un-suppressed. When the owner frees, its cascade decrefs the interior child,
+  finds an `Owned` region and no-ops, and the subtree drop frees the child. A
+  missed interior-edge suppression costs nothing. A **store-adopted** member
+  keeps its **own** compiler-emitted decref, unlike a capture-adopted member,
+  whose decref is suppressed. That decref is a structural no-op **provided it
+  fires while the member is still `Owned`**, **before** the root's subtree drop.
+  The emit guarantees that order even when member and root share a
+  `decref_point` node ([adopt.md](adopt.md)). The member's release is sorted
+  ahead of the root's, so the root's later drop reclaims the member exactly once.
 - **`reparent_owned_children(from, to)`** hands `from`'s whole direct
-  `owned_children` set to `to`: each child is re-stamped `Owned { owner: to }` and the
-  set is appended to `to`'s children — a **move**, never a copy, so the forest's
-  forward/back edges stay consistent (the subtree-drop walk debug-asserts them) and no
-  child gains a second owner. Neither endpoint's own reclaim mode changes and no count
+  `owned_children` set to `to`. Each child is re-stamped `Owned { owner: to }`,
+  and the set is appended to `to`'s children. It is a **move**, never a copy, so
+  the forest's forward/back edges stay consistent (the subtree-drop walk
+  debug-asserts them) and no child gains a second owner. Neither endpoint's own reclaim mode changes and no count
   is created or consumed: the children were `Owned` and stay `Owned`; only the owner
-  whose demise reclaims them changes. This is the ownership-**transfer** primitive the
-  cross-fiber cuts ride — a set of regions owned by one node is handed wholesale to
-  another (a parked activation's node to the fiber's at teardown; a completing fiber's
-  node to its consumer's) so one set-drop at the new owner's demise reclaims them all.
+  whose demise reclaims them changes. The cross-fiber cuts ride this
+  ownership-**transfer** primitive. A parked activation's node passes to the
+  fiber's at teardown, and a completing fiber's node to its consumer's, so one
+  set-drop at the new owner's demise reclaims them all.
   A self-reparent, an absent `from`, or an empty child set is a no-op. Pinned by
   `regionstore::tests::reparent`.
 - **Subtree drop, in phases.** Freeing a region (`free_runtime_region_pages`)
-  collects the whole owned subtree — the region plus every transitive
-  `owned_children`, walked Rust-side with no heap deref — **rescues** any member the
-  recorded edge tables prove is still externally referenced (§ The incoming edge
-  table and the external-reference rescue), then **reads every remaining member's
-  recorded `outgoing` edge table** (§ The outgoing edge table) and partitions its
-  targets: a target *in* the freed set is interior and dropped (reclaimed by this drop,
-  never cascaded), a target *outside* is a genuinely-**Shared** frontier ref to cascade;
-  only then returns every member's pages, bumping each generation (a stale pointer into
-  them detonates at the next debug `region_of`, exactly as for an ordinary free;
-  [generations.md](generations.md)); and finally cascades the collected Shared-frontier refs once.
+  runs five phases:
+  1. collect the whole owned subtree, the region plus every transitive
+     `owned_children`, walked Rust-side with no heap deref;
+  2. **rescue** any member the recorded edge tables prove is still externally
+     referenced (the rescue, below);
+  3. read every remaining member's recorded `outgoing` table. A target *in* the
+     freed set is interior and dropped, never cascaded. A target *outside* is a
+     **Shared** frontier ref to cascade;
+  4. return every member's pages, bumping each generation, so a stale pointer
+     detonates at the next debug `region_of` ([generations.md](generations.md));
+  5. cascade the collected Shared-frontier refs once.
+
   **No phase dereferences a heap page to discover an edge** — discovery is the recorded
   table, not a content walk; pages are touched only to tear them down. Interior cycles
   reclaim with the pages: the drop walks `owned_children`, not the reference graph, so a
@@ -96,40 +93,39 @@ not expressible the other way.
 
 ## The outgoing edge table — reclamation without a heap scan
 
-A dying region must release its references *into other regions* (the Shared frontier the
-subtree / RC-zero free cascades). Discovering those by walking the dying region's contents
-at free is a heap scan; instead **every cross-region reference is recorded at creation**
-into the source region's `outgoing: FxHashMap<RuntimeRegion, u32>` — per-reference counts,
-universal (on every `RegionEntry`, `Owned` and `Counted` alike: an Owned region carries
-`outgoing` for its cascade-on-drop but no count). Reclamation walks `outgoing` (O(edges)),
-never the contents — what makes "no heap walk to reclaim" literally true.
+A dying region must release its references *into other regions*: the Shared
+frontier the subtree or RC-zero free cascades. Walking the dying region's
+contents to find them would be a heap scan. Instead, **every cross-region
+reference is recorded at creation** into the source region's
+`outgoing: FxHashMap<RuntimeRegion, u32>`, with per-reference counts. Every
+`RegionEntry` carries one, `Owned` and `Counted` alike. Reclamation walks
+`outgoing` (O(edges)), never the contents.
 
 **What it records: content edges only.** The table mirrors exactly what the free-time
 content scan (`find_object_cross_refs`) would find — a `Value` stored *into* another
-region's heap object — and nothing else. The larger *incoming* RC count a region carries
-(owner, return / argument / parameter transfer, borrow references) is a separate ledger;
-those increfs are balanced by compiler-emitted `DecrefValueRegion`/`DecrefRegion`, not by
-the free-time cascade, so they are **not** edges. `outgoing` is the cascade's worklist, the
+region's heap object — and nothing else. A region's *incoming* RC count also
+covers owner, return, argument, parameter and borrow references. That is a
+separate ledger: compiler-emitted `DecrefValueRegion`/`DecrefRegion` balance
+those increfs, so they are **not** edges. `outgoing` is the cascade's worklist, the
 incoming count is the RC-zero trigger; the two are different sizes by design (the
 `rc - in_degree` residual the `cross_ref_edges` diagnostic reports).
 
 **Where it is recorded — the same sites that incref the containment edge:**
 
 - **At allocation**, the creation funnel `incref_cross_region_refs`
-  ([refcount.rs](../../../src/value/fiberheap/regionstore/refcount.rs)) already scans a freshly-allocated object via
-  `find_object_cross_refs` and increfs each cross-region referent; it records the matching
-  `outgoing` edge in the *same loop*, so the alloc-path table is scan-equivalent **by
-  construction** (one function feeds both). This covers every object variant the scan
+  ([refcount.rs](../../../src/value/fiberheap/regionstore/refcount.rs)) scans a
+  fresh object via `find_object_cross_refs` and increfs each cross-region
+  referent. It records the matching `outgoing` edge in the *same loop*, so the
+  alloc-path table is scan-equivalent **by construction**. This covers every object variant the scan
   covers — pair/array/struct/set contents, a closure's env + backing + template, a fiber's
   env + template, the `traits` side-field.
 - **At a post-alloc mutable store**, the mutable-store seam
-  ([mutate.rs](../../../src/value/arena/mutate.rs), the
-  sole path a `Value` enters or leaves a live container on every tier — interpreter, JIT,
-  WASM) records the edge co-located with the RC incref/decref: push / insert / extend / add
-  record, pop / remove / drain / del un-record, a replace
+  ([mutate.rs](../../../src/value/arena/mutate.rs)) records the edge beside the
+  RC incref/decref. It is the sole path a `Value` enters or leaves a live
+  container on every tier. Push, insert, extend and add record; pop, remove,
+  drain and del un-record. A replace
   (`set_at_with_rebind`/`struct_put_with_rebind`/`lbox_store_with_rebind`/`capture_store_with_rebind`)
-  un-records the old target and records
-  the new — exactly mirroring the RC rebind.
+  un-records the old target and records the new, mirroring the RC rebind.
 - **At a fiber's terminal completion**, `incref_signal_region`
   ([refcount.rs](../../../src/vm/fiber/refcount.rs)) pins the result
   held in `fiber.signal`; that result is a content edge the scan's Fiber arm reads, so the
@@ -137,34 +133,35 @@ incoming count is the RC-zero trigger; the two are different sizes by design (th
   walk when the fiber frees (a terminal fiber is read, never resumed, so there is no
   explicit un-record), matching the scan's asymmetric park-retain.
 
-**Filter parity.** A recorded edge applies the same filter `find_object_cross_refs` applies
-— skip a target of 0 or 1 (reserved, not real regions) and a self-edge (`target == source`)
-— so a same-region store records nothing, exactly as the scan skips `own_id`. The scan's
+**Filter parity.** A recorded edge applies the filter `find_object_cross_refs`
+applies. It skips a target of 0 or 1 (reserved, not real regions) and a
+self-edge, so a same-region store records nothing, as the scan skips `own_id`. The scan's
 region resolution is **ownership-verified**: a candidate id (read from the pointer's masked
 page header) counts only when a live region of THIS store genuinely owns the pointer's
-address (`RegionPool::owns`). A pointer the store does not manage — a foreign-heap value
-(a compile-time-env constant baked into a template's constant pool lives on the CompileCtx
-VM's heap; a worker reading a parent-heap value) or a shared/Rc allocation — reads whatever
-bytes sit at the masked base, which can spell a local id. Bare liveness is time-dependent
+address (`RegionPool::owns`). A pointer the store does not manage reads whatever
+bytes sit at the masked base, which can spell a local id. Such a pointer is a
+foreign-heap value or a shared/Rc allocation. A compile-time-env constant in a
+template's constant pool lives on the CompileCtx VM's heap, and a worker can
+read a parent-heap value. Bare liveness is time-dependent
 (dead at record time, live at scan time splits the two sides); ownership is time-invariant
 for a foreign pointer, so record and scan agree by construction
 (`regionstore::tests::edges::foreign_store_value_records_no_edge_and_frees_clean`).
 
-**The debug equivalence oracle.** The content scan is *not* deleted: it is demoted to a
-`#[cfg(debug_assertions)]` oracle. At each free, before teardown — while every member's
-pages are still mapped, which the ordering exists to guarantee because the scan
-dereferences target pages to classify them — the drop asserts the recorded `outgoing` table (filtered to currently-valid
-referents) is multiset-equal to a one-time content scan. Any accounting drift — a missed
-mutation funnel, a double-record — becomes a deterministic panic at the free site, naming the
-region and both edge sets, instead of a silent leak (a missing edge) or UAF (an extra edge).
+**The debug equivalence oracle.** The content scan survives as a
+`#[cfg(debug_assertions)]` oracle. At each free, before teardown, the drop
+asserts that the recorded `outgoing` table, filtered to valid referents, is
+multiset-equal to a one-time content scan. The scan dereferences target pages,
+so it runs while every member's pages are still mapped. A missed mutation funnel
+or a double-record becomes a deterministic panic at the free site. The panic
+names the region and both edge sets, where release would leak (a missing edge)
+or UAF (an extra edge).
 In release builds only the table walk runs — O(edges), no scan. The diagnostic
 `cross_ref_edges` (the `arena/region-edges` leak-graph) stays scan-based, so it remains an
 *independent* check of the table rather than a mirror of it.
 
-Research footing: classic Tofte–Talpin regions need no cascade at all (a region only points
-at longer-lived outer regions, so freeing it dereferences nothing). Elle's hybrid adds exactly
-one scan-needing edge class — Owned/Shared → Shared — and recording it eagerly eliminates the
-lazy free-time discovery.
+Classic Tofte–Talpin regions need no cascade, because a region points only at
+longer-lived outer regions. Elle's hybrid adds one scan-needing edge class,
+Owned/Shared → Shared, and records it eagerly.
 
 ## The incoming edge table and the external-reference rescue
 
@@ -177,19 +174,18 @@ the drop itself**:
 
 - **The incoming edge table.** Each `RegionEntry` mirrors its `outgoing` table with
   `incoming: FxHashMap<RuntimeRegion, u32>`: for every recorded content edge
-  `src → dst`, `dst.incoming[src]` carries the same count. It is maintained by
-  exactly the sites that maintain `outgoing` — `record_outgoing` /
-  `unrecord_outgoing`, plus the subtree drop's frontier walk (which removes a dying
-  source's footprint from each live target it referenced) — so the two ledgers move
-  in lockstep; an unbalanced un-record debug-asserts exactly as the outgoing side
-  does. Like `outgoing`, it records content edges only: the transfer/borrow
+  `src → dst`, `dst.incoming[src]` carries the same count. The sites that
+  maintain `outgoing` maintain it too: `record_outgoing`, `unrecord_outgoing`,
+  and the subtree drop's frontier walk, which removes a dying source's footprint
+  from each live target. The two ledgers move in lockstep, and an unbalanced
+  un-record debug-asserts on either side. Like `outgoing`, it records content edges only: the transfer/borrow
   references in the incoming RC count are balanced by compiler-emitted decrefs and
   are not edges.
 
-- **The rescue.** A subtree drop first collects its member set read-only. A
-  non-root member whose `incoming` table names a source that **survives the drop**
-  — neither in the dying set nor inside the member's own subtree — is **rescued**
-  instead of torn down: it leaves the forest (`Owned → Counted`) with a count
+- **The rescue.** A subtree drop first collects its member set read-only. Take a
+  non-root member whose `incoming` table names a source that **survives the
+  drop**, in neither the dying set nor the member's own subtree. That member is
+  **rescued** instead of torn down: it leaves the forest (`Owned → Counted`) with a count
   rebuilt from its recorded incoming edges, and its own subtree stays intact
   beneath it. Dying sources are counted in (their frontier decrefs arrive in the
   same drop); the member's own subtree's back-edges are excluded (they release only
@@ -199,17 +195,15 @@ the drop itself**:
   surviving edges can make a sibling member externally referenced, which rescues
   the sibling too.
 
-The rescue is the runtime's **refusal-to-Shared** (the always-legal baseline),
-applied at the last moment the forest can still choose it: a region whose external
-uniqueness does not hold at the drop — however the external reference arose, and
-whichever adopt kind claimed the region — falls back to per-region RC instead of
-being freed under a live reference. It fires only when a live external edge exists
+The rescue is the runtime's **refusal-to-Shared**, the always-legal baseline, at
+the last moment the forest can choose it. A region whose external uniqueness
+fails at the drop falls back to per-region RC instead of being freed under a
+live reference, whatever adopt kind claimed it. It fires only when a live external edge exists
 at the drop; the externally-unique common case pays one empty-map check per
 member. Pinned by `regionstore::tests::rescue` and, end to end under guardfree, by
 [region-capture-cell-member-cascade-uaf.lisp](../../../tests/impl/region-capture-cell-member-cascade-uaf.lisp):
 a struct member stored into a module-level capture cell survives its parent's
 subtree drop and frees at the cell's release.
-
 
 ## A rootless cycle frees at its scope
 

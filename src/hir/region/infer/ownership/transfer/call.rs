@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The call face: a producer lambda bound once and used only as a callee, whose every call site passes the consumer gate.
 //!
 //! docs/impl/region/owner.md

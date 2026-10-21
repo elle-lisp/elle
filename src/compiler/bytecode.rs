@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! Compiled bytecode: the instruction bytes, the constant pool, and the
 //! emit/patch surface the emitter writes through.
 //!

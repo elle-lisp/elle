@@ -1,13 +1,13 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! What counts as a branch arm: a program region at most one of which runs per execution.
 //!
 //! docs/impl/region/window.md
 //!
 //! An arm is not a syntactic arm body. For an `If` and a `Match` the two
-//! coincide. For the short-circuiting forms they do not: a `cond`'s clause TESTS
-//! are conditional positions exactly as its bodies are (test *k* runs only where
-//! tests 0..*k*-1 all failed), and an `and`/`or` tail is a conditional position
-//! with no sibling body at all. Reading those forms syntactically leaves a
+//! coincide. For the short-circuiting forms they do not. A `cond`'s clause TESTS
+//! are conditional positions exactly as its bodies are: test *k* runs only where
+//! tests 0..*k*-1 all failed. An `and`/`or` tail is a conditional position with
+//! no sibling body at all. Reading those forms syntactically leaves a
 //! release whose last use is a later test outside every arm, which is exactly
 //! where the polymorphic entry point puts it.
 //!
@@ -35,9 +35,9 @@ use crate::hir::liveness::Order;
 
 /// One arm: the node whose head hosts a compensating release, and the post-order
 /// interval of the span it covers. For a syntactic arm the interval is that
-/// node's own subtree; for the tail of a short-circuiting chain it spans from
-/// that node through the form's last part, and `id` is the first node the tail
-/// evaluates — the point control reaches when the previous test failed.
+/// node's own subtree. For the tail of a short-circuiting chain it spans from
+/// that node through the form's last part. Then `id` is the first node the tail
+/// evaluates, the point control reaches when the previous test failed.
 pub(super) struct Arm {
     pub(super) id: HirId,
     pub(super) lo: u32,
@@ -87,10 +87,10 @@ pub(super) fn branch_arms(hir: &Hir, order: &Order) -> Vec<ArmSet> {
             // The rest of the chain past clause `k` ends at the form's last part
             // — the `else` branch, or the last clause's body where the form has
             // none. A `cond` that matches no clause evaluates to `nil` having run
-            // no body, so at the last level the sibling arm is the `else` or
-            // nothing at all: there is no node to host a release, and the pass
-            // simply does not fire on that path (the leak-preserving direction a
-            // `Match` with no matching arm already takes).
+            // no body. So at the last level the sibling arm is the `else` or
+            // nothing at all. With no node to host a release, the pass simply
+            // does not fire on that path. That is the leak-preserving direction a
+            // `Match` with no matching arm already takes.
             let Some(last) = else_branch
                 .as_deref()
                 .or_else(|| clauses.last().map(|(_t, b)| b))

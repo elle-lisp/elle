@@ -15,11 +15,14 @@ pub(super) use kinds::*;
 pub(in crate::hir::typeinfer) use recognize::*;
 pub(super) use take::*;
 
-/// A validated fusable chain, ready for `take_chain`: which op heads it (a scalar
-/// terminal, or nothing but the pipeline), the inner pipeline kinds in the order
-/// the walk encounters them (OUTER→INNER), and whether the base is a mutable
-/// `@array` (so a Collect terminal emits the accumulator unfrozen — the
-/// mutable-array arm).
+/// A validated fusable chain, ready for `take_chain`.
+///
+/// - `terminal`: which op heads it, a scalar terminal or nothing but the
+///   pipeline.
+/// - `kinds`: the inner pipeline kinds in the order the walk encounters them
+///   (OUTER→INNER).
+/// - `mutable_base`: whether the base is a mutable `@array`, so a Collect
+///   terminal emits the accumulator unfrozen (the mutable-array arm).
 pub(super) struct ChainPlan {
     pub(super) terminal: TerminalOp,
     pub(super) kinds: Vec<Hof>,
@@ -29,17 +32,20 @@ pub(super) struct ChainPlan {
 /// Validate that `hir` is a fusable HOF chain and return its plan. The chain is an
 /// optional outermost scalar terminal — a `fold`/`reduce`, a `count`, or a search —
 /// over a `map`/`map-indexed`/`filter`/`take-while`/`drop-while`/`mapcat` pipeline
-/// (in any mix) bottoming out at a proven array — a mutable one only under a lone
-/// `map`, `filter` or `mapcat`. Every function qualifies (`qualifies_lambda`, at
-/// the op's own arity — 1 for every op but `fold` and `map-indexed`, which take
-/// 2); and for a **composition** — total op count ≥ 2, where the terminal counts as
-/// an op — every body is `reorder_safe` and none captures (the reordering gate;
-/// see the module doc). A lone op carries no reorder requirement: a fold threads
-/// its accumulator strictly in element order and a count applies its predicate
-/// left to right, exactly as the stdlib ops do, and a lone search or `take-while`
-/// reads the same way up to the element that decides it. A composition that fails
-/// the gate declines whole, and the pre-order recursion (`rewrite`) still fuses its
-/// inner run.
+/// (in any mix). It bottoms out at a proven array, a mutable one only under a lone
+/// `map`, `filter` or `mapcat`.
+///
+/// Every function qualifies (`qualifies_lambda`) at the op's own arity: 1 for
+/// every op but `fold` and `map-indexed`, which take 2. A **composition** has a
+/// total op count ≥ 2, where the terminal counts as an op. In a composition every
+/// body is `reorder_safe` and none captures (the reordering gate; see the module
+/// doc).
+///
+/// A lone op carries no reorder requirement. A fold threads its accumulator
+/// strictly in element order, and a count applies its predicate left to right,
+/// exactly as the stdlib ops do. A lone search or `take-while` reads the same way
+/// up to the element that decides it. A composition that fails the gate declines
+/// whole, and the pre-order recursion (`rewrite`) still fuses its inner run.
 ///
 /// The walk stops at the first node that is not a fusable HOF call; that node is
 /// the base candidate. If it is not a proven array, or a function fails to
@@ -116,15 +122,19 @@ pub(super) fn validate_chain(
         }
     }
     let base = classify_base(cur, arena, bases)?;
-    // A mutable `@array` base fuses only a single `map`/`filter`/`mapcat`: the fused
+    // A mutable `@array` base fuses only a single `map`/`filter`/`mapcat`. The fused
     // loop walks the base LIVE against a `len` captured once, which matches those
-    // stdlib arms exactly for one op — a `mapcat`'s through the `each` macro's own
-    // indexed arm, which captures the length once as well. A `fold` (which snapshots
-    // via `->array`), a `count`, a search, a `map-indexed`, a `take-while` and a
-    // `drop-while` (which re-read `(length coll)` every iteration), and a composition
-    // (whose staged ops each run to completion over a fresh array) would each
-    // diverge from an interleaved live walk under a mutating lambda. The pre-order
-    // recursion still fuses the innermost single op of a declined mutable chain.
+    // stdlib arms exactly for one op. A `mapcat` matches through the `each` macro's
+    // own indexed arm, which captures the length once as well. Under a mutating
+    // lambda, these would each diverge from an interleaved live walk:
+    //
+    // - a `fold`, which snapshots through `trait/elements`;
+    // - a `count`, a search, a `map-indexed`, a `take-while` and a `drop-while`,
+    //   which re-read `(length coll)` every iteration;
+    // - a composition, whose staged ops each run to completion over a fresh array.
+    //
+    // The pre-order recursion still fuses the innermost single op of a declined
+    // mutable chain.
     let mutable_base = base == BaseKind::Mutable;
     let lone_live_walk = terminal == TerminalOp::Collect
         && matches!(kinds[..], [Hof::Map] | [Hof::Filter] | [Hof::Mapcat]);
@@ -147,13 +157,15 @@ pub(super) fn validate_chain(
 
 /// May a lambda body be safely reordered against sibling per-element work in a
 /// composition? A composition interleaves the transforms rather than running
-/// each to completion, so a body is reorder-safe only if it has no genuine
-/// **sequencing** effect: no yield, I/O, emit, FFI, OS-signal, or halt, and it
-/// propagates no parameter signal. `SIG_ERROR` is deliberately permitted —
-/// error reordering changes only *which* of several errors surfaces first (each
-/// still surfaces as an error), and a dissolvable numeric kernel over proven
-/// data does not error at all; refusing it would forbid every arithmetic
-/// composition, which is exactly the tower shape this fusion exists to collapse.
+/// each to completion. So a body is reorder-safe only if it has no genuine
+/// **sequencing** effect (no yield, I/O, emit, FFI, OS-signal, or halt), and it
+/// propagates no parameter signal.
+///
+/// `SIG_ERROR` is deliberately permitted. Error reordering changes only *which*
+/// of several errors surfaces first, and each still surfaces as an error. A
+/// dissolvable numeric kernel over proven data does not error at all. Refusing
+/// it would forbid every arithmetic composition, which is exactly the tower
+/// shape this fusion exists to collapse.
 pub(super) fn reorder_safe(sig: Signal) -> bool {
     sig.bits.subtract(SIG_ERROR).is_empty() && sig.propagates == 0
 }

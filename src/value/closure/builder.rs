@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! `CodeBuilder`: a code object written by hand, for the tests and tools that need one no compile produced.
 //!
 //! docs/impl/region/template.md

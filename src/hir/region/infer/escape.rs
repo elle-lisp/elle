@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! Escape's frontier verdicts projected onto regions, and the release-route mirror the frame-held admission reads.
 //!
 //! docs/impl/escape.md

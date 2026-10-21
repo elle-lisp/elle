@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! The declared floor, and the guard facts a branching form applies to the binding types and then restores.
 //!
 //! docs/impl/typeinfer.md

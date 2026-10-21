@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! A function literal as the analyzer leaves it: its parameters, captures and body, and what a call to it signals.
 //!
 //! docs/impl/hir.md

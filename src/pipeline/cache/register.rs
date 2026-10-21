@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! What a host, a REPL line and the standard library register into a compile context.
 //!
 //! docs/pipeline.md

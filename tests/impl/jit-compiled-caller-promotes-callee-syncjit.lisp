@@ -1,7 +1,8 @@
-(elle/epoch 14)
-# audited: 2026-10-06
+(elle/epoch 15)
+# audited: 2026-10-21
 # jit-compiled-caller-promotes-callee.lisp with every function compiled on its
 # first call, on the VM thread.
+#
 # docs/impl/jit.md
 #
 # The caller is compiled before it makes its first call, so it has no

@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-21
 // What an analysis hands a signal solver: each lambda's declarations, and a file analyzed without compiling its imports.
 //
 // docs/impl/solver.md
@@ -46,7 +46,7 @@ fn compiling_the_module_interns_its_marker() {
 fn analysis_never_compiles_a_literal_import() {
     // A solver states facts per file and links them, so it must be able to
     // analyze a file whose import graph has a cycle. A compile of each import
-    // recurses on such a cycle until the stack overflows.
+    // would recurse on such a cycle until the stack overflows.
     let tmp = tempfile::tempdir().expect("scratch dir");
     let source = module_with_marker(tmp.path(), "analyzed-solver-marker");
     let mut rt = setup();
@@ -66,8 +66,8 @@ fn analysis_never_compiles_a_literal_import() {
 #[test]
 fn compiling_a_file_never_compiles_its_literal_import() {
     // The loader compiles the module when the import runs, and this compile
-    // runs nothing. The counter-factual is the projection probe, which
-    // compiled each literal import while the importer was analyzed.
+    // runs nothing. The counter-factual is a projection probe that compiles
+    // each literal import while the importer is analyzed.
     let tmp = tempfile::tempdir().expect("scratch dir");
     let source = module_with_marker(tmp.path(), "importer-solver-marker");
     let mut rt = setup();

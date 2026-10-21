@@ -1,18 +1,19 @@
 (elle/epoch 15)
-# audited: 2026-10-14
+# audited: 2026-10-21
 # A compiled emit of :halt takes no delivery retain, so a halted fiber strands nothing.
+#
 # docs/impl/region/park.md
 #
-# The sidecar turns the graft off: a call to a function the compiler can see
-# becomes the function's body (docs/impl/graft.md), and `body` nothing calls
-# never compiles.
+# The sidecar turns the graft off. Under the graft, a call to a function the
+# compiler can see becomes the function's body (docs/impl/graft.md), and a
+# `body` nothing calls never compiles.
 #
 # A halted fiber is promoted to :dead and never resumed, so the delivery a
 # suspending emit retains for has no consumer. The interpreter's `Emit` handler
 # therefore takes neither the retain nor the ledger record for a halt. The JIT's
-# side-exit must skip both as well. One that takes them strands the payload's
-# region once per halted fiber, so the window below reads about `window` where it
-# should read near 0. The interpreter never takes them, so the gauge reads 0
+# side-exit must skip both as well. One that took them would strand the payload's
+# region once per halted fiber, so the window below would read about `window`
+# where it should read near 0. The interpreter never takes them, so the gauge reads 0
 # there, and only a compiled `body` tells the two apart.
 #
 # The trap: `body` compiles only if a counted call reaches it. A fiber's first
@@ -22,8 +23,8 @@
 #
 # The payload's read after each halt is the soundness face: the park retain of
 # the terminal result pins it, not the delivery retain the side-exit gives up.
-# region-jit-halt-emit-guardfree.lisp runs this file with guardfree armed, which
-# faults on a freed payload.
+# tests/impl/region-jit-halt-emit-guardfree.lisp runs this file with guardfree
+# armed, which faults on a freed payload.
 #
 # In a build without the JIT `(vm/config :jit)` reads nil and nothing compiles,
 # so the gauge needs a JIT.

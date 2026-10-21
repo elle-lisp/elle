@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-21
 //! The entry points that compile source or a syntax tree and run it on the caller's VM.
 //!
 //! docs/pipeline.md

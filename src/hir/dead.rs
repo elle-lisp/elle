@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! Dead binding elimination: removes an unread `let`/`letrec` binding whose initializer is effect-free.
 //!
 //! Removing the initializer deletes the dead call it makes, so the call never

@@ -1,6 +1,6 @@
 # Escape analysis — the authoritative true-escape pass
 
-<!-- audited: 2026-10-13 -->
+<!-- audited: 2026-10-21 -->
 
 Escape analysis decides, once for every consumer, whether a value outlives the activation it was born in.
 

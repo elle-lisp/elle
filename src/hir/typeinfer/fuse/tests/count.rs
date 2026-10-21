@@ -1,14 +1,14 @@
-// audited: 2026-09-23
+// audited: 2026-10-21
 //! The `count` terminal — a guard stage plus a scalar tally.
 //!
 //! docs/impl/dissolution/terminals.md
 
 use super::*;
 
-/// A single `(count pred xs)` dissolves to a **scalar tally** loop: the `count`
-/// dispatch is gone, no closure survives (neither the predicate nor the
-/// self-recursive walker `count`'s own array arm binds in a `letrec`), the
-/// predicate runs inline, and — as for a fold — there is NO `@array` and NO
+/// A single `(count pred xs)` dissolves to a **scalar tally** loop. The `count`
+/// dispatch is gone, and no closure survives: neither the predicate nor the
+/// self-recursive walker `count`'s own array arm binds in a `letrec`. The
+/// predicate runs inline, and, as for a fold, there is NO `@array` and NO
 /// `freeze`. Two `if`s: the loop condition, plus the one guard the tally sits
 /// under.
 #[test]
@@ -37,7 +37,7 @@ fn single_count_dissolves_to_scalar_tally() {
 }
 
 /// `(count p (map g xs))` fuses to ONE scalar loop: both dispatches gone, both
-/// bodies inline, and NO array anywhere — the map stage transforms the value
+/// bodies inline, and NO array anywhere. The map stage transforms the value
 /// straight into the counted predicate, so the intermediate array the `map` would
 /// have built never exists.
 #[test]
@@ -88,9 +88,9 @@ fn count_of_filter_fuses_to_one_scalar_loop() {
     );
 }
 
-/// The reorder gate counts the terminal as an op: a lone `count` (length 1)
+/// The reorder gate counts the terminal as an op. A lone `count` (length 1)
 /// visits each element left to right and applies its predicate exactly as the
-/// stdlib op does, so it never reorders and fuses even with a NON-reorder-safe
+/// stdlib op does. So it never reorders, and fuses even with a NON-reorder-safe
 /// body (one that prints, and so signals `:io`).
 #[test]
 fn single_count_with_non_reorder_safe_body_still_fuses() {
@@ -104,7 +104,7 @@ fn single_count_with_non_reorder_safe_body_still_fuses() {
 }
 
 /// A count composition with a NON-reorder-safe prefix stage declines the whole
-/// composition (length ≥ 2 carries the reorder requirement) and falls back to
+/// composition (length ≥ 2 carries the reorder requirement). It falls back to
 /// fusing only the inner reorder-safe run: the inner `filter` fuses on the
 /// recursion, and the outer `count` stays a plain call over the fused loop.
 #[test]

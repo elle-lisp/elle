@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-21
 //! The signal fixpoint: a lambda that read a seed takes the signal its binding settles on, and each error reports once.
 //!
 //! docs/pipeline.md

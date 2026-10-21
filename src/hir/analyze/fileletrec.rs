@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! A file's top-level forms as one letrec: classifying each form, and pre-binding its names.
 //!
 //! docs/bindings.md

@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! Building a `Lowerer`: the constructor and the `with_*` builders that hand
 //! it the front end's analysis products before `lower` runs.
 //!
@@ -86,7 +86,7 @@ impl<'a> Lowerer<'a> {
 
     /// Seed `immutable_values` with primitive binding→value pairs.
     ///
-    /// Primitive bindings are `BindingScope::Local` with `mark_immutable()`.
+    /// Primitive bindings are immutable `BindingScope::Local` bindings.
     /// The lowerer never allocates slots for them — instead, `lower_var`
     /// checks `immutable_values` first and emits `ValueConst` for any
     /// binding with a known constant value.

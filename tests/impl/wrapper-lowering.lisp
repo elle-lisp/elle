@@ -1,7 +1,9 @@
 (elle/epoch 15)
-# audited: 2026-10-20
+# audited: 2026-10-21
 # A wrapper call over two proven numbers dissolves to its %-op, and a call over
 # unproven operands keeps the wrapper's guards.
+#
+# docs/impl/graft.md
 #
 # Each wrapper is spelled two ways. `dissolved` tests both operands for numbers
 # without raising, so the grafted wrapper's own guards fold away and only the op
@@ -9,7 +11,6 @@
 # Which code the compiler emits is the subject here, so the test reads the
 # disassembly. What each wrapper answers is a language claim, in
 # tests/lang/operators.lisp.
-# docs/impl/graft.md
 
 (defn disasm-text [f]
   "The disassembly of f's bytecode, as one string."
@@ -27,8 +28,8 @@
 # to keep, so it is not here; its number test is pinned in
 # hir::typeinfer::tests::graft.
 #
-# The counter-factual: while a wrapper call stayed a call, its guards lived in
-# the wrapper's own body, so the unproven spelling held no Emit either.
+# The counter-factual: if a wrapper call stayed a call, its guards would live in
+# the wrapper's own body, so the unproven spelling would hold no Emit either.
 (def wrappers
   [[:+ (dissolved +) (grafted +)] [:- (dissolved -) (grafted -)]
    [:* (dissolved *) (grafted *)] [:< (dissolved <) (grafted <)]

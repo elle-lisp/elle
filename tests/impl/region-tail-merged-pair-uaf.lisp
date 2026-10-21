@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-06
+(elle/epoch 15)
+# audited: 2026-10-21
 # A tail call that passes a nested pair leaves standing every pair the callee builds.
 #
 # docs/impl/region/merging.md
@@ -12,15 +12,16 @@
 # received before its own tail call. The sidecar runs this file under
 # `--trace=guardfree`, which faults on a read of a freed page.
 #
-# The counter-factuals are two faults that each looked like a correct list
-# until something read it. A callee whose merged slot reused the caller's
-# region built its pairs there, and the release of its argument freed them.
-# A region walk that inlined the self call saw the two pairs of one activation
-# hold each other, and freed both before the call that received them. The
+# The counter-factuals are two faults that each look like a correct list until
+# something reads it. A callee whose merged slot reused the caller's region
+# would build its pairs there, and the release of its argument would free them.
+# A region walk that inlined the self call would see the two pairs of one
+# activation hold each other, and would free both before the call that received
+# them. The
 # rows read every list after the recursion returns, so either fault reads a
 # freed page.
 
-# Hand-written intrinsics: the shape the region walk inlined into itself.
+# Hand-written intrinsics: the shape a region walk could inline into itself.
 (defn walk-hand [lst acc]
   (if (%pair? lst)
     (walk-hand (%rest lst) (%pair (%first lst) (%pair 0 acc)))

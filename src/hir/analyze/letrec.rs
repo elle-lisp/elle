@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The `letrec` binding form: pre-bind every name, analyze the initializers in order, then settle their signals by fixpoint.
 //!
 //! docs/bindings.md

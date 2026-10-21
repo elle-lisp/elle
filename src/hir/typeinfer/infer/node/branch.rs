@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! What a branch proves: the join over the arms a form can take, and the facts each arm knows.
 //!
 //! docs/impl/typeinfer.md

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! Shared helpers for the region-inference tests: compile a shape, run the solver, find a node.
 //!
 //! docs/impl/region/rules.md
@@ -171,7 +171,7 @@ pub(super) fn assert_body_results_escape_scopes(info: &RegionInfo, hir: &Hir) {
     for (scope_id, body_id) in &scope_bodies {
         let scope_r = match info.scope_region.get(scope_id) {
             Some(r) => r,
-            None => continue, // no scope region (e.g., cell bindings)
+            None => continue, // no scope region (for example, cell bindings)
         };
         // Skip phantom allocations: Begin and Match register
         // alloc_here for lowerer bookkeeping (MakeCaptureCell,
@@ -252,9 +252,8 @@ pub(super) fn analyze_with_hir(source: &str) -> (Hir, BindingArena, SymbolTable,
 
 /// The trap these two share: a binding is found by *identity*, never by asking
 /// a memo for a spelling. A primitive's id is minted against the compile
-/// context's own table, so the caller's memo may never have learned the name —
-/// `SymbolId::of` sidesteps that entirely (docs/impl/symbol.md § "Reading a
-/// name, and not reading one").
+/// context's own table, so the caller's memo may never have learned the name.
+/// `SymbolId::of` sidesteps that entirely (docs/impl/symbol.md).
 pub(super) fn find_calls_to_primitive(hir: &Hir, name: &str, arena: &BindingArena) -> Vec<HirId> {
     let mut out = Vec::new();
     fn walk(hir: &Hir, want: SymbolId, arena: &BindingArena, out: &mut Vec<HirId>) {

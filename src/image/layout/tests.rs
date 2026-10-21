@@ -10,9 +10,9 @@ use crate::value::heap::HeapObject;
 
 // The probed set and the dumper's sealed set are the same set, spelled
 // once (`dumpable`). The counter-factual: a variant added to the
-// dumper without a probe panics in `write_canonical`, and a probe for
-// a variant the dumper cannot emit would widen the verifier's accept
-// set — this pin catches both drifts.
+// dumper without a probe panics in `write_canonical`. A probe for a
+// variant the dumper cannot emit would widen the verifier's accept
+// set. This pin catches both drifts.
 #[test]
 fn probes_cover_exactly_the_dumpable_set() {
     for &tag in HeapObject::TAGS {
@@ -108,8 +108,8 @@ fn canonical_bytes_are_construction_independent() {
     }
 }
 
-// The same for a struct key, where the residue is larger than the datum:
-// a `Bool` key writes one meaningful byte into a slot sized for a `Value`,
+// The same for a struct key, where the residue is larger than the datum.
+// A `Bool` key writes one meaningful byte into a slot sized for a `Value`,
 // so a wholesale copy would carry 23 bytes of its construction temporary
 // into the artifact.
 #[test]
@@ -183,7 +183,7 @@ fn canonical_bytes_preserve_field_values() {
 // opcodes in source order, so the fingerprint names each set, and the LIR
 // body's own layout beside the payload's (docs/impl/image/format.md).
 //
-// The counter-factual is a fingerprint that names neither: a build that adds
+// The counter-factual is a fingerprint that names neither. A build that adds
 // an opcode in the middle of either enum maps an image built before it, and
 // every instruction past the insertion runs as its neighbor. No layout probe
 // can see that, because no field moved.

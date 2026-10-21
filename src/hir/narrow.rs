@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! Signal narrowing: drops `:error` from a primitive call whose argument types rule the error out.
 //!
 //! After type inference, `narrow_signals` strips SIG_ERROR from those calls.
@@ -12,7 +12,6 @@ use super::binding::Binding;
 use super::expr::{CallArg, Hir, HirKind};
 use super::types::{NodeTypes, TyId, TypeInterner};
 use crate::signals::Signal;
-use crate::value::fiber::SignalBits;
 use crate::value::SymbolId;
 
 /// Strip SIG_ERROR from calls to known primitives when argument types
@@ -46,8 +45,7 @@ pub(super) fn narrow_signals(
                 arena,
                 binding_min_length,
             ) {
-                let sig_error = SignalBits::from_bit(0); // SIG_ERROR = bit 0
-                hir.signal.bits = hir.signal.bits.subtract(sig_error);
+                hir.signal.bits = hir.signal.bits.subtract(crate::signals::SIG_ERROR);
             }
         }
     }
@@ -201,7 +199,7 @@ pub(super) fn repropagate_signals(hir: &mut Hir) {
             repropagate_signals(value);
         }
 
-        // Eval: always Yields — recurse but don't narrow
+        // Eval: keep the node's own signal, and recurse
         HirKind::Eval { expr, env } => {
             repropagate_signals(expr);
             repropagate_signals(env);

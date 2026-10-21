@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 // Signal inference across function boundaries: what a call to a direct, higher-order, reassigned or unknown callee signals.
 //
 // docs/signals/inference.md

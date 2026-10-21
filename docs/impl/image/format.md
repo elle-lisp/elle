@@ -206,8 +206,7 @@ An instruction set is recorded as its length and a hash of its names in byte
 order. A payload's bytecode and its LIR body's nodes store opcodes as bytes,
 so a build that renumbers either set reads every body instruction as a
 different one, and no layout probe can see that. A `prim_id` needs no entry,
-because a primitive travels by name (§ "A primitive travels by name, for the
-same reason").
+because a primitive travels by name, as described above.
 
 The fragment encoding is an input for the same reason. A payload's body
 fragment is the bytes `bincode` wrote for a `LambdaFragment`

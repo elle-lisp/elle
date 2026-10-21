@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! Where a cell's release lands: the env cell's box, and the node a 1-slot
 //! container's content drop must cover.
 //!
@@ -29,22 +29,22 @@ pub(super) struct CellPlacement<'a> {
 /// same point, which the uncounted-read and return extensions read as where the
 /// cell stops protecting a borrow.
 ///
-/// The cell's own reference to its current content dies at its last access — the
-/// latest of its reads and of the node COVERING its writes — and the point is
-/// then hoisted until it post-dominates them all.
+/// The cell's own reference to its current content dies at its last access: the
+/// latest of its reads and of the node COVERING its writes. The point is then
+/// hoisted until it post-dominates them all.
 ///
-/// A single write is that covering node itself. Several are not: a cell reached
-/// from mutually exclusive arms has its latest write inside ONE arm, and a drop
-/// there runs on that path alone, leaving every other arm's value held by the
-/// cell and released nowhere. The writes' innermost covering node — their lowest
-/// common ancestor — is the nearest point after all of them that every storing
-/// path reaches.
+/// A single write is that covering node itself. Several are not. A cell reached
+/// from mutually exclusive arms has its latest write inside ONE arm. A drop there
+/// runs on that path alone, leaving every other arm's value held by the cell and
+/// released nowhere. The writes' innermost covering node, their lowest common
+/// ancestor, is the nearest point after all of them that every storing path
+/// reaches.
 ///
 /// A cell CARRIED ACROSS a loop is re-pointed every iteration, so a drop inside
 /// the body would free the content the next iteration reads. Such a cell is a
-/// loop PARAMETER, i.e. its scope node is the loop itself, so seeding from that
-/// node lands the one drop after the loop — where the lowerer emits the loop's
-/// own releases. A cell bound INSIDE a loop body has a body scope node instead,
+/// loop PARAMETER, that is, its scope node is the loop itself. So seeding from
+/// that node lands the one drop after the loop, where the lowerer emits the
+/// loop's own releases. A cell bound INSIDE a loop body has a body scope node instead,
 /// so it keeps its seed and drops once per iteration, matching its per-iteration
 /// mint. And a loop's parameters stay readable past the loop (the
 /// `(while … (assign acc …)) acc` idiom), which is why every step here is a max
@@ -90,14 +90,15 @@ pub(super) fn place_content_drops(info: &mut RegionInfo, p: &CellPlacement) {
 /// Move `seed` out to the node of every enclosing branch arm and loop that does
 /// not also enclose the BINDER, iterated outward until nothing encloses it.
 ///
-/// The drop must POST-DOMINATE every access: the cell holds one reference
-/// whichever path stored it, so a point seeded at the structurally-latest access
-/// — which may sit inside one branch arm, or inside a loop the binder is bound
-/// outside — would run on that path alone (a leak on every sibling arm) or once
-/// per iteration (freeing content a later iteration reads). The lowerer emits a
-/// node's releases after it, so a branch node's land after the merge and a loop
-/// node's after the loop. An arm or loop the binder is bound INSIDE keeps the
-/// seed: the cell itself is per-path or per-iteration there, and so is its drop.
+/// The drop must POST-DOMINATE every access. The cell holds one reference
+/// whichever path stored it. A point seeded at the structurally-latest access
+/// may sit inside one branch arm, or inside a loop the binder is bound outside.
+/// It would then run on that path alone, a leak on every sibling arm. Or it
+/// would run once per iteration, freeing content a later iteration reads. The
+/// lowerer emits a node's releases after it, so a branch node's land after the
+/// merge and a loop node's after the loop. An arm or loop the binder is bound
+/// INSIDE keeps the seed: the cell itself is per-path or per-iteration there,
+/// and so is its drop.
 fn hoist_past_partial_paths(seed: HirId, b: Binding, p: &CellPlacement) -> HirId {
     let ord = |id: HirId| p.order.get(&id).copied().unwrap_or(0);
     // The BINDER's position, off the walk's binder-init record — `du.def_site`
@@ -159,32 +160,33 @@ pub(super) fn collect_branch_arm_sets(
 /// box's `DecrefCellRegion` frees that page. Emitted in the other order, the
 /// unwrap reads memory the free reclaimed.
 ///
-/// At one `decref_point` the release order already states this — a value release
+/// At one `decref_point` the release order already states this. A value release
 /// that unwraps a cell reads deepest and sorts ahead of the cell release that
 /// frees the page (`lir::lower::Lowerer::order_releases`,
-/// docs/impl/region/rules.md Rule 4). Across two points nothing does, and the two
-/// points diverge by construction: both regions
-/// ride the binding's uses through the binding-chain extension, then the VALUE
-/// region takes a second, later bound from its allocation site's last use, which
-/// follows the binder's own value out to whatever consumes it. The cell region is
-/// a phantom placeholder with no allocation site, so it keeps the binding-use
-/// bound alone and the box is freed at the capture.
+/// docs/impl/region/rules.md Rule 4). Across two points nothing does, and the
+/// two points diverge by construction. Both regions ride the binding's uses
+/// through the binding-chain extension. Then the VALUE region takes a second,
+/// later bound from its allocation site's last use, which follows the binder's
+/// own value out to whatever consumes it. The cell region is a phantom
+/// placeholder with no allocation site. So it keeps the binding-use bound alone,
+/// and the box is freed at the capture.
 ///
 /// The one region a value route reads through the cell is the region the
-/// binding's own binder ALLOCATED — the entry `record_region_slot` makes against
-/// the binder's slot, which for an env-celled binding is the env index
+/// binding's own binder ALLOCATED. That is the entry `record_region_slot` makes
+/// against the binder's slot, which for an env-celled binding is the env index
 /// (`lir::lower::binding::define`). A region the binding merely NAMES records no
-/// slot and takes the release-by-id route, which reads no page: `(def @c n)`
+/// slot and takes the release-by-id route, which reads no page. `(def @c n)`
 /// names its parameter's phantom region and allocates nothing, so its box owes
-/// that region's release nothing. A binder whose init allocates nothing, a
-/// binding two binders claim, and a captured-reassigned binding (whose init
-/// reference is dropped off its own register rather than through the cell) are
-/// all absent from the route for the same reason, and are left alone here.
+/// that region's release nothing. Three more cases are absent from the route for
+/// the same reason, and are left alone here. They are a binder whose init
+/// allocates nothing, a binding two binders claim, and a captured-reassigned
+/// binding, whose init reference is dropped off its own register rather than
+/// through the cell.
 ///
 /// The clamp is a maximum like every other pin, so it can only move the box
-/// release later; the point it produces is then taken out of any enclosing loop,
-/// because an env cell is minted once per activation and its release must fire
-/// once per activation whatever drew it inward.
+/// release later. The point it produces is then taken out of any enclosing loop.
+/// An env cell is minted once per activation, and its release must fire once per
+/// activation whatever drew it inward.
 pub(super) fn pin_cell_release_after_routed_releases(
     info: &mut RegionInfo,
     order: &Order,
@@ -253,14 +255,14 @@ pub(super) fn post_loop_placement(
 /// sites' lowest common ancestor.
 ///
 /// A 1-slot container's content drop must run once on every path any store ran
-/// on, and the stores' LCA is the nearest node that qualifies: it contains them
-/// all, so a post-order index puts it after each, and it is a single node rather
-/// than one position per arm (docs/impl/region/bindings.md). One store answers itself, which is the placement a straight-line
-/// cell already had.
+/// on, and the stores' LCA is the nearest node that qualifies. It contains them
+/// all, so a post-order index puts it after each. It is a single node rather
+/// than one position per arm (docs/impl/region/bindings.md). One store answers
+/// itself, which is the placement a straight-line cell already had.
 ///
 /// The LCA is inside the same lambda the stores are, which the cell's own scope
-/// node is not: a `(var u nil)` at the head of a function body has the `Lambda`
-/// for a scope node, and the lowerer runs that node's releases in the ENCLOSING
+/// node is not. A `(var u nil)` at the head of a function body has the `Lambda`
+/// for a scope node. The lowerer runs that node's releases in the ENCLOSING
 /// function, where the cell has no slot at all.
 pub(super) fn innermost_covering(hir: &Hir, order: &Order, sites: &[u32]) -> Option<HirId> {
     let lo = order.low(&hir.id).unwrap_or(0);

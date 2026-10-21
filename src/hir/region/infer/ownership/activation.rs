@@ -1,21 +1,22 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! The activation-owner cut: a capture-back-edge SCC, adopted into the executing activation's owner node.
 //!
 //! docs/impl/region/owner.md
 //!
 //! A container captured by a closure it holds (`m ⊇ c` by store, `c ⊇ m` by
-//! capture — the m↔c SCC) is the one containment-graph cycle neither
-//! region-rooted mode can own: the owner-aware lifetime obligation refuses a
-//! captured-AND-store-adopted member (its own live `DecrefValueRegion` fires at
-//! the over-extended position past the closure, after any region root's drop —
-//! `compute_adopt_edges`), and the co-owned group free refuses any cycle
-//! touching a closure region (`closure_regions`). The owner that CAN reclaim it
-//! is the **executing activation**: its owner node's completion release
-//! post-dominates every in-activation use by construction (the trampoline's
-//! clean break, the parks, the discard, and the fiber teardown each run it), so
-//! adopting the SCC's members into the node and suppressing their own decrefs
-//! frees the cycle wholesale — interior m↔c references reclaim with the set, no
-//! cascade.
+//! capture, the m↔c SCC) is the one containment-graph cycle neither
+//! region-rooted mode can own. The owner-aware lifetime obligation refuses a
+//! captured-AND-store-adopted member, because its own live `DecrefValueRegion`
+//! fires at the over-extended position past the closure, after any region root's
+//! drop (`compute_adopt_edges`). The co-owned group free refuses any cycle
+//! touching a closure region (`closure_regions`).
+//!
+//! The owner that CAN reclaim it is the **executing activation**. Its owner
+//! node's completion release post-dominates every in-activation use by
+//! construction: the trampoline's clean break, the parks, the discard, and the
+//! fiber teardown each run it. So adopting the SCC's members into the node and
+//! suppressing their own decrefs frees the cycle whole. Interior m↔c references
+//! reclaim with the set, with no cascade.
 
 use super::super::*;
 use super::inputs::OwnershipInputs;
@@ -26,56 +27,58 @@ use rustc_hash::{FxHashMap, FxHashSet};
 /// (`RegionInfo::activation_adopt_sites`): adopt-site HirId → the
 /// capture-back-edge SCC members to `AdoptIntoActivation` there, in allocation
 /// program order. The primary site is the innermost structural scope enclosing
-/// every member's allocation; a scope that can park carries a SECOND entry for
-/// the same members — an early key on the scope's sequential spine, ahead of
+/// every member's allocation. A scope that can park carries a SECOND entry for
+/// the same members: an early key on the scope's sequential spine, ahead of
 /// every park (gate 6, the park split). The channel is idempotent on an Owned
 /// member, so the scope-exit adopt behind the early key is a structural no-op
-/// on the paths that ran both. Run by the ownership pass in
-/// `analyze_regions_with`.
+/// on the paths that ran both. The ownership pass in `analyze_regions_with`
+/// runs this.
 ///
 /// Admission (each gate refusing to Shared, the always-legal baseline):
 ///
-/// 1. **The signature.** A genuine mutual-reach SCC (≥ 2 members) of the eligible
-///    containment graph whose interior edges include at least one **capture** AND
-///    at least one **store** — a non-hard `cross_region_refs` edge, or a
-///    funnel-recovered `containment_edges` edge (the storing ops lower as opaque
-///    `Funnel` native calls), so the cut admits the funnel store face exactly as
-///    it admits an intrinsic-store edge. A capture-only SCC is the letrec closure web
-///    (the closure-cycle merge's instrument); a store-only SCC is the co-owned
-///    group's.
-/// 2. **Member gates.** Every member ownable (`not_ownable` false — no frontier
-///    crossing, no dynamic-lifetime class), sole-held, with an allocation site,
-///    and with **pairwise-distinct sole holder bindings**: the value-resolved
-///    adopt loads each member from its own binding slot, so two members sharing
-///    a holder (a branch-dependent union in one slot) cannot both be adopted —
-///    the shape refuses rather than leak a suppressed-but-unadopted member.
-/// 3. **Disjointness.** No member is claimed by another mechanism — a merge
-///    participant (builder-idiom or closure-cycle), a co-owned group member, or
-///    a store/capture-adopt subtree region (either endpoint) — the one-owner
-///    invariant held at the emit level, so the runtime's one-adoption assert
-///    stays unreachable.
+/// 1. **The signature.** A genuine mutual-reach SCC (≥ 2 members) of the
+///    eligible containment graph, whose interior edges include at least one
+///    **capture** AND at least one **store**. A store is a non-hard
+///    `cross_region_refs` edge, or a funnel-recovered `containment_edges` edge
+///    (the storing ops lower as opaque `Funnel` native calls). So the cut admits
+///    the funnel store face exactly as it admits an intrinsic-store edge. A
+///    capture-only SCC is the letrec closure web, which the closure-cycle merge
+///    handles; a store-only SCC is the co-owned group's.
+/// 2. **Member gates.** Every member is ownable (`not_ownable` false: no
+///    frontier crossing, no dynamic-lifetime class), sole-held, with an
+///    allocation site, and with **pairwise-distinct sole holder bindings**. The
+///    value-resolved adopt loads each member from its own binding slot. Two
+///    members sharing a holder (a branch-dependent union in one slot) cannot
+///    both be adopted, so the shape refuses rather than leak a
+///    suppressed-but-unadopted member.
+/// 3. **Disjointness.** No other mechanism claims a member: a merge participant
+///    (builder-idiom or closure-cycle), a co-owned group member, or either
+///    endpoint of a store/capture-adopt subtree edge. That holds the one-owner
+///    invariant at the emit level, so the runtime's one-adoption assert stays
+///    unreachable.
 /// 4. **The hull.** Every region referencing INTO the SCC, transitively over ALL
-///    edge kinds (hard may-store edges included — a may-holder is a holder — and
-///    embed edges included — a fresh result holds what it embeds),
-///    must itself be ownable: the members free at the activation's completion,
+///    edge kinds, must itself be ownable. Hard may-store edges count, because a
+///    may-holder is a holder, and embed edges count, because a fresh result
+///    holds what it embeds. The members free at the activation's completion,
 ///    so every holder must provably die within the activation. A holder that
 ///    returns, crosses a fiber frontier, or has runtime-determined lifetime
 ///    refuses the SCC. Hull members outside the SCC keep their own baseline
-///    releases — their cascades onto the Owned members are structural no-ops.
+///    releases, and their cascades onto the Owned members are structural no-ops.
 /// 5. **One activation, no loop seam.** The members' allocation sites share an
-///    innermost enclosing structural scope — the adopt site
-///    ([`innermost_enclosing_scope`]; a cross-lambda SCC refuses) — and no
+///    innermost enclosing structural scope, the adopt site
+///    ([`innermost_enclosing_scope`]; a cross-lambda SCC refuses). No
 ///    `While`/`Loop` encloses a member's allocation without also enclosing that
-///    site. Adopt-per-iteration is sound (each iteration adopts that round's
-///    fresh regions); alloc-inside/adopt-outside is not — the static suppression
-///    covers every iteration while the slot-loaded adopt reaches only the last.
+///    site. Adopt-per-iteration is sound, because each iteration adopts that
+///    round's fresh regions. Alloc-inside/adopt-outside is not: the static
+///    suppression covers every iteration, while the slot-loaded adopt reaches
+///    only the last.
 /// 6. **The park split.** No park may run between a member's allocation and its
-///    adopt: in that interval the members are `Counted` with their own releases
-///    suppressed, so a route that abandons such a park strands the whole SCC —
-///    no release table names the members, and no node adopted them. When the
-///    adopt scope can park (`Signal::may_park` on its aggregated signal), the
+///    adopt. In that interval the members are `Counted` with their own releases
+///    suppressed. A route that abandons such a park strands the whole SCC,
+///    because no release table names the members and no node adopted them. When
+///    the adopt scope can park (`Signal::may_park` on its aggregated signal), the
 ///    walk finds an early adopt key on the scope's sequential spine
-///    ([`park_split_key`]) and emits the adopt there too; a shape the spine
+///    ([`park_split_key`]) and emits the adopt there too. A shape the spine
 ///    cannot order refuses to Shared (docs/impl/region/owner.md).
 ///
 /// The **free** needs no post-dominance check of its own: the adopt only
@@ -134,9 +137,10 @@ pub(in crate::hir::region::infer) fn compute_activation_adopts(
         if taken.contains(&r) {
             continue;
         }
-        // The SCC of `r` over the eligible containment graph (mutual reach) — read from the
-        // one shared Tarjan pass (`scc_of`), the same SCC the co-owned group walk reads;
-        // which member the iteration reaches first is irrelevant.
+        // The SCC of `r` over the eligible containment graph (mutual reach). It
+        // comes from the one shared Tarjan pass (`scc_of`), the same SCC the
+        // co-owned group walk reads, so the member the iteration reaches first
+        // does not matter.
         let scc = inputs.scc_of(r);
         if scc.len() < 2 {
             continue;
@@ -221,9 +225,9 @@ pub(in crate::hir::region::infer) fn compute_activation_adopts(
         }
         // Gate 6 — the park split: a parking adopt scope gets an early key
         // ahead of every park, or refuses. The scope-exit entry stays beside
-        // the early one — a path that leaves the scope before the key (a
-        // `break` past it) still adopts there, and the channel's idempotence
-        // absorbs the double adopt on paths that run both.
+        // the early one. A path that leaves the scope before the key (a `break`
+        // past it) still adopts there, and the channel's idempotence absorbs
+        // the double adopt on paths that run both.
         let mut early_key = None;
         if let Some(site_node) = find_node(hir, site) {
             if site_node.signal.may_park() {
@@ -265,12 +269,12 @@ fn find_node(hir: &Hir, id: HirId) -> Option<&Hir> {
     found
 }
 
-/// The node's sequential constituents in execution order — a `Let`/`Letrec`'s
-/// binding inits then body, a `Begin`/`Block`'s statements — each completing
+/// The node's sequential constituents in execution order: a `Let`/`Letrec`'s
+/// binding inits then body, or a `Begin`/`Block`'s statements. Each completes
 /// before the next begins, so `emit_decrefs_for` on a constituent's id runs
 /// between it and its successor (for a binding init, after the binding's
-/// store). `None` for any other node: its interior execution order is not one
-/// this walk can read, so the park split refuses rather than guess.
+/// store). `None` for any other node: this walk cannot read its interior
+/// execution order, so the park split refuses rather than guess.
 fn sequential_constituents(node: &Hir) -> Option<Vec<&Hir>> {
     match &node.kind {
         HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => Some(
@@ -302,15 +306,15 @@ fn contains_any(hir: &Hir, targets: &FxHashSet<HirId>) -> bool {
 }
 
 /// The park split (gate 6): the node whose `emit_decrefs_for` is the early
-/// adopt key — ordered after every member allocation and before every park
-/// that could strand one — or `None` where no such node exists on the
+/// adopt key. It is ordered after every member allocation and before every
+/// park that could strand one. `None` where no such node exists on the
 /// sequential spine.
 ///
 /// Per spine level, the key candidate is the LAST constituent containing a
 /// member allocation: every member's binding store completes with it, and
 /// every later constituent's park finds the members already Owned. A park in
-/// an EARLIER constituent refuses only where a member allocation precedes it
-/// (`allocs_before` carries that fact into recursion) — a park before every
+/// an EARLIER constituent refuses only where a member allocation precedes it,
+/// and `allocs_before` carries that fact into recursion. A park before every
 /// member allocation strands nothing, because no member exists when it parks.
 /// When the candidate itself both allocates and parks, the walk recurses into
 /// it; a non-sequential candidate ([`sequential_constituents`] `None`) or a

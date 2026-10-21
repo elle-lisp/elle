@@ -1,5 +1,5 @@
 // audited: 2026-10-22
-//! SendValue wrapper for thread-safe value transmission
+//! `SendValue` and `SendBundle`: a value deep-copied so it can cross to another thread.
 //!
 //! docs/threads.md
 //!
@@ -182,7 +182,7 @@ pub enum SendValue {
     /// distinct heap objects, and every copy resolves identically. `default`/`traits`
     /// are sent recursively (so a parameter is sendable iff they are). This is
     /// what lets a closure that closes over `*stdout*`/`*stderr*` (anything using
-    /// `println`) cross `os/spawn`.
+    /// `println`) cross `sys/spawn`.
     Parameter {
         id: u32,
         default: Box<SendValue>,

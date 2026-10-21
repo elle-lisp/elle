@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! HOF-chain loop fusion: a higher-order call over a proven array becomes one loop
 //! with its function's body spliced in.
 //!
@@ -13,10 +13,11 @@
 //! lowers it exactly as it lowers the stdlib op's own body. The pass never builds
 //! a `loop`/`recur` or a capture cell by hand.
 //!
-//! A function argument is a call-site lambda literal, which the rewrite moves and
-//! which may capture when its op is alone in the chain (`captures_locals`), or a
-//! named function whose body a fragment carries: this unit's, by binding, or
-//! another unit's, on its function value's code payload. A chain of two or more ops
+//! A function argument is one of two things. It is a call-site lambda literal,
+//! which the rewrite moves and which may capture when its op is alone in the
+//! chain (`captures_locals`). Or it is a named function whose body a fragment
+//! carries: this unit's, by binding, or another unit's, on its function value's
+//! code payload. A chain of two or more ops
 //! interleaves its functions' calls, so each must pass `reorder_safe` and capture
 //! nothing. Only the chain's innermost op may end the walk early; every other
 //! early exit gates its own stage.
@@ -57,9 +58,9 @@ pub(in crate::hir::typeinfer) use chain::classify_base;
 
 /// Fuse every qualifying HOF chain into an inlined index-walk loop. A function
 /// argument that names a function reaches its body through `unit`, this unit's
-/// closed functions, or through the fragment on the code payload of the value
-/// `values` holds for a binding the runtime supplies, which `memo` decodes once
-/// per compile.
+/// closed functions. Otherwise it reaches the fragment on the code payload of
+/// the value `values` holds for a binding the runtime supplies, which `memo`
+/// decodes once per compile.
 pub(crate) fn fuse_map_chains(
     hir: &mut Hir,
     arena: &mut BindingArena,

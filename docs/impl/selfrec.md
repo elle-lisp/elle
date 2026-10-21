@@ -71,8 +71,9 @@ Each entrant hands the callee value through the one-shot entry register, and
 [vm.md](vm.md) lists them. They include the JIT and WASM fallbacks into the
 interpreter, the JIT tail-call resolutions, and forced-tier dispatch
 (`compile/run-on`). They also include the fiber's first resume, `arena/allocs`,
-macro-transformer calls, FFI callback trampolines, and spawned-worker bodies. `LoadSelf` debug-asserts that the
-register is populated, so an unthreaded entrant fails loudly.
+macro-transformer calls, FFI callback trampolines, and spawned-worker bodies.
+`LoadSelf` debug-asserts that the register is populated, so an unthreaded
+entrant fails loudly.
 
 A `Recursive` reference lowers to `LoadSelf` in **every** position, through
 `current_self_binding` ([lir/lower/expr/var.rs](../../src/lir/lower/expr/var.rs)):

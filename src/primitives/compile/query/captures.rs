@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! `compile/captures` and `compile/captured-by`: what a named function captures, and who captures a name.
 //!
 //! docs/analysis/portrait.md

@@ -91,11 +91,11 @@ constructs carry `:error`:
   required parameter pattern, and a `&keys` pattern. An `&opt` or `&named`
   pattern binds `nil` instead of raising, so it adds nothing.
 - Qualified access, `m:k`, which is a `get`.
-- A call whose argument count the compiler did not check: a spliced call
-  `(f ;xs)`, and a call to a callee whose arity the compiler does not know,
-  such as a parameter or a binding of `squelch`. The spliced value must also
-  be a sequence. A primitive, a stdlib function and a function defined in
-  the file have a known arity, so a call to one with the right count adds
+- A call whose argument count the compiler did not check. That is a spliced
+  call `(f ;xs)`, or a call to a callee whose arity the compiler does not
+  know, such as a parameter or a binding of `squelch`. The spliced value must
+  also be a sequence. A primitive, a stdlib function and a function defined in
+  the file have a known arity. A call to one with the right count adds
   nothing, and a call with the wrong count is a compile error.
 - A collection literal with a splice, `[1 ;xs]`: the spliced value must be
   a sequence.
@@ -375,8 +375,8 @@ also fires when the squelched closure is called in tail position.
 Three classes of signal cross a `squelch` or `attune` boundary untouched.
 `:error` and `:halt` pass whole, so squelching `:error` does nothing. The VM's
 `:switch` trampoline passes. A signal that carries `:fuel` is a pause the VM
-injects under code that is not silent, such as a fuel stop or a dynamic
-breakpoint's `|:debug :fuel|`, and it passes whole too.
+injects under code that is not silent, and it passes whole too. A fuel stop
+and a dynamic breakpoint's `|:debug :fuel|` are such pauses.
 [signals/mod.rs](../../src/signals/mod.rs) holds the one predicate,
 `squelched_bits`, that every tier asks.
 

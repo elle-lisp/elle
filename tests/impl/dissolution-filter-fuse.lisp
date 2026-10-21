@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-21
 # A fused `filter`, lone or composed, computes exactly the survivors the un-fused
 # `filter` computes, and mints fewer objects.
 #
@@ -84,11 +84,11 @@
         "a capturing predicate fuses to the stdlib value")
 
 # A mixed map/filter chain whose predicate prints: the print signals `:io`, which
-# is not reorder-safe, so the length-2 composition declines and only the inner
+# is not reorder-safe, so the length-2 composition declines. Only the inner
 # `filter` fuses, leaving the outer `map` a plain call over the fused loop.
-# `lower_call`'s argument spill keeps that sound (call-arg-across-loop.lisp).
-# The value is the same either way. dissolution-mixed-fuse.lisp weighs the
-# reorder-safe mixed chains.
+# `lower_call`'s argument spill keeps that sound
+# (tests/impl/call-arg-across-loop.lisp). The value is the same either way.
+# tests/impl/dissolution-mixed-fuse.lisp weighs the reorder-safe mixed chains.
 (assert (= (map (fn [x] (* x 10))
                 (filter (fn [x]
                           (print "")
@@ -101,7 +101,7 @@
 
 # ── Realization: the per-element call is gone ─────────────────────────
 # A single `filter` over an inline predicate splices the guard into the loop, so no
-# closure is called per element; the un-fused reference calls its `block`-body
+# closure is called per element. The un-fused reference calls its `block`-body
 # oracle once per element. Both compute the same survivors. `arena/total-allocs`
 # counts every object ever minted.
 (defn allocs [thunk]
@@ -128,9 +128,9 @@
                 f-fused))
 
 # A `(numeric!)`-declared raw-`%`-intrinsic predicate fuses too
-# (docs/impl/dissolution/inline.md): the declaration floors the parameter at
-# Number, which discharges `%gt`'s comparable-family obligation, and the floor is
-# carried onto the spliced binding — so the guard stage holds the opcode itself.
+# (docs/impl/dissolution/inline.md). The declaration floors the parameter at
+# Number, which discharges `%gt`'s comparable-family obligation. The floor is
+# carried onto the spliced binding, so the guard stage holds the opcode itself.
 # The un-fused oracle carries the same declaration and opcode behind a `block`
 # body, which cannot close into a fragment.
 (defn big? [x]

@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-14
+# audited: 2026-10-21
 # The ledger of tests/impl/region-collector-arg-move.lisp: what a fresh value moved into a collector parameter leaves behind per call.
 (producer "tests/impl/region-collector-arg-move.lisp")
 ["objects gauge (live-growth)" :objects :floor 0.5 :class :growth]

@@ -1,6 +1,6 @@
 # Compilation pipeline
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-21 -->
 
 Which VM each entry point expands macros on, what a loader keeps a compile under, and how signal inference settles over a letrec.
 

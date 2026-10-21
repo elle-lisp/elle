@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! `CodePayload` — a code object's variable-length data, inline in region pages.
 //!
 //! docs/impl/region/template.md
@@ -9,8 +9,8 @@
 //! emission and shared by every header built over it. Nothing here owns Rust
 //! heap memory: the payload's bytes *are* the payload, which is what an image
 //! needs of body data. The record is copied whole into the code region, so it
-//! is `repr(C)` and exactly its fields: every pad is a named field written
-//! zero, and no field is an enum whose shorter variants leave bytes unwritten.
+//! is `repr(C)` and exactly its fields. Every pad is a named field written zero,
+//! and no field is an enum whose shorter variants leave bytes unwritten.
 
 use crate::hir::region::StaticRegion;
 use crate::reader::SourceLoc;
@@ -89,6 +89,7 @@ pub struct LocEntry {
 /// A code object's payload: every variable-length field of one lambda, inline
 /// in region pages. `Copy`, so a header names it with a `RegionSlice` of length
 /// one and copies nothing.
+///
 /// The fields are `pub(crate)` rather than `pub(super)` for one consumer: the
 /// image dumper reads them to copy a payload and to name its relocation slots
 /// (docs/impl/image/sealing.md). Everything else goes through the accessors.
@@ -303,7 +304,7 @@ impl<'a> StrKeys<'a> {
 }
 
 /// Read a region-inline byte slice as `str`. The bytes came from a `String` or
-/// `&str` when the payload was written, so they are UTF-8 by construction; a
+/// `&str` when the payload was written, so they are UTF-8 by construction. A
 /// torn read would mean the code region was freed under a live header, which
 /// the header's counted reference exists to prevent.
 pub(super) fn str_of(slice: RegionSlice<u8>) -> &'static str {

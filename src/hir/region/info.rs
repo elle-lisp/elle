@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! `RegionInfo`: what region inference produces for a compilation unit — the
 //! per-allocation and per-scope assignments, and the lowerer's cuts.
 //!
@@ -273,8 +273,8 @@ pub struct RegionInfo {
     pub cell_containers: HashMap<Binding, CellContainer>,
     /// Every region a 1-slot container in `cell_containers` stores. Such a
     /// value's region is a RUNTIME fact even where its allocation site names a
-    /// static slot, so a later mint must read the region off the value; and
-    /// the lowerer's mutated-slot backstop exempts it, its route being the
+    /// static slot, so a later mint must read the region off the value. The
+    /// lowerer's mutated-slot backstop exempts it, its route being the
     /// producer's own slot.
     ///
     /// docs/impl/region/bindings.md
@@ -319,18 +319,18 @@ pub struct RegionInfo {
     /// docs/impl/region/letrec.md
     pub cycle_tail_release: HashMap<HirId, Region>,
     /// Regions whose every holder binding leaves this activation by the RETURN
-    /// facet at most — off the fiber frontier, with an unmutated release route
-    /// — so the frame holds the region's one reference while the frame lives.
+    /// facet at most, off the fiber frontier, with an unmutated release route.
+    /// So the frame holds the region's one reference while the frame lives.
     /// The admission any mechanism owes when it makes a release fire where none
     /// fired before.
     ///
-    /// docs/impl/region/relocate.md
+    /// docs/impl/region/held.md
     pub frame_held_regions: rustc_hash::FxHashSet<Region>,
     /// Regions a value-routed release can NAME — the analysis-side mirror of
     /// the slot `value_release_slot` would load. The conservative reading of
     /// the emitter's refusals.
     ///
-    /// docs/impl/region/relocate.md
+    /// docs/impl/region/replicate.md
     pub value_routed_regions: rustc_hash::FxHashSet<Region>,
     /// Frame-replacing tail-call HirId → [`TailCalleeFacts`]. Populated only
     /// where the callee resolves to a lambda this compilation can see; every

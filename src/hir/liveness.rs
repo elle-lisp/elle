@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! Liveness over functional HIR, and the structural execution order every liveness and region decision compares.
 //!
 //! docs/impl/region/anchors.md

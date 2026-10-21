@@ -29,7 +29,7 @@ pub use root::*;
 // for single-object `Value` builders that have no region to thread (test
 // scaffolding). The value's owner governs the region's lifetime. Slice-backed
 // builders (`string`/`array`/`bytes`/`set`) go through `value::build::*` instead,
-// so their payload slice and header share one region (region/model.md).
+// so their payload slice and header share one region (docs/impl/region/model.md).
 
 /// Allocate a single heap object into a freshly-minted region on `heap`. For
 /// objects with no `RegionSlice` payload (a slice would land in a different fresh
@@ -61,7 +61,7 @@ pub fn alloc_region_slice<T: Copy + 'static>(
 // region: `MaterializeConst` resolves that static slot to a physical
 // `RuntimeRegion` per activation and materializes a fresh value into it. These
 // take the region explicitly, like `MakeArrayMut`/`List`, so the literal is born
-// in the right region (Rule 3).
+// in the right region (docs/impl/region/rules.md).
 
 /// Allocate a heap object into an explicit, caller-resolved mortal region.
 pub fn alloc_in_region(heap: &mut FiberHeap, obj: HeapObject, region: RuntimeRegion) -> Value {
@@ -153,8 +153,9 @@ pub fn incref_region(heap: &mut FiberHeap, id: Option<RuntimeRegion>) {
 
 /// The exhaustive set of Rule 5 escape sites — every place a runtime
 /// reference-count is *raised* because a value escapes the scope it was born
-/// in. This enum is the audit surface docs/impl/region/rules.md Rule 5 demands:
-/// "the escape-site list being complete *is* correctness for the RC half". Every
+/// in. This enum is the escape-site list Rule 5 asks for
+/// (docs/impl/region/rules.md), and the list being complete is correctness for
+/// the RC half. Every
 /// runtime escape incref goes through [`incref_for_escape`], so `git grep
 /// EscapeSite` enumerates the whole set in one greppable place. A missing arm
 /// is a missing incref (a use-after-free); a spurious one is a leak.
@@ -212,7 +213,7 @@ pub enum EscapeSite {
     /// error reaches releases it (docs/impl/region/effects.md).
     AbortDelivery,
     /// A child fiber's set-once terminal result, park-retained until the fiber
-    /// is freed (released by the signal scan — asymmetric by Rule 7).
+    /// is freed (released by the signal scan — asymmetric, docs/impl/region/rules.md).
     TerminalSignal,
     /// A resume value delivered into a frame parked at a suspending PRIMITIVE
     /// call. The primitive never returns, so its `Return` mint never runs and
@@ -279,7 +280,7 @@ pub fn incref_for_escape(heap: &mut FiberHeap, region: Option<RuntimeRegion>, si
     incref_region(heap, region);
 }
 
-/// The "pass-through retain" (Rule 5, [`EscapeSite::NativeCallResult`]) shared
+/// The Rule 5 "pass-through retain" ([`EscapeSite::NativeCallResult`]) shared
 /// by every site that runs a native/intrinsic body into a freshly-minted
 /// per-call region: `dispatch_native_call` and the conditionally-allocating
 /// intrinsic opcode handlers (`%put`/`%del`/`%string-push`).
@@ -312,7 +313,7 @@ pub fn decref_region(heap: &mut FiberHeap, id: Option<RuntimeRegion>) {
 /// The region a store of `val` into `container` counts: `val`'s own region,
 /// unless that is the container's. A reference from a region to itself is counted
 /// by neither half of the store funnel, exactly as the allocation scan and the
-/// free cascade skip it (docs/impl/region/rules.md, Rule 5). An immediate has no
+/// free cascade skip it (docs/impl/region/rules.md). An immediate has no
 /// region to count.
 fn counted_store_region(heap: &FiberHeap, container: Value, val: Value) -> Option<RuntimeRegion> {
     let r = region_of(heap, val)?;

@@ -1,11 +1,11 @@
 (elle/epoch 15)
-# audited: 2026-10-14
+# audited: 2026-10-21
 # A non-tail recursion 10,000 deep completes, and can park, pause, raise and be
 # squelched at the bottom.
 #
 # Non-tail recursion waits in the fiber, not on the Rust stack
 # (docs/impl/vm.md). None of the recursive calls here is a
-# tail call. The file makes eleven recursions at about 8 µs a call in the
+# tail call. The file makes ten recursions at about 8 µs a call in the
 # interpreter, so this depth keeps it inside the per-file time budget.
 #
 # The compiled tier's hand-off to the interpreter on a low native stack is not
@@ -13,8 +13,8 @@
 # worker finishes. rig/tests/deep_recursion.rs compiles on the VM thread and
 # pins it 100,000 deep.
 #
-# Counter-factual: a VM that nested a Rust frame of 25–30 KB per call halts every
-# one of these at depth 200 with `:stack-overflow`.
+# Counter-factual: a VM that nested a Rust frame of 25–30 KB per call would halt
+# every one of these at depth 200 with `:stack-overflow`.
 
 (def depth 10000)
 
