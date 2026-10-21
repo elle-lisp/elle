@@ -1,4 +1,4 @@
-//! audited: 2026-10-20
+// audited: 2026-10-20
 //! A slice of an immutable string or bytes points into its source; a slice of
 //! a mutable one is a copy.
 //!

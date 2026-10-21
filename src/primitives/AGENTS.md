@@ -12,6 +12,7 @@ Up: [..](../AGENTS.md)
 
 - [access/](access/AGENTS.md) — (empty)
 - [arena/](arena/AGENTS.md) — (empty)
+- [bytes/](bytes/AGENTS.md) — (empty)
 - [chan/](chan/AGENTS.md) — (empty)
 - [compile/](compile/AGENTS.md) — (empty)
 - [concurrency/](concurrency/AGENTS.md) — (empty)
