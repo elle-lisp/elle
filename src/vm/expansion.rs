@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! Code a compile runs on a VM: a macro transformer call, and the body of a
 //! `begin-for-syntax` definition, each under the expansion budget.
 //!
@@ -19,22 +19,20 @@
 //! own set back after it. A call to an ambient primitive halts the expansion
 //! with `:terminal`, which no fiber mask catches.
 
+mod budget;
+
+pub(crate) use budget::ExpansionBudget;
+pub use budget::EXPANSION_FUEL;
+use budget::SPENT_KIND;
+
 use super::core::VM;
 use crate::signals::registry::format_bits;
 use crate::signals::EFFECT_CAPS;
 use crate::syntax::Unit;
-use crate::value::fiber::Fuel;
 use crate::value::heap::TableKey;
 use crate::value::CodeUnit;
 use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT, SIG_TERMINAL};
 use std::rc::Rc;
-
-/// The fuel an expansion may spend, with every expansion nested inside it,
-/// whatever fuel its fiber holds.
-pub const EXPANSION_FUEL: u64 = 1 << 24;
-
-/// The error kind of the halt a spent expansion budget raises.
-const SPENT_KIND: &str = "out-of-fuel";
 
 /// The error kind of the halt that refuses an ambient primitive.
 const AMBIENT_KIND: &str = "ambient-refused";
@@ -42,47 +40,6 @@ const AMBIENT_KIND: &str = "ambient-refused";
 /// The bits of that halt. `:terminal` carries it past every fiber mask, as the
 /// spent budget's halt passes them by halting again at the next charge.
 const REFUSAL: SignalBits = SIG_HALT.union(SIG_TERMINAL);
-
-/// The budget of the expansion running on a VM, apart from the fuel of every
-/// fiber. Unmetered while no expansion runs, so a charge then takes nothing.
-#[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct ExpansionBudget(Fuel);
-
-impl ExpansionBudget {
-    /// Whether an expansion is running.
-    #[inline]
-    pub(crate) fn is_live(self) -> bool {
-        self.0.is_metered()
-    }
-
-    /// Take one unit. Answers false, and takes nothing, when an expansion runs
-    /// and its budget is spent: the charging instruction must then halt it.
-    #[inline]
-    pub(crate) fn charge(&mut self) -> bool {
-        !self.0.is_metered() || self.0.charge()
-    }
-
-    /// Start the budget, unless an expansion already runs. Answers whether this
-    /// call started it, which makes the caller the one to [`Self::close`] it.
-    fn open(&mut self) -> bool {
-        if self.is_live() {
-            return false;
-        }
-        self.0 = Fuel::budget(EXPANSION_FUEL).expect("the expansion budget is an integer");
-        true
-    }
-
-    /// End the budget: no expansion runs.
-    fn close(&mut self) {
-        self.0 = Fuel::unmetered();
-    }
-
-    /// The units left, or `None` while no expansion runs.
-    #[cfg(test)]
-    fn remaining(self) -> Option<u64> {
-        self.0.remaining()
-    }
-}
 
 /// Why code a compile ran answered no value.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -231,19 +188,6 @@ impl VM {
         Err(fault)
     }
 
-    /// Halt the running expansion, whose budget a charge at `resume_ip` found
-    /// spent. A halt, not an error, because no handler can give the budget
-    /// back, so it passes every mask and silent boundary on its way to
-    /// `at_expansion`.
-    pub(crate) fn halt_spent_expansion(&mut self, resume_ip: usize) -> (SignalBits, usize) {
-        let err = self.escaping_error(
-            SPENT_KIND,
-            format!("the expansion fuel budget of {EXPANSION_FUEL} units is spent"),
-        );
-        self.fiber.signal = Some((SIG_HALT, err));
-        (SIG_HALT, resume_ip)
-    }
-
     /// Refuse a call to `def`, an ambient primitive, inside the running
     /// expansion. The primitive does not run. The halt carries `:terminal`, so
     /// no fiber mask, `protect` or silent boundary stops it on its way to
@@ -258,13 +202,6 @@ impl VM {
             &[("func", Value::native_fn(def))],
         );
         (REFUSAL, err)
-    }
-
-    /// Whether code runs inside an expansion, where every call runs on the
-    /// interpreter so each charge site spends the budget.
-    #[inline]
-    pub(crate) fn expanding(&self) -> bool {
-        self.expansion_budget.is_live()
     }
 
     /// The error in the fiber's signal slot, taken and formatted.
