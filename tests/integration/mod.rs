@@ -235,9 +235,6 @@ mod workflows {
 mod ci_profile {
     include!("ci_profile.rs");
 }
-mod cache_dir {
-    include!("cache_dir.rs");
-}
 mod ci_steps {
     include!("ci_steps.rs");
 }
