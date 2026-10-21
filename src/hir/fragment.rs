@@ -22,9 +22,11 @@ use crate::value::SymbolId;
 use rustc_hash::FxHashMap;
 
 mod lambda;
+mod names;
 mod pattern;
 
 pub use lambda::{ArmBody, LambdaFragment, Selected};
+pub use names::FragmentName;
 
 /// The shape of the bytes a code payload carries for a [`LambdaFragment`].
 /// Move it when the fragment types change shape: the image fingerprint records
@@ -42,14 +44,6 @@ pub enum FragmentBinding {
     Local(BindingInner),
     /// A free variable of the body, resolved by name in the host unit.
     Global(SymbolId),
-}
-
-/// A name a fragment holds where no value holds it: a symbol by its id, or a
-/// keyword by the spelling the body wrote (docs/impl/region/template.md).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FragmentName<'a> {
-    Symbol(SymbolId),
-    Keyword(&'a str),
 }
 
 /// An HIR body whose every `Binding` indexes its own table.
@@ -169,19 +163,6 @@ impl HirFragment {
         let mut out = Vec::new();
         walk(&self.body, &self.bindings, &mut out);
         out
-    }
-
-    /// Call `f` on every name the fragment holds: each binding's, each global,
-    /// and each keyword and symbol key its body spells. A carrier that moves the
-    /// fragment to another instance spells them there.
-    pub fn for_each_name(&self, f: &mut impl FnMut(FragmentName<'_>)) {
-        for entry in &self.bindings {
-            f(FragmentName::Symbol(match entry {
-                FragmentBinding::Local(inner) => inner.name,
-                FragmentBinding::Global(name) => *name,
-            }));
-        }
-        body_names(&self.body, f);
     }
 
     /// Does every free global resolve in the host unit? Asked before a graft so
@@ -358,8 +339,8 @@ impl Rebind for Grafting<'_> {
 ///
 /// `None` on any form not listed here. That list is the fragment's whole
 /// contract, and `close` and `graft` share this walk, so a body that closes
-/// always grafts. [`body_names`] names what the listed forms spell, so a form
-/// added here that holds a name is added there too.
+/// always grafts. [`HirFragment::for_each_name`] names what the listed forms
+/// spell, so a form added here that holds a name is added there too.
 fn rebind(h: &Hir, r: &mut impl Rebind) -> Option<Hir> {
     let kind = match &h.kind {
         HirKind::Nil => HirKind::Nil,
@@ -466,22 +447,6 @@ fn rebind(h: &Hir, r: &mut impl Rebind) -> Option<Hir> {
 /// arguments) under the same discipline. `None` if any element declines.
 fn rebind_all(v: &[Hir], r: &mut impl Rebind) -> Option<Vec<Hir>> {
     v.iter().map(|c| rebind(c, r)).collect()
-}
-
-/// Call `f` on every name `h` spells outside the binding table. Of the forms
-/// [`rebind`] admits, a keyword literal and a `match` pattern hold one; a
-/// form added there that holds a name has to be added here too.
-fn body_names(h: &Hir, f: &mut impl FnMut(FragmentName<'_>)) {
-    match &h.kind {
-        HirKind::Keyword(k) => f(FragmentName::Keyword(k)),
-        HirKind::Match { arms, .. } => {
-            for (pat, _, _) in arms {
-                pattern::pattern_names(pat, f);
-            }
-        }
-        _ => {}
-    }
-    h.for_each_child(|c| body_names(c, f));
 }
 
 #[cfg(test)]
