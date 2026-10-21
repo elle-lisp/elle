@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! The expansion budget, one count that nested expansions share apart from
 //! fiber fuel, and the capabilities an expansion withholds.
 //!
@@ -11,6 +11,7 @@
 
 use super::*;
 use crate::syntax::UnitTag;
+use crate::value::fiber::Fuel;
 
 /// A unit for an expansion that calls no `gensym`.
 fn unit() -> Unit {
