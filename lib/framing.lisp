@@ -97,14 +97,16 @@
       (let [buf r:buf
             pos r:pos
             i (bytes/find buf d pos)]
+        # An empty piece is never pushed: beside the piece a fill brings it
+        # would make two parts, and join-parts copies two.
         (if i
           (begin
-            (push parts (slice buf pos i))
+            (when (< pos i) (push parts (slice buf pos i)))
             (put r :pos (+ i dlen))
             (assign result (join-parts parts))
             (assign done true))
           (begin
-            (push parts (slice buf pos))
+            (when (< pos (length buf)) (push parts (slice buf pos)))
             (put r :pos (length buf))
             (when (> dlen 1)
               (assign tail (last-bytes tail (slice buf pos) (dec dlen))))

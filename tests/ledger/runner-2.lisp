@@ -294,6 +294,6 @@
 ["tests/impl/bytes-view.lisp" :objects 240]
 ["tests/lang/bytes-find.lisp" :objects 420]
 ["tests/lang/framing.lisp" :objects 868]
-["tests/impl/framing-view.lisp" :objects 202]
+["tests/impl/framing-view.lisp" :objects 324]
 ["tests/lang/framing-records.lisp" :objects 1121]
 ["tests/lang/redis-resp.lisp" :objects 143]
