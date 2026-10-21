@@ -157,6 +157,7 @@ const PRODUCERS: &[&str] = &[
     "tests/impl/plumb.lisp",
     "tests/impl/h2-stress-scoped.lisp",
     "tests/impl/region-page-recycle.lisp",
+    "tests/impl/region-loop-pages.lisp",
     "tests/impl/region-macro-id-recycle.lisp",
     "tests/impl/region-collector-arg-move.lisp",
     "tests/impl/resource.lisp",
