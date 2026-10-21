@@ -91,11 +91,11 @@ fn a_registered_primitive_resolves_in_compiled_code_and_in_eval() {
 
 #[test]
 fn code_a_worker_compiles_names_the_primitives_its_instance_registered() {
-    // The counter-factual: a worker built with the core primitives alone runs
-    // a closure that calls `host/add-ten`, because the call rides in the
-    // closure's constants, and fails on an `eval` that names it. The test
-    // runner compiles each file in a worker, so its files never saw the rig's
-    // primitives.
+    // The counter-factual: a worker built with the core primitives alone would
+    // run a closure that calls `host/add-ten`, because the call rides in the
+    // closure's constants, and would fail on an `eval` that names it. The test
+    // runner compiles each file in a worker, so its files would not see the
+    // rig's primitives.
     assert_eq!(
         on_registered("(sys/join (sys/spawn (fn [] (host/add-ten 32))))"),
         Ok(42),
@@ -116,123 +116,13 @@ fn code_a_worker_compiles_names_the_primitives_its_instance_registered() {
 #[test]
 fn a_worker_passes_the_primitives_on_to_the_workers_it_spawns() {
     // The counter-factual: a worker that registers what it inherited but
-    // records none of it hands its own workers the core primitives alone.
+    // records none of it would hand its own workers the core primitives alone.
     assert_eq!(
         on_registered(
             "(sys/join (sys/spawn (fn [] \
                (ev/run (fn [] (sys/join (sys/spawn (fn [] (eval '(host/add-ten 32))))))))))"
         ),
         Ok(42)
-    );
-}
-
-/// A host binding reaches every compile in the instance, the file a program
-/// imports included: that file compiles on the instance's context when the
-/// import runs, not on the program's.
-#[test]
-fn a_host_binding_reaches_a_file_a_program_imports() {
-    let mut rt = Runtime::new();
-    bind_host(
-        &mut rt,
-        "host/add-ten",
-        Value::native_fn(&HOST_ADD_TEN),
-        Some(Arity::Exact(1)),
-    );
-    let dir = tempfile::tempdir().expect("scratch dir");
-    let module = dir.path().join("m.lisp");
-    std::fs::write(&module, "(host/add-ten 32)\n").expect("write m.lisp");
-    assert_eq!(load_int(&mut rt, &module), Some(42));
-}
-
-/// Load `module` through `import-file` from a program run on `rt`, and answer
-/// the module's value as an integer.
-fn load_int(rt: &mut Runtime, module: &std::path::Path) -> Option<i64> {
-    let program = format!("(import-file \"{}\")", module.display());
-    let (vm, symbols, cctx) = rt.parts();
-    eval_all(&program, symbols, vm, cctx, "<test>")
-        .expect("the import runs")
-        .as_int()
-}
-
-/// A file whose compile resolved `host/v` to 1 the instance keeps. A host
-/// binding registered before the next load reaches that load. The
-/// counter-factual ran the kept code, which still answered 1.
-#[test]
-fn a_host_binding_reaches_the_next_load_of_a_loaded_file() {
-    let mut rt = Runtime::new();
-    bind_host(&mut rt, "host/v", Value::int(1), None);
-    let dir = tempfile::tempdir().expect("scratch dir");
-    let module = dir.path().join("m.lisp");
-    std::fs::write(&module, "host/v\n").expect("write m.lisp");
-    assert_eq!(load_int(&mut rt, &module), Some(1));
-    bind_host(&mut rt, "host/v", Value::int(2), None);
-    assert_eq!(load_int(&mut rt, &module), Some(2));
-}
-
-fn host_two(
-    _ctx: &mut elle::primitives::ctx::NativeCtx<'_>,
-    _args: &[Value],
-) -> (SignalBits, Value) {
-    (SignalBits::EMPTY, Value::int(2))
-}
-
-/// A primitive that takes over the name `host/v`.
-static HOST_V: PrimitiveDef = PrimitiveDef {
-    name: "host/v",
-    func: host_two,
-    signal: Signal::silent(),
-    arity: Arity::Exact(0),
-    doc: "Answer 2.",
-    params: &[],
-    category: "host",
-    example: "(host/v)",
-    effect: RegionEffect::Immediate,
-    ..PrimitiveDef::DEFAULT
-};
-
-/// A primitive the host registers between two loads of one file reaches the
-/// second load, as a binding does. The counter-factual ran the kept code, which
-/// read `host/v` as the integer the first compile saw.
-#[test]
-fn a_primitive_reaches_the_next_load_of_a_loaded_file() {
-    let mut rt = Runtime::new();
-    bind_host(&mut rt, "host/v", Value::int(1), None);
-    let dir = tempfile::tempdir().expect("scratch dir");
-    let module = dir.path().join("m.lisp");
-    std::fs::write(&module, "(if (integer? host/v) host/v (host/v))\n").expect("write m.lisp");
-    assert_eq!(load_int(&mut rt, &module), Some(1));
-    rt.register_primitive(&HOST_V);
-    assert_eq!(load_int(&mut rt, &module), Some(2));
-}
-
-/// A REPL binding reaches a later REPL line and no other compile. The
-/// counter-factual registered it with the instance, so `compile_file` resolved
-/// it too.
-#[test]
-fn a_repl_binding_reaches_a_repl_line_and_no_file() {
-    let mut rt = Runtime::new();
-    let sym_id = rt.symbols().intern("repl-x");
-    let (cctx, heap) = rt.compile_and_heap();
-    cctx.register_repl_binding(
-        heap,
-        sym_id,
-        Value::int(5),
-        elle::value::arena::RootRef::Take,
-        Signal::silent(),
-        None,
-    );
-
-    let (vm, symbols, cctx) = rt.parts();
-    let (line, _) = elle::pipeline::compile_file_repl("(+ repl-x 1)", symbols, cctx, "<repl>")
-        .expect("a REPL line resolves the REPL binding");
-    let value = vm.execute_scheduled(&line, cctx).expect("the line runs");
-    assert_eq!(value.as_int(), Some(6));
-
-    let err = compile_file("(+ repl-x 1)", symbols, cctx, "<file>")
-        .expect_err("a file must not resolve the REPL binding");
-    assert!(
-        err.contains("undefined variable: repl-x"),
-        "the file fails on the unbound name: {err}"
     );
 }
 
@@ -329,4 +219,10 @@ fn test_step_based_execution() {
     let arr = result.as_array().unwrap();
     assert!(arr[0].is_keyword());
     assert_eq!(arr[1].as_int().unwrap(), 600);
+}
+
+// ── What a registration reaches ─────────────────────────────────────
+
+mod reach {
+    include!("embedding/reach.rs");
 }
