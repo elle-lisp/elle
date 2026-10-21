@@ -1,5 +1,5 @@
-// audited: 2026-10-06
-//! What crosses the send boundary intact: closures and their LIR, ports and parameters, symbols, and the mirrors.
+// audited: 2026-10-21
+//! What crosses the send boundary intact: closures and their LIR, ports and parameters, names, and the mirrors.
 //!
 //! docs/threads.md
 //! docs/impl/symbol.md
@@ -7,6 +7,7 @@
 //! - `closures` — a closure's LIR and its abandoned-frame tables survive the trip.
 //! - `ports` — a parameter and a stdio port cross by identity and by kind.
 //! - `symbols` — a symbol or keyword names the same thing on both sides.
+//! - `payload` — the names a code payload holds outside its values cross too.
 //! - `mirror` — the serde mirror keeps container kinds apart, and the syntax
 //!   mirror rebuilds a tree in the destination's arena.
 
@@ -31,5 +32,6 @@ fn into_value_in_region(f: impl FnOnce(&mut crate::primitives::ctx::Alloc) -> Va
 
 mod closures;
 mod mirror;
+mod payload;
 mod ports;
 mod symbols;
