@@ -9,9 +9,7 @@ The compilation entry points, from source text to bytecode, LIR, HIR or a value,
 - Run the stages in order for each entry point: read, strip declarations,
   migrate, expand, analyze, regularize, infer regions, lower, emit, and run
   when the entry point asks.
-- Own `CompileCtx`, the compile context of one instance: the macro VM, the
-  expander, the compile metadata of every global name, the REPL layer, and
-  the store of the units loaded files compiled to.
+- Own `CompileCtx`, the compile context of one instance.
 - Boot the compile context: compile [core.lisp](../core.lisp) and load
   [prelude.lisp](../prelude.lisp), or install both from a boot image
   ([booting from an image](../../docs/impl/image/boot.md)).
@@ -112,18 +110,13 @@ exports, the store, and the graft policy. Its methods fall into six groups:
 - **Register**: `register_host_binding` and `register_primitive` reach every
   compile in the instance. `register_stdlib_exports` installs the standard
   library's exports. `register_repl_binding` and `register_repl_macros` reach
-  later REPL lines alone. Each registration that every compile sees empties
-  the store. The crate-internal `set_stdlib_exports` records the stdlib
-  export struct, which a boot image carries as a root.
+  later REPL lines alone. The crate-internal `set_stdlib_exports` records the
+  stdlib export struct, which a boot image carries as a root.
 - **Look up**: `lookup_stdlib_value`, `global_function_ids`, `meta`,
   `primitive_meta`, `core_env`, `heap_ptr`, and the crate-internal `macros`
   and `boot_exports`.
 - **Tear down**: `release` empties the store, and drops the references the
   cached macro transformers hold, the REPL layer's among them.
-
-The free function `compile_file_stored` reaches the store. It keeps each
-loaded file's unit while its compile inputs match
-([docs/pipeline.md](../../docs/pipeline.md)).
 
 ## Data flow
 
@@ -193,44 +186,6 @@ The other entry points leave this path:
   macros, then regularizes, lowers and runs the result. Any failure there
   panics.
 
-## Dependents
-
-- [program.rs](../program.rs) — runs a file, stdin or `-e` through
-  `compile_file`
-- [runtime/core.rs](../runtime/core.rs) — builds the instance's compile
-  context with `new_with_heap` or `from_boot_image`
-- [primitives/module_init.rs](../primitives/module_init.rs) — compiles
-  stdlib.lisp through `compile_file`, then calls `register_stdlib_exports`
-- [primitives/modules.rs](../primitives/modules.rs) — compiles a loaded file
-  through `compile_file_stored`, on behalf of the calling fiber
-- [repl/eval.rs](../repl/eval.rs) and [repl/defer.rs](../repl/defer.rs) —
-  compile each input with `compile_file_repl`, then register its definitions
-  and macros
-- [lsp/state.rs](../lsp/state.rs) — `analyze_file`, and `global_function_ids`
-  for completion
-- [lint/cli.rs](../lint/cli.rs) — `analyze_file`
-- [primitives/compile/query/analysis.rs](../primitives/compile/query/analysis.rs)
-  — `analyze_file`, for `compile/analyze`
-- [vm/signal/modules.rs](../vm/signal/modules.rs) — the three test-runner
-  entry points, for `compile/barrier-module`, `compile/whole-module` and
-  `compile/whole-module-syntax`
-- [dump/mod.rs](../dump/mod.rs) and [program/dump.rs](../program/dump.rs) —
-  `compile_file_to_fhir` and `compile_file_to_lir`, for `--dump`
-- [wasm/mod.rs](../wasm/mod.rs) — `splice_includes` and `compile_file_to_lir`
-- [primitives/concurrency/worker.rs](../primitives/concurrency/worker.rs) — a
-  compile context for each worker thread
-- [syntax/expand/macro_expand.rs](../syntax/expand/macro_expand.rs) and
-  [syntax/expand/compiletime.rs](../syntax/expand/compiletime.rs) —
-  `eval_syntax`
-- [syntax/expand/mod.rs](../syntax/expand/mod.rs) — `sources::PRELUDE`, for
-  `load_prelude`
-- [vm/eval.rs](../vm/eval.rs) — `core_env` and `primitive_meta`, for the
-  runtime `eval`
-- [vm/scheduled.rs](../vm/scheduled.rs) — `lookup_stdlib_value`, to find `ev/run`
-- [image/boot/](../image/boot/) — hashes the three sources, and dumps the
-  boot exports and the macro table into an image
-- [tests/common/mod.rs](../../tests/common/mod.rs) — `eval_all`
-
 ## Invariants
 
 1. **Each instance owns one compile context, passed as a parameter.** The
@@ -274,8 +229,7 @@ The other entry points leave this path:
    reports.
 
 9. **A loader compiles a file once while its inputs match.**
-   `compile_file_stored` keeps each unit in the instance's store under the
-   file's path, beside a digest of the compile inputs that can change. A load
-   whose digest matches runs a clone of the kept unit. Registering a host
+   `compile_file_stored` keeps each unit in the instance's store, and a load
+   whose inputs match runs a clone of the kept unit. Registering a host
    binding, a host primitive or the standard library's exports empties the
    store ([docs/pipeline.md](../../docs/pipeline.md)).
