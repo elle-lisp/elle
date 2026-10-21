@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-10-20
 //! What the region free path discharges when a parked fiber's last reference drops.
 //!
 //! docs/impl/region/park.md
@@ -7,7 +7,7 @@ use super::*;
 
 /// A parked fiber whose last counted reference DROPS — no terminal transition
 /// ever runs — discharges its owned state at the region free
-/// (docs/impl/region/owner.md § "The free-path fiber discharge"): the parked
+/// (docs/impl/region/owner.md): the parked
 /// frame's activation owner node and the fiber owner node are taken out of the
 /// dying fiber (`Fiber::take_parked_state`) and fed to the free's cascade, so
 /// their adopted members' pages return (generation bump) and the live count
@@ -84,8 +84,7 @@ fn dropped_parked_fiber_discharges_owned_state() {
 }
 
 /// A dropped parked fiber's non-terminal SIGNAL value releases its one park
-/// escape retain (docs/impl/region/park.md — the
-/// third rule). The body yields a heap value: `handle_emit` retains its region
+/// escape retain (docs/impl/region/park.md). The body yields a heap value: `handle_emit` retains its region
 /// (`EmitEscape`) as it escapes into `fiber.signal`, and the resume path that
 /// would consume the retain never runs. Dropping the fiber must release it —
 /// afterwards the test's own alloc reference is the region's last, so one

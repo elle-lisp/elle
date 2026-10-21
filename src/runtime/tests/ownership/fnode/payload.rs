@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-20
 //! That a park's payload region is worth exactly one retain, at every stage and on every route into the fiber.
 //!
 //! docs/impl/region/park.md
@@ -186,8 +186,7 @@ fn a_parked_terminal_payload_is_worth_one_retain_at_every_stage() {
 }
 
 /// A resume value delivered into a frame parked at a suspending PRIMITIVE call
-/// arrives carrying one owning reference (docs/impl/region/park.md § "A delivery
-/// into a replayed frame carries one owning reference").
+/// arrives carrying one owning reference (docs/impl/region/park.md).
 ///
 /// The replayed frame re-enters at the parked call's continuation, which runs
 /// that call's compiler-emitted result release. A bytecode callee funds the
