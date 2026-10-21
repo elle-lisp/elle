@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 // The image store milestone: dump a sealed value graph, hydrate it by
 // private file mapping, and prove the mechanism end to end.
 // docs/impl/image/plan.md
@@ -222,6 +222,29 @@ fn refused(src: &mut FiberHeap, root: Value, path: &std::path::Path, named: &str
         other => panic!("expected a refused dump, got {other:?}"),
     }
     assert!(!path.exists(), "a refused dump left a partial file");
+}
+
+// ── Compiled closures ───────────────────────────────────────────────
+
+/// Evaluate `source` in `rt` as one file named `file`, answering the last
+/// form's value.
+fn eval_in(rt: &mut Runtime, source: &str, file: &str) -> Value {
+    let (vm, symbols, cctx) = rt.parts();
+    elle::pipeline::eval_all(source, symbols, vm, cctx, file).expect("eval")
+}
+
+/// Compile `source` in a fresh runtime, answering the runtime and the last
+/// form's value. The runtime holds the value's heap, so it stays the caller's.
+fn compiled(source: &str, file: &str) -> (Runtime, Value) {
+    let mut rt = Runtime::new();
+    let value = eval_in(&mut rt, source, file);
+    (rt, value)
+}
+
+/// Dump `root`, a value on `rt`'s heap, to `path` under `rt`'s memo.
+fn dump_from(rt: &mut Runtime, root: Value, path: &std::path::Path) {
+    let (heap, symbols) = rt.heap_and_symbols();
+    image::dump(heap, symbols, root, path).expect("dump");
 }
 
 /// Hydrate `path` into `rt` and bind its root as `hydrated-f`, so a call

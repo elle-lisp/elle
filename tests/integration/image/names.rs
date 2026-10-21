@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-10-21
 // What an image's name table carries, and what a fresh instance can print
 // because of it.
 // docs/impl/image/format.md
@@ -15,11 +15,10 @@ fn shown(v: Value, names: &SymbolTable) -> String {
     format!("{}", v.display_with(Some(names)))
 }
 
-// § Test plan, "Names": a fresh instance prints an image's keyword by name,
-// having never met the spelling. The counter-factual is the memo the test
-// builds empty: with no name table in the file, the keyword still hydrates
-// as an equal value and renders `#<keyword:0x…>`, which is what every
-// keyword in an image did before the table existed.
+// A fresh instance prints an image's keyword by name, having never met the
+// spelling. The counter-factual is the memo the test builds empty: with no
+// name table in the file, the keyword still hydrates as an equal value and
+// renders `#<keyword:0x…>`.
 #[test]
 fn a_hydrated_keyword_prints_its_name() {
     let dir = crate::common::ScratchDir::new("image-name-keyword");
@@ -79,10 +78,10 @@ fn the_graphs_names_reach_a_fresh_instance() {
     );
 }
 
-// § "The name table carries spellings, not hashes": a spelling the dumping
-// instance never learned is absent, and the value is still a perfectly good
-// value — it just has no name to print. A dumper that failed the dump here,
-// or that invented a spelling, would both break the memo's contract.
+// A spelling the dumping instance never learned is absent, and the value is
+// still a perfectly good value with no name to print. A dumper that failed
+// the dump here, or that invented a spelling, would break the memo's
+// contract.
 #[test]
 fn a_spelling_the_dumper_never_learned_still_hydrates() {
     let dir = crate::common::ScratchDir::new("image-name-unlearned");
@@ -134,11 +133,10 @@ fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack.windows(needle.len()).position(|w| w == needle)
 }
 
-// § Test plan, "Names" / § Dumping: two dumps of one graph are byte-identical
-// whole files, and the name table is no exception. The counter-factual is the
-// two memos: they hold the same spellings in opposite insertion orders, so a
-// dumper that emitted its name table in memo-iteration order writes two
-// different files from one graph.
+// Two dumps of one graph are byte-identical whole files, and the name table
+// is no exception. The counter-factual is the two memos: they hold the same
+// spellings in opposite insertion orders, so a dumper that emitted its name
+// table in memo-iteration order writes two different files from one graph.
 #[test]
 fn the_name_table_does_not_depend_on_memo_order() {
     let dir = crate::common::ScratchDir::new("image-name-order");
@@ -162,6 +160,102 @@ fn the_name_table_does_not_depend_on_memo_order() {
         std::fs::read(&b).expect("read b"),
         "the name table depends on the order its memo learned the spellings"
     );
+}
+
+// ── The names a code payload holds outside its values ───────────────
+
+/// A function whose fragment names its own name, a parameter, a `let` binding
+/// and a top-level global, none of which a value in its graph spells. `%pair`
+/// builds at run time, so the global is a real capture rather than a constant
+/// the lowerer inlines.
+const GRAFTED: &str = "(def image-frag-global (%pair 40 2))\n\
+                       (defn image-frag-fn [image-frag-param]\n\
+                         (let [image-frag-local (%pair image-frag-param image-frag-global)]\n\
+                           image-frag-local))\n\
+                       image-frag-fn";
+
+/// A function whose body mints a compiled capture cell. Inside a lambda only
+/// a local function a sibling captures gets one, so the body holds two that
+/// call each other. The body holds lambdas, so it closes into no fragment, and
+/// the cell's name lives only in the LIR and the bytecode.
+const CELLED: &str = "(defn image-cell-fn []\n\
+                        (defn image-cell-name [n] (if (%eq n 0) 0 (image-cell-other n)))\n\
+                        (defn image-cell-other [n] (image-cell-name 0))\n\
+                        image-cell-name)\n\
+                      image-cell-fn";
+
+/// Assert that `names` spells every one of `want`.
+fn spells(names: &SymbolTable, want: &[&str]) {
+    for &name in want {
+        assert_eq!(
+            names.name(SymbolId::of(name)),
+            Some(name),
+            "the hydrating instance cannot spell {name}, which the payload names"
+        );
+    }
+}
+
+// A hydrated function's fragment names its bindings by hash, and a graft of
+// it mints bindings under those names. The counter-factual is the fragment as
+// opaque bytes: the function hydrates and grafts correctly, and an escape dump
+// or an error then names each grafted binding `~`.
+#[test]
+fn a_fragments_names_reach_a_fresh_instance() {
+    let dir = crate::common::ScratchDir::new("image-name-fragment");
+    let path = dir.join("fragment.image");
+
+    let (mut rt, f) = compiled(GRAFTED, "<image-names>");
+    assert!(
+        !closure_of(f).template.fragment().is_empty(),
+        "the function closes into no fragment, so this test exercises nothing"
+    );
+    dump_from(&mut rt, f, &path);
+
+    let mut dst = traited_heap();
+    let mut dst_names = SymbolTable::new();
+    image::hydrate_path(&mut dst, &mut dst_names, &path).expect("hydrate");
+    spells(
+        &dst_names,
+        &[
+            "image-frag-fn",
+            "image-frag-param",
+            "image-frag-local",
+            "image-frag-global",
+        ],
+    );
+}
+
+// A capture cell's name is a raw id in the LIR and in the bytecode, and the
+// cell the function mints at run time carries it. The counter-factual is a
+// dump that spells only the values it copies: the cell's name never reaches
+// the hydrating instance.
+#[test]
+fn a_capture_cells_name_reaches_a_fresh_instance() {
+    use elle::lir::InstrRef;
+
+    let dir = crate::common::ScratchDir::new("image-name-cell");
+    let path = dir.join("cell.image");
+
+    let (mut rt, f) = compiled(CELLED, "<image-names>");
+    let names_the_cell = closure_of(f)
+        .template
+        .lir()
+        .expect("a compiled lambda carries LIR")
+        .nodes()
+        .any(|n| {
+            matches!(n.instr(), InstrRef::MakeCaptureCell { name, .. }
+                     if name == SymbolId::of("image-cell-name"))
+        });
+    assert!(
+        names_the_cell,
+        "the function mints no named cell, so this test exercises nothing"
+    );
+    dump_from(&mut rt, f, &path);
+
+    let mut dst = traited_heap();
+    let mut dst_names = SymbolTable::new();
+    image::hydrate_path(&mut dst, &mut dst_names, &path).expect("hydrate");
+    spells(&dst_names, &["image-cell-name"]);
 }
 
 // Replay is a learning site, and a learning site meets names it already
