@@ -68,6 +68,19 @@ module holds. `finalize_function` ([translate.rs](../../src/jit/translate.rs))
 takes the builder and the module and passes `module.target_config()`, so no
 caller builds the configuration.
 
+## Sealing blocks
+
+Cranelift builds SSA form from the translator's variables. A read in a block
+that is not yet sealed, and so may still gain a predecessor, adds a block
+parameter, which the seal removes again when every predecessor agrees on the
+value. Each spill reads every local, so a function sealed only at its end pays
+time and memory for its blocks times its locals.
+
+The translator seals an LIR block once every block that jumps to it has been
+translated ([seal.rs](../../src/jit/compiler/seal.rs)). A read in a block that
+only forward jumps reach then adds no parameter. The loop header is sealed
+last, because every self tail call jumps to it.
+
 ## Arithmetic: the tag-check diamond, and skipping it
 
 A binary operation, a comparison and a negation each compile to a diamond
