@@ -1,6 +1,6 @@
 # Code objects — a payload, a header and a code unit
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-21 -->
 
 A code object is a payload in a code region and a one-word header naming it, and a compile unit owns the region.
 
@@ -247,15 +247,19 @@ value walk meets them:
 | Field | Names |
 |-------|-------|
 | fragment | each binding's name, each global, the function's own name, a struct pattern's symbol keys, and every keyword the body spells |
-| lir | each symbol constant, and each capture cell's name |
-| bytecode | each capture cell's name, as the raw operand of `MakeCapture` |
+| lir | each symbol and keyword constant, each struct key an instruction reads, and each capture cell's name |
+| bytecode | each capture cell's name, as the raw operand of `MakeCapture`, which is the name the LIR's `MakeCaptureCell` holds |
 
 A carrier that moves a payload to another instance therefore records the
 spelling of each, beside the spellings its value walk records. The image
-dumper, `send` and the stdlib cache are the three carriers. A receiving
-instance learns these spellings nowhere else, so without them a grafted body's
-binding prints with no name ([symbol.md](../symbol.md) owns the memo they
-reach).
+dumper, `send` and the stdlib cache are the three carriers. Each reads a
+capture cell's name from the LIR. A unit's entry carries no LIR, and only the
+stdlib cache stores an entry, so an entry's cell names cross with no spelling.
+
+The constant pool holds every LIR constant as a value too, so a receiving
+instance learns the fragment's names and the cell names nowhere else. Without
+them a grafted body's binding prints with no name ([symbol.md](../symbol.md)
+owns the memo they reach).
 
 Two of the fields changed shape rather than merely moving.
 
