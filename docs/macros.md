@@ -1,6 +1,6 @@
 # Macros
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-21 -->
 
 Elle's macros run as ordinary Elle code at expansion time, and are hygienic by
 sets of scopes; `datum->syntax` breaks hygiene on purpose.
@@ -51,7 +51,9 @@ raise, but it reads no state outside the unit and changes none:
   started the compile withholds. A primitive that needs one is denied, and the
   compile fails naming the macro and the primitive
   ([capabilities.md](signals/capabilities.md)). So a body cannot print, read a
-  file, open a socket or load a library.
+  file, open a socket or load a library. An expansion cannot pause, so no
+  parent mediates the denial, whatever its mask names. Code the compile
+  produces runs with the fiber's own capabilities.
 - **A body reads no ambient state.** Some primitives reach state outside the
   unit through no capability bit: the environment, the arguments, the pid, the
   clocks, `vm/config`, the signal registry, `hash`, the standard ports, and
@@ -94,6 +96,11 @@ needs `:fs` for it.
 
 (def shout '(begin (defmacro shout [] (println "expanding")) (shout)))
 (assert (string/contains? (compile-error shout) "macro 'shout'") "printing is an effect")
+
+(def peek '(begin (defmacro peek [] (file/read "/etc/hostname")) (peek)))
+(assert (string/contains? (compile-error peek) "file/read") "a fiber that withholds nothing")
+(let [f (fiber/new (fn [] (eval peek)) |:fs :error| :deny |:fs|)]
+  (assert (= (get (fiber/resume f) :error) :eval-error) "no denial escapes the compile"))
 
 (assert (get (vm/primitive-meta "sys/env") :ambient))
 (assert (not (get (vm/primitive-meta "string/join") :ambient)))
