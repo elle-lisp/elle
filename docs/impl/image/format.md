@@ -20,7 +20,7 @@ One image is one file, or one blob embedded in a larger one:
 | relocations | pointer stream: (slot offset, target offset); primitive stream: (slot offset, name index); file stream: (slot offset, file index); reconstruction stream: (slot offset, constructor tag). Offsets are region-relative bytes: the hydrated region is one contiguous interval, so `base + offset` names any slot or target in O(1) and the (page, offset) pair collapses |
 | object index | (offset, tag) per heap object, sorted — rebuilds `dtors`/`ref_objs` and drives the verifier |
 | primitive table | the names the body's native-fn slots hold, one length-prefixed string each, sorted by name — the primitive stream indexes it |
-| name table | the spellings of the symbols and keywords in the body, one length-prefixed string each, sorted by name |
+| name table | the spellings of the symbols and keywords the body names, a code payload's own names included, one length-prefixed string each, sorted by name |
 | file table | the source-file names the body's spans point at, one length-prefixed string each, sorted by name — the file stream indexes it |
 | signal table | not written yet: a dump refuses a declared signal instead ([sealing.md](sealing.md)) |
 | watermarks | dump-time counters, carried in the header block: parameter id, hygiene scope id and static-region mint today, next signal bit with the milestone that needs it |
@@ -82,6 +82,10 @@ needs no table at all. Display does not travel: a hydrating instance holds none
 of the dump's spellings, and a value whose spelling it never met prints as
 `#<symbol:hash>`. The name table is what closes that gap, for both vocabularies
 at once ([symbol.md](../symbol.md) owns the memo it replays into).
+
+The dumper records a spelling wherever its copy meets a name: a symbol or
+keyword value, a struct key, and each name a code payload holds outside its
+value slots ([region/template.md](../region/template.md) lists those).
 
 An entry is a spelling: a byte length, the bytes, and zero padding out to the
 next multiple of eight. No hash appears. The hydrator hashes each spelling with
@@ -231,7 +235,7 @@ Size and align alone do not pin field offsets. The fingerprint therefore also
 records the probed layout of every variant the dumper can emit — the heap
 objects, and the `TableKey` variants a struct entry carries: the
 discriminant byte and each leaf field's offset and length
-([measurements.md](measurements.md) item 6 records the probe mechanism and the
+([measurements.md](measurements.md) records the probe mechanism and the
 measured layout). It records the field offsets of every record the dumper
 assembles as well: a syntax node, a code payload, the payload's LIR body, and
 the four LIR records the body names. A build whose layout reorders a field or

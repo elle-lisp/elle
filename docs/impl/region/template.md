@@ -1,6 +1,6 @@
 # Code objects — a payload, a header and a code unit
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-20 -->
 
 A code object is a payload in a code region and a one-word header naming it, and a compile unit owns the region.
 
@@ -41,9 +41,8 @@ The result is a **`CodeUnit`**: the entry header, and one counted reference to
 the code region. `Bytecode` is the emitter's working buffer and nothing more;
 the pipeline hands out a `CodeUnit`.
 
-Packing a whole unit into one region is the shape the old payload cache reached
-by accident of timing. The unit is the thing that has one lifetime, so the
-unit now owns the region outright, and no cache stands between them.
+The unit is the thing that has one lifetime, so the unit owns the region
+outright, and no cache stands between them.
 
 ## How long a code region lives
 
@@ -194,8 +193,8 @@ image rewrites it from the file table ([format.md](../image/format.md)).
 
 The payload and the LIR body inside it are copied whole into the code region,
 so each is `repr(C)` and exactly its fields, with every byte written
-([generations.md](generations.md) § "Every byte the magic screens has to be
-written"). A pad is a named field written zero, as the LIR records carry one.
+([generations.md](generations.md)). A pad is a named field written zero, as
+the LIR records carry one.
 No field is an enum whose shorter variants leave bytes unwritten: the arity is
 a record of two counts and a kind byte, and the signal is stored as its two
 words. The record's own tail pad brings it to a whole number of words.
@@ -241,6 +240,22 @@ the function, and that compile decodes it once. The encoding has a version,
 `FRAGMENT_ENCODING`, which the image fingerprint records, so an image written
 under another encoding falls back to a source boot rather than grafting a body
 it cannot read ([format.md](../image/format.md)).
+
+A payload also names symbols and keywords outside its value slots, where no
+value walk meets them:
+
+| Field | Names |
+|-------|-------|
+| fragment | each binding's name, each global, the function's own name, a struct pattern's symbol keys, and every keyword the body spells |
+| lir | each symbol constant, and each capture cell's name |
+| bytecode | each capture cell's name, as the raw operand of `MakeCapture` |
+
+A carrier that moves a payload to another instance therefore records the
+spelling of each, beside the spellings its value walk records. The image
+dumper, `send` and the stdlib cache are the three carriers. A receiving
+instance learns these spellings nowhere else, so without them a grafted body's
+binding prints with no name ([symbol.md](../symbol.md) owns the memo they
+reach).
 
 Two of the fields changed shape rather than merely moving.
 
