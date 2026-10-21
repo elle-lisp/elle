@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! An HIR body closed over the bindings it names, so it can be re-hosted in any arena.
 //!
 //! docs/impl/hir.md
@@ -42,6 +42,14 @@ pub enum FragmentBinding {
     Local(BindingInner),
     /// A free variable of the body, resolved by name in the host unit.
     Global(SymbolId),
+}
+
+/// A name a fragment holds where no value holds it: a symbol by its id, or a
+/// keyword by the spelling the body wrote (docs/impl/region/template.md).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FragmentName<'a> {
+    Symbol(SymbolId),
+    Keyword(&'a str),
 }
 
 /// An HIR body whose every `Binding` indexes its own table.
@@ -162,6 +170,10 @@ impl HirFragment {
         walk(&self.body, &self.bindings, &mut out);
         out
     }
+
+    /// The names the fragment holds, for a carrier to spell. Not walked yet:
+    /// it answers none.
+    pub fn for_each_name(&self, _f: &mut impl FnMut(FragmentName<'_>)) {}
 
     /// Does every free global resolve in the host unit? Asked before a graft so
     /// a caller can decline while it still has the un-spliced call in hand.
