@@ -288,5 +288,5 @@
 ["tests/lang/caps-ffi.lisp" :objects 148]
 ["tests/lang/operators.lisp" :objects 943]
 ["tests/impl/graft.lisp" :objects 206]
-["tests/impl/wrapper-lowering.lisp" :objects 167]
+["tests/impl/wrapper-lowering.lisp" :objects 248]
 ["tests/impl/size-count.lisp" :objects 227]

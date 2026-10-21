@@ -63,13 +63,13 @@
   b61(~) local mutated=false immutable=true needs_capture=false
 [lambda_captures]
   #34 params=[] captures=[]
-  #93 params=[] captures=[]
-  #97 params=[] captures=[b21(n)<Local>]
-  #175 params=[] captures=[]
-  #230 params=[] captures=[]
-  #238 params=[] captures=[b43(b)<Local>]
-  #297 params=[] captures=[]
-  #299 params=[b55(n)] captures=[b54(f)<Recursive>]
+  #89 params=[] captures=[]
+  #93 params=[] captures=[b21(n)<Local>]
+  #167 params=[] captures=[]
+  #222 params=[] captures=[]
+  #230 params=[] captures=[b43(b)<Local>]
+  #289 params=[] captures=[]
+  #291 params=[b55(n)] captures=[b54(f)<Recursive>]
 [return_frontier]
   [r15, r39, r52, r56, r60]
 [suppressed_decref_regions]
@@ -131,7 +131,7 @@
     block88: DecrefValueRegion v395
     block88: DecrefValueRegion v397
   ; closure[0] <anon>
-    block0: IncrefValueRegion v6
+    block0: IncrefValueRegion v4
   ; closure[1] <anon>
     block0: IncrefRegion s17
     block0: IncrefRegion s18
@@ -139,8 +139,8 @@
     block0: DecrefRegion s18
   ; closure[2] <anon>
     block0: IncrefValueRegion v1
-    block0: DecrefValueRegion v7
-    block0: IncrefValueRegion v10
+    block0: DecrefValueRegion v5
+    block0: IncrefValueRegion v8
   ; closure[3] <anon>
     block0: IncrefValueRegion v4
   ; closure[4] <anon>
@@ -159,6 +159,6 @@
     block0: DecrefRegion s21
   ; closure[7] f
     block1: IncrefValueRegion v5
-    block2: DecrefValueRegion v19
-    block2: IncrefValueRegion v18
-    block3: DecrefValueRegion v21
+    block2: DecrefValueRegion v15
+    block2: IncrefValueRegion v14
+    block3: DecrefValueRegion v17

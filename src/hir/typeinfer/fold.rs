@@ -1,11 +1,12 @@
-// audited: 2026-10-14
+// audited: 2026-10-20
 //! The fold: after inference, delete the branches and dispatch arms the inferred types decide.
 //!
 //! A decided `if` becomes its taken branch. A `(match (type-of x) …)` whose
 //! live arm is decided becomes that arm's body. A `cond` loses the clauses a
 //! decided test rules out, and an `and` or `or` stops at the operand that
-//! decides it. A deletion that would take a binding something outside it still
-//! reads is declined. No statement after a raise goes: a resume reaches it.
+//! decides it. A sequence drops the literal a decided guard left in it. A
+//! deletion that would take a binding something outside it still reads is
+//! declined. No statement after a raise goes: a resume reaches it.
 //!
 //! docs/impl/graft.md
 
@@ -101,6 +102,7 @@ impl Folder<'_> {
             }
             HirKind::And(_) => self.fold_shortcircuit(h, Decided::False, Decided::True),
             HirKind::Or(_) => self.fold_shortcircuit(h, Decided::True, Decided::False),
+            HirKind::Begin(_) => drop_literal_statements(h),
             _ => {}
         }
     }
@@ -186,6 +188,40 @@ impl Folder<'_> {
             .iter()
             .all(|b| self.reads.get(b).copied().unwrap_or(0) <= inside.get(b).copied().unwrap_or(0))
     }
+}
+
+/// Drop each immediate literal before the sequence's tail: a decided guard
+/// leaves its `nil` where it stood, and such a statement has no effect and no
+/// reader. A sequence left with its tail alone becomes the tail. Inference
+/// need not run again for this, because the sequence's type is its tail's.
+fn drop_literal_statements(h: &mut Hir) {
+    let HirKind::Begin(items) = &mut h.kind else {
+        return;
+    };
+    let tail = items.len().saturating_sub(1);
+    let mut i = 0;
+    items.retain(|item| {
+        let keep = i >= tail || !is_immediate(item);
+        i += 1;
+        keep
+    });
+    if items.len() == 1 {
+        let only = items.pop().expect("one statement is left");
+        *h = only;
+    }
+}
+
+/// An immediate literal, which evaluates to itself with no effect.
+fn is_immediate(h: &Hir) -> bool {
+    matches!(
+        h.kind,
+        HirKind::Nil
+            | HirKind::EmptyList
+            | HirKind::Bool(_)
+            | HirKind::Int(_)
+            | HirKind::Float(_)
+            | HirKind::Keyword(_)
+    )
 }
 
 /// Count every read of a binding: a `Var`, a write's target, a capture.

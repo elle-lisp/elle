@@ -9,9 +9,9 @@
 # closure in regions of their own. The counting loops then claim two pages per
 # iteration, the CRC-32 step eighteen and the struct scan three, and the loop
 # over the wrappers takes about eighteen times the loop over the intrinsics.
-# With the graft, every loop reads 0 pages, and the ratio reads about 2: the
-# graft binds a written operand with a let, which the loop pays per use
-# (#1405).
+# With the graft, every loop reads 0 pages, and the ratio reads about 1: the
+# graft writes the counter in place of each wrapper's parameter, so the two
+# loops compile alike.
 #
 # Each page subject is a run-block of b iterations, read on the page gauge.
 # The gauge is deterministic, so a reading is exact, and the ledger in

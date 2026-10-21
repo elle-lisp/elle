@@ -155,11 +155,11 @@
   #141 params=[b44(a), b45(b)] captures=[]
   #146 params=[b46(a), b47(b)] captures=[]
   #163 params=[b50(a), b51(b)] captures=[]
-  #181 params=[] captures=[b2(one-get)<Local>]
-  #201 params=[] captures=[b3(discard-get)<Local>]
-  #233 params=[] captures=[b4(two-len)<Local>]
-  #357 params=[] captures=[b1(two-get)<Local>]
-  #452 params=[] captures=[b1(two-get)<Local>]
+  #177 params=[] captures=[b2(one-get)<Local>]
+  #197 params=[] captures=[b3(discard-get)<Local>]
+  #229 params=[] captures=[b4(two-len)<Local>]
+  #349 params=[] captures=[b1(two-get)<Local>]
+  #444 params=[] captures=[b1(two-get)<Local>]
 [return_frontier]
   [r23, r34]
 [suppressed_decref_regions]
@@ -310,9 +310,9 @@
   ; closure[4] two-len
     block0: DecrefValueRegion v6
     block0: DecrefValueRegion v12
+    block0: DecrefValueRegion v17
     block0: DecrefValueRegion v19
-    block0: DecrefValueRegion v21
-    block0: IncrefValueRegion v18
+    block0: IncrefValueRegion v16
   ; closure[5] <anon>
     block0: DecrefValueRegion v10
     block0: TailCall defer_callee_release=false
@@ -328,9 +328,9 @@
   ; closure[7] <anon>
     block0: DecrefValueRegion v14
     block0: DecrefValueRegion v20
+    block0: DecrefValueRegion v25
     block0: DecrefValueRegion v27
-    block0: DecrefValueRegion v29
-    block0: IncrefValueRegion v26
+    block0: IncrefValueRegion v24
   ; closure[8] <anon>
     block0: DecrefValueRegion v15
     block0: DecrefValueRegion v22

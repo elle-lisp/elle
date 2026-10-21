@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-20
 // docs/impl/hir.md
 //! Arena-backed binding storage for the compilation pipeline.
 //!
@@ -38,8 +38,8 @@ pub struct BindingInner {
     /// Whether this binding is captured by a nested closure. **Module-private**:
     /// the lexical-capture proxy has NO escape authority (docs/impl/escape.md), so
     /// no consumer may name it for an escape or reachability decision. Written
-    /// through `mark_captured`; read by a
-    /// SINGLE consumer — `needs_capture()`, for cell layout. Escape's capture facet
+    /// through `mark_captured`; read by two lexical consumers, `needs_capture()`
+    /// for cell layout and `closure_may_write()`. Escape's capture facet
     /// is flow-true (transitive `lambda_captures` propagation from genuine frontier
     /// seeds, never this proxy), and the region solver's reachability questions read
     /// the HIR capture-graph (`region::infer::escape::captured_bindings`); neither reads
@@ -191,6 +191,13 @@ impl BindingInner {
     /// the container may itself have been donated.
     pub fn is_one_slot_container(&self) -> bool {
         self.is_restorable_capture_cell() || self.is_mutated
+    }
+
+    /// May a closure write this binding? Only one that captured it can. The
+    /// graft asks before it writes an operand in place of a parameter
+    /// (docs/impl/graft/operands.md).
+    pub fn closure_may_write(&self) -> bool {
+        self.is_captured && self.is_mutated
     }
 
     /// Mark this binding as captured by a nested closure. The analyzer's sole

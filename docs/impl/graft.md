@@ -1,6 +1,6 @@
 # Grafting a call
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-20 -->
 
 A call into another unit's function becomes that function's body, and the proven types delete every branch its operands cannot take.
 
@@ -167,46 +167,11 @@ even when no call to it is left:
         "the grafted call still proves x in the definition")
 ```
 
-### Operands and parameters
+### The operands
 
-The graft binds each parameter to its operand in the order the operands are
-written, so the evaluation order of the call is kept. An operand that is an
-immediate literal, or a `Var` naming a binding nothing writes, replaces the
-parameter directly in the body. Such a binding holds one value for the whole
-body. The test is that nothing writes it, not that it is immutable, because a
-`match` pattern's variable is never marked immutable. Every other operand is
-bound by a `let` to a fresh local first. The direct replacement matters for the
-fold: a guard in the grafted body then tests the caller's own binding, and its
-fact narrows that binding.
-
-A parameter a `(numeric!)` declaration floors is always bound by a `let`. The
-floor is a fact about the parameter's binding, and the `let` carries that
-binding into the caller, so the body's `%`-ops prove against the floor as they
-did inside the function. Replacing the parameter with an unproven operand would
-drop the floor and reject a program that compiles today.
-
-### The rest list and the known arity
-
-A rest parameter receives the operands past the fixed ones. The count is known
-at the call, so a body that dispatches on the rest list decides the dispatch at
-graft time. The body must be a `match` on the rest parameter. Its arms are tried
-in order against the known shape of the list:
-
-- `()` matches no extra operands;
-- a list pattern of plain variables or `_`, as `(b)` or `(a b)`, matches that
-  many, and a `& r` tail matches that many or more;
-- `_` or a bare variable matches any count.
-
-The first arm that matches is the body the graft uses, and its pattern variables
-bind to the operands under the rule above. A tail or a bare variable binds to a
-`(list …)` of the operands it covers. An arm with a literal element, a nested
-pattern or a guard cannot be decided at graft time, so reaching one declines the
-graft. A body that is not such a `match` binds the rest parameter to the
-`(list …)` of the extra operands, `()` when there are none.
-
-Each arm closes on its own. An arm that does not close, such as the general arm
-of `+` with its `letrec` walker, leaves the calls of its arity as calls, while
-the other arities still graft.
+Which operand is written in place of its parameter, which a `let` binds first,
+and how the known operand count decides a rest-list dispatch are
+[the operands](graft/operands.md).
 
 ## The fold
 
@@ -230,7 +195,11 @@ the two mutabilities of a string or an array apart.
 
 Every form in that grammar is free of effects, so a decided condition is removed
 whole. An `if` becomes its taken branch. A `(match (type-of x) …)` whose live
-arm is decided becomes that arm's body.
+arm is decided becomes that arm's body. A `when` guard that decides false
+becomes the `nil` of its untaken side, and a sequence drops such a statement:
+an immediate literal before the tail has no effect and no reader. A sequence
+left with its tail alone becomes the tail, so a grafted wrapper whose guards
+both go is its op and nothing else.
 
 A `cond` loses each clause whose test decides false. A clause whose test
 decides true becomes the `cond`'s else, and the clauses after it go. An `and`
@@ -273,8 +242,9 @@ the block. Such a `break` leaves the block for the statement after it:
 The guard narrowing reads this: a statement after a guard whose branch
 diverges knows the guard's condition was false ([type inference](typeinfer.md)).
 
-The fold deletes no statement from a sequence. A raise does not end its
-sequence, because an `:error` signal is resumable. A parent fiber that catches
+The fold deletes no statement that runs from a sequence, only a literal a
+decided guard left behind. A raise does not end its sequence, because an
+`:error` signal is resumable. A parent fiber that catches
 the error can resume the child, and the child continues with the statement
 after the raise ([fiber primitives](../signals/primitives.md)):
 
@@ -402,15 +372,11 @@ still runs, and deletes what the types decide around the calls that stay.
 
 - `hir::typeinfer::tests::graft::*` — which calls graft. Each arithmetic and
   comparison wrapper over two proven operands leaves its op and no guard; an
-  unproven pair grafts and keeps its runtime check. Three operands keep an
-  arithmetic call and graft a comparison to one spliced call, and a spliced
-  operand
-  keeps the call. A user binding named `+` never reaches the stdlib body, a
-  recursive function stays a call, a `(numeric!)` parameter keeps its floor in
-  the graft, and a function the program defines grafts while its definition
-  still proves its parameters. Under `GraftPolicy::Off` every call stays a
-  call, to a function the program defines and to the stdlib, and the stdlib
-  keeps its own grafts. A body the program defines keeps its own lines where
+  unproven pair grafts and keeps its runtime check. A user binding named `+`
+  never reaches the stdlib body, a recursive function stays a call, and a
+  function the program defines grafts while its definition still proves its
+  parameters. Under `GraftPolicy::Off` every call stays a call, to a function
+  the program defines and to the stdlib, and the stdlib keeps its own grafts. A body the program defines keeps its own lines where
   it grafts, and a stdlib body takes the line of the call.
 - `hir::typeinfer::tests::live::*` — which lambdas the graft reaches. In a
   function nothing calls, a call whose body holds an op to prove stays a call,
@@ -427,8 +393,9 @@ still runs, and deletes what the types decide around the calls that stay.
   deletion that narrows a join, a guard that proves through a grafted
   predicate and through a graft's `let`, a dead arm that binds a hoisted cell,
   and the error bit a dissolved body loses. It also pins a `cond` clause and
-  the `and` and `or` operands a decided test removes, and a block its own
-  `break` leaves, which proves nothing after it.
+  the `and` and `or` operands a decided test removes, a block its own
+  `break` leaves, which proves nothing after it, and the literal statement a
+  decided guard leaves, which goes.
 - `hir::typeinfer::tests::graft::a_payloads_fragment_decodes_once_per_compile`
   — two lookups of one stdlib function in one compile hand out one fragment.
 - `value::closure::tests::payload` — the payload record is exactly its

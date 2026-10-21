@@ -1,7 +1,8 @@
-// audited: 2026-10-14
+// audited: 2026-10-20
 //! The graft: a call to a known function becomes the body its operand count selects, unless that body recurses.
 //!
 //! docs/impl/graft.md
+//! docs/impl/graft/operands.md
 //!
 //! A same-unit callee's body is the fragment its lambda carries; another
 //! unit's is the fragment on the code payload of the closure its binding holds.
@@ -20,6 +21,7 @@ use std::rc::Rc;
 
 mod close;
 mod live;
+mod operand;
 mod record;
 mod scope;
 mod site;

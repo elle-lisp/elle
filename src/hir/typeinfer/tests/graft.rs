@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-20
 // src/hir/AGENTS.md
 // docs/impl/graft.md
 //! Which calls become their callee's body: a known, non-recursive function at
@@ -8,7 +8,8 @@
 //! stdlib closures: without the stdlib a source's `+` names nothing.
 
 use super::{
-    calls_by_splice, compile_booted, count_calls_to, count_emits, count_intrinsics, count_ops,
+    calls_by_splice, compile_booted, compiled, count_calls_to, count_emits, count_intrinsics,
+    count_ops,
 };
 use crate::hir::{BindingArena, Hir, HirKind};
 
@@ -23,10 +24,6 @@ const WRAPPERS: [(&str, &str); 8] = [
     (">=", "%ge"),
     ("=", "%eq"),
 ];
-
-fn compiled(src: &str) -> (Hir, BindingArena) {
-    compile_booted(src).unwrap_or_else(|e| panic!("{src} must compile: {e}"))
-}
 
 /// Over two proven ints the wrapper's guards and its number test are all
 /// decided, so the call dissolves to the op and nothing that could raise is
