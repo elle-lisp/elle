@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! The code-object half of the compacting copy: a payload, its LIR body, and the
 //! child code objects its `MakeClosure` instructions index.
 //!
@@ -6,8 +6,8 @@
 //!
 //! copy.rs owns the value walk and calls in here whenever it meets a code
 //! object. A payload copies once however many headers name it, its constants
-//! go back through the value walk, and its child table copies header by
-//! header.
+//! go back through the value walk, the names it holds outside its values are
+//! spelled into the name table, and its child table copies header by header.
 
 use crate::hir::region::RuntimeRegion;
 use crate::lir::LirBody;
@@ -22,7 +22,8 @@ use super::ImageError;
 
 /// Copy one code payload into the scratch region, deduplicated on the source
 /// backing so every header over one payload keeps one copy. Constants, the
-/// LIR body's values and the children go through walks of their own; every
+/// LIR body's values and the children go through walks of their own, the
+/// names outside them leave their spellings in the walk's table, and every
 /// other field is plain data.
 ///
 /// The refusal lives here because the payload is what names it: a WASM-built
@@ -46,6 +47,7 @@ pub(super) fn copy_payload(
     if let Some(&copy) = walk.payloads.get(&key) {
         return Ok(copy);
     }
+    walk.note_payload_names(t);
     let src = *t.payload();
     let mut constants = Vec::with_capacity(src.constants.len());
     for &c in src.constants.iter() {

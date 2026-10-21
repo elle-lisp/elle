@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! The graft: a call to a known function becomes the body its operand count selects, unless that body recurses.
 //!
 //! docs/impl/graft.md
@@ -95,9 +95,7 @@ impl FragmentMemo {
         if let Some(hit) = self.decoded.borrow().get(&key) {
             return hit.clone();
         }
-        let decoded = bincode::deserialize::<LambdaFragment>(bytes)
-            .ok()
-            .map(Rc::new);
+        let decoded = LambdaFragment::decode(bytes).map(Rc::new);
         self.decoded.borrow_mut().insert(key, decoded.clone());
         decoded
     }

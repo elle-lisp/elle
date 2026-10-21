@@ -1,6 +1,6 @@
 # hir
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-21 -->
 
 The analyzed program, with bindings resolved, captures computed and signals
 inferred, and the passes over it.
@@ -237,8 +237,10 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     `SymbolId` per free global — and `graft` re-hosts it in any arena.
     Nothing may hoist selected `BindingInner` fields beside a body instead.
     A function's own code payload carries the fragment of its body as bytes,
-    so a later unit reaches the body through the function value. See
-    [docs/impl/hir.md](../../docs/impl/hir.md).
+    written by `LambdaFragment::encode` and read by `decode`, so a later unit
+    reaches the body through the function value. `for_each_name` answers every
+    name a fragment holds, which a carrier spells for the receiving instance.
+    See [docs/impl/hir.md](../../docs/impl/hir.md).
 
 26. **A call to a known function becomes its body.** The graft replaces a
     call whose callee is an immutable, non-recursive function binding with

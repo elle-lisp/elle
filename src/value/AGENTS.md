@@ -1,6 +1,6 @@
 # value
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-10-21 -->
 
 Runtime value representation using a tagged union.
 
@@ -19,7 +19,7 @@ Runtime value representation using a tagged union.
 | [repr/accessors.rs](repr/accessors.rs) | Value field access and type checking |
 | [repr/traits.rs](repr/traits.rs) | `Display`, `Debug`, `Clone` implementations |
 | [types.rs](types.rs) | `Arity`, `SymbolId`, `NativeFn`, `TableKey`, sorted-struct helpers |
-| [closure.rs](closure.rs) | `Closure` (template + env + squelch mask) and the `TemplateRef` seam; submodules `payload` (`CodePayload`, the region-inline code data), `arity` (`ArityRec`, the arity as a record with every byte written), `header` (`ClosureTemplate`), `arena` (`CodeArena` and the `PayloadParts` a payload is written from), `unit` (`CodeUnit` and `CodePin`, the Rust-held references to a code region). [template.md](../../docs/impl/region/template.md) owns the argument |
+| [closure.rs](closure.rs) | `Closure` (template + env + squelch mask) and the `TemplateRef` seam; submodules `payload` (`CodePayload`, the region-inline code data), `arity` (`ArityRec`, the arity as a record with every byte written), `header` (`ClosureTemplate`), `arena` (`CodeArena` and the `PayloadParts` a payload is written from), `unit` (`CodeUnit` and `CodePin`, the Rust-held references to a code region), `names` (the names a payload holds outside its value slots, which the image dumper and `send` spell). [template.md](../../docs/impl/region/template.md) owns the argument |
 | [fiber.rs](fiber.rs) | `Fiber`, `FiberHandle`, `WeakFiberHandle`, `SuspendedFrame`, `FiberStatus`; re-exports `SignalBits` (from [fiber/signalbits.rs](fiber/signalbits.rs)) and the `SIG_*` constants (from `crate::signals`) |
 | [fiber/dues.rs](fiber/dues.rs) | `ActivationDues` — what one activation owes the region system when it ends: its owner node and the releases it took over from frame-replacing tail calls, carried as one record so a park moves both or neither ([owner.md](../../docs/impl/region/owner.md)) |
 | [fiber/delivery.rs](fiber/delivery.rs) | `Delivery` — the delivery ledger: how the current park's delivery references are funded, with a method-only surface ([what a park retains](../../docs/impl/region/park.md)) |
@@ -120,9 +120,9 @@ These are set during the swap protocol in `with_child_fiber`
      POD, not the lambda's syntax tree.
 
 6. **Thread transfer uses `SendValue`.** `SendValue` wraps values for safe
-     transfer between threads, cloning `Rc` contents as needed. Trait tables
-     are serialized as part of the value — they are NOT stripped on cross-thread
-     transfer.
+     transfer between threads, cloning `Rc` contents as needed. A
+     user-attached trait table is serialized as part of the value. A registry
+     default crosses as nil, and the receiving thread's registry supplies it.
 
 7. **`SuspendedFrame` captures everything needed to resume.** A single type
      holds the bytecode, constants, env, IP, and operand stack for a suspended
@@ -238,8 +238,10 @@ immediates, not heap objects, so they are not in this list.)
 
 ### SendValue behavior
 
-Trait tables are **serialized** on `SendBundle::from_value` via a recursive
-`from_value_inner` call, the same as any other `Value` field. Trait tables
+A user-attached trait table is **serialized** on `SendBundle::from_value` via a
+recursive `from_value_inner` call, the same as any other `Value` field. A
+registry default is sent as nil instead, because the receiving thread builds
+its own (`send_traits` in [ser.rs](send/ser.rs)). Trait tables
 are structs whose values may be closures; closures survive
 cross-thread transfer intact via the intern table in `SendBundle`. The
 receiving thread reconstructs the trait table in `into_value_inner` and

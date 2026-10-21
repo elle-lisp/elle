@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! Serializing a live closure instance into the bundle's intern table.
 //!
 //! docs/threads.md
@@ -11,7 +11,7 @@
 use super::super::*;
 use super::ctx::SerContext;
 use super::from_value_inner;
-use super::template::{code_fields, send_children, send_lir};
+use super::template::{code_fields, sendable};
 
 /// Serialize a closure instance reached at heap value `value`, interning it
 /// into `ctx.closures` with cycle detection and returning a `Ref` to its slot.
@@ -47,26 +47,10 @@ pub(super) fn send_closure(
         .map(|v| from_value_inner(*v, ctx))
         .collect::<Result<Vec<_>, _>>()?;
 
-    let constants = template
-        .constants()
-        .iter()
-        .map(|v| from_value_inner(*v, ctx))
-        .collect::<Result<Vec<_>, _>>()?;
-
-    // The LIR crosses with the closure, so the worker's JIT can compile it.
-    let (lir, lir_values) = send_lir(template.lir(), ctx)?;
-
-    // The nested lambdas' code objects cross beside the closure's, so the
-    // receiver fills the child table its `MakeClosure`s index.
-    let child_protos = send_children(template, ctx)?;
-
-    ctx.closures[idx] = SendableClosure {
-        constants,
-        lir,
-        lir_values,
-        child_protos,
-        ..code_fields(template, env, closure_rc.squelch_mask)
-    };
+    // The constants, the LIR the worker's JIT compiles, and the nested
+    // lambdas' code objects the receiver's `MakeClosure`s index all cross
+    // beside the closure.
+    ctx.closures[idx] = sendable(template, env, closure_rc.squelch_mask, ctx)?;
 
     Ok(SendValue::Ref(idx))
 }

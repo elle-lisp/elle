@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! Per-call serialization context threaded through `from_value_inner`.
 //!
 //! docs/threads.md
@@ -46,9 +46,10 @@ impl<'s> SerContext<'s> {
     }
 
     /// Record `id`'s name into the bundle's name table, if the sender's memo
-    /// knows one. Called at every serializer site that meets a symbol: the
-    /// immediate-value arm and the struct-key clones (keys are `TableKey`s,
-    /// never routed through `from_value_inner`).
+    /// knows one. Called at every serializer site that meets a symbol value:
+    /// the immediate-value arm and the struct-key clones (keys are `TableKey`s,
+    /// never routed through `from_value_inner`). A code payload's own names go
+    /// through [`note_payload_names`](Self::note_payload_names).
     pub(super) fn note_symbol(&mut self, id: SymbolId) {
         self.note(id.0, self.memo.and_then(|m| m.name(id)));
     }
@@ -60,6 +61,17 @@ impl<'s> SerContext<'s> {
             hash,
             crate::value::keyword::resolve_keyword_name(self.memo, hash),
         );
+    }
+
+    /// Record the spelling of every name `t`'s payload holds outside its value
+    /// slots, which no serializer arm meets (docs/impl/region/template.md).
+    pub(super) fn note_payload_names(&mut self, t: &crate::value::ClosureTemplate) {
+        let memo = self.memo;
+        t.for_each_name(|n| {
+            if let Some((hash, name)) = n.spelling(memo) {
+                self.note(hash, Some(name));
+            }
+        });
     }
 
     fn note(&mut self, hash: u64, name: Option<&str>) {

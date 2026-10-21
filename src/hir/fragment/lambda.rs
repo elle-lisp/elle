@@ -1,10 +1,10 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! A function closed into fragments, one per arity its body dispatches on, for a graft or a fused loop.
 //!
 //! docs/impl/graft.md
 //! docs/impl/hir.md
 
-use super::{ClosedGlobals, HirFragment};
+use super::{ClosedGlobals, FragmentName, HirFragment};
 use crate::hir::arena::BindingArena;
 use crate::hir::binding::Binding;
 use crate::hir::expr::{Hir, HirKind, Lambda, VarargKind};
@@ -214,6 +214,31 @@ impl LambdaFragment {
 
     pub fn name(&self) -> Option<SymbolId> {
         self.name
+    }
+
+    /// The bytes a code payload carries for this fragment.
+    pub fn encode(&self) -> Vec<u8> {
+        bincode::serialize(self).expect("a LambdaFragment is plain data, so it serializes")
+    }
+
+    /// The fragment `bytes` encode. `None` for bytes that are no body: empty,
+    /// or written under another encoding.
+    pub fn decode(bytes: &[u8]) -> Option<Self> {
+        if bytes.is_empty() {
+            return None;
+        }
+        bincode::deserialize(bytes).ok()
+    }
+
+    /// Call `f` on every name the fragment holds: the function's own name, and
+    /// each name every arm's body holds.
+    pub fn for_each_name(&self, f: &mut impl FnMut(FragmentName<'_>)) {
+        if let Some(name) = self.name {
+            f(FragmentName::Symbol(name));
+        }
+        for body in self.arm_bodies().flatten() {
+            body.fragment.for_each_name(f);
+        }
     }
 }
 
