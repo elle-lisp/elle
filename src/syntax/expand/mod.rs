@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! Hygienic macro expansion: the macro table, the unit under expansion, and the
 //! walk that rewrites a form until no macro heads it.
 //!
@@ -16,6 +16,7 @@ mod introspection;
 mod macro_expand;
 mod macrodef;
 mod quasiquote;
+mod scope;
 mod syntaxcase;
 #[cfg(test)]
 mod tests;
@@ -57,8 +58,9 @@ pub struct Expander {
     /// bodies via `eval_syntax`. `Rc` so that the per-pipeline-call clone is a
     /// pointer bump rather than a deep copy of the maps. The owning instance's
     /// `CompileCtx` sets this to `primitives` at construction and to
-    /// `primitives + stdlib exports` once `init_stdlib` runs. REPL and host
-    /// bindings are deliberately NOT included (macro bodies never resolve them).
+    /// `primitives + stdlib exports` once `init_stdlib` runs, and adds each
+    /// primitive a host registers. REPL and host bindings are deliberately NOT
+    /// included (macro bodies never resolve them).
     /// Because it rides on the `Expander`, `eval_syntax` reaches it without a
     /// separate `CompileCtx` borrow — which would alias the macro VM mid-expand.
     eval_meta: Rc<PrimitiveMeta>,
@@ -80,18 +82,6 @@ impl Clone for Expander {
             expansion_depth: self.expansion_depth,
         }
     }
-}
-
-/// Scope operation applied by `map_scope_recursive`. Both operations honor
-/// `scope_exempt`: a datum->syntax node keeps exactly the scopes its context
-/// gave it. The context's scopes at transformer time include the expansion's
-/// pre-stamped intro scope, which datum->syntax itself strips (see
-/// `prim_datum_to_syntax`), so an exempt node already carries its TRUE
-/// use-site scope set and must dodge the flip.
-#[derive(Clone, Copy)]
-enum ScopeOp {
-    Add,
-    Flip,
 }
 
 impl Expander {
@@ -132,9 +122,9 @@ impl Expander {
     /// expand: the arena's region dies with the unit, so every node the
     /// expansion builds dies with it too.
     ///
-    /// The pipeline does not call this directly — `CompileCtx`'s
+    /// The pipeline does not call this directly. `CompileCtx`'s
     /// `with_macro_expansion` and `expander_and_meta` take the arena and hand
-    /// out an expander already pointed at it, so an expansion cannot end up
+    /// out an expander already pointed at it. So an expansion cannot end up
     /// allocating into the process-root template arena by omission. It is here
     /// for the two expanders the pipeline does not own: the VM's cached `eval`
     /// expander and the bare one that loads core.lisp.
@@ -150,7 +140,8 @@ impl Expander {
 
     /// Replace the macro-body compile metadata. The owning `CompileCtx` calls
     /// this with `primitives` at construction and `primitives + stdlib exports`
-    /// after `init_stdlib`.
+    /// after `init_stdlib`, and `register_primitive` calls it with each
+    /// primitive a host registers.
     pub fn set_eval_meta(&mut self, meta: PrimitiveMeta) {
         self.eval_meta = Rc::new(meta);
     }
@@ -256,19 +247,6 @@ impl Expander {
         }
     }
 
-    /// Mint the unit's next ordinary scope.
-    pub(crate) fn fresh_scope(&mut self) -> ScopeId {
-        ScopeId::new(self.unit.tag(), self.unit.next_scope())
-    }
-
-    /// Mint the unit's next INTRO scope, from the same count with the intro
-    /// bit set. One is minted per macro expansion and flipped onto
-    /// template-origin nodes; the analyzer's referential-transparency rule
-    /// keys on the bit.
-    pub(crate) fn fresh_intro_scope(&mut self) -> ScopeId {
-        ScopeId::intro(self.unit.tag(), self.unit.next_scope())
-    }
-
     /// Create a symbol syntax node
     fn make_symbol(&self, name: &str, span: Span) -> Syntax {
         Syntax::symbol(&self.arena, name, span)
@@ -277,21 +255,6 @@ impl Expander {
     /// Create a list syntax node
     fn make_list(&self, items: Vec<Syntax>, span: Span) -> Syntax {
         Syntax::list(&self.arena, &items, span)
-    }
-
-    /// Stamp a fresh file scope onto a syntax tree. This distinguishes
-    /// user bindings from primitives (which have empty scopes), enabling
-    /// macro hygiene: template symbols from the prelude carry
-    /// `ScopeId::PRIMITIVE` and won't match user bindings that carry the file
-    /// scope instead.
-    pub fn stamp_file_scope(&mut self, syntax: Syntax) -> Syntax {
-        let scope = self.fresh_scope();
-        self.add_scope_recursive(syntax, scope)
-    }
-
-    /// Public wrapper for adding a scope to a syntax tree.
-    pub(crate) fn stamp_scope(&self, syntax: Syntax, scope: ScopeId) -> Syntax {
-        self.add_scope_recursive(syntax, scope)
     }
 
     /// Expand all macros in a syntax tree
@@ -404,59 +367,5 @@ impl Expander {
             }
             _ => Ok(syntax),
         }
-    }
-
-    fn add_scope_recursive(&self, syntax: Syntax, scope: ScopeId) -> Syntax {
-        self.map_scope_recursive(syntax, scope, ScopeOp::Add)
-    }
-
-    /// Flip `scope` on every non-exempt node (see `Syntax::flip_scope`):
-    /// the post-expansion hygiene operation. Template-origin identifiers
-    /// gain the intro scope; argument-origin identifiers (pre-stamped at
-    /// wrap time) lose it again. datum->syntax results are exempt — they
-    /// already carry their context's true scopes (the intro scope is
-    /// stripped at copy time by `prim_datum_to_syntax`).
-    pub(super) fn flip_scope_recursive(&self, syntax: Syntax, scope: ScopeId) -> Syntax {
-        self.map_scope_recursive(syntax, scope, ScopeOp::Flip)
-    }
-
-    /// Stamp `scope` onto `syntax` and, where it applies, onto its children.
-    ///
-    /// The walk COPIES: it builds a new node and a new child slice at every
-    /// level it touches. Subtrees are shared by pointer, so a walk that wrote
-    /// through the source would stamp trees the caller still holds — a macro
-    /// argument's identifiers would gain a scope they never entered.
-    fn map_scope_recursive(&self, syntax: Syntax, scope: ScopeId, op: ScopeOp) -> Syntax {
-        // datum->syntax nodes keep their exact scopes — neither ordinary
-        // stamping nor the hygiene flip touches them.
-        if syntax.scope_exempt {
-            return syntax;
-        }
-
-        let mut out = syntax;
-        match op {
-            ScopeOp::Add => out.add_scope(&self.arena, scope),
-            ScopeOp::Flip => out.flip_scope(&self.arena, scope),
-        }
-
-        // A quote's contents are literal data, and a syntax literal already
-        // carries the scopes of the context it was captured in. Neither
-        // descends. (`SyntaxKind::children` reports no children for a syntax
-        // literal, so only quote needs saying here.)
-        if matches!(out.kind, SyntaxKind::Quote(_)) {
-            return out;
-        }
-
-        let kind = out.kind;
-        let children = kind.children();
-        if children.is_empty() {
-            return out;
-        }
-        let mapped: Vec<Syntax> = children
-            .iter()
-            .map(|item| self.map_scope_recursive(*item, scope, op))
-            .collect();
-        out.kind = kind.rebuild(&self.arena, &mapped);
-        out
     }
 }
