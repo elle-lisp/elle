@@ -1,4 +1,4 @@
-//! audited: 2026-09-30
+// audited: 2026-10-20
 //! Fixtures the async-backend tests share: sockets a peer never answers,
 //! scratch paths, and the assertion that a cancelled operation retires.
 //!
@@ -254,7 +254,7 @@ fn fill_tcp_backlog(port: u16) -> Vec<libc::c_int> {
     queued
 }
 
-// ── Descriptor helpers, shared by park.rs, gone.rs, descriptor.rs, bytes.rs ──
+// ── Descriptor helpers, shared by park.rs, gone.rs, descriptor.rs, bytes.rs, longline.rs ──
 
 /// A connected stream pair. The returned descriptors are the test's to close;
 /// `Port` takes the first, and the test plays the peer on the second.
@@ -315,6 +315,7 @@ mod bytes;
 mod descriptor;
 mod fileops;
 mod gone;
+mod longline;
 mod net;
 mod netcancel;
 mod netend;
