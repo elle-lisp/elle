@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-10-20
 //! The 16 bytes at a region page's base, and the masked walk that finds them
 //! from a pointer anywhere inside the page.
 //!
@@ -17,8 +17,8 @@ use std::mem::size_of;
 #[repr(C)]
 struct PageHeader {
     region_id: u32,
-    /// The claiming store's identity for this page (docs/impl/region/generations.md
-    /// § "Region generations"): which `RegionStore` claimed it, at which
+    /// The claiming store's identity for this page
+    /// (docs/impl/region/generations.md): which `RegionStore` claimed it, at which
     /// generation of `region_id`. A debug-build `region_of` compares the
     /// generation against the store's current one — a mismatch is a deref
     /// through a freed-but-cached page, a stale-region UAF caught at the
@@ -52,7 +52,7 @@ pub(crate) const HEADER_SIZE: usize = size_of::<PageHeader>();
 const _: () = assert!(HEADER_SIZE == 16);
 
 /// The `(generation, store)` pair stamped into each claimed page's header
-/// alongside the region id (docs/impl/region/generations.md § "Region generations") —
+/// alongside the region id (docs/impl/region/generations.md) —
 /// grouped so the two u32s can't be swapped at a call site.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -140,10 +140,13 @@ pub(crate) unsafe fn header_if_valid(addr: usize, size: usize) -> Option<(u32, P
 
 /// Read just the region_id from the page header at a given pointer — the
 /// generation-blind probe for paths that must not generation-check (the
-/// free-time cascade scan; see docs/impl/region/generations.md § "Region generations").
+/// free-time cascade scan; see docs/impl/region/generations.md).
 ///
 /// # Safety
 /// Same contract as [`header_of_page_ptr`].
 pub(crate) unsafe fn region_of_page_ptr(ptr: *const (), min_page_size: usize) -> u32 {
     header_of_page_ptr(ptr, min_page_size).0
 }
+
+#[cfg(test)]
+mod tests;
