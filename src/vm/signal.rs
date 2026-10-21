@@ -1,13 +1,13 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! Primitive signal dispatch, and the capability gate and denial every native call passes.
+//!
+//! docs/impl/region/park.md
+//! docs/signals/authority.md
 //!
 //! Routes signal bits returned by NativeFn primitives to the appropriate
 //! handler: stack push for SIG_OK, error storage for SIG_ERROR, fiber
 //! execution for SIG_RESUME/SIG_PROPAGATE/SIG_ABORT, VM state reads
 //! for SIG_QUERY.
-//!
-//! docs/impl/region/park.md
-//! docs/signals/authority.md
 
 use crate::signals::dispatch::{classify, SignalAction};
 use crate::value::{BytecodeFrame, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_OK};
@@ -21,25 +21,27 @@ mod modules;
 
 mod config;
 
+mod allocs;
+
 mod emit;
 
 impl VM {
     /// Mint the DELIVERY reference of a payload a native call is RAISING, where
-    /// the payload is one of the call's own arguments — the shape a dynamic
-    /// `emit` takes, its non-literal first argument making the raise an ordinary
+    /// the payload is one of the call's own arguments. A dynamic `emit` takes
+    /// this shape: its non-literal first argument makes the raise an ordinary
     /// native call (docs/impl/region/park.md).
     ///
     /// The catcher's read of the signal consumes exactly one reference, and every
     /// other reference the raising frame holds answers to that frame's own release
     /// routes. So the delivery is minted here, exactly as `handle_emit` mints it on
-    /// the literal path — and recorded with it (the ledger's `record_mint`), so the
-    /// abandoned-frame walk and the parked frame's discharge stop exempting the
-    /// payload's region and run those routes in full.
+    /// the literal path, and recorded with it (the ledger's `record_mint`). The
+    /// abandoned-frame walk and the parked frame's discharge then stop exempting
+    /// the payload's region, and run those routes in full.
     ///
-    /// Both positions raise through this. Which route the frame's own reference
-    /// then takes is theirs to arrange: a tail exit consumes its borrowed-argument
-    /// retains and nil-stamps their stashes, while a Call-position site's payload
-    /// stash is a recorded value route the replay or the walk runs
+    /// Both positions raise through this, and each arranges the route the frame's
+    /// own reference then takes. A tail exit consumes its borrowed-argument
+    /// retains and nil-stamps their stashes. A Call-position site's payload stash
+    /// is a recorded value route the replay or the walk runs
     /// (docs/impl/region/mechanism.md).
     ///
     /// A payload the native BUILT — a fresh error struct — is nobody's argument
@@ -73,7 +75,7 @@ impl VM {
     /// one the op built, and no body reference stands on it, so the install that
     /// displaces it owes a release. The `emit` primitive relaying a child's io
     /// park parks that same request under the same bits, but as one of its own
-    /// ARGUMENTS, which the body owns; a release there frees the child's
+    /// ARGUMENTS, which the body owns. A release there would free the child's
     /// request under the child. The identity test tells them apart, as it does
     /// for a raised payload ([`Self::mint_raised_argument_delivery`]).
     ///
@@ -159,7 +161,7 @@ impl VM {
             }
             SignalAction::Suspend => {
                 // The yielded value escapes into `fiber.signal`, where the
-                // scheduler reads it (e.g. an IoRequest handed to io/submit).
+                // scheduler reads it (for example, an IoRequest handed to io/submit).
                 // Retain its region: the escape is the "+1 incremented
                 // elsewhere" of the prediction-free model. The caller's
                 // `DecrefValueRegion` at the yielding call's decref_point (which
@@ -191,11 +193,12 @@ impl VM {
                     .unwrap_or_default();
                 // MOVE what the activation owes into the frame (its slot is
                 // likewise still on top) so it rides the park to the resumed
-                // body's completion (docs/impl/region/owner.md § "Owner nodes").
+                // body's completion (docs/impl/region/owner.md).
                 let activation_dues = self.take_activation_dues();
                 // Suspending primitive: this activation's remap is still on top
-                // (the wrapping `saving_stack` pops it after we return), and the
-                // current closure is this activation's — park it for the resume.
+                // (the wrapping `execute_bytecode_saving_stack` pops it after we
+                // return), and the current closure is this activation's — park it
+                // for the resume.
                 let current_closure = self.fiber.current_closure;
                 let frame = SuspendedFrame::Bytecode(BytecodeFrame::suspend(
                     code.clone(),
@@ -349,12 +352,12 @@ impl VM {
         };
 
         // The denial payload escapes into `fiber.signal`, read later via
-        // `fiber/value` after control has left this fiber. Like the
-        // `SignalAction::Suspend` path (see `handle_primitive_signal`), retain
-        // its region: the resumer's `DecrefValueRegion` at the denied call's
-        // decref_point would otherwise drop this freshly-built struct's only
-        // reference (rc=1, the owning activation scope) and free it out from
-        // under `fiber/value`.
+        // `fiber/value` after control has left this fiber. Retain its region,
+        // as the `SignalAction::Suspend` path does (see `handle_primitive_signal`).
+        // Otherwise the resumer's `DecrefValueRegion` at the denied call's
+        // decref_point would drop this freshly-built struct's only reference
+        // (rc=1, the owning activation scope) and free it out from under
+        // `fiber/value`.
         let heap = unsafe { &mut *self.heap_ptr };
         let r = crate::value::arena::region_of(heap, payload);
         crate::value::arena::incref_for_escape(
@@ -367,12 +370,12 @@ impl VM {
         // continuation releases that result (see the `SignalAction::Suspend` arm).
         // Which is why the payload's own birth reference reaches no consumer past
         // the park: the continuation's release names the resume value, not this
-        // struct. The park records both facts — the delivery mint the resume
-        // owes, and the payload whose release the displacing install owes —
-        // because only this classifier can tell a denial from an `(emit …)`
-        // under the same withheld bits (docs/impl/region/park.md), and the
-        // payload once more as the park whose delivery retain a boundary would
-        // have to release.
+        // struct. The park records both facts: the delivery mint the resume
+        // owes, and the payload whose release the displacing install owes. Only
+        // this classifier can tell a denial from an `(emit …)` under the same
+        // withheld bits (docs/impl/region/park.md). The park records the payload
+        // once more, as the park whose delivery retain a boundary would have to
+        // release.
         self.fiber.delivery.park_denial(blocked, payload);
 
         // Save the stack and build a suspended frame (same as suspending signals)
@@ -386,8 +389,8 @@ impl VM {
         // MOVE what the activation owes into the frame (see the Suspend arm).
         let activation_dues = self.take_activation_dues();
         // Capability denial suspends the current activation; its remap is still on
-        // top (the wrapping `saving_stack` pops it after return), and its closure
-        // is the current one — park it for the resume.
+        // top (the wrapping `execute_bytecode_saving_stack` pops it after return),
+        // and its closure is the current one — park it for the resume.
         let current_closure = self.fiber.current_closure;
         let frame = SuspendedFrame::Bytecode(BytecodeFrame::suspend(
             code.clone(),
