@@ -1,14 +1,18 @@
 # The tool producers
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-21 -->
 
 Producers that drive a tool outside Elle, parse the counts it prints, and
 report each count as a reading.
 
 Each file here is a producer ([ratchet](../../docs/ratchet.md)). A ledger
-under `tests/ledger` names it, and it runs in-process under `elle-rig test`,
-in the producer pass beside the implementation suite. What it checks is a
-tool's report, so neither suite directory holds it.
+under `tests/ledger` names it, and it runs in-process under `elle-rig test`.
+What it checks is a tool's report, so neither suite directory holds it.
+
+The audit and size producers read the tree alone, so `make tree-producers`
+runs them on the release rig, and `make qa` runs that target
+([ci](../../docs/analysis/ci.md)). The valgrind producer runs in each build's
+producer pass beside the implementation suite.
 
 ## The audit queue
 
