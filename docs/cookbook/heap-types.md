@@ -1,150 +1,75 @@
 # Adding a New Heap Type
 
+<!-- audited: 2026-10-21 -->
 
 A heap type is a new kind of runtime value stored behind a tagged-union
-pointer. Use the `LStringMut` type as a reference — it's a recent, clean
-example.
+pointer.
 
-### Files to modify (in order)
+[values.md](../impl/values.md) owns the representation. This recipe lists the
+places a new variant has to reach, split by whether the compiler finds them.
 
-1. **`src/value/heap.rs`** — Add variant to `HeapObject` enum, add tag to
-   `HeapTag` enum, add arms to `tag()`, `type_name()`, and `Debug`.
+## The variant and its tags
 
-2. **`src/value/repr/constructors.rs`** — Add `Value::my_type(...)` constructor.
+1. In [heap.rs](../../src/value/heap.rs), give `HeapTag` a variant at an
+   unused number. Give `HeapObject` a variant whose discriminant is that tag:
 
-3. **`src/value/repr/accessors.rs`** — Add `is_my_type()` predicate and
-   `as_my_type()` accessor.
+   ```rust
+   MyType { data: MyData, traits: Value } = HeapTag::MyType as u64,
+   ```
 
-4. **`src/value/display.rs`** — Add `Display` and `Debug` formatting arms.
+   Do not leave the discriminant out. A variant without one takes the previous
+   variant's plus one, and no compile error says so.
+2. Keep the variant no larger than `Syntax`. Put a larger payload behind a
+   `Box`, or every heap object grows to fit it.
+3. Add a `TAG_*` constant for the `Value` tag in
+   [repr/mod.rs](../../src/value/repr/mod.rs). When the new tag is the largest,
+   raise the bound in `Value::malformed_reason` as well.
+4. Carry `traits: Value`, initialized to `Value::NIL`, unless the type is
+   infrastructure that no user sees. [values.md](../impl/values.md) lists the
+   variants without it.
 
-5. **`src/value/repr/traits.rs`** — Add `PartialEq` arm for the new type.
+## What the compiler finds
 
-6. **`src/value/send.rs`** — Add `SendValue` variant (if sendable) or
-   rejection arm (if not).
+These matches are exhaustive, so the build fails until each has an arm. Give
+each one a decision, never a wildcard.
 
-7. **`src/primitives/json/serializer.rs`** — Add arm to `serialize_value`
-   (exhaustive `HeapTag` match).
+| File | Matches |
+|------|---------|
+| [objimpl.rs](../../src/value/heap/objimpl.rs) | `tag`, `traits`, `value_tag`, `type_name`, `Debug` |
+| [dropsafety.rs](../../src/value/fiberheap/dropsafety.rs) | `needs_drop`, `holds_value_refs` |
+| [introspect.rs](../../src/value/fiberheap/regionpool/introspect.rs) | the cross-region scan, `find_object_cross_refs` |
+| [introspect/tests.rs](../../src/value/fiberheap/regionpool/introspect/tests.rs) | the scan pin's exemplar for each tag |
+| [census.rs](../../src/value/fiberheap/census.rs) | the sealing class a dump gives each tag, and its `--trace=census` row |
+| [ord.rs](../../src/value/repr/traits/ord.rs) | the type rank `Value`'s order uses |
+| [ser.rs](../../src/value/send/ser.rs) | what `send` carries or refuses |
+| [serializer.rs](../../src/primitives/json/serializer.rs) | what JSON writes or refuses |
+| [traits.rs](../../src/primitives/traits.rs) | the `with-traits` copy |
 
-8. **`src/formatter/core.rs`** — Add arm to `format_value` (exhaustive
-   `HeapObject` match).
+## What the compiler does not find
 
-9. **`src/syntax/convert.rs`** — Update `Syntax::from_value()` if the type
-   can appear in macro results (Value → Syntax conversion).
+- A constructor in [build.rs](../../src/value/build.rs), and a method on the
+  primitive context in [ctx/build.rs](../../src/primitives/ctx/build.rs) when a
+  primitive allocates one. Build a heap value there, never from the variant at
+  a call site.
+- A predicate in
+  [predicates.rs](../../src/value/repr/accessors/predicates.rs), and an
+  accessor in [conversions.rs](../../src/value/repr/accessors/conversions.rs).
+- Display in [display.rs](../../src/value/display.rs). Equality in
+  [eq.rs](../../src/value/repr/eq.rs) and hashing in
+  [traits.rs](../../src/value/repr/traits.rs) end in a wildcard arm, so a new
+  type compares and hashes as that arm says until it has an arm of its own.
+- The receiving side of `send` in [de.rs](../../src/value/send/de.rs), for a
+  type `send` carries.
+- Two lists of every tag: `tag_from_u64` in
+  [format/mod.rs](../../src/image/format/mod.rs), and `ALL_TAGS` in the scan
+  pin.
+- An image. The dumper writes only the variants the layout probe measures
+  ([layout/heap.rs](../../src/image/layout/heap.rs)), so a new variant fails a
+  dump until [sealing.md](../impl/image/sealing.md) admits it and the probe
+  measures it.
 
-### Step by step
-
-**Step 1: `src/value/heap.rs`** — Three changes:
-
-```rust
-// In HeapTag enum — assign next available discriminant:
-pub enum HeapTag {
-    // ... existing ...
-    MyType = 22,  // next after LStringMut = 21
-}
-
-// In HeapObject enum:
-pub enum HeapObject {
-    // ... existing ...
-    /// Description of my type
-    MyType(MyTypeData),
-}
-
-// In HeapObject::tag():
-HeapObject::MyType(_) => HeapTag::MyType,
-
-// In HeapObject::type_name():
-HeapObject::MyType(_) => "my-type",
-
-// In HeapObject Debug impl:
-HeapObject::MyType(_) => write!(f, "<my-type>"),
-```
-
-**Step 2: `src/value/repr/constructors.rs`** — Add constructor:
-
-```rust
-impl Value {
-    pub fn my_type(data: MyTypeData) -> Self {
-        use crate::value::heap::{alloc, HeapObject};
-        alloc(HeapObject::MyType(data))
-    }
-}
-```
-
-**Step 3: `src/value/repr/accessors.rs`** — Add predicate and accessor:
-
-```rust
-impl Value {
-    pub fn is_my_type(&self) -> bool {
-        use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::MyType)
-    }
-
-    pub fn as_my_type(&self) -> Option<&MyTypeData> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_heap() { return None; }
-        match unsafe { deref(*self) } {
-            HeapObject::MyType(data) => Some(data),
-            _ => None,
-        }
-    }
-}
-```
-
-**Step 4: `src/value/display.rs`** — Add arms in both `Display` and
-`Debug` impls (search for existing heap type formatting like `LStringMut`):
-
-```rust
-// In Display impl, after @string handling:
-if let Some(data) = self.as_my_type() {
-    return write!(f, "<my-type:{}>", data);
-}
-
-// Debug impl delegates to Display for most heap types.
-```
-
-**Step 5: `src/value/repr/traits.rs`** — Add `PartialEq` arm:
-
-```rust
-// In the (self_obj, other_obj) match:
-(HeapObject::MyType(a), HeapObject::MyType(b)) => a == b,
-// or for reference equality:
-(HeapObject::MyType(_), HeapObject::MyType(_)) => {
-    std::ptr::eq(self_obj as *const _, other_obj as *const _)
-}
-```
-
-**Step 6: `src/value/send.rs`** — Add to `SendValue`:
-
-```rust
-// If sendable, add a variant and implement from_value/into_value:
-pub enum SendValue {
-    // ...
-    MyType(MyTypeOwnedData),
-}
-
-// In from_value():
-HeapObject::MyType(data) => Ok(SendValue::MyType(data.clone())),
-
-// In into_value():
-SendValue::MyType(data) => alloc(HeapObject::MyType(data)),
-
-// If NOT sendable:
-HeapObject::MyType(_) => Err("Cannot send my-type".to_string()),
-```
-
-### Traits field
-
-User-facing heap variants carry a `traits: Value` field (initialized to
-`Value::NIL`). If your type should support `with-traits` / `traits`,
-add this field to `MyTypeData` and handle it in the constructor. See
-`LArray` or `LStruct` for examples. The 19 existing user-facing heap
-variants all carry this field. Infrastructure types (`Float`, `NativeFn`,
-`LibHandle`, `FFISignature`, `FFIType`) do not.
-
-### After adding the type
-
-You'll likely want primitives to create and manipulate it (see Recipe 1)
-and a type-check predicate in `src/primitives/types.rs`.
+Then give the type primitives ([primitives.md](primitives.md)) and a
+type-check predicate in [types.rs](../../src/primitives/types.rs).
 
 ---
 

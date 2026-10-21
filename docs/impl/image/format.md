@@ -193,9 +193,13 @@ an expander.
 
 ## Fingerprint: regenerate, never migrate
 
-`HeapObject` is `repr(Rust)`, and opcode discriminants are
-source-order-dependent. An image is therefore valid only for a binary whose
-layout agrees with the dumper's. The fingerprint records the format version,
+`HeapObject` is `repr(u64)`: an object's first word is its `HeapTag`, and
+each variant's fields follow in declaration order. A build's features cannot
+move the tag, which a `repr(Rust)` enum lets rustc hide in a niche of its
+largest variant. The field types, `TableKey` and the syntax node are still
+`repr(Rust)`, and opcode discriminants are source-order-dependent. An image is
+therefore valid only for a binary whose layout agrees with the dumper's. The
+fingerprint records the format version,
 the rustc version and target, the OS base page size, `size_of`/`align_of` for
 `Value`, `HeapObject` and `RegionSlice`, `CURRENT_EPOCH`, both instruction
 sets, and the probed layouts below.

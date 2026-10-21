@@ -364,7 +364,7 @@ Every record the dumper writes receives only its discriminant byte and the
 leaf-field extents the layout probes record ([format.md](image/format.md)).
 The records are an object slot, a struct entry whose key is an
 enum with padding of its own, and a syntax node, which is a struct with a
-`bool` in it around an enum. A `repr(Rust)` enum copy carries uninitialized
+`bool` in it around an enum. An enum copy carries uninitialized
 padding from its construction temporary, so the dumper never copies a record
 wholesale. The extent copy leaves padding out, and two dumps of the same graph
 are byte-identical whole files. The warm cache keys on the source digest and
