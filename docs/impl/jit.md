@@ -147,9 +147,11 @@ the file calls goes into the queue. If the queue ran to its end, those threads
 would keep compiling for VMs that are gone, and take the processor from the
 forms still running.
 
-Cranelift cannot be interrupted inside a compile, so at most one task finishes
-after the VM drops its worker. The drop does not join the thread, so a VM that
-ends does not wait for that compile.
+The compile in progress stops as well. The translator reads the drop before
+each LIR block, and the compile reads it again before Cranelift's backend
+starts, so the thread exits with no result. A drop that lands inside the
+backend waits for it, because the backend cannot be interrupted. The drop does
+not join the thread, so a VM that ends waits for neither.
 
 ## How a call leaves compiled code
 
