@@ -1,16 +1,16 @@
 # Booting from an image
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-21 -->
 
 What the boot configuration carries, how `elle image dump-boot` writes it, and
 how a fresh instance starts from it.
 
 [image.md](../image.md) owns the design, [sealing.md](sealing.md) what a body
-may hold, and [format.md](format.md) the file's sections. This document owns
-the boot configuration: its root set, and the source digest that decides
-whether an image still describes these sources. It also owns the two ways an
-image reaches a start, the embedded blob and the warm cache, and how a worker
-boots from its parent's.
+may hold, [format.md](format.md) the file's sections, and [blob.md](blob.md)
+the embedded blob. This document owns the boot configuration: its root set,
+and the source digest that decides whether an image still describes these
+sources. It also owns the policy that picks the image a start reads, the warm
+cache, and how a worker boots from its parent's.
 
 ## The boot state is one value graph
 
@@ -142,62 +142,9 @@ and every process mapping the image shares them.
 
 ## The embedded blob
 
-The embedded blob is the boot image a release executable carries. A release
-`make elle` builds an `elle` and an `elle-rig` that each carry the image of
-their own sources, so the first start hydrates it as every later start does. A
-debug build, a plain `cargo build` and the variant builds carry none.
-
-The Makefile builds twice. Stage 1 is an ordinary release build in
-`target/stage1`, and its `elle image dump-boot` writes the blob to
-`target/stage1/boot.image`. Stage 2 builds again with `ELLE_BOOT_BLOB` naming
-that file, and [build.rs](../../../build.rs) then compiles the blob in with
-`include_bytes!`. Every release cargo call in the Makefile that links the
-default-feature library passes the same variable.
-
-Stage 1 has a target directory of its own because cargo keeps one build of a
-library per profile and feature set. A change to the variable rebuilds that
-library, so in one shared directory every `make elle` would build the library
-twice. A variant build passes no variable. A blob is what one build dumped, and
-the fingerprint does not record the cargo features ([format.md](format.md)).
-
-Stage 1 replaces the blob file only when the dump's bytes differ. Cargo
-rebuilds the library when the file is newer than the last build, through both
-`include_bytes!` and the build script's rerun check. So rewriting the same
-bytes would rebuild the library at every `make elle`.
-
-`make elle` then checks stage 2, and fails when either check fails:
-
-- Its own `elle image dump-boot` writes the embedded bytes again, byte for
-  byte. Embedding changes the binary and none of the fingerprint's inputs, and
-  the dump is deterministic ([image.md](../image.md)). So a difference means
-  the two stages compiled the library differently.
-- A `--cache=` start with `--trace=boot` that spawns a worker prints a
-  `blob-map` mark and two `image-hydrate` marks. The start mapped the blob from
-  its own executable, and the worker hydrated the same descriptor.
-
-The blob sits behind a `#[repr(align(65536))]` wrapper, so its virtual address
-is 64 KiB-aligned, and load-segment congruence makes its file offset aligned
-too. The constant is the largest base page any supported host reports, because
-the alignment a blob needs is the host's page size. No smaller constant covers
-a 64 KiB arm64 kernel. A blob dumped on a 4 KiB host still fails the
-fingerprint on a 16 KiB one ([format.md](format.md)), and the start falls back.
-
-A start finds the blob in the file that holds it. The offset is the static's
-address, less the base of the segment that holds it, plus that segment's file
-offset. `dl_iterate_phdr` reports the segments on Linux and Android, and the
-Mach-O load commands report them on macOS. Linux and Android open the
-executable through `/proc/self/exe`, which names the running file even after a
-rebuild replaced its path. A shared object, such as the embedding demo's
-library, opens by the path the loader reports, and so does a macOS executable.
-
-The bytes at that offset must begin with the blob's header block as it sits in
-memory, and the offset must fall on a base page. A rebuild that replaced a
-macOS path breaks the first rule, and so does a universal Mach-O, which holds
-the slice at an offset its load commands do not show. When a rule fails, or
-the file does not open, the start copies the blob into an anonymous file
-([image.md](../image.md)) and hydrates that. It prints `blob-copy`
-in place of `blob-map`. The copy costs a write of the whole blob, and its pages
-are this process's alone.
+A release executable carries a boot image of its own, the embedded blob, which
+[blob.md](blob.md) owns: the two-stage build, the alignment, and how a start
+finds the bytes.
 
 `BootImage::Embedded` names a blob and a warm-cache directory to fall back to,
 and `BootImage::Process` resolves to it when the binary carries a blob. A
@@ -331,17 +278,6 @@ cache in `boot` beneath the `--cache=` directory ([config.md](../../config.md)).
 `--boot-image=DIR` reads and writes the warm cache in DIR and never reads the
 blob, so a test of the warm cache tests it on every build. `--boot-image=off`
 compiles core, prelude and stdlib at every start.
-
-Both halves of parity have landed. A hydrated closure carries its LIR in its
-payload, so a hot stdlib function promotes to the JIT under either boot
-([sealing.md](sealing.md)). It carries the body fragment a graft reads in the
-same payload, so a call to a library function grafts under either boot
-([graft.md](../graft.md)). User code compiles to the same bytecode under either
-boot, and `make bytecode-parity` proves it over the corpus (§ The gate). A
-reference count on a hydrated stdlib value does not walk the probe ladder: the
-store's interval table resolves the pointer with a range check
-([image.md](../image.md)). The key holds the binary's identity, so a new build
-never hydrates an older build's image, and a blob is always the binary's own.
 
 The default reaches every `Runtime::new()`: `elle`, its REPL and its
 subcommands, and an embedder's runtime. It reaches the language server and the

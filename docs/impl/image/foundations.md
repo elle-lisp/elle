@@ -1,6 +1,6 @@
 # Foundations
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-21 -->
 
 Five representation fixes the image needs: each pays at runtime today, and each
 deletes image machinery.
@@ -97,9 +97,9 @@ expander's working tree included. A mutable Rust tree in the compiler beside a
 region-native form at the boundary would be two representations of one datum:
 conversion seams, double maintenance, and a standing invitation for the two to
 drift. The bar is **parity**, since expansion is compile-path-hot and the
-fallback compile pays it too; [measurements.md](measurements.md) measured the
-prototype at 2–5× faster than a Rust-heap tree on every expansion-hot
-operation, so the boundary-only split never had a case.
+fallback compile pays it too. The region-native tree is faster than a Rust-heap
+tree on every expansion-hot operation, so the boundary-only split never had a
+case.
 
 Hygiene scope ids minted by the expander remain process-local counters; the
 image records a scope watermark so a fresh expander mints above every scope
@@ -114,8 +114,8 @@ code region, so no compile-time blueprint holds a second copy. The lowerer
 builds the same records in a working region from the start, so no Rust-heap
 form of LIR is left.
 
-Four things the port buys. None is a compile-time number;
-[measurements.md](measurements.md) measured those, and they are real but small.
+Four things the port buys. The compile-time gains are real but small, and none
+of the four is one of them.
 
 - **Save and load become the mechanism the image already has.** Body-resident
   LIR dumps in the dumper's own walk and arrives with the mapping. The
@@ -128,28 +128,24 @@ Four things the port buys. None is a compile-time number;
 - **One portability rule.** Sealed region data crosses a worker, an image and a
   socket the way every other value does. The hand-written `Send` claim on
   `JitTask` becomes a property of the type instead of a comment.
-- **Allocation the project can see.** Building the boot sources' LIR in a
-  Rust-heap working form cost 21,281 `malloc` calls, and no gauge the region
-  system owns could see one of them. Built in a working region, the LIR answers
-  to `--region-page-size`, `--page-pool-max`, `arena/page-claims`, the leak
-  suite, `--trace=scrub` and `--trace=guardfree`.
+- **Allocation the project can see.** A Rust-heap working form allocates
+  through `malloc`, where no gauge the region system owns can see it. Built in
+  a working region, the LIR answers to `--region-page-size`, `--page-pool-max`,
+  `arena/page-claims`, the leak suite, `--trace=scrub` and `--trace=guardfree`.
 
 Two things stayed work rather than argument. The JIT worker runs on another
 thread and a region belongs to one `RegionStore`, so a promotion still copies
-its function out — 8.7 ns an instruction against the Rust clone's 13.8 ns, but
-a copy either way. And the lowerer splices into blocks it has already
-finished, which a fixed-extent slice cannot take. Syntax met that wall and
-answered it by copying as it stamps ([syntax.md](../syntax.md)). LIR answers it
-with a slice that grows in its own region, `RegionVec`, which
-[measurements.md](measurements.md) measured at parity before the lowerer moved
-onto it.
+its function out, faster than the Rust clone did, but a copy either way. And
+the lowerer splices into blocks it has already finished, which a fixed-extent
+slice cannot take. Syntax met that wall and answered it by copying as it stamps
+([syntax.md](../syntax.md)). LIR answers it with a slice that grows in its own
+region, `RegionVec`.
 
 ### The shape
 
-The node [measurements.md](measurements.md) prototyped is the shape, and
-[lir.md](../lir.md) owns its details. An instruction is a 48-byte `repr(C)`
-record with no implicit padding, and its variable-length
-operands sit in one pool per function, named by index. A function refers to its
+[lir.md](../lir.md) owns the node's details. An instruction is a 48-byte
+`repr(C)` record with no implicit padding, and its variable-length operands sit
+in one pool per function, named by index. A function refers to its
 own parts by index everywhere, so only its top-level slices are pointers. An
 instruction page therefore carries no relocation slot and stays clean in an
 image. A reader decodes a record into a borrowed `InstrRef` with safe Rust over
@@ -176,4 +172,5 @@ The port lands as a seam and then three stages, each green on its own:
    `LirModule` and `LirConst` are gone: `InstrRef` is the one instruction type,
    built by the lowerer and decoded by every reader.
 
-[plan.md](plan.md) records the pins each stage lands with.
+Each stage's tests carry the pins it landed with, and [plan.md](plan.md) records
+the acceptance gate the stages share.

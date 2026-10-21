@@ -2,7 +2,7 @@
 // The defining span crosses on the payload, so `meta/origin` answers after a
 // hydration.
 // docs/impl/image/sealing.md
-// docs/impl/image/plan.md
+// docs/impl/image/pins.md
 
 use super::*;
 use elle::syntax::Span;

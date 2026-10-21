@@ -1,6 +1,6 @@
 # The image file
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-21 -->
 
 The byte layout of an image, and the fingerprint that decides whether this
 binary may map it.
@@ -50,7 +50,7 @@ The hydrator therefore refuses a misaligned offset before it maps anything,
 naming the offset and the page size. The refusal is a build error rather than
 a corrupt file: whoever placed the image chose the offset, and the same
 descriptor is legal once the image moves to a boundary. An embedded blob meets
-the rule by construction — [boot.md](boot.md) pins its alignment to the
+the rule by construction — [blob.md](blob.md) pins its alignment to the
 largest base page any supported host reports.
 
 ## Relocation slots

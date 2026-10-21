@@ -1,9 +1,9 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! Booting from an image: what a boot dump carries, what a fresh instance
 //! answers out of it, what the warm cache stores, and what a blob boots.
 //!
 //! docs/impl/image/boot.md
-//! docs/impl/image/plan.md
+//! docs/impl/image/pins.md
 //!
 //! This is its own test binary because a boot dump is refused by any signal
 //! the process declared. Signal inference marks a core.lisp closure as able to

@@ -1,8 +1,9 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 // Where a start finds a blob: in the file that holds it, at an aligned offset,
 // or nowhere, and what it hydrates in each case.
+// docs/impl/image/blob.md
 // docs/impl/image/boot.md
-// docs/impl/image/plan.md
+// docs/impl/image/pins.md
 
 use std::fs::File;
 use std::os::unix::fs::{FileExt, MetadataExt};

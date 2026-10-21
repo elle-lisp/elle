@@ -1,8 +1,8 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 // The warm cache: what a boot stores, under which name, what the next boot
 // reads, and what a store leaves behind.
 // docs/impl/image/boot.md
-// docs/impl/image/plan.md
+// docs/impl/image/pins.md
 
 use super::*;
 use elle::compiler::stdlib_cache::StdlibCache;
@@ -38,10 +38,10 @@ fn images(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
     found
 }
 
-// § Test plan, "Warm cache": a second instance over one directory boots from
-// the image the first stored, and the stored file is the one the policy names.
-// The assertion is on the reported boot source, because a cache that silently
-// never hits still yields a working runtime.
+// A second instance over one directory boots from the image the first stored,
+// and the stored file is the one the policy names. The assertion is on the
+// reported boot source, because a cache that silently never hits still yields
+// a working runtime.
 #[test]
 fn a_second_instance_boots_from_the_image_the_first_stored() {
     let dir = crate::common::ScratchDir::new("image-warm-hit");
@@ -73,9 +73,9 @@ fn a_second_instance_boots_from_the_image_the_first_stored() {
     );
 }
 
-// § Test plan, "Warm cache": a valid image filed under the plain source digest,
-// which is the name an older build gave it, is never opened. The key holds the
-// binary's identity, so an image another build stored has another name.
+// A valid image filed under the plain source digest, which is the name an older
+// build gave it, is never opened. The key holds the binary's identity, so an
+// image another build stored has another name.
 //
 // The counter-factual is the digest alone. The image below is valid and its
 // digest matches, so a loader that keyed on the digest would hydrate it, and
@@ -101,9 +101,8 @@ fn an_image_under_the_plain_digest_is_never_opened() {
     );
 }
 
-// § Test plan, "Warm cache": a rejected file is replaced rather than rejected
-// again — the start that meets it compiles and stores, and the start after
-// that hits.
+// A rejected file is replaced rather than rejected again — the start that
+// meets it compiles and stores, and the start after that hits.
 //
 // The counter-factual is a loader that leaves a rejected file where it is:
 // every later start pays the whole front end, and the directory holds a file
@@ -131,10 +130,10 @@ fn a_rejected_image_is_replaced_rather_than_rejected_again() {
     );
 }
 
-// § Test plan, "Warm cache": a store prunes every other image in its
-// directory, another executable's included. Every rebuild orphans the last
-// file, at megabytes apiece, and a rustdoc test runs from a fresh temporary
-// executable each time, so only a rule over the whole directory bounds it.
+// A store prunes every other image in its directory, another executable's
+// included. Every rebuild orphans the last file, at megabytes apiece, and a
+// rustdoc test runs from a fresh temporary executable each time, so only a
+// rule over the whole directory bounds it.
 //
 // The counter-factual is a store that keeps another executable's images: the
 // directory then grows by one image for every executable that ever booted in

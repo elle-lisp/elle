@@ -1,8 +1,8 @@
-// audited: 2026-10-20
-// Bakes in the rustc version for the fingerprint, compiles in the boot blob,
-// and links libgcc where libffi needs it.
+// audited: 2026-10-21
+// Bakes in the rustc version for the fingerprint, names the boot blob the
+// library compiles in, and links libgcc where libffi needs it.
 // docs/impl/image/format.md
-// docs/impl/image/boot.md
+// docs/impl/image/blob.md
 
 fn main() {
     // The compiling rustc's version string, baked in for the image

@@ -1,8 +1,9 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 // The embedded blob: an instance hydrates the blob it is given, stores
 // nothing, and falls back to the warm cache when the blob is refused.
+// docs/impl/image/blob.md
 // docs/impl/image/boot.md
-// docs/impl/image/plan.md
+// docs/impl/image/pins.md
 //
 // Each blob here lives on the heap, so a start copies it into an anonymous
 // file. src/image/boot/blob/tests.rs pins the mapping from the executable, and

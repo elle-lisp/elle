@@ -1,6 +1,6 @@
 # CI and Triage
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-21 -->
 
 CI structure, local workflow, and failure diagnosis.
 
@@ -38,10 +38,9 @@ The merge queue ([merge-queue.yml](../../.github/workflows/merge-queue.yml))
 runs `make smoke`, split into steps: `make qa`, then each pass `SMOKE_PASSES`
 names, with `PROPTEST_CASES=1`. So the queue runs QA on the merged result,
 which no pull-request job sees. Its toolchain therefore carries what the `QA`
-job's does: rustfmt,
-clippy, both cross-check targets and LLVM 22. The weekly schedule
-([weekly.yml](../../.github/workflows/weekly.yml)) runs the whole workspace
-suite on beta and nightly at 128 cases, plus a dependency audit.
+job's does: rustfmt, clippy, both cross-check targets and LLVM 22. The weekly
+schedule ([weekly.yml](../../.github/workflows/weekly.yml)) runs the whole
+workspace suite on beta and nightly at 128 cases, plus a dependency audit.
 
 ### QA runs first, and every other job waits for it
 
@@ -51,10 +50,10 @@ job instead of the whole matrix.
 
 The prose checks run first inside QA. [prose.rs](../../tests/prose.rs) holds
 every stamped file to the parts of [the policy](../../DOCUMENTATION.md) a
-machine can decide. Before this rule, an over-long call-out failed all three
-Rust Tests jobs, 20 to 47 minutes in, after QA had passed. The checks have a
-binary of their own, so QA does not wait for the shared test binary to compile.
-`make prose` runs them, and `make qa` runs `make prose` before anything else.
+machine can decide, so an over-long call-out fails in minutes rather than
+inside the Rust Tests jobs. The checks have a binary of their own, so QA does
+not wait for the shared test binary to compile. `make prose` runs them, and
+`make qa` runs `make prose` before anything else.
 
 QA runs on every pull request, with no `source` gate. A Markdown-only change
 can break a call-out or a link, and those are what the prose checks read.
@@ -142,24 +141,19 @@ Every job that drives the Makefile builds `--release` and runs its binaries
 from `target/release`, on every platform: `elle` and `elle-rig`, or a variant's
 own ([bins](../../bins/overview.md)). The Makefile picks that under
 `ifdef GITHUB_ACTIONS`, which is set on all GitHub runners, so the macOS and
-AArch64 Smoke jobs are release runs exactly as the x86_64 ones are. No platform
-is quietly gated at a weaker optimization level.
+AArch64 Smoke jobs are release runs exactly as the x86_64 ones are.
 
 The Rust Tests jobs build the `ci` profile on every platform, and `make test`
 builds it too. The profile is the dev profile with the workspace crates at
 `opt-level = 2`. Most of the Rust suite's time goes to the `elle` processes its
-tests start, and each one at `opt-level = 0` runs about ten times slower. With no
-stdlib cache, `integration::runner_cost` took 94 s under the dev profile and 12
-s under `ci`. The profile keeps debug assertions, so the region checks still
-run. Each test runtime and each process it starts caches its standard library
-under the runner's `HOME` ([config](../config.md)).
+tests start, and each one at `opt-level = 0` runs about ten times slower. The
+profile keeps debug assertions, so the region checks still run. Each test
+runtime and each process it starts caches its standard library under the
+runner's `HOME` ([config](../config.md)).
 
-A release `make elle` builds twice, and the first build has a target directory
-of its own ([boot.md](../impl/image/boot.md)). The second build embeds the boot
-image the first one dumped, so every corpus job's `elle` and `elle-rig` carry
-the image and hydrate it at every start. The target fails when the second
-build's own dump differs from the blob it carries, or when its start does not
-map the blob.
+A release `make elle` embeds a boot image in the binaries it builds, so every
+corpus job's `elle` and `elle-rig` hydrate it at every start
+([blob.md](../impl/image/blob.md)).
 
 Four jobs change the release profile they build. `Default Build Tests`, `Boot
 Image Tests`, `Thread-Pool I/O Tests` and `macOS Smoke` set
@@ -263,8 +257,7 @@ AArch64. The smaller batch shortened the macOS job's wall clock a great
 deal. Measure again before you change it.
 
 AArch64 Smoke takes the same batch to shorten its wall clock too. It never
-stalled, and this document records no measurement of the effect there. Read the
-job's time before and after the change to learn whether it helped.
+stalled, and no measurement shows the effect there.
 
 The working theory for the macOS stall is page size. Pages on the macOS runner
 (arm64) are 16 KiB, and pages on the x86_64 Linux runner are 4 KiB. Nobody has
@@ -375,21 +368,14 @@ plugin directory to a workspace member.
 
 ### The boot-image job
 
-Every release `make elle` proves that its embedded blob hydrates. A build
-without a blob reads the warm cache instead ([boot.md](../impl/image/boot.md)),
-and a start that cannot hydrate boots from source, so the suites pass either
-way. No other job proves that the warm cache hydrates, and none compares the
-two boots' bytecode.
-
-`Boot Image Tests` runs `make smoke-boot-image`. The target first runs `make
-bytecode-parity`, which compiles every corpus file under a source boot and
-under an image boot and fails on any difference in the bytecode. It then stores
-an image, proves the next start hydrates it, and runs the corpus through that
-instance. Each start names the warm-cache directory, and a start that names
-one never reads the blob.
-It sets `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS` for the reason the two backend
-jobs do: a hydrated region is a region, and the region checks are compiled out
-of a release build without the flag.
+Every release `make elle` proves that its embedded blob hydrates. A start that
+cannot hydrate boots from source, so the suites pass either way. No other job
+proves that the warm cache hydrates, and none compares the two boots' bytecode.
+So `Boot Image Tests` runs `make smoke-boot-image`
+([boot.md](../impl/image/boot.md) owns the gate). It sets
+`CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS` for the reason the two backend jobs
+do: a hydrated region is a region, and the region checks are compiled out of a
+release build without the flag.
 
 ### A corpus job's results leave the runner
 

@@ -1,8 +1,8 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! Where a Mach-O process maps an address from: dyld's image list and each
 //! image's segment load commands.
 //!
-//! docs/impl/image/boot.md
+//! docs/impl/image/blob.md
 //!
 //! The layouts and the four dyld calls are declared here rather than taken from
 //! `libc`, which deprecates its Mach-O bindings. The Mach-O ABI fixes all of

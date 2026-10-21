@@ -1,6 +1,6 @@
 # Images — regions hydrated at load
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-21 -->
 
 Design for image-style persistence: one mechanism, and the two configurations
 it serves.
@@ -9,18 +9,21 @@ The two are the **boot** image (core, prelude, and stdlib pre-compiled into the
 binary) and **environment** images (user `save`/`load`). Both use the same
 format, dumper, and hydrator, and differ only in dependency list and dump
 policy (see *One mechanism, two configurations*). This document owns the design
-argument. Six companions carry the rest:
+argument. Eight companions carry the rest:
 
 - [Foundations](image/foundations.md) — the five representation fixes the
   image rests on.
 - [Sealing](image/sealing.md) — what the body may hold, what the hydrating
   instance rebuilds, and what fails the dump.
 - [boot.md](image/boot.md) — the boot configuration: its root set, its source
-  digest, the embedded blob and the warm cache.
+  digest, the policy that picks an image, and the warm cache.
+- [blob.md](image/blob.md) — the embedded blob: the two-stage build, and how a
+  start finds its bytes.
 - [format.md](image/format.md) — the file's sections, and the fingerprint that
   gates a load.
 - [plan.md](image/plan.md) — the landing order, and the pins each milestone
   must land with.
+- [pins.md](image/pins.md) — the pins the boot milestone landed with.
 - [measurements.md](image/measurements.md) — the eight experiments that
   answered the design's open questions, with their numbers.
 
@@ -72,12 +75,11 @@ everything frees — holds without amendment. Leak
 accounting, the generation checks, `--trace=scrub`, `--trace=guardfree`, and
 `arena/dump` all see ordinary pages in an ordinary region.
 
-Compaction is where the runtime win comes from. Stdlib boot today produces
-hundreds of regions — one per letrec capture cell plus everything they pin
-(405 measured; item 2 of [the measurements](image/measurements.md) records the
-census). The image is **one** region: every internal reference is a self-edge,
-so its edge tables are empty, and all RC traffic against stdlib values lands
-on a single counter.
+Compaction is where the runtime win comes from. A source boot produces
+hundreds of regions, one per letrec capture cell plus everything they pin. The
+image is **one** region: every internal reference is a self-edge, so its edge
+tables are empty, and all RC traffic against stdlib values lands on a single
+counter.
 
 ## One mechanism, two configurations
 
@@ -194,8 +196,8 @@ as it stands. The payload carries it as bytes, like the docstring, so the
 stdlib disk cache stores it with the payload ([the stdlib cache](stdlib-cache.md))
 and an image maps it with the payload, as it maps the LIR (§ JIT), with no
 re-derivation from syntax. A hydrated closure therefore grafts as a compiled one
-does. The parity test in [the landing plan](image/plan.md) is the acceptance
-gate.
+does. The compile-parity test in [the boot milestone's pins](image/pins.md) is
+the acceptance gate.
 
 ## Hydration
 
@@ -401,13 +403,6 @@ hydrated stdlib closure promotes exactly as a compiled one does, so the tier
 half of parity holds, as the compile half does ([image/boot.md](image/boot.md)
 owns the gate that proves it).
 
-The cost of the change is measured and small. The region form was faster on
-every operation the Rust-heap form met, by about a third of one percent of the
-compile it belongs to. It also held less memory
-([image/measurements.md](image/measurements.md) items 7 and 8). The case for
-it is never that number. It is that an image stops needing a mechanism of its
-own for one type.
-
 ## Build integration
 
 - **Warm cache (no build changes):** when no boot image hydrates, boot compiles
@@ -420,7 +415,7 @@ own for one type.
   image the first build dumps, so a release binary's first start hydrates from
   its own executable. Embedding changes the binary and none of the
   fingerprint's inputs, and the dump is deterministic, so the second build
-  dumps the blob it carries. [boot.md](image/boot.md) owns the two stages, the
+  dumps the blob it carries. [blob.md](image/blob.md) owns the two stages, the
   64 KiB alignment, and how a start finds the bytes.
 
 ## Verifier

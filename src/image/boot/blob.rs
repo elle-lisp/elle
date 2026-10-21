@@ -1,8 +1,8 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! The embedded blob: the boot image a release executable carries, and where a
 //! start finds its bytes.
 //!
-//! docs/impl/image/boot.md
+//! docs/impl/image/blob.md
 //!
 //! A start maps the blob from the file that holds it, at the offset the
 //! segment table gives, when the bytes there begin with the blob's header
@@ -17,7 +17,7 @@ use crate::image::{ImageError, ImageSource};
 use super::OpenImage;
 
 /// Bytes at the largest base page any supported host reports, so a blob's file
-/// offset is a multiple of every host's page (docs/impl/image/boot.md).
+/// offset is a multiple of every host's page (docs/impl/image/blob.md).
 #[repr(align(65536))]
 pub(crate) struct Aligned<T: ?Sized>(pub(crate) T);
 

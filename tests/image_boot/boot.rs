@@ -1,8 +1,8 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 // The boot configuration end to end: an image dumped from a booted instance,
 // and a fresh instance that answers out of it.
 // docs/impl/image/boot.md
-// docs/impl/image/plan.md
+// docs/impl/image/pins.md
 
 use super::*;
 use elle::compiler::stdlib_cache::StdlibCache;

@@ -68,7 +68,7 @@ all: elle docs  ## Build everything
 # ── Build ───────────────────────────────────────────────────────────
 
 # A release build carries its own boot image, the embedded blob
-# (docs/impl/image/boot.md). Stage 1 builds a release `elle` in a target
+# (docs/impl/image/blob.md). Stage 1 builds a release `elle` in a target
 # directory of its own, and its dump writes the blob. Stage 2 builds in the
 # shared directory with ELLE_BOOT_BLOB naming the blob, and build.rs compiles
 # it in. Cargo keeps one build of a library per profile and feature set, and a
