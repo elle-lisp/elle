@@ -1,5 +1,6 @@
-// audited: 2026-10-14
-// Where a program finds a module, what a cycle of literal imports reports, and how often a file that loads twice compiles.
+// audited: 2026-10-21
+// Where a program finds a module, and how often a file that loads twice compiles.
+//
 // docs/modules.md
 // docs/config.md
 
@@ -43,8 +44,8 @@ fn module_dir() -> tempfile::TempDir {
 }
 
 /// A bare spec never searches the working directory, so a file beside the
-/// program cannot shadow a library of the same name. The counter-factual is
-/// the search that put the working directory first: it loads `m.lisp`.
+/// program cannot shadow a library of the same name. The counter-factual
+/// would search the working directory first, and would load `m.lisp`.
 #[test]
 fn a_bare_spec_does_not_search_the_working_directory() {
     let dir = module_dir();
@@ -142,79 +143,6 @@ fn trace_import_names_the_loaded_file() {
     );
 }
 
-/// A scratch directory holding `a.lisp` and `b.lisp`, which import each other
-/// through literal `import-file` paths at their top levels.
-fn cycle_dir() -> tempfile::TempDir {
-    let dir = tempfile::tempdir().expect("scratch dir");
-    std::fs::write(
-        dir.path().join("a.lisp"),
-        "(def b ((import-file \"b.lisp\")))\n(fn [] {:b b})\n",
-    )
-    .expect("write a.lisp");
-    std::fs::write(
-        dir.path().join("b.lisp"),
-        "(def a ((import-file \"a.lisp\")))\n(fn [] {:a a})\n",
-    )
-    .expect("write b.lisp");
-    dir
-}
-
-/// A cycle of literal imports reaches the loader, which names every file in it.
-/// The program file runs without a load mark, so the cycle the loader sees
-/// starts at `b.lisp`. The counter-factual is the analysis that compiled each
-/// literal import: it recursed on the cycle until the process aborted on a stack
-/// overflow, and no exit code came back.
-#[test]
-fn a_cycle_of_literal_imports_names_the_cycle() {
-    let dir = cycle_dir();
-    let a = dir.path().join("a.lisp").display().to_string();
-    let b = dir.path().join("b.lisp").display().to_string();
-    let (code, _, stderr) = run_elle(dir.path(), &[&a], "");
-    assert_eq!(
-        code, 1,
-        "the run fails with an error, not an abort: {stderr}"
-    );
-    let cycle = format!("circular dependency: {b} -> {a} -> {b}");
-    assert!(
-        stderr.contains(&cycle),
-        "the error names the cycle `{cycle}`: {stderr}"
-    );
-}
-
-/// A module that imports itself is a cycle of one file.
-#[test]
-fn a_literal_self_import_names_the_cycle() {
-    let dir = tempfile::tempdir().expect("scratch dir");
-    let s = dir.path().join("s.lisp");
-    std::fs::write(&s, "(def s ((import-file \"s.lisp\")))\n(fn [] {:z 3})\n")
-        .expect("write s.lisp");
-    let s = s.display().to_string();
-    let (code, _, stderr) = run_elle(dir.path(), &[&s], "");
-    assert_eq!(
-        code, 1,
-        "the run fails with an error, not an abort: {stderr}"
-    );
-    let cycle = format!("circular dependency: {s} -> {s}");
-    assert!(
-        stderr.contains(&cycle),
-        "the error names the cycle `{cycle}`: {stderr}"
-    );
-}
-
-/// `compile/analyze` runs no code, and with no compile of an import there is
-/// nothing a cycle can recurse through. The counter-factual aborts the process
-/// on a stack overflow before `analyzed` is printed.
-#[test]
-fn analyzing_a_cycle_of_literal_imports_ends() {
-    let dir = cycle_dir();
-    let a = dir.path().join("a.lisp").display().to_string();
-    let program =
-        format!("(compile/analyze (slurp \"{a}\") {{:file \"{a}\"}})\n(print \"analyzed\")\n");
-    let (code, stdout, stderr) = run_elle(dir.path(), &["-"], &program);
-    assert_eq!(code, 0, "the analysis returns (stderr: {stderr})");
-    assert_eq!(stdout.trim(), "analyzed");
-}
-
 /// How many compiles of `file` a `--trace=compile` run reported: each compile
 /// traces its read phase once, under the file's path.
 fn compiles_of(stderr: &str, file: &str) -> usize {
@@ -226,8 +154,8 @@ fn compiles_of(stderr: &str, file: &str) -> usize {
 }
 
 /// Two loads of one file compile it once, and both run it. The
-/// counter-factual compiled the file on every load, and its read phase
-/// appeared twice.
+/// counter-factual would compile the file on every load, and its read phase
+/// would appear twice.
 #[test]
 fn two_loads_of_one_file_compile_it_once() {
     let dir = module_dir();
@@ -246,8 +174,8 @@ fn two_loads_of_one_file_compile_it_once() {
 }
 
 /// A compile that fails keeps nothing, so the next load of the file compiles
-/// it again and reports the error again. The counter-factual kept the failure
-/// beside the code, and the second load compiled nothing.
+/// it again and reports the error again. The counter-factual would keep the
+/// failure beside the code, and the second load would compile nothing.
 #[test]
 fn a_failed_compile_compiles_again_on_the_next_load() {
     let dir = tempfile::tempdir().expect("scratch dir");
@@ -266,4 +194,8 @@ fn a_failed_compile_compiles_again_on_the_next_load() {
         2,
         "bad.lisp compiled on each load: {stderr}"
     );
+}
+
+mod cycle {
+    include!("module_cli/cycle.rs");
 }
