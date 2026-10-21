@@ -1,6 +1,6 @@
 # Native region effects: declared, not guessed
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-21 -->
 
 How each primitive declares its region behavior, and what each `RegionEffect`
 variant claims.
@@ -18,35 +18,39 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
 - **`Fresh`** — a heap result is freshly allocated in the call's own result
   region; no argument is stored anywhere *outside* the result. The result
   MAY embed references to the arguments (`pair`, `list`, struct
-  constructors): those are counted by the result object's alloc-time scan
-  and released by its free-time cascade (Rule 5, immutable contents) — no
-  compile-time **RC** edge needed, which is exactly why an embedding constructor
-  is `Fresh` and not `Stores`. The **ownership forest**, however, must know
-  *which* arguments the result embeds, so it does not judge an embedded value
-  externally unique and adopt it while the escaping result still references it
-  (the captured-trait-table-into-an-escaping-value shape). `Fresh` alone is too
-  vague — `popn` is `Fresh` yet embeds none of its args — so a `Fresh` native
-  that embeds an argument names it in `PrimitiveDef::embeds`, and the region walk
-  records an **embed edge** `result ⊇ arg` in `RegionInfo::embed_edges`
-  (`with-traits`'s `&[1]` — its `traits` side-field; `slice`'s and `string`'s
-  `&[0]` — the view a slice-backed result keeps over its argument's pages,
-  [values](../values.md)). The edge drives no `IncrefRegion`: the alloc-scan
-  counts the embedding. The forest reads the edge one way only. It counts
-  against external uniqueness, so a subtree that holds the argument and not
-  the result stays Shared. It builds no subtree: an embed is neither a funnel
-  store, a cell store nor a capture, so the forest has no site at which to
-  adopt the argument into the result, and a member with no emittable owner
-  edge refuses its whole subtree. A container that owns the result owns it as
-  an ordinary member. The container's drop reclaims the result, and the drop's
-  cascade releases the result's recorded edge to its Shared source
-  ([ownership](ownership.md)). (An immediate result — e.g. a nil
-  error-path return — is always permitted; the claim constrains the heap
-  case. Same for the variants below. Note:
-  `Fresh` therefore does NOT mean "no new holder of the argument's
-  region" — uniqueness inference consults the call-result flow AND the `embeds`
-  containment, not this declaration alone.)
+  constructors). The result object's alloc-time scan counts those references,
+  and its free-time cascade releases them (Rule 5, immutable contents). No
+  compile-time **RC** edge is needed, which is why an embedding constructor is
+  `Fresh` and not `Stores`. The **ownership forest**, however, must know
+  *which* arguments the result embeds. Otherwise it could judge an embedded
+  value externally unique and adopt it while the escaping result still
+  references it (the captured-trait-table-into-an-escaping-value shape).
+  `Fresh` alone is too vague: `popn` is `Fresh` yet embeds none of its args.
+  So a `Fresh` native that embeds an argument names it in
+  `PrimitiveDef::embeds`. The region walk then records an **embed edge**
+  `result ⊇ arg` in `RegionInfo::embed_edges`. `with-traits` declares `&[1]`,
+  its `traits` side-field. `slice` and `string` declare `&[0]`, the view a
+  slice-backed result keeps over its argument's pages
+  ([values](../values.md)). The edge drives no `IncrefRegion`, because the
+  alloc-scan counts the embedding.
+
+  The forest reads the edge one way only. It counts against external
+  uniqueness, so a subtree that holds the argument and not the result stays
+  Shared. It builds no subtree: an embed is neither a funnel store, a cell
+  store nor a capture. So the forest has no site at which to adopt the
+  argument into the result, and a member with no emittable owner edge refuses
+  its whole subtree. A container that owns the result owns it as an ordinary
+  member. The container's drop reclaims the result, and the drop's cascade
+  releases the result's recorded edge to its Shared source
+  ([ownership](ownership.md)).
+
+  An immediate result, for example a nil error-path return, is always
+  permitted; the claim constrains the heap case. Same for the variants below.
+  `Fresh` therefore does NOT mean "no new holder of the argument's region":
+  uniqueness inference consults the call-result flow AND the `embeds`
+  containment, not this declaration alone.
 - **`PassThrough`** — a heap result is one of the arguments or a value
-  living in an argument's region (or a value with no region, e.g. an
+  living in an argument's region (or a value with no region, for example an
   immediate); no argument is stored. The dispatch pass-through retain
   (Rule 5's "new reference")
   hands the caller its counted reference.
@@ -58,8 +62,8 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   store funnel (`push`/`put` and friends) are runtime-counted too — a
   funnel-storing native declares `Funnel`, below. This is *containment*:
   the stored value goes into a structure that stays within the caller's
-  ownership subtree (`ffi/callback` stores a closure into a C function
-  pointer), so it is **not** a fiber-frontier crossing and seeds nothing
+  ownership subtree, as `ffi/callback` stores a closure into a C function
+  pointer. So it is **not** a fiber-frontier crossing, and it seeds nothing
   for the ownership forest.
 - **`Sends { args }`** — the listed arguments cross a **fiber boundary**:
   they are handed to another fiber (`chan/send`'s message rides the channel
@@ -67,20 +71,21 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   The store is **seam-counted**: the send body increfs the message's region
   at runtime after a successful enqueue (`EscapeSite::ChanSend` in
   `prim_chan_send`), so the solver records **no edge** — exactly as for
-  `Funnel` and `Delivers`. A compile-time edge cannot carry this reference:
-  its incref is keyed on a region *pair* the solver must name, and at a real
-  call site the channel is typically a module-level binding read as an
-  upvalue, so no pair exists and no incref is emitted — the message then
-  rides the buffer on the sender's own references and is freed before the
+  `Funnel` and `Delivers`. A compile-time edge cannot carry this reference,
+  because its incref is keyed on a region *pair* the solver must name. At a
+  real call site the channel is typically a module-level binding read as an
+  upvalue, so no pair exists and no incref is emitted. The message would then
+  ride the buffer on the sender's own references and be freed before the
   receive ([region-chan-send-owned-param-uaf.lisp](../../../tests/impl/region-chan-send-owned-param-uaf.lisp)). The buffer
   is **external** to the region system — no free-time cascade balances
   anything stored in it — so the seam retain IS the message's reference. The
-  message is a genuinely-Shared (no-bounded-dominator) region, so it stays on
-  the per-region RC baseline ([ownership.md](ownership.md)): the send bumps its
-  count (the seam retain), and the **receive lowers it** — `chan/recv` / `chan/try-select` /
-  `chan/wait-ready` each decref the message's region as it leaves the buffer
-  (`release_received_message`, guarded by `value_in_region_store` so a
-  cross-thread message on a foreign heap is left to that heap's accounting).
+  message is a genuinely-Shared (no-bounded-dominator) region, and
+  [ownership.md](ownership.md) prescribes how its incoming count is kept. The
+  send bumps it (the seam retain), and the **receive lowers it**: `chan/recv`,
+  `chan/try-select` and `chan/wait-ready` each decref the message's region as
+  it leaves the buffer (`release_received_message`). `value_in_region_store`
+  guards that release, so a cross-thread message on a foreign heap is left to
+  that heap's accounting.
   Without the receive-side release the send-site incref never balances — one
   leaked region per send/recv cycle ([region-chan-send-recv.lisp](../../../tests/impl/region-chan-send-recv.lisp),
   and the `chan-send-recv` probe in [oracle.lisp](../../../tests/impl/oracle.lisp)). The
@@ -93,30 +98,31 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   fresh `[:ok]`), so the oracle's result-side check is identical to
   `Stores`. `chan/send` is the sole declarant today.
 - **`Funnel`** — every argument store goes through the mutable-store
-  funnel (arena.rs `push_with_incref`-style, runtime-counted — the
-  statically-complete store seam; the same seam records the *outgoing edge* the
-  free-time walk consumes, [ownership.md](ownership.md)), and the result may be fresh
-  OR pass-through (`put` on an immutable struct copies; on a mutable one
-  returns the container). No solver edges: a compile-time clique incref
-  would double-count the funnel's runtime incref against the container's
-  single free-time cascade decref — one leaked region per stored value
-  per call, which is exactly why `Funnel` emits no clique edge (the
-  `put`/`push` store probes in [oracle.lisp](../../../tests/impl/oracle.lisp) pin the seam
-  reclaiming). No
+  funnel, runtime-counted in the style of arena.rs `push_with_incref`. The
+  funnel is the statically-complete store seam, and it also records the
+  *outgoing edge* the free-time walk consumes ([ownership.md](ownership.md)).
+  The result may be fresh OR pass-through: `put` on an immutable struct
+  copies, and on a mutable one returns the container. No solver edges: a
+  compile-time clique incref would double-count the funnel's runtime incref
+  against the container's single free-time cascade decref. That would leak one
+  region per stored value per call, which is why `Funnel` emits no clique
+  edge. The `put`/`push` store probes in
+  [oracle.lisp](../../../tests/impl/oracle.lisp) pin the seam reclaiming. No
   result-side oracle constraint (either freshness is legal), exactly as
   `Mixed`. It exists so a funnel-storing op is not forced into
   `Mixed`'s clique.
-- **`Opaque`** — examined, and confirmed to store **no** argument (every
-  argument is read or copied out — into a Rust `String`/`Vec`, the kernel,
-  a fresh structure — never retained uncounted in another argument or an
-  external structure), but the result is neither always-fresh nor
-  always-pass-through: it lives in neither the call's own region nor an
-  argument's (e.g. a value minted on the scheduler heap and delivered by a
-  fiber resume — the `subprocess` value `subprocess/exec` answers).
-  This is `Mixed` **minus the store**: **no arg clique** (nothing is stored,
-  so the mutual may-store edges would only leak — exactly the gap that forces
-  a no-store, opaque-result, multi-heap-arg primitive into a leaking `Mixed`),
-  and **no result-side oracle constraint** (the result may live anywhere). It
+- **`Opaque`** — examined, and confirmed to store **no** argument. Every
+  argument is read or copied out, into a Rust `String`/`Vec`, the kernel or a
+  fresh structure, and never retained uncounted in another argument or an
+  external structure. But the result is neither always-fresh nor
+  always-pass-through. It lives in neither the call's own region nor an
+  argument's, for example a value minted on the scheduler heap and delivered
+  by a fiber resume: the `subprocess` value `subprocess/exec` answers.
+  This is `Mixed` **minus the store**. It has **no arg clique**: nothing is
+  stored, so the mutual may-store edges would only leak, and without `Opaque`
+  a no-store, opaque-result, multi-heap-arg primitive would need a leaking
+  `Mixed`. It has **no result-side oracle constraint** either, since the
+  result may live anywhere. It
   is the variant that separates the two properties `Mixed` conflates — an
   uncounted *arg store* (which justifies the clique) from a merely *non-fresh
   result* (which does not). Declare `Opaque`, not `Mixed`, for a primitive
@@ -124,27 +130,27 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
 
   **A read-only trait dispatcher is `Opaque`.** A primitive that resolves its
   work through the trait table (`has?` → `Collection:has?`) has an unbounded
-  result: `with-traits` may replace the protocol with a user closure returning
+  result. `with-traits` may replace the protocol with a user closure returning
   anything, so neither `Immediate` nor `Fresh` holds on every path. The *store*
-  side is bounded regardless — the built-in method reads and returns a bool,
-  and a user closure is ordinary Elle code, which stores only through the
-  runtime-counted mutable-store funnel (the same argument the user-function
-  case below makes). Two properties, two answers: unbounded result, no store —
+  side is bounded regardless. The built-in method reads and returns a bool, and
+  a user closure is ordinary Elle code, which stores only through the
+  runtime-counted mutable-store funnel, as the user-function case below
+  argues. Two properties, two answers: unbounded result, no store —
   `Opaque`. Declaring `Mixed` there buys nothing and costs one never-balancing
   `IncrefRegion` per heap-argument pair per call
   ([region-has-clique-leak.lisp](../../../tests/impl/region-has-clique-leak.lisp)).
 
   The sequence reads and conversions are the same shape and take the same
-  declaration: `first`, `second`, `rest`, `->array` and `->list` each resolve
-  through `Sequence`/`Collection`, and each hands back an element of arg0, arg0
-  itself, or a fresh collection built from it — unbounded on the result side,
-  storing nothing. Their clique is empty either way (each takes one heap
-  argument, and the clique is over *pairs* of arguments), so what a `Mixed`
+  declaration. `first`, `second`, `rest`, `->array` and `->list` each resolve
+  through `Sequence`/`Collection`. Each hands back an element of arg0, arg0
+  itself, or a fresh collection built from it: unbounded on the result side,
+  storing nothing. Their clique is empty either way, because each takes one
+  heap argument and the clique is over *pairs* of arguments. What a `Mixed`
   declaration would cost them is on the ESCAPE side, which reads the same
-  declaration: `Mixed`/`Unknown` seeds every argument on escape's **store**
-  facet ([../escape.md](../escape.md)), and a region escaping by a facet other
+  declaration. `Mixed`/`Unknown` seeds every argument on escape's **store**
+  facet ([../escape.md](../escape.md)). A region escaping by a facet other
   than return keeps the conservative baseline at every mechanism gated on
-  `frame_held_regions` — the branch-arm release window among them. A
+  `frame_held_regions`, the branch-arm release window among them. A
   declaration is therefore a claim about escape as much as about edges, and the
   strongest true one is what a read-only dispatcher owes
   ([region-sequence-read-effect.lisp](../../../tests/impl/region-sequence-read-effect.lisp)).
@@ -153,14 +159,14 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   selects an operation by a runtime string; `compile/run-on` dispatches a
   caller-supplied closure on a chosen tier; the `compile/*-module` loaders,
   `import/load-file` and `import/load-syntax` compile a module and run its top
-  level as a thunk. None of that reaches
-  the store side: each copies its arguments
-  out (a Rust `String`, a cloned `Syntax`) and the Elle code it re-enters can
-  store only through the runtime-counted funnel, exactly as an opaque user fn
-  can. The *result* is what the re-entry makes unbounded, so the answer is again
-  `Opaque` — and the obligation it carries is on the dispatch, not the primitive:
-  an operation added behind one of these gateways that RETAINS an argument past
-  the call invalidates the declaration and must move it back to `Mixed`
+  level as a thunk. None of that reaches the store side. Each copies its
+  arguments out (a Rust `String`, a cloned `Syntax`), and the Elle code it
+  re-enters can store only through the runtime-counted funnel, as an opaque
+  user fn can. The *result* is what the re-entry makes unbounded, so the answer
+  is again `Opaque`. The obligation it carries is on the dispatch, not the
+  primitive. An operation added behind one of these gateways that RETAINS an
+  argument past the call invalidates the declaration, and must move it back to
+  `Mixed`
   ([region-query-clique-leak.lisp](../../../tests/impl/region-query-clique-leak.lisp)). The three module loaders are
   the declarants whose result side is furthest from their own region. A module
   value comes back through the thunk's return convention already carrying the
@@ -172,10 +178,11 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   [region-fiber-child-effect-uaf.lisp](../../../tests/impl/region-fiber-child-effect-uaf.lisp)).
 
   **A fiber-graph read is `Opaque`.** `fiber/child` hands back the cached
-  child-fiber `Value` its argument carries. The cache is written by the resume
-  machinery (`with_child_fiber`), not by this call, so the read itself stores
-  nothing; the value it returns lives in whatever region the child was minted in,
-  which is neither the call's own nor its argument's. Unbounded result, no store —
+  child-fiber `Value` its argument carries. The resume machinery
+  (`with_child_fiber`) writes the cache, not this call, so the read itself
+  stores nothing. The value it returns lives in whatever region the child was
+  minted in, which is neither the call's own nor its argument's. Unbounded
+  result, no store —
   `Opaque`, and its argument is not a store-facet escape seed. What a `Mixed`
   declaration costs a read like this is that seed: a fiber named in one arm of a
   branch and read in another loses the branch-arm release window and strands per
@@ -195,23 +202,24 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   identical two writes on every resume — `with_child_fiber` step 2 when it
   descends, `seed_child_inheritance` when it suspends instead — and its
   `Delivers { args: &[1] }` lists the resume value alone. The fiber argument has
-  never been a store there, and the two wiring natives agree. What keeps the
-  cache honest is not a reference but its consumer: `fiber/child` reads it only
-  while the wiring call's own frame is live or parked, and absorbing the child's
+  never been a store there, and the two wiring natives agree. Its consumer
+  keeps the cache honest, with no reference. `fiber/child` reads it only while
+  the wiring call's own frame is live or parked, and absorbing the child's
   signal clears both fields (`VM::absorbs`'s callers).
 
   The cost of `Mixed` here is the branch-arm seed the read rule above describes,
-  and `defer` is where it lands. `defer` reads its fiber with `fiber/status`, with
-  `fiber/value` in one arm and with `fiber/propagate` in the other, so a store
-  facet on the propagate argument leaves the branch's only release in the arm the
-  success path never takes. Every evaluation then strands the fiber value and its
-  body closure, and a loop whose body is wrapped in `defer` grows without bound
+  and `defer` is where it lands. `defer` reads its fiber with `fiber/status`,
+  then with `fiber/value` in one arm and with `fiber/propagate` in the other. A
+  store facet on the propagate argument would leave the branch's only release
+  in the arm the success path never takes. Every evaluation would then strand
+  the fiber value and its body closure, and a loop whose body is wrapped in
+  `defer` would grow without bound
   (the `defer-while` and `defer-error` probes in [oracle.lisp](../../../tests/impl/oracle.lisp)).
 - **`Delivers { args }`** — the listed (0-based) arguments are handed to
   **another fiber** by installing them in its signal slot, and the result is
   unbounded. The fiber value installers are the declarants: `fiber/resume`'s
-  resume value, `fiber/abort`'s and `fiber/cancel`'s error payload, and
-  `fiber/emit`'s emitted value. Each carries both of the properties `Mixed`
+  resume value, the error payload of `fiber/abort`, `fiber/cancel` and
+  `fiber/refuse`, and `fiber/emit`'s emitted value. Each carries both of the properties `Mixed`
   conflates, so `Delivers` answers them separately:
 
   - **The argument side is `Funnel`'s answer — no clique.** Every install seam
@@ -220,18 +228,18 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
     (`record_terminal_signal_park`: the hard kill's, and the completing resume's
     step-6a park), so the fiber's free-time signal scan balances it. An install
     the next step CONSUMES is handed straight back out of the slot by
-    `do_fiber_resume_single` and pushed onto the resumed frame's stack, and it is
-    the RESUMED frame that counts it: the suspending call's continuation mints the
-    resume value it re-enters on — the parked native call's own result retain, or
-    the `Emit`'s (`RegionInfo::unfunded_resume_values`,
+    `do_fiber_resume_single`, and pushed onto the resumed frame's stack. The
+    RESUMED frame counts it: the suspending call's continuation mints the resume
+    value it re-enters on. That mint is the parked native call's own result
+    retain, or the `Emit`'s (`RegionInfo::unfunded_resume_values`,
     [park.md](park.md)). A
     compile-time incref at the install would double-count the first against its
     single cascade decref and duplicate the second, which is exactly the arg-clique
     leak ([region-fiber-install-clique-leak.lisp](../../../tests/impl/region-fiber-install-clique-leak.lisp)).
   - **The argument side is also `Sends`'s answer — a frontier crossing.** The
-    value goes to a fiber this activation does not bound, so escape seeds each
+    value goes to a fiber this activation does not bound. So escape seeds each
     listed argument on its **fiber** facet (`hir::escape`), never the store
-    facet: an installed value is never Owned by the installing activation's
+    facet, and an installed value is never Owned by the installing activation's
     subtree.
   - **The result side is `Opaque`'s answer — unbounded.** A resume hands back
     whatever the resumed fiber yields or returns, minted on that fiber's own
@@ -243,10 +251,10 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   seams count their own store at runtime and record no solver edge. `chan/send`
   leaves its message in a channel buffer external to the region system, which
   nothing cascades, so the send-site retain IS the message's reference and
-  `chan/recv` lowers it. A fiber's signal slot is not external — it is a
-  scanned field of a region-managed fiber object — so an outliving install is
-  balanced by the fiber's free-time signal scan, and a consumed one by the
-  resumed frame's own accounting.
+  `chan/recv` lowers it. A fiber's signal slot is a scanned field of a
+  region-managed fiber object, not an external store. The fiber's free-time
+  signal scan balances an outliving install, and the resumed frame's own
+  accounting balances a consumed one.
 
   **An injected error payload arrives unfunded, so the injection mints its
   delivery.** Every other install of a terminal payload into a signal slot funds
@@ -276,9 +284,9 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   The injection also RECORDS the mint, on both fibers whose frames the payload
   travels through — the aborted fiber (`do_fiber_abort`) and, where the error
   escapes, the aborting one (`VM::park_propagating_abort`). A frame holding the
-  payload then funds no delivery, so the abandoned-frame walk and the parked
-  frame's discharge stop exempting the payload's region, exactly as they do for
-  an emit raise ([unwind.md](unwind.md)). A literal materialized straight into the
+  payload then funds no delivery. So the abandoned-frame walk and the parked
+  frame's discharge stop exempting the payload's region, as they do for an emit
+  raise ([unwind.md](unwind.md)). A literal materialized straight into the
   `fiber/abort` argument lives in a frame slot and nowhere else, so without the
   record its release stays owed forever (the `abort-discard` probe in
   [oracle.lisp](../../../tests/impl/oracle.lisp)).
@@ -286,27 +294,26 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   [region-fiber-abort-delivery-uaf.lisp](../../../tests/impl/region-fiber-abort-delivery-uaf.lisp) carries a face per route: the
   under-mint faults there under `--trace=guardfree`, and the over-mint shows as
   region growth, since a spare reference never faults.
-- **`Mixed`** — examined, and the native stores arguments *uncounted*
-  (the property the arg clique exists to cover) — and/or returns a result
-  that is neither always-fresh nor always-pass-through (a trait-dispatching
-  primitive that may run a user closure). A positive declaration — "we read it; this is the honest
-  worst case." A primitive that stores nothing but merely returns a
+- **`Mixed`** — examined, and the native stores arguments *uncounted*, the
+  property the arg clique exists to cover. Its result may also be neither
+  always-fresh nor always-pass-through. A positive declaration — "we read it;
+  this is the honest worst case." A primitive that stores nothing but merely
+  returns a
   non-fresh result is **`Opaque`** (above), not `Mixed` — the clique is
   keyed on the *store*, so a non-storing native must not carry it.
 
   **A signal a handler stores for is a store.** A primitive whose work is done by
   the VM's handler for its signal is judged on what that handler does with the
   argument. `git` returns `SIG_QUERY` carrying the closure it is asked to compile,
-  and the handler caches the SPIR-V on that closure's template — a retention that
-  outlives the call, shared by every closure over that template, and recorded by no
-  seam. So the store is real and uncounted, which is `Mixed`'s property, and the
+  and the handler caches the SPIR-V on that closure's template. That retention
+  outlives the call, is shared by every closure over that template, and is
+  recorded by no seam. So the store is real and uncounted, which is `Mixed`'s property, and the
   argument stays a store-facet escape seed.
 
   The rule asks for a **holder**, not merely for a write. A handler that writes an
   argument into a field the free-time walk never enumerates creates no second
-  holder of the region and can under-count nothing, so the strongest true claim is
-  the one that says so — `Opaque`, the child-chain wiring's answer under `Opaque`
-  above. Both halves are pinned solver-side by
+  holder of the region, and can under-count nothing. The strongest true claim
+  then says so: `Opaque`, the child-chain wiring's answer above. Both halves are pinned solver-side by
   `fiber_graph_natives_declare_opaque_and_git_keeps_the_hard_edge`.
 - **`Unknown`** — nobody has looked. The default for unexamined
   primitives, every plugin-supplied definition (the plugin ABI cannot
