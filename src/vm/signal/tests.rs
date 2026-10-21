@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-20
 //! How a primitive's signal is dispatched, and what each park records about the
 //! references it leaves standing.
 //!
@@ -150,7 +150,7 @@ fn dispatch_query_answer_is_born_in_the_ctx_region() {
     assert_eq!(
         crate::value::arena::region_of(ctx.heap_mut(), answer),
         Some(answer_region),
-        "the SIG_QUERY answer is born in the ctx's region, not the region TLS",
+        "the SIG_QUERY answer is born in the ctx's region",
     );
 }
 
@@ -159,8 +159,7 @@ fn dispatch_query_answer_is_born_in_the_ctx_region() {
 /// A suspending primitive's park owes its resume value one reference: the
 /// primitive never returns, so the `Return` mint that would fund the parked
 /// call's compiler-emitted result release never runs, and the resume value
-/// stands in for that result (docs/impl/region/park.md § "A delivery into a
-/// replayed frame carries one owning reference"). The classifier is the only
+/// stands in for that result (docs/impl/region/park.md). The classifier is the only
 /// place that can tell — by the delivery the frame is built and, for a tail
 /// suspend, was built by a driver that never saw the primitive — so it records
 /// the answer on the fiber for `do_fiber_resume_single` to take.
@@ -227,9 +226,8 @@ fn a_completing_primitive_owes_its_resume_value_nothing() {
 
 /// A capability denial parks a payload the VM built in place of a call that never
 /// ran, so no body reference answers for it and the install that displaces it owes
-/// its region one decref (docs/impl/region/park.md § "A payload the RUNTIME built
-/// is released by the install that displaces it"). Only the denial site can tell a
-/// park has that shape, so it records the payload for
+/// its region one decref (docs/impl/region/park.md). Only the denial site can
+/// tell a park has that shape, so it records the payload for
 /// `release_displaced_bodyless_payload` to match against the live parked signal.
 #[test]
 fn a_capability_denial_park_records_the_payload_it_leaves_over() {

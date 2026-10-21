@@ -1,13 +1,9 @@
-//! Dynamic parameter baseline a child fiber inherits from its parent — the
-//! counted seeding (`retain_param_baseline`) and the debug-only borrow check
-//! that proves the count holds. A child routinely outlives its creator's
-//! `parameterize` scope, so each heap entry of the installed baseline takes
-//! one retain and a recorded `fiber → value` content edge, released by the
-//! fiber object's own free (docs/impl/region/owner.md § "A child's inherited
-//! parameter baseline is a counted holder"). `record_param_borrows` snapshots
-//! each entry region's generation and `first_stale_borrow` later confirms
-//! none was freed under the fiber (docs/impl/region/generations.md
-//! § "Uncounted-borrow check").
+// audited: 2026-10-20
+//! The parameter baseline a child fiber inherits: its counted seeding, and the
+//! debug check that the count holds.
+//!
+//! docs/impl/region/park.md
+//! docs/impl/region/generations.md
 
 use crate::value::Value;
 
@@ -56,14 +52,13 @@ pub(crate) fn flatten_param_frames(frames: &[Vec<(u32, Value)>]) -> Vec<(u32, Va
     flat
 }
 
-/// Snapshot the uncounted cross-fiber borrows in a child's inherited baseline
-/// parameter frame: for each heap-valued binding, record `(param_id, region,
-/// current generation)`. Seeding the baseline takes no reference count, so this
-/// records the generation at which each borrowed region is live; the resume and
-/// `resolve_parameter` checks later confirm the region has not been freed since.
-/// Immediate (non-heap) bindings carry no region and are skipped. Debug-only —
-/// the check it feeds runs only under `debug_assertions`
-/// (docs/impl/region/generations.md § "Uncounted-borrow check").
+/// Snapshot the cross-fiber borrows in a child's inherited baseline parameter
+/// frame: for each heap-valued binding, record `(param_id, region, current
+/// generation)`. The seeding retain keeps each region live; the resume and
+/// `resolve_parameter` checks later confirm the region has not been freed
+/// since, which is the oracle that the retain holds. Immediate (non-heap) bindings
+/// carry no region and are skipped. Debug-only — the check it feeds runs only
+/// under `debug_assertions`.
 ///
 /// The region and its generation are read from the SAME `heap`
 /// (`region_of_ptr`/`generation_raw`), so the recorded pair and the later

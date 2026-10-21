@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-20
 //! The SIG_SWITCH trampoline driving nested `fiber/resume` iteratively rather
 //! than on the Rust stack. `finish_fiber_resume` is the shared completion driver
 //! for `do_fiber_resume` and `do_fiber_abort` (see their docs in `super`).
@@ -148,8 +148,7 @@ impl VM {
                     // parked there when it handed this child to the trampoline.
                     // A restart of the parent answers that call, which produced
                     // no result, so the delivery owes the mint
-                    // (docs/impl/region/park.md § "A restart delivers into an
-                    // error park").
+                    // (docs/impl/region/park.md).
                     if bits.intersects(SIG_ERROR) {
                         let (parent_handle, _) = fiber_stack.last().unwrap();
                         parent_handle.with_mut(|f| f.delivery.park_error(RaiseSite::Call, value));
