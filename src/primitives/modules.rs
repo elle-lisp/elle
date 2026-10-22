@@ -1,11 +1,11 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! The three module loaders, for Elle source, a shared library and one form.
-//!
-//! `import/load-file` runs Elle source, `import/load-plugin` loads a shared
-//! library, and `import/load-syntax` runs one form.
 //!
 //! docs/modules.md
 //! docs/impl/region/park.md
+//!
+//! `import/load-file` runs Elle source, `import/load-plugin` loads a shared
+//! library, and `import/load-syntax` runs one form.
 
 use crate::primitives::def::RegionEffect;
 use crate::signals::Signal;
@@ -86,9 +86,9 @@ fn retain_plugin_result(vm: &mut crate::vm::VM, value: Value) {
 
 /// Run `load` under the circular-load mark for `key`.
 ///
-/// The mark brackets the load: everything a load does is the one call below, so
-/// every way out of it — a compile error, a read failure, an error the module
-/// raised — reaches the single unmark after that call. A load that finds `key`
+/// The mark brackets the load: everything a load does is the one call below. So
+/// every way out of it reaches the single unmark after that call: a compile
+/// error, a read failure, an error the module raised. A load that finds `key`
 /// already marked is a cycle, and the error names every file in it.
 fn with_load_mark(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
@@ -307,9 +307,9 @@ primitive! {
         params: &["path"],
         example: "(import/load-file \"tests/modules/test.lisp\")",
         // Opaque, not Mixed: the path is copied out to a Rust String to read the
-        // file and never retained, so no argument is stored, while the result —
-        // a value the module's own compiled top level returned — lives in
-        // neither this call's region nor the path's. The VM re-entry rule:
+        // file and never retained, so no argument is stored. The result, a value
+        // the module's own compiled top level returned, lives in neither this
+        // call's region nor the path's. The VM re-entry rule:
         // unbounded result, no store (docs/impl/region/effects.md).
         effect: RegionEffect::Opaque,
         result_minted: true,
