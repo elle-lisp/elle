@@ -10,7 +10,7 @@ Up: [..](../AGENTS.md)
 - [boot.md](boot.md) — **Booting from an image** What the boot configuration carries, how `elle image dump-boot` writes it, and how a fresh instance starts from it.
 - [dumping.md](dumping.md) — **Dumping** How the dumper turns a value graph into an image: the compacting copy, the determinism it guarantees, and the policy for mutable bindings.
 - [format.md](format.md) — **The image file** The byte layout of an image, and the fingerprint that decides whether this binary may map it.
-- [foundations.md](foundations.md) — **Foundations** Six representation fixes the image rests on: each pays at runtime, and each deletes image machinery.
+- [foundations.md](foundations.md) — **Foundations** <<<<<<< HEAD Six representation fixes the image rests on: each pays at runtime, and each deletes image machinery.
 - [hydration.md](hydration.md) — **Hydration** How an image's pages become a region of the hydrating instance: the steps, the descriptor, and how a pointer into them resolves.
 - [measurements.md](measurements.md) — **What the experiments measured** Eight questions the image design turned on, each answered by an experiment, with the numbers it produced.
 - [parity.md](parity.md) — **Parity: what a hydrated closure keeps** Why a hydrated closure compiles and promotes as a compiled one does: its code payload carries the body fragment and the LIR.
