@@ -247,8 +247,8 @@ fn build_full_source(
     } else {
         ("", body_spliced.as_str())
     };
-    // Strip any (elle/epoch N) from stdlib, not just the current epoch.
-    // Avoids a footgun where bumping CURRENT_EPOCH breaks --wasm=full.
+    // Strip any (elle/epoch N) from stdlib, not just the current epoch, so a
+    // change to CURRENT_EPOCH would not break --wasm=full.
     let (stdlib_body, stripped_epoch) = if STDLIB.starts_with("(elle/epoch") {
         let rest = STDLIB.split_once('\n').map(|(_, r)| r).unwrap_or("");
         (rest, true)
@@ -312,7 +312,7 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<S
     let full_source;
     let stdlib_form_count;
     let compile_source = if with_stdlib {
-        let (fs, count) = build_full_source(source, source_name, &mut compile)?;
+        let (fs, count) = build_full_source(source, source_name, compile)?;
         full_source = fs;
         stdlib_form_count = count;
         full_source.as_str()
@@ -412,8 +412,7 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<S
     let result = emit::emit_module(&lir_module, stubbed, vm.heap_ptr, sym_ptr);
     let t2 = std::time::Instant::now();
 
-    // Dump WASM for analysis. /dev/shm (a tmpfs) rather than /tmp: the latter
-    // is a shared, size-limited filesystem this process must not scribble into.
+    // Dump the module bytes for analysis (WASM_DUMP_PATH says where).
     if crate::config::get().wasm_dump {
         std::fs::write(WASM_DUMP_PATH, &result.wasm_bytes).ok();
     }
