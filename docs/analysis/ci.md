@@ -18,7 +18,7 @@ set when the diff moves only the submodule pointer.
 | Detect Changes | ubuntu | Sets `source` from the changed paths | — |
 | QA | ubuntu | The prose checks, `cargo fmt`, the indexes, the tree's ledgers, then clippy, the macOS cross-check, rustdoc, the Rust doctests | — |
 | Documentation Build | ubuntu | `make docs` and the Elle doc site, minus the publish | — |
-| Default Build Tests | ubuntu | The producer pass, `doctest`, then each other suite pass of the default build and its rig, one step each; `signal-solve` — the signal solver spike ([solver](../impl/solver.md)) | — |
+| Default Build Tests | ubuntu | The producer pass, `doctest`, then each other suite pass of the default build and its rig, one step each; `signal-solve`, the cross-file signal solver ([solver](../impl/solver.md)) | — |
 | No-JIT Build Tests | ubuntu | `smoke-nojit` — the language suite on the interpreter alone | — |
 | Boot Image Tests | ubuntu | `smoke-boot-image` — bytecode parity between the two boots, then the language suite booted from an image | — |
 | Rust Tests | ubuntu | Integration tests, the rig's tests, then property tests, under the `ci` profile | 16 |
@@ -293,8 +293,8 @@ release build without the flag.
 A job that runs `elle test` records every form's verdict in a session DB, with
 stdout, stderr and the rest of each result's assets in the CAS beside it
 ([test-store](../test-store.md)). The runner exists so that a failure is a
-query rather than a log. On a runner you cannot reach, the store has to be
-uploaded or that is exactly what it is not.
+query rather than a log. On a runner you cannot reach, that holds only once
+the store is uploaded.
 
 So each job that records runs points `ELLE_STATE` at a directory in the
 workspace, and uploads the session DB and the CAS beside it as an artifact,
