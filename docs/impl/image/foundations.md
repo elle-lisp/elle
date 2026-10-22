@@ -2,8 +2,8 @@
 
 <!-- audited: 2026-10-21 -->
 
-Five representation fixes the image needs: each pays at runtime today, and each
-deletes image machinery.
+The five representation fixes the image stands on: each pays at runtime, and
+each deletes image machinery.
 
 The image effort does not start with images. Each fix below lands green
 against the existing corpus with no image machinery, and **deletes** image
@@ -17,14 +17,14 @@ we intend to fix anyway.
 
 ## Stable symbol identity — landed
 
-A `SymbolId` used to be a dense per-table index minted in first-intern order —
-a process-local accident. Everything downstream compensated: every code object
+A `SymbolId` used to be a dense per-table index minted in first-intern order,
+a process-local accident. Everything downstream compensated. Every code object
 carried a `symbol_names` map for cross-table remap, `send` re-interned by name,
-`CompileCtx` leaned on a fragile "registration order is deterministic"
-invariant, and — the sharpest edge — immutable structs and sets are *sorted
-arrays* whose order (`TableKey`/`Value` compare symbols by raw id) was
-process-local, so a persisted sorted container was correct only where it was
-built.
+and `CompileCtx` leaned on a fragile "registration order is deterministic"
+invariant. The sharpest edge was the sorted containers. Immutable structs and
+sets are *sorted arrays*, and `TableKey` and `Value` compared symbols by raw id.
+So the order was process-local, and a persisted sorted container was correct
+only where it was built.
 
 A `SymbolId` is now the 64-bit FNV-1a hash of the name, and a name lives in a
 per-instance display memo rather than a process-wide table
@@ -52,26 +52,26 @@ body data, and a struct's key bytes are self-edges of its own region.
 ## Region-native closure templates — landed
 
 `ClosureTemplate` was ~20 `Rc`/`Vec` fields, and `MakeClosure` cloned the whole
-blueprint into the instance region on every closure creation — 13 refcount
-bumps and two Rust-heap allocations apiece, in a `HeapObject` variant whose 288
-bytes set the size of every other variant.
+blueprint into the instance region on every closure creation. Each clone cost
+13 refcount bumps and two Rust-heap allocations, in a `HeapObject` variant
+whose 288 bytes set the size of every other variant.
 
 A code object is now two things
 ([region/template.md](../region/template.md) owns the argument): a
 `CodePayload` holding every field inline in region pages, and a one-word
 region-resident header naming that payload. The emitter writes a compile
-unit's payloads into one code region, so `MakeClosure` copies one word and
-takes one cross-region reference rather than copying a function's bytecode per
-iteration of a loop that builds a closure. Payoff for images: the payload is
-body data — bytecode, constants, name and doc as region strings, masks and
-release tables as inline slices, and source locations as a sorted
-`RegionSlice<LocEntry>` over an interned file table, replacing a
-`HashMap<usize, SourceLoc>` whose `String` file names could not be sealed at
-any price.
+unit's payloads into one code region. So `MakeClosure` copies one word and
+takes one cross-region reference, where a loop that builds a closure would
+otherwise copy a function's bytecode on every iteration. Payoff for images:
+the payload is body data. Bytecode, constants, name and doc are region
+strings, and masks and release tables are inline slices. Source locations are
+a sorted `RegionSlice<LocEntry>` over an interned file table, in place of a
+`HashMap<usize, SourceLoc>` whose `String` file names no image could seal.
 
 The header used to keep an `Rc` to a compile-time blueprint, for four questions
-the payload could not answer: the nested lambdas a `MakeClosure` indexes, the
-LIR the JIT promotes from, the defining syntax, and the SPIR-V cache. The
+the payload could not answer. They were the nested lambdas a `MakeClosure`
+indexes, the LIR the JIT promotes from, the defining syntax, and the SPIR-V
+cache. The
 syntax foundation removed one, the child table another, and the SPIR-V cache
 moved to the VM. The LIR foundation below answered the last from the payload
 and deleted the blueprint.
