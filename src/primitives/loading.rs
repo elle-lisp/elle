@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! FFI library loading, symbol lookup, signature creation, call, and callback primitives.
 //!
 //! docs/ffi.md
@@ -153,7 +153,7 @@ pub(crate) fn prim_ffi_on_unload(
 
 /// Run every registered FFI library teardown (`ffi/on-unload`), in reverse load
 /// order. Explicit-only — the program calls this when it knows teardown is safe
-/// (e.g. after `sys/join`ing workers); it never unloads the libraries.
+/// (for example after `sys/join`ing workers); it never unloads the libraries.
 pub(crate) fn prim_ffi_run_teardowns(
     _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     _args: &[Value],
@@ -367,10 +367,9 @@ primitive!(
             category: "ffi",
             example: "(ffi/call sqrt-ptr sig 2.0)",
             // Fresh, not Mixed: every arg is marshalled BY COPY (CString,
-            // AlignedBuffer — src/ffi/to_c.rs), `:ptr` accepts only
-            // user-managed pointer values (never an Elle heap payload), and
-            // the result is converted from C memory into the call's own
-            // region. No Elle reference survives the call, so an arg clique
+            // AlignedBuffer — src/ffi/to_c.rs). `:ptr` accepts only
+            // user-managed pointer values, never an Elle heap payload. The
+            // result is converted from C memory into the call's own region. No Elle reference survives the call, so an arg clique
             // would keep each heap arg's region alive for nothing.
             effect: RegionEffect::Fresh,
         }
