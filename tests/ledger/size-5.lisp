@@ -110,5 +110,4 @@
 ["tests/integration/pipeline_property/collections.rs" :tokens 3000]
 ["tests/integration/pipeline_property/higher.rs" :tokens 4500]
 ["tests/integration/pipeline/special.rs" :tokens 3500]
-["tests/integration/plugins.rs" :tokens 3000]
 ["tests/integration/pre_commit.rs" :tokens 4500]
