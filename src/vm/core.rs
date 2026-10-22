@@ -109,8 +109,15 @@ pub struct VM {
     /// Call counts by bytecode address; a freed function's count reads as
     /// zero ([`CallCounts`]).
     pub closure_call_counts: CallCounts,
+    /// The buffer `tail_call_inner` and `build_tail_call_env` fill a tail
+    /// callee's environment in before they copy it into the callee's `Rc`. It
+    /// keeps its capacity across calls, and never aliases `env_cache`.
     pub tail_call_env_cache: Vec<Value>,
+    /// The buffer `build_closure_env` fills a callee's environment in before it
+    /// copies it into the callee's `Rc`. It keeps its capacity across calls.
     pub env_cache: Vec<Value>,
+    /// The tail call the dispatch loop just exited with, taken by the
+    /// trampoline that runs the callee. `None` between calls.
     pub(crate) pending_tail_call: Option<TailCallInfo>,
     /// The non-tail call `call_inner` just made, set with the dispatch loop's
     /// exit and taken by `run_dispatch` at once. `None` between calls.
