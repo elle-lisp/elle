@@ -8,7 +8,7 @@ distinct from user-level error handling.
 ## Runtime signals and capability bits
 
 [protocol.md](signals/protocol.md) owns bits 0 to 10 and the user-defined
-range. This document owns bits 11 to 18.
+range. This document owns bits 11 to 19.
 
 ```text
 Signal     Bit   Purpose
@@ -21,6 +21,7 @@ switch     13    VM-internal fiber switch trampoline; no keyword
 :os-signal 16    POSIX signal send/raise capability
 :fs        17    Filesystem access capability
 :net       18    Network access capability
+:ambient   19    Ambient-state capability
 ```
 
 ## Fuel budgets
@@ -111,6 +112,14 @@ the VM can answer, such as `arena/stats`, `arena/allocs` or `vm/config`.
 `:exec` is a capability bit. A subprocess request carries it beside `:io`:
 `:io` routes the request to the scheduler, and `:exec` is the bit a fiber's
 mask or `:deny` names to allow or refuse spawning.
+
+## SIG_AMBIENT
+
+`:ambient` is a capability bit. A primitive carries it when its body reads or
+changes state that no argument carries and no other bit names: the
+environment, the clocks, the VM's configuration and gauges, the standard
+ports. A fiber denied it computes only from what it was handed, and every macro
+expansion withholds it ([capabilities.md](signals/capabilities.md)).
 
 ---
 
