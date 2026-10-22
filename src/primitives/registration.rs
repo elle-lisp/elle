@@ -119,7 +119,7 @@ pub(crate) fn def_by_name(name: &str) -> Option<&'static PrimitiveDef> {
 /// Hash→(spelling, def) index over the same tables `def_by_name` walks.
 ///
 /// The built-in vocabulary is fixed at build time, so its spellings need no
-/// instance memo: a compiler pass holding a primitive binding's `SymbolId` can
+/// instance memo. A compiler pass holding a primitive binding's `SymbolId` can
 /// recover the name it was written with, wherever it runs and with no table in
 /// scope. That is what keeps type inference, narrowing and fusion off the
 /// display path (docs/impl/symbol.md).
@@ -160,10 +160,11 @@ pub(crate) fn def_by_symbol(id: crate::value::SymbolId) -> Option<&'static Primi
 /// (no `HeapObject`, no region), so the id is its whole identity: dense (a
 /// switch key for tier-2 MLIR/GPU lowering) and portable across `send`/`spawn`.
 ///
-/// Seeded with the canonical `ALL_TABLES`+ffi defs so the common primitives get
-/// small, deterministic ids; any other native-fn def (the trait-method handlers
-/// in `traitregistry`, ffi callbacks) is appended on first `prim_id_of` — in a
-/// deterministic startup order, so the ids are stable across runs of one binary.
+/// Seeded with the canonical `ALL_TABLES`+ffi defs, so the common primitives get
+/// small, deterministic ids. Any other native-fn def (the trait-method handlers
+/// in `traitregistry`, ffi callbacks) is appended on first `prim_id_of`. That
+/// happens in a deterministic startup order, so the ids are stable across runs
+/// of one binary.
 /// Keyed by the def's `&'static` address (every table is a `static PRIMITIVES`
 /// item, so addresses are stable across every reference site).
 struct PrimRegistry {
@@ -195,10 +196,10 @@ static PRIM_REGISTRY: std::sync::LazyLock<std::sync::Mutex<PrimRegistry>> =
 ///
 /// A native-fn immediate's whole payload is its `prim_id`, which is the def's
 /// index in the canonical `ALL_TABLES`+`ffi_tables` enumeration. That id is
-/// only meaningful against the exact table that minted it, so consumers that
+/// only meaningful against the exact table that minted it. So consumers that
 /// persist native-fn values (the stdlib disk cache) must mix this identity
-/// into their key: any addition, removal, rename, or reorder of a canonical
-/// primitive changes the hash and invalidates the persisted payload.
+/// into their key. Any addition, removal, rename, or reorder of a canonical
+/// primitive changes the hash, and invalidates the persisted payload.
 pub(crate) fn hash_prim_table_identity<H: std::hash::Hasher>(hasher: &mut H) {
     for table in ALL_TABLES.iter().chain(ffi_tables().iter()) {
         for def in *table {
@@ -216,8 +217,8 @@ fn hash_def_identity<H: std::hash::Hasher>(def: &PrimitiveDef, hasher: &mut H) {
 
 /// The `prim_id` of a primitive definition — how `Value::native_fn` finds the id
 /// to store as the immediate payload. Returns the existing id, or appends the def
-/// and assigns the next one (for defs minted outside the canonical tables, e.g.
-/// trait-method handlers).
+/// and assigns the next one (for defs minted outside the canonical tables, for
+/// example trait-method handlers).
 pub fn prim_id_of(def: &'static PrimitiveDef) -> u32 {
     let mut reg = PRIM_REGISTRY.lock().expect("prim registry poisoned");
     let key = def as *const PrimitiveDef as usize;
