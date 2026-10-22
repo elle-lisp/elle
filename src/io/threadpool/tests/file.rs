@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! The operations a pool worker runs on a file by its path: what each reports for a file, a missing path and a fifo.
 //!
 //! src/io/AGENTS.md

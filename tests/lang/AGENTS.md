@@ -11,3 +11,5 @@ Up: [..](../AGENTS.md)
 ## Directories
 
 - [aws/](aws/AGENTS.md) — (empty)
+- [gun/](gun/AGENTS.md) — (empty)
+- [include/](include/AGENTS.md) — (empty)

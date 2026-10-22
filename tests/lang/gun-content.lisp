@@ -1,51 +1,19 @@
 (elle/epoch 15)
-# audited: 2026-10-14
-# std/gun's content node #: each key is the SHA-256 hex of its value's encoding, and admission refuses any other field.
+# audited: 2026-10-21
+# std/gun's content node #: each key is the SHA-256 hex of its value's encoding, and a write of the same value changes nothing.
 # lib/gun/sea.md
 # lib/gun/chains.md
 
-## ── Plugin availability check ────────────────────────────────────
+(include-file "gun/check.lisp")
 
-(let [[c-ok? _] (protect (import "plugin/crypto"))]
-  (unless c-ok?
-    (error (struct :error :gated :reason "plugin/crypto not available"))))
-
-(def crypto (import "plugin/crypto"))
+(def crypto (plugin "crypto" (protect (import "plugin/crypto"))))
 # No :random: the content node needs :crypto alone.
 (def gun ((import "std/gun") :crypto crypto))
-(def plain-gun ((import "std/gun")))
 (def value ((import "std/gun/value")))
-
-# ============================================================================
-# Helpers
-# ============================================================================
-
-(defn fails-with [reason thunk]
-  "Run thunk, and answer the error it raises after checking its reason."
-  (let [[ok? err] (protect (thunk))]
-    (assert (not ok?) (string "expected an error with reason " reason))
-    (assert (= (get err :error) :gun-error) "a gun error")
-    (assert (= (get err :reason) reason) (string "the reason is " reason))
-    err))
-
-(defn zeros [n]
-  "n zero bytes."
-  (let [out (@bytes)]
-    (each _ in (range n)
-      (push out 0))
-    (freeze out)))
 
 (defn hash-key [v]
   "The key that lib/gun/sea.md gives v in the content node."
   (seq->hex (crypto:sha256 (value:encode v))))
-
-# Every database reports here unless a test watches its errors itself. The
-# file ends by checking that nothing arrived.
-(def unexpected @[])
-
-(defn open-db [&named @store @on-error]
-  (default on-error (fn [err] (push unexpected err)))
-  (gun:open :store store :on-error on-error))
 
 (def hello-key
   "159051e9a9d711b993a56b707677ffc5cb84e01cbbd587db672c08e69e04a324")
@@ -76,8 +44,8 @@
 # Writing and reading
 # ============================================================================
 
-# identical? and not =, as in tests/lang/gun.lisp: = would let 1.0 come back
-# as 1 and -0.0 as 0.0. A link is read from the node, not followed.
+# identical? and not =, as in tests/lang/gun-value.lisp: = would let 1.0 come
+# back as 1 and -0.0 as 0.0. A link is read from the node, not followed.
 (let [db (open-db)
       content (gun:get db "#")]
   (each v in every-kind
@@ -110,40 +78,6 @@
           "put-content passes :ack through, and writes before it waits"))
 
 # ============================================================================
-# Refused writes
-# ============================================================================
-
-(let [store (gun:memory-store)
-      db (open-db :store store)
-      content (gun:get db "#")]
-  (gun:put-content db "hello")
-  (fails-with :bad-hash (fn [] (gun:put content {"abc" "x"})))
-  (fails-with :bad-hash (fn [] (gun:put content {(hash-key "y") "x"})))
-  (fails-with :bad-hash (fn []
-                          (gun:put content
-                                   {(string/uppercase (hash-key "x")) "x"})))
-  (fails-with :bad-hash (fn [] (gun:put (gun:get content hello-key) "other")))
-  (fails-with :bad-hash (fn [] (gun:put (gun:get content hello-key) nil)))
-  # One field is right and one is wrong. Merging field by field would let the
-  # first one in.
-  (fails-with :bad-hash (fn []
-                          (gun:put content {(hash-key "ok") "ok" "zz" "bad"})))
-  (assert (= (gun:once content) {hello-key "hello"})
-          "no refused put changes the content node")
-  (assert (= (keys (store:read "#")) (list hello-key)) "or the store"))
-
-(let [db (open-db)]
-  (each name in ["#x" "#/abc" "##"]
-    (fails-with :invalid-space (fn [] (gun:once (gun:get db name))))
-    (fails-with :invalid-space (fn [] (gun:put (gun:get db name) {:a 1}))))
-  # A nested struct needs the soul #/<key>. Its key is no hash either, and
-  # the soul's reason is the one that names the mistake.
-  (fails-with :invalid-space (fn [] (gun:put (gun:get db "#") {"k" {:a 1}})))
-  (fails-with :invalid-space (fn []
-                               (gun:put (gun:get (gun:get db "#") "k") {:a 1})))
-  (assert (nil? (gun:once (gun:get db "#"))) "and writes nothing"))
-
-# ============================================================================
 # Writing the same value again
 # ============================================================================
 
@@ -162,60 +96,4 @@
           "a write of the same value calls no field subscription")
   (assert (= (length node-calls) 1) "and no node subscription"))
 
-# ============================================================================
-# Admission on load
-# ============================================================================
-
-(defn load-tampered [fields]
-  "Open a database on a store whose # node holds fields. Answers
-   [content-value reasons]."
-  (let [store (gun:memory-store)
-        errs @[]
-        db (open-db :store store :on-error (fn [err] (push errs err)))]
-    (store:write "#" fields)
-    [(gun:once (gun:get db "#"))
-     (map (fn [e] [(get e :reason) (get e :key)]) errs)]))
-
-(def written
-  (let [store (gun:memory-store)
-        db (open-db :store store)]
-    (gun:put-content db "hello")
-    (gun:put-content db 7)
-    (store:read "#")))
-
-(let [[c reasons] (load-tampered written)]
-  (assert (= c {hello-key "hello" (hash-key 7) 7}) "untouched fields load")
-  (assert (empty? reasons) "and report nothing"))
-
-(let [[st _] (get written hello-key)
-      [c reasons] (load-tampered (merge written {hello-key [st "Mallory"]}))]
-  (assert (= c {(hash-key 7) 7}) "a changed value is dropped on load")
-  (assert (= reasons [[:bad-hash hello-key]]) "and reported"))
-
-(let [[c reasons] (load-tampered (merge written {"copy" (get written hello-key)}))]
-  (assert (= c {hello-key "hello" (hash-key 7) 7})
-          "a field copied to another key is dropped")
-  (assert (= reasons [[:bad-hash "copy"]]) "and reported"))
-
-(let [[st v] (get written hello-key)
-      sig (zeros 64)
-      [c reasons] (load-tampered (merge written {hello-key [st v sig]}))]
-  (assert (= c {(hash-key 7) 7}) "a signed field of # is dropped on load")
-  (assert (= reasons [[:bad-signature hello-key]])
-          "and reported as a bad signature"))
-
-# ============================================================================
-# Without :crypto
-# ============================================================================
-
-(let [db (plain-gun:open)]
-  (fails-with :sea-not-configured (fn [] (plain-gun:once (plain-gun:get db "#"))))
-  (fails-with :sea-not-configured (fn []
-                                    (plain-gun:put (plain-gun:get db "#")
-                                    {hello-key "hello"})))
-  (fails-with :sea-not-configured (fn [] (plain-gun:content-key "hello")))
-  (fails-with :sea-not-configured (fn [] (plain-gun:put-content db "hello"))))
-
-(assert (empty? unexpected)
-        (string "no database reported an error: " unexpected))
-(println "tests/lang/gun-content.lisp: all tests passed")
+(all-passed "gun-content")

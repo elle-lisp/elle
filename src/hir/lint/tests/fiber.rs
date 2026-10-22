@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! The two hints a literal `fiber/new` gets: a call its deny set will deny, and a signal that will pass its mask.
 //!
 //! docs/signals/capabilities.md

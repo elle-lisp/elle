@@ -1,5 +1,5 @@
-//! audited: 2026-10-14
-//! Operations on a file by its path through the backend: the value each answers, and the error that names the path.
+//! audited: 2026-10-21
+//! File operations by path through the backend: the id each completes under, its answer, and the error that names the path.
 //!
 //! src/io/AGENTS.md
 
@@ -21,17 +21,27 @@ fn text(v: Value) -> String {
 }
 
 /// Submit `op`, wait for its one completion, and answer what it held: the
-/// value, or the error's `:path` and its printed form.
+/// value, or the error's `:path` and its printed form. The submission files one
+/// pending entry under the id it answers, and the completion consumes it.
 fn run(op: FileOp) -> Result<Answer, (Option<String>, String)> {
     let backend = AsyncBackend::new().unwrap();
     let req = IoRequest::unbounded(IoOp::File(op), Value::NIL);
     let id = backend
         .submit(&req, crate::io::pending::Submitter::for_test())
         .unwrap();
+    assert_eq!(
+        backend.pending_ids(),
+        vec![id],
+        "one pending entry, under the id"
+    );
     let mut completions = backend.wait(PATIENCE).unwrap();
     assert_eq!(completions.len(), 1, "one operation, one completion");
     let c = completions.pop().unwrap();
     assert_eq!(c.id, id);
+    assert!(
+        backend.pending_ids().is_empty(),
+        "the completion consumed it"
+    );
     let out = match &c.result {
         Ok(v) if v.is_nil() => Ok(Answer::Nil),
         Ok(v) if *v == Value::TRUE => Ok(Answer::True),
@@ -144,6 +154,15 @@ fn a_read_of_bytes_that_are_not_utf8_is_an_io_error() {
         let (named, msg) = run(FileOp::Read { path: path.clone() }).expect_err("not text");
         assert_eq!(named.as_deref(), Some(path.as_str()));
         assert!(msg.contains("io-error"), "an :io-error: {msg}");
+        std::fs::remove_file(&path).ok();
+    });
+}
+
+#[test]
+fn a_sync_answers_nil() {
+    crate::value::arena::with_test_region(|| {
+        let path = write_temp_file("sync me");
+        assert_eq!(run(FileOp::Sync { path: path.clone() }), Ok(Answer::Nil));
         std::fs::remove_file(&path).ok();
     });
 }

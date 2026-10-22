@@ -1,73 +1,19 @@
 (elle/epoch 15)
-# audited: 2026-10-14
+# audited: 2026-10-21
 # std/gun keepers over loopback: :peers dials and redials with backoff, resync after a drop, and gun:close.
 # lib/gun/mesh.md
-# lib/gun.md
-#
-# Timing checks are lower bounds, or deadlines far below the wait that a
-# broken rule would hit, so a slow machine passes and a broken rule fails.
 
-## ── Plugin availability check ────────────────────────────────────
+(include-file "gun/check.lisp")
+(include-file "gun/loopback.lisp")
 
-(let [[h-ok? _] (protect (import "plugin/hash"))
-      [r-ok? _] (protect (import "plugin/random"))]
-  (unless (and h-ok? r-ok?)
-    (error (struct :error :gated
-                   :reason "plugin/hash or plugin/random not available"))))
-
-(def ws
-  ((import "std/websocket") :hash (import "plugin/hash")
-                            :random (import "plugin/random")))
+(def hash-plugin (plugin "hash" (protect (import "plugin/hash"))))
+(def random (plugin "random" (protect (import "plugin/random"))))
+(def ws ((import "std/websocket") :hash hash-plugin :random random))
 (def gun ((import "std/gun") :websocket ws))
 
 # ============================================================================
 # Helpers
 # ============================================================================
-
-(defn fails-with [reason thunk]
-  "Run thunk, and answer the error it raises after checking its reason."
-  (let [[ok? err] (protect (thunk))]
-    (assert (not ok?) (string "expected an error with reason " reason))
-    (assert (= (get err :error) :gun-error) "a gun error")
-    (assert (= (get err :reason) reason) (string "the reason is " reason))
-    err))
-
-(defn within [seconds what thunk]
-  "Run thunk, and fail unless it ends within seconds."
-  (assert (ev/timeout seconds
-                      (fn []
-                        (thunk)
-                        true)) what))
-
-(defn until [thunk]
-  "Poll thunk until it answers true."
-  (while (not (thunk)) (ev/sleep 0.02)))
-
-(defn eventually [what thunk]
-  "Poll thunk until it answers true, for 10 seconds at most."
-  (within 10 what (fn [] (until thunk))))
-
-# Every database reports here unless a test watches its errors itself. The
-# file ends by checking that nothing arrived.
-(def unexpected @[])
-
-(defn open-db [&named @peers @redial @on-error]
-  (default on-error (fn [err] (push unexpected err)))
-  (gun:open :peers peers :redial redial :on-error on-error))
-
-(defn listen [&opt port]
-  "A loopback listener on port, or on a free port, and the ws:// URL that
-   reaches it. Answers [listener url port]."
-  (let [listener (tcp/listen "127.0.0.1" (or port 0))
-        at (port/path listener)
-        p (parse-int (slice at (+ 1 (string/find at ":"))))]
-    [listener (string "ws://127.0.0.1:" p "/gun") p]))
-
-(defn serve-on [db listener]
-  "Serve db on listener in a fiber of its own. Answers a function that
-   closes the listener."
-  (ev/spawn (fn [] (gun:serve db listener)))
-  (fn [] (port/close listener)))
 
 (defn db-id [db]
   (get (get db :core) :id))
@@ -82,36 +28,6 @@
    would."
   (each p in (values (get (get db :core) :peers))
     (p:close)))
-
-# ── Peers by hand ───────────────────────────────────────────────────────────
-
-(defn raw-send [conn msg]
-  (ws:send conn (json/serialize msg)))
-
-(defn raw-recv [conn]
-  "The next message on conn, parsed, or nil when the connection closed."
-  (let [m (ws:recv conn)]
-    (unless (= m:type :close) (json/parse (string m:data)))))
-
-(defn raw-server []
-  "A peer by hand that serves: it answers each hi, answers each get with no
-   nodes, and counts the hellos it heard."
-  (let [[listener url _] (listen)
-        hellos (box 0)]
-    (ev/spawn (fn []
-                (ws:serve listener
-                          (fn [conn]
-                            (raw-recv conn)
-                            (rebox hellos (+ 1 (unbox hellos)))
-                            (raw-send conn {"hi" "raw-server"})
-                            (forever
-                              (let [msg (raw-recv conn)]
-                                (when (nil? msg) (break nil))
-                                (when (get msg "get")
-                                  (raw-send conn {"ack" (get msg "id") "put" {}}))))))))
-    {:url url
-     :hellos (fn [] (unbox hellos))
-     :close (fn [] (port/close listener))}))
 
 # ============================================================================
 # Joining, a drop, and convergence
@@ -249,6 +165,4 @@
 (reset)
 (closing)
 
-(assert (empty? unexpected)
-        (string "no database reported an error: " unexpected))
-(println "tests/lang/gun-redial.lisp: all tests passed")
+(all-passed "gun-redial")

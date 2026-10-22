@@ -1,6 +1,7 @@
-// audited: 2026-10-14
-// src/io/AGENTS.md
+// audited: 2026-10-21
 // Unit tests for the thread-pool backend, one module per concern.
+//
+// src/io/AGENTS.md
 //
 //   - `hub`:      CompletionHub in_flight accounting (the one-channel invariant)
 //   - `net`:      what a connect makes of a refusal, and the platform

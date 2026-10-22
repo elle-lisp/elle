@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! Opening a file on a pool worker: the descriptor it reports, and the bound on a fifo nobody reads.
 //!
 //! src/io/AGENTS.md

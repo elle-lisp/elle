@@ -1,22 +1,17 @@
-(elle/epoch 14)
-# audited: 2026-10-12
+(elle/epoch 15)
+# audited: 2026-10-21
 # std/gun's peer messages: each kind round-trips as JSON, a link stays a link, and a bad message is refused.
 # lib/gun/mesh.md
 # lib/gun/sea.md
 
+(include-file "gun/check.lisp")
+
+(def gun ((import "std/gun")))
 (def state ((import "std/gun/state")))
 (def value ((import "std/gun/value")))
 (def ham ((import "std/gun/ham") :state state :value value))
 (def graph ((import "std/gun/graph") :state state :value value :ham ham))
 (def wire ((import "std/gun/wire") :value value :graph graph))
-
-(defn fails-with [reason thunk]
-  "Run thunk, and answer the error it raises after checking its reason."
-  (let [[ok? err] (protect (thunk))]
-    (assert (not ok?) (string "expected an error with reason " reason))
-    (assert (= (get err :error) :gun-error) "a gun error")
-    (assert (= (get err :reason) reason) (string "the reason is " reason))
-    err))
 
 (let [g {"users/alice" {"name" [7 "Alice"]
                         "boss" [7 (value:link "bob")]
@@ -71,4 +66,4 @@
                "{\"hi\":7}"]
   (fails-with :bad-message (fn [] (wire:decode text))))
 
-(println "tests/lang/gun-wire.lisp: all tests passed")
+(all-passed "gun-wire")

@@ -1,4 +1,4 @@
-//! audited: 2026-10-14
+//! audited: 2026-10-21
 //! The submission frame — what every operation the backend issues shares.
 //!
 //! A submission mints an id, hands the operation to io_uring or to a
@@ -9,12 +9,13 @@
 //! is checked here rather than trusted to the shared frame.
 //!
 //! `PendingOp::Port` (stream I/O, accept, datagram, shutdown) takes its own
-//! route through `submit`; `backend.rs` and `net.rs` pin that one.
+//! route through `submit`; `backend.rs` and `net.rs` pin that one. Each
+//! operation on a file by its path is pinned in `pathops.rs`.
 //!
 //! src/io/AGENTS.md
 
 use super::*;
-use crate::io::request::{FileKind, FileOp, SpawnRequest, StdioDisposition, TaskFn};
+use crate::io::request::{FileKind, SpawnRequest, StdioDisposition, TaskFn};
 
 /// Submit `req` and assert the backend filed exactly one new pending entry,
 /// keyed by the id `submit` returned.
@@ -155,46 +156,6 @@ fn an_open_completes_under_the_id_it_was_submitted_with() {
         completion.discard();
 
         std::fs::remove_file(&path).ok();
-    });
-}
-
-#[test]
-fn a_sync_completes_under_the_id_it_was_submitted_with() {
-    crate::value::arena::with_test_region(|| {
-        let backend = AsyncBackend::new().unwrap();
-        let path = write_temp_file("sync me");
-        let req = IoRequest::unbounded(IoOp::File(FileOp::Sync { path: path.clone() }), Value::NIL);
-        let id = submit_pending(&backend, &req, "sync");
-        let completion = expect_completion(&backend, id, "sync");
-        assert!(
-            completion.result.as_ref().is_ok_and(|v| v.is_nil()),
-            "sync: a file syncs, and the answer is nil"
-        );
-        completion.discard();
-
-        std::fs::remove_file(&path).ok();
-    });
-}
-
-/// A sync whose syscall failed answers an `:io-error` that names its path.
-#[test]
-fn a_failed_sync_names_its_path() {
-    crate::value::arena::with_test_region(|| {
-        let backend = AsyncBackend::new().unwrap();
-        let path = format!("{}/missing", temp_path("sync-no-such-dir"));
-        let req = IoRequest::unbounded(IoOp::File(FileOp::Sync { path: path.clone() }), Value::NIL);
-        let id = submit_pending(&backend, &req, "sync");
-        let completion = expect_completion(&backend, id, "sync");
-        let err = *completion
-            .result
-            .as_ref()
-            .expect_err("sync: a missing path fails");
-        let msg = format!("{}", err);
-        completion.discard();
-        assert!(
-            msg.contains("io-error") && msg.contains(&path),
-            "sync: the error is an :io-error that names the path: {msg}"
-        );
     });
 }
 

@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-14
+# audited: 2026-10-21
 # A thread inherits the capabilities the fiber that spawned it withholds, so a sandboxed fiber cannot escape by spawning.
 # docs/signals/capabilities.md
 #

@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-14
+# audited: 2026-10-21
 # The file/ calls that move contents run on the I/O pool: other fibers run while one waits, and each needs :fs and :io.
-# docs/io.md
+# docs/io/files.md
 #
 # Each call below waits about 0.3 s for the other end of a fifo, which a shell
 # opens late. The trap: a call that ran on the scheduler's thread would block

@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-14
+# audited: 2026-10-21
 # file/sync: a file, a directory, a missing path, a fifo, and the :fs capability it needs.
-# docs/io.md
+# docs/io/files.md
 
 (defn fails-with [kind thunk]
   "Run thunk, and answer the error it raises after checking its kind."
