@@ -11,14 +11,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use crate::common::ScratchDir;
-
-/// Write `body` at `rel` under `root`, creating its directories.
-fn write(root: &Path, rel: &str, body: &str) {
-    let path = root.join(rel);
-    std::fs::create_dir_all(path.parent().expect("has a parent")).expect("create fixture dir");
-    std::fs::write(&path, body).expect("write fixture file");
-}
+use crate::common::{write_fixture, ScratchDir};
 
 /// Run git in `dir` with a configuration of its own, so the user's hooks,
 /// signing and identity never reach the fixture.
@@ -71,13 +64,13 @@ fn a_directory_whose_name_starts_with_a_dot_is_left_out() {
     // Counter-factual: a walk that drops `.git` alone lists `.cache`, a tool's
     // directory, and writes an index inside it.
     let t = ScratchDir::new("agents-dot-dir");
-    write(t.path(), "docs/one.md", "# One\n\nThe first subject.\n");
-    write(
+    write_fixture(t.path(), "docs/one.md", "# One\n\nThe first subject.\n");
+    write_fixture(
         t.path(),
         "docs/.cache/rules.md",
         "# Rules\n\nA tool's own notes.\n",
     );
-    write(
+    write_fixture(
         t.path(),
         "docs/sub/two.md",
         "# Two\n\nThe second subject.\n",
@@ -106,20 +99,20 @@ fn an_untracked_document_never_reaches_an_index() {
     // and the hook would commit an index that lists it.
     let t = ScratchDir::new("agents-untracked");
     git(t.path(), &["init", "-q"]);
-    write(t.path(), ".gitignore", "notes.md\n");
-    write(t.path(), "docs/one.md", "# One\n\nThe first subject.\n");
+    write_fixture(t.path(), ".gitignore", "notes.md\n");
+    write_fixture(t.path(), "docs/one.md", "# One\n\nThe first subject.\n");
     git(t.path(), &["add", ".gitignore", "docs/one.md"]);
-    write(
+    write_fixture(
         t.path(),
         "docs/notes.md",
         "# Notes\n\nAn ignored scratch note.\n",
     );
-    write(
+    write_fixture(
         t.path(),
         "docs/draft.md",
         "# Draft\n\nA document nobody added yet.\n",
     );
-    write(
+    write_fixture(
         t.path(),
         "docs/scratch/plan.md",
         "# Plan\n\nA directory nobody added yet.\n",
@@ -150,8 +143,8 @@ fn a_tracked_document_gone_from_disk_is_not_listed() {
     // document the working tree has deleted, and links to nothing.
     let t = ScratchDir::new("agents-deleted");
     git(t.path(), &["init", "-q"]);
-    write(t.path(), "docs/one.md", "# One\n\nThe first subject.\n");
-    write(t.path(), "docs/two.md", "# Two\n\nThe second subject.\n");
+    write_fixture(t.path(), "docs/one.md", "# One\n\nThe first subject.\n");
+    write_fixture(t.path(), "docs/two.md", "# Two\n\nThe second subject.\n");
     git(t.path(), &["add", "docs"]);
     std::fs::remove_file(t.join("docs/two.md")).expect("delete a tracked document");
 
@@ -175,7 +168,7 @@ fn a_root_below_another_repository_reads_every_file() {
     let t = ScratchDir::new("agents-nested-root");
     git(t.path(), &["init", "-q"]);
     let root = t.join("fixture");
-    write(&root, "docs/one.md", "# One\n\nThe first subject.\n");
+    write_fixture(&root, "docs/one.md", "# One\n\nThe first subject.\n");
 
     let index = index(&root, "docs");
     assert!(
