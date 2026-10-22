@@ -63,14 +63,13 @@ impl VM {
     /// would be freed under its reader).
     ///
     /// Test-only. The VM error/result chokepoint ([`escaping_error`],
-    /// [`set_error`], [`error_extra`], [`escaping_match_fail`]) builds through an
+    /// [`set_error`], [`escaping_match_fail`]) builds through an
     /// `Alloc::new(self.heap())`, which mints+owns exactly such a fresh region
     /// and exposes the `ctx.*` allocation surface. This bare mint exists only
     /// for the pin tests that assert the contract.
     ///
     /// [`escaping_error`]: Self::escaping_error
     /// [`set_error`]: Self::set_error
-    /// [`error_extra`]: Self::error_extra
     /// [`escaping_match_fail`]: Self::escaping_match_fail
     #[cfg(test)]
     pub(crate) fn result_region(&mut self) -> crate::hir::region::RuntimeRegion {
@@ -92,8 +91,9 @@ impl VM {
     /// so `rich_error!` is uniform over `ctx` and `self`. The `extra` field
     /// values must be born in the same region: immediates (keywords/ints) or
     /// pass-throughs (incref'd by `alloc`'s content scan). A VM site has no
-    /// `string` of its own to misplace. Its callers are a tier's refusal and an
-    /// expansion's refusal of an ambient primitive.
+    /// `string` of its own to misplace. Its caller is a tier's refusal, so a
+    /// build with no optional tier has none.
+    #[cfg(any(feature = "jit", feature = "wasm", feature = "mlir"))]
     pub(crate) fn error_extra(
         &mut self,
         kind: &str,
