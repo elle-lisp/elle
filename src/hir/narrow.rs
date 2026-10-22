@@ -5,6 +5,10 @@
 //! `repropagate_signals` then recomputes parent signals bottom-up, so a
 //! narrowed leaf reaches its ancestors.
 //!
+//! A row names a primitive, so it applies only where the callee's binding is
+//! the one the runtime supplies. A function the program defines under the same
+//! name keeps the signal its body gives it.
+//!
 //! docs/impl/typeinfer.md
 
 use super::arena::BindingArena;
