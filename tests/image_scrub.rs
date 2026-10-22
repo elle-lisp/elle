@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-10-22
 //! A hydrated region under `--trace=scrub`: the diagnostic leaves the image's
 //! values alone, and parks none of its pages in the cache.
 //!
@@ -45,7 +45,7 @@ fn build_graph(heap: &mut FiberHeap, region: elle::hir::region::RuntimeRegion) -
     heap.alloc_in_region(HeapObject::Pair(Pair::new(Value::int(1), arr)), region)
 }
 
-// § Test plan, "Diagnostics": under `--trace=scrub` a hydrated image answers
+// Diagnostics: under `--trace=scrub` a hydrated image answers
 // exactly as it does without the flag, and its pages are unmapped on release
 // rather than blanked into the cache.
 //

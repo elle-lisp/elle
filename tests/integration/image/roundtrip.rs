@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-10-22
 // What comes back out of an image: the same graph, the same sharing, the same
 // bytes on a second dump.
 // docs/impl/image/plan.md
@@ -7,7 +7,7 @@ use super::*;
 use elle::image::{self, ImageError};
 use elle::value::heap::deref;
 
-// § Test plan, "Round-trip": dump a data graph, hydrate in a fresh heap,
+// Round-trip: dump a data graph, hydrate in a fresh heap,
 // assert structural equality. The fresh heap is what a fresh process would
 // hold: nothing in it predates the hydration, so equality can only come from
 // the mapped pages and the relocation pass.
@@ -24,7 +24,7 @@ fn data_graph_round_trips_through_dump_and_hydrate() {
     assert_eq!(root, hydrated.root, "hydrated graph differs from source");
 }
 
-// Sharing is preserved (§ Dumping: the visited map keys on payload address,
+// Sharing is preserved (docs/impl/image.md: the visited map keys on payload address,
 // "cycles and sharing preserved — unlike `send`"). The counter-factual: a
 // per-edge copier would round-trip to a structurally equal graph and pass
 // the test above while silently doubling every shared subgraph.
@@ -61,7 +61,13 @@ fn immediate_root_round_trips() {
     let path = dir.join("imm.image");
 
     let mut src = FiberHeap::new();
-    image::dump(&mut src, &SymbolTable::new(), Value::keyword("just-me"), &path).expect("dump");
+    image::dump(
+        &mut src,
+        &SymbolTable::new(),
+        Value::keyword("just-me"),
+        &path,
+    )
+    .expect("dump");
     let mut dst = FiberHeap::new();
     let hydrated = image::hydrate_path(&mut dst, &mut SymbolTable::new(), &path).expect("hydrate");
     assert_eq!(hydrated.root, Value::keyword("just-me"));
@@ -69,7 +75,7 @@ fn immediate_root_round_trips() {
 
 // ── Fingerprint fallback ────────────────────────────────────────────
 
-// § Test plan, "Round-trip": a load with a corrupted fingerprint falls back
+// Round-trip: a load with a corrupted fingerprint falls back
 // cleanly — a typed error, no region minted, no mapping left behind.
 #[test]
 fn corrupted_fingerprint_falls_back_cleanly() {
@@ -115,7 +121,7 @@ fn garbage_file_is_rejected() {
     }
 }
 
-// § Fingerprint: the layout probes participate in the fingerprint, so a
+// docs/impl/image/format.md: the layout probes participate in the fingerprint, so a
 // binary whose `HeapObject` layout shifted rejects the image instead of
 // hydrating garbage. The keys are on the list for the same reason: a struct
 // entry is body bytes, and `TableKey` is a `repr(Rust)` enum whose payload
@@ -136,7 +142,7 @@ fn fingerprint_records_variant_layouts() {
 
 // ── Relocation independence ─────────────────────────────────────────
 
-// § Test plan, "Relocation": hydrate the same image twice in one process —
+// Relocation: hydrate the same image twice in one process —
 // two regions, two address sets — and assert both hydrations are correct
 // and independent (freeing the first leaves the second intact).
 #[test]
@@ -148,8 +154,10 @@ fn double_hydration_is_correct_and_independent() {
     let root = dump_graph(&mut src, &path);
 
     let mut dst = FiberHeap::new();
-    let first = image::hydrate_path(&mut dst, &mut SymbolTable::new(), &path).expect("first hydrate");
-    let second = image::hydrate_path(&mut dst, &mut SymbolTable::new(), &path).expect("second hydrate");
+    let first =
+        image::hydrate_path(&mut dst, &mut SymbolTable::new(), &path).expect("first hydrate");
+    let second =
+        image::hydrate_path(&mut dst, &mut SymbolTable::new(), &path).expect("second hydrate");
     assert_ne!(
         first.root.as_heap_ptr(),
         second.root.as_heap_ptr(),
@@ -167,14 +175,14 @@ fn double_hydration_is_correct_and_independent() {
 
 // ── Determinism ─────────────────────────────────────────────────────
 
-// § Test plan, "Determinism" / § Dumping: two dumps of the same graph are
+// Determinism (docs/impl/image.md): two dumps of the same graph are
 // byte-identical whole files. The counter-factual is the stack painting:
 // the dumper's scratch objects are `repr(Rust)` enum copies whose padding
 // comes from their construction temporaries, so a dumper that copies slot
 // bytes wholesale writes whatever the stack held into the file — painting
 // the stack differently before each dump forced ~700 differing bytes.
 // Only a dumper that assembles slots from the probed field extents
-// (docs/impl/image/measurements.md item 6) keeps the files identical.
+// (docs/impl/image/measurements.md) keeps the files identical.
 #[test]
 fn dump_is_byte_deterministic_whole_file() {
     let dir = crate::common::ScratchDir::new("image-determinism");

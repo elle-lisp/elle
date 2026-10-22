@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-10-22
 // How a hydrated region behaves as memory: the pool, teardown, and the
 // kernel's rule for a file offset.
 // docs/impl/image/plan.md
@@ -6,7 +6,7 @@
 use super::*;
 use elle::image;
 
-// § Test plan, "Mapping": release a file-backed page and assert the pool
+// Mapping: release a file-backed page and assert the pool
 // unmapped it rather than caching it. Per-heap byte accounting is the
 // race-free observable: `allocated_bytes` counts region pages AND cached
 // pages, so if the freed hydrated pages were cached the count would not
@@ -34,7 +34,7 @@ fn hydrated_pages_release_by_munmap_not_cache() {
     );
 }
 
-// § Test plan, "Hygiene": hydrate, free, and the heap returns to its
+// Hygiene: hydrate, free, and the heap returns to its
 // baseline — no image-specific carve-out in the region accounting.
 #[test]
 fn hydration_teardown_returns_to_baseline() {
@@ -57,7 +57,7 @@ fn hydration_teardown_returns_to_baseline() {
     assert_eq!(dst.visible_len(), objs_before);
 }
 
-// § Hydration: "Never rewrite an image file in place" — the atomic
+// Never rewrite an image file in place (docs/impl/image.md): the atomic
 // temp-and-rename discipline keeps a mapped old inode stable while a new
 // file replaces the path. Pin the read side: replace the file by rename
 // while a hydration is live, then read the hydrated values.
