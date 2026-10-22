@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! Signal type for tracking which signals a function may emit.
 //!
 //! docs/signals/protocol.md
@@ -14,8 +14,8 @@
 //! `Signal` (this module) is a **compile-time** type used during HIR analysis
 //! and LIR lowering. Its `propagates` field is a bitmask of parameter indices
 //! whose signals flow through the function — this is needed to infer the signal
-//! of a call site based on its arguments. `SignalBits` (in `value/fiber/signalbits.rs`) is
-//! the **runtime** representation: a flat bitmask stored on closures and used by
+//! of a call site based on its arguments. `SignalBits` (in
+//! src/value/fiber/signalbits.rs) is the **runtime** representation: a flat bitmask stored on closures and used by
 //! the VM and JIT for dispatch. These are intentionally separate types serving
 //! different phases. The `propagates` field has no runtime analogue. Do not
 //! attempt to unify them.
@@ -147,7 +147,7 @@ pub const SIG_PAUSE: SignalBits = SIG_FUEL;
 /// - `:error` and `:halt` are the escapes every boundary lets out, so a signal
 ///   carrying either passes whole.
 /// - A signal carrying a pause bit is the VM's pause, raised under whatever
-///   code was running, so it passes whole too: a dynamic breakpoint's
+///   code was running, so it passes whole too. A dynamic breakpoint's
 ///   `|:debug :fuel|` must reach the debugger through a squelch of `:debug`.
 /// - `:switch`, matched exactly, is the VM's fiber-switch trampoline. The exact
 ///   match keeps a user signal that merely rides alongside enforceable.
@@ -228,9 +228,9 @@ impl Signal {
     /// Can this function park on the suspend route — the route
     /// [`dispatch::is_suspending`] answers at run time, of which this is the
     /// static face? It is asked of an inferred signal whose bits are a UNION
-    /// of possible raises: any bit outside `:error` and `:halt` can take that
-    /// route, so a compound like `:io`+`:error` answers true where the runtime
-    /// predicate classifies one concrete raise at a time. An error and a halt
+    /// of possible raises, and any bit outside `:error` and `:halt` can take
+    /// that route. So a compound like `:io`+`:error` answers true, where the
+    /// runtime predicate classifies one concrete raise at a time. An error and a halt
     /// leave by exits of their own. The error exit parks the frame as well
     /// (docs/impl/region/park.md), but it is not the route this predicate
     /// asks about. `SIG_FFI` marks a foreign call, not a raise, and never
