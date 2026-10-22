@@ -1,15 +1,15 @@
 // audited: 2026-10-22
 //! Per-instance trait registry: default traitsets stamped at allocation.
+//!
 //! docs/traits.md
 //!
-//! Each collection/sequence HeapTag has a default traitset, an immutable
-//! struct. The tables are **instance state** living on the `FiberHeap`
-//! (docs/impl/region/ctx.md: nothing correctness-bearing is thread-centric),
-//! so two embedded instances on one thread each carry their own and never
-//! cross-reference. The trait-method natives themselves are static
-//! `&'static PrimitiveDef` immediates — process-global and correctly shared,
-//! like every other primitive. Constructors read the heap's registry entry and
-//! stamp it into the new object's `traits` field.
+//! Each collection/sequence HeapTag has a default traitset, an immutable struct.
+//! The tables are **instance state** living on the `FiberHeap`, because nothing
+//! correctness-bearing is thread-centric. So two embedded instances on one
+//! thread each carry their own and never cross-reference. The trait-method
+//! natives themselves are static `&'static PrimitiveDef` immediates — process-
+//! global and correctly shared, like every other primitive. Constructors read
+//! the heap's registry entry and stamp it into the new object's `traits` field.
 
 use std::collections::BTreeMap;
 
@@ -22,8 +22,8 @@ use crate::value::Value;
 mod methods;
 use methods::*;
 
-/// One slot per tag through CaptureCell (28). ClosureTemplate (29) carries no
-/// traits, and a read past the table answers NIL.
+/// Length of the per-tag table: every tag up to `CaptureCell` (28). A tag past
+/// it, `ClosureTemplate`, reads as nil through `FiberHeap::default_traits_for`.
 const NUM_TAGS: usize = 29;
 
 /// Return the default traitset for a given HeapTag on `heap`. Returns
@@ -162,10 +162,10 @@ pub fn dispatch_trait_method(
 }
 
 /// Call a resolved trait method (NativeFn or Closure). `ctx` is the calling
-/// native's capability — its `alloc_region` is the outer call's result slot, so
-/// the native-fn branch runs the method against it (a fresh result then lands in
-/// the region `dispatch_native_call` reclaims); the closure branch re-enters the
-/// driving VM through it.
+/// native's capability, and its `alloc_region` is the outer call's result slot.
+/// So the native-fn branch runs the method against it, and a fresh result then
+/// lands in the region `dispatch_native_call` reclaims. The closure branch
+/// re-enters the driving VM through it.
 fn call_method_fn(
     method_fn: &Value,
     protocol: &str,
@@ -175,14 +175,14 @@ fn call_method_fn(
 ) -> (SignalBits, Value) {
     // NativeFn — call directly, against the OUTER call's own `ctx`. A trait
     // method resolved here is the body of an outer native (`first`/`rest`/`nth`,
-    // `length`, …) that already holds a compiler-assigned result slot; running
+    // `length`, …) that already holds a compiler-assigned result slot. Running
     // the method against that same `ctx` lands its fresh result in the outer
-    // call's `alloc_region`, so `dispatch_native_call` recognises it as fresh and
-    // the consumer's `DecrefValueRegion` reclaims it. Minting a SEPARATE
-    // `boundary` region here instead stranded a genuinely-fresh result — the
-    // tail-copy slice of `(rest [array])` — in a region distinct from
-    // `alloc_region`, which `dispatch_native_call` then mis-read as a pass-through
-    // and over-retained, leaking that region (pinned bounded by
+    // call's `alloc_region`. So `dispatch_native_call` recognizes it as fresh, and
+    // the consumer's `DecrefValueRegion` reclaims it. A SEPARATE `boundary`
+    // region minted here would strand a genuinely-fresh result, the tail-copy
+    // slice of `(rest [array])`, in a region distinct from `alloc_region`.
+    // `dispatch_native_call` would mis-read it as a pass-through and over-retain
+    // it, leaking that region (pinned bounded by
     // `runtime::tests::ownership::region_native_trait_dispatch_fresh_result_reclaims`).
     // A borrowed-element method (`first`/`nth`) allocates nothing, so its result
     // still lives in the arg's region and is correctly pass-through-retained.
