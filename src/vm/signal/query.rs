@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! `SIG_QUERY` dispatch: the questions a primitive asks the running VM.
 //!
 //! docs/runtime.md
@@ -41,9 +41,9 @@ impl VM {
     ///
     /// Every operation here READS its argument or copies it out; none retains it
     /// past the call. `vm/query` declares `RegionEffect::Opaque` on the strength of
-    /// that (docs/impl/region/effects.md), so an operation added here
-    /// that retains its argument must move the declaration back to `Mixed` — the
-    /// arg clique is what covers an uncounted store, and `Opaque` withdraws it
+    /// that (docs/impl/region/effects.md). So an operation added here that retains
+    /// its argument must move the declaration back to `Mixed`. The arg clique is
+    /// what covers an uncounted store, and `Opaque` withdraws it
     /// (`tests/impl/region-query-clique-leak.lisp`).
     pub(crate) fn dispatch_query(
         &mut self,
@@ -319,19 +319,18 @@ impl VM {
             // The process-global JIT code-address registry, rendered as one `0x<addr>
             // <name>` line per compiled function. Read beside a native thread
             // photograph, whose JIT frames are otherwise unattributable `???` addresses
-            // (docs/impl/jit.md). Empty string when nothing compiled.
+            // (docs/impl/jit-map.md). Empty string when nothing compiled.
             #[cfg(feature = "jit")]
             "jit/map" => (SIG_OK, ctx.string(crate::jit::registry::render())),
             #[cfg(not(feature = "jit"))]
             "jit/map" => (SIG_OK, ctx.string(String::new())),
             // A window of instruction words around a JIT address, for the
-            // reader of a thread photograph: the map names the function a
-            // sampled `???` frame belongs to, and this shows the bytes its
-            // PC is parked on plus their neighborhood — enough to carry a
-            // LoadExtName call-target literal.
-            // Nil for a malformed address, one outside every
-            // registered block, or one whose pages are no longer resident
-            // (docs/impl/jit.md).
+            // reader of a thread photograph. The map names the function a
+            // sampled `???` frame belongs to. This shows the bytes its PC is
+            // parked on plus their neighborhood, enough to carry a LoadExtName
+            // call-target literal. Nil for a malformed address, one outside
+            // every registered block, or one whose pages are no longer
+            // resident (docs/impl/jit-map.md).
             #[cfg(feature = "jit")]
             "jit/peek" => {
                 let parsed = arg
