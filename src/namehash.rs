@@ -1,17 +1,16 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! The 64-bit name hash that gives symbols and keywords their identity.
 //!
 //! docs/impl/symbol.md
 //!
-//! Both are immediates in the 16-byte `Value`: the payload holds this hash, so
-//! equality is `u64 == u64` — no string compare, no heap deref — and the same
-//! name yields the same payload in every table, thread, process, and build.
+//! Both are immediates in the 16-byte `Value`, and the payload holds this hash.
+//! So equality is `u64 == u64`, with no string compare and no heap deref. The
+//! same name yields the same payload in every table, thread, process, and build.
 //! Symbols reach it through [`crate::symbol`], keywords through
 //! [`crate::value::keyword`].
 //!
 //! Two different names on one hash is a fatal, unrecoverable condition: both
-//! registries panic rather than merge the names. See
-//! [docs/impl/symbol.md](../../docs/impl/symbol.md) § "Collisions are fatal".
+//! registries panic rather than merge the names (docs/impl/symbol.md).
 
 const FNV_OFFSET: u64 = 0xcbf29ce484222325;
 const FNV_PRIME: u64 = 0x100000000000001b;
