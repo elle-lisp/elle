@@ -99,8 +99,9 @@ does, so that one rare type does not set the size of every object. Each
 (backed by a `RegionStore`), which every fiber of the instance shares.
 
 The pages store `HeapObject` shells. Many variants contain inner Rust heap
-data: a mutable container's store ([store.rs](../../src/value/store.rs)), a
-fiber's handle, an external's payload. The `needs_drop()` function
+data: a mutable container's store other than a byte store
+([store.rs](../../src/value/store.rs)), a fiber's handle, an external's
+payload. The `needs_drop()` function
 ([dropsafety.rs](../../src/value/fiberheap/dropsafety.rs)) sorts each `HeapTag`
 into a region's destructor list or its reference list, and it answers true for
 some variants that own nothing, such as `LString`. The free scans both lists for
@@ -125,9 +126,10 @@ Immutable collections (arrays, strings, bytes, sets, structs) store their data
 inline in their region's pages via `RegionSlice<T>` — a `(ptr, len)` view into
 region-owned bytes, usually adjacent to the containing `HeapObject` header. This
 avoids inner `Vec` or `Box<str>` allocations for the common case. A mutable
-type keeps its contents in a store that grows on the Rust heap, because a region
-slice cannot grow. [Mutable stores in region pages](mutable.md) designs
-the move into the container's region.
+type keeps its contents in a store that grows, which a region slice cannot. The
+byte store of an `@string` or `@bytes` is an extent of the container's region,
+and every other store grows on the Rust heap
+([mutable stores in region pages](mutable.md)).
 
 A `slice` of an immutable string or bytes, and a `string` built over immutable
 bytes, is a **view**: a header in the call's own region whose `RegionSlice`
@@ -140,7 +142,7 @@ primitives declare `Fresh` with `embeds: &[0]`, so the ownership forest sees
 the containment ([effects](region/effects.md)). The payload copies that
 remain are the ones a backing in another region cannot serve. `with-traits`
 clones into its own region, `send` and the image dumper copy the bytes, and a
-slice of a mutable value copies because a `Vec` can move.
+slice of a mutable value copies because a write can shift or move its store.
 
 ### Trait tables
 

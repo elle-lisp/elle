@@ -165,8 +165,8 @@ The port lands as a seam and then three stages, each green on its own:
    body data, so a closure hydrated from an image reaches the JIT. This is the
    image's goal.
 3. **Retire `TemplateProto`** — landed. A code object is one payload slice in
-   its compile unit's code region, and the payload cache, the blueprint arm of
-   every header and the second copy of the bytecode are gone.
+   its compile unit's code region. The payload cache, the blueprint arm of every
+   header and the second copy of the bytecode are gone.
 4. **A region-native lowerer** — landed. The lowerer builds the records in a
    working region, through slices that grow, and freezes each function as it
    finishes. `LirInstr`, `LirFunction`, `BasicBlock`, `SpannedInstr`,
@@ -180,7 +180,8 @@ the acceptance gate the stages share.
 
 A mutable container keeps its contents on the Rust heap, behind an `Rc` and a
 `RefCell`, so no image can seal one. The fix moves the contents into an extent
-of the container's own region, and a mutable value becomes body data. It deletes
+of the container's own region, and a mutable value becomes body data. The byte
+store of `@string` and `@bytes` has moved. It deletes
 the environment image's side-stream before anybody writes one.
 [Mutable stores in region pages](../mutable.md) owns the design, and
 [sending a region](../send.md) rests on it too.

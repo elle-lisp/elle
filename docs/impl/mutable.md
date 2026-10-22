@@ -7,33 +7,35 @@ so a mutable value is sealed data an image or a send can copy.
 
 This is the sixth representation fix the image rests on
 ([foundations](image/foundations.md)), and [sending a region](send.md) rests on
-it too. The seam is in place ([the stores](../../src/value/store.rs)); every
-store still keeps its contents on the Rust heap.
+it too. The seam is in place ([the stores](../../src/value/store.rs)), and the
+byte store of `@string` and `@bytes` lies in region pages. Every other store
+keeps its contents on the Rust heap.
 
-## Where a mutable store lives today
+## Where a mutable store lives
 
 | Variant | Store | Holds |
 |---------|-------|-------|
 | `@array` (`LArrayMut`) | `ArrayStore` | `Rc<RefCell<Vec<Value>>>` |
-| `@string` (`LStringMut`), `@bytes` (`LBytesMut`) | `ByteStore` | `Rc<RefCell<Vec<u8>>>` |
+| `@string` (`LStringMut`), `@bytes` (`LBytesMut`) | `ByteStore` | an extent of bytes in the container's region |
 | `@set` (`LSetMut`) | `SetStore` | `Rc<RefCell<BTreeSet<Value>>>` |
 | `@struct` (`LStructMut`) | `StructStore` | `Rc<RefCell<BTreeMap<TableKey, Value>>>` |
 | box (`LBox`), capture cell (`CaptureCell`) | `CellStore` | `Rc<RefCell<Value>>` |
 
-The `Rc` buys no sharing. Nothing clones it: `with-traits` builds a fresh one,
+The `Rc` buys no sharing. Nothing clones it: `with-traits` builds a fresh store,
 so a traited copy is independent of its source
 ([traits.rs](../../src/primitives/traits.rs)). Every holder of a mutable value
-holds the one shell, because the fibers of an instance share one heap. The
-`RefCell` panics on a write that overlaps a Rust-side read of the same store.
-The store type around it is the seam: a read takes a guard, and only the store
-funnels write ([region rules](region/rules.md)).
+holds the one shell, because the fibers of an instance share one heap. A write
+that overlaps a Rust-side read of the same store panics: the `RefCell` refuses
+it, and so does the byte store's borrow count. The store type is the seam: a
+read takes a guard, and only the store funnels write
+([region rules](region/rules.md)).
 
-The Rust-heap store costs three things:
+A Rust-heap store costs three things:
 
 - **Allocation the region gauges cannot see.** Each container is a `malloc`,
   and each growth a `realloc`. `--region-page-size`, `arena/page-claims`,
   `--trace=scrub` and `--trace=guardfree` see none of it.
-- **Destructors.** Seven variants own Rust-heap memory, so freeing a region
+- **Destructors.** Five variants own Rust-heap memory, so freeing a region
   that holds one must drop it.
 - **No seal.** A mutable value is not page bytes, so an image refuses it and a
   send needs a Rust-heap mirror of it ([sending a region](send.md)).
@@ -42,14 +44,19 @@ The Rust-heap store costs three things:
 
 A mutable container keeps its contents in an **extent** of its own region: the
 shell holds the extent's pointer, its length and its capacity. That is a
-`RegionVec` without its arena pointer ([lir.md](lir.md)). A growth resolves the
-container's region through the store funnel, which resolves it already to
-record the stored value's edge.
+`RegionVec` without its arena pointer ([lir.md](lir.md)). A store is built with
+an extent exactly its length, and an empty store claims nothing.
 
-A full extent grows by claiming one twice as large in the same region and
-copying into it. The old extent is dead until the region frees, as a
+A full extent grows by claiming one at least twice as large in the same region
+and copying into it. The old extent is dead until the region frees, as a
 `RegionVec`'s is. Doubling bounds the dead extents of one store below its
 capacity.
+
+A growth resolves the container's region through the store funnel: the region
+of the funnel's heap whose pages hold the shell. A shell that no region of that
+heap holds belongs to another thread's heap, and a channel delivers one today
+([sending a region](send.md)). The funnel panics rather than grow it. A write
+that fits the capacity claims nothing, so it resolves no region.
 
 | Variant | Store in region pages |
 |---------|-----------------------|
@@ -66,7 +73,9 @@ search. An insert or a delete shifts entries within the capacity.
 
 The shell keeps a **borrow count** with the rules a `RefCell` keeps, so a write
 that overlaps a Rust-side read still panics. The count is plain bits, and a dump
-writes it as zero.
+writes it as zero. A store in region pages owns nothing outside them, so its
+variant needs no destructor. The free still scans the shell for its `traits`
+edge.
 
 ## What does not change
 
@@ -106,17 +115,21 @@ writes it as zero.
 - **Shell size.** Pointer, length, capacity, borrow count and `traits` must fit
   within the `HeapObject` size the `Syntax` variant already sets, and the layout
   probes pin every variant ([the image file](image/format.md)).
-- **Reach.** About 230 sites in 64 files read or write a mutable store directly.
+- **Foreign shells.** Until a crossed channel copies its messages, a store that
+  arrived from another thread can be read and edited within its capacity, and
+  its growth panics.
 
 ## Landing
 
 The seam is the first step: every read and every write of a mutable store goes
-through methods on the store, so no call site names the `Rc` or the `RefCell`.
-A read takes a guard that shows the contents as a slice, or answers a lookup,
-and never shows the collection behind it. The store funnels take every write of
-a `Value`. A byte store has one funnel, a splice, and it takes the heap as the
+through methods on the store, so no call site names the representation. A read
+takes a guard that shows the contents as a slice, or answers a lookup, and
+never shows the collection behind it. The store funnels take every write of a
+`Value`. A byte store has one funnel, a splice, and it takes the heap as the
 others do, because a growth claims an extent. Then one variant moves per step,
-each green on its own: `@bytes` and `@string`, then
-`@array`, then box and capture cell, then `@set`, then `@struct` behind its
-benchmark. [The image plan](image/plan.md) orders the foundation among the image
+each green on its own: `@bytes` and `@string`, then `@array`, then box and
+capture cell, then `@set`, then `@struct` behind its benchmark. A step changes
+its own store file, its funnels and its constructors. The seam and the byte
+step have landed.
+[The image plan](image/plan.md) orders the foundation among the image
 milestones.

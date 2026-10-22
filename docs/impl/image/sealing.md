@@ -126,10 +126,11 @@ Refused outright: `Fiber`, thread and library handles, ports, externals, FFI
 signatures, managed pointers.
 
 Every mutable variant, `LBox` and an unsnapped capture cell are refused as
-unsealed data, because each keeps its store on the Rust heap. Once that store
-moves into region pages ([mutable stores](../mutable.md)), each is body data,
-and the dump policy alone decides ([sending a region](../send.md) holds its
-table).
+unsealed data. Each but `@string` and `@bytes` keeps its store on the Rust
+heap. A store that has moved into region pages ([mutable stores](../mutable.md))
+is body data, and the dump policy alone decides on it
+([sending a region](../send.md) holds its table). Until that policy lands, the
+dumper refuses the byte stores too.
 
 A closure whose signal or squelch mask names a signal this process *declared*
 is refused too, by the signal's name. A process-global registry hands out bits

@@ -6,8 +6,8 @@ The order the send design lands in, the pins each milestone lands with, and
 the risks still open.
 
 [The send design](../send.md) owns the argument, and
-[mutable stores in region pages](../mutable.md) owns the foundation. Nothing
-here is implemented.
+[mutable stores in region pages](../mutable.md) owns the foundation. The first
+milestone's seam and byte step have landed, and nothing else here has.
 
 ## Landing order
 
@@ -54,8 +54,12 @@ guards a behavior its milestone must keep.
 
 - **Growth.** An `@array`, an `@string`, an `@bytes`, a `@set` and a `@struct`
   each grow past three doublings, and every element reads back.
-- **Gauges.** A loop that pushes onto one `@array` raises `arena/page-claims`.
-  Today the count stays flat, because `realloc` serves the growth.
+- **Gauges.** A loop that pushes onto one store raises `arena/page-claims`. A
+  Rust-heap store keeps the count flat, because `realloc` serves its growth.
+- **Teardown.** A store in region pages has no destructor, so its variant
+  leaves a region's destructor list for its reference list.
+- **Foreign shells.** A growing write to a store whose shell lies in another
+  heap panics, and the panic names the cause.
 - **Borrows.** A write while a Rust-side read of the same store is live panics,
   as a `RefCell` does today. Two dumps of one `@array`, one of them taken while
   a read is live, are byte-identical, because a dump writes the count as zero.
