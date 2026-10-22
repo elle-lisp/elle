@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-21
 //! Compile-time templates for heap literals.
 //!
 //! docs/impl/region/model.md
@@ -11,11 +11,11 @@
 //! `MaterializeConst` instruction builds a **fresh** value from the template each
 //! time it executes, into the literal's OWN solver-assigned region.
 //!
-//! The whole structure shares that one region (an immutable aggregate): every
+//! The whole structure shares that one region (an immutable aggregate). Every
 //! node is materialized bottom-up into the same region, so all internal
 //! references are self-edges (filtered by `find_object_cross_refs`'s
-//! `rid != own_id`) — no spurious cross-region RC, and freeing the one region
-//! reclaims the entire structure at its `decref_point` (Rule 4/7).
+//! `rid != own_id`). So no spurious cross-region RC arises, and freeing the one
+//! region reclaims the entire structure at its `decref_point` (Rule 4/7).
 
 use crate::hir::region::RuntimeRegion;
 use crate::value::Value;
@@ -33,7 +33,7 @@ pub enum ConstTemplate {
     Int(i64),
     Float(f64),
     /// A symbol carried by name. Its id is the name's hash in every instance,
-    /// but an instance prints only the spellings its table has learned, so
+    /// but an instance prints only the spellings its table has learned. So
     /// [`materialize`](Self::materialize) interns the name into the executing
     /// instance's table, as a sent symbol does (`value::send`).
     /// spawn-eval.lisp pins the crossing.
@@ -195,7 +195,7 @@ impl ConstTemplate {
                 use crate::syntax::{Syntax, SyntaxArena};
                 // The node is born in the region the materialized value lives
                 // in, so the `Value` owns its tree outright
-                // (docs/impl/syntax.md § "A syntax `Value` owns its tree").
+                // (docs/impl/syntax.md).
                 let arena = unsafe { SyntaxArena::from_raw(heap as *mut _, region) };
                 let mut syn = Syntax::symbol_scoped(&arena, name, *span, scopes);
                 syn.scope_exempt = *scope_exempt;
