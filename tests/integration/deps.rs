@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-22
 // Every committed lockfile holds one Cranelift, one regalloc2 and a wasmtime
 // past its advisory, and each variant's holds the root's.
 //
@@ -95,9 +95,9 @@ fn the_graph_holds_one_regalloc2() {
 }
 
 /// The oldest `wasmtime` that carries the fix for its newest published
-/// advisories (RUSTSEC-2026-0325, -0326 and -0327). When `cargo audit` names a
-/// newer fix, raise this in the same change as the pin in Cargo.toml.
-const WASMTIME_FLOOR: (u64, u64, u64) = (49, 0, 2);
+/// advisories (RUSTSEC-2026-0378 and -0379). When `cargo audit` names a newer
+/// fix, raise this in the same change as the pin in Cargo.toml.
+const WASMTIME_FLOOR: (u64, u64, u64) = (49, 0, 4);
 
 fn parse_semver(version: &str) -> (u64, u64, u64) {
     let mut parts = version.split(['.', '-', '+']).map(|part| {
