@@ -1,6 +1,6 @@
 # One test system
 
-<!-- audited: 2026-09-30 -->
+<!-- audited: 2026-10-21 -->
 
 The plan that folds every test product into `elle test`, keeps the results,
 and states what a run may skip.
@@ -46,7 +46,7 @@ key that makes a repeat import a no-op. A run row already carries the commit,
 worktree, host, and build, so an imported run says what it ran against.
 
 Later, the store becomes shared: a content-addressed blob store plus a small
-index, Redis first, exactly the `store` milestone in [fleet](impl/fleet.md).
+index, Redis first, exactly the `store` milestone of [fleet](impl/fleet/plan.md).
 Dev boxes, CI, and fleet workers then append to one history.
 
 ### One scheduler
@@ -59,7 +59,7 @@ files and each rig profile rather than a matrix of passes.
 ### Builds and the rig replace the pass matrix
 
 A language test runs on the runtime a build ships, with no flag
-([spec](spec.md) § Two suites). So the language suite has no pass matrix: its
+([spec](spec.md)). So the language suite has no pass matrix: its
 matrix is the set of builds CI makes, and each build is one implementation.
 
 An implementation test that needs a mode names it in a sidecar beside the
@@ -99,10 +99,11 @@ so budgets are measured (above) and modes live in a sidecar (above).
 A verdict is a function of the form, the binary, the boot sources, and the
 profile. So a cached result is reusable only under a total key: the form's
 closure hash times the boot fingerprint times the profile. The boot
-fingerprint covers the binary and everything it reads to become a runtime —
-the same identity [image](impl/image.md) computes to gate hydration and
-[fleet](impl/fleet.md) uses for routing. Build it once; three systems consume
-it.
+fingerprint hashes the running executable, so it covers the binary and the boot
+sources built into it ([test-store](test-store.md)). It is finer than the layout
+fingerprint that gates an image's hydration ([the image file](impl/image/format.md))
+and routes a fleet task ([fleet workers](impl/fleet/workers.md)). Two builds
+that lay values out alike share a layout fingerprint and differ here.
 
 The fingerprint is in: every run records one ([test-store](test-store.md)).
 What is missing is the lookup that spends it.

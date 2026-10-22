@@ -15,7 +15,7 @@ Up: [..](../AGENTS.md)
 - [differential.md](differential.md) — **Differential Tier Testing** A correct closure returns the same value on every execution tier that accepts it, and `compile/run-on` is how a test asks each tier.
 - [dissolution.md](dissolution.md) — **Dissolution — HOF loop fusion** The pass that turns a higher-order call over a proven array into a loop with the function's body spliced in.
 - [escape.md](escape.md) — **Escape analysis — the authoritative true-escape pass** Escape analysis decides, once for every consumer, whether a value outlives the activation it was born in.
-- [fleet.md](fleet.md) — **Fleet — adhoc distributed execution over images (more...)**
+- [fleet.md](fleet.md) — **Fleet — adhoc distributed execution over images** A design for running Elle functions on other machines, with the code shipped as an environment image at call time.
 - [gpu.md](gpu.md) — **GPU Compute** How a plain Elle closure becomes a dispatched compute kernel, across the MLIR backend and the Vulkan plugin.
 - [graft.md](graft.md) — **Grafting a call** A call into another unit's function becomes that function's body, and the proven types delete every branch its operands cannot take.
 - [hir.md](hir.md) — **HIR — High-level IR** The HIR pass converts expanded syntax trees into a typed intermediate representation.
@@ -45,6 +45,7 @@ Up: [..](../AGENTS.md)
 ## Directories
 
 - [dissolution/](dissolution/AGENTS.md) — Dissolution: whose body the loop splices, Dissolution: the pipeline stages, Dissolution: the scalar terminals
+- [fleet/](fleet/AGENTS.md) — Fleet: the client, Fleet: liveness and the tick, Fleet: durable orchestration, Fleet: the plan, Fleet: the queue, Fleet: references and the store, Fleet: the tests, Fleet: workers and routing
 - [graft/](graft/AGENTS.md) — Grafting a call: the operands
 - [image/](image/AGENTS.md) — The embedded blob, Booting from an image, The image file, Foundations, What the experiments measured, The boot milestone's pins, Landing order and test plan, Sealing
 - [region/](region/AGENTS.md) — Ownership adopts and the root's lifetime obligation, Where a release is anchored, Reassigned mutable bindings are 1-slot containers, A borrowing read's result, Capture cells, What a region-effect declaration buys, Per-arm compensation, NativeCtx — explicit allocation: every value names its region and heap, A merged cycle behind a tail call, Region diagnostics and validation, Native region effects: declared, not guessed, Rich errors — one region-coherent struct routine + `rich_error!`, Region generations: stale derefs detonate in debug builds, The frame-held admission, The letrec closure-cycle merge, The mechanism, Merging, Region representation — id-spaces, per-execution model, layout, Owner nodes — an activation as a forest root, Adoption and subtree drop (the ownership forest), What a park retains, and who releases it, Reads of a 1-slot container, A release past a frame-replacing tail call, The relocation point and its replicas, A rest list in one region, Region rules — the implementor's correctness obligations, Settled invariants, What a signal exit owes, Code objects — a payload, a header and a code unit, An abandoned frame runs the releases it still owes, The branch-arm release window
