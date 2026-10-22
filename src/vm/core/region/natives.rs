@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! Dispatching a native call: the result region it mints, the pass-through
 //! retain it hands the caller, and the declaration oracle over both.
 //!
@@ -15,25 +15,25 @@ impl VM {
     /// cache), so each execution mints its own fresh physical region —
     /// never cached.
     ///
-    /// `_static_id` is unused: every call result gets its own fresh region. The
-    /// slot is still the solver's per-call result-region *assignment*, carried
-    /// end to end (emitter → bytecode → both dispatch tiers), and the
-    /// `StaticRegion` newtype keeps it from being compared with a runtime id
-    /// (`dispatch_native_call`'s doc).
+    /// `static_id` picks no region, because every call result gets its own fresh
+    /// one; only the arena trace names it. The slot is still the solver's
+    /// per-call result-region *assignment*, carried end to end (emitter →
+    /// bytecode → both dispatch tiers). The `StaticRegion` newtype keeps it from
+    /// being compared with a runtime id (`dispatch_native_call`'s doc).
     ///
-    /// The mint is **tracked**: the region is minted before the callee runs,
-    /// because the callee may allocate its result into it, and a callee that
+    /// The mint is **tracked**. The region is minted before the callee runs,
+    /// because the callee may allocate its result into it. A callee that
     /// returns an immediate or a value borrowed from an argument allocates
-    /// nothing. The receipt lets the dispatcher return that id to the free list
-    /// (docs/impl/region/model.md); a call that does
-    /// allocate leaves the id live and the recycle no-ops.
+    /// nothing, and the receipt lets the dispatcher return that id to the free
+    /// list (docs/impl/region/model.md). A call that does allocate leaves the id
+    /// live, and the recycle does nothing.
     #[inline]
     pub(crate) fn new_runtime_region_for_call_slot(
         &mut self,
-        _static_id: StaticRegion,
+        static_id: StaticRegion,
     ) -> RegionMint {
         let mint = self.heap().new_runtime_region_tracked();
-        self.note_region_mint(mint.region(), "call result", Some(_static_id));
+        self.note_region_mint(mint.region(), "call result", Some(static_id));
         mint
     }
     /// Close out a call-result mint: return its id to the free list unless the call
@@ -48,25 +48,25 @@ impl VM {
     /// (`call_inner` / `tail_call_inner`) and the JIT (`elle_jit_call` /
     /// `elle_jit_tail_call`).
     ///
-    /// Mints this call's fresh result region, runs the primitive with that
-    /// region as its `NativeCtx` alloc target (so fresh allocations land in it), then
-    /// hands the caller exactly one owning reference to the result's runtime
-    /// region whenever the result lives in a *different* region than this call
-    /// allocated (a pass-through native such as `first`/`rest`/`get`). That
+    /// Mints this call's fresh result region, and runs the primitive with that
+    /// region as its `NativeCtx` alloc target, so fresh allocations land in it.
+    /// When the result lives in a *different* region than this call allocated (a
+    /// pass-through native such as `first`/`rest`/`get`), the dispatch hands the
+    /// caller exactly one owning reference to the result's runtime region. That
     /// retain balances the caller's `DecrefValueRegion` at the result
     /// binding's decref_point. A fresh result lives in `alloc_region` and is
     /// skipped — its alloc incref (rc=1) already is the handoff.
     ///
-    /// Both engines MUST go through this so the retain/release accounting is
-    /// identical regardless of which tier runs the caller; a JIT caller that
-    /// skipped the pass-through retain would under-count the result region and
-    /// free it while a freshly built cons still references it (UAF).
+    /// Both engines MUST go through this, so the retain/release accounting is
+    /// identical whichever tier runs the caller. A JIT caller that skipped the
+    /// pass-through retain would under-count the result region, and free it
+    /// while a freshly built cons still references it (UAF).
     ///
     /// The skip compares two *runtime* regions — `result_region` against the
-    /// `alloc_region` this call just minted. Both sides are `RuntimeRegion`; the
+    /// `alloc_region` this call just minted. Both sides are `RuntimeRegion`. The
     /// `StaticRegion` newtype on `region_id` keeps a static slot from being
-    /// compared here, where it would never match a freshly minted runtime id and
-    /// would leak one region per native call
+    /// compared here, where it would never match a freshly minted runtime id
+    /// and would leak one region per native call
     /// (`tests/impl/region-native-result-leak.lisp`).
     pub(crate) fn dispatch_native_call(
         &mut self,
@@ -107,17 +107,14 @@ impl VM {
             // region; docs/impl/region/rules.md). The escape/skip accounting below
             // then treats it exactly as a native result: a fresh answer lives in
             // `alloc_region` (skip), a pass-through answer (`fiber/self`) lives
-            // elsewhere and is retained. Building it in any region but this call's
-            // own is fatal in a spawned worker, whose result region also holds the
-            // live reconstructed closure + captures: they would be freed out from
-            // under execution when this result's `DecrefValueRegion` drops that
-            // region to 0 (tests/impl/spawn-config-region.lisp).
+            // elsewhere and is retained. An answer built in any other region is
+            // fatal in a spawned worker. The worker's result region also holds the
+            // live reconstructed closure and its captures. This result's
+            // `DecrefValueRegion` would drop that region to 0, and free them out
+            // from under execution (tests/impl/spawn-config-region.lisp).
             if crate::signals::dispatch::classify(bits, &value)
                 == crate::signals::dispatch::SignalAction::Query
             {
-                // Build the SIG_QUERY answer through THIS call's ctx, so it is
-                // born in `alloc_region` like any native result (the pass-through
-                // accounting below then treats it identically).
                 question = Some(value);
                 self.dispatch_query(&mut ctx, value)
             } else {
@@ -146,8 +143,7 @@ impl VM {
                 RegionEffect::Immediate => assert!(
                     result_region.is_none(),
                     "primitive `{}` declares RegionEffect::Immediate but returned \
-                     a heap value in {:?} (declaration oracle; docs/impl/region/effects.md \
-                     \"Native region effects\")",
+                     a heap value in {:?} (declaration oracle; docs/impl/region/effects.md)",
                     def.name,
                     result_region,
                 ),
@@ -156,8 +152,7 @@ impl VM {
                         result_region.is_none() || fresh,
                         "primitive `{}` declares RegionEffect::{:?} but returned a \
                      non-fresh heap value in {:?}, not this call's own region \
-                     {:?} (declaration oracle; docs/impl/region/effects.md \"Native region \
-                     effects\")",
+                     {:?} (declaration oracle; docs/impl/region/effects.md)",
                         def.name,
                         def.effect,
                         result_region,
@@ -168,8 +163,7 @@ impl VM {
                     !fresh,
                     "primitive `{}` declares RegionEffect::PassThrough but \
                      returned a value freshly allocated in this call's own \
-                     region {:?} (declaration oracle; docs/impl/region/effects.md \"Native \
-                     region effects\")",
+                     region {:?} (declaration oracle; docs/impl/region/effects.md)",
                     def.name, alloc_region,
                 ),
                 RegionEffect::Funnel
@@ -189,36 +183,43 @@ impl VM {
         //
         // EXCEPT a `moves_out` native (`%pop`/`pop`): its result is an element
         // REMOVED from a container arg, and the body already took the pass-through
-        // retain in-place — necessarily BEFORE releasing the container's reference,
-        // or a sole-owned element would be freed under the returned Value
-        // (`arena::pop_with_decref`). Retaining again here would double-count (one
-        // leaked region per op — the `raw-pop` probe in tests/impl/probe/store.lisp).
+        // retain in place. It must take the retain BEFORE it releases the
+        // container's reference, or a sole-owned element would be freed under the
+        // returned Value (`arena::pop_with_decref`). Retaining again here would
+        // double-count, one leaked region per op (the `raw-pop` probe in
+        // tests/impl/probe/store.lisp).
+        //
         // AND EXCEPT a `result_minted` native (the module loaders, the
-        // `compile/*-module` test loaders): its result was produced by compiled
-        // code run on this VM, so it left that code through the return convention
-        // already carrying the one owed reference the caller's release consumes —
-        // and the declarant supplies that reference itself on any path that did
-        // not run a thunk (`import/load-plugin`'s retain). Retaining again here is the same
-        // double-count — one stranded region graph per call (the `import-result`
+        // `compile/*-module` test loaders). Its result was produced by compiled
+        // code run on this VM. So it left that code through the return convention,
+        // already carrying the one owed reference the caller's release consumes.
+        // On any path that ran no thunk, the declarant supplies that reference
+        // itself (`import/load-plugin`'s retain). Retaining again here is the same
+        // double-count, one stranded region graph per call (the `import-result`
         // probe in tests/impl/probe/native.lisp).
+        //
         // AND ONLY for a value the native returns as a RESULT. The retain funds
         // the caller's `DecrefValueRegion` on the call result, and that release
-        // targets the call result — so a value the native returns as a SIGNAL
-        // PAYLOAD has no consumer for it. The signal machinery accounts for a
-        // payload itself, on the path each payload actually takes: a fiber
-        // carrier (`fiber/resume`/`fiber/abort`/`fiber/propagate` returning its
-        // fiber ARGUMENT) is replaced by the child's outcome before any caller
-        // release runs; a suspending payload rides `fiber.signal` under the
-        // `SuspendEscape`/`EmitEscape` retain and is released on the resume path;
-        // an error or halt payload is read through the signal, never through the
-        // caller's result slot, which the handler stamps `nil`. Retaining any of
-        // them here strands one region per call — a parked-then-discarded fiber's
-        // whole region graph (docs/impl/region/park.md;
-        // the `multi-resume`/`yield-discard` probes in tests/impl/probe/concurrent.lisp),
-        // or the emitted value of every `fiber/emit`
-        // (tests/impl/region-fiber-install-clique-leak.lisp). This is
-        // the same exemption the declaration oracle above makes for a
-        // signal-carrying return, stated on the accounting side.
+        // targets the call result. So a value the native returns as a SIGNAL
+        // PAYLOAD has no consumer for the retain. The signal machinery accounts
+        // for a payload itself, on the path each payload takes:
+        //
+        // - A fiber carrier (`fiber/resume`/`fiber/abort`/`fiber/propagate`
+        //   returning its fiber ARGUMENT) is replaced by the child's outcome
+        //   before any caller release runs.
+        // - A suspending payload rides `fiber.signal` under the
+        //   `SuspendEscape`/`EmitEscape` retain, and is released on the resume
+        //   path.
+        // - An error or halt payload is read through the signal, never through
+        //   the caller's result slot, which the handler stamps `nil`.
+        //
+        // Retaining any of them here would strand one region per call. That is
+        // a parked-then-discarded fiber's whole region graph
+        // (docs/impl/region/park.md; the `multi-resume`/`yield-discard` probes
+        // in tests/impl/probe/concurrent.lisp), or the emitted value of every
+        // `fiber/emit` (tests/impl/region-fiber-install-clique-leak.lisp). The
+        // declaration oracle above makes the same exemption for a
+        // signal-carrying return; this is that exemption on the accounting side.
         let is_result = crate::signals::dispatch::classify(bits, &value)
             == crate::signals::dispatch::SignalAction::Ok;
         if !def.moves_out && !def.result_minted && is_result {
