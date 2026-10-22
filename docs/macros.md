@@ -1,6 +1,6 @@
 # Macros
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-22 -->
 
 Elle's macros run as ordinary Elle code at expansion time, and are hygienic by
 sets of scopes; `datum->syntax` breaks hygiene on purpose.
@@ -46,22 +46,21 @@ raise, but it reads no state outside the unit and changes none:
   budget counts silent code, the fibers the body resumes and the expansions it
   starts. A body that exhausts it fails the compile, and the error names the
   macro.
-- **A body spends no effect capability.** Every expansion withholds
-  `|:ffi :io :exec :gpu :os-signal :fs :net|`, beside what the fiber whose code
-  started the compile withholds. A primitive that needs one is denied, and the
-  compile fails naming the macro and the primitive
-  ([capabilities.md](signals/capabilities.md)). So a body cannot print, read a
-  file, open a socket or load a library. An expansion cannot pause, so no
-  parent mediates the denial, whatever its mask names. Code the compile
-  produces runs with the fiber's own capabilities.
-- **A body reads no ambient state.** Some primitives reach state outside the
-  unit through no capability bit: the environment, the arguments, the pid, the
-  clocks, `vm/config`, the signal registry, `hash`, the standard ports, and
-  the VM's caches and gauges. A call to one halts the expansion. The halt
-  carries `:terminal`, so it passes every fiber mask, every `protect` and the
-  boundary of every silent function. The compile fails naming the macro and
-  the primitive. `(vm/primitive-meta name)`
-  answers `:ambient true` for each, and `(doc name)` says so.
+- **A body spends no effect capability and reads no ambient state.** Every
+  expansion withholds `|:ffi :io :exec :gpu :os-signal :fs :net :ambient|`,
+  beside what the fiber whose code started the compile withholds. A primitive
+  that needs one is denied, and the compile fails naming the macro and the
+  primitive ([capabilities.md](signals/capabilities.md)). So a body cannot
+  print, read a file, open a socket or load a library. Nor can it read the
+  environment, the arguments, the pid, the clocks, `vm/config`, the signal
+  registry, `hash`, the standard ports, or the VM's caches and gauges.
+  `(doc name)` names the bits an expansion withholds that a primitive needs.
+- **No parent mediates the denial.** An expansion cannot pause, so a denial
+  that leaves the body fails the compile, whatever the compiling fiber's mask
+  names. A fiber inside the body whose mask names the bit catches the denial,
+  as any parent does. The denied call never runs, so the body goes on with a
+  value its own code chose. Code the compile produces runs with the fiber's own
+  capabilities.
 - **The primitives the compile binds are an input.** `vm/list-primitives`,
   `doc` and `vm/primitive-meta` answer for each in a body as they do at run
   time, a primitive the host registers included ([embedding.md](embedding.md)).
@@ -92,7 +91,12 @@ needs `:fs` for it.
 (def pid '(begin (defmacro pid []
                    (fiber/resume (fiber/new (fn [] (sys/pid)) |:halt :error|)))
                  (pid)))
-(assert (string/contains? (compile-error pid) "sys/pid") "no fiber mask catches the halt")
+(assert (string/contains? (compile-error pid) "sys/pid") "a mask without :ambient")
+
+(defmacro mediated []
+  (let [f (fiber/new (fn [] (sys/pid)) |:ambient|)]
+    (get (fiber/resume f) :denied)))
+(assert (= (mediated) |:ambient|) "a fiber in the body catches the denial")
 
 (def shout '(begin (defmacro shout [] (println "expanding")) (shout)))
 (assert (string/contains? (compile-error shout) "macro 'shout'") "printing is an effect")
@@ -102,8 +106,8 @@ needs `:fs` for it.
 (let [f (fiber/new (fn [] (eval peek)) |:fs :error| :deny |:fs|)]
   (assert (= (get (fiber/resume f) :error) :eval-error) "no denial escapes the compile"))
 
-(assert (get (vm/primitive-meta "sys/env") :ambient))
-(assert (not (get (vm/primitive-meta "string/join") :ambient)))
+(assert (string/contains? (doc sys/env) ":ambient"))
+(assert (not (string/contains? (doc string/join) ":ambient")))
 ```
 
 The check at run time does not reach two reads. Under `eval`, a macro body
