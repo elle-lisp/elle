@@ -1,14 +1,14 @@
-// audited: 2026-10-11
+// audited: 2026-10-22
 //! Signal registry for mapping signal keywords to bit positions.
 //!
 //! The registry maintains a global mapping of signal keywords (`:error`,
 //! `:yield`, etc.) to their corresponding bit positions. Built-in signals
-//! occupy bits 0-18, bits 19-31 are runtime-reserved, and user-defined signals
+//! occupy bits 0-19, bits 20-31 are runtime-reserved, and user-defined signals
 //! are allocated from bits 32-63.
 
 use super::{
-    SIG_DEBUG, SIG_ERROR, SIG_EXEC, SIG_FFI, SIG_FS, SIG_FUEL, SIG_GPU, SIG_HALT, SIG_IO, SIG_NET,
-    SIG_OS_SIGNAL, SIG_WAIT, SIG_YIELD,
+    SIG_AMBIENT, SIG_DEBUG, SIG_ERROR, SIG_EXEC, SIG_FFI, SIG_FS, SIG_FUEL, SIG_GPU, SIG_HALT,
+    SIG_IO, SIG_NET, SIG_OS_SIGNAL, SIG_WAIT, SIG_YIELD,
 };
 use crate::value::fiber::SignalBits;
 use std::sync::{Mutex, OnceLock};
@@ -22,7 +22,7 @@ pub struct SignalEntry {
 
 /// Global registry mapping signal keywords to bit positions.
 ///
-/// Built-in signals are pre-registered at their fixed bits, 0 to 18 (the table in
+/// Built-in signals are pre-registered at their fixed bits, 0 to 19 (the table in
 /// docs/signals/protocol.md). Bits 3, 5, 7, 10 and 13 are VM-internal and bit 6 is
 /// unused; none of them is registered.
 ///
@@ -59,6 +59,7 @@ impl SignalRegistry {
     /// - `:os-signal` at bit 16
     /// - `:fs` at bit 17
     /// - `:net` at bit 18
+    /// - `:ambient` at bit 19
     pub fn with_builtins() -> Self {
         let mut registry = Self::new();
         // These unwraps are safe because we're registering unique built-in names
@@ -75,6 +76,7 @@ impl SignalRegistry {
         let _ = registry.register_builtin("os-signal", SIG_OS_SIGNAL.trailing_zeros());
         let _ = registry.register_builtin("fs", SIG_FS.trailing_zeros());
         let _ = registry.register_builtin("net", SIG_NET.trailing_zeros());
+        let _ = registry.register_builtin("ambient", SIG_AMBIENT.trailing_zeros());
         registry
     }
 
@@ -138,7 +140,7 @@ impl SignalRegistry {
         self.register(name)
     }
 
-    /// Look up the bit position for an signal keyword.
+    /// Look up the bit position for a signal keyword.
     ///
     /// Returns `Some(bit_position)` if the signal is registered, `None` otherwise.
     pub fn lookup(&self, name: &str) -> Option<u32> {
@@ -153,7 +155,7 @@ impl SignalRegistry {
         &self.entries
     }
 
-    /// Convert an signal keyword to its signal bits representation.
+    /// Convert a signal keyword to its signal bits representation.
     ///
     /// Returns `Some(SignalBits)` if the signal is registered, `None` otherwise.
     pub fn to_signal_bits(&self, name: &str) -> Option<SignalBits> {
@@ -182,12 +184,12 @@ impl SignalRegistry {
     /// keyword sets from signal bitmasks.
     ///
     /// This is a learning site. The registry is process-global and holds names
-    /// a program coined at run time — `(signal :my-sig)` allocates a bit — so
-    /// an instance reading a name back here may never have met the spelling,
-    /// and no static vocabulary can cover it. A worker thread has met none of
+    /// a program coined at run time: `(signal :my-sig)` allocates a bit. An
+    /// instance reading a name back here may never have met the spelling, and
+    /// no static vocabulary can cover it. A worker thread has met none of
     /// them. `memo` is `None` only where no instance is in reach, in which
     /// case the built-in names still resolve through the vocabulary
-    /// (docs/impl/symbol.md § "The display memo").
+    /// (docs/impl/symbol.md).
     pub fn bits_to_keywords(
         &self,
         bits: SignalBits,
@@ -208,9 +210,9 @@ impl SignalRegistry {
     /// Format signal bits as a human-readable string.
     ///
     /// Returns a string like `"{:error, :yield}"` for multiple bits, or `"{}"`
-    /// for empty. A bit the registry does not carry — the VM-internal ones,
-    /// which no program declares — is reported as a raw mask alongside the
-    /// names, because a signal that is not empty must not read as `{}`.
+    /// for empty. A bit the registry does not carry, such as a VM-internal one
+    /// that no program declares, is reported as a raw mask beside the names. A
+    /// signal that is not empty must not read as `{}`.
     pub fn format_signal_bits(&self, bits: SignalBits) -> String {
         let mut names = Vec::new();
         let mut named = SignalBits::EMPTY;
@@ -285,10 +287,10 @@ where
 /// Clone the current global registry state.
 ///
 /// Paired with [`restore_registry`] to bracket a *diagnostic* compile that must
-/// not leave observable global side effects — e.g. `compile/dumps` / `render_all`
-/// renders a module's `--dump` artifacts by compiling it, and a `(signal :kw)`
+/// leave no observable global side effect. `compile/dumps` and `render_all`
+/// render a module's `--dump` artifacts by compiling it. A `(signal :kw)`
 /// declaration in that module would otherwise spend one of the 32 user bits,
-/// which the process never gets back. See `src/dump/mod.rs`.
+/// which the process never gets back (src/dump/mod.rs).
 pub fn snapshot_registry() -> SignalRegistry {
     with_registry(|r| r.clone())
 }

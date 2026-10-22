@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-22
 //! The process primitives: `sys/*` over this process, and `subprocess/*` over a child.
 //!
 //! docs/subprocess.md
@@ -203,8 +203,7 @@ type ExecOpts = (
 
 primitive! {
     "sys/exit" => prim_exit {
-        ambient: true,
-        signal: Signal::halts(),
+        signal: Signal::ambient_halts(),
         arity: Arity::Range(0, 1),
         doc: "Exit the process with an optional exit code (0-255)",
         params: &["code"],
@@ -214,8 +213,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "sys/trap-exit!" => prim_trap_exit {
-        ambient: true,
-        signal: Signal::silent(),
+        signal: Signal::ambient(),
         arity: Arity::Exact(1),
         doc: "Trap `exit` on this thread as a catchable {:error :exited :code N} signal (true) or restore process termination (false). Used by the test runner.",
         params: &["on"],
@@ -234,21 +232,21 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "sys/args" => prim_sys_args {
-        ambient: true,
+        signal: Signal::ambient(),
         doc: "Return command-line arguments as a list (excluding interpreter and script path)",
         category: "sys",
         example: "(sys/args)",
         effect: RegionEffect::Fresh,
     }
     "sys/argv" => prim_sys_argv {
-        ambient: true,
+        signal: Signal::ambient(),
         doc: "Return the full argv as a list: script name as element 0 followed by all user args. Element 0 is \"-\" for stdin or the script path for a file. Returns an empty list in REPL mode.",
         category: "sys",
         example: "(sys/argv)",
         effect: RegionEffect::Fresh,
     }
     "sys/pid" => prim_sys_pid {
-        ambient: true,
+        signal: Signal::ambient(),
         arity: Arity::Exact(0),
         doc: "Return the current process's pid as an integer.",
         params: &[],
@@ -258,8 +256,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "sys/env" => prim_sys_env {
-        ambient: true,
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         arity: Arity::Range(0, 1),
         doc: "Return the process environment as a struct with string keys and string values, or look up a single variable by name. Non-UTF-8 entries are silently skipped.",
         params: &["name"],

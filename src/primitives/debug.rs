@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-22
 //! The debug primitives an author reaches for to see a running program.
 //!
 //! docs/analysis/debugging.md
@@ -202,8 +202,7 @@ pub(crate) fn prim_symbol_count(
 // Declarative primitive definitions for debug operations.
 primitive! {
     "debug/print" => prim_debug_print {
-        ambient: true,
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         arity: Arity::Exact(1),
         doc: "Prints a value with debug information to stderr",
         params: &["value"],
@@ -213,8 +212,7 @@ primitive! {
         effect: RegionEffect::PassThrough,
     }
     "debug/trace" => prim_trace {
-        ambient: true,
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         arity: Arity::Exact(2),
         doc: "Traces execution with a label, prints to stderr, returns value",
         params: &["label", "value"],
@@ -224,7 +222,7 @@ primitive! {
         effect: RegionEffect::PassThrough,
     }
     "debug/memory" => prim_memory_usage {
-        ambient: true,
+        signal: Signal::ambient(),
         doc: "Returns memory usage statistics as (rss-bytes virtual-bytes)",
         category: "debug",
         example: "(debug/memory)",
@@ -232,7 +230,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "debug/symbol-count" => prim_symbol_count {
-        ambient: true,
+        signal: Signal::ambient(),
         doc: "Returns the number of distinct spellings this instance's memo holds, symbols and keywords together",
         category: "debug",
         example: "(debug/symbol-count)",

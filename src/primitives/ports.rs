@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-22
 //! The port primitives: open, close, query and seek the port a file descriptor stands behind.
 //!
 //! docs/io.md
@@ -75,21 +75,21 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "port/stdin" => prim_port_stdin {
-        ambient: true,
+        signal: Signal::ambient(),
         doc: "Return a port for standard input.",
         category: "port",
         example: "(port/stdin)",
         effect: RegionEffect::Fresh,
     }
     "port/stdout" => prim_port_stdout {
-        ambient: true,
+        signal: Signal::ambient(),
         doc: "Return a port for standard output.",
         category: "port",
         example: "(port/stdout)",
         effect: RegionEffect::Fresh,
     }
     "port/stderr" => prim_port_stderr {
-        ambient: true,
+        signal: Signal::ambient(),
         doc: "Return a port for standard error.",
         category: "port",
         example: "(port/stderr)",
@@ -113,8 +113,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "port/set-options" => prim_port_set_options {
-        ambient: true,
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         arity: Arity::AtLeast(1),
         doc: "Give the port a :timeout in seconds, which each call on it that names none takes. :timeout nil takes it away.",
         params: &["port"],

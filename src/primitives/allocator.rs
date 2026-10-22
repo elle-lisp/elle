@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-22
 //! The `with-allocator` primitives: push a custom allocator on the instance's heap, and pop it.
 //!
 //! docs/impl/values.md
@@ -96,8 +96,7 @@ fn extract_allocator_rc(value: Value) -> Option<Rc<AllocatorBox>> {
 
 primitive! {
     "allocator/install" => prim_install_allocator {
-        ambient: true,
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         arity: Arity::Exact(1),
         doc: "Install a custom allocator on the instance's heap. \
                INTERNAL: use via with-allocator macro only.",
@@ -106,8 +105,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "allocator/uninstall" => prim_uninstall_allocator {
-        ambient: true,
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         doc: "Uninstall the current custom allocator, freeing remaining \
                custom objects. INTERNAL: use via with-allocator macro only.",
         category: "allocator",

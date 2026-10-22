@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-22
 //! `SIG_QUERY` dispatch: the questions a primitive asks the running VM.
 //!
 //! docs/runtime.md
@@ -209,7 +209,15 @@ impl VM {
                     // aliases as a list of strings
                     let aliases: Vec<Value> = doc.aliases.iter().map(|a| ctx.string(*a)).collect();
                     fields.insert(TableKey::keyword("aliases"), ctx.list(aliases));
-                    fields.insert(TableKey::keyword("ambient"), Value::bool(doc.ambient));
+                    // The bits the primitive declares, as a keyword set. The
+                    // `:signal` string names no capability bit but `:ffi`.
+                    let declared = crate::signals::registry::with_registry(|r| {
+                        r.bits_to_keywords(doc.signal.bits, self.symbols())
+                    });
+                    fields.insert(
+                        TableKey::keyword("bits"),
+                        ctx.set(declared.into_iter().collect()),
+                    );
                     (SIG_OK, ctx.struct_from(fields))
                 } else {
                     (SIG_OK, Value::NIL)
