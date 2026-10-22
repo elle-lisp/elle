@@ -302,3 +302,6 @@
 ["tests/impl/framing-view.lisp" :objects 23]
 ["tests/lang/framing-records.lisp" :objects 23]
 ["tests/lang/redis-resp.lisp" :objects 23]
+["tests/lang/compile-isolation.lisp" :objects 133]
+["tests/lang/import-again.lisp" :objects 319]
+["tests/lang/macro-purity.lisp" :objects 425]
