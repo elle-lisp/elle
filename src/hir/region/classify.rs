@@ -45,9 +45,9 @@ pub struct CallClassification {
     /// fresh result ([`crate::primitives::def::PrimitiveDef::embeds`]). The region
     /// walk's `Fresh` arm records an embed edge `result ⊇ arg`
     /// (`RegionInfo::embed_edges`) for each. So the ownership forest sees a value
-    /// the fresh result keeps a reference to, and refuses to adopt it: a captured
-    /// trait table `with-traits` embeds into an escaping value is one, and the
-    /// source a `slice` views is another. Empty by default (the walk records no
+    /// the fresh result keeps a reference to, and refuses to adopt it. A captured
+    /// trait table `with-traits` embeds into an escaping value is one such value,
+    /// and the source a `slice` views is another. Empty by default (the walk records no
     /// embed edges); only the real primitive classification
     /// (`PrimitiveClassification::new`) fills it.
     pub embeds: rustc_hash::FxHashMap<SymbolId, &'static [usize]>,
