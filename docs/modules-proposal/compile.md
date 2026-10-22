@@ -1,6 +1,6 @@
 # Modules: how a file compiles
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-22 -->
 
 The implemented parts of the module proposal: sound signals, raw loaders, contained and deterministic expansion, and one compile per file.
 
@@ -66,14 +66,11 @@ directory searched sets `ELLE_PATH=.`.
   may raise, because a raise is a compile error the unit's inputs decide, and
   `list`, `concat` and quasiquote all raise.
 - A compile that code on a fiber starts expands every macro without the
-  capabilities that fiber withholds, and every expansion withholds the effect
-  capabilities as well. A denied primitive in a transformer fails the compile,
-  naming the macro and the primitive (#1321,
-  [capabilities.md](../signals/capabilities.md)).
-- A primitive that reads or changes ambient state through no capability bit
-  carries a mark, and an expansion refuses it. The refusal halts the
-  expansion, so no handler in the transformer catches it, and the compile
-  fails naming the macro and the primitive ([macros.md](../macros.md)).
+  capabilities that fiber withholds. Every expansion also withholds the effect
+  capabilities and `:ambient`, which names the reads of state no argument
+  carries. A denied primitive in a transformer fails the compile, naming the
+  macro and the primitive (#1321, [capabilities.md](../signals/capabilities.md),
+  [macros.md](../macros.md)).
 - An expansion runs under a fuel budget the VM counts, which silent code, the
   fibers the expansion resumes and the expansions it starts all spend.
   Exhausting it fails the compile, naming the macro (#1322,
@@ -96,8 +93,8 @@ the expansion.
 
 A unit expands to the same tree in every process. Its scope ids and its
 expansion-time gensym names come from its own tag and its own count
-([macros.md](../macros.md)). State kept in
-`begin-for-syntax` resets on every compile, so the unit's source fixes it too.
+([macros.md](../macros.md)). State kept in `begin-for-syntax` resets on every
+compile, so the unit's source fixes it too.
 
 A user signal's bit still follows declaration order, so a compile takes the
 declarations as an input. Within one process a bit never changes, and an

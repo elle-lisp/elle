@@ -1,6 +1,6 @@
 # Modules: one pure form
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-22 -->
 
 The decided shape of a module: one pure form per file, evaluated once per instance, held pure by a full deny, and shipped as an image.
 
@@ -70,21 +70,19 @@ definitions jointly, forward and mutual references included
 ## How the form is held pure
 
 `import/load-file` evaluates the form in a fiber that withholds every
-capability. A form that loads a library, reads a file or prints is denied, and
-the load fails naming the primitive. A user could write the same evaluation
-with `fiber/new` and `:deny`.
+capability. A form that loads a library, reads a file, prints or reads ambient
+state is denied, and the load fails naming the primitive. Ambient state is what
+`:ambient` names: the environment, the arguments, the pid, the clocks,
+`backend?` and every other read of state no argument carries
+([capabilities.md](../signals/capabilities.md)). A user could write the same
+evaluation with `fiber/new` and `:deny`.
 
-Two parts need more than that fiber:
-
-- **Ambient reads gain a capability bit.** `sys/env`, `sys/args`, `sys/pid`,
-  the clocks, `backend?` and the other primitives an expansion refuses carry a
-  mark today, and no bit. Each gains one, so the fiber's mask denies them, and
-  `:deny` withholds them from any fiber.
-- **No mutable state reaches the value.** A mutable container in the value, or
-  a closure that assigns a binding the form made, would be shared by every
-  importer. The loader walks the value and refuses both. The walk enforces at
-  run time what an analysis may report earlier. `lib/aws.lisp` assigns its
-  top-level `@sigv4-mod` inside its lambda, so the binding moves inside too.
+One part needs more than that fiber: no mutable state reaches the value. A
+mutable container in the value, or a closure that assigns a binding the form
+made, would be shared by every importer. The loader walks the value and refuses
+both. The walk enforces at run time what an analysis may report earlier.
+`lib/aws.lisp` assigns its top-level `@sigv4-mod` inside its lambda, so the
+binding moves inside too.
 
 A raise is allowed: a raise is deterministic, and a cache tolerates it.
 

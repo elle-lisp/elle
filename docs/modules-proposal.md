@@ -1,6 +1,6 @@
 # Modules: a proposal
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-22 -->
 
 The module system Elle is building toward: one pure form per file, evaluated once per instance, linked across files, shipped as images.
 
@@ -60,11 +60,11 @@ included, is a possible raise. Signals describe control flow and nothing else.
 **Silent** means the inferred signal is empty and the inference is sound.
 
 **Pure** means silent apart from `:error`, reading no ambient state, and
-changing no state that outlives the evaluation. Signals decide only the first
-part. Today `sys/env`, `sys/args`, `sys/pid` and `backend?` transfer no
-control, so they are silent, and they are still ambient reads. Assigning a
+changing no state that outlives the evaluation. Signals decide the first two
+parts: `sys/env`, `sys/args`, `sys/pid`, `backend?` and every other ambient
+read carry `:ambient` ([capabilities.md](signals/capabilities.md)). Assigning a
 captured binding, reading a mutable binding, and mutating a shared container
-are silent too.
+are silent, so no signal decides the third.
 
 **Deterministic** means the same inputs give the same output, a raise included.
 A compile is deterministic in its key and reads files, so determinism is

@@ -55,9 +55,7 @@ signal, and the drivers above it act on each one:
 - `SIG_FUEL`: the instruction budget ran out. A silent function spends fuel
   but never pauses ([inference.md](../../docs/signals/inference.md)). A spent
   expansion budget halts instead ([runtime.md](../../docs/runtime.md)).
-- `SIG_HALT`: graceful VM termination, not resumable. An expansion refuses an
-  ambient primitive with a halt that carries `:terminal`, so no mask catches
-  it ([macros.md](../../docs/macros.md)).
+- `SIG_HALT`: graceful VM termination, not resumable.
 
 `execute_code`, which `execute` calls, is the translation boundary. It
 converts `SignalBits` to `Result<Value, String>` for external callers. On
@@ -200,8 +198,9 @@ setup runs, `compile/run-on :jit`, a macro expansion, `call_closure`, an FFI
 callback and the root driver each refuse one. `refuse_hosted_park` ends the
 park through the discard chokepoint, and the host raises at its own call. An
 error the hosted code raises parks its chain as any error does, and every host
-ends that park through `discard_hosted_error` before it raises or reports. `arena/allocs` and `compile/run-on :bytecode` hand
-the suspension on as their own call's park (`abandon_hosted_park`). The module
+ends that park through `discard_hosted_error` before it raises or reports.
+`arena/allocs` and `compile/run-on :bytecode` hand the suspension on as their
+own call's park (`abandon_hosted_park`). The module
 doc of [execute.rs](execute.rs) holds the rules on what is preserved, what is
 overwritten, and how to add a caller.
 
