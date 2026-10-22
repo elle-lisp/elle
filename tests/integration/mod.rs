@@ -229,6 +229,9 @@ mod agents_links {
 mod agents_submodule {
     include!("agents_submodule.rs");
 }
+mod agents_tree {
+    include!("agents_tree.rs");
+}
 mod audit {
     include!("audit.rs");
 }
