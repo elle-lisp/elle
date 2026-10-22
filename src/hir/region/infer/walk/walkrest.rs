@@ -92,8 +92,6 @@ impl RegionInference {
             }
 
             HirKind::Block { block_id, body, .. } => {
-                self.block_regions.insert(*block_id, self.current_region);
-
                 let scope_region = self.fresh_region(self.current_region);
                 self.scope_region.insert(hir.id, scope_region);
                 let saved = self.current_region;
