@@ -1,5 +1,6 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 // Where a syntax tree lives and how long: a unit's tree dies with the unit, and a macro template outlives its unit.
+//
 // docs/impl/syntax.md
 //
 // The tree is region data, so its lifetime is a region's lifetime.
@@ -52,9 +53,9 @@ fn a_units_syntax_arena_is_freed_with_the_unit() {
 /// was copied into the instance's template arena as it was registered, so it
 /// survives the death of the working arena the `defmacro` form was read into.
 ///
-/// The REPL path is the one that persists a macro across units
-/// (`register_repl_macros` keeps a line's macros for later REPL lines), so it
-/// is what this drives, and the later unit is a REPL line too.
+/// The REPL path is the one that persists a macro across units:
+/// `register_repl_macros` keeps a line's macros for later REPL lines. So this
+/// test drives the REPL path, and the later unit is a REPL line too.
 ///
 /// The counter-factual: a template left in the defining unit's arena would be
 /// freed with that unit, and this expansion would read released pages.
@@ -83,9 +84,7 @@ fn a_macro_template_outlives_the_unit_that_defined_it() {
     let (vm, symbols, cctx) = rt.parts();
     let (line, _) =
         compile_file_repl("(triple 14)", symbols, cctx, "<user>").expect("the line expands");
-    let out = vm
-        .execute_scheduled(&line, cctx)
-        .expect("the line runs");
+    let out = vm.execute_scheduled(&line, cctx).expect("the line runs");
     assert_eq!(out.as_int(), Some(42));
 }
 
