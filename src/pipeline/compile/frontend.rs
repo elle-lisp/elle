@@ -5,7 +5,9 @@
 //! docs/pipeline.md
 //!
 //! The stages run in order: read, strip declarations, migrate, expand with
-//! include splicing, transform, classify, analyze and regularize.
+//! include splicing, transform, classify, analyze and regularize. A unit's tag
+//! hashes its forms as the reader produced them, before epoch migration
+//! rewrites them.
 
 use super::*;
 
@@ -120,7 +122,9 @@ pub(super) fn compile_syntaxes_frontend_xform(
 
 /// The front end past reading: migrate, expand, `xform`, classify, analyze and
 /// regularize. Every caller runs it inside `with_syntax_arena`, so the
-/// per-compilation scratch is freed when the caller returns.
+/// per-compilation scratch is freed when the caller returns. `syntaxes` are
+/// the forms as the caller read them, so the unit's tag is taken here, before
+/// migration rewrites them.
 #[allow(clippy::type_complexity)]
 fn compile_syntaxes_frontend_xform_inner(
     arena: SyntaxArena,
@@ -133,6 +137,7 @@ fn compile_syntaxes_frontend_xform_inner(
 ) -> FrontendResult {
     let ct = crate::trace::compile();
     let t = std::time::Instant::now();
+    let unit = UnitTag::of(source_name, &syntaxes);
 
     let source_epoch = crate::epoch::extract_epoch(&mut syntaxes)?;
     // Version and migration declarations vanish before migration, so an
@@ -143,7 +148,7 @@ fn compile_syntaxes_frontend_xform_inner(
     }
 
     let (expanded_forms, mut expander, meta) =
-        cctx.with_macro_expansion(arena, layer, |macro_vm, mut expander, meta| {
+        cctx.with_macro_expansion(arena, layer, unit, |macro_vm, mut expander, meta| {
             // A form takes the file scope as it leaves the queue, after the
             // include splice, so a spliced form shares the including file's
             // scope and each sees what the other defines (docs/modules.md).

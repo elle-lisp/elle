@@ -140,7 +140,12 @@ fn eval_in_arena(
         }
     }
 
-    // Expand
+    // The datum is a unit of its own: the counts this expander ran up for
+    // earlier evals do not reach it.
+    expander.begin_unit(crate::syntax::UnitTag::of(
+        "<eval>",
+        std::slice::from_ref(&syntax),
+    ));
     let expanded = match expander.expand(syntax, symbols, vm) {
         Ok(e) => e,
         Err(e) => {

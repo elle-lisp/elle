@@ -129,6 +129,7 @@ impl VM {
             kill,
             kill_word,
             expansion_budget: Default::default(),
+            expansion_unit: None,
             current_fiber_handle: None, // root fiber has no handle
             current_fiber_value: None,  // root fiber has no Value
             ffi: FFISubsystem::new(),

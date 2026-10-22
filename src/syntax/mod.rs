@@ -26,22 +26,15 @@ pub mod files;
 mod kind;
 mod node;
 mod span;
+mod unit;
 
 pub use arena::{thread_arena, SyntaxArena, SyntaxHeap};
 pub use expand::{Expander, MacroDef, MacroParams};
 pub use kind::{SeqCtor, SyntaxKind, WrapCtor};
 pub use node::{SynRef, Syntax};
 pub use span::Span;
-
-/// The unit of expansion a scope id was minted in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct UnitTag(u32);
-
-impl UnitTag {
-    /// The tag no unit takes: the primitive scope and the compiler's intro
-    /// scope carry it.
-    pub(crate) const NONE: UnitTag = UnitTag(0);
-}
+pub(crate) use unit::Unit;
+pub use unit::UnitTag;
 
 /// A hygiene scope. Identifiers with the same name and different scope sets
 /// are different identifiers.
@@ -102,11 +95,6 @@ impl ScopeId {
         self.0 & Self::INTRO_BIT != 0
     }
 
-    /// The count within the minting unit, without the intro bit.
-    pub(crate) fn count(self) -> u32 {
-        (self.0 & Self::COUNT_MASK) as u32
-    }
-
     /// The id as one word, for an encoding that writes it out.
     pub(crate) fn to_bits(self) -> u64 {
         self.0
@@ -124,6 +112,11 @@ impl ScopeId {
     /// distinct ids and not the unit they came from.
     pub(crate) fn test(count: u32) -> ScopeId {
         Self::new(UnitTag::NONE, count)
+    }
+
+    /// The count within the minting unit, without the intro bit.
+    pub(crate) fn count(self) -> u32 {
+        (self.0 & Self::COUNT_MASK) as u32
     }
 }
 

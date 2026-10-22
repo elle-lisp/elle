@@ -1,6 +1,6 @@
 // audited: 2026-10-21
 //! What the file gets from the copied graph: page bytes, the four relocation
-//! streams, the object index, and the two watermarks.
+//! streams, the object index, and the parameter watermark.
 //!
 //! docs/impl/image/dumping.md
 //! docs/impl/image/format.md
@@ -85,8 +85,6 @@ pub(super) struct Emitted {
     pub prims: Vec<(u64, &'static str)>,
     /// `(slot, encoded constructor)` per value the hydrating instance builds.
     pub recons: Vec<(u64, u64)>,
-    /// One past the highest hygiene scope counter any node carries.
-    pub scope_watermark: u32,
     /// One past the highest id any parameter carries.
     pub param_watermark: u32,
 }
@@ -107,7 +105,6 @@ pub(super) fn emit(
         files: Vec::new(),
         prims: Vec::new(),
         recons: Vec::new(),
-        scope_watermark: 0,
         param_watermark: 0,
     };
     let mut backings: Vec<Backing> = Vec::new();
@@ -347,9 +344,6 @@ impl Emitted {
         if let Some(name) = node.span.file() {
             self.files
                 .push(((node_off + layout::file_slot_in_node()) as u64, name.into()));
-        }
-        for scope in node.scopes() {
-            self.scope_watermark = self.scope_watermark.max(scope.count() + 1);
         }
         if let Some((rel, src)) = self.slice_backing(&node.scopes, at)? {
             backings.push(Backing::raw::<ScopeId>(rel, src, node.scopes().len()));
