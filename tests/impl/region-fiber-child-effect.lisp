@@ -1,28 +1,28 @@
-(elle/epoch 14)
-# audited: 2026-10-06
+(elle/epoch 15)
+# audited: 2026-10-21
 # A branch arm that reads a live-in fiber with `fiber/child` strands nothing, because the read stores nothing.
 # docs/impl/region/effects.md
 # docs/impl/escape.md
 #
 # The call hands back the cached child-fiber `Value` its argument carries. That
 # cache is written by the resume machinery (`with_child_fiber`), not by this
-# call, so the read stores no argument; what it returns lives in whatever region
+# call, so the read stores no argument. What it returns lives in whatever region
 # the child was minted in, which is neither the call's own region nor its
 # argument's. Unbounded result, no store — `Opaque`.
 #
 # What the wrong declaration costs is NOT the arg clique. `fiber/child` takes a
 # single heap argument and the clique is over PAIRS of arguments, so there is no
 # edge to emit either way. The cost is on the ESCAPE side, which reads the same
-# declaration: `Mixed`/`Unknown` seeds every argument on escape's store facet,
-# and a region escaping by a facet other than return keeps the conservative
-# baseline at every mechanism gated on `frame_held_regions` — the branch-arm
-# release window among them.
+# declaration: `Mixed`/`Unknown` seeds every argument on escape's store facet. A
+# region escaping by a facet other than return keeps the conservative baseline
+# at every mechanism gated on `frame_held_regions`, the branch-arm release
+# window among them.
 #
 # So the gauge below is a BRANCH: the fiber subject is live-in, one arm reads it
 # with `fiber/child`, and a sibling arm names it too. Where the read seeds a
-# store facet on the subject the window declines, the branch's only release stays
-# in the arm holding the `decref_point`, and the arm driven here strands the whole
-# subject — the fiber value and its body closure — once per call. The
+# store facet on the subject, the window declines. The branch's only release then
+# stays in the arm holding the `decref_point`, and the arm driven here strands the
+# whole subject, the fiber value and its body closure, once per call. The
 # `fiber/bits` rows are the contrast (`Immediate` seeds nothing) and the
 # single-arm row is the control that the read itself reclaims.
 #
