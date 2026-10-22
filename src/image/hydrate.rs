@@ -140,8 +140,8 @@ pub fn hydrate(
         return Err(corrupt("immediate root with a heap tag"));
     } else if header.n_pages != 0 {
         // Only a graph that allocated nothing has an immediate root, so pages
-        // beside one are drift — and they would leave the payload word read
-        // as an offset by one branch and as a value by another.
+        // beside one are drift. They would leave the payload word read as an
+        // offset by one branch, and as a value by another.
         return Err(corrupt("immediate root beside a pages section"));
     }
     // A native-fn root's payload is a primitive-table index, since the header
@@ -315,7 +315,7 @@ pub fn hydrate(
 
     // Write each reconstructed value into its slot and count the reference it
     // creates. The target lives in a region of this instance's own, so the
-    // hydrated region's free cascade must release it exactly once — and the
+    // hydrated region's free cascade must release it exactly once. The
     // free-time edge oracle compares the recorded table against the same
     // pointers it just wrote (docs/impl/region/ownership.md).
     for (slot, v) in rebuilt {
