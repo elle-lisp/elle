@@ -1,12 +1,12 @@
-// audited: 2026-10-21
+// audited: 2026-10-22
 //! Meta-programming primitives: gensym, the syntax-object operations, squelch and attune, meta/origin, and git.
 //!
 //! docs/macros.md
 //! docs/impl/spirv.md
 //! docs/signals/inference.md
 //!
-//! `tests/lang/prim-meta.lisp`, `tests/lang/syntax-predicates.lisp` and
-//! `tests/lang/macros.lisp` pin them.
+//! `tests/lang/prim-meta.lisp`, `tests/lang/syntax-predicates.lisp`,
+//! `tests/lang/macros.lisp` and `tests/lang/expansion-units.lisp` pin them.
 
 use crate::primitives::ctx::NativeCtx;
 use crate::primitives::def::RegionEffect;
