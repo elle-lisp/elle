@@ -1,4 +1,8 @@
-// Unit tests harness
+// audited: 2026-10-22
+// The unit-test harness: one module per file in this directory, each pulled
+// into the shared test binary.
+//
+// tests/AGENTS.md
 mod symbol {
     include!("symbol.rs");
 }
@@ -29,4 +33,7 @@ mod table_key {
 }
 mod cycle {
     include!("cycle.rs");
+}
+mod mutable_store {
+    include!("mutable_store.rs");
 }
