@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! The boot-image policy and the warm cache: which images an instance reads,
 //! where a compiled boot stores one, and what a store leaves behind.
 //!
@@ -195,3 +195,6 @@ fn prune_superseded(dir: &Path, keep: &Path) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
