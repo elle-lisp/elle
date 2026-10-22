@@ -69,6 +69,11 @@ an unknown function, and its call's type is Top:
         "a parameter named length is not the primitive")
 ```
 
+The signal narrowing ([narrowing](../../src/hir/narrow.rs)) reads the binding
+the same way. It drops `:error` from a call to a primitive whose operand types
+rule the error out, and never from a call to a function the program defines
+under that name.
+
 | Callee | The call's type |
 |---|---|
 | a lambda binding this unit writes | Top (§ "A written binding's result is Top") |
