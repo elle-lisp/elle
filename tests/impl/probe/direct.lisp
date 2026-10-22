@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-10-22
 # The direct-loop rows for scope reclamation, branch compensation, collections, strings and cells — one per-op thunk each.
 #
 # docs/impl/region/diagnostics.md
@@ -100,11 +100,8 @@
    ["fold" (fn [j] (fold (fn [a x] (+ a x)) 0 [1 2 3]))]
    # zip's column walks are cell-free top-level drivers threading `arrs`/`out` and
    # their accumulators as params (`zip-tuple-at`/`zip-build-array`/`zip-build-list`),
-   # so the walks allocate no closure and no capture cell. Each driver is a walk
-   # whose base case returns a heap argument while the recursive arm holds the
-   # `decref_point`, so it rests on the per-path return frontier
-   # (docs/impl/region/compensate.md). Without it each call would strand the
-   # argument it hands back. A control at 0.
+   # so the walks allocate no closure and no capture cell. Each driver rests on
+   # the per-path return frontier, as `take`/`drop` below do. A control at 0.
    ["zip" (fn [j] (zip [1 2] [3 4]))] ["sort" (fn [j] (sort [3 1 2]))]
    # `reverse` is a CLOSED control for the branch-arm release window
    # (docs/impl/region/window.md): its accumulator is named by every arm of the
@@ -309,10 +306,9 @@
         {:val x}))]
    # `map-while`/`filter-while`/`mapcat-while` are DISSOLUTION controls. A kernel
    # over a proven immutable array fuses to an inlined index-walk loop
-   # (docs/impl/dissolution.md), so the stdlib op — and every per-call strand it
-   # carries (the closure `map` mints for `f`, the `freeze` copy) — ceases to exist
-   # and the rate is 0. The UN-fused op is gauged by `wrap-map` below, whose
-   # function has a `block` body.
+   # (docs/impl/dissolution.md). The stdlib op then ceases to exist, with every
+   # per-call strand it carries: the closure `map` mints for `f`, and the
+   # `freeze` copy. The rate is 0. `wrap-map` below gauges the UN-fused op.
    ["map-while"
     (fn [j]
       (map (fn [x]
@@ -344,10 +340,8 @@
    # which a fragment cannot close over, so fusion declines and the real `map`
    # runs with its per-call strands measured (docs/impl/dissolution.md). A
    # capturing lambda literal is no decline: it splices at the call site. A
-   # control at 0: `map` dispatches on its collection's type through a `cond`,
-   # whose later clause TESTS are conditional positions for the argument's one
-   # release (docs/impl/region/window.md). Its `push-accum` face is the same op
-   # driven into a block-local accumulator.
+   # control at 0, on the clause-test reading `distinct` pins above. Its
+   # `push-accum` face is the same op driven into a block-local accumulator.
    ["wrap-map" (fn [j] (map wrap-add [1 2 3]))] ["factory" (fn [j] (t13proc j))]
    ["cond-factory" (fn [j] (t13cond j))] ["alias" (fn [j] (make-struct j))]
    ["nested-factory" (fn [j] (t13nested j))]
