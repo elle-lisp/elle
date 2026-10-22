@@ -1,20 +1,19 @@
 (elle/epoch 15)
-# audited: 2026-10-14
-## The std/gun mesh rules: fetch, forward, acks, deferral, resync, redial and close, over the connections peer.lisp runs.
+# audited: 2026-10-21
+## The std/gun mesh rules: fetch, forward, acks, deferral and resync, over the connections peer.lisp runs.
 ## lib/gun/mesh.md
 ## lib/gun/overview.md
 ##
 ## Loaded via:
-##   (def mesh ((import "std/gun/mesh") :core core :wire wire :peer peer))
+##   (def mesh ((import "std/gun/mesh") :core core :wire wire :wait wait))
 ##
-## Exports: {:fetch :touch :broadcast :forget :await-ack :serve :connect
-##           :keep :close :peers}
+## Exports: {:fetch :touch :handlers :broadcast :forget :await-ack :closed?
+##           :fail}
 ##
-## A wait is a record of the peers a get or a put went to, and a latch that
-## opens when every one answered or left (a get), or when the first one
-## acked (a put). The database's :closed latch opens once, on close.
+## :handlers answers the functions peer.lisp calls for a database, which
+## join.lisp hands it. :fail raises the gun-error that join.lisp raises too.
 
-(fn [&named core wire peer]
+(fn [&named core wire wait]
 
   (def sync ((import "std/sync")))
   (def uuid ((import "std/uuid")))
@@ -48,42 +47,6 @@
     (let [[ok? _] (protect (p:send msg))]
       (unless ok? (p:close))))
 
-  ## ── Waits ────────────────────────────────────────────────────────────
-
-  (defn open-wait [c id targets until]
-    "Wait for the peers in targets to answer the message id. until is :all
-     for a get and :first for a put."
-    (let [waiting @{}]
-      (each p in targets
-        (put waiting p:key true))
-      (put c:pending id
-           {:waiting waiting
-            :until until
-            :latch (sync:make-latch)
-            :first (box nil)})))
-
-  (defn settle [c id key answer]
-    "Record that the peer with key answered the message id, with answer."
-    (when-let [w (get c:pending id)] (del w:waiting key)
-              (when (and answer (nil? (unbox w:first))) (rebox w:first answer))
-              (when (or (empty? w:waiting) (and answer (= w:until :first)))
-                (let [latch w:latch]
-                  (latch:open)))))
-
-  (defn await [c id seconds]
-    "Wait for the message id to settle, for seconds at most, and answer the
-     first answer it recorded, or nil."
-    (let [w (get c:pending id)
-          latch w:latch]
-      (defer
-        (del c:pending id)
-        (unless (empty? w:waiting)
-          (ev/timeout seconds
-                      (fn []
-                        (latch:wait)
-                        true)))
-        (unbox w:first))))
-
   ## ── Fetching ─────────────────────────────────────────────────────────
 
   (defn fetch-souls [c souls except]
@@ -112,10 +75,10 @@
           (unless (or (empty? fresh) (empty? targets))
             (let [id (uuid:v4)
                   msg (wire:get id (freeze fresh))]
-              (open-wait c id targets :all)
+              (wait:open-wait c id targets :all)
               (each p in targets
                 (send-to p msg))
-              (await c id c:wait)))))
+              (wait:await c id c:wait)))))
       (each [_ latch] in others
         (latch:wait))
       (let [again (filter (fn [soul] (nil? (get c:fetched soul)))
@@ -206,8 +169,8 @@
                   :answer
                     (begin
                       (reporting c (fn [] (absorb c msg:graph p:key)))
-                      (settle c msg:ack p:key nil))
-                  :ack (settle c msg:ack p:key [p:id msg])
+                      (wait:settle c msg:ack p:key nil))
+                  :ack (wait:settle c msg:ack p:key [p:id msg])
                   (core:report c
                                {:error :gun-error
                                 :reason :bad-message
@@ -216,7 +179,7 @@
      :down (fn [p]
              (del c:peers p:key)
              (each id in [;(keys c:pending)]
-               (settle c id p:key nil)))
+               (wait:settle c id p:key nil)))
      :error (fn [err] (core:report c err))})
 
   ## ── A local put ──────────────────────────────────────────────────────
@@ -227,7 +190,7 @@
     (let [targets (peers-except c nil)
           id (uuid:v4)]
       (when ack?
-        (open-wait c id (if (empty? g) [] targets) :first))
+        (wait:open-wait c id (if (empty? g) [] targets) :first))
       (unless (empty? g)
         (let [msg (wire:put id g)]
           (each p in targets
@@ -242,79 +205,18 @@
   (defn await-ack [c id seconds]
     "Wait for the first ack of the put id. Raises :no-ack when none comes
      within seconds, and :peer-error when the first ack says the merge failed."
-    (let [answer (await c id seconds)]
+    (let [answer (wait:await c id seconds)]
       (when (nil? answer) (gun-error :no-ack "no peer acked the put"))
       (let [[peer-id msg] answer]
         (unless msg:ok?
           (gun-error :peer-error "a peer failed to merge the put"
                      :peer-id peer-id :peer-reason msg:reason)))))
 
-  ## ── Joining ──────────────────────────────────────────────────────────
-
-  (defn serve [c listener]
-    "Accept peers for c on listener until it closes."
-    (peer:serve listener c:id (handlers c)))
-
-  (defn dial [c url]
-    (peer:dial url c:id c:wait (handlers c)))
-
-  (defn connect [c url]
-    "Dial the peer at url for c, and answer a function that closes the
-     connection. Raises :closed once c has closed."
-    (when (closed? c) (gun-error :closed "the database is closed"))
-    (let [p (dial c url)]
-      p:close))
-
-  (defn pause [c seconds]
-    "Wait seconds, or until c closes."
-    (let [latch c:closed]
-      (ev/timeout seconds
-                  (fn []
-                    (latch:wait)
-                    true))))
-
-  (defn keep [c url lo hi]
-    "Start a keeper: a fiber that dials url for c until c closes. After a
-     dial that succeeds, it waits for the peer to leave, and its delay goes
-     back to lo. After a dial that fails, it reports the error. Then it waits
-     its delay, which each failed dial doubles up to hi, and dials again."
-    (peer:require-websocket)
-    (ev/spawn (fn []
-                (def @delay lo)
-                (while (not (closed? c))
-                  (let [[ok? p] (protect (dial c url))]
-                    (cond
-                      ok? (let [gone p:gone]
-                            (gone:wait)
-                            (assign delay lo)
-                            (pause c delay))
-                      (closed? c) nil
-                      (begin
-                        (core:report c p)
-                        (pause c delay)
-                        (assign delay (min hi (* 2 delay)))))))))
-    nil)
-
-  (defn close [c]
-    "Close c: end every keeper, close every connected peer, and close each
-     peer that registers after this. A second close does nothing."
-    (let [latch c:closed]
-      (latch:open))
-    (each p in (values c:peers)
-      (p:close))
-    nil)
-
-  (defn peers [c]
-    "The database ids of the peers connected to c."
-    (map (fn [p] p:id) (values c:peers)))
-
   {:fetch fetch
    :touch touch
+   :handlers handlers
    :broadcast broadcast
    :forget forget
    :await-ack await-ack
-   :serve serve
-   :connect connect
-   :keep keep
-   :close close
-   :peers peers})
+   :closed? closed?
+   :fail gun-error})

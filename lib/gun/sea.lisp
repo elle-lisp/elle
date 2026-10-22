@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-14
+# audited: 2026-10-21
 ## The SEA rules of std/gun: key pairs, user spaces, the signature of a field, the content node, admission, and encryption.
 ## lib/gun/sea.md
 ## lib/gun/overview.md

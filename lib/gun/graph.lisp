@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-14
+# audited: 2026-10-21
 ## Souls, the in-memory nodes, the merge that answers a diff, and the flattening of a nested struct.
 ## lib/gun.md
 ## lib/gun/overview.md

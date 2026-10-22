@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-14
+# audited: 2026-10-21
 ## One std/gun WebSocket connection: the hello, the reader loop, the send lock, and close.
 ## lib/gun/mesh.md
 ## lib/gun/overview.md

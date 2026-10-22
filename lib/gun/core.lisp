@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-14
+# audited: 2026-10-21
 ## One gun database: its graph, store, clock, lock, subscriptions, peers and close latch; loading, the walk, the merges and notify.
 ## lib/gun.md
 ## lib/gun/mesh.md

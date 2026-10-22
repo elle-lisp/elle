@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-13
+# audited: 2026-10-21
 ## A field of a gun node: its state, its value, and its signature in a user space, built and read only here.
 ## lib/gun.md
 ## lib/gun/sea.md

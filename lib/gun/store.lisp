@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-13
+# audited: 2026-10-21
 ## The memory store and the Redis store, behind one interface of :read and :write.
 ## lib/gun.md
 ## lib/gun/sea.md

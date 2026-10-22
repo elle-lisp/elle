@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-12
+(elle/epoch 15)
+# audited: 2026-10-21
 ## The hybrid logical clock that stamps each write, and the only comparison of two states.
 ## lib/gun.md
 ## lib/gun/overview.md

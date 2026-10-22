@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-13
+# audited: 2026-10-21
 ## The peer messages of std/gun: build them, write them as JSON text, and read them back with every check.
 ## lib/gun/mesh.md
 ## lib/gun/overview.md

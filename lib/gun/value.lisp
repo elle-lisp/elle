@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-14
+# audited: 2026-10-21
 ## What a gun value may be, the link that points at a node, and the encoding that stores and orders values.
 ## lib/gun.md
 ## lib/gun/overview.md

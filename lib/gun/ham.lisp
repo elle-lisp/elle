@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-11
+(elle/epoch 15)
+# audited: 2026-10-21
 ## The HAM verdict on one incoming field against the field it would replace.
 ## lib/gun.md
 ## lib/gun/overview.md
