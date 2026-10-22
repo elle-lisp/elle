@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! I/O primitives: type predicates and backend operations.
 //!
 //! src/io/AGENTS.md
@@ -105,8 +105,8 @@ fn io_submit_required_bits(args: &[Value]) -> SignalBits {
 /// is for. The backend asks that fiber what became of it before it assembles a
 /// completion, and ends an operation the fiber can no longer receive
 /// (docs/impl/io-inflight.md). A call that names no fiber is submitting for a
-/// reader that is not a fiber of this scheduler — `handle-io-forward` submits
-/// for a child scheduler's queue — and nothing about such a submission is ever
+/// reader that is not a fiber of this scheduler: `handle-io-forward` submits
+/// for a child scheduler's queue. Nothing about such a submission is ever
 /// withheld.
 fn prim_io_submit(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
@@ -141,12 +141,11 @@ fn prim_io_submit(
         );
     }
     // Who this submission is on behalf of. The heap is the requesting instance's
-    // own (the ctx's): the backend records it and builds every completion value
-    // on it — immediate (spawn) or harvested on the scheduler thread — so results
-    // live where the issuing fiber lives, never on a per-thread slot a second
-    // instance could share. The fiber is what says whether a result still has
-    // anywhere to go; a call that names none is submitting for a reader that is
-    // not a fiber of this scheduler (`handle-io-forward`).
+    // own (the ctx's), and the backend records it. It builds every completion
+    // value on it, immediate (spawn) or harvested on the scheduler thread. So
+    // results live where the issuing fiber lives, never on a per-thread slot a
+    // second instance could share. The fiber is what says whether a result still
+    // has anywhere to go.
     let origin_heap = ctx.heap_mut() as *mut crate::value::fiberheap::FiberHeap;
     let submitter = match args.get(2) {
         Some(fiber) if fiber.as_fiber().is_some() => {
