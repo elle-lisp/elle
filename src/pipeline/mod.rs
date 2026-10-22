@@ -7,7 +7,8 @@
 //! Each stage lives beside this file:
 //!
 //! - `cache`: the compile-context type an instance threads through every call.
-//! - `bootstrap`: the core.lisp bootstrap that builds one.
+//! - `bootstrap`: the core.lisp bootstrap that builds one, and the exports a
+//!   boot leaves.
 //! - `sources`: the three sources a boot compiles.
 //! - `compile`, `analyze` and `eval`: the three surfaces over them.
 
@@ -21,8 +22,8 @@ pub mod sources;
 
 // Re-export public API
 pub use analyze::{analyze, analyze_file};
-pub use bootstrap::install_core_exports;
-pub use cache::{compile_file_stored, BootExports, CompileCtx, Layer};
+pub use bootstrap::{install_core_exports, BootExports};
+pub use cache::{compile_file_stored, CompileCtx, Layer};
 #[cfg(test)]
 pub(crate) use compile::compile_file_to_typed_fhir;
 pub use compile::{
