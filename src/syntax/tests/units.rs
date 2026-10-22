@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-21
 //! A unit mints the same scope ids and gensym names wherever it expands, and two units mint different ones.
 //!
 //! docs/impl/syntax.md
@@ -61,8 +61,8 @@ fn symbol_name(rt: &mut Runtime, source: &str) -> String {
 }
 
 // The counter-factual is a count that runs across the process: the second
-// instance's gensym carries on from the first instance's, and the two answer
-// different names for one file.
+// instance's gensym would carry on from the first instance's, and the two
+// would answer different names for one file.
 #[test]
 fn one_unit_mints_the_same_ids_in_two_instances() {
     let first = run_file(&mut Runtime::without_stdlib(), FILE_UNIT, "unit.lisp");
@@ -82,9 +82,9 @@ fn one_unit_mints_the_same_ids_in_two_evals() {
 
 // A transformer compiles in the first unit that expands its macro, and every
 // later unit calls the cached closure. `kind-of`'s body uses `case`, which
-// calls `gensym` while it expands, so a transformer compile that counted in
-// the caller's unit would move the caller's gensym count on the first eval
-// below and not on the second.
+// calls `gensym` while it expands. A transformer compile that counted in the
+// caller's unit would move the caller's gensym count on the first eval below
+// and not on the second.
 #[test]
 fn a_unit_mints_the_same_ids_whether_or_not_its_transformers_have_compiled() {
     let mut rt = Runtime::without_stdlib();
