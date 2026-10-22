@@ -201,6 +201,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `kill` | `KillSwitch` | The kill word every charge site reads first; a worker takes its spawner's through `set_kill_switch` ([runtime.md](../../docs/runtime.md)) |
 | `kill_word` | `*const AtomicU64` | Where `kill`'s word lives, for compiled code to load through the VM pointer |
 | `expansion_budget` | `ExpansionBudget` | The budget of the expansion running on this VM, spent by every fiber it runs; unmetered while none runs ([runtime.md](../../docs/runtime.md)) |
+| `expansion_unit` | `Option<Unit>` | The unit whose expansion runs code on this VM, lent by `at_expansion`; `gensym` names its symbols after it, and counts across the process while it is `None` ([macros.md](../../docs/macros.md)) |
 | `heap_ptr` | `*mut FiberHeap` | This instance's single heap, owned by `RuntimeCore` (or privately leaked for a bare VM). All fibers share it; reach it via `heap()` |
 | `current_fiber_handle` | `Option<FiberHandle>` | Handle for current fiber (`None` for root) |
 | `current_fiber_value` | `Option<Value>` | Cached Value for current fiber (`None` for root) |
@@ -214,7 +215,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `error_loc` | `Option<SourceLoc>` | Where the error now propagating was raised. Written by `record_error_loc` (first-writer-wins, so the innermost frame keeps it), taken by `absorbs` when a mask catches ([vm.md](../../docs/impl/vm.md)) |
 | `env_cache` | `Vec<Value>` | Reusable buffer for `build_closure_env` (avoids alloc per call) |
 | `tail_call_env_cache` | `Vec<Value>` | Reusable buffer for the tail-call env built by `tail_call_inner` and `build_tail_call_env` |
-| `eval_expander` | `Option<Expander>` | Cached Expander for runtime `eval` (avoids re-loading prelude) |
+| `eval_expander` | `Option<Expander>` | Cached Expander for runtime `eval` (avoids re-loading prelude); each eval begins a unit on it |
 | `user_args` | `Vec<String>` | The arguments after the source file, after `-`, or after `--`; empty when none follow. Read by `sys/args` |
 
 ### Key Fiber fields (on `vm.fiber`)
@@ -255,7 +256,7 @@ parameter frames). Each re-entry nests on the Rust stack, so it halts with
 | `arena/allocs` SIG_QUERY handler | [config.rs](signal/config.rs) | Runs a thunk to measure its allocations |
 | `compile/run-on :bytecode` | [bytecode.rs](run_on/bytecode.rs) | Runs a closure on the bytecode tier |
 | The tail-call sentinel | [jit.rs](run_on/jit.rs), [jit_entry.rs](jit_entry.rs) | Finishes a tail call a compiled callee handed back |
-| `call_transformer`, `run_at_expansion` | [expansion.rs](expansion.rs) | Macro transformers and `begin-for-syntax` definitions, under the expansion fuel budget |
+| `call_transformer`, `run_at_expansion` | [expansion.rs](expansion.rs) | Macro transformers and `begin-for-syntax` definitions, under the expansion fuel budget, with the unit they expand lent to `gensym` |
 | `call_closure` | [call.rs](call.rs) | Trait methods, and the `import/resolve` an `include` calls |
 | JIT helpers | [callops.rs](../jit/calls/callops.rs) | Run an uncompiled callee, or any callee once the native stack is low |
 | The WASM host | [linker.rs](../wasm/linker.rs), [linker.rs](../wasm/lazy/linker.rs) | Falls back to bytecode for a callee the module does not hold |

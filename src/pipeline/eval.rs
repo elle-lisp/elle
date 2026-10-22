@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-13
 //! The entry points that compile source or a syntax tree and run it on the caller's VM.
 //!
 //! docs/pipeline.md
@@ -11,7 +11,7 @@ use crate::hir::{Analyzer, BindingArena};
 use crate::lir::{Emitter, Lowerer};
 use crate::reader::read_syntax;
 use crate::symbol::SymbolTable;
-use crate::syntax::Expander;
+use crate::syntax::{Expander, UnitTag};
 use crate::vm::VM;
 
 /// Compile and run a syntax tree with the caller's expander: a macro
@@ -78,9 +78,13 @@ pub fn eval_syntax(
     let bytecode = emitter.emit_module(&lir_module).bytecode;
 
     // The body runs under the expansion fuel budget, and a park it raises is
-    // refused: an expansion cannot hold one.
-    vm.run_at_expansion(&crate::value::CodeUnit::new(code, bytecode))
-        .map_err(|fault| fault.describe())
+    // refused: an expansion cannot hold one. A gensym it calls counts in the
+    // expander's unit.
+    vm.run_at_expansion(
+        &crate::value::CodeUnit::new(code, bytecode),
+        expander.unit_mut(),
+    )
+    .map_err(|fault| fault.describe())
 }
 
 /// Compile one form and run it. The caller's VM both expands the form and runs
@@ -109,7 +113,8 @@ fn eval_in_arena(
     let syntax = read_syntax(arena, source, source_name)?;
 
     // The instance's expander + compile meta; expansion runs on the caller's vm.
-    let (mut expander, meta) = cctx.expander_and_meta(arena);
+    let unit = UnitTag::of(source_name, std::slice::from_ref(&syntax));
+    let (mut expander, meta) = cctx.expander_and_meta(arena, unit);
 
     let scoped = if source_name.starts_with('<') {
         syntax
