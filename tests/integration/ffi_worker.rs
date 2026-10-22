@@ -1,22 +1,16 @@
-// FFI library lifetime across worker threads: a library that registers thread-local
-// destructors must not be unmapped while a thread still has a pending destructor.
+// audited: 2026-10-22
+// A worker that leaves a library's thread-exit destructor armed exits cleanly, because no worker unmaps the library.
 //
-// The hazard: a foreign library calls `pthread_key_create(&key, destructor)` and a
-// worker stores a non-null value under that key, so glibc invokes `destructor` from
-// `__nptl_deallocate_tsd` as the OS thread exits. The test runner runs FFI-using
-// Elle inside `os/spawn` workers. The OLD behavior dlclose'd the library on worker
-// teardown — unmapping its code — so the thread-exit destructor walk jumped into the
-// now-unmapped page → a SIGSEGV that killed the whole process, and the only remedy
-// was for the programmer to manually delete the key before the worker exited.
+// docs/ffi.md
 //
-// The fix (src/ffi/registry.rs): FFI library mappings are owned process-globally and
-// NEVER `dlclose`d (the same discipline plugins use). The `dlopen` refcount never
-// reaches 0 on a worker, so the mapping stays put and a worker's thread-exit
-// destructor always lands in mapped code — no manual teardown required. This file
-// pins that: a worker that loads the fixture, arms its TLS destructor, and exits
-// WITHOUT clearing the key now exits CLEANLY (the assertion that flipped from the old
-// "killed by a signal" is itself the proof the mapping outlives the worker). Gated on
-// a C compiler being present; a no-op without one.
+// A foreign library may call `pthread_key_create(&key, destructor)`, and a
+// worker that stores a non-null value under that key has glibc call
+// `destructor` from `__nptl_deallocate_tsd` as its OS thread exits. Were the
+// library `dlclose`d on worker teardown, that walk would jump into an unmapped
+// page and the SIGSEGV would kill the whole process. src/ffi/registry.rs owns
+// every mapping for the life of the process and never `dlclose`s one, so the
+// destructor always lands in mapped code. Each test is gated on a C compiler,
+// and does nothing without one.
 
 use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
@@ -25,10 +19,7 @@ use std::process::{Command, ExitStatus};
 // A pthread TLS key whose destructor lives in THIS `.so`. `reg_tls_dtor` arms it
 // (stores a non-null value, so the destructor runs at thread exit); on first call
 // it creates the key. `clear_tls_dtor` deletes the key, so the destructor will NOT
-// run. With the OLD per-worker `dlclose`, an armed-but-not-cleared key whose `.so`
-// was unmapped left glibc's thread-exit walk pointing into unmapped code — the crash
-// this test guarded. With the fix, the `.so` is never unmapped, so the armed
-// destructor is always safe to run.
+// run.
 const FIXTURE_C: &str = r#"
 #include <pthread.h>
 static pthread_key_t key;
@@ -47,24 +38,55 @@ fn elle_binary() -> &'static str {
     env!("CARGO_BIN_EXE_elle")
 }
 
-/// Compile the TLS-destructor fixture into `OUT_DIR` (under the cargo target tree,
-/// which — unlike `/dev/shm` — is mapped executable, a prerequisite for `dlopen`).
-/// Returns the `.so` path, or `None` when no C compiler is available, in which case
-/// the test no-ops (there is nothing to exercise).
-fn build_fixture() -> Option<PathBuf> {
-    let out = PathBuf::from(env!("OUT_DIR"));
-    let src = out.join("tlsdtor.c");
-    let so = out.join("libtlsdtor.so");
-    std::fs::write(&src, FIXTURE_C).expect("write fixture source");
-    let cc = std::env::var("CC").unwrap_or_else(|_| "cc".into());
-    match Command::new(cc)
-        .args(["-shared", "-fPIC", "-O2", "-pthread", "-o"])
-        .arg(&so)
-        .arg(&src)
-        .status()
-    {
-        Ok(s) if s.success() => Some(so),
-        _ => None,
+/// The fixture library, built in a directory of its own and removed with it.
+///
+/// The trap: both tests run at once in one process. Were the fixture built at
+/// one fixed path, one test's compiler would rewrite the `.so` while the
+/// other's worker loads it. `dlopen` would refuse the half-written file as
+/// "file too short", and the worker would exit 1 and fail the clean-exit check.
+struct Fixture(PathBuf);
+
+impl Fixture {
+    /// Compile the fixture under `OUT_DIR`, which sits in the cargo target tree
+    /// and so is mapped executable, as `dlopen` requires: a tmpfs such as
+    /// `/dev/shm` may not be. `None` when no C compiler is available.
+    fn build(tag: &str) -> Option<Fixture> {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        let dir = PathBuf::from(env!("OUT_DIR"))
+            .join(format!("ffi-worker-{tag}-{}-{n}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create fixture dir");
+        let fixture = Fixture(dir);
+        let src = fixture.0.join("tlsdtor.c");
+        std::fs::write(&src, FIXTURE_C).expect("write fixture source");
+        let cc = std::env::var("CC").unwrap_or_else(|_| "cc".into());
+        match Command::new(cc)
+            .args(["-shared", "-fPIC", "-O2", "-pthread", "-o"])
+            .arg(fixture.so())
+            .arg(&src)
+            .status()
+        {
+            Ok(s) if s.success() => Some(fixture),
+            _ => None,
+        }
+    }
+
+    fn so(&self) -> PathBuf {
+        self.0.join("libtlsdtor.so")
+    }
+
+    fn so_str(&self) -> String {
+        self.so()
+            .to_str()
+            .expect("fixture path is utf-8")
+            .to_string()
+    }
+}
+
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 
@@ -122,25 +144,23 @@ fn run_two_workers(so: &str) -> ExitStatus {
 
 #[test]
 fn worker_ffi_load_without_teardown_exits_cleanly() {
-    let Some(so) = build_fixture() else {
+    let Some(fixture) = Fixture::build("teardown") else {
         return; // no C compiler on this host; nothing to exercise
     };
-    let so = so.to_str().expect("fixture path is utf-8");
+    let so = fixture.so_str();
 
-    // The fix, and the counterfactual that flipped. A worker loads the fixture, arms
-    // a thread-local destructor whose code lives in the `.so`, and exits WITHOUT
-    // deleting the key. Under the old per-worker `dlclose` this SIGSEGV'd (the
-    // destructor's page was unmapped before thread exit); now the mapping is
-    // process-global and never unmapped, so the worker exits cleanly. This clean
-    // exit is the proof the mapping outlives the worker.
-    let clean = run_worker(so, false);
+    // A worker loads the fixture, arms a thread-local destructor whose code
+    // lives in the `.so`, and exits WITHOUT deleting the key. A per-worker
+    // `dlclose` would unmap the destructor's page before thread exit, and the
+    // process would die of SIGSEGV. The clean exit shows the mapping outlives
+    // the worker.
+    let clean = run_worker(&so, false);
     assert_eq!(
         clean.signal(),
         None,
         "a worker that loaded an FFI lib with a live TLS destructor and exited \
-         without manual teardown was killed by signal {:?} — the library mapping is \
-         being unloaded on worker teardown (the dlclose-after-TLS-dtor crash this \
-         fix removes). Exit code {:?}.",
+         without manual teardown was killed by signal {:?}. The library mapping is \
+         unloaded on worker teardown. Exit code {:?}.",
         clean.signal(),
         clean.code(),
     );
@@ -152,7 +172,7 @@ fn worker_ffi_load_without_teardown_exits_cleanly() {
     );
 
     // Explicitly clearing the key before exit is still valid and clean.
-    let cleared = run_worker(so, true);
+    let cleared = run_worker(&so, true);
     assert_eq!(
         cleared.signal(),
         None,
@@ -164,15 +184,15 @@ fn worker_ffi_load_without_teardown_exits_cleanly() {
 
 #[test]
 fn two_workers_same_lib_no_double_unmap() {
-    let Some(so) = build_fixture() else {
+    let Some(fixture) = Fixture::build("two-workers") else {
         return;
     };
-    let so = so.to_str().expect("fixture path is utf-8");
+    let so = fixture.so_str();
 
     // Two workers load the SAME library (dedup by canonical path in the registry)
     // and both exit without teardown. Since the mapping is never unloaded, neither
     // worker's exit unmaps the destructor the other (or it itself) still has armed.
-    let status = run_two_workers(so);
+    let status = run_two_workers(&so);
     assert_eq!(
         status.signal(),
         None,
