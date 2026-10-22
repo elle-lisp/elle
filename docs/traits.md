@@ -87,8 +87,8 @@ table it attaches there may be a mutable @struct. Immutable method structs
 avoid a RefCell borrow on each method lookup.
 
 A method struct also holds whatever operator methods the collection
-overrides — `:map`, `:fold`, `:reverse` and the rest. § Collection
-operators below has the names and the argument order.
+overrides — `:map`, `:fold`, `:reverse` and the rest. The operator section
+below gives the names and the argument order.
 
 ### Which types get which protocols
 
@@ -118,8 +118,8 @@ This means `point` above, whose table names only `:Point`, still supports
 `first`, `length`, etc. — the user traits don't mask the defaults.
 
 The fallback is per protocol, not per method. A table that names a
-protocol owns every method in it, so `(with-traits (list 1 2)
-@{:Sequence {:first …}})` has no `rest` at all — the default `:Sequence`
+protocol owns every method in it. So `(with-traits (list 1 2)
+@{:Sequence {:first …}})` has no `rest` at all: the default `:Sequence`
 is out of reach the moment the user table declares one. Attach the
 methods to the protocol the value does not otherwise need, or write the
 whole protocol out.
@@ -145,7 +145,7 @@ layers. The first layer that answers wins.
    bytes or syntax object — mutable or not — keeps its own traversal.
    An operator never reads a trait table for one, so
    `(with-traits [1 2 3] …)` still maps as an array, and a plain array
-   costs what it always did.
+   pays nothing for a lookup.
 2. **A per-operator method overrides the operator.** When the value's
    trait table carries a method named for the operator, the operator
    calls it and returns its answer. This is how a lazy or a remote
@@ -155,9 +155,9 @@ layers. The first layer that answers wins.
    for this operator but does carry `:iter`, the operator drains the
    iterator and works on the elements it yields.
 
-A value that answers none of the three raises `:type-error`, as before.
-A plain set or struct answers none: no default traitset carries `:iter`,
-so both convert and iterate exactly as they did.
+A value that answers none of the three raises `:type-error`. A plain set
+or struct answers none, because no default traitset carries `:iter`. So
+each converts and iterates by its own arm.
 
 ### Where an operator method lives
 
@@ -225,8 +225,8 @@ surrounding function; there is no `:each` method. `zip` reads `:iter` on
 each input it is given. `frequencies` and `group-by` are written with
 `each`, so they dispatch the way `each` does.
 
-`each` itself keeps the set and struct arms it always had, and reads
-`:iter` ahead of them. So a with-traits struct that carries `:iter`
+`each` itself keeps its set and struct arms, and reads `:iter` ahead of
+them. So a with-traits struct that carries `:iter`
 iterates as its protocol says, and a plain one still walks its
 key-value pairs.
 
@@ -263,7 +263,7 @@ When the fiber completes (status `:dead`), iteration is done.
 ## Sharing and mutability
 
 Default traitsets are **shared by reference**. All arrays point to the
-same immutable struct, as § Reading traits shows, so a default protocol
+same immutable struct, as the first section shows, so a default protocol
 changes for no value.
 
 Per-instance override via `with-traits`:
@@ -354,9 +354,9 @@ not a type heuristic. User-attached @struct traits are preserved.
 
 Default traitsets are built once per heap into its pinned **root region**
 (`alloc_root`), and the per-tag table is stored on the heap itself. They are
-not reclaimed by scope-based arena operations, but they are *not* immortal:
-the teardown sweep releases the root region, and `reset_default_traits`
-clears the heap's table so a read after teardown returns `nil` rather than a
+not reclaimed by scope-based arena operations, but they are *not* immortal.
+The teardown sweep releases the root region, and `reset_default_traits`
+clears the heap's table, so a read after teardown returns `nil` rather than a
 freed pointer. The next instance builds its own. The method handles a
 traitset carries *are* native-fns: immediate `prim_id` values that occupy no
 region. The traitset pointer in a heap object is just a pointer — no arena
