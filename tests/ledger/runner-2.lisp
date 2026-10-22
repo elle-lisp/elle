@@ -285,7 +285,7 @@
 ["tests/lang/import-loaders.lisp" :objects 365]
 ["tests/lang/meta-location.lisp" :objects 154]
 ["tests/lang/import-resolve.lisp" :objects 318]
-["tests/lang/caps-macro.lisp" :objects 425]
+["tests/lang/caps-macro.lisp" :objects 525]
 ["tests/impl/region-query-carrier-leak.lisp" :objects 291]
 ["tests/lang/ffi-bool.lisp" :objects 23]
 ["tests/lang/ffi-write.lisp" :objects 23]
