@@ -37,3 +37,6 @@ mod cycle {
 mod mutable_store {
     include!("mutable_store.rs");
 }
+mod mutable_bytes {
+    include!("mutable_bytes.rs");
+}

@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-22
 //! Fixtures the async-backend tests share: sockets a peer never answers,
 //! scratch paths, and the assertion that a cancelled operation retires.
 //!
@@ -26,7 +26,7 @@ const PATIENCE: Option<Duration> = Some(Duration::from_secs(5));
 /// not define it anywhere else, so naming it unconditionally stopped the whole
 /// test target from compiling off Linux.
 ///
-/// The flag is kept on Linux, where these tests already run, so their behaviour
+/// The flag is kept on Linux, where these tests already run, so their behavior
 /// there is unchanged. Elsewhere the listener is left blocking, because the
 /// thread-pool backend calls `accept(2)` directly: on a non-blocking listener
 /// that returns `EAGAIN` before any peer connects, and the backend reports the
@@ -254,7 +254,7 @@ fn fill_tcp_backlog(port: u16) -> Vec<libc::c_int> {
     queued
 }
 
-// ── Descriptor helpers, shared by park.rs, gone.rs, descriptor.rs, bytes.rs, longline.rs ──
+// ── Descriptor helpers: a socket pair, a pipe, and what file a number names ──
 
 /// A connected stream pair. The returned descriptors are the test's to close;
 /// `Port` takes the first, and the test plays the peer on the second.
@@ -316,6 +316,7 @@ mod descriptor;
 mod fileops;
 mod gone;
 mod longline;
+mod mutable;
 mod net;
 mod netcancel;
 mod netend;

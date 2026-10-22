@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-22
 //! What a `FiberHeap` promises about the physical region ids it hands out, and
 //! what it does with a value whose region is gone.
 //!
@@ -62,6 +62,8 @@ fn test_fiber_heap_clear() {
     assert!(heap.is_empty());
 }
 
+// A byte store lies in region pages and needs no drop. The reference list
+// carries its `traits` edge to the free scan.
 #[test]
 fn test_fiber_heap_needs_drop_exhaustive() {
     assert!(!needs_drop(HeapTag::Pair));
@@ -69,6 +71,10 @@ fn test_fiber_heap_needs_drop_exhaustive() {
     assert!(!needs_drop(HeapTag::LibHandle));
     assert!(!needs_drop(HeapTag::ManagedPointer));
     assert!(!needs_drop(HeapTag::Parameter));
+    assert!(!needs_drop(HeapTag::LStringMut));
+    assert!(!needs_drop(HeapTag::LBytesMut));
+    assert!(holds_value_refs(HeapTag::LStringMut));
+    assert!(holds_value_refs(HeapTag::LBytesMut));
 
     assert!(needs_drop(HeapTag::LBox));
     assert!(needs_drop(HeapTag::CaptureCell));
@@ -78,9 +84,7 @@ fn test_fiber_heap_needs_drop_exhaustive() {
     assert!(needs_drop(HeapTag::LStruct));
     assert!(needs_drop(HeapTag::Closure));
     assert!(needs_drop(HeapTag::LArray));
-    assert!(needs_drop(HeapTag::LStringMut));
     assert!(needs_drop(HeapTag::LBytes));
-    assert!(needs_drop(HeapTag::LBytesMut));
     assert!(needs_drop(HeapTag::Syntax));
     assert!(needs_drop(HeapTag::Fiber));
     assert!(needs_drop(HeapTag::ThreadHandle));

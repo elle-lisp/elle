@@ -156,6 +156,10 @@ the whole process shares, and its teardown is not a backend's.
 - `a_write_hands_the_kernel_the_payload_where_it_lies`
   ([bytes.rs](../../src/io/aio/tests/bytes.rs)) changes a payload after its
   write parks. The peer receives the changed bytes.
+- `a_mutable_payload_is_written_as_it_was_at_submission`
+  ([mutable.rs](../../src/io/aio/tests/mutable.rs)) overwrites and grows an
+  `@bytes` after its write parks. The peer receives the bytes the write was
+  submitted with.
 - `a_read_that_ends_unanswered_gives_the_port_its_remainder_back`
   ([bytes.rs](../../src/io/aio/tests/bytes.rs)) cancels a read and times one
   out, and reads the remainder afterwards.

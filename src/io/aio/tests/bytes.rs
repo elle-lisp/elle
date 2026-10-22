@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-22
 //! A write read from its payload, a remainder given back to its port, and a
 //! teardown that waits for a worker.
 //!
@@ -10,7 +10,7 @@ use std::os::unix::io::{FromRawFd, OwnedFd};
 /// Write junk into `fd` until the kernel refuses more, and report how much it
 /// took. The descriptor is left blocking, as it was: io_uring answers a write
 /// on a non-blocking descriptor with `EAGAIN` rather than waiting for room.
-fn fill_send_buffer(fd: RawFd) -> usize {
+pub(super) fn fill_send_buffer(fd: RawFd) -> usize {
     let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
     assert!(flags >= 0, "F_GETFL failed");
     set_nonblocking(fd);
@@ -44,7 +44,7 @@ pub(super) fn write_all(fd: RawFd, bytes: &[u8]) {
 }
 
 /// Read exactly `n` bytes from a blocking `fd`.
-fn read_exactly(fd: RawFd, n: usize) -> Vec<u8> {
+pub(super) fn read_exactly(fd: RawFd, n: usize) -> Vec<u8> {
     let mut got = vec![0u8; n];
     let mut filled = 0usize;
     while filled < n {
