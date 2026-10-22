@@ -1,4 +1,4 @@
-//! audited: 2026-10-14
+//! audited: 2026-10-21
 //! The thread-pool backend: the operations a worker runs, and the one channel
 //! every worker reports through.
 //!

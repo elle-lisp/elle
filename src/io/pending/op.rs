@@ -1,4 +1,4 @@
-//! audited: 2026-10-14
+//! audited: 2026-10-21
 //! One in-flight operation: the shapes it can take, the heap values it holds,
 //! and what it gives back when nobody will read its result.
 //!
@@ -14,7 +14,7 @@ use std::rc::Rc;
 
 /// What kind of operation a worker ran, reported beside the id so the entry
 /// that id resolves through can be checked against it
-/// (docs/impl/io-inflight.md § "One id, one operation").
+/// (docs/impl/io-inflight.md).
 ///
 /// Coarser than [`PendingOp`]: these name what a worker can report having done,
 /// which is why the check is [`PendingOp::accepts`] and not an equality.
@@ -47,8 +47,7 @@ pub(crate) enum PendingOp {
         port_key: PortKey,
         port: Value,
         /// This operation's share of the descriptor it names, held until the
-        /// entry is retired (docs/impl/io-descriptor.md § "Descriptor
-        /// retirement").
+        /// entry is retired (docs/impl/io-descriptor.md).
         ///
         /// `None` for an operation on a port that owns no descriptor: the
         /// stdio numbers are process-wide and outlive every `Port` that names
@@ -66,8 +65,7 @@ pub(crate) enum PendingOp {
         listener_kind: Option<PortKind>,
         /// The remainder the port handed this read, already copied into the
         /// front of the caller's buffer. Given back if the read ends without
-        /// answering (docs/impl/io-bytes.md § "The port hands its remainder
-        /// to the read").
+        /// answering (docs/impl/io-bytes.md).
         lent: Vec<u8>,
         /// Bytes of this operation's payload already in place: in the caller's
         /// buffer for a read (a borrowed remainder included), or written out
@@ -114,8 +112,8 @@ pub(crate) enum PendingOp {
     },
     /// Open a file path. Creates a new port on completion.
     ///
-    /// An open runs on the thread pool on every platform (src/io/AGENTS.md,
-    /// invariant 14), so `PoolOp::Open` owns the path the syscall reads, and
+    /// An open runs on the thread pool on every platform (src/io/AGENTS.md),
+    /// so `PoolOp::Open` owns the path the syscall reads, and
     /// `buffer_handle` is an empty placeholder.
     Open {
         /// The file path (for error messages).
@@ -240,8 +238,7 @@ impl PendingOp {
 
     /// The heap values this operation holds and a completion dereferences when
     /// it cooks a result. `OperandHold` retains exactly this list
-    /// (docs/impl/io-inflight.md § "A submitted operation holds the values its
-    /// completion reads").
+    /// (docs/impl/io-inflight.md).
     ///
     /// The trap: this match and `PortOp::operand` are exhaustive on purpose. A
     /// variant that gains a value field and does not name it goes unretained,
@@ -273,8 +270,7 @@ impl PendingOp {
     /// The one operand the kernel or a pool worker reaches by address rather
     /// than through the completion: a read's buffer, a write's payload, a
     /// `recv-from` result whose `:data` the ring receives into. A cancel keeps
-    /// this one held until the completion arrives (docs/impl/io-bytes.md § "The
-    /// kernel's operand is held until the completion arrives"). `Value::NIL`,
+    /// this one held until the completion arrives (docs/impl/io-bytes.md). `Value::NIL`,
     /// which retains nothing, for every operation that addresses none.
     pub(crate) fn addressed(&self) -> Value {
         match self {
@@ -306,8 +302,7 @@ impl PendingOp {
 
     /// Could an operation of kind `kind` have filed this entry? A "no" is the
     /// table and the completion contradicting each other, and the caller
-    /// withholds rather than cooks (docs/impl/io-inflight.md § "One id, one
-    /// operation").
+    /// withholds rather than cooks (docs/impl/io-inflight.md).
     pub(crate) fn accepts(&self, kind: OpKind) -> bool {
         matches!(
             (self, kind),
@@ -382,8 +377,7 @@ impl PendingOp {
     ///
     /// A process wait on the ring reaped nothing, since it asks with `WNOWAIT`,
     /// so its `siginfo_t` is all there is to give back. The pool's wait reaps
-    /// in the worker, through the exit record (src/io/AGENTS.md § "A reap is
-    /// never wasted").
+    /// in the worker, through the exit record (src/io/AGENTS.md).
     pub(crate) fn retire(self, result_fd: i32, buffer_pool: &mut BufferPool) {
         if let Some(bh) = self.buffer_handle() {
             buffer_pool.release(bh);

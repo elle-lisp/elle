@@ -108,7 +108,7 @@ pub(super) fn process_raw_completion(
                 // A wait that finds no child answers from the record when this
                 // process is holding the status: two waits on one child are
                 // legal, and the loser is entitled to what the winner reaped
-                // (src/io/AGENTS.md § "A reap is never wasted").
+                // (src/io/AGENTS.md).
                 if -result_code == libc::ECHILD {
                     if let Some(code) = exit.status() {
                         return Completion::ok(id, birth, Value::int(code as i64));

@@ -1,4 +1,4 @@
-//! audited: 2026-10-14
+//! audited: 2026-10-21
 //! `CompletionHub::submit`, and the runner each pool operation dispatches to
 //! on the worker that takes it.
 //!
@@ -13,8 +13,8 @@ impl CompletionHub {
     /// `bounds` is how long the operation may wait and how `io/cancel` ends it.
     /// Every submission states one, so an operation that can wait for something
     /// that may never happen cannot be submitted without saying so — see
-    /// docs/impl/io-inflight.md § "The stop pipe" for the two conditions that decide
-    /// which kind an operation needs.
+    /// docs/impl/io-inflight.md for the two conditions that decide which kind an
+    /// operation needs.
     ///
     /// How many operations may run at once is the OS's to say: the pool hands
     /// the job to a worker that is already there or starts one, and the ceiling

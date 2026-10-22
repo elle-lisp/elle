@@ -1,4 +1,4 @@
-//! audited: 2026-10-14
+//! audited: 2026-10-21
 //! Mock I/O backend for testing and benchmarking.
 //!
 //! src/io/AGENTS.md

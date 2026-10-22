@@ -1,4 +1,4 @@
-//! audited: 2026-10-14
+//! audited: 2026-10-21
 //! The submissions that name an OS object the request carries or creates: a
 //! watcher, a signal receiver, a file, a child, a background task.
 //!
@@ -130,13 +130,8 @@ impl AsyncBackend {
     /// Submit a file open operation. Open creates the port its completion
     /// fills, so `port` arrives pre-allocated rather than in `request.port`.
     ///
-    /// This is a thread-pool operation on every platform, io_uring included.
-    /// An `open(2)` on a fifo waits for the other end, and a wait is only
-    /// answerable where the worker can hold it: `IORING_OP_OPENAT` blocks an
-    /// io-wq thread that a linked timeout marks cancelled but cannot retract,
-    /// so the kernel keeps the thread and the caller's `:timeout` buys nothing.
-    /// One implementation is also one answer: the fifo behavior docs/io.md
-    /// describes is the same whichever platform is underneath.
+    /// This is a thread-pool operation on every platform, io_uring included;
+    /// src/io/AGENTS.md says why.
     pub(super) fn submit_open(
         &self,
         path: &str,
@@ -173,11 +168,10 @@ impl AsyncBackend {
     /// Submit an operation on a file named by its path.
     ///
     /// This is a thread-pool operation on every platform, for the reason an
-    /// open is: the worker opens the path before it does anything else. A
-    /// sync opens it non-blocking, and `fsync(2)` waits on nothing outside
-    /// this process, so a sync takes no stop pipe. Every other operation runs
-    /// through blocking `std::fs` calls that a stop pipe cannot reach, and on
-    /// a fifo they wait for the other end: `Bounds::uninterruptible`.
+    /// open is. A sync opens its path non-blocking, and `fsync(2)` waits on
+    /// nothing outside this process, so a sync takes no stop pipe. Every other
+    /// operation runs through blocking `std::fs` calls that a stop pipe cannot
+    /// reach: `Bounds::uninterruptible`.
     pub(super) fn submit_file(&self, op: &FileOp) -> Result<SubmissionId, String> {
         let path = op.path();
         if path.contains('\0') {

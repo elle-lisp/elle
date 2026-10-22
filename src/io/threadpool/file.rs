@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! The operations a pool worker runs on a file named by its path, and what each reports.
 //!
 //! src/io/AGENTS.md
