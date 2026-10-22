@@ -13,7 +13,7 @@ Up: [..](../AGENTS.md)
 - [blas/](blas/AGENTS.md) — BLAS/LAPACK FFI Demo
 - [cfgviz/](cfgviz/AGENTS.md) — Control Flow Graph Visualization Demo
 - [conway/](conway/AGENTS.md) — Conway's Game of Life
-- [docgen/](docgen/AGENTS.md) — Documentation Site Generator
+- [docgen/](docgen/AGENTS.md) — Documentation site generator
 - [egui/](egui/AGENTS.md) — egui
 - [embedding/](embedding/AGENTS.md) — (empty)
 - [fib/](fib/AGENTS.md) — Fibonacci Benchmark

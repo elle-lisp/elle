@@ -1,12 +1,12 @@
-//! audited: 2026-09-28
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-10-22
+//! The panic a signal handler in the dispatch loop raises on stack underflow.
 //!
-//! src/vm/AGENTS.md
+//! src/vm/overview.md
 
 use super::*;
 
-// Stack underflow is a VM bug, and every handler panics on it (src/vm/AGENTS.md,
-// invariant 1). Counter-factual: a handler that reads NIL for a missing
+// Stack underflow is a VM bug, and every handler panics on it
+// (src/vm/overview.md). Counter-factual: a handler that reads NIL for a missing
 // operand passes the bound check as a non-closure, and the broken bytecode
 // runs on.
 #[test]

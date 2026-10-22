@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-22
 //! Closure environment building: captures, arguments, the rest collection and local cells, each in regions of its own.
 //!
 //! docs/impl/region/rules.md
@@ -10,9 +10,9 @@
 //! names them), rest-parameter collection (`rest.rs`), and local slots.
 //!
 //! Entry points:
-//! - `build_closure_env`: reuses `env_cache` to avoid a fresh allocation per call
-//! - `populate_env`: fills a caller-supplied buffer; shared by `build_closure_env`
-//!   and `tail_call_inner` (which uses `tail_call_env_cache`)
+//! - `build_closure_env`: fills `env_cache`, which keeps its capacity across calls
+//! - `populate_env`: fills a caller-supplied buffer; every builder here and
+//!   `tail_call_inner` share it
 
 use crate::hir::region::RuntimeRegion;
 use crate::value::Value;
@@ -29,8 +29,8 @@ mod rest;
 /// Rule 6 (no commingling) and the principle "every value its own region": each
 /// env value gets its OWN fresh runtime region, never one shared per-call "env
 /// region". A value-based release of any one (the owned-params calling
-/// convention) then frees only that value, never a co-located live neighbour —
-/// so an owned-param `DecrefValueRegion` cannot free a shared region out from
+/// convention) then frees only that value, never a co-located live neighbour.
+/// So an owned-param `DecrefValueRegion` cannot free a shared region out from
 /// under a still-live `CaptureCell`. A rest list takes one region per cons, or
 /// one for the whole list where no cons can outlive the head
 /// (docs/impl/region/restlist.md).
@@ -42,7 +42,8 @@ fn env_value_region(heap: &mut crate::value::fiberheap::FiberHeap) -> RuntimeReg
 impl VM {
     /// Build a closure environment from captured variables and arguments.
     ///
-    /// Reuses `self.env_cache` to avoid a fresh Vec allocation per call.
+    /// Fills `self.env_cache`, which keeps its capacity across calls, and copies
+    /// it into the callee's `Rc`.
     /// Returns `None` if `populate_env` fails (e.g., bad keyword args for `&keys`/`&named`).
     pub fn build_closure_env(
         &mut self,
@@ -78,12 +79,12 @@ impl VM {
     /// `tail_call_env_cache` (it must not alias `env_cache`). Returns `None`
     /// (error set on fiber) on bad keyword args.
     ///
-    /// `own_params` is what `tail_call_inner` decides from the same fact: an
-    /// ordinary tail call is a pure MOVE (`false` — the caller's reference to
+    /// `own_params` is what `tail_call_inner` decides from the same fact. An
+    /// ordinary tail call is a pure MOVE (`false`): the caller's reference to
     /// each arg transfers to the callee, which releases it at the param's last
-    /// use, so no `CallArgument` incref here), while a SPLICED tail call has no
-    /// reference of the frame's to move and the callee mints one of its own
-    /// (`true`; docs/impl/region/mechanism.md, the spliced call).
+    /// use, so no `CallArgument` incref runs here. A SPLICED tail call has no
+    /// reference of the frame's to move, and the callee mints one of its own
+    /// (`true`; docs/impl/region/mechanism.md).
     #[cfg(feature = "jit")]
     pub(crate) fn build_tail_call_env(
         &mut self,
@@ -112,11 +113,11 @@ impl VM {
     /// — no duplicated env builder.
     ///
     /// **`own_params = false` (a pure MOVE, like a tail call).** The trampoline
-    /// converts each C argument into a *fresh* Elle value — scalars/pointers are
-    /// immediates; `:struct`/array/byte args are newly minted heap values (rc=1,
-    /// `read_value_from_buffer` → `Value::array`/`Value::bytes`) — and does NOT
-    /// retain them past the call (`Value` is `Copy`; dropping its `elle_args`
-    /// Vec releases no region). So the single owning reference to each heap arg
+    /// converts each C argument into a *fresh* Elle value. Scalars and pointers
+    /// are immediates; `:struct`, array and byte args are newly minted heap
+    /// values (rc=1, `read_value_from_buffer` → `Value::array`/`Value::bytes`).
+    /// The trampoline does NOT retain them past the call (`Value` is `Copy`;
+    /// dropping its `elle_args` Vec releases no region). So the single owning reference to each heap arg
     /// transfers to the callee, which releases it value-based at the param's
     /// last use. Hence NO `CallArgument` incref: `own_params = true` would add a
     /// reference nothing balances (the trampoline never decrefs), leaking the
@@ -153,8 +154,9 @@ impl VM {
 
     /// Populate an environment buffer with captures, arguments, and local slots.
     ///
-    /// Shared by `build_closure_env` (which uses `env_cache`) and
-    /// `tail_call_inner` (which uses `tail_call_env_cache`). The two caches
+    /// Shared by `build_closure_env` (which uses `env_cache`), by
+    /// `tail_call_inner` and `build_tail_call_env` (which use
+    /// `tail_call_env_cache`), and by `build_callback_env`. The two caches
     /// can't alias — a tail call may occur inside a closure call that is
     /// still using `env_cache`.
     ///
@@ -253,9 +255,9 @@ impl VM {
                     }
                 };
                 // On a MOVE (`own_params = false`: a tail call / FFI callback) the
-                // caller's owning reference to each arg transferred to us, and a
-                // collected arg lands in `collected` — which took its own reference
-                // when it stored the value — rather than in an env slot. So the
+                // caller's owning reference to each arg transferred to us. A
+                // collected arg lands in `collected`, which took its own reference
+                // when it stored the value, rather than in an env slot. So the
                 // moved reference is surplus and is released here, whichever
                 // collector took the value over (docs/impl/region/relocate.md).
                 // Released after `collected` is built, so the collection's own
