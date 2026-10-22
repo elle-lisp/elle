@@ -117,5 +117,9 @@ harness = false
 name = "regionrc"
 harness = false
 
+[[bench]]
+name = "fuel"
+harness = false
+
 [target.'cfg(target_os = "linux")'.dependencies]
 io-uring = "0.7"
