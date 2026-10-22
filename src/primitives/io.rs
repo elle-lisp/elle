@@ -366,8 +366,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "io/backend" => prim_io_backend {
-        ambient: true,
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         arity: Arity::Range(1, 2),
         doc: "Create an I/O backend. :async for asynchronous, :mock for testing. Optional second arg is the worker keepalive in seconds (nil for the default): how long an idle I/O worker thread waits for another operation before it retires.",
         params: &["kind", "keepalive"],
@@ -386,8 +385,7 @@ primitive! {
         bits_from_args: Some(io_submit_required_bits),
     }
     "io/workers" => prim_io_workers {
-        ambient: true,
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         arity: Arity::Exact(1),
         doc: "Background worker operations this backend has submitted but not yet reaped. On io_uring the kernel runs most operations, so this counts only the ones that run on threads there.",
         params: &["backend"],
@@ -396,8 +394,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "io/reap" => prim_io_reap {
-        ambient: true,
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         arity: Arity::Exact(1),
         doc: "Non-blocking poll for async I/O completions. Returns array of completion structs.",
         params: &["backend"],
@@ -406,16 +403,15 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "io/wait" => prim_io_wait {
-        ambient: true,
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         arity: Arity::AtLeast(1),
         doc: "Wait for async I/O completions until one arrives or the :timeout or :deadline passes. No bound waits as long as it takes; :timeout 0 polls. Returns array of completion structs.",
         params: &["backend"],
         category: "io",
         example: "(io/wait backend :timeout 1)",
         // Fresh: builds a fresh array of completion structs in this call's ctx
-        // region, exactly like its sibling io/reap. Synchronous (Signal::errors,
-        // no yield), so this Fresh claim is oracle-CHECKED on every debug call.
+        // region, exactly like its sibling io/reap. Synchronous (no yield), so
+        // this Fresh claim is oracle-CHECKED on every debug call.
         effect: RegionEffect::Fresh,
         // The success result is always an immutable array (`ctx.array`), so a
         // binding from it is statically `:array` — the scheduler's
@@ -423,8 +419,7 @@ primitive! {
         ret: RetType::Array,
     }
     "io/cancel" => prim_io_cancel {
-        ambient: true,
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         arity: Arity::Exact(2),
         doc: "Cancel a pending async I/O operation by submission ID. Returns nil.",
         params: &["backend", "id"],

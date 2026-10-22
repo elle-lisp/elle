@@ -27,7 +27,6 @@ pub(crate) static VOCABULARY: &[&str] = &[
     "addr",
     "aliases",
     "allocated-bytes",
-    "ambient",
     "annotated",
     "args",
     "arity",
@@ -171,6 +170,7 @@ pub(crate) static VOCABULARY: &[&str] = &[
     // Signal names the registry pre-registers. A signal a program declares at
     // run time cannot be listed here; it is learned where the registry is read
     // (docs/impl/symbol.md).
+    "ambient",
     "debug",
     "exec",
     "fs",
@@ -231,7 +231,6 @@ pub(crate) static VOCABULARY: &[&str] = &[
     "exited",
     "signal-violation",
     "broken-proof",
-    "ambient-refused",
     "use-after-free",
     "wasm-error",
     // Type names (`type-of` and type errors mint `Value::keyword(type_name())`)

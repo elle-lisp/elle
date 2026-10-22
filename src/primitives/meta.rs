@@ -425,8 +425,7 @@ primitive! {
         effect: RegionEffect::Mixed,
     }
     "fn/git?" => prim_fn_git {
-        ambient: true,
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         arity: Arity::Range(1, 2),
         doc: "Returns true if the VM caches SPIR-V for the closure at the workgroup size \
               (default 256). False for a non-closure.",
@@ -436,8 +435,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "disgit" => prim_disgit {
-        ambient: true,
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         arity: Arity::Range(1, 2),
         doc: "Return the SPIR-V bytes the VM caches for a closure at the workgroup size \
               (default 256). Errors if nothing is cached at that size.",

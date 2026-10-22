@@ -1,4 +1,4 @@
-//! audited: 2026-10-22
+// audited: 2026-10-22
 //! POSIX signal primitives — send, raise, watch, next, close, plus
 //! introspection (pending / mask / watching / name).
 //!
@@ -410,8 +410,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "os/sig-watch" => prim_sig_watch {
-        ambient: true,
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         arity: Arity::Exact(1),
         doc: "Open a signal receiver that watches a set of POSIX signals. Blocks the signals on the calling thread and queues deliveries onto a kernel fd. Returns a SignalReceiver. See docs/posix-signals.md for mask policy.",
         params: &["signal-set"],
@@ -432,8 +431,7 @@ primitive! {
         effect: RegionEffect::Opaque,
     }
     "os/sig-close" => prim_sig_close {
-        ambient: true,
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         arity: Arity::Exact(1),
         doc: "Close a signal receiver. Decrements the watched-set refcount; the signal is unblocked process-wide when the last watcher releases it. Idempotent.",
         params: &["receiver"],
@@ -451,8 +449,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "os/sig-pending" => prim_sig_pending {
-        ambient: true,
-        signal: Signal::silent(),
+        signal: Signal::ambient(),
         arity: Arity::Exact(0),
         doc: "Return a set of keywords for signals currently pending delivery on the calling thread (sigpending(2)).",
         category: "posix",
@@ -460,8 +457,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "os/sig-mask" => prim_sig_mask {
-        ambient: true,
-        signal: Signal::silent(),
+        signal: Signal::ambient(),
         arity: Arity::Exact(0),
         doc: "Return a set of keywords for signals currently blocked on the calling thread (pthread_sigmask).",
         category: "posix",
@@ -469,8 +465,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "os/sig-watching" => prim_sig_watching {
-        ambient: true,
-        signal: Signal::silent(),
+        signal: Signal::ambient(),
         arity: Arity::Exact(0),
         doc: "Return a set of keywords for signals currently being watched by at least one live receiver.",
         category: "posix",
