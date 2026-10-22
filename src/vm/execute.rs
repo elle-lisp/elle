@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-22
 //! Bytecode execution entry points, the tail-call trampoline, and the opening
 //! and closing of an activation.
 //!
@@ -8,7 +8,7 @@
 //! An interpreted non-tail call does not come back through here: the callee
 //! runs on its caller's dispatch loop, in `nested.rs`. What does come through
 //! `execute_bytecode_saving_stack` is **re-entry** — a primitive or a compiled
-//! function running a closure from Rust. src/vm/AGENTS.md lists the
+//! function running a closure from Rust. src/vm/overview.md lists the
 //! re-entrant callers.
 //!
 //! ### What `execute_bytecode_saving_stack` preserves

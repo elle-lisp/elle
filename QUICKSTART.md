@@ -1,8 +1,12 @@
 # Elle Quickstart
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-22 -->
 
-Elle is a Lisp with lexical scope, closures, and a signal system.
+Read this before you write Elle: the traps that cost the most, and the document that owns each language topic.
+
+Elle is a Lisp with lexical scope, closures, and a signal system. It looks
+like Scheme, Clojure and Common Lisp, and differs from each of them in ways
+that break a guess.
 
 ## Critical gotchas
 
@@ -20,6 +24,8 @@ Read these first — they cause the most bugs.
   is mutable.
 - **`let` is sequential** (Clojure-style) — bindings are flat pairs
   `[a 1 b 2]`; each binding sees all previous ones. `let*` is an alias.
+
+[Warts](docs/warts.md) lists every intentional oddity.
 
 ## Running
 
