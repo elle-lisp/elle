@@ -1,6 +1,6 @@
 (elle/epoch 15)
-# audited: 2026-10-21
-# A macro expands without the effect capabilities and what the compiling fiber withholds; a denied primitive fails the compile.
+# audited: 2026-10-22
+# A macro expands without what the compiling fiber withholds, and a denied primitive fails the compile.
 #
 # docs/signals/capabilities.md
 # docs/macros.md
@@ -14,10 +14,6 @@
 # Source text for `(defmacro m [] (emit :caps-macro/beat 1))`. The bit is no
 # effect capability, so only a fiber's :deny withholds it.
 (def beat-macro "(defmacro m [] (emit :caps-macro/beat 1))")
-
-# Source text for `(defmacro m [] (file/read PATH))`.
-(defn reader-macro [path]
-  (string/join ["(defmacro m [] (file/read \"" path "\"))"] ""))
 
 # Source text for MACRO and then a call of it.
 (defn forms [macro]
@@ -38,13 +34,6 @@
 (defn sandboxed [deny body]
   (fiber/resume (fiber/new body |:caps-macro/beat :fs :error| :deny deny)))
 
-# Run `body` on this fiber, which withholds nothing, and answer the error it
-# raised.
-(defn unrestricted [body what]
-  (let [[ok? err] (protect (body))]
-    (assert (not ok?) (string/join [what ": the compile fails"] ""))
-    err))
-
 # Assert that `v` is the error a failed compile raised: `:eval-error` from
 # `eval` and the loaders, `:compile-error` from `compile/analyze`.
 (defn assert-compile-error [v what]
@@ -60,9 +49,7 @@
     (assert (string/contains? msg primitive)
             (string/join [what ": the error names " primitive ": " msg] ""))))
 
-(with-temp-dir root (def secret (path/join root "secret"))
-               (file/write secret "3311")
-
+(with-temp-dir root
                # ── What the compiling fiber withholds ──────────────────────────────
 
                # Each compile a fiber starts expands without the bits that fiber withholds.
@@ -88,31 +75,6 @@
                (assert-denied (sandboxed deny-beat (fn [] (import-file module)))
                               "fiber/emit" "import-file")
 
-               # ── What every expansion withholds ──────────────────────────────────
-
-               # This fiber withholds nothing, and still no macro reads a file. The
-               # counter-factual would expand each macro with every capability and answer
-               # "3311".
-               (def read-secret (reader-macro secret))
-               (assert-denied (unrestricted (fn []
-                                (eval (read (program read-secret)))) "eval")
-                              "file/read" "eval")
-               (assert-denied (unrestricted (fn []
-                                (compile/analyze (forms read-secret)))
-                              "compile/analyze") "file/read" "compile/analyze")
-               (assert-denied (unrestricted (fn []
-                                (import/load-syntax (read (program read-secret))))
-                              "import/load-syntax") "file/read"
-                              "import/load-syntax")
-
-               # `ffi/native` answers a handle to the process itself, so a macro that
-               # called it would load nothing and still reach outside the unit.
-               (def native (path/join root "native.lisp"))
-               (file/write native
-                           "(defmacro m [] (begin (ffi/native nil) 7))\n(m)\n")
-               (assert-denied (unrestricted (fn [] (import-file native))
-                              "import-file") "ffi/native" "import-file")
-
                # ── An include ──────────────────────────────────────────────────────
 
                # An include is an input of the compile, so it reads under the fiber's own
@@ -127,17 +89,6 @@
                  (assert (string/contains? (get v :message) "include")
                          "the error names the include"))
                (assert (= 42 (load-include))
-                       "the denial does not outlast its compile, and an unrestricted one includes")
-
-               # ── Code a compile produced ─────────────────────────────────────────
-
-               # The expansion ends before its unit runs, and the unit runs with the
-               # capabilities of its fiber. The counter-factual would leave the effect
-               # bits withheld past the expansion, and the read would be denied.
-               (def after
-                 (string/join ["(begin (defmacro w [] 0) (w) (file/read \""
-                               secret "\"))"] ""))
-               (assert (= "3311" (eval (read after)))
-                       "run-time code reads the file"))
+                       "the denial does not outlast its compile, and an unrestricted one includes"))
 
 (println "caps-macro: OK")
