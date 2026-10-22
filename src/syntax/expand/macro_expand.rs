@@ -1,4 +1,4 @@
-// audited: 2026-10-07
+// audited: 2026-10-13
 //! Expands one macro call by running its transformer closure on the VM and
 //! deep-copying the result back to owned `Syntax`.
 //!
@@ -52,7 +52,7 @@
 
 use super::{Expander, MacroDef, SyntaxKind, MAX_MACRO_EXPANSION_DEPTH};
 use crate::symbol::SymbolTable;
-use crate::syntax::Syntax;
+use crate::syntax::{Syntax, UnitTag};
 use crate::value::Value;
 use crate::vm::expansion::CompileTimeFault;
 use crate::vm::VM;
@@ -156,7 +156,12 @@ impl Expander {
             *span,
         );
 
-        let closure_val = crate::pipeline::eval_syntax(fn_expr, self, symbols, vm)?;
+        // The compile is a unit of its own, so the scopes and names it mints do
+        // not depend on which unit first expanded the macro (docs/impl/syntax.md).
+        let unit = UnitTag::of(&macro_def.name, &[fn_expr]);
+        let closure_val = self.in_unit(unit, |this| {
+            crate::pipeline::eval_syntax(fn_expr, this, symbols, vm)
+        })?;
 
         // Safe: the closure was compiled and run on `vm`. A VM's heap is leaked
         // for the process or owned by its instance, which drops it after every
@@ -309,7 +314,7 @@ impl Expander {
             // its results carry the context's TRUE use-site scope set
             // (nested expansions save/restore — strictly synchronous).
             let prev_intro = crate::syntax::set_current_macro_intro(Some(intro_scope));
-            let call_result = vm.call_transformer(transformer, &arg_values);
+            let call_result = vm.call_transformer(transformer, &arg_values, &mut self.unit);
             crate::syntax::set_current_macro_intro(prev_intro);
             let result_value = call_result.map_err(|fault| match fault {
                 CompileTimeFault::Raised(msg) => msg,

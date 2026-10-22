@@ -23,18 +23,15 @@ use std::sync::atomic::{AtomicU32, Ordering};
 mod syntaxops;
 pub(crate) use syntaxops::*;
 
+/// The count of the names `gensym` answers outside every expansion.
 static GENSYM_COUNTER: AtomicU32 = AtomicU32::new(0);
 
-/// Generate a unique symbol.
+/// Generate a fresh symbol, interned in the instance's table so a template
+/// can bind it.
 ///
-/// Returns a symbol value (not a string). The symbol is interned in the
-/// current symbol table so it can be used in quasiquote templates:
-///
-/// ```lisp
-/// (defmacro with-temp (body)
-///   (let ((tmp (gensym "tmp")))
-///     `(let ((,tmp 42)) ,body)))
-/// ```
+/// While an expansion runs, the VM holds the unit it expands, and the name
+/// counts in that unit (docs/macros.md). Outside one, it counts across the
+/// process.
 pub(crate) fn prim_gensym(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -49,8 +46,14 @@ pub(crate) fn prim_gensym(
         "G".to_string()
     };
 
-    let counter = GENSYM_COUNTER.fetch_add(1, Ordering::SeqCst);
-    let sym_name = format!("{}{}", prefix, counter);
+    let sym_name = match ctx.vm().expansion_unit.as_mut() {
+        Some(unit) => unit.gensym(&prefix),
+        None => format!(
+            "{}{}",
+            prefix,
+            GENSYM_COUNTER.fetch_add(1, Ordering::SeqCst)
+        ),
+    };
 
     // Intern the symbol name so we return a proper symbol value, into this
     // instance's table reached through the driving VM.

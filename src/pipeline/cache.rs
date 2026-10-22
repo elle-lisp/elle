@@ -19,7 +19,7 @@ use crate::primitives::def::PrimitiveMeta;
 use crate::primitives::{build_primitive_meta, register_primitives};
 use crate::signals::Signal;
 use crate::symbol::SymbolTable;
-use crate::syntax::Expander;
+use crate::syntax::{Expander, UnitTag};
 use crate::value::arena::RootRef;
 use crate::value::fiber::SignalBits;
 use crate::vm::VM;
@@ -236,11 +236,13 @@ impl CompileCtx {
     /// already pointed at it. Taking it here rather than leaving it to the
     /// caller is what keeps an expansion from allocating into the instance's
     /// process-root template arena, which nothing would ever reclaim
-    /// (docs/impl/syntax.md).
+    /// (docs/impl/syntax.md). `unit` is the unit the compile expands, and the
+    /// clone has begun it, so every scope it mints names that unit.
     pub fn with_macro_expansion<F, R>(
         &mut self,
         arena: crate::syntax::SyntaxArena,
         layer: Layer,
+        unit: UnitTag,
         f: F,
     ) -> R
     where
@@ -248,30 +250,33 @@ impl CompileCtx {
     {
         self.vm.reset_fiber();
         self.vm.fiber.withheld = self.withheld;
-        let (expander, meta) = self.layered(layer, arena);
+        let (expander, meta) = self.layered(layer, arena, unit);
         f(&mut self.vm, expander, meta)
     }
 
-    /// A cloned `Expander` — pointed at `arena`, as in
+    /// A cloned `Expander` — pointed at `arena` and begun on `unit`, as in
     /// [`with_macro_expansion`](Self::with_macro_expansion) — and compile
     /// `meta`, of the instance's layer, without borrowing the macro VM. Used by
     /// `eval`/`analyze`, which run expansion on their own VM.
     pub fn expander_and_meta(
         &self,
         arena: crate::syntax::SyntaxArena,
+        unit: UnitTag,
     ) -> (Expander, PrimitiveMeta) {
-        self.layered(Layer::Instance, arena)
+        self.layered(Layer::Instance, arena, unit)
     }
 
     /// Clones of the expander and the meta a compile of `layer` sees, the
-    /// expander pointed at `arena`.
+    /// expander pointed at `arena` and begun on `unit`.
     fn layered(
         &self,
         layer: Layer,
         arena: crate::syntax::SyntaxArena,
+        unit: UnitTag,
     ) -> (Expander, PrimitiveMeta) {
         let mut expander = self.expander.clone();
         expander.set_arena(arena);
+        expander.begin_unit(unit);
         let mut meta = self.meta.clone();
         if layer == Layer::Repl {
             self.repl.overlay(&mut expander, &mut meta);

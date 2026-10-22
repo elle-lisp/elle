@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-13
 //! The expansion budget: one count that nested expansions share, apart from
 //! the fuel of the fiber an expansion runs on.
 //!
@@ -9,6 +9,12 @@
 //! and the expander cannot nest the allocation scope such a call opens.
 
 use super::*;
+use crate::syntax::UnitTag;
+
+/// A unit for an expansion that calls no `gensym`.
+fn unit() -> Unit {
+    Unit::begin(UnitTag::of("<budget>", &[]))
+}
 
 /// An expansion nested inside another spends the outer one's budget, and only
 /// the outermost closes it. The counter-factual opens a fresh budget for each
@@ -19,11 +25,11 @@ fn a_nested_expansion_spends_the_outer_budget() {
     assert!(!vm.expanding(), "no expansion runs on a new VM");
     let mut inner_left = None;
     let mut open_after_inner = false;
-    let outer = vm.at_expansion(|vm| {
+    let outer = vm.at_expansion(&mut unit(), |vm| {
         for _ in 0..10 {
             assert!(vm.expansion_budget.charge(), "the budget holds ten units");
         }
-        let inner = vm.at_expansion(|vm| {
+        let inner = vm.at_expansion(&mut unit(), |vm| {
             inner_left = vm.expansion_budget.remaining();
             SignalBits::EMPTY
         });
@@ -52,7 +58,7 @@ fn an_expansion_puts_the_fibers_fuel_aside() {
     let mut vm = VM::new();
     vm.fiber.fuel = Fuel::budget(5).expect("a small budget");
     let mut during = Some(0);
-    let answer = vm.at_expansion(|vm| {
+    let answer = vm.at_expansion(&mut unit(), |vm| {
         during = vm.fiber.fuel.remaining();
         assert!(vm.expansion_budget.charge(), "the expansion spends its own");
         SignalBits::EMPTY
@@ -68,7 +74,7 @@ fn an_expansion_puts_the_fibers_fuel_aside() {
 #[test]
 fn a_spent_budget_answers_the_fuel_fault() {
     let mut vm = VM::new();
-    let answer = vm.at_expansion(|vm| vm.halt_spent_expansion(0).0);
+    let answer = vm.at_expansion(&mut unit(), |vm| vm.halt_spent_expansion(0).0);
     assert_eq!(answer, Err(CompileTimeFault::Fuel));
     assert!(!vm.expanding(), "the halted expansion closes the budget");
 }

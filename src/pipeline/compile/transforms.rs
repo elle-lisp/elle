@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-13
 //! The source transforms the test-runner compile modes apply to a file's forms, and
 //! `include` and `include-file` resolution.
 //!
@@ -185,7 +185,8 @@ pub fn splice_includes(
     let mut home = crate::syntax::SyntaxHeap::new();
     let arena = home.arena();
     let syntaxes = read_syntax_all_for(arena, source, source_name)?;
-    cctx.with_macro_expansion(arena, Layer::Instance, |vm, _expander, meta| {
+    let unit = crate::syntax::UnitTag::of(source_name, &syntaxes);
+    cctx.with_macro_expansion(arena, Layer::Instance, unit, |vm, _expander, meta| {
         let mut pending: std::collections::VecDeque<Syntax> = syntaxes.into();
         let mut included = included_root(source_name);
         let mut parts: Vec<String> = Vec::new();

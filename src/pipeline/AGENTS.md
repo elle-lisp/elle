@@ -97,7 +97,9 @@ exports, and the graft policy. Its methods fall into six groups:
   reads them.
 - **Expand**: `with_macro_expansion` runs a closure on the macro VM, and
   `expander_and_meta` answers the clones alone. Both take the unit's syntax
-  arena and hand out clones of the expander and the compile metadata.
+  arena and its tag, and hand out clones of the expander and the compile
+  metadata, the expander begun on the unit. `with_macro_expansion` also takes
+  the `Layer`.
 - **Register**: `register_host_binding` and `register_primitive` reach every
   compile in the instance. `register_stdlib_exports` installs the standard
   library's exports. `register_repl_binding` and `register_repl_macros` reach
@@ -116,6 +118,7 @@ This is the path of `compile_file`. The test-runner modes and
 source text
     │  read_syntax_all_for (the Lua surface for a .lua file)
     │  check_lexicon_agreement
+    │  UnitTag::of: the unit's tag, from its name and its forms as read
     ▼
 top-level forms
     │  extract_epoch, extract_semver_directives, migrate_forms
@@ -219,10 +222,10 @@ The other entry points leave this path:
 
 2. **A call expands with clones.** `with_macro_expansion` and
    `expander_and_meta` clone the expander and the compile metadata, so a
-   nested compile during expansion does not alias the compile context. A macro
-   that one compile defines reaches a later compile only through
-   `register_repl_macros`, and only a REPL line, compiled through
-   `compile_file_repl`, sees it.
+   nested compile during expansion does not alias the compile context. The
+   clone has begun the unit the compile expands. A macro that one compile
+   defines reaches a later compile only through `register_repl_macros`, and
+   only a REPL line, compiled through `compile_file_repl`, sees it.
 
 3. **A unit reads and expands in its own syntax arena.** Each entry point
    except `eval_syntax` mints the arena and frees it on return, and nothing in

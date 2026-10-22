@@ -118,8 +118,6 @@ pub struct Boot {
     /// The region the pages were mapped into, kept for the free a refused
     /// install owes.
     region: RuntimeRegion,
-    /// One past the highest hygiene scope counter the image's templates carry.
-    pub(crate) scope_watermark: u32,
 }
 
 impl Boot {
@@ -138,9 +136,9 @@ impl Boot {
         self.macros.as_struct().unwrap_or(&[])
     }
 
-    /// Define every macro the image carries on `expander`, and raise its scope
-    /// counter past the scopes the image's syntax carries
-    /// (docs/impl/image/format.md).
+    /// Define every macro the image carries on `expander`. Its templates'
+    /// scopes name the units that minted them, so the expander has no counter
+    /// to raise past them (docs/impl/image/boot.md).
     pub(crate) fn install_macros(
         &self,
         heap: &mut FiberHeap,
@@ -148,7 +146,6 @@ impl Boot {
         symbols: &SymbolTable,
     ) {
         install::macros(heap, self, expander, symbols);
-        expander.raise_scope_counter(self.scope_watermark);
     }
 }
 
@@ -202,7 +199,6 @@ pub fn hydrate(
         stdlib: nil_field(key::STDLIB),
         macros: nil_field(key::MACROS),
         region: hydrated.region,
-        scope_watermark: hydrated.scope_watermark,
     };
     match boot.check(symbols) {
         Ok(()) => {

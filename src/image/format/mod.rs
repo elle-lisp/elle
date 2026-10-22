@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-21
 //! The image file's geometry and the fingerprint that gates hydration, with
 //! the codecs its tables are written and read through.
 //!
@@ -28,7 +28,7 @@ use crate::value::Value;
 
 use super::ImageError;
 
-pub(crate) const VERSION: u32 = 4;
+pub(crate) const VERSION: u32 = 5;
 
 /// Fixed size of the serialized header block: the magic, the section
 /// geometry, the root, and the fingerprint string. The pages section starts
