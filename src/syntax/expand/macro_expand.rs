@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-21
 //! Expands one macro call by running its transformer closure on the VM and
 //! deep-copying the result back to owned `Syntax`.
 //!
@@ -15,20 +15,20 @@
 //! macro.
 //!
 //! Scope preservation: atom arguments (nil, bool, int, float, string, keyword)
-//! are passed as their direct `Value` equivalents — they don't participate in
-//! binding resolution and wrapping them as syntax objects would change their
-//! runtime semantics (e.g., `false` wrapped in a syntax object becomes truthy).
-//! Symbols and compound forms are wrapped as `Value::syntax(arg)` to preserve
-//! scope sets through the closure call.
+//! are passed as their direct `Value` equivalents. They do not take part in
+//! binding resolution, and wrapping them as syntax objects would change their
+//! runtime semantics: `false` wrapped in a syntax object, for example, becomes
+//! truthy. Symbols and compound forms are wrapped as `Value::syntax(arg)` to
+//! preserve scope sets through the closure call.
 //!
 //! Hygiene (Flatt 2016, sets of scopes): each expansion mints a fresh intro
-//! scope, PRE-STAMPS it on the wrapped arguments, and after the transformer
-//! returns, FLIPS it on the whole result (`flip_scope_recursive`): template-
-//! origin identifiers — which never saw the scope — gain it, and argument-
-//! origin identifiers lose it, recovering their use-site scope sets exactly.
-//! A template binder therefore carries the intro scope while inbound
-//! identifiers do not, so under the subset resolution rule the binder cannot
-//! capture them (tests/lang/hygiene.lisp). `datum->syntax`
+//! scope, and PRE-STAMPS it on the wrapped arguments. After the transformer
+//! returns, the expander FLIPS the scope on the whole result
+//! (`flip_scope_recursive`). Template-origin identifiers, which never saw the
+//! scope, gain it. Argument-origin identifiers lose it, which recovers their
+//! use-site scope sets exactly. A template binder therefore carries the intro
+//! scope while inbound identifiers do not, so under the subset resolution rule
+//! the binder cannot capture them (tests/lang/hygiene.lisp). `datum->syntax`
 //! (scope_exempt) opts a node out of both operations — the deliberate-capture
 //! escape hatch.
 //!
@@ -37,17 +37,17 @@
 //! definition's transformer cell owns its region, and the last clone of the
 //! definition to drop releases it (src/syntax/expand/AGENTS.md).
 //! Phase 2 (closure call + result conversion) is a CLOSED ALLOCATION SCOPE
-//! (docs/impl/region/rules.md § "Macro expansion — a closed allocation scope"):
-//! a per-call mint log records every region the transformer mints, and after the
-//! result is deep-copied to owned Syntax the scope is reclaimed by balancing each
-//! survivor's unexplained references. The scope also owns the transient region
-//! the argument wrapping below allocates into, so its physical id goes back to
-//! the free list whether or not anything was wrapped into it. Together those
+//! (docs/impl/region/rules.md). A per-call mint log records every region the
+//! transformer mints. After the result is deep-copied to owned Syntax, the
+//! scope is reclaimed by balancing each survivor's unexplained references. The
+//! scope also owns the transient region the argument wrapping below allocates
+//! into, so its physical id goes back to the free list whether or not anything
+//! was wrapped into it. Together those
 //! keep the per-invocation cost of an expansion constant in every dimension:
 //! objects, regions, bytes, and physical ids.
 //!
 //! Known limitations:
-//! - Macros cannot return improper lists (e.g. `(pair 1 2)`). The
+//! - Macros cannot return improper lists (for example, `(pair 1 2)`). The
 //!   `from_value()` conversion requires proper lists.
 
 use super::{Expander, MacroDef, SyntaxKind, MAX_MACRO_EXPANSION_DEPTH};
@@ -70,9 +70,9 @@ use crate::vm::VM;
 /// allocation scope (docs/impl/region/rules.md), so the wrapped args are
 /// reclaimed with the rest of the transformer's scratch once the result is
 /// deep-copied to owned Syntax. Only the heap cases (`String`, compound
-/// `_ => syntax`) take the region; the atom cases are immediates with no region,
-/// so an all-atom argument list leaves the region unmaterialized and the scope's
-/// close is what returns its id (docs/impl/region/model.md).
+/// `_ => syntax`) take the region. The atom cases are immediates with no region,
+/// so an all-atom argument list leaves the region unmaterialized. The scope's
+/// close then returns its id (docs/impl/region/model.md).
 fn wrap_macro_arg_value(
     heap: &mut crate::value::fiberheap::FiberHeap,
     arg: &Syntax,
@@ -265,11 +265,10 @@ impl Expander {
         // two without tracking provenance through the transformer.
         let intro_scope = self.fresh_intro_scope();
 
-        // Macro expansion is a CLOSED ALLOCATION SCOPE (docs/impl/region/rules.md
-        // § "Macro expansion — a closed allocation scope"): the transformer's
-        // entire `Value` output is deep-copied to owned `Syntax` below, so every
-        // region it mints — the arg-wrap region, the constructed output tree, and
-        // the scratch its constructors discard internally — is dead afterward.
+        // Macro expansion is a CLOSED ALLOCATION SCOPE (docs/impl/region/rules.md).
+        // The transformer's entire `Value` output is deep-copied to owned `Syntax`
+        // below. So every region it mints is dead afterward: the arg-wrap region,
+        // the constructed output tree, and the scratch its constructors discard.
         // Open a mint log around the whole call so the reclaim pass can balance
         // each survivor's unexplained references by RC. The reclaim covers every
         // region the log names: root, interior, and orphan scratch.
@@ -278,11 +277,11 @@ impl Expander {
         // below allocates into it. The scope mints it and the reclaim closes it,
         // so it is covered whether or not anything was wrapped into it.
         let region_id = scope.arg_region();
-        // The expansion's heap, reached through the VM's raw `heap_ptr` (a `Copy`
-        // pointer that holds no borrow), so the `stamp` closure stays `Fn + Copy`
-        // — it captures the pointer, not a `&mut VM` — and the `.map(stamp)` reuse
-        // pattern below keeps compiling while every wrapped arg is born on this
-        // instance's own heap.
+        // The expansion's heap, reached through the VM's raw `heap_ptr`, a `Copy`
+        // pointer that holds no borrow. So the `stamp` closure captures the
+        // pointer, not a `&mut VM`, and stays `Fn + Copy`. The `.map(stamp)` reuse
+        // below then compiles, and every wrapped arg is born on this instance's
+        // own heap.
         let heap_ptr = vm.heap_ptr;
         let result_syntax = (|| {
             // Wrap arguments as Values born in this expansion's transient region
@@ -321,9 +320,9 @@ impl Expander {
                 fault => format!("{}: macro '{}': {}", span, macro_def.name, fault.describe()),
             })?;
             // Deep-copy the result to owned Syntax while the transformer's
-            // scratch is still live; the scope reclaim below then frees ALL of
-            // it (the result tree's root and interior, the arg region, and any
-            // constructor-discarded orphan), balancing each survivor's
+            // scratch is still live. The scope reclaim below then frees ALL of
+            // it: the result tree's root and interior, the arg region, and any
+            // constructor-discarded orphan. It balances each survivor's
             // unexplained references by RC. The result tree carried a Rule-5
             // `ReturnValue` escape on its root and one on every tail-flowing
             // node whose decref the solver suppressed; the reclaim balances them
