@@ -70,8 +70,7 @@ pub(crate) fn prim_backend_q(
 // Declarative primitive definitions for config operations.
 primitive! {
     "vm/tier" => prim_vm_tier {
-        ambient: true,
-        signal: Signal::silent(),
+        signal: Signal::ambient(),
         arity: Arity::Exact(0),
         doc: "The backend tier currently executing, as a keyword \
               (:bytecode, :jit, :wasm, :mlir-cpu). Reflects the tier forced \
@@ -82,8 +81,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "backend?" => prim_backend_q {
-        ambient: true,
-        signal: Signal::silent(),
+        signal: Signal::ambient(),
         arity: Arity::Exact(1),
         doc: "True iff the given tier keyword is the currently executing tier. \
               Runtime predicate, since one closure runs on every tier under \
@@ -94,8 +92,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "vm/config" => prim_vm_config {
-        ambient: true,
-        signal: Signal::query_errors(),
+        signal: Signal::ambient_query_errors(),
         arity: Arity::Range(0, 1),
         doc: "Read runtime configuration. No args returns the full config struct. \
               Pass a keyword (:jit, :mlir, :trace, :stats, :max-depth, :unicode, \
@@ -108,8 +105,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "vm/config-set" => prim_vm_config_set {
-        ambient: true,
-        signal: Signal::query_errors(),
+        signal: Signal::ambient_query_errors(),
         arity: Arity::Exact(2),
         doc: "Set a runtime configuration field: :jit or :mlir to a positive \
               threshold, :trace to a keyword set, :max-depth to a positive integer. \

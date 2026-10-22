@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-22
 # The process scheduler: runs process fibers in rounds, forwards their I/O, and tears down orphans.
 # lib/process/overview.md
 # docs/processes.md
@@ -7,8 +7,8 @@
 #
 # A process fiber's mask is `process-fiber`'s, in primitives.lisp. :yield
 # carries the commands, :wait structured concurrency inside a process, and
-# :io the I/O this scheduler forwards. :exec, :ffi, :gpu, :os-signal and :fs
-# carry a capability denial here, and the scheduler refuses it.
+# :io the I/O this scheduler forwards. :exec, :ffi, :gpu, :os-signal, :fs,
+# :net and :ambient carry a capability denial here, and the scheduler refuses it.
 
 (def primitives ((import "std/process/primitives")))
 (def make-core (import "std/process/core"))
@@ -265,10 +265,10 @@
           (core:wake-waiting)
 
           # No process left alive: every remaining sub-fiber is an orphan.
-          # Tear them down here — after draining, so a fire-and-forget
-          # sub-fiber still runs once, but before the idle handler below
-          # would spin on a futex orphan or block on io/wait for an I/O
-          # orphan that never completes.
+          # Tear them down here, after draining, so a fire-and-forget
+          # sub-fiber still runs once. Tear them down before the idle handler
+          # below, which would spin on a futex orphan or block on io/wait for
+          # an I/O orphan that never completes.
           (when (not (core:any-alive?)) (abort-orphan-subs))
           (when (empty? ready) (idle))
 

@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-22
 //! Fiber introspection and management primitives.
 //!
 //! docs/signals/primitives.md
@@ -265,8 +265,7 @@ primitive! {
         effect: RegionEffect::Opaque,
     }
     "fiber/parent" => prim_fiber_parent {
-        ambient: true,
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         arity: Arity::Exact(1),
         doc: "Get the parent fiber, or nil if this is a top-level fiber",
         params: &["fiber"],
