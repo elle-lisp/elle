@@ -1,5 +1,5 @@
 // audited: 2026-10-21
-//! `CompileCtx`, one instance's compile-time state, and `BootExports`, the export structs its boot left.
+//! `CompileCtx`, one instance's compile-time state: how it is built, how a compile expands on it, and what it answers.
 //!
 //! src/pipeline/AGENTS.md
 //! docs/impl/image/boot.md
@@ -24,7 +24,7 @@ use crate::value::fiber::SignalBits;
 use crate::vm::VM;
 use std::collections::HashMap;
 
-use super::bootstrap::{compile_core, install_core_exports};
+use super::bootstrap::{compile_core, install_core_exports, BootExports};
 
 mod register;
 mod repl;
@@ -33,26 +33,6 @@ pub use repl::Layer;
 use repl::ReplLayer;
 pub use store::compile_file_stored;
 use store::Store;
-
-/// The two export structs a boot leaves behind: core.lisp's and stdlib.lisp's.
-///
-/// Both are process roots already, so holding them costs nothing. The boot
-/// dump reads them, because they are the root set an image carries. Each is
-/// nil until the boot that produces it runs.
-#[derive(Debug, Clone, Copy)]
-pub struct BootExports {
-    pub core: crate::value::Value,
-    pub stdlib: crate::value::Value,
-}
-
-impl Default for BootExports {
-    fn default() -> Self {
-        BootExports {
-            core: crate::value::Value::NIL,
-            stdlib: crate::value::Value::NIL,
-        }
-    }
-}
 
 /// Per-instance compile-time state.
 ///
