@@ -19,9 +19,8 @@ use crate::value::heap::{HeapObject, Pair};
 fn array_push_mutates_in_place_and_returns_same_value() {
     crate::value::arena::with_test_region(|| {
         let mut vm = vm_with_primitives();
-
-        let h = crate::primitives::ctx::TestHeap::new();
-        let arr = h.ctx().array_mut(vec![]);
+        let arr_region = unsafe { (*vm.heap_ptr).new_runtime_region() };
+        let arr = ctx_in(&mut vm, arr_region).array_mut(vec![]);
         let v = Value::int(42);
         let ret = elle_jit_array_push(arr.tag, arr.payload, v.tag, v.payload, vm_arg(&mut vm));
         let ret_val = ret.to_value();
