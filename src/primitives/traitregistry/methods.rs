@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-21
 //! The default traitsets' method structs, the immutable tables that hold them, and the native methods they name.
 //!
 //! docs/traits.md
@@ -101,8 +101,8 @@ pub(super) fn build_collection_methods(heap: &mut FiberHeap) -> Value {
 /// Allocate an immutable trait-table struct into `heap`'s pinned root region.
 ///
 /// Uses [`alloc_root`](crate::value::arena::alloc_root). The instance's registry
-/// holds the table for the lifetime of *this instance* — pinned alive by
-/// reference count in an ordinary, reclaimable region, not forever: the teardown
+/// holds the table for the lifetime of *this instance*, pinned alive by
+/// reference count in an ordinary, reclaimable region, not forever. The teardown
 /// sweep releases the root region by RC (`teardown_process_root_regions`), so the
 /// table is reclaimed when the instance ends.
 pub(super) fn alloc_trait_table(heap: &mut FiberHeap, entries: BTreeMap<TableKey, Value>) -> Value {
