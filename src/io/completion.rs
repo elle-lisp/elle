@@ -1,4 +1,4 @@
-//! audited: 2026-10-14
+//! audited: 2026-10-21
 //! Completion processing for async I/O: one arm per operation shape, each
 //! answering with a value it was handed or one it builds.
 //!
@@ -7,7 +7,7 @@
 
 use crate::io::pending::PendingOp;
 use crate::io::pool::{BufferHandle, BufferPool};
-use crate::io::request::{FileKind, PortOp, Reap};
+use crate::io::request::{PortOp, Reap};
 use crate::io::types::{FdState, PortKey};
 use crate::io::{Completion, SubmissionId};
 use crate::port::{Encoding, Port, PortKind};
@@ -17,7 +17,9 @@ use std::collections::HashMap;
 use std::os::unix::io::AsRawFd;
 use std::os::unix::io::{FromRawFd, OwnedFd, RawFd};
 
+mod file;
 mod port;
+use file::complete_file_op;
 use port::complete_port_op;
 
 /// Set TCP_NODELAY on a TCP stream fd to disable Nagle's algorithm.
@@ -53,24 +55,6 @@ fn wait_failed(
         errno_message(errno)
     );
     Completion::failed(id, birth, "exec-error", msg)
-}
-
-/// A file operation by path that failed with `why`: an `:io-error` whose
-/// `:path` names the file.
-fn file_failed(
-    id: SubmissionId,
-    mut birth: crate::io::Birthplace,
-    kind: FileKind,
-    path: &str,
-    why: impl std::fmt::Display,
-) -> Completion {
-    let error = {
-        let ctx = birth.alloc();
-        let msg = format!("{}: {}: {}", kind.primitive(), path, why);
-        let named = ctx.string(path);
-        ctx.error_extra("io-error", msg, &[("path", named)])
-    };
-    Completion::err(id, birth, error)
 }
 
 /// True when this errno says the caller's `:timeout` elapsed rather than the
@@ -209,39 +193,7 @@ pub(super) fn process_raw_completion(
             Completion::ok(id, birth, *port_val)
         }
         PendingOp::File { kind, path, .. } => {
-            if result_code < 0 {
-                // A worker sends the error's own text; a sync sends none.
-                let why = if data.is_empty() {
-                    std::io::Error::from_raw_os_error(-result_code).to_string()
-                } else {
-                    String::from_utf8_lossy(&data).into_owned()
-                };
-                return file_failed(id, birth, *kind, path, why);
-            }
-            match kind {
-                FileKind::Read => match String::from_utf8(data) {
-                    Ok(s) => {
-                        let answer = birth.alloc().string(s);
-                        Completion::ok(id, birth, answer)
-                    }
-                    Err(e) => file_failed(id, birth, *kind, path, e),
-                },
-                FileKind::Lines => match String::from_utf8(data) {
-                    Ok(s) => {
-                        let answer = {
-                            let ctx = birth.alloc();
-                            let lines: Vec<Value> = s.lines().map(|l| ctx.string(l)).collect();
-                            ctx.list(lines)
-                        };
-                        Completion::ok(id, birth, answer)
-                    }
-                    Err(e) => file_failed(id, birth, *kind, path, e),
-                },
-                FileKind::Write | FileKind::Append | FileKind::Copy => {
-                    Completion::ok(id, birth, Value::TRUE)
-                }
-                FileKind::Sync => Completion::ok(id, birth, Value::NIL),
-            }
+            complete_file_op(id, result_code, data, *kind, path, birth)
         }
         PendingOp::Connect {
             connect_fd,

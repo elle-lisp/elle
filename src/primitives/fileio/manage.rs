@@ -1,7 +1,7 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! The file/ primitives that only read or change metadata: delete, mkdir, mktempdir, rename, size and stat.
 //!
-//! docs/io.md
+//! docs/io/files.md
 
 use super::*;
 use crate::rich_error;
