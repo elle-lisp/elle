@@ -229,6 +229,9 @@ mod audit_report {
 mod audit_counts {
     include!("audit_counts.rs");
 }
+mod audit_policy {
+    include!("audit_policy.rs");
+}
 mod audit_sources {
     include!("audit_sources.rs");
 }

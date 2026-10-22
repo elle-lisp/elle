@@ -11,14 +11,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use crate::common::ScratchDir;
-
-/// Write `body` at `rel` under `root`, creating its directories.
-fn write(root: &Path, rel: &str, body: &str) {
-    let path = root.join(rel);
-    std::fs::create_dir_all(path.parent().expect("has a parent")).expect("create fixture dir");
-    std::fs::write(&path, body).expect("write fixture file");
-}
+use crate::common::{write_fixture, ScratchDir};
 
 /// Run git in `dir` with a configuration of its own, so the user's hooks,
 /// signing and identity never reach the fixture.
@@ -71,7 +64,7 @@ fn the_root_index_is_titled_root_and_links_no_parent() {
     // Counter-factual: a title read off the directory name prints `# .` for the
     // root, and names the checkout's own directory when read off the root path.
     let t = ScratchDir::new("agents-root-title");
-    write(t.path(), "README.md", "# Top\n\nThe repository.\n");
+    write_fixture(t.path(), "README.md", "# Top\n\nThe repository.\n");
 
     let index = index(t.path(), ".");
     assert_eq!(
@@ -88,13 +81,13 @@ fn the_root_index_is_titled_root_and_links_no_parent() {
 #[test]
 fn a_directory_whose_name_starts_with_a_dot_is_left_out() {
     let t = ScratchDir::new("agents-dot-dir");
-    write(t.path(), "README.md", "# Top\n\nThe repository.\n");
-    write(
+    write_fixture(t.path(), "README.md", "# Top\n\nThe repository.\n");
+    write_fixture(
         t.path(),
         ".github/rules.md",
         "# Rules\n\nThe branch rules.\n",
     );
-    write(t.path(), "docs/one.md", "# One\n\nThe first subject.\n");
+    write_fixture(t.path(), "docs/one.md", "# One\n\nThe first subject.\n");
 
     let index = index(t.path(), ".");
     assert!(
@@ -119,15 +112,15 @@ fn an_untracked_document_never_reaches_an_index() {
     // ignored name, and the hook would commit an index that lists it.
     let t = ScratchDir::new("agents-untracked");
     git(t.path(), &["init", "-q"]);
-    write(t.path(), ".gitignore", "notes.md\n");
-    write(t.path(), "one.md", "# One\n\nThe first subject.\n");
+    write_fixture(t.path(), ".gitignore", "notes.md\n");
+    write_fixture(t.path(), "one.md", "# One\n\nThe first subject.\n");
     git(t.path(), &["add", ".gitignore", "one.md"]);
-    write(
+    write_fixture(
         t.path(),
         "notes.md",
         "# Notes\n\nAn ignored scratch note.\n",
     );
-    write(
+    write_fixture(
         t.path(),
         "draft.md",
         "# Draft\n\nA document nobody added yet.\n",
@@ -154,8 +147,8 @@ fn a_tracked_document_gone_from_disk_is_not_listed() {
     // document the working tree has deleted, and links to nothing.
     let t = ScratchDir::new("agents-deleted");
     git(t.path(), &["init", "-q"]);
-    write(t.path(), "docs/one.md", "# One\n\nThe first subject.\n");
-    write(t.path(), "docs/two.md", "# Two\n\nThe second subject.\n");
+    write_fixture(t.path(), "docs/one.md", "# One\n\nThe first subject.\n");
+    write_fixture(t.path(), "docs/two.md", "# Two\n\nThe second subject.\n");
     git(t.path(), &["add", "docs"]);
     std::fs::remove_file(t.join("docs/two.md")).expect("delete a tracked document");
 
@@ -176,11 +169,11 @@ fn a_submodule_s_documents_never_reach_an_index() {
     // that read it would differ between a checkout and CI.
     let t = ScratchDir::new("agents-submodule");
     git(t.path(), &["init", "-q"]);
-    write(t.path(), "README.md", "# Top\n\nThe repository.\n");
+    write_fixture(t.path(), "README.md", "# Top\n\nThe repository.\n");
     let inner = t.join("vendor");
     std::fs::create_dir_all(&inner).expect("create the inner repository");
     git(&inner, &["init", "-q"]);
-    write(&inner, "guide.md", "# Guide\n\nThe vendored guide.\n");
+    write_fixture(&inner, "guide.md", "# Guide\n\nThe vendored guide.\n");
     git(&inner, &["add", "guide.md"]);
     git(&inner, &["commit", "-q", "-m", "guide"]);
     git(t.path(), &["add", "README.md", "vendor"]);
@@ -205,7 +198,7 @@ fn a_root_below_another_repository_reads_every_file() {
     let t = ScratchDir::new("agents-nested-root");
     git(t.path(), &["init", "-q"]);
     let root = t.join("fixture");
-    write(&root, "docs/one.md", "# One\n\nThe first subject.\n");
+    write_fixture(&root, "docs/one.md", "# One\n\nThe first subject.\n");
 
     let index = index(&root, "docs");
     assert!(
