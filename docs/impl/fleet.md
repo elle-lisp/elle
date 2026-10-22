@@ -1,6 +1,6 @@
 # Fleet — adhoc distributed execution over images
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-22 -->
 
 A design for running Elle functions on other machines, with the code shipped as
 an environment image at call time.
@@ -95,10 +95,10 @@ sandbox. Multi-tenant execution of untrusted code is a non-goal.
 - **Ship source text and `eval` it on the worker.** It pays the compile the
   image deletes, per worker per task. It cannot ship a session either, because
   closures capture runtime values and source carries none.
-- **Ship closures through `SendValue` alone**, as `sys/spawn` does. It carries
-  one closure graph and no macros, modules or compiler state. It encodes per
-  task with no deduplication, and its bytes are not canonical, so it cannot key
-  a cache.
+- **Ship each closure as a data image**, the bytes form of the message a spawn
+  sends ([sending a region](send.md)). It carries one closure graph and no macros,
+  modules or compiler state, and it dumps that graph for every call where an
+  environment image is dumped once per session state.
 - **A subprocess per task.** Kill-on-timeout and crash isolation come free,
   but every task pays a process spawn and a boot. It also forfeits the scoped
   load, the cascade unload and the leak accounting the image mechanism

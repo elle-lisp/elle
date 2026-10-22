@@ -1,6 +1,6 @@
 # Fleet: references and the store
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-22 -->
 
 What crosses a machine boundary in a fleet, where its bytes live, and the key
 that names a task.
@@ -14,17 +14,17 @@ Everything that crosses a machine boundary is a **reference**: an immutable
 struct that names content by hash.
 
 ```text
-{:hash  "…"          # BLAKE3 of the encoded bytes (plugin/hash)
+{:hash  "…"          # BLAKE3 of the image bytes (plugin/hash)
  :size  1024
- :codec :send        # :send | :image
  :tier  :inline      # :inline | :store
  :bytes <bytes>}     # present only for :inline
 ```
 
-| Codec | Bytes | Use |
-|-------|-------|-----|
-| `:send` | `SendValue` encoded as bytes; `sys/spawn` moves the same form in memory ([threads](../../threads.md)) | arguments and results, the default |
-| `:image` | image-format bytes: an environment image for code, or a data-only image for a large value graph that deserves page-speed hydration | code, and a later milestone for data |
+Every reference names an image. Code is an environment image, and an argument
+or a result is a data image, which `image/encode` writes and `image/decode`
+hydrates ([sending a region](../send.md)). Both are locked to the build that
+wrote them, so a reference crosses only between processes of one fingerprint
+([workers](workers.md)).
 
 A payload under 1 KiB rides inline in the reference itself. Everything else
 lives in the **store**, keyed by hash. The store is `fleet:blob:<hash>` in

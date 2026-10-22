@@ -1,6 +1,6 @@
 # Fleet: the queue
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-22 -->
 
 The Redis keys a fleet coordinates through, the task lifecycle over them, and
 the delivery, flow-control and ordering policies.
@@ -25,10 +25,8 @@ that keeps them honest ([the client](api.md)).
 | Key (prefix `fleet:`) | Type | Content |
 |---|---|---|
 | `blob:<hash>` | string | encoded bytes |
-| `tasks:<fingerprint>` | stream | image tasks for one binary layout, group `workers` |
-| `tasks:<fingerprint>:<pool>` | stream | tasks bound to a named worker pool |
-| `tasks:any` | stream | module-entry tasks any worker can run |
-| `lane:<pipeline>:<n>` | stream | one FIFO lane of an ordered pipeline |
+| `tasks:<fingerprint>` | stream | the tasks for one binary layout, group `workers` |
+| `tasks:<fingerprint>:<pool>` | stream | tasks bound to a named worker pool || `lane:<pipeline>:<n>` | stream | one FIFO lane of an ordered pipeline |
 | `queue:<name>` | hash | named-queue control: the paused flag and the caps |
 | `task:<key>` | hash | policy, status, attempt, timestamps, worker id |
 | `job:<id>` | hash | the task-key list, the remaining counter, the continuation flag |

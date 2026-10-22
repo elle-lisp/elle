@@ -1,6 +1,6 @@
 # Fleet: workers and routing
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-22 -->
 
 The process that claims and runs fleet tasks, the substrates it runs on, and
 how a task finds a worker that can run it.
@@ -93,8 +93,8 @@ An image is valid only for a binary whose layout fingerprint matches
 code transport, and fleet accepts it. What fleet refuses is "one fleet, one
 binary", so the fingerprint is a **routing key, not a gate**:
 
-- A client enqueues image tasks on `tasks:<fingerprint>`, its own.
-- A worker consumes the stream for its own fingerprint, plus `tasks:any`.
+- A client enqueues every task on `tasks:<fingerprint>`, its own.
+- A worker consumes the stream for its own fingerprint.
 - The worker registry records each worker's fingerprint, so `fleet:status`
   can say "no compatible worker" instead of hanging.
 
@@ -103,9 +103,10 @@ upgrade is a drain, where old-fingerprint tasks finish on old workers while new
 clients' tasks land on new ones.
 
 A module-entry task names a binding from a module file both sides load, so it
-carries no image at all. It rides `tasks:any`, and its only compatibility bar
-is the wire codec. There is no cross-version image story, and none is promised:
-images are regenerated, never migrated.
+carries no environment image. Its arguments are data images, which carry the
+same lock ([references](store.md)), so it rides its client's fingerprint stream
+like any other task. There is no cross-version image story, and none is
+promised: images are regenerated, never migrated.
 
 ## Routing by pool
 

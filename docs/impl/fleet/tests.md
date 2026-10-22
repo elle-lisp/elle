@@ -1,6 +1,6 @@
 # Fleet: the tests
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-22 -->
 
 The pins each fleet milestone must land with, one entry per subject.
 
@@ -9,8 +9,8 @@ implemented.
 
 ## Data
 
-- **Store.** Every `SendValue`-encodable type round-trips through the blob
-  store. The inline tier and the store tier cut over at the size boundary.
+- **Store.** Every value the bytes transport admits
+  ([sending a region](../send.md)) round-trips through the blob store. The inline tier and the store tier cut over at the size boundary.
   Identical values collapse to one blob. Counter-factual: two distinct values
   never share a hash entry.
 - **Vacated blobs.** Expire a result blob and fetch it: the error is
@@ -99,8 +99,8 @@ implemented.
   produces the captured value remotely.
 - **Routing.** A worker with a mismatched fingerprint never claims an image
   task. The task completes when a compatible worker joins, and `fleet:status`
-  names the incompatibility while it waits. A module-entry task runs on both
-  populations. A task naming pool `:gpu` is claimed only by a worker serving
+  names the incompatibility while it waits. A module-entry task waits for its
+  client's fingerprint in the same way. A task naming pool `:gpu` is claimed only by a worker serving
   that pool, and `fleet:status` names an unserved pool.
 - **Recursion.** A task that calls `fleet:map` completes on a single-worker
   fleet without deadlock, because the claim loop never blocks on the child

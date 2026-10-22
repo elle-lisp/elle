@@ -1,6 +1,6 @@
 # The image file
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-22 -->
 
 The byte layout of an image, and the fingerprint that decides whether this
 binary may map it.
@@ -25,18 +25,17 @@ One image is one file, or one blob embedded in a larger one:
 | signal table | not written yet: a dump refuses a declared signal instead ([sealing.md](sealing.md)) |
 | watermarks | dump-time counters, carried in the header block: parameter id, hygiene scope id and static-region mint today, next signal bit with the milestone that needs it |
 | manifest | the bindings an image installs. It is body data, not a section: an export struct names each binding with a keyword key and each value answers its own signal, arity and doc ([boot.md](boot.md) owns the boot configuration's root struct). Dependency fingerprints are header fields, and an image with an empty dependency list records none |
-| side-stream | not written yet: no dump policy permits a mutable binding until the environment milestone ([dumping](dumping.md)) |
 
 ## The pages section starts at a base-page boundary
 
-`mmap` accepts only a file offset that is a multiple of the OS page size, and
-that size is a property of the running machine rather than of the format:
-Linux on x86-64 reports 4 KiB, macOS on arm64 reports 16 KiB. The header block
-is therefore padded with zeros up to the first base-page boundary at or after
-it, and the pages section begins there. Pinning the section to a fixed 4 KiB
-start instead would map on a 4 KiB machine and fail every page with `EINVAL`
-on a 16 KiB one — the header block is the only part of the file read with
-`read` rather than mapped, so it is the only part whose offset is free.
+`mmap` accepts only a file offset that is a multiple of the OS page size. That
+size is a property of the running machine rather than of the format: Linux on
+x86-64 reports 4 KiB, macOS on arm64 reports 16 KiB. The header block is
+therefore padded with zeros up to the first base-page boundary at or after it,
+and the pages section begins there. Pinning the section to a fixed 4 KiB start
+instead would map on a 4 KiB machine and fail every page with `EINVAL` on a
+16 KiB one. The header block is the only part of the file read with `read`
+rather than mapped, so it is the only part whose offset is free.
 
 ## An image starts at a base-page boundary of its container
 
@@ -59,15 +58,15 @@ A pointer slot is any 8-byte field holding an absolute address: a heap-tagged
 `Value`'s payload, a `RegionSlice`'s ptr. A primitive slot is the payload word
 of a `Value` with `TAG_NATIVE_FN`, which the primitive stream names.
 Symbol and keyword payloads are stable hashes and need no
-relocation. The dumper emits each entry as it copies the object — it knows
-every variant's layout, so there is no post-hoc discovery, and targets are
-region-relative offsets so hydration rewrites each slot in O(1) with no
+relocation. The dumper emits each entry as it copies the object. It knows every
+variant's layout, so there is no post-hoc discovery. Targets are
+region-relative offsets, so hydration rewrites each slot in O(1) with no
 address search.
 
 A function's LIR costs slots per function, never per instruction. A record
 names its operands by index into its own function's tables, so only the body's
-top-level slices are pointers: one slot per non-empty slice, plus one per file
-spelling and one per heap value its `ValueConst` instructions load. The pages
+top-level slices are pointers. That is one slot per non-empty slice, plus one
+per file spelling and one per heap value its `ValueConst` instructions load. The pages
 that hold the records carry no slot at all, so they stay clean in a mapping.
 
 **Static region slots** baked into bytecode operands are opaque per-function
@@ -120,8 +119,8 @@ is four bytes, not eight, because a `FileId` is a `u32`; the verifier bounds
 it and checks its alignment like any other slot.
 
 The cost is frames. Every node of a tree read from a real file carries a file
-id, so the file stream dirties every frame those nodes sit in — where an atom
-node with no pointers would otherwise have stayed clean. A payload pays one
+id, so the file stream dirties every frame those nodes sit in. An atom node
+with no pointers would otherwise have stayed clean. A payload pays one
 slot for its whole code object, because one origin is all it holds. Leaving
 the ids alone would be wrong rather than cheap: the span would name whatever
 file the hydrating process happens to have interned at that index, and print
@@ -155,8 +154,8 @@ rewrites both, and the dumper leaves the slot zero.
 
 A tag is a kind in its high word and that kind's argument in the low one, so a
 constructor added later needs no re-encoding. Two kinds ship. The default
-traitset names the heap tag whose table to look up, and an instance whose trait
-tables are not built refuses the load by name — rather than writing nil into a
+traitset names the heap tag whose table to look up. An instance whose trait
+tables are not built refuses the load by name, rather than writing nil into a
 traits slot and leaving a value that answers no protocol. The standard-stream
 port names which stream, and the hydrating instance opens a fresh one. That
 second constructor allocates, so its value lands in a companion region and the
@@ -222,13 +221,13 @@ read.
 
 The three boot sources are not fingerprint inputs. An image built before
 somebody edited stdlib.lisp has a layout this binary can map and a library it
-must not answer with, so the boot configuration carries a digest of its sources
+must not answer with. So the boot configuration carries a digest of its sources
 in the body and refuses a mismatch there ([boot.md](boot.md)). Recording them
 here instead would invalidate every image — a user's environment image included
 — the day the standard library changed a line.
 
 The base page size earns its place because the file's geometry is built from
-it: the pages section starts at a base-page boundary and every page size in
+it. The pages section starts at a base-page boundary, and every page size in
 the page table is a multiple of it. Two machines can agree on the target
 triple and still disagree here — arm64 Linux ships both 4 KiB and 64 KiB
 kernels. Recording the size turns that case into a fingerprint mismatch, which
@@ -236,9 +235,9 @@ falls back to sources, instead of a page table the reader rejects as corrupt
 or an offset `mmap` refuses.
 
 Size and align alone do not pin field offsets. The fingerprint therefore also
-records the probed layout of every variant the dumper can emit — the heap
-objects, and the `TableKey` variants a struct entry carries: the
-discriminant byte and each leaf field's offset and length
+records the probed layout of every variant the dumper can emit: the heap
+objects, and the `TableKey` variants a struct entry carries. A probe records
+the discriminant byte and each leaf field's offset and length
 ([measurements.md](measurements.md) records the probe mechanism and the
 measured layout). It records the field offsets of every record the dumper
 assembles as well: a syntax node, a code payload, the payload's LIR body, and

@@ -1,6 +1,6 @@
 # Hydration
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-22 -->
 
 How an image's pages become a region of the hydrating instance: the steps, the
 descriptor, and how a pointer into them resolves.
@@ -46,11 +46,10 @@ checks they run.
    raises its expander's scope counter, and installs the root struct's bindings
    ([booting](boot.md)).
 
-An environment load would decode the side-stream's mutable bindings here,
-where its dump policy permitted them, through the `SendValue` deserializer into
-ordinary regions rooted like REPL bindings ([dumping](dumping.md)). A function's
-LIR needs no step: it is body data, mapped with everything else
-([parity](parity.md)).
+A function's LIR needs no step: it is body data, mapped with everything else
+([parity](parity.md)). A mutable binding an environment dump admits will need
+none either, once its store is body data, and it grows into pages the region
+claims after hydration ([mutable stores](../mutable.md)).
 
 An environment image hydrates on top of a boot image and relocates its
 cross-image slots against the boot region's hydrated pages. References between

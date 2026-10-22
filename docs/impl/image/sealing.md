@@ -1,6 +1,6 @@
 # Sealing
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-22 -->
 
 What an image's body may hold, what the hydrating instance rebuilds for itself,
 and what fails the dump.
@@ -10,18 +10,20 @@ and what fails the dump.
 
 ## What the body may hold
 
-After the foundations, the body may contain only *sealed* heap objects:
-byte-self-contained, pointing only into this image (or an image it depends
-on), and free of Rust heap ownership (no `Rc`, `Vec`, `Box`, or `RefCell`
-inside). Page bytes must *be* the object. Sealed objects have no real
+The body may contain only *sealed* heap objects. A sealed object is
+byte-self-contained and points only into this image or an image it depends on.
+It owns nothing on the Rust heap: no `Rc`, `Vec`, `Box` or `RefCell` inside.
+Page bytes must *be* the object. Sealed objects have no real
 destructors, so the hydrated region's teardown drops are no-ops by
 construction.
 
-Sealed and portable after the foundations: `Pair`, `LString`, `LArray`,
-`LBytes`, `LSet`, `LStruct`, `Syntax`, closure templates, closure instances
-(env is an inline `RegionSlice<Value>`), keywords and symbols (payloads are
-stable name hashes), native-fns (dense `prim_id`, remapped by name), ints
-and floats, `Parameter`.
+| Sealed and portable | Why |
+|---------------------|-----|
+| `Pair`, `LString`, `LArray`, `LBytes`, `LSet`, `LStruct`, `Syntax`, `Parameter` | region-native payloads |
+| closure templates and closure instances | a closure's env is an inline `RegionSlice<Value>` |
+| keywords and symbols | a payload is a stable name hash |
+| native-fns | a dense `prim_id`, remapped by name |
+| ints and floats | immediates |
 
 A native-fn's `prim_id` is dense and process-local, so it travels as a name
 ([format.md](format.md) owns the stream). A def the canonical primitive
@@ -30,8 +32,9 @@ fails the dump instead. Nothing loses by that refusal: those handlers are
 reachable only through the default trait tables, which hydration reconstructs.
 
 A sorted container copies in order and is never re-sorted. Every key an image
-may carry ranks by its own content — a name hash for a symbol or a keyword, the
-bytes for a string, its elements for an array, its structure for anything else.
+may carry ranks by its own content. A symbol or a keyword ranks by its name
+hash, a string by its bytes, an array by its elements, and anything else by its
+structure.
 So the order the dump wrote is the order the hydrating instance's comparator
 agrees with, and a binary search over the mapped entries finds what it found
 before. The keys that rank by address instead belong to values the dumper
@@ -41,8 +44,8 @@ refuses anyway.
 
 A closure instance is three sealed fields: the template it references, its env
 slice, and its squelch mask. All three cross whole, traits beside them, and
-every env value goes through the ordinary walk — a capture cell in an env
-snaps to its content or fails the dump (§ "Capture cells are snapped, not
+every env value goes through the ordinary walk. A capture cell in an env snaps
+to its content or fails the dump (§ "Capture cells are snapped, not
 persisted").
 
 A closure template is a header naming a payload, and nothing else
@@ -50,15 +53,15 @@ A closure template is a header naming a payload, and nothing else
 copies into the body: every slice lands in the image, constants go through the
 value walk, and two headers over one payload keep one payload copy.
 
-Everything a code object answers is therefore identical after hydration:
-bytecode, constants, arity, signal, masks, locations, the region tables, the
-defining span `meta/origin` reports, the child table, the LIR the JIT
-promotes from, and the body fragment a graft reads. The fragment is bytes, so
-it copies as the docstring does, and a compile that grafts a hydrated closure
-decodes it where it would decode a compiled one's
-([graft.md](../graft.md)). The SPIR-V a `(git f)` compiled is not part of the code object;
-it lives in a cache on the VM, and the GPU path recompiles in a fresh process
-(§ "What the body refuses").
+Everything a code object answers is therefore identical after hydration. That
+covers bytecode, constants, arity, signal, masks, locations and the region
+tables. It covers the defining span `meta/origin` reports, the child table,
+the LIR the JIT promotes from, and the body fragment a graft reads. The
+fragment is bytes, so it copies as the docstring does, and a compile that
+grafts a hydrated closure decodes it where it would decode a compiled one's
+([graft.md](../graft.md)). The SPIR-V a `(git f)` compiled is not part of the
+code object. It lives in a cache on the VM, and the GPU path recompiles in a
+fresh process (§ "What the body refuses").
 
 The defining span is twenty bytes of plain data. Its file id is the one
 process-local number a payload holds, and it travels by name like a syntax
@@ -107,8 +110,8 @@ The compiler knows which top-level bindings are assigned anywhere in the
 file, and the mint of a compiled forward cell records that fact on the cell,
 the binding's name beside it. A cell whose binding is assigned fails the
 dump, naming the binding: its content is post-boot-mutable state, which the
-strict policy refuses outright and the environment policy routes through the
-side-stream. The boot image therefore requires stdlib to have no assigned
+strict policy refuses outright and the environment policy admits only on
+opt-in ([dumping](dumping.md)). The boot image therefore requires stdlib to have no assigned
 top-levels — a property the dump enforces, and a reasonable one to demand of
 a standard library. [The measurements](measurements.md) count the boot
 graph's cells; stdlib assigns no top-level, so every one of them snaps.
@@ -119,30 +122,33 @@ named by variant.
 
 ## What the body refuses
 
-Refused outright: every mutable variant, `LBox`, `Fiber`, thread and library
-handles, ports, externals, FFI signatures, managed pointers.
+Refused outright: `Fiber`, thread and library handles, ports, externals, FFI
+signatures, managed pointers.
+
+Every mutable variant, `LBox` and an unsnapped capture cell are refused as
+unsealed data, because each keeps its store on the Rust heap. Once that store
+moves into region pages ([mutable stores](../mutable.md)), each is body data,
+and the dump policy alone decides ([sending a region](../send.md) holds its
+table).
 
 A closure whose signal or squelch mask names a signal this process *declared*
-is refused too, by the signal's name. Bits from 32 up are handed out in
-declaration order by a process-global registry, and no image carries a signal
-table, so such a bit would mean a different signal — or none — in the instance
-that hydrates it. The test is against what the registry handed out rather than
-against the whole high range: inference sets high bits to mean "this may signal
-anything", and those mean the same on both sides of a dump. One consequence is
+is refused too, by the signal's name. A process-global registry hands out bits
+from 32 up in declaration order, and no image carries a signal table. So such a
+bit would mean a different signal, or none, in the instance that hydrates it.
+The test is against what the registry handed out rather than against the whole
+high range. Inference sets high bits to mean "this may signal anything", and
+those mean the same on both sides of a dump. One consequence is
 worth knowing: a core.lisp closure carries such an inference mask, so a process
 that has declared a signal can no longer dump a boot image. A boot dump runs
-before any program does, so the order holds where it matters. Mutable
-*bindings* may still be persisted through the side-stream where the image's
-dump policy permits it — the environment policy does, opt-in; the strict boot
-policy does not ([dumping](dumping.md) owns the fork). The SPIR-V kernel
+before any program does, so the order holds where it matters. The SPIR-V kernel
 cache is VM state, not a code-object field, so nothing in it crosses: the GPU
 path recompiles.
 
 ## Process-owned resources reconstruct in place
 
 The boot graph is not fully pure: stdlib defines `*stdin*`/`*stdout*`/
-`*stderr*` as dynamic parameters, and a `Parameter` heap object — itself
-sealed POD (`{id, default, traits}`) — holds as its *default* an `External`
+`*stderr*` as dynamic parameters. A `Parameter` heap object is itself sealed
+POD (`{id, default, traits}`), and it holds as its *default* an `External`
 wrapping the stdio port. `send` already made the semantic call for this case:
 a stdio port is reconstructed fresh on the receiving side, never carried.
 The image does the same via the **reconstruction stream**: (slot location,
@@ -157,7 +163,7 @@ Reconstruction must be in place, not re-evaluation of the defining forms:
 closures like `println` capture the `Parameter` object itself, so a
 re-evaluated `def` would mint a second parameter the captured references
 never see. Anything the dumper meets that is neither sealed nor
-reconstructible nor side-streamable fails the dump with a named binding.
+reconstructible fails the dump with a named binding.
 
 ## A traits slot has three answers
 

@@ -14,8 +14,8 @@ OS threads for CPU-bound work. For I/O-bound concurrency, prefer
 ```
 
 `sys/spawn` **deep-copies** the closure and all captured values into the
-new thread as a `SendBundle`. The threads share no value — mutations on one
-side are invisible to the other. A value that cannot be serialized (a fiber,
+new thread as a `SendBundle`, so a mutation on one side is invisible to the
+other. A value that cannot be serialized (a fiber,
 an open file or socket port) makes the spawn fail with a `:thread-error`. The
 thread's result comes back the same way: it is serialized into a shared slot
 and reconstructed in the joining thread's heap.
@@ -95,7 +95,7 @@ heavy worker of that instance compiles the standard library at every spawn.
 
 #### Quoted symbols cross the boundary unchanged
 
-A deep-copied value (closure, quoted datum, channel message) crosses threads
+A deep-copied value (a closure, a quoted datum, a join result) crosses threads
 inside a `SendBundle`. A symbol id is the FNV-1a hash of its name
 ([impl/symbol.md](impl/symbol.md)), so it means the same thing on both sides and
 copies verbatim — as an immediate, with no name and no re-interning. This is what
@@ -204,7 +204,7 @@ signals a completion channel, waking any parked joiner exactly once;
   — which `protect` catches as `[false {:error :timeout ...}]`. The worker
   runs on: a timed-out worker is abandoned and its result is discarded,
   unless the join names `:kill true`, which kills it. Each worker has its
-  own VM and shares no value, so an abandoned worker cannot corrupt the
+  own VM and its own heap, so an abandoned worker cannot corrupt the
   joiner's values.
 - A worker that vanishes without producing a result (an unwinding panic
   in the thread) surfaces as `{:error :thread-error ...}`.
@@ -294,6 +294,13 @@ or `[:disconnected]`, and a receive answers `[:ok msg]`, `[:empty]` or
 (assert (= [:disconnected] (chan/recv rx)))
 (chan/close-recv rx)                     # close receiver half
 ```
+
+A channel passes the value itself, never a copy. Across threads, a receiver
+of a heap value reads the sender's heap, so the message is valid only while
+the sending thread lives. Do not send a heap value from a worker that exits
+before the receive. The receiver then reads freed pages, and the process
+faults. Send an immediate, or return the value as the worker's result.
+[Sending a region](impl/send.md) designs the fix.
 
 ## See also
 

@@ -1,11 +1,11 @@
 # Landing order and test plan
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-22 -->
 
 What lands in which order, and the pins each milestone must land with.
 
 [The image design](../image.md) owns the argument,
-[the foundations](foundations.md) the five representation fixes below,
+[the foundations](foundations.md) the six representation fixes below,
 [booting from an image](boot.md) the boot configuration, and
 [the measurements](measurements.md) the experiments that answered the design's
 open questions. [pins.md](pins.md) holds the boot milestone's pins.
@@ -14,7 +14,7 @@ open questions. [pins.md](pins.md) holds the boot milestone's pins.
 
 Foundations first. Each lands green on the existing corpus with no image code,
 and each deletes image machinery ([the foundations](foundations.md) argue all
-five):
+six). Five landed before any image code:
 
 1. **symbol** — landed. Stable content-addressed symbol identity
    ([symbols](../symbol.md)).
@@ -25,8 +25,8 @@ five):
 4. **syntax** — landed. The region-native syntax tree
    ([the syntax tree](../syntax.md)).
 5. **lir** — landed. Region-native LIR ([lir.md](../lir.md)), in four steps,
-   each green on its own: **lir-view** froze every function into one read
-   form, **lir-payload** put the frozen function in the code payload,
+   each green on its own. **lir-view** froze every function into one read
+   form, and **lir-payload** put the frozen function in the code payload.
    **lir-retire** made a code object one payload slice, and **lir-lower** built
    the records in a working region.
 
@@ -36,12 +36,16 @@ Then the image milestones:
    to end over every value the foundations sealed as data
    ([format.md](format.md)).
 7. **boot** — landed. The boot configuration ([boot.md](boot.md)), with
-   closures, primitives, traitsets and parameters in the body; the warm cache;
-   parity with a source boot in tiers, grafts and bytecode; the interval table
-   ([hydration](hydration.md)); per-worker hydration; and the embedded blob
-   ([blob.md](blob.md)).
-8. **environment** — `image/save` and `image/load`, manifest deltas over
-   boot, mutable side-stream.
+   closures, primitives, traitsets and parameters in the body, and the warm
+   cache. It also brought parity with a source boot in tiers, grafts and
+   bytecode, the interval table ([hydration](hydration.md)), per-worker
+   hydration, and the embedded blob ([blob.md](blob.md)).
+8. **mutable** — the sixth foundation: region-native mutable stores
+   ([mutable.md](../mutable.md)). It lands before environment, so a mutable
+   binding is body data before any dump writes one. [The send plan](../send/plan.md)
+   orders its steps and holds its pins.
+9. **environment** — `image/save` and `image/load`, manifest deltas over
+   boot, and `&allow-mutable` as a switch in the dump policy.
 
 ## Test plan
 

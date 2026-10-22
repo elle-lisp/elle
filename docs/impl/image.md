@@ -1,6 +1,6 @@
 # Images — regions hydrated at load
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-22 -->
 
 Design for image-style persistence: one mechanism, and the two configurations
 it serves.
@@ -13,7 +13,7 @@ argument and the alternatives it beat. The companions carry the rest:
 
 | Document | Owns |
 |----------|------|
-| [foundations](image/foundations.md) | the five representation fixes the image rests on |
+| [foundations](image/foundations.md) | the six representation fixes the image rests on |
 | [dumping](image/dumping.md) | the compacting copy, its determinism, and the mutable-binding policy |
 | [sealing](image/sealing.md) | what the body may hold, what the hydrating instance rebuilds, what fails the dump |
 | [the image file](image/format.md) | the file's sections, and the fingerprint that gates a load |
@@ -85,7 +85,7 @@ another only in its **dependency list** and its **dump policy**:
 - The **boot** configuration is the image with an empty dependency list. Its
   root is one struct over the core exports, the stdlib exports and the macro
   definitions ([booting](image/boot.md) owns the shape). Its policy is strict:
-  no mutable bindings, in body or side-stream. The warm cache or the embedded
+  no mutable bindings. The warm cache or the embedded
   blob distributes it, and it is regenerated from sources whenever the
   fingerprint or the source digest misses.
 - The **environment** configuration depends on a boot image. Its roots are

@@ -1,6 +1,6 @@
 # Dumping
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-22 -->
 
 How the dumper turns a value graph into an image: the compacting copy, the
 determinism it guarantees, and the policy for mutable bindings.
@@ -64,7 +64,9 @@ produce identical files ([hydration](hydration.md)).
 
 The strict policy, boot's, fails the dump on a mutable binding and names it. The
 environment policy defaults to the same refusal with a `deep-freeze`
-suggestion. `&allow-mutable` opts into encoding the binding through the
-side-stream, rebuilt as a fresh mutable at load ([hydration](hydration.md)). The
-manifest's per-binding kind field makes the opt-in additive. Neither the opt-in
-nor the side-stream is written yet ([the plan](plan.md)).
+suggestion. `&allow-mutable` opts in, and the binding's store copies into the
+body like any other value, because a mutable store lives in region pages
+([mutable stores](../mutable.md)). The manifest's per-binding kind field makes
+the opt-in additive. Neither the opt-in nor the region-native store is written
+yet ([the plan](plan.md)), and [sending a region](../send.md) holds the policy
+table every configuration reads.

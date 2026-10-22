@@ -1,6 +1,6 @@
 # Fleet: the plan
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-22 -->
 
 What fleet needs from the runtime, the order its milestones land in, and the
 risks still open.
@@ -12,7 +12,8 @@ the pins each milestone lands with. Nothing here is implemented.
 
 Fleet is pure Elle, a `lib/fleet.lisp` over existing modules: `std/redis`,
 `std/process`, `std/sync`, `plugin/hash`, and the image primitives. It asks
-four things of the image work ([the image plan](../image/plan.md)):
+five things of the image work ([the image plan](../image/plan.md),
+[the send plan](../send/plan.md)):
 
 1. **`image/save` with explicit extra roots**, from the environment milestone:
    the session delta, plus the call's function value as a distinguished root,
@@ -31,10 +32,12 @@ four things of the image work ([the image plan](../image/plan.md)):
    own method, or its `:iter`, before their type checks
    ([traits](../../traits.md)). The scattered collection is its first heavy
    consumer.
+5. **`image/encode` and `image/decode`**, from the send plan's bytes
+   milestone: an argument and a result cross as a data image.
 
 ## Landing order
 
-The first two milestones need no image machinery. Their entries are restricted
+The first two milestones need no environment image. Their entries are restricted
 to bindings the worker already has, from a module file both sides load. That is
 a useful durable work queue on its own, and it builds no throwaway code. The
 third milestone makes fleet adhoc.
@@ -44,7 +47,7 @@ flow control, cache-only reads — to a phase that never came. Here each has a
 numbered home.
 
 1. **store**: references, BLAKE3 hashing, the blob store over Redis with the
-   inline tier, `SendValue` encoding at the boundary, and task keys
+   inline tier, data images at the boundary, and task keys
    ([references](store.md)).
 2. **queue**: the task lifecycle over streams and consumer groups: claim, ack,
    heartbeat, reclaim, policy-driven retry with delayed redelivery, and
@@ -79,11 +82,11 @@ numbered home.
    session delta. Measure it on a realistic REPL session. If it taxes hot call
    sites, `fleet:freeze` is the escape hatch and a dirty-tracking cache is the
    fix.
-2. **`SendValue` between machines.** The codec crosses threads today, not
-   builds. A symbol's identity is its name hash, so symbol payloads are stable
-   across builds ([foundations](../image/foundations.md)). Audit the primitive
-   references in argument data before the store milestone trusts the codec on
-   the wire.
+2. **Small arguments.** An image's pages start at a base-page boundary, so a
+   data image of one integer spans at least two base pages, and the 1 KiB
+   inline tier admits none. Measure the dump, the store and the hydration of a
+   small argument before the store milestone. An immediate riding the reference
+   as itself is the candidate answer.
 3. **Blocking foreign calls.** A task pinned in FFI that never yields defeats
    cooperative cancellation. The crash-only fallback, worker suicide and
    reclaim, works but is blunt. Measure how often real workloads hit it before
