@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-21
 //! The default traitsets' method structs, the immutable tables that hold them, and the native methods they name.
 //!
 //! docs/traits.md
