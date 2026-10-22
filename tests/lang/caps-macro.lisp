@@ -1,12 +1,13 @@
 (elle/epoch 15)
-# audited: 2026-10-14
+# audited: 2026-10-21
 # A macro expands without the effect capabilities and what the compiling fiber withholds; a denied primitive fails the compile.
+#
 # docs/signals/capabilities.md
 # docs/macros.md
-
+#
 # Each compile below builds its source as text and reads it at run time. A
 # quoted form would not do: an explicit quote is macro-expanded at the outer
-# compile (#1229), which runs outside every sandbox.
+# compile, which runs outside every sandbox.
 
 (signal :caps-macro/beat)
 
@@ -32,7 +33,7 @@
 
 # Run `body` in a fiber that withholds `deny`, and answer what it returns or
 # signals. A caught error leaves the fiber :paused, as an escaped denial
-# does, so the value tells the two apart: the mask catches the denied bits
+# does, so the value tells the two apart. The mask catches the denied bits
 # too, and a denial that escaped the compile comes back as its payload.
 (defn sandboxed [deny body]
   (fiber/resume (fiber/new body |:caps-macro/beat :fs :error| :deny deny)))
@@ -65,7 +66,7 @@
                # ── What the compiling fiber withholds ──────────────────────────────
 
                # Each compile a fiber starts expands without the bits that fiber withholds.
-               # The counter-factual let the macro emit, and the compile reported a
+               # The counter-factual: the macro would emit, and the compile would report a
                # suspension that named no primitive.
                (def deny-beat |:caps-macro/beat|)
 
@@ -90,7 +91,7 @@
                # ── What every expansion withholds ──────────────────────────────────
 
                # This fiber withholds nothing, and still no macro reads a file. The
-               # counter-factual expanded each macro with every capability and answered
+               # counter-factual would expand each macro with every capability and answer
                # "3311".
                (def read-secret (reader-macro secret))
                (assert-denied (unrestricted (fn []
@@ -115,8 +116,8 @@
                # ── An include ──────────────────────────────────────────────────────
 
                # An include is an input of the compile, so it reads under the fiber's own
-               # capabilities. The counter-factual for the denial spliced the file in and
-               # answered 42.
+               # capabilities. The counter-factual for the denial would splice the file in
+               # and answer 42.
                (def included (path/join root "inc.lisp"))
                (file/write included "42\n")
                (defn load-include []
@@ -131,8 +132,8 @@
                # ── Code a compile produced ─────────────────────────────────────────
 
                # The expansion ends before its unit runs, and the unit runs with the
-               # capabilities of its fiber. The counter-factual left the effect bits
-               # withheld past the expansion, and the read was denied.
+               # capabilities of its fiber. The counter-factual would leave the effect
+               # bits withheld past the expansion, and the read would be denied.
                (def after
                  (string/join ["(begin (defmacro w [] 0) (w) (file/read \""
                                secret "\"))"] ""))
