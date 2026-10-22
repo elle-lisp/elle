@@ -371,14 +371,7 @@ fn reconstruct(
             Ok(table)
         }
         Ctor::StdioPort(stream) => {
-            let region = match *companion {
-                Some(r) => r,
-                None => {
-                    let r = heap.new_runtime_region();
-                    *companion = Some(r);
-                    r
-                }
-            };
+            let region = *companion.get_or_insert_with(|| heap.new_runtime_region());
             Ok(crate::value::build::external(
                 heap,
                 "port",
