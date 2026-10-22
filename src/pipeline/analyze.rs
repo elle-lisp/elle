@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-13
 //! The entry points that analyze one form or a whole file to HIR, for the linter, the LSP and compile/analyze.
 //!
 //! docs/pipeline.md
@@ -8,7 +8,7 @@ use super::CompileCtx;
 use crate::hir::{classify_form, Analyzer, BindingArena};
 use crate::reader::{read_syntax, read_syntax_all};
 use crate::symbol::SymbolTable;
-use crate::syntax::Span;
+use crate::syntax::{Span, UnitTag};
 use crate::vm::VM;
 
 /// Analyze one form to HIR and mark its tail calls. Nothing is regularized
@@ -39,7 +39,8 @@ fn analyze_in_arena(
 ) -> Result<AnalyzeResult, String> {
     let syntax = read_syntax(arena, source, source_name)?;
 
-    let (mut expander, meta) = cctx.expander_and_meta(arena);
+    let unit = UnitTag::of(source_name, std::slice::from_ref(&syntax));
+    let (mut expander, meta) = cctx.expander_and_meta(arena, unit);
 
     let expanded = expander.expand(syntax, symbols, vm)?;
     let mut arena = BindingArena::new();
@@ -94,6 +95,7 @@ fn analyze_file_in_arena(
     source_name: &str,
 ) -> Result<AnalyzeResult, String> {
     let mut syntaxes = read_syntax_all(arena, source, source_name)?;
+    let unit = UnitTag::of(source_name, &syntaxes);
 
     // Strip the epoch and version declarations and migrate old-epoch syntax,
     // as the compile front end does, so the linter and the portrait read the
@@ -105,7 +107,7 @@ fn analyze_file_in_arena(
         crate::epoch::migrate_forms(&arena, &mut syntaxes, epoch)?;
     }
 
-    let (mut expander, meta) = cctx.expander_and_meta(arena);
+    let (mut expander, meta) = cctx.expander_and_meta(arena, unit);
 
     // Expand all forms
     let mut expanded_forms = Vec::new();

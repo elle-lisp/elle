@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-13
 //! The core.lisp bootstrap: compile and run the core module before any compile context exists, and hand its exports to the one being built.
 //!
 //! src/pipeline/AGENTS.md
@@ -90,6 +90,7 @@ pub(super) fn compile_core(
     // Expand with bare expander (no prelude)
     let mut bare_expander = unsafe { Expander::new(heap_ptr) };
     bare_expander.set_arena(syntax_arena);
+    bare_expander.begin_unit(crate::syntax::UnitTag::of("<core>", &syntaxes));
     let expanded_forms: Vec<_> = syntaxes
         .into_iter()
         .map(|s| bare_expander.expand(s, symbols, vm))

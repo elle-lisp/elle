@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-13
 //! Code a compile runs on a VM: a macro transformer call, and the body of a
 //! `begin-for-syntax` definition, each under the expansion budget.
 //!
@@ -6,7 +6,8 @@
 //! docs/runtime.md
 //! docs/impl/region/park.md
 //!
-//! Both run on the fiber the expansion runs on: the macro VM's fresh fiber, or
+//! Each runs with the unit it expands lent to the VM, where `gensym` names its
+//! symbols after it. Both run on the fiber the expansion runs on: the macro VM's fresh fiber, or
 //! the fiber whose `eval` or `compile/analyze` started the compile. The budget
 //! lives on the VM, so every fiber the expansion resumes spends it, and an
 //! expansion nested inside another spends the outer one's. The fiber's own fuel
@@ -16,6 +17,7 @@
 
 use super::core::VM;
 use crate::signals::registry::format_bits;
+use crate::syntax::Unit;
 use crate::value::fiber::Fuel;
 use crate::value::heap::TableKey;
 use crate::value::CodeUnit;
@@ -107,12 +109,14 @@ impl CompileTimeFault {
 
 impl VM {
     /// Call the macro transformer `closure` with `args` under the expansion
-    /// budget. The closure is handed to the body as its executing-closure
-    /// register, so a self-recursive transformer resolves its self-reference.
+    /// budget, for the expansion of `unit`. The closure is handed to the body
+    /// as its executing-closure register, so a self-recursive transformer
+    /// resolves its self-reference.
     pub(crate) fn call_transformer(
         &mut self,
         closure: Value,
         args: &[Value],
+        unit: &mut Unit,
     ) -> Result<Value, CompileTimeFault> {
         let Some(transformer) = closure.as_closure() else {
             return Err(CompileTimeFault::Raised(format!(
@@ -127,35 +131,47 @@ impl VM {
             return Err(self.raised_now());
         };
         let code = transformer.template.code();
-        self.at_expansion(|vm| {
+        self.at_expansion(unit, |vm| {
             vm.pending_entry_closure = closure;
             vm.run_thunk_to_completion(&code, &env)
         })
     }
 
-    /// Run `unit`, compiled from the body of a `begin-for-syntax` definition or
-    /// a transformer's `fn` form, under the expansion budget. The unit is held
-    /// until the run ends, because the entry's `Code` takes no reference of its
-    /// own.
-    pub(crate) fn run_at_expansion(&mut self, unit: &CodeUnit) -> Result<Value, CompileTimeFault> {
-        let unit = unit.on_heap(self.heap());
-        let code = unit.entry().code();
+    /// Run `code`, compiled from the body of a `begin-for-syntax` definition or
+    /// a transformer's `fn` form, under the expansion budget, for the expansion
+    /// of `unit`. The code unit is held until the run ends, because the entry's
+    /// `Code` takes no reference of its own.
+    pub(crate) fn run_at_expansion(
+        &mut self,
+        code: &CodeUnit,
+        unit: &mut Unit,
+    ) -> Result<Value, CompileTimeFault> {
+        let code = code.on_heap(self.heap());
+        let entry = code.entry().code();
         let env = Rc::new(vec![]);
-        self.at_expansion(|vm| vm.run_thunk_to_completion(&code, &env))
+        self.at_expansion(unit, |vm| vm.run_thunk_to_completion(&entry, &env))
     }
 
     /// Run `body` under the expansion budget, with the fiber's own fuel put
     /// aside, then give the fiber its fuel back and read what the body
     /// answered. An expansion nested inside another spends the outer budget.
+    ///
+    /// The body runs with a copy of `unit` lent to the VM, so a `gensym` it
+    /// calls names its symbol after the unit, and `unit` keeps the count the
+    /// body ran up. A nested expansion lends its own unit and restores this one.
     fn at_expansion(
         &mut self,
+        unit: &mut Unit,
         body: impl FnOnce(&mut VM) -> SignalBits,
     ) -> Result<Value, CompileTimeFault> {
         let depth = self.fiber.param_depth();
         let opened = self.expansion_budget.open();
         // A fiber's default fuel is no budget at all.
         let fuel = std::mem::take(&mut self.fiber.fuel);
+        let outer = self.expansion_unit.replace(*unit);
         let bits = body(self);
+        let lent = std::mem::replace(&mut self.expansion_unit, outer);
+        unit.take_back(lent.expect("the unit lent to an expansion comes back"));
         self.fiber.fuel = fuel;
         if opened {
             self.expansion_budget.close();
