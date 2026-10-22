@@ -45,12 +45,12 @@
 # ── A counting loop over the wrappers is the loop over the intrinsics ──
 
 # The counter is a written local no closure captures, so the graft writes it
-# in place of each wrapper's parameter, and once the guards fold the body is
-# the intrinsic one: the two functions disassemble alike.
+# in place of each wrapper's parameter. Once the guards fold, the body is the
+# intrinsic one, and the two functions disassemble alike.
 #
-# The counter-factual: a let per use, which bound the counter to the wrapper's
-# parameter on every iteration and cost a store and a load the intrinsic loop
-# never paid.
+# The counter-factual: a let per use would bind the counter to the wrapper's
+# parameter on every iteration, and cost a store and a load the intrinsic loop
+# never pays.
 (defn count-ops [b]
   (when (%not (%int? b)) (error :b-not-int))
   (var i 0)
