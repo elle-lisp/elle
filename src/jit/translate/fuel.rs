@@ -1,6 +1,7 @@
-// audited: 2026-10-12
+// audited: 2026-10-22
 // docs/impl/jit.md
 // docs/signals/inference.md
+// benches/AGENTS.md
 //! The inline fuel charge, which takes one unit from the fiber's budget at
 //! each charge site and parks the frame when the budget is spent.
 //!
@@ -9,10 +10,14 @@
 //! here and `JitCode.charge_sites` in `elle_jit_fuel_pause`. Code the compiled
 //! function never runs still counts its sites, so the counters stay in step. A
 //! silent function records no site: its charge spends a unit while one is left
-//! and never pauses.
+//! and never pauses. A build with the `ablation` feature lets the fuel bench
+//! choose that charge's shape.
 
 use super::*;
 use crate::value::fiber::Fuel;
+
+#[cfg(feature = "ablation")]
+pub(crate) mod ablation;
 
 impl<'a> FunctionTranslator<'a> {
     /// Whether a jump to `target` from the block being translated runs
@@ -113,19 +118,11 @@ impl<'a> FunctionTranslator<'a> {
         let vm = self
             .vm_ptr
             .ok_or_else(|| JitError::InvalidLir("fuel charge without vm pointer".to_string()))?;
-        // The VM outlives every compiled activation it runs, and the word is a
-        // naturally aligned u64, so the access is trusted.
-        let offset = Fuel::WORD_OFFSET_IN_VM as i32;
-        let flags = MemFlagsData::trusted();
-        let word = builder.ins().load(I64, flags, vm, offset);
-
         if !self.records_sites() {
-            let left = builder.ins().icmp_imm_u(IntCC::NotEqual, word, 0);
-            let taken = builder.ins().uextend(I64, left);
-            let spent = builder.ins().isub(word, taken);
-            builder.ins().store(flags, spent, vm, offset);
-            return Ok(());
+            return self.emit_silent_charge(builder, vm);
         }
+        let (offset, flags) = Self::budget_word();
+        let word = builder.ins().load(I64, flags, vm, offset);
 
         let index = self.next_charge_site()?;
         let (self_tag, self_payload) = self.self_tag_payload.ok_or_else(|| {
@@ -163,5 +160,40 @@ impl<'a> FunctionTranslator<'a> {
         let less_one = builder.ins().iadd_imm_s(word, -1);
         builder.ins().store(flags, less_one, vm, offset);
         Ok(())
+    }
+
+    /// Where compiled code finds the budget word: its offset from the VM
+    /// pointer, and the flags of the access. The VM outlives every compiled
+    /// activation it runs, and the word is a naturally aligned u64, so the
+    /// access is trusted.
+    fn budget_word() -> (i32, MemFlagsData) {
+        (Fuel::WORD_OFFSET_IN_VM as i32, MemFlagsData::trusted())
+    }
+
+    /// The charge in a silent function: the word less one unless it is zero,
+    /// with no branch and nothing that leaves the function.
+    fn emit_saturating_charge(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        vm: cranelift_codegen::ir::Value,
+    ) -> Result<(), JitError> {
+        let (offset, flags) = Self::budget_word();
+        let word = builder.ins().load(I64, flags, vm, offset);
+        let left = builder.ins().icmp_imm_u(IntCC::NotEqual, word, 0);
+        let taken = builder.ins().uextend(I64, left);
+        let spent = builder.ins().isub(word, taken);
+        builder.ins().store(flags, spent, vm, offset);
+        Ok(())
+    }
+
+    /// The charge at a silent site, which is the saturating one in every
+    /// build but the bench's.
+    #[cfg(not(feature = "ablation"))]
+    fn emit_silent_charge(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        vm: cranelift_codegen::ir::Value,
+    ) -> Result<(), JitError> {
+        self.emit_saturating_charge(builder, vm)
     }
 }

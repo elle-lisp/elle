@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-22
 // docs/impl/jit.md
 //! `FunctionTranslator`: the register-to-variable mapping every LIR instruction
 //! and terminator is lowered to Cranelift IR through.
@@ -35,7 +35,7 @@ use super::vtable::RuntimeHelpers;
 use super::JitError;
 use super::TailDeferrals;
 
-mod fuel;
+pub(super) mod fuel;
 mod instr;
 mod region;
 mod spill;
