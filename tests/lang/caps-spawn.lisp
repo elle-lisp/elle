@@ -106,9 +106,6 @@
 (assert (refused? (spawned |:net| (fn [] (protect (tcp/listen "127.0.0.1" 0))))
                   "tcp/listen" :net) "a denied listen is refused")
 
-(assert (refused? (spawned |:ambient| (fn [] (protect (sys/pid)))) "sys/pid"
-                  :ambient) "a denied pid read is refused")
-
 # The gate refuses the call before the loader reads the path, so no library need
 # exist. `import-file` hands a library name to `import/load-plugin`, and the
 # payload names that primitive.

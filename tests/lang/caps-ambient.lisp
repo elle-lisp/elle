@@ -52,6 +52,48 @@
   (assert (= (fiber/resume f) "1-2-3") "a denied fiber computes from its values")
   (assert (= (fiber/status f) :dead) "and finishes"))
 
+# ── A fiber a sandbox spawns keeps the denial ─────────────────────────
+
+(defn refused? [outcome]
+  "Whether a protect outcome is the refusal of sys/pid, denied :ambient."
+  (let [[ok? denial] outcome]
+    (and (not ok?) (= (get denial :error) :capability-denied)
+         (= (get denial :primitive) "sys/pid")
+         (= (get denial :denied) |:ambient|))))
+
+# The scheduler refuses the denial at the spawned fiber's own call site. The
+# counter-factual: an ev/spawn mask that does not name :ambient, so the denial
+# passes the scheduler and fails the file.
+(let [f (fiber/new (fn [] (ev/join (ev/spawn (fn [] (protect (sys/pid))))))
+                   |:error| :deny |:ambient|)]
+  (assert (refused? (fiber/resume f)) "a spawned fiber is refused its pid read"))
+
+# A process system started in the sandbox: its scheduler refuses the denial, so
+# the process fiber's mask must name :ambient. The sandbox catches :ambient, so
+# a denial that passed the process scheduler stops it there.
+(def process ((import "std/process")))
+(let [out @[]
+      sandbox (fiber/new (fn []
+                           (process:start (fn [] (push out (protect (sys/pid))))))
+                         |:error :ambient| :deny |:ambient|)]
+  (fiber/resume sandbox)
+  (assert (= (fiber/status sandbox) :dead)
+          "the sandboxed process system finishes")
+  (assert (refused? (get out 0)) "a process is refused its pid read"))
+
+# ── A macro body may mediate the denial ───────────────────────────────
+
+# A fiber in the body whose mask names :ambient catches the denial, as any
+# parent does, and the body expands to what its own code chose. The pid is
+# never read. The counter-factual: a refusal no mask catches, and the compile
+# failed.
+(defmacro mediated []
+  (let [f (fiber/new (fn [] (sys/pid)) |:ambient|)
+        denial (fiber/resume f)]
+    (string (get denial :primitive) " " (get denial :error))))
+(assert (= (mediated) "sys/pid capability-denied")
+        "a fiber in the body catches the denial")
+
 # ── The bit is in the signal a call infers ────────────────────────────
 
 (defn compiles? [src]
