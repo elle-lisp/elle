@@ -128,7 +128,7 @@ pub(crate) fn def_by_name(name: &str) -> Option<&'static PrimitiveDef> {
 /// Hash→(spelling, def) index over the same tables `def_by_name` walks.
 ///
 /// The built-in vocabulary is fixed at build time, so its spellings need no
-/// instance memo: a compiler pass holding a primitive binding's `SymbolId` can
+/// instance memo. A compiler pass holding a primitive binding's `SymbolId` can
 /// recover the name it was written with, wherever it runs and with no table in
 /// scope. That is what keeps type inference, narrowing and fusion off the
 /// display path (docs/impl/symbol.md).
@@ -167,10 +167,10 @@ pub(crate) fn def_by_symbol(id: crate::value::SymbolId) -> Option<&'static Primi
 ///
 /// A native-fn immediate's whole payload is its `prim_id`, which is the def's
 /// index in the canonical `ALL_TABLES`+`ffi_tables` enumeration. That id is
-/// only meaningful against the exact table that minted it, so consumers that
+/// only meaningful against the exact table that minted it. So consumers that
 /// persist native-fn values (the stdlib disk cache) must mix this identity
-/// into their key: any addition, removal, rename, or reorder of a canonical
-/// primitive changes the hash and invalidates the persisted payload.
+/// into their key. Any addition, removal, rename, or reorder of a canonical
+/// primitive changes the hash, and invalidates the persisted payload.
 pub(crate) fn hash_prim_table_identity<H: std::hash::Hasher>(hasher: &mut H) {
     for def in canonical_defs() {
         hash_def_identity(def, hasher);
