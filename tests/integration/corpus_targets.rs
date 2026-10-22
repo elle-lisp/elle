@@ -1,4 +1,4 @@
-// audited: 2026-10-15
+// audited: 2026-10-21
 // The suite targets run the binary through the runner alone, `make qa` runs what the QA job runs, and runs first.
 //
 // docs/testing.md
@@ -33,7 +33,7 @@ fn every_suite_target_runs_the_binary_through_the_runner_alone() {
         .into_iter()
         .map(make_expand)
         .collect();
-    let rigs: Vec<String> = ["ELLE_RIG", "ELLE_RIG_WASM", "ELLE_RIG_MLIR"]
+    let rigs: Vec<String> = ["ELLE_RIG", "ELLE_RIG_WASM", "ELLE_RIG_MLIR", "RELEASE_RIG"]
         .into_iter()
         .map(make_expand)
         .collect();
@@ -55,6 +55,7 @@ fn every_suite_target_runs_the_binary_through_the_runner_alone() {
         ("smoke-wasm", "ELLE_WASM"),
         ("smoke-wasm-impl", "ELLE_WASM"),
         ("smoke-wasm-full", "ELLE_WASM"),
+        ("tree-producers", "RELEASE_RIG"),
     ];
     // The boot-image gate runs `elle` itself before its pass, to prove the
     // image hydrates; boot_image_gate.rs checks that step.
@@ -123,8 +124,7 @@ fn assert_qa_before_the_suites(target: &str) {
     );
 }
 
-// `qa` takes about two minutes and the suites about thirty. The
-// counter-factual: `test` lists `smoke` first, so a formatting or clippy
+// The counter-factual: `test` lists `smoke` first, so a formatting or clippy
 // failure surfaces half an hour into the run, after suites it has nothing to
 // do with.
 #[test]

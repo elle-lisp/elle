@@ -54,12 +54,14 @@ jobs:
   # a Markdown-only change can break what the prose checks read
   # (docs/analysis/ci.md).
   qa:
-    name: QA (prose, fmt, clippy, doc)
+    name: QA (prose, fmt, ledgers, clippy, doc)
     runs-on: ubuntu-latest
     env:
       MLIR_SYS_220_PREFIX: /usr/lib/llvm-22
       TABLEGEN_220_PREFIX: /usr/lib/llvm-22
       LIBCLANG_PATH: /usr/lib/llvm-22/lib
+      # `make tree-producers` records its run here (docs/analysis/ci.md).
+      ELLE_STATE: ${{ github.workspace }}/target/elle-state
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -67,16 +69,10 @@ jobs:
           components: rustfmt,clippy
           targets: x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
-      # Before LLVM: the prose checks need none of it, and they are the step a
-      # change fails most often.
+      # Before LLVM and before any build: the prose checks, the format and the
+      # indexes need neither, and they are the steps a change fails most often.
       - name: Check the prose
         run: make prose
-      - name: Install LLVM 22 (for mlir feature)
-        run: |
-          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
-          echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main" | sudo tee /etc/apt/sources.list.d/llvm.list
-          sudo apt-get update
-          sudo apt-get install -y llvm-22-dev libpolly-22-dev mlir-22-tools libmlir-22-dev libclang-22-dev clang-22
       - name: Check formatting
         run: cargo fmt -- --check
       # The generated AGENTS.md indexes are committed, so a worktree starts
@@ -84,6 +80,21 @@ jobs:
       # hard gate, because CI cannot rewrite the tree.
       - name: Check generated indexes
         run: make agents-check
+      # The runner's store reaches SQLite and zstd through FFI.
+      - name: Install SQLite and zstd
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-dev libzstd-dev
+      # The audit and size producers read the tree, not the build, so a stale
+      # row fails here rather than in a suite job (docs/analysis/ci.md).
+      - name: Judge the tree's ledgers
+        run: make tree-producers
+      - name: Install LLVM 22 (for mlir feature)
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update
+          sudo apt-get install -y llvm-22-dev libpolly-22-dev mlir-22-tools libmlir-22-dev libclang-22-dev clang-22
       - name: Run clippy on workspace
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       # The clippy step above only ever sees the Linux arm of every
@@ -109,6 +120,15 @@ jobs:
       # exclude doctests.
       - name: Compile documentation examples
         run: cargo test --workspace --doc
+      - name: Upload the session store
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-qa
+          path: |
+            target/elle-state/elle-tests.db
+            target/elle-state/cas
+          retention-days: 14
 
   # The documentation site is generated from docs/*.md plus the Elle sources
   # under src/, so it breaks on a renamed heading or a moved source file as
@@ -137,8 +157,9 @@ jobs:
       - name: Generate Elle documentation site
         run: ./target/release/elle demos/docgen/generate.lisp
 
-  # The default build and its rig: the language suite as a user runs it, then
-  # each pass of the rig, one step each (docs/analysis/ci.md).
+  # The default build and its rig: the producer pass first, then the language
+  # suite as a user runs it, then each other pass of the rig, one step each
+  # (docs/analysis/ci.md).
   default:
     name: Default Build Tests
     needs: [changes, qa]
@@ -165,6 +186,8 @@ jobs:
         run: make elle
       - name: make elle-rig
         run: make elle-rig
+      - name: make smoke-producers
+        run: make smoke-producers
       - name: make doctest
         run: make doctest
       - name: make smoke-lang
@@ -173,8 +196,6 @@ jobs:
         run: make smoke-impl
       - name: make smoke-eager
         run: make smoke-eager
-      - name: make smoke-producers
-        run: make smoke-producers
       - name: make smoke-charge
         run: make smoke-charge
       - name: Upload the session store
@@ -297,12 +318,12 @@ jobs:
           sudo systemctl start redis-server
       - name: make elle-pool
         run: make elle-pool
+      - name: make smoke-pool-producers
+        run: make smoke-pool-producers
       - name: make smoke-pool
         run: make smoke-pool
       - name: make smoke-pool-impl
         run: make smoke-pool-impl
-      - name: make smoke-pool-producers
-        run: make smoke-pool-producers
       - name: Upload the session store
         if: always()
         uses: actions/upload-artifact@v4
@@ -363,14 +384,14 @@ jobs:
           sudo apt-get install -y llvm-22-dev libpolly-22-dev mlir-22-tools libmlir-22-dev libclang-22-dev clang-22 parallel
       - name: make elle-mlir
         run: make elle-mlir
+      - name: make smoke-mlir-producers
+        run: make smoke-mlir-producers
       - name: make doctest
         run: make doctest ELLE=./target/release/elle-mlir
       - name: make smoke-mlir
         run: make smoke-mlir
       - name: make smoke-mlir-impl
         run: make smoke-mlir-impl
-      - name: make smoke-mlir-producers
-        run: make smoke-mlir-producers
       - name: Upload the session store
         if: always()
         uses: actions/upload-artifact@v4
@@ -492,6 +513,8 @@ jobs:
           sudo apt-get install -y parallel
       - name: make elle
         run: make elle
+      - name: make smoke-producers
+        run: make smoke-producers
       - name: make doctest
         run: make doctest
       - name: make smoke-lang
@@ -500,8 +523,6 @@ jobs:
         run: make smoke-impl
       - name: make smoke-eager
         run: make smoke-eager
-      - name: make smoke-producers
-        run: make smoke-producers
       - name: make smoke-charge
         run: make smoke-charge
       - name: make embedding
@@ -650,6 +671,8 @@ jobs:
         run: cargo clippy -p elle -- -D warnings
       - name: make elle
         run: make elle
+      - name: make smoke-producers
+        run: make smoke-producers
       - name: make doctest
         run: make doctest
       - name: make smoke-lang
@@ -658,8 +681,6 @@ jobs:
         run: make smoke-impl
       - name: make smoke-eager
         run: make smoke-eager
-      - name: make smoke-producers
-        run: make smoke-producers
       - name: make smoke-charge
         run: make smoke-charge
       - name: make embedding

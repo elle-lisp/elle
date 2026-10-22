@@ -16,14 +16,14 @@ set when the diff moves only the submodule pointer.
 | Job | Runner | What | Proptest cases |
 |-----|--------|------|----------------|
 | Detect Changes | ubuntu | Sets `source` from the changed paths | — |
-| QA | ubuntu | The prose checks, then `cargo fmt`, clippy, the macOS cross-check, rustdoc | — |
+| QA | ubuntu | The prose checks, `cargo fmt`, the indexes, the tree's ledgers, then clippy, the macOS cross-check, rustdoc, the Rust doctests | — |
 | Documentation Build | ubuntu | `make docs` and the Elle doc site, minus the publish | — |
-| Default Build Tests | ubuntu | `doctest`, then each suite pass of the default build and its rig, one step each | — |
+| Default Build Tests | ubuntu | The producer pass, `doctest`, then each other suite pass of the default build and its rig, one step each | — |
 | No-JIT Build Tests | ubuntu | `smoke-nojit` — the language suite on the interpreter alone | — |
 | Boot Image Tests | ubuntu | `smoke-boot-image` — bytecode parity between the two boots, then the language suite booted from an image | — |
 | Rust Tests | ubuntu | Integration tests, the rig's tests, then property tests, under the `ci` profile | 16 |
-| Thread-Pool I/O Tests | ubuntu | `smoke-pool`, `smoke-pool-impl`, `smoke-pool-producers` — both suites on a build without `uring` and its rig | — |
-| MLIR Tests | ubuntu | `doctest`, `smoke-mlir`, `smoke-mlir-impl`, `smoke-mlir-producers` — the language suite on the MLIR build, the implementation suite on its rig | — |
+| Thread-Pool I/O Tests | ubuntu | `smoke-pool-producers`, `smoke-pool`, `smoke-pool-impl` — both suites on a build without `uring` and its rig | — |
+| MLIR Tests | ubuntu | `smoke-mlir-producers`, `doctest`, `smoke-mlir`, `smoke-mlir-impl` — the language suite on the MLIR build, the implementation suite on its rig | — |
 | WASM Build | ubuntu | `check-wasm` — the feature compiles, the tier boots | — |
 | Plugin Tests | ubuntu | Builds the `plugins/` submodule, asserts its artifacts, runs its corpus | — |
 | AArch64 Smoke | ubuntu-arm | Each pass of `make smoke`, one step each | — |
@@ -54,6 +54,15 @@ machine can decide, so an over-long call-out fails in minutes rather than
 inside the Rust Tests jobs. The checks have a binary of their own, so QA does
 not wait for the shared test binary to compile. `make prose` runs them, and
 `make qa` runs `make prose` before anything else.
+
+Two producers read the tree and not the build:
+[audit.lisp](../../tests/ratchet/audit.lisp) counts the audit queue, and
+[size.lisp](../../tests/ratchet/size.lisp) prices each file over its cap. A
+change to any document can move either reading, and a build cannot. So QA
+builds the release rig and runs `make tree-producers`, which judges both
+against their ledgers before any suite starts, and no build's producer pass
+runs them again. That step records a run, so QA uploads its store (§ A corpus
+job's results leave the runner).
 
 QA runs on every pull request, with no `source` gate. A Markdown-only change
 can break a call-out or a link, and those are what the prose checks read.
@@ -114,19 +123,21 @@ target as a step of its own. So a step's time is one pass's time, a red step
 names the pass that failed, and a pass's log starts where its step starts.
 
 A pass deals its files into batches and runs them side by side, and each batch
-prints its own summary. When one target ran four passes, one step held every
-batch summary of all four. The step's time was their sum, and the boundary
-between two passes was one `===` line among hundreds. So each pass is a target
-of its own, and [the rig](../../rig/overview.md) names the ones that run on a
-rig.
+prints its own summary. Each pass is a target of its own, and
+[the rig](../../rig/overview.md) names the ones that run on a rig.
 
 What each batch prints is [testing](../testing.md)'s, and what it records
 leaves in the store the job uploads (§ A corpus job's results leave the
 runner).
 
-[ci_steps.rs](../../tests/integration/ci_steps.rs) is the standing check
-that no step runs a target of more than one pass, and
-[suites.rs](../../tests/integration/suites.rs) that every suite target runs
+A job runs its build's producer pass right after the build, before `doctest`
+and every other pass. The pass is short, and a stale ledger row fails it as
+surely as a broken file fails a suite. `SMOKE_PASSES` names it first, so
+`make smoke` and the merge queue keep that order.
+
+[ci_steps.rs](../../tests/integration/ci_steps.rs) is the standing check that
+no step runs a target of more than one pass and that the producer pass leads,
+and [suites.rs](../../tests/integration/suites.rs) that every suite target runs
 exactly one.
 
 Each job caches under its own key — set explicitly with
@@ -204,9 +215,7 @@ an SDK or an NDK — only the target's std.
 
 `make crosscheck` runs both, and that is what the target is for. A `cfg` arm no
 local command compiles has a runner for its first reader, and the report
-arrives after the push rather than before it. The Android job has run since
-#752, and the local target arrived later covering macOS alone — so an
-Android-only break compiled everywhere a developer could look.
+arrives after the push rather than before it.
 
 [crosscheck.rs](../../tests/integration/crosscheck.rs) is the standing check
 that every target a job cross-compiles is a target `make crosscheck` compiles
@@ -220,9 +229,7 @@ _NPROCESSORS_ONLN` where `nproc` is absent, which is every macOS runner. It does
 not write a number down.
 
 GitHub does not give every runner the same machine, and it re-sizes them
-without notice. Today the Linux x86_64 and AArch64 runners report four
-processors and the macOS runner reports three. A constant chosen for one runner
-over-subscribes the other.
+without notice. A constant chosen for one runner over-subscribes another.
 
 Over-subscription does not fail the corpus, it stretches it. Every file still
 passes its assertions, and the ones nearest the per-file budget get killed on
@@ -248,16 +255,10 @@ language pass runs its files inside the runner process, so there a batch bounds
 the heap one runner holds. An implementation pass runs each file as its own
 child, so there a batch bounds only how many files one runner records.
 
-The default is 25 files. `macOS Smoke` and `AArch64 Smoke` use 10. That choice
-was measured when a batch ran all its files inside the runner process. A
-25-file batch stalled on macOS, where
-[region-eval-return-leak](../../tests/impl/region-eval-return-leak.lisp) hit
-its deadline with `join: deadline exceeded`. The same run passed on Linux and
-AArch64. The smaller batch shortened the macOS job's wall clock a great
-deal. Measure again before you change it.
-
-AArch64 Smoke takes the same batch to shorten its wall clock too. It never
-stalled, and no measurement shows the effect there.
+The default is 25 files. `macOS Smoke` and `AArch64 Smoke` use 10, because a
+25-file batch stalled on macOS when a batch ran all its files inside the runner
+process. AArch64 never stalled, and takes the smaller batch to shorten its wall
+clock. Measure again before you change either.
 
 The working theory for the macOS stall is page size. Pages on the macOS runner
 (arm64) are 16 KiB, and pages on the x86_64 Linux runner are 4 KiB. Nobody has
@@ -273,11 +274,9 @@ The Makefile reads the platform from `HOST_OS` and `HOST_ARCH`, which default to
 The `plugins/` submodule is a separate cargo workspace. Every plugin in it
 takes `elle-plugin` by path, so a rebuild moves the plugin and the SDK
 together: a changed `elle_api!` declaration either compiles at every call site
-or does not. #997 changed six declarations and stopped 17 plugins from
-compiling, at about 90 call sites, and nothing went red. No job checked the
-submodule out.
+or does not, and a job that never checks the submodule out sees neither.
 
-The ABI version guard does not close that hole. It compares `ABI_VERSION` when
+The ABI version guard does not close that gap. It compares `ABI_VERSION` when
 a plugin loads, so it catches a stale `.so` built against an older SDK. A
 source break never reaches a load. Only a job that compiles the submodule sees
 one.
@@ -318,8 +317,7 @@ RocksDB and needs libclang. `elle-plotters` reaches `font-kit`, which needs
 fontconfig through pkg-config and pulls the freetype, expat and png headers
 behind it.
 
-A manifest scan finds none of that, which is how the job's first run failed on
-a fontconfig nobody had declared. Two other readings do find it, and they
+A manifest scan finds none of that. Two other readings do find it, and they
 answer different questions.
 
 For what the plugins **link**, read the built artifacts. After a local `make
@@ -331,9 +329,9 @@ nothing under any other portable plugin.
 
 For what the plugins **build with**, `ldd` says nothing: a build-time tool
 leaves no trace in the artifact. `oxrocksdb-sys` runs bindgen, which dlopens
-libclang at build time and links none of it — the job's second run failed
-there, one layer past the first. That class shows up only in a build on a bare
-runner, so read it out of the failure and set the variable the tool asks for.
+libclang at build time and links none of it. That class shows up only in a
+build on a bare runner, so read it out of the failure and set the variable the
+tool asks for.
 The job locates `libclang.so` rather than naming an LLVM version, because the
 version moves with the runner image.
 
@@ -342,8 +340,7 @@ version moves with the runner image.
 Each `plugins/tests/*.lisp` imports its `.so` under `protect` and exits 0 when
 the import fails. That is deliberate, because the file has to run on a tree
 where the submodule was never built. It also means a plugin that did not build
-makes its own test report success: run from a directory where the paths did not
-resolve, 13 of 19 files reported `ok` having executed nothing.
+makes its own test report success.
 
 `make plugins-verify` asserts the build output separately. Every package in
 `plugins/Makefile`'s `PORTABLE` list must have produced its cdylib under
@@ -461,7 +458,7 @@ make test
 | **Property tests fail** | `Rust Tests` fails with a shrunk counterexample | The shrunk output shows the *minimal* failing input. | Reproduce with the exact shrunk values as a unit test. Check the files under `tests/proptest-regressions/`. |
 | **Integration tests fail** | `Rust Tests` fails | Tests use `eval_source()` which runs the full pipeline. | Read the assertion. Check whether the test expects `.unwrap()` (success) or `.is_err()` (error). |
 | **Prose** | `QA` fails on `make prose` | A stamped file breaks a rule a machine can check: a call-out over 140 characters, a broken link, a bare filename, or banned wording. | Run `make prose` and repair the file the message names ([DOCUMENTATION.md](../../DOCUMENTATION.md)). |
-| **File size** | `Default Build Tests` fails `smoke-producers` on a row of [size.lisp](../../tests/ratchet/size.lisp) | A source or a document grew past its bucket, a file new to the ledger raised the excess, or a file shrank and left its row stale or missing. | Shed the growth or split the file ([DOCUMENTATION.md](../../DOCUMENTATION.md)). Re-pin a stale row with `elle-rig test --repin tests/ratchet/size.lisp`, and delete a missing one. |
+| **The tree's ledgers** | `QA` fails `make tree-producers` on a row of [size.lisp](../../tests/ratchet/size.lisp) or [audit.lisp](../../tests/ratchet/audit.lisp) | A file grew past its bucket or shrank under it, a file new to the size ledger raised the excess, or a stamp moved an audit count. | Shed the growth or split the file ([DOCUMENTATION.md](../../DOCUMENTATION.md)). Re-pin a stale row with `elle-rig test --repin` and the producer's path, and delete a missing one. |
 | **Clippy** | `QA` fails on the clippy step | Any Rust warning. CI runs with `-D warnings`. | Run `cargo clippy --workspace --all-targets -- -D warnings` locally. |
 | **Formatting** | `QA` fails on `cargo fmt --check` | Unformatted Rust code. | Run `cargo fmt`. |
 | **Rustdoc** | `QA` fails on the `cargo doc` step | Broken intra-doc links or malformed doc comments. CI documents private items, so a link into a `pub(crate)` item counts. A `#[cfg(test)]` item is absent from a doc build — gate it `#[cfg(any(test, doc))]` if the docs link to it. | Run `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items` locally. |

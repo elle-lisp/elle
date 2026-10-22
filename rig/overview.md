@@ -1,6 +1,6 @@
 # The rig
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-21 -->
 
 `elle-rig` hosts the same compiler and runtime as `elle`, and configures them
 in ways a user build cannot.
@@ -150,7 +150,8 @@ is `(elle/executable)`: this rig, run as `elle-rig FLAGS PATH`
 store, and the run has the rig's build. The `Makefile` target `smoke-impl`
 runs the implementation suite that way, and `smoke-eager` and `smoke-scrub`
 run under their profiles. `smoke-producers` and `smoke-charge` run their files
-in-process under `elle-rig test`. The thread-pool and MLIR builds repeat
+in-process under `elle-rig test`, and so does `tree-producers`, on the release
+rig whatever `ELLE_RIG` names. The thread-pool and MLIR builds repeat
 `smoke-impl` and `smoke-producers` on the rig of their own build, as
 `smoke-pool-impl`, `smoke-pool-producers`, `smoke-mlir-impl` and
 `smoke-mlir-producers`. `smoke-wasm-impl` runs it

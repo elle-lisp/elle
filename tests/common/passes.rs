@@ -1,4 +1,4 @@
-// audited: 2026-10-15
+// audited: 2026-10-21
 //! The `elle test` passes a suite target runs, read off `make --dry-run`.
 //!
 //! docs/testing.md
@@ -134,6 +134,21 @@ pub fn producer_files() -> BTreeSet<String> {
     out
 }
 
+/// The producers that read the tree and not the build, which `make qa` judges
+/// once on the release rig (docs/analysis/ci.md).
+#[allow(dead_code)]
+pub const TREE_PRODUCERS: [&str; 2] = ["tests/ratchet/audit.lisp", "tests/ratchet/size.lisp"];
+
+/// The producers a build's producer pass runs: every producer but the tree's.
+#[allow(dead_code)]
+pub fn build_producer_files() -> BTreeSet<String> {
+    let mut out = producer_files();
+    for tree in TREE_PRODUCERS {
+        assert!(out.remove(tree), "no ledger names the tree producer {tree}");
+    }
+    out
+}
+
 /// The file whose claim needs a process of its own: it asserts that a program
 /// cannot change the JIT policy, which the in-process runner sets.
 #[allow(dead_code)]
@@ -166,12 +181,14 @@ pub fn isolated_impl_files() -> BTreeSet<String> {
         .collect()
 }
 
-/// Assert that `target` runs every producer in-process on the rig `rig`, in a
-/// pass of their own, and none of them in an isolated pass (docs/test-runner.md).
+/// Assert that `target` runs the build's producers in-process on the rig
+/// `rig`, in a pass of their own, and no producer in an isolated pass
+/// (docs/test-runner.md).
 #[allow(dead_code)]
 pub fn assert_producer_pass(target: &str, passes: &[Pass], rig: &str) {
     let producers = producer_files();
-    let own: Vec<&Pass> = passes.iter().filter(|p| p.files == producers).collect();
+    let build = build_producer_files();
+    let own: Vec<&Pass> = passes.iter().filter(|p| p.files == build).collect();
     assert_eq!(
         own.len(),
         1,

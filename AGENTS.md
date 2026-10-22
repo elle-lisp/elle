@@ -1,6 +1,6 @@
 # Elle
 
-<!-- audited: 2026-10-19 -->
+<!-- audited: 2026-10-21 -->
 
 Elle is a Lisp. Source text becomes bytecode; bytecode runs on a VM.
 
@@ -199,8 +199,8 @@ It takes ~30 minutes.
 | Command | Runtime | What it does |
 |---------|---------|-------------|
 | `cargo test -p elle --lib` | ~1.5min | Rust unit tests — the fast inner loop |
-| `make smoke` | ~30min release | qa, then the language suite, the implementation suite on the rig, doctests, embedding, the semver surface gate |
-| `make qa` | ~2min | The PR gate's QA job, locally: rustfmt, the generated indexes, workspace clippy, the cross-checks, rustdoc. `make smoke` runs it first |
+| `make smoke` | ~30min release | qa, then the suite passes and checks [testing](docs/testing.md) lists |
+| `make qa` | [testing](docs/testing.md) | The PR gate's QA job, locally. `make smoke` runs it first |
 | `make test` | smoke + ~5min | smoke, then unit and integration tests |
 | `make crosscheck` | ~2min | Clippy over the macOS arms and `cargo check` over the Android arms of `cfg(target_os)` — needs `rustup target add x86_64-apple-darwin aarch64-linux-android` |
 | `cargo test --workspace` | ~30min | full suite — **ask first** |
@@ -219,7 +219,7 @@ Redirect to a file, or use `elle test --summary`.
 
 A test is a language test or an implementation test, and the two live in
 different places: [`docs/spec.md`](docs/spec.md) says which is which.
-For test organization, helpers, and how to add tests:
+For the two suites and how to add a test:
 [`docs/testing.md`](docs/testing.md).
 For CI structure and failure triage:
 [CI and triage](docs/analysis/ci.md).

@@ -1,6 +1,6 @@
 # Testing
 
-<!-- audited: 2026-10-15 -->
+<!-- audited: 2026-10-21 -->
 
 The two test suites, what each one claims, the builds that run them, and how a
 run is read.
@@ -31,9 +31,11 @@ specification is [docs/test-runner.md](test-runner.md), with
 | `make smoke-lang` | The language suite |
 | `make smoke-impl` | The implementation suite on the rig |
 | `make smoke-eager` | Both suites on the rig, every function compiled on its first call |
-| `make smoke-producers` | The files a ledger names, in-process on the rig |
+| `make smoke-producers` | The files a ledger names, less the two `make tree-producers` runs, in-process on the rig |
 | `make smoke-charge` | Each file's charge on the runner's heap |
-| `make smoke` | `make qa`, then the five passes above, the doctests, the embedding demo, and the surface gate |
+| `make tree-producers` | The audit and size ledgers on the release rig; `make qa` runs it |
+| `make qa` | The `QA` job ([ci](analysis/ci.md)) and the Android cross-check: about two minutes, and two more when the release rig needs a build |
+| `make smoke` | `make qa`, then the five `smoke-` passes above, the doctests, the embedding demo, and the surface gate |
 | `make test` | `make smoke`, then the Rust unit and integration tests |
 | `elle test tests/lang/*.lisp` | Run those files in-process; print a summary; gate on exit code |
 | `elle-rig tests/impl/NAME.lisp` | Run one implementation test with its sidecar |

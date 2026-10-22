@@ -1,4 +1,4 @@
-// audited: 2026-10-15
+// audited: 2026-10-21
 // The default build's suite targets: which files each pass runs, on which
 // program, under which flags, and that each target is one pass.
 //
@@ -12,8 +12,8 @@
 // verdict per file, and still gates green, so the recipe is checked here.
 
 use crate::common::{
-    assert_plain_language_pass, assert_producer_pass, assert_rig_runs, charge_files,
-    isolated_impl_files, lang_files, make_expand, makefile_rules, passes, producer_files,
+    assert_plain_language_pass, assert_producer_pass, assert_rig_runs, build_producer_files,
+    charge_files, isolated_impl_files, lang_files, make_expand, makefile_rules, passes,
     suite_targets, the_pass, Pass, CHARGE_SKIP,
 };
 use std::collections::BTreeSet;
@@ -107,7 +107,8 @@ fn smoke_eager_runs_both_suites_under_the_eager_profile() {
 }
 
 // The producers run in-process on the rig, in a pass of their own, so each
-// reading comes from both JIT policies (docs/test-runner.md).
+// reading comes from both JIT policies (docs/test-runner.md). The two that read
+// the tree run in `make qa` instead (docs/analysis/ci.md).
 //
 // The counter-factual: an isolated producer runs once, under whatever its
 // child's policy is, so a reading that moves under the eager JIT is read only
@@ -119,8 +120,8 @@ fn smoke_producers_runs_the_producers_in_process_in_a_pass_of_their_own() {
     assert_producer_pass("the default build's rig targets", &all, "ELLE_RIG");
     assert_eq!(
         the_pass("smoke-producers").files,
-        producer_files(),
-        "`make smoke-producers` is the producers' pass"
+        build_producer_files(),
+        "`make smoke-producers` runs every producer but the tree's"
     );
 }
 

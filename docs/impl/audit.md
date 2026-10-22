@@ -1,6 +1,6 @@
 # The audit queue
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-21 -->
 
 Every file carries the day it last met the documentation policy, and the queue
 names what to read next by what a stale file costs.
@@ -193,8 +193,8 @@ a macOS runner. So the eligibility test and the stamp read use shell builtins
 alone.
 
 A pin is two-sided. A commit that stamps a file in the first two counts, or
-repairs a deviation, lowers that count, and the producer pass then fails on a
-`stale` pin. Re-pin it in the same
+repairs a deviation, lowers that count, and `make qa` then fails on a `stale`
+pin ([CI](../analysis/ci.md)). Re-pin it in the same
 pull request with `elle-rig test --repin tests/ratchet/audit.lisp`, so the
 ledger's diff shows how far the change moved the queue.
 

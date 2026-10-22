@@ -54,14 +54,14 @@ jobs:
       # passes are `SMOKE_PASSES`, in order, after `make qa`.
       - name: QA
         run: make qa
+      - name: Producers (rig)
+        run: make smoke-producers
       - name: Language suite
         run: make smoke-lang
       - name: Implementation suite (rig)
         run: make smoke-impl
       - name: Both suites, eager JIT (rig)
         run: make smoke-eager
-      - name: Producers (rig)
-        run: make smoke-producers
       - name: Charge per file (rig)
         run: make smoke-charge
       - name: Doctests
