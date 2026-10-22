@@ -29,7 +29,8 @@ pub(super) fn narrow_signals(
 ) {
     // Try to narrow this node
     if let HirKind::Call { func, args, .. } = &hir.kind {
-        let callee_binding = super::typeinfer::unwrap_callee_binding(func);
+        let callee_binding =
+            super::typeinfer::unwrap_callee_binding(func).filter(|b| arena.get(*b).is_primitive);
         if let Some(callee_binding) = callee_binding {
             let callee_sym = arena.get(callee_binding).name;
             let arg_tys: Vec<TyId> = args
@@ -41,14 +42,7 @@ pub(super) fn narrow_signals(
                         .unwrap_or(TypeInterner::TOP)
                 })
                 .collect();
-            if should_narrow_error(
-                callee_sym,
-                &arg_tys,
-                args,
-                interner,
-                arena,
-                binding_min_length,
-            ) {
+            if should_narrow_error(callee_sym, &arg_tys, args, interner, binding_min_length) {
                 hir.signal.bits = hir.signal.bits.subtract(crate::signals::SIG_ERROR);
             }
         }
@@ -66,7 +60,6 @@ fn should_narrow_error(
     arg_tys: &[TyId],
     args: &[CallArg],
     interner: &TypeInterner,
-    _arena: &BindingArena,
     binding_min_length: &rustc_hash::FxHashMap<Binding, usize>,
 ) -> bool {
     // Const patterns over the name's hash rather than a resolved spelling:
