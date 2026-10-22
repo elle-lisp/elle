@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-22
 // Registers every integration test file, which is what makes one run.
 //
 // tests/AGENTS.md
@@ -309,6 +309,9 @@ mod ratchet {
 }
 mod ledgers {
     include!("ledgers.rs");
+}
+mod benches {
+    include!("benches.rs");
 }
 
 // `allocator.rs` is absent from the list above and does not compile. It calls
