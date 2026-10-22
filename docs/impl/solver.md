@@ -1,6 +1,6 @@
 # The signal solver
 
-<!-- audited: 2026-10-13 -->
+<!-- audited: 2026-10-21 -->
 
 Signal inference across files: facts per file, a link through literal imports, and the least model of a few Datalog rules.
 
@@ -59,8 +59,8 @@ HIR and states facts about it. A file's analysis never compiles its imports
 
 - What a lambda raises by itself comes from the analyzer (`LambdaDecl`): its
   emits, a `match` with no total arm, a bound's entry check, and every
-  construct that [inference.md](../signals/inference.md) lists under "What
-  raises". The code outside every lambda takes the same bits from
+  construct that [inference.md](../signals/inference.md) lists as one that
+  raises. The code outside every lambda takes the same bits from
   `AnalyzeResult`. The solver states none of these rules again, so it cannot
   drift from the analyzer on them.
 - A primitive's bits and propagated parameters come from the compile
@@ -193,9 +193,9 @@ answers in `# expect` lines, which `--expect` checks:
 `import KEY` an open export, and `instantiate` an open module instance. The
 bits, parameters and free variables must match exactly.
 
-A `# violates NAME |BITS| [prop I] [field I KEY] [import KEY] [instantiate]`
-line states the bits the body of `NAME` raises past its ceiling, and the free
-variables it depends on, in the words of `# expect`. Under `--expect`, every
+A `# violates` line has the shape of an `# expect` line. It states the bits
+the body of `NAME` raises past its ceiling, and the free variables it depends
+on. Under `--expect`, every
 violation the model finds in a fixture must be stated, and every stated one
 found. A fixture holds no violation unless the solver is looser than the
 analyzer, so the fixtures state none. A unit test of the rules builds a model
@@ -233,8 +233,8 @@ names the exports it calls, and a literal argument to an open export adds
 
 `make signal-solve` builds the spike, runs its unit tests, runs every fixture
 with `--expect`, and runs it over all of `lib/`. It fails when a unit test or
-an expectation fails, or when the two engines disagree. `make test` runs it, and so does the `Default Build Tests`
-job ([ci.md](../analysis/ci.md)).
+an expectation fails, or when the two engines disagree. `make test` runs it,
+and so does the `Default Build Tests` job ([ci.md](../analysis/ci.md)).
 
 A fixture names each import by a literal `import-file` path, which resolves
 against the fixture's own directory, so a fixture runs from any directory:
