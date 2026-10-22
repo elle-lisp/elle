@@ -1,6 +1,7 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 // The post-boot heap census: the regression net for the image design's
 // sealing claims.
+//
 // docs/impl/image/sealing.md
 // docs/impl/image/measurements.md
 //
@@ -34,8 +35,8 @@ fn source_boot() -> Runtime {
 // obstacle and must be recorded in the design before this expectation moves.
 // The counter-factual this guards: a stdlib change that defines a mutable
 // top-level (an @struct cache, a box) would boot fine and pass every
-// behavioral test, yet silently make the future boot image undumpable — this
-// assertion is what fails instead.
+// behavioral test. Yet it would silently make the boot image undumpable, and
+// this assertion is what fails instead.
 #[test]
 fn boot_heap_unsealed_leaves_are_exactly_the_reconstructible_set() {
     let mut rt = source_boot();
@@ -84,8 +85,8 @@ fn boot_census_reports_the_expected_shape() {
         census.regions
     );
     // The trap this loop already caught once: the boot residue is function
-    // definitions, not data — no `Pair` (or string, or array) survives to
-    // the post-boot heap, so only the code-object tags may be asserted here.
+    // definitions, not data. No `Pair` (or string, or array) survives to the
+    // post-boot heap, so only the code-object tags may be asserted here.
     for tag in [
         HeapTag::Closure,
         HeapTag::ClosureTemplate,
