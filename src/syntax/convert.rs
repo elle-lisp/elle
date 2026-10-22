@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-21
 //! Conversion between Syntax and Value: runtime quote, and macro results read back as syntax.
 //!
 //! docs/impl/syntax.md
@@ -26,11 +26,11 @@ pub(crate) fn contains_syntax_literal(s: &Syntax) -> bool {
 }
 
 /// Record every keyword spelling in `syntax` into the instance memo — the
-/// keyword analogue of interning identifiers. Called by the expander on each
-/// tree it enters (macro arguments and quasiquote templates round-trip
-/// keywords as bare hashes, so their spellings must be learned before the
-/// round-trip) and by the analyzer as a pre-pass
-/// (docs/impl/symbol.md). Idempotent; the memo dedups.
+/// keyword analogue of interning identifiers. The expander calls it on each
+/// tree it enters, and the analyzer as a pre-pass (docs/impl/symbol.md). Macro
+/// arguments and quasiquote templates round-trip keywords as bare hashes, so
+/// their spellings must be learned before the round-trip. Idempotent; the memo
+/// dedups.
 pub(crate) fn learn_keywords(syntax: &Syntax, symbols: &mut SymbolTable) {
     match &syntax.kind {
         SyntaxKind::Keyword(name) => {
@@ -316,26 +316,26 @@ impl Syntax {
         }
     }
 
-    /// Convert runtime Value to Syntax
+    /// Convert runtime Value to Syntax, born in `arena`.
     /// Used for analyzing macro results.
-    /// When encountering a syntax object, returns it directly — preserving
-    /// scopes from the original Syntax. The passed `span` is ignored in
-    /// this case; the syntax object carries its own (more accurate) span.
+    /// A syntax object comes back as a copy in `arena`, with the scopes of the
+    /// original Syntax. The passed `span` is ignored in this case; the syntax
+    /// object carries its own (more accurate) span.
     pub fn from_value(
         arena: &SyntaxArena,
         value: &Value,
         symbols: &SymbolTable,
         span: Span,
     ) -> Result<Syntax, String> {
-        // Syntax objects pass through directly, preserving scopes — the
-        // post-expansion hygiene FLIP (flip_scope_recursive) relies on
-        // them arriving intact: argument-origin nodes carry their use-site
-        // scopes plus the pre-stamped intro scope (which the flip removes),
-        // template-origin nodes carry definition-site scopes only (the flip
-        // adds the intro scope). Nodes from `datum->syntax` carry their own
-        // scope_exempt flag and dodge the flip — do NOT blanket-exempt here:
-        // blanket-exempting disables hygiene entirely by shielding every
-        // identifier from the intro scope.
+        // Syntax objects come back with their scopes intact, because the
+        // post-expansion hygiene FLIP (flip_scope_recursive) relies on them.
+        // Argument-origin nodes carry their use-site scopes plus the
+        // pre-stamped intro scope, which the flip removes. Template-origin
+        // nodes carry definition-site scopes only, and the flip adds the intro
+        // scope. Nodes from `datum->syntax` carry their own scope_exempt flag
+        // and dodge the flip. Do NOT blanket-exempt here: blanket-exempting
+        // would disable hygiene entirely, by shielding every identifier from
+        // the intro scope.
         if let Some(embedded) = value.as_syntax() {
             // COPY, do not share: the value's tree lives in the value's own
             // region, and the macro-scope reclaim frees that region as soon as
