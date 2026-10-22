@@ -1,13 +1,13 @@
-// audited: 2026-10-13
+// audited: 2026-10-21
 //! A Send-safe mirror of a syntax tree, so parsed source can cross `sys/spawn`.
 //!
 //! docs/impl/syntax.md
 //! docs/threads.md
 //!
 //! The test runner reads a legacy multi-form file in the main VM and ships the
-//! syntax to a worker, which compiles and runs it with its own stdlib, so the
-//! file's runtime `import`s and the worker's `ev/run` scheduler share one set
-//! of dynamic parameters. Spans and hygiene scopes cross unchanged.
+//! syntax to a worker. The worker compiles and runs it with its own stdlib, so
+//! the file's runtime `import`s and the worker's `ev/run` scheduler share one
+//! set of dynamic parameters. Spans and hygiene scopes cross unchanged.
 //!
 //! A `Syntax` node's payloads are pointers into a region, and a region belongs
 //! to one `RegionStore`. Crossing a thread therefore means owning the payloads
