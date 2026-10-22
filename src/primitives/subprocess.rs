@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! The process primitives: `sys/*` over this process, and `subprocess/*` over a child.
 //!
 //! docs/subprocess.md
@@ -53,7 +53,7 @@ pub(crate) fn prim_exit(
 
     // When the driving VM has the exit trap set (the test runner, around a
     // test's execution), turn `exit` into a catchable signal instead of a
-    // process-wide kill, so a single test can't truncate the whole run.
+    // process-wide kill. So a single test cannot truncate the whole run.
     if ctx.vm().exit_trapped {
         return crate::rich_error!(
             ctx,
@@ -71,7 +71,7 @@ pub(crate) fn prim_exit(
 /// (sys/trap-exit! true)   ; `exit` on this VM now emits {:error :exited …}
 /// (sys/trap-exit! false)  ; `exit` on this VM terminates the process again
 ///
-/// One VM per worker thread, so this is scoped to the calling OS thread: the test
+/// One VM per worker thread, so this is scoped to the calling OS thread. The test
 /// runner brackets each test's execution with it, while the runner's own `exit`
 /// (on a VM with the trap unset) still terminates the process normally.
 pub(crate) fn prim_trap_exit(
