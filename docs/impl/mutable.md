@@ -111,8 +111,11 @@ writes it as zero.
 
 The seam lands first: every read and every write of a mutable store goes
 through methods on the store, so no call site names the `Rc` or the `RefCell`.
-The read accessors and the store funnels already cover most of them. Then one
-variant moves per step, each green on its own: `@bytes` and `@string`, then
+A read takes a guard that shows the contents as a slice, or answers a lookup,
+and never shows the collection behind it. The store funnels already take every
+write of a `Value`. A byte store gains one funnel, a splice, and it takes the
+heap as the others do, because a growth claims an extent. Then one variant
+moves per step, each green on its own: `@bytes` and `@string`, then
 `@array`, then box and capture cell, then `@set`, then `@struct` behind its
 benchmark. [The image plan](image/plan.md) orders the foundation among the image
 milestones.
