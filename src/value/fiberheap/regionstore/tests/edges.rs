@@ -4,7 +4,6 @@
 //! docs/impl/region/ownership.md
 
 use super::*;
-use crate::value::store::ArrayStore;
 
 // Every cross-region CONTENT edge — a `Value` in a region's heap objects
 // pointing into another region — is recorded at creation into the source
@@ -24,13 +23,7 @@ fn recorded_outgoing_matches_scan_after_alloc() {
     let c = store.new_runtime_region();
     let h = store.new_runtime_region();
     let cv = store.alloc_obj(c, cons_obj());
-    store.alloc_obj(
-        h,
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(vec![cv]),
-            traits: Value::NIL,
-        },
-    );
+    holder(&mut store, h, &[cv]);
     assert_eq!(
         store.outgoing_edges(h),
         vec![(c.get(), 1)],
@@ -57,13 +50,7 @@ fn same_region_store_records_no_edge() {
     let mut store = RegionStore::default();
     let r = store.new_runtime_region();
     let v = store.alloc_obj(r, cons_obj());
-    store.alloc_obj(
-        r,
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(vec![v]),
-            traits: Value::NIL,
-        },
-    );
+    holder(&mut store, r, &[v]);
     assert!(
         store.outgoing_edges(r).is_empty(),
         "a same-region store records no edge (self-edge filtered, scan parity)"
@@ -81,13 +68,7 @@ fn owned_region_carries_outgoing_but_no_count() {
     let c = store.new_runtime_region();
     let h = store.new_runtime_region();
     let cv = store.alloc_obj(c, cons_obj());
-    store.alloc_obj(
-        h,
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(vec![cv]),
-            traits: Value::NIL,
-        },
-    );
+    holder(&mut store, h, &[cv]);
     store.alloc_obj(owner, cons_obj());
     store.adopt_region(owner, h); // h: Counted → Owned
     assert_eq!(store.rc(h), 0, "an Owned region has no independent count");
@@ -158,13 +139,7 @@ fn oracle_panics_on_drift() {
     let x = store.new_runtime_region();
     let h = store.new_runtime_region();
     let cv = store.alloc_obj(c, cons_obj());
-    store.alloc_obj(
-        h,
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(vec![cv]),
-            traits: Value::NIL,
-        },
-    );
+    holder(&mut store, h, &[cv]);
     store.alloc_obj(x, cons_obj()); // a valid frontier region, NOT in h's contents
     store.force_outgoing_edge_for_test(h, x); // drift: table {c, x}, content {c}
     store.decref(h); // h rc 1 → 0 → free → oracle compares table vs scan → panic

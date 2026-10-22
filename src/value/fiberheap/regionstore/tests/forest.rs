@@ -10,7 +10,6 @@
 // the edge and frees nothing through it.
 
 use super::*;
-use crate::value::store::ArrayStore;
 
 /// Freeing the root subtree-drops its owned child: the root's single decref
 /// frees the whole subtree. (RED against link-only: without subtree drop the
@@ -71,20 +70,8 @@ fn subtree_drop_reclaims_interior_cycle() {
     // a holds b and b holds a — a mutable reference cycle interior to the subtree.
     let a_val = store.alloc_obj(a, cons_obj());
     let b_val = store.alloc_obj(b, cons_obj());
-    store.alloc_obj(
-        a,
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(vec![b_val]),
-            traits: Value::NIL,
-        },
-    );
-    store.alloc_obj(
-        b,
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(vec![a_val]),
-            traits: Value::NIL,
-        },
-    );
+    holder(&mut store, a, &[b_val]);
+    holder(&mut store, b, &[a_val]);
     store.adopt_region(root, a);
     store.adopt_region(root, b);
 
@@ -125,20 +112,8 @@ fn subtree_drop_cascades_shared_frontier_not_interior_cycle() {
     let a_val = store.alloc_obj(a, cons_obj());
     let b_val = store.alloc_obj(b, cons_obj());
     // a holds b (interior); b holds a (interior cycle) AND shared_val (frontier ref).
-    store.alloc_obj(
-        a,
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(vec![b_val]),
-            traits: Value::NIL,
-        },
-    );
-    store.alloc_obj(
-        b,
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(vec![a_val, shared_val]),
-            traits: Value::NIL,
-        },
-    );
+    holder(&mut store, a, &[b_val]);
+    holder(&mut store, b, &[a_val, shared_val]);
     // b's array auto-increfs its cross-region refs: a (interior) and shared (frontier).
     assert_eq!(
         store.rc(shared),
@@ -285,20 +260,8 @@ fn interior_cycle_in_owner_node_reclaims() {
     // a holds b and b holds a — a mutable reference cycle interior to the node.
     let a_val = store.alloc_obj(a, cons_obj());
     let b_val = store.alloc_obj(b, cons_obj());
-    store.alloc_obj(
-        a,
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(vec![b_val]),
-            traits: Value::NIL,
-        },
-    );
-    store.alloc_obj(
-        b,
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(vec![a_val]),
-            traits: Value::NIL,
-        },
-    );
+    holder(&mut store, a, &[b_val]);
+    holder(&mut store, b, &[a_val]);
     store.adopt_region(node, a);
     store.adopt_region(node, b);
 

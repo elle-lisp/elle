@@ -9,7 +9,6 @@
 // at all, and a link that records the edge without freezing the count.
 
 use super::*;
-use crate::value::store::ArrayStore;
 
 /// Control (counterfactual anchor): WITHOUT adoption, freeing one region leaves
 /// an unrelated region untouched — the per-region-RC baseline. This is what
@@ -93,22 +92,16 @@ fn adoption_consumes_cross_reference_count() {
     let mut store = RegionStore::default();
     let parent = store.new_runtime_region();
     let child = store.new_runtime_region();
-    let holder = store.new_runtime_region();
-    // The child starts at rc = 1; the alloc of holder's array, which
+    let other = store.new_runtime_region();
+    // The child starts at rc = 1; the alloc of the other region's array, which
     // references it, increfs it to rc = 2.
     let child_val = store.alloc_obj(child, cons_obj());
-    store.alloc_obj(
-        holder,
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(vec![child_val]),
-            traits: Value::NIL,
-        },
-    );
+    holder(&mut store, other, &[child_val]);
     store.alloc_obj(parent, cons_obj());
     assert_eq!(
         store.rc(child),
         2,
-        "child held by holder's cross-region ref"
+        "child held by the other region's cross-region ref"
     );
 
     store.adopt_region(parent, child);

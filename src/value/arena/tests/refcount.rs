@@ -5,18 +5,10 @@
 //! docs/impl/region/rules.md
 
 use super::*;
-use crate::value::store::ArrayStore;
 
 /// An @array in a region of its own: the container a store helper counts against.
 fn container_elsewhere(heap: &mut FiberHeap) -> Value {
-    alloc_in_fresh_region(
-        heap,
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(vec![]),
-            traits: Value::NIL,
-        },
-    )
-    .0
+    array_in_fresh_region(heap).0
 }
 
 #[test]
@@ -146,13 +138,7 @@ fn mutable_array_push_keeps_region_alive() {
         alloc_in_fresh_region(heap, HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)));
 
     let heap = unsafe { &mut *heap_ptr };
-    let (arr, rid_b) = alloc_in_fresh_region(
-        heap,
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(vec![]),
-            traits: Value::NIL,
-        },
-    );
+    let (arr, rid_b) = array_in_fresh_region(heap);
     assert_ne!(rid_a, rid_b);
 
     let rc_before = region_rc(unsafe { &*heap_ptr }, rid_a);
@@ -221,13 +207,7 @@ fn pop_extracts_moved_out_element_from_owned_subtree() {
         alloc_in_fresh_region(heap, HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)));
 
     let heap = unsafe { &mut *heap_ptr };
-    let (arr, rid_b) = alloc_in_fresh_region(
-        heap,
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(vec![]),
-            traits: Value::NIL,
-        },
-    );
+    let (arr, rid_b) = array_in_fresh_region(heap);
     assert_ne!(rid_a, rid_b);
 
     // Push val into the @array (records the edge + increfs). Drop the initial

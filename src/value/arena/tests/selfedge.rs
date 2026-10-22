@@ -14,16 +14,10 @@
 
 use super::*;
 use crate::value::heap::TableKey;
-use crate::value::store::{ArrayStore, CellStore, SetStore, StructStore};
+use crate::value::store::{CellStore, SetStore, StructStore};
 
 fn array_in(heap: &mut FiberHeap, r: RuntimeRegion) -> Value {
-    heap.alloc_in_region(
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(vec![]),
-            traits: Value::NIL,
-        },
-        r,
-    )
+    crate::value::build::array_mut(heap, Vec::new(), r)
 }
 
 fn struct_in(heap: &mut FiberHeap, r: RuntimeRegion) -> Value {

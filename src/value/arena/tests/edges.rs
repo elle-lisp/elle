@@ -10,7 +10,7 @@
 // the count and not the edge: red while no edge is recorded, green once one is.
 
 use super::*;
-use crate::value::store::{ArrayStore, SetStore};
+use crate::value::store::SetStore;
 
 /// A mutable push records the content edge `B → A` (B = the array's region,
 /// A = the pushed value's). RED before the seam records.
@@ -21,13 +21,7 @@ fn mutable_push_records_outgoing_edge() {
     let (val, rid_a) =
         alloc_in_fresh_region(heap, HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)));
     let heap = unsafe { &mut *heap_ptr };
-    let (arr, rid_b) = alloc_in_fresh_region(
-        heap,
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(vec![]),
-            traits: Value::NIL,
-        },
-    );
+    let (arr, rid_b) = array_in_fresh_region(heap);
     assert_ne!(rid_a, rid_b);
     assert!(
         unsafe { (*heap_ptr).outgoing_edges(rid_b) }.is_empty(),
@@ -51,13 +45,7 @@ fn duplicate_edges_counted_then_decremented() {
     let (val, rid_a) =
         alloc_in_fresh_region(heap, HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)));
     let heap = unsafe { &mut *heap_ptr };
-    let (arr, rid_b) = alloc_in_fresh_region(
-        heap,
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(vec![]),
-            traits: Value::NIL,
-        },
-    );
+    let (arr, rid_b) = array_in_fresh_region(heap);
     let heap = unsafe { &mut *heap_ptr };
     crate::value::arena::push_with_incref(heap, arr, val);
     let heap = unsafe { &mut *heap_ptr };
@@ -95,13 +83,7 @@ fn overwrite_removes_old_edge() {
     let (val_c, rid_c) =
         alloc_in_fresh_region(heap, HeapObject::Pair(Pair::new(Value::int(2), Value::NIL)));
     let heap = unsafe { &mut *heap_ptr };
-    let (arr, rid_b) = alloc_in_fresh_region(
-        heap,
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(vec![]),
-            traits: Value::NIL,
-        },
-    );
+    let (arr, rid_b) = array_in_fresh_region(heap);
     let heap = unsafe { &mut *heap_ptr };
     crate::value::arena::push_with_incref(heap, arr, val_a);
     assert_eq!(

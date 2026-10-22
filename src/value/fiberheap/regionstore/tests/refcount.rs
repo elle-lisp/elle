@@ -6,7 +6,7 @@
 //! docs/impl/region/diagnostics.md
 
 use super::*;
-use crate::value::store::{ArrayStore, CellStore, StructStore};
+use crate::value::store::{CellStore, StructStore};
 
 #[test]
 fn alloc_obj_creates_region_lazily() {
@@ -273,12 +273,7 @@ fn cascade_decrefs_cross_region_refs() {
     // alloc_obj auto-increfs region 2 for the cross-region ref → rc(2)=2.
     let mut store = RegionStore::default();
     let val_in_r2 = store.alloc_obj(rr(2), cons_obj()); // rc(2)=1
-
-    let arr = HeapObject::LArrayMut {
-        data: ArrayStore::new(vec![val_in_r2]),
-        traits: Value::NIL,
-    };
-    store.alloc_obj(rr(3), arr); // auto-incref r2 → rc(2)=2
+    holder(&mut store, rr(3), &[val_in_r2]); // auto-incref r2 → rc(2)=2
 
     assert_eq!(store.rc(rr(2)), 2);
 
@@ -299,12 +294,7 @@ fn free_region_decrefs_escaped() {
     // Free r3 → cascade decrefs r2 → rc=0, freed.
     let mut store = RegionStore::default();
     let val_in_r2 = store.alloc_obj(rr(2), cons_obj()); // rc(2)=1
-
-    let arr = HeapObject::LArrayMut {
-        data: ArrayStore::new(vec![val_in_r2]),
-        traits: Value::NIL,
-    };
-    store.alloc_obj(rr(3), arr); // auto-incref r2 → rc(2)=2
+    holder(&mut store, rr(3), &[val_in_r2]); // auto-incref r2 → rc(2)=2
 
     assert_eq!(store.rc(rr(2)), 2);
 
@@ -377,15 +367,7 @@ fn deep_cascade_chain_does_not_overflow_stack() {
     const N: u32 = 40_000;
     let mut store = RegionStore::default();
     let leaf = |s: &mut RegionStore, id: u32| s.alloc_obj(rr(id), cons_obj());
-    let link = |s: &mut RegionStore, id: u32, child: Value| {
-        s.alloc_obj(
-            rr(id),
-            HeapObject::LArrayMut {
-                data: ArrayStore::new(vec![child]),
-                traits: Value::NIL,
-            },
-        )
-    };
+    let link = |s: &mut RegionStore, id: u32, child: Value| holder(s, rr(id), &[child]);
     // Region ids 2..=N+1 (0/1 are reserved). Tail (N+1) is the leaf; each region
     // k<N+1 holds region k+1's value, auto-increfing k+1 to rc=2 (scope + the
     // one incoming cross-ref). The head (region 2) keeps rc=1.

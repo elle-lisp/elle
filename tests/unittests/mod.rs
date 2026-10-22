@@ -40,3 +40,6 @@ mod mutable_store {
 mod mutable_bytes {
     include!("mutable_bytes.rs");
 }
+mod mutable_array {
+    include!("mutable_array.rs");
+}

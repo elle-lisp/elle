@@ -62,8 +62,8 @@ fn test_fiber_heap_clear() {
     assert!(heap.is_empty());
 }
 
-// A byte store lies in region pages and needs no drop. The reference list
-// carries its `traits` edge to the free scan.
+// A store in region pages needs no drop. The free scans its shell, found on
+// the reference list.
 #[test]
 fn test_fiber_heap_needs_drop_exhaustive() {
     assert!(!needs_drop(HeapTag::Pair));
@@ -73,13 +73,14 @@ fn test_fiber_heap_needs_drop_exhaustive() {
     assert!(!needs_drop(HeapTag::Parameter));
     assert!(!needs_drop(HeapTag::LStringMut));
     assert!(!needs_drop(HeapTag::LBytesMut));
+    assert!(!needs_drop(HeapTag::LArrayMut));
     assert!(holds_value_refs(HeapTag::LStringMut));
     assert!(holds_value_refs(HeapTag::LBytesMut));
+    assert!(holds_value_refs(HeapTag::LArrayMut));
 
     assert!(needs_drop(HeapTag::LBox));
     assert!(needs_drop(HeapTag::CaptureCell));
     assert!(needs_drop(HeapTag::LString));
-    assert!(needs_drop(HeapTag::LArrayMut));
     assert!(needs_drop(HeapTag::LStructMut));
     assert!(needs_drop(HeapTag::LStruct));
     assert!(needs_drop(HeapTag::Closure));

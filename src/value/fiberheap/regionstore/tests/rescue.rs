@@ -11,7 +11,6 @@
 // `region_capture_cell_member_cascade_uaf`.
 
 use super::*;
-use crate::value::store::ArrayStore;
 
 /// A member referenced from OUTSIDE the dying subtree (a live container holds a
 /// value in it — the capture-cell shape) survives the root's drop and frees at
@@ -28,21 +27,9 @@ fn externally_referenced_member_is_rescued_from_subtree_drop() {
     let member_val = store.alloc_obj(member, cons_obj());
     // The external holder stores the member's value BEFORE the adopt (records
     // cell → member and increfs, exactly as the capture-store funnel does).
-    store.alloc_obj(
-        cell,
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(vec![member_val]),
-            traits: Value::NIL,
-        },
-    );
+    holder(&mut store, cell, &[member_val]);
     // The parent holds the member too (the closure-env shape), then adopts it.
-    store.alloc_obj(
-        parent,
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(vec![member_val]),
-            traits: Value::NIL,
-        },
-    );
+    holder(&mut store, parent, &[member_val]);
     store.adopt_region(parent, member);
 
     store.decref(parent); // subtree drop — must rescue the member, not tear it down
@@ -80,23 +67,11 @@ fn external_reference_recorded_after_adopt_still_rescues() {
     let member = store.new_runtime_region();
     let cell = store.new_runtime_region();
     let member_val = store.alloc_obj(member, cons_obj());
-    store.alloc_obj(
-        parent,
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(vec![member_val]),
-            traits: Value::NIL,
-        },
-    );
+    holder(&mut store, parent, &[member_val]);
     store.adopt_region(parent, member);
     // The external store happens AFTER the adopt: incref is a frozen no-op, the
     // content edge is recorded regardless.
-    store.alloc_obj(
-        cell,
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(vec![member_val]),
-            traits: Value::NIL,
-        },
-    );
+    holder(&mut store, cell, &[member_val]);
 
     store.decref(parent);
     assert_eq!(
@@ -127,35 +102,11 @@ fn rescued_count_excludes_own_subtree_back_edges() {
     let member_val = store.alloc_obj(member, cons_obj());
     let grand_val = store.alloc_obj(grand, cons_obj());
     // member holds grand (the containment edge)…
-    store.alloc_obj(
-        member,
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(vec![grand_val]),
-            traits: Value::NIL,
-        },
-    );
+    holder(&mut store, member, &[grand_val]);
     // …and grand back-references member (the interior knot).
-    store.alloc_obj(
-        grand,
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(vec![member_val]),
-            traits: Value::NIL,
-        },
-    );
-    store.alloc_obj(
-        root,
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(vec![member_val]),
-            traits: Value::NIL,
-        },
-    );
-    store.alloc_obj(
-        cell,
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(vec![member_val]),
-            traits: Value::NIL,
-        },
-    );
+    holder(&mut store, grand, &[member_val]);
+    holder(&mut store, root, &[member_val]);
+    holder(&mut store, cell, &[member_val]);
     store.adopt_region(root, member);
     store.adopt_region(member, grand);
 
@@ -203,28 +154,10 @@ fn rescue_cascades_to_sibling_referenced_by_rescued_member() {
     let m1_val = store.alloc_obj(m1, cons_obj());
     let m2_val = store.alloc_obj(m2, cons_obj());
     // m1 holds m2 (a sibling edge inside the subtree).
-    store.alloc_obj(
-        m1,
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(vec![m2_val]),
-            traits: Value::NIL,
-        },
-    );
-    store.alloc_obj(
-        root,
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(vec![m1_val, m2_val]),
-            traits: Value::NIL,
-        },
-    );
+    holder(&mut store, m1, &[m2_val]);
+    holder(&mut store, root, &[m1_val, m2_val]);
     // Only m1 is externally held.
-    store.alloc_obj(
-        cell,
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(vec![m1_val]),
-            traits: Value::NIL,
-        },
-    );
+    holder(&mut store, cell, &[m1_val]);
     store.adopt_region(root, m1);
     store.adopt_region(root, m2);
 
@@ -266,20 +199,8 @@ fn extract_owned_region_admits_external_references() {
     let elem = store.new_runtime_region();
     let cell = store.new_runtime_region(); // an external holder of the element
     let elem_val = store.alloc_obj(elem, cons_obj());
-    store.alloc_obj(
-        container,
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(vec![elem_val]),
-            traits: Value::NIL,
-        },
-    );
-    store.alloc_obj(
-        cell,
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(vec![elem_val]),
-            traits: Value::NIL,
-        },
-    );
+    holder(&mut store, container, &[elem_val]);
+    holder(&mut store, cell, &[elem_val]);
     store.adopt_region(container, elem);
 
     // The pop funnel's order: un-record the container's edge, then extract.
