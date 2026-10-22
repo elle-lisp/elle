@@ -1,5 +1,5 @@
-(elle/epoch 14)
-## audited: 2026-10-06
+(elle/epoch 15)
+## audited: 2026-10-21
 ## Elle standard prelude: the macros every program is expanded against.
 ## docs/stdlib.md
 ##
@@ -168,8 +168,8 @@
                             :syntax (quote ,pred)))))))))
 
 ## gate! - loud conditional compilation (the test runner's skip mechanism).
-## (gate! COND "reason" body...) runs BODY when COND is truthy; when COND is
-## unmet it does NOT vanish silently — it emits a structured :gated signal
+## (gate! COND "reason" body...) runs BODY when COND is truthy. When COND is
+## unmet it does NOT vanish silently: it emits a structured :gated signal
 ## carrying the REASON, which a harness catches and records as status=skip.
 ## See docs/test-runner.md and docs/compile-time.md.
 ##
@@ -299,8 +299,8 @@
 ## The last arm walks an array by index, and three sources fill that array: a
 ## collection whose traits carry :iter, a set, and a struct's pairs. Anything
 ## else raises. The iterator is drained into the array rather than driven by a
-## callback so that a `break` in BODY still reaches the loop; a closure per
-## element would trap it, since a break cannot cross a function boundary.
+## callback, so that a `break` in BODY still reaches the loop. A closure per
+## element would trap the break, since a break cannot cross a function boundary.
 ## docs/loops.md holds what each element is, and docs/traits.md the dispatch
 ## this arm completes.
 (defmacro each (var iter-or-in & forms)
@@ -411,7 +411,7 @@
   `(while true ,;body))
 
 ## repeat - run body N times
-## (repeat 3 (println "hi")) prints "hi" three times
+## (repeat 3 (println "hi")) prints "hi" three times.
 ## The count guard both reports a non-integer loudly and proves the loop
 ## counter comparison for the silent %lt (the count is a user expression the
 ## expansion site cannot otherwise type). (Map literals don't splice under
@@ -442,9 +442,9 @@
         `(,f ,;init-args (splice ,last-arg))))))
 
 ## import - load a module by spec, as import/resolve (src/stdlib.lisp) names it
-## (import "std/http") => (import-file (import/resolve "std/http" DIR))
+## (import "std/http") => (import-file (import/resolve "std/http" DIR)).
 ## DIR is the directory of the file that calls import, or the working directory
-## for code with no file: a list a macro builds carries the location of the
+## for code with no file. A list a macro builds carries the location of the
 ## call, so meta/location here names the caller. docs/modules.md holds the rules.
 (defmacro import (spec)
   `(import-file (import/resolve ,spec
