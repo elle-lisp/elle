@@ -1,25 +1,27 @@
 (elle/epoch 15)
-# audited: 2026-10-20
-# Declaring `fiber/child` and `import/load-file` `Opaque` frees nothing early: the soundness face of region-fiber-child-effect.lisp.
+# audited: 2026-10-21
+# Declaring `fiber/child` and `import/load-file` `Opaque` frees no argument before its last reader.
 # docs/impl/region/effects.md
 # docs/impl/escape.md
 #
-# The declaration says two things and no more: the result may live anywhere (so the
-# walk keeps recording `result ⊒ each argument`), and no argument is stored
-# uncounted (so escape seeds nothing on its store facet). What that withdraws is
-# the false store facet, and with it the refusal it forced on every mechanism gated
-# on `frame_held_regions` — the branch-arm release window among them.
+# Soundness complement of region-fiber-child-effect.lisp. The declaration says
+# two things and no more. The result may live anywhere, so the walk keeps
+# recording `result ⊒ each argument`. No argument is stored uncounted, so
+# escape seeds nothing on its store facet. A `Mixed` declaration would add a
+# false store facet, and with it a refusal on every mechanism gated on
+# `frame_held_regions`, the branch-arm release window among them.
 #
-# So the hazards are the ones a store-facet refusal masks, and they are about the
-# ARGUMENT: its release lands at the branch merge rather than inside the arm that
-# names it last, so it must still land behind every later reader. The witnesses
-# drive a fiber read after the branch, resumed after it, stored into a container
-# a sibling arm reads, returned to a caller that resumes it, captured by a
-# closure called later, and held across the fiber frontier — plus the same shapes
-# for the path `import/load-file` reads. Each read reaches the subject's own
-# pages (`fiber/bits` reads the fiber object; a resume runs its body out of
-# them), so an over-early free faults rather than reading stale but mapped bytes.
-# A fresh subject per iteration keeps region ids churning.
+# So the hazards are the ones that refusal would mask, and they are about the
+# ARGUMENT. Its release lands at the branch merge rather than inside the arm
+# that names it last, so it must still land behind every later reader. The
+# witnesses drive a fiber read after the branch, and one resumed after it. One
+# is stored into a container a sibling arm reads, one returned to a caller that
+# resumes it, one captured by a closure called later, and one held across the
+# fiber frontier. The same shapes cover the path `import/load-file` reads. Each
+# read reaches the subject's own pages (`fiber/bits` reads the fiber object; a
+# resume runs its body out of them), so an over-early free faults rather than
+# reading stale but mapped bytes. A fresh subject per iteration keeps region
+# ids churning.
 
 # ── the fiber subject ────────────────────────────────────────────────────────
 
