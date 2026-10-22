@@ -1,3 +1,8 @@
+// audited: 2026-10-21
+//! The region walk's basic shapes: lets, branches, blocks, captures and intrinsics, read as allocations and scope regions.
+//!
+//! docs/impl/region/model.md
+
 use super::*;
 
 #[test]
@@ -6,7 +11,7 @@ fn let_immediate_is_scope() {
     let (_, _, info) = analyze("(let [x 1] x)");
     assert!(
         count_live_scopes(&info) >= 1,
-        "expected at least one Scope region for (let [x 1] x)"
+        "expected a scope region holding an allocation for (let [x 1] x)"
     );
 }
 
@@ -31,7 +36,7 @@ fn let_string_used_locally_stays_scope() {
     // allocates within that scope (value flow determines escape).
     assert!(
         count_live_scopes(&info) >= 1,
-        "expected Scope region for let with local use"
+        "expected a scope region holding an allocation for a let with a local use"
     );
 }
 
@@ -40,10 +45,9 @@ fn lambda_capture_widens() {
     // (let [x 1] (fn () x)) — the lambda captures x and gets its own
     // region.
     let (_, _, info) = analyze("(let [x 1] (fn () x))");
-    // Lambda should have a Function region
     assert!(
         count_live_scopes(&info) >= 1,
-        "expected Function region for lambda"
+        "expected a scope region holding the lambda's allocation"
     );
 }
 
@@ -97,7 +101,7 @@ fn solver_converges() {
     );
 }
 
-// ── binding_var: value flow through bindings ──────────────
+// ── binding_regions: value flow through bindings ──────────
 
 #[test]
 fn var_propagates_binding_var() {
@@ -108,7 +112,7 @@ fn var_propagates_binding_var() {
     // The string allocation escapes the let body (it is the result).
     let _non_global_scope_allocs: Vec<_> =
         info.alloc_region.iter().filter(|(_, r)| r.0 != 0).collect();
-    // With correct binding_var propagation, the string escapes the
+    // With the regions propagated through x, the string escapes the
     // let body, so the let's scope region has no local allocs.
     // (This test documents the expected behavior; the exact region
     // assignment depends on the enclosing context from the test wrapper.)
@@ -126,11 +130,11 @@ fn intrinsic_doesnt_escape() {
     let (_, _, info) = analyze("(let [x 1] (%add x 2))");
     assert!(
         count_live_scopes(&info) >= 1,
-        "let with intrinsic body should be Scope"
+        "expected a scope region holding an allocation for a let with an intrinsic body"
     );
 }
 
-// ── block_regions: break targets ─────────────────────────
+// ── block and break: break targets ───────────────────────
 
 #[test]
 fn break_with_immediate_no_calls_preserves_scope() {
@@ -182,11 +186,11 @@ fn or_unifies_all_branches() {
     );
 }
 
-// ── binding_var: value propagation chains ───────────────────
+// ── binding_regions: value propagation chains ───────────────
 
 #[test]
 fn nested_let_propagates_through_vars() {
-    // (let [x "hello"] (let [y x] y)) — y's binding_var is x's var,
+    // (let [x "hello"] (let [y x] y)) — y takes x's binding regions,
     // and y escapes the inner let. The string lives in its own region,
     // distinct from both let scopes.
     let (_, _, info) = analyze("(let [x \"hello\"] (let [y x] y))");
@@ -223,7 +227,7 @@ fn if_binding_propagation() {
     );
 }
 
-// ── block_regions: break across scope boundaries ─────────
+// ── block and break: break across scope boundaries ───────
 
 #[test]
 fn break_string_across_let() {
@@ -244,21 +248,20 @@ fn nested_blocks_break_targets_correct() {
     let (_, _, info) = analyze("(block :outer (block :inner (break :outer 42)))");
     assert!(
         count_live_scopes(&info) >= 1,
-        "nested blocks with immediate break should have Scope"
+        "expected a scope region holding an allocation for nested blocks"
     );
 }
 
-// ── capture region assignment via binding_var ─────────────
+// ── capture region assignment via binding_regions ─────────
 
 #[test]
 fn capture_string_widens() {
     // (let [x "hello"] (fn () x)) — lambda captures x which holds
     // a string. The string must outlive the lambda's allocation site.
     let (_, _, info) = analyze("(let [x \"hello\"] (fn () x))");
-    // Lambda produces a Function region; string should exist
     assert!(
         count_live_scopes(&info) >= 1,
-        "lambda should produce Function region"
+        "expected a scope region holding the lambda's allocation"
     );
     assert!(
         info.alloc_region.len() >= 2,
@@ -274,7 +277,7 @@ fn capture_immediate_no_widening() {
     let (_, _, info) = analyze("(let [x 1] (fn () x))");
     assert!(
         count_live_scopes(&info) >= 1,
-        "lambda should produce Function region"
+        "expected a scope region holding the lambda's allocation"
     );
     // Lambda itself allocates (it's a closure), but x doesn't
     // Expect exactly the lambda + letrec wrapper lambdas
@@ -315,7 +318,7 @@ fn intrinsic_arithmetic_no_allocation() {
     // from the letrec wrapper)
     assert!(
         count_live_scopes(&info) >= 1,
-        "let with arithmetic intrinsic should be Scope"
+        "expected a scope region holding an allocation for a let over arithmetic"
     );
 }
 
@@ -344,7 +347,7 @@ fn user_immediate_callee_no_alloc() {
     // immediate-returning — its call produces no escaping allocation.
     assert!(
         count_live_scopes(&info) >= 1,
-        "let with user-immediate call should be Scope, got scope_kinds: {:?}",
+        "expected a scope region holding an allocation, live regions: {:?}",
         info.live_regions
     );
 }
@@ -359,6 +362,6 @@ fn user_non_immediate_callee_forces_global() {
     // escapes into its own region, leaving the let scope empty.
     assert!(
         count_empty_scopes(&info) >= 1,
-        "let with non-immediate user call should be Global"
+        "expected a scope region with no allocation of its own"
     );
 }

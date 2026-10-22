@@ -1,4 +1,4 @@
-// audited: 2026-09-15
+// audited: 2026-10-21
 //! Region walk for the remaining HIR forms (`Match` through `Error`), split out
 //! of `RegionInference::walk` to keep that dispatcher small.
 //!
@@ -93,8 +93,6 @@ impl RegionInference {
             }
 
             HirKind::Block { block_id, body, .. } => {
-                self.block_regions.insert(*block_id, self.current_region);
-
                 let scope_region = self.fresh_region(self.current_region);
                 self.scope_region.insert(hir.id, scope_region);
                 let saved = self.current_region;
