@@ -12,6 +12,7 @@ mod bindings;
 mod environment;
 mod fixpoint;
 mod messages;
+mod qualified;
 
 fn make_span() -> Span {
     Span::new(0, 0, 1, 1)

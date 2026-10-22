@@ -1,6 +1,6 @@
 # The image file
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-21 -->
 
 The byte layout of an image, and the fingerprint that decides whether this
 binary may map it.
@@ -20,10 +20,10 @@ One image is one file, or one blob embedded in a larger one:
 | relocations | pointer stream: (slot offset, target offset); primitive stream: (slot offset, name index); file stream: (slot offset, file index); reconstruction stream: (slot offset, constructor tag). Offsets are region-relative bytes: the hydrated region is one contiguous interval, so `base + offset` names any slot or target in O(1) and the (page, offset) pair collapses |
 | object index | (offset, tag) per heap object, sorted — rebuilds `dtors`/`ref_objs` and drives the verifier |
 | primitive table | the names the body's native-fn slots hold, one length-prefixed string each, sorted by name — the primitive stream indexes it |
-| name table | the spellings of the symbols and keywords in the body, one length-prefixed string each, sorted by name |
+| name table | the spellings of the symbols and keywords the body names, a code payload's own names included, one length-prefixed string each, sorted by name |
 | file table | the source-file names the body's spans point at, one length-prefixed string each, sorted by name — the file stream indexes it |
-| signal table | user-defined signal names in dump-time bit order |
-| watermarks | dump-time counters, carried in the header block: parameter id and hygiene scope id today, static-region mint and next signal bit with the milestones that need them |
+| signal table | not written yet: a dump refuses a declared signal instead ([sealing.md](sealing.md)) |
+| watermarks | dump-time counters, carried in the header block: parameter id, hygiene scope id and static-region mint today, next signal bit with the milestone that needs it |
 | manifest | the bindings an image installs. It is body data, not a section: an export struct names each binding with a keyword key and each value answers its own signal, arity and doc ([boot.md](boot.md) owns the boot configuration's root struct). Dependency fingerprints are header fields, and an image with an empty dependency list records none |
 | side-stream | `SendValue`-encoded mutable bindings, present only where the dump policy permits mutables |
 
@@ -50,8 +50,8 @@ The hydrator therefore refuses a misaligned offset before it maps anything,
 naming the offset and the page size. The refusal is a build error rather than
 a corrupt file: whoever placed the image chose the offset, and the same
 descriptor is legal once the image moves to a boundary. An embedded blob meets
-the rule by construction — [image.md](../image.md) § "Build integration" pins
-its alignment to the largest base page any supported host reports.
+the rule by construction — [blob.md](blob.md) pins its alignment to the
+largest base page any supported host reports.
 
 ## Relocation slots
 
@@ -71,10 +71,9 @@ spelling and one per heap value its `ValueConst` instructions load. The pages
 that hold the records carry no slot at all, so they stay clean in a mapping.
 
 **Static region slots** baked into bytecode operands are opaque per-function
-keys; they collide harmlessly across functions. The loader bumps the global
-mint counter past the image watermark anyway, so uniqueness diagnostics stay
-truthful. Parameter ids, hygiene scopes, and signal bits get the same
-watermark treatment.
+keys, so a hydrated function keeps the slots it was compiled with, and no slot
+is relocated. The counter that mints them still moves at hydration, for the
+reason § "The watermarks bound what a fresh instance may mint" gives.
 
 ## The name table carries spellings, not hashes
 
@@ -83,6 +82,10 @@ needs no table at all. Display does not travel: a hydrating instance holds none
 of the dump's spellings, and a value whose spelling it never met prints as
 `#<symbol:hash>`. The name table is what closes that gap, for both vocabularies
 at once ([symbol.md](../symbol.md) owns the memo it replays into).
+
+The dumper records a spelling wherever its copy meets a name: a symbol or
+keyword value, a struct key, and each name a code payload holds outside its
+value slots ([region/template.md](../region/template.md) lists those).
 
 An entry is a spelling: a byte length, the bytes, and zero padding out to the
 next multiple of eight. No hash appears. The hydrator hashes each spelling with
@@ -161,24 +164,42 @@ edge into that region is counted like any other.
 
 ## The watermarks bound what a fresh instance may mint
 
-Two counters reach the body, and both are process-local. An expander mints
-hygiene scope ids from one; a process-wide counter mints parameter ids from
-zero. Each is compared for equality and nothing else, so an instance minting
-from its own start hands out ids the body already uses. Two unrelated scopes
-would then compare equal, and a new parameter would share `*stdin*`'s id.
+Three counters reach the body, and all three are process-local. An expander
+mints hygiene scope ids from one. A process-wide counter mints parameter ids
+from zero, and another mints static region slots, the region operands the
+lowerer writes into bytecode.
 
-The header therefore records one watermark per counter: one past the highest
-value the body carries. The scope watermark masks the intro bit off first,
-since intro scopes and ordinary ones come from the same counter. Hydration
-raises the process's parameter counter past its own watermark, and answers with
-the scope watermark for the loader that owns an expander. A body carrying
+A scope or a parameter id is compared for equality and nothing else, so an
+instance minting from its own start hands out ids the body already uses. Two
+unrelated scopes would then compare equal, and a new parameter would share
+`*stdin*`'s id. The header therefore records one past the highest value the
+body carries for each. The scope watermark masks the intro bit off first, since
+intro scopes and ordinary ones come from the same counter. A body carrying
 neither records zero for both.
+
+A static slot collides harmlessly, because a slot is a key within one function.
+Its watermark exists for parity: an image boot must emit the bytecode a source
+boot emits ([boot.md](boot.md)). A source boot compiles user code with the
+counter where the boot's own compiles left it, so a boot image records that
+mark rather than the highest slot its body holds. The mark is never lower, so
+it also clears every slot in the body. It is taken once, when the boot ends, so
+two dumps of one boot state write one file whatever compiles between them. An
+image of any other graph records zero, because no compile waits to start from
+its counter.
+
+Hydration raises the process's parameter counter and static-region counter to
+their watermarks, and answers with the scope watermark for the loader that owns
+an expander.
 
 ## Fingerprint: regenerate, never migrate
 
-`HeapObject` is `repr(Rust)`, and opcode discriminants are
-source-order-dependent. An image is therefore valid only for a binary whose
-layout agrees with the dumper's. The fingerprint records the format version,
+`HeapObject` is `repr(u64)`: an object's first word is its `HeapTag`, and
+each variant's fields follow in declaration order. A build's features cannot
+move the tag, which a `repr(Rust)` enum lets rustc hide in a niche of its
+largest variant. The field types, `TableKey` and the syntax node are still
+`repr(Rust)`, and opcode discriminants are source-order-dependent. An image is
+therefore valid only for a binary whose layout agrees with the dumper's. The
+fingerprint records the format version,
 the rustc version and target, the OS base page size, `size_of`/`align_of` for
 `Value`, `HeapObject` and `RegionSlice`, `CURRENT_EPOCH`, both instruction
 sets, and the probed layouts below.
@@ -218,13 +239,13 @@ Size and align alone do not pin field offsets. The fingerprint therefore also
 records the probed layout of every variant the dumper can emit — the heap
 objects, and the `TableKey` variants a struct entry carries: the
 discriminant byte and each leaf field's offset and length
-([measurements.md](measurements.md) item 6 records the probe mechanism and the
+([measurements.md](measurements.md) records the probe mechanism and the
 measured layout). It records the field offsets of every record the dumper
 assembles as well: a syntax node, a code payload, the payload's LIR body, and
 the four LIR records the body names. A build whose layout reorders a field or
 moves the discriminant fails the fingerprint instead of hydrating garbage, so
 the two-stage embed build cannot pass with a shifted layout. The same extents
-drive slot canonicalization ([image.md](../image.md) § Dumping).
+drive slot canonicalization ([image.md](../image.md)).
 
 On mismatch the loader falls back — the `include_str!` sources never go away,
 so the image is an optimization, not a correctness dependency. Images are

@@ -1,13 +1,13 @@
-// audited: 2026-10-14
-//! Serializing a code object a `MakeClosure` indexes into a `SendableClosure`.
+// audited: 2026-10-21
+//! Serializing a code object into a `SendableClosure`: its fields, the values and code objects it names, and its spellings.
 //!
 //! docs/threads.md
 //! docs/impl/region/template.md
 //!
-//! Kept apart from the instance path in `from_value_inner`: such a code object
-//! has no heap identity to intern, so its serialization is a straight
-//! recursive copy with empty `env`/`squelch_mask`, distinct enough to read on
-//! its own.
+//! Both code paths build their `SendableClosure` here. A closure instance
+//! interns into the bundle and brings its `env` and squelch mask; a code
+//! object a `MakeClosure` indexes has no heap identity to intern, so it is a
+//! straight recursive copy with both empty.
 
 use super::super::*;
 use super::ctx::SerContext;
@@ -17,7 +17,7 @@ use crate::value::closure::ClosureTemplate;
 /// A code object's frozen LIR as it crosses: the records verbatim, and the
 /// values its `ValueConst`s load through the ordinary value walk, so a closure
 /// among them interns into the bundle once.
-pub(in crate::value::send) fn send_lir(
+fn send_lir(
     lir: Option<crate::lir::LirView<'_>>,
     ctx: &mut SerContext<'_>,
 ) -> Result<(Option<crate::lir::LirCode>, Vec<SendValue>), String> {
@@ -34,7 +34,7 @@ pub(in crate::value::send) fn send_lir(
 
 /// The code objects `t`'s `MakeClosure` instructions index, each serialized
 /// whole, in child-table order.
-pub(in crate::value::send) fn send_children(
+fn send_children(
     t: &ClosureTemplate,
     ctx: &mut SerContext<'_>,
 ) -> Result<Vec<SendableClosure>, String> {
@@ -51,6 +51,19 @@ pub(in crate::value::send) fn sendable_from_template(
     t: &ClosureTemplate,
     ctx: &mut SerContext<'_>,
 ) -> Result<SendableClosure, String> {
+    sendable(t, Vec::new(), SignalBits::EMPTY, ctx)
+}
+
+/// `t` as a `SendableClosure` carrying `env` and `squelch_mask`: its constants,
+/// LIR and children through the walks above, every other field copied, and
+/// the spelling of each name its payload holds outside its values noted.
+pub(in crate::value::send) fn sendable(
+    t: &ClosureTemplate,
+    env: Vec<SendValue>,
+    squelch_mask: SignalBits,
+    ctx: &mut SerContext<'_>,
+) -> Result<SendableClosure, String> {
+    ctx.note_payload_names(t);
     let constants: Vec<SendValue> = t
         .constants()
         .iter()
@@ -63,13 +76,14 @@ pub(in crate::value::send) fn sendable_from_template(
         lir,
         lir_values,
         child_protos,
-        ..code_fields(t, Vec::new(), SignalBits::EMPTY)
+        ..code_fields(t, env, squelch_mask)
     })
 }
 
 /// Every scalar and table field of `t`, for a `SendableClosure` carrying `env`
 /// and `squelch_mask`. The constants, the LIR and the children walk the value
-/// graph, so the caller fills them.
+/// graph, so [`sendable`] fills them; a closure's intern placeholder leaves
+/// them empty.
 pub(in crate::value::send) fn code_fields(
     t: &ClosureTemplate,
     env: Vec<SendValue>,

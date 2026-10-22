@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-20
 //! WASM backend: LIR → WASM emission and Wasmtime execution.
 //!
 //! docs/impl/wasm.md
@@ -59,10 +59,10 @@ const WASM_DUMP_PATH: &str = "/dev/shm/elle-wasm-dump.wasm";
 /// Whether the user source defines the same top-level name twice — a
 /// redefinition the naive single-thunk wrap would reject as a duplicate binding.
 ///
-/// Conservative and name-based: for each top-level `(def* …)` / `(var …)` /
-/// `*/def*` form it collects the leaf symbols of the binding target — a bare
-/// name (`(def x …)`) or every name a destructuring pattern binds
-/// (`(def [ok _] …)` binds `ok`, the `_` wildcard is ignored). A symbol seen
+/// Conservative and name-based. For each top-level `(def* …)` / `(var …)` /
+/// `*/def*` form it collects the leaf symbols of the binding target: a bare
+/// name (`(def x …)`), or every name a destructuring pattern binds. A pattern
+/// `(def [ok _] …)` binds `ok`, and the `_` wildcard is ignored. A symbol seen
 /// twice selects the top-level restructure (build_scheduled_toplevel); otherwise
 /// the single-thunk wrap is kept, which preserves closure execution context for
 /// the whole program. A redefinition introduced only by macro expansion is not
@@ -266,8 +266,8 @@ fn build_full_source(source: &str, source_name: &str) -> Result<(String, usize),
     // But the restructure has a cost: a top-level def's RHS then runs in the
     // ENTRY function, and some operations (`eval`'s dynamic compilation) trap
     // there while working in a closure. The single-thunk wrap keeps the WHOLE
-    // program in a closure, so it is the safe default; the restructure is used
-    // ONLY when the program actually redefines a top-level name — the case the
+    // program in a closure, so it is the safe default. The restructure is used
+    // ONLY when the program actually redefines a top-level name, the case the
     // single wrap cannot compile. A file that both redefines a name AND calls
     // `eval` in a def RHS still traps in the entry. Pinned by
     // `wasm_full_allows_toplevel_def_redefinition` (restructure path) and
@@ -281,46 +281,32 @@ fn build_full_source(source: &str, source_name: &str) -> Result<(String, usize),
     Ok((full_source, stdlib_form_count))
 }
 
-fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<String, String> {
-    // One heap shared by the program/eval VM and the compile context's
-    // macro-expansion VM (as `RuntimeCore::bare` does). Compile-time macro
-    // expansion runs on the compile context's macro VM; stdlib closures it must
-    // call (see the `init_stdlib` note below) are created on this heap by the
-    // program VM, so the two VMs must share it for the cross-VM call to resolve.
-    let mut heap = Box::new(crate::value::fiberheap::FiberHeap::new());
-    let heap_ptr: *mut crate::value::fiberheap::FiberHeap = &mut *heap;
-    let mut vm = crate::vm::VM::new_with_heap(heap_ptr);
-    let mut symbols = Box::new(crate::symbol::SymbolTable::new());
-    crate::primitives::register_primitives(&mut vm, &mut symbols);
-    let sym_ptr: *mut crate::symbol::SymbolTable = &mut *symbols;
-    // Point the VM at this instance's symbol table (stable boxed address).
-    vm.set_symbols(sym_ptr);
-    // This standalone eval owns its per-instance compile context (the stdlib it
-    // needs is spliced into the source below, so it accumulates during compile);
-    // wire the VM to it so a runtime `(eval …)` in the program resolves here.
-    let mut compile = Box::new(crate::pipeline::CompileCtx::new_with_heap(heap_ptr));
-    vm.set_compile_ctx(&mut *compile as *mut crate::pipeline::CompileCtx);
+/// The host runtime a run boots under `caches`, with the stdlib when the run
+/// splices it. Compile-time macro expansion runs on its compile context's
+/// macro VM, so a transformer body that calls a stdlib function resolves it
+/// there (docs/impl/wasm.md). It boots as `elle` does: from the boot image
+/// when one hydrates (docs/impl/image/boot.md).
+fn host_runtime(with_stdlib: bool, caches: crate::runtime::BootCaches) -> crate::runtime::Booted {
+    crate::runtime::RuntimeCore::boot(
+        crate::config::get().unicode_generation(),
+        with_stdlib,
+        crate::runtime::BootFrom::Caches(caches),
+    )
+}
 
-    // Load stdlib into the compile context so COMPILE-TIME macro expansion
-    // resolves stdlib functions. A prelude or user macro's transformer body may
-    // call a stdlib `defn` while expanding — `assert`'s transformer calls
-    // `pair?` (src/stdlib.lisp) to detect a comparison form — and expansion runs
-    // on the macro VM, not in the spliced source. Without stdlib loaded here that
-    // call is unbound and expansion fails with "undefined variable: pair?" before
-    // any WASM is emitted (src/wasm/tests/stdlib.rs).
-    // This is independent of the source-splice in `build_full_source`: the splice
-    // makes stdlib callable from WASM at RUNTIME; this load makes it callable
-    // during macro expansion at COMPILE time. User references still bind to the
-    // spliced letrec definitions (lexical scope shadows the registered exports),
-    // so the emitted WASM calls the compiled stdlib, not the macro-VM closures.
-    if with_stdlib {
-        crate::primitives::init_stdlib(
-            &mut vm,
-            &mut symbols,
-            &mut compile,
-            &crate::compiler::stdlib_cache::StdlibCache::Process,
-        );
-    }
+/// Where the host runtime a run boots under `caches` got its boot state.
+#[cfg(test)]
+fn host_boot_source(
+    with_stdlib: bool,
+    caches: crate::runtime::BootCaches,
+) -> crate::image::boot::BootSource {
+    host_runtime(with_stdlib, caches).boot_source
+}
+
+fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<String, String> {
+    let mut core = host_runtime(with_stdlib, crate::runtime::BootCaches::process()).core;
+    let (vm, symbols, compile) = core.parts();
+    let sym_ptr: *mut crate::symbol::SymbolTable = &mut *symbols;
 
     let full_source;
     let stdlib_form_count;
@@ -338,8 +324,8 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<S
     let t0 = std::time::Instant::now();
     let lir_module = crate::pipeline::compile_file_to_lir(
         compile_source,
-        &mut symbols,
-        &mut compile,
+        symbols,
+        compile,
         source_name,
         stdlib_form_count,
     )?;
@@ -439,7 +425,7 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<S
     );
     // This standalone eval owns its driving VM (built above); thread it to the
     // host so primitive calls build a VM-bearing `NativeCtx`.
-    wasm_store.data_mut().vm = &mut vm as *mut crate::vm::VM;
+    wasm_store.data_mut().vm = &mut *vm as *mut crate::vm::VM;
     wasm_store.data_mut().precached_closures = precached;
     let linker = linker::create_linker(&engine).map_err(|e| e.to_string())?;
     let t3 = std::time::Instant::now();
@@ -453,7 +439,7 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<S
 
     // Materialize the result's display form NOW, while the heap is still alive.
     // A heap-valued result (an array, a list, a string) is a pointer into this
-    // function's heap, which drops on return — so returning the `Value` would hand
+    // function's heap, which drops on return. Returning the `Value` would hand
     // the caller a dangling pointer it derefs when it formats the value. The CLI
     // discards the result (program output comes from `println` side effects during
     // execution), but test harnesses format it; returning the owned string keeps
@@ -461,7 +447,7 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<S
     // / `wasm_stdlib` heap-result tests (for example `[1 2 3]`, `(map … (list 1 2 3))`).
     // Render through this instance's table: a bare `Display` prints a symbol or
     // keyword as `#<symbol:hash>` (docs/impl/symbol.md).
-    let ret = ret.map(|v| format!("{}", v.display_with(Some(&symbols))));
+    let ret = ret.map(|v| format!("{}", v.display_with(Some(&*symbols))));
 
     let funcs = 1 + lir_module.closures.len();
     let lir_secs = (t1 - t0).as_secs_f64();

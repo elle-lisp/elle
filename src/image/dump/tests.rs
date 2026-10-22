@@ -1,14 +1,13 @@
-// audited: 2026-09-11
-//! What a dump records that no caller outside this crate can build: a syntax
-//! tree's scope sets, and the port behind a parameter's default.
+// audited: 2026-10-21
+//! What a dump writes that only this crate can see: scope sets, a parameter,
+//! the static-region watermark, and a raced path.
 //!
 //! docs/impl/image/sealing.md
 //! docs/impl/image/format.md
+//! docs/impl/image.md
 
 use std::path::PathBuf;
 
-use crate::hir::region::RuntimeRegion;
-use crate::port::{Direction, Encoding, Port, PortId, PortKind};
 use crate::symbol::SymbolTable;
 use crate::syntax::ScopeId;
 use crate::syntax::{Span, Syntax, SyntaxArena};
@@ -16,7 +15,7 @@ use crate::value::fiberheap::FiberHeap;
 use crate::value::heap::{deref, HeapObject};
 use crate::value::Value;
 
-use super::super::{ImageError, Sections};
+mod parameter;
 
 /// A scratch file this test owns, removed when it goes out of scope.
 struct Scratch(PathBuf);
@@ -37,6 +36,14 @@ impl Drop for Scratch {
     }
 }
 
+/// Hydrate `scratch` into a fresh heap, answering both.
+fn hydrate(scratch: &Scratch) -> (FiberHeap, super::super::Hydrated) {
+    let mut dst = FiberHeap::new();
+    let hydrated =
+        super::super::hydrate_path(&mut dst, &mut SymbolTable::new(), &scratch.0).expect("hydrate");
+    (dst, hydrated)
+}
+
 /// Dump `build`'s value and hydrate it into a second heap, answering that
 /// heap and what hydration reported. The heap comes back because the tree
 /// lives in its mapped pages.
@@ -50,11 +57,7 @@ fn round_trip(
     let arena = SyntaxArena::new(&mut src, region);
     let root = build(&mut src, &arena);
     super::dump(&mut src, &SymbolTable::new(), root, &scratch.0).expect("dump");
-
-    let mut dst = FiberHeap::new();
-    let hydrated =
-        super::super::hydrate_path(&mut dst, &mut SymbolTable::new(), &scratch.0).expect("hydrate");
-    (dst, hydrated)
+    hydrate(&scratch)
 }
 
 /// Wrap `tree` in a syntax value, as `value::build::syntax` does.
@@ -65,6 +68,17 @@ fn syntax_value(heap: &mut FiberHeap, arena: &SyntaxArena, tree: Syntax) -> Valu
             syntax: owned,
             traits: Value::NIL,
         },
+        arena.region(),
+    )
+}
+
+/// The list `(1)`: a body that holds no syntax, no parameter and no code.
+fn one_pair(heap: &mut FiberHeap, arena: &SyntaxArena) -> Value {
+    heap.alloc_in_region(
+        HeapObject::Pair(crate::value::heap::Pair::new(
+            Value::int(1),
+            Value::EMPTY_LIST,
+        )),
         arena.region(),
     )
 }
@@ -92,11 +106,12 @@ fn a_nodes_scope_set_survives_hydration() {
     assert_eq!(tree_of(hydrated.root).scopes(), scopes);
 }
 
-// § "The scope watermark bounds what a fresh expander may mint": an expander
-// starts its counter at one, so a hydrated body's scopes and a fresh
-// expander's would collide. The watermark clears every counter value in the
-// body — the intro scope included, since intro ids and ordinary ones come off
-// the same counter and differ only in a reserved bit.
+// The scope watermark bounds what a fresh expander may mint
+// (docs/impl/image.md). An expander starts its counter at one, so a hydrated
+// body's scopes and a fresh expander's would collide. The watermark clears
+// every counter value in the body — the intro scope included, since intro ids
+// and ordinary ones come off the same counter and differ only in a reserved
+// bit.
 //
 // The counter-factual is `intro(9)`: read as a raw id it is a number near
 // `u32::MAX`, so a watermark that did not mask the bit would answer with a
@@ -119,242 +134,85 @@ fn the_scope_watermark_clears_every_counter_in_the_body() {
 // push every later expander's counter up for nothing.
 #[test]
 fn a_body_without_syntax_has_no_watermark() {
-    let (_dst, hydrated) = round_trip(
-        |heap, arena| {
-            heap.alloc_in_region(
-                HeapObject::Pair(crate::value::heap::Pair::new(
-                    Value::int(1),
-                    Value::EMPTY_LIST,
-                )),
-                arena.region(),
-            )
-        },
-        "no-watermark",
-    );
+    let (_dst, hydrated) = round_trip(one_pair, "no-watermark");
     assert_eq!(hydrated.scope_watermark, 0);
 }
 
-// ── A parameter and the resource behind its default ──────────────────
+// ── The static-region watermark ──────────────────────────────────────
 
-/// A parameter carrying `default`, allocated into `region`.
-fn parameter_in(heap: &mut FiberHeap, region: RuntimeRegion, id: u32, default: Value) -> Value {
-    heap.alloc_in_region(
-        HeapObject::Parameter {
-            id,
-            default,
-            traits: Value::NIL,
-        },
-        region,
-    )
-}
-
-/// The id and the default of a parameter value.
-fn parameter_of(v: Value) -> (u32, Value) {
-    let HeapObject::Parameter { id, default, .. } = (unsafe { deref(v) }) else {
-        panic!("the value is not a parameter");
-    };
-    (*id, *default)
-}
-
-/// What a `"port"` external says about itself: which stream it is, and which
-/// port it is. Both by value, because an external's payload is borrowed from
-/// the `Value` the caller holds.
-fn port_of(v: Value) -> (PortKind, PortId) {
-    assert_eq!(v.external_type_name(), Some("port"), "not a port external");
-    let port = v
-        .as_external::<Port>()
-        .expect("a port external holds a Port");
-    (port.kind(), port.id())
-}
-
-/// Dump a parameter whose default is a fresh stdout port, as the image's only
-/// reconstruction. Answers the scratch file and the dumped port's identity, so
-/// a caller can ask whether the hydrated port is that one or another.
-fn dump_stdio_parameter(tag: &str, id: u32) -> (Scratch, PortId) {
-    let scratch = Scratch::new(tag);
-    let mut src = FiberHeap::new();
-    let region = src.new_runtime_region();
-    let default = crate::value::build::external(&mut src, "port", Port::stdout(), region);
-    let root = parameter_in(&mut src, region, id, default);
-    super::dump(&mut src, &SymbolTable::new(), root, &scratch.0).expect("dump");
-    (scratch, port_of(default).1)
-}
-
-/// Hydrate `scratch` into a fresh heap, answering both.
-fn hydrate(scratch: &Scratch) -> (FiberHeap, super::super::Hydrated) {
-    let mut dst = FiberHeap::new();
-    let hydrated =
-        super::super::hydrate_path(&mut dst, &mut SymbolTable::new(), &scratch.0).expect("hydrate");
-    (dst, hydrated)
-}
-
-// A `Parameter` is sealed POD, so a default that is ordinary data crosses in
-// the body like the contents of any other object, and the id crosses beside
-// it.
-#[test]
-fn a_parameters_data_default_round_trips() {
-    let scratch = Scratch::new("param-data");
-    let mut src = FiberHeap::new();
-    let region = src.new_runtime_region();
-    let root = parameter_in(&mut src, region, 7, Value::int(42));
-    super::dump(&mut src, &SymbolTable::new(), root, &scratch.0).expect("dump");
-
-    let (_dst, hydrated) = hydrate(&scratch);
-    assert_eq!(parameter_of(hydrated.root), (7, Value::int(42)));
-}
-
-// A stdio port is process-owned, so the hydrating instance opens its own.
+// Only a boot image records a static-region watermark: it is the mark the
+// boot left, which a source boot's first user compile starts from
+// (docs/impl/image/format.md). No compile waits on any other graph's counter,
+// so a plain dump records zero, and its hydration moves no counter.
 //
-// The counter-factual is the port identity. A stdout port answers `port/write`
-// the same way whoever made it, so a hydrated default that was somehow carried
-// across would pass every behavioral check — and hold a `Port` built by a
-// process that has exited. Comparing identities is what tells a rebuilt port
-// from a carried one.
+// The counter-factual is the live counter, read as the dump runs. It answers
+// every parity question correctly, and it writes a different file each time
+// anything compiles between two dumps of one graph.
 #[test]
-fn a_stdio_default_is_rebuilt_by_the_hydrating_instance() {
-    let (scratch, dumped) = dump_stdio_parameter("param-stdio", 1);
-    let (dst, hydrated) = hydrate(&scratch);
-
-    let (_, default) = parameter_of(hydrated.root);
-    let (kind, id) = port_of(default);
-    assert_eq!(kind, PortKind::Stdout, "the stream changed");
-    assert_ne!(id, dumped, "the hydrated default is the dumped port");
-
-    let ptr = default.as_heap_ptr().expect("the default is a heap value");
-    assert_ne!(
-        dst.region_of_ptr(ptr),
-        hydrated.region.get(),
-        "the reconstructed port landed in the image's own pages"
-    );
+fn a_plain_dump_records_no_static_region_watermark() {
+    let (_dst, hydrated) = round_trip(one_pair, "no-static-watermark");
+    assert_eq!(hydrated.static_region_watermark, 0);
 }
 
-// A reconstruction writes a pointer into another region, which is a
-// cross-region reference like any other: counted once at hydration and
-// released once by the free cascade. The trap is the free-time equivalence
-// oracle — a debug build scans the dying region and aborts when the recorded
-// edge table disagrees with what it finds.
-#[test]
-fn a_reconstructed_default_is_counted_once() {
-    let (scratch, _) = dump_stdio_parameter("param-edge", 1);
-    let mut dst = FiberHeap::new();
-    let before = dst.active_region_count();
-    let hydrated =
-        super::super::hydrate_path(&mut dst, &mut SymbolTable::new(), &scratch.0).expect("hydrate");
+// ── Two dumps racing for one path ────────────────────────────────────
 
-    let (_, default) = parameter_of(hydrated.root);
-    let ptr = default.as_heap_ptr().expect("the default is a heap value");
-    let companion =
-        RuntimeRegion::new(dst.region_of_ptr(ptr)).expect("the port lives in a real region");
-    assert_eq!(
-        dst.region_rc(companion),
-        1,
-        "the reconstructed port's region is held by something besides the edge"
-    );
-
-    dst.decref_region_if_present(hydrated.region);
-    assert_eq!(
-        dst.region_rc(companion),
-        0,
-        "freeing the hydrated region did not release the reconstructed port"
-    );
-    assert_eq!(
-        dst.active_region_count(),
-        before,
-        "a hydration left a region behind"
-    );
-}
-
-// Only the three standard streams reconstruct. A file port owns a descriptor
-// this process opened, and the name it was opened under promises nothing about
-// what another process would find there — so the dump fails by name rather
-// than writing an entry no load can answer.
-#[test]
-fn a_file_port_default_refuses_the_dump() {
-    let scratch = Scratch::new("param-file-port");
-    let mut src = FiberHeap::new();
-    let region = src.new_runtime_region();
-    let port = Port::new_unopened(
-        PortKind::File,
-        Direction::Read,
-        Encoding::Text,
-        "image.lisp".to_string(),
-    );
-    let default = crate::value::build::external(&mut src, "port", port, region);
-    let root = parameter_in(&mut src, region, 2, default);
-
-    match super::dump(&mut src, &SymbolTable::new(), root, &scratch.0) {
-        Err(ImageError::Unsupported(what)) => assert!(
-            what.contains("File"),
-            "the refusal does not name the kind of port: {what}"
-        ),
-        other => panic!("expected a refused dump, got {other:?}"),
+/// The list `(0 1 … n-1)`, reversed, in one region of `heap`: megabytes of
+/// pages once `n` is large, so a dump spends long enough writing them for a
+/// second dump to arrive while it does.
+fn long_list(heap: &mut FiberHeap, n: i64) -> Value {
+    let region = heap.new_runtime_region();
+    let mut list = Value::EMPTY_LIST;
+    for i in 0..n {
+        list = heap.alloc_in_region(
+            HeapObject::Pair(crate::value::heap::Pair::new(Value::int(i), list)),
+            region,
+        );
     }
-    assert!(!scratch.0.exists(), "a refused dump left a partial file");
+    list
 }
 
-// The dumper zeroes a reconstructed slot's whole `Value`, both words, so the
-// artifact records nothing about the resource the dumping process held. Two
-// builds whose ports land at different addresses then write one file.
-#[test]
-fn the_artifact_records_no_port_address() {
-    let (scratch, _) = dump_stdio_parameter("param-zero", 1);
-    let bytes = std::fs::read(&scratch.0).expect("read image");
-    let s = super::super::sections(&bytes).expect("a freshly dumped image parses");
-
-    assert_eq!(
-        s.reconstruction.len(),
-        Sections::RECON_BYTES,
-        "the image should name exactly one reconstruction slot"
-    );
-    let slot = u64::from_le_bytes(
-        bytes[s.reconstruction.start..s.reconstruction.start + 8]
-            .try_into()
-            .expect("8 bytes"),
-    ) as usize;
-    let at = s.pages.start + slot;
-    let width = std::mem::size_of::<Value>();
-    assert_eq!(
-        &bytes[at..at + width],
-        vec![0u8; width],
-        "the dumped slot still carries the dumping instance's port"
-    );
-}
-
-// A parameter resolves by id, so a fresh instance minting from its own counter
-// would hand out an id the body already uses, and `parameterize` over either
-// one would rebind both. The watermark is what stops that, and hydration
-// raises the process counter past it.
+// An image file is never rewritten in place (docs/impl/image.md), so two
+// dumps racing for one path each rename a whole file. The warm cache meets
+// this whenever two threads of one process boot at once and both miss.
 //
-// The id is far above anything a test run mints, so `peek` can only exceed it
-// because this image moved the counter.
+// The trap is the thread. A temporary file named for the process is one name
+// for every thread in it, so the second dump truncates the first one's file,
+// the first rename takes it, and the second rename finds nothing to move. The
+// rounds are there because the race needs the two writes to overlap.
 #[test]
-fn the_parameter_watermark_clears_every_id_in_the_body() {
-    const ID: u32 = 4_000_000;
-    let (scratch, _) = dump_stdio_parameter("param-watermark", ID);
-    let (_dst, hydrated) = hydrate(&scratch);
+fn two_threads_dumping_to_one_path_each_rename_a_whole_file() {
+    const LENGTH: i64 = 50_000;
+    let scratch = Scratch::new("race");
+    for round in 0..8 {
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let dumps: Vec<_> = (0..2)
+            .map(|_| {
+                let path = scratch.0.clone();
+                let barrier = std::sync::Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    let mut heap = FiberHeap::new();
+                    let root = long_list(&mut heap, LENGTH);
+                    barrier.wait();
+                    super::dump(&mut heap, &SymbolTable::new(), root, &path)
+                        .map_err(|e| e.to_string())
+                })
+            })
+            .collect();
+        for dump in dumps {
+            if let Err(e) = dump.join().expect("a dumping thread panicked") {
+                panic!("round {round}: a dump racing another for its path failed: {e}");
+            }
+        }
 
-    assert_eq!(hydrated.param_watermark, ID + 1);
-    assert!(
-        crate::value::parameter::peek() > ID,
-        "hydration left the process minting ids the image already uses"
-    );
-}
-
-// A body with no parameter moves no counter. Zero says that, and a dump that
-// reported one anyway would push every later mint up for nothing.
-#[test]
-fn a_body_without_parameters_has_no_watermark() {
-    let (_dst, hydrated) = round_trip(
-        |heap, arena| {
-            heap.alloc_in_region(
-                HeapObject::Pair(crate::value::heap::Pair::new(
-                    Value::int(1),
-                    Value::EMPTY_LIST,
-                )),
-                arena.region(),
-            )
-        },
-        "no-param-watermark",
-    );
-    assert_eq!(hydrated.param_watermark, 0);
+        let (_dst, hydrated) = hydrate(&scratch);
+        let items = hydrated
+            .root
+            .list_to_vec()
+            .expect("the raced file holds a list");
+        assert_eq!(
+            items.len() as i64,
+            LENGTH,
+            "round {round}: the raced file holds a torn list"
+        );
+    }
 }

@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-10-12
 //! Read-only introspection: counts, byte totals, cross-ref/edge dumps, and the
 //! generation accessor. These back the `arena/*` diagnostics and the free-time
 //! equivalence oracle's comparison views; none mutate reclamation state. The
@@ -20,9 +20,10 @@ impl RegionStore {
     }
 
     /// The recorded outgoing edges of a region as `(target, count)` pairs,
-    /// sorted by target id — the test view of `RegionEntry::outgoing` (the §
-    /// "The outgoing edge table" recorded view, distinct from the `cross_ref_edges`
-    /// content scan, so a test can pin the two equal). Empty for an absent region.
+    /// sorted by target id: the test view of `RegionEntry::outgoing`. It is the
+    /// § "The outgoing edge table" recorded view, distinct from the
+    /// `cross_ref_edges` content scan, so a test can pin the two equal. Empty for
+    /// an absent region.
     #[cfg(test)]
     pub fn outgoing_edges(&self, id: RuntimeRegion) -> Vec<(u32, u32)> {
         let idx = id.get() as usize;
@@ -62,13 +63,19 @@ impl RegionStore {
         }
     }
 
-    /// Sum of live objects across every active region. Unlike the
-    /// `FiberHeap::alloc_count` running counter (incremented at alloc,
-    /// decremented only on the decref/decref_if_present paths), this reads the
-    /// current per-region object counts directly, so it tracks ALL
-    /// reclamation — including scope-region resets that recycle a region's
-    /// pages without flowing through `decref_region`. That makes it the
-    /// trustworthy basis for `arena/count`.
+    /// The interval table's regions, in hydration order (docs/impl/image.md).
+    #[cfg(test)]
+    pub(crate) fn interval_table(&self) -> Vec<RuntimeRegion> {
+        self.images.clone()
+    }
+
+    /// Sum of live objects across every active region. The
+    /// `FiberHeap::alloc_count` running counter is incremented at alloc and
+    /// decremented only on the decref/decref_if_present paths. This reads the
+    /// current per-region object counts directly instead, so it tracks ALL
+    /// reclamation, including a group free (`free_region_group`), which does not
+    /// flow through `decref_region`. That makes it the trustworthy basis for
+    /// `arena/count`.
     pub fn total_obj_count(&self) -> usize {
         self.regions
             .iter()
@@ -119,8 +126,8 @@ impl RegionStore {
     /// The backend of the `arena/region-ids` gauge
     /// (docs/impl/region/diagnostics.md).
     ///
-    /// The *id* dimension, which the object, byte, and page gauges cannot show: a
-    /// minted id that never allocates holds none of what they count, yet keeps
+    /// The *id* dimension, which the object, byte, and page gauges cannot show.
+    /// A minted id that never allocates holds none of what they count, yet keeps
     /// its id out of circulation forever (docs/impl/region/model.md § "Physical
     /// id recycling"). A mint that finds `free_physical` empty raises this;
     /// a mint that recycles leaves it alone. So a steady-state loop holds it
@@ -210,17 +217,11 @@ impl RegionStore {
     /// number of references a region's RC carries that are NOT explained by
     /// live region contents (owner/escape references never released).
     pub fn cross_ref_edges(&self) -> Vec<(u32, u32)> {
-        let page_size = self.pool.initial_page_size();
-        let valid = |rid: u32, ptr: *const ()| {
-            self.regions
-                .get(rid as usize)
-                .and_then(|s| s.as_ref())
-                .is_some_and(|e| e.pool.owns(ptr))
-        };
+        let owner = |p| self.owning_region(p);
         let mut edges = Vec::new();
         for (idx, slot) in self.regions.iter().enumerate() {
             if let Some(e) = slot.as_ref() {
-                for to in e.pool.find_region_cross_refs(idx as u32, page_size, &valid) {
+                for to in e.pool.find_region_cross_refs(idx as u32, &owner) {
                     edges.push((idx as u32, to));
                 }
             }
@@ -251,10 +252,11 @@ impl RegionStore {
     ///
     /// A program that ends without letting go of an io-backend strands it to
     /// teardown, with its in-flight ops' `Port`/`ProcessHandle` values still
-    /// filed. Quiescing each backend BEFORE the id-ordered free sweep — while
-    /// every value is still there — keeps the drain from reading, and releasing,
-    /// what an earlier region in the same sweep already freed (src/io/AGENTS.md
-    /// § "A hold is let go while its store is still there").
+    /// filed. So quiesce each backend BEFORE the id-ordered free sweep, while
+    /// every value is still there. The drain then never reads, or releases, what
+    /// an earlier region in the same sweep already freed
+    /// (docs/impl/io-inflight.md § "A hold is let go while its store is still
+    /// there").
     pub fn collect_external_data(&self, type_name: &str) -> Vec<std::rc::Rc<dyn std::any::Any>> {
         let mut out = Vec::new();
         for slot in self.regions.iter() {

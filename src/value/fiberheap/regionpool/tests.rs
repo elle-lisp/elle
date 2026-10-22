@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! Unit tests for one region's pages: dual-ended layout, growth, teardown,
 //! the walk that finds a page base, and the cross-region scan.
 //!
@@ -290,11 +290,20 @@ fn a_slice_backing_in_another_region_is_a_cross_region_reference() {
     let mut holder = pool_for(9);
     let backing = source.alloc_region_slice(b"a line of bytes", &mut pool);
     let inline = holder.alloc_region_slice(b"inline", &mut pool);
-    let valid =
-        |rid: u32, ptr: *const ()| (rid == 7 && source.owns(ptr)) || (rid == 9 && holder.owns(ptr));
+    // The owner resolver a store would pass: the region that owns the
+    // address, or 0 when neither does.
+    let owner = |ptr: *const ()| {
+        if source.owns(ptr) {
+            7
+        } else if holder.owns(ptr) {
+            9
+        } else {
+            0
+        }
+    };
     let refs_of = |obj: &HeapObject| {
         let mut refs = Vec::new();
-        RegionPool::find_object_cross_refs(obj, 9, base_page(), &valid, &mut refs);
+        RegionPool::find_object_cross_refs(obj, 9, &owner, &mut refs);
         refs
     };
 

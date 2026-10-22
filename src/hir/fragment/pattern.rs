@@ -1,10 +1,10 @@
-// audited: 2026-10-06
-//! Rebuilds a `match` arm's pattern against a fragment's table, introducing each variable once.
+// audited: 2026-10-21
+//! Rebuilds a `match` arm's pattern against a fragment's table, and names what a pattern spells.
 //!
 //! docs/impl/hir.md
 
-use super::Rebind;
-use crate::hir::pattern::HirPattern;
+use super::{FragmentName, Rebind};
+use crate::hir::pattern::{HirPattern, PatternKey, PatternLiteral};
 
 /// Rebuild `p`, introducing every variable it binds. An `or` binds the same
 /// variables in each alternative, so the second alternative finds the binding
@@ -76,4 +76,51 @@ fn rebind_entries<K: Clone>(
         .iter()
         .map(|(k, p)| Some((k.clone(), rebind_pattern(p, r)?)))
         .collect()
+}
+
+/// Call `f` on every name `p` spells: a keyword literal, and each struct
+/// pattern's keys. A variable is a binding, which the fragment's table names.
+pub(super) fn pattern_names(p: &HirPattern, f: &mut impl FnMut(FragmentName<'_>)) {
+    match p {
+        HirPattern::Wildcard | HirPattern::Nil | HirPattern::Var(_) => {}
+        HirPattern::Literal(PatternLiteral::Keyword(k)) => f(FragmentName::Keyword(k)),
+        HirPattern::Literal(_) => {}
+        HirPattern::Pair { head, tail } => {
+            pattern_names(head, f);
+            pattern_names(tail, f);
+        }
+        HirPattern::List { elements, rest }
+        | HirPattern::Tuple { elements, rest }
+        | HirPattern::Array { elements, rest } => {
+            for e in elements {
+                pattern_names(e, f);
+            }
+            if let Some(r) = rest {
+                pattern_names(r, f);
+            }
+        }
+        HirPattern::Struct { entries, rest } | HirPattern::Table { entries, rest } => {
+            entry_names(entries, f);
+            if let Some(r) = rest {
+                pattern_names(r, f);
+            }
+        }
+        HirPattern::NamedStruct { entries } => entry_names(entries, f),
+        HirPattern::Set { binding } | HirPattern::SetMut { binding } => pattern_names(binding, f),
+        HirPattern::Or(alts) => {
+            for a in alts {
+                pattern_names(a, f);
+            }
+        }
+    }
+}
+
+fn entry_names(entries: &[(PatternKey, HirPattern)], f: &mut impl FnMut(FragmentName<'_>)) {
+    for (key, p) in entries {
+        f(match key {
+            PatternKey::Keyword(k) => FragmentName::Keyword(k),
+            PatternKey::Symbol(id) => FragmentName::Symbol(*id),
+        });
+        pattern_names(p, f);
+    }
 }

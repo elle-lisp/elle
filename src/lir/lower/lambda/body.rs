@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! Lambda body compilation: state save and restore, environment layout, and the body frozen as a function of its own.
 //!
 //! src/lir/lower/AGENTS.md
@@ -38,8 +38,7 @@ impl<'a> Lowerer<'a> {
         // The body closed for a graft rides to the code payload as bytes, which
         // a later compile decodes once (docs/impl/graft.md).
         head.fragment = match &lambda.fragment {
-            Some(fragment) => bincode::serialize(fragment.as_ref())
-                .expect("a LambdaFragment is plain data, so it serializes"),
+            Some(fragment) => fragment.encode(),
             None => Vec::new(),
         };
 
@@ -93,9 +92,9 @@ impl<'a> Lowerer<'a> {
             }
         });
 
-        // num_locals starts at 0; non-LBox params and let-bound vars
+        // num_locals starts at 0; stack-held params and let-bound vars
         // will increment it as they're allocated.
-        // LBox params go into the env (not counted in num_locals for stack frame).
+        // Cell-held params go into the env (not counted in num_locals for stack frame).
         self.next_reg = 0;
         self.next_label = 1;
         self.discard_slot = None;

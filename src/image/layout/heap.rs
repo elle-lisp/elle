@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The heap-object half of the layout probe: exemplars and field extents for
 //! every `HeapObject` variant the dumper can emit.
 //!
@@ -36,8 +36,8 @@ impl Probed for HeapObject {
 
     const TAGS: &'static [HeapTag] = &PROBED;
     const PREFIX: &'static str = "";
-    /// A `HeapObject` aligns every payload to a word, so the seven bytes
-    /// above the discriminant are padding the probe asserts are zero.
+    /// A `HeapObject`'s discriminant is a whole word, its `HeapTag`, so the
+    /// seven bytes above the low one are written zeros.
     const DISC_BYTES: usize = 8;
 
     fn layouts() -> &'static [VariantLayout<HeapTag>] {

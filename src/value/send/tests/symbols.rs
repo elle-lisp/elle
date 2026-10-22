@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! A symbol or keyword that crosses the send boundary names the same thing on the receiving side.
 //!
 //! docs/impl/symbol.md
@@ -40,13 +40,7 @@ fn a_symbol_value_names_the_same_symbol_on_both_sides() {
     .expect("symbol is sendable");
 
     let mut receiver = skewed_receiver();
-    let got = {
-        let heap_ptr = crate::value::arena::leaked_test_heap();
-        let region = unsafe { (*heap_ptr).new_runtime_region() };
-        let mut alloc =
-            crate::primitives::ctx::Alloc::with_region(region, unsafe { &mut *heap_ptr });
-        sv.into_value(&mut alloc, Some(&mut receiver))
-    };
+    let got = into_value_in_region(|alloc| sv.into_value(alloc, Some(&mut receiver)));
 
     let got_id = got.as_symbol().expect("reconstructed value is a symbol");
     assert_eq!(got_id, begin, "the id crosses unchanged");
@@ -83,13 +77,7 @@ fn a_symbol_struct_key_names_the_same_symbol_on_both_sides() {
 
         let mut receiver = skewed_receiver();
         let probe = TableKey::Symbol(receiver.intern("key-alpha"));
-        let got = {
-            let heap_ptr = crate::value::arena::leaked_test_heap();
-            let region = unsafe { (*heap_ptr).new_runtime_region() };
-            let mut alloc =
-                crate::primitives::ctx::Alloc::with_region(region, unsafe { &mut *heap_ptr });
-            bundle.into_value(&mut alloc, Some(&mut receiver))
-        };
+        let got = into_value_in_region(|alloc| bundle.into_value(alloc, Some(&mut receiver)));
 
         let entries = got.as_struct().expect("reconstructed value is a struct");
         assert_eq!(
@@ -171,13 +159,7 @@ fn a_keyword_names_the_same_keyword_on_both_sides() {
             SendBundle::from_value(s, h.heap(), Some(&sender)).expect("struct is sendable");
 
         let mut receiver = SymbolTable::new();
-        let got = {
-            let heap_ptr = crate::value::arena::leaked_test_heap();
-            let region = unsafe { (*heap_ptr).new_runtime_region() };
-            let mut alloc =
-                crate::primitives::ctx::Alloc::with_region(region, unsafe { &mut *heap_ptr });
-            bundle.into_value(&mut alloc, Some(&mut receiver))
-        };
+        let got = into_value_in_region(|alloc| bundle.into_value(alloc, Some(&mut receiver)));
 
         assert_eq!(
             format!("{}", got.display_with(Some(&receiver))),

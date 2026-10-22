@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! Closing a body into an `HirFragment` and grafting it into another arena: what crosses whole, and what declines.
 //!
 //! docs/impl/hir.md
@@ -14,6 +14,14 @@ struct Lambda {
     body: Hir,
     numeric: bool,
     arena: BindingArena,
+}
+
+impl Lambda {
+    /// Close the body over its parameters, admitting an intrinsic exactly when
+    /// the function declares `(numeric!)`.
+    fn close(&self) -> Option<(Vec<u32>, HirFragment)> {
+        HirFragment::close(&self.body, &self.params, &self.arena, self.numeric)
+    }
 }
 
 /// Compile `source` and hand back its first lambda's parameters, body, and
@@ -112,8 +120,7 @@ fn let_indices(fragment: &HirFragment, params: &[u32]) -> Vec<usize> {
 #[test]
 fn a_graft_reproduces_the_defining_arenas_metadata_field_for_field() {
     let l = lambda("(fn [x] (let [y (hash x)] y))");
-    let (params, fragment) =
-        HirFragment::close(&l.body, &l.params, &l.arena, l.numeric).expect("the body closes");
+    let (params, fragment) = l.close().expect("the body closes");
 
     let source_param = format!("{:?}", l.arena.get(l.params[0]));
     let mut host = l.arena;
@@ -164,8 +171,7 @@ fn a_graft_names_only_bindings_of_the_host_arena() {
         l.arena.len() > 100,
         "the defining arena must be far larger than the host, or this proves nothing"
     );
-    let (_params, fragment) =
-        HirFragment::close(&l.body, &l.params, &l.arena, l.numeric).expect("the body closes");
+    let (_params, fragment) = l.close().expect("the body closes");
 
     let (mut host, globals) = arena_with_primitives(&["hash"]);
     let (_map, body) = fragment
@@ -184,8 +190,7 @@ fn a_graft_names_only_bindings_of_the_host_arena() {
 #[test]
 fn a_sequential_let_maps_a_later_value_to_the_earlier_fresh_binding() {
     let l = lambda("(fn [x] (let [a x] (let [b a] b)))");
-    let (_params, fragment) =
-        HirFragment::close(&l.body, &l.params, &l.arena, l.numeric).expect("the body closes");
+    let (_params, fragment) = l.close().expect("the body closes");
 
     let (mut host, globals) = arena_with_primitives(&[]);
     let (_map, body) = fragment
@@ -214,7 +219,7 @@ fn a_free_local_declines_the_close() {
     // so no other unit can name it and the body is not portable.
     let l = lambda("(let [z 1] (fn [x] z))");
     assert!(
-        HirFragment::close(&l.body, &l.params, &l.arena, l.numeric).is_none(),
+        l.close().is_none(),
         "a body naming an enclosing runtime local must decline"
     );
 }
@@ -225,17 +230,13 @@ fn a_letrec_declines_the_close() {
     // rebuilt. That order is what makes a sequential `let` closable and a
     // `letrec` unrepresentable: a `letrec` value may name the binding it defines.
     let l = lambda("(fn [x] (letrec [y 1] y))");
-    assert!(
-        HirFragment::close(&l.body, &l.params, &l.arena, l.numeric).is_none(),
-        "a `letrec` body must decline"
-    );
+    assert!(l.close().is_none(), "a `letrec` body must decline");
 }
 
 #[test]
 fn an_unresolvable_global_declines_the_graft_and_mints_nothing() {
     let l = lambda("(fn [x] (hash x))");
-    let (_params, fragment) =
-        HirFragment::close(&l.body, &l.params, &l.arena, l.numeric).expect("the body closes");
+    let (_params, fragment) = l.close().expect("the body closes");
 
     let (mut host, globals) = arena_with_primitives(&["identical?"]);
     let before = host.len();
@@ -253,8 +254,7 @@ fn an_unresolvable_global_declines_the_graft_and_mints_nothing() {
 #[test]
 fn a_fragment_survives_a_serialization_round_trip() {
     let l = lambda("(fn [x] (let [y (hash x)] y))");
-    let (params, fragment) =
-        HirFragment::close(&l.body, &l.params, &l.arena, l.numeric).expect("the body closes");
+    let (params, fragment) = l.close().expect("the body closes");
 
     let bytes = bincode::serialize(&fragment).expect("a fragment serializes");
     let decoded: HirFragment = bincode::deserialize(&bytes).expect("and deserializes");
@@ -294,3 +294,5 @@ fn an_intrinsic_closes_only_under_the_numeric_declaration() {
         "without it there is no fact to carry, so the body must decline"
     );
 }
+
+mod names;

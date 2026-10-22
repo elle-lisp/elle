@@ -1,4 +1,4 @@
-// audited: 2026-09-11
+// audited: 2026-10-12
 //! The hydrator: map an image's pages privately, relocate them, and install
 //! them as a freshly minted counted region.
 //!
@@ -104,6 +104,7 @@ pub fn hydrate(
         || header.prims_len > 1 << 32
         || header.scope_watermark > u32::MAX as u64
         || header.param_watermark > u32::MAX as u64
+        || header.static_region_watermark > u32::MAX as u64
     {
         return Err(corrupt("section counts out of range"));
     }
@@ -168,6 +169,8 @@ pub fn hydrate(
     // (docs/impl/image/format.md).
     let param_watermark = header.param_watermark as u32;
     crate::value::parameter::raise_to(param_watermark);
+    let static_region_watermark = header.static_region_watermark as u32;
+    crate::lir::lower::raise_static_regions_to(static_region_watermark);
 
     // An immediate-rooted image maps nothing; the region is empty.
     if header.n_pages == 0 {
@@ -177,6 +180,7 @@ pub fn hydrate(
             region,
             scope_watermark: header.scope_watermark as u32,
             param_watermark,
+            static_region_watermark,
         });
     }
 
@@ -343,6 +347,7 @@ pub fn hydrate(
         region,
         scope_watermark: header.scope_watermark as u32,
         param_watermark,
+        static_region_watermark,
     })
 }
 
@@ -386,3 +391,6 @@ fn reconstruct(
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

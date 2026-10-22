@@ -1,9 +1,9 @@
-// audited: 2026-09-21
+// audited: 2026-10-21
 //! Booting from an image: what a boot dump carries, what a fresh instance
-//! answers out of it, and what the warm cache stores.
+//! answers out of it, what the warm cache stores, and what a blob boots.
 //!
 //! docs/impl/image/boot.md
-//! docs/impl/image/plan.md
+//! docs/impl/image/pins.md
 //!
 //! This is its own test binary because a boot dump is refused by any signal
 //! the process declared. Signal inference marks a core.lisp closure as able to
@@ -20,9 +20,21 @@ use elle::image::ImageError;
 use elle::runtime::Runtime;
 use elle::value::Value;
 
+/// Evaluate `source` in `rt` and answer its value.
+fn eval(rt: &mut Runtime, source: &str) -> Value {
+    let (vm, symbols, cctx) = rt.parts();
+    elle::pipeline::eval_all(source, symbols, vm, cctx, "<image-boot>").expect("eval")
+}
+
 mod boot {
     include!("image_boot/boot.rs");
 }
+mod determinism {
+    include!("image_boot/determinism.rs");
+}
 mod warm {
     include!("image_boot/warm.rs");
+}
+mod embedded {
+    include!("image_boot/embedded.rs");
 }

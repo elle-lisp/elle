@@ -1,6 +1,6 @@
 # Values
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-21 -->
 
 Every Elle value is a 16-byte tagged union: an 8-byte tag and an 8-byte
 payload.
@@ -81,17 +81,20 @@ TAG_CAPTURE_CELL (34) CaptureCell { cell: Rc<RefCell<Value>>, origin, traits }
 TAG_CLOSURE_TEMPLATE (35) ClosureTemplate(ClosureTemplate)  # never user-visible
 ```
 
-The tag numbers are not contiguous and are not in HeapObject declaration order
-(`TAG_STRING` was swapped to 26 so `TAG_NATIVE_FN` could sit at 10, just below
-`TAG_HEAP_START` = 11; nothing hardcodes the numeric values — all uses are by
-name). `Float` (the heap-NaN variant) has no live tag: all floats are immediate
+The tag numbers are not contiguous and are not in HeapObject declaration order:
+`TAG_NATIVE_FN` sits at 10, just below `TAG_HEAP_START` = 11, and `TAG_STRING`
+at 26. They are a numbering apart from `HeapTag`'s, and every use names them
+rather than their values. `Float` (the heap-NaN variant) has no live tag: all floats are immediate
 (`TAG_FLOAT`), and `HeapObject::Float` is never allocated. See
 [heap.rs](../../src/value/heap.rs) for the authoritative list.
 
 ### Heap allocation
 
-`HeapObject` is a Rust enum — a fixed-size tagged union. All variants
-occupy the same number of bytes (the size of the largest variant). Each
+`HeapObject` is a `repr(u64)` enum, so every object starts with a word that
+holds its `HeapTag`, and each variant's discriminant is that tag. Every variant
+occupies the size of the largest, and the largest is `Syntax`, a node and its
+`traits`. A bigger payload goes behind a `Box`, as `FFISignature`'s libffi CIF
+does, so that one rare type does not set the size of every object. Each
 `HeapObject` lives in a region page of the instance's `FiberHeap`
 (backed by a `RegionStore`), which every fiber of the instance shares.
 
@@ -138,7 +141,7 @@ slice of a mutable value copies because a `Vec` can move.
 
 ### Trait tables
 
-Every user-facing heap variant (19 types) carries a `traits: Value` field
+Every user-facing heap variant (20 types) carries a `traits: Value` field
 initialized to `NIL`. The five infrastructure variants (`Float`, `LibHandle`,
 `FFISignature`, `FFIType`, `ClosureTemplate`) do not. `with-traits` accepts only
 a struct (`LStruct` or `LStructMut`) as the table to store here. The field is

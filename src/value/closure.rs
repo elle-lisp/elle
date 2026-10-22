@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-21
 //! Closure type for the Elle runtime
 //!
 //! docs/impl/region/template.md
@@ -27,6 +27,7 @@ mod arity;
 mod boundary;
 mod builder;
 mod header;
+mod names;
 mod payload;
 mod unit;
 
@@ -154,9 +155,9 @@ impl Closure {
         }
     }
 
-    /// Returns the underlying template signal, accounting for any squelch mask.
-    /// Prefer effective_signal() for external consumers.
-    /// Use template.signal() directly in JIT contexts where squelch must not
+    /// The effective signal, squelch mask applied: the same answer as
+    /// [`effective_signal`](Self::effective_signal), which external consumers
+    /// should prefer. Use template.signal() directly in JIT contexts where squelch must not
     /// affect code generation (the underlying bytecode still yields; squelch
     /// enforcement happens at the call boundary, not inside the JIT'd code).
     pub fn signal(&self) -> Signal {

@@ -1,17 +1,19 @@
-// audited: 2026-09-21
+// audited: 2026-10-20
 //! The boot configuration: dump a booted instance's exports and macros as one
 //! image, and install one into a fresh instance.
 //!
 //! docs/impl/image/boot.md
 //!
 //! The root is one immutable struct, so the manifest is body data and the
-//! ordinary dumper and hydrator carry it. `BootImage` is the warm cache's
-//! policy: where an instance looks for an image, and where it stores the one
-//! it compiled.
+//! ordinary dumper and hydrator carry it. `BootImage` is the boot-image
+//! policy: the embedded blob an instance hydrates, the warm cache it reads,
+//! and where it stores the image it compiled.
 
+mod blob;
 mod build;
 mod cache;
 mod install;
+mod open;
 #[cfg(test)]
 mod tests;
 
@@ -25,7 +27,9 @@ use crate::value::{TableKey, Value};
 
 use super::ImageError;
 
-pub(crate) use cache::store;
+pub use blob::Blob;
+pub(crate) use cache::{store, Executable};
+pub(crate) use open::OpenImage;
 
 /// The keys the root struct and a macro entry carry. Both halves name them —
 /// [`build`] writing, [`install`] reading — so they are spelled once.
@@ -44,18 +48,28 @@ mod key {
 /// Where an instance looks for its boot image, and where it stores one.
 ///
 /// A construction parameter rather than process state, for the reason
-/// [`crate::compiler::stdlib_cache::StdlibCache`] is one: the suite builds many
+/// [`crate::compiler::stdlib_cache::StdlibCache`] is one. The suite builds many
 /// instances across threads, and a directory that travels with the instance is
 /// what keeps one test's cache invisible to the test beside it.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum BootImage {
     /// Never read or write an image; compile core, prelude and stdlib.
-    #[default]
     Off,
-    /// The process-wide choice: `boot` beneath the `--cache=<dir>` directory.
+    /// The process-wide choice: the blob this binary carries, then the warm
+    /// cache in `boot` beneath the `--cache=<dir>` directory. `--cache=` with
+    /// no directory turns the warm cache off.
+    #[default]
     Process,
-    /// This directory, whatever the process-wide choice is.
+    /// The warm cache in this directory, whatever the process-wide choice is.
+    /// It reads no blob.
     Dir(PathBuf),
+    /// The image `blob` holds, then the warm cache in `fallback` when there is
+    /// one and the blob is refused. `Process` resolves to this when the binary
+    /// carries a blob (docs/impl/image/boot.md).
+    Embedded {
+        blob: Blob,
+        fallback: Option<PathBuf>,
+    },
 }
 
 /// Where a runtime's boot state came from. A warm cache that silently never
@@ -73,7 +87,7 @@ pub enum BootSource {
 ///
 /// The fingerprint gates layout and says nothing about the sources, so this is
 /// what decides whether an image still describes them
-/// (docs/impl/image/boot.md). It also names the warm cache's file, so an edit
+/// (docs/impl/image/boot.md). It also enters the warm cache's key, so an edit
 /// to any of the three misses rather than loads.
 pub fn sources_digest() -> String {
     use crate::pipeline::sources::{CORE, PRELUDE, STDLIB};
@@ -88,8 +102,8 @@ pub fn sources_digest() -> String {
 /// A hydrated boot image, installed as a process root and ready for a fresh
 /// instance to read its pieces out of.
 ///
-/// The three fields are read out of the root struct once, here, rather than on
-/// every question: a borrow of the macro table is then the `Boot`'s, which is
+/// The value fields are read out of the root struct once, here, rather than on
+/// every question. A borrow of the macro table is then the `Boot`'s, which is
 /// the region's lifetime rather than a temporary's.
 #[derive(Debug)]
 pub struct Boot {
@@ -160,18 +174,27 @@ pub(super) fn field_text(structure: Value, name: &str) -> Option<String> {
     value.as_str().map(str::to_owned)
 }
 
-/// Hydrate the boot image at `path` into `heap`, or answer why this binary
-/// refuses it.
-///
-/// A refusal leaves no region behind. On success the image's region is a
-/// process root, so the whole boot graph is released by one decref at teardown
-/// — the caller installs the pieces and never frees them itself.
+/// Hydrate the boot image at `path` into `heap`: [`hydrate`] over the whole file.
 pub fn hydrate_path(
     heap: &mut FiberHeap,
     symbols: &mut SymbolTable,
     path: &Path,
 ) -> Result<Boot, ImageError> {
-    let hydrated = super::hydrate_path(heap, symbols, path)?;
+    hydrate(heap, symbols, &super::ImageSource::open(path)?)
+}
+
+/// Hydrate the boot image `source` holds into `heap`, or answer why this binary
+/// refuses it.
+///
+/// A refusal leaves no region behind. On success the image's region is a
+/// process root, so the whole boot graph is released by one decref at teardown
+/// — the caller installs the pieces and never frees them itself.
+pub fn hydrate(
+    heap: &mut FiberHeap,
+    symbols: &mut SymbolTable,
+    source: &super::ImageSource,
+) -> Result<Boot, ImageError> {
+    let hydrated = super::hydrate(heap, symbols, source)?;
     let nil_field = |name| field(hydrated.root, name).unwrap_or(Value::NIL);
     let boot = Boot {
         root: hydrated.root,
@@ -223,18 +246,20 @@ impl Boot {
 /// Dump `cctx`'s boot state to `path`, atomically.
 ///
 /// The graph is the two export structs and the macro table, under a digest of
-/// the sources they came from. The aggregate is assembled in a scratch region
-/// dropped either way: it names values the instance owns and takes no
-/// reference to them, exactly as the dumper's own scratch does.
+/// the sources they came from. The header carries the static-region mark the
+/// boot left. The aggregate is assembled in a scratch region dropped either
+/// way: it names values the instance owns and takes no reference to them,
+/// exactly as the dumper's own scratch does.
 pub(crate) fn dump(
     heap: &mut FiberHeap,
     symbols: &mut SymbolTable,
     cctx: &crate::pipeline::CompileCtx,
     path: &Path,
-) -> Result<(), ImageError> {
+) -> Result<std::fs::File, ImageError> {
     let scratch = heap.new_runtime_region();
-    let result = build::root(heap, symbols, cctx, scratch)
-        .and_then(|root| super::dump(heap, symbols, root, path));
+    let result = build::root(heap, symbols, cctx, scratch).and_then(|root| {
+        super::dump::dump_marked(heap, symbols, root, path, cctx.static_region_mark())
+    });
     heap.decref_region_if_present(scratch);
     result
 }

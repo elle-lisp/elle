@@ -1,6 +1,6 @@
 # Runtime Configuration (`vm/config`)
 
-<!-- audited: 2026-10-15 -->
+<!-- audited: 2026-10-20 -->
 
 What a build decides, what the `elle` command line sets, and what a running
 program reads and changes through `vm/config`.
@@ -123,7 +123,7 @@ Available trace keywords:
 | `:regions` | Region inference and lifetime decisions |
 | `:anf` | A-normal form lift pass |
 | `:pages` | Region page allocation |
-| `:boot` | Boot-sequence timing: primitive registration, core, prelude, stdlib compile/execute (string-traced, no bit) |
+| `:boot` | Boot-sequence timing: primitive registration, core, prelude, stdlib compile/execute, the boot image's hydrate and store, and whether the embedded blob was mapped or copied (string-traced, no bit) |
 | `:census` | Post-boot heap census: per-tag object counts and bytes, capture cells, pointer-slot density, unsealed variants (string-traced, no bit; see [sealing.md](impl/image/sealing.md)) |
 | `:free` | Region free diagnostics (string-traced, no bit) |
 | `:guardfree` | Guarded-free diagnostics (string-traced, no bit) |
@@ -141,7 +141,7 @@ grep filtering.
 
 ### Old flags (aliases)
 
-Old `--debug-*` flags are kept as aliases for backward compatibility:
+Elle keeps the old `--debug-*` flags as aliases:
 
 | Old flag | Equivalent |
 |----------|-----------|
@@ -186,20 +186,24 @@ elle --wasm=lazy script.lisp        # the same, on the eleventh call
 ### Boot image
 
 ```bash
-elle --boot-image=off script.lisp    # compile core, prelude and stdlib (default)
-elle --boot-image=on script.lisp     # warm-cache a boot image under --cache=
-elle --boot-image=DIR script.lisp    # warm-cache it in DIR
+elle --boot-image=on script.lisp     # the embedded blob, then the warm cache under --cache= (default)
+elle --boot-image=DIR script.lisp    # the warm cache in DIR alone
+elle --boot-image=off script.lisp    # compile core, prelude and stdlib
 ```
 
 A boot image is core.lisp, prelude.lisp and stdlib.lisp already compiled, as
-page bytes an instance maps instead of running the front end. On a hit, boot
-hydrates it; on a miss, boot compiles from source and stores one for the next
-start. `elle image dump-boot FILE` writes one explicitly.
+page bytes an instance maps instead of running the front end. A release binary
+that `make elle` built carries one, the embedded blob, and the default
+hydrates it. A binary without a blob reads the warm cache instead. On a hit,
+boot hydrates the stored image; on a miss, boot compiles from source and
+stores one for the next start. `elle image dump-boot FILE` writes one
+explicitly.
 
-The default is off. User code under an image boot compiles without cross-unit
-inlining yet, so turning it on trades steady-state throughput for startup;
-[boot.md](impl/image/boot.md) owns the policy and names what the default waits
-on.
+The default keeps the warm cache in `boot` beneath the `--cache=` directory, so
+`--cache=` with no directory turns the warm cache off and leaves the blob. An
+image boot runs user code as a source boot does, on every tier.
+[boot.md](impl/image/boot.md) owns the policy, the key that ties an image to
+the binary that stored it, and the paths the default does not reach.
 
 ### The cache directory
 
@@ -296,8 +300,8 @@ with an `:argument-error`.
 
 ### Future feature flags
 
-The following keywords are accepted in trace sets without error, for
-forward compatibility:
+A trace set accepts the following keywords without error, for forward
+compatibility:
 
 - `:spirv` — SPIR-V shader compilation
 - `:mlir` — MLIR compilation tier

@@ -1,6 +1,6 @@
 # ffi
 
-<!-- audited: 2026-10-13 -->
+<!-- audited: 2026-10-21 -->
 
 The foreign function interface: load C libraries, describe C types, marshal values, and call through libffi.
 
@@ -64,7 +64,7 @@ Elle code
   ├─ ffi/native "libm.so.6"  →  registry::load()  →  process-global mapping; FFISubsystem maps id→key
   ├─ ffi/lookup lib "sqrt"    →  FFISubsystem::get_symbol(id,"sqrt")  →  registry::symbol()  →  Value::pointer(addr)
   ├─ ffi/signature :double [:double]  →  Signature  →  ctx.ffi_signature()
-  │                                                      └─ HeapObject::FFISignature(sig, RefCell<Option<Cif>>)
+  │                                                      └─ HeapObject::FFISignature(sig, RefCell<Option<Box<Cif>>>)
   └─ ffi/call ptr sig 2.0     →  prim_ffi_call
        │
        ├─ Value.get_or_prepare_cif()  →  lazily prepares and caches Cif
@@ -134,7 +134,7 @@ with `read_value_from_buffer`.
 
 Reified function signature: `convention`, `ret: TypeDesc`, `args: Vec<TypeDesc>`,
 `fixed_args: Option<usize>`. The `fixed_args` field supports variadic functions
-(e.g., `printf`): `Some(n)` means the first `n` args are fixed, the rest are
+(for example `printf`): `Some(n)` means the first `n` args are fixed, the rest are
 variadic. `None` means non-variadic.
 
 ### MarshalledArg
@@ -199,9 +199,11 @@ so dropping a worker's `FFISubsystem` `dlclose`s nothing. Methods: `load_library
    `:string` (invariant 2).
 
 6. **CIF caching is per signature value.** `HeapObject::FFISignature` holds a
-   `RefCell<Option<Cif>>` that `Value::get_or_prepare_cif()` fills on first
-   use, and every later `ffi/call` with that value reuses it. Two
+   `RefCell<Option<Box<Cif>>>` that `Value::get_or_prepare_cif()` fills on
+   first use, and every later `ffi/call` with that value reuses it. Two
    `ffi/signature` calls with the same types make two values with two caches.
+   The CIF sits behind a `Box` because an inline one would set the size of
+   every heap object ([values.md](../../docs/impl/values.md)).
 
 7. **NULL is nil.** `Value::pointer(0)` is `Value::NIL`, so a NULL return
    value reads as nil, and nil marshals to NULL for `:ptr` and `:string`.
@@ -216,7 +218,7 @@ so dropping a worker's `FFISubsystem` `dlclose`s nothing. Methods: `load_library
 10. **Library mappings are process-global and never `dlclose`d**
     ([registry.rs](registry.rs), matching [plugin.rs](../plugin.rs)). A worker
     that loads an FFI library and exits never unmaps
-    it, so a thread-local destructor the library registered (e.g. libgit2 via OpenSSL)
+    it, so a thread-local destructor the library registered (for example libgit2 via OpenSSL)
     always runs against still-mapped code — the worker-teardown SIGSEGV in
     `__nptl_deallocate_tsd` is impossible by construction. Teardown (`ffi/on-unload` +
     `ffi/run-teardowns`) is explicit-only, optional graceful cleanup; the runtime

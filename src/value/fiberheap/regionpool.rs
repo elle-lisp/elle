@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! Per-region storage with dual-ended page layout.
 //!
 //! docs/impl/region/model.md
@@ -18,11 +18,13 @@
 //!
 //! The 16-byte page header — the region id, the `(generation, store)` stamp,
 //! and the self-validating size tag — lives in `header.rs` beside the masked
-//! walk that reads it from a pointer.
+//! walk that reads it from a pointer. `image.rs` adopts a hydrated image's pages
+//! and reports the layouts a dump copies.
 //!
 //! No per-slot free list — regions are freed in bulk only.
 
 use std::mem::{align_of, size_of};
+use std::ops::Range;
 
 use super::pagepool::{MmapPage, PageDirty, PagePool};
 use super::{holds_value_refs, needs_drop};
@@ -31,21 +33,23 @@ use crate::value::region_slice::RegionSlice;
 use crate::value::Value;
 
 mod header;
+mod image;
 
 #[cfg(test)]
-pub(crate) use header::header_of_page_ptr;
-pub(crate) use header::{header_if_valid, region_of_page_ptr, PageStamp, HEADER_SIZE};
+pub(crate) use header::header_if_valid;
+pub(crate) use header::{header_of_page_ptr, region_of_page_ptr, PageStamp, HEADER_SIZE};
+pub(crate) use image::PageLayout;
 
 /// Upper bound on a region's geometrically-growing page size.
 ///
 /// A region doubles its next page size each time it claims one, so a
-/// region that keeps allocating amortises page-claim cost. Left uncapped
-/// the doubling races into hundreds of MB or multi-GB pages: a region that
-/// holds its garbage until it dies claims a page double the last for the
-/// next handful of bytes, turning a linear byte total into a geometric
-/// memory total. Saturating the growth here bounds the over-allocation per
-/// region to one page. A single allocation larger than this still gets a
-/// one-off page sized to fit (see `alloc_data`).
+/// region that keeps allocating amortises page-claim cost. Uncapped, the
+/// doubling reaches pages of hundreds of MB or more. A region that holds its
+/// garbage until it dies claims a page double the last for the next handful
+/// of bytes, which turns a linear byte total into a geometric memory total.
+/// Saturating the growth here bounds the over-allocation per region to one
+/// page. A single allocation larger than this still gets a one-off page
+/// sized to fit (see `alloc_data`).
 const MAX_PAGE_SIZE: usize = 1 << 22; // 4 MiB
 
 /// A single page owned by a region.
@@ -104,10 +108,10 @@ impl RegionPage {
         Some(unsafe { self.page.as_mut_ptr().add(start) })
     }
 
-    /// Hand this page back to the pool along with the spans this region wrote —
-    /// the only route a region page takes out of a region, so the cursors that
-    /// describe it can never be read off a different page
-    /// (docs/impl/region/model.md § "Page recycling").
+    /// Hand this page back to the pool along with the spans this region wrote.
+    /// This is the only route a region page takes out of a region, so the
+    /// cursors that describe it can never be read off a different page
+    /// (docs/impl/region/model.md).
     ///
     /// The object span starts *after* the header, so the page keeps the
     /// `(region_id, generation, store)` stamp written at claim while it waits
@@ -128,13 +132,11 @@ impl RegionPage {
     }
 }
 
-/// One page's byte layout, as [`RegionPool::page_layouts`] reports it.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct PageLayout {
-    pub base: usize,
-    pub len: usize,
-    pub obj_cursor: usize,
-    pub data_cursor: usize,
+/// The pages a hydrated image mapped: the interval they tile, and how many of
+/// the pool's pages, from the first, lie in it.
+struct ImageSpan {
+    interval: Range<usize>,
+    pages: usize,
 }
 
 /// Per-region storage: owns pages, tracks objects needing Drop.
@@ -142,9 +144,9 @@ pub(crate) struct RegionPool {
     pages: Vec<RegionPage>,
     region_id: u32,
     /// The `(generation, store)` stamp written into every page header this
-    /// pool claims (docs/impl/region/generations.md § "Region generations"). Fixed for the
-    /// pool's lifetime: a region is created at one generation, by one
-    /// store, and freed whole.
+    /// pool claims (docs/impl/region/generations.md). Fixed for the pool's
+    /// lifetime: a region is created at one generation, by one store, and freed
+    /// whole.
     stamp: PageStamp,
     /// Number of HeapObject slots allocated.
     obj_count: usize,
@@ -161,6 +163,11 @@ pub(crate) struct RegionPool {
     /// never a process-global — a `--trace=pages` toggle in one instance cannot
     /// make another instance's page claims spam.
     trace: crate::config::TraceCell,
+    /// The interval a hydrated image's pages tile (docs/impl/image.md). `owns`
+    /// answers inside it with a range check, and the store's interval table
+    /// reads it before the page-base walk. `None` for a region that hydrated
+    /// nothing.
+    image: Option<ImageSpan>,
 }
 
 mod introspect;
@@ -181,6 +188,7 @@ impl RegionPool {
             ref_objs: Vec::new(),
             next_page_size: initial_page_size,
             trace,
+            image: None,
         }
     }
 
@@ -292,62 +300,10 @@ impl RegionPool {
         for rp in pages {
             rp.release_into(pool);
         }
+        self.image = None;
         let freed = self.obj_count;
         self.obj_count = 0;
         freed
-    }
-
-    /// Byte layout of every page this region owns, in claim order. The image
-    /// dumper reads these to copy page bytes and bound the meaningful spans
-    /// (docs/impl/image.md § Dumping).
-    pub(crate) fn page_layouts(&self) -> Vec<PageLayout> {
-        self.pages
-            .iter()
-            .map(|p| PageLayout {
-                base: p.page.as_ptr() as usize,
-                len: p.page.len(),
-                obj_cursor: p.obj_cursor,
-                data_cursor: p.data_cursor,
-            })
-            .collect()
-    }
-
-    /// Adopt a hydrated image page (docs/impl/image.md § Hydration steps 3–5):
-    /// stamp its header with this region's identity and install the cursors
-    /// the image's page table recorded, so later allocation into this region
-    /// and the release spans both see the true layout.
-    pub(crate) fn adopt_hydrated_page(
-        &mut self,
-        page: MmapPage,
-        obj_cursor: usize,
-        data_cursor: usize,
-    ) {
-        debug_assert!(
-            HEADER_SIZE <= obj_cursor && obj_cursor <= data_cursor && data_cursor <= page.len(),
-            "hydrated page cursors out of order: {obj_cursor}..{data_cursor} in {}",
-            page.len(),
-        );
-        let mut rp = RegionPage::new(page, self.region_id, self.stamp);
-        rp.obj_cursor = obj_cursor;
-        rp.data_cursor = data_cursor;
-        self.pages.push(rp);
-    }
-
-    /// Rebuild the object bookkeeping from an image's object index
-    /// (docs/impl/image.md § Hydration step 5): route each object to `dtors`
-    /// or `ref_objs` by the same predicates the alloc path uses, and count it.
-    pub(crate) fn install_object_index(
-        &mut self,
-        objects: &[(*mut HeapObject, crate::value::heap::HeapTag)],
-    ) {
-        for &(ptr, tag) in objects {
-            if needs_drop(tag) {
-                self.dtors.push(ptr);
-            } else if holds_value_refs(tag) {
-                self.ref_objs.push(ptr);
-            }
-        }
-        self.obj_count += objects.len();
     }
 
     /// Add a new page from the pool.

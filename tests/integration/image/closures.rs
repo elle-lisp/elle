@@ -1,8 +1,8 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 // A closure and its code object cross the body, field by field and sharing
 // kept.
 // docs/impl/image/sealing.md
-// docs/impl/image/plan.md
+// docs/impl/image/pins.md
 
 use std::rc::Rc;
 
@@ -10,11 +10,16 @@ use super::*;
 use elle::hir::region::StaticRegion;
 use elle::hir::VarargKind;
 use elle::image::Sections;
-use elle::pipeline::eval_all;
 use elle::signals::Signal;
 use elle::value::heap::deref;
 use elle::value::{Arity, CaptureMask, RestListLayout};
 use elle::SourceLoc;
+
+/// The file the compiled closures below are written in.
+const FILE: &str = "<image-closures>";
+
+/// A lambda whose body is all intrinsics, so its graph is its own.
+const COMPILED: &str = "(fn [x] (if (%eq x 2) 42 7))";
 
 /// A code object exercising every payload field a data closure carries: real
 /// locations with two interned files, both release tables, a merge set, the
@@ -62,9 +67,9 @@ fn full_code(heap: &mut FiberHeap, region: RuntimeRegion) -> (TemplateRef, Value
     (code, shared)
 }
 
-// § Test plan, "Closures": the payload survives field by field, and the env
-// and squelch mask beside it. Sharing is one graph: an env value that is also
-// a constant hydrates as ONE object, reachable both ways.
+// The payload survives field by field, and the env and squelch mask beside
+// it. Sharing is one graph: an env value that is also a constant hydrates as
+// ONE object, reachable both ways.
 #[test]
 fn a_closures_code_object_round_trips_field_by_field() {
     let dir = crate::common::ScratchDir::new("image-closure-fields");
@@ -138,10 +143,10 @@ fn a_closures_code_object_round_trips_field_by_field() {
     assert_eq!(closure.squelch_mask, SignalBits::from_bit(33));
 }
 
-// § Test plan, "Closures": two headers over one payload hydrate naming one
-// payload copy. The counter-factual is a per-header deep copy, which
-// round-trips structurally equal and silently doubles every payload — only
-// pointer identity can see it.
+// Two headers over one payload hydrate naming one payload copy. The
+// counter-factual is a per-header deep copy, which round-trips structurally
+// equal and silently doubles every payload — only pointer identity can see
+// it.
 #[test]
 fn two_headers_over_one_payload_hydrate_sharing_one_payload() {
     let dir = crate::common::ScratchDir::new("image-closure-payload");
@@ -180,10 +185,10 @@ fn two_headers_over_one_payload_hydrate_sharing_one_payload() {
     assert_eq!(ha.template.bytecode(), &[3, 1, 4]);
 }
 
-// § Test plan, "Closures": the relocation stream records a shared payload's
-// slots once, however many headers name it. The counter-factual is a
-// per-header walk, which appends the payload's inner entries again for the
-// second header — exact duplicates, adjacent once the stream is sorted.
+// The relocation stream records a shared payload's slots once, however many
+// headers name it. The counter-factual is a per-header walk, which appends
+// the payload's inner entries again for the second header — exact
+// duplicates, adjacent once the stream is sorted.
 #[test]
 fn a_shared_payloads_slots_relocate_once() {
     let dir = crate::common::ScratchDir::new("image-closure-reloc-once");
@@ -259,10 +264,9 @@ fn an_env_capture_cell_refuses_the_dump() {
 
 // ── Determinism and hygiene ─────────────────────────────────────────
 
-// § Test plan, "Closures": a dumped closure writes one file across two dumps.
-// The payload is the widest record the dumper assembles — a struct of
-// slice headers and a `repr(Rust)` arity — so its construction temporaries
-// are exactly where residue would come from.
+// A dumped closure writes one file across two dumps. The payload is the
+// widest record the dumper assembles, a struct of slice headers and scalars,
+// so its construction temporaries are exactly where residue would come from.
 #[test]
 fn a_closure_dump_is_byte_deterministic() {
     let dir = crate::common::ScratchDir::new("image-closure-determinism");
@@ -310,43 +314,27 @@ fn freeing_a_hydrated_closure_region_returns_to_baseline() {
 
 // ── The call: a compiled closure answers after hydration ────────────
 
-// § Test plan, "Closures": a closure compiled in one runtime answers a call
-// in a fresh one, through a REPL binding and the ordinary dispatch path. The
-// source closure carries LIR (every compiled lambda does), and the hydrated
-// one reads the same function out of the image's pages — the LIR the JIT
-// promotes it from.
+// A closure compiled in one runtime answers a call in a fresh one, through a
+// REPL binding and the ordinary dispatch path. The source closure carries LIR
+// (every compiled lambda does), and the hydrated one reads the same function
+// out of the image's pages — the LIR the JIT promotes it from.
 //
-// The trap is the body's spelling. A stdlib wrapper like `+` is itself a
-// closure the lambda captures, and stdlib closures build nested lambdas —
-// which the dump refuses. `%eq` and `if` compile to bare instructions, so
-// this closure's graph is its own.
+// The body is spelled in intrinsics: `%eq` and `if` compile to bare
+// instructions, so the closure's graph is its own code object and nothing
+// the standard library holds.
 #[test]
 fn a_compiled_closure_answers_a_call_after_hydration() {
     let dir = crate::common::ScratchDir::new("image-closure-call");
     let path = dir.join("compiled.image");
 
-    let mut rt = Runtime::new();
-    let f = {
-        let (vm, symbols, cctx) = rt.parts();
-        eval_all(
-            "(fn [x] (if (%eq x 2) 42 7))",
-            symbols,
-            vm,
-            cctx,
-            "<image-closures>",
-        )
-        .expect("eval")
-    };
+    let (mut rt, f) = compiled(COMPILED, FILE);
     let want = f
         .as_closure()
         .expect("the eval produced a closure")
         .template
         .lir()
         .expect("a compiled lambda carries LIR before the dump");
-    {
-        let (heap, symbols) = rt.heap_and_symbols();
-        image::dump(heap, symbols, f, &path).expect("dump");
-    }
+    dump_from(&mut rt, f, &path);
 
     let mut rt2 = Runtime::new();
     let root = bind_hydrated(&mut rt2, &path);
@@ -359,10 +347,7 @@ fn a_compiled_closure_answers_a_call_after_hydration() {
     if let Some(diff) = want.first_difference(&got) {
         panic!("the hydrated LIR differs from the source's at {diff}");
     }
-    let result = {
-        let (vm, symbols, cctx) = rt2.parts();
-        eval_all("(hydrated-f 2)", symbols, vm, cctx, "<image-closures>").expect("call")
-    };
+    let result = eval_in(&mut rt2, "(hydrated-f 2)", FILE);
     assert_eq!(
         result.as_int(),
         Some(42),
@@ -370,10 +355,10 @@ fn a_compiled_closure_answers_a_call_after_hydration() {
     );
 }
 
-// § Test plan, "lir-payload": a hydrated closure sent to a worker carries its
-// LIR, read out of the image's pages, so the worker's JIT can compile what
-// arrives. The counter-factual is a sender that drops the LIR: the worker would
-// run the closure interpreted with every answer still right.
+// A hydrated closure sent to a worker carries its LIR, read out of the
+// image's pages, so the worker's JIT can compile what arrives. The
+// counter-factual is a sender that drops the LIR: the worker would run the
+// closure interpreted with every answer still right.
 #[test]
 fn a_hydrated_closure_sends_its_lir() {
     use elle::lir::code::Op;
@@ -384,28 +369,14 @@ fn a_hydrated_closure_sends_its_lir() {
     let path = dir.join("compiled.image");
     let ops = |v: &LirView<'_>| v.nodes().map(|n| n.op()).collect::<Vec<Op>>();
 
-    let mut rt = Runtime::new();
-    let f = {
-        let (vm, symbols, cctx) = rt.parts();
-        eval_all(
-            "(fn [x] (if (%eq x 2) 42 7))",
-            symbols,
-            vm,
-            cctx,
-            "<image-closures>",
-        )
-        .expect("eval")
-    };
+    let (mut rt, f) = compiled(COMPILED, FILE);
     let want = ops(&f
         .as_closure()
         .expect("the eval produced a closure")
         .template
         .lir()
         .expect("a compiled lambda carries LIR"));
-    {
-        let (heap, symbols) = rt.heap_and_symbols();
-        image::dump(heap, symbols, f, &path).expect("dump");
-    }
+    dump_from(&mut rt, f, &path);
 
     let mut dst = FiberHeap::new();
     let hydrated = image::hydrate_path(&mut dst, &mut SymbolTable::new(), &path).expect("hydrate");

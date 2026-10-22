@@ -1,6 +1,6 @@
 # CI and Triage
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-21 -->
 
 CI structure, local workflow, and failure diagnosis.
 
@@ -20,7 +20,7 @@ set when the diff moves only the submodule pointer.
 | Documentation Build | ubuntu | `make docs` and the Elle doc site, minus the publish | — |
 | Default Build Tests | ubuntu | `doctest`, then each suite pass of the default build and its rig, one step each | — |
 | No-JIT Build Tests | ubuntu | `smoke-nojit` — the language suite on the interpreter alone | — |
-| Boot Image Tests | ubuntu | `smoke-boot-image` — the language suite booted from an image | — |
+| Boot Image Tests | ubuntu | `smoke-boot-image` — bytecode parity between the two boots, then the language suite booted from an image | — |
 | Rust Tests | ubuntu | Integration tests, the rig's tests, then property tests, under the `ci` profile | 16 |
 | Thread-Pool I/O Tests | ubuntu | `smoke-pool`, `smoke-pool-impl`, `smoke-pool-producers` — both suites on a build without `uring` and its rig | — |
 | MLIR Tests | ubuntu | `doctest`, `smoke-mlir`, `smoke-mlir-impl`, `smoke-mlir-producers` — the language suite on the MLIR build, the implementation suite on its rig | — |
@@ -38,10 +38,9 @@ The merge queue ([merge-queue.yml](../../.github/workflows/merge-queue.yml))
 runs `make smoke`, split into steps: `make qa`, then each pass `SMOKE_PASSES`
 names, with `PROPTEST_CASES=1`. So the queue runs QA on the merged result,
 which no pull-request job sees. Its toolchain therefore carries what the `QA`
-job's does: rustfmt,
-clippy, both cross-check targets and LLVM 22. The weekly schedule
-([weekly.yml](../../.github/workflows/weekly.yml)) runs the whole workspace
-suite on beta and nightly at 128 cases, plus a dependency audit.
+job's does: rustfmt, clippy, both cross-check targets and LLVM 22. The weekly
+schedule ([weekly.yml](../../.github/workflows/weekly.yml)) runs the whole
+workspace suite on beta and nightly at 128 cases, plus a dependency audit.
 
 ### QA runs first, and every other job waits for it
 
@@ -51,10 +50,10 @@ job instead of the whole matrix.
 
 The prose checks run first inside QA. [prose.rs](../../tests/prose.rs) holds
 every stamped file to the parts of [the policy](../../DOCUMENTATION.md) a
-machine can decide. Before this rule, an over-long call-out failed all three
-Rust Tests jobs, 20 to 47 minutes in, after QA had passed. The checks have a
-binary of their own, so QA does not wait for the shared test binary to compile.
-`make prose` runs them, and `make qa` runs `make prose` before anything else.
+machine can decide, so an over-long call-out fails in minutes rather than
+inside the Rust Tests jobs. The checks have a binary of their own, so QA does
+not wait for the shared test binary to compile. `make prose` runs them, and
+`make qa` runs `make prose` before anything else.
 
 QA runs on every pull request, with no `source` gate. A Markdown-only change
 can break a call-out or a link, and those are what the prose checks read.
@@ -142,17 +141,19 @@ Every job that drives the Makefile builds `--release` and runs its binaries
 from `target/release`, on every platform: `elle` and `elle-rig`, or a variant's
 own ([bins](../../bins/overview.md)). The Makefile picks that under
 `ifdef GITHUB_ACTIONS`, which is set on all GitHub runners, so the macOS and
-AArch64 Smoke jobs are release runs exactly as the x86_64 ones are. No platform
-is quietly gated at a weaker optimization level.
+AArch64 Smoke jobs are release runs exactly as the x86_64 ones are.
 
 The Rust Tests jobs build the `ci` profile on every platform, and `make test`
 builds it too. The profile is the dev profile with the workspace crates at
 `opt-level = 2`. Most of the Rust suite's time goes to the `elle` processes its
-tests start, and each one at `opt-level = 0` runs about ten times slower. With no
-stdlib cache, `integration::runner_cost` took 94 s under the dev profile and 12
-s under `ci`. The profile keeps debug assertions, so the region checks still
-run. Each test runtime and each process it starts caches its standard library
-under the runner's `HOME` ([config](../config.md)).
+tests start, and each one at `opt-level = 0` runs about ten times slower. The
+profile keeps debug assertions, so the region checks still run. Each test
+runtime and each process it starts caches its standard library under the
+runner's `HOME` ([config](../config.md)).
+
+A release `make elle` embeds a boot image in the binaries it builds, so every
+corpus job's `elle` and `elle-rig` hydrate it at every start
+([blob.md](../impl/image/blob.md)).
 
 Four jobs change the release profile they build. `Default Build Tests`, `Boot
 Image Tests`, `Thread-Pool I/O Tests` and `macOS Smoke` set
@@ -172,10 +173,10 @@ and its failures read as flaky timeouts (§ "Runner capacity").
 [workflows.rs](../../tests/integration/workflows.rs) is the standing check that
 both backends keep a job.
 
-`macOS Smoke` runs the rig's scrub profile beside the flag, because the panic that
-reads a scrubbed page needs both ([diagnostics](../impl/region/diagnostics.md)). Its binary
-is a release build that also runs the debug-only checks, on the smallest runner
-in the workflow. Read a macOS corpus timing against that, not against a Linux
+`macOS Smoke` runs the rig's scrub profile beside the flag, because the panic
+that reads a scrubbed page needs both
+([diagnostics](../impl/region/diagnostics.md)). Its binary is a release build
+that also runs the debug-only checks, on the smallest runner in the workflow. Read a macOS corpus timing against that, not against a Linux
 one.
 
 ### Every job that runs `cargo test` installs rustfmt and clippy
@@ -225,8 +226,8 @@ over-subscribes the other.
 
 Over-subscription does not fail the corpus, it stretches it. Every file still
 passes its assertions, and the ones nearest the per-file budget get killed on
-the way out. That failure is a `timeout` row that names the budget, which reads as a flaky
-runner rather than as a job count that never fit. `JOBS` remains an override
+the way out. That failure is a `timeout` row that names the budget, which
+reads as a flaky runner rather than as a job count that never fit. `JOBS` remains an override
 for a job that needs a different number.
 
 Outside CI the default stays the constant 16. A development box is not sized by
@@ -256,8 +257,7 @@ AArch64. The smaller batch shortened the macOS job's wall clock a great
 deal. Measure again before you change it.
 
 AArch64 Smoke takes the same batch to shorten its wall clock too. It never
-stalled, and this document records no measurement of the effect there. Read the
-job's time before and after the change to learn whether it helped.
+stalled, and no measurement shows the effect there.
 
 The working theory for the macOS stall is page size. Pages on the macOS runner
 (arm64) are 16 KiB, and pages on the x86_64 Linux runner are 4 KiB. Nobody has
@@ -368,16 +368,14 @@ plugin directory to a workspace member.
 
 ### The boot-image job
 
-`--boot-image=` is off by default, and stays off until a `sys/spawn` worker
-hydrates its own stdlib ([boot.md](../impl/image/boot.md)). No other job
-boots from an image, so a change that breaks hydration passes every gate in the
-workflow.
-
-`Boot Image Tests` runs `make smoke-boot-image`. The target stores an image,
-proves the next start hydrates it, and runs the corpus through that instance.
-It sets `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS` for the reason the two backend
-jobs do: a hydrated region is a region, and the region checks are compiled out
-of a release build without the flag.
+Every release `make elle` proves that its embedded blob hydrates. A start that
+cannot hydrate boots from source, so the suites pass either way. No other job
+proves that the warm cache hydrates, and none compares the two boots' bytecode.
+So `Boot Image Tests` runs `make smoke-boot-image`
+([boot.md](../impl/image/boot.md) owns the gate). It sets
+`CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS` for the reason the two backend jobs
+do: a hydrated region is a region, and the region checks are compiled out of a
+release build without the flag.
 
 ### A corpus job's results leave the runner
 
@@ -458,7 +456,8 @@ make test
 | **Documentation site** | `Documentation Build` fails on `./target/release/elle demos/docgen/generate.lisp` | Using `nil?` to check end-of-list. Lists terminate with `EMPTY_LIST`, not `NIL`. | Use `empty?` for list termination checks. Check [generate.lisp](../../demos/docgen/generate.lisp) and [lib](../../demos/docgen/lib). |
 | **Language suite fails** | A corpus job fails `smoke-lang` | A language test answers differently on that build. | Run `./target/release/elle tests/lang/failing.lisp` on the same build. Check the assertion message; a file that passes on one build and fails on another has found a defect in the build that fails. |
 | **Implementation suite fails** | `Default Build Tests` fails `smoke-impl` or `smoke-eager` | An implementation test on the rig, or a suite file under the eager profile. | Run `./target/release/elle-rig tests/impl/failing.lisp`; the file's sidecar sets its mode. For a profile failure, pass the same `--profile`. |
-| **Boot from an image fails** | `Boot Image Tests` fails and every other corpus job passes | The corpus file answers differently under a hydrated boot, or the image no longer hydrates. | Run `make smoke-boot-image` locally. Read the hydration proof first: a target that fails there never reached the corpus. |
+| **The embedded blob fails** | A corpus job fails on `make elle` after the second build | The second build's dump differs from the blob it carries, so the two builds compiled the library differently. Or a start did not map the blob from its own executable. | Run `make elle CARGO_PROFILE=--release` locally. A dump difference keeps both files to `cmp`. Otherwise read the `--trace=boot` lines it prints: `blob-copy` names a blob the start could not find in its own file. |
+| **Boot from an image fails** | `Boot Image Tests` fails and every other corpus job passes | A corpus file compiles to other bytecode or answers differently under a hydrated boot, or the image no longer hydrates. | Run `make smoke-boot-image` locally. A parity failure names the files that differ and keeps both dumps of each under `target/bytecode-parity`; diff a pair. Otherwise read the hydration proof first: a target that fails there never reached the corpus. |
 | **Property tests fail** | `Rust Tests` fails with a shrunk counterexample | The shrunk output shows the *minimal* failing input. | Reproduce with the exact shrunk values as a unit test. Check the files under `tests/proptest-regressions/`. |
 | **Integration tests fail** | `Rust Tests` fails | Tests use `eval_source()` which runs the full pipeline. | Read the assertion. Check whether the test expects `.unwrap()` (success) or `.is_err()` (error). |
 | **Prose** | `QA` fails on `make prose` | A stamped file breaks a rule a machine can check: a call-out over 140 characters, a broken link, a bare filename, or banned wording. | Run `make prose` and repair the file the message names ([DOCUMENTATION.md](../../DOCUMENTATION.md)). |

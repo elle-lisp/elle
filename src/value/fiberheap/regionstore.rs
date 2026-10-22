@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-12
 //! Region table: maps a physical region id → RegionEntry (RegionPool + RC).
 //!
 //! `RegionStore` lives on `FiberHeap` and owns the `PagePool` (per-thread
@@ -6,10 +6,10 @@
 //!
 //! ## Reference counting
 //!
-//! Each region has a `u32` RC that starts at 1 (scope ref).
-//! `incref(id)` / `decref(id)` adjust it. `decref_if_present(id)` is a
-//! decref: if RC > 0 it decrements and frees when RC reaches 0.
-//! The initial 1 is the scope's ref; cross-region refs add beyond that.
+//! Each `Counted` region has a `u32` RC that starts at 1 (the scope ref).
+//! `incref(id)` / `decref(id)` adjust it, and a decref that reaches 0 frees
+//! the region. `decref_if_present(id)` is the decref that tolerates an id
+//! with no entry. Cross-region refs add to the RC beyond the scope's 1.
 //!
 //! ## Cascading frees
 //!
@@ -30,12 +30,12 @@ use rustc_hash::FxHashMap;
 
 /// How a live region is reclaimed — a **typestate** (docs/impl/region/ownership.md),
 /// not an `(rc, owner)` pair. A region is reclaimed *exactly one way*, and the two
-/// ways are mutually exclusive variants, so **owned-and-RC'd** — a region carrying
-/// both a live count and an owner, where the count could independently free a
-/// region the owner will also subtree-drop (a double-free) — is unrepresentable by
-/// construction. `adopt_region` *moves* a region from `Counted` into `Owned`,
-/// consuming the count; once `Owned` there is no `u32` left to decrement, so a stray
-/// decref is a structural no-op, not a guard the decref path must remember to apply.
+/// ways are mutually exclusive variants. So **owned-and-RC'd** is unrepresentable
+/// by construction: a region carrying both a live count and an owner, whose count
+/// could free a region the owner will also subtree-drop (a double-free).
+/// `adopt_region` *moves* a region from `Counted` into `Owned`, consuming the
+/// count. Once `Owned` there is no `u32` left to decrement, so a stray decref is a
+/// structural no-op, not a guard the decref path must remember to apply.
 enum Reclaim {
     /// Shared / baseline: a cross-region reference count, starting at 1 (the scope
     /// ref). `decref` frees the region when it reaches 0.
@@ -58,11 +58,13 @@ struct RegionEntry {
     /// node of a deep subtree is itself `Owned` *and* has `owned_children`.
     owned_children: Vec<RuntimeRegion>,
     /// Outgoing cross-region reference edges from this region: `target → count`
-    /// (docs/impl/region/ownership.md). The *content* edges — a `Value` in this
-    /// region's heap objects pointing into another region — recorded at creation
-    /// (the alloc funnel + the mutable-store seam + the fiber terminal-signal
-    /// funnel) so reclamation walks this table
-    /// (O(edges)) instead of scanning page contents. **Universal**: present on
+    /// (docs/impl/region/ownership.md). These are the *content* edges, a `Value`
+    /// in this region's heap objects pointing into another region. Three funnels
+    /// record them at creation: the alloc funnel, the mutable-store seam and the
+    /// fiber terminal-signal funnel. So reclamation walks this table (O(edges))
+    /// instead of scanning page contents.
+    ///
+    /// **Universal**: present on
     /// every region, `Owned` and `Counted` alike (an Owned region carries it for
     /// its cascade-on-drop but has no count). Mirrors exactly what
     /// `find_object_cross_refs` would find — same self/reserved-id filter — which
@@ -72,10 +74,10 @@ struct RegionEntry {
     outgoing: FxHashMap<RuntimeRegion, u32>,
     /// Incoming content edges: `source → count`, the exact mirror of every
     /// source's `outgoing` entry for this region (docs/impl/region/ownership.md).
-    /// Maintained in lockstep by `record_outgoing`/`unrecord_outgoing` and by the
-    /// subtree drop's frontier walk (a dying source's footprint is removed from each
-    /// live target), so for a live region it lists precisely the live-or-currently-
-    /// dying regions whose heap contents reference it. This is what lets a
+    /// `record_outgoing`/`unrecord_outgoing` maintain it in lockstep, and so does
+    /// the subtree drop's frontier walk, which removes a dying source's footprint
+    /// from each live target. So for a live region it lists precisely the live or
+    /// currently dying regions whose heap contents reference it. This is what lets a
     /// subtree drop enforce external uniqueness at the drop itself: a member
     /// still referenced from outside the dying set is rescued to `Counted`
     /// instead of torn down under the live reference. Content edges only — the
@@ -101,8 +103,8 @@ impl RegionEntry {
 /// id carried at that moment (docs/impl/region/model.md).
 ///
 /// It is the only key [`RegionStore::recycle_unmaterialized`] accepts, and its
-/// fields are private to this module, so a caller cannot ask the store to
-/// recycle an id no mint produced — injecting an id `next_physical` has not
+/// fields are private to this module. So a caller cannot ask the store to
+/// recycle an id no mint produced. An injected id that `next_physical` has not
 /// passed would let a later mint issue it a second time, and that is
 /// unrepresentable here rather than guarded against at the use site.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -133,10 +135,10 @@ pub(crate) struct RegionStore {
     /// unassigned/immediate sentinel and id 1 is reserved, so minting starts at 2.
     next_physical: u32,
     /// Physical ids available for reissue. Two paths return an id here, and
-    /// between them every minted id comes back (docs/impl/region/model.md):
-    /// `free_runtime_region_pages`, when a region's pages are torn down, and
-    /// `recycle_unmaterialized`, when a mint ends without ever allocating into
-    /// its id. Reusing them keeps the `regions` Vec
+    /// between them every minted id comes back (docs/impl/region/model.md).
+    /// `free_runtime_region_pages` returns it when a region's pages are torn
+    /// down, and `recycle_unmaterialized` when a mint ends without ever
+    /// allocating into its id. Reusing them keeps the `regions` Vec
     /// bounded by the max *concurrently-live* region count even though
     /// allocation mints a fresh region per execution.
     ///
@@ -149,8 +151,8 @@ pub(crate) struct RegionStore {
     /// returns an id's pages (RC-zero free, wholesale teardown); a recycled
     /// id mints its next region at the bumped generation. Each claimed page
     /// is stamped with its region's generation, and debug-build `region_of`
-    /// compares stamp to counter — a mismatch is a stale deref, caught at
-    /// the deref site instead of surfacing as a wrong read later.
+    /// compares stamp to counter. A mismatch is a stale deref, caught at the
+    /// deref site instead of surfacing as a wrong read later.
     generations: Vec<u32>,
     /// Process-unique identity of this store, stamped into every page header
     /// it claims. Scopes the generation check: generations from two
@@ -159,20 +161,20 @@ pub(crate) struct RegionStore {
     /// generation-compared.
     store_id: u32,
     /// Active mint log for a *closed allocation scope* (macro expansion,
-    /// docs/impl/region/rules.md). When `Some`, every id `new_runtime_region`
-    /// mints is recorded with the generation it is about to be stamped at, so the scope's
-    /// reclaim pass can balance each surviving region's unexplained references
-    /// — and a recycled id (freed-and-reminted mid-scope) is distinguished
-    /// from its earlier incarnation by generation. `None` outside such a scope
-    /// (the common case: one branch on the mint path).
+    /// docs/impl/region/rules.md). When `Some`, the log records every id
+    /// `new_runtime_region` mints, with the generation it is about to be
+    /// stamped at. So the scope's reclaim pass can balance each surviving
+    /// region's unexplained references. The generation also tells a recycled id
+    /// (freed and reminted mid-scope) from its earlier incarnation. `None`
+    /// outside such a scope (the common case: one branch on the mint path).
     mint_log: Option<Vec<(u32, u32)>>,
     /// Where each id was last minted, keyed by physical region id — the
     /// `--trace=arena` attribution `arena/dump` prints beside a region's tags
     /// (docs/impl/region/diagnostics.md). A tag census says a retained region
     /// holds a string; this says which function made it.
     ///
-    /// Empty unless that trace bit is set: `note_mint_site` is the only writer
-    /// and its callers gate on the bit, so an untraced run pays one `is_empty`
+    /// Empty unless that trace bit is set: `note_mint_site` is the only writer,
+    /// and its callers gate on the bit. So an untraced run pays one `is_empty`
     /// read at dump time and nothing at mint time. Bounded by the id
     /// high-water mark, since a recycled id overwrites its entry.
     mint_sites: std::collections::HashMap<u32, std::rc::Rc<str>>,
@@ -195,6 +197,11 @@ pub(crate) struct RegionStore {
     /// free path and the forest primitives count here; the `arena/*` reclamation
     /// gauges read it.
     counters: counters::ReclaimCounters,
+    /// The interval table: this store's hydrated regions, in hydration order
+    /// (docs/impl/image.md). Each one's pool holds the interval its pages tile,
+    /// and `region_of_ptr` and `owning_region` read the table before the
+    /// page-base walk. A region leaves the table when its pages are released.
+    images: Vec<RuntimeRegion>,
 }
 
 mod alloc;
@@ -214,27 +221,28 @@ static NEXT_STORE_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU3
 
 /// Upper bound on a physically-plausible region id, the `ensure_raw` backstop's
 /// tripwire (docs/impl/region/generations.md). The region table is indexed by id
-/// and bounded by the max *concurrently-live* regions —
-/// every minted id returns to `free_physical`, and static-slot ids are bounded by
-/// the compiler's region-slot count — so a real id stays far below this. An id
-/// above it reaching `ensure_raw` is a corrupt page-header read handed back as a
-/// region id — a misidentified page base (the `region_of_ptr` walk's ownership
-/// validation and the page-header magic close the known cause) or a stale/foreign
-/// read — not a region to lazily create.
+/// and bounded by the max *concurrently-live* regions. Every minted id returns to
+/// `free_physical`, and the compiler's region-slot count bounds static-slot ids,
+/// so a real id stays far below this. An id above it reaching `ensure_raw` is a
+/// corrupt page-header read handed back as a region id, not a region to lazily
+/// create. The read is a stale or foreign one, or a misidentified page base,
+/// which the `region_of_ptr` walk's ownership validation and the page-header
+/// magic rule out.
 ///
-/// The bound has to clear two things at once, and it is the *ratio* between them
-/// that leaves room to do so — not any absolute figure, which only tracks the
-/// machine. A live region owns at least one 4 KiB page (Rule 6), so holding 2^28
-/// regions at once means holding at least 1 TiB of region pages, while the table
-/// for those ids is 2^28 × `size_of::<Option<RegionEntry>>()`, about 56 GB. The
-/// table is always ~1/20th of the pages a program at that id is already holding.
+/// The bound has to clear two things at once, and the *ratio* between them
+/// leaves room to do so; an absolute figure only tracks the machine. A live region
+/// owns at least one 4 KiB page (Rule 6). So holding 2^28 regions at once means
+/// holding at least 1 TiB of region pages, while the table for those ids is
+/// 2^28 × `size_of::<Option<RegionEntry>>()`, about 56 GB. The table is always
+/// ~1/20th of the pages a program at that id is already holding.
+///
 /// Set the bound past what a machine's memory lets a program hold live, and the
-/// table at that bound is something the same machine can still allocate — which
-/// it must, because the check runs before `regions.resize_with`: a table the
-/// allocator cannot build aborts one id *below* the tripwire, killing the program
-/// with a byte count and no diagnosis. That failure is still reachable on a
-/// machine too small to allocate the 56 GB table, which is why the assertion
-/// message names id exhaustion beside corruption instead of asserting the latter.
+/// same machine can still allocate the table at that bound. It must, because the
+/// check runs before `regions.resize_with`. A table the allocator cannot build
+/// aborts one id *below* the tripwire, killing the program with a byte count and
+/// no diagnosis. That failure is still reachable on a machine too small to
+/// allocate the 56 GB table, which is why the assertion message names id
+/// exhaustion beside corruption instead of asserting the latter.
 const MAX_PLAUSIBLE_REGION_ID: u32 = 1 << 28;
 
 impl RegionStore {
@@ -255,6 +263,7 @@ impl RegionStore {
             trace,
             over_frees: 0,
             counters: counters::ReclaimCounters::default(),
+            images: Vec::new(),
         }
     }
 
@@ -264,10 +273,19 @@ impl RegionStore {
     pub fn teardown_all(&mut self) {
         for idx in 0..self.regions.len() {
             if let Some(mut entry) = self.regions[idx].take() {
-                entry.pool.teardown(&mut self.pool);
-                self.bump_generation(idx as u32);
+                self.release_pages(idx as u32, &mut entry);
             }
         }
+    }
+
+    /// Run a region's destructors, return its pages to the pool, and bump its
+    /// generation: the end every page-returning path shares. A hydrated region
+    /// leaves the interval table here. Returns the number of objects freed.
+    fn release_pages(&mut self, id: u32, entry: &mut RegionEntry) -> usize {
+        self.images.retain(|r| r.get() != id);
+        let freed = entry.pool.teardown(&mut self.pool);
+        self.bump_generation(id);
+        freed
     }
 
     /// Bump the generation counter for a physical id whose pages were just

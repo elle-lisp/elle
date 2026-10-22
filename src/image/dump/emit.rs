@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! What the file gets from the copied graph: page bytes, the four relocation
 //! streams, the object index, and the two watermarks.
 //!
@@ -37,7 +37,8 @@ pub(super) struct Placement {
 
 impl Placement {
     /// Pages largest first: packing in descending size order keeps every
-    /// page's offset a multiple of its own size (§ File format).
+    /// page's offset a multiple of its own size
+    /// (docs/impl/image/format.md).
     pub(super) fn new(layouts: &mut [PageLayout]) -> Placement {
         layouts.sort_by_key(|l| std::cmp::Reverse(l.len));
         let mut pages = Vec::with_capacity(layouts.len());
@@ -111,8 +112,8 @@ pub(super) fn emit(
     };
     let mut backings: Vec<Backing> = Vec::new();
     // Image offsets of the payloads already walked: a shared payload's inner
-    // slots relocate once, however many headers name it (docs/impl/image/plan.md
-    // § Test plan, "Closures"). Membership only — never iterated.
+    // slots relocate once, however many headers name it
+    // (docs/impl/image/pins.md). Membership only — never iterated.
     let mut payloads_walked: HashSet<u64> = HashSet::new();
 
     for obj in pool.into_iter().flat_map(|p| p.live_objects()) {

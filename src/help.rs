@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-20
 //! `elle --help`: the usage text, with the `--trace` and `--dump` keyword
 //! lists generated from the tables that define them.
 //!
@@ -89,7 +89,7 @@ pub(super) fn print_help() {
     println!("  --home=DIR            Module resolution root (env: ELLE_HOME)");
     println!("  --path=DIRS           Colon-separated module search path (env: ELLE_PATH)");
     println!("  --cache=DIR           Disk cache directory (env: ELLE_CACHE)");
-    println!("  --boot-image=WHERE    Boot image cache: off (default), on, or DIR");
+    println!("  --boot-image=WHERE    Boot image cache: on (default), off, or DIR");
     println!("  --unicode=MAJ[.MIN]   Unicode generation for string semantics (default: newest vendored)");
     println!("  --json                JSON output on stderr\n");
     println!("Syntax:");

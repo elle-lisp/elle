@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-10-21
 // What an image's name table carries, and what a fresh instance can print
 // because of it.
 // docs/impl/image/format.md
@@ -15,11 +15,10 @@ fn shown(v: Value, names: &SymbolTable) -> String {
     format!("{}", v.display_with(Some(names)))
 }
 
-// § Test plan, "Names": a fresh instance prints an image's keyword by name,
-// having never met the spelling. The counter-factual is the memo the test
-// builds empty: with no name table in the file, the keyword still hydrates
-// as an equal value and renders `#<keyword:0x…>`, which is what every
-// keyword in an image did before the table existed.
+// A fresh instance prints an image's keyword by name, having never met the
+// spelling. The counter-factual is the memo the test builds empty: with no
+// name table in the file, the keyword still hydrates as an equal value and
+// renders `#<keyword:0x…>`.
 #[test]
 fn a_hydrated_keyword_prints_its_name() {
     let dir = crate::common::ScratchDir::new("image-name-keyword");
@@ -79,10 +78,10 @@ fn the_graphs_names_reach_a_fresh_instance() {
     );
 }
 
-// § "The name table carries spellings, not hashes": a spelling the dumping
-// instance never learned is absent, and the value is still a perfectly good
-// value — it just has no name to print. A dumper that failed the dump here,
-// or that invented a spelling, would both break the memo's contract.
+// A spelling the dumping instance never learned is absent, and the value is
+// still a perfectly good value with no name to print. A dumper that failed
+// the dump here, or that invented a spelling, would break the memo's
+// contract.
 #[test]
 fn a_spelling_the_dumper_never_learned_still_hydrates() {
     let dir = crate::common::ScratchDir::new("image-name-unlearned");
@@ -134,11 +133,10 @@ fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack.windows(needle.len()).position(|w| w == needle)
 }
 
-// § Test plan, "Names" / § Dumping: two dumps of one graph are byte-identical
-// whole files, and the name table is no exception. The counter-factual is the
-// two memos: they hold the same spellings in opposite insertion orders, so a
-// dumper that emitted its name table in memo-iteration order writes two
-// different files from one graph.
+// Two dumps of one graph are byte-identical whole files, and the name table
+// is no exception. The counter-factual is the two memos: they hold the same
+// spellings in opposite insertion orders, so a dumper that emitted its name
+// table in memo-iteration order writes two different files from one graph.
 #[test]
 fn the_name_table_does_not_depend_on_memo_order() {
     let dir = crate::common::ScratchDir::new("image-name-order");

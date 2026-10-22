@@ -1,15 +1,17 @@
-// audited: 2026-09-29
-// The boot-image gate: the flag `elle test` honours, and the target that runs
-// the language suite from an image.
+// audited: 2026-10-21
+// The boot-image gate: the runner's flag, the target that runs the suite from an
+// image, and when it checks bytecode parity.
 //
 // docs/impl/image/boot.md
 // docs/analysis/ci.md
 //
-// Both halves fail quietly, which is why they are pinned here. `elle test`
+// Every part fails quietly, which is why each is pinned here. `elle test`
 // partitions its argv: a flag it does not know is not refused, it is handed to
 // the runner as a file path. And the gate target is shell text nothing
 // compiles, so a target that drops the flag runs the language suite on an
 // ordinary source boot and reports exactly the green a hydrated run reports.
+//
+// boot_parity.rs pins the parity check itself.
 
 use crate::common::{make_dry_run, make_var};
 use std::process::Command;
@@ -28,8 +30,7 @@ const GATE: &str = "smoke-boot-image";
 /// arrive through variables, and a parser that resolved them itself would be a
 /// second `make` that can disagree with the first.
 fn gate_recipe() -> String {
-    make_dry_run(GATE)
-        .unwrap_or_else(|| panic!("`make --dry-run {GATE}` failed; no such target"))
+    make_dry_run(GATE).unwrap_or_else(|| panic!("`make --dry-run {GATE}` failed; no such target"))
 }
 
 /// Every `--boot-image=` value the gate's recipe names. A value that closes a
@@ -155,9 +156,9 @@ fn the_gate_target_points_the_language_suite_at_one_image_directory() {
 // suite passes and the gate reports a hydration that never happened. So the
 // target asks for the boot mark and fails without it.
 //
-// The counter-factual: drop the proof, break hydration in the loader, and this
-// gate stays green while every other suite job also stays green — nothing in
-// the workflow boots from an image.
+// The counter-factual: drop the proof, break the warm cache's hydration, and
+// this gate stays green while every other suite job also stays green — no
+// other job boots from the warm cache.
 #[test]
 fn the_gate_target_proves_the_image_hydrated_before_it_runs_the_language_suite() {
     let recipe = gate_recipe();
@@ -170,5 +171,27 @@ fn the_gate_target_proves_the_image_hydrated_before_it_runs_the_language_suite()
         recipe.contains("image-hydrate"),
         "`make {GATE}` never reads the `image-hydrate` mark, so a binary that \
          ignored `--boot-image=` would pass it:\n{recipe}"
+    );
+}
+
+// `make smoke-boot-image` runs the parity check before the language suite. A
+// corpus that answers alike under an image boot can still have compiled to
+// other bytecode, and the suite cannot see that; the dumps can. The recipe is
+// read as `make` expands it, so a prerequisite dropped from the target fails
+// here rather than leaving a green job that compares nothing.
+#[test]
+fn the_gate_target_compares_bytecode_before_it_runs_the_language_suite() {
+    let recipe = gate_recipe();
+    let elle = make_var("ELLE", &[]).expect("`make print-ELLE` did not run");
+    let runner = format!("{elle} test");
+    let parity = recipe
+        .find("scripts/bytecode-golden parity")
+        .unwrap_or_else(|| panic!("`make {GATE}` never runs the bytecode parity check:\n{recipe}"));
+    let suite = recipe
+        .find(&runner)
+        .unwrap_or_else(|| panic!("`make {GATE}` never runs `{runner}`:\n{recipe}"));
+    assert!(
+        parity < suite,
+        "`make {GATE}` runs the language suite before the parity check:\n{recipe}"
     );
 }

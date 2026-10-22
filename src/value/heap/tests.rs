@@ -1,7 +1,8 @@
-// audited: 2026-09-08
-// Unit tests for heap-object allocation, tags, and the region residence an
-// image dump depends on.
-// docs/impl/values.md
+// audited: 2026-10-21
+//! Unit tests for heap-object allocation, tags, size, and the region residence
+//! an image dump depends on.
+//!
+//! docs/impl/values.md
 
 use super::*;
 
@@ -67,4 +68,23 @@ fn test_heap_tag() {
         assert_eq!(s.tag(), HeapTag::LString);
         assert_eq!(s.type_name(), "string");
     });
+}
+
+// The syntax variant sets every object's size, in every build: one tag word,
+// the node, and its `traits` (docs/impl/values.md). A larger payload goes
+// behind a `Box`.
+//
+// The counter-factual is an FFI signature carrying its libffi CIF inline. That
+// variant then sets the size, so the `ffi` feature decides how large every
+// string, pair and closure is, and a build without it lays objects out
+// differently from one with it.
+#[test]
+fn the_syntax_variant_sets_the_heap_object_size() {
+    assert_eq!(
+        std::mem::size_of::<HeapObject>(),
+        std::mem::size_of::<u64>()
+            + std::mem::size_of::<crate::syntax::Syntax>()
+            + std::mem::size_of::<Value>(),
+        "a variant larger than the syntax node sets the size of every heap object"
+    );
 }

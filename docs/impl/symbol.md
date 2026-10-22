@@ -1,6 +1,6 @@
 # Symbols and keywords — identity is the name hash
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-20 -->
 
 A `SymbolId` is the 64-bit FNV-1a hash of the symbol's name. Nothing mints it
 and no table owns it: the same name yields the same id in every symbol table,
@@ -61,14 +61,15 @@ A memo learns a name where names already travel:
 | Site | What arrives |
 |------|--------------|
 | the reader, the expander and the analyzer | every identifier and keyword in the source text, and every keyword in a tree the expander enters or `read` converts to a value |
+| the qualified-symbol desugaring | each key a qualified symbol names: `a:b` becomes `(get a :b)`, whose keyword no source token spells |
 | primitive registration | the name and every alias of each primitive, and the struct keys of a plugin's exports |
 | primitives | every keyword a native mints through its `NativeCtx`, including the kind of an error it raises, and every symbol a native builds from a string, such as `gensym` |
 | the plugin ABI | every keyword a plugin mints through `make_keyword`'s call ctx |
 | `make_external` | the type name a plugin wraps an external in; the string lives in the plugin's `.so`, so no vocabulary entry can carry it |
 | the signal registry | every signal name read back out of the process-global registry — by `(signals)`, `fiber/caps`, a compile query's `:bits` set, or a capability denial |
-| `send` | the bundle's name table — the spelling of every symbol and keyword the value holds, resolved through the sender's memo and the vocabulary — replayed into the receiver's memo |
-| the stdlib cache | the stored templates' name table, replayed as the cache loads |
-| hydration and the boot image | the image's name table, recorded as the image is built and replayed into the hydrating instance |
+| `send` | the bundle's name table — the spelling of every symbol and keyword the value holds, a code payload's own names included ([region/template.md](region/template.md)), resolved through the sender's memo and the vocabulary — replayed into the receiver's memo |
+| the stdlib cache | the stored templates' name table, which `send` builds, replayed as the cache loads |
+| hydration and the boot image | the image's name table, recorded as the image is built, a code payload's own names included, and replayed into the hydrating instance |
 | `ConstTemplate` decode | symbols and keywords encoded by name in the constant pool |
 
 The signal registry is a read site, not a mint site. It holds spellings a
@@ -240,8 +241,9 @@ and a plugin's is not. So the ctx records it where the external is built, and
 | `Value` | `Value::symbol(SymbolId)`, `as_symbol() -> Option<SymbolId>`; `Value::keyword(&str)`, `keyword_hash() -> Option<u64>` |
 | Struct and set keys | `TableKey::Symbol(SymbolId)` and `TableKey::Keyword(u64)`, ordered by hash |
 | HIR bindings | `BindingInner::name`, `SymbolId::SYNTHETIC` for temporaries |
-| LIR constants | `ConstRef::Symbol(SymbolId)`, `ConstRef::Keyword(u64)` |
-| Bytecode | none directly — a symbol reaches bytecode as a constant-pool `Value` (a `u16` pool index) or inside a `ConstTemplate`, which encodes symbols by name |
+| Body fragments | each binding's `BindingInner::name` and each global's `SymbolId`, inside the `bincode` bytes a code payload carries |
+| LIR | `ConstRef::Symbol(SymbolId)`, `ConstRef::Keyword(u64)`, and the cell name of `MakeCaptureCell` |
+| Bytecode | the cell name `MakeCapture` carries as a raw `u64` operand; every other symbol reaches bytecode as a constant-pool `Value` (a `u16` pool index) or inside a `ConstTemplate`, which encodes symbols by name |
 
 `Value::symbol` takes a `SymbolId`, not a bare `u64`, because a keyword hash is
 also a `u64`: the newtype is what stops `Value::symbol(keyword_hash(s))` from

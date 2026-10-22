@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! The cross-region scan reports every channel each heap variant holds a value in.
 //!
 //! docs/impl/region/diagnostics.md
@@ -277,6 +277,13 @@ fn obj_with_value_in_every_channel(
 /// Every `HeapTag`, for iteration. Completeness here forces nothing:
 /// the exhaustive `match` above is what forces a decision for a new
 /// variant (at compile time); this list only drives the runtime loop.
+/// Resolve a pointer to the id its page header names, whatever region that is.
+/// These pins ask which channels the scan reports, not how it resolves them.
+fn any_header(store: &RegionStore) -> impl Fn(*const ()) -> u32 {
+    let page_size = store.page_size();
+    move |p| unsafe { region_of_page_ptr(p, page_size) }
+}
+
 const ALL_TAGS: &[HeapTag] = &[
     HeapTag::LString,
     HeapTag::Pair,
@@ -324,13 +331,7 @@ fn exhaustive_scan_finds_cross_region_refs_in_every_variant() {
 
     let scan = |obj: &HeapObject, store: &RegionStore| {
         let mut refs = Vec::new();
-        RegionPool::find_object_cross_refs(
-            obj,
-            own.get(),
-            store.page_size(),
-            &|_, _| true,
-            &mut refs,
-        );
+        RegionPool::find_object_cross_refs(obj, own.get(), &any_header(store), &mut refs);
         refs
     };
 
@@ -421,7 +422,7 @@ fn an_opaque_external_reports_only_its_traits() {
         traits: vt,
     };
     let mut refs = Vec::new();
-    RegionPool::find_object_cross_refs(&obj, own.get(), store.page_size(), &|_, _| true, &mut refs);
+    RegionPool::find_object_cross_refs(&obj, own.get(), &any_header(&store), &mut refs);
     assert_eq!(
         refs,
         vec![rt.get()],

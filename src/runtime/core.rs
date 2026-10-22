@@ -1,89 +1,48 @@
-// audited: 2026-09-21
-//! `RuntimeCore`: the per-instance owner bundle, and the boot that fills it.
+// audited: 2026-10-21
+//! `RuntimeCore`: the per-instance owner bundle, and the construction that points its VM at the rest.
 //!
 //! docs/impl/region/rules.md
 //! docs/impl/image/boot.md
 //!
 //! One instance is one heap, one VM, one symbol table and one compile context,
 //! each boxed so the raw pointers the VM holds stay valid across the move out
-//! of the constructor. The boot either hydrates an image or compiles the three
-//! sources; both arms end in the same registration tails.
+//! of the constructor. boot.rs holds the boot that fills it.
 
-use crate::compiler::stdlib_cache::StdlibCache;
-use crate::image::boot::BootImage;
+use std::sync::Arc;
+
+use super::boot::{hydrate_boot_image, BootCaches, BootFrom};
+use crate::image::boot::OpenImage;
 use crate::pipeline::CompileCtx;
+use crate::register_primitives;
 use crate::symbol::SymbolTable;
 use crate::vm::VM;
-use crate::{init_stdlib, register_primitives};
-
-/// The two caches one instance boots through: where its compiled stdlib is
-/// cached, and where its boot image is.
-///
-/// Both travel with the instance rather than coming from process state
-/// (docs/impl/image/boot.md), so the pair is one construction parameter.
-#[derive(Debug, Clone, Default)]
-pub struct BootCaches {
-    /// Where the compiled stdlib bytecode is cached
-    /// (docs/impl/stdlib-cache.md). Consulted only when no boot image loads.
-    pub stdlib: StdlibCache,
-    /// Where the boot image is (docs/impl/image/boot.md). `Off` by default.
-    pub image: BootImage,
-}
-
-/// Hydrate the image `image` names, or answer `None` and leave the instance to
-/// compile its three sources.
-///
-/// A refusal is reported and swallowed: a boot image is a speedup, and every
-/// reason to refuse one — a fingerprint from another build, a digest from other
-/// sources, a truncated file — is a reason to compile instead. The report is
-/// what keeps a cache that never hits from looking like one that always does.
-fn hydrate_boot_image(
-    heap: &mut crate::value::fiberheap::FiberHeap,
-    symbols: &mut SymbolTable,
-    image: &BootImage,
-) -> Option<crate::image::boot::Boot> {
-    let path = image.path()?;
-    if !path.exists() {
-        return None;
-    }
-    let t = std::time::Instant::now();
-    match crate::image::boot::hydrate_path(heap, symbols, &path) {
-        Ok(boot) => {
-            crate::phase!(crate::trace::boot(), "boot", t, "image-hydrate");
-            Some(boot)
-        }
-        Err(e) => {
-            eprintln!("[boot-image] {}: {e}", path.display());
-            None
-        }
-    }
-}
 
 /// The per-instance owner bundle: the `FiberHeap`, the `VM`, the `SymbolTable`,
 /// the per-instance compile-time state (`CompileCtx`), and the resident
 /// primitive metadata. Two embedded Elle instances in one process each own one
 /// privately, so neither sees the other's regions, stdlib exports, or REPL
 /// definitions. Both [`super::Runtime`] (the `elle foo.lisp`/REPL/embedding path) and
-/// the `os/spawn` worker construct one.
+/// the `sys/spawn` worker construct one.
 ///
 /// The members are boxed where an address must stay stable across the move out
-/// of a constructor: the `SymbolTable`, `CompileCtx`, and `FiberHeap` because the
-/// `VM` holds a raw pointer to each (`set_symbols` / `set_compile_ctx` /
-/// `heap_ptr`), through which the runtime `eval` instruction, value
-/// name-resolution, and every allocation/RC operation reach them.
+/// of a constructor. The `VM` holds a raw pointer to the `SymbolTable`, the
+/// `CompileCtx` and the `FiberHeap` (`set_symbols` / `set_compile_ctx` /
+/// `heap_ptr`). The runtime `eval` instruction, value name-resolution, and every
+/// allocation/RC operation reach them through those pointers.
 ///
-/// The heap is a sibling of the `VM`, not a field inside it: the `VM` reaches it
+/// The heap is a sibling of the `VM`, not a field inside it. The `VM` reaches it
 /// only through `heap_ptr`, so a `&mut VM` reborrow and a `&mut FiberHeap`
-/// reborrow never alias one allocation (the soundness contract `ctx.vm()` +
-/// `ctx.heap_mut()` already rely on). Declared after the `VM`/`CompileCtx` so it
-/// drops last — after teardown has run and after the pointer-holders drop.
+/// reborrow never alias one allocation. That is the soundness contract
+/// `ctx.vm()` + `ctx.heap_mut()` already rely on. Declared after the
+/// `VM`/`CompileCtx` so it drops last — after teardown has run and after the
+/// pointer-holders drop.
 pub struct RuntimeCore {
     vm: Box<VM>,
     symbols: Box<SymbolTable>,
     compile: Box<CompileCtx>,
     /// This instance's region store. The program VM and the `CompileCtx`'s
     /// macro-expansion VM both point their `heap_ptr` here, so an instance is one
-    /// heap. Two coexisting instances own two distinct heaps (tls.md).
+    /// heap. Two coexisting instances own two distinct heaps.
     heap: Box<crate::value::fiberheap::FiberHeap>,
     /// Kept resident for the core's life (primitive signal/arity metadata).
     _meta: crate::primitives::def::PrimitiveMeta,
@@ -101,19 +60,27 @@ impl RuntimeCore {
     /// Build a core whose VMs (program and macro) segment strings under the
     /// given Unicode generation for their whole lives.
     pub fn bare_with_unicode(gen: crate::segment::Generation) -> Self {
-        Self::for_boot(gen, &BootImage::Off).0
+        Self::for_boot(gen, &[]).0
     }
 
-    /// Build a core out of the boot image `image` names, or out of the three
-    /// sources when it names none this binary can hydrate
-    /// (docs/impl/image/boot.md).
+    /// Boot a core with the stdlib under `caches`, as `Runtime::with_caches`
+    /// does, for a holder that never tears it down: a core has no teardown
+    /// sweep to run on drop.
+    pub fn with_caches(caches: BootCaches) -> Self {
+        let gen = crate::config::get().unicode_generation();
+        Self::boot(gen, true, BootFrom::Caches(caches)).core
+    }
+
+    /// Build a core out of the first of `images` this binary accepts, or out
+    /// of the three sources when it accepts none (docs/impl/image/boot.md).
     ///
-    /// Answers the core and the hydrated image, because the caller's stdlib
-    /// step installs out of the same image the core's compile context did.
-    pub(crate) fn for_boot(
+    /// Answers the core, the hydrated image and the open image it came from,
+    /// because the caller's stdlib step installs out of the same image the
+    /// core's compile context did, and its workers hydrate the same descriptor.
+    pub(super) fn for_boot(
         gen: crate::segment::Generation,
-        image: &BootImage,
-    ) -> (Self, Option<crate::image::boot::Boot>) {
+        images: &[Arc<OpenImage>],
+    ) -> (Self, Option<(crate::image::boot::Boot, Arc<OpenImage>)>) {
         // This instance's heap, owned here and shared by the program VM and the
         // macro-expansion VM. Built first: both VMs point their `heap_ptr` at it,
         // so the instance is one region store and core.lisp/stdlib closures
@@ -132,10 +99,10 @@ impl RuntimeCore {
         // value name-resolution resolve in THIS instance's own table. Mirrors
         // `set_compile_ctx` below.
         vm.set_symbols(&mut *symbols as *mut SymbolTable);
-        let boot = hydrate_boot_image(&mut heap, &mut symbols, image);
+        let hydrated = hydrate_boot_image(&mut heap, &mut symbols, images);
         // The macro VM shares this instance's heap (see `bare`'s heap comment).
-        let mut compile = Box::new(match &boot {
-            Some(boot) => CompileCtx::from_boot_image(heap_ptr, boot, &mut symbols),
+        let mut compile = Box::new(match &hydrated {
+            Some((boot, _)) => CompileCtx::from_boot_image(heap_ptr, boot, &mut symbols),
             None => CompileCtx::new_with_heap(heap_ptr),
         });
         compile.set_unicode_generation(gen);
@@ -150,17 +117,8 @@ impl RuntimeCore {
                 heap,
                 _meta: meta,
             },
-            boot,
+            hydrated,
         )
-    }
-
-    /// Install a hydrated image's stdlib exports, in place of compiling and
-    /// running stdlib.lisp. The image's region is already a process root, so
-    /// this roots nothing of its own (docs/impl/image/boot.md).
-    pub(crate) fn install_stdlib_from_image(&mut self, boot: &crate::image::boot::Boot) {
-        let exports = boot.stdlib_exports();
-        let (_vm, symbols, compile) = self.parts();
-        crate::primitives::module_init::install_exports(symbols, compile, exports);
     }
 
     /// The three disjoint borrows a boot dump takes: the heap for the graph,
@@ -174,20 +132,6 @@ impl RuntimeCore {
         &CompileCtx,
     ) {
         (&mut self.heap, &mut self.symbols, &self.compile)
-    }
-
-    /// Compile and execute stdlib.lisp into this core's `CompileCtx`. The caller
-    /// must have installed the symbol-table context first (stdlib macros gensym).
-    pub fn load_stdlib(
-        &mut self,
-        cache: &crate::compiler::stdlib_cache::StdlibCache,
-    ) -> crate::primitives::module_init::StdlibSource {
-        // Record it on the VM so a `sys/spawn` worker, which reaches the
-        // spawning instance only through `ctx.vm()`, inherits this directory
-        // instead of falling back to the process-wide one.
-        self.vm.set_stdlib_cache(cache.clone());
-        let (vm, symbols, compile) = self.parts();
-        init_stdlib(vm, symbols, compile, cache)
     }
 
     /// Mutable access to the VM.
@@ -209,8 +153,7 @@ impl RuntimeCore {
     /// allocation and reference-count operation reads through. This is the
     /// core-owned `Box<FiberHeap>` that the VM's `heap_ptr` aliases; reaching it
     /// directly keeps the borrow disjoint from a `&mut VM`. Two embedded instances
-    /// on one thread each get their own (tls.md § Acceptance criterion); a shared
-    /// per-thread heap is the coexistence defect this axis removes.
+    /// on one thread each get their own.
     pub fn heap(&mut self) -> &mut crate::value::fiberheap::FiberHeap {
         &mut self.heap
     }
@@ -220,6 +163,12 @@ impl RuntimeCore {
     /// compile context (macro expansion, meta, projections).
     pub fn parts(&mut self) -> (&mut VM, &mut SymbolTable, &mut CompileCtx) {
         (&mut self.vm, &mut self.symbols, &mut self.compile)
+    }
+
+    /// The same three, shared: for a reader that holds them beside a borrow of
+    /// its own state, as the language server's handlers do.
+    pub(crate) fn parts_shared(&self) -> (&VM, &SymbolTable, &CompileCtx) {
+        (&self.vm, &self.symbols, &self.compile)
     }
 
     /// The heap and the symbol table as disjoint borrows — the pair the image

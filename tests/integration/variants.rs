@@ -1,4 +1,4 @@
-// audited: 2026-10-15
+// audited: 2026-10-20
 // Each variant build's targets: the binaries they build, their features, and
 // the suite pass each runs on them.
 //
@@ -255,12 +255,19 @@ fn smoke_pool_impl_runs_the_implementation_suite_on_the_pool_rig() {
     assert_producer_pass("the pool build's rig targets", &all, "ELLE_RIG");
 }
 
-/// The `cargo build` line `make TARGET` runs.
+/// The `cargo build` line `make TARGET` runs for its own build.
+///
+/// A release build of the default library first builds stage 1 in a target
+/// directory of its own, to write the boot image it embeds
+/// (docs/impl/image/boot.md). That line builds the default `elle` whatever the
+/// target, so it is passed over. Under `make test` the dry run inherits the
+/// caller's `CARGO_PROFILE` through `MAKEFLAGS`, so the release recipe is the
+/// one read there.
 fn build_line(target: &str) -> String {
     let recipe = make_dry_run(target).unwrap_or_else(|| panic!("`make {target}` did not run"));
     recipe
         .lines()
-        .find(|l| l.contains("cargo build"))
+        .find(|l| l.contains("cargo build") && !l.contains("--target-dir target/stage1"))
         .unwrap_or_else(|| panic!("`make {target}` builds nothing:\n{recipe}"))
         .to_string()
 }

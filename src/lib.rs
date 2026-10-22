@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-20
 //! The Elle library: the compiler pipeline, the VM and its runtime, and the entry points an embedder or a binary drives.
 //!
 //! docs/embedding.md
@@ -26,7 +26,10 @@
 //! ```
 //!
 //! The lower-level pieces remain available for embedders that manage the VM,
-//! symbol table, and compile context themselves (no automatic teardown):
+//! symbol table, and compile context themselves (no automatic teardown). They
+//! compile core.lisp, prelude.lisp and stdlib.lisp from source; only a
+//! [`Runtime`](runtime::Runtime) boots from the boot image
+//! (docs/impl/image/boot.md).
 //!
 //! ```
 //! use elle::{eval, init_stdlib, register_primitives, SymbolTable, VM};

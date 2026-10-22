@@ -1,16 +1,17 @@
-// audited: 2026-09-29
+// audited: 2026-10-20
 //! How a release names what it frees: the address space a value slot belongs
 //! to, and the process-global counter that mints a static region id.
 //!
 //! docs/impl/region/mechanism.md
 //! docs/impl/region/model.md
+//! docs/impl/image/format.md
 
 use super::*;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 /// Global region ID counter. IDs 0 (invalid) and 1 are reserved; minting starts at 2.
-/// Used by the lowerer for solver-assigned regions and by the compilation
-/// pipeline for transient compile-time regions.
+/// Used by the lowerer for solver-assigned regions, and by `execute_scheduled`
+/// for the call it encodes by hand.
 static NEXT_STATIC_REGION: AtomicU32 = AtomicU32::new(2);
 
 /// Mint a fresh **static** region id — a compile-time, globally-unique slot
@@ -25,6 +26,21 @@ pub fn new_static_region() -> StaticRegion {
         "static region id counter wrapped or hit reserved range"
     );
     StaticRegion::new(id).expect("static region id counter is >= 2, hence nonzero")
+}
+
+/// The id the next [`new_static_region`] hands out, without minting it.
+pub(crate) fn static_region_counter() -> u32 {
+    NEXT_STATIC_REGION.load(Ordering::Relaxed)
+}
+
+/// Raise the counter so that no later [`new_static_region`] answers below
+/// `watermark`, and never lower it.
+///
+/// A boot image records the counter where its boot ended, and raising this
+/// one to it is what lets an image boot hand user code the slots
+/// a source boot would (docs/impl/image/format.md).
+pub(crate) fn raise_static_regions_to(watermark: u32) {
+    NEXT_STATIC_REGION.fetch_max(watermark, Ordering::Relaxed);
 }
 
 /// Where a value-route release reads the value whose region it means.

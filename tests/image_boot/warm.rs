@@ -1,20 +1,25 @@
-// audited: 2026-09-21
-// The warm cache: what a boot stores, what the next boot reads, and what a
-// store leaves behind.
+// audited: 2026-10-21
+// The warm cache: what a boot stores, under which name, what the next boot
+// reads, and what a store leaves behind.
 // docs/impl/image/boot.md
-// docs/impl/image/plan.md
+// docs/impl/image/pins.md
 
 use super::*;
 use elle::compiler::stdlib_cache::StdlibCache;
 use elle::image::boot::{self, BootImage, BootSource};
 use elle::runtime::BootCaches;
 
+/// The warm-cache policy a test over `dir` boots under.
+fn policy_in(dir: &std::path::Path) -> BootImage {
+    BootImage::Dir(dir.join("boot"))
+}
+
 /// A runtime whose boot image lives in `dir` and whose compiled stdlib is
 /// cached beside it, so the only files it can hit are this test's.
 fn runtime_in(dir: &std::path::Path) -> Runtime {
     Runtime::with_caches(BootCaches {
         stdlib: StdlibCache::Dir(dir.join("stdlib")),
-        image: BootImage::Dir(dir.join("boot")),
+        image: policy_in(dir),
     })
 }
 
@@ -33,9 +38,10 @@ fn images(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
     found
 }
 
-// § Test plan, "Warm cache": a second instance over one directory boots from
-// the image the first stored. The assertion is on the reported boot source,
-// because a cache that silently never hits still yields a working runtime.
+// A second instance over one directory boots from the image the first stored,
+// and the stored file is the one the policy names. The assertion is on the
+// reported boot source, because a cache that silently never hits still yields
+// a working runtime.
 #[test]
 fn a_second_instance_boots_from_the_image_the_first_stored() {
     let dir = crate::common::ScratchDir::new("image-warm-hit");
@@ -48,11 +54,15 @@ fn a_second_instance_boots_from_the_image_the_first_stored() {
     drop(first);
 
     let stored = images(dir.path());
-    assert_eq!(stored.len(), 1, "the first boot stored no image: {stored:?}");
     assert_eq!(
-        stored[0].file_name().and_then(|n| n.to_str()),
-        Some(format!("{}.image", boot::sources_digest()).as_str()),
-        "the stored image is not named for the source digest"
+        stored.len(),
+        1,
+        "the first boot stored no image: {stored:?}"
+    );
+    assert_eq!(
+        Some(&stored[0]),
+        policy_in(dir.path()).path().as_ref(),
+        "the stored image is not the file the policy names"
     );
 
     let second = runtime_in(dir.path());
@@ -63,9 +73,36 @@ fn a_second_instance_boots_from_the_image_the_first_stored() {
     );
 }
 
-// § Test plan, "Warm cache": a rejected file is replaced rather than rejected
-// again — the start that meets it compiles and stores, and the start after
-// that hits.
+// A valid image filed under the plain source digest, which is the name an older
+// build gave it, is never opened. The key holds the binary's identity, so an
+// image another build stored has another name.
+//
+// The counter-factual is the digest alone. The image below is valid and its
+// digest matches, so a loader that keyed on the digest would hydrate it, and
+// would hydrate an older build's code the same way.
+#[test]
+fn an_image_under_the_plain_digest_is_never_opened() {
+    let seeded = crate::common::ScratchDir::new("image-warm-plain-seed");
+    drop(runtime_in(seeded.path()));
+    let valid = images(seeded.path()).into_iter().next().expect("one image");
+
+    let dir = crate::common::ScratchDir::new("image-warm-plain");
+    std::fs::create_dir_all(dir.join("boot")).expect("mkdir");
+    let plain = dir
+        .join("boot")
+        .join(format!("{}.image", boot::sources_digest()));
+    std::fs::copy(&valid, &plain).expect("file the image under the plain digest");
+
+    let rt = runtime_in(dir.path());
+    assert_eq!(
+        rt.boot_source(),
+        BootSource::Compiled,
+        "a runtime hydrated an image filed under the plain digest"
+    );
+}
+
+// A rejected file is replaced rather than rejected again — the start that
+// meets it compiles and stores, and the start after that hits.
 //
 // The counter-factual is a loader that leaves a rejected file where it is:
 // every later start pays the whole front end, and the directory holds a file
@@ -93,15 +130,28 @@ fn a_rejected_image_is_replaced_rather_than_rejected_again() {
     );
 }
 
-// § Test plan, "Warm cache": a store prunes the superseded file and leaves the
-// kept one. Every edit to a boot source mints a new digest and orphans the
-// last file, at megabytes apiece.
+// A store prunes every other image in its directory, another executable's
+// included. Every rebuild orphans the last file, at megabytes apiece, and a
+// rustdoc test runs from a fresh temporary executable each time, so only a
+// rule over the whole directory bounds it.
+//
+// The counter-factual is a store that keeps another executable's images: the
+// directory then grows by one image for every executable that ever booted in
+// it.
 #[test]
-fn a_store_prunes_the_superseded_image() {
+fn a_store_prunes_every_other_image() {
     let dir = crate::common::ScratchDir::new("image-warm-prune");
-    let orphan = dir.join("boot").join("0123456789abcdef.image");
     std::fs::create_dir_all(dir.join("boot")).expect("mkdir");
-    std::fs::write(&orphan, b"an earlier digest's image").expect("write orphan");
+    let planted: Vec<std::path::PathBuf> = [
+        "0123456789abcdef.image",
+        "0000000000000000-0123456789abcdef.image",
+    ]
+    .iter()
+    .map(|name| dir.join("boot").join(name))
+    .collect();
+    for path in &planted {
+        std::fs::write(path, b"an image some other build stored").expect("plant an image");
+    }
 
     drop(runtime_in(dir.path()));
 
@@ -109,37 +159,11 @@ fn a_store_prunes_the_superseded_image() {
     assert_eq!(
         kept.len(),
         1,
-        "the store did not prune the superseded image: {kept:?}"
+        "the store did not prune every other image: {kept:?}"
     );
-    assert!(!orphan.exists(), "the orphan survived the store");
-}
-
-// § Test plan, "Warm cache": the default policy neither reads a directory nor
-// writes one. The default is off while a hydrated stdlib reaches neither the
-// JIT tier nor cross-unit inlining (docs/impl/image/boot.md), so a runtime
-// that stored one anyway would turn the policy into a suggestion.
-#[test]
-fn the_default_policy_neither_reads_an_image_nor_writes_one() {
-    let dir = crate::common::ScratchDir::new("image-warm-off");
-    // Seed a valid image, so reading one is possible and only the policy
-    // stops it.
-    drop(runtime_in(dir.path()));
-    let seeded = images(dir.path());
-    assert_eq!(seeded.len(), 1, "no image to ignore");
-
-    let rt = Runtime::with_caches(BootCaches {
-        stdlib: StdlibCache::Dir(dir.join("stdlib")),
-        image: BootImage::default(),
-    });
     assert_eq!(
-        rt.boot_source(),
-        BootSource::Compiled,
-        "the default policy hydrated an image"
-    );
-    drop(rt);
-    assert_eq!(
-        images(dir.path()),
-        seeded,
-        "the default policy wrote into the boot directory"
+        Some(&kept[0]),
+        policy_in(dir.path()).path().as_ref(),
+        "the image the store kept is not the one it wrote"
     );
 }

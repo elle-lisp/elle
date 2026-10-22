@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-20
 // The `--dump=STAGE[,STAGE,...]` surface: each stage prints its banner and the markers its artifact is read by.
 // docs/config.md
 //
@@ -73,7 +73,7 @@ fn dfa_reports_signal_and_capture_mask() {
     assert!(status.success());
     assert!(out.contains("── dfa"), "missing dfa banner:\n{}", out);
     // The DFA per-function summary reports the inferred signal and the capture
-    // masks (see `dump::dfa_function` / `main::print_dfa_function`).
+    // masks (see `dump::dfa_module`).
     assert!(out.contains("signal="), "missing signal field:\n{}", out);
     assert!(
         out.contains("capture_params_mask="),
@@ -160,11 +160,12 @@ fn all_stages_run_in_pipeline_order() {
     }
 }
 
-/// `--dump=bytecode` with the stdlib cache off, so every run compiles the
-/// standard library and mints its static region slots before the file's own.
+/// `--dump=bytecode` with the stdlib cache and the boot image off, so every run
+/// compiles the standard library and mints its static region slots before the
+/// file's own.
 fn dump_bytecode(source: &str) -> (String, String, std::process::ExitStatus) {
     let output = Command::new(elle())
-        .arg("--cache=")
+        .args(["--cache=", "--boot-image=off"])
         .arg("--dump=bytecode")
         .arg("-e")
         .arg(source)

@@ -1,6 +1,6 @@
 # Elle
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-20 -->
 
 A Lisp whose compiler infers what each function does and where each value dies,
 and runs on those facts.
@@ -223,22 +223,25 @@ back. An *image* is a compacted region plus a relocation table. Loading one
 maps its pages privately and rewrites its pointers in one pass. No value is
 decoded, and pages that nothing touches are never read from disk.
 
-The boot image holds the whole standard library as one region. From a warm
-image, Elle starts in under 10 ms with 13 MB resident. Loading the library from
-the default bytecode cache takes 45 ms and 45 MB, and compiling it from source
-takes 270 ms and 100 MB. Try the image with a cache directory:
+The boot image holds the whole standard library as one region. A release
+binary that `make elle` builds carries its boot image inside the executable,
+so its first start loads it too. Any other build compiles the library at its
+first start and stores the image in the cache directory, and every later start
+loads it. From an image, Elle starts in under 10 ms with 13 MB resident.
+Loading the library from the bytecode cache takes 45 ms and 45 MB, and
+compiling it from source takes 270 ms and 100 MB. `--boot-image=off` compiles
+at every start:
 
 ```sh
-elle --boot-image=$HOME/.cache/elle script.lisp
+elle --boot-image=off script.lisp
 ```
 
-The boot image is opt-in for now. A closure loaded from an image carries its
-LIR and the body a graft reads, so the library compiles on the JIT and a call
-to `+` becomes its body under either boot. A thread a program spawns still
-compiles its library from source. Saving and loading
-a user session as an image comes next, and then [fleet](docs/impl/fleet.md):
-running a function on other machines by shipping its image. The
-[image design](docs/impl/image.md) holds the details.
+A closure loaded from an image carries its LIR and the body a graft reads, so
+the library compiles on the JIT and a call to `+` becomes its body under either
+boot. A thread a program spawns loads the image its parent holds. Saving
+and loading a user session as an image comes next, and then
+[fleet](docs/impl/fleet.md): running a function on other machines by shipping
+its image. The [image design](docs/impl/image.md) holds the details.
 
 ## Hygienic macros
 
@@ -297,7 +300,8 @@ surface ([versioning](docs/versioning.md)).
 ## Using Elle
 
 Build with a stable Rust toolchain. The [install guide](INSTALL.md) lists the
-system libraries.
+system libraries, and shows the `make` build that puts the boot image inside the
+binary.
 
 ```sh
 cargo build --release -p elle

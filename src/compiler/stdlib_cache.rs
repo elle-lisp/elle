@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-20
 //! Cache the compiled standard library on disk, so a later process
 //! deserializes it instead of running the front end again.
 //!
@@ -87,29 +87,13 @@ impl StdlibCache {
     }
 }
 
-/// Identity of the running binary — its length and modification time.
-///
-/// Returns `None` when the executable cannot be located or measured. A binary
-/// that cannot identify itself must not share a cache with one that can, and
-/// falling back to the version string would restore the very confusion this
-/// exists to prevent, so the caller declines to cache instead.
-fn build_identity() -> Option<(u64, u128)> {
-    let exe = std::env::current_exe().ok()?;
-    let meta = std::fs::metadata(exe).ok()?;
-    let mtime = meta
-        .modified()
-        .ok()?
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()?
-        .as_nanos();
-    Some((meta.len(), mtime))
-}
-
 /// Content hash of the stdlib source, the running binary's identity,
 /// `FORMAT_VERSION`, and the primitive-table identity — the cache key.
 ///
 /// `None` when the binary cannot be identified; the caller then neither reads
-/// nor writes a cache file.
+/// nor writes a cache file. A binary that cannot identify itself must not
+/// share a cache with one that can, and falling back to the version string
+/// would restore the very confusion the identity exists to prevent.
 fn cache_key(stdlib_source: &str) -> Option<String> {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -117,7 +101,9 @@ fn cache_key(stdlib_source: &str) -> Option<String> {
     // The binary itself, not its version string: two builds of one version
     // compile stdlib differently the moment a pass changes
     // (docs/impl/stdlib-cache.md).
-    build_identity()?.hash(&mut hasher);
+    crate::image::boot::Executable::current()?
+        .identity()
+        .hash(&mut hasher);
     FORMAT_VERSION.hash(&mut hasher);
     // A serialized native-fn immediate carries a `prim_id`, valid only against
     // the table that minted it; without this a foreign id reaches
@@ -156,8 +142,8 @@ pub fn try_load(
     Some(load_bytecode(stored, vm, symbols))
 }
 
-/// Store the compiled stdlib to the disk cache. Failures are ignored — the
-/// cache is an optimization; a fresh compile is always valid.
+/// Store the compiled stdlib to the disk cache. A failure is reported and
+/// ignored — the cache is an optimization; a fresh compile is always valid.
 pub fn try_store(
     stdlib_source: &str,
     cache: &StdlibCache,

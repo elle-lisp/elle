@@ -1,8 +1,8 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 // The code objects a hydrated `MakeClosure` indexes: the payload's child
 // table, which crosses as headers in the body.
 // docs/impl/image/sealing.md
-// docs/impl/image/plan.md
+// docs/impl/image/pins.md
 
 use super::*;
 use elle::image;
@@ -18,8 +18,8 @@ fn parent_of(name: &str, child: CodeBuilder) -> CodeBuilder {
         .children(vec![child])
 }
 
-// § Test plan, "Children": the child's payload crosses field by field, and a
-// lambda nested two deep rides the child's own child table.
+// The child's payload crosses field by field, and a lambda nested two deep
+// rides the child's own child table.
 #[test]
 fn a_child_code_object_crosses_field_by_field() {
     let dir = crate::common::ScratchDir::new("image-child-fields");
@@ -55,9 +55,9 @@ fn a_child_code_object_crosses_field_by_field() {
     assert_eq!(grand.num_children(), 0);
 }
 
-// § Test plan, "Children": a hydrated closure builds its nested lambda, and
-// the lambda answers a call. The binding is a REPL binding, so `MakeClosure`
-// runs on the ordinary dispatch path and reads the child out of the body.
+// A hydrated closure builds its nested lambda, and the lambda answers a call.
+// The binding is a REPL binding, so `MakeClosure` runs on the ordinary
+// dispatch path and reads the child out of the body.
 //
 // The inner lambda captures the outer parameter, so the call also proves the
 // env a hydrated `MakeClosure` builds reaches the child's frame.
@@ -92,10 +92,10 @@ fn a_hydrated_closure_builds_its_nested_lambda() {
     }
 }
 
-// § Test plan, "Children": the instruction builds a fresh header per
-// creation. The counter-factual is handing out the image's own header, which
-// answers every call correctly and quietly moves the instance-to-template
-// edge across regions — only pointer identity sees the difference.
+// The instruction builds a fresh header per creation. The counter-factual is
+// handing out the image's own header, which answers every call correctly and
+// quietly moves the instance-to-template edge across regions — only pointer
+// identity sees the difference.
 #[test]
 fn two_lambdas_from_one_hydrated_parent_are_two_headers_over_one_payload() {
     let dir = crate::common::ScratchDir::new("image-child-headers");
@@ -146,10 +146,9 @@ fn two_lambdas_from_one_hydrated_parent_are_two_headers_over_one_payload() {
     );
 }
 
-// § Test plan, "Children": a hydrated closure sent to a worker carries its
-// children, which the worker rebuilds into the child table its own
-// `MakeClosure` indexes. Without them the worker's instruction indexes an
-// empty table and has nothing to build.
+// A hydrated closure sent to a worker carries its children, which the worker
+// rebuilds into the child table its own `MakeClosure` indexes. Without them
+// the worker's instruction indexes an empty table and has nothing to build.
 #[test]
 fn a_hydrated_closure_sends_its_children() {
     let dir = crate::common::ScratchDir::new("image-child-send");
@@ -178,9 +177,9 @@ fn a_hydrated_closure_sends_its_children() {
     assert_eq!(sent.child_protos[0].name.as_deref(), Some("nested-lambda"));
 }
 
-// § Test plan, "Children": a parent and its child write one file across two
-// dumps. A child payload is assembled from the same probed extents its
-// parent's is, so its construction temporaries are residue the same way.
+// A parent and its child write one file across two dumps. A child payload is
+// assembled from the same probed extents its parent's is, so its construction
+// temporaries are residue the same way.
 #[test]
 fn a_child_bearing_dump_is_byte_deterministic() {
     let dir = crate::common::ScratchDir::new("image-child-determinism");

@@ -1,6 +1,6 @@
 # The language specification
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-20 -->
 
 What the specification of Elle holds, what it leaves to an implementation, and
 how a test says which of the two it checks.
@@ -114,8 +114,8 @@ specified snapshot layout belongs to it too. The fingerprint that locks an
 image to one binary solves one implementation's portability problem, and it is
 the current configuration rather than a rule ([image](impl/image.md)). A
 snapshot becomes portable once the code layer is in the specification. HIR
-fragments in a snapshot are optional data: an implementation that ignores one
-loses cross-unit inlining, and every call stays a call.
+fragments in a snapshot are optional data: an implementation that ignores them
+grafts no function from another unit, and each call to one stays a call.
 
 ## What is not written yet
 

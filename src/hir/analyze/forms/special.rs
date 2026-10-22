@@ -1,8 +1,9 @@
-// audited: 2026-10-06
+// audited: 2026-10-12
 //! The special forms that desugar in the analyzer: `environment`, `parameterize`, `cond`, and qualified symbols.
 //!
 //! docs/impl/hir.md
 //! docs/signals/inference.md
+//! docs/impl/symbol.md
 
 use super::*;
 
@@ -204,7 +205,8 @@ impl<'a> Analyzer<'a> {
     /// `(get (get a :b) :c)`.
     ///
     /// The first segment is resolved as a variable (local or global).
-    /// Each subsequent segment becomes a keyword argument to `get`.
+    /// Each subsequent segment becomes a keyword argument to `get`, and its
+    /// spelling is recorded in the memo, because no keyword token spells it.
     /// All synthesized HIR nodes carry the original symbol's span.
     ///
     /// The `get` binding always resolves to the global primitive,
@@ -244,6 +246,7 @@ impl<'a> Analyzer<'a> {
         for segment in &segments[1..] {
             let get_func = Hir::silent(HirKind::Var(get_binding), *span);
             let key = Hir::silent(HirKind::Keyword(segment.to_string()), *span);
+            self.symbols.keyword(segment);
             // Use projected signal if the binding has a projection for this field.
             let call_signal = if let HirKind::Var(binding) = &result.kind {
                 if let Some(proj) = self.projection_env.get(binding) {

@@ -1,11 +1,13 @@
-// audited: 2026-10-15
-//! Pins the configuration: per-instance trace cells, the tier a build starts, the
-//! refused flags, the cache directory and the page size.
+// audited: 2026-10-21
+//! Pins the configuration: trace cells, the starting tier, the refused flags
+//! and the page size.
 //!
 //! docs/config.md
 
 use super::*;
 use crate::value::fiberheap::pagepool::base_page;
+
+mod cache;
 
 /// Trace state is per-instance: a `RuntimeConfig` reads and writes its own
 /// [`TraceCell`], so a diagnostic toggle on one instance never reaches another.
@@ -257,90 +259,6 @@ fn dump_stats_runs_the_program() {
         both.dump,
         std::collections::HashSet::from(["lir".to_string()]),
         "a stage beside stats still dumps and exits"
-    );
-}
-
-// ── The cache directory (docs/config.md) ──
-
-/// A variable lookup over `set` alone, standing in for the process environment.
-fn vars<'a>(set: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
-    move |name| {
-        set.iter()
-            .find(|(key, _)| *key == name)
-            .map(|(_, value)| value.to_string())
-    }
-}
-
-/// The cache directory `set` names, as a path, with `temp-root` as the
-/// platform temp directory.
-fn cache_dir(set: &[(&str, &str)]) -> Option<std::path::PathBuf> {
-    cache_dir_from(vars(set), std::path::Path::new("temp-root")).map(std::path::PathBuf::from)
-}
-
-#[test]
-fn elle_cache_names_the_cache_directory() {
-    assert_eq!(
-        cache_dir(&[("ELLE_CACHE", "/var/cache/e"), ("HOME", "/home/u")]),
-        Some("/var/cache/e".into())
-    );
-}
-
-#[test]
-fn an_empty_elle_cache_turns_caching_off() {
-    assert_eq!(cache_dir(&[("ELLE_CACHE", ""), ("HOME", "/home/u")]), None);
-}
-
-#[test]
-fn xdg_cache_home_gets_an_elle_directory() {
-    assert_eq!(
-        cache_dir(&[("XDG_CACHE_HOME", "/xdg"), ("HOME", "/home/u")]),
-        Some(std::path::Path::new("/xdg").join("elle"))
-    );
-}
-
-#[test]
-fn home_falls_back_to_the_xdg_default() {
-    assert_eq!(
-        cache_dir(&[("HOME", "/home/u")]),
-        Some(std::path::Path::new("/home/u").join(".cache").join("elle"))
-    );
-}
-
-/// The counter-factual: the cache followed `TMPDIR` first, so the directory
-/// moved with a variable that names scratch space, not a cache.
-#[test]
-fn the_temp_variables_do_not_choose_the_cache_directory() {
-    assert_eq!(
-        cache_dir(&[
-            ("TMPDIR", "/scratch"),
-            ("TMP", "/scratch"),
-            ("HOME", "/home/u")
-        ]),
-        Some(std::path::Path::new("/home/u").join(".cache").join("elle"))
-    );
-}
-
-/// The counter-factual: with neither `TMPDIR` nor `TMP` set, the cache was
-/// off, and every start compiled the standard library with nothing failing.
-#[test]
-fn with_no_variable_set_the_cache_is_in_the_temp_directory() {
-    assert_eq!(
-        cache_dir(&[]),
-        Some(std::path::Path::new("temp-root").join("elle-cache"))
-    );
-}
-
-/// An empty variable names no directory, so the lookup reads past it. Only an
-/// empty `ELLE_CACHE` turns caching off.
-#[test]
-fn an_empty_variable_other_than_elle_cache_counts_as_unset() {
-    assert_eq!(
-        cache_dir(&[("XDG_CACHE_HOME", ""), ("HOME", "/home/u")]),
-        Some(std::path::Path::new("/home/u").join(".cache").join("elle"))
-    );
-    assert_eq!(
-        cache_dir(&[("XDG_CACHE_HOME", ""), ("HOME", "")]),
-        Some(std::path::Path::new("temp-root").join("elle-cache"))
     );
 }
 

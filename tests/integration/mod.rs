@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 // Registers every integration test file, which is what makes one run.
 //
 // tests/AGENTS.md
@@ -186,6 +186,9 @@ mod program_value {
 mod spawn_stack {
     include!("spawn_stack.rs");
 }
+mod worker_boot {
+    include!("worker_boot.rs");
+}
 mod ffi_worker {
     include!("ffi_worker.rs");
 }
@@ -232,9 +235,6 @@ mod workflows {
 mod ci_profile {
     include!("ci_profile.rs");
 }
-mod cache_dir {
-    include!("cache_dir.rs");
-}
 mod ci_steps {
     include!("ci_steps.rs");
 }
@@ -270,6 +270,15 @@ mod capacity {
 }
 mod boot_image_gate {
     include!("boot_image_gate.rs");
+}
+mod boot_parity {
+    include!("boot_parity.rs");
+}
+mod boot_image_cli {
+    include!("boot_image_cli.rs");
+}
+mod blob_build {
+    include!("blob_build.rs");
 }
 mod doctest {
     include!("doctest.rs");

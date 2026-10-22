@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! An HIR body closed over the bindings it names, so it can be re-hosted in any arena.
 //!
 //! docs/impl/hir.md
@@ -22,9 +22,11 @@ use crate::value::SymbolId;
 use rustc_hash::FxHashMap;
 
 mod lambda;
+mod names;
 mod pattern;
 
 pub use lambda::{ArmBody, LambdaFragment, Selected};
+pub use names::FragmentName;
 
 /// The shape of the bytes a code payload carries for a [`LambdaFragment`].
 /// Move it when the fragment types change shape: the image fingerprint records
@@ -337,7 +339,8 @@ impl Rebind for Grafting<'_> {
 ///
 /// `None` on any form not listed here. That list is the fragment's whole
 /// contract, and `close` and `graft` share this walk, so a body that closes
-/// always grafts.
+/// always grafts. [`HirFragment::for_each_name`] names what the listed forms
+/// spell, so a form added here that holds a name is added there too.
 fn rebind(h: &Hir, r: &mut impl Rebind) -> Option<Hir> {
     let kind = match &h.kind {
         HirKind::Nil => HirKind::Nil,

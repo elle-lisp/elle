@@ -1,11 +1,10 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 // The defining span crosses on the payload, so `meta/origin` answers after a
 // hydration.
 // docs/impl/image/sealing.md
-// docs/impl/image/plan.md
+// docs/impl/image/pins.md
 
 use super::*;
-use elle::pipeline::eval_all;
 use elle::syntax::Span;
 use elle::value::Arity;
 
@@ -43,9 +42,9 @@ fn round_trip(origin: Option<Span>, path: &std::path::Path) -> (FiberHeap, Value
     (dst, hydrated.root)
 }
 
-// § Test plan, "Closures": a hydrated closure reports the line, the column and
-// the file it was written at. Every field of the span crosses, not only the
-// three `meta/origin` prints, because the span is carried whole.
+// A hydrated closure reports the line, the column and the file it was written
+// at. Every field of the span crosses, not only the three `meta/origin`
+// prints, because the span is carried whole.
 #[test]
 fn a_hydrated_header_answers_the_origin_its_source_did() {
     let dir = crate::common::ScratchDir::new("image-origin-fields");
@@ -59,11 +58,11 @@ fn a_hydrated_header_answers_the_origin_its_source_did() {
     );
 }
 
-// § "A span names its file by name, not by id": the file table decides which
-// file a hydrated origin names. The counter-factual is the patch — renaming
-// the spelling in the table renames the file the origin reports. Without the
-// file stream the hydrated span keeps its dumped id, which in this one process
-// still resolves, to the original name.
+// The file table decides which file a hydrated origin names. The
+// counter-factual is the patch — renaming the spelling in the table renames
+// the file the origin reports. Without the file stream the hydrated span
+// keeps its dumped id, which in this one process still resolves, to the
+// original name.
 #[test]
 fn a_hydrated_origin_names_the_file_the_table_spells() {
     let dir = crate::common::ScratchDir::new("image-origin-file");
@@ -142,20 +141,16 @@ fn a_lambda_with_no_origin_still_answers_none() {
     );
 }
 
-// § Test plan, "Closures": `meta/origin` still answers. The end-to-end pin —
-// a lambda compiled in one runtime, hydrated into a fresh one, and asked
-// through the ordinary dispatch path for the file and line it was written at.
+// `meta/origin` still answers. The end-to-end pin is a lambda compiled in one
+// runtime, hydrated into a fresh one, and asked through the ordinary dispatch
+// path for the file and line it was written at.
 #[test]
 fn meta_origin_answers_for_a_hydrated_closure() {
     let dir = crate::common::ScratchDir::new("image-origin-meta");
     let path = dir.join("compiled.image");
     const FILE: &str = "aaa-image-origin-meta.lisp";
 
-    let mut rt = Runtime::new();
-    let f = {
-        let (vm, symbols, cctx) = rt.parts();
-        eval_all("(fn [x] (if (%eq x 2) 42 7))", symbols, vm, cctx, FILE).expect("eval")
-    };
+    let (mut rt, f) = compiled("(fn [x] (if (%eq x 2) 42 7))", FILE);
     assert!(
         f.as_closure()
             .expect("the eval produced a closure")
@@ -164,30 +159,20 @@ fn meta_origin_answers_for_a_hydrated_closure() {
             .is_some(),
         "a compiled lambda carries an origin before the dump"
     );
-    {
-        let (heap, symbols) = rt.heap_and_symbols();
-        image::dump(heap, symbols, f, &path).expect("dump");
-    }
+    dump_from(&mut rt, f, &path);
 
     let mut rt2 = Runtime::new();
     bind_hydrated(&mut rt2, &path);
-    let (vm, symbols, cctx) = rt2.parts();
-    let file = eval_all(
+    let file = eval_in(
+        &mut rt2,
         &format!("(= (get (meta/origin hydrated-f) :file) \"{FILE}\")"),
-        symbols,
-        vm,
-        cctx,
         "<image-origin>",
-    )
-    .expect("meta/origin");
+    );
     assert_eq!(file, Value::TRUE, "meta/origin named the wrong file");
-    let line = eval_all(
+    let line = eval_in(
+        &mut rt2,
         "(get (meta/origin hydrated-f) :line)",
-        symbols,
-        vm,
-        cctx,
         "<image-origin>",
-    )
-    .expect("meta/origin");
+    );
     assert_eq!(line.as_int(), Some(1), "meta/origin named the wrong line");
 }

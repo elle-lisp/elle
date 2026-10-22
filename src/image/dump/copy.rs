@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The compacting copy: what the dumper accepts into an image's body, and
 //! the spellings it records on the way through.
 //!
@@ -7,11 +7,12 @@
 //! One walk builds a sealed twin of the graph in a scratch region, sharing
 //! preserved through a map keyed on source payload address. A value outside
 //! the sealed set fails the copy, naming the variant, before any byte is
-//! written. Every symbol and keyword the walk meets — in a value position or
-//! as a struct key — leaves its spelling in the name table. A closure's
-//! header crosses as its one payload slice; code.rs owns what the payload
-//! behind it costs, and crossing.rs owns the two fields that may name a
-//! process-owned resource (docs/impl/image/sealing.md).
+//! written. Every symbol and keyword the walk meets leaves its spelling in the
+//! name table: in a value position, as a struct key, or among the names a code
+//! payload holds outside its values. A closure's header crosses as its one
+//! payload slice; code.rs owns what the payload behind it costs, and
+//! crossing.rs owns the two fields that may name a process-owned resource
+//! (docs/impl/image/sealing.md).
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -84,9 +85,24 @@ impl<'a> Walk<'a> {
             None => crate::value::keyword::resolve_keyword_name(Some(memo), v.payload),
         };
         if let Some(name) = name {
-            if !self.names.contains(name) {
-                self.names.insert(name.into());
+            self.record(name);
+        }
+    }
+
+    /// Record the spelling of every name `t`'s payload holds outside its value
+    /// slots, which the value walk never meets (docs/impl/region/template.md).
+    pub(super) fn note_payload_names(&mut self, t: &ClosureTemplate) {
+        let memo = self.memo;
+        t.for_each_name(|n| {
+            if let Some((_, name)) = n.spelling(Some(memo)) {
+                self.record(name);
             }
+        });
+    }
+
+    fn record(&mut self, name: &str) {
+        if !self.names.contains(name) {
+            self.names.insert(name.into());
         }
     }
 

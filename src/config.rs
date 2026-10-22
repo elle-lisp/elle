@@ -1,4 +1,4 @@
-// audited: 2026-10-15
+// audited: 2026-10-20
 //! Two configurations: `Config` is set once at startup and read anywhere,
 //! `RuntimeConfig` rides on one VM and a running program may change it.
 //!
@@ -202,12 +202,10 @@ pub struct Config {
     /// empty `ELLE_CACHE`).
     pub cache: Option<String>,
 
-    /// Where a boot image is read and stored (`--boot-image=`). `None` is the
-    /// default and means no image: boot compiles core, prelude and stdlib
-    /// (docs/impl/image/boot.md names the two milestones the default waits on).
-    /// `Some("")` selects the `--cache=` directory; any other string is a
-    /// directory of its own.
-    pub boot_image: Option<String>,
+    /// Where a boot image is read and stored (`--boot-image=`). The default is
+    /// the embedded blob, then the warm cache beneath the `--cache=` directory
+    /// (docs/impl/image/boot.md).
+    pub boot_image: crate::image::boot::BootImage,
 
     // -- Paths --
     /// Elle home directory (module resolution root).
@@ -288,7 +286,7 @@ impl Default for Config {
             wasm: WasmPolicy::Off,
             no_stdlib: false,
             cache: default_cache_dir(),
-            boot_image: None,
+            boot_image: crate::image::boot::BootImage::Process,
             home: std::env::var("ELLE_HOME").ok(),
             path: std::env::var("ELLE_PATH").ok(),
             json: false,
@@ -319,12 +317,7 @@ impl Config {
 
     /// The boot-image policy this process starts instances with.
     pub fn boot_image(&self) -> crate::image::boot::BootImage {
-        use crate::image::boot::BootImage;
-        match self.boot_image.as_deref() {
-            None => BootImage::Off,
-            Some("") => BootImage::Process,
-            Some(dir) => BootImage::Dir(std::path::PathBuf::from(dir)),
-        }
+        self.boot_image.clone()
     }
 
     /// Check if a trace keyword is set.

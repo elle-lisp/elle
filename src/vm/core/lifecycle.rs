@@ -41,15 +41,14 @@ impl VM {
         self.unicode_generation = gen;
     }
 
-    /// Where this VM's instance caches its compiled stdlib — what a `sys/spawn`
-    /// worker inherits.
-    pub fn stdlib_cache(&self) -> &crate::compiler::stdlib_cache::StdlibCache {
-        &self.stdlib_cache
+    /// What a worker spawned from this VM's instance boots from.
+    pub fn worker_boot(&self) -> &crate::runtime::WorkerBoot {
+        &self.worker_boot
     }
 
-    /// Record it. Construction-time only, from `RuntimeCore::load_stdlib`.
-    pub(crate) fn set_stdlib_cache(&mut self, cache: crate::compiler::stdlib_cache::StdlibCache) {
-        self.stdlib_cache = cache;
+    /// Record it. Construction-time only, from the instance's boot.
+    pub(crate) fn set_worker_boot(&mut self, boot: crate::runtime::WorkerBoot) {
+        self.worker_boot = boot;
     }
 
     /// The primitives the host registered on this VM's instance, in order —
@@ -77,8 +76,8 @@ impl VM {
     }
 
     /// Build a VM pointing at an externally-owned heap (`RuntimeCore`'s
-    /// `Box<FiberHeap>`), the coexistence-correct constructor: the program VM and
-    /// its instance's macro-expansion VM share this one heap, so core.lisp and
+    /// `Box<FiberHeap>`), the coexistence-correct constructor. The program VM and
+    /// its instance's macro-expansion VM share this one heap. So core.lisp and
     /// stdlib closures (created on the macro/program VM) and the values user code
     /// builds at runtime all live in the same region store. Two embedded
     /// instances on one thread each own a distinct heap and pass it here, so
@@ -116,8 +115,8 @@ impl VM {
         VM {
             runtime_config: rc,
             unicode_generation: crate::config::get().unicode_generation(),
-            stdlib_cache: crate::compiler::stdlib_cache::StdlibCache::default(),
             host_primitives: Vec::new(),
+            worker_boot: crate::runtime::WorkerBoot::default(),
             heap_ptr,
             compile_ctx_ptr: std::ptr::null_mut(),
             symbols_ptr: std::ptr::null_mut(),
