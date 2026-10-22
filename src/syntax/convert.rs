@@ -316,11 +316,11 @@ impl Syntax {
         }
     }
 
-    /// Convert runtime Value to Syntax
+    /// Convert runtime Value to Syntax, born in `arena`.
     /// Used for analyzing macro results.
-    /// When encountering a syntax object, returns it directly — preserving
-    /// scopes from the original Syntax. The passed `span` is ignored in
-    /// this case; the syntax object carries its own (more accurate) span.
+    /// A syntax object comes back as a copy in `arena`, with the scopes of the
+    /// original Syntax. The passed `span` is ignored in this case; the syntax
+    /// object carries its own (more accurate) span.
     pub fn from_value(
         arena: &SyntaxArena,
         value: &Value,
