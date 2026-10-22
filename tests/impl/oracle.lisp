@@ -1,15 +1,17 @@
-(elle/epoch 14)
-# audited: 2026-10-05
-# The region leak dashboard: one per-op leak rate per probe, judged against tests/ledger/oracle.lisp.
+(elle/epoch 15)
+# audited: 2026-10-21
+# The region leak dashboard: one per-op leak rate per probe, judged against the ledger files naming it.
 # docs/ratchet.md
 # docs/impl/region/diagnostics.md
 #
 # Every probe is a shape driven in a loop under a heap gauge — the object
 # count, the region count, the byte count or the physical-id counter, chosen
 # for the dimension its class leaks in — and read as a per-op rate by the
-# ratchet's estimator (lib/ratchet.md). A rate says how large a leak is and
-# nothing about soundness: the trustworthy UAF signal is `--trace=guardfree`
-# under the full stdlib (docs/impl/region/diagnostics.md).
+# ratchet's estimator (lib/ratchet.md). The stdlib scratch family reads a
+# crest beside its rate, the object high-water mark's slope in one call's
+# input size, for what a call holds to its return. A rate says how large a
+# leak is and nothing about soundness: the trustworthy UAF signal is
+# `--trace=guardfree` under the full stdlib (docs/impl/region/diagnostics.md).
 #
 # The ledger holds every pin. A rate that moves either way fails, a probe
 # with no row fails as unledgered, and a row with no probe fails as missing,
@@ -29,6 +31,7 @@
 (include-file "probe/concurrent.lisp")
 (include-file "probe/tailcall.lisp")
 (include-file "probe/stdlib.lisp")
+(include-file "probe/scratch.lisp")
 (include-file "probe/abort.lisp")
 (include-file "probe/store.lisp")
 (include-file "probe/yield.lisp")

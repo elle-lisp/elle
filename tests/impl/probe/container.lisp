@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-30
+(elle/epoch 15)
+# audited: 2026-10-21
 # Persistent fn-local containers, the loop-carried accumulator a function returns, the element a walk stores, and the captured accumulator a builder fills.
 #
 # docs/impl/region/diagnostics.md
@@ -16,8 +16,8 @@
 # clause TESTS held the collection's one release, and a clause test is a
 # conditional position exactly as a clause body is
 # (docs/impl/region/mechanism.md § "An arm is a conditional position, not a
-# syntactic arm body"). Its kernel CAPTURES `k` deliberately — a capture declines
-# loop fusion, so the real stdlib `map` runs and there is a per-op scratch to
+# syntactic arm body"). It maps `wrap-add`, whose `block` body declines loop
+# fusion, so the real stdlib `map` runs and there is a per-op scratch to
 # measure; a fusable kernel has none, which is what the dissolution controls
 # (`map-while`) measure. A control at 0.
 # `struct-outer` is the fn-local reassign-1-slot control: a loop-carried cell whose
@@ -83,12 +83,8 @@
            (when (%not (%int? b)) (error :block-not-int))
            (def @acc @[])
            (def @j 0)
-           (def k 1)
            (while (%lt j b)
-             (push acc
-                   (map (fn [x]
-                          (numeric!)
-                          (%add x k)) [1 2 3]))
+             (push acc (map wrap-add [1 2 3]))
              (assign j (%add j 1)))))
 (r:drive "struct-outer"
          (fn [b]
