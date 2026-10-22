@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-22
 //! Code a compile runs on a VM: a macro transformer call, and the body of a
 //! `begin-for-syntax` definition, each under the expansion budget.
 //!
@@ -15,9 +15,8 @@
 //! unspent. A compile cannot hold a park, so a body that suspends has its park
 //! refused, as `eval` refuses one, and the call answers a fault.
 //!
-//! The fiber also withholds the effect capabilities for the call, and gets its
-//! own set back after it. A call to an ambient primitive halts the expansion
-//! with `:terminal`, which no fiber mask catches.
+//! The fiber also withholds the effect capabilities and `:ambient` for the
+//! call, and gets its own set back after it.
 
 mod budget;
 
@@ -27,29 +26,20 @@ use budget::SPENT_KIND;
 
 use super::core::VM;
 use crate::signals::registry::format_bits;
-use crate::signals::EFFECT_CAPS;
+use crate::signals::EXPANSION_WITHHELD;
 use crate::syntax::Unit;
 use crate::value::heap::TableKey;
 use crate::value::CodeUnit;
-use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT, SIG_TERMINAL};
+use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT};
 use std::rc::Rc;
-
-/// The error kind of the halt that refuses an ambient primitive.
-const AMBIENT_KIND: &str = "ambient-refused";
-
-/// The bits of that halt. `:terminal` carries it past every fiber mask, as the
-/// spent budget's halt passes them by halting again at the next charge.
-const REFUSAL: SignalBits = SIG_HALT.union(SIG_TERMINAL);
 
 /// Why code a compile ran answered no value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompileTimeFault {
     /// The body called `primitive`, which needs `bits` that the expansion
-    /// withholds: an effect capability, or one the compiling fiber withholds.
+    /// withholds: an effect capability, `:ambient`, or a bit the compiling
+    /// fiber withholds.
     Denied { primitive: String, bits: SignalBits },
-    /// The body called `primitive`, which reaches state outside the unit
-    /// through no capability bit.
-    Ambient { primitive: String },
     /// The expansion budget ran out while the body ran.
     Fuel,
     /// The body raised this error, or halted with it.
@@ -66,9 +56,6 @@ impl CompileTimeFault {
             Self::Denied { primitive, bits } => format!(
                 "{primitive} needs {}, which the expansion withholds",
                 format_bits(*bits)
-            ),
-            Self::Ambient { primitive } => format!(
-                "{primitive} reads or changes state outside the unit, which an expansion may not"
             ),
             Self::Fuel => {
                 format!("exhausted its expansion fuel budget of {EXPANSION_FUEL} units")
@@ -128,7 +115,7 @@ impl VM {
     }
 
     /// Run `body` under the expansion budget, with the fiber's own fuel put
-    /// aside and the effect capabilities withheld, then give the fiber its fuel
+    /// aside and the expansion's set withheld, then give the fiber its fuel
     /// and its withheld set back and read what the body answered. An expansion
     /// nested inside another spends the outer budget.
     ///
@@ -145,7 +132,7 @@ impl VM {
         // A fiber's default fuel is no budget at all.
         let fuel = std::mem::take(&mut self.fiber.fuel);
         let withheld = self.fiber.withheld;
-        self.fiber.withheld = withheld.union(EFFECT_CAPS);
+        self.fiber.withheld = withheld.union(EXPANSION_WITHHELD);
         let outer = self.expansion_unit.replace(*unit);
         let bits = body(self);
         let lent = std::mem::replace(&mut self.expansion_unit, outer);
@@ -165,8 +152,6 @@ impl VM {
                 Ok(value)
             } else if error_kind_is(value, SPENT_KIND) {
                 Err(CompileTimeFault::Fuel)
-            } else if let Some(primitive) = refused_primitive(value) {
-                Err(CompileTimeFault::Ambient { primitive })
             } else {
                 Err(CompileTimeFault::Raised(
                     self.format_error_with_location(value),
@@ -188,22 +173,6 @@ impl VM {
         Err(fault)
     }
 
-    /// Refuse a call to `def`, an ambient primitive, inside the running
-    /// expansion. The primitive does not run. The halt carries `:terminal`, so
-    /// no fiber mask, `protect` or silent boundary stops it on its way to
-    /// `at_expansion`, and its payload names the primitive.
-    pub(crate) fn refuse_ambient(
-        &mut self,
-        def: &'static crate::primitives::def::PrimitiveDef,
-    ) -> (SignalBits, Value) {
-        let err = self.error_extra(
-            AMBIENT_KIND,
-            format!("{} reads or changes state outside the unit", def.name),
-            &[("func", Value::native_fn(def))],
-        );
-        (REFUSAL, err)
-    }
-
     /// The error in the fiber's signal slot, taken and formatted.
     fn raised_now(&mut self) -> CompileTimeFault {
         let (_, err) = self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
@@ -221,17 +190,6 @@ impl VM {
         }
         field("primitive")?.with_string(|s| s.to_string())
     }
-}
-
-/// The name of the primitive `value` refuses, when it is the payload
-/// `VM::refuse_ambient` builds: its kind, and the primitive in `:func`.
-fn refused_primitive(value: Value) -> Option<String> {
-    if !error_kind_is(value, AMBIENT_KIND) {
-        return None;
-    }
-    let fields = value.as_struct()?;
-    let func = crate::value::sorted_struct_get(fields, &TableKey::keyword("func"))?;
-    Some(func.as_native_def()?.name.to_string())
 }
 
 /// Whether `value` is an error struct whose `:error` field is the keyword

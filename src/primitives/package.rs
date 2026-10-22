@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-22
 //! What this build of Elle is: its version, its epoch, the cargo profile it
 //! was compiled under, and the fingerprint of the binary itself.
 //!
@@ -11,6 +11,7 @@ use std::sync::OnceLock;
 
 use crate::epoch::CURRENT_EPOCH;
 use crate::primitives::def::RegionEffect;
+use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::Value;
@@ -58,7 +59,7 @@ pub(crate) fn prim_build_profile(
 /// The path of the running binary, or nil when the OS will not say.
 ///
 /// A program that wants to run Elle again has to name the Elle it is already
-/// running, and nothing else in the process can: `(sys/argv)` carries the
+/// running, and nothing else in the process can. `(sys/argv)` carries the
 /// source it was pointed at, and a subcommand replaces even that. Resolving
 /// `elle` off `PATH` would answer with a different build, so the test runner
 /// spawns this (docs/test-cli.md).
@@ -78,9 +79,9 @@ pub(crate) fn prim_executable(
 // ── The boot fingerprint ───────────────────────────────────────────────
 //
 // A verdict is a function of the form, the binary, the boot sources, and the
-// run configuration. Nothing in a process could name the binary, so a recorded
-// result belonged to a commit and never to a build, and a cached green could
-// not say which executable earned it (docs/test-store.md).
+// run configuration. Without a name for the binary, a recorded result would
+// belong to a commit and never to a build, and a cached green could not say
+// which executable earned it (docs/test-store.md).
 //
 // The three sources a boot compiles — core.lisp, prelude.lisp and stdlib.lisp
 // — are built into the executable, so hashing its bytes covers the binary and
@@ -181,7 +182,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "elle/executable" => prim_executable {
-        ambient: true,
+        signal: Signal::ambient(),
         doc: "Return the path of the running elle binary, or nil when the OS will not say.",
         category: "elle",
         example: "(elle/executable)",

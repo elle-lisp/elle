@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-22
 //! Heap arena and memory management primitives — the gauges a program samples
 //! its own heap with, and the leak localisers it dumps.
 //!
@@ -233,8 +233,7 @@ pub(crate) fn prim_arena_region_info(
 
 primitive! {
     "debug/arena-stats" => prim_arena_stats {
-        ambient: true,
-        signal: Signal::query_errors(),
+        signal: Signal::ambient_query_errors(),
         arity: Arity::Range(0, 1),
         doc: "Return heap arena statistics.",
         params: &["fiber?"],
@@ -244,9 +243,8 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "debug/arena-count" => prim_arena_count {
-        ambient: true,
         ret: RetType::Int,
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         doc: "Return current heap object count.",
         category: "debug",
         example: "(debug/arena-count)",
@@ -254,8 +252,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-set-object-limit" => prim_arena_set_object_limit {
-        ambient: true,
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         arity: Arity::Exact(1),
         doc: "Set max heap object count. Pass nil to remove limit. Returns previous limit or nil.",
         params: &["n"],
@@ -265,8 +262,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-object-limit" => prim_arena_object_limit {
-        ambient: true,
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         doc: "Get current object limit. Returns int or nil (unlimited).",
         category: "debug",
         example: "(debug/arena-object-limit)",
@@ -274,9 +270,8 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-bytes" => prim_arena_bytes {
-        ambient: true,
         ret: RetType::Int,
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         doc: "Return bytes consumed by the current FiberHeap.",
         category: "debug",
         example: "(debug/arena-bytes)",
@@ -284,9 +279,8 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-page-claims" => prim_arena_page_claims {
-        ambient: true,
         ret: RetType::Int,
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         doc: "Return pages claimed from the heap's page pool (monotonic, never decremented on release).",
         category: "debug",
         example: "(debug/arena-page-claims)",
@@ -294,8 +288,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-allocs" => prim_arena_allocs {
-        ambient: true,
-        signal: Signal::query_errors(),
+        signal: Signal::ambient_query_errors(),
         arity: Arity::Exact(1),
         doc: "Run thunk, return (result . net-allocs).",
         params: &["thunk"],
@@ -305,9 +298,8 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "debug/arena-peak" => prim_arena_peak {
-        ambient: true,
         ret: RetType::Int,
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         doc: "Return peak object count (high-water mark).",
         category: "debug",
         example: "(debug/arena-peak)",
@@ -315,9 +307,8 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-total-allocs" => prim_arena_total_allocs {
-        ambient: true,
         ret: RetType::Int,
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         doc: "Return cumulative objects ever minted (monotonic, never decremented on free).",
         category: "debug",
         example: "(debug/arena-total-allocs)",
@@ -325,9 +316,8 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-reset-peak" => prim_arena_reset_peak {
-        ambient: true,
         ret: RetType::Int,
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         doc: "Reset peak to current count. Returns previous peak.",
         category: "debug",
         example: "(debug/arena-reset-peak)",
@@ -335,9 +325,8 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-region-of" => prim_arena_region_of {
-        ambient: true,
         ret: RetType::Int,
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         arity: Arity::Exact(1),
         doc: "Return region ID for a heap value (0 for non-heap).",
         params: &["value"],
@@ -347,8 +336,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-dump" => prim_arena_dump {
-        ambient: true,
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         doc: "Print every live mortal region (id, rc, object count, object tags) to stderr. Returns nil.",
         category: "debug",
         example: "(arena/dump)",
@@ -356,9 +344,8 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-region-count" => prim_arena_region_count {
-        ambient: true,
         ret: RetType::Int,
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         doc: "Return number of active regions.",
         category: "debug",
         example: "(debug/arena-region-count)",
@@ -366,9 +353,8 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-over-frees" => prim_arena_over_frees {
-        ambient: true,
         ret: RetType::Int,
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         doc: "Return direct double-releases seen (monotonic): a DecrefRegion of an absent or already-zeroed region.",
         category: "debug",
         example: "(debug/arena-over-frees)",
@@ -376,9 +362,8 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-region-ids" => prim_arena_region_ids {
-        ambient: true,
         ret: RetType::Int,
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         doc: "Return physical region ids issued (one past the largest id ever minted from scratch).",
         category: "debug",
         example: "(debug/arena-region-ids)",
@@ -386,9 +371,8 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-region-table" => prim_arena_region_table {
-        ambient: true,
         ret: RetType::Int,
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         doc: "Return entries in the region table (one past the largest physical region id ever made live).",
         category: "debug",
         example: "(debug/arena-region-table)",
@@ -396,8 +380,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "debug/arena-region-info" => prim_arena_region_info {
-        ambient: true,
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         doc: "Return array of {:id N :rc N :objects N} per active region.",
         category: "debug",
         example: "(debug/arena-region-info)",
