@@ -1,6 +1,6 @@
 # syntax/expand
 
-<!-- audited: 2026-10-13 -->
+<!-- audited: 2026-10-21 -->
 
 Hygienic macro expansion: macro definition, macro calls, quasiquote, and introspection.
 
@@ -39,7 +39,7 @@ Expander
     ├─► load prelude macros (when, unless, try, protect, defer, with, etc.)
     ├─► check for macro calls
     ├─► compile the transformer once per definition via pipeline::eval_syntax()
-    ├─► call the transformer on the arguments via VM::call_closure()
+    ├─► call the transformer on the arguments via VM::call_transformer()
     ├─► convert result Value back to Syntax via from_value()
     ├─► flip the expansion's intro scope on the result
     ├─► handle macro? (check registry, return true/false literal)
@@ -104,8 +104,8 @@ Special forms recognized before macro calls:
 - **`defmacro` / `define-macro`** — Define a macro. Stored in the macro registry.
 - **`macro?`** — Check if a name is a registered macro. Returns a literal boolean.
 - **`expand-macro`** — Expand a quoted form. Returns the expanded form wrapped in quote.
-- **`begin-for-syntax`** — Compile-time definitions. Evaluates `(def <symbol> <expr>)` forms via `eval_syntax` and stores the resulting values in `Expander.compile_time_env`. Returns nil. Processed in `src/syntax/expand/compiletime.rs`. Only plain-symbol `def` forms are supported; all others are rejected at expansion time.
-- **`syntax-case`** — Pattern matching on syntax objects. Recognized before macro calls. Generates a chain of `let`/`if` forms using the syntax predicates. The scrutinee is bound to a gensym at the outermost level. No `eval_syntax` calls — pure code generation. Implemented in `src/syntax/expand/syntaxcase.rs`.
+- **`begin-for-syntax`** — Compile-time definitions. Evaluates `(def <symbol> <expr>)` forms via `eval_syntax` and stores the resulting values in `Expander.compile_time_env`. Returns nil. Processed in [compiletime.rs](compiletime.rs). Only plain-symbol `def` forms are supported; all others are rejected at expansion time.
+- **`syntax-case`** — Pattern matching on syntax objects. Recognized before macro calls. Generates a chain of `let`/`if` forms using the syntax predicates. The scrutinee is bound to a gensym at the outermost level. No `eval_syntax` calls — pure code generation. Implemented in [syntaxcase.rs](syntaxcase.rs).
 
 ## Expander struct
 
@@ -128,7 +128,7 @@ The `Expander` maintains:
 
 ## Arenas
 
-The expander holds two: `arena` is the working arena of the unit under expansion (the pipeline sets it per unit), and `templates` is the instance's process-root arena, where `handle_defmacro` copies a macro template so it outlives the unit that defined it. `map_scope_recursive` COPIES — subtrees are shared by pointer, so a walk that wrote through the source would stamp trees the caller still holds. See docs/impl/syntax.md § "Where a node lives".
+The expander holds two. `arena` is the working arena of the unit under expansion, which the pipeline sets per unit. `templates` is the instance's process-root arena, where `handle_defmacro` copies a macro template so it outlives the unit that defined it. `map_scope_recursive` COPIES, because subtrees are shared by pointer: a walk that wrote through the source would stamp trees the caller still holds. [The syntax tree](../../../docs/impl/syntax.md) owns where a node lives.
 
 ## Hygiene escape hatch: `datum->syntax`
 
@@ -176,22 +176,21 @@ The expander holds two: `arena` is the working arena of the unit under expansion
 
 9. **Expansion depth is bounded.** Max 200 levels to prevent infinite expansion. If exceeded, compilation fails with "macro expansion depth exceeded" error.
 
-10. **`compile_time_env` belongs to one unit.** A clone starts with it empty, and `begin_unit` empties it, so a compile-time definition reaches no other compile: not one that clones the instance's expander, and not a later datum the VM's cached `eval` expander begins. See the manual `Clone` impl and `begin_unit` in `mod.rs`.
+10. **`compile_time_env` belongs to one unit.** A clone starts with it empty, and `begin_unit` empties it. So a compile-time definition reaches no other compile: not one that clones the instance's expander, and not a later datum the VM's cached `eval` expander begins. See the manual `Clone` impl and `begin_unit` in [mod.rs](mod.rs).
 
 11. **`syntax-case` is pure code generation, not expansion-time evaluation.** The scrutinee expression is not evaluated at expansion time (it may be a macro parameter with no value). Instead, `syntax-case` generates a chain of `let`/`if` forms that perform pattern matching at runtime using the syntax predicates. The generated code runs when the macro transformer closure executes inside the VM.
 
 ## When to modify
 
-- **Adding a new prelude macro**: Add to `src/prelude.lisp`, not here
-- **Changing macro expansion algorithm**: Update `mod.rs::expand()`
-- **Changing quasiquote semantics**: Update `quasiquote.rs`
-- **Changing macro argument wrapping**: Update `macro_expand.rs::wrap_macro_arg_value()`
-- **Adding introspection forms**: Update `introspection.rs`
+- **Adding a new prelude macro**: Add to [prelude.lisp](../../prelude.lisp), not here
+- **Changing macro expansion algorithm**: Update `expand()` in [mod.rs](mod.rs)
+- **Changing quasiquote semantics**: Update [quasiquote.rs](quasiquote.rs)
+- **Changing macro argument wrapping**: Update `wrap_macro_arg_value()` in [macro_expand.rs](macro_expand.rs)
+- **Adding introspection forms**: Update [introspection.rs](introspection.rs)
 
 ## Common pitfalls
 
-- **Breaking hygiene**: When creating synthetic identifiers, ensure they carry the correct scope set
+- **Breaking hygiene**: When creating synthetic identifiers, make sure that they carry the correct scope set
 - **Forgetting to expand recursively**: After macro expansion, the result must be recursively expanded (with depth limit)
 - **Not preserving scope sets**: A symbol or compound argument crosses the transformer call as a syntax object, which must keep its scope set through the Value round-trip
 - **Conflating `quote` and `SyntaxLiteral`**: a template atom is quoted; a template symbol is a `SyntaxLiteral`, which keeps its scopes
-- **Not handling improper lists**: Macros cannot return improper lists (for example, `(pair 1 2)`). The `from_value()` conversion requires proper lists.
