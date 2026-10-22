@@ -65,3 +65,7 @@ mod primitives {
 mod inference {
     include!("signal_enforcement/inference.rs");
 }
+
+mod narrowing {
+    include!("signal_enforcement/narrowing.rs");
+}
