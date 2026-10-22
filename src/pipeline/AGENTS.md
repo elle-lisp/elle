@@ -40,11 +40,11 @@ graft and the fold.
 | [compile/transforms.rs](compile/transforms.rs) | The two test-runner transforms, and the entry points over them |
 | [analyze.rs](analyze.rs) | `analyze` and `analyze_file` |
 | [eval.rs](eval.rs) | `eval`, `eval_all`, `eval_file` and `eval_syntax` |
-| [cache.rs](cache.rs) | `CompileCtx` and `BootExports` |
+| [cache.rs](cache.rs) | `CompileCtx` |
 | [cache/register.rs](cache/register.rs) | What a host, a REPL line and the standard library register into a `CompileCtx` |
 | [cache/repl.rs](cache/repl.rs) | The REPL layer: the macros and definitions earlier REPL lines made |
 | [cache/store.rs](cache/store.rs) | The store, and `compile_file_stored` |
-| [bootstrap.rs](bootstrap.rs) | The core.lisp compile, and `install_core_exports` |
+| [bootstrap.rs](bootstrap.rs) | The core.lisp compile, `install_core_exports`, and `BootExports` |
 | [sources.rs](sources.rs) | The three boot sources, embedded at build time |
 | [directives.rs](directives.rs) | The `elle/version` and `elle/migration` declarations ([versioning](../../docs/versioning.md)) |
 
