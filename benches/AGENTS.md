@@ -62,24 +62,37 @@ builder idiom seeds it.
 cargo bench --bench regionrc
 ```
 
-## The fuel bench — what one charge costs a loop
+## The fuel bench — the ladder of charge shapes
 
 Every backward jump and every call charges one unit of fuel
-([runtime.md](../docs/runtime.md)), and the function's signal decides the
-charge's shape. A silent function's charge is a saturating decrement. A
-function that may raise branches on zero first, so that it can pause
-([impl/jit.md](../docs/impl/jit.md)). The bench runs one loop in both shapes,
-tight and wide, on each tier the build carries, and reports trips per second.
-A reading is the cost of one trip, charge included. The gap between the silent
-and the raising reading is the price of the branch.
+([runtime.md](../docs/runtime.md)). The bench reads what each operation of the
+charge costs a loop trip. It runs one silent loop on the JIT under a ladder of
+charge shapes, each one operation more than the last:
 
-The bench exists for a change to the charge. Save a baseline before the
-change and compare after it:
+| Shape | The silent charge site holds |
+|-------|------------------------------|
+| `none` | nothing: the floor, a loop that checks nothing |
+| `decrement` | a load, a subtract and a store |
+| `saturating` | the same, and the compare and extend that stop the word at zero: today's silent charge ([impl/jit.md](../docs/impl/jit.md)) |
+| `branch` | a load, a branch on zero around a subtract and a store: the shape of today's raising charge |
+| `check` | the branch, and a load of a limit word, a compare and a second branch: the shape of a kill check |
+
+Beside the ladder, every tier runs the same loop as a function that may raise,
+whose charge is the real pausing one, and the interpreter runs the silent loop
+as it charges it. Each loop comes tight, with two intrinsics beside the charge,
+and wide, with eight. A reading is trips per second, so a case is the cost of
+one trip, charge included.
+
+The shapes are a knob in the translator that only a build with the `ablation`
+feature carries ([config.md](../docs/config.md)), and the bench requires that
+feature. A production build has no knob and emits the `saturating` shape at
+every silent site. Save a baseline before a change to the charge and compare
+after it:
 
 ```bash
-cargo bench --bench fuel -- --save-baseline before
+cargo bench --features ablation --bench fuel -- --save-baseline before
 # make the change, then:
-cargo bench --bench fuel -- --baseline before
+cargo bench --features ablation --bench fuel -- --baseline before
 ```
 
 ## Running
