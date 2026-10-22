@@ -81,7 +81,7 @@
 ["tests/lang/http2.lisp" :objects 44]
 ["tests/lang/hygiene.lisp" :objects 682]
 ["tests/lang/inclib.lisp" :objects 63]
-["tests/lang/include.lisp" :objects 71]
+["tests/lang/include.lisp" :objects 109]
 ["tests/lang/integer-radix.lisp" :objects 325]
 ["tests/lang/intrinsic-mutable-literal.lisp" :objects 182]
 ["tests/lang/intrinsics.lisp" :objects 2505]
