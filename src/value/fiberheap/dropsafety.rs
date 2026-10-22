@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-22
 //! Per-tag drop/cascade classification: which variants need `Drop`, and which hold region references.
 //!
 //! docs/impl/region/model.md
@@ -28,9 +28,10 @@ pub(crate) fn needs_drop(tag: HeapTag) -> bool {
         HeapTag::LStruct => true,
         HeapTag::Closure => true,
         HeapTag::LArray => true,
-        HeapTag::LStringMut => true,
+        // A byte store lies in its region's pages (docs/impl/mutable.md).
+        HeapTag::LStringMut => false,
         HeapTag::LBytes => true,
-        HeapTag::LBytesMut => true,
+        HeapTag::LBytesMut => false,
         HeapTag::Syntax => true,
         HeapTag::Fiber => true,
         HeapTag::ThreadHandle => true,
@@ -58,6 +59,8 @@ pub(crate) fn holds_value_refs(tag: HeapTag) -> bool {
         HeapTag::Float => false,
         HeapTag::LibHandle => false,
         HeapTag::ManagedPointer => false,
+        // Only the `traits` edge, which the free scan reads off the shell.
+        HeapTag::LStringMut | HeapTag::LBytesMut => true,
         HeapTag::LBox
         | HeapTag::CaptureCell
         | HeapTag::LString
@@ -66,9 +69,7 @@ pub(crate) fn holds_value_refs(tag: HeapTag) -> bool {
         | HeapTag::LStruct
         | HeapTag::Closure
         | HeapTag::LArray
-        | HeapTag::LStringMut
         | HeapTag::LBytes
-        | HeapTag::LBytesMut
         | HeapTag::Syntax
         | HeapTag::Fiber
         | HeapTag::ThreadHandle

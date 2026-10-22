@@ -194,7 +194,7 @@ fn obj_with_value_in_every_channel(
         ),
         HeapTag::LStringMut => (
             HeapObject::LStringMut {
-                data: ByteStore::new(Vec::new()),
+                data: ByteStore::empty(),
                 traits: vt,
             },
             traits_only,
@@ -208,7 +208,7 @@ fn obj_with_value_in_every_channel(
         ),
         HeapTag::LBytesMut => (
             HeapObject::LBytesMut {
-                data: ByteStore::new(Vec::new()),
+                data: ByteStore::empty(),
                 traits: vt,
             },
             traits_only,
@@ -272,9 +272,6 @@ fn obj_with_value_in_every_channel(
     })
 }
 
-/// Every `HeapTag`, for iteration. Completeness here forces nothing:
-/// the exhaustive `match` above is what forces a decision for a new
-/// variant (at compile time); this list only drives the runtime loop.
 /// Resolve a pointer to the id its page header names, whatever region that is.
 /// These pins ask which channels the scan reports, not how it resolves them.
 fn any_header(store: &RegionStore) -> impl Fn(*const ()) -> u32 {
@@ -282,6 +279,9 @@ fn any_header(store: &RegionStore) -> impl Fn(*const ()) -> u32 {
     move |p| unsafe { region_of_page_ptr(p, page_size) }
 }
 
+/// Every `HeapTag`, for iteration. Completeness here forces nothing:
+/// the exhaustive `match` above is what forces a decision for a new
+/// variant (at compile time); this list only drives the runtime loop.
 const ALL_TAGS: &[HeapTag] = &[
     HeapTag::LString,
     HeapTag::Pair,

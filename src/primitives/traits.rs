@@ -3,7 +3,7 @@
 //!
 //! docs/traits.md
 //!
-//! `with-traits` attaches an immutable struct as a trait table to a value,
+//! `with-traits` attaches a struct as a trait table to a value,
 //! returning a new heap object with the same data and the given table.
 //!
 //! `traits` returns the trait table attached to a value, or `nil` if none.
@@ -19,7 +19,7 @@ use crate::primitives::def::{RegionEffect, RetType};
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::heap::{deref, HeapObject};
-use crate::value::store::{ArrayStore, ByteStore, CellStore, SetStore, StructStore};
+use crate::value::store::{ArrayStore, CellStore, SetStore, StructStore};
 use crate::value::types::Arity;
 use crate::value::Value;
 
@@ -89,11 +89,10 @@ pub(crate) fn prim_with_traits(
 /// Fiber, ThreadHandle, and External are the exception, and must be: they
 /// wrap a shared handle rather than owning data, so the clone names the same
 /// fiber, thread, or plugin object. Value identity follows the handle, so the
-/// two wrappers stay equal (`repr/eq.rs`, "Wrapper variants take their
-/// identity from the handle").
+/// two wrappers stay equal (src/value/repr/eq.rs).
 ///
-/// For infrastructure types (Float, NativeFn, LibHandle, FFISignature,
-/// FFIType), returns Err.
+/// For infrastructure types (Float, LibHandle, FFISignature, FFIType,
+/// ClosureTemplate), returns Err.
 ///
 /// # Safety
 /// `value` must be a valid heap pointer.
@@ -158,18 +157,12 @@ unsafe fn clone_with_traits(
             elements: ctx.alloc_slice::<crate::value::Value>(elements.as_slice()),
             traits: table,
         })),
-        HeapObject::LStringMut { data, .. } => Ok(ctx.alloc(HeapObject::LStringMut {
-            data: ByteStore::new(data.read().to_vec()),
-            traits: table,
-        })),
+        HeapObject::LStringMut { data, .. } => Ok(ctx.string_mut_with_traits(&data.read(), table)),
         HeapObject::LBytes { data, .. } => Ok(ctx.alloc(HeapObject::LBytes {
             data: ctx.alloc_slice::<u8>(data.as_slice()),
             traits: table,
         })),
-        HeapObject::LBytesMut { data, .. } => Ok(ctx.alloc(HeapObject::LBytesMut {
-            data: ByteStore::new(data.read().to_vec()),
-            traits: table,
-        })),
+        HeapObject::LBytesMut { data, .. } => Ok(ctx.bytes_mut_with_traits(&data.read(), table)),
         HeapObject::LBox { cell, .. } => Ok(ctx.alloc(HeapObject::LBox {
             cell: CellStore::new(cell.get()),
             traits: table,

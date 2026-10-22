@@ -6,17 +6,16 @@
 //! docs/impl/image/measurements.md
 //!
 //! Reached from `Runtime::build_with` under `--trace=census` and from the
-//! sealing regression net in `tests/integration/census.rs`. The census is
-//! item 2 of the measurements above.
+//! sealing regression net in `tests/integration/census.rs`.
 //!
 //! Byte accounting is a dump-size estimate, not an allocator audit. Each
 //! object contributes its `HeapObject` shell plus its payload wherever the
 //! payload lives — region pages (`RegionSlice` backings, syntax trees, code
-//! payloads) or, for a mutable container, the Rust heap. A payload shared
-//! through an aliased `RegionSlice` is counted once (first holder). Not
-//! counted: per-container `Rc`/`RefCell` bookkeeping, a code payload's region
-//! tables, masks, child table and LIR body, and fiber-internal state (fibers
-//! are refused from the body).
+//! payloads, a byte store's extent) or, for every other mutable container,
+//! the Rust heap. A payload shared through an aliased `RegionSlice` is counted
+//! once (first holder). Not counted: per-container `Rc`/`RefCell` bookkeeping,
+//! a code payload's region tables, masks, child table and LIR body, and
+//! fiber-internal state (fibers are refused from the body).
 //!
 //! Pointer-slot counting follows the image format's relocation definition
 //! (docs/impl/image/format.md): a heap-tagged `Value` slot or

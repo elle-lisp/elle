@@ -3,13 +3,10 @@
 //!
 //! docs/impl/region/ctx.md
 //!
-//! The `HeapObject` constructors, shared by the `NativeCtx`
-//! capability (`ctx.*`, which passes its own `heap`/`region`) and the
-//! compiler-internal region-threaded population (which passes a region and
-//! the heap).
-//!
-//! Every fn here names BOTH its destination region (Rule 3: born in the right
-//! region) and its heap, so the allocation target is visible in the signature.
+//! The `NativeCtx` capability (`ctx.*`, which passes its own heap and region)
+//! and the compiler's region-threaded population share these. Every fn names
+//! its destination region (Rule 3: born in the right region) and its heap in
+//! its signature.
 
 use std::any::Any;
 use std::cell::Cell;
@@ -211,13 +208,19 @@ pub(crate) fn capture_cell(
 #[inline]
 pub(crate) fn string_mut(heap: &mut FiberHeap, bytes: Vec<u8>, region: RuntimeRegion) -> Value {
     let traits = default_traits_for(heap, HeapTag::LStringMut);
-    heap.alloc_in_region(
-        HeapObject::LStringMut {
-            data: ByteStore::new(bytes),
-            traits,
-        },
-        region,
-    )
+    string_mut_with_traits(heap, &bytes, traits, region)
+}
+
+/// Allocate a mutable `@string` carrying `traits`, and its bytes, into
+/// `region` on `heap` (docs/impl/mutable.md).
+pub(crate) fn string_mut_with_traits(
+    heap: &mut FiberHeap,
+    bytes: &[u8],
+    traits: Value,
+    region: RuntimeRegion,
+) -> Value {
+    let data = ByteStore::new_in(heap, region, bytes);
+    heap.alloc_in_region(HeapObject::LStringMut { data, traits }, region)
 }
 
 /// Allocate immutable bytes (inline in the arena) into `region` on `heap`.
@@ -266,13 +269,19 @@ fn lbytes(
 #[inline]
 pub(crate) fn bytes_mut(heap: &mut FiberHeap, data: Vec<u8>, region: RuntimeRegion) -> Value {
     let traits = default_traits_for(heap, HeapTag::LBytesMut);
-    heap.alloc_in_region(
-        HeapObject::LBytesMut {
-            data: ByteStore::new(data),
-            traits,
-        },
-        region,
-    )
+    bytes_mut_with_traits(heap, &data, traits, region)
+}
+
+/// Allocate mutable `@bytes` carrying `traits`, and its bytes, into `region`
+/// on `heap`.
+pub(crate) fn bytes_mut_with_traits(
+    heap: &mut FiberHeap,
+    data: &[u8],
+    traits: Value,
+    region: RuntimeRegion,
+) -> Value {
+    let data = ByteStore::new_in(heap, region, data);
+    heap.alloc_in_region(HeapObject::LBytesMut { data, traits }, region)
 }
 
 /// Allocate a syntax object into `region` on `heap`, copying `s`'s tree into

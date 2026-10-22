@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-22
 //! The seq `slice`: a view over an immutable string or bytes, and a copy of every other sequence.
 //!
 //! docs/bytes.md
@@ -41,7 +41,8 @@ fn grapheme_byte_range(
 ///
 /// An immutable string or bytes answers a view over its own payload, and the
 /// region walk keeps the source alive under it (docs/impl/values.md). A
-/// mutable one copies, because its `Vec` can move under a view.
+/// mutable one copies, because a write can shift or move its store under a
+/// view.
 pub fn seq_slice(val: &Value, start: i64, end: i64, ctx: &mut NativeCtx) -> Result<Value, Value> {
     if let Some(b) = val.as_bytes() {
         let s = resolve_slice_index(start, b.len());

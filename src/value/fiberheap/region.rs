@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-22
 //! `FiberHeap` region-allocator surface.
 //!
 //! Everything that allocates into, reference-counts, adopts, or inspects the
@@ -269,6 +269,15 @@ impl FiberHeap {
     /// backend of `arena::region_of`.
     pub fn region_of_ptr(&self, ptr: *const ()) -> u32 {
         self.region_store.region_of_ptr(ptr)
+    }
+
+    /// The live region of this heap whose pages hold `value`, or `None` for an
+    /// immediate and for a value another heap owns. A page header names a
+    /// region whoever stamped it, so this asks the region itself, as the free
+    /// scan does (`RegionStore::owning_region`).
+    pub(crate) fn owning_region_of(&self, value: Value) -> Option<RuntimeRegion> {
+        let ptr = value.as_heap_ptr()?;
+        RuntimeRegion::new(self.region_store.owning_region(ptr))
     }
 
     /// Get the reference count for a region.

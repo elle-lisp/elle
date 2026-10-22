@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-22
 //! The ergonomic `ctx.*` allocation surface: one constructor per heap type,
 //! each born on the ctx's heap in the ctx's own region.
 //! docs/impl/region/ctx.md
@@ -6,11 +6,9 @@
 use super::Alloc;
 use crate::value::Value;
 
-/// Generate the ergonomic `ctx.*` constructors (docs/impl/region/ctx.md
-/// "the body-migration surface"): each forwards to the matching
-/// `value::build::*` source with the ctx's own heap and region, so a native
-/// body reads `ctx.string("x")` and the value is born on the ctx's heap in the
-/// ctx's region. One spec line per heap type.
+/// Generate the ergonomic `ctx.*` constructors, one spec line per heap type.
+/// Each forwards to the matching `value::build::*` source with the ctx's own
+/// heap and region, so a native body reads `ctx.string("x")`.
 macro_rules! ctx_ctors {
     ( $(
         $(#[$attr:meta])*
@@ -65,6 +63,8 @@ ctx_ctors! {
     capture_cell (value: Value, origin: crate::value::heap::CellOrigin);
     /// Allocate a mutable `@string` into the call's region.
     string_mut (bytes: Vec<u8>);
+    /// Allocate a mutable `@string` carrying `traits` into the call's region.
+    string_mut_with_traits (bytes: &[u8], traits: Value);
     /// Allocate immutable bytes into the call's region.
     bytes (data: Vec<u8>);
     /// Allocate `len` zero bytes into the call's region, with no Rust buffer
@@ -81,6 +81,8 @@ ctx_ctors! {
     string_view (backing: &str);
     /// Allocate mutable `@bytes` into the call's region.
     bytes_mut (data: Vec<u8>);
+    /// Allocate mutable `@bytes` carrying `traits` into the call's region.
+    bytes_mut_with_traits (data: &[u8], traits: Value);
     /// Allocate a syntax object into the call's region.
     syntax (s: crate::syntax::Syntax);
     /// Allocate an immutable set into the call's region.
@@ -94,7 +96,7 @@ ctx_ctors! {
 impl<'h> Alloc<'h> {
     /// Construct an error value `{:error :kind :message msg}` born on the ctx's
     /// heap in the call's region (the ergonomic forwarder a native body uses
-    /// instead of the bare `error_val`).
+    /// instead of `error_val_in`).
     ///
     /// The kind keyword is an immediate: identity only, **spelling not
     /// recorded**. `Alloc` holds no symbol table, so this method records
@@ -108,7 +110,7 @@ impl<'h> Alloc<'h> {
     }
 
     /// Construct an error value with extra context fields, born in the call's
-    /// region — the ctx forwarder for the bare `error_val_extra`.
+    /// region — the ctx forwarder for `error_val_extra_in`.
     #[inline]
     pub fn error_extra(
         &self,
@@ -120,7 +122,7 @@ impl<'h> Alloc<'h> {
     }
 
     /// The runtime no-match error for `match`, born in the call's region —
-    /// the ctx forwarder for the bare `match_fail_error`.
+    /// the ctx forwarder for `match_fail_error_in`.
     #[inline]
     pub fn match_fail(&self, val: Value) -> Value {
         crate::value::build::match_fail(self.heap(), val, self.region)
@@ -147,10 +149,7 @@ impl<'h> Alloc<'h> {
     // These wrap one `HeapObject` (no `RegionSlice` payload), so they allocate
     // directly into the call's region via `alloc`. Hand-written because their
     // arg shapes / construction logic are specific (a minted id, a handle
-    // wrapper, an FFI descriptor). They replace the bare `Value::*`
-    // single-object ctors at native-call sites (RegionEffect::Fresh requires the
-    // result in the call's own region, which the region-free bare ctor — minting
-    // its own fresh region — would violate).
+    // wrapper, an FFI descriptor).
 
     /// Allocate a dynamic `parameter` with `default` into the call's region.
     #[inline]

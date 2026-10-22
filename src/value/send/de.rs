@@ -146,7 +146,7 @@ pub(in crate::value::send) fn parts_from_sendable(
 pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) -> Value {
     use crate::value::closure::Closure;
     use crate::value::heap::{HeapObject, Pair};
-    use crate::value::store::{ArrayStore, ByteStore, CellStore, SetStore, StructStore};
+    use crate::value::store::{ArrayStore, CellStore, SetStore, StructStore};
     use std::collections::BTreeSet;
 
     match sv {
@@ -223,10 +223,7 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) ->
         SendValue::Buffer(bytes, traits) => {
             let traits_resolved = into_value_inner(*traits, ctx);
             let traits_val = recv_traits(ctx.ctx.heap_mut(), traits_resolved, HeapTag::LStringMut);
-            ctx.alloc(HeapObject::LStringMut {
-                data: ByteStore::new(bytes),
-                traits: traits_val,
-            })
+            ctx.ctx.string_mut_with_traits(&bytes, traits_val)
         }
         SendValue::Bytes(bytes, traits) => {
             let traits_resolved = into_value_inner(*traits, ctx);
@@ -240,10 +237,7 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) ->
         SendValue::Blob(bytes, traits) => {
             let traits_resolved = into_value_inner(*traits, ctx);
             let traits_val = recv_traits(ctx.ctx.heap_mut(), traits_resolved, HeapTag::LBytesMut);
-            ctx.alloc(HeapObject::LBytesMut {
-                data: ByteStore::new(bytes),
-                traits: traits_val,
-            })
+            ctx.ctx.bytes_mut_with_traits(&bytes, traits_val)
         }
 
         SendValue::LBox(contents, traits) => {

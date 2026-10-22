@@ -7,21 +7,33 @@ use super::*;
 
 /// Replace the bytes in `range` of an `@string` or `@bytes` with `with`, and
 /// answer the bytes it removed. A byte store holds no `Value`, so no region
-/// tracking runs. The heap is here because a store that grows claims room in
-/// the container's region. The caller keeps an `@string` UTF-8. Panics if
-/// `store` is neither, or `range` is out of bounds.
+/// tracking runs. A store that must grow claims its new extent in the region
+/// of `heap` whose pages hold the shell. The caller keeps an `@string` UTF-8.
+///
+/// Panics if `store` is neither, if `range` is out of bounds, or if the store
+/// must grow and no region of `heap` holds it: a shell another thread's heap
+/// owns, which a cross-thread channel delivers.
 pub fn bytes_splice(
     heap: &mut FiberHeap,
     store: Value,
     range: std::ops::Range<usize>,
     with: &[u8],
 ) -> Vec<u8> {
-    let _ = heap;
-    store
+    let bytes = store
         .string_store()
         .or_else(|| store.bytes_store())
-        .expect("bytes_splice: expected @string or @bytes")
-        .splice(range, with)
+        .expect("bytes_splice: expected @string or @bytes");
+    bytes.splice(range, with, |n| {
+        let region = heap.owning_region_of(store).unwrap_or_else(|| {
+            panic!(
+                "bytes_splice: the {} lies in no region of this heap, so it cannot \
+                 grow (docs/impl/mutable.md)",
+                store.type_name()
+            )
+        });
+        let room = heap.alloc_room_in_region::<u8>(n, region);
+        std::ptr::NonNull::new(room).expect("a region allocation is never null")
+    })
 }
 
 /// Append `with` to an `@string` or `@bytes`: a [`bytes_splice`] at the end.
