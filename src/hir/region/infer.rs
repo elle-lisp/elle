@@ -229,9 +229,6 @@ struct RegionInference {
     /// release at the inner read, and the extraction reads freed pages.
     /// Pinned by tests/impl/region-named-param-uaf.lisp.
     destructure_sites: Vec<(HirId, Vec<Region>)>,
-    /// BlockId → enclosing region at the point the block was entered.
-    /// The `Block` arm writes it, and nothing reads it.
-    block_regions: HashMap<super::super::expr::BlockId, Region>,
     /// BlockId → the regions of every `break` value handed to that block, in
     /// walk order. A `break` TRANSFERS its value to the block, whose value is
     /// its fall-through value OR any break's. So the `Block` arm unions these
@@ -347,7 +344,6 @@ impl RegionInference {
             destructure_leaf_bindings: rustc_hash::FxHashSet::default(),
             return_sites: Vec::new(),
             destructure_sites: Vec::new(),
-            block_regions: HashMap::new(),
             block_break_regions: HashMap::new(),
             block_break_nodes: HashMap::new(),
             break_skip_blocks: Vec::new(),
