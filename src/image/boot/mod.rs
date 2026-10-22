@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! The boot configuration: dump a booted instance's exports and macros as one
 //! image, and install one into a fresh instance.
 //!
@@ -73,7 +73,7 @@ pub enum BootImage {
 }
 
 /// Where a runtime's boot state came from. A warm cache that silently never
-/// hits still yields a working runtime, so behaviour alone cannot tell the two
+/// hits still yields a working runtime, so behavior alone cannot tell the two
 /// apart — this is what a caller reads instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BootSource {
