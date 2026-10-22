@@ -1,6 +1,6 @@
 # benches
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-22 -->
 
 Criterion and reporting benchmarks for the Elle compiler and VM.
 
@@ -11,6 +11,7 @@ Criterion and reporting benchmarks for the Elle compiler and VM.
 | [benchmarks.rs](benchmarks.rs) | Criterion | Wall-clock benchmarks: parsing, symbol interning, compilation, VM execution, end-to-end eval, macro expansion |
 | [memory.rs](memory.rs) | reporting | Heap allocations and bytes, total and net, while four programs compile and run: fib, n-queens, a list build, a closure loop |
 | [regionrc.rs](regionrc.rs) | reporting | Compile-time RC-coalescing win: value→slot mint reduction (transform 1) and merge-induced self-edges eliminated (transform 2), over the stdlib load and both Elle suites |
+| [fuel.rs](fuel.rs) | Criterion | The fuel charge per loop trip: a silent and a raising loop, tight and wide, on the bytecode and JIT tiers |
 
 ## Benchmark groups in benchmarks.rs
 
@@ -59,6 +60,26 @@ builder idiom seeds it.
 
 ```bash
 cargo bench --bench regionrc
+```
+
+## The fuel bench — what one charge costs a loop
+
+Every backward jump and every call charges one unit of fuel
+([runtime.md](../docs/runtime.md)), and the function's signal decides the
+charge's shape. A silent function's charge is a saturating decrement. A
+function that may raise branches on zero first, so that it can pause
+([impl/jit.md](../docs/impl/jit.md)). The bench runs one loop in both shapes,
+tight and wide, on each tier the build carries, and reports trips per second.
+A reading is the cost of one trip, charge included. The gap between the silent
+and the raising reading is the price of the branch.
+
+The bench exists for a change to the charge. Save a baseline before the
+change and compare after it:
+
+```bash
+cargo bench --bench fuel -- --save-baseline before
+# make the change, then:
+cargo bench --bench fuel -- --baseline before
 ```
 
 ## Running
