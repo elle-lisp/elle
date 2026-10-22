@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-10-22
 # The runner's ledger, part 2 of 3: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/lang/each.lisp" :objects 1012]
@@ -79,7 +79,7 @@
 ["tests/lang/http.lisp" :objects 1972]
 ["tests/lang/http2-session-futex.lisp" :objects 182]
 ["tests/lang/http2.lisp" :objects 44]
-["tests/lang/hygiene.lisp" :objects 753]
+["tests/lang/hygiene.lisp" :objects 682]
 ["tests/lang/inclib.lisp" :objects 63]
 ["tests/lang/include.lisp" :objects 109]
 ["tests/lang/integer-radix.lisp" :objects 325]
@@ -97,7 +97,7 @@
 ["tests/lang/lexical-scope.lisp" :objects 1822]
 ["tests/lang/lint-rules.lisp" :objects 330]
 ["tests/lang/macro-rest.lisp" :objects 184]
-["tests/lang/macros.lisp" :objects 456]
+["tests/lang/macros.lisp" :objects 333]
 ["tests/lang/mask-exec-routes.lisp" :objects 202]
 ["tests/lang/match-guards.lisp" :objects 561]
 ["tests/lang/match-or.lisp" :objects 575]
@@ -105,7 +105,7 @@
 ["tests/lang/match-structures.lisp" :objects 595]
 ["tests/lang/matching.lisp" :objects 457]
 ["tests/lang/migrated.lisp" :objects 678]
-["tests/lang/modules.lisp" :objects 819]
+["tests/lang/modules.lisp" :objects 447]
 ["tests/lang/monoroute.lisp" :objects 288]
 ["tests/lang/mutability.lisp" :objects 329]
 ["tests/lang/named-arg-tail-refusal.lisp" :objects 136]
