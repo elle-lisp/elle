@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-20
+# audited: 2026-10-21
 # The redis client's commands against a live Redis, in a keyspace of its own.
 # lib/redis.md
 #
@@ -15,11 +15,11 @@
 
 # Redis is shared infrastructure, so this file's keyspace carries the running
 # process's pid.  The per-file namespace separates the files; the pid separates
-# the runs.  Without it a fixed name collides the way a fixed scratch filename
-# does: a second run against the same server — another checkout, a rerun
-# overlapping this one — writes the same keys, and each run's SCAN+DEL cleanup
-# deletes the other's mid-flight.  The reader then sees its own value missing
-# and fails an assertion that has nothing to do with Redis.
+# the runs. Without it a fixed name would collide the way a fixed scratch
+# filename does. A second run against the same server (another checkout, a
+# rerun overlapping this one) would write the same keys. Each run's SCAN+DEL
+# cleanup would delete the other's mid-flight. The reader would then see its own value missing
+# and fail an assertion that has nothing to do with Redis.
 #
 # Build every key with (test-key "name").  A bare key literal escapes the pid
 # scope and reopens the collision.
