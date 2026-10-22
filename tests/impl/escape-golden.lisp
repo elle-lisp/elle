@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-06
+(elle/epoch 15)
+# audited: 2026-10-21
 # The normalized escape dump of ten real suite files matches its snapshot byte for byte.
 # docs/impl/escape.md
 #
@@ -7,8 +7,8 @@
 # solver, functionalize, the lowerer's tail-call predicates) read it. A change
 # that moves where escape is decided must not change what gets emitted. This
 # file snapshots the normalized `escape` dump (compile/dumps → :escape,
-# rendered by src/dump/escape.rs) of a set of REAL suite files and pins it
-# byte-for-byte, so a change to escape behaviour changes a snapshot and fails
+# rendered by src/dump/escape.rs) of a set of REAL suite files. It pins each
+# byte-for-byte, so a change to escape behavior changes a snapshot and fails
 # here.
 #
 # The dump's last section is `[region_instrs]`, the emitted RC stream, so this
@@ -16,11 +16,11 @@
 # a wider net than escape alone.
 #
 # WHAT A DRIFT SAYS. The comparison reads the drift by section
-# (tests/modules/snapdiff.lisp) and the failure names it: a drift confined to
+# (tests/modules/snapdiff.lisp), and the failure names it. A drift confined to
 # `[region_instrs]`, with the escape verdicts above it byte-identical, is a
-# region-placement change and re-blesses; one that moves `[needs_capture]`,
-# `[lambda_captures]`, `[return_frontier]` or `[suppressed_decref_regions]` is an
-# escape change and wants the argument this file exists to demand. The
+# region-placement change and re-blesses. One that moves `[needs_capture]`,
+# `[lambda_captures]`, `[return_frontier]` or `[suppressed_decref_regions]` is
+# an escape change, and wants the argument this file exists to demand. The
 # rendered dump is written beside its snapshot as <name>.got (untracked), because
 # a drift that does not reproduce leaves the run's two texts as the only account
 # of it. A drift also renders a SECOND time: two renders that disagree are an
@@ -28,10 +28,11 @@
 #
 # Why these files and not both whole suites: compile/dumps compiles each source
 # twice and holds the regions it allocates, which is why the runner captures no
-# dumps (docs/test-runner.md). So this pins a bounded set of real files covering
-# the escape shapes — scope-exit values, escape-return, HOF-tail, owned-arg,
-# reassign, closure, loop-closure, native-result, the general closure file and
-# a fiber-boundary file — rather than a curated set of toy reconstructions. The
+# dumps (docs/test-runner.md). So this pins a bounded set of real files rather
+# than a curated set of toy reconstructions. They cover the escape shapes:
+# scope-exit values, escape-return, HOF-tail, owned-arg, reassign, closure,
+# loop-closure, native-result, the general closure file and a fiber-boundary
+# file. The
 # second render is on the failure path alone, so a clean run renders once.
 #
 # Storage: one tests/golden/escape/<name>.snap per file. First run CAPTURES
