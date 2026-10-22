@@ -180,8 +180,8 @@ the acceptance gate the stages share.
 
 A mutable container keeps its contents on the Rust heap, behind an `Rc` and a
 `RefCell`, so no image can seal one. The fix moves the contents into an extent
-of the container's own region, and a mutable value becomes body data. The byte
-store of `@string` and `@bytes` has moved. It deletes
-the environment image's side-stream before anybody writes one.
+of the container's own region, and a mutable value becomes body data. The
+stores of `@string`, `@bytes` and `@array` have moved. The fix deletes the
+environment image's side-stream before anybody writes one.
 [Mutable stores in region pages](../mutable.md) owns the design, and
 [sending a region](../send.md) rests on it too.

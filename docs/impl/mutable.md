@@ -7,15 +7,15 @@ so a mutable value is sealed data an image or a send can copy.
 
 This is the sixth representation fix the image rests on
 ([foundations](image/foundations.md)), and [sending a region](send.md) rests on
-it too. The seam is in place ([the stores](../../src/value/store.rs)), and the
-byte store of `@string` and `@bytes` lies in region pages. Every other store
-keeps its contents on the Rust heap.
+it too. The seam is in place ([the stores](../../src/value/store.rs)). The
+byte store of `@string` and `@bytes` and the store of `@array` lie in region
+pages, and every other store keeps its contents on the Rust heap.
 
 ## Where a mutable store lives
 
 | Variant | Store | Holds |
 |---------|-------|-------|
-| `@array` (`LArrayMut`) | `ArrayStore` | `Rc<RefCell<Vec<Value>>>` |
+| `@array` (`LArrayMut`) | `ArrayStore` | an extent of `Value` in the container's region |
 | `@string` (`LStringMut`), `@bytes` (`LBytesMut`) | `ByteStore` | an extent of bytes in the container's region |
 | `@set` (`LSetMut`) | `SetStore` | `Rc<RefCell<BTreeSet<Value>>>` |
 | `@struct` (`LStructMut`) | `StructStore` | `Rc<RefCell<BTreeMap<TableKey, Value>>>` |
@@ -26,7 +26,7 @@ so a traited copy is independent of its source
 ([traits.rs](../../src/primitives/traits.rs)). Every holder of a mutable value
 holds the one shell, because the fibers of an instance share one heap. A write
 that overlaps a Rust-side read of the same store panics: the `RefCell` refuses
-it, and so does the byte store's borrow count. The store type is the seam: a
+it, and so does an extent's borrow count. The store type is the seam: a
 read takes a guard, and only the store funnels write
 ([region rules](region/rules.md)).
 
@@ -35,7 +35,7 @@ A Rust-heap store costs three things:
 - **Allocation the region gauges cannot see.** Each container is a `malloc`,
   and each growth a `realloc`. `--region-page-size`, `arena/page-claims`,
   `--trace=scrub` and `--trace=guardfree` see none of it.
-- **Destructors.** Five variants own Rust-heap memory, so freeing a region
+- **Destructors.** Four variants own Rust-heap memory, so freeing a region
   that holds one must drop it.
 - **No seal.** A mutable value is not page bytes, so an image refuses it and a
   send needs a Rust-heap mirror of it ([sending a region](send.md)).
@@ -44,8 +44,9 @@ A Rust-heap store costs three things:
 
 A mutable container keeps its contents in an **extent** of its own region: the
 shell holds the extent's pointer, its length and its capacity. That is a
-`RegionVec` without its arena pointer ([lir.md](lir.md)). A store is built with
-an extent exactly its length, and an empty store claims nothing.
+`RegionVec` without its arena pointer ([lir.md](lir.md)). One extent type,
+generic over what it holds, serves every store that keeps one. A store is built
+with an extent exactly its length, and an empty store claims nothing.
 
 A full extent grows by claiming one at least twice as large in the same region
 and copying into it. The old extent is dead until the region frees, as a
@@ -74,8 +75,8 @@ search. An insert or a delete shifts entries within the capacity.
 The shell keeps a **borrow count** with the rules a `RefCell` keeps, so a write
 that overlaps a Rust-side read still panics. The count is plain bits, and a dump
 writes it as zero. A store in region pages owns nothing outside them, so its
-variant needs no destructor. The free still scans the shell for its `traits`
-edge.
+variant needs no destructor. The free still scans the shell: its `traits` edge,
+and each `Value` in its live extent.
 
 ## What does not change
 
@@ -129,7 +130,8 @@ never shows the collection behind it. The store funnels take every write of a
 others do, because a growth claims an extent. Then one variant moves per step,
 each green on its own: `@bytes` and `@string`, then `@array`, then box and
 capture cell, then `@set`, then `@struct` behind its benchmark. A step changes
-its own store file, its funnels and its constructors. The seam and the byte
-step have landed.
+its own store file, its funnels and its constructors. The `@array` step also
+puts the byte store on the shared extent type. The seam, the byte step and the
+`@array` step have landed.
 [The image plan](image/plan.md) orders the foundation among the image
 milestones.
