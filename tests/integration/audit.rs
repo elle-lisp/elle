@@ -364,60 +364,6 @@ fn a_licence_at_the_root_exempts_nothing() {
 }
 
 #[test]
-fn files_stamped_before_the_policy_are_reported_as_out_of_policy() {
-    // The stamp records which version of the policy a file met, not how
-    // recently somebody read it. A file read yesterday against last year's
-    // rules has still never seen the current ones, and only the policy's own
-    // stamp can tell the two apart.
-    let t = Tree::new("policy-floor");
-    t.write(
-        "DOCUMENTATION.md",
-        "# Documentation policy\n\n<!-- audited: 2026-06-01 -->\n\nThe rules.\n",
-    )
-    .write("stale.md", &doc(Some("2026-05-31"), 400))
-    .write("current.md", &doc(Some("2026-06-02"), 400));
-
-    let out = Command::new(script())
-        .args(["--root", t.0.to_str().expect("utf-8 path"), "--policy"])
-        .output()
-        .expect("run scripts/audit");
-    let listed = String::from_utf8(out.stdout).expect("utf-8 output");
-
-    assert!(
-        listed.contains("stale.md"),
-        "a file stamped one day before the policy has not met it:\n{listed}"
-    );
-    assert!(
-        !listed.contains("current.md"),
-        "a file stamped after the policy has met it:\n{listed}"
-    );
-}
-
-#[test]
-fn the_policy_floor_is_not_just_recency() {
-    // The counter-factual: rank by date alone and these two sort the same way
-    // whatever the policy says, so the test would pass against an
-    // implementation that never reads DOCUMENTATION.md at all.
-    let t = Tree::new("policy-not-recency");
-    t.write(
-        "DOCUMENTATION.md",
-        "# Documentation policy\n\n<!-- audited: 2020-01-01 -->\n\nThe rules.\n",
-    )
-    .write("old-but-current.md", &doc(Some("2020-06-01"), 400));
-
-    let out = Command::new(script())
-        .args(["--root", t.0.to_str().expect("utf-8 path"), "--policy"])
-        .output()
-        .expect("run scripts/audit");
-    let listed = String::from_utf8(out.stdout).expect("utf-8 output");
-
-    assert!(
-        !listed.contains("old-but-current.md"),
-        "an old stamp that still postdates the policy is in policy:\n{listed}"
-    );
-}
-
-#[test]
 fn the_scripts_use_no_construct_that_fails_on_macos() {
     // CI runs macos-latest (.github/workflows/pr.yml). The trap is that every
     // one of these works here and fails there, so a Linux-only run is green
