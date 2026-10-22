@@ -1,18 +1,13 @@
 (elle/epoch 15)
-# audited: 2026-10-13
+# audited: 2026-10-21
 ## lib/ratchet.lisp — measure a shape and print one reading line per subject,
 ## for the runner to judge against the committed ledger.
 ## docs/ratchet.md
 ##
 ## Loaded via: (def r ((import "std/ratchet")))
-## Usage:
-##   (r:read "unstamped files" :files 12)             — any number, printed
-##   (r:delta "residue" (fn [] (send-one)) :on [r:objects r:regions] :n 30)
-##   (r:rate "io-drop" probe-io-drop :on [r:objects] :epsilon 0.4)
-##   (r:drive "recur-struct" struct-recur)             — the same rate over (run-block b)
-##
-## The guide is lib/ratchet.md. The estimator is lib/ratchet/estimator.lisp,
-## and the line is lib/ratchet/ledger.lisp's.
+## The guide is lib/ratchet.md, with every drive in use. The estimator is
+## lib/ratchet/estimator.lisp, the crest is lib/ratchet/crest.lisp, and the
+## line is lib/ratchet/ledger.lisp's.
 
 (fn []
   (def est ((import "std/ratchet/estimator")))
@@ -73,6 +68,10 @@
     (println (led:render-reading reading))
     (push readings reading)
     reading)
+
+  # The crest prints through this instrument's settle!, so it is one more
+  # reading here and proves itself once per instrument.
+  (def cr ((import "std/ratchet/crest") settle!))
 
   (defn with-subject [reading subject]
     (put reading :subject subject))
@@ -212,6 +211,7 @@
    :rate rate
    :drive drive
    :stmt-run est:stmt-run
+   :crest cr:crest
    :best-of best-of
    :ratio ratio
    :readings readings})
