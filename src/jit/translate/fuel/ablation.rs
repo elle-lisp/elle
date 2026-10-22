@@ -71,8 +71,58 @@ impl<'a> FunctionTranslator<'a> {
         builder: &mut FunctionBuilder,
         vm: IrValue,
     ) -> Result<(), JitError> {
-        let _ = charge_shape();
-        self.emit_saturating_charge(builder, vm)
+        match charge_shape() {
+            ChargeShape::None => Ok(()),
+            ChargeShape::Decrement => {
+                let (offset, flags) = Self::budget_word();
+                let word = builder.ins().load(I64, flags, vm, offset);
+                let less_one = builder.ins().iadd_imm_s(word, -1);
+                builder.ins().store(flags, less_one, vm, offset);
+                Ok(())
+            }
+            ChargeShape::Saturating => self.emit_saturating_charge(builder, vm),
+            ChargeShape::Branch => self.emit_branching_charge(builder, vm, false),
+            ChargeShape::Check => self.emit_branching_charge(builder, vm, true),
+        }
+    }
+
+    /// A branch on zero around the decrement, and with `check` the kill
+    /// check's second branch after it: a load of a limit word, a compare and
+    /// a branch to a cold block. The VM holds no limit word yet, so its first
+    /// word shifted down to its top bit stands in, which keeps the load real
+    /// and the branch cold. The cold block does nothing, so the shape costs
+    /// what the check costs and changes nothing.
+    fn emit_branching_charge(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        vm: IrValue,
+        check: bool,
+    ) -> Result<(), JitError> {
+        let (offset, flags) = Self::budget_word();
+        let word = builder.ins().load(I64, flags, vm, offset);
+        let spend = builder.create_block();
+        let done = builder.create_block();
+        builder.ins().brif(word, spend, &[], done, &[]);
+
+        builder.switch_to_block(spend);
+        builder.seal_block(spend);
+        let less_one = builder.ins().iadd_imm_s(word, -1);
+        builder.ins().store(flags, less_one, vm, offset);
+        if check {
+            let raw = builder.ins().load(I64, flags, vm, 0);
+            let limit = builder.ins().ushr_imm_u(raw, 63);
+            let kill = builder.ins().icmp(IntCC::UnsignedLessThan, less_one, limit);
+            let cold = builder.create_block();
+            builder.set_cold_block(cold);
+            builder.ins().brif(kill, cold, &[], done, &[]);
+            builder.switch_to_block(cold);
+            builder.seal_block(cold);
+        }
+        builder.ins().jump(done, &[]);
+
+        builder.switch_to_block(done);
+        builder.seal_block(done);
+        Ok(())
     }
 }
 
