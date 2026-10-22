@@ -92,7 +92,7 @@
 ["tests/impl/typed-int-ops.lisp" :tokens 3000]
 ["tests/integration/agents.rs" :tokens 3500]
 ["tests/integration/allocator.rs" :tokens 3500]
-["tests/integration/audit.rs" :tokens 5000]
+["tests/integration/audit.rs" :tokens 4000]
 ["tests/integration/bytecode_doc.rs" :tokens 3000]
 ["tests/integration/compliance/types.rs" :tokens 3000]
 ["tests/integration/error_reporting.rs" :tokens 4000]
