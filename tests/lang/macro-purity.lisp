@@ -1,6 +1,6 @@
 (elle/epoch 15)
-# audited: 2026-10-14
-# A macro body reads no state outside its unit: an ambient read halts the expansion past every handler, and run-time code is free.
+# audited: 2026-10-22
+# A macro body reads no state outside its unit: every expansion withholds :ambient, and run-time code reads freely.
 # docs/macros.md
 
 # The message of the error a compile of `form` raised.
@@ -17,7 +17,7 @@
     (assert (string/contains? msg primitive)
             (string/join [what ": the error names " primitive ": " msg] ""))))
 
-# ── An ambient read halts the expansion ───────────────────────────────
+# ── An ambient read fails the compile ─────────────────────────────────
 
 # The counter-factual for each: the macro read the environment, the pid or a
 # clock, and expanded to what it read.
@@ -30,21 +30,30 @@
                      (clock/monotonic))
                    (now)) "now" "clock/monotonic" "clock/monotonic")
 
-# The refusal is a halt, so `protect` inside the body does not catch it, and
-# the body never reads the error in place of the environment.
+# The denial raises :ambient, not :error, so `protect` inside the body does not
+# catch it, and the body never reads the error in place of the environment.
 (assert-refused '(begin
                    (defmacro home []
                      (protect (sys/env "HOME")))
                    (home)) "home" "sys/env" "sys/env under protect")
 
-# The halt carries :terminal, so a fiber whose mask names :halt does not catch
-# it either. The counter-factual: a plain halt, which that mask absorbs, and
-# the macro expanded to the refusal's payload.
+# A fiber in the body whose mask does not name :ambient passes the denial on.
 (assert-refused '(begin
                    (defmacro pid []
                      (fiber/resume (fiber/new (fn [] (sys/pid)) |:halt :error|)))
                    (pid)) "pid" "sys/pid"
-                "sys/pid in a fiber that catches :halt")
+                "sys/pid in a fiber that catches :halt and :error")
+
+# A fiber in the body whose mask names :ambient catches the denial, as any
+# parent does, and the body expands to what its own code chose. The pid is
+# never read. The counter-factual: a refusal no mask catches, and the compile
+# failed.
+(defmacro mediated []
+  (let [f (fiber/new (fn [] (sys/pid)) |:ambient|)
+        denial (fiber/resume f)]
+    (string (get denial :primitive) " " (get denial :error))))
+(assert (= (mediated) "sys/pid capability-denied")
+        "a fiber in the body catches the denial")
 
 # A `begin-for-syntax` body runs at expansion as a transformer does.
 (let [msg (compile-error '(begin-for-syntax (def home (sys/env "HOME")))
@@ -55,7 +64,7 @@
 # ── What a macro body may still do ────────────────────────────────────
 
 # Pure computation over the unit's inputs, and over the primitives the compile
-# binds, which are an input too. The counter-factual marked too wide a set.
+# binds, which are an input too. The counter-factual withheld too wide a set.
 (defmacro shaped [& names]
   (let [joined (string/join (map (fn [n] (string (syntax->datum n))) names) "-")
         tmp (gensym "t")]
@@ -70,9 +79,9 @@
 
 # ── Code the expansion produced ───────────────────────────────────────
 
-# The refusal belongs to the expansion. Code a macro expands to reads the
+# The denial belongs to the expansion. Code a macro expands to reads the
 # environment when it runs, and so does code after a refused compile. The
-# counter-factual left the refusal standing past the expansion.
+# counter-factual left :ambient withheld past the expansion.
 (defmacro pid-form []
   '(sys/pid))
 (assert (= (pid-form) (sys/pid)) "an expansion may call an ambient primitive")
@@ -86,12 +95,11 @@
 
 # ── What a reader of the primitive learns ─────────────────────────────
 
-# The counter-factual: the mark was invisible, and a reader learned of it
-# from a failed compile.
-(assert (get (vm/primitive-meta "sys/env") :ambient) "sys/env carries the mark")
-(assert (not (get (vm/primitive-meta "string/join") :ambient))
-        "string/join carries none")
-(assert (string/contains? (doc sys/env) "expansion")
-        "the docstring says an expansion refuses it")
+# The counter-factual: the bit was invisible, and a reader learned of it from a
+# failed compile.
+(assert (string/contains? (doc sys/env) ":ambient")
+        "the docstring names the withheld bit sys/env needs")
+(assert (not (string/contains? (doc string/join) ":ambient"))
+        "and string/join needs none")
 
 (println "macro-purity: OK")

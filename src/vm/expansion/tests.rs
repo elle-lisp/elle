@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-22
 //! The expansion budget, one count that nested expansions share apart from
 //! fiber fuel, and the capabilities an expansion withholds.
 //!
@@ -81,10 +81,11 @@ fn a_spent_budget_answers_the_fuel_fault() {
     assert!(!vm.expanding(), "the halted expansion closes the budget");
 }
 
-/// An expansion withholds the effect capabilities beside what its fiber
-/// withholds, and the fiber gets its own set back when the expansion ends. The
-/// counter-factual runs the transformer with the fiber's set alone, so a macro
-/// reads a file wherever no fiber denied `:fs`.
+/// An expansion withholds the effect capabilities and `:ambient` beside what its
+/// fiber withholds, and the fiber gets its own set back when the expansion ends.
+/// The counter-factual runs the transformer with the fiber's set alone, so a
+/// macro reads a file wherever no fiber denied `:fs`, and the environment
+/// wherever no fiber denied `:ambient`.
 #[test]
 fn an_expansion_withholds_the_effect_capabilities_until_it_ends() {
     use crate::signals::{SIG_EXEC, SIG_FFI, SIG_FS, SIG_GPU, SIG_IO, SIG_NET, SIG_OS_SIGNAL};
@@ -96,6 +97,9 @@ fn an_expansion_withholds_the_effect_capabilities_until_it_ends() {
         SIG_OS_SIGNAL,
         SIG_FS,
         SIG_NET,
+        crate::signals::registry::SignalRegistry::with_builtins()
+            .to_signal_bits("ambient")
+            .expect("the registry names :ambient"),
     ];
     let mut vm = VM::new();
     vm.fiber.withheld = SIG_ERROR;

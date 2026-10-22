@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-11
+# audited: 2026-10-22
 # A process keeps the withheld set of the fiber that spawned it, and its scheduler refuses a denied call.
 # docs/process-scheduler.md
 #
@@ -83,6 +83,10 @@
                   "tcp/listen" :net)
         "a process denied :net is refused its listen")
 
+(assert (refused? (from-sandbox |:ambient| process:spawn
+                                (fn [] (protect (sys/pid)))) "sys/pid" :ambient)
+        "a process denied :ambient is refused its pid read")
+
 # ── An uncaught refusal ends the process with the denial ──────────────
 
 (with-temp-dir dir
@@ -129,8 +133,8 @@
 # process scheduler stops the sandbox there, and it never finishes.
 #
 # The trap: with a sandbox masked |:error| alone, a denial that passed the
-# process scheduler still reaches the async scheduler, whose ev/spawn mask
-# names the bit and refuses it at the same call site, so the case passes.
+# process scheduler still reaches the async scheduler. Its ev/spawn mask names
+# the bit and refuses it at the same call site, so the case passes.
 (defn sandboxed-system [deny thunk]
   "Run thunk as the one process of a system started in a sandbox denied
    `deny` and masked to catch it. Answer what the process answered."
@@ -154,5 +158,8 @@
 (assert (refused? (sandboxed-system |:net|
                                     (fn [] (protect (tcp/listen "127.0.0.1" 0))))
                   "tcp/listen" :net) "and so is its listen, denied :net")
+
+(assert (refused? (sandboxed-system |:ambient| (fn [] (protect (sys/pid))))
+                  "sys/pid" :ambient) "and its pid read, denied :ambient")
 
 (println "caps-process: OK")
