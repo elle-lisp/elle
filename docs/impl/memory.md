@@ -1,6 +1,6 @@
 # The region memory model
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-21 -->
 
 The mission of the region system, the map of its documents, the settled
 invariants, and the leak classes that name the open frontier.
@@ -277,16 +277,20 @@ acceptance bars are the roadmap's ([the roadmap](assessment.md)); a closed
 root keeps a one-line entry so the name in an old probe or commit still
 resolves.
 
-**F1. Stdlib per-call scratch — the dominant production leak.** The everyday
-collection/string/HOF API leaks intermediate scratch per call. Two
-sub-mechanisms:
+**F1. Stdlib per-call scratch.** The everyday collection, string and HOF API
+minted intermediate scratch per call. Two sub-mechanisms, both closed:
 
-- **F1a — ephemeral copy / Fresh-native call-result scratch.** A non-escaping,
-  acyclic region minted inside a stdlib body: a fresh slice per
-  `(rest array)` step, a fresh accumulator a HOF fills and freezes. No static
-  slot names it, it is not a cycle, and it is not RC-released promptly on
-  discard. Its close is dissolution — index-walk instead of minting a slice —
-  and the residue that is not copy-scratch decomposes into F5 strands.
+- **F1a — ephemeral copy scratch. Closed, with controls.** A non-escaping,
+  acyclic region minted inside a stdlib body and discarded there: the slice a
+  `(rest array)` step copies, the accumulator a HOF fills and freezes. A
+  per-call rate cannot see one. A call that mints a slice per step and frees
+  every slice at its return reads 0 per call however long the call ran. So
+  each shape is read on two scales, its per-call rate beside its crest, the
+  slope of the object high-water mark in the call's own input size
+  ([ratchet](../ratchet.md)). The
+  [scratch probes](../../tests/impl/probe/scratch.lisp) hold the gauge, and
+  every row is a control. Dissolution removes the shape where it fires
+  ([loop fusion](dissolution.md)).
 - **F1b — dispatch-wrapper passthrough. Closed.** A container wrapper's
   `(match (type-of coll) …)` referenced its container argument in every arm,
   so the release of that argument landed in an arm the executed path never
@@ -388,8 +392,10 @@ State is read from steady-state region growth and the oracle, never from
 emitted RC. The trustworthy measurements are two. The first is live-region and
 RSS growth across repeated iterations: a reclaimed class is bounded, with slope
 → 0. Each probe sits beside a live-growth discriminator that proves the gauge is
-not dead. The second is `--trace=guardfree` under the full stdlib for UAF. A fix is proven by measured
-slope → 0 plus guardfree-clean.
+not dead. A rate is read across calls; the crest reads inside one, as the
+high-water mark's slope in the call's input size, and the stdlib scratch
+shapes are read on both. The second is `--trace=guardfree` under the full
+stdlib for UAF. A fix is proven by measured slope → 0 plus guardfree-clean.
 
 [The oracle](../../tests/impl/oracle.lisp) is the leak-state dashboard:
 representative shapes per class, driven on the ratchet's estimator, which

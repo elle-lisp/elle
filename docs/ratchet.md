@@ -1,15 +1,13 @@
 # The ratchet
 
-<!-- audited: 2026-10-19 -->
+<!-- audited: 2026-10-21 -->
 
 One library measures, one committed ledger holds every bound, and the runner
 judges, records and re-pins; nothing else carries a number.
 
-This document is the specification. The instrument and the ledger are built,
-as [the guide](../lib/ratchet.md) shows, and so is the runner's side: the
-judge, the rows, the `missing` gate, the summary and `--repin`. A producer is
-on the ratchet when `tests/ledger` holds a file for it. The producers under
-§ The producers are proposed.
+This document is the specification, and [the guide](../lib/ratchet.md) shows
+the instrument in use. A producer is on the ratchet when `tests/ledger` holds
+a file for it.
 
 ## What a ratchet is
 
@@ -51,7 +49,7 @@ A measurement is a fact. A bound is a claim. The two never live in one file.
 
 | Part | Where | What it owns |
 |------|-------|--------------|
-| The instrument | `lib/ratchet.lisp` and `lib/ratchet/estimator.lisp` | gauges, the estimator, the drives, the reading line |
+| The instrument | `lib/ratchet.lisp`, `lib/ratchet/estimator.lisp` and `lib/ratchet/crest.lisp` | gauges, the estimator, the crest, the drives, the reading line |
 | The reading | one line on stdout | subject, axis, value, unit, uncertainty |
 | The ledger | `tests/ledger/*.lisp`, committed | one row per (subject, axis) and build: the bound, its kind, its class |
 | The ledger module | `lib/ratchet/ledger.lisp` and `lib/ratchet/repin.lisp` | the row reader, the judge, the line reader, the re-pin's rewrite |
@@ -301,6 +299,7 @@ producer prints the same lines the runner reads, and judges none of them.
 | `(drive subject run-block & opts)` | the same rate over a run-block of the caller's own, `(fn [b])` performing `b` ops: a tail recursion, a fiber drained after `b` yields, a loop that must be a discarded statement |
 | `(stmt-run thunk)` | the run-block that calls `thunk` `b` times as a discarded statement, the while-loop shape a per-call leak needs to show |
 | `(delta subject body & opts)` | each `:on` gauge's change over `:n` runs of `body`, per run, after one uncounted run |
+| `(crest subject shape & opts)` | the slope of the object high-water mark in the input size of `(shape n)`: the mark above its reset baseline at `:n` and at twice `:n`, their difference over `:n`, after one uncounted run; objects per element, exact, so its half-width is 0 |
 | `(best-of rounds control subject)` | the smallest CPU time each thunk took over `rounds` alternating rounds, as `[control subject]`; it prints nothing |
 | `(ratio subject measured control)` | the `best-of` timing of `measured` over that of `control` |
 | `(read subject axis value & opts)` | any number from anywhere: a count a script parsed, a byte total `valgrind` printed |
@@ -311,7 +310,9 @@ reports it as `<axis> gauge (live-growth)`. Its row is a growth floor, and the
 runner voids the axis when that floor fails. No producer writes a
 discriminator, and none can forget one. A module-level sink keeps every struct
 it is handed, so the object count, the region count and the byte count climb.
-A sink of pairs keeps the free list drained, so the id counter climbs.
+A sink of pairs keeps the free list drained, so the id counter climbs. A crest
+is proved on its own axis: the first one drives a list of `n` pairs, whose
+mark climbs one per element, and reports it as `crest gauge (live-growth)`.
 
 ## The producers
 
@@ -325,33 +326,9 @@ and why its rows are what they are is its ledger's comments.
 `elle test --rust` exists ([test-cli](test-cli.md)). The line format is the
 whole contract, so that step adds a parser and no second channel.
 
-## Landing order
-
-Each phase lands as documentation, then a failing test, then code, and each
-is one pull request. The first four are in. Of the fifth, the runner's own
-gauges, the audit queue, valgrind and the first residue tests are in.
-
-1. **The library and the ledger.** `lib/ratchet.lisp` with `rate`, `delta`,
-   `read` and the gauges, the judge and the row reader, and `tests/ledger/`.
-   The counter-factual: the judge, as a pure function, calls a reading past
-   its pin a regression and one past it the better way stale.
-2. **The runner reads the line.** `src/test/ledger.lisp` parses stdout for
-   every form and child, writes the rows, adds `missing`, prints the summary
-   and gates. The counter-factual: a ledger row no producer answers fails the
-   run.
-3. **`--repin`.** The counter-factual: a stale row is rewritten, a regression
-   is refused, and the comment above the row survives.
-4. **The dashboards move.** Oracle and plumb over the library, their pins in
-   two ledger files, and their headers shortened to what the library does not
-   already say. The counter-factual is the dashboards' own: every row reads
-   what it read before the move.
-5. **The residue tests, the runner's own gauges, the audit queue, valgrind.**
-   One producer per pull request, each with its ledger. A residue test
-   replaces its window helper with `rate` or `delta`, its ceiling with a row,
-   and its gauge-live gate with the instrument's live-growth row. A gauge it
-   kept for its own sake is a growth floor. The counter-factual is the ledger
-   itself: committed ahead of the producer, every row of it is `missing` until
-   the producer reads it.
+A producer lands as documentation, then its ledger, then its code. The
+ledger is the counter-factual: committed ahead of the producer, every row of
+it is `missing` until the producer reads it.
 
 ## Decisions this document takes
 
