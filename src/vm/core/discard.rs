@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-22
 //! Abandoning suspended work: a call boundary, a host's refusal, and the
 //! chokepoint that runs what the discarded frames still owed.
 //!
@@ -45,9 +45,9 @@ impl VM {
     /// `compile/run-on` entries return it as the call's result.
     ///
     /// `parked` is the signal whose park this boundary ends, named by the site
-    /// rather than read from `fiber.signal`: two sites reach here through
+    /// rather than read from `fiber.signal`. Two sites reach here through
     /// `invoke_closure_jit`, which restores the CALLER's signal before it asks
-    /// the boundary's question and holds the parked one in a local. What the
+    /// the boundary's question, and holds the parked one in a local. What the
     /// park owed is released against it (docs/impl/region/park.md). `depth` is
     /// the parameter depth at the boundary's call.
     pub(crate) fn boundary_violation(
@@ -84,9 +84,9 @@ impl VM {
         };
         let (bits, kind, message) = refusal;
         let err = self.escaping_error(kind, message);
-        // The error the boundary raises is what leaves with the signal, so it is
-        // the payload the discard's own releases must leave standing — built in a
-        // fresh region of its own, so in practice it exempts nothing and the
+        // The error the boundary raises leaves with the signal, so it is the
+        // payload the discard's own releases must leave standing. It is built in
+        // a fresh region of its own, so in practice it exempts nothing, and the
         // abandoned frames' tables run in full.
         self.discard_suspended_frames(err, parked, depth);
         Some((bits, err))
@@ -102,23 +102,23 @@ impl VM {
     /// boundary and may still own it.
     ///
     /// The discarded frames' continuations will never run, so every release that
-    /// lived in one is at its last chance here. What each frame owes it carries
-    /// itself, in three readings [`crate::value::fiber::ParkedDues`] collects
-    /// together: its parked owner node and the releases its activation took over
-    /// from its own frame-replacing tail calls (both MOVED into the frame at the
-    /// suspend — the record's only home, so no completion or resume can reach
-    /// them a second time), and the releases its two emitter-recorded tables name,
-    /// read against its saved locals and its saved activation map.
+    /// lived in one is at its last chance here. Each frame carries what it owes,
+    /// in three readings [`crate::value::fiber::ParkedDues`] collects together.
+    /// Two are its parked owner node and the releases its activation took over
+    /// from its own frame-replacing tail calls. Both MOVED into the frame at the
+    /// suspend, the record's only home, so no completion or resume can reach them
+    /// a second time. The third is the releases its two emitter-recorded tables
+    /// name, read against its saved locals and its saved activation map.
     ///
-    /// Each reading names regions this chokepoint is entitled to release: a
+    /// Each reading names regions this chokepoint is entitled to release. A
     /// node's members are exactly the regions the inference proved externally
-    /// unique and moved in through `AdoptIntoActivation`, a deferred region is one
-    /// the compiler itself named as this activation's to release, and a table
-    /// entry is a release the executing function emitted for its own slot with a
-    /// receipt that says it did not run. The fiber's survival is not part of that
-    /// reading: a frame's saved stack and saved map were taken and cloned at its
-    /// own park, and its activation returned before this point, so no live frame
-    /// shares the state the receipts are read against.
+    /// unique and moved in through `AdoptIntoActivation`. A deferred region is
+    /// one the compiler itself named as this activation's to release. A table
+    /// entry is a release the executing function emitted for its own slot, with
+    /// a receipt that says it did not run. The fiber's survival is not part of
+    /// that reading. A frame's saved stack and saved map were taken and cloned
+    /// at its own park, and its activation returned before this point. So no
+    /// live frame shares the state the receipts are read against.
     ///
     /// What stays refused is a blanket release of the rest of the frame's
     /// `activation_region_map`. It is a borrowed view carrying no receipt, and a
@@ -126,22 +126,22 @@ impl VM {
     /// the activation that catches the squelch. Those regions stay leaked on this
     /// path until an ownership cut adopts them (UAF-safe, bounded per discard).
     ///
-    /// A fourth reading answers for the PARK rather than for the frames, and it
-    /// is the delivery ledger's: this exit is neither the reader that consumes a
-    /// park's delivery retain nor the install that releases a runtime-built
-    /// payload, so both are owed here (docs/impl/region/park.md).
+    /// A fourth reading, the delivery ledger's, answers for the PARK rather than
+    /// for the frames. This exit is neither the reader that consumes a park's
+    /// delivery retain nor the install that releases a runtime-built payload, so
+    /// both are owed here (docs/impl/region/park.md).
     ///
-    /// `payload` is the value the exit leaves with — a boundary's own error,
-    /// the error a host ends ([`Self::discard_hosted_error`]), or `nil` for a
-    /// refusing host, which builds its error afterwards — whose region no
-    /// release here may take, on the same
-    /// reading the abandoned-frame walk makes (docs/impl/region/mechanism.md).
+    /// `payload` is the value the exit leaves with: a boundary's own error, the
+    /// error a host ends ([`Self::discard_hosted_error`]), or `nil` for a
+    /// refusing host, which builds its error afterwards. No release here may take
+    /// its region, on the same reading the abandoned-frame walk makes
+    /// (docs/impl/region/mechanism.md).
     /// `parked` is the signal whose park this ends, named by the site that
     /// ends it (see `boundary_violation`).
     ///
     /// `depth` is the parameter depth at the call the boundary or the host
     /// answers, and the fiber's parameter frames are truncated to it
-    /// (src/vm/AGENTS.md).
+    /// (src/vm/overview.md).
     pub(crate) fn discard_suspended_frames(
         &mut self,
         payload: Value,
@@ -156,9 +156,9 @@ impl VM {
             crate::vm::fiber::release_parked_dues(heap, dues, protect, None);
         }
         // The park's own references run after the tables above, which still find
-        // the payload's region live: a body-allocated payload's own release is
-        // one of those entries, and the delivery retain dropped here is what
-        // keeps it from being the region's last.
+        // the payload's region live. A body-allocated payload's own release is one
+        // of those entries, and the delivery retain dropped here keeps it from
+        // being the region's last.
         let heap = unsafe { &mut *self.heap_ptr };
         crate::vm::fiber::release_abandoned_park(heap, &mut self.fiber.delivery, parked);
         // The abandoned park's funding has no consumer — the delivery funnel
@@ -243,7 +243,7 @@ impl VM {
     }
 
     /// A host that runs a thunk on the current fiber hands the thunk's
-    /// suspension on as its own call's park: `arena/allocs` and
+    /// suspension on as its own call's park. `arena/allocs` and
     /// `compile/run-on :bytecode` return the thunk's signal as their own, and
     /// the call's park is built from it. The thunk's park ends there, so its
     /// funding record must not survive into the park the host's call makes

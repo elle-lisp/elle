@@ -7,8 +7,3 @@ Up: [..](../AGENTS.md)
 ## Documents
 
 - [README.md](README.md) — **Documentation site generator** An Elle program that renders the repository's markdown documents and an API reference as a static HTML site.
-
-## Directories
-
-- [docs/](docs/AGENTS.md) — (empty)
-- [lib/](lib/AGENTS.md) — (empty)
