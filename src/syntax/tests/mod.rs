@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-21
 //! Tests for syntax nodes: construction, scopes, the printed form the reader
 //! reads back, and expansion.
 //!
@@ -128,10 +128,10 @@ fn test_display_float_integral_round_trips() {
     // `Syntax` Display must round-trip through the reader for EVERY literal —
     // most subtly an integral-valued float. `splice_includes` (the WASM
     // full-module path) re-stringifies each user form through this Display and
-    // re-reads it, so a `Float(7.0)` rendered as the bare integer `7` re-reads
-    // as `Int(7)` — silently changing `(type-of 7.0)` from :float to :integer.
-    // Non-integral floats (1.5) never hit this because their text already
-    // carries a '.'; that is why the bug hid behind `test_display_float`'s PI.
+    // re-reads it. A `Float(7.0)` rendered as the bare integer `7` would
+    // re-read as `Int(7)`, and `(type-of 7.0)` would change from :float to
+    // :integer. A non-integral float (1.5) cannot show this, because its text
+    // already carries a '.', so `test_display_float`'s PI would pass either way.
     let (_home, a) = arena();
     for &v in &[7.0f64, 2.0, 1000.0, -3.0, 1.5, 0.5, 1e21] {
         let text = Syntax::new(SyntaxKind::Float(v), Span::synthetic()).to_string();
@@ -173,9 +173,9 @@ const AWKWARD: &str = "é'\"\\\n\t\r\u{1}\0";
 #[test]
 fn test_display_string_reads_back_under_every_lexicon() {
     // The printed text is read again, and not always under the lexicon that
-    // read the original (docs/impl/lexicon.md). Rust's `escape_default`
-    // wrote `\u{e9}` for `é` and `\'` for `'`: epoch 12 reads the first as
-    // the five characters `u{e9}`, and epoch 13 refuses the second.
+    // read the original (docs/impl/lexicon.md). Rust's `escape_default` would
+    // write `\u{e9}` for `é` and `\'` for `'`: epoch 12 would read the first
+    // as the five characters `u{e9}`, and epoch 13 would refuse the second.
     let (_home, a) = arena();
     let nodes = [
         Syntax::string(&a, AWKWARD, Span::synthetic()),
