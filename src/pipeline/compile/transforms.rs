@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! The source transforms the test-runner compile modes apply to a file's forms.
 //!
 //! docs/test-runner.md
@@ -34,10 +34,10 @@ pub(super) fn barrier_transform(
     let sym = |s: &str| Syntax::symbol(arena, s, sp);
     let slist = |items: Vec<Syntax>| Syntax::list(arena, &items, sp);
     // The accumulator is compiler-injected, not written by the user. Scope-stamp
-    // every occurrence with a fresh scope so it is *hygienic*: a reference the
-    // user writes (which never carries this scope) can never resolve to it, so
-    // `(environment)` excludes it — the same scope-subset rule that hides
-    // macro-introduced bindings — and a test file that binds its own
+    // every occurrence with a fresh scope, so it is *hygienic*: a reference the
+    // user writes (which never carries this scope) can never resolve to it. So
+    // `(environment)` excludes it, by the same scope-subset rule that hides
+    // macro-introduced bindings, and a test file that binds its own
     // `__test-out` does not collide with the harness.
     let acc = |s: &str| Syntax::symbol_scoped(arena, s, sp, &[acc_scope]);
     let acc_name = "__test-out";
@@ -76,20 +76,21 @@ pub(super) fn barrier_transform(
 }
 
 /// The whole-file transform (see `compile_whole_module`). Runs on the
-/// macro-EXPANDED top-level forms and wraps **all** of them — `def`/`var` setup
-/// and expressions alike — into the body of a single 0-arg thunk, returned as
-/// one `[0 thunk]` entry. This is the legacy multi-form path: a file is an
+/// macro-EXPANDED top-level forms and wraps **all** of them, `def`/`var` setup
+/// and expressions alike, into the body of a single 0-arg thunk, returned as
+/// one `[0 thunk]` entry. This is the legacy multi-form path. A file is an
 /// imperative script whose forms depend on their order, so it is run as one
-/// unit (in source order, once per tier, in isolation) rather than sliced into
-/// per-form thunks with `def`/`var` hoisted eagerly — which reorders the program
-/// (read-before-write) and re-runs shared mutations per tier. The thunk body is
-/// the internal `(%file-body form…)` form, NOT a bare `(fn () form…)` body: a
-/// plain `fn` body uses internal-define semantics (all defines hoisted into one
-/// frame, last-wins shadowing), whereas `%file-body` runs the exact
-/// `analyze_file_letrec` a real file gets — so forward references, mutual
+/// unit: in source order, once per tier, in isolation. Sliced into per-form
+/// thunks with `def`/`var` hoisted eagerly, it would run reordered
+/// (read-before-write) and re-run shared mutations per tier.
+///
+/// The thunk body is the internal `(%file-body form…)` form, NOT a bare
+/// `(fn () form…)` body. A plain `fn` body uses internal-define semantics: all
+/// defines hoisted into one frame, last-wins shadowing. `%file-body` runs the
+/// exact `analyze_file_letrec` a real file gets. So forward references, mutual
 /// recursion, AND def redefinition (a redefinition's RHS sees the previous
 /// binding) resolve identically to a direct `elle FILE` run. Output shape
-/// matches `barrier_transform` (a `__test-out` array of `[index thunk]`) so the
+/// matches `barrier_transform` (a `__test-out` array of `[index thunk]`), so the
 /// runner consumes both the same way:
 ///
 /// ```text
@@ -141,8 +142,8 @@ pub(super) fn whole_module_transform(
 
 /// Compile a file as a single whole-file thunk (legacy multi-form path). Mirrors
 /// `compile_barrier_module` but with `whole_module_transform`: the result is one
-/// `[0 thunk]` entry whose thunk runs every form in source order. See
-/// docs/test-runner.md § Multi-form files.
+/// `[0 thunk]` entry whose thunk runs every form in source order
+/// (docs/test-runner.md).
 pub fn compile_whole_module(
     source: &str,
     symbols: &mut SymbolTable,
@@ -155,9 +156,10 @@ pub fn compile_whole_module(
 /// Compile already-read top-level `syntaxes` as a single whole-file thunk
 /// (`compile_whole_module` from syntax instead of source text). Powers
 /// `compile/whole-module-syntax`: the test runner parses a legacy multi-form
-/// file once in the main VM and ships the syntax to a worker, which compiles +
-/// runs it with its own stdlib so the file's runtime `import`s and the worker's
-/// `ev/run` scheduler agree on the dynamic scheduler parameters.
+/// file once in the main VM, and ships the syntax to a worker. The worker
+/// compiles and runs it with its own stdlib, so the file's runtime `import`s
+/// and the worker's `ev/run` scheduler agree on the dynamic scheduler
+/// parameters.
 pub fn compile_whole_module_forms(
     syntaxes: Vec<Syntax>,
     symbols: &mut SymbolTable,
