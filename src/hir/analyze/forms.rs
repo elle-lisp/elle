@@ -1,10 +1,10 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The control-flow forms, and the quoted-datum, intrinsic and primitive helpers other forms share.
+//!
+//! docs/impl/hir.md
 //!
 //! The forms are `if`, `begin`, `block`, `break`, `while`, `and`, `or` and
 //! `eval`.
-//!
-//! docs/impl/hir.md
 
 use super::*;
 use crate::hir::expr::CallArg;
@@ -22,14 +22,14 @@ impl<'a> Analyzer<'a> {
     /// Analyze a quoted datum (`'X` / `(quote X)`) into HIR.
     ///
     /// A quoted COMPOUND datum (list / array / nested structure) becomes a
-    /// `HirKind::QuoteConst` carrying a `ConstTemplate` — plain compile-time data
-    /// that `MaterializeConst` materializes fresh into a reclaimable region each
-    /// execution (region/model.md, "Constants lower as ordinary allocations"). An
+    /// `HirKind::QuoteConst` carrying a `ConstTemplate`. That is plain
+    /// compile-time data, which `MaterializeConst` materializes fresh into a
+    /// reclaimable region each execution (docs/impl/region/model.md). An
     /// IMMEDIATE datum (`'5`, `'foo`, `'()`) stays a `HirKind::Quote` immediate on
     /// the no-region fast path.
     ///
     /// A datum carrying a hygiene-bearing `SyntaxLiteral` (introduced by
-    /// quasiquote / macro arg passing, to preserve scope sets) is no exception:
+    /// quasiquote / macro arg passing, to preserve scope sets) is no exception.
     /// `to_const_template` carries the scope set verbatim in a
     /// `ConstTemplate::SyntaxSymbol`, so it too lowers to an ordinary
     /// `MaterializeConst` allocation, hygiene intact.
@@ -146,10 +146,9 @@ impl<'a> Analyzer<'a> {
             // Two-pass analysis for letrec-style semantics:
             // Pass 1: Create bindings for all defines (without analyzing values)
             //
-            // A fn body is a letrec* context (docs/bindings.md "Function
-            // bodies are an implicit letrec"): defining the same binding
-            // identity twice in one body is rejected exactly like an
-            // explicit letrec's duplicate.
+            // A fn body is a letrec* context (docs/bindings.md): defining the
+            // same binding identity twice in one body is rejected exactly like
+            // an explicit letrec's duplicate.
             let mut duplicates = super::scopes::DuplicateGuard::default();
             for item in items {
                 for (name, scopes) in Self::is_define_form(item) {
@@ -414,8 +413,8 @@ impl<'a> Analyzer<'a> {
         } else {
             Hir::silent(HirKind::Nil, span)
         };
-        // eval runs the datum on the calling fiber and holds no park of that
-        // code, so the one signal it raises is :error: a compile failure, a
+        // eval runs the datum on the calling fiber, and holds no park of that
+        // code. So the one signal it raises is :error: a compile failure, a
         // raise inside the datum, or a yield, an I/O request or a halt the
         // handler refused.
         self.add_inherent_bits(crate::value::SIG_ERROR);
