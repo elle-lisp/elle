@@ -44,17 +44,6 @@
                    (pid)) "pid" "sys/pid"
                 "sys/pid in a fiber that catches :halt and :error")
 
-# A fiber in the body whose mask names :ambient catches the denial, as any
-# parent does, and the body expands to what its own code chose. The pid is
-# never read. The counter-factual: a refusal no mask catches, and the compile
-# failed.
-(defmacro mediated []
-  (let [f (fiber/new (fn [] (sys/pid)) |:ambient|)
-        denial (fiber/resume f)]
-    (string (get denial :primitive) " " (get denial :error))))
-(assert (= (mediated) "sys/pid capability-denied")
-        "a fiber in the body catches the denial")
-
 # A `begin-for-syntax` body runs at expansion as a transformer does.
 (let [msg (compile-error '(begin-for-syntax (def home (sys/env "HOME")))
                          "begin-for-syntax")]

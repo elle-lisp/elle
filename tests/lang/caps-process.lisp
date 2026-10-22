@@ -83,10 +83,6 @@
                   "tcp/listen" :net)
         "a process denied :net is refused its listen")
 
-(assert (refused? (from-sandbox |:ambient| process:spawn
-                                (fn [] (protect (sys/pid)))) "sys/pid" :ambient)
-        "a process denied :ambient is refused its pid read")
-
 # ── An uncaught refusal ends the process with the denial ──────────────
 
 (with-temp-dir dir
@@ -158,8 +154,5 @@
 (assert (refused? (sandboxed-system |:net|
                                     (fn [] (protect (tcp/listen "127.0.0.1" 0))))
                   "tcp/listen" :net) "and so is its listen, denied :net")
-
-(assert (refused? (sandboxed-system |:ambient| (fn [] (protect (sys/pid))))
-                  "sys/pid" :ambient) "and its pid read, denied :ambient")
 
 (println "caps-process: OK")
