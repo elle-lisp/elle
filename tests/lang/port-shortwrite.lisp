@@ -1,9 +1,8 @@
-(elle/epoch 14)
-# audited: 2026-10-06
+(elle/epoch 15)
+# audited: 2026-10-21
 ## port/write writes every byte before it returns, and returns that count.
 ## docs/io.md
 ##
-## `port/write` writes every byte before it returns, and returns that count.
 ## A caller never loops on the return value.
 ##
 ## One write(2) transfers only what fits in the fd's send buffer at that
@@ -19,8 +18,8 @@
 ##   - a remote socket accepted 40,520 bytes of a 150,000-byte write
 ##
 ## Both assertions check the returned count AND the bytes the peer actually
-## received, because the two fail independently: a backend that loops but
-## reports only the last chunk breaks the count, and one that reports the full
+## received, because the two fail independently. A backend that loops but
+## reports only the last chunk breaks the count. One that reports the full
 ## length without looping breaks the peer's tally.
 ##
 ## A regression here is quiet on small payloads — they fit in one syscall — and
@@ -29,9 +28,9 @@
 ## finishes, and the connection dying at the peer's idle timeout.
 ##
 ## Cases 1 and 2 test the primitive directly. Case 3 tests the same property end
-## to end through `lib/tls.lisp`, which is the largest caller that relies on it:
-## every one of its six sends hands a whole buffer to `port/write` and trusts the
-## count, so a backend that stops looping breaks TLS before anything else. The
+## to end through `lib/tls.lisp`, the largest caller that relies on it. Every one
+## of its six sends hands a whole buffer to `port/write` and trusts the count, so
+## a backend that stops looping breaks TLS before anything else. The
 ## two layers fail independently — a new TLS send path that bypasses `port/write`
 ## would pass cases 1 and 2 and fail case 3.
 ##
@@ -90,7 +89,7 @@
 
 ## ── 2. A default socket truncates a large write ──────────────────────
 ##
-## The defect needs no socket options. A default send buffer on loopback
+## The short write needs no socket options. A default send buffer on loopback
 ## accepts about 2.5 MB, so an 8 MB write stops early as well.
 
 (ev/run (fn []
@@ -109,9 +108,9 @@
 ##
 ## `lib/tls.lisp` sends whole ciphertext buffers with one `port/write` each and
 ## uses the count for nothing. An 8 MB record stream is far past what loopback's
-## send buffer accepts at once, so the write is short at the syscall layer even
-## though the module issues exactly one call — the case the module cannot see and
-## therefore cannot handle itself.
+## send buffer accepts at once. So the write is short at the syscall layer, even
+## though the module issues exactly one call: the case the module cannot see, and
+## so cannot handle itself.
 ##
 ## A dropped tail deadlocks both sides here rather than raising: the server waits
 ## on a read for bytes that were never sent, and the client waits on the reply the
@@ -206,9 +205,9 @@
 ##
 ## `port/write` returns the length of what it was given, and zero is a
 ## length. The trap: a write of nothing completes with the same zero a
-## read uses to report EOF, so a completion path that reads zero as "the
-## stream ended" answers nil here and breaks the return contract for the
-## one payload that has nothing to distinguish it.
+## read uses to report EOF. A completion path that reads zero as "the
+## stream ended" would answer nil here. That breaks the return contract for
+## the one payload that has nothing to distinguish it.
 (with-temp-dir dir
                (let [p (port/open (path/join dir "empty-write.txt") :write)]
                  (defer
