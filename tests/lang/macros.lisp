@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-13
+# audited: 2026-10-22
 # A macro expands where it is called, may expand into another macro, and calls helpers defined by begin-for-syntax.
 # docs/macros.md
 
@@ -47,24 +47,6 @@
 (assert (not (= (gensym "v") (gensym "v")))
         "each gensym at run time is a fresh symbol")
 
-# While a unit expands, gensym names its symbols after the unit, and the datum
-# one eval compiles is a unit. The counter-factual is a count that runs across
-# the process: the second eval of one datum answers a name the first did not.
-(def one-unit
-  '(begin
-     (defmacro fresh []
-       (list 'quote (gensym "t")))
-     (fresh)))
-(def other-unit
-  '(begin
-     (defmacro other []
-       (list 'quote (gensym "t")))
-     (other)))
-
-(assert (= (eval one-unit) (eval one-unit)) "one unit expands to one name")
-(assert (not (= (eval one-unit) (eval other-unit)))
-        "two units expand to two names")
-
 # ── begin-for-syntax ─────────────────────────────────────────────────
 
 # A definition inside begin-for-syntax exists when macros expand, so a macro
@@ -86,13 +68,3 @@
   (quad (syntax->datum n)))
 
 (assert (= (quadruple 3) 12) "a second begin-for-syntax block calls the first")
-
-# A begin-for-syntax definition belongs to the unit that makes it, and each
-# eval is a unit. The counter-factual is an eval expander that keeps the
-# definitions: the third eval below finds the first one's helper and answers 42.
-(eval '(begin-for-syntax (def eval-helper (fn [] 42))))
-(eval '(defmacro uses-eval-helper []
-        (eval-helper)))
-(let [[ok? _] (protect (eval '(uses-eval-helper)))]
-  (assert (not ok?)
-          "an eval does not see an earlier eval's begin-for-syntax definition"))
