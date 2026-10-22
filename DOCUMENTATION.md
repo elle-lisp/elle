@@ -1,6 +1,7 @@
 # Documentation policy
 
 <!-- audited: 2026-10-22 -->
+<!-- policy: 2026-10-20 -->
 
 Every document and every source file says what is true now, names the document
 that governs it, and carries the day it last met these rules.
@@ -43,8 +44,9 @@ cannot decide:
 2. The content earns the time it takes to read.
 3. Nothing here belongs in another file.
 
-Confirming the size and stamping is the failure this list exists to prevent. A file can sit inside every limit and still describe an interface that
-changed a year ago.
+Confirming the size and stamping is the failure this list exists to prevent. A
+file can sit inside every limit and still describe an interface that changed a
+year ago.
 
 **A false stamp is worse than none.** An unstamped file waits in the queue for
 somebody to reach it. A stamped one has left the queue, so a wrong claim stops
@@ -384,13 +386,13 @@ that carries this file. These rules belong to this one.
   machine decides here. Every link resolves, no document is named in a bare
   code span, and every call-out is present and under 140 characters.
 - The same checks find no banned register, and every document a source header
-  names. A file stamped with a deviation is exempt from all of them. The stamp claims sentence length and repeated
-  sentences by hand.
+  names. A file stamped with a deviation is exempt from all of them. The stamp
+  claims sentence length and repeated sentences by hand.
 - [The audit queue](docs/impl/audit.md) owns `scripts/audit`: the queue, the
-  commit gate, and the three files exempt by name. `scripts/audit --counts`
-  prints the files with no stamp, the files stamped before this policy, and the
-  files stamped with a deviation. [The audit producer](tests/ratchet/audit.lisp)
-  pins each count.
+  commit gate, the three files exempt by name, and the counts
+  [the audit producer](tests/ratchet/audit.lisp) pins.
+- The `policy:` line under this file's stamp dates the last rule change. Move
+  it with a rule, and in no other change.
 - `scripts/agents` generates and commits the `AGENTS.md` of every directory
   that holds no hand-written one ([the generated index](docs/impl/agents-index.md)).
   Edit the document, never the index, and run `make agents` to rebuild it.
