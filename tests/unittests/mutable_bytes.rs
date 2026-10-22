@@ -1,6 +1,6 @@
 // audited: 2026-10-22
-// The byte store of an @string or @bytes: an extent in its container's region,
-// grown by the splice and owning nothing outside the region's pages.
+// The byte store of an @string or @bytes: an extent of its container's region,
+// grown by the splice, owning nothing outside it.
 //
 // docs/impl/mutable.md
 //
