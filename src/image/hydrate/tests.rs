@@ -1,7 +1,7 @@
-// audited: 2026-10-12
+// audited: 2026-10-21
 //! The interval table: a hydrated region's pointers resolve, and its pool answers ownership, without reading a page header.
 //!
-//! docs/impl/image.md
+//! docs/impl/image/hydration.md
 //! docs/impl/region/generations.md
 
 use std::path::Path;

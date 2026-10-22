@@ -1,7 +1,8 @@
 // audited: 2026-10-21
 //! A region pool's image side: the pages a hydrated image maps, adopted with their cursors, and the layouts a dump copies.
 //!
-//! docs/impl/image.md
+//! docs/impl/image/hydration.md
+//! docs/impl/image/dumping.md
 
 use std::ops::Range;
 
@@ -37,7 +38,7 @@ impl RegionPool {
 
     /// Byte layout of every page this region owns, in claim order. The image
     /// dumper reads these to copy page bytes and bound the meaningful spans
-    /// (docs/impl/image.md).
+    /// (docs/impl/image/dumping.md).
     pub(crate) fn page_layouts(&self) -> Vec<PageLayout> {
         self.pages
             .iter()
@@ -50,7 +51,7 @@ impl RegionPool {
             .collect()
     }
 
-    /// Adopt a hydrated image's pages (docs/impl/image.md), each with the
+    /// Adopt a hydrated image's pages (docs/impl/image/hydration.md), each with the
     /// cursors the image's page table recorded. Each header takes this region's
     /// identity, so later allocation into this region and the release spans
     /// both see the true layout. The pages tile one interval, which the pool
@@ -92,7 +93,7 @@ impl RegionPool {
     }
 
     /// Rebuild the object bookkeeping from an image's object index
-    /// (docs/impl/image.md): route each object to `dtors` or `ref_objs` by the
+    /// (docs/impl/image/hydration.md): route each object to `dtors` or `ref_objs` by the
     /// same predicates the alloc path uses, and count it.
     pub(crate) fn install_object_index(
         &mut self,

@@ -14,7 +14,6 @@
 ["docs/impl/dissolution/stages.md" :tokens 5500]
 ["docs/impl/escape.md" :tokens 5500]
 ["docs/impl/graft.md" :tokens 6000]
-["docs/impl/image.md" :tokens 6500]
 ["docs/impl/image/measurements.md" :tokens 6000]
 ["docs/impl/io-inflight.md" :tokens 5500]
 ["docs/impl/jit.md" :tokens 4500]

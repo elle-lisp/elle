@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-21
 //! Pointer → region classification: the resolution behind every runtime RC decision.
 //!
 //! docs/impl/region/generations.md
@@ -7,7 +7,7 @@
 //! check. `owning_region` answers the allocation funnel, the free cascade and
 //! the mint-scope reclaim, which must not generation-check. Both read the
 //! interval table before the page-base walk, so a pointer into a hydrated
-//! image never reads a page header (docs/impl/image.md).
+//! image never reads a page header (docs/impl/image/hydration.md).
 
 use super::super::regionpool::{header_of_page_ptr, region_of_page_ptr, PageStamp};
 use super::*;
@@ -113,7 +113,7 @@ impl RegionStore {
              current — region {rid} was freed (and possibly recycled) \
              after this Value was created; this deref is the \
              use-after-free site \
-             (docs/impl/region/generations.md § 'Region generations'){attribution}",
+             (docs/impl/region/generations.md){attribution}",
             stamp.generation,
         );
     }

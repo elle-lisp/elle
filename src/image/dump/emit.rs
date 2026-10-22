@@ -2,7 +2,7 @@
 //! What the file gets from the copied graph: page bytes, the four relocation
 //! streams, the object index, and the two watermarks.
 //!
-//! docs/impl/image.md
+//! docs/impl/image/dumping.md
 //! docs/impl/image/format.md
 //!
 //! One pass over the scratch region's live objects. Every record it writes —

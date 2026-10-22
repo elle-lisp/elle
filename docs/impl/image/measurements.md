@@ -1,6 +1,6 @@
 # What the experiments measured
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-21 -->
 
 Eight questions the image design turned on, each answered by an experiment,
 with the numbers it produced.
@@ -48,7 +48,7 @@ and [plan.md](plan.md) the order everything lands in.
    static scan found zero top-level `assign`s in stdlib.lisp, so every
    cell snaps. The unsealed leaves are exactly the reconstruction stream's
    two classes: the three stdio-port `External`s and the two default
-   traitsets ([sealing.md](sealing.md)); nothing else in the graph is refused, so the boot image is
+   traitsets ([sealing](sealing.md)); nothing else in the graph is refused, so the boot image is
    dumpable. Relocation load: 1,258 heap-pointer slots + 350 `RegionSlice`
    ptrs + 684 primitive slots ≈ 2,300 relocation entries.
 
@@ -73,7 +73,7 @@ and [plan.md](plan.md) the order everything lands in.
    flag the release path checks. Two findings: relocation slots and targets
    collapse to region-relative offsets (recorded in [format.md](format.md)),
    and raw object-slot bytes are not byte-deterministic under `repr(Rust)`
-   padding (recorded in [image.md](../image.md); resolved by item
+   padding (recorded in [dumping](dumping.md); resolved by item
    6's extent copy). The three the spike left open have since landed with the
    **store** milestone: the `(fd, offset)` input form with an anonymous
    memory file for byte sources, the verifier's object walk, and the
@@ -111,8 +111,8 @@ and [plan.md](plan.md) the order everything lands in.
    cross-table id holes that stable ids close: `send` shipped
    `LirConst::Symbol` inside the live `LirFunction` verbatim, so worker-side
    JIT re-emission pooled sender-space ids; and `TableKey::Symbol` keys inside
-   sent structs cross untranslated. The symbol milestone must land regression
-   tests for both.
+   sent structs cross untranslated. The symbol milestone landed a regression
+   test for each ([the send tests](../../../src/value/send/tests/symbols.rs)).
 5. **Expander mutation parity — dispatched, parity exceeded.** A throwaway
    prototype node ran the expander's hot operations head to head against
    the Rust-heap tree, allocating through the real region store
@@ -177,9 +177,12 @@ and [plan.md](plan.md) the order everything lands in.
    128 bytes, align 8. The by-value `ClosureTemplate` variant used to set
    that size at 288 bytes, making a `Float` slot ~95% padding; the template
    foundation reduced the variant to a payload slice plus a blueprint
-   pointer. The discriminant is one byte at offset 0 (declaration index
-   plus 3) with bytes 1–7 zero; every probed variant places its payload
-   field at 8 and `traits` at 24 (`Pair` nests its whole struct at 8).
+   pointer, and the LIR foundation deleted the pointer. The discriminant was
+   one byte at offset 0 (declaration index plus 3) with bytes 1–7 zero; every
+   probed variant placed its payload field at 8 and `traits` at 24 (`Pair`
+   nests its whole struct at 8). `HeapObject` is `repr(u64)` now, so its
+   first word is its `HeapTag` ([values.md](../values.md)), and the probes
+   read that word.
    Extents are recorded per leaf field, never per variant field, because a
    variant field is not always one run of meaningful bytes: a `Parameter`'s
    `id` is four bytes in a word-aligned slot, and a `RegionSlice` is a
@@ -191,13 +194,13 @@ and [plan.md](plan.md) the order everything lands in.
    extents, and a canonicalize-then-read-back check per variant — and
    panic on violation, so a rustc that moves the tag or reorders fields
    fails loudly before any image is written or trusted. The unlock
-   ([image.md](../image.md)): the dumper assembles object slots
+   ([dumping](dumping.md)): the dumper assembles object slots
    from the extents, dumps are byte-identical whole files, and the
    determinism pin asserts whole-file equality with a poisoned-padding
    counter-factual.
 7. **Region-native LIR — measured, one premise corrected.** The design kept
    LIR out of the body and planned an encoded side-stream to carry it
-   ([image.md](../image.md)). One premise behind that was that a
+   ([parity](parity.md)). One premise behind that was that a
    region-native LIR wins nothing: the JIT reads a function's LIR once, at
    promotion, on a background thread. That covered the steady state and left
    the compile path unmeasured, where the lowerer builds the LIR of 3,700
@@ -343,8 +346,8 @@ and [plan.md](plan.md) the order everything lands in.
    compile-time cost. Growth leaves dead extents in the working region, bounded
    by the nodes the compile wrote and freed with that region. The prototype's
    21 calls a round are the replay's own. The port freezes each finished
-   function into exact-size `Vec`s ([lir.md](../lir.md)), which costs a fixed handful of calls per function rather than one per
-   instruction.
+   function into exact-size tables ([lir.md](../lir.md)), so no growth slack
+   outlives the compile.
 
    To redo: run the bench where item 7 says. For the op mix, apply a counter
    patch at `emit`, `emit_alloc_with_slot`, `finish_block`, the two splice

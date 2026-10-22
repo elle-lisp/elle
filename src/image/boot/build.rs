@@ -1,4 +1,4 @@
-// audited: 2026-10-07
+// audited: 2026-10-21
 //! Assemble a booted instance's boot state as one immutable struct, the root
 //! a boot image is dumped from.
 //!
@@ -63,7 +63,7 @@ fn macro_table(
 ) -> Value {
     // The names come off a hash map, so they are sorted here rather than
     // wherever the map happened to put them: one boot state must write one
-    // file (docs/impl/image.md § Dumping).
+    // file (docs/impl/image/dumping.md).
     let mut names: Vec<String> = cctx.macros().keys().cloned().collect();
     names.sort();
     let mut entries: Vec<(&str, Value)> = Vec::with_capacity(names.len());

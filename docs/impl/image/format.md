@@ -25,7 +25,7 @@ One image is one file, or one blob embedded in a larger one:
 | signal table | not written yet: a dump refuses a declared signal instead ([sealing.md](sealing.md)) |
 | watermarks | dump-time counters, carried in the header block: parameter id, hygiene scope id and static-region mint today, next signal bit with the milestone that needs it |
 | manifest | the bindings an image installs. It is body data, not a section: an export struct names each binding with a keyword key and each value answers its own signal, arity and doc ([boot.md](boot.md) owns the boot configuration's root struct). Dependency fingerprints are header fields, and an image with an empty dependency list records none |
-| side-stream | `SendValue`-encoded mutable bindings, present only where the dump policy permits mutables |
+| side-stream | not written yet: no dump policy permits a mutable binding until the environment milestone ([dumping](dumping.md)) |
 
 ## The pages section starts at a base-page boundary
 
@@ -245,7 +245,7 @@ assembles as well: a syntax node, a code payload, the payload's LIR body, and
 the four LIR records the body names. A build whose layout reorders a field or
 moves the discriminant fails the fingerprint instead of hydrating garbage, so
 the two-stage embed build cannot pass with a shifted layout. The same extents
-drive slot canonicalization ([image.md](../image.md)).
+drive slot canonicalization ([dumping](dumping.md)).
 
 On mismatch the loader falls back — the `include_str!` sources never go away,
 so the image is an optimization, not a correctness dependency. Images are

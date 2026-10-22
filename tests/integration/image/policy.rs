@@ -1,13 +1,13 @@
-// audited: 2026-09-10
+// audited: 2026-10-21
 // What the dumper refuses, and how it says so.
-// docs/impl/image.md
+// docs/impl/image/dumping.md
 
 use super::*;
 use elle::image::{self, ImageError};
 use std::rc::Rc;
 
-// § Dumping: "Unsupported values fail the dump with an error naming the
-// binding" — for the store milestone, naming the refused variant. A mutable
+// A refused value fails the dump with an error naming the binding or, for a
+// value no binding names, the refused variant. A mutable
 // store must never be silently dropped or frozen into the body.
 #[test]
 fn mutable_value_refuses_dump() {

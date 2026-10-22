@@ -38,7 +38,7 @@ Then the image milestones:
 7. **boot** — landed. The boot configuration ([boot.md](boot.md)), with
    closures, primitives, traitsets and parameters in the body; the warm cache;
    parity with a source boot in tiers, grafts and bytecode; the interval table
-   ([image.md](../image.md)); per-worker hydration; and the embedded blob
+   ([hydration](hydration.md)); per-worker hydration; and the embedded blob
    ([blob.md](blob.md)).
 8. **environment** — `image/save` and `image/load`, manifest deltas over
    boot, mutable side-stream.

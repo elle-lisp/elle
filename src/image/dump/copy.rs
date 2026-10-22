@@ -158,7 +158,7 @@ pub(super) fn copy_value(
     }
     let obj = unsafe { deref(v) };
     // A list's `rest` spine is walked by loop rather than by recursion, so a
-    // list costs memory rather than stack (docs/impl/image.md).
+    // list costs memory rather than stack (docs/impl/image/dumping.md).
     if matches!(obj, HeapObject::Pair(_)) {
         return copy_pair_spine(heap, region, v, walk);
     }
@@ -373,7 +373,7 @@ fn patch_pair(copy: Value, write: impl FnOnce(&mut Pair)) {
 ///
 /// A list's length is bounded by memory rather than by the text that built
 /// it, so a recursive walk down `rest` aborts the process on a stack overflow
-/// where this writes the image (docs/impl/image.md). Each copy is reserved
+/// where this writes the image (docs/impl/image/dumping.md). Each copy is reserved
 /// before anything it holds is walked, exactly as a closure's is, so a cycle
 /// that re-enters a pair closes onto the one copy.
 ///

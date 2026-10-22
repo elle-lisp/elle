@@ -10,7 +10,7 @@ use elle::compiler::stdlib_cache::StdlibCache;
 // Two dumps of one boot state write one file. This is determinism at the scale
 // where a code payload's padding can leak: every closure template of the
 // library and its constants, against the handful the small graphs carry
-// (docs/impl/image.md owns the mechanism).
+// (docs/impl/image/dumping.md owns the mechanism).
 #[test]
 fn two_dumps_of_one_boot_state_write_one_file() {
     let dir = crate::common::ScratchDir::new("image-boot-determinism");

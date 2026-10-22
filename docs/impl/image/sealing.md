@@ -1,6 +1,6 @@
 # Sealing
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-21 -->
 
 What an image's body may hold, what the hydrating instance rebuilds for itself,
 and what fails the dump.
@@ -110,7 +110,7 @@ dump, naming the binding: its content is post-boot-mutable state, which the
 strict policy refuses outright and the environment policy routes through the
 side-stream. The boot image therefore requires stdlib to have no assigned
 top-levels — a property the dump enforces, and a reasonable one to demand of
-a standard library. [measurements.md](measurements.md) item 2 counts the boot
+a standard library. [The measurements](measurements.md) count the boot
 graph's cells; stdlib assigns no top-level, so every one of them snaps.
 
 A cell minted at run time — a captured parameter, a captured lambda-local —
@@ -134,7 +134,7 @@ that has declared a signal can no longer dump a boot image. A boot dump runs
 before any program does, so the order holds where it matters. Mutable
 *bindings* may still be persisted through the side-stream where the image's
 dump policy permits it — the environment policy does, opt-in; the strict boot
-policy does not ([image.md](../image.md) owns the fork). The SPIR-V kernel
+policy does not ([dumping](dumping.md) owns the fork). The SPIR-V kernel
 cache is VM state, not a code-object field, so nothing in it crosses: the GPU
 path recompiles.
 
@@ -162,7 +162,7 @@ reconstructible nor side-streamable fails the dump with a named binding.
 ## A traits slot has three answers
 
 The **default trait tables** are the first reconstructible class, found by
-the census ([measurements.md](measurements.md) item 2). Every collection the
+the census ([the measurements](measurements.md)). Every collection the
 runtime allocates carries a `traits` field pointing at one of the instance's
 two default traitsets — `@struct`s built by `init_default_traits` at VM init,
 before any stdlib load or hydration. They are instance infrastructure, not

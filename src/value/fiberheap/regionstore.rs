@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-21
 //! Region table: maps a physical region id → RegionEntry (RegionPool + RC).
 //!
 //! `RegionStore` lives on `FiberHeap` and owns the `PagePool` (per-thread
@@ -198,7 +198,7 @@ pub(crate) struct RegionStore {
     /// gauges read it.
     counters: counters::ReclaimCounters,
     /// The interval table: this store's hydrated regions, in hydration order
-    /// (docs/impl/image.md). Each one's pool holds the interval its pages tile,
+    /// (docs/impl/image/hydration.md). Each one's pool holds the interval its pages tile,
     /// and `region_of_ptr` and `owning_region` read the table before the
     /// page-base walk. A region leaves the table when its pages are released.
     images: Vec<RuntimeRegion>,

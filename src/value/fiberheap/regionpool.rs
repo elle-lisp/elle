@@ -163,7 +163,7 @@ pub(crate) struct RegionPool {
     /// never a process-global — a `--trace=pages` toggle in one instance cannot
     /// make another instance's page claims spam.
     trace: crate::config::TraceCell,
-    /// The interval a hydrated image's pages tile (docs/impl/image.md). `owns`
+    /// The interval a hydrated image's pages tile (docs/impl/image/hydration.md). `owns`
     /// answers inside it with a range check, and the store's interval table
     /// reads it before the page-base walk. `None` for a region that hydrated
     /// nothing.

@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-21
 //! `FiberHeap` region-allocator surface.
 //!
 //! Everything that allocates into, reference-counts, adopts, or inspects the
@@ -217,7 +217,7 @@ impl FiberHeap {
         self.alloc_count -= freed;
     }
 
-    /// Install a hydrated image region (docs/impl/image.md):
+    /// Install a hydrated image region (docs/impl/image/hydration.md):
     /// adopt the mapped pages, rebuild the object bookkeeping from the index
     /// (`base`-relative offsets), and account the objects like any other
     /// allocation. Returns the minted `Counted` region — rc 1, the caller's
@@ -240,14 +240,14 @@ impl FiberHeap {
     }
 
     /// The hydrated regions this heap resolves through the interval table,
-    /// in hydration order (docs/impl/image.md).
+    /// in hydration order (docs/impl/image/hydration.md).
     #[cfg(test)]
     pub(crate) fn interval_table(&self) -> Vec<RuntimeRegion> {
         self.region_store.interval_table()
     }
 
     /// The page layouts and live objects of one region, for the image dumper
-    /// (docs/impl/image.md). `None` for an absent region.
+    /// (docs/impl/image/dumping.md). `None` for an absent region.
     pub(crate) fn region_pool(&self, id: RuntimeRegion) -> Option<&super::regionpool::RegionPool> {
         self.region_store.region_pool(id)
     }

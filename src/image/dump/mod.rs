@@ -1,8 +1,8 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! The dumper: a compacting copy of a sealed data graph into a scratch
 //! region, written out as an image file.
 //!
-//! docs/impl/image.md
+//! docs/impl/image/dumping.md
 //! docs/impl/image/format.md
 //!
 //! This file assembles the file: it copies the graph, asks emit.rs what the
@@ -270,7 +270,7 @@ fn dump_into(
 ///
 /// Never rewrite an image file in place, because a hydration's mapping of the
 /// old inode must stay stable while a new image replaces the path
-/// (docs/impl/image.md). The temporary file's name
+/// (docs/impl/image/hydration.md). The temporary file's name
 /// is this write's alone, because two threads of one process can dump to one
 /// path at once. It sits in the target's directory because a rename is atomic
 /// only within one filesystem, and a failed write removes it. Answers the file

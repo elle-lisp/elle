@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-21
 //! Unit tests for the page pool: page classes, alignment, the cache bound, and a recycle that writes nothing.
 //!
 //! docs/impl/region/model.md
@@ -344,7 +344,7 @@ fn large_pages_are_self_aligned() {
 }
 
 // A file-backed (hydrated image) page is never cached: its release is `munmap`, even
-// when the cache has room (docs/impl/image.md). The anonymous release above
+// when the cache has room (docs/impl/image/hydration.md). The anonymous release above
 // (`release_and_reclaim`) is the counter-factual: same pool, same room, an anonymous
 // page IS cached.
 #[test]

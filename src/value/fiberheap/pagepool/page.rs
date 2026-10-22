@@ -1,4 +1,4 @@
-// audited: 2026-09-22
+// audited: 2026-10-21
 //! An mmap-backed region page: how it is mapped self-aligned, and the gauge of
 //! bytes every pool holds from the OS.
 //!
@@ -61,7 +61,7 @@ pub(crate) struct MmapPage {
     ptr: *mut u8,
     len: usize,
     /// A hydrated image page: a `MAP_PRIVATE` view of an image file
-    /// (docs/impl/image.md § Hydration step 3). The pool neither caches nor
+    /// (docs/impl/image/hydration.md). The pool neither caches nor
     /// recycles such a page, because it maps a file rather than anonymous
     /// memory. Its release is this page's `Drop`: `munmap`. Anonymous pages
     /// (every other constructor) are `false`.
@@ -175,7 +175,7 @@ impl MmapPage {
     /// Diagnostic (`--trace=scrub`): zero the spans `dirty` names, so a read
     /// through a pointer that outlived this page's region finds an all-zero
     /// slot and detonates at `arena::deref` instead of returning the dead
-    /// region's bytes (docs/impl/region/model.md § "Page recycling"). Returns
+    /// region's bytes (docs/impl/region/model.md). Returns
     /// the bytes written.
     pub(super) fn reset(&mut self, dirty: &PageDirty) -> usize {
         let mut written = 0;
@@ -216,7 +216,7 @@ impl Drop for MmapPage {
 /// Process-wide by design. `arena/page-claims` reads one heap's claims, so it
 /// cannot see a heap another thread owns — and a worker thread's heap is
 /// exactly the memory a program that spawns workers has to get back
-/// (docs/threads.md § "A worker owns its heap and gives it back"). This is the
+/// (docs/threads.md). This is the
 /// gauge that says whether it did.
 pub fn mapped_bytes() -> u64 {
     MAPPED_BYTES.load(Ordering::Relaxed)

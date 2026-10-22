@@ -1,6 +1,6 @@
 # fiberheap
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-21 -->
 
 The per-VM heap: the physical region allocator
 ([model.md](../../../docs/impl/region/model.md)).
@@ -46,7 +46,7 @@ names its heap and region explicitly through `arena`.
 | [regionstore/free/rescue.rs](regionstore/free/rescue.rs) | The drop-time rescue: a member still referenced from outside the dying subtree returns to `Counted`, with its own subtree, instead of being torn down |
 | [regionstore/mintscope.rs](regionstore/mintscope.rs) | closed allocation-scope mint log (macro expansion): `begin_mint_log` / `reclaim_mint_scope` RC-balance the scratch DAG by `rc − in_degree` (an `Owned` survivor is left to its owner's drop) |
 | [regionstore/counters.rs](regionstore/counters.rs) | The reclamation counters behind the `arena/*` frees, sizes, adopts, rescues, extracts, reparents and owned gauges, and their process totals under `--dump=stats` |
-| [regionstore/hydrate.rs](regionstore/hydrate.rs) | Install a hydrated image region: adopt the mapped pages as one interval, enter the region in the interval table, and rebuild object bookkeeping from the image's index ([image.md](../../../docs/impl/image.md)) |
+| [regionstore/hydrate.rs](regionstore/hydrate.rs) | Install a hydrated image region: adopt the mapped pages as one interval, enter the region in the interval table, and rebuild object bookkeeping from the image's index ([hydration.md](../../../docs/impl/image/hydration.md)) |
 | [regionpool.rs](regionpool.rs) | `RegionPool`: dual-ended pages, object and data cursors, page claim and release, and a hydrated region's interval |
 | [regionpool/header.rs](regionpool/header.rs) | The 16-byte page header: region id, `(generation, store)` stamp, self-validating size tag, and the masked walk that finds a base from any pointer inside the page |
 | [regionpool/introspect.rs](regionpool/introspect.rs) | `owns`, and the `find_object_cross_refs` content scan behind the cascade and the diagnostics |
@@ -71,7 +71,7 @@ and the ownership check make that walk sound.
 A hydrated image region's pages tile one contiguous interval, which its pool
 records. The store's interval table lists those regions, and `region_of_ptr`
 and `owning_region` read it before the walk. So a pointer into an image never
-reads a page header ([image.md](../../../docs/impl/image.md)).
+reads a page header ([hydration.md](../../../docs/impl/image/hydration.md)).
 
 ## Region generations
 
