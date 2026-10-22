@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-30
+(elle/epoch 15)
+# audited: 2026-10-21
 # The shapes the direct-loop rows drive: values, error payloads, parked primitives, propagate depth, env and module cells, branch arms.
 #
 # docs/impl/region/diagnostics.md
@@ -31,6 +31,15 @@
     {:iter i :val (%add i 1)}))
 (defn make-label [i]
   (string "item-" i))
+# The functions the un-fused `map` and `filter` rows pass. A `block` body is
+# one a fragment cannot close over, so fusion declines and the stdlib op runs
+# (docs/impl/dissolution.md); a lambda literal, capturing or not, would fuse.
+(defn wrap-add [x]
+  (block :oracle
+    (+ x 1)))
+(defn wrap-big? [x]
+  (block :oracle
+    (> x 1)))
 (defn t19-store [c v]
   (put c :x v))
 # The `error-payload-helper` / `error-payload-param` raisers: each allocates or

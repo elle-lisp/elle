@@ -1,16 +1,18 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 // docs/impl/hir.md
-//! Arena-backed binding storage for the compilation pipeline.
+//! The binding record the compilation pipeline keeps per binding, and its arena.
 //!
-//! `BindingArena` owns all `BindingInner` values for a compilation unit.
-//! It is created by the pipeline entry point, borrowed mutably by the
+//! `BindingArena` (store.rs) owns all `BindingInner` values for a compilation
+//! unit. It is created by the pipeline entry point, borrowed mutably by the
 //! `Analyzer`, and borrowed immutably by the `Lowerer`.
 //!
 //! `BindingInner` and `BindingScope` are compile-time-only data and do not
 //! belong in the runtime value system.
 
-use super::binding::Binding;
 use crate::value::SymbolId;
+
+mod store;
+pub use store::BindingArena;
 
 /// Where a binding lives at runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -38,13 +40,20 @@ pub struct BindingInner {
     /// Whether this binding is captured by a nested closure. **Module-private**:
     /// the lexical-capture proxy has NO escape authority (docs/impl/escape.md), so
     /// no consumer may name it for an escape or reachability decision. Written
-    /// through `mark_captured`; read by two lexical consumers, `needs_capture()`
-    /// for cell layout and `closure_may_write()`. Escape's capture facet
+    /// through `mark_captured`; read by one lexical consumer, `needs_capture()`
+    /// for cell layout. Escape's capture facet
     /// is flow-true (transitive `lambda_captures` propagation from genuine frontier
     /// seeds, never this proxy), and the region solver's reachability questions read
     /// the HIR capture-graph (`region::infer::escape::captured_bindings`); neither reads
     /// this field, and there is no getter through which they could.
     is_captured: bool,
+    /// Whether an `assign` to this binding sits in a lambda nested in the
+    /// binding's scope, so a closure can write it. A closure that captures the
+    /// binding and only reads it leaves this false: capture is a mention, and
+    /// only an `assign` is a write. Written through `mark_written_by_closure`
+    /// and read through [`closure_may_write`](Self::closure_may_write), the
+    /// question the graft asks (docs/impl/graft/operands.md).
+    is_written_by_closure: bool,
     /// Whether this binding is immutable (def)
     pub is_immutable: bool,
     /// Whether this binding was pre-created before its initializer runs
@@ -114,6 +123,7 @@ impl BindingInner {
             scope,
             is_mutated: false,
             is_captured: false,
+            is_written_by_closure: false,
             is_immutable: false,
             is_prebound: false,
             init_pending: false,
@@ -193,11 +203,21 @@ impl BindingInner {
         self.is_restorable_capture_cell() || self.is_mutated
     }
 
-    /// May a closure write this binding? Only one that captured it can. The
-    /// graft asks before it writes an operand in place of a parameter
+    /// May a closure write this binding? Only one holding an `assign` to it
+    /// can, and the analyzer recorded whether any does. The graft asks before
+    /// it writes an operand in place of a parameter
     /// (docs/impl/graft/operands.md).
     pub fn closure_may_write(&self) -> bool {
-        self.is_captured && self.is_mutated
+        self.is_written_by_closure
+    }
+
+    /// Record an `assign` to this binding from a lambda the binding does not
+    /// belong to. The analyzer's sole writer (`analyze_assign`), called when
+    /// the target resolves across a function boundary. A setter keeps the
+    /// field module-private, so the fact is read only through
+    /// [`closure_may_write`](Self::closure_may_write).
+    pub(in crate::hir) fn mark_written_by_closure(&mut self) {
+        self.is_written_by_closure = true;
     }
 
     /// Mark this binding as captured by a nested closure. The analyzer's sole
@@ -229,76 +249,5 @@ impl BindingInner {
     pub fn compiled_forward_cell(&self, init_is_lambda: bool, in_lambda: bool) -> bool {
         self.needs_capture()
             && (!in_lambda || (init_is_lambda && self.is_immutable && !self.is_mutated))
-    }
-}
-
-/// Arena for compile-time bindings.
-///
-/// Bindings are allocated during analysis (`&mut self`) and read during
-/// lowering (`&self`). The arena is dropped at the end of the compilation
-/// unit — no leaks.
-///
-/// A `Binding(u32)` index is only valid for the arena that created it.
-#[derive(Debug)]
-pub struct BindingArena {
-    bindings: Vec<BindingInner>,
-}
-
-impl BindingArena {
-    /// Create an empty arena.
-    pub fn new() -> Self {
-        Self {
-            bindings: Vec::new(),
-        }
-    }
-
-    /// Allocate a new binding. Analysis phase only.
-    pub fn alloc(&mut self, name: SymbolId, scope: BindingScope) -> Binding {
-        self.alloc_from(BindingInner::new(name, scope))
-    }
-
-    /// Allocate a binding from ready-made metadata. The graft of an
-    /// [`HirFragment`](crate::hir::fragment::HirFragment) enters here: the
-    /// fragment holds a whole `BindingInner` per binding its body introduces,
-    /// so re-hosting reproduces the binding rather than describing it again.
-    pub fn alloc_from(&mut self, inner: BindingInner) -> Binding {
-        let index = self.bindings.len() as u32;
-        self.bindings.push(inner);
-        Binding(index)
-    }
-
-    /// Allocate a synthetic binding with no source-level identity.
-    /// Used by compiler passes that need temporaries (for example, phi-insertion
-    /// condition bindings). The name is set to `SymbolId::SYNTHETIC`.
-    pub fn gensym(&mut self) -> Binding {
-        let b = self.alloc(SymbolId::SYNTHETIC, BindingScope::Local);
-        self.get_mut(b).is_synthetic = true;
-        b
-    }
-
-    /// Read-only access. Available in both analysis and lowering phases.
-    pub fn get(&self, binding: Binding) -> &BindingInner {
-        &self.bindings[binding.0 as usize]
-    }
-
-    /// Mutable access. Analysis phase only (requires `&mut self`).
-    pub fn get_mut(&mut self, binding: Binding) -> &mut BindingInner {
-        &mut self.bindings[binding.0 as usize]
-    }
-
-    /// Number of bindings in the arena.
-    pub fn len(&self) -> usize {
-        self.bindings.len()
-    }
-
-    /// Returns true if the arena contains no bindings.
-    pub fn is_empty(&self) -> bool {
-        self.bindings.is_empty()
-    }
-}
-
-impl Default for BindingArena {
-    fn default() -> Self {
-        Self::new()
     }
 }

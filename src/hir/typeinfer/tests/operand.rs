@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 // src/hir/AGENTS.md
 // docs/impl/graft/operands.md
 //! Which operands a graft writes in place of the callee's parameters, and
@@ -26,7 +26,7 @@ fn intrinsic_operand_names(hir: &Hir, arena: &BindingArena, op: &str) -> Vec<Sym
     out
 }
 
-/// A loop counter is a written local no closure captures, so the graft writes
+/// A loop counter is a written local no closure writes, so the graft writes
 /// it in place of the wrapper's parameter, and each op reads the counter
 /// itself. The counter-factual is a `let` per use: each op then read the
 /// wrapper's own parameter, bound to the counter again on every iteration.
@@ -68,10 +68,34 @@ fn a_written_parameter_operand_is_written_in_place() {
     assert_eq!(run_booted(src), Value::int(0), "{src}");
 }
 
-/// A closure that captured the binding may write it from inside the grafted
-/// body, so such an operand keeps the value it had at the call. The
-/// counter-factual is the body reading the binding after the closure wrote
-/// it, which answers 1 in both spellings.
+/// A loop counter a closure captures and only reads is still a local no
+/// closure writes, so the graft writes it in place, and each op reads the
+/// counter's cell itself. The counter-factual is the `let` per use the capture
+/// used to cost: the capture then stood in for a write, and each op read a
+/// fresh local instead of the cell.
+#[test]
+fn a_captured_local_no_closure_writes_is_written_in_place() {
+    let src = "(defn w [b] (var i 0) (def show (fn [] i)) \
+               (while (< i b) (assign i (+ i 1))) (show)) (w 5)";
+    let (hir, arena) = compiled(src);
+    let (i, b) = (SymbolId::of("i"), SymbolId::of("b"));
+    assert_eq!(
+        intrinsic_operand_names(&hir, &arena, "%lt"),
+        vec![i, b],
+        "{src}: the comparison reads the counter and the bound"
+    );
+    assert_eq!(
+        intrinsic_operand_names(&hir, &arena, "%add"),
+        vec![i],
+        "{src}: the increment reads the counter"
+    );
+    assert_eq!(run_booted(src), Value::int(5), "{src}");
+}
+
+/// A closure that writes the binding may do so from inside the grafted body,
+/// so such an operand keeps the value it had at the call. The counter-factual
+/// is the body reading the binding after the closure wrote it, which answers
+/// 1 in both spellings.
 #[test]
 fn a_captured_written_operand_keeps_the_value_it_had_at_the_call() {
     let file_scope = "(var i 0) (defn bump [] (assign i (%add i 1))) (defn f [x] (bump) x) (f i)";

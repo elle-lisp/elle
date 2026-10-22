@@ -1,6 +1,6 @@
 # ratchet
 
-<!-- audited: 2026-10-13 -->
+<!-- audited: 2026-10-21 -->
 
 Measure a shape and print one reading line per subject, for the runner to
 judge against the committed ledger.
@@ -117,6 +117,46 @@ thunk's own return convention would reclaim the strand on its way out.
 (assert (= (get (get stmt 0) :subject) "statement drop") "stmt-run makes a run-block of a thunk")
 ```
 
+## A crest is the high-water mark's slope
+
+A rate reads what a shape leaves behind across calls. It cannot see what a
+call holds inside itself and frees at its return: a walk that copies a slice
+per step and strands every slice until the call ends reads 0 per call. `crest`
+reads that. It runs `(shape n)` once uncounted, then resets the object
+high-water mark and runs the shape at `:n` and at twice `:n`, reading the mark
+above its baseline each time. The reading is the difference over `:n`, in
+objects per element of the input. A mark is a count, so the half-width is 0.
+
+```lisp
+(defn climb [n]
+  (when (%not (%int? n)) (error :n))
+  (def @xs ())
+  (def @i 0)
+  (while (%lt i n)
+    (assign xs (pair i xs))
+    (assign i (%add i 1)))
+  (length xs))
+(def climbed (r:crest "a list of n pairs" climb :n 50))
+(assert (= climbed:axis :crest) "a crest is read on its own axis")
+(assert (= climbed:unit "objects/element") "in objects per element of the input")
+(assert (= climbed:half 0) "and exact: a high-water mark is a count")
+(assert (>= climbed:value 0.9) "n pairs live at once climb one per element")
+
+(defn churn [n]
+  (when (%not (%int? n)) (error :n))
+  (def @i 0)
+  (while (%lt i n)
+    {:x i}
+    (assign i (%add i 1))))
+(def churned (r:crest "a struct per element, dropped" churn :n 50))
+(assert (< churned:value 0.1) "a struct freed at each step leaves the mark where it was")
+```
+
+A constant the shape pays at any size, such as building its own input, cancels
+in the difference. The first crest drives the list of pairs itself and reports
+it as `crest gauge (live-growth)`, a growth floor on the `:crest` axis, so a
+mark that stopped climbing voids every crest after it.
+
 ## A timing is the thread's CPU time
 
 `best-of` runs two thunks in alternating rounds and answers
@@ -171,6 +211,7 @@ is not the estimator's uncertainty, which every rate already carries.
 | `(rate subject probe &named on epsilon block min max stable)` | the adaptive per-op rate of `(probe j)`, on each gauge in `on` |
 | `(drive subject run-block &named on epsilon block min max stable)` | the same rate over `(run-block b)`, which performs `b` ops of the caller's own shape |
 | `(stmt-run thunk)` | the run-block that calls `thunk` `b` times as a discarded statement |
+| `(crest subject shape &named n)` | the slope of the object high-water mark in the input size of `(shape n)`, read at `n` and at twice `n` |
 | `(best-of rounds control subject)` | `[control subject]`: the smallest CPU time each thunk took over `rounds` alternating rounds |
 | `(ratio subject measured control &named rounds)` | the `best-of` time of `measured` over that of `control`, on the `:time` axis |
 | `readings` | every reading this instrument printed, in order |

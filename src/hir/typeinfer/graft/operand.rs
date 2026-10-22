@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! Which operand is written in place of its parameter, and which a `let` binds first.
 //!
 //! docs/impl/graft/operands.md
@@ -11,7 +11,7 @@ impl Grafter<'_> {
     /// Is this operand written in place of its parameter? It is when it holds
     /// one value from the call to the body's last read of it: an immediate
     /// literal, a binding nothing writes, or a written binding that no closure
-    /// captures and none of the operands `later` writes. A closed body holds
+    /// writes and none of the operands `later` writes. A closed body holds
     /// no `assign` and no lambda, so nothing else can write a binding between
     /// the call and a read. Anything else is bound by a `let`, so it is
     /// evaluated once and where the call evaluated it.
@@ -36,8 +36,8 @@ impl Grafter<'_> {
 }
 
 /// Does `h` write `b` anywhere inside it? An `assign` to it does, and so does
-/// a store into its cell. A lambda inside `h` that writes it has captured it,
-/// which `closure_may_write` already answers for.
+/// a store into its cell. A lambda inside `h` that writes it is a closure that
+/// writes it, which `closure_may_write` already answers for.
 fn writes(h: &Hir, b: Binding) -> bool {
     let mut found = match &h.kind {
         HirKind::Assign { target, .. } => *target == b,

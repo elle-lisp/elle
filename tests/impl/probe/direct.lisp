@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-30
+(elle/epoch 15)
+# audited: 2026-10-21
 # The direct-loop rows for scope reclamation, branch compensation, collections, strings and cells — one per-op thunk each.
 #
 # docs/impl/region/diagnostics.md
@@ -312,8 +312,8 @@
    # over a proven immutable array fuses to an inlined index-walk loop
    # (docs/impl/dissolution.md), so the stdlib op — and every per-call strand it
    # carries (the closure `map` mints for `f`, the `freeze` copy) — ceases to exist
-   # and the rate is 0. The UN-fused op is gauged by `wrap-map` below, whose lambda
-   # captures.
+   # and the rate is 0. The UN-fused op is gauged by `wrap-map` below, whose
+   # function has a `block` body.
    ["map-while"
     (fn [j]
       (map (fn [x]
@@ -341,19 +341,15 @@
       (let [f (fn [] (fn [] j))]
         ((f))))] ["user-struct" (fn [j] (make-struct j))]
    ["user-string" (fn [j] (make-label j))] ["chain" (fn [j] (process j))]
-   # The gauge for the UN-fused stdlib `map`: the kernel CAPTURES `k`, a shape loop
-   # fusion declines (splicing a capture at the call site is out of scope), so the
-   # real `map` runs and its per-call strands are measured. A control at 0: `map`
-   # dispatches on its collection's type through a `cond`, whose later clause TESTS
-   # are conditional positions for the argument's one release
-   # (docs/impl/region/window.md). Its `push-accum` face is the same op driven into
-   # a block-local accumulator.
-   ["wrap-map"
-    (fn [j]
-      (let [k 1]
-        (map (fn [x]
-               (numeric!)
-               (%add x k)) [1 2 3])))] ["factory" (fn [j] (t13proc j))]
+   # The gauge for the UN-fused stdlib `map`: `wrap-add` has a `block` body,
+   # which a fragment cannot close over, so fusion declines and the real `map`
+   # runs with its per-call strands measured (docs/impl/dissolution.md). A
+   # capturing lambda literal is no decline: it splices at the call site. A
+   # control at 0: `map` dispatches on its collection's type through a `cond`,
+   # whose later clause TESTS are conditional positions for the argument's one
+   # release (docs/impl/region/window.md). Its `push-accum` face is the same op
+   # driven into a block-local accumulator.
+   ["wrap-map" (fn [j] (map wrap-add [1 2 3]))] ["factory" (fn [j] (t13proc j))]
    ["cond-factory" (fn [j] (t13cond j))] ["alias" (fn [j] (make-struct j))]
    ["nested-factory" (fn [j] (t13nested j))]
    ["struct-field"

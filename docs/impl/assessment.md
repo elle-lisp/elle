@@ -1,6 +1,6 @@
 # The region roadmap
 
-<!-- audited: 2026-09-30 -->
+<!-- audited: 2026-10-21 -->
 
 The region system's plan of work: the state gauges, the fix-selection
 discipline, the measured dead ends, and the open work in order.
@@ -138,8 +138,8 @@ at 0 forever. The ledger shrinks as classes close.
   an acyclic call-result released that way over-keeps at loop scale, where
   the RC cascade reclaims per iteration. For a cycle the activation bound is
   unavoidable and correct. Corollary: the per-op oracle is blind to
-  within-activation growth, so any mechanism that defers release to
-  activation completion needs a within-activation gauge before it ships.
+  within-activation growth and the crest sees it, so a mechanism that defers
+  release to activation completion is gauged by a crest before it ships.
 - **Do not trade a bounded scratch leak for an unbounded time cost.**
   Rewriting `take` over `(->array coll)` removes the reverse-scratch and
   materializes the whole input — O(length) where the first/rest walk is O(k).
@@ -259,11 +259,10 @@ element the closure the pass exists to dissolve, so every counter advances by
 the raw `%add` opcode ([dissolution.md](dissolution.md)). The loop the pass emits is code like any other and can carry the
 very cost it was written to remove.
 
-**Hand-dissolution of F1a is exhausted for the probed shapes.** What was left
-under those probes decomposed into F5 strands, so a new hand-rewrite needs an
-explicit reason. F1a has no probe at all — the ephemeral copy-scratch the
-model describes still has no gauge of its own, so a new F1a fix needs a new
-probe.
+**Hand-dissolution of F1a is exhausted.** The
+[scratch probes](../../tests/impl/probe/scratch.lisp) read each copy-scratch
+shape's per-call rate beside its crest, and every row is a control, so a new
+hand-rewrite needs a shape that moves one of them.
 
 Beyond the ops, the widening of the same mechanism is **backend realization**
 (below): the fused loop is the substrate for JIT-group / CPU SIMD / GPU

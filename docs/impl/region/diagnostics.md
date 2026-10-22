@@ -1,6 +1,6 @@
 # Region diagnostics and validation
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-21 -->
 
 Implementation-facing: the instruments that tell correct from broken, and the
 test scaffolding that keeps the region rules honest.
@@ -128,6 +128,15 @@ mode in a sidecar ([rig](../../../rig/overview.md)).
   [region-page-recycle.lisp](../../../tests/impl/region-page-recycle.lisp)
   reads it. Immediate, so sampling it allocates nothing and does not perturb
   the measurement.
+- `(arena/peak)` and `(arena/reset-peak)`: the high-water mark of the live
+  object count, and the call that sets the mark to the count now and answers
+  the previous mark. Both read the counter `alloc_in_region` advances, not the
+  per-region tally `arena/count` sums, so a window's baseline is `arena/peak`
+  read after the reset. The mark is the dimension a per-op rate cannot show: a
+  call that mints a slice per step and frees every slice at its return reads
+  0 per call however long it ran, and its mark reads the slices. The ratchet's
+  crest reads the mark at two input sizes and reports its slope
+  ([ratchet](../../ratchet.md)). Immediate, so sampling allocates nothing.
 - `(arena/region-ids)` and `(arena/region-table)`: the *id* dimension, which no
   other gauge can show. A minted id that never allocates holds no object, no
   page, and no reference count, so `arena/count`, `arena/bytes`,
@@ -307,7 +316,8 @@ The **leak state** lives in two dashboards, [oracle.lisp](../../../tests/impl/or
 and [plumb.lisp](../../../tests/impl/plumb.lisp), each a producer on the ratchet
 ([ratchet](../../ratchet.md)). Each runs one representative shape per residual class in
 a loop with a heap gauge sampled *by the program* — `arena/count`,
-`arena/region-count`, `arena/bytes` or `arena/region-ids`, chosen for the dimension
+`arena/region-count`, `arena/bytes`, `arena/region-ids` or the crest of
+`arena/peak`, chosen for the dimension
 the class leaks in — and prints one reading per shape with its measured per-op rate,
 judged against the row its ledger holds for it. The former scattered per-pattern leak
 files are folded into them, so leak state is read in one place, not a scattered suite.

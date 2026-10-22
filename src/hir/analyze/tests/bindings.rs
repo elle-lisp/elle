@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The `letrec*` rules the analyzer enforces: duplicates by binding identity, use before initialization, and self-edge captures.
 //!
 //! docs/bindings.md

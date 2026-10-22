@@ -1,6 +1,6 @@
 # Grafting a call: the operands
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-21 -->
 
 Which operand replaces its parameter in the grafted body, which is bound by a `let` first, and how a rest list is decided.
 
@@ -29,10 +29,13 @@ last read the body makes of it:
 - a `Var` naming a binding nothing writes. The test is that nothing writes it,
   not that it is immutable, because a `match` pattern's variable is never
   marked immutable;
-- a `Var` naming a written binding that no closure captures, when no operand
+- a `Var` naming a written binding that no closure writes, when no operand
   after it writes the binding. A closed body holds no `assign` and no lambda,
-  so only a closure that captured the binding, or a later operand, could write
-  it between the call and a read.
+  so only a closure that writes the binding, or a later operand, could write
+  it between the call and a read. A closure writes a binding when an `assign`
+  to it sits in a lambda nested in the binding's scope, which the analyzer
+  records on the binding. A closure that captures the binding and only reads
+  it cannot change it, so holding a written binding is not writing it.
 
 Every other operand is bound by a `let` to a fresh local first. The direct
 replacement matters for the fold: a guard in the grafted body then tests the
@@ -47,8 +50,15 @@ a store and a load on every iteration.
 (assert (< 0 (occurrences counted "(%lt i#")) "the comparison reads the counter itself")
 (assert (< 0 (occurrences counted "(%add i#")) "and so does the increment")
 
-# A closure that captured the binding may write it from inside the body, so
-# the operand keeps the value it had at the call.
+# A closure that only reads the counter cannot change it, so the counter is
+# still written in place. It lives in a cell, and each op reads the cell itself.
+(def read (fhir "(defn w [b] (var i 0) (def show (fn [] i))
+                   (while (< i b) (assign i (+ i 1))) (show)) (w 5)"))
+(assert (< 0 (occurrences read "(%lt (deref-cell i#")) "the comparison reads the cell")
+(assert (< 0 (occurrences read "(%add (deref-cell i#")) "and so does the increment")
+
+# A closure that writes the binding may do so from inside the body, so the
+# operand keeps the value it had at the call.
 (var i 0)
 (defn bump [] (assign i (%add i 1)))
 (defn after-bump [x] (bump) x)
@@ -94,9 +104,12 @@ the other arities still graft.
 ## Pinning tests
 
 - `hir::typeinfer::tests::operand::*` — a written local and a mutated
-  parameter no closure captures are written in place, while a captured
-  binding, and one a later operand writes, keep the value they held at the
-  call.
+  parameter are written in place, and so is a written local a closure captures
+  and only reads, while a binding a closure writes, and one a later operand
+  writes, keep the value they held at the call.
+- `hir::analyze::tests::bindings::*` — an `assign` inside a nested lambda
+  records that a closure writes the binding, and an `assign` in the binding's
+  own function does not.
 - `hir::typeinfer::tests::graft::*` — a `(numeric!)` parameter keeps its floor
   in the graft, three operands keep an arithmetic call and graft a comparison
   to one spliced call, and a spliced operand keeps the call.

@@ -1,6 +1,6 @@
 # hir/analyze
 
-<!-- audited: 2026-10-13 -->
+<!-- audited: 2026-10-21 -->
 
 Syntax to HIR analysis: binding resolution, capture computation, signal inference, and linting.
 
@@ -45,7 +45,8 @@ Syntax (expanded, with scope sets)
     ▼
 Analyzer (&mut BindingArena)
     ├─► resolve variables → Binding (u32 index into BindingArena)
-    ├─► track mutations → arena.get_mut(b).is_mutated = true
+    ├─► track mutations → arena.get_mut(b).is_mutated = true, and an assign
+    │   inside a nested lambda marks the binding written by a closure
     ├─► track captures → scope lookup marks them + CaptureInfo
     ├─► infer signals → Signal { bits, propagates }
     ├─► validate scope rules (hygienic resolution)
@@ -182,7 +183,11 @@ This prevents accidental capture in macros while allowing intentional capture vi
 - **Marking captures by hand**: Resolve names through `lookup`, which marks
   sibling captures. Do not call `mark_captured` for a self-reference; a
   `Recursive` capture must not mark.
-- **Forgetting to mark mutations**: If a binding is assigned via `assign`, set `arena.get_mut(b).is_mutated = true`
+- **Forgetting to mark mutations**: If a binding is assigned via `assign`, set
+  `arena.get_mut(b).is_mutated = true`, and when the `assign` sits in a lambda
+  the binding does not belong to, mark it written by a closure too. The graft
+  reads that mark before it writes an operand in place
+  ([the operands](../../../docs/impl/graft/operands.md))
 - **Conflating nil and empty list**: Use `HirKind::EmptyList` for `()`, not `HirKind::Nil`
 - **Not propagating signals**: When combining sub-expressions, use
   `signal.combine()` to merge signals upward. A node's signal alone does not
