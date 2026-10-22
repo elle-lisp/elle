@@ -1,26 +1,25 @@
-(elle/epoch 14)
-# audited: 2026-10-06
+(elle/epoch 15)
+# audited: 2026-10-21
 # resp-read reassembles a bulk string that spans more than one TCP segment.
 # lib/redis.md
 #
-# Background: port/read on a stream socket (TCP, Unix) follows POSIX
-# "up to N bytes" semantics — io_uring deliberately does *not* resubmit
-# short reads on stream sockets (see src/io/uring.rs, the
-# `if !is_stream` gate around the read-short-read resubmission path).
-# So a single (port/read port (+ len 2)) for a bulk reply that the
-# kernel hands back across two recv() calls returns truncated data and
-# leaves the tail of the bulk plus its trailing \r\n on the wire.  The
-# next resp-read then read-lines those leftover bytes as a "reply" and
-# parses a chunk of payload as a RESP prefix — typically a digit or
-# '-' that surfaces as "integer: cannot parse \"...,...,...\" as
-# base-10 integer" or "unexpected RESP prefix: <byte>".
+# Background: port/read on a stream socket (TCP, Unix) answers "up to N
+# bytes", the POSIX semantics, and io_uring does not read on past a short read
+# on a stream socket (src/io/uring/resubmit.rs). So a bulk reply the kernel
+# hands back across two recv() calls arrives in pieces. resp-read takes the
+# bulk through framing:exact, which reads on until it holds the whole length.
+#
+# The counter-factual: a reader that took the bulk with one port/read would
+# return truncated data, and leave the tail of the bulk and its trailing \r\n
+# on the wire. The next resp-read would then read those bytes as a reply, and
+# parse a chunk of payload as a RESP prefix.
 #
 # This test confirms the property even single-fiber callers depend on:
 # a redis bulk reply round-trips byte-for-byte regardless of size.
 #
 # The threshold for short reads on loopback is roughly the kernel TCP
-# recv buffer (default ~64 KiB on Linux); we use 200 KiB so the kernel
-# almost always splits the reply.  Off-loopback the threshold is much
+# recv buffer (default ~64 KiB on Linux). The test uses 200 KiB, so the kernel
+# almost always splits the reply. Off-loopback the threshold is much
 # smaller (1 MSS), but a single test value covers both regimes.
 #
 # Requires a live Redis on 127.0.0.1:6379.  Records a reasoned skip otherwise.
@@ -30,10 +29,10 @@
 (def value-size 200000)
 (def n-rounds 200)
 
-# Redis is shared infrastructure, so the key carries this process's pid.  A
-# fixed name collides the way a fixed scratch filename does: a second run
-# against the same server — another checkout, a rerun overlapping this one —
-# seeds, reads and deletes the same key, and the deletion arrives as a nil
+# Redis is shared infrastructure, so the key carries this process's pid. A
+# fixed name would collide the way a fixed scratch filename does. A second run
+# against the same server (another checkout, a rerun overlapping this one)
+# would seed, read and delete the same key. The deletion would arrive as a nil
 # reply the reader cannot tell from a short read.
 (def test-key (string "test:redis-short-read:" (sys/pid) ":big"))
 
