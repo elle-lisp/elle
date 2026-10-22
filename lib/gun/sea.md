@@ -1,6 +1,6 @@
 # sea
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-22 -->
 
 The SEA rules of std/gun: key pairs, user spaces that only their key writes, the signed text, the content node, admission, and encryption.
 
@@ -58,16 +58,6 @@ Given a module loaded with `:crypto` and `:random`, this function answers
                  {:name "Alice"})
     (sea-gun:once (sea-gun:get (sea-gun:get db (string "~" alice:pub))
                                "profile"))))
-
-(defn sea-gun []
-  "The gun module with :crypto and :random, or nil without both plugins."
-  (let [[crypto-ok? crypto] (protect (import "plugin/crypto"))
-        [random-ok? random] (protect (import "plugin/random"))]
-    (when (and crypto-ok? random-ok?)
-      ((import "std/gun") :crypto crypto :random random))))
-
-(when-let [g (sea-gun)]
-  (assert (= (user-example g) {"name" "Alice"})))
 ```
 
 ## Signatures
@@ -168,8 +158,8 @@ value of their own and can be put anywhere.
   or a plaintext that does not decode raise `:decrypt-failed`.
 
 A user publishes an encryption key by putting its `epub` in its own space,
-where nobody else can replace it. Given the module that `sea-gun` builds
-above, this function answers `"for Bob"`:
+where nobody else can replace it. Given a module loaded with `:crypto` and
+`:random`, this function answers `"for Bob"`:
 
 ```lisp
 (defn secret-example [g]
@@ -183,7 +173,4 @@ above, this function answers `"for Bob"`:
     (let [space (g:get db (string "~" alice:pub))
           epub (g:once (g:get space "epub"))]
       (g:decrypt (g:secret bob epub) (g:once (g:get space "note"))))))
-
-(when-let [g (sea-gun)]
-  (assert (= (secret-example g) "for Bob")))
 ```

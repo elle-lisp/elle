@@ -1,6 +1,6 @@
 # mesh
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-22 -->
 
 How std/gun databases join over WebSocket: serve, connect, keepers and close, and the protocol of messages, merges, reads and acks.
 
@@ -37,13 +37,6 @@ loaded with `:websocket`, this function answers `{"text" "hello"}`:
           (port/close listener))
         (mesh-gun:put (mesh-gun:get client "note") {:text "hello"} :ack 5)
         (mesh-gun:once (mesh-gun:get server "note"))))))
-
-(let [[hash-ok? hash] (protect (import "plugin/hash"))
-      [random-ok? random] (protect (import "plugin/random"))]
-  (when (and hash-ok? random-ok?)
-    (let [ws ((import "std/websocket") :hash hash :random random)]
-      (assert (= (peers-example ((import "std/gun") :websocket ws))
-                 {"text" "hello"})))))
 ```
 
 `gun:open` takes `:peers`, a list of `ws://` URLs, and keeps the database

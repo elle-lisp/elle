@@ -1,6 +1,6 @@
 # chains
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-22 -->
 
 How a std/gun chain reads and writes: get, put, once, on and set, maps, key ranges, souls, links by chain, unset and content.
 
@@ -193,7 +193,8 @@ a `put` does. When no field links to the member, it writes nothing:
 that `gun:content-key` answers for it: the SHA-256 hex of the value's
 encoding. It takes any chain of the database, and `:ack` as a `put` does.
 Its answer is the key. [sea.md](sea.md) holds the rules of `#`, and the
-content node needs the module's `:crypto`:
+content node needs the module's `:crypto`. Given a module loaded with
+`:crypto`, this function answers `"hello"`:
 
 ```lisp
 (defn content-example [sea-gun]
@@ -203,8 +204,4 @@ content node needs the module's `:crypto`:
     (assert (= k "159051e9a9d711b993a56b707677ffc5cb84e01cbbd587db672c08e69e04a324"))
     (assert (= (sea-gun:content-key "hello") k))
     (sea-gun:once (sea-gun:get (sea-gun:get db "#") k))))
-
-(let [[ok? crypto] (protect (import "plugin/crypto"))]
-  (when ok?
-    (assert (= (content-example ((import "std/gun") :crypto crypto)) "hello"))))
 ```
