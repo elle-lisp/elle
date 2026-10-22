@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-11
+# audited: 2026-10-22
 # A fiber `ev/spawn` creates keeps its spawner's denial, and the scheduler refuses its denied calls.
 # docs/signals/capabilities.md
 #
@@ -11,7 +11,7 @@
 # resume, the spawned fiber takes the scheduler's empty set, so the write lands
 # and `(fiber/caps)` lists :fs. With the inheritance but no refusal, a denial
 # the spawned fiber's mask names falls to the scheduler's catch-all and is
-# resumed with nil, which the fiber reads as the call's return: `protect`
+# resumed with nil. The fiber reads nil as the call's return, so `protect`
 # reports `[true nil]` for a subprocess that never ran.
 #
 # The sandbox's own mask names only :error. A denial that escapes the scheduler
@@ -105,6 +105,9 @@
 
 (assert (refused? (spawned |:net| (fn [] (protect (tcp/listen "127.0.0.1" 0))))
                   "tcp/listen" :net) "a denied listen is refused")
+
+(assert (refused? (spawned |:ambient| (fn [] (protect (sys/pid)))) "sys/pid"
+                  :ambient) "a denied pid read is refused")
 
 # The gate refuses the call before the loader reads the path, so no library need
 # exist. `import-file` hands a library name to `import/load-plugin`, and the

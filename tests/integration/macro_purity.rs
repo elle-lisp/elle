@@ -1,5 +1,5 @@
-// audited: 2026-10-14
-// A macro body reads and changes nothing outside its unit: the primitives an expansion refuses, a file's compile, a host primitive.
+// audited: 2026-10-22
+// A macro body reads and changes nothing outside its unit: the primitives that declare :ambient, a file's compile, a host primitive.
 //
 // docs/macros.md
 
@@ -11,10 +11,9 @@ use elle::value::fiber::{SignalBits, SIG_OK};
 use elle::value::types::Arity;
 use elle::Value;
 
-/// Every primitive that reaches state outside the unit through no capability
-/// bit, by its canonical name. A primitive joins the list when its body reads
-/// or changes process state, a VM cache or an address; one that needs a handle
-/// only such a primitive mints is left off.
+/// Every primitive that declares `:ambient`, by its canonical name. A primitive
+/// joins the list when its body reads or changes process state, a VM cache or
+/// an address; one that needs a handle only such a primitive mints is left off.
 const AMBIENT: &[&str] = &[
     "allocator/install",
     "allocator/uninstall",
@@ -104,22 +103,22 @@ const AMBIENT: &[&str] = &[
     "watch-close",
 ];
 
-/// The canonical names `vm/primitive-meta` marks `:ambient`, sorted and joined
-/// by spaces.
+/// The canonical names whose declared bits `vm/primitive-meta` answers with
+/// `:ambient`, sorted and joined by spaces.
 const MARKED: &str = r#"
 (def names @[])
 (each name in (vm/list-primitives)
   (let [meta (vm/primitive-meta name)]
-    (when (and meta (get meta :ambient))
+    (when (and meta (contains? (get meta :bits) :ambient))
       (push names (get meta :name)))))
 (string/join (sort (distinct (freeze names))) " ")
 "#;
 
-/// The mark is a claim the expansion gate acts on, so the list is read whole:
-/// a primitive gains or loses it only by an edit here. The counter-factual
-/// marks nothing, and every ambient read reaches a macro body.
+/// The bit is a claim every denial acts on, so the list is read whole: a
+/// primitive gains or loses it only by an edit here. The counter-factual
+/// declares it nowhere, and every ambient read reaches a macro body.
 #[test]
-fn the_primitives_an_expansion_refuses_are_these() {
+fn the_primitives_that_declare_ambient_are_these() {
     let mut expected: Vec<&str> = AMBIENT.to_vec();
     if cfg!(feature = "mlir") {
         expected.push("mlir/compile-spirv");
@@ -149,8 +148,8 @@ fn a_file_compile_expands_without_the_effect_capabilities() {
     );
 }
 
-/// A silent transformer that reads the pid reports the refusal, not a broken
-/// proof: the refusal halts, and a halt crosses a silent boundary. The
+/// A transformer that reads the pid reports the denial, not a broken proof: the
+/// transformer carries :ambient, so no silent boundary stands in the way. The
 /// counter-factual expanded to the pid of the test process.
 #[test]
 fn a_file_compile_refuses_an_ambient_read() {
@@ -166,9 +165,8 @@ fn a_file_compile_refuses_an_ambient_read() {
     );
 }
 
-/// A closure the transformer forces onto the bytecode tier halts on the refusal
-/// as well, and the compile reports it. The counter-factual expanded to the
-/// pid.
+/// A closure the transformer forces onto the bytecode tier is denied as well,
+/// and the compile reports it. The counter-factual expanded to the pid.
 #[test]
 fn a_forced_tier_reports_the_refusal() {
     let source = "(defmacro pid [] (compile/run-on :bytecode (fn [] (sys/pid))))\n(pid)\n";

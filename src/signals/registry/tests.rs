@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-10-22
 //! The registry's built-in bits, its user allocation and budget, and how it names a signal.
 //!
 //! docs/signals/protocol.md
@@ -24,6 +24,14 @@ fn the_network_bit_is_registered_at_eighteen() {
     let registry = SignalRegistry::with_builtins();
     assert_eq!(crate::signals::SIG_NET.trailing_zeros(), 18);
     assert_eq!(registry.lookup("net"), Some(18));
+}
+
+/// `:ambient` takes bit 19, the next of the runtime-reserved range, so a fiber's
+/// `:deny` names it like any other capability (docs/signals/protocol.md).
+#[test]
+fn the_ambient_bit_is_registered_at_nineteen() {
+    let registry = SignalRegistry::with_builtins();
+    assert_eq!(registry.lookup("ambient"), Some(19));
 }
 
 #[test]
