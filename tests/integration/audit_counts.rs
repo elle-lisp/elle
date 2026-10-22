@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-22
 // The audit queue's three counts, the walk over the files git tracks, and the processes it starts.
 //
 // docs/impl/audit.md
@@ -10,17 +10,10 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
-use crate::common::ScratchDir;
+use crate::common::{write_fixture, ScratchDir};
 
 fn script() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/audit")
-}
-
-/// Write `body` at `rel` under `root`, creating its directories.
-fn write(root: &Path, rel: &str, body: &str) {
-    let path = root.join(rel);
-    std::fs::create_dir_all(path.parent().expect("has a parent")).expect("create fixture dir");
-    std::fs::write(&path, body).expect("write fixture file");
 }
 
 /// A document carrying `stamp` if one is given.
@@ -29,6 +22,11 @@ fn doc(stamp: Option<&str>) -> String {
         Some(d) => format!("# Title\n\n<!-- audited: {d} -->\n\nbody\n"),
         None => "# Title\n\nbody\n".to_string(),
     }
+}
+
+/// A policy stamped on `date` whose policy date is `date` too.
+fn policy(date: &str) -> String {
+    format!("# Policy\n\n<!-- audited: {date} -->\n<!-- policy: {date} -->\n\nThe rules.\n")
 }
 
 /// `scripts/audit --root ROOT ARGS…`, which must succeed.
@@ -64,13 +62,13 @@ fn git(root: &Path, args: &[&str]) {
 
 #[test]
 fn counts_names_the_unstamped_files_and_the_files_stamped_before_the_policy() {
-    // The policy file stamps itself on the floor, which is not before it.
+    // The policy file stamps itself on its policy date, which is not before it.
     let t = ScratchDir::new("audit-counts");
-    write(t.path(), "DOCUMENTATION.md", &doc(Some("2026-06-01")));
-    write(t.path(), "never.md", &doc(None));
-    write(t.path(), "also-never.rs", "// no stamp\nfn f() {}\n");
-    write(t.path(), "before.md", &doc(Some("2026-05-31")));
-    write(t.path(), "current.md", &doc(Some("2026-06-02")));
+    write_fixture(t.path(), "DOCUMENTATION.md", &policy("2026-06-01"));
+    write_fixture(t.path(), "never.md", &doc(None));
+    write_fixture(t.path(), "also-never.rs", "// no stamp\nfn f() {}\n");
+    write_fixture(t.path(), "before.md", &doc(Some("2026-05-31")));
+    write_fixture(t.path(), "current.md", &doc(Some("2026-06-02")));
 
     assert_eq!(
         audit(t.path(), &["--counts"]),
@@ -81,18 +79,18 @@ fn counts_names_the_unstamped_files_and_the_files_stamped_before_the_policy() {
 
 #[test]
 fn counts_names_the_files_stamped_with_a_deviation_whatever_their_date() {
-    // The counter-factual: read a deviation stamp by its date alone and the
-    // old one joins the files before the policy, the new one passes as plain,
-    // and the count of files that knowingly break a rule reads zero.
+    // The counter-factual: read a deviation stamp by its date alone, and the
+    // old one joins the files before the policy while the new one passes as
+    // plain. The count of files that knowingly break a rule then reads zero.
     let t = ScratchDir::new("audit-deviation");
-    write(t.path(), "DOCUMENTATION.md", &doc(Some("2026-06-01")));
-    write(t.path(), "old.md", &doc(Some("2026-05-01 (#12)")));
-    write(
+    write_fixture(t.path(), "DOCUMENTATION.md", &policy("2026-06-01"));
+    write_fixture(t.path(), "old.md", &doc(Some("2026-05-01 (#12)")));
+    write_fixture(
         t.path(),
         "new.rs",
         "// audited: 2026-06-02 (#34)\nfn f() {}\n",
     );
-    write(t.path(), "plain.md", &doc(Some("2026-06-02")));
+    write_fixture(t.path(), "plain.md", &doc(Some("2026-06-02")));
 
     assert_eq!(
         audit(t.path(), &["--counts"]),
@@ -107,9 +105,9 @@ fn the_walk_lists_only_the_files_git_tracks() {
     // hand-off note nobody committed sits in the queue and in the counts, and
     // one commit reads a different count in each checkout.
     let t = ScratchDir::new("audit-tracked");
-    write(t.path(), "DOCUMENTATION.md", &doc(Some("2026-06-01")));
-    write(t.path(), "tracked.md", &doc(None));
-    write(t.path(), "untracked.md", &doc(None));
+    write_fixture(t.path(), "DOCUMENTATION.md", &policy("2026-06-01"));
+    write_fixture(t.path(), "tracked.md", &doc(None));
+    write_fixture(t.path(), "untracked.md", &doc(None));
     git(t.path(), &["init", "-q"]);
     git(t.path(), &["add", "DOCUMENTATION.md", "tracked.md"]);
 
@@ -133,8 +131,8 @@ fn a_tree_inside_another_repository_has_every_file_walked() {
     // and the queue reads empty.
     let t = ScratchDir::new("audit-nested");
     git(t.path(), &["init", "-q"]);
-    write(t.path(), "inner/DOCUMENTATION.md", &doc(Some("2026-06-01")));
-    write(t.path(), "inner/a.md", &doc(None));
+    write_fixture(t.path(), "inner/DOCUMENTATION.md", &policy("2026-06-01"));
+    write_fixture(t.path(), "inner/a.md", &doc(None));
 
     assert_eq!(
         audit(&t.path().join("inner"), &["--counts"]),
@@ -177,10 +175,10 @@ fn shim_tools(bin: &Path, log: &Path, path: &std::ffi::OsStr) {
 fn processes_for(files: usize) -> usize {
     let t = ScratchDir::new("audit-forks");
     let root = t.join("tree");
-    write(&root, "DOCUMENTATION.md", &doc(Some("2026-06-01")));
+    write_fixture(&root, "DOCUMENTATION.md", &policy("2026-06-01"));
     for i in 0..files {
         let stamp = (i % 2 == 0).then_some("2026-06-02");
-        write(&root, &format!("a/b/c/doc{i}.md"), &doc(stamp));
+        write_fixture(&root, &format!("a/b/c/doc{i}.md"), &doc(stamp));
     }
     let path = std::env::var_os("PATH").expect("PATH is set");
     let bin = t.join("bin");

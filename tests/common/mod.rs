@@ -1,13 +1,16 @@
 // audited: 2026-11-13
-//! Shared test helpers: the evals, the cached evals property tests use, and a scratch directory.
+//! Shared test helpers: the evals, the cached evals property tests use, and scratch directories and their files.
 //!
 //! tests/AGENTS.md
 //!
-//! Six children hold the readers the repository's own tests share: `repo`
-//! reads the Makefile, the two suites and the source tree, `makefile` the
-//! Makefile's rules and the targets that record runs, `passes` the suite passes
-//! a target runs, `workflows` the CI workflow files, `documents` the list of
-//! documents `make doctest` runs, and `store` an `elle test` session store.
+//! Six children hold the readers the repository's own tests share:
+//!
+//! - `repo`: the Makefile, the two suites and the source tree
+//! - `makefile`: the Makefile's rules and the targets that record runs
+//! - `passes`: the suite passes a target runs
+//! - `workflows`: the CI workflow files
+//! - `documents`: the list of documents `make doctest` runs
+//! - `store`: an `elle test` session store
 //!
 //! A one-shot eval drives a [`Runtime`], and a cached eval drives the
 //! [`RuntimeCore`] a `Runtime` wraps. Each instance owns its heap, `VM`,
@@ -41,10 +44,10 @@ pub use workflows::*;
 //
 // A result `Value` is a tagged pointer straight into its `Runtime`'s region
 // heap; `Display`, `with_string`, `as_pair`, … deref that pointer directly (no
-// ambient heap, no handle). The `Runtime` is torn down — and its `Box<FiberHeap>`
-// freed — the instant it drops, so a heap-valued result handed *out* of the eval
-// dangles (a use-after-free the plain VM reads as stale-but-intact, only
-// guardfree reddens). Immediates carry no pointer, so only a heap-valued result
+// ambient heap, no handle). The `Runtime` is torn down, and its `Box<FiberHeap>`
+// freed, the instant it drops. So a heap-valued result handed *out* of the eval
+// dangles: a use-after-free the plain VM reads as stale-but-intact, and only
+// guardfree reddens. Immediates carry no pointer, so only a heap-valued result
 // dangles.
 //
 // So these helpers are **scoped**: they hand the `Result<Value, String>` to a
@@ -270,4 +273,12 @@ impl Drop for ScratchDir {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
     }
+}
+
+/// Write `body` at `rel` under `root`, creating the directories between.
+#[allow(dead_code)]
+pub fn write_fixture(root: &std::path::Path, rel: &str, body: &str) {
+    let path = root.join(rel);
+    std::fs::create_dir_all(path.parent().expect("has a parent")).expect("create fixture dir");
+    std::fs::write(&path, body).expect("write fixture file");
 }
