@@ -130,11 +130,14 @@
                          "eval takes two forms in a begin, which answers the last")
                  (let [src (string/join ["(include-file \"" lib
                                         "\")\n(defn g [] (twice 1))\n"] "")
-                       a (compile/analyze src
-                       {:file (path/join dir "main.lisp")})
+                       inline "(defn twice [v] (* 2 v))\n(defn g [] (twice 1))\n"
+                       file {:file (path/join dir "main.lisp")}
+                       a (compile/analyze src file)
                        [ok? sig] (protect (compile/signal a :twice))]
                    (assert ok? "compile/analyze sees an included definition")
-                   (assert (get sig :silent) "and infers its signal"))))
+                   (assert (= (compile/signal (compile/analyze inline file)
+                              :twice) sig)
+                           "and infers the signal of the definition written in place"))))
 
 # A body include reads under the capabilities of the fiber the compile runs
 # for, as a top-level one does.
