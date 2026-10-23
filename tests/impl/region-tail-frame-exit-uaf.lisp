@@ -1,13 +1,13 @@
-(elle/epoch 12)
-# audited: 2026-09-08
-# Soundness complement of region-tail-frame-exit.lisp: hoisting a release from
-# the dead post-`TailCall` block to just before the `TailCall` must not free
-# anything the callee can still reach.
+(elle/epoch 15)
+# audited: 2026-10-20
+# A release hoisted ahead of a frame-replacing tail call frees nothing the callee can still reach.
+# docs/impl/region/relocate.md
 #
-# The hoist moves a release EARLIER — the one place in the region system it does
-# (docs/impl/region/mechanism.md § "A release past a frame-replacing tail call is
-# not a release"). On the closure path it fires where none fired before, so it
-# needs BOTH gates, and each witness below drives one of them. The **exemption**
+# This is the soundness face of region-tail-frame-exit.lisp. The hoist moves a
+# release from the dead post-`TailCall` block to just before the `TailCall`:
+# EARLIER, the one place in the region system a release moves that way. On the
+# closure path it fires where no release would otherwise fire, so it needs BOTH
+# gates, and each witness below drives one of them. The **exemption**
 # covers what the call names: an argument's release must not fire before the
 # callee it was moved to reads it, and the callee closure's own region must not
 # be dropped before the frame it replaces runs. The **admission** — escape
@@ -48,7 +48,7 @@
 (include-file "tailexit/move.lisp")
 (include-file "tailexit/replica.lisp")
 
-# ── controls: the same reads with a NATIVE tail call — correct now ────────────
+# ── controls: the same reads with a NATIVE tail call ──────────────────────────
 (defn c-plain (i)
   (let [x (list (string "p" i) i)]
     (length (first x))))
@@ -185,11 +185,9 @@
 (assert (%gt e16b 0)
         "fold accumulator freed before its own combiner minted for it")
 (assert (%gt e17 0)
-        "a letrec closure's replicated release freed more than the frame's own \
-         reference under a branch body tail")
+        "a letrec closure's replicated release freed more than the frame's own \n         reference under a branch body tail")
 (assert (%gt e18 0)
-        "a scrutinee's replicated release freed more than the frame's own \
-         reference at a merge inherited from the branch's entry")
+        "a scrutinee's replicated release freed more than the frame's own \n         reference at a merge inherited from the branch's entry")
 (assert (> e4 0) "value freed under a closure that escaped holding it")
 (assert (%gt f 0) "stranded value freed after being stored into a container")
 (assert (%gt g 0) "returned value freed under the caller's read")
@@ -217,18 +215,14 @@
 (assert (%gt sc1 0)
         "the region the short-circuit arm moved into its callee was freed first")
 (assert (%gt sc2 0)
-        "the region the short-circuit arm's callee captured was freed before the \
-         call")
+        "the region the short-circuit arm's callee captured was freed before the \n         call")
 (assert (%gt sc3 0)
-        "the region the short-circuit arm's callee handed back was freed under \
-         the caller")
+        "the region the short-circuit arm's callee handed back was freed under \n         the caller")
 (assert (%gt sc4 0)
-        "a value the short-circuit arm stored into a longer-lived container was \
-         freed")
+        "a value the short-circuit arm stored into a longer-lived container was \n         freed")
 (assert (%gt sc5 0)
         "a value the short-circuit arm's escaping closure captured was freed")
 (assert (%gt sc6 0)
-        "the short-circuit replica and the merge's own release both ran on one \
-         path")
+        "the short-circuit replica and the merge's own release both ran on one \n         path")
 
 (println "region-tail-frame-exit-uaf: ok")

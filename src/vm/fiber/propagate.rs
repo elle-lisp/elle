@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-20
 //! `fiber/propagate`: re-raise a child fiber's caught signal to this fiber's
 //! own parent. Call- and tail-position handlers (see the `super` module doc).
 //!
@@ -18,8 +18,7 @@ impl VM {
     /// resumer's release, not this one, so without a mint here that release
     /// consumes a reference nothing took — the payload's count then runs one
     /// short of the recorded `fiber → payload` edges and the free cascade
-    /// reclaims it under the caller (docs/impl/region/park.md § "A propagated
-    /// signal is a fresh park, and owes its own delivery reference").
+    /// reclaims it under the caller (docs/impl/region/park.md).
     ///
     /// Three cases take no mint, each because the delivery already has an owner
     /// or no consumer:
@@ -50,10 +49,9 @@ impl VM {
         // Re-raising the child's error resumes the propagation the catch ended,
         // so the location parked with the payload becomes live again. This is
         // what lets `defer` and the scheduler report the form that raised,
-        // rather than the form that re-raised (docs/impl/vm.md § "Where a
-        // reported error's location comes from"). The parked pair is taken only
-        // when it still names THIS payload; a record the fiber kept from an
-        // earlier error describes nothing here.
+        // rather than the form that re-raised (docs/impl/vm.md). The parked pair is
+        // taken only when it still names THIS payload; a record the fiber kept
+        // from an earlier error describes nothing here.
         if bits.intersects(SIG_ERROR) && self.error_loc.is_none() {
             self.error_loc = handle.with(|fiber| {
                 fiber

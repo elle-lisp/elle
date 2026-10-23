@@ -49,7 +49,7 @@
 ["src/hir/region/infer/tests/reassign/returned.rs" :tokens 3000]
 ["src/hir/region/infer/tests/support.rs" :tokens 4000]
 ["src/hir/region/infer/walk/call.rs" :tokens 5500]
-["src/hir/region/infer/walk/classify.rs" :tokens 3500]
+["src/hir/region/infer/walk/classify.rs" :tokens 3000]
 ["src/hir/region/infer/walk.rs" :tokens 4500]
 ["src/hir/region/infer/walk/walkrest.rs" :tokens 3000]
 ["src/hir/region/info.rs" :tokens 6000]

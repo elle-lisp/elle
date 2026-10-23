@@ -75,10 +75,9 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   receive ([region-chan-send-owned-param-uaf.lisp](../../../tests/impl/region-chan-send-owned-param-uaf.lisp)). The buffer
   is **external** to the region system — no free-time cascade balances
   anything stored in it — so the seam retain IS the message's reference. The
-  message is a genuinely-Shared (no-bounded-dominator) region, and its
-  incoming count is maintained the way § class 7 of
-  [ownership.md](ownership.md) prescribes: the send bumps it (the seam
-  retain), and the **receive lowers it** — `chan/recv` / `chan/try-select` /
+  message is a genuinely-Shared (no-bounded-dominator) region, so it stays on
+  the per-region RC baseline ([ownership.md](ownership.md)): the send bumps its
+  count (the seam retain), and the **receive lowers it** — `chan/recv` / `chan/try-select` /
   `chan/wait-ready` each decref the message's region as it leaves the buffer
   (`release_received_message`, guarded by `value_in_region_store` so a
   cross-thread message on a foreign heap is left to that heap's accounting).
@@ -96,8 +95,7 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
 - **`Funnel`** — every argument store goes through the mutable-store
   funnel (arena.rs `push_with_incref`-style, runtime-counted — the
   statically-complete store seam; the same seam records the *outgoing edge* the
-  free-time walk consumes, [ownership.md](ownership.md) § The outgoing edge
-  table), and the result may be fresh
+  free-time walk consumes, [ownership.md](ownership.md)), and the result may be fresh
   OR pass-through (`put` on an immutable struct copies; on a mutable one
   returns the container). No solver edges: a compile-time clique incref
   would double-count the funnel's runtime incref against the container's
@@ -224,7 +222,7 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
     the RESUMED frame that counts it: the suspending call's continuation mints the
     resume value it re-enters on — the parked native call's own result retain, or
     the `Emit`'s (`RegionInfo::unfunded_resume_values`,
-    [park.md](park.md) § "A resume value crosses counted, or not at all"). A
+    [park.md](park.md)). A
     compile-time incref at the install would double-count the first against its
     single cascade decref and duplicate the second, which is exactly the arg-clique
     leak ([region-fiber-install-clique-leak.lisp](../../../tests/impl/region-fiber-install-clique-leak.lisp)).
@@ -278,8 +276,7 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   escapes, the aborting one (`VM::park_propagating_abort`). A frame holding the
   payload then funds no delivery, so the abandoned-frame walk and the parked
   frame's discharge stop exempting the payload's region, exactly as they do for
-  an emit raise ([mechanism.md](mechanism.md) § "An abandoned frame runs the
-  releases it still owes"). A literal materialized straight into the
+  an emit raise ([unwind.md](unwind.md)). A literal materialized straight into the
   `fiber/abort` argument lives in a frame slot and nowhere else, so without the
   record its release stays owed forever (the `abort-discard` probe in
   [oracle.lisp](../../../tests/impl/oracle.lisp)).
@@ -306,8 +303,8 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   The rule asks for a **holder**, not merely for a write. A handler that writes an
   argument into a field the free-time walk never enumerates creates no second
   holder of the region and can under-count nothing, so the strongest true claim is
-  the one that says so — `Opaque`, the child-chain wiring's answer (§ `Opaque`,
-  "The child-chain WIRING is `Opaque` too"). Both halves are pinned solver-side by
+  the one that says so — `Opaque`, the child-chain wiring's answer under `Opaque`
+  above. Both halves are pinned solver-side by
   `fiber_graph_natives_declare_opaque_and_git_keeps_the_hard_edge`.
 - **`Unknown`** — nobody has looked. The default for unexamined
   primitives, every plugin-supplied definition (the plugin ABI cannot

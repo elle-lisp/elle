@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-20
 // What a runtime's teardown frees, and what two runtimes on one thread each
 // keep to themselves: the heap, the VM state, the compile context.
 //
@@ -61,7 +61,7 @@ fn teardown_frees_registered_root_only_via_rc() {
     );
 }
 
-/// Counterfactual for the coexistence effort: two embedded Elle instances on one
+/// Counterfactual for the compile-state axis: two embedded Elle instances on one
 /// thread, doing interleaved **compute**, must be isolated. (io trading between
 /// instances is not covered; this pins compute only.) The litmus: a site is
 /// correct iff it behaves correctly with two instances interleaved on one
@@ -204,7 +204,7 @@ fn two_instances_agree_on_every_symbol_name() {
     );
 }
 
-/// Counterfactual for the heap axis (tls.md § Acceptance criterion): two
+/// Counterfactual for the heap axis (docs/impl/region/ctx.md): two
 /// embedded instances on one thread each allocate in their OWN heap, and
 /// neither sees the other's regions. A site is correct iff it behaves correctly
 /// with two instances interleaved on one thread; a shared per-*thread* heap

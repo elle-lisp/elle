@@ -1,17 +1,17 @@
+// audited: 2026-10-20
+//! Every region the walk mints names a real allocation, so a transparent node mints none.
+//!
+//! docs/impl/region/rules.md
+
 use super::*;
 
-// ── "Every region corresponds to a real allocation" tests ──────
-//
-// These pin the rule documented in docs/impl/region/rules.md § "Every region
-// must correspond to a real allocation": the regions walk must
-// NOT call alloc_here at HIR nodes the lowerer is transparent for
-// (MakeCell, DerefCell, SetCell) and MUST register call-shaped
-// results (Call, Eval) in call_result_regions so the lowerer can
-// emit value-gated DecrefValueRegion. Failure mode that the
-// fixes prevent: a region exists at compile time with no matching
-// alloc_in_region in the bytecode; its DecrefRegion at decref_point
-// decrements an RC that no IncrefRegion ever raised, producing
-// underflow or conflation with neighbouring region IDs.
+// These pin Rule 2, "every region corresponds to a real allocation": the regions
+// walk must NOT call alloc_here at HIR nodes the lowerer is transparent for
+// (MakeCell, DerefCell, SetCell) and MUST register call-shaped results (Call,
+// Eval) in call_result_regions so the lowerer can emit a value-gated
+// DecrefValueRegion. A region with no matching alloc_in_region in the bytecode
+// has a DecrefRegion that decrements an RC no IncrefRegion ever raised: an
+// underflow, or a conflation with a neighbouring region id.
 
 #[test]
 fn makecell_walk_is_transparent_pass_through() {

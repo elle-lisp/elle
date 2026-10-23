@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-20
 //! Compiled bytecode: the instruction bytes, the constant pool, and the
 //! emit/patch surface the emitter writes through.
 //!
@@ -39,14 +39,13 @@ pub struct Bytecode {
     /// (docs/impl/region/template.md).
     pub children: Vec<Value>,
     /// The static region slots this function's allocations SHARE after a
-    /// builder-idiom merge (docs/impl/region/merging.md § Merging), ascending,
+    /// builder-idiom merge (docs/impl/region/merging.md), ascending,
     /// so the executing `Code` can mint-or-reuse them. Empty unless a merge
     /// fired (a builder idiom seeded by a nested `%pair` literal).
     pub merged_slots: Vec<u32>,
     /// The local slots this function's value-routed releases read, so an error
     /// exit walks the releases its abandoned frame still owed
-    /// (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
-    /// still owes").
+    /// (docs/impl/region/unwind.md).
     pub frame_release_slots: Vec<u16>,
     /// The `DecrefRegion` half of the same table — the static region slots
     /// this function's slot-routed releases name.
@@ -136,8 +135,8 @@ impl Bytecode {
     /// Emit a `SignalBits` operand: eight bytes, big-endian.
     ///
     /// Every bit of the mask is meaningful — user signals live at bits 32-63 —
-    /// so this is the only way to write one. See `docs/impl/bytecode.md`
-    /// § "Signal-bits operands"; [`crate::vm::VM::read_signal_bits`] reads it.
+    /// so this is the only way to write one (docs/impl/bytecode.md).
+    /// [`crate::vm::VM::read_signal_bits`] reads it.
     pub fn emit_signal_bits(&mut self, bits: crate::value::fiber::SignalBits) {
         self.instructions
             .extend_from_slice(&bits.raw().to_be_bytes());

@@ -1,13 +1,14 @@
-(elle/epoch 12)
-# audited: 2026-09-21
-# A fn-local 1-slot container whose STORED value carries a second name. The
-# alias refuses nothing: the pin rule is a maximum and the alias's own reads
+(elle/epoch 15)
+# audited: 2026-10-20
+# A fn-local 1-slot container whose stored value carries a second name takes the counted store.
+# docs/impl/region/compensate.md
+#
+# The alias refuses nothing: the pin rule is a maximum and the alias's own reads
 # extend the stored region's release, so the cell takes the counted store and
-# each iteration's producer release stays inside the loop
-# (docs/impl/region/bindings.md § "An aliased stored value takes the counted
-# store"). Refused, the shape strands every named-then-stored element but the
-# last — per call, permanently — which is the conditional-accumulate idiom the
-# scheduler's unjoined-error scan takes (elle-lisp/elle#1186).
+# each iteration's producer release stays inside the loop. Refused, the shape
+# strands every named-then-stored element but the last — per call, permanently —
+# which is the conditional-accumulate idiom the scheduler's unjoined-error scan
+# takes.
 #
 # Every subject builds its input INSIDE the call. The strand is the input's own
 # elements, so an input hoisted out of the driver holds one region set for the

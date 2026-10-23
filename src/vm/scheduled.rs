@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-20
 //! VM entry points that connect bytecode execution to the async scheduler.
 //!
 //! docs/impl/vm.md
@@ -91,7 +91,7 @@ impl VM {
         // The entry thunk's code object is the unit's entry: it runs the
         // top-level bytecode, so it carries the real program's location table,
         // child table, and builder-idiom merge metadata
-        // (docs/impl/region/merging.md § Merging). Without them the top-level
+        // (docs/impl/region/merging.md). Without them the top-level
         // merge would diverge from the unit/embedding paths, which carry it.
         let unit = unit.on_heap(self.heap());
 
@@ -119,7 +119,7 @@ impl VM {
 
         // The entry thunk gets a runtime region of its own, minted from the heap.
         // The static slot baked into the synthetic `Call` above is a compile-time
-        // name from a different id-space (docs/impl/region/model.md § id-spaces):
+        // name from a different id-space (docs/impl/region/model.md):
         // read as a physical id it names whichever live region already answers to
         // that number, so the thunk would land among another value's objects and
         // the mint's creation claim would never be taken. A mint takes that claim

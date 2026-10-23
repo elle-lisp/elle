@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-20
 //! The module-scope half of the 1-slot-container model: a file-letrec cell
 //! that adopts a fresh allocation and counts a call result's store.
 //!
@@ -29,8 +29,8 @@ pub(super) fn apply_module_scope(
             .get(b)
             .map(|v| v.as_slice())
             .unwrap_or(&[]);
-        // Backstop (docs/impl/region/bindings.md "a mutated slot is not a
-        // release route"), recorded UNCONDITIONALLY — before the gate. A
+        // The mutated-slot backstop (docs/impl/region/bindings.md), recorded
+        // UNCONDITIONALLY — before the gate. A
         // top-level reassigned binding's slot is overwritten over time, so a
         // value-routed release of ANY region it holds through that slot loads
         // whatever the slot holds THEN and frees it, not the region intended
@@ -72,7 +72,7 @@ pub(super) fn apply_module_scope(
         // container recorded below, and the cell's reference is the store's
         // incref, released by drop-on-overwrite. The call result's region is a
         // runtime fact the cell cannot claim by name, which is why it counts
-        // (docs/impl/region/bindings.md § "Module scope").
+        // (docs/impl/region/bindings.md).
         let donates = !regions.iter().any(|r| info.call_result_regions.contains(r));
         for s in stores.sites() {
             info.drop_on_overwrite_sites.insert(s);

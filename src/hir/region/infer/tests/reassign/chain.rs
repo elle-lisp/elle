@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-10-20
 //! A chain of forwarding loop parameters hands one reference along, so its links are admitted or declined whole.
 //!
 //! docs/impl/region/bindings.md
@@ -112,11 +112,9 @@ fn reassign_gate_keeps_loop_carried_cell_forwarded_from_a_cell() {
 /// loops names the first loop's stored value, and its `(%length keep)` read at
 /// the tail extends that region's release through the ordinary binding chain —
 /// the pin rule's maximum orders the release after it, so the model's claim is
-/// still only the cell's own counted reference (docs/impl/region/bindings.md
-/// § "The store-site pin asks only that the store run once per binding of the
-/// name it reads"). The chain is still
-/// admitted or declined WHOLE; what the alias moves is the init's discharge,
-/// donation to counted-init.
+/// still only the cell's own counted reference (docs/impl/region/bindings.md).
+/// The chain is still admitted or declined WHOLE; what the alias moves is the
+/// init's discharge, donation to counted-init.
 #[test]
 fn reassign_gate_counts_an_aliased_forwarding_link() {
     let (hir, info) = two_loop_chain("(var keep last)", "(%length keep)");
@@ -143,9 +141,7 @@ fn reassign_gate_counts_an_aliased_forwarding_link() {
 /// forwards its content drop on, and the last link keeps it. The return claims
 /// the reference the `Return`'s mint creates, not the one the chain forwards, so
 /// the last link's content drop — emitted after that mint — is still the release
-/// of the chain's own reference (docs/impl/region/bindings.md § "Returned
-/// fn-local reassigned mutables — the return claims the MINT's reference, not
-/// the cell's").
+/// of the chain's own reference (docs/impl/region/bindings.md).
 #[test]
 fn reassign_gate_counts_a_forwarding_chain_whose_last_link_is_returned() {
     let (hir, info) = two_loop_chain("", "last");

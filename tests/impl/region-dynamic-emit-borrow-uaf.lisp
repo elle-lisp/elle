@@ -1,7 +1,9 @@
-(elle/epoch 12)
-# audited: 2026-09-19
-# A fiber body owns one reference of every value it yields, and what yields is the
-# emit OPERATION rather than the `Emit` node (docs/impl/region/park.md).
+(elle/epoch 15)
+# audited: 2026-10-20
+# A fiber body owns one reference of every value it yields, and what yields is the emit operation, not the `Emit` node.
+# docs/impl/region/park.md
+# docs/impl/region/signalexit.md
+# docs/signals/emit.md
 #
 # A park's escape retain is the DELIVERY reference: the resumer's compiler-emitted
 # release of the resume result consumes it. What a discarded fiber's discharge
@@ -13,19 +15,18 @@
 # consumed and the value dies under every holder that outlives the fiber.
 #
 # A first argument the compiler cannot read as a keyword set falls through to the
-# `emit` primitive (docs/signals/emit.md § "Dynamic emit"), so the park is an
+# `emit` primitive (docs/signals/emit.md), so the park is an
 # ordinary call rather than the `Emit` terminator. Two positions, two references:
 # a TAIL emit's payload already carries the borrowed-argument retain the call mints
 # for the callee, which the post-`TailCall` block releases on resume, so the
-# suspending exit must leave it standing (docs/impl/region/mechanism.md § "What the
-# fall-through owes, a signal exit owes too"); a NON-TAIL emit has no such retain,
-# so the site mints one of its own.
+# suspending exit must leave it standing (docs/impl/region/signalexit.md); a
+# NON-TAIL emit has no such retain, so the site mints one of its own.
 #
 # The fault needs both ingredients, and the controls at the bottom remove one each:
 # resume the fiber to completion, emit something the body allocated, or emit
 # through the literal path, and the same program is balanced without an extra
-# reference. So a fix that mints unconditionally trades this fault for a per-park
-# leak, which the growth gauge at the end refuses.
+# reference. So a site that mints unconditionally trades this fault for a
+# per-park leak, which the growth gauge at the end refuses.
 #
 # Each witness reads its subject AFTER the abandoned fiber's region is gone —
 # through the borrow's own holder, through `fiber/value`, and through a container —

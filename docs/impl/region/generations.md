@@ -1,6 +1,6 @@
 # Region generations: stale derefs detonate in debug builds
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-21 -->
 
 The per-region generation counter and page stamps that turn a stale region deref
 into a debug-build panic at the deref site.
@@ -75,9 +75,9 @@ answers no region where no live region of this store owns the pointer.
 ### Every byte the magic screens has to be written
 
 The magic bounds a *coincidence*, so it holds only over bytes something chose.
-A claimed page's body is whatever its last occupant left ([model.md](model.md)
-§ "Page recycling"). The walk reads the word at offset 12 of every
-`base_page`-aligned address inside a large page. A 16-byte record that lands on
+A claimed page's body is whatever its last occupant left ([model.md](model.md)).
+The walk reads the word at offset 12 of every `base_page`-aligned address inside
+a large page. A 16-byte record that lands on
 one of those addresses, and leaves its last four bytes as padding, does not
 overwrite what was there: it publishes it. What was there can be a real
 `size_tag`, and then the walk stops at a forged base mid-page and the odds the
@@ -101,10 +101,9 @@ enum's unwritten payload bytes, and the tail of its LIR body; a syntax node had
 published the pad after its flag and the bytes a short kind leaves unwritten.
 So such a record is `repr(C)` and exactly its fields: a pad is a named field
 written zero, and a scalar an enum would leave half written is stored as its
-parts ([template.md](template.md) § "What the payload holds") or zeroed as the
-node is copied in, where the enum is the node's own kind
-([syntax.md](../syntax.md) § "The node"). Memcheck is the oracle:
-[valgrind.lisp](../../../tests/ratchet/valgrind.lisp) reads the error contexts
+parts ([template.md](template.md)) or zeroed as the node is copied in, where
+the enum is the node's own kind ([syntax.md](../syntax.md)). Memcheck is the
+oracle: [valgrind.lisp](../../../tests/ratchet/valgrind.lisp) reads the error contexts
 of a boot on both standard-library paths, and its ledger pins every one at
 zero.
 
@@ -113,9 +112,8 @@ least. It resolves a pointer through this same walk and then filters the answer
 by ownership. So the scan drops a forged id, and the real cross-region edge
 behind it goes with the id, while the table recorded at allocation still
 carries the edge. In a debug build the edge-table oracle reports the
-disagreement at the free ([ownership.md](ownership.md) § "The outgoing edge
-table"). In a release build the edge is never released, and the target region
-is held to teardown.
+disagreement at the free ([ownership.md](ownership.md)). In a release build
+the edge is never released, and the target region is held to teardown.
 
 `ensure_raw` carries an **always-on backstop**. The generation and ownership
 checks above are debug-only or bound to a store, so a release path could still
@@ -125,8 +123,8 @@ hand `ensure_raw` a garbage id from a stale or foreign read. An id past
 GB, and abort on allocation failure far from the deref. So `ensure_raw` panics
 there, naming the hazard, in every build. The region table is bounded by the
 most regions live at once, because every id reaches `free_physical` again,
-freed and never-materialized alike ([model.md](model.md) § "Physical id
-recycling"). A real id therefore never approaches the bound.
+freed and never-materialized alike ([model.md](model.md)). A real id
+therefore never approaches the bound.
 
 The backstop is not a detector. It makes the failure *loud* instead of an
 opaque OOM, and the deref site and the freeing region still come from the
@@ -175,11 +173,10 @@ dynamic-parameter bindings as a baseline frame (`prim_fiber_new`,
 `seed_child_inheritance`). Each heap value in that frame, for example a
 scheduler reached through a parameter, takes one seeding retain and a recorded
 `fiber → value` content edge. The fiber object's own free releases both
-([park.md](park.md) § "A child's inherited parameter baseline is a counted
-holder"). The check below is the oracle that the count holds: the borrowed
-region must outlive the borrowing fiber. Generations make that checked rather
-than assumed, so a missing or displaced retain panics at the resume boundary
-instead of surfacing as a stale read far from the seam.
+([park.md](park.md)). The check below is the oracle that the count holds: the
+borrowed region must outlive the borrowing fiber. Generations make that checked
+rather than assumed, so a missing or displaced retain panics at the resume
+boundary instead of surfacing as a stale read far from the seam.
 
 When the baseline is seeded, the fiber records each heap binding's
 `(parameter, region, generation)` (`param_borrows`, debug builds only). The

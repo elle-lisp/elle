@@ -1,10 +1,11 @@
-(elle/epoch 12)
-# audited: 2026-09-21
-# A dispatch stores into one fn-local mutable from each of its arms, and nothing
-# reads the binding afterward. The cell's content drop is one point, so it must
-# be a point every storing path reaches: the cell's own SCOPE NODE, which
-# contains every write by construction (docs/impl/region/bindings.md § "Where the
-# content drop lands").
+(elle/epoch 15)
+# audited: 2026-10-20
+# A dispatch that stores into one fn-local mutable from each arm drops the cell's content at its scope node.
+# docs/impl/region/bindings.md
+#
+# Nothing reads the binding after the dispatch. The cell's content drop is one
+# point, so it must be a point every storing path reaches: the cell's own SCOPE
+# NODE, which contains every write by construction.
 #
 # Placing the drop at the latest WRITE instead puts it inside one arm. Every
 # other arm then stores a value the cell's counted reference holds and nothing
@@ -45,7 +46,7 @@
   nil)
 
 # The same dispatch with the cell READ after it — the control whose phi read
-# places the drop without the floor. Bounded before this shape was.
+# places the drop without the floor.
 (defn dispatch-read []
   (var u nil)
   (let [k (get picker 0)]
@@ -123,8 +124,8 @@
           (string "the strand scales with the call count: " small
                   " over 200 calls vs " large " over 400")))
 
-# The control was bounded before the floor landed, so a regression that moves
-# only this number is a different defect from the one above.
+# The control does not need the floor, so a regression that moves only this
+# number is a different defect from the one above.
 (assert (%lt (growth 200 dispatch-read) 100)
         "the dispatch whose cell is read afterward is bounded")
 

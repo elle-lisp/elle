@@ -1,13 +1,16 @@
-(elle/epoch 12)
-# A timed-out bidi stream, caught, over a recycled session.
+(elle/epoch 15)
+# audited: 2026-10-20
+# Bidi streams run under `ev/timeout`, with and without `protect`, leave a recycled HTTP/2 session usable.
+# docs/concurrency.md
+# lib/http2.md
 #
 # Three mechanisms meet in a gRPC client and each one tears fibers down:
 # `ev/timeout` aborts the loser of its race on every call, a bidi stream
 # leaves a reader parked on the session's data queue, and recycling the
 # session closes the connection those readers are parked on. `protect`
-# around the timeout adds the fourth: the caller catches the timeout's
-# error instead of unwinding, so the fibers the timeout aborted are torn
-# down while their caller keeps running.
+# around the timeout adds the fourth: an error the timed work raises is
+# caught rather than unwinding the caller, so the fibers the timeout
+# aborted are torn down while their caller keeps running.
 #
 # The invariant is that the session stays usable through all of it. Each
 # phase below runs bidi streams under `ev/timeout`, recycles the session,
@@ -19,7 +22,7 @@
 # message count and size, so the timed-out streams are still moving bytes
 # when the recycle closes the connection under them.
 #
-# See docs/concurrency.md § ev/timeout and lib/http2/session.lisp.
+# The session is lib/http2/session.lisp.
 
 (def http2 ((import "std/http2")))
 
@@ -157,7 +160,7 @@
 (each round in (range 0 3)
   (within (string "uncaught round " (string round)) (fn [] (cycle-uncaught 5))))
 
-# ── Phase 2: the same, with the timeout's error caught ───────────────
+# ── Phase 2: the same, with every timeout under protect ──────────────
 
 (println "the same with protect around every timeout...")
 

@@ -1,8 +1,7 @@
-(elle/epoch 12)
-# A fn-local reassigned mutable is a 1-slot container, and a container's
-# reference to its content needs TWO release channels, not one
-# (docs/impl/region/bindings.md § "Reassigned mutable bindings are 1-slot
-# containers").
+(elle/epoch 15)
+# audited: 2026-10-20
+# A fn-local reassigned mutable is a 1-slot container whose reference to its content needs two release channels.
+# docs/impl/region/bindings.md
 #
 # The cell holds exactly one reference to whatever it currently points at. That
 # reference dies at the OVERWRITE for every displaced prior, and at the cell's
@@ -30,14 +29,12 @@
 # only one of them would name the producer discipline rather than the container.
 #
 # The cell's INIT is content too, and a HEAP init is what separates the model's
-# gate from the model (docs/impl/region/bindings.md § "The gate", "A loop
-# parameter's init source is not a second holder"). Functionalization names a
-# loop-carried cell twice — the pre-loop version and the loop parameter its init
-# forwards to — so a sole-held check that counts bindings reads one name as two
-# holders and refuses the whole model. A `nil` init carries no region and so
-# never exposes it, which is why every heap-init face below is driven beside its
-# nil-init twin above: a rate that moves for one and not the other names the
-# gate, not the channels.
+# gate from the model. Functionalization names a loop-carried cell twice — the
+# pre-loop version and the loop parameter its init forwards to — so a sole-held
+# check that counts bindings reads one name as two holders and refuses the whole
+# model. A `nil` init carries no region and so never exposes it, which is why
+# every heap-init face below is driven beside its nil-init twin above: a rate
+# that moves for one and not the other names the gate, not the channels.
 
 (defn measure (thunk warm window)
   (var i 0)
@@ -202,7 +199,7 @@
 # and the cell's demise straddle a park, so a release aimed at the forwarded init
 # fires against a parked frame's mapping. Guardfree over a pinned corpus is
 # necessary and not sufficient — a park is where an over-wide release survives
-# every non-parking pin and dies in the corpus — so the shape the gate now admits
+# every non-parking pin and dies in the corpus — so the shape the gate admits
 # is driven across one here as well as in the leak dashboard.
 (defn heap-init-fiber (n)
   (let [f (fiber/new (fn []
@@ -220,16 +217,16 @@
         (when (int? v) (assign sum (+ sum v)))))
     sum))
 
-# ── refusal controls: correctness only, boundedness NOT claimed ───
-# Both shapes must keep FAILING the gate, so neither is asserted bounded — the
-# fallback is the unsuppressed baseline, which over-keeps. What they pin is that
-# the exclusion stays narrow: admitting either would put two release channels
-# against the one reference the cell holds, and the reads below would see a
-# freed value.
+# ── edge-of-the-gate controls: correctness only, boundedness NOT claimed ───
+# Neither shape is asserted bounded here: region-cell-aliased-init.lisp and
+# region-cell-forward-chain.lisp gauge their rates. What these pin is that no
+# second release channel reaches the one reference the cell holds, because the
+# reads below see a freed value if one does.
 #
 # A genuine alias: `keep` is a DIFFERENT source name holding the same region, so
-# it is not a forwarding edge and the region-keyed suppression would cancel its
-# own decref while it still holds the value.
+# it is not a forwarding edge and the fold refuses it — the region-keyed
+# suppression would cancel `keep`'s own decref while it still holds the value.
+# The cell counts the init instead.
 (defn heap-init-aliased (n)
   (var last (string "init"))
   (var keep last)
@@ -240,8 +237,9 @@
   (length keep))
 
 # Two sequential loops over one cell: the second loop's parameter forwards from
-# the first loop's parameter, which carries a cell of its own whose content drop
-# the region-keyed suppression does not cancel.
+# the first loop's, which carries a cell of its own. The fold follows the chain
+# whole, so the forwarding link emits no content drop and the reference the
+# chain hands along has one release.
 (defn heap-init-seq2 (n)
   (var last (string "init"))
   (var i 0)
@@ -253,7 +251,7 @@
     (assign i (%add i 1)))
   (get last :x))
 
-# ── controls: bounded already ─────────────────────────────────────
+# ── controls: the module-scope container, and no cell at all ──────
 # The module-scope 1-slot container (donation + frame teardown) and the same
 # loop with no cell at all bracket the diagnosis from the other side.
 (var mod-last nil)
@@ -423,9 +421,9 @@
         (concat "a heap init stored into a longer-lived container did not survive "
                 "the overwrite that displaced it, sum=" (number->string hesc)))
 
-# The refusal controls: not asserted bounded (the gate refuses them, so the
-# fallback over-keeps), but every value must still be readable — an exclusion
-# widened to either shape frees one of these under its own reader.
+# The edge-of-the-gate controls: not asserted bounded here, but every value must
+# still be readable — a second release channel on either shape frees one of
+# these under its own reader.
 (var hrefuse 0)
 (var hr 0)
 (while (%lt hr 500)

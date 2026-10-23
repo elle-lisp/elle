@@ -1,20 +1,21 @@
-(elle/epoch 12)
-# Soundness complement of region-fiber-child-effect.lisp: declaring `fiber/child`
-# and `import` `Opaque` must not free anything early.
+(elle/epoch 15)
+# audited: 2026-10-20
+# Declaring `fiber/child` and `import` `Opaque` frees nothing early: the soundness face of region-fiber-child-effect.lisp.
+# docs/impl/region/effects.md
+# docs/impl/escape.md
 #
 # The declaration says two things and no more: the result may live anywhere (so the
 # walk keeps recording `result ⊒ each argument`), and no argument is stored
 # uncounted (so escape seeds nothing on its store facet). What that withdraws is
 # the false store facet, and with it the refusal it forced on every mechanism gated
-# on `frame_held_regions` — the branch-arm release window among them
-# (docs/impl/region/effects.md § `Opaque`; docs/impl/escape.md).
+# on `frame_held_regions` — the branch-arm release window among them.
 #
-# So the hazards are the ones the withdrawn refusal used to mask, and they are
-# about the ARGUMENT: its release now lands at the branch merge rather than inside
-# the arm that names it last, so it must still land behind every later reader. The
-# witnesses drive a fiber read after the branch, resumed after it, stored into a
-# container a sibling arm reads, returned to a caller that resumes it, captured by
-# a closure called later, and held across the fiber frontier — plus the same shapes
+# So the hazards are the ones a store-facet refusal masks, and they are about the
+# ARGUMENT: its release lands at the branch merge rather than inside the arm that
+# names it last, so it must still land behind every later reader. The witnesses
+# drive a fiber read after the branch, resumed after it, stored into a container
+# a sibling arm reads, returned to a caller that resumes it, captured by a
+# closure called later, and held across the fiber frontier — plus the same shapes
 # for `import`'s specifier. Each read reaches the subject's own pages (`fiber/bits`
 # reads the fiber object; a resume runs its body out of them), so an over-early
 # free faults rather than reading stale but mapped bytes. A fresh subject per
@@ -119,7 +120,7 @@
     _ 0)
   (length (concat (get specs (%sub (length specs) 1)) "!")))
 
-# ── controls: the same reads with no branch — correct now ────────────────────
+# ── controls: the same reads with no branch ──────────────────────────────────
 (defn c-plain (f)
   (fiber/child f)
   (length (fiber/resume f)))

@@ -1,4 +1,4 @@
-// audited: 2026-10-16
+// audited: 2026-10-20
 //! The region-inference pipeline: the walk, then every post-pass that decides
 //! where a release lands. The order is the point — each pass reads answers the
 //! ones before it settled.
@@ -176,8 +176,7 @@ pub fn analyze_regions_with(
     // Which regions a value-routed release can NAME — the releases the frame-exit
     // relocation is able to replicate into a branch arm, and so the regions the
     // branch-arm window may anchor when an arm leaves through a frame-replacing
-    // callee (region/window.md § "An arm that leaves through a callee takes a
-    // replica, not the anchor"). Recorded here, beside the other admission the
+    // callee (region/window.md). Recorded here, beside the other admission the
     // window owes, because the mirror of the lowerer's `region_to_slot` reads
     // `binder_init_sites` — which the walk holds and the decref passes do not.
     info.value_routed_regions =
@@ -250,7 +249,7 @@ pub fn analyze_regions_with(
     info.branch_arm_decrefs = branch_comp.tail;
     info.container_release_sites = branch_comp.container_release_sites.into_iter().collect();
 
-    // The builder-idiom merge seed (docs/impl/region/merging.md § Merging). Its
+    // The builder-idiom merge seed (docs/impl/region/merging.md). Its
     // coincident-decref_point gate reads the final `region_data`, so it follows
     // every decref_point post-pass above. The lowerer consumes the
     // resulting `merged_parent` forest through `static_slot`'s `merged_root`
@@ -258,21 +257,19 @@ pub fn analyze_regions_with(
     // identity, i.e. the unmerged baseline.
     info.merged_parent = super::merge::compute_merges(hir, arena, &info, &escape_info, &order);
 
-    // The letrec closure-cycle merge (docs/impl/region/letrec.md § The letrec
-    // closure-cycle merge): a self/mutual
+    // The letrec closure-cycle merge (docs/impl/region/letrec.md): a self/mutual
     // recursive closure SCC and its prebound capture cells collapse onto one arena,
     // extending the same `merged_parent` forest and riding the same `merged_root`
     // canonicalization as the builder-idiom seed. Unconditional (not flag-gated), so it
     // lands on every tier. The single `DecrefRegion` fires at the root region's
-    // `decref_point`, set here to the merge's own `drop_site` (region/adopt.md § The
-    // lifetime obligation the root carries). That is normally the cycle's binding scope
+    // `decref_point`, set here to the merge's own `drop_site` (region/adopt.md).
+    // That is normally the cycle's binding scope
     // — the `letrec` that prebinds the members' capture cells — whose scope-exit
     // post-dominates every direct use of the members (they are bound there), while a
     // foreign capture of a member is RC-counted and outlives the single decref. Where
     // the letrec hands a member OUT it is instead the release point that member's own
     // region already carries, so the arena follows the value past the binding scope
-    // rather than being taken to zero under it (region/letrec.md § "Drop site —
-    // following a handed-out member"). Runs after the builder seed (it shares the map)
+    // rather than being taken to zero under it (region/letrec.md). Runs after the builder seed (it shares the map)
     // and before the ownership pass (so `is_merged` excludes these members).
     for cm in super::merge::compute_closure_cycle_merges(hir, arena, &info, &escape_info, &order) {
         for &m in &cm.members {
@@ -288,7 +285,7 @@ pub fn analyze_regions_with(
         // strands the binding-scope drop past the frame-replacing `TailCall`; the
         // lowerer keys `deferred_release_slot = static_slot(root)` at each such site so a
         // closure callee's frame replacement is balanced by the activation-completion
-        // adopt (region/letrec.md § The letrec closure-cycle merge). A member tail
+        // adopt (region/cycletail.md). A member tail
         // keeps its own `stranded_cycle_bindings` channel and is not recorded here.
         for &site in &cm.tail_release_sites {
             info.cycle_tail_release.insert(site, cm.root);
@@ -312,8 +309,8 @@ pub fn analyze_regions_with(
     );
 
     // Which `Emit` sites yield a payload their own body releases nowhere, so the
-    // lowerer can mint the body's missing reference there (docs/impl/region/park.md
-    // § "A fiber body owns one reference of every value it yields"). Runs after
+    // lowerer can mint the body's missing reference there (docs/impl/region/park.md).
+    // Runs after
     // every decref_point post-pass and both merge seeds: the
     // question is where a region's release lands, and a merged child's release is
     // its root's.

@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-10-20
 //! The forwarding chain functionalization gives one reassigned name, and what
 //! the gate reads off it.
 //!
@@ -90,9 +90,8 @@ impl Reassigns {
     /// Two sequential loops over one binding chain the edges
     /// (`last#2 ← last#1 ← last#0`), and each link hands the one reference on, so
     /// the whole chain resolves to its final version
-    /// (docs/impl/region/bindings.md § "A chain of forwarding edges hands one
-    /// reference along, so the fold follows it whole"). The walk is bounded by
-    /// the edge count so a malformed map cannot spin.
+    /// (docs/impl/region/bindings.md). The walk is bounded by the edge count so a
+    /// malformed map cannot spin.
     pub(super) fn last_of_chain(next: &HashMap<Binding, Binding>, b: Binding) -> Binding {
         let mut cur = b;
         for _ in 0..next.len() {

@@ -1,12 +1,13 @@
-(elle/epoch 12)
-# audited: 2026-09-21
+(elle/epoch 15)
+# audited: 2026-10-20
+# A walk's element name is the store's feeder, not a second holder, so the cell keeps the 1-slot-container model.
+# docs/impl/region/bindings.md
+#
 # A walk over a freshly-built collection assigns each element to a fn-local
 # mutable and reads the binding afterward. The element arrives through a name of
 # the walk's own — `each` binds one, `(let [p (get items idx)] …)` — and that
 # name is the store's FEEDER: nothing reads it after the store, so the cell's
-# store-site pin lands where the name dies and the 1-slot-container model holds
-# (docs/impl/region/bindings.md § "A name the store consumes is not a second
-# holder of the value").
+# store-site pin lands where the name dies and the 1-slot-container model holds.
 #
 # Reading the feeder as a second holder of the stored value refuses the model,
 # and the unsuppressed baseline it falls back to cannot bound a loop: the
@@ -31,7 +32,7 @@
   u)
 
 # The control: the element read stored straight into the cell, so the value's
-# only name is the compiler's own ANF temp. Bounded before this shape was.
+# only name is the compiler's own ANF temp.
 (defn last-pair-direct []
   (var u nil)
   (let [items (pairs table)]
@@ -102,9 +103,9 @@
                   " on 3 entries vs " large " on 12, over 200 calls")))
 
 # ── 4. The control reads the same ───────────────────────────────────────
-# The direct store was bounded before the feeder exclusion landed, so a
-# regression that only moves this number is a different defect from the one
-# above. The pair isolates the element NAME rather than the walk.
+# The direct store does not need the feeder exclusion, so a regression that
+# only moves this number is a different defect from the one above. The pair
+# isolates the element NAME rather than the walk.
 (assert (%lt (growth 200 last-pair-direct) 100)
         "the directly-stored element read is bounded")
 

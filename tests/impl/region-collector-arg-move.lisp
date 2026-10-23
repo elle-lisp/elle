@@ -1,7 +1,7 @@
-(elle/epoch 14)
-# audited: 2026-10-05
-# A fresh heap value handed to a collector parameter over a frame-replacing tail
-# call, and what the callee owes for it.
+(elle/epoch 15)
+# audited: 2026-10-20
+# A collector parameter takes over the reference a frame-replacing tail call moves into it.
+# docs/impl/region/relocate.md
 #
 # A tail call MOVES its arguments: the caller does not incref them, and the
 # release it never runs is the reference the callee's owned-param release
@@ -11,10 +11,8 @@
 # reference to each member. The caller's moved reference is a second one, and
 # nothing in the callee names it.
 #
-# docs/impl/region/mechanism.md § "A collector parameter takes the moved
-# reference over itself" owns the argument. This file measures the rate, per
-# call, on the object and region counts, against the rows of
-# tests/ledger/region-collector-arg-move.lisp.
+# This file measures the rate, per call, on the object and region counts,
+# against the rows of tests/ledger/region-collector-arg-move.lisp.
 #
 # ── The counter-factual ──────────────────────────────────────────────
 #

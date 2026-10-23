@@ -1,4 +1,4 @@
-// audited: 2026-10-07
+// audited: 2026-10-20
 //! Hygienic macro expansion: the macro table, the scope counter hygiene turns
 //! on, and the walk that rewrites a form until no macro heads it.
 //!
@@ -41,7 +41,7 @@ pub struct Expander {
     /// Where macro templates are copied to when a macro is defined. This is
     /// the instance's process-root syntax arena: a `MacroDef` outlives the
     /// unit that defined it and every unit that expands it
-    /// (docs/impl/syntax.md § "Where a node lives").
+    /// (docs/impl/syntax.md).
     templates: SyntaxArena,
     macros: HashMap<String, MacroDef>,
     /// Compile-time values defined by `begin-for-syntax` blocks.
@@ -295,7 +295,7 @@ impl Expander {
         // transformer's `gensym`/`syntax->datum`/`read` (via `ctx.vm().symbols()`)
         // interns into the same table the expander threads. Idempotent across
         // recursion; the table is reborrowed per transformer call, never touched
-        // simultaneously (docs/impl/region/ctx.md § "Symbols").
+        // simultaneously (docs/impl/region/ctx.md).
         vm.set_symbols(symbols as *mut SymbolTable);
         // Keyword spellings must be learned BEFORE expansion: a macro argument
         // or quasiquote template round-trips a keyword as a bare hash, and the

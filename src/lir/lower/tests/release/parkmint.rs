@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-20
 //! The reference a park mints for a payload the emitting body borrows, and the
 //! receipt each site's release of it carries.
 //!
@@ -84,8 +84,7 @@ fn park_mints_nothing_for_a_body_allocated_payload() {
 /// The `(retains, releases)` a NON-TAIL dynamic emit is wrapped in — retains
 /// before the `SuspendingCall` in its block, releases after it. The park is an
 /// ordinary call here, so the resume lands at the next instruction rather than in
-/// a block of its own (docs/impl/region/park.md § "What yields is the emit
-/// OPERATION, not the `Emit` node").
+/// a block of its own (docs/impl/region/park.md).
 fn dynamic_park_borrow_ops(module: &FrozenModule) -> (usize, usize) {
     fn in_func(func: &LirOwned) -> Option<(usize, usize)> {
         let (b, at) = suspending_call(func)?;
@@ -165,8 +164,7 @@ fn stamped_value_routes(instrs: &[InstrRef<'_>]) -> Vec<(u16, bool)> {
 #[test]
 fn a_non_tail_dynamic_emit_payload_release_carries_its_receipt() {
     // The site's payload release is a recorded value route, not a bare pair
-    // (docs/impl/region/mechanism.md § "An abandoned frame runs the releases it
-    // still owes"). Two things make it one, and both matter where the signal
+    // (docs/impl/region/unwind.md). Two things make it one, and both matter where the signal
     // turns out to be TERMINAL: the nil stamp, so a restart's replay of the
     // continuation cannot run the release the walk already ran, and the table
     // entry, so a fiber nobody restarts reaches the release at all.
@@ -209,8 +207,7 @@ fn a_non_tail_dynamic_emit_payload_release_carries_its_receipt() {
 #[test]
 fn a_borrowed_emit_payload_release_carries_its_receipt() {
     // The literal `Emit` twin of the dynamic site's receipt above
-    // (docs/impl/region/unwind.md § "An abandoned frame runs the releases it
-    // still owes"). The release is first in the resume block, and it must stamp
+    // (docs/impl/region/unwind.md). The release is first in the resume block, and it must stamp
     // the slot it read and appear in the frame's release table.
     //
     // Counterfactual — with the pair alone, a park that an abort raises in place

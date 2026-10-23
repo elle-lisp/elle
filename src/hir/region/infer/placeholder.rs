@@ -1,4 +1,4 @@
-// audited: 2026-09-16
+// audited: 2026-10-20
 //! The phantom placeholder regions: a value with no compiled allocation to
 //! name still needs a release, so it is given a region of its own.
 //!
@@ -10,14 +10,12 @@ use super::*;
 impl RegionInference {
     /// Give every rest name a `Match` arm binds to a BUILT collection a
     /// placeholder region of its own, and hand that region to the name
-    /// (docs/impl/region/anchors.md § "A rest pattern's collection is built,
-    /// not read out").
+    /// (docs/impl/region/anchors.md).
     ///
     /// A bare name and nothing else. A decision tree loads each name by walking
     /// its own access path and re-runs the build on every path through the
     /// rest, so a collection a further pattern matched has as many allocations
-    /// as it has names and one placeholder would not cover them
-    /// (docs/impl/region/anchors.md § "Where the holder set stops").
+    /// as it has names and one placeholder would not cover them.
     pub(super) fn record_match_rest_regions<'p>(
         &mut self,
         node: HirId,
@@ -47,9 +45,7 @@ impl RegionInference {
     /// takes the n-th placeholder at the n-th build, so the ORDER is the key
     /// and a name only decides where the release lands. An entry whose
     /// sub-pattern binds no name still takes a region — no holder reaches it,
-    /// so it keeps the base pin at this node
-    /// (docs/impl/region/anchors.md § "A rest pattern's collection is built,
-    /// not read out").
+    /// so it keeps the base pin at this node (docs/impl/region/anchors.md).
     pub(super) fn record_destructure_rest_regions(&mut self, node: HirId, pattern: &HirPattern) {
         if self.pattern_rest_regions.contains_key(&node) {
             return;
@@ -111,9 +107,7 @@ impl RegionInference {
     /// to the outermost enclosing loop: the box is minted once per activation,
     /// so its release must fire once per activation — a binding-last-use
     /// release that sits inside a loop frees the box on iteration 1 and the
-    /// next iteration reads the recycled cell (the env-cell-in-loop UAF;
-    /// docs/impl/region/cells.md "Env cells in loops: release once per
-    /// activation, not per iteration").
+    /// next iteration reads the recycled cell (docs/impl/region/cells.md).
     /// This mirrors the captured-param treatment in the Lambda arm. Returns the
     /// placeholder region iff the binding is such an env cell; `None` for
     /// top-level captured defs (compiled `MakeCaptureCell`, already released)

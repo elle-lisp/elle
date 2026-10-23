@@ -1,6 +1,6 @@
 # What the experiments measured
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-20 -->
 
 Eight questions the image design turned on, each answered by an experiment,
 with the numbers it produced.
@@ -48,8 +48,7 @@ and [plan.md](plan.md) the order everything lands in.
    static scan found zero top-level `assign`s in stdlib.lisp, so every
    cell snaps. The unsealed leaves are exactly the reconstruction stream's
    two classes: the three stdio-port `External`s and the two default
-   traitsets ([image.md](../image.md) § "Process-owned resources reconstruct
-   in place"); nothing else in the graph is refused, so the boot image is
+   traitsets ([sealing.md](sealing.md)); nothing else in the graph is refused, so the boot image is
    dumpable. Relocation load: 1,258 heap-pointer slots + 350 `RegionSlice`
    ptrs + 684 primitive slots ≈ 2,300 relocation entries.
 
@@ -65,7 +64,7 @@ and [plan.md](plan.md) the order everything lands in.
 3. **The store spike — dispatched, mechanism proven.** `src/image` dumps
    and hydrates data-only graphs (pairs, strings, bytes, arrays, floats,
    portable immediates) end to end, pinned by `tests/integration/image.rs`
-   against [plan.md](plan.md) § Test plan: round-trip equality in a fresh
+   against [plan.md](plan.md): round-trip equality in a fresh
    heap, sharing preservation, corrupted-fingerprint fallback with no leaked
    region or mapping, double hydration with independent address sets,
    rename-over-a-live-mapping, teardown to baseline, and file-backed release
@@ -74,7 +73,7 @@ and [plan.md](plan.md) the order everything lands in.
    flag the release path checks. Two findings: relocation slots and targets
    collapse to region-relative offsets (recorded in [format.md](format.md)),
    and raw object-slot bytes are not byte-deterministic under `repr(Rust)`
-   padding (recorded in [image.md](../image.md) § Dumping; resolved by item
+   padding (recorded in [image.md](../image.md); resolved by item
    6's extent copy). The three the spike left open have since landed with the
    **store** milestone: the `(fd, offset)` input form with an anonymous
    memory file for byte sources, the verifier's object walk, and the
@@ -192,17 +191,17 @@ and [plan.md](plan.md) the order everything lands in.
    extents, and a canonicalize-then-read-back check per variant — and
    panic on violation, so a rustc that moves the tag or reorders fields
    fails loudly before any image is written or trusted. The unlock
-   ([image.md](../image.md) § Dumping): the dumper assembles object slots
+   ([image.md](../image.md)): the dumper assembles object slots
    from the extents, dumps are byte-identical whole files, and the
    determinism pin asserts whole-file equality with a poisoned-padding
    counter-factual.
 7. **Region-native LIR — measured, one premise corrected.** The design kept
    LIR out of the body and planned an encoded side-stream to carry it
-   ([image.md](../image.md) § JIT). One premise behind that was that a
+   ([image.md](../image.md)). One premise behind that was that a
    region-native LIR wins nothing: the JIT reads a function's LIR once, at
    promotion, on a background thread. That covered the steady state and left
    the compile path unmeasured, where the lowerer builds the LIR of 3,700
-   lines of library on every cache miss. `benches/lirshape` measures it. A
+   lines of library on every cache miss. `benches/lirshape` measured it. A
    48-byte POD node in region pages runs against the 104-byte `SpannedInstr`,
    both carrying the same graph. The bench asserts that the instruction and
    register-operand counts agree, so a prototype that dropped part of the graph
@@ -301,7 +300,7 @@ and [plan.md](plan.md) the order everything lands in.
    Splices are one operation in a hundred, and every run the lowerer takes
    out of a block is spliced somewhere.
 
-   `benches/lirshape` replays that shape over the same corpus twice. Each
+   `benches/lirshape` replayed that shape over the same corpus twice. Each
    instruction is one push, each block one `finish_block`, and a nested lambda
    is replayed at its `MakeClosure`. Every tail call takes one move and one
    replica, which comes to 920 splices of four nodes against the lowerer's
@@ -344,8 +343,7 @@ and [plan.md](plan.md) the order everything lands in.
    compile-time cost. Growth leaves dead extents in the working region, bounded
    by the nodes the compile wrote and freed with that region. The prototype's
    21 calls a round are the replay's own. The port freezes each finished
-   function into exact-size `Vec`s ([lir.md](../lir.md) § "The working form"),
-   which costs a fixed handful of calls per function rather than one per
+   function into exact-size `Vec`s ([lir.md](../lir.md)), which costs a fixed handful of calls per function rather than one per
    instruction.
 
    To redo: run the bench where item 7 says. For the op mix, apply a counter

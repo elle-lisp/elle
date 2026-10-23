@@ -1,4 +1,7 @@
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-10-20
+//! A `break` to a block in tail position is in tail position too, so its value takes one return mint.
+//!
+//! docs/impl/region/anchors.md
 //!
 //! The property under test is the one this pass shares with `mark_tail_calls`:
 //! **a `break` targeting a block that is in tail position is itself in tail
@@ -7,8 +10,7 @@
 //! `tail_blocks` set for exactly that reason, and an iterative node between the
 //! block and the break — `Loop` or `While` — must carry it through even as
 //! `in_tail` goes false: the break jumps *past* the loop to the block's exit
-//! label (docs/impl/region/mechanism.md § "A break out of a TAIL block carries
-//! the return mint").
+//! label.
 //!
 //! Without the mint the returned value leaves with no owning reference while the
 //! release pinned at the exit label still fires, so the caller reads a freed
@@ -132,7 +134,7 @@ fn break_to_an_interior_block_through_a_loop_takes_no_mint() {
 #[test]
 fn a_call_in_break_position_is_minted_once_through_its_anf_name() {
     // The mint is emitted exactly once per returned value
-    // (docs/impl/region/mechanism.md § "The return mint is emitted exactly once").
+    // (docs/impl/region/mechanism.md).
     // ANF names a call's result, so the mint lands on the NAME — balanced by that
     // binding's own `decref_point` — not a second time around the call itself.
     let hir = fhir("(defn k [x] x) (fn [] (forever (break (k (string \"s\")))))");

@@ -1,14 +1,15 @@
-(elle/epoch 13)
-# audited: 2026-09-30
+(elle/epoch 15)
+# audited: 2026-10-20
 # Fiber-internal yielding loops, drained so loop-scope reclamation fires, and the channel send/receive round trip.
-#
 # docs/impl/region/diagnostics.md
+# docs/impl/region/effects.md
+#
 # ── Fiber-internal yielding loops ─────────────────────────────────────
 # The loop and the yield live inside the fiber. The run-block creates a fiber
 # that runs b internal iterations then COMPLETES, and drains it — so loop-scope
-# reclamation fires exactly as in the originals (a forever-generator never exits
-# its loop, so per-iteration values that reclaim at scope-exit would falsely read
-# as leaks). Flip rotation at the yield back-edge is the mechanism under test.
+# reclamation fires (a forever-generator never exits its loop, so per-iteration
+# values that reclaim at scope-exit would falsely read as leaks). Per-iteration
+# reclamation across the yield back-edge is what is under test.
 (defn drain-block [make b]
   (let [f (make b)]
     (while (not= (fiber/status f) :dead) (fiber/resume f))))
@@ -91,17 +92,16 @@
                                          (yield i)
                                          (assign i (%add i 1)))) |:yield|)) b)))
 
-# ── Channel send/recv — the genuinely-Shared (class 7) incoming-count ──
+# ── Channel send/recv — a genuinely Shared message ─────────────────────
 # `chan/send` is the sole `RegionEffect::Sends` declarant: its message crosses the
 # fiber frontier (it rides the channel buffer, by pointer, to the receiving fiber),
-# so it can never be Owned by a bounded activation and stays on the incoming-count
-# (per-region RC) path — the always-Shared class. The send seam increfs the
-# message region at the enqueue to hold it in the buffer until received ("a store
-# into a Shared region bumps its count"); the receive removes it from the buffer, so
-# its region's incoming count is lowered there ("an overwrite/drop lowers it" —
-# region/ownership.md § class 7, the Shared incoming-count). Reclaimed: rate 0. The
-# fresh channel each block is created and freed within the run-block, so only the
-# per-op message reclamation shows; it reads 2/op without the receive-side release.
+# so it can never be Owned by a bounded activation and stays on the per-region RC
+# baseline (docs/impl/region/effects.md, docs/impl/region/ownership.md). The send
+# seam increfs the message region at the enqueue to hold it in the buffer until
+# received; the receive removes it from the buffer and lowers its region's count
+# there. Reclaimed: rate 0. The fresh channel each block is created and freed
+# within the run-block, so only the per-op message reclamation shows; it reads
+# 2/op without the receive-side release.
 (r:drive "chan-send-recv"
          (fn [b]
            (when (%not (%int? b)) (error :block-not-int))

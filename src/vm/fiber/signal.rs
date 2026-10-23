@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-10-20
 //! The interpreter-level SIG_RESUME handlers, and the trampoline entry
 //! `do_fiber_resume`.
 //!
@@ -14,10 +14,9 @@ use super::*;
 
 impl VM {
     /// Promote a fiber to `:dead` and free everything it owns — the halt-promotion
-    /// twin of `with_child_fiber`'s completion arm (docs/impl/region/owner.md
-    /// § "Owner nodes" — "Fiber teardown frees everything the fiber owns"). Dead is
-    /// terminal (`fiber/resume` refuses it), so the parked chain and owner nodes can
-    /// never be replayed. An `:error` promotion must NOT come here — an errored
+    /// twin of `with_child_fiber`'s completion arm (docs/impl/region/owner.md).
+    /// Dead is terminal (`fiber/resume` refuses it), so the parked chain and
+    /// owner nodes can never be replayed. An `:error` promotion must NOT come here — an errored
     /// fiber is resumable (the restarts system) and keeps its parked state.
     fn finalize_dead_fiber(&mut self, handle: &FiberHandle) {
         let owned = handle.with_mut(|fiber| {
@@ -59,16 +58,15 @@ impl VM {
         // Skip a child already seeded at CREATION (`fiber/new` snapshots the
         // creator's parameter bindings into `param_frames`): overwriting it here
         // with THIS fiber's current frames would install the resumer's bindings
-        // instead of the creator's — the exact ev/spawn bug creation-time capture
-        // fixes. Seed only a still-unseeded New child, from a non-empty baseline.
+        // instead of the creator's. Seed only a still-unseeded New child, from a
+        // non-empty baseline.
         let (child_is_new, child_unseeded) =
             handle.with(|f| (f.status == FiberStatus::New, f.param_frames.is_empty()));
         if child_is_new && child_unseeded && !self.fiber.param_frames.is_empty() {
             let flat = flatten_param_frames(&self.fiber.param_frames);
             #[cfg(debug_assertions)]
             let borrows = record_param_borrows(&flat, self.heap());
-            // The seeded baseline is a counted holder (docs/impl/region/park.md
-            // § "A child's inherited parameter baseline is a counted holder"):
+            // The seeded baseline is a counted holder (docs/impl/region/park.md):
             // retain each heap entry and record the fiber → value edge; the
             // fiber object's free releases them through the baseline walk.
             super::retain_param_baseline(unsafe { &mut *self.heap_ptr }, fiber_value, &flat);
@@ -104,9 +102,7 @@ impl VM {
     /// trampoline via `pending_fiber_resume`, and returns SIG_SWITCH. The
     /// trampoline descends iteratively; on the child's completion its unwind
     /// loop resumes our continuation frame with the result pushed.
-    // `pub(in crate::vm)`: originally `pub(super)` in `fiber.rs` (super = `vm`);
-    // moving the method one level deeper preserves the same effective visibility,
-    // as `crate::vm::signal` is the caller.
+    // `pub(in crate::vm)`: `crate::vm::signal` is the caller.
     pub(in crate::vm) fn handle_fiber_resume_signal(
         &mut self,
         fiber_value: Value,
@@ -134,7 +130,7 @@ impl VM {
                 .unwrap_or_default();
             // MOVE what the caller's activation owes into its continuation park — this
             // activation unwinds with the SIG_SWITCH handoff
-            // (docs/impl/region/owner.md § "Owner nodes").
+            // (docs/impl/region/owner.md).
             let activation_dues = self.take_activation_dues();
             // The closure that called `fiber/resume` is the one to resume into.
             let current_closure = self.fiber.current_closure;
@@ -200,7 +196,7 @@ impl VM {
                         .unwrap_or_default();
                     // MOVE what the caller's activation owes into its continuation park —
                     // this activation unwinds with the child's suspending
-                    // signal (docs/impl/region/owner.md § "Owner nodes").
+                    // signal (docs/impl/region/owner.md).
                     let activation_dues = self.take_activation_dues();
                     // Caller activation's remap (the resumed sub-fiber runs
                     // on its own frame stack; this frame continues us).
@@ -230,8 +226,7 @@ impl VM {
     /// retain, the compiler's owned-arg releases, and the `Return` that hands
     /// the child's result up — which the standard interrupted-frame park
     /// captures and the resume replays (see the in-body comment).
-    // `pub(in crate::vm)`: see `handle_fiber_resume_signal` — same widening from
-    // the original `pub(super)` in `fiber.rs` to keep `crate::vm::signal` reach.
+    // `pub(in crate::vm)`: `crate::vm::signal` is the caller.
     pub(in crate::vm) fn handle_fiber_resume_signal_tail(
         &mut self,
         fiber_value: Value,

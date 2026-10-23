@@ -1,10 +1,14 @@
+// audited: 2026-10-20
 //! Value constructors for immediate (non-heap) types.
 //!
 //! Heap values are built through the region-and-heap-explicit
 //! `crate::value::build::*` source (and the ergonomic `NativeCtx`/`Alloc`
 //! `ctx.*` surface that forwards to it). There is no heap-free `Value::*`
 //! heap constructor: a heap allocation names the heap it is born on or it does
-//! not compile (tls.md § "The honesty invariant").
+//! not compile.
+//!
+//! docs/impl/values.md
+//! docs/impl/region/ctx.md
 
 use super::{Value, TAG_CPOINTER, TAG_FLOAT, TAG_INT, TAG_KEYWORD, TAG_SYMBOL};
 
@@ -57,8 +61,8 @@ impl Value {
     /// Create a keyword value from a name string. Identity only — the
     /// spelling is recorded nowhere; display resolves it through the
     /// per-instance memo and the static vocabulary
-    /// (docs/impl/symbol.md § "The display memo"). `const`, so a well-known
-    /// keyword can be a constant.
+    /// (docs/impl/symbol.md). `const`, so a well-known keyword can be a
+    /// constant.
     #[inline]
     pub const fn keyword(name: &str) -> Self {
         Value {
@@ -103,10 +107,11 @@ impl Value {
     /// Create a native function value from a static primitive definition.
     ///
     /// A native-fn is an IMMEDIATE: `Value{TAG_NATIVE_FN, prim_id}`, where the
-    /// prim_id is the def's dense index in `primitives::table()`. It carries no
-    /// heap payload and no region — a native-fn is a `&'static PrimitiveDef`,
-    /// nothing to reclaim. Identity is by prim_id (the immediate eq path),
-    /// portable across `send`/`spawn`, and the switch key for tier-2 lowering.
+    /// prim_id is the def's dense index in the primitive registry
+    /// (`prim_id_of`). It carries no heap payload and no region — a native-fn
+    /// is a `&'static PrimitiveDef`, nothing to reclaim. Identity is by prim_id
+    /// (the immediate eq path), portable across `send`/`spawn`, and the key the
+    /// WASM host dispatches on.
     #[inline]
     pub fn native_fn(def: &'static crate::primitives::def::PrimitiveDef) -> Self {
         Value {

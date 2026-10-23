@@ -1,32 +1,30 @@
 (elle/epoch 15)
 # audited: 2026-10-21
-# Persistent fn-local containers, the loop-carried accumulator a function returns, the element a walk stores, and the captured accumulator a builder fills.
-#
+# Probes for fn-local containers, returned and captured accumulators, and the element a walk stores.
 # docs/impl/region/diagnostics.md
+# docs/impl/region/bindings.md
+# docs/impl/region/window.md
+#
 # ── Persistent fn-local containers ────────────────────────────────────
 # The container is `def`'d fn-local INSIDE the run-block (the faithful shape — a
-# captured let-local or module binding hits a different region path) and reused
-# across the block's ops. `push-outer` reclaims (rate 0): a block-local accumulator
-# is freed at the block's return once the `push` wrapper stops stranding its
-# owned-param reference (F1b container compensation) — its earlier per-op growth was
-# that over-keep, not genuine retention (the gauge-live discriminator uses a
-# MODULE-level sink, `probe-disc`, and is unaffected). `push-accum` is the same
-# accumulator fed the per-op `map` scratch (§ F1a), and reclaims for the same
-# reason once that scratch does: `map` dispatches through a `cond` whose later
-# clause TESTS held the collection's one release, and a clause test is a
-# conditional position exactly as a clause body is
-# (docs/impl/region/mechanism.md § "An arm is a conditional position, not a
-# syntactic arm body"). It maps `wrap-add`, whose `block` body declines loop
-# fusion, so the real stdlib `map` runs and there is a per-op scratch to
-# measure; a fusable kernel has none, which is what the dissolution controls
-# (`map-while`) measure. A control at 0.
+# captured let-local or module binding takes a different region path) and reused
+# across the block's ops. `push-outer` reclaims (rate 0): a block-local
+# accumulator is freed at the block's return, because the `push` wrapper strands
+# none of its owned-param reference. `push-accum` is the same accumulator fed the
+# per-op `map` scratch, and reclaims for the same reason that scratch does: `map`
+# dispatches through a `cond` whose later clause TESTS hold the collection's one
+# release, and a clause test is a conditional position exactly as a clause body
+# is (docs/impl/region/window.md). It maps `wrap-add`, whose `block` body
+# declines loop fusion, so the real stdlib `map` runs and there is a per-op
+# scratch to measure; a fusable kernel has none, which is what the dissolution
+# controls (`map-while`) measure. A control at 0.
 # `struct-outer` is the fn-local reassign-1-slot control: a loop-carried cell whose
-# content is re-minted every iteration, bounded by the overwrite + demise pair (F5).
-# `string-outer`/`append-outer` are CLOSED controls for the same close
-# `stdlib-concat` gauges: each iteration's `concat`/`append` returns `push-all`'s
-# accumulator parameter, and the branch-arm window anchors its release where every
-# arm reaches it. Their rate was always flat per-iter, never accumulator growth, so
-# a rise here is a per-call strand.
+# content is re-minted every iteration, bounded by the overwrite and demise pair.
+# `string-outer`/`append-outer` are CLOSED controls for the shape the
+# `stdlib-concat` gauge reads: each iteration's `concat`/`append` returns
+# `push-all`'s accumulator parameter, and the branch-arm window anchors its
+# release where every arm reaches it. Their rate is flat per iteration, never
+# accumulator growth, so a rise here is a per-call strand.
 (println "── folded suite: persistent containers ──")
 (r:drive "put-overwrite"
          (fn [b]
@@ -150,15 +148,14 @@
 # name the walk binds — `each` expands to `(let [p (get items idx)] BODY)`. That
 # name is the store's FEEDER, so the cell keeps the container model and each
 # element's producer reference dies at the store that took it
-# (docs/impl/region/bindings.md § "A name the store consumes is not a second
-# holder of the value").
+# (docs/impl/region/bindings.md).
 #
 # `walk-feeder-return` hands the last element back and `walk-feeder-discard`
 # drops it, and they must stay a PAIR: only the returned one reaches the
 # `Return`'s mint, and only the discarded one leaves the content drop with
 # nothing but the cell's scope node to place it — the collection type picks the
 # `each` arm, so the latest store sits inside an arm the walk need not take
-# (§ "Where the content drop lands"). Controls at 0: the elements live in the
+# (docs/impl/region/bindings.md). Controls at 0: the elements live in the
 # call-result region of a `Fresh` native, so a regression strands the whole
 # collection — one region and two objects per entry.
 (def @feeder-table @{:a 1 :b 2 :c 3})

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-20
 //! `and`/`or` lowering: the branch a short-circuit operator compiles to.
 //!
 //! docs/impl/region/replicate.md
@@ -20,7 +20,7 @@ impl<'a> Lowerer<'a> {
 
         // Every operand's block branches or jumps to the done block, so each is an
         // ARM of the branch this lowering writes and the done block is their merge
-        // (docs/impl/region/replicate.md § "A short-circuit operand is an arm").
+        // (docs/impl/region/replicate.md).
         // Read while this branch's own entry block is still open, exactly as
         // `lower_if` and `lower_cond` read it.
         let branch_hoists = self.begin_branch_arms();

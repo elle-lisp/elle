@@ -1,17 +1,18 @@
-(elle/epoch 12)
-# A name a DESTRUCTURING pattern introduces records no release route.
+(elle/epoch 15)
+# audited: 2026-10-20
+# A name a destructuring pattern introduces records no release route, so reassigning it poisons nothing.
+# docs/impl/region/window.md
 #
 # Four sites record one — `Define`, `Let`, `Letrec`, and the lambda prologue — and
 # a pattern name is none of them: the pattern extracts the name from its
 # scrutinee, and no binder stores it into a slot a value-routed release ever
 # loads. So reassigning such a name says nothing about where the SCRUTINEE's own
 # release may go: the scrutinee routes through the temp that produced it, which
-# nothing repoints (docs/impl/region/mechanism.md § "A mutated holder poisons its
-# value route, not its cell box").
+# nothing repoints.
 #
-# Reading the mutation off the pattern name instead refused the scrutinee's region
-# from the frame-held admission, so the branch-arm window could not anchor its
-# release and every path through the branch held the whole input.
+# Reading the mutation off the pattern name instead refuses the scrutinee's
+# region from the frame-held admission, so the branch-arm window cannot anchor
+# its release and every path through the branch holds the whole input.
 
 # ── 1. The reassigned pattern name — both arms read the pair ────────────
 # `xs` is live into the branch and both arms name it through the pattern's two
@@ -27,9 +28,9 @@
         "the sibling arm reads the same destructured pair")
 
 # ── 2. Not over-freed — the scrutinee outlives the reassignment ─────────
-# The release the admission unlocks fires on paths that used to run none, so the
-# read-back is the over-free face: a scrutinee freed at the merge would leave
-# these reads walking a reclaimed page.
+# The release the admission unlocks fires on paths that would otherwise run none,
+# so the read-back is the over-free face: a scrutinee freed at the merge would
+# leave these reads walking a reclaimed page.
 (defn read-back [t]
   (let [xs (list 4 5 6)]
     (def (@h a b) xs)

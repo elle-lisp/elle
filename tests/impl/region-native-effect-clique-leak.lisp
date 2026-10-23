@@ -1,15 +1,16 @@
-(elle/epoch 12)
-# Counterfactual for the opaque-call arg-clique leak class
-# (docs/impl/region/effects.md "Native region effects: declared, not guessed").
+(elle/epoch 15)
+# audited: 2026-10-20
+# A native declared to store no argument records no compile-time arg clique, so a loop of calls strands no region.
+# docs/impl/region/effects.md
+# docs/impl/region/clique.md
 #
-# For an opaque native call the solver historically assumed every heap
-# argument may be stored into every other — mutual may-store edges, a
-# compile-time `IncrefRegion` of each heap argument's region at the call
-# site, balanced by the target region's free-time cascade ONLY if the store
-# actually happens. `identical?` stores nothing, so both increfs never
-# balance: each iteration's two string-literal regions are left at rc=1
-# after their `DecrefRegion` drops the initial reference — two leaked
-# regions per call (measured at HEAD: delta 200 at n=100, 2000 at n=1000).
+# An undeclared native is read as a mutual may-store clique: every heap argument
+# may be stored into every other, so each heap argument's region takes a
+# compile-time `IncrefRegion` at the call site, balanced by the target region's
+# free-time cascade ONLY if the store happens. `identical?` stores nothing, so
+# under that reading both increfs never balance: each iteration's two
+# string-literal regions stay at rc=1 after their `DecrefRegion` drops the
+# initial reference — two leaked regions per call.
 #
 # `identical?` declares `RegionEffect::Immediate` (it returns a bool and
 # stores no argument), so the solver must emit NO arg-clique edges for it.
@@ -46,12 +47,12 @@
 # compile-time `IncrefRegion` no free cascade balances, stranding one region
 # per call with no second argument anywhere in the shape.
 #
-# The rule is stated over the clique, so the declarant has to be one that
-# carries it: `fiber/child` declares `RegionEffect::Mixed` and takes a single
-# argument. `first` is the same shape over a declarant that carries no clique at
-# all (`Opaque`, the read-only trait dispatcher rule — docs/impl/region/
-# effects.md § `Opaque`), so the pair separates "one argument emits no edge"
-# from "this native emits none anywhere".
+# The only built-in `Mixed` native is `git`, which compiles SPIR-V, so the
+# clique loop itself is pinned at compile time by
+# `effect_mixed_call_pairs_arguments_not_one_arguments_regions`
+# (src/hir/region/infer/tests/effects.rs). Both natives below declare `Opaque`
+# and take a single argument: these rows pin that one argument with two source
+# regions strands nothing at run time.
 
 (defn two-region-arg [n]
   (let [k (if (%lt n 0)
@@ -80,7 +81,7 @@
   (%sub (arena/region-count) before))
 
 (assert (nil? (two-region-arg 1))
-        "the branch-valued argument reaches the Mixed native")
+        "the branch-valued argument reaches fiber/child")
 (assert (nil? (two-region-arg -1)) "the other arm reaches the same call")
 (assert (= (two-region-read 1) 3)
         "the branch-valued argument reads back through the sequence read")

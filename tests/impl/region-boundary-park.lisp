@@ -1,8 +1,7 @@
-(elle/epoch 12)
-# audited: 2026-09-19
-# A boundary ends a park with no reader and no install
-# (docs/impl/region/park.md § "A boundary ends a park with no reader and no
-# install, so it owes both references").
+(elle/epoch 15)
+# audited: 2026-10-20
+# A boundary ends a park with no reader and no install, so it owes both references.
+# docs/impl/region/park.md
 #
 # A `squelch`/`attune` violation is the third way a park can end. The other two
 # each consume one of the park's two references: a resumer reads the payload out
@@ -55,22 +54,22 @@
 
 # (c) the same io park behind a `squelch` of `:io` rather than an `attune`:
 # one boundary, two spellings.
-(def squelch-io-body (squelch (fn [] (println "")) :io))
+(def squelch-io-body (squelch :io (fn [] (println ""))))
 
 # (d) an `Emit` node's park with a HEAP payload. The body allocated it, so its
 # own reference is the release table's and only the delivery retain is owed.
-(def emit-body (squelch (fn [] (emit :yield (string "y" 1))) :yield))
+(def emit-body (squelch :yield (fn [] (emit :yield (string "y" 1)))))
 
 # (e) the same park reached through the emit PRIMITIVE, whose first argument the
 # compiler cannot read as a keyword set. A different park site, the same debt.
 (def dynamic-emit-body
-  (squelch (fn [] (fiber/emit :yield (string "y" 1))) :yield))
+  (squelch :yield (fn [] (fiber/emit :yield (string "y" 1)))))
 
 # controls ─────────────────────────────────────────────────────────────────────
 
 # (f) an IMMEDIATE emit payload. It lives in no region, so the boundary owes it
-# nothing — and a subject built this way would read bounded before the fix.
-(def immediate-body (squelch (fn [] (emit :yield 1)) :yield))
+# nothing — and a subject built this way reads bounded whatever the boundary does.
+(def immediate-body (squelch :yield (fn [] (emit :yield 1))))
 
 # (g) the same io call with NO boundary: the resume consumes the delivery and
 # the install releases the request, so this pins that the subjects measure the
@@ -79,13 +78,13 @@
   (println ""))
 
 # (h) the same squelched body that never violates: the ordinary releases run.
-(def clean-body (squelch (fn [] (string "y" 1)) :yield))
+(def clean-body (squelch :yield (fn [] (string "y" 1))))
 
 # (i) a RAISE at a boundary rather than a park. An error emit takes the same
 # escape retain but parks nothing, and its delivery is the raise's own mint —
 # recorded in the ledger, which withdraws the payload exemption so the frames'
 # tables reclaim it. A regression here is the boundary claiming a raise.
-(def raise-body (squelch (fn [] (error (string "y" 1))) :error))
+(def raise-body (squelch :error (fn [] (error (string "y" 1)))))
 
 # measurement ──────────────────────────────────────────────────────────────────
 

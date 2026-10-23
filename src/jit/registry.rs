@@ -1,27 +1,20 @@
-// audited: 2026-10-20
-// docs/impl/jit-map.md
+// audited: 2026-10-21
 //! The process-global JIT code-address registry.
 //!
-//! Native samplers cannot name JIT frames: the code lives in anonymous
-//! Cranelift mappings, so a thread photograph shows `??? (in <unknown
-//! binary>)` exactly where the answer is. Every successful compile records
-//! its entry address and function name here, and `(vm/query "jit/map" nil)`
-//! renders the table for the reader holding such a photograph.
+//! docs/impl/jit-map.md
 //!
-//! One table for the whole process, fed from every VM's compile paths (the
-//! background `elle-jit` workers and the synchronous tier probes alike).
-//! Entries are never removed: a stack captured at any time may reference
-//! code whose `JitCode` has since been dropped, and a dangling name is
-//! still the right label for the frame that ran it.
+//! Every VM's compile paths feed the one table: the background `elle-jit`
+//! workers and the synchronous tier probes alike. A dangling name is still the
+//! right label for the frame that ran the code.
 
 use std::sync::Mutex;
 
 static ENTRIES: Mutex<Vec<(usize, String)>> = Mutex::new(Vec::new());
 
 /// Record one compiled function's entry address. Called once per successful
-/// compile; duplicate addresses (a page reused after a module was dropped)
-/// simply shadow the older entry in `render`, which sorts by address and
-/// keeps the later insertion.
+/// compile. A duplicate address (a page reused after a module was dropped)
+/// keeps both entries: `snapshot` sorts stably, so the later insertion follows
+/// the older one.
 pub(crate) fn record(entry: usize, name: &str) {
     let mut entries = ENTRIES.lock().expect("jit registry lock poisoned");
     entries.push((entry, name.to_string()));

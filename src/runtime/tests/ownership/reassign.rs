@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-10-20
 //! A module-scope mutable reassigned in a loop releases each displaced value at its overwrite, whatever produced it.
 //!
 //! docs/impl/region/bindings.md
@@ -35,8 +35,8 @@ fn assert_gauge_sees_growth() {
 }
 
 /// A TOP-LEVEL (file-letrec) mutable reassigned in a loop must not accumulate
-/// its overwritten PRIOR values until frame teardown (docs/impl/region/bindings.md
-/// § "Module scope"). Each prior is dead the instant the next `assign` displaces
+/// its overwritten PRIOR values until frame teardown
+/// (docs/impl/region/bindings.md). Each prior is dead the instant the next `assign` displaces
 /// it; holding it to program exit is unbounded RSS growth in a long-running loop.
 ///
 /// The donation: a fresh local allocation's ordinary decref is suppressed and the
@@ -64,7 +64,7 @@ fn reassign_toplevel_prior_release_is_bounded() {
 
 /// A CALL RESULT stored into a top-level mutable takes the counted store, and
 /// the stored region keeps its producer release, pinned to the store site
-/// (docs/impl/region/bindings.md § "Module scope"). Every shape here is a call
+/// (docs/impl/region/bindings.md). Every shape here is a call
 /// result: an array literal and a struct literal lower to a native call, as the
 /// `list`, `string` and `pair` wrappers do, and a counted element read aliases
 /// one.
