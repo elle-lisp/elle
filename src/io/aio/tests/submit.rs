@@ -1,4 +1,4 @@
-//! audited: 2026-09-30
+//! audited: 2026-10-21
 //! The submission frame — what every operation the backend issues shares.
 //!
 //! A submission mints an id, hands the operation to io_uring or to a
@@ -9,12 +9,13 @@
 //! is checked here rather than trusted to the shared frame.
 //!
 //! `PendingOp::Port` (stream I/O, accept, datagram, shutdown) takes its own
-//! route through `submit`; `backend.rs` and `net.rs` pin that one.
+//! route through `submit`; `backend.rs` and `net.rs` pin that one. Each
+//! operation on a file by its path is pinned in `pathops.rs`.
 //!
 //! src/io/AGENTS.md
 
 use super::*;
-use crate::io::request::{SpawnRequest, StdioDisposition, TaskFn};
+use crate::io::request::{FileKind, SpawnRequest, StdioDisposition, TaskFn};
 
 /// Submit `req` and assert the backend filed exactly one new pending entry,
 /// keyed by the id `submit` returned.
@@ -290,6 +291,14 @@ fn a_pending_entry_accepts_only_the_kind_of_operation_that_filed_it() {
             },
             OpKind::Poll,
         ),
+        (
+            PendingOp::File {
+                kind: FileKind::Sync,
+                path: "synced".to_string(),
+                buffer_handle: pool.alloc(0),
+            },
+            OpKind::File,
+        ),
     ];
     let every_kind = [
         OpKind::Port,
@@ -297,6 +306,7 @@ fn a_pending_entry_accepts_only_the_kind_of_operation_that_filed_it() {
         OpKind::Sleep,
         OpKind::ProcessWait,
         OpKind::Open,
+        OpKind::File,
         OpKind::Task,
         OpKind::Resolve,
         OpKind::Watch,

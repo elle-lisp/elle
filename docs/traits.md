@@ -1,6 +1,6 @@
 # Traits
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-10-21 -->
 
 Every heap-allocated value carries a `traits` field — a pointer to a
 trait table (struct or @struct). Collection and sequence types get a
@@ -34,8 +34,9 @@ cannot show the sharing; a write to the shared table can:
 `with-traits` creates a new value with a custom trait table:
 
 ```lisp
-(def point (with-traits [1 2 3] {:type :point}))
-(assert (= (traits point) {:type :point}))
+(def point-traits {:Point {:x (fn [self] (get self 0))}})
+(def point (with-traits [1 2 3] point-traits))
+(assert (= (traits point) point-traits))
 (assert (= (length point) 3))
 (assert (= (get point 1) 2))
 ```
@@ -49,7 +50,7 @@ operate on the underlying data, not the trait table.
 Traits do not affect structural equality, ordering, or hashing:
 
 ```lisp
-(assert (= [1 2 3] (with-traits [1 2 3] {:type :point})))
+(assert (= [1 2 3] (with-traits [1 2 3] point-traits)))
 ```
 
 ## Protocol dispatch
@@ -109,7 +110,7 @@ When a primitive like `first` is called on value `v`:
 
 If the value has user-attached traits that lack the requested protocol,
 the dispatcher falls back to the default traitset from the registry.
-This means `(with-traits [1 2 3] {:tag :my-type})` still supports
+This means `point` above, whose table names only `:Point`, still supports
 `first`, `length`, etc. — the user traits don't mask the defaults.
 
 The fallback is per protocol, not per method. A table that names a
@@ -312,6 +313,25 @@ Any value can implement `:Sequence` via `with-traits`:
 (assert (= (first (rest (make-range 0 10))) 1))
 (assert (= (fold + 0 (make-range 0 5)) 10))   # fold drains :iter
 ```
+
+## A library's own protocol
+
+A trait table can name a protocol that the runtime does not know. The
+dispatcher looks a protocol up by its name, so it never reads one it does not
+know, and the default `:Sequence` and `:Collection` still answer behind it.
+Name the protocol with a capitalized keyword, map it to an immutable struct of
+methods as § Trait table schema says, and read it with `get`:
+
+```lisp
+(def area-traits {:Shape {:area (fn [self] (* (self :w) (self :h)))}})
+(def rect (with-traits {:w 2 :h 3} area-traits))
+(assert (= ((get (get (traits rect) :Shape) :area) rect) 6))
+(assert (= (length rect) 2) "the default :Collection still answers")
+(assert (= rect {:w 2 :h 3}) "and equality still ignores the table")
+```
+
+The methods cross a thread with the value, as § Cross-thread behavior says.
+[std/gun](../lib/gun/overview.md) names its links with a `:Gun` protocol.
 
 ## Cross-thread behavior
 

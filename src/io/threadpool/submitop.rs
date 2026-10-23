@@ -1,4 +1,4 @@
-//! audited: 2026-09-23
+//! audited: 2026-10-21
 //! `CompletionHub::submit`, and the runner each pool operation dispatches to
 //! on the worker that takes it.
 //!
@@ -13,8 +13,8 @@ impl CompletionHub {
     /// `bounds` is how long the operation may wait and how `io/cancel` ends it.
     /// Every submission states one, so an operation that can wait for something
     /// that may never happen cannot be submitted without saying so — see
-    /// docs/impl/io-inflight.md § "The stop pipe" for the two conditions that decide
-    /// which kind an operation needs.
+    /// docs/impl/io-inflight.md for the two conditions that decide which kind an
+    /// operation needs.
     ///
     /// How many operations may run at once is the OS's to say: the pool hands
     /// the job to a worker that is already there or starts one, and the ceiling
@@ -69,7 +69,9 @@ impl CompletionHub {
 ///
 /// `Task` and `Resolve` take no bound because nothing can bound them; their
 /// submissions say so with `Bounds::uninterruptible`, and dropping the bounds
-/// here is what disposes of them.
+/// here is what disposes of them. `Flush` and `File` take none because they
+/// wait on nothing outside this process, and their submissions say
+/// `Bounds::prompt`.
 pub(super) fn run(op: PoolOp, bounds: Bounds) -> (i32, Vec<u8>) {
     match op {
         PoolOp::Read { fd, landing } => stream::read(OpBound::new(fd, bounds), fd, landing),
@@ -121,6 +123,7 @@ pub(super) fn run(op: PoolOp, bounds: Bounds) -> (i32, Vec<u8>) {
         PoolOp::Open { path, flags, mode } => {
             open::open(OpBound::detached(bounds), &path, flags, mode)
         }
+        PoolOp::File(op) => file::run(op),
         PoolOp::Task(closure) => closure(),
         PoolOp::Resolve { hostname } => resolve(&hostname),
 

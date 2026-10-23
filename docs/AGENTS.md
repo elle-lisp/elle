@@ -27,7 +27,7 @@ Up: [..](../AGENTS.md)
 - [fmt.md](fmt.md) — **elle fmt** Opinionated code formatter for Elle.
 - [functions.md](functions.md) — **Functions** How to make, call, compose and inspect functions, and how deep recursion may go.
 - [intrinsics.md](intrinsics.md) — **Intrinsics** Intrinsics are silent bytecode operations prefixed with `%`.
-- [io.md](io.md) — **I/O** All I/O in Elle is async — reads and writes yield to the scheduler.
+- [io.md](io.md) — **I/O** All I/O in Elle is async: each call yields to the scheduler, and other fibers run until it completes.
 - [libraries.md](libraries.md) — **Libraries** Elle ships with libraries in `lib/`.
 - [loops.md](loops.md) — **Loops** Elle's loop forms are `while`, `forever`, `repeat`, and `each`.
 - [lua.md](lua.md) — **Lua Syntax Mode** Elle supports a Lua surface syntax for `.lua` files.
@@ -71,10 +71,10 @@ Up: [..](../AGENTS.md)
 
 ## Directories
 
-- [analysis/](analysis/AGENTS.md) — Code Analysis and Semantic Understanding, Agent Reasoning in Elle, Where subject-mixing begins, and the source cap it sets (2026-10-19), CI and Triage, Debugging and introspection, Analysis, Portrait, Testing Strategy
+- [analysis/](analysis/AGENTS.md) — Code Analysis and Semantic Understanding, Agent Reasoning in Elle, Where subject-mixing begins, and the source cap it sets (2026-10-19), CI and Triage, Debugging and introspection, Analysis, The plugins submodule in CI, Portrait, Testing Strategy
 - [cookbook/](cookbook/AGENTS.md) — Adding a New Bytecode Instruction, Adding a New Heap Type, Cookbook, Adding a New Lint Rule, Adding a New Plugin, Adding a New Prelude Macro, Adding a New Primitive Function, Adding a New Special Form
 - [debugger/](debugger/AGENTS.md) — Debugger: what a paused fiber shows, Debugger: how a fiber comes to pause, Debugger: recording and replay
 - [impl/](impl/AGENTS.md) — The generated index, The ANF lift, The region roadmap, The audit queue, Bytecode, Cranelift, Differential Tier Testing, Dissolution — HOF loop fusion, Escape analysis — the authoritative true-escape pass, Fleet — adhoc distributed execution over images, GPU Compute, Grafting a call, HIR — High-level IR, Images — regions hydrated at load, Where a stream operation's bytes live, Descriptors and workers, An operation in flight, The JIT code map, JIT, Lexicon: epoch-aware lexing, LIR — Low-level IR, The region memory model, MLIR Backend, Reader, Self-recursion: the executing-closure mechanism (no cell), SPIR-V Backend, Standard Library Disk Cache, Symbols and keywords — identity is the name hash, Syntax — a region-native immutable tree, Type inference: the ascent, and what a call proves, Values, VM, WASM Backend
-- [io/](io/AGENTS.md) — I/O deadlines
+- [io/](io/AGENTS.md) — Files, I/O deadlines
 - [regions/](regions/AGENTS.md) — Value lifetime, constants, and teardown — the guarantees, Region performance — merging and the cost model, Region semantics — the model you write against
 - [signals/](signals/AGENTS.md) — Authority, Capability enforcement, Signal Design, emit, Fiber Architecture, Signals, Signal Inference, Signals and JIT, Mediation, Fiber Primitives, Signal Protocol, Signal Questions, Signal Recovery

@@ -1,6 +1,6 @@
 # An operation in flight
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-21 -->
 
 What a submitted I/O operation holds and owns, and how it ends when the fiber that asked is gone.
 
@@ -63,8 +63,8 @@ root it recorded, not of the region it started from.
 An operand really does arrive `Owned`. A connection accepted inside a process
 and handed to a per-connection `ev/spawn` is adopted into that activation's
 subtree, and `handle-io-forward` then submits a write on it for the child
-scheduler. [process-io.lisp](../../tests/lang/process-io.lisp) § 10 is that program, and the retain on
-the port's own region there holds nothing at all.
+scheduler. [process-io.lisp](../../tests/lang/process-io.lisp) runs that program, and the retain
+on the port's own region there holds nothing at all.
 
 Retaining the root keeps the whole subtree for the operation's lifetime, which
 is more than the operand needs. The list of operands makes the same trade: one
@@ -91,8 +91,7 @@ free without them. Draining first, while every region is still there, leaves
 that destructor a hold that reaches nothing.
 
 The same order is what lets a drain assemble a completion at teardown: the
-values it reads are still allocated. That is why the WASM tier drained here
-before there was a hold to release, and the rule now covers both. A pool worker
+values it reads are still allocated. A pool worker
 that reads into a buffer or writes from a payload is waited for in the same
 drain, because its bytes land in the regions the sweep frees
 ([where a stream operation's bytes live](io-bytes.md)).
@@ -279,9 +278,9 @@ reported, so each worker is asked once — a drain runs on every loop tick, and
 the completion takes a moment to come back.
 
 Operations that end on their own are asked too, and the ask reaches nothing.
-`Resolve` runs to the resolver's own end and `Task` runs until its closure
-returns, so neither carries a stop pipe; their completions arrive as they always
-would.
+`Resolve` runs to the resolver's own end, `Task` runs until its closure
+returns, and a `File` operation runs until its syscalls return, so none carries
+a stop pipe; their completions arrive as they always would.
 
 The runtime does not lean on a peer to deliver these. A peer that writes wakes
 the parked worker, and the completion then arrives without the sweep having
@@ -320,7 +319,9 @@ Two conditions decide which operations carry one:
   as the peer takes what is already in it. A peer that stops reading fills the
   buffer and parks the write in `bound.wait(POLLOUT)`, so the write carries a
   pipe like the reads do. `Flush`, `SendTo` and `Shutdown` transfer what the
-  process already handed over, so those three take no pipe (`Bounds::prompt`).
+  process already handed over. A `File` sync opens its path with
+  `O_NONBLOCK`, so a fifo cannot make it wait for a writer. Those four take no
+  pipe (`Bounds::prompt`).
 - **Stopping it must not park it instead.** `OpBound` takes the descriptor
   non-blocking for the operation's lifetime, so the syscall reports
   `EAGAIN` and hands the wait back to the poll where the stop is visible. A
@@ -345,6 +346,11 @@ an AF_UNIX peer whose backlog is full.
 `getaddrinfo(3)` runs to the resolver's own end and an opaque closure runs until
 it returns; a cancel discards the result without giving the worker thread back
 any sooner. Every use of that constructor names the call that behaves this way.
+
+A `File` read, write, append or copy meets the first condition on a fifo, whose
+other end need never open, and cannot meet the second: it runs through
+blocking `std::fs` calls, which a stop pipe cannot reach. It says so with
+`Bounds::uninterruptible` too, and a cancel discards its result in the same way.
 
 `ev/timeout` cancels on every call — the body's operation or the timer's,
 whichever lost — so this path runs constantly rather than at the edges.

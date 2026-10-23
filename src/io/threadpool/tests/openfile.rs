@@ -1,10 +1,10 @@
-// audited: 2026-09-30
+// audited: 2026-10-21
 //! Opening a file on a pool worker: the descriptor it reports, and the bound on a fifo nobody reads.
 //!
 //! src/io/AGENTS.md
 
 use super::super::*;
-use super::file_path;
+use super::{file_path, Fifo};
 
 #[test]
 fn test_threadpool_open_existing_file_returns_valid_fd() {
@@ -63,32 +63,6 @@ fn test_threadpool_open_nonexistent_path_returns_negative_errno() {
         "expected negative errno for nonexistent path, got {}",
         completions[0].result_code
     );
-}
-
-/// A fifo that unlinks with itself.
-struct Fifo(String);
-
-impl Fifo {
-    fn new(tag: &str) -> Fifo {
-        let path = file_path(tag);
-        let c_path = std::ffi::CString::new(path.as_str()).unwrap();
-        assert_eq!(
-            unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) },
-            0,
-            "mkfifo failed"
-        );
-        Fifo(path)
-    }
-
-    fn c_path(&self) -> std::ffi::CString {
-        std::ffi::CString::new(self.0.as_str()).unwrap()
-    }
-}
-
-impl Drop for Fifo {
-    fn drop(&mut self) {
-        std::fs::remove_file(&self.0).ok();
-    }
 }
 
 /// Opening a fifo for writing waits for a reader — and the caller's `:timeout`

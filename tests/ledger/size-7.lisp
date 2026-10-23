@@ -4,7 +4,7 @@
 (producer "tests/ratchet/size.lisp")
 ["AGENTS.md" :tokens 4500]
 ["DOCUMENTATION.md" :tokens 4500]
-["docs/analysis/ci.md" :tokens 7000]
+["docs/analysis/ci.md" :tokens 6000]
 ["docs/coming-from.md" :tokens 5000]
 ["docs/debugger.md" :tokens 4500]
 ["docs/epochs.md" :tokens 5500]
@@ -43,7 +43,6 @@
 ["docs/impl/vm.md" :tokens 4500]
 ["docs/impl/wasm.md" :tokens 6500]
 ["docs/intrinsics.md" :tokens 6500]
-["docs/io.md" :tokens 4500]
 ["docs/mcp.md" :tokens 5000]
 ["docs/posix-signals.md" :tokens 5500]
 ["docs/ratchet.md" :tokens 5500]

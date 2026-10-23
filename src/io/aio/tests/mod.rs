@@ -321,5 +321,6 @@ mod netcancel;
 mod netend;
 mod netread;
 mod park;
+mod pathops;
 mod process;
 mod submit;

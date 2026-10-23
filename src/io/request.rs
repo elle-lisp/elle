@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-10-21
 //! IoRequest — typed I/O request descriptors.
 //!
 //! Stream primitives build IoRequest values and yield them via SIG_IO.
@@ -14,11 +14,13 @@ use std::time::Duration;
 
 mod bound;
 mod buffer;
+mod file;
 mod process;
 mod socket;
 mod spawn;
 
 pub use bound::Bound;
+pub use file::{FileKind, FileOp};
 pub use socket::*;
 pub use spawn::*;
 // In-place buffer fill helpers and the process handle keep their original
@@ -182,6 +184,8 @@ pub enum IoOp {
         direction: Direction,
         encoding: Encoding,
     },
+    /// An operation on a file named by its path. Portless.
+    File(FileOp),
     /// Run an arbitrary closure on a background thread.
     /// Returns bytes on success, error on failure.
     #[allow(dead_code)]
@@ -223,11 +227,12 @@ impl IoOp {
     ///
     /// Every async operation reaches the scheduler, so each carries `SIG_IO`.
     /// An operation that also exercises a gated authority adds its bit: a
-    /// subprocess spawn or wait adds `SIG_EXEC`, opening a path adds `SIG_FS`,
-    /// and a socket operation adds `SIG_NET`. This is the same requirement the
-    /// primitive that mints the request declares; the derivation lets the
-    /// spend gate at `io/submit` test a request whatever route it arrived by,
-    /// without trusting a declaration on the submission primitive.
+    /// subprocess spawn or wait adds `SIG_EXEC`, opening or syncing a path adds
+    /// `SIG_FS`, and a socket operation adds `SIG_NET`. This is the same
+    /// requirement the primitive that mints the request declares; the
+    /// derivation lets the spend gate at `io/submit` test a request whatever
+    /// route it arrived by, without trusting a declaration on the submission
+    /// primitive.
     ///
     /// `IoOp::Task` wraps an arbitrary closure whose effects are not derivable,
     /// so it is deny-by-default: it declares every gated bit. It is unreachable
@@ -237,7 +242,7 @@ impl IoOp {
         let base = SIG_IO;
         match self {
             IoOp::Spawn(_) | IoOp::ProcessWait => base.union(SIG_EXEC),
-            IoOp::Open { .. } => base.union(SIG_FS),
+            IoOp::Open { .. } | IoOp::File(_) => base.union(SIG_FS),
             IoOp::Connect {
                 addr: ConnectAddr::Unix { .. },
             } => base.union(SIG_NET).union(SIG_FS),

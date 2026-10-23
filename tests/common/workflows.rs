@@ -1,13 +1,14 @@
-// audited: 2026-10-15
+// audited: 2026-10-21
 //! The CI workflow files, the jobs in them, and the steps in a job.
 //!
 //! docs/analysis/ci.md
 //!
 //! `workflows.rs` asks what the pull-request gate waits for, `ci_steps.rs`
 //! what each step runs, `run_artifacts.rs` what each suite job leaves behind,
-//! and `toolchains.rs` what each job's toolchain carries. All four need the
-//! same reading — a workflow file split into jobs — and a second copy of it is
-//! a second answer to "what is a job".
+//! `toolchains.rs` what each job's toolchain carries, and `suite_plugins.rs`
+//! whether a suite job builds the suite plugins first. Each needs the same
+//! reading — a workflow file split into jobs — and a second copy of it is a
+//! second answer to "what is a job".
 
 use super::repo_root;
 
@@ -128,4 +129,22 @@ pub fn runs_target(body: &str, target: &str) -> bool {
             .next()
             .is_some_and(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
     })
+}
+
+/// Every `make TARGET VAR=VALUE…` a run line of `body` starts, as the target
+/// and its variables.
+#[allow(dead_code)]
+pub fn make_steps(body: &str) -> Vec<(String, Vec<String>)> {
+    body.lines()
+        .filter_map(|line| line.trim_start().strip_prefix("run: make "))
+        .filter_map(|rest| {
+            let mut words = rest.split_whitespace();
+            let target = words.next()?.to_string();
+            let vars = words
+                .filter(|w| w.contains('='))
+                .map(str::to_string)
+                .collect();
+            Some((target, vars))
+        })
+        .collect()
 }

@@ -1,4 +1,4 @@
-//! audited: 2026-09-30
+//! audited: 2026-10-21
 //! Mock I/O backend for testing and benchmarking.
 //!
 //! src/io/AGENTS.md
@@ -139,6 +139,7 @@ impl crate::io::IoBackend for MockBackend {
             IoOp::Spawn(_) => "spawn",
             IoOp::ProcessWait => "process-wait",
             IoOp::Open { .. } => "open",
+            IoOp::File(_) => "file",
             IoOp::Seek { .. } => "seek",
             IoOp::Tell => "tell",
             IoOp::Task(_) => "task",
@@ -261,6 +262,7 @@ impl crate::io::IoBackend for MockBackend {
                     Err(birth.error("io-error", "mock: subprocess ops not supported"))
                 }
                 IoOp::Open { .. } => Err(birth.error("io-error", "mock: open not supported")),
+                IoOp::File(_) => Err(birth.error("io-error", "mock: file ops not supported")),
                 IoOp::Seek { .. } | IoOp::Tell => {
                     Err(birth.error("io-error", "mock: seek/tell not supported"))
                 }

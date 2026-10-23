@@ -1,4 +1,4 @@
-//! audited: 2026-09-30
+//! audited: 2026-10-21
 //! Completion processing for async I/O: one arm per operation shape, each
 //! answering with a value it was handed or one it builds.
 //!
@@ -17,7 +17,9 @@ use std::collections::HashMap;
 use std::os::unix::io::AsRawFd;
 use std::os::unix::io::{FromRawFd, OwnedFd, RawFd};
 
+mod file;
 mod port;
+use file::complete_file_op;
 use port::complete_port_op;
 
 /// Set TCP_NODELAY on a TCP stream fd to disable Nagle's algorithm.
@@ -106,7 +108,7 @@ pub(super) fn process_raw_completion(
                 // A wait that finds no child answers from the record when this
                 // process is holding the status: two waits on one child are
                 // legal, and the loser is entitled to what the winner reaped
-                // (src/io/AGENTS.md § "A reap is never wasted").
+                // (src/io/AGENTS.md).
                 if -result_code == libc::ECHILD {
                     if let Some(code) = exit.status() {
                         return Completion::ok(id, birth, Value::int(code as i64));
@@ -189,6 +191,9 @@ pub(super) fn process_raw_completion(
                 .expect("PendingOp::Open port must be a Port");
             port_ref.set_fd(fd);
             Completion::ok(id, birth, *port_val)
+        }
+        PendingOp::File { kind, path, .. } => {
+            complete_file_op(id, result_code, data, *kind, path, birth)
         }
         PendingOp::Connect {
             connect_fd,

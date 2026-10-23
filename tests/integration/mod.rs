@@ -253,6 +253,9 @@ mod change_filter {
 mod plugins {
     include!("plugins.rs");
 }
+mod suite_plugins {
+    include!("suite_plugins.rs");
+}
 mod runner_budget {
     include!("runner_budget.rs");
 }

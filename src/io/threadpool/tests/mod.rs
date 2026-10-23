@@ -1,6 +1,7 @@
-// audited: 2026-09-05
-// src/io/AGENTS.md
+// audited: 2026-10-21
 // Unit tests for the thread-pool backend, one module per concern.
+//
+// src/io/AGENTS.md
 //
 //   - `hub`:      CompletionHub in_flight accounting (the one-channel invariant)
 //   - `net`:      what a connect makes of a refusal, and the platform
@@ -9,8 +10,10 @@
 //   - `pool`:     worker reuse: the crew's handover, growth, and retirement
 //   - `process`:  ProcessWait completion encoding
 //   - `openfile`: Open op fd/errno results
+//   - `file`:     what a file operation by path reports
 //   - `signals`:  forked signalfd/kqueue read + close-time drain regressions
 //   - `stdin`:    stdin worker shutdown (idle and mid-read)
+mod file;
 mod hub;
 mod net;
 mod opbound;
@@ -38,4 +41,30 @@ fn file_path(tag: &str) -> String {
         .to_str()
         .unwrap()
         .to_string()
+}
+
+/// A fifo that unlinks with itself.
+pub(super) struct Fifo(pub(super) String);
+
+impl Fifo {
+    pub(super) fn new(tag: &str) -> Fifo {
+        let path = file_path(tag);
+        let c_path = std::ffi::CString::new(path.as_str()).unwrap();
+        assert_eq!(
+            unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) },
+            0,
+            "mkfifo failed"
+        );
+        Fifo(path)
+    }
+
+    pub(super) fn c_path(&self) -> std::ffi::CString {
+        std::ffi::CString::new(self.0.as_str()).unwrap()
+    }
+}
+
+impl Drop for Fifo {
+    fn drop(&mut self) {
+        std::fs::remove_file(&self.0).ok();
+    }
 }

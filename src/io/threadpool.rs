@@ -1,4 +1,4 @@
-//! audited: 2026-09-30
+//! audited: 2026-10-21
 //! The thread-pool backend: the operations a worker runs, and the one channel
 //! every worker reports through.
 //!
@@ -108,6 +108,9 @@ pub(super) enum PoolOp {
         flags: i32,
         mode: u32,
     },
+    /// An operation on a file named by its path. Returns what `file::run`
+    /// reports for it.
+    File(crate::io::request::FileOp),
     /// Run an arbitrary closure. Returns (result_code, data).
     Task(Box<dyn FnOnce() -> (i32, Vec<u8>) + Send>),
     /// Resolve a hostname via getaddrinfo(3). Returns IP addresses as
@@ -210,6 +213,7 @@ impl PoolOp {
             PoolOp::Sleep => OpKind::Sleep,
             PoolOp::ProcessWait { .. } => OpKind::ProcessWait,
             PoolOp::Open { .. } => OpKind::Open,
+            PoolOp::File(_) => OpKind::File,
             PoolOp::Task(_) => OpKind::Task,
             PoolOp::Resolve { .. } => OpKind::Resolve,
             PoolOp::WatchRead { .. } => OpKind::Watch,
@@ -260,6 +264,7 @@ use pool::{Job, WorkerPool};
 
 mod child;
 mod event;
+mod file;
 mod net;
 mod open;
 mod stream;

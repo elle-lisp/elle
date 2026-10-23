@@ -1,6 +1,6 @@
 (elle/epoch 15)
-# audited: 2026-10-14
-# The runner's ledger, part 1 of 2: the objects each file's second run in-process leaves live in the runner's heap.
+# audited: 2026-10-21
+# The runner's ledger, part 1 of 3: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/impl/abort-wait-lists.lisp" :objects 805]
 ["tests/impl/apply-tail-linear.lisp" :objects 223]
@@ -233,7 +233,7 @@
 ["tests/lang/caps-process.lisp" :objects 644]
 ["tests/lang/caps-refuse.lisp" :objects 794]
 ["tests/lang/caps-spawn.lisp" :objects 511]
-["tests/lang/caps-thread.lisp" :objects 273]
+["tests/lang/caps-thread.lisp" :objects 267]
 ["tests/lang/caps-wasm-host.lisp" :objects 481]
 ["tests/lang/caps.lisp" :objects 839]
 ["tests/lang/chan-select-deadline.lisp" :objects 946]

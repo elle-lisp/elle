@@ -56,6 +56,13 @@ jobs:
         run: make qa
       - name: Producers (rig)
         run: make smoke-producers
+      # The plugins the language suite loads (docs/analysis/plugins.md § "The
+      # plugins the language suite loads"). QA runs first, on a tree without
+      # the submodule, as the QA job's does.
+      - name: Check out the plugins submodule
+        run: git submodule update --init plugins
+      - name: make suite-plugins
+        run: make suite-plugins
       - name: Language suite
         run: make smoke-lang
       - name: Implementation suite (rig)

@@ -1,4 +1,4 @@
-// audited: 2026-10-04
+// audited: 2026-10-21
 //! What the Makefile, the two Elle suites and the tree's source files say, read the way a pass reads them.
 //!
 //! tests/AGENTS.md
@@ -7,7 +7,8 @@
 //! Several test files ask the same questions of the two Elle suites, the
 //! Makefile and the source tree: which files a suite holds, which of them
 //! declare a deadline of their own, what a variable expands to, what a target
-//! will run, and which files a policy sweep reads. The readers live here
+//! will run and what it answers when it runs, which package a plugin directory
+//! declares, and which files a policy sweep reads. The readers live here
 //! because a second copy of them is a second answer.
 
 /// One Makefile variable's value, as `make` itself expands it, or `None` if
@@ -133,6 +134,37 @@ pub fn makefile() -> String {
 #[allow(dead_code)]
 pub fn make_expand(name: &str) -> String {
     make_var(name, &[]).unwrap_or_else(|| panic!("`make print-{name}` did not run"))
+}
+
+/// Run `make TARGET` with `overrides` on its command line, over a slate
+/// cleared of `GITHUB_ACTIONS`, and answer whether it passed and what it
+/// printed. A command-line assignment beats the Makefile's own, which is what
+/// lets a test drive an assertion target both ways without a build.
+#[allow(dead_code)]
+pub fn run_make(target: &str, overrides: &[&str]) -> (bool, String) {
+    let out = std::process::Command::new("make")
+        .current_dir(repo_root())
+        .arg("--no-print-directory")
+        .arg(target)
+        .args(overrides)
+        .env_remove("GITHUB_ACTIONS")
+        .output()
+        .unwrap_or_else(|e| panic!("run `make {target}`: {e}"));
+    let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
+    text.push_str(&String::from_utf8_lossy(&out.stderr));
+    (out.status.success(), text)
+}
+
+/// The package that `plugins/DIR/Cargo.toml` declares, or `None` where the
+/// directory holds no crate.
+#[allow(dead_code)]
+pub fn plugin_package(dir: &str) -> Option<String> {
+    let manifest = repo_root().join("plugins").join(dir).join("Cargo.toml");
+    let text = std::fs::read_to_string(manifest).ok()?;
+    let line = text
+        .lines()
+        .find(|l| l.trim_start().starts_with("name = "))?;
+    Some(line.split('"').nth(1)?.to_string())
 }
 
 /// The path patterns the Makefile gives the wider budget.

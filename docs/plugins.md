@@ -1,6 +1,6 @@
 # Plugins
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-10-21 -->
 
 Elle ships with Rust plugins and pure Elle standard library modules.
 Plugins are cdylib crates loaded at runtime via `import`. Standard modules
@@ -71,8 +71,8 @@ make mcp              # elle, oxigraph and syn (for the MCP server)
 `elle-egui` and `elle-wayland`. All five compile on a stock toolchain, because
 none links a system library: a plugin that needs one opens it with dlopen. The
 last three need a GPU or a display before they can do anything, and that keeps
-them out of the portable list. [docs/analysis/ci.md](analysis/ci.md) owns the
-split, in "The plugins job".
+them out of the portable list. [The plugins submodule in
+CI](analysis/plugins.md) owns the split.
 
 Or build individual plugins:
 
@@ -105,8 +105,7 @@ make smoke-plugins    # assert the artifacts, then run plugins/tests/*.lisp
 produced no `.so`. That assertion is not decoration. Every test file imports its
 `.so` under `protect` and exits 0 when the import fails, so a plugin that did
 not build makes its own test report success. The reasoning, and the CI job that
-runs these targets, are in
-[docs/analysis/ci.md](analysis/ci.md), in "The plugins job".
+runs these targets, are in [the plugins submodule in CI](analysis/plugins.md).
 
 ## Usage pattern
 

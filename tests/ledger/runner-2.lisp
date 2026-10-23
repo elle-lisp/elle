@@ -1,6 +1,6 @@
 (elle/epoch 15)
-# audited: 2026-10-20
-# The runner's ledger, part 2 of 2: the objects each file's second run in-process leaves live in the runner's heap.
+# audited: 2026-10-21
+# The runner's ledger, part 2 of 3: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/lang/each.lisp" :objects 1012]
 ["tests/lang/embedding.lisp" :objects 345]
@@ -81,7 +81,7 @@
 ["tests/lang/http2.lisp" :objects 44]
 ["tests/lang/hygiene.lisp" :objects 682]
 ["tests/lang/inclib.lisp" :objects 63]
-["tests/lang/include.lisp" :objects 71]
+["tests/lang/include.lisp" :objects 109]
 ["tests/lang/integer-radix.lisp" :objects 325]
 ["tests/lang/intrinsic-mutable-literal.lisp" :objects 182]
 ["tests/lang/intrinsics.lisp" :objects 2505]

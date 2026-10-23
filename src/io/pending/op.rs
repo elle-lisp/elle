@@ -1,11 +1,11 @@
-//! audited: 2026-09-30
+//! audited: 2026-10-21
 //! One in-flight operation: the shapes it can take, the heap values it holds,
 //! and what it gives back when nobody will read its result.
 //!
 //! docs/impl/io-inflight.md
 
 use crate::io::pool::{BufferHandle, BufferPool};
-use crate::io::request::{Bound, ConnectAddr, PortOp};
+use crate::io::request::{Bound, ConnectAddr, FileKind, PortOp};
 use crate::io::types::PortKey;
 use crate::port::PortKind;
 use crate::value::Value;
@@ -14,7 +14,7 @@ use std::rc::Rc;
 
 /// What kind of operation a worker ran, reported beside the id so the entry
 /// that id resolves through can be checked against it
-/// (docs/impl/io-inflight.md § "One id, one operation").
+/// (docs/impl/io-inflight.md).
 ///
 /// Coarser than [`PendingOp`]: these name what a worker can report having done,
 /// which is why the check is [`PendingOp::accepts`] and not an equality.
@@ -26,6 +26,7 @@ pub(crate) enum OpKind {
     Sleep,
     ProcessWait,
     Open,
+    File,
     Task,
     Resolve,
     Watch,
@@ -46,8 +47,7 @@ pub(crate) enum PendingOp {
         port_key: PortKey,
         port: Value,
         /// This operation's share of the descriptor it names, held until the
-        /// entry is retired (docs/impl/io-descriptor.md § "Descriptor
-        /// retirement").
+        /// entry is retired (docs/impl/io-descriptor.md).
         ///
         /// `None` for an operation on a port that owns no descriptor: the
         /// stdio numbers are process-wide and outlive every `Port` that names
@@ -65,8 +65,7 @@ pub(crate) enum PendingOp {
         listener_kind: Option<PortKind>,
         /// The remainder the port handed this read, already copied into the
         /// front of the caller's buffer. Given back if the read ends without
-        /// answering (docs/impl/io-bytes.md § "The port hands its remainder
-        /// to the read").
+        /// answering (docs/impl/io-bytes.md).
         lent: Vec<u8>,
         /// Bytes of this operation's payload already in place: in the caller's
         /// buffer for a read (a borrowed remainder included), or written out
@@ -113,8 +112,8 @@ pub(crate) enum PendingOp {
     },
     /// Open a file path. Creates a new port on completion.
     ///
-    /// An open runs on the thread pool on every platform (src/io/AGENTS.md,
-    /// invariant 14), so `PoolOp::Open` owns the path the syscall reads, and
+    /// An open runs on the thread pool on every platform (src/io/AGENTS.md),
+    /// so `PoolOp::Open` owns the path the syscall reads, and
     /// `buffer_handle` is an empty placeholder.
     Open {
         /// The file path (for error messages).
@@ -122,6 +121,18 @@ pub(crate) enum PendingOp {
         buffer_handle: BufferHandle,
         /// Pre-allocated port Value (born in the solver's region at the call site).
         port: Value,
+    },
+    /// An operation on a file named by its path. Portless.
+    ///
+    /// A file operation runs on the thread pool on every platform, as an open
+    /// does, so `PoolOp::File` owns what the syscalls read, and
+    /// `buffer_handle` is an empty placeholder.
+    File {
+        /// What the completion builds from the worker's result.
+        kind: FileKind,
+        /// The path (for error messages).
+        path: String,
+        buffer_handle: BufferHandle,
     },
     /// Background task — arbitrary closure running on thread pool.
     Task { buffer_handle: BufferHandle },
@@ -215,6 +226,7 @@ impl PendingOp {
             PendingOp::Sleep { buffer_handle, .. } => Some(*buffer_handle),
             PendingOp::ProcessWait { buffer_handle, .. } => Some(*buffer_handle),
             PendingOp::Open { buffer_handle, .. } => Some(*buffer_handle),
+            PendingOp::File { buffer_handle, .. } => Some(*buffer_handle),
             PendingOp::Task { buffer_handle, .. } => Some(*buffer_handle),
             PendingOp::Resolve { buffer_handle, .. } => Some(*buffer_handle),
             PendingOp::WatchNext { buffer_handle, .. } => Some(*buffer_handle),
@@ -226,8 +238,7 @@ impl PendingOp {
 
     /// The heap values this operation holds and a completion dereferences when
     /// it cooks a result. `OperandHold` retains exactly this list
-    /// (docs/impl/io-inflight.md § "A submitted operation holds the values its
-    /// completion reads").
+    /// (docs/impl/io-inflight.md).
     ///
     /// The trap: this match and `PortOp::operand` are exhaustive on purpose. A
     /// variant that gains a value field and does not name it goes unretained,
@@ -247,6 +258,7 @@ impl PendingOp {
             PendingOp::WatchNext { watcher, .. } => out[0] = *watcher,
             PendingOp::SigNext { receiver, .. } => out[0] = *receiver,
             PendingOp::Sleep { .. }
+            | PendingOp::File { .. }
             | PendingOp::Task { .. }
             | PendingOp::Resolve { .. }
             | PendingOp::PollFd { .. }
@@ -258,8 +270,7 @@ impl PendingOp {
     /// The one operand the kernel or a pool worker reaches by address rather
     /// than through the completion: a read's buffer, a write's payload, a
     /// `recv-from` result whose `:data` the ring receives into. A cancel keeps
-    /// this one held until the completion arrives (docs/impl/io-bytes.md § "The
-    /// kernel's operand is held until the completion arrives"). `Value::NIL`,
+    /// this one held until the completion arrives (docs/impl/io-bytes.md). `Value::NIL`,
     /// which retains nothing, for every operation that addresses none.
     pub(crate) fn addressed(&self) -> Value {
         match self {
@@ -279,6 +290,7 @@ impl PendingOp {
             | PendingOp::Sleep { .. }
             | PendingOp::ProcessWait { .. }
             | PendingOp::Open { .. }
+            | PendingOp::File { .. }
             | PendingOp::Task { .. }
             | PendingOp::Resolve { .. }
             | PendingOp::WatchNext { .. }
@@ -290,8 +302,7 @@ impl PendingOp {
 
     /// Could an operation of kind `kind` have filed this entry? A "no" is the
     /// table and the completion contradicting each other, and the caller
-    /// withholds rather than cooks (docs/impl/io-inflight.md § "One id, one
-    /// operation").
+    /// withholds rather than cooks (docs/impl/io-inflight.md).
     pub(crate) fn accepts(&self, kind: OpKind) -> bool {
         matches!(
             (self, kind),
@@ -300,6 +311,7 @@ impl PendingOp {
                 | (PendingOp::Sleep { .. }, OpKind::Sleep)
                 | (PendingOp::ProcessWait { .. }, OpKind::ProcessWait)
                 | (PendingOp::Open { .. }, OpKind::Open)
+                | (PendingOp::File { .. }, OpKind::File)
                 | (PendingOp::Task { .. }, OpKind::Task)
                 | (PendingOp::Resolve { .. }, OpKind::Resolve)
                 | (PendingOp::WatchNext { .. }, OpKind::Watch)
@@ -318,6 +330,7 @@ impl PendingOp {
             PendingOp::Sleep { .. } => "sleep",
             PendingOp::ProcessWait { .. } => "process wait",
             PendingOp::Open { .. } => "open",
+            PendingOp::File { .. } => "file",
             PendingOp::Task { .. } => "task",
             PendingOp::Resolve { .. } => "resolve",
             PendingOp::WatchNext { .. } => "watch",
@@ -364,8 +377,7 @@ impl PendingOp {
     ///
     /// A process wait on the ring reaped nothing, since it asks with `WNOWAIT`,
     /// so its `siginfo_t` is all there is to give back. The pool's wait reaps
-    /// in the worker, through the exit record (src/io/AGENTS.md § "A reap is
-    /// never wasted").
+    /// in the worker, through the exit record (src/io/AGENTS.md).
     pub(crate) fn retire(self, result_fd: i32, buffer_pool: &mut BufferPool) {
         if let Some(bh) = self.buffer_handle() {
             buffer_pool.release(bh);

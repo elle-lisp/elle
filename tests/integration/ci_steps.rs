@@ -8,7 +8,7 @@
 // lines, and ask `make --dry-run` what each suite target runs.
 
 use crate::common::{
-    passes, recording_targets, runs_target, smoke_passes, step_lines, workflow_files,
+    make_steps, passes, recording_targets, runs_target, smoke_passes, step_lines, workflow_files,
     workflow_jobs as jobs,
 };
 use std::collections::BTreeSet;
@@ -32,23 +32,6 @@ fn workflow(path: &str) -> String {
         .find(|(p, _)| p == path)
         .map(|(_, text)| text)
         .unwrap_or_else(|| panic!("{path} does not exist"))
-}
-
-/// Every `make TARGET VAR=VALUE…` a run line of `body` starts, as the target
-/// and its variables.
-fn make_steps(body: &str) -> Vec<(String, Vec<String>)> {
-    body.lines()
-        .filter_map(|line| line.trim_start().strip_prefix("run: make "))
-        .filter_map(|rest| {
-            let mut words = rest.split_whitespace();
-            let target = words.next()?.to_string();
-            let vars = words
-                .filter(|w| w.contains('='))
-                .map(str::to_string)
-                .collect();
-            Some((target, vars))
-        })
-        .collect()
 }
 
 // A CI step runs one make target, and a target that ran several passes made

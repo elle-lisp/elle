@@ -1,56 +1,28 @@
-// The gate that keeps the `plugins/` submodule compiling against this tree.
+// audited: 2026-10-21
+// The gate that keeps the `plugins/` submodule compiling: every plugin is a workspace member, and its artifact assertion holds.
+//
+// docs/analysis/plugins.md
 //
 // The submodule is a separate cargo workspace whose crates take `elle-plugin`
 // by path, so a changed `elle_api!` declaration moves the SDK and the plugin
-// together and the workspace either compiles or does not. Until the `Plugin
-// Tests` job existed, nothing in CI checked the submodule out: #997 changed six
-// declarations, stopped 17 plugins from compiling at about 90 call sites, and
-// every gate stayed green (#1023). The argument, and why the ABI version guard
-// cannot stand in for the job, are in docs/analysis/ci.md § "The plugins job".
+// together and the workspace either compiles or does not. The `Plugin Tests`
+// job compiles it. The ABI version guard cannot stand in for the job, because
+// a source break never reaches a load.
 //
 // These tests cover the halves the job cannot check for itself: that every
 // plugin is inside the workspace the job compiles, that the list of artifacts
 // it demands still describes the submodule, and that the demand actually fails
-// when an artifact is absent.
+// when an artifact is absent. suite_plugins.rs holds the same for the plugins
+// the language suite loads.
 
+use crate::common::{plugin_package, repo_root, run_make};
 use std::fs;
-use std::path::PathBuf;
-use std::process::Command;
-
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-}
-
-/// Run one Makefile target with variable overrides, returning (success, output).
-/// A command-line assignment beats the Makefile's own, which is what lets the
-/// artifact assertion be driven both ways without a plugin build.
-fn run_make(target: &str, overrides: &[&str]) -> (bool, String) {
-    let out = Command::new("make")
-        .current_dir(repo_root())
-        .arg("--no-print-directory")
-        .arg(target)
-        .args(overrides)
-        .env_remove("GITHUB_ACTIONS")
-        .output()
-        .unwrap_or_else(|e| panic!("run `make {target}`: {e}"));
-    let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
-    text.push_str(&String::from_utf8_lossy(&out.stderr));
-    (out.status.success(), text)
-}
 
 /// The plugins the artifact assertion must not demand. `make plugins-all`
 /// compiles them and `make plugins` does not build them, so a `plugins-verify`
 /// that named them would fail every portable build.
-/// docs/analysis/ci.md § "The plugins job" owns the split.
+/// docs/analysis/plugins.md owns the split.
 const NOT_PORTABLE: &[&str] = &["polars", "arrow", "vulkan", "egui", "wayland"];
-
-/// The package name a plugin directory declares, or `None` when the directory
-/// holds no crate.
-fn package_name(dir: &str) -> Option<String> {
-    let text = fs::read_to_string(repo_root().join("plugins").join(dir).join("Cargo.toml")).ok()?;
-    let line = text.lines().find(|l| l.trim_start().starts_with("name = "))?;
-    Some(line.split('"').nth(1)?.to_string())
-}
 
 /// The directories under `plugins/` that hold a crate.
 fn plugin_directories() -> Vec<String> {
@@ -129,7 +101,7 @@ fn every_plugin_directory_is_a_workspace_member() {
 
     let empty: Vec<&String> = members
         .iter()
-        .filter(|dir| package_name(dir).is_none())
+        .filter(|dir| plugin_package(dir).is_none())
         .collect();
     assert!(
         empty.is_empty(),
@@ -173,15 +145,13 @@ fn the_demanded_artifacts_describe_the_submodule() {
         let stem = artifact
             .strip_prefix("target/release/libelle_")
             .and_then(|s| s.strip_suffix(".so"))
-            .unwrap_or_else(|| {
-                panic!("`{artifact}` is not a `target/release/libelle_*.so` path")
-            });
+            .unwrap_or_else(|| panic!("`{artifact}` is not a `target/release/libelle_*.so` path"));
 
         // Cargo names a cdylib after the package, with `-` as `_`, unless the
         // crate overrides it with `[lib] name`. The directory is the package
         // name without the `elle-` prefix.
         let dir = stem.replace('_', "-");
-        let package = package_name(&dir).unwrap_or_else(|| {
+        let package = plugin_package(&dir).unwrap_or_else(|| {
             panic!("`{artifact}` names plugins/{dir}, which declares no package")
         });
         assert_eq!(
@@ -208,7 +178,7 @@ fn the_demanded_artifacts_describe_the_submodule() {
         assert!(
             !artifacts.contains(&path.as_str()),
             "the assertion demands `{path}`, which the portable build does not \
-             produce; see docs/analysis/ci.md § \"The plugins job\""
+             produce; see docs/analysis/plugins.md"
         );
     }
 }

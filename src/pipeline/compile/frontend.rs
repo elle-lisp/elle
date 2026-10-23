@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The file front end: source text or read forms to regularized HIR, shared by every file entry point but `compile_file_to_lir`.
 //!
 //! src/pipeline/AGENTS.md
@@ -125,15 +125,11 @@ fn compile_syntaxes_frontend_xform_inner(
 
     let (expanded_forms, mut expander, meta) =
         cctx.with_macro_expansion(arena, |macro_vm, mut expander, meta| {
-            let mut pending: std::collections::VecDeque<Syntax> = if source_name.starts_with('<') {
-                syntaxes.into()
-            } else {
-                let file_scope = expander.fresh_scope();
-                syntaxes
-                    .into_iter()
-                    .map(|s| expander.stamp_scope(s, file_scope))
-                    .collect()
-            };
+            // A form takes the file scope as it leaves the queue, after the
+            // include splice, so a spliced form shares the including file's
+            // scope and each sees what the other defines (docs/modules.md).
+            let file_scope = (!source_name.starts_with('<')).then(|| expander.fresh_scope());
+            let mut pending: std::collections::VecDeque<Syntax> = syntaxes.into();
             let mut expanded_forms = Vec::new();
             let mut included: HashSet<String> = HashSet::from([source_name.to_string()]);
             while let Some(syntax) = pending.pop_front() {
@@ -146,6 +142,10 @@ fn compile_syntaxes_frontend_xform_inner(
                 )? {
                     continue;
                 }
+                let syntax = match file_scope {
+                    Some(scope) => expander.stamp_scope(syntax, scope),
+                    None => syntax,
+                };
                 expanded_forms.push(expander.expand(syntax, symbols, macro_vm)?);
             }
             Ok::<_, String>((expanded_forms, expander, meta))

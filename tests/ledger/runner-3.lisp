@@ -1,0 +1,28 @@
+(elle/epoch 15)
+# audited: 2026-10-22
+# The runner's ledger, part 3 of 3: the objects each file's second run in-process leaves live in the runner's heap.
+(producer "elle test")
+["tests/lang/file-content.lisp" :objects 615]
+["tests/lang/file-sync.lisp" :objects 274]
+["tests/lang/gun-content-refused.lisp" :objects 667]
+["tests/lang/gun-content.lisp" :objects 546]
+["tests/lang/gun-graph.lisp" :objects 795]
+["tests/lang/gun-link.lisp" :objects 759]
+["tests/lang/gun-map.lisp" :objects 1031]
+["tests/lang/gun-mesh-errors.lisp" :objects 546]
+["tests/lang/gun-mesh-reads.lisp" :objects 691]
+["tests/lang/gun-mesh.lisp" :objects 579]
+["tests/lang/gun-redial.lisp" :objects 930]
+["tests/lang/gun-redis.lisp" :objects 1023]
+["tests/lang/gun-sea-admission.lisp" :objects 500]
+["tests/lang/gun-sea-forged.lisp" :objects 541]
+["tests/lang/gun-sea-mesh.lisp" :objects 627]
+["tests/lang/gun-sea.lisp" :objects 864]
+["tests/lang/gun-seal.lisp" :objects 471]
+["tests/lang/gun-state.lisp" :objects 564]
+["tests/lang/gun-store.lisp" :objects 504]
+["tests/lang/gun-sync.lisp" :objects 520]
+["tests/lang/gun-value.lisp" :objects 527]
+["tests/lang/gun-walks.lisp" :objects 567]
+["tests/lang/gun-wire.lisp" :objects 433]
+["tests/lang/gun.lisp" :objects 1036]

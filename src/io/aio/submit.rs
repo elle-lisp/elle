@@ -1,4 +1,4 @@
-//! audited: 2026-09-30
+//! audited: 2026-10-21
 //! `AsyncBackend::submit` — the one entry point, and how it routes a request to
 //! a portless path, an immediate answer, or a backend.
 //!
@@ -75,6 +75,11 @@ impl AsyncBackend {
             return self.submit_open(path, flags, mode, request.bound, request.port);
         }
 
+        // A file operation is portless — it names a path, which the worker opens.
+        if let IoOp::File(ref op) = request.op {
+            return self.submit_file(op);
+        }
+
         // Task: run closure on thread pool.
         if let IoOp::Task(ref task_fn) = request.op {
             return self.submit_task(task_fn);
@@ -124,7 +129,7 @@ impl AsyncBackend {
             // struct in place; the worker reaps itself via channel
             // disconnect at AsyncBackend drop time.
             //
-            // See `docs/io.md` "Closing `*stdin*`".
+            // See docs/io.md.
             if matches!(port_key, PortKey::Stdin) {
                 {
                     let inner = self.inner.borrow();
@@ -195,7 +200,7 @@ impl AsyncBackend {
             // are those of a close. What it gives up is its SHARE of the
             // descriptor — an operation still in flight holds one of its own,
             // and the number goes back to the OS with the last of them
-            // (docs/impl/io-descriptor.md § "Descriptor retirement").
+            // (docs/impl/io-descriptor.md).
             port.close();
 
             // Queue immediate completion.
@@ -267,8 +272,7 @@ impl AsyncBackend {
         // whenever it covers the request in full — `frame::line_end` and
         // `frame::exact_end` are the same cuts the completion makes. A remainder
         // that falls short goes with the read, for the completion to answer
-        // from (docs/impl/io-bytes.md § "The port hands its remainder to the
-        // read").
+        // from (docs/impl/io-bytes.md).
         let port_encoding = port.encoding();
         let gen = inner.unicode_generation;
         {
