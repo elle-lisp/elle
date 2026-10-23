@@ -1,8 +1,8 @@
 # MLIR Backend
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-23 -->
 
-A tier-2 path that compiles a hot numeric function through MLIR and LLVM, ahead of the Cranelift JIT.
+A tier-2 path that compiles a hot numeric function through MLIR and LLVM, in place of the Cranelift JIT.
 
 > **Feature-gated:** The MLIR backend requires `--features mlir` at build
 > time and a working LLVM 22 + MLIR install (the `melior` crate links to
@@ -17,8 +17,9 @@ through a `LirView` ([lir.md](lir.md)). It lowers it through the MLIR `arith`
 it with the MLIR `ExecutionEngine`. The result is a native function pointer
 called from the VM with C calling convention.
 
-It runs alongside the bytecode VM and the Cranelift JIT — not as a
-replacement. The same eligibility predicate also drives SPIR-V emission
+An `mlir` build carries this tier in place of the Cranelift JIT
+([config](../config.md)), beside the bytecode VM, which runs what the tier
+refuses. The same eligibility predicate also drives SPIR-V emission
 for GPU dispatch (see [impl/spirv.md](spirv.md) and
 [impl/gpu.md](gpu.md)).
 
@@ -89,15 +90,15 @@ low bit and read e.g. `2` as false.
 ## VM integration
 
 `VM::try_mlir_call` ([mlir_entry.rs](../../src/vm/mlir_entry.rs)) is
-consulted on every closure call that reaches the compiled tiers, after the WASM
-tier and before the Cranelift JIT. It:
+consulted on every closure call that reaches the compiled tiers. It:
 
 1. Skips non-`is_gpu_candidate` closures (cheap field check).
 2. Returns the cached engine result if available.
 3. Returns early if the closure is in the rejection set.
 4. Reads the closure call counter, and proceeds only once it reaches the
-   MLIR threshold in the VM's runtime configuration. The counter is owned by
-   the JIT path, which runs after MLIR; MLIR only reads.
+   MLIR threshold in the VM's runtime configuration. The JIT path owns the
+   counter and counts only while the JIT is enabled, which an `mlir` build
+   starts without, so an adaptive policy never reaches its threshold (#1419).
 5. Runs `is_mlir_cpu_eligible` (full instruction walk).
 6. Compiles via `MlirCache::compile`, caches the engine under the closure's
    bytecode with a pin on its code region, and invokes.
@@ -125,8 +126,10 @@ The result is reboxed based on the compiled function's return type:
 - `ScalarType::Bool` → `Value::bool(result != 0)`
 
 A compile failure joins the rejection set, so later calls do not retry it,
-and the call falls through to the next tier. A failure while the compiled code
-runs raises a structured `mlir-error`.
+and the call runs in the interpreter. A failure while the compiled code
+runs raises a structured `mlir-error`. Compiled code charges no fuel and reads
+no kill word ([runtime](../runtime.md)): a budget never pauses it, and a kill
+lands at the VM's next charge site after the call returns.
 
 ## MlirCache
 
@@ -176,7 +179,7 @@ concurrently.
 ## See also
 
 - [impl/lir.md](lir.md) — the IR being lowered
-- [impl/jit.md](jit.md) — the Cranelift tier that runs after MLIR rejection
+- [impl/jit.md](jit.md) — the Cranelift JIT, the tier an `mlir` build replaces
 - [impl/spirv.md](spirv.md) — the GPU lowering path that shares the eligibility check
 - [impl/gpu.md](gpu.md) — end-to-end GPU compute via MLIR + SPIR-V + Vulkan
 - [impl/differential.md](differential.md) — cross-tier agreement via `compile/run-on` and the runner's diverge status

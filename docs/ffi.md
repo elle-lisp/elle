@@ -1,6 +1,6 @@
 # FFI
 
-<!-- audited: 2026-10-13 -->
+<!-- audited: 2026-10-23 -->
 
 Elle calls C functions through libffi, with keyword type descriptors, reified signatures and explicit marshalling.
 
@@ -255,6 +255,10 @@ A signature accepts keywords such as `:i32` and compound type values from
 ```
 
 The number of arguments must match the signature's argument count exactly.
+
+A call runs to its end once it starts. A kill of the worker that makes it
+([threads](threads.md)) lands at the worker's next charge site, after the call
+returns.
 
 ```lisp
 (def libc (ffi/native nil))

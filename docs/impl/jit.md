@@ -1,6 +1,6 @@
 # JIT
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-10-23 -->
 
 The JIT compiles hot functions from LIR to native code using Cranelift.
 
@@ -215,10 +215,10 @@ its code region, so no count outlives that pin and none passes to a later
 function at the same address.
 
 **Every failed compile is recorded**, whichever kind it is, so the negative
-cache covers all of them. A refusal the translator plans for —
-`UnsupportedInstruction` or `Polymorphic` — is recorded and says
-nothing further. A Cranelift failure or an invalid-LIR result is a defect in
-the compiler, so it is recorded and also printed on stderr, once. Every path
+cache covers all of them. A refusal the translator plans for,
+`UnsupportedInstruction`, is recorded and says nothing further. A Cranelift
+failure or an invalid-LIR result is a defect in the compiler, so it is recorded
+and also printed on stderr, once. Every path
 that takes a result classifies it through `VM::record_jit_failure`: the
 background poll, the diagnostic drain, and the synchronous compile that
 `--trace=syncjit` runs. A flag meant to show a codegen failure must not be the

@@ -1,65 +1,35 @@
 # Benchmarks
 
-Performance benchmarks for Elle using Criterion. Benchmarks measure compilation time, execution speed, and memory usage across various workloads.
+<!-- audited: 2026-10-23 -->
 
-## Running Benchmarks
+Criterion and reporting benchmarks for the Elle compiler and VM, run by hand.
+
+[AGENTS.md](AGENTS.md) names each benchmark file, what it measures, and the
+groups inside it. No CI job runs a benchmark: a reading comes from a run on
+your own machine, compared against a baseline you saved there.
+
+## Running
 
 ```bash
-# Run all benchmarks
+# Every benchmark
 cargo bench
 
-# Run a specific benchmark
-cargo bench benchmark_name
+# One benchmark file, or one group inside it
+cargo bench --bench benchmarks
+cargo bench --bench benchmarks -- macro_expansion
 
-# Run with verbose output
-cargo bench -- --verbose
+# Compile and run each case once, with no timing
+cargo bench --bench benchmarks -- macro_expansion --test
 
-# Save results for comparison
-cargo bench -- --save-baseline my_baseline
-
-# Compare against a baseline
-cargo bench -- --baseline my_baseline
+# Save a baseline before a change, then compare after it
+cargo bench -- --save-baseline before
+cargo bench -- --baseline before
 ```
 
-## Benchmark Types
+Criterion writes its reports under `target/criterion/`, one directory per
+case, with the confidence interval of each reading.
 
-| Type | Tool | Measures | Use for |
-|------|------|----------|---------|
-| **Criterion** | Criterion.rs | Execution time, variance | Detecting regressions |
+## See also
 
-## What Benchmarks Measure
-
-- **Compilation**: Time to compile Elle code to bytecode
-- **Execution**: Time to run compiled code
-- **Startup**: Time to initialize the VM
-- **Memory**: Heap allocations and peak memory usage
-- **JIT**: Performance of JIT-compiled code vs interpreted
-
-## Benchmark Organization
-
-Benchmarks are organized by category:
-
-- **Arithmetic**: Numeric computation performance
-- **List operations**: Cons, car, cdr, length
-- **String operations**: Concatenation, slicing, searching
-- **Closures**: Capture, call overhead
-- **Control flow**: If, while, match performance
-- **Macros**: Expansion time
-
-## CI Integration
-
-The CI pipeline runs benchmarks and reports regressions:
-
-```
-Benchmark Results:
-  arithmetic/add: 1.23ms (no change)
-  list/length: 4.56ms (+5% regression)
-  closure/call: 2.34ms (no change)
-```
-
-Regressions are reported but don't fail the build (`fail-on-alert: false`).
-
-## See Also
-
-- [AGENTS.md](AGENTS.md) - technical reference for LLM agents
+- [AGENTS.md](AGENTS.md) — the benchmark files and groups
 - [Criterion.rs documentation](https://bheisler.github.io/criterion.rs/book/)
