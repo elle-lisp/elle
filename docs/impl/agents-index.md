@@ -48,8 +48,13 @@ check over every tracked path.
 An index lists, for its own directory:
 
 - each document, as a link, with its title and call-out
-- each subdirectory, as a link, with that directory's summary
+- each subdirectory that has an index, as a link, with that directory's
+  summary
 - a link to the parent index
+
+A subdirectory has an index when it holds a document, or an `AGENTS.md` not
+yet converted. One that holds only sources has none, and a link to it would
+lead nowhere.
 
 ## The call-out
 
