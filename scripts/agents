@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# audited: 2026-09-22
+# audited: 2026-10-23
 # Builds a directory's AGENTS.md from the call-out sentence of every document
 # in it, so the index cannot rot and cannot be posted to.
 # docs/impl/agents-index.md
@@ -13,12 +13,16 @@ usage:
   scripts/agents [DIR]         write the index for DIR and everything below it
   scripts/agents --print DIR   write DIR's index to stdout
   scripts/agents --check [DIR] exit 1 when a committed index is stale
+  scripts/agents --counts      the hand-written indexes, and the rows in them
+                               that name a file
   scripts/agents --root DIR    treat DIR as the repository root
   scripts/agents --help        this text
 
 An entry is a document's link, its `# Title` and its call-out — the first
 sentence of the first paragraph under that title. A document with no call-out,
 or one over the budget, is listed as uncalled, which is the work queue.
+
+No run writes or counts the root AGENTS.md, the guide a person writes.
 EOF
 }
 
@@ -30,7 +34,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --root) root=$(cd "$2" && pwd); shift 2 ;;
         --help | -h) usage; exit 0 ;;
-        --print | --check) mode="${1#--}"; shift ;;
+        --print | --check | --counts) mode="${1#--}"; shift ;;
         --*) usage >&2; exit 2 ;;
         *) dir="$1"; shift ;;
     esac
@@ -149,11 +153,57 @@ tree_of() {
         2>/dev/null | sed -e "s|^$root$|.|" -e "s|^$root/||" | LC_ALL=C sort
 }
 
+# Every AGENTS.md below the root, relative to it: the files git tracks when the
+# root is the top of a work tree, and every file under it otherwise. Two
+# checkouts of one commit then count alike, whichever submodules each holds.
+indexes() {
+    local cdup
+    if cdup=$(cd "$root" && git rev-parse --show-cdup 2>/dev/null) && [ -z "$cdup" ]; then
+        (cd "$root" && git -c core.quotePath=false ls-files -- '*/AGENTS.md')
+        return
+    fi
+    find "$root" -mindepth 2 -type f -name AGENTS.md \
+        -not -path '*/.git/*' -not -path '*/target/*' -not -path '*/node_modules/*' \
+        | sed "s|^$root/||"
+}
+
+# The two counts the ratchet pins: the indexes no run may write, and the table
+# rows in them whose first cell names a file. A first cell names a file when it
+# is a link, or a code span ending in an extension or in `/`; `io/submit` is a
+# primitive's name.
+counts() {
+    local f hand=0
+    local files=()
+    while IFS= read -r f; do
+        [ -n "$f" ] && [ -f "$root/$f" ] || continue
+        owned "$root/$f" && continue
+        hand=$((hand + 1))
+        files+=("$root/$f")
+    done < <(indexes)
+    printf 'hand-written %d\n' "$hand"
+    # awk with no file reads stdin, so an empty list prints its zero here.
+    if [ "$hand" -eq 0 ]; then
+        printf 'file-rows 0\n'
+        return
+    fi
+    awk '
+        BEGIN {
+            row = "^\\|[[:space:]]*(\\[[^]]*\\]\\([^)]*\\)|`[^`|]*(\\.[A-Za-z0-9]+|[^`|/]/)`)[[:space:]]*\\|"
+        }
+        $0 ~ row { n++ }
+        END { printf "file-rows %d\n", n }
+    ' "${files[@]}"
+}
+
+# Both loops pass over the root: its index is the guide, which no run writes
+# or checks.
 case "$mode" in
     print) index "${dir:-.}" ;;
+    counts) counts ;;
     check)
         rc=0
         while read -r d; do
+            [ "${d:-.}" != . ] || continue
             [ -n "$(docs_in "${d:-.}")" ] || continue
             target="$root/${d:+$d/}AGENTS.md"
             # Same ownership rule as the write path. A directory still holding
@@ -164,22 +214,23 @@ case "$mode" in
                 rc=1
             fi
         done < <(tree_of "${dir:-.}")
+        counts
         exit $rc
         ;;
     write)
         n=0
-        skipped=0
         while read -r d; do
+            [ "${d:-.}" != . ] || continue
             [ -n "$(docs_in "${d:-.}")" ] || continue
             target="$root/${d:+$d/}AGENTS.md"
             if ! owned "$target"; then
                 echo "skipped ${d:-.}: hand-written AGENTS.md" >&2
-                skipped=$((skipped + 1))
                 continue
             fi
             index "${d:-.}" >"$target"
             n=$((n + 1))
         done < <(tree_of "${dir:-.}")
-        echo "wrote $n indexes; skipped $skipped hand-written"
+        echo "wrote $n indexes"
+        counts
         ;;
 esac

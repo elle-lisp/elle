@@ -290,7 +290,7 @@ ISOLATED_IMPL_FILES := $(filter-out $(PRODUCER_FILES),$(IMPL_FILES))
 # The producers that read the tree and not the build. They read the same on
 # every build, so `qa` judges them once, and no build's producer pass runs
 # them again (docs/analysis/ci.md).
-TREE_PRODUCERS  := tests/ratchet/audit.lisp tests/ratchet/size.lisp
+TREE_PRODUCERS  := tests/ratchet/audit.lisp tests/ratchet/agents.lisp tests/ratchet/size.lisp
 BUILD_PRODUCERS := $(filter-out $(TREE_PRODUCERS),$(PRODUCER_FILES))
 
 # The charge pass reads what each file's second run in-process costs the
@@ -446,7 +446,7 @@ smoke-producers: elle elle-rig  ## The build's producers, in-process on the rig
 	@echo "=== the producers, in-process on the rig ==="
 	$(call RUN_SUITE,$(BUILD_PRODUCERS),,$(ELLE_RIG))
 
-tree-producers:  ## The audit and size ledgers, in-process on the release rig
+tree-producers:  ## The audit, index and size ledgers, in-process on the release rig
 	cargo build --release -p elle-rig
 	@echo "=== the tree's producers, in-process on the release rig ==="
 	$(call RUN_SUITE,$(TREE_PRODUCERS),,$(RELEASE_RIG))
