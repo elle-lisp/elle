@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! A `TailCall` callee starts as a fresh activation does: unwritten locals read
 //! NIL, and no region slot is mapped.
 //!

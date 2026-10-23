@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! A write inside a narrowed branch outlives the branch, and a block's type
 //! joins the values its `break`s carry.
 //!

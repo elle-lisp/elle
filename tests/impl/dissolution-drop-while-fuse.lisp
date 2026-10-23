@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-21
 # A fused `drop-while`, lone, in a chain or under a terminal, computes exactly
 # what the staged stdlib ops compute, and mints fewer objects.
 #
@@ -49,8 +49,8 @@
 
 # ── the two facts drop-while's own array arm decides ───────────────────
 # Its array arm returns the accumulator with no `(if (mutable? coll) …)` test, so
-# the result is MUTABLE even over an immutable base — and its `(empty? coll)`
-# clause precedes that arm, so an empty input answers with the empty LIST. Fusion
+# the result is MUTABLE even over an immutable base. Its `(empty? coll)` clause
+# precedes that arm, so an empty input answers with the empty LIST. Fusion
 # reproduces both: a rewrite may not change a value.
 (assert (mutable? (drop-while (fn [x] (even? x)) [2 4 5]))
         "the fused result is unfrozen, as the stdlib array arm's is")
@@ -131,7 +131,7 @@
 
 # ── the declines ───────────────────────────────────────────────────────
 # A `filter` inner to a drop-while can hand an empty collection on from a NON-empty
-# base, where the staged op answers `()` and a fused loop its accumulator, so the
+# base. There the staged op answers `()` and a fused loop its accumulator, so the
 # chain declines whole. The value is the stdlib's either way.
 (assert (= (type-of (drop-while (fn [y] (even? y))
                                 (filter (fn [x] (nil? x)) [1 2 3]))) :list)
@@ -171,10 +171,11 @@
 (assert (= (get base 0) 2) "the base Var survives the fused walk")
 
 # ── Realization: two walker closures, two cells, and the intermediate ──
-# `drop-while`'s array arm walks with TWO `letrec`-bound self-recursive closures —
-# one to find the start, one to copy from it — so the un-fused form mints two
-# closures and two forward cells per call on top of the predicate closure; the
-# fused loop mints none. `arena/total-allocs` counts every object ever minted.
+# `drop-while`'s array arm walks with TWO `letrec`-bound self-recursive closures:
+# one to find the start, one to copy from it. The un-fused form mints both and
+# their forward cells per call, beside the list walker bound ahead of the dispatch
+# and the predicate closure. The fused loop mints none. `arena/total-allocs`
+# counts every object ever minted.
 (defn allocs [thunk]
   (let [before (arena/total-allocs)]
     (thunk)

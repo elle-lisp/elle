@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! Stack simulation helpers for the LIR emitter.
 //!
 //! src/lir/AGENTS.md
@@ -11,7 +11,7 @@ use crate::compiler::bytecode::Instruction;
 
 // These methods live on Emitter because they mutate emitter state
 // (both bytecode and the simulated stack).  They are separated here
-// to keep the instruction-dispatch table in mod.rs focused on
+// to keep the instruction-dispatch table in the `instr` module focused on
 // instruction encoding.
 //
 // Coupled fields on Emitter: `stack`, `reg_to_stack` and `bytecode`.
@@ -67,23 +67,21 @@ impl super::Emitter {
     /// branches, one branch may create orphans while another does not,
     /// leaving different stack depths at the merge point.  This causes
     /// DupN offsets in the merge block to be wrong, shifting operands and
-    /// producing incorrect results (e.g. a struct value in a hash-key
+    /// producing incorrect results (for example, a struct value in a hash-key
     /// slot → "struct keys must be immutable (got struct)").
     ///
     /// This is the FORWARD edge's trim, and it is deliberately partial: it
     /// stops at the first live cell, leaving whatever the edge is carrying to
     /// the merge. A back edge carries nothing and takes [`Self::pop_to`].
     ///
-    /// `floor` is the operand depth the target block has already been
-    /// fixed at by an earlier predecessor (`Emitter::edge_depth`), and
-    /// trimming past it is what turns this cleanup into a miscompilation:
-    /// only `Terminator::Jump` pops, so an orphan a jump edge removed is
-    /// still named by the simulation a sibling `Terminator::Branch` edge
-    /// recorded for the same merge — and the merge's own successors then
-    /// pop it a second time, on a path where it is already gone.  The
-    /// stack falls one slot into the frame's reserved local region and the
-    /// topmost local stops existing (src/lir/AGENTS.md § "Merge operand
-    /// depth").  Pass `0` only when the target's depth is not fixed yet:
+    /// `floor` is the operand depth an earlier predecessor already fixed the
+    /// target block at (`Emitter::edge_depth`). Trimming past it turns this
+    /// cleanup into a miscompilation. Only `Terminator::Jump` pops, so an
+    /// orphan a jump edge removed is still named by the simulation a sibling
+    /// `Terminator::Branch` edge recorded for the same merge. The merge's own
+    /// successors then pop it a second time, on a path where it is already
+    /// gone. The stack falls one slot into the frame's reserved local region,
+    /// and the topmost local stops existing (src/lir/AGENTS.md).  Pass `0` only when the target's depth is not fixed yet:
     /// this edge is then the one that fixes it.
     pub(super) fn pop_trailing_orphans_to(&mut self, floor: usize) {
         while self.stack.len() > floor {
@@ -106,14 +104,14 @@ impl super::Emitter {
     /// Emit `Pop` until the operand stack is exactly `floor` deep, whatever the
     /// cells above it are.
     ///
-    /// The trim a BACK edge takes (src/lir/AGENTS.md § "Merge operand depth").
-    /// `pop_trailing_orphans_to` stops at the first live cell, so an orphan a
-    /// live one sits on top of survives it — and a loop body that reaches its
-    /// back edge with such a pair deepens the header's stack once per trip, for
-    /// as long as the loop runs. A back edge may go further than the orphan trim
-    /// because its target was emitted before the edge existed: the target's
-    /// simulation names only cells below `floor`, so it reads nothing this block
-    /// pushed and every surplus cell is dead.
+    /// The trim a BACK edge takes (src/lir/AGENTS.md).
+    /// `pop_trailing_orphans_to` stops at the first live cell, so an orphan with
+    /// a live cell on top of it survives. A loop body that reaches its back edge
+    /// with such a pair deepens the header's stack once per trip, for as long as
+    /// the loop runs. A back edge may go further than the orphan trim, because
+    /// its target was emitted before the edge existed. The target's simulation
+    /// names only cells below `floor`, so it reads nothing this block pushed,
+    /// and every surplus cell is dead.
     pub(super) fn pop_to(&mut self, floor: usize) {
         while self.stack.len() > floor {
             self.bytecode.emit(Instruction::Pop);
@@ -144,9 +142,9 @@ impl super::Emitter {
             }
         }
         // Fall back to ensure_on_top for each operand.
-        // This handles the uncommon case (e.g., after control flow merges).
-        // NOTE: The DupN fallback leaves original values as orphans on the
-        // actual VM stack. This is a pre-existing limitation of ensure_on_top.
+        // This handles the uncommon case (for example, after control flow
+        // merges). The DupN fallback leaves original values as orphans on the
+        // actual VM stack, a limitation of ensure_on_top.
         // From intrinsic lowering, operands are always freshly lowered and
         // already in position, so this path is not reached in practice.
         self.ensure_on_top(lhs);

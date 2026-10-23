@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-14
+# audited: 2026-10-21
 # The ledger of tests/impl/resource.lisp: each scenario's net heap objects and its peak, pinned at what the tree reads.
 (producer "tests/impl/resource.lisp")
 # The byte total the file prints has no row: a page's size is the platform's.

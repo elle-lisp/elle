@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! The innermost structural scope enclosing a set of HIR nodes: where a co-owned group or an activation's SCC is freed.
 //!
 //! docs/impl/region/ownership.md
@@ -9,18 +9,18 @@ use rustc_hash::FxHashSet;
 /// The innermost structural scope node (`Let`/`Letrec`/`Begin`/`Loop`/`Block`) that
 /// lexically encloses every HirId in `targets`, or `None` if they share no common
 /// structural scope within one function body. This is the co-owned-cycle cut's drop
-/// point ([`compute_owned_region_groups`](super::compute_owned_region_groups)): the
-/// lowerer's `emit_decrefs_for` on this node fires after its whole body, so a
-/// `FreeRegionGroup` emitted there post-dominates every member's last use and every
-/// pass-through-alias release inside the scope.
+/// point ([`compute_owned_region_groups`](super::compute_owned_region_groups)) and the
+/// activation cut's adopt site. The lowerer's `emit_decrefs_for` on this node fires
+/// after its whole body. So a `FreeRegionGroup` emitted there post-dominates every
+/// member's last use and every pass-through-alias release inside the scope.
 ///
-/// Computed as the deepest node common to every target's structural-scope ancestor stack
-/// (the longest common prefix). A `Lambda` **resets** the stack — its body is a separate
-/// function, so a scope outside the lambda cannot enclose a node inside it; a group whose
-/// members live directly in a lambda body with no enclosing structural scope returns
-/// `None` and stays Shared (the always-legal baseline). The scope node's own id is not in
-/// its descendants' stacks (recorded at entry, before the node is pushed), which is what
-/// makes the result a strict *ancestor* — and thus a post-dominator in post-order.
+/// Computed as the deepest node common to every target's structural-scope ancestor
+/// stack (the longest common prefix). A `Lambda` **resets** the stack, because its
+/// body is a separate function, and a scope outside the lambda cannot enclose a node
+/// inside it. A group whose members live directly in a lambda body, with no enclosing
+/// structural scope, returns `None` and stays Shared. A target's stack is recorded
+/// at entry, before the node itself is pushed. So the result is a strict *ancestor*,
+/// and thus a post-dominator in post-order.
 pub(in crate::hir::region::infer) fn innermost_enclosing_scope(
     hir: &Hir,
     targets: &FxHashSet<HirId>,
@@ -45,9 +45,9 @@ pub(in crate::hir::region::infer) fn innermost_enclosing_scope(
             found.push(stack.clone());
         }
         if matches!(h.kind, HirKind::Lambda { .. }) {
-            // Separate function body — a fresh ancestor stack (outer scopes do not enclose
-            // it). All members of one co-owned cycle are allocated in one activation, so
-            // a cross-lambda common prefix would be empty (→ refuse), which is correct.
+            // A separate function body takes a fresh ancestor stack, because outer
+            // scopes do not enclose it. A cross-lambda common prefix is then empty, and
+            // the caller refuses.
             let mut inner = Vec::new();
             h.for_each_child(|c| walk(c, targets, &mut inner, found));
             return;
@@ -63,8 +63,8 @@ pub(in crate::hir::region::infer) fn innermost_enclosing_scope(
     }
     let mut found: Vec<Vec<HirId>> = Vec::new();
     walk(hir, targets, &mut Vec::new(), &mut found);
-    // Every target must have been located, or the result would be a scope enclosing only
-    // some of them — refuse.
+    // Every target must have been located. Otherwise the result would be a scope
+    // enclosing only some of them, so refuse.
     if found.len() != targets.len() {
         return None;
     }

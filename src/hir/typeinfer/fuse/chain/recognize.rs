@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! Recognizing the calls a chain is made of, the functions they may splice, and
 //! the array base the chain walks.
 //!

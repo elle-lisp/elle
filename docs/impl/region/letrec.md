@@ -1,6 +1,6 @@
 # The letrec closure-cycle merge
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-21 -->
 
 Mutually recursive closures hold each other through forward cells, so RC never reaches zero; the merge collapses the cycle onto one arena.
 
@@ -11,7 +11,7 @@ member is a capture-cell↔closure structure. The forward-reference **cell** hol
 the closure (`StoreCaptureCell`), and a *sibling* closure **captures** the cell,
 both at the binding scope, never mutated. The cells and closures reference each
 other around the SCC, so per-region RC never reaches zero
-([rules.md](rules.md) Rule 8), and the cycle leaks. A *mutable* `@array` cycle is
+([rules.md](rules.md)), and the cycle leaks. A *mutable* `@array` cycle is
 the deliberate boundary ([adopt.md](adopt.md)). An immutable cycle is
 reclaimable, and a fiber that builds one per loop iteration would otherwise leak
 without bound.
@@ -157,9 +157,8 @@ something else still reads the arena.
   A body that falls out to a bare value hands its value to an *enclosing*
   consumer instead. The mint that funds the caller, if there is one at all, then
   sits outside the scope node. That is no reason to refuse. It is a reason the
-  release cannot stay at the binding scope, and "Drop site — following a
-  handed-out member" below follows the value out to where its own release
-  already sits.
+  release cannot stay at the binding scope. The drop site then follows the value
+  out to where its own release already sits, as a later section says.
 
   This reading decides only whether the mint is inside the body, so an exit it
   does not recognize must read as outside. A loop and a short-circuit
@@ -332,12 +331,14 @@ other side.
 The **frontier gate**'s faces are pinned as one family in `merge::escape`, so
 the two halves cannot drift into each other. The return half's admission is
 pinned across all three ways a body leaves the frame:
-`merge_admits_returned_member_cycle_on_member_tail` (a member tail call),
-`merge_admits_returned_cycle_on_non_member_tail` (a non-member one, whose two
-callee kinds take the two late channels), and
-`merge_admits_returned_cycle_on_value_tail` (a bare member value, whose `Return`
-mints inside the body). `merge_admits_returned_cycle_bound_out_of_tail_position`
-pins the value handed to an enclosing consumer, where the release follows the
+
+- `merge_admits_returned_member_cycle_on_member_tail`: a member tail call.
+- `merge_admits_returned_cycle_on_non_member_tail`: a non-member one, whose two
+  callee kinds take the two late channels.
+- `merge_admits_returned_cycle_on_value_tail`: a bare member value, whose
+  `Return` mints inside the body.
+
+`merge_admits_returned_cycle_bound_out_of_tail_position` pins the value handed to an enclosing consumer, where the release follows the
 member out. It asserts the merge AND the drop site, since either alone is
 unsound.
 

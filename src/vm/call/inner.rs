@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The interpreter's Call-position dispatch by callee kind: native, parameter,
 //! closure and collection, behind the capability gate.
 //!
@@ -62,8 +62,8 @@ impl VM {
             // tiers account identically; see `VM::dispatch_native_call`.
             let (bits, value) = self.dispatch_native_call(def, args.as_slice(), region_id);
             // A terminal :error hands the payload to a catcher, whose read
-            // consumes one reference this frame's own routes do not fund — so the
-            // raise mints it here where the payload is an argument of this call,
+            // consumes one reference this frame's own routes do not fund. So the
+            // raise mints it here, where the payload is an argument of this call:
             // the Call-position twin of the tail exit's mint (`tail_call_inner`).
             // The site's own payload retain, where the compiler took one, is left
             // standing for the continuation past this call: a restart replays it,
@@ -181,10 +181,12 @@ impl VM {
 
             // A compiled callee runs as a native call nested on the Rust stack.
             // While that stack is low, the callee runs here instead, on fiber
-            // frames (docs/impl/vm.md).
+            // frames (docs/impl/vm.md). During an expansion it runs here too,
+            // because compiled code cannot spend the expansion budget
+            // (docs/runtime.md).
             #[cfg(any(feature = "jit", feature = "wasm", feature = "mlir"))]
-            let compiled_room =
-                !crate::vm::native_stack::below(crate::vm::native_stack::COMPILED_CALL_RESERVE);
+            let compiled_room = !self.expanding()
+                && !crate::vm::native_stack::below(crate::vm::native_stack::COMPILED_CALL_RESERVE);
 
             // Tiered WASM compilation and dispatch.
             // Checked before JIT because WASM is the preferred fast path when enabled.

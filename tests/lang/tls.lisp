@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 14)
+# audited: 2026-10-06
 # The TLS library completes a handshake with example.com.
 # lib/tls.md
 #
@@ -12,13 +12,11 @@
 ##   ./target/release/elle tests/lang/tls.lisp
 ##
 ## Note: Plugin primitives are not resolvable by name at compile time.
-## They are accessed via the struct returned by import-file and closed
+## They are accessed via the struct that import returns, and closed
 ## over in lib/tls.lisp.
 
-## Try release build first, fall back to debug.
-(def [ok? tls-plugin]
-  (let [[ok? r] (protect (import-file "target/release/libelle_tls.so"))]
-    (if ok? [ok? r] (protect (import-file "target/debug/libelle_tls.so")))))
+## `plugin/tls` tries the running binary's build profile first, then the other.
+(def [ok? tls-plugin] (protect (import "plugin/tls")))
 
 (unless ok?
   (error (struct :error :gated
@@ -30,7 +28,7 @@
 
 ## Load the TLS stdlib, passing the plugin struct so it can close over
 ## the plugin primitives.
-(def tls ((import-file "lib/tls.lisp") tls-plugin))
+(def tls ((import "std/tls") tls-plugin))
 
 ## ── Probe network access ──────────────────────────────────────────────────
 ## If we can't reach example.com:443, skip the network-dependent tests.

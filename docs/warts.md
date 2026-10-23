@@ -1,14 +1,14 @@
 # Warts
 
-<!-- audited: 2026-10-11 -->
+<!-- audited: 2026-10-22 -->
 
 Where Elle surprises a programmer from another Lisp: the intentional differences,
 then the known limitations.
 
 ## Intentional differences
 
-The three that shape whole programs are in [AGENTS.md](../AGENTS.md) and
-[QUICKSTART.md](../QUICKSTART.md); this is the full list.
+[QUICKSTART.md](../QUICKSTART.md) names the ones that cost the most; this is the
+full list.
 
 - **`nil` and `()` are distinct.** `nil` is falsy; `()` is the empty list and is
   truthy. Use `empty?` for end-of-list. [empty-list.md](empty-list.md) gives the

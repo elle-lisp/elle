@@ -1,6 +1,6 @@
 # Capability enforcement
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-23 -->
 
 Capabilities flow down. A fiber's parent decides what the fiber is
 permitted to do. Operations the fiber can't perform become signals the
@@ -32,9 +32,9 @@ can't do. They're independent:
 
 The table reads the same for every capability. A mask catches a signal
 when the two share **any** bit, so naming a capability in the mask catches
-the operations that raise it — `:exec` catches subprocess requests, `:fs`
-catches the filesystem denials, `:io` catches scheduler requests. There is
-no bit a mask must name before another bit takes effect.
+the operations that raise it. `:exec` catches subprocess requests, `:fs`
+catches the filesystem denials, and `:io` catches scheduler requests. There
+is no bit a mask must name before another bit takes effect.
 
 Naming a capability catches the operation whether or not you also deny it.
 Denial changes what the child is *allowed* to do; the mask changes what
@@ -97,6 +97,7 @@ scheduler, and a fiber denied `:yield` cannot yield but can still read. See
 | `:os-signal` | 16 | Blocks POSIX signal send/raise | no |
 | `:fs` | 17 | Blocks filesystem access | no |
 | `:net` | 18 | Blocks sockets and name resolution | no |
+| `:ambient` | 19 | Blocks reads and changes of process state that no other bit names | no |
 
 VM-internal signals (resume, propagate, query, terminal, fuel, switch,
 wait) cannot be denied.
@@ -165,6 +166,30 @@ carry `:io` alone on a socket, as they carry no `:fs` on a file. The denial
 gates the primitive that opens a connection, so a parent that hands a child a
 connected port grants it that connection.
 
+## Ambient state is `:ambient`
+
+`:ambient` is the bit that means "reads or changes process state that no
+argument carries and no other bit names". The environment, the arguments and
+the pid carry it, and so do the clocks, `vm/config`, the VM's gauges, the
+signal registry, `hash` and the standard ports. A fiber denied it computes from
+the values it was handed and nothing else:
+
+```lisp
+(let [f (fiber/new (fn [] (sys/env "HOME")) |:ambient :error| :deny |:ambient|)]
+  (assert (= (get (fiber/resume f) :denied) |:ambient|)))
+
+(let [f (fiber/new (fn [] (string/join ["a" "b"] "-")) |:error| :deny |:ambient|)]
+  (assert (= (fiber/resume f) "a-b") "computation over its values runs"))
+
+(assert (contains? (get (vm/primitive-meta "sys/env") :bits) :ambient)
+        "a primitive's metadata names the bits it declares")
+```
+
+Every macro expansion withholds `:ambient`, so a macro body cannot read the
+clock or the environment ([macros.md](../macros.md)). A function that calls an
+ambient primitive carries `:ambient` in its inferred signal, so it is not
+silent.
+
 ## What happens on denial
 
 When a fiber calls a primitive whose declared signal bits overlap
@@ -194,20 +219,22 @@ and the value — not the primitive's name — says what the spend costs. For th
 the gate reads the requirement from the argument and tests it against the calling
 fiber, so a fiber cannot spend what it withholds however it obtained the value.
 
-Three primitives work this way, each in its own domain:
+Two primitives work this way, each in its own domain:
 
 - `io/submit` spends the operation its request argument carries. A spawn request
   needs `|:io :exec|`, and an open or a file operation by path needs
   `|:io :fs|`. A socket operation needs
   `|:io :net|`: a connect, an accept, a datagram, a shutdown or a name lookup.
   A connect to a Unix socket adds `:fs`, and a plain read needs `|:io|`.
-- native `import` runs a shared library's `elle_plugin_init`, which is foreign
-  code, so a `.so`/`.dylib`/`.dll` spec needs `:ffi`. A `.lisp` module needs only
-  the `:fs` that `import` already declares.
 - `emit` raises the bits its first argument names, so it needs those bits. The
   literal form compiles to the `Emit` instruction rather than a call, and that
   instruction asks the same question of the bits it carries
   ([emit.md](emit.md)).
+
+Loading a module needs no such rule, because each loader does one thing.
+`import/load-plugin` runs a shared library's `elle_plugin_init`, which is
+foreign code, so it declares `:ffi`. `import/load-file` loads Elle source and
+declares `:fs` and no `:ffi`.
 
 ```lisp
 # The first fiber may build the request; `f` may not spend it.
@@ -240,17 +267,17 @@ capability space that is NOT withheld:
 
 ```lisp
 (fiber/caps)
-# => |:debug :error :exec :ffi :fs :gpu :halt :io :net :os-signal :yield|
+# => |:ambient :debug :error :exec :ffi :fs :gpu :halt :io :net :os-signal :yield|
 
 (let [f (fiber/new (fn [] 42) |:error| :deny |:fs :ffi|)]
   (fiber/caps f))
-# => |:debug :error :exec :gpu :halt :io :net :os-signal :yield|
+# => |:ambient :debug :error :exec :gpu :halt :io :net :os-signal :yield|
 ```
 
 ## Reading a body against its mask and deny set
 
-A `fiber/new` call can show both directions at once. When its body is a
-function literal and its mask and `:deny` set are literal keywords or sets,
+A `fiber/new` call can show both directions at once. Its body may be a
+function literal, and its mask and `:deny` set literal keywords or sets. Then
 the compiler knows the signals the body may raise, the signals its parent
 catches, and the capabilities its parent withholds. The linter then gives two
 hints:
@@ -285,7 +312,7 @@ A child inherits both restrictions plus any `:deny` of its own:
                |:error|
                :deny |:fs|)]
   (fiber/resume outer))
-# => |:debug :error :exec :gpu :halt :io :net :os-signal :yield|
+# => |:ambient :debug :error :exec :gpu :halt :io :net :os-signal :yield|
 # (missing :fs from parent, missing :ffi from own deny)
 ```
 
@@ -334,7 +361,8 @@ a thread.
 A parent that catches a denial decides what the denied call does: it can
 perform the call and resume the child with the result, or refuse it with
 `fiber/refuse`. A fiber a scheduler runs is refused by that scheduler.
-[mediation.md](mediation.md) holds all three.
+[mediation.md](mediation.md) holds all three. A denial inside a macro
+expansion reaches no parent, and the compile fails ([macros.md](../macros.md)).
 
 ## Intrinsics are not checked
 
@@ -364,22 +392,17 @@ calls. That is the internal-helper seam #930 describes:
 
 Each sandbox below holds against the primitives the fiber names. A
 capability-bearing value handed in from outside is confined only where a crossing
-checks it: a submitted request is, and loading a native library is; a module
-already loaded and handed in is not — see the spend section above.
+checks it: a submitted request is; a module already loaded and handed in is
+not — see the spend section above.
 
 ```lisp
 (defn compute [] (* 6 7))
-(defn worker [] (file/read "/etc/hostname"))
 (defn plugin-init [] (subprocess/system "true" []))
 
-# Pure computation sandbox — no IO, no filesystem, no FFI, no subprocess
-(let [f (fiber/new compute |:io :fs :ffi :exec :error|
-                    :deny |:io :fs :ffi :exec|)]
+# Pure computation sandbox — no IO, filesystem, FFI, subprocess or ambient state
+(let [f (fiber/new compute |:io :fs :ffi :exec :ambient :error|
+                    :deny |:io :fs :ffi :exec :ambient|)]
   (assert (= (fiber/resume f) 42)))
-
-# Mediated worker — keeps stdout and the network; the parent sees each disk access
-(let [f (fiber/new worker |:fs :error| :deny |:fs|)]
-  (assert (= (get (fiber/resume f) :primitive) "file/read")))
 
 # Watch what a plugin's init tries to do
 (let [f (fiber/new plugin-init |:error :exec :ffi| :deny |:exec :ffi|)]
@@ -389,20 +412,11 @@ already loaded and handed in is not — see the spend section above.
   (fiber/cancel f))
 ```
 
-Denying `:ffi` stops the fiber loading a native module: a `.so` spec requires
-`:ffi` for the foreign code its load runs. A `.lisp` module needs only the `:fs`
-that `import` declares.
+Denying `:ffi` stops a native module load. The gate refuses the call before
+the loader reads the path, so no library need exist:
 
 ```lisp
-# Nested sandbox: outer denies IO, inner denies errors
-(let [outer (fiber/new
-               (fn []
-                 (let [inner (fiber/new (fn [] :done) |:error| :deny |:error|)]
-                   (fiber/resume inner)
-                   (fiber/caps inner)))   # read from outside: fiber/caps itself declares :error
-               |:io :error|
-               :deny |:io|)
-      caps (fiber/resume outer)]
-  (assert (not (contains? caps :io)))      # from outer
-  (assert (not (contains? caps :error))))  # from its own deny
+(let [f (fiber/new (fn [] (import/load-plugin "nonexistent.so")) |:ffi :error|
+                   :deny |:ffi|)]
+  (assert (= (get (fiber/resume f) :primitive) "import/load-plugin")))
 ```

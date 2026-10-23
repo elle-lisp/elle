@@ -1,6 +1,6 @@
 # The mechanism
 
-<!-- audited: 2026-10-16 -->
+<!-- audited: 2026-10-21 -->
 
 The RC-instruction machinery the [rules](rules.md) constrain: how each
 instruction names its region, and when a static slot may stand in. Two nets keep

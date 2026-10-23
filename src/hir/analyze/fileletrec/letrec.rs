@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-21
 //! The three passes over a file's top-level forms: pre-bind every name,
 //! analyze each initializer, and run the signal fixpoint over the lambdas.
 //!
@@ -207,12 +207,13 @@ impl<'a> Analyzer<'a> {
         // Pass 2 read the silent seed of a lambda analyzed later
         // (docs/pipeline.md).
         //
-        // Scope isolation: Pass 2 may have analyzed expression entries (e.g.,
-        // parameterize bodies) that contain `def` forms. Those defs register
-        // bindings in the file scope. Re-analyzing lambda defs with these
-        // extra bindings visible would produce incorrect capture sets. We
-        // snapshot the scope before Pass 3 and restore it after so that
-        // re-analysis sees only the pre-bound def/var names from Pass 1.
+        // Scope isolation: Pass 2 may have analyzed expression entries, such
+        // as parameterize bodies, that contain `def` forms. Those defs
+        // register bindings in the file scope. Re-analyzing lambda defs with
+        // these extra bindings visible would produce incorrect capture sets.
+        // So Pass 3 runs on the scope as Pass 1 left it, and the scope Pass 2
+        // left comes back after, so that re-analysis sees only the pre-bound
+        // def/var names from Pass 1.
         if !lambda_entries.is_empty() {
             let mut pass2_bindings = None;
             if let (Some(snapshot), Some(scope)) = (&pass1_scope_snapshot, self.scopes.last_mut()) {
@@ -231,11 +232,6 @@ impl<'a> Analyzer<'a> {
             }
         }
 
-        // Compute signal projection from the last binding's init value.
-        let projection = bindings
-            .last()
-            .and_then(|(_, value)| self.compute_signal_projection(value));
-
         // Body: reference to the last binding (the file's return value).
         let body = match last_binding {
             Some(binding) => Hir::silent(HirKind::Var(binding), span),
@@ -243,9 +239,6 @@ impl<'a> Analyzer<'a> {
         };
 
         self.pop_scope();
-
-        // Stash the projection on the Analyzer for the pipeline to retrieve.
-        self.last_signal_projection = projection;
 
         // Mark every direct file-letrec binding as module scope: a top-level
         // `def`, `var` or expression statement, a destructure leaf, or a

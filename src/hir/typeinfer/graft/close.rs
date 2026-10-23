@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! Closes every lambda of the unit into the fragment its code payload will carry, and names the functions a call may graft.
 //!
 //! docs/impl/graft.md

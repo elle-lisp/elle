@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! What each graft bound to a parameter of a function this unit defines, which inference joins as a call site.
 //!
 //! docs/impl/graft.md

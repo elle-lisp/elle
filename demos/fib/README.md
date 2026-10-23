@@ -1,6 +1,6 @@
 # Fibonacci Benchmark
 
-<!-- audited: 2026-10-07 -->
+<!-- audited: 2026-10-21 -->
 
 Naive recursive `fib(30)`: about 2.7 million calls, which measure the cost of a
 function call and of integer arithmetic.

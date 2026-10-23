@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-21
 //! The non-scoped mutating binding forms: `define` (a local `def`) and `set` (`lower_assign`).
 //!
 //! docs/impl/region/bindings.md
@@ -160,7 +160,7 @@ impl<'a> Lowerer<'a> {
 
         if let Some(&slot) = self.binding_to_slot.get(target) {
             if self.in_lambda && is_upvalue && needs_capture {
-                // For LBox upvalues, use StoreCapture (updates cell) + LoadCapture (unwraps)
+                // For a cell-held upvalue, StoreCapture updates the cell and LoadCapture unwraps it
                 self.emit(InstrRef::StoreCapture {
                     index: slot,
                     src: value_reg,

@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-21
 //! The node factory a fused loop is built with, and the one-step counter advance
 //! every loop it builds shares.
 //!
@@ -30,9 +30,9 @@ pub(super) fn fresh_mutable(arena: &mut BindingArena) -> Binding {
 /// synthesized node carries and the arena for minting locals, so the fixed
 /// `(get`/`push`/`freeze)` scaffold and the per-element transform/guard pipeline
 /// build nodes uniformly. The synthesized helper calls and `if`/`let` scaffolding
-/// carry `sig` — the original call's signal, a sound upper bound over every op in
-/// the stdlib op's body — while spliced lambda bodies keep their own signals (they
-/// are moved in whole). Bottom-up re-propagation (`hir/narrow.rs`) then rebuilds
+/// carry `sig`: the original call's signal, a sound upper bound over every op in
+/// the stdlib op's body. Spliced lambda bodies keep their own signals, because
+/// they are moved in whole. Bottom-up re-propagation (src/hir/narrow.rs) then rebuilds
 /// the fused form's signal from these leaves without under-reporting.
 pub(super) struct Build<'a> {
     pub(super) arena: &'a mut BindingArena,
@@ -82,13 +82,13 @@ impl Build<'_> {
     /// one, a `find-index`'s survivor count, a `count`'s tally.
     ///
     /// The raw `%add` is the opcode the stdlib walks this loop stands in for advance
-    /// by (`src/prelude.lisp`'s `each` macro). Reaching the stdlib `+` instead would put
-    /// a variadic call in the loop: `+` collects a rest-list and folds it with a
-    /// `letrec` walker, so every element would mint that list, the walker's closure
-    /// and its cell — re-creating per element exactly the closure this pass exists to
-    /// dissolve. The intrinsic's operand contract discharges from the counter's own
-    /// type: the scaffold seeds each at the literal `0` and advances it by this site
-    /// alone, so nothing but a number ever reaches it.
+    /// by (src/prelude.lisp's `each` macro), and it is one instruction under every
+    /// graft policy. A stdlib `+` call reaches that one instruction only when the
+    /// graft replaces it with its two-operand arm and the fold deletes the arm's
+    /// number guards. A `+` call left a call would collect its operands into a fresh
+    /// rest list on every element. The intrinsic's operand contract discharges from
+    /// the counter's own type: the scaffold seeds each at the literal `0` and
+    /// advances it by this site alone, so nothing but a number ever reaches it.
     pub(super) fn advance(&self, counter: Binding) -> Hir {
         let step = self.node(HirKind::Intrinsic {
             op: crate::hir::expr::IntrinsicOp::Add,

@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-22
 //! A caller paused in its fiber while its interpreted callee runs on the same
 //! dispatch loop, and what completing the call needs.
 //!
@@ -19,7 +19,7 @@ pub struct CallSite {
 }
 
 /// How many `parameterize` frames a fiber held at an entry: a call, a host
-/// that runs code, or a call boundary (src/vm/AGENTS.md). Read only off a
+/// that runs code, or a call boundary (src/vm/overview.md). Read only off a
 /// fiber ([`super::Fiber::param_depth`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ParamDepth(pub(super) usize);

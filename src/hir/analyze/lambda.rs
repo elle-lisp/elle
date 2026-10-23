@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! Analyzes a `fn` form: binds its parameters, analyzes its body, and infers the signal a call to it emits.
 //!
 //! docs/functions.md
@@ -251,10 +251,12 @@ impl<'a> Analyzer<'a> {
         // Must happen before draining current_param_bounds, since
         // compute_inferred_signal reads them for bounded params.
         let mut inferred_signals = self.compute_inferred_signal(&body, &params);
+        let mut direct = self.current_signal_sources.direct_bits;
 
         // A parameter bound is checked at entry, and the check may raise.
         if !self.current_param_bounds.is_empty() {
             inferred_signals = inferred_signals.combine(Signal::errors());
+            direct = direct.union(crate::value::SIG_ERROR);
         }
 
         // Check immutable! assertions
@@ -361,10 +363,14 @@ impl<'a> Analyzer<'a> {
             .doc(doc)
             .origin(origin)
             .numeric(assert_numeric);
-        Ok(Hir::new(
-            HirKind::Lambda(Box::new(lambda)),
-            span,
-            Signal::silent(),
-        ))
+        let hir = Hir::new(HirKind::Lambda(Box::new(lambda)), span, Signal::silent());
+        self.lambda_decls.insert(
+            hir.id,
+            LambdaDecl {
+                ceiling: declared_ceiling,
+                direct,
+            },
+        );
+        Ok(hir)
     }
 }

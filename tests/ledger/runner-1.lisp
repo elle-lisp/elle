@@ -1,6 +1,6 @@
 (elle/epoch 15)
-# audited: 2026-10-21
-# The runner's ledger, part 1 of 3: the objects each file's second run in-process leaves live in the runner's heap.
+# audited: 2026-10-23
+# The runner's ledger, part 1 of 4: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/impl/abort-wait-lists.lisp" :objects 805]
 ["tests/impl/apply-tail-linear.lisp" :objects 223]

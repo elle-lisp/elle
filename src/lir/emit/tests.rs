@@ -1,10 +1,13 @@
-// audited: 2026-10-14
-// docs/impl/bytecode.md
-// src/lir/AGENTS.md
+// audited: 2026-10-21
 //! What the bytecode emitter writes: control flow, yield points and the
-//! coalescing oracle. What an edge owes the operand stack is `depth`'s
-//! subject, where a call parks is `callsite`'s, where fuel is charged is
-//! `charge`'s, and what a nested lambda's payload carries is `payload`'s.
+//! coalescing oracle.
+//!
+//! docs/impl/bytecode.md
+//! src/lir/AGENTS.md
+//!
+//! What an edge owes the operand stack is `depth`'s subject, where a call
+//! parks is `callsite`'s, where fuel is charged is `charge`'s, and what a
+//! nested lambda's payload carries is `payload`'s.
 
 use super::*;
 
@@ -68,9 +71,9 @@ fn interpreter_charge_points(bytecode: &[u8]) -> Vec<usize> {
         .collect()
 }
 
-/// A program with each shape that charges fuel or makes a call: self and
-/// mutual tail calls, a `while` loop, non-tail and spliced calls, a closure, a
-/// generator, a `letrec` loop, a `match` and an `each`.
+/// A program with each shape that charges fuel or makes a call. The shapes are
+/// self and mutual tail calls, a `while` loop, non-tail and spliced calls, a
+/// closure, a generator, a `letrec` loop, a `match` and an `each`.
 const CORPUS: &str = r#"
 (defn spin [i n] (if (< i n) (spin (+ i 1) n) i))
 (defn count-up [n] (var i 0) (while (< i n) (assign i (+ i 1))) i)
@@ -233,9 +236,9 @@ fn test_yield_point_info_collected() {
 // ── The coalescing equivalence oracle (`AssertRegionMatches`) ──
 //
 // `AssertRegionMatches { region_id, src }` is the debug-only net under
-// coalescing: it panics in the bytecode interpreter when a static region slot
+// coalescing. It panics in the bytecode interpreter when a static region slot
 // resolves (through the activation map) to a different physical region than the
-// value actually lives in — turning a mis-coalesce (a UAF in waiting) into a
+// value actually lives in. That turns a mis-coalesce (a UAF in waiting) into a
 // deterministic panic at the exact instruction. These pins prove the net both
 // *bites* (wrong slot → panic) and is *precise* (right slot → silent), built
 // from the spec in `InstrRef::AssertRegionMatches`, not from emission output.

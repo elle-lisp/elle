@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The rest-list gate: which variadic lambdas build their `&` rest list in one region.
 //!
 //! docs/impl/region/restlist.md
@@ -10,9 +10,9 @@ use crate::primitives::def::RegionEffect;
 use crate::value::SymbolId;
 use rustc_hash::FxHashSet;
 
-/// Every lambda in `hir` whose `&` rest list no cell of can outlive its head:
-/// the parameter is never reassigned, no nested lambda reaches it, and every
-/// reference to it reads the list without taking a cell out.
+/// Every lambda in `hir` whose `&` rest list has no cell that can outlive its
+/// head. The parameter is never reassigned, no nested lambda reaches it, and
+/// every reference to it reads the list without taking a cell out.
 pub(super) fn one_region_rest_lists(
     hir: &Hir,
     arena: &BindingArena,

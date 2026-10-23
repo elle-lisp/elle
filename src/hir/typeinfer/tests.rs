@@ -1,20 +1,27 @@
-// audited: 2026-10-20
-// src/hir/AGENTS.md
-// docs/impl/typeinfer.md
+// audited: 2026-10-21
 //! The inference pass's unit tests, and the helpers they compile through and
 //! read the result with.
 //!
-//! One module per subject: `narrow` for what a guard or a dispatch arm proves,
-//! `rettype` for what an op's result proves, `recursion` for what a recursive
-//! call's result proves, `mutation` for what a written binding proves,
-//! `bottom` for what the lattice's start proves, `callsite` for what a call
-//! contributes where its operands and parameters do not line up,
-//! `destructure` for what a destructuring write proves, `branch` for what a
-//! branch's write and a block's `break` leave behind, `prune` for dead-arm
-//! removal, `contract` for prove-or-reject, `graft` for which calls become
-//! their callee's body, `operand` for which operands a graft writes in place,
-//! `live` for which lambdas the graft reaches, `fold` for what the recorded
-//! types then delete.
+//! src/hir/AGENTS.md
+//! docs/impl/typeinfer.md
+//!
+//! One module per subject:
+//!
+//! - `narrow`: what a guard or a dispatch arm proves.
+//! - `rettype`: what an op's result proves.
+//! - `recursion`: what a recursive call's result proves.
+//! - `mutation`: what a written binding proves.
+//! - `bottom`: what the lattice's start proves.
+//! - `callsite`: what a call contributes where its operands and parameters do
+//!   not line up.
+//! - `destructure`: what a destructuring write proves.
+//! - `branch`: what a branch's write and a block's `break` leave behind.
+//! - `prune`: dead-arm removal.
+//! - `contract`: prove-or-reject.
+//! - `graft`: which calls become their callee's body.
+//! - `operand`: which operands a graft writes in place.
+//! - `live`: which lambdas the graft reaches.
+//! - `fold`: what the recorded types then delete.
 
 use super::TypeInfo;
 use crate::hir::types::TyId;
@@ -67,7 +74,7 @@ fn inferred_types(src: &str) -> Vec<TyId> {
 /// The inferred type of every `%`-intrinsic node named `op` in `src`, in the
 /// order the walk reaches them.
 ///
-/// Sharper than `inferred_types`, which reports every node's type at once: over
+/// Sharper than `inferred_types`, which reports every node's type at once. Over
 /// int literals the operands put `Int` into that set themselves, so an op's own
 /// result rule can only be read off the op's own node.
 fn intrinsic_result_types(src: &str, op: &str) -> Vec<TyId> {

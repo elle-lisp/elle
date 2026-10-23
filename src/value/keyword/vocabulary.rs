@@ -12,14 +12,14 @@
 /// a plugin, parsed from JSON) are learned by the instance memo instead.
 ///
 /// `vocabulary_is_collision_free` proves the list injective under the hash.
-/// A missing entry is a defect with no compile error behind it: the keyword
+/// A missing entry is a defect with no compile error behind it. The keyword
 /// prints as `#<keyword:hash>`, and `json/serialize` refuses any struct that
 /// carries it as a key, because JSON has no rendering for a hash. Two tests
-/// keep the list complete, since the constructor cannot —
-/// `vocabulary_covers_literal_mint_sites` scans every form that hands a
-/// literal to a keyword constructor, and `vocabulary_covers_accessor_mint_sites`
-/// enumerates the tables whose `&'static str` accessors feed the same
-/// constructors from behind a `match` arm or a table no scan can see.
+/// keep the list complete, since the constructor cannot.
+/// `vocabulary_covers_literal_mint_sites` scans every form that hands a literal
+/// to a keyword constructor. `vocabulary_covers_accessor_mint_sites` enumerates
+/// the tables whose `&'static str` accessors feed the same constructors from
+/// behind a `match` arm or a table no scan can see.
 pub(crate) static VOCABULARY: &[&str] = &[
     // Result-struct keys and general fields
     "a",
@@ -166,9 +166,11 @@ pub(crate) static VOCABULARY: &[&str] = &[
     // Capability / feature gating
     "capability-denied",
     "feature-disabled",
+    "expansion",
     // Signal names the registry pre-registers. A signal a program declares at
     // run time cannot be listed here; it is learned where the registry is read
     // (docs/impl/symbol.md).
+    "ambient",
     "debug",
     "exec",
     "fs",
@@ -302,6 +304,8 @@ pub(crate) static VOCABULARY: &[&str] = &[
     "trace",
     "unicode",
     "max-depth",
+    "home",
+    "plugin-suffix",
     "adaptive",
     "custom",
     "eager",

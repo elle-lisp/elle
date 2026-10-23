@@ -1,4 +1,7 @@
+// audited: 2026-10-21
 //! Compile-time templates for heap literals.
+//!
+//! docs/impl/region/model.md
 //!
 //! A quoted compound literal (`'(a b c)`, `'[1 2]`, nested data) is **not** a
 //! pre-baked heap `Value` — a heap literal is an ordinary, reclaimable
@@ -8,11 +11,11 @@
 //! `MaterializeConst` instruction builds a **fresh** value from the template each
 //! time it executes, into the literal's OWN solver-assigned region.
 //!
-//! The whole structure shares that one region (an immutable aggregate): every
+//! The whole structure shares that one region (an immutable aggregate). Every
 //! node is materialized bottom-up into the same region, so all internal
 //! references are self-edges (filtered by `find_object_cross_refs`'s
-//! `rid != own_id`) — no spurious cross-region RC, and freeing the one region
-//! reclaims the entire structure at its `decref_point` (Rule 4/7).
+//! `rid != own_id`). So no spurious cross-region RC arises, and freeing the one
+//! region reclaims the entire structure at its `decref_point` (Rule 4/7).
 
 use crate::hir::region::RuntimeRegion;
 use crate::value::Value;
@@ -29,12 +32,11 @@ pub enum ConstTemplate {
     Bool(bool),
     Int(i64),
     Float(f64),
-    /// A symbol carried BY NAME, not by id: symbol ids are per-symbol-table
-    /// (per-instance), so a raw id would name a different symbol — or nothing —
-    /// after the template crosses a `sys/spawn` boundary. The name is re-interned
-    /// into the executing instance's table at materialize time (the `symbols`
-    /// threaded into [`materialize`](Self::materialize)), exactly as a sent symbol
-    /// Value re-interns (`value::send`). (spawn-eval.lisp pins this.)
+    /// A symbol carried by name. Its id is the name's hash in every instance,
+    /// but an instance prints only the spellings its table has learned. So
+    /// [`materialize`](Self::materialize) interns the name into the executing
+    /// instance's table, as a sent symbol does (`value::send`).
+    /// spawn-eval.lisp pins the crossing.
     Symbol(String),
     Keyword(String),
     // Heap leaves / aggregates — allocated into the literal's region.
@@ -47,11 +49,10 @@ pub enum ConstTemplate {
     /// always a symbol, produced by quasiquote). Materializes to a fresh
     /// `Value::syntax` wrapping a `Symbol` node carrying its scope set — a fresh
     /// ordinary (reclaimable) allocation per execution. The scope ids are
-    /// carried verbatim (they are process-global) so hygiene resolution is
-    /// preserved.
+    /// carried verbatim, so hygiene resolution is preserved.
     SyntaxSymbol {
         name: String,
-        scopes: Vec<u32>,
+        scopes: Vec<crate::syntax::ScopeId>,
         span: crate::syntax::Span,
         scope_exempt: bool,
     },
@@ -96,11 +97,10 @@ impl ConstTemplate {
     /// self-edge, taking no cross-region RC. Mirrors the immutable constructors
     /// in `value/repr/constructors.rs`, into the explicit resolved region.
     ///
-    /// A quoted `Symbol` leaf re-interns its name into `symbols` (the executing
-    /// instance's table, threaded explicitly); the id is then valid HERE even
-    /// across a `sys/spawn` boundary. `symbols` must be `Some` whenever the
-    /// template contains a `Symbol` leaf (the only arm that needs it); a `None`
-    /// there panics.
+    /// A quoted `Symbol` leaf interns its name into `symbols`, the executing
+    /// instance's table, so that instance can print it after a `sys/spawn`
+    /// crossing. `symbols` must be `Some` whenever the template contains a
+    /// `Symbol` leaf (the only arm that needs it); a `None` there panics.
     pub fn materialize(
         &self,
         heap: &mut crate::value::fiberheap::FiberHeap,
@@ -126,9 +126,6 @@ impl ConstTemplate {
                 }
                 Value::keyword(k)
             }
-            // Re-intern the symbol's name into the executing instance's table so
-            // the id is valid HERE — across a `sys/spawn` boundary the sender's id
-            // would name a different symbol (spawn-eval.lisp).
             ConstTemplate::Symbol(name) => {
                 let symbols = symbols.expect("materialize: no symbol table for a quoted symbol");
                 Value::symbol(symbols.intern(name))
@@ -195,13 +192,12 @@ impl ConstTemplate {
                 span,
                 scope_exempt,
             } => {
-                use crate::syntax::{ScopeId, Syntax, SyntaxArena};
+                use crate::syntax::{Syntax, SyntaxArena};
                 // The node is born in the region the materialized value lives
                 // in, so the `Value` owns its tree outright
-                // (docs/impl/syntax.md § "A syntax `Value` owns its tree").
+                // (docs/impl/syntax.md).
                 let arena = unsafe { SyntaxArena::from_raw(heap as *mut _, region) };
-                let scope_ids: Vec<ScopeId> = scopes.iter().map(|&s| ScopeId(s)).collect();
-                let mut syn = Syntax::symbol_scoped(&arena, name, *span, &scope_ids);
+                let mut syn = Syntax::symbol_scoped(&arena, name, *span, scopes);
                 syn.scope_exempt = *scope_exempt;
                 alloc_in_region(
                     heap,
@@ -280,8 +276,8 @@ impl ConstTemplate {
                 out.push(TAG_SYNTAX_SYMBOL);
                 put_str(out, name);
                 out.extend_from_slice(&(scopes.len() as u32).to_be_bytes());
-                for &s in scopes {
-                    out.extend_from_slice(&s.to_be_bytes());
+                for s in scopes {
+                    out.extend_from_slice(&s.to_bits().to_be_bytes());
                 }
                 out.extend_from_slice(&(span.start as u64).to_be_bytes());
                 out.extend_from_slice(&(span.end as u64).to_be_bytes());
@@ -352,8 +348,10 @@ impl ConstTemplate {
             TAG_SYNTAX_SYMBOL => {
                 let name = get_str(bytes, ip);
                 let n = u32::from_be_bytes(take::<4>(bytes, ip)) as usize;
-                let scopes: Vec<u32> = (0..n)
-                    .map(|_| u32::from_be_bytes(take::<4>(bytes, ip)))
+                let scopes: Vec<crate::syntax::ScopeId> = (0..n)
+                    .map(|_| {
+                        crate::syntax::ScopeId::from_bits(u64::from_be_bytes(take::<8>(bytes, ip)))
+                    })
                     .collect();
                 let start = u64::from_be_bytes(take::<8>(bytes, ip)) as usize;
                 let end = u64::from_be_bytes(take::<8>(bytes, ip)) as usize;

@@ -60,6 +60,15 @@ mod bins {
 mod argv_cli {
     include!("argv_cli.rs");
 }
+mod macro_fuel {
+    include!("macro_fuel.rs");
+}
+mod macro_purity {
+    include!("macro_purity.rs");
+}
+mod module_cli {
+    include!("module_cli.rs");
+}
 mod dispatch {
     include!("dispatch.rs");
 }
@@ -105,8 +114,8 @@ mod tier_cli {
 mod embedding {
     include!("embedding.rs");
 }
-mod projection {
-    include!("projection.rs");
+mod squelch {
+    include!("squelch.rs");
 }
 mod lsp {
     include!("lsp.rs");
@@ -208,6 +217,9 @@ mod paths {
 mod agents {
     include!("agents.rs");
 }
+mod agents_tree {
+    include!("agents_tree.rs");
+}
 mod audit {
     include!("audit.rs");
 }
@@ -216,6 +228,9 @@ mod audit_report {
 }
 mod audit_counts {
     include!("audit_counts.rs");
+}
+mod audit_policy {
+    include!("audit_policy.rs");
 }
 mod audit_sources {
     include!("audit_sources.rs");

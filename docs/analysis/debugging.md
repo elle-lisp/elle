@@ -1,6 +1,6 @@
 # Debugging and introspection
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-21 -->
 
 The primitives a program uses to print its values, inspect a closure, and time its own work.
 

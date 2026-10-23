@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! Callee inlining for the region walk: re-walk a known callee's body so its intrinsics record edges at the call site.
 //!
 //! docs/impl/region/mechanism.md

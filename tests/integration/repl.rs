@@ -1,15 +1,21 @@
-// Integration tests for REPL behavior.
-//
-// Tests pipe input through the elle binary to verify form-by-form
-// evaluation, def persistence, multi-line accumulation, and error
-// handling.
+// audited: 2026-10-21
+// The REPL fed through a pipe: one form at a time, what a line binds, and the errors a session survives.
+// docs/pipeline.md
 
 use std::io::Write;
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 fn elle(input: &str) -> (String, String, i32) {
+    elle_in(Path::new("."), input)
+}
+
+/// Run a session in `cwd`, so that a relative `import-file` path resolves
+/// against it: a REPL line has no file of its own.
+fn elle_in(cwd: &Path, input: &str) -> (String, String, i32) {
     let bin = env!("CARGO_BIN_EXE_elle");
     let mut child = Command::new(bin)
+        .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -98,6 +104,21 @@ fn def_redefinition() {
     assert!(lines[2].contains("2"), "redefined value: {}", out);
 }
 
+/// A function a line defines again is the body a later line's `map` runs. The
+/// counter-factual recorded each line's functions for later lines to splice
+/// into a fused `map`, keeping the first definition, so the `map` answered
+/// `[1 1]` while a direct call answered 2.
+#[test]
+fn a_redefined_function_is_the_body_a_later_map_runs() {
+    let (out, _, code) = elle("(defn f [x] 1)\n(defn f [x] 2)\n(map f [1 2])\n(f 0)\n");
+    assert_eq!(code, 0);
+    assert!(out.contains("⟹ [2 2]"), "the map runs the second f: {out}");
+    assert!(
+        out.contains("⟹ 2"),
+        "a direct call runs the second f: {out}"
+    );
+}
+
 // ── Multi-line accumulation ──────────────────────────────────────────
 
 #[test]
@@ -116,7 +137,8 @@ fn multiline_let() {
 
 #[test]
 fn multiline_defn() {
-    let (out, _, code) = elle("(defn fib (n)\n  (if (< n 2) n\n    (+ (fib (- n 1)) (fib (- n 2)))))\n(fib 10)\n");
+    let (out, _, code) =
+        elle("(defn fib (n)\n  (if (< n 2) n\n    (+ (fib (- n 1)) (fib (- n 2)))))\n(fib 10)\n");
     assert_eq!(code, 0);
     assert!(out.contains("⟹ 55"), "fib result: {}", out);
 }
@@ -157,9 +179,7 @@ fn var_destructure_persists() {
 
 #[test]
 fn defmacro_persists() {
-    let (out, _, code) = elle(
-        "(defmacro double (x) (list (quote *) x 2))\n(double 5)\n",
-    );
+    let (out, _, code) = elle("(defmacro double (x) (list (quote *) x 2))\n(double 5)\n");
     assert_eq!(code, 0);
     assert!(out.contains("⟹ 10"), "macro call: {}", out);
 }
@@ -183,72 +203,6 @@ fn defmacro_uses_def() {
     assert!(out.contains("⟹ 105"), "macro using def: {}", out);
 }
 
-// ── Forward references and mutual recursion ─────────────────────────
-
-#[test]
-fn forward_reference_across_lines() {
-    let (out, _, code) = elle("(defn foo [] (bar))\n(defn bar [] 42)\n(foo)\n");
-    assert_eq!(code, 0, "stdout: {}\n", out);
-    assert!(out.contains("⟹ 42"), "forward ref result: {}", out);
-}
-
-#[test]
-fn mutual_recursion_across_lines() {
-    let (out, _, code) = elle(
-        "(defn ping [n] (if (= n 0) :done (pong (- n 1))))\n\
-         (defn pong [n] (if (= n 0) :done (ping (- n 1))))\n\
-         (ping 10)\n",
-    );
-    assert_eq!(code, 0, "stdout: {}\n", out);
-    assert!(out.contains("⟹ :done"), "mutual recursion: {}", out);
-}
-
-#[test]
-fn forward_reference_same_line() {
-    let (out, _, code) = elle("(defn foo [] (bar)) (defn bar [] 42) (foo)\n");
-    assert_eq!(code, 0, "stdout: {}\n", out);
-    assert!(out.contains("⟹ 42"), "forward ref same line: {}", out);
-}
-
-#[test]
-fn three_way_mutual_recursion() {
-    // a(5) → b(4) → c(3) → a(2) → b(1) → c(0) → :c
-    let (out, _, code) = elle(
-        "(defn a [n] (if (= n 0) :a (b (- n 1))))\n\
-         (defn b [n] (if (= n 0) :b (c (- n 1))))\n\
-         (defn c [n] (if (= n 0) :c (a (- n 1))))\n\
-         (a 5)\n",
-    );
-    assert_eq!(code, 0, "stdout: {}\n", out);
-    assert!(out.contains("⟹ :c"), "three-way mutual recursion: {}", out);
-}
-
-#[test]
-fn deferred_then_resolved_by_later_def() {
-    // foo references bar which doesn't exist yet; bar is defined later;
-    // foo should be resolved and callable.
-    let (out, _, code) = elle(
-        "(defn foo [x] (bar x))\n\
-         (defn bar [x] (* x 10))\n\
-         (foo 3)\n",
-    );
-    assert_eq!(code, 0, "stdout: {}\n", out);
-    assert!(out.contains("⟹ 30"), "deferred resolution: {}", out);
-}
-
-#[test]
-fn chained_forward_references() {
-    // foo → bar → baz, all defined in forward order
-    let (out, _, code) = elle(
-        "(defn foo [] (bar))\n\
-         (defn bar [] (baz))\n\
-         (defn baz [] 99)\n\
-         (foo)\n",
-    );
-    assert_eq!(code, 0, "stdout: {}\n", out);
-    assert!(out.contains("⟹ 99"), "chained forward refs: {}", out);
-}
-
 // ── Error handling ───────────────────────────────────────────────────
 
 #[test]
@@ -270,4 +224,12 @@ fn error_does_not_poison_session() {
     let (out, err, _) = elle("bad-symbol\n(+ 1 2)\n");
     assert!(err.contains("undefined"), "error: {}", err);
     assert!(out.contains("⟹ 3"), "recovery: {}", out);
+}
+
+mod imports {
+    include!("repl/imports.rs");
+}
+
+mod forward {
+    include!("repl/forward.rs");
 }

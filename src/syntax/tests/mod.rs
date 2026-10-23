@@ -1,4 +1,4 @@
-// audited: 2026-10-07
+// audited: 2026-10-21
 //! Tests for syntax nodes: construction, scopes, the printed form the reader
 //! reads back, and expansion.
 //!
@@ -8,6 +8,7 @@
 use super::*;
 
 mod region;
+pub(crate) mod units;
 
 /// A heap and arena for a test that builds nodes by hand. Keep the returned
 /// `SyntaxHeap` alive for as long as the nodes.
@@ -36,10 +37,10 @@ fn test_syntax_construction() {
 fn test_syntax_with_scopes() {
     let (_home, a) = arena();
     let span = Span::new(0, 5, 1, 1);
-    let syntax = Syntax::symbol_scoped(&a, "x", span, &[ScopeId(1), ScopeId(2)]);
+    let syntax = Syntax::symbol_scoped(&a, "x", span, &[ScopeId::test(1), ScopeId::test(2)]);
     assert_eq!(syntax.scopes().len(), 2);
-    assert_eq!(syntax.scopes()[0], ScopeId(1));
-    assert_eq!(syntax.scopes()[1], ScopeId(2));
+    assert_eq!(syntax.scopes()[0], ScopeId::test(1));
+    assert_eq!(syntax.scopes()[1], ScopeId::test(2));
 }
 
 #[test]
@@ -49,16 +50,16 @@ fn test_add_scope() {
     let mut syntax = Syntax::symbol(&a, "x", span);
     assert_eq!(syntax.scopes().len(), 0);
 
-    syntax.add_scope(&a, ScopeId(1));
+    syntax.add_scope(&a, ScopeId::test(1));
     assert_eq!(syntax.scopes().len(), 1);
-    assert_eq!(syntax.scopes()[0], ScopeId(1));
+    assert_eq!(syntax.scopes()[0], ScopeId::test(1));
 
     // Adding same scope again should not duplicate
-    syntax.add_scope(&a, ScopeId(1));
+    syntax.add_scope(&a, ScopeId::test(1));
     assert_eq!(syntax.scopes().len(), 1);
 
     // Adding different scope should work
-    syntax.add_scope(&a, ScopeId(2));
+    syntax.add_scope(&a, ScopeId::test(2));
     assert_eq!(syntax.scopes().len(), 2);
 }
 
@@ -127,10 +128,10 @@ fn test_display_float_integral_round_trips() {
     // `Syntax` Display must round-trip through the reader for EVERY literal —
     // most subtly an integral-valued float. `splice_includes` (the WASM
     // full-module path) re-stringifies each user form through this Display and
-    // re-reads it, so a `Float(7.0)` rendered as the bare integer `7` re-reads
-    // as `Int(7)` — silently changing `(type-of 7.0)` from :float to :integer.
-    // Non-integral floats (1.5) never hit this because their text already
-    // carries a '.'; that is why the bug hid behind `test_display_float`'s PI.
+    // re-reads it. A `Float(7.0)` rendered as the bare integer `7` would
+    // re-read as `Int(7)`, and `(type-of 7.0)` would change from :float to
+    // :integer. A non-integral float (1.5) cannot show this, because its text
+    // already carries a '.', so `test_display_float`'s PI would pass either way.
     let (_home, a) = arena();
     for &v in &[7.0f64, 2.0, 1000.0, -3.0, 1.5, 0.5, 1e21] {
         let text = Syntax::new(SyntaxKind::Float(v), Span::synthetic()).to_string();
@@ -172,9 +173,9 @@ const AWKWARD: &str = "é'\"\\\n\t\r\u{1}\0";
 #[test]
 fn test_display_string_reads_back_under_every_lexicon() {
     // The printed text is read again, and not always under the lexicon that
-    // read the original (docs/impl/lexicon.md). Rust's `escape_default`
-    // wrote `\u{e9}` for `é` and `\'` for `'`: epoch 12 reads the first as
-    // the five characters `u{e9}`, and epoch 13 refuses the second.
+    // read the original (docs/impl/lexicon.md). Rust's `escape_default` would
+    // write `\u{e9}` for `é` and `\'` for `'`: epoch 12 would read the first
+    // as the five characters `u{e9}`, and epoch 13 would refuse the second.
     let (_home, a) = arena();
     let nodes = [
         Syntax::string(&a, AWKWARD, Span::synthetic()),
@@ -217,7 +218,7 @@ fn test_display_list() {
 }
 
 #[test]
-fn test_display_tuple() {
+fn test_display_array() {
     let (_home, a) = arena();
     let span = Span::new(0, 10, 1, 1);
     let items = [
@@ -229,7 +230,7 @@ fn test_display_tuple() {
 }
 
 #[test]
-fn test_display_array() {
+fn test_display_array_mut() {
     let (_home, a) = arena();
     let span = Span::new(0, 10, 1, 1);
     let items = [
@@ -268,8 +269,10 @@ fn test_expander_fresh_scope() {
     let scope1 = expander.fresh_scope();
     let scope2 = expander.fresh_scope();
     assert_ne!(scope1, scope2);
-    assert_eq!(scope1, ScopeId(1));
-    assert_eq!(scope2, ScopeId(2));
+    // An expander no compile began a unit on still mints under a tag of its
+    // own, from zero, and never the primitive scope.
+    assert_eq!((scope1.count(), scope2.count()), (0, 1));
+    assert_ne!(scope1, ScopeId::PRIMITIVE);
 }
 
 #[test]
@@ -407,7 +410,7 @@ fn test_macro_arity_check() {
 }
 
 #[test]
-fn test_scope_merge() {
+fn test_span_merge() {
     let span1 = Span::new(0, 5, 1, 1);
     let span2 = Span::new(10, 15, 2, 5);
     let merged = span1.merge(&span2);

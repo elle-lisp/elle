@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! Converts register-based LIR to stack-based bytecode, simulating the operand stack to find each register's value.
 //!
 //! docs/impl/bytecode.md
@@ -45,7 +45,7 @@ pub struct Emitter {
     yield_stack_state: FxHashMap<Label, (Vec<Reg>, FxHashMap<Reg, usize>)>,
     /// Operand depth each already-emitted block started at, keyed by label.
     /// `yield_stack_state` answers the same question for a block still ahead of
-    /// the cursor, but `emit_block` consumes that entry — so this is what a back
+    /// the cursor, but `emit_block` consumes that entry. So this is what a back
     /// edge into a loop header has left to trim against (`edge_depth`).
     block_entry_depth: FxHashMap<Label, usize>,
     /// Yield point metadata collected during emission.
@@ -205,10 +205,10 @@ impl Emitter {
 
         // Emit blocks in the order they were appended by the lowerer.
         //
-        // The lowerer appends blocks by calling finish_block(), which means
-        // predecessor blocks are always appended before their successors —
-        // EXCEPT for merge/done blocks, which are left open
-        // and appended last (after all blocks that jump to them). This
+        // The lowerer appends blocks by calling finish_block(), so predecessor
+        // blocks are always appended before their successors. The EXCEPTION is
+        // merge/done blocks, which are left open and appended last, after all
+        // blocks that jump to them. This
         // guarantees that by the time the emitter processes a done/merge
         // block, all predecessors have already emitted their Jump/Branch
         // terminators and saved their stack state into yield_stack_state.
@@ -253,7 +253,7 @@ impl Emitter {
             .collect();
 
         // A frozen function's values have no owner of their own: the constant
-        // pool keeps them alive (src/lir/AGENTS.md invariant 7).
+        // pool keeps them alive (src/lir/AGENTS.md).
         debug_assert!(
             func.values()
                 .iter()
@@ -339,7 +339,7 @@ impl Emitter {
         // The VM shares a single stack for both local variable slots
         // (addressed by StoreLocal/LoadLocal as frame_base + index) and
         // the operand stack.  Without pre-allocation, StoreLocal can
-        // clobber operand values pushed by enclosing expressions (e.g.
+        // clobber operand values pushed by enclosing expressions (for example
         // the `1` in `(+ 1 (match 2 ...))`).
         //
         // By emitting num_locals Nil instructions here, we reserve
@@ -395,9 +395,8 @@ impl Emitter {
         if index >= locals_start {
             let local_offset = index - locals_start;
             // The mask names every local precisely, at any index: an unset slot
-            // is a non-cell stack local; a set slot is a cell local reached via
-            // the env. No >=64 conservatism (which forced — and leaked — cells
-            // for uncaptured high locals).
+            // is a non-cell stack local; a set slot is a cell local reached
+            // through the env.
             if !func.capture_locals_mask().is_set(local_offset as usize) {
                 // Non-cell local: use stack slot
                 Some(index - func.num_captures())

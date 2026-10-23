@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-10-21
 //! Owner-node cuts end to end: the capture-back-edge cycle, the transferred returned cycle, and their parks.
 //!
 //! docs/impl/region/owner.md
@@ -14,9 +14,9 @@ use super::*;
 /// End-to-end reclamation of the **capture-back-edge cycle** — the activation-owner
 /// cut (inference pin
 /// `region::infer::tests::adopt::cuts::activation_adopts_capture_back_edge_scc`). A
-/// Fresh container `root` holds `m` (store `root ⊇ m`), `m` holds a closure `c`
-/// (store `m ⊇ c`), and `c` captures `m` back (capture `c ⊇ m`) — the m↔c cycle
-/// through a closure env. No REGION root can own it: `m` is captured, so its
+/// Fresh container `root` holds `m` (store `root ⊇ m`), and `m` holds a closure `c`
+/// (store `m ⊇ c`). `c` captures `m` back (capture `c ⊇ m`), the m↔c cycle through
+/// a closure env. No REGION root can own it: `m` is captured, so its
 /// `decref_point` over-extends past the closure while its own `DecrefValueRegion`
 /// stays live, and the owner-aware lifetime obligation refuses
 /// (`adopt_edges_refuses_captured_store_member_on_lifetime`). The ACTIVATION owns
@@ -58,16 +58,15 @@ fn region_ownership_capture_back_edge_cycle_reclaims() {
 }
 
 /// The capture-back-edge SCC with a park INSIDE the adopt scope, on the two
-/// in-process abandonment routes — the park split end-to-end (inference pin
+/// in-process abandonment routes: the park split end-to-end. The inference pin is
 /// `region::infer::tests::adopt::cuts::activation_adopt_sites_ahead_of_park`; the
-/// abort route and both heap dimensions ride the `adopt-park-*` oracle family).
+/// abort route and both heap dimensions ride the `adopt-park-*` oracle family.
 /// The early adopt runs after the members' allocations and before the yield, so
-/// the parked frame carries the members in its activation owner node; the
-/// handle drop's free-path discharge and the cancel's terminal teardown then
-/// free node + members. The trap this gauges: the scope-exit adopt alone sits
-/// PAST the yield, so a route that abandons the park would strand the whole
-/// SCC (~2 regions per op) — suppressed members that no release table names
-/// and no node ever adopted.
+/// the parked frame carries the members in its activation owner node. The handle
+/// drop's free-path discharge and the cancel's terminal teardown then free node +
+/// members. The trap this gauges: the scope-exit adopt alone sits PAST the yield.
+/// A route that abandons the park would then strand the whole SCC (~2 regions per
+/// op), suppressed members that no release table names and no node ever adopted.
 #[test]
 fn region_ownership_parked_capture_back_edge_scc_reclaims_on_abandonment() {
     const PRELUDE: &str = "(def body (fn [] (let [root (@array) m (@array)] \
@@ -144,13 +143,14 @@ fn region_ownership_reclaims_returned_cycle_across_calls() {
     );
 }
 
-/// The same producer under the graft, so each `(mk)` becomes its body: the cycle
+/// The same producer under the graft, so each `(mk)` becomes its body. The cycle
 /// is built inline in the consumer, and the value it hands out is the grafted
 /// body's `let`, not a call's result (docs/impl/graft.md). Grafting must not
 /// cost a program the reclamation the call had.
 ///
-/// The counter-factual: the transfer cut keys on a consumer's call site, so the
-/// grafted form had no site to adopt, and each run leaked the two cycle regions.
+/// The counter-factual: a transfer cut keyed on a consumer's call site alone would
+/// find no site to adopt in the grafted form, and each run would leak the two
+/// cycle regions.
 #[test]
 fn region_ownership_reclaims_a_grafted_returned_cycle() {
     const SUBJECT: &str = "(def mk (fn [] (let [a (@array) b (@array)] \
@@ -204,10 +204,10 @@ fn region_ownership_reclaims_fiber_terminal_cycle() {
 
 /// The transfer adopt **rides parks and the fiber teardown**, exercised
 /// end-to-end by production-emitted adopts. The consumer is a FIBER BODY that
-/// calls the producer, yields (parking its activation node with the adopted
-/// cycle), and either completes (the resumed body's clean break frees node +
-/// members) or is hard-killed mid-park (`fiber/cancel` → the terminal teardown
-/// frees the parked node's members).
+/// calls the producer and yields, parking its activation node with the adopted
+/// cycle. It then either completes, and the resumed body's clean break frees the node
+/// and its members, or it is hard-killed mid-park. Then `fiber/cancel` runs the terminal
+/// teardown, which frees the parked node's members.
 ///
 /// This is a SOUNDNESS pin: the transfer adopt and the owner node must ride the
 /// park, the restore and the terminal teardown without double-freeing or
@@ -229,7 +229,7 @@ fn region_ownership_transfer_adopt_rides_parks_and_fiber_teardown() {
     let _ = steady_region_growth_ungrafted(complete);
 
     // Hard-killed mid-park: the first cycle is adopted, the body parks at the yield, and
-    // `fiber/cancel` tears the fiber down — the kill must free the parked activation
+    // `fiber/cancel` tears the fiber down. The kill must free the parked activation
     // node's members (the second cycle is never built) without double-freeing.
     let cancel = "(def mk (fn [] (let [a (@array) b (@array)] \
                     (begin (%array-push a b) (%array-push b a) a)))) \
@@ -308,11 +308,11 @@ fn region_ownership_reclaims_returned_cycle_under_jit() {
     );
 }
 
-/// The consumer-facing adopt channel is IDEMPOTENT on an already-Owned child:
-/// delivering one region to `AdoptIntoActivation` twice within an activation (a
-/// masked-`:error` fiber restarted after handing out the same payload) leaves
-/// it owned by the first adopt instead of tripping `adopt_region`'s one-owner
-/// assert, and the completion release frees it exactly once.
+/// The consumer-facing adopt channel is IDEMPOTENT on an already-Owned child. A
+/// masked-`:error` fiber restarted after handing out the same payload delivers one
+/// region to `AdoptIntoActivation` twice within an activation. The region stays
+/// owned by the first adopt instead of tripping `adopt_region`'s one-owner assert,
+/// and the completion release frees it exactly once.
 #[test]
 fn adopt_into_activation_absorbs_redelivery() {
     use crate::compiler::bytecode::{Bytecode, Instruction};
@@ -367,18 +367,19 @@ fn adopt_into_activation_absorbs_redelivery() {
 /// nested-closure-captures-its-encloser family — the only shape family
 /// whose owner-capture is an UPVALUE and which external uniqueness admits — must NOT be
 /// over-claimed by the forest's capture adopt. The nested closure's region is minted
-/// per CALL of the enclosing closure, so adopting the longer-lived member would free it
-/// under the encloser's still-live env reference and re-adopt an already-Owned region on
-/// the next construction; the lifetime obligation refuses the shape by construction (the
-/// forwarding capture pins the member's tight last-use at/past the enclosing lambda node,
-/// which post-dates the nested root's in-body drop in post-order). The member then stays
+/// per CALL of the enclosing closure. Adopting the longer-lived member would free it
+/// under the encloser's still-live env reference, and re-adopt an already-Owned
+/// region on the next construction. The lifetime obligation refuses the shape by
+/// construction. The forwarding capture pins the member's tight last-use at or past
+/// the enclosing lambda node, which post-dates the nested root's in-body drop in
+/// post-order. The member then stays
 /// on the ordinary per-region-RC baseline.
 ///
 /// This is a SOUNDNESS pin, over a body that constructs the nested closure TWICE per run
-/// (`(e true)` recurses once through `(e false)`): running it 50× must be PANIC-CLEAN —
-/// an over-admission would emit the adopt at o's construction, and the second
-/// construction would re-adopt the already-Owned member, tripping the one-owner debug
-/// assert (or a generation panic). Its region growth is whatever per-region RC yields
+/// (`(e true)` recurses once through `(e false)`): running it 50× must be PANIC-CLEAN.
+/// An over-admission would emit the adopt at o's construction, and the second
+/// construction would re-adopt the already-Owned member. That trips the one-owner
+/// debug assert, or a generation panic. Its region growth is whatever per-region RC yields
 /// (`%pair`/`%first` are inline intrinsics) and is NOT this pin's concern — the
 /// reclamation cuts are pinned by the `reclaims_*` tests above.
 #[test]

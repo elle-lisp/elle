@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! Where the lowerer puts each region's release, one submodule per question.
 //!
 //! docs/impl/region/rules.md
@@ -9,7 +9,7 @@
 //! - `frametables` — that the abandoned-frame release tables name exactly the
 //!   routes the emitter wrote.
 //! - `order` — the order releases take when several share one decref_point
-//!   (docs/impl/region/rules.md Rule 4).
+//!   (docs/impl/region/rules.md).
 //! - `determinism` — that the analysis and the release order it drives are a
 //!   pure function of the source.
 //! - `cellslots` — that a compiled capture cell owns its region slot, and that
@@ -56,9 +56,9 @@ mod shortcircuit;
 /// that block ends in a frame-replacing `TailCall`.
 ///
 /// A branch whose arms do not all tail-call is read here rather than through
-/// `branch_arm_release_slots`, which needs one `TailCall` per arm: what these pins
-/// ask is whether the release reaches the arm that FALLS THROUGH, so the merge
-/// block — which makes no tail call at all — is the block that has to carry it.
+/// `branch_arm_release_slots`, which needs one `TailCall` per arm. These pins ask
+/// whether the release reaches the arm that FALLS THROUGH, so the merge block,
+/// which makes no tail call at all, is the block that has to carry it.
 fn released_slots_by_block(func: &LirOwned) -> Vec<(bool, Vec<u16>)> {
     func.view()
         .blocks()

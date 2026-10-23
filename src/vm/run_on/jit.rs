@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-22
 //! `compile/run-on :jit` — force Cranelift JIT execution, in a build with the
 //! `jit` feature.
 //!
@@ -71,7 +71,7 @@ impl VM {
         let saved_stack = std::mem::take(&mut self.fiber.stack);
         let saved_signal = self.fiber.signal.take();
         // Where an error or a refused park truncates the parameter frames to
-        // (src/vm/AGENTS.md).
+        // (src/vm/overview.md).
         let depth = self.fiber.param_depth();
         let mut boundary = crate::value::closure::Boundary::of(closure);
 

@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! Tofte-Talpin region inference for functional HIR: the walk's state, and how it mints a region.
 //!
 //! docs/impl/region/model.md
@@ -229,9 +229,6 @@ struct RegionInference {
     /// release at the inner read, and the extraction reads freed pages.
     /// Pinned by tests/impl/region-named-param-uaf.lisp.
     destructure_sites: Vec<(HirId, Vec<Region>)>,
-    /// BlockId → enclosing region at the point the block was entered.
-    /// The `Block` arm writes it, and nothing reads it.
-    block_regions: HashMap<super::super::expr::BlockId, Region>,
     /// BlockId → the regions of every `break` value handed to that block, in
     /// walk order. A `break` TRANSFERS its value to the block, whose value is
     /// its fall-through value OR any break's. So the `Block` arm unions these
@@ -347,7 +344,6 @@ impl RegionInference {
             destructure_leaf_bindings: rustc_hash::FxHashSet::default(),
             return_sites: Vec::new(),
             destructure_sites: Vec::new(),
-            block_regions: HashMap::new(),
             block_break_regions: HashMap::new(),
             block_break_nodes: HashMap::new(),
             break_skip_blocks: Vec::new(),
@@ -388,9 +384,8 @@ impl RegionInference {
     ///
     /// IDEMPOTENT UNDER INLINED RE-WALK. `try_inline_call` re-walks an
     /// inlinable callee's body to discover the cross-region edges it records
-    /// over the call's arguments (`inline_depth > 0`); the body's HIR nodes are
-    /// then visited a SECOND time
-    /// with the SAME ids as the structural walk. The structural walk OWNS
+    /// over the call's arguments (`inline_depth > 0`). The body's HIR nodes are
+    /// then visited a SECOND time with the SAME ids as the structural walk. The structural walk OWNS
     /// `alloc_region`. A fresh mint here during a re-walk would OVERWRITE the
     /// structural entry with a region parented in the caller's context. The
     /// ownership and compensation passes read escape's return frontier projected

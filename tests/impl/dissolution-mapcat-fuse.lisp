@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-21
 # A fused `mapcat`, in a chain or under a terminal, computes exactly what the
 # staged stdlib ops compute, and a consumed one mints fewer objects.
 #
@@ -45,8 +45,8 @@
 
 # ── the two facts mapcat's own array arm decides ───────────────────────
 # Its array arm returns the `@array` it filled with no `(if (mutable? coll) …)` test,
-# so the result is MUTABLE even over an immutable base — and its `(empty? coll)`
-# clause precedes that arm, so an empty input answers with the empty LIST. A non-empty
+# so the result is MUTABLE even over an immutable base. Its `(empty? coll)` clause
+# precedes that arm, so an empty input answers with the empty LIST. A non-empty
 # base whose every result is empty still answers with the (empty) accumulator.
 (assert (mutable? (mapcat (fn [x] [x]) [1 2 3]))
         "the fused result is unfrozen, as the stdlib array arm's is")
@@ -107,7 +107,7 @@
 
 # ── the declines ───────────────────────────────────────────────────────
 # The inner walk is indexed, so a function whose result is not a proven array stays a
-# plain call — the stdlib op walks a list with first/rest, which the fused form has no
+# plain call. The stdlib op walks a list with first/rest, which the fused form has no
 # stage for.
 (assert (= (->list (mapcat (fn [x] (list x (* x 10))) [1 2])) (list 1 10 2 20))
         "a list-returning function declines to the stdlib op")
@@ -136,7 +136,7 @@
 
 # ── the mutable-array arm ──────────────────────────────────────────────
 # `mapcat`'s array arm walks the base through `each`, which captures `(length seq)`
-# once and reads the base live — exactly what the fused loop does — so a lone mapcat
+# once and reads the base live, exactly as the fused loop does. So a lone mapcat
 # fuses over a mutable base, with the accumulator returned unfrozen as ever.
 (def @mut @[1 2])
 (assert (= (->list (mapcat (fn [x] [x (* x 2)]) mut)) (list 1 2 2 4))
@@ -162,7 +162,7 @@
 (assert (= (get base 0) 7) "the base Var survives the fused walk")
 
 # ── Realization: the flat collection between the ops ───────────────────
-# A LONE mapcat is not weighed: its array arm walks with two `each` macro
+# A LONE mapcat is not weighed. Its array arm walks with two `each` macro
 # expansions rather than a `letrec` closure, and both forms mint the per-element
 # array its function returns, so there is no closure to dissolve. What fusion
 # removes is the flat collection between the mapcat and whatever consumes it.

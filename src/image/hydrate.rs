@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-21
 //! The hydrator: map an image's pages privately, relocate them, and install
 //! them as a freshly minted counted region.
 //!
@@ -102,7 +102,6 @@ pub fn hydrate(
         || header.names_len > 1 << 32
         || header.files_len > 1 << 32
         || header.prims_len > 1 << 32
-        || header.scope_watermark > u32::MAX as u64
         || header.param_watermark > u32::MAX as u64
         || header.static_region_watermark > u32::MAX as u64
     {
@@ -124,7 +123,7 @@ pub fn hydrate(
     let mut meta = vec![0u8; meta_len as usize];
     source.read_exact_at(&mut meta, meta_off)?;
 
-    // The verifier's first pass (§ Verifier): every table decoded and
+    // The verifier's first pass: every table decoded and
     // bounds-checked before a byte of the image is mapped.
     let t = verify::tables(&header, &meta)?;
 
@@ -141,8 +140,8 @@ pub fn hydrate(
         return Err(corrupt("immediate root with a heap tag"));
     } else if header.n_pages != 0 {
         // Only a graph that allocated nothing has an immediate root, so pages
-        // beside one are drift — and they would leave the payload word read
-        // as an offset by one branch and as a value by another.
+        // beside one are drift. They would leave the payload word read as an
+        // offset by one branch, and as a value by another.
         return Err(corrupt("immediate root beside a pages section"));
     }
     // A native-fn root's payload is a primitive-table index, since the header
@@ -156,10 +155,10 @@ pub fn hydrate(
         }
     };
 
-    // Replay the name table (step 2), before the region is minted: the
-    // spellings are what let this instance print the image's symbols and
-    // keywords, and recording one whose hash the instance maps to a different
-    // spelling panics here rather than making two names one name.
+    // Replay the name table before the region is minted. The spellings are
+    // what let this instance print the image's symbols and keywords. Recording
+    // one whose hash the instance maps to a different spelling panics here,
+    // rather than making two names one name.
     for name in &t.names {
         symbols.record_spelling(crate::namehash::name_hash(name), name);
     }
@@ -178,13 +177,12 @@ pub fn hydrate(
         return Ok(Hydrated {
             root,
             region,
-            scope_watermark: header.scope_watermark as u32,
             param_watermark,
             static_region_watermark,
         });
     }
 
-    // Reserve one contiguous interval aligned to the largest page (step 3):
+    // Reserve one contiguous interval aligned to the largest page:
     // with pages placed largest-first, base alignment makes every page
     // self-aligned for the masked-header walk.
     let max_align = t.pages[0].1.size as usize;
@@ -220,11 +218,11 @@ pub fn hydrate(
         armed: true,
     };
 
-    // Map each page from the descriptor into its slot (step 3). The image
-    // starts on a base-page boundary, the pages section starts on one inside
-    // it, and each offset within that section is a multiple of that page's
-    // own (≥ base-page) size — so every file offset here is a multiple of the
-    // OS page size, the only offsets `mmap` accepts.
+    // Map each page from the descriptor into its slot. The image starts on a
+    // base-page boundary, and the pages section starts on one inside it. Each
+    // offset within that section is a multiple of that page's own
+    // (≥ base-page) size. So every file offset here is a multiple of the OS
+    // page size, the only offsets `mmap` accepts.
     for &(off, e) in &t.pages {
         let want = (base + off as usize) as *mut libc::c_void;
         let got = unsafe {
@@ -243,7 +241,7 @@ pub fn hydrate(
         debug_assert_eq!(got, want, "MAP_FIXED returned a different address");
     }
 
-    // The relocation pass (step 4): one linear sweep, each write faulting
+    // The relocation pass: one linear sweep, each write faulting
     // its 4 KiB frame copy-on-write private.
     for &(slot, target) in &t.relocs {
         unsafe {
@@ -269,8 +267,8 @@ pub fn hydrate(
         }
     }
 
-    // The verifier's object walk (§ Verifier), over the shells relocation
-    // has already made resident.
+    // The verifier's object walk, over the shells relocation has already made
+    // resident.
     let mapped: Vec<MappedPage> = t
         .pages
         .iter()
@@ -300,7 +298,7 @@ pub fn hydrate(
         }
     }
 
-    // Install (steps 5–6): the mapped pages become a freshly minted Counted
+    // Install: the mapped pages become a freshly minted Counted
     // region; the header stamps and cursor rebuild happen inside.
     let pages: Vec<(MmapPage, usize, usize)> = t
         .pages
@@ -317,7 +315,7 @@ pub fn hydrate(
 
     // Write each reconstructed value into its slot and count the reference it
     // creates. The target lives in a region of this instance's own, so the
-    // hydrated region's free cascade must release it exactly once — and the
+    // hydrated region's free cascade must release it exactly once. The
     // free-time edge oracle compares the recorded table against the same
     // pointers it just wrote (docs/impl/region/ownership.md).
     for (slot, v) in rebuilt {
@@ -345,7 +343,6 @@ pub fn hydrate(
             header.root_tag,
         ),
         region,
-        scope_watermark: header.scope_watermark as u32,
         param_watermark,
         static_region_watermark,
     })
@@ -374,14 +371,7 @@ fn reconstruct(
             Ok(table)
         }
         Ctor::StdioPort(stream) => {
-            let region = match *companion {
-                Some(r) => r,
-                None => {
-                    let r = heap.new_runtime_region();
-                    *companion = Some(r);
-                    r
-                }
-            };
+            let region = *companion.get_or_insert_with(|| heap.new_runtime_region());
             Ok(crate::value::build::external(
                 heap,
                 "port",

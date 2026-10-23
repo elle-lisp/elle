@@ -1,6 +1,6 @@
 # Region rules — the implementor's correctness obligations
 
-<!-- audited: 2026-10-16 -->
+<!-- audited: 2026-10-21 -->
 
 The exhaustive correctness contract the compiler and runtime must uphold for
 regions.

@@ -1,6 +1,6 @@
 # Elle
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-21 -->
 
 A Lisp whose compiler infers what each function does and where each value dies,
 and runs on those facts.

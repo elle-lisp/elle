@@ -70,8 +70,8 @@ Then the image milestones:
 - Syntax: a tree round-trips with its structure, its spans, its scope sets,
   and its scope-exempt flags intact. The file table decides a hydrated
   span's file: rename the spelling in the table, and every span follows it. A
-  synthetic span still names no file. The scope watermark
-  exceeds every counter value the body carries, intro scopes included.
+  synthetic span still names no file. A scope id hydrates unchanged, its unit
+  tag and its intro bit included.
 - Source: an image parked at a non-zero, base-page-aligned offset inside a
   larger file hydrates from that descriptor and offset. A misaligned offset
   is refused by name, before anything is mapped.

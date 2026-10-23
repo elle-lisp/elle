@@ -2,7 +2,6 @@
 # audited: 2026-10-22
 # The size ledger of tests/ratchet/size.lisp, part 7: each document over its cap at its 500-token bucket.
 (producer "tests/ratchet/size.lisp")
-["AGENTS.md" :tokens 4500]
 ["DOCUMENTATION.md" :tokens 4500]
 ["docs/analysis/ci.md" :tokens 6000]
 ["docs/coming-from.md" :tokens 5000]
@@ -57,4 +56,3 @@
 ["src/lir/AGENTS.md" :tokens 5500]
 ["src/lir/lower/AGENTS.md" :tokens 4500]
 ["src/value/AGENTS.md" :tokens 4500]
-["src/vm/AGENTS.md" :tokens 5500]

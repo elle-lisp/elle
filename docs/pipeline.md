@@ -1,8 +1,8 @@
 # Compilation pipeline
 
-<!-- audited: 2026-10-13 -->
+<!-- audited: 2026-10-22 -->
 
-Which VM each entry point expands macros on, and how signal inference settles over the mutual recursion of a letrec.
+Which VM each entry point expands macros on, what a loader keeps a compile under, and how signal inference settles over a letrec.
 
 [The pipeline index](../src/pipeline/AGENTS.md) lists the entry points, the
 compile context and the stages in order. [The HIR index](../src/hir/AGENTS.md)
@@ -18,7 +18,9 @@ whose VM that is, and a macro's side effects land on that VM.
 `CompileCtx::with_macro_expansion`. It resets the macro VM's fiber and hands
 the closure a clone of the expander and of the compile metadata. These entry
 points need no VM from the caller, and a macro's side effects stay on the
-macro VM.
+macro VM. A primitive that compiles for a fiber, such as a loader, names that
+fiber's withheld capabilities with `CompileCtx::on_behalf_of`, and the macro
+VM's fresh fiber withholds them too.
 
 **The caller's VM.** `eval`, `analyze` and `analyze_file` expand on the VM the
 caller passes, with the clones `CompileCtx::expander_and_meta` answers. `eval`
@@ -37,9 +39,68 @@ on the expander (`eval_meta`), so it needs no borrow of the compile context
 while the context is mid expansion.
 
 Each clone is independent, so a compile nested inside an expansion, such as a
-`begin-for-syntax` that imports a file, does not alias the compile context. A
-macro one compile defines reaches a later compile only when the REPL registers
-it with `register_repl_macros`.
+`begin-for-syntax` that imports a file, does not alias the compile context.
+
+## The REPL layer
+
+A REPL line compiles through `compile_file_repl`. Its clone also carries the
+macros earlier lines defined, and its analysis the definitions they made. No
+other entry point sees either, so a file a line imports compiles as it would
+from any program. A macro one compile defines reaches a later compile only
+when the REPL registers it with `register_repl_macros`.
+
+## Units
+
+Each clone has begun the unit its compile expands, so every scope the clone
+mints names that unit ([the syntax tree](impl/syntax.md)). The VM's `eval`
+instruction keeps one expander across calls instead, and begins a unit for each
+datum. That drops the `begin-for-syntax` definitions the last datum made.
+`eval_syntax` compiles a transformer in a unit of its own, and the caller's
+unit resumes after.
+
+Every transformer call runs through `VM::call_transformer`, and every
+`begin-for-syntax` definition through `eval_syntax`. Both run the body under
+the expansion fuel budget ([runtime signals](runtime.md)), and both turn a park
+the body raises into a compile error, because an expansion cannot hold one.
+
+## No compile reads another file
+
+No entry point compiles a file other than the one it is given. The analyzer
+reads nothing from the target of an `import-file`, so a cycle of imports does
+not recurse. A file names its imports, and the loader compiles each one, or
+runs the code the store keeps, when the import runs.
+
+A compile may still run Elle code from the standard library. An `include`
+calls `import/resolve` on the VM that expands it to find its file
+([modules](modules.md)). An include reads a file and compiles none: its forms
+become part of the unit that holds it ([include](include.md)).
+
+## The store
+
+`compile_file_stored` answers the `CodeUnit` the store keeps for a path while
+the compile inputs still match, and otherwise compiles the file and keeps the
+unit. An entry holds a digest of the inputs that can change within an
+instance: the source text, the path, the capabilities `on_behalf_of` named,
+and each include's resolved path and text. A lookup resolves each include again
+on the macro VM, as the compile did, and reads it again. A compile that fails
+keeps nothing. Each load runs a clone of the kept unit, so every load runs the
+same code and builds values of its own ([modules](modules.md)).
+
+Registering a host binding, a host primitive or the standard library's exports
+empties the store, because every compile resolves those names. No other
+compile input needs a place in the key:
+
+- The epoch is in the source text. The build, the Unicode generation and the
+  configuration are fixed when the instance is built.
+- A loader's compile reads the instance's layer alone: no REPL layer, no
+  `eval` environment and no test transform.
+- A declared user signal keeps its bit for the life of the process, and a
+  compile that names an undeclared one fails.
+- A file's compile reads none of its imports, as the section above says.
+- A transformer is pure, so it reads nothing outside these inputs
+  ([macros](macros.md)).
+
+`CompileCtx::release` empties the store before teardown counts the residue.
 
 ## Signal inference over a letrec
 
@@ -133,16 +194,27 @@ not the guarantee.
 
 ### Scope
 
-The fixpoint is per file. A mutual recursion across a file boundary does not
-settle, because each import is a separate compilation. The
-[signal inference document](signals/inference.md) says why that is a design
-choice, and describes the projection that carries a signal across a file
-boundary.
+The fixpoint is per file. No signal crosses a file boundary
+([signal inference](signals/inference.md)), so a mutual recursion across one
+does not settle.
 
 A function body seeds a `def` only as the `def` is reached. A lambda that
 calls a sibling defined later in the same body reads no seed for it. It takes
 the unknown-callee signal instead, which is sound and may be wider than the
-sibling's.
+sibling's. Mutual recursion between siblings takes it at the call to the later
+one. A call to an earlier sibling reads that sibling's signal:
+
+```lisp
+(defn outer-bits [src]
+  (get (compile/signal (compile/analyze src) :outer) :bits))
+
+(def later (outer-bits "(defn outer [] (defn f [] (g)) (defn g [] (yield 1)) (f))"))
+(def earlier (outer-bits "(defn outer [] (defn g [] (yield 1)) (defn f [] (g)) (f))"))
+(def mutual (outer-bits "(defn outer [] (defn f [n] (if (= n 0) 0 (g (- n 1)))) (defn g [n] (yield n) (f n)) (f 3))"))
+(assert (has? later :io) "a call to a later sibling takes every bit")
+(assert (has? mutual :io) "mutual recursion between siblings takes every bit")
+(assert (= earlier |:yield|) "a call to an earlier sibling reads its signal")
+```
 
 The inferred signals are data a program can query: `compile/signal`, the
 [portrait](analysis/portrait.md), and the [MCP server](mcp.md) read them.

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The consumer gate the call and fiber faces read at each site that receives a producer's result.
 //!
 //! docs/impl/region/owner.md

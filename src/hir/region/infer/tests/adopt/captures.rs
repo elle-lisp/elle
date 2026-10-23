@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! What a closure may adopt through a capture edge, and the upvalue, fiber, escaping, shared and re-storable shapes that refuse.
 //!
 //! docs/impl/region/adopt.md
@@ -16,15 +16,15 @@ use super::*;
 
 #[test]
 fn capture_adopt_edges_are_emittable() {
-    // Every capture adopt edge `compute_adopt_edges` emits must be EMITTABLE: the owning
-    // closure's Lambda must capture a binding whose source regions include the member, so
-    // `lower_lambda_expr`'s reload (slot or env) can find the value for the
+    // Every capture adopt edge `compute_adopt_edges` emits must be EMITTABLE. The owning
+    // closure's Lambda must capture a binding whose source regions include the member,
+    // so `lower_lambda_expr`'s reload (slot or env) can find the value for the
     // value-resolved adopt (suppress ⊆ adopt). Checked across the shape that DOES adopt a
     // capture and the web/upvalue shapes that are refused (vacuous there, but they
     // exercise the path that would regress). Counterfactual: a `compute_adopt_edges`
-    // change that chose an owner-edge no capture realizes — e.g. keying a member onto a
-    // closure that merely reaches it transitively — fails this directly, before the
-    // suppressed-yet-unadopted leak ever reaches the runtime.
+    // change that chose an owner-edge no capture realizes fails this directly, before the
+    // suppressed-yet-unadopted leak reaches the runtime. For example, it might key a
+    // member onto a closure that only reaches it transitively.
     let shapes = [
         // The simple local capture that IS adopted.
         "(begin (let [p (%pair 1 2)] (let [c (fn [] (%first p))] (c))) nil)",
@@ -55,18 +55,18 @@ fn owned_subtree_upvalue_capture_owner_refused_on_lifetime() {
     // letrec recursion) AND the pair `m`, and `e` ALSO captures `m` (the forward every
     // upvalue implies). With the capture edge pointed through the cell
     // (`closure ⊇ cell ⊇ content`), external uniqueness ADMITS the subtree
-    // `{o, cell_e, e, m}` with `o` as root, so the refusal MUST hold at the lifetime
-    // obligation: `o`'s region is minted per
-    // CALL of `e`, so adopting `m`/`e` (which survive across calls) would free them under
-    // `e`'s still-live references and re-adopt an already-Owned region on the next call.
+    // `{o, cell_e, e, m}` with `o` as root. So the refusal MUST hold at the lifetime
+    // obligation. `o`'s region is minted per CALL of `e`. Adopting `m`/`e`, which survive
+    // across calls, would free them under `e`'s still-live references and re-adopt an
+    // already-Owned region on the next call.
     // The obligation refuses structurally: the forwarding capture resolves `m`'s tight
     // last-use through `e`'s binding chain to a position at/past the enclosing lambda node,
     // which post-dates `o`'s in-body drop in post-order. Three halves:
-    //   (1) the subtree is admitted, and the root's capture of `m` is env-loaded (an
-    //       upvalue) — the shape genuinely exercises the cross-activation path;
-    //   (2) the obligation's refusal CAUSE is pinned: `m`'s tight last-use over-extends
-    //       past the root's decref_point (the exact condition it refuses on);
-    //   (3) no adopt is emitted — the family stays Shared (the always-legal baseline).
+    //   1. the subtree is admitted, and the root's capture of `m` is env-loaded (an
+    //       upvalue), so the shape genuinely exercises the cross-activation path;
+    //   2. the obligation's refusal CAUSE is pinned: `m`'s tight last-use over-extends
+    //       past the root's decref_point, the exact condition it refuses on;
+    //   3. no adopt is emitted, and the family stays Shared.
     let src = "(begin (let [m (%pair 1 2)] \
                         (letrec [e (fn [] (let [o (fn [] (begin (e) (%first m)))] (o)))] (e))) \
                       nil)";
@@ -87,10 +87,9 @@ fn owned_subtree_upvalue_capture_owner_refused_on_lifetime() {
         owner.0,
     );
     // (2) the refusal cause: the tight last-use over-extends past the root's drop. A
-    // change that makes this pass — a tighter transitive last-use, or a root whose drop
-    // moves out of the enclosing body — flips this precondition and forces the author to
-    // re-derive the soundness argument (the per-call-root double-adopt) before admitting
-    // the family.
+    // tighter transitive last-use, or a root whose drop moves out of the enclosing body,
+    // flips this precondition. The author must then re-derive the soundness argument (the
+    // per-call-root double-adopt) before admitting the family.
     let order = compute_order(&hir);
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     let root_dp = ord(info
@@ -126,10 +125,10 @@ fn owned_subtree_upvalue_capture_owner_refused_on_lifetime() {
 
 #[test]
 fn owned_subtree_refuses_fiber_member() {
-    // A fiber's region is never a member of a region-rooted Owned subtree: a fiber
-    // value acquires aliases by merely RUNNING — the scheduler's parent/child chain
+    // A fiber's region is never a member of a region-rooted Owned subtree. A fiber
+    // value acquires aliases by merely RUNNING: the scheduler's parent/child chain
     // and the `fiber/child`/`fiber/parent` graph reads create references at runtime
-    // that no structural post-dominance predicate can see — and adoption freezes the
+    // that no structural post-dominance predicate can see. Adoption freezes the
     // region's RC, so no retain could pin an adopted fiber under those reads. The
     // capture shape below is exactly what external uniqueness would otherwise admit:
     // a closure sole-captures a `fiber/new` result ({closure ⊇ fiber}, nothing else
@@ -257,8 +256,8 @@ fn owned_subtrees_refuses_escaping_capture_cell_clique() {
     // The escape boundary: the capturing closure `drive` is RETURNED, so it crosses the
     // return frontier (a Shared seed) and its whole `closure ⊇ cell ⊇ content` chain must
     // stay Shared. `compute_owned_subtrees` admits NO subtree over the cell.
-    // (region-repeated-call-adopt-uaf.lisp is the runtime witness of this boundary — an
-    // escaping top-level chain must never be subtree-dropped.)
+    // tests/impl/region-repeated-call-adopt-uaf.lisp is the runtime witness of this
+    // boundary: an escaping top-level chain must never be subtree-dropped.
     let (_hir, info, owned) = owned_subtrees_with_effects(
         "(defn build [n] \
            (letrec [drive (fn [m] (leaf m)) \
@@ -303,10 +302,11 @@ fn owned_subtrees_refuses_two_sibling_captured_cell() {
 // An `@`-mutable captured cell is re-stored every loop iteration; its release is hoisted
 // once past the loop, so each stored content's lifetime is `[store, next-rebind]` —
 // SHORTER than the cell's. Adopting it into the cell's subtree would free a displaced
-// prior under a live cell (`region-capture-cell-loop-uaf.lisp`). So a re-storable cell's
-// content is NOT adoptable: `capture_containment_edges` skips the capture (the cell stays
-// a borrow), and `compute_adopt_edges`'s `adoptable_cell` refuses its `cell ⊇ content`
-// edge even when the walk records it (for external-uniqueness *counting*). The
+// prior under a live cell (`tests/impl/region-capture-cell-loop-uaf.lisp`). So a
+// re-storable cell's content is NOT adoptable. `capture_containment_edges` skips the
+// capture, and the cell stays a borrow. `compute_adopt_edges`'s `adoptable_cell` refuses
+// its `cell ⊇ content` edge even when the walk records it for external-uniqueness
+// *counting*. The
 // immutable letrec cell in the same clique is handled the other way — re-pointed and
 // adoptable. These pin both halves of the gate.
 
@@ -364,8 +364,8 @@ fn capture_edge_skips_restorable_cell_admits_immutable_in_one_clique() {
         leaf_cell.0,
     );
     // The re-storable @acc yields NO owner edge: none of its source regions is a capture
-    // edge source (the `is_restorable_capture_cell` skip — the loop hazard). @acc takes
-    // the `populate_env` route so it has no compiled cell of its own.
+    // edge source (the `is_restorable_capture_cell` skip). @acc takes the `populate_env`
+    // route, so it has no compiled cell of its own.
     assert_eq!(
         info.single_cell_region_of(restorable),
         None,

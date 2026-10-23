@@ -1,6 +1,9 @@
-(elle/epoch 12)
-# audited: 2026-09-23
+(elle/epoch 15)
+# audited: 2026-10-21
 # The operand proof, end to end.
+#
+# docs/impl/lir.md
+# docs/intrinsics.md
 #
 # A %-intrinsic whose operands the front end proved are integers emits the
 # integer-only bytecode; one it could not prove emits the polymorphic bytecode.
@@ -10,8 +13,6 @@
 # op in the chain — and a float operand denies it there. A call's result carries
 # one too, a recursive call included, and so does a wrapper call over proven
 # ints, which lowers to the op.
-# docs/impl/lir.md
-# docs/intrinsics.md
 
 (defn disasm-text [f]
   "The disassembly of f's bytecode, as one string."
@@ -101,16 +102,16 @@
     (error {:error :type-error :message "rem-then-add: int required"}))
   (%add (%rem x 16) 1))
 
-# The counter-factual, and the reason this section exists: while a remainder
-# typed as Number, the %add read an unproven operand and kept the polymorphic
-# Add — the int chain died at the remainder even though both its operands were
-# proven ints.
+# The counter-factual, and the reason this section exists. Were a remainder
+# typed as Number, the %add would read an unproven operand and keep the
+# polymorphic Add. The int chain would die at the remainder even though both
+# its operands were proven ints.
 (assert (string/contains? (disasm-text rem-then-add) "AddInt")
         "the remainder of two proven ints proves the %add")
 (assert (= (rem-then-add 33) 2) "AddInt computes over the remainder")
 
 (defn mask [x]
-  "The masking kernel the bitwise contract used to refuse."
+  "A masking kernel the bitwise contract admits on a guard-proven remainder."
   (when (%not (int? x))
     (error {:error :type-error :message "mask: int required"}))
   (%bit-and (%rem x 16) 15))
@@ -129,10 +130,11 @@
     n
     (%add (fib-int (%sub n 1)) (fib-int (%sub n 2)))))
 
-# The counter-factual: while a self-recursive call returned Bottom, this %add
-# read two unproven operands and kept the polymorphic Add. No spelling of an
-# integer recursion emitted the integer opcode, and the JIT kept a tag-check
-# diamond in the hot path of a body that is two subtractions and a compare.
+# The counter-factual: were a self-recursive call to return Bottom, this %add
+# would read two unproven operands and keep the polymorphic Add. No spelling of
+# an integer recursion would emit the integer opcode, and the JIT would keep a
+# tag-check diamond in the hot path of a body that is two subtractions and a
+# compare.
 (assert (string/contains? (disasm-text fib-int) "AddInt")
         "%add over two self-recursive int results emits AddInt")
 (assert (= (fib-int 10) 55) "AddInt computes the recursion")
@@ -147,8 +149,8 @@
     n
     (+ (fib-wrap (- n 1)) (fib-wrap (- n 2)))))
 
-# The counter-factual: while (- n 1) typed as a Number and + stayed a call,
-# this body held three wrapper calls and no integer opcode.
+# The counter-factual: were (- n 1) typed as a Number and + left a call, this
+# body would hold three wrapper calls and no integer opcode.
 (assert (string/contains? (disasm-text fib-wrap) "AddInt")
         "+ over two self-recursive int results lowers to AddInt")
 (assert (string/contains? (disasm-text fib-wrap) "SubInt")
@@ -188,9 +190,9 @@
         "a call to an unwritten local lambda binding proves the %add")
 (assert (= (call-local-lambda) 3) "AddInt computes over the call's result")
 
-# The counter-factual: the binder kept the first initializer's body type
-# through every later write, so this compiled and `%bit-and` ran the integer
-# opcode over the string "s", printing 0.
+# The counter-factual: a binder that kept the first initializer's body type
+# through every later write would compile this, and `%bit-and` would run the
+# integer opcode over the string "s", printing 0.
 (let [r (protect (compile/barrier-module (string "(var f (fn [x] 1)) "
                  "(assign f (fn [x] \"s\")) " "(%bit-and (f 0) 1)")
                  "<typed-int-ops>"))]
@@ -205,8 +207,8 @@
 # The trap: a bitwise opcode reads a float's payload as an integer, so a wrong
 # result type here is silent garbage rather than a fault.
 #
-# The counter-factual: while %mod was declared the constant Int this compiled,
-# and `(%bit-and (%mod 5.5 2.0) 1)` returned 0 — where the `mod` wrapper's own
+# The counter-factual: were %mod declared the constant Int, this would compile,
+# and `(%bit-and (%mod 5.5 2.0) 1)` would return 0. The `mod` wrapper's own
 # integer? guards raise :type-error on the same operands.
 (let [r (protect (compile/barrier-module "(%bit-and (%mod 5.5 2.0) 1)"
                  "<typed-int-ops>"))]

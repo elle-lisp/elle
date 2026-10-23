@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! Two configurations: `Config` is set once at startup and read anywhere,
 //! `RuntimeConfig` rides on one VM and a running program may change it.
 //!
@@ -45,13 +45,13 @@ static DEFAULTS: OnceLock<Config> = OnceLock::new();
 /// Read the global config. Before [`init`], answers from the defaults.
 ///
 /// The read does NOT install those defaults. A `get_or_init` here would let
-/// any incidental early read — a scratch heap sizing its page pool, a page
-/// claim asking whether `--dump=stats` is on — decide the whole process's
-/// configuration and silently discard every flag the user passed. Startup
-/// order then becomes a standing hazard: it held while nothing allocated
-/// before `init`, and broke the moment something did (the pre-VM `unicode!`
-/// prescan parses source, and parsing allocates). Answering from a separate
-/// cell removes the hazard rather than restating the ordering rule.
+/// any incidental early read decide the whole process's configuration and
+/// silently discard every flag the user passed. A scratch heap sizing its page
+/// pool reads early, and so does a page claim asking whether `--dump=stats` is
+/// on. Startup order would then be a standing hazard, because something
+/// allocates before `init`: the pre-VM `unicode!` prescan parses source, and
+/// parsing allocates. Answering from a separate cell removes the hazard rather
+/// than restating the ordering rule.
 /// `tests/integration/trace_boot.rs` pins it: those runs pass a file, which
 /// is the path that takes the prescan.
 pub fn get() -> &'static Config {
@@ -79,7 +79,7 @@ pub use keywords::{dump_bits, trace_bits, DUMP_KEYWORDS, TRACE_KEYWORDS};
 /// state reads this one cell: the VM (via `RuntimeConfig::has_trace_bit`), the
 /// region pool's `PAGES` gate, and a channel's `CHAN` gate (each holds a clone).
 /// Two coexisting instances own two distinct cells, so a diagnostic toggle on one
-/// never leaks into the other — the isolation the corpus runner relies on to keep
+/// never leaks into the other. The corpus runner relies on that isolation to keep
 /// a `--trace=`-heavy file from bleeding into the rest of a shared run.
 pub type TraceCell = Arc<AtomicU32>;
 

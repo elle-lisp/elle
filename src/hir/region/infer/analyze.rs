@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! The region-inference pipeline: the walk, then every post-pass that decides
 //! where a release lands. The order is the point — each pass reads answers the
 //! ones before it settled.
@@ -57,9 +57,9 @@ pub fn analyze_regions_with(
     let root = ri.tree.fresh_root(&mut ri.next_region);
     ri.current_region = root;
     // The entry function returns the top-level expression's value, so the program
-    // tail is part of the return frontier — but that is escape's judgment
-    // (`analyze_escape` seeds the top-level tail; `region::infer::escape` projects it),
-    // not a fact the solver records here.
+    // tail is part of the return frontier. That is escape's judgment, not a fact
+    // the solver records here: `analyze_escape` seeds the top-level tail, and
+    // `region::infer::escape` projects it.
     ri.walk(hir);
     // Capture binding_regions before build_info consumes ri — used
     // below to extend decref_point through binding chains.
@@ -86,15 +86,15 @@ pub fn analyze_regions_with(
     info.captured_reassigned_bindings = captured_reassigns;
 
     // Mutated-slot backstop for RE-STORABLE compiled capture cells. A mutable
-    // captured binding's cell content is repointed over time (its RC is owned
-    // by `handle_update_capture`, not the 1-slot-container maps), but a
+    // captured binding's cell content is repointed over time; its RC is owned
+    // by `handle_update_capture`, not the 1-slot-container maps. But a
     // whole-value read through the cell can still be solved to the CELL's own
     // compiled region (the Begin pre-pass CaptureCell insertion into
     // `binding_regions[b]`). That region names the cell, not whatever content
-    // the cell holds at read time, so a static route against it — a coalesced
-    // return/store retain — resolves the slot against repointed content (the
-    // `AssertRegionMatches` mis-coalesce on a `(deref-cell x)` tail read of a
-    // mutated `(var x …)`). Poison exactly the cell regions so
+    // the cell holds at read time. So a static route against it, a coalesced
+    // return/store retain, resolves the slot against repointed content. An
+    // example is the `AssertRegionMatches` mis-coalesce on a `(deref-cell x)`
+    // tail read of a mutated `(var x …)`. Poison exactly the cell regions so
     // `coalescible_solver_region` refuses and such reads stay value-resolved.
     // Keyed on `is_restorable_capture_cell`, the re-store predicate, which the
     // binding's declaration decides; `captured_reassigned_bindings` holds only
@@ -129,7 +129,7 @@ pub fn analyze_regions_with(
     let postdom = super::postdom::PostDom::new(hir, &order);
 
     // ── Mutable-reassign: the cell as a 1-slot container ───────────────────
-    // A reassigned mutable binding holds different values over time; no single
+    // A reassigned mutable binding holds different values over time. No single
     // static program point names "the value's last use", so model the cell as a
     // 1-slot mutable container instead (see `reassign`). Runs before the
     // decref_point passes so the suppression/backstop sets it records are in
@@ -155,12 +155,12 @@ pub fn analyze_regions_with(
     let last_use_info = compute_last_use(hir, &du.uses, &order);
 
     // Escape's answer to the COUNT question, projected onto regions: which regions
-    // this frame holds alone for as long as it lives. Recorded once here because two
-    // mechanisms owe exactly this admission — the branch-arm release window below
-    // and the lowerer's frame-exit release at a tail call — and both of them make
-    // a release fire on a path where none fired before (region/window.md,
-    // region/relocate.md). Computed before the decref passes so it reads the
-    // escape facts, not any placement they go on to change.
+    // this frame holds alone for as long as it lives. Two mechanisms owe exactly
+    // this admission, so it is recorded once here. They are the branch-arm
+    // release window below and the lowerer's frame-exit release at a tail call.
+    // Both make a release fire on a path where none fired before
+    // (docs/impl/region/held.md). Computed before the decref passes so it reads
+    // the escape facts, not any placement they go on to change.
     info.frame_held_regions = super::escape::frame_held_regions(
         &escape_info,
         arena,
@@ -173,12 +173,13 @@ pub fn analyze_regions_with(
     // owned parameters, where this compilation can resolve the callee at all.
     info.tail_callee_facts = super::escape::tail_callee_facts(hir, &frame_replacing_tail_calls);
 
-    // Which regions a value-routed release can NAME — the releases the frame-exit
-    // relocation is able to replicate into a branch arm, and so the regions the
-    // branch-arm window may anchor when an arm leaves through a frame-replacing
-    // callee (region/window.md). Recorded here, beside the other admission the
-    // window owes, because the mirror of the lowerer's `region_to_slot` reads
-    // `binder_init_sites` — which the walk holds and the decref passes do not.
+    // Which regions a value-routed release can NAME. These are the releases the
+    // frame-exit relocation is able to replicate into a branch arm. So they are
+    // the regions the branch-arm window may anchor when an arm leaves through a
+    // frame-replacing callee (docs/impl/region/window.md). Recorded here, beside
+    // the other admission the window owes, because the mirror of the lowerer's
+    // `region_to_slot` reads `binder_init_sites`. The walk holds that map, and
+    // the decref passes do not.
     info.value_routed_regions =
         super::escape::value_routed_regions(arena, &info, &reassigns.binder_init_sites);
 
@@ -228,10 +229,10 @@ pub fn analyze_regions_with(
     let last_use = &last_use_info.per_node;
 
     // Per-path branch compensation (`region::infer::compensate`), the counted route for
-    // every region the branch-arm window above declined: a region whose single
+    // every region the branch-arm window above declined. A region whose single
     // `decref_point` sits inside a conditional arm is freed there on the used
-    // path but leaks on the sibling arms; add a compensating release at each dead
-    // sibling arm's head. Reads the FINAL `region_data` (the decref_point post-passes
+    // path but leaks on the sibling arms. So add a compensating release at each
+    // dead sibling arm's head. Reads the FINAL `region_data` (the decref_point post-passes
     // above) and the exclusion sets, so it runs after them. Independent of the merge
     // seed below (a merge child is excluded), but placed before it for locality.
     let branch_comp = super::compensate::compute_branch_compensation(
@@ -253,24 +254,27 @@ pub fn analyze_regions_with(
     // coincident-decref_point gate reads the final `region_data`, so it follows
     // every decref_point post-pass above. The lowerer consumes the
     // resulting `merged_parent` forest through `static_slot`'s `merged_root`
-    // canonicalization (one slot per merge tree); an empty forest leaves it the
-    // identity, i.e. the unmerged baseline.
+    // canonicalization (one slot per merge tree). An empty forest leaves it the
+    // identity, that is, the unmerged baseline.
     info.merged_parent = super::merge::compute_merges(hir, arena, &info, &escape_info, &order);
 
-    // The letrec closure-cycle merge (docs/impl/region/letrec.md): a self/mutual
-    // recursive closure SCC and its prebound capture cells collapse onto one arena,
-    // extending the same `merged_parent` forest and riding the same `merged_root`
-    // canonicalization as the builder-idiom seed. Unconditional (not flag-gated), so it
-    // lands on every tier. The single `DecrefRegion` fires at the root region's
-    // `decref_point`, set here to the merge's own `drop_site` (region/adopt.md).
-    // That is normally the cycle's binding scope
-    // — the `letrec` that prebinds the members' capture cells — whose scope-exit
-    // post-dominates every direct use of the members (they are bound there), while a
-    // foreign capture of a member is RC-counted and outlives the single decref. Where
-    // the letrec hands a member OUT it is instead the release point that member's own
-    // region already carries, so the arena follows the value past the binding scope
-    // rather than being taken to zero under it (region/letrec.md). Runs after the builder seed (it shares the map)
-    // and before the ownership pass (so `is_merged` excludes these members).
+    // The letrec closure-cycle merge (docs/impl/region/letrec.md). A self or
+    // mutual recursive closure SCC and its prebound capture cells collapse onto
+    // one arena. The merge extends the same `merged_parent` forest and rides the
+    // same `merged_root` canonicalization as the builder-idiom seed. It is
+    // unconditional (not flag-gated), so it lands on every tier. The single
+    // `DecrefRegion` fires at the root region's `decref_point`, set here to the
+    // merge's own `drop_site` (docs/impl/region/adopt.md).
+    //
+    // That is normally the cycle's binding scope, the `letrec` that prebinds the
+    // members' capture cells. Its scope-exit post-dominates every direct use of
+    // the members, which are bound there. A foreign capture of a member is
+    // RC-counted and outlives the single decref. Where the letrec hands a member
+    // OUT, the drop site is instead the release point that member's own region
+    // already carries. So the arena follows the value past the binding scope
+    // rather than being taken to zero under it. Runs after the builder seed (it
+    // shares the map) and before the ownership pass (so `is_merged` excludes
+    // these members).
     for cm in super::merge::compute_closure_cycle_merges(hir, arena, &info, &escape_info, &order) {
         for &m in &cm.members {
             // The member set (roots included) feeds `tail_callee_defers_release`' refusal
@@ -282,11 +286,11 @@ pub fn analyze_regions_with(
             }
         }
         // A NON-member body tail (a native `%add`, a redefined `+`, a foreign `g`)
-        // strands the binding-scope drop past the frame-replacing `TailCall`; the
-        // lowerer keys `deferred_release_slot = static_slot(root)` at each such site so a
-        // closure callee's frame replacement is balanced by the activation-completion
-        // adopt (region/cycletail.md). A member tail
-        // keeps its own `stranded_cycle_bindings` channel and is not recorded here.
+        // strands the binding-scope drop past the frame-replacing `TailCall`. The
+        // lowerer keys `deferred_release_slot = static_slot(root)` at each such
+        // site. So the activation-completion adopt balances a closure callee's
+        // frame replacement (docs/impl/region/cycletail.md). A member tail keeps
+        // its own `stranded_cycle_bindings` channel and is not recorded here.
         for &site in &cm.tail_release_sites {
             info.cycle_tail_release.insert(site, cm.root);
         }

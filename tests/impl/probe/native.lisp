@@ -1,17 +1,19 @@
-(elle/epoch 13)
-# audited: 2026-09-30
+(elle/epoch 15)
+# audited: 2026-10-21
 # Native results produced by running compiled code, the byte gauge, and the value-survival assertions no rate can make.
 #
 # docs/impl/region/diagnostics.md
+# docs/impl/region/clique.md
+#
 # ── Thunk-run native results ──────────────────────────────────────────
 # A native can produce its result by running compiled code on the driving VM:
-# `import` runs the module body, and `arena/allocs` runs the measured thunk.
-# Such a result already carries its return mint. The dispatch pass-through
-# retain must not fund the caller a second time (`result_minted`,
-# docs/impl/region/effects.md § "Native region effects"). `arena/allocs`
+# `import/load-file`, which `import` expands to, runs the module body, and
+# `arena/allocs` runs the measured thunk. Such a result already carries its
+# return mint. The dispatch pass-through retain must not fund the caller a
+# second time (`result_minted`). `arena/allocs`
 # embeds its thunk's result in a fresh pair, so the boundary consumes the
 # mint after the pair's alloc-scan counts the embedding. Both are controls at
-# 0; a second funding reads ~3/op — the returned closure, its letrec arena,
+# 0; a second funding would read ~3/op — the returned closure, its letrec arena,
 # and a capture cell, stranded per call. The discarded-statement shape needs
 # the DIRECT while run-block (a thunk's return convention would mask the
 # over-keep).
@@ -49,7 +51,7 @@
 # ── Byte-gauge ────────────────────────────────────────────────────────
 # Bump-arena bytes, not object count: a scope-dropped string must return its
 # BYTES. Measured to 200 bytes/op, finer than the gauge's own epsilon, so a
-# regression back to page-granular leaking reads as whole pages.
+# regression back to page-granular leaking would read as whole pages.
 (println "── folded suite: byte-gauge ──")
 (r:rate "string-bytes"
         (fn [j]
@@ -89,14 +91,15 @@
 (assert (= (concat [1 2] [3 4]) [1 2 3 4]) "array concat value")
 (assert (= (concat "foo" "bar") "foobar") "string concat value")
 # The closure-as-module's accessor still reaches its captured value after the
-# module's frame is gone. `module-cell-read-window` above prices the fallback the
-# frame-exit relocation takes for this shape; this is the property that fallback
-# exists to keep, and it is a value assertion because neither memory gauge can
-# see it — the box release and the release routed through the box are correctly
-# COUNTED either way, so an inverted pair reads flat here and clean under
-# `--trace=guardfree`. The emission order itself is stated over the finished
-# blocks by `lir::lower::assert_cells_outlive_their_readers`, which runs in every
-# debug build over every block it lowers.
+# module's frame is gone. The row `module-cell-read-window`
+# (tests/impl/probe/concurrent.lisp) prices the fallback the frame-exit
+# relocation takes for this shape. This is the property that fallback exists to
+# keep. It is a value assertion because neither memory gauge can see it: the
+# box release and the release routed through the box are correctly COUNTED
+# either way. An inverted pair would read flat on the gauges and clean under
+# `--trace=guardfree`. `assert_cells_outlive_their_readers`
+# (src/lir/lower/order.rs) states the emission order itself over the finished
+# blocks, and runs in every debug build over every block it lowers.
 (assert (= ((get (mod-cell-immediate) :p)) (ptr/from-int 7))
         "closure-as-module accessor read back its Immediate-init capture")
 (assert (= ((get (mod-cell-heap) :p)) "cap")

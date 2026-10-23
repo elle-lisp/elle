@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The coalescing predicate: which region mints a static slot can name, and which stay value-resolved.
 //!
 //! docs/impl/region/mechanism.md
@@ -14,10 +14,10 @@ use super::*;
 // encoding moves the same runtime region count; the slot-resolved one skips a
 // runtime region lookup.
 //
-// These pins are written from the design document, NOT from emission output:
-// each is counterfactual against a predicate that misclassifies the case (an
-// accept-all-live predicate accepts every "refused" pin; a reject-all predicate
-// refuses every "accepted" pin).
+// These pins are written from the design document, NOT from emission output.
+// Each is counterfactual against a predicate that misclassifies the case: an
+// accept-all-live predicate accepts every "refused" pin, and a reject-all
+// predicate refuses every "accepted" pin.
 
 #[test]
 fn coalescible_predicate_class_logic() {
@@ -200,8 +200,9 @@ fn coalescible_region_requires_locally_emitted_slot() {
 #[test]
 fn coalescible_accepts_returned_fresh_pair() {
     // `(fn () (%pair 1 2))` — the tail is a fresh `%pair` allocation wrapped in
-    // `Return`. Its region is a real local allocation (walk.rs `op.allocates()`),
-    // so the return mint is coalescible (the predicate's direct-alloc branch).
+    // `Return`. Its region is a real local allocation (`op.allocates()` in
+    // src/hir/region/infer/walk/intrinsic.rs), so the return mint is coalescible
+    // (the predicate's direct-alloc branch).
     // Counterfactual: a reject-all predicate refuses it.
     let (lowerer, hir) = make_lowerer("(fn () (%pair 1 2))");
     let mut found = false;
@@ -248,7 +249,8 @@ fn coalescible_accepts_returned_var_bound_to_fresh_pair() {
 #[test]
 fn coalescible_accepts_returned_string_literal() {
     // `(fn () "hi")` — a returned string literal is a `MaterializeConst`
-    // allocation with its own live region (walk.rs String arm), so coalescible.
+    // allocation with its own live region (the `String` arm in
+    // src/hir/region/infer/walk.rs), so coalescible.
     let (lowerer, hir) = make_lowerer("(fn () \"hi\")");
     let mut found = false;
     for p in return_value_ptrs(&hir) {
@@ -317,8 +319,8 @@ fn coalescible_refuses_a_cell_stored_value() {
 #[test]
 fn coalescible_refuses_returned_param() {
     // `(fn (x) x)` — the tail returns the fixed parameter `x`. A param's region
-    // is a phantom call-result placeholder (walk.rs: `call_result_regions`, no
-    // `alloc_here`, so not `live`), the dynamic boundary's "phantom param" row.
+    // is a phantom call-result placeholder (src/hir/region/infer/walk.rs:
+    // `call_result_regions`, no `alloc_here`, so not `live`), the dynamic boundary's "phantom param" row.
     // Counterfactual: a predicate omitting the live/call-result checks would
     // wrongly accept the param.
     let (lowerer, hir) = make_lowerer("(fn (x) x)");
@@ -458,7 +460,7 @@ fn region_table_entries_are_static_regions_at_least_two() {
     // into a function's table. Asserting `&[StaticRegion]` plus `.get() >= 2`
     // pins both the type and the value invariant.
     //
-    // Counterfactual: a bare `u32` table (a `RegionId` alias) would let neither
+    // Counterfactual: a bare `u32` table would let neither
     // the `&[StaticRegion]` binding nor `.get()` on an entry compile, so the
     // type itself enforces this.
     let module = compile_to_lir("(fn () (let [x (string \"a\")] x))");

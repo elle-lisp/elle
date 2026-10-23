@@ -1,6 +1,6 @@
 # CI and Triage
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-22 -->
 
 CI structure, local workflow, and failure diagnosis.
 
@@ -18,7 +18,7 @@ set when the diff moves only the submodule pointer.
 | Detect Changes | ubuntu | Sets `source` from the changed paths | — |
 | QA | ubuntu | The prose checks, `cargo fmt`, the indexes, the tree's ledgers, then clippy, the macOS cross-check, rustdoc, the Rust doctests | — |
 | Documentation Build | ubuntu | `make docs` and the Elle doc site, minus the publish | — |
-| Default Build Tests | ubuntu | The producer pass, `doctest`, then each other suite pass of the default build and its rig, one step each | — |
+| Default Build Tests | ubuntu | The producer pass, `doctest`, then each other suite pass of the default build and its rig, one step each; `signal-solve`, the cross-file signal solver ([solver](../impl/solver.md)) | — |
 | No-JIT Build Tests | ubuntu | `smoke-nojit` — the language suite on the interpreter alone | — |
 | Boot Image Tests | ubuntu | `smoke-boot-image` — bytecode parity between the two boots, then the language suite booted from an image | — |
 | Rust Tests | ubuntu | Integration tests, the rig's tests, then property tests, under the `ci` profile | 16 |
@@ -63,8 +63,7 @@ Two producers read the tree and not the build:
 change to any document can move either reading, and a build cannot. So QA
 builds the release rig and runs `make tree-producers`, which judges both
 against their ledgers before any suite starts, and no build's producer pass
-runs them again. That step records a run, so QA uploads its store (§ A corpus
-job's results leave the runner).
+runs them again. That step records a run, so QA uploads its store.
 
 QA runs on every pull request, with no `source` gate. A Markdown-only change
 can break a call-out or a link, and those are what the prose checks read.
@@ -74,13 +73,12 @@ runs first, runs always, and gates every other job.
 ### Each build is an implementation
 
 The corpus jobs differ in the build they make, not in flags they pass. A build
-carries one optimizing tier and one I/O backend ([config](../config.md)),
-and every build runs the language suite with no flag ([spec](../spec.md)).
-So the job list above is
-the implementation matrix. It holds the default build, a build with no JIT, a
-thread-pool build, an MLIR build, a build with no features, and the default
-build on AArch64 and macOS. A language test that passes on one and fails on
-another has found a defect in the build that fails.
+carries one optimizing tier and one I/O backend ([config](../config.md)), and
+every build runs the language suite with no flag ([spec](../spec.md)). So the
+job list above is the implementation matrix. It holds the default build, a
+build with no JIT, a thread-pool build, an MLIR build, a build with no
+features, and the default build on AArch64 and macOS. A language test that
+passes on one and fails on another has found a defect in the build that fails.
 
 The build with no features cannot host the runner: the runner's store reaches
 SQLite and zstd through FFI. So `smoke-noffi` runs `elle test` on the default
@@ -112,11 +110,9 @@ slower of the pair instead of the sum. The split doubles the runner minutes the
 platform spends and roughly halves the wall clock, which is the trade the merge
 gate cares about.
 
-A Smoke job runs each pass of `make smoke` as a step of its own, not `make
-smoke` itself (§ One step, one pass). The Makefile names the passes once, in
-`SMOKE_PASSES`. Each pass runs once. A `make smoke` step after the job's
-`doctest` step would run the doctests twice. A Smoke job runs no `make qa`: the
-`QA` job is the QA gate for every platform.
+A Smoke job runs each pass `SMOKE_PASSES` names once, as a step of its own,
+and not `make smoke` itself. It runs no `make qa`: the `QA` job is the QA gate
+for every platform.
 
 ### One step, one pass
 
@@ -128,9 +124,8 @@ A pass deals its files into batches and runs them side by side, and each batch
 prints its own summary. Each pass is a target of its own, and
 [the rig](../../rig/overview.md) names the ones that run on a rig.
 
-What each batch prints is [testing](../testing.md)'s, and what it records
-leaves in the store the job uploads (§ A corpus job's results leave the
-runner).
+[Testing](../testing.md) describes what each batch prints, and the job uploads
+what it records.
 
 A job runs its build's producer pass right after the build, before `doctest`
 and every other pass. The pass is short, and a stale ledger row fails it as
@@ -181,16 +176,16 @@ runs, so a pool-only defect fails on a Linux runner before it reaches the Mac.
 
 The rule is one such job per I/O backend. `Thread-Pool I/O Tests` covers the
 pool and `Default Build Tests` covers io_uring, so finding a region defect never
-depends on the macOS runner. That runner is the slowest box in the workflow,
-and its failures read as flaky timeouts (§ "Runner capacity").
+depends on the macOS runner. That runner is the slowest box in the workflow, and
+its failures read as flaky timeouts.
 [workflows.rs](../../tests/integration/workflows.rs) is the standing check that
 both backends keep a job.
 
 `macOS Smoke` runs the rig's scrub profile beside the flag, because the panic
 that reads a scrubbed page needs both
 ([diagnostics](../impl/region/diagnostics.md)). Its binary is a release build
-that also runs the debug-only checks, on the smallest runner in the workflow. Read a macOS corpus timing against that, not against a Linux
-one.
+that also runs the debug-only checks, on the smallest runner in the workflow.
+Read a macOS corpus timing against that, not against a Linux one.
 
 ### Every job that runs `cargo test` installs rustfmt and clippy
 
@@ -236,8 +231,8 @@ without notice. A constant chosen for one runner over-subscribes another.
 Over-subscription does not fail the corpus, it stretches it. Every file still
 passes its assertions, and the ones nearest the per-file budget get killed on
 the way out. That failure is a `timeout` row that names the budget, which
-reads as a flaky runner rather than as a job count that never fit. `JOBS` remains an override
-for a job that needs a different number.
+reads as a flaky runner rather than as a job count that never fit. `JOBS`
+remains an override for a job that needs a different number.
 
 Outside CI the default stays the constant 16. A development box is not sized by
 the runner, and its owner can pass `JOBS=`.
@@ -293,8 +288,8 @@ release build without the flag.
 A job that runs `elle test` records every form's verdict in a session DB, with
 stdout, stderr and the rest of each result's assets in the CAS beside it
 ([test-store](../test-store.md)). The runner exists so that a failure is a
-query rather than a log. On a runner you cannot reach, the store has to be
-uploaded or that is exactly what it is not.
+query rather than a log. On a runner you cannot reach, that holds only once
+the store is uploaded.
 
 So each job that records runs points `ELLE_STATE` at a directory in the
 workspace, and uploads the session DB and the CAS beside it as an artifact,
@@ -369,6 +364,7 @@ make test
 | **Implementation suite fails** | `Default Build Tests` fails `smoke-impl` or `smoke-eager` | An implementation test on the rig, or a suite file under the eager profile. | Run `./target/release/elle-rig tests/impl/failing.lisp`; the file's sidecar sets its mode. For a profile failure, pass the same `--profile`. |
 | **The embedded blob fails** | A corpus job fails on `make elle` after the second build | The second build's dump differs from the blob it carries, so the two builds compiled the library differently. Or a start did not map the blob from its own executable. | Run `make elle CARGO_PROFILE=--release` locally. A dump difference keeps both files to `cmp`. Otherwise read the `--trace=boot` lines it prints: `blob-copy` names a blob the start could not find in its own file. |
 | **Boot from an image fails** | `Boot Image Tests` fails and every other corpus job passes | A corpus file compiles to other bytecode or answers differently under a hydrated boot, or the image no longer hydrates. | Run `make smoke-boot-image` locally. A parity failure names the files that differ and keeps both dumps of each under `target/bytecode-parity`; diff a pair. Otherwise read the hydration proof first: a target that fails there never reached the corpus. |
+| **Signal solver** | `Default Build Tests` fails `signal-solve` | A fixture's `# expect` line no longer holds, or the two engines solved different models. | Run `make signal-solve` locally. A disagreement names the engines; [solver.md](../impl/solver.md) states the rules both must solve. |
 | **Property tests fail** | `Rust Tests` fails with a shrunk counterexample | The shrunk output shows the *minimal* failing input. | Reproduce with the exact shrunk values as a unit test. Check the files under `tests/proptest-regressions/`. |
 | **Integration tests fail** | `Rust Tests` fails | Tests use `eval_source()` which runs the full pipeline. | Read the assertion. Check whether the test expects `.unwrap()` (success) or `.is_err()` (error). |
 | **Prose** | `QA` fails on `make prose` | A stamped file breaks a rule a machine can check: a call-out over 140 characters, a broken link, a bare filename, or banned wording. | Run `make prose` and repair the file the message names ([DOCUMENTATION.md](../../DOCUMENTATION.md)). |

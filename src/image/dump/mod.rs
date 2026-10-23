@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! The dumper: a compacting copy of a sealed data graph into a scratch
 //! region, written out as an image file.
 //!
@@ -228,7 +228,6 @@ fn dump_into(
         names_len: name_table.len() as u64,
         files_len: file_table.len() as u64,
         prims_len: prim_table.len() as u64,
-        scope_watermark: emitted.scope_watermark as u64,
         param_watermark: emitted.param_watermark as u64,
         static_region_watermark: static_region_watermark as u64,
         fingerprint: format::fingerprint(),
