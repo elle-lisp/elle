@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-23
 //! elle's subcommands — `fmt`, `lint`, `lsp`, `rewrite`, `image`, `semver`, `test` — dispatched for `elle` and the rig alike.
 //!
 //! rig/overview.md
@@ -145,6 +145,9 @@ impl Test {
         // with it eager, and this is the one process that may set either
         // (docs/test-runner.md).
         config.test_runner = true;
+        // A test runs the JIT verifier, and so does every process the run
+        // starts (docs/impl/verifier.md).
+        config.verify_jit_for_tests();
         crate::config::init(config);
         crate::io::init_process_signals();
         Test { runner_args }

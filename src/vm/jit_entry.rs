@@ -1,4 +1,4 @@
-// audited: 2026-10-07
+// audited: 2026-10-23
 //! Where a closure call meets the JIT: the hotness counter, the code cache, and the trampolines back into the interpreter.
 //!
 //! docs/impl/jit.md
@@ -212,7 +212,8 @@ impl VM {
         // synchronous install like the background path logs its own.
         if crate::config::get().has_trace("syncjit") {
             let pin = CodePin::of(self.heap(), &closure.template);
-            let res = crate::jit::JitCompiler::new().and_then(|c| c.compile(&task.lir.view()));
+            let res =
+                crate::jit::JitCompiler::for_process().and_then(|c| c.compile(&task.lir.view()));
             match res {
                 Ok(jit_code) => {
                     if self

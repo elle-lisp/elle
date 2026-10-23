@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-10-23
 //! The keyword vocabulary: every spelling the Rust runtime mints from a fixed
 //! string.
 //!
@@ -302,6 +302,7 @@ pub(crate) static VOCABULARY: &[&str] = &[
     "trace",
     "unicode",
     "max-depth",
+    "jit-verify",
     "adaptive",
     "custom",
     "eager",

@@ -1,4 +1,4 @@
-.PHONY: all elle elle-rig boot-blob docs docgen smoke test qa crosscheck clean space help \
+.PHONY: all elle release elle-rig boot-blob docs docgen smoke test qa crosscheck clean space help \
        smoke-lang smoke-impl smoke-eager smoke-producers smoke-charge smoke-scrub \
        tree-producers \
        smoke-boot-image smoke-nojit smoke-pool smoke-pool-impl smoke-pool-producers \
@@ -44,6 +44,11 @@ else
   ELLE          ?= ./target/debug/elle
   CARGO_PROFILE :=
 endif
+
+# Every recipe runs Cranelift's verifier on the code the JIT compiles: a recipe
+# here is a test or serves one, and `make doctest` runs `elle` on each document
+# directly (docs/impl/verifier.md). A build ignores the variable.
+export ELLE_JIT_VERIFY := on
 
 # Where cargo leaves what this Makefile builds, for the profile it builds.
 CARGO_OUT = target/$(if $(findstring --release,$(CARGO_PROFILE)),release,debug)
@@ -133,6 +138,11 @@ endef
 elle: $(BLOB_STAGE)  ## Build the Elle binary; a release build carries its boot image
 	$(EMBED) cargo build $(CARGO_PROFILE) -p elle
 	$(CHECK_BLOB)
+
+# The production binary, whatever CARGO_PROFILE says: the release `make elle`,
+# boot image and checks included.
+release:  ## Build the release elle with its boot image (target/release/elle)
+	@$(MAKE) --no-print-directory elle CARGO_PROFILE=--release
 
 elle-rig: $(BLOB_STAGE)  ## Build the rig: the Elle runtime a test configures (rig/overview.md)
 	$(EMBED) cargo build $(CARGO_PROFILE) -p elle-rig

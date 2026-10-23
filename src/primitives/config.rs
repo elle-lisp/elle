@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-23
 //! `vm/config` and `vm/config-set` over the VM's runtime configuration, and the tier predicates.
 //!
 //! docs/config.md
@@ -95,8 +95,9 @@ primitive! {
         signal: Signal::query_errors(),
         arity: Arity::Range(0, 1),
         doc: "Read runtime configuration. No args returns the full config struct. \
-              Pass a keyword (:jit, :mlir, :trace, :stats, :max-depth, :unicode) to \
-              read one field; a tier threshold reads nil when the tier is off.",
+              Pass a keyword (:jit, :mlir, :trace, :stats, :max-depth, :unicode, \
+              :jit-verify) to read one field; a tier threshold reads nil when the \
+              tier is off, and :jit-verify reads whether Cranelift verifies JIT code.",
         params: &["key?"],
         category: "meta",
         example: "(vm/config :jit)",

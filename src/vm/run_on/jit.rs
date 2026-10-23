@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-23
 //! `compile/run-on :jit` — force Cranelift JIT execution, in a build with the
 //! `jit` feature.
 //!
@@ -42,7 +42,7 @@ impl VM {
         let jit_code = match self.jit_code_for(bytecode_ptr) {
             Some(jc) => jc,
             None => {
-                let compiler = match crate::jit::JitCompiler::new() {
+                let compiler = match crate::jit::JitCompiler::for_process() {
                     Ok(c) => c,
                     Err(e) => {
                         return (
