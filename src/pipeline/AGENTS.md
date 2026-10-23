@@ -36,7 +36,7 @@ graft and the fold.
 | [compile.rs](compile.rs) | The bytecode and FHIR entry points, and the lowering they share |
 | [compile/frontend.rs](compile/frontend.rs) | The file front end: source text or forms to regularized HIR |
 | [compile/lir.rs](compile/lir.rs) | `compile_file_to_lir`: a file to frozen LIR |
-| [compile/include.rs](compile/include.rs) | `include` and `include-file`: resolution, the include log, and `splice_includes` |
+| [compile/include.rs](compile/include.rs) | `include` and `include-file`: resolution, the chain of files being included, the include log, and `splice_includes` |
 | [compile/transforms.rs](compile/transforms.rs) | The two test-runner transforms, and the entry points over them |
 | [analyze.rs](analyze.rs) | `analyze` and `analyze_file` |
 | [eval.rs](eval.rs) | `eval`, `eval_all`, `eval_file` and `eval_syntax` |

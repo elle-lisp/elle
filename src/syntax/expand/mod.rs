@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-22
 //! Hygienic macro expansion: the macro table, the unit under expansion, and the
 //! walk that rewrites a form until no macro heads it.
 //!
@@ -12,6 +12,7 @@
 mod collections;
 mod compiletime;
 mod define;
+mod include;
 mod introspection;
 mod macro_expand;
 mod macrodef;
@@ -66,6 +67,8 @@ pub struct Expander {
     eval_meta: Rc<PrimitiveMeta>,
     /// The unit under expansion, and what it has minted.
     unit: Unit,
+    /// The unit's include log, and the chain of files being included.
+    includes: crate::pipeline::Includes,
     expansion_depth: usize,
 }
 
@@ -79,6 +82,7 @@ impl Clone for Expander {
             core_env: self.core_env.clone(),  // persists — needed by macro bodies
             eval_meta: Rc::clone(&self.eval_meta), // shared pointer; immutable after stdlib load
             unit: self.unit,
+            includes: crate::pipeline::Includes::default(),
             expansion_depth: self.expansion_depth,
         }
     }
@@ -101,6 +105,7 @@ impl Expander {
             // An expander that no compile began a unit on, as a test's is,
             // still mints under a tag of its own.
             unit: Unit::begin(UnitTag::of("<expander>", &[])),
+            includes: crate::pipeline::Includes::default(),
             expansion_depth: 0,
         }
     }
@@ -164,7 +169,8 @@ impl Expander {
 
     /// Start expanding the unit `tag` names: every scope this expander mints
     /// from here names that unit, its counts start at zero, and the
-    /// `begin-for-syntax` definitions of the last unit are gone.
+    /// `begin-for-syntax` definitions and the include log of the last unit are
+    /// gone.
     ///
     /// The pipeline does not call this directly — `CompileCtx`'s
     /// `with_macro_expansion` and `expander_and_meta` take the unit and hand
@@ -173,6 +179,7 @@ impl Expander {
     pub(crate) fn begin_unit(&mut self, tag: UnitTag) {
         self.unit = Unit::begin(tag);
         self.compile_time_env.clear();
+        self.includes = crate::pipeline::Includes::default();
     }
 
     /// Run `f` in the unit `tag` names, and resume this expander's unit after
@@ -257,13 +264,15 @@ impl Expander {
         Syntax::list(&self.arena, &items, span)
     }
 
-    /// Expand all macros in a syntax tree
-    pub fn expand(
+    /// Expand every macro in `syntax`, and push what it expands to onto `out`:
+    /// one form, or for an include, each form of the file it names.
+    fn expand_into(
         &mut self,
         syntax: Syntax,
+        out: &mut Vec<Syntax>,
         symbols: &mut SymbolTable,
         vm: &mut VM,
-    ) -> Result<Syntax, String> {
+    ) -> Result<(), String> {
         // Point the transformer-running VM at the table THIS expansion uses, so a
         // transformer's `gensym`/`syntax->datum`/`read` (via `ctx.vm().symbols()`)
         // interns into the same table the expander threads. Idempotent across
@@ -274,46 +283,29 @@ impl Expander {
         // or quasiquote template round-trips a keyword as a bare hash, and the
         // value → syntax conversion on the way back needs the spelling.
         crate::syntax::convert::learn_keywords(&syntax, symbols);
-        match &syntax.kind {
+        let expanded = match &syntax.kind {
             SyntaxKind::Symbol(_) => Ok(syntax),
-            SyntaxKind::List(items) if !items.is_empty() => {
-                // Check if first element is a symbol
-                if let Some(name) = items[0].as_symbol() {
-                    // Handle defmacro specially - register and return nil
-                    if name == "defmacro" || name == "define-macro" {
-                        return self.handle_defmacro(items, &syntax.span);
-                    }
-
-                    // Handle macro introspection
-                    if name == "macro?" {
-                        return self.handle_macro_predicate(items, &syntax.span);
-                    }
-                    if name == "expand-macro" {
-                        return self.handle_expand_macro(items, &syntax.span, symbols, vm);
-                    }
-
-                    if name == "begin-for-syntax" {
-                        return self.handle_begin_for_syntax(items, &syntax.span, symbols, vm);
-                    }
-
-                    if name == "syntax-case" {
-                        return self.handle_syntax_case(items, &syntax.span, symbols, vm);
-                    }
-
-                    // Check if it's a macro call
-                    if let Some(macro_def) = self.macros.get(name).cloned() {
-                        return self.expand_macro_call(
-                            &macro_def,
-                            &items[1..],
-                            &syntax,
-                            symbols,
-                            vm,
-                        );
-                    }
+            SyntaxKind::List(items) if !items.is_empty() => match items[0].as_symbol() {
+                // A definition registers and expands to nil.
+                Some("defmacro" | "define-macro") => self.handle_defmacro(items, &syntax.span),
+                Some("macro?") => self.handle_macro_predicate(items, &syntax.span),
+                Some("expand-macro") => self.handle_expand_macro(items, &syntax.span, symbols, vm),
+                Some("begin-for-syntax") => {
+                    self.handle_begin_for_syntax(items, &syntax.span, symbols, vm)
                 }
-                // Not a macro call - expand children recursively
-                self.expand_seq(items, &syntax, symbols, vm, SyntaxKind::List)
-            }
+                Some("syntax-case") => self.handle_syntax_case(items, &syntax.span, symbols, vm),
+                Some(name) => {
+                    if let Some(include) = crate::pipeline::IncludeName::of(&syntax) {
+                        return self.splice_include(syntax, include, out, symbols, vm);
+                    }
+                    if let Some(macro_def) = self.macros.get(name).cloned() {
+                        let args = &items[1..];
+                        return self.expand_macro_call(&macro_def, args, &syntax, out, symbols, vm);
+                    }
+                    self.expand_seq(items, &syntax, symbols, vm, SyntaxKind::List)
+                }
+                None => self.expand_seq(items, &syntax, symbols, vm, SyntaxKind::List),
+            },
             SyntaxKind::Array(items) => {
                 self.expand_seq(items, &syntax, symbols, vm, SyntaxKind::Array)
             }
@@ -366,6 +358,8 @@ impl Expander {
                 ))
             }
             _ => Ok(syntax),
-        }
+        };
+        out.push(expanded?);
+        Ok(())
     }
 }

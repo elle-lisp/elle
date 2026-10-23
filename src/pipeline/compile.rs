@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-22
 //! The bytecode and FHIR compile entry points, and the lowering they share.
 //!
 //! src/pipeline/AGENTS.md
@@ -12,7 +12,6 @@ use crate::reader::{read_syntax, read_syntax_all_for};
 use crate::symbol::SymbolTable;
 use crate::syntax::{Span, Syntax, SyntaxArena, SyntaxKind, UnitTag};
 use crate::value::CodeUnit;
-use std::collections::HashSet;
 
 mod frontend;
 mod include;
