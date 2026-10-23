@@ -1,6 +1,6 @@
 # The tool producers
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-23 -->
 
 Producers that drive a tool outside Elle, parse the counts it prints, and
 report each count as a reading.
@@ -9,8 +9,8 @@ Each file here is a producer ([ratchet](../../docs/ratchet.md)). A ledger
 under `tests/ledger` names it, and it runs in-process under `elle-rig test`.
 What it checks is a tool's report, so neither suite directory holds it.
 
-The audit and size producers read the tree alone, so `make tree-producers`
-runs them on the release rig, and `make qa` runs that target
+The audit, index and size producers read the tree alone, so `make
+tree-producers` runs them on the release rig, and `make qa` runs that target
 ([ci](../../docs/analysis/ci.md)). The valgrind producer runs in each build's
 producer pass beside the implementation suite.
 
@@ -18,6 +18,12 @@ producer pass beside the implementation suite.
 
 [audit.lisp](audit.lisp) reads the three counts of
 [the audit queue](../../docs/impl/audit.md), which owns them.
+
+## The generated index
+
+[agents.lisp](agents.lisp) reads the two counts of
+[the generated index](../../docs/impl/agents-index.md), which owns them: the
+hand-written indexes, and the rows in them that name a file.
 
 ## valgrind
 
