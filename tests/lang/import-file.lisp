@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-22
+# audited: 2026-10-23
 # import-file takes its path as written, beside its writer, and refuses one that names no module; neither loader is a value.
 # docs/modules.md
 
@@ -19,9 +19,9 @@
 (let [[ok? _] (protect (import-file "../../lib/base64"))]
   (assert (not ok?) "import-file tries no .lisp suffix"))
 # Only a build that made the plugin can show the prefix is ignored.
-(let [[built? _] (protect (import "plugin/myplugin"))]
+(let [[built? _] (protect (import "plugin/hash"))]
   (when built?
-    (let [[ok? _] (protect (import-file "plugin/myplugin"))]
+    (let [[ok? _] (protect (import-file "plugin/hash"))]
       (assert (not ok?) "import-file applies no plugin/ prefix"))))
 
 # ============================================================================
