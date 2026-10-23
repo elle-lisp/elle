@@ -189,6 +189,7 @@
 ["tests/lang/macro-effects.lisp" :objects 323]
 ["tests/lang/import-file.lisp" :objects 400]
 ["tests/lang/caps-ambient.lisp" :objects 617]
+["tests/lang/include-splice.lisp" :objects 596]
 ["tests/impl/stdlib-hof-cost.lisp" :objects 23]
 ["tests/impl/region-tail-operand-let.lisp" :objects 23]
 ["tests/lang/def-nested.lisp" :objects 23]
