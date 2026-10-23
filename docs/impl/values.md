@@ -1,6 +1,6 @@
 # Values
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-10-23 -->
 
 Every Elle value is a 16-byte tagged union: an 8-byte tag and an 8-byte
 payload.
@@ -127,10 +127,10 @@ inline in their region's pages via `RegionSlice<T>` — a `(ptr, len)` view into
 region-owned bytes, usually adjacent to the containing `HeapObject` header. This
 avoids inner `Vec` or `Box<str>` allocations for the common case. A mutable
 type keeps its contents in a store that grows, which a region slice cannot. The
-store of an `@string`, `@bytes`, `@array` or `@set` is an extent of the
-container's region, and the store of a `@struct` grows on the Rust heap. A box
-or a capture cell holds its one value inside its shell
-([mutable stores in region pages](mutable.md)).
+store of an `@string`, `@bytes` or `@array` is an extent of the container's
+region. An `@set` keeps a B-tree whose nodes lie in one such extent, and the
+store of a `@struct` grows on the Rust heap. A box or a capture cell holds its
+one value inside its shell ([mutable stores in region pages](mutable.md)).
 
 A `slice` of an immutable string or bytes, and a `string` built over immutable
 bytes, is a **view**: a header in the call's own region whose `RegionSlice`

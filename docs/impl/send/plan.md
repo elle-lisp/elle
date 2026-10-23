@@ -1,6 +1,6 @@
 # Sending a region: the plan
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-10-23 -->
 
 The order the send design lands in, the pins each milestone lands with, and
 the risks still open.
@@ -67,8 +67,11 @@ guards a behavior its milestone must keep.
 - **Copies stay copies.** A mutation through a `with-traits` copy leaves its
   source unchanged, and a write's payload survives a growth of the store it was
   read from while the write waits.
-- **Benchmark.** `@struct` put and delete at 10³, 10⁴ and 10⁵ entries gate the
-  `@struct` step ([the foundation](../mutable.md) names the fallback).
+- **Benchmark.** An `@set` add and delete, and a `@struct` put and delete, run
+  at 10³, 10⁴ and 10⁵ random keys beside std's `BTreeSet` and `BTreeMap` on the
+  same keys. At 10⁵ each stays within twice std's time. The bound gates the
+  `@set` tree step and the `@struct` step, and the `@set` on a sorted extent
+  fails it.
 
 ### policy
 
