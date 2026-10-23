@@ -257,7 +257,7 @@
 ["tests/lang/trait-dispatch.lisp" :objects 1351]
 ["tests/lang/trait-operator-fallback.lisp" :objects 1162]
 ["tests/lang/trait-operator-methods.lisp" :objects 786]
-["tests/lang/traits.lisp" :objects 1891]
+["tests/lang/traits.lisp" :objects 1924]
 ["tests/lang/type-predicates.lisp" :objects 1415]
 ["tests/lang/typeinfer.lisp" :objects 239]
 ["tests/lang/unicode.lisp" :objects 88]
