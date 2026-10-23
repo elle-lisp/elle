@@ -20,15 +20,8 @@ Up: [..](../AGENTS.md)
 ## Directories
 
 - [aws/](aws/AGENTS.md) — Elle AWS Client
-- [dns/](dns/AGENTS.md) — (empty)
-- [git/](git/AGENTS.md) — (empty)
-- [gtk4/](gtk4/AGENTS.md) — (empty)
-- [gun/](gun/AGENTS.md) — The submodules behind [gun.lisp](../gun.lisp): states, values, fields, HAM, the graph, stores, SEA, the core, chains and the mesh.
-- [http/](http/AGENTS.md) — The submodules behind [http.lisp](../http.lisp): URLs, transports, the wire format, chunked bodies and server-sent events.
-- [http2/](http2/AGENTS.md) — The submodules behind [http2.lisp](../http2.lisp): HPACK, the frame codec, stream state, the session loops and the server.
-- [process/](process/AGENTS.md) — The submodules behind [process.lisp](../process.lisp): the scheduler in four parts, the primitives, and one file per behavior.
-- [ratchet/](ratchet/AGENTS.md) — (empty)
-- [rdf/](rdf/AGENTS.md) — (empty)
-- [redis/](redis/AGENTS.md) — The submodules behind [redis.lisp](../redis.lisp): the RESP codec and its connection, the ambient connection, and the command wrappers.
-- [sdl3/](sdl3/AGENTS.md) — (empty)
-- [semver/](semver/AGENTS.md) — (empty)
+- [gun/](gun/AGENTS.md) — The submodules behind [gun.lisp](gun.lisp): states, values, fields, HAM, the graph, stores, SEA, the core, chains and the mesh.
+- [http/](http/AGENTS.md) — The submodules behind [http.lisp](http.lisp): URLs, transports, the wire format, chunked bodies and server-sent events.
+- [http2/](http2/AGENTS.md) — The submodules behind [http2.lisp](http2.lisp): HPACK, the frame codec, stream state, the session loops and the server.
+- [process/](process/AGENTS.md) — The submodules behind [process.lisp](process.lisp): the scheduler in four parts, the primitives, and one file per behavior.
+- [redis/](redis/AGENTS.md) — The submodules behind [redis.lisp](redis.lisp): the RESP codec and its connection, the ambient connection, and the command wrappers.

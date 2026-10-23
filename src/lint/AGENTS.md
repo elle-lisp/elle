@@ -7,9 +7,3 @@ Up: [..](../AGENTS.md)
 ## Documents
 
 - [README.md](README.md) — **Lint** The linter's diagnostic type, its codes, its rules, and the `elle lint` command.
-
-## Directories
-
-- [cli/](cli/AGENTS.md) — (empty)
-- [diagnostics/](diagnostics/AGENTS.md) — (empty)
-- [rules/](rules/AGENTS.md) — (empty)

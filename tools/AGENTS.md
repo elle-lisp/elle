@@ -10,5 +10,4 @@ Up: [..](../AGENTS.md)
 
 ## Directories
 
-- [aws/](aws/AGENTS.md) — (empty)
 - [pageclaims/](pageclaims/AGENTS.md) — A profiler that names the code paths claiming the most region pages in one run of a program.

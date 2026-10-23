@@ -74,10 +74,17 @@ docs_in() {
         | sed "s|^$root/||" | LC_ALL=C sort
 }
 
+# The subdirectories that have an index to link: a document of their own, or
+# an AGENTS.md not yet converted. One of sources alone has none.
 subdirs_in() {
+    local sub
     find "$root/$1" -mindepth 1 -maxdepth 1 -type d \
         -not -name '.git' -not -name 'target' -not -name 'node_modules' 2>/dev/null \
-        | sed "s|^$root/||" | LC_ALL=C sort
+        | sed "s|^$root/||" | LC_ALL=C sort | while read -r sub; do
+            if [ -e "$root/$sub/AGENTS.md" ] || [ -n "$(docs_in "$sub")" ]; then
+                echo "$sub"
+            fi
+        done
 }
 
 index() {
@@ -116,6 +123,9 @@ index() {
             base=$(basename "$sub")
             if [ -f "$root/$sub/overview.md" ]; then
                 IFS=$'\t' read -r title para < <(callout "$root/$sub/overview.md")
+                # A relative link in the call-out leads from the child.
+                para=$(printf '%s' "$para" |
+                    sed -E -e "s#\]\(([^)/:\#][^):]*)\)#]($base/\1)#g" -e "s#\]\($base/\.\./#](#g")
                 echo "- [$base/]($base/AGENTS.md) — ${para:-**$title (more...)**}"
             else
                 # No overview.md, so the parent lists what is inside. Worse
@@ -153,46 +163,9 @@ tree_of() {
         2>/dev/null | sed -e "s|^$root$|.|" -e "s|^$root/||" | LC_ALL=C sort
 }
 
-# Every AGENTS.md below the root, relative to it: the files git tracks when the
-# root is the top of a work tree, and every file under it otherwise. Two
-# checkouts of one commit then count alike, whichever submodules each holds.
-indexes() {
-    local cdup
-    if cdup=$(cd "$root" && git rev-parse --show-cdup 2>/dev/null) && [ -z "$cdup" ]; then
-        (cd "$root" && git -c core.quotePath=false ls-files -- '*/AGENTS.md')
-        return
-    fi
-    find "$root" -mindepth 2 -type f -name AGENTS.md \
-        -not -path '*/.git/*' -not -path '*/target/*' -not -path '*/node_modules/*' \
-        | sed "s|^$root/||"
-}
-
-# The two counts the ratchet pins: the indexes no run may write, and the table
-# rows in them whose first cell names a file. A first cell names a file when it
-# is a link, or a code span ending in an extension or in `/`; `io/submit` is a
-# primitive's name.
+# The two counts the ratchet pins, which scripts/unconverted owns.
 counts() {
-    local f hand=0
-    local files=()
-    while IFS= read -r f; do
-        [ -n "$f" ] && [ -f "$root/$f" ] || continue
-        owned "$root/$f" && continue
-        hand=$((hand + 1))
-        files+=("$root/$f")
-    done < <(indexes)
-    printf 'hand-written %d\n' "$hand"
-    # awk with no file reads stdin, so an empty list prints its zero here.
-    if [ "$hand" -eq 0 ]; then
-        printf 'file-rows 0\n'
-        return
-    fi
-    awk '
-        BEGIN {
-            row = "^\\|[[:space:]]*(\\[[^]]*\\]\\([^)]*\\)|`[^`|]*(\\.[A-Za-z0-9]+|[^`|/]/)`)[[:space:]]*\\|"
-        }
-        $0 ~ row { n++ }
-        END { printf "file-rows %d\n", n }
-    ' "${files[@]}"
+    "$(dirname "$0")/unconverted" --root "$root"
 }
 
 # Both loops pass over the root: its index is the guide, which no run writes
