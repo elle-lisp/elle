@@ -64,7 +64,7 @@ it. In a function that is not silent, a charge that finds the budget spent
 parks the frame at the instruction that charged, and the interpreter runs that
 instruction again on resume. In a silent function a charge takes a unit while
 one is left and never parks, so a silent function records no charge site, as
-it records no call site ([jit.md](../impl/jit.md)). Every charge on either
+it records no call site ([jit-fuel.md](../impl/jit-fuel.md)). Every charge on either
 tier reads the kill word first, and a killed worker leaves compiled code with
 the terminal error, through the check after the call in each compiled caller
 ([runtime](../runtime.md)).

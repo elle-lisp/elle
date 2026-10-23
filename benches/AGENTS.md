@@ -75,7 +75,7 @@ charge shapes, each one operation more than the last:
 | `decrement` | a load, a subtract and a store |
 | `saturating` | the same, and the compare and extend that stop the word at zero: a silent charge with no kill check |
 | `branch` | a load, a branch on zero around a subtract and a store: the raising charge less its pause |
-| `check` | the branch, and a load of the kill word, a compare and a second branch: the silent charge every build emits ([impl/jit.md](../docs/impl/jit.md)) |
+| `check` | the branch, and a load of the kill word, a compare and a second branch: the silent charge every build emits ([impl/jit-fuel.md](../docs/impl/jit-fuel.md)) |
 
 Beside the ladder, every tier runs the same loop as a function that may raise,
 whose charge is the real pausing one, and the interpreter runs the silent loop

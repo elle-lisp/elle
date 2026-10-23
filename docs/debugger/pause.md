@@ -1,6 +1,6 @@
 # Debugger: how a fiber comes to pause
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-10-22 -->
 
 Breakpoints compiled into a program or armed in a running one, and stepping by
 fuel.
@@ -57,7 +57,7 @@ interpreter park sites that can park a re-execute pause compute
 `push_resume_value = !bits.intersects(SIG_FUEL)`
 ([src/vm/fiber/resume.rs](../../src/vm/fiber/resume.rs), [src/vm/core/resume.rs](../../src/vm/core/resume.rs),
 [src/vm/call/inner/park.rs](../../src/vm/call/inner/park.rs)). Compiled code parks
-its own fuel pause and never pushes ([jit.md](../impl/jit.md)); the other
+its own fuel pause and never pushes ([jit-fuel.md](../impl/jit-fuel.md)); the other
 suspend sites park emit/yield frames and hardcode the push. The `:fuel` bit therefore selects
 re-execute semantics — the paused instruction has not run and runs on resume —
 with no edits to those sites. The `:debug` bit routes the pause to
@@ -105,7 +105,7 @@ Today fuel is charged at seven interpreter sites: backward `Jump`,
 the four call opcodes, and the two array-call opcodes
 ([src/vm/dispatch/interp/opcodes.rs](../../src/vm/dispatch/interp/opcodes.rs)). Conditional jumps never
 charge. The JIT charges at the same instructions
-([jit.md](../impl/jit.md)), and the WASM and MLIR tiers charge nothing. A
+([jit-fuel.md](../impl/jit-fuel.md)), and the WASM and MLIR tiers charge nothing. A
 silent function spends fuel at these sites and never pauses at one
 ([inference.md](../signals/inference.md)), so a step cannot stop inside one.
 Step mode would need every compiled tier to charge per instruction too, or to

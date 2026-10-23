@@ -270,13 +270,13 @@ The signal system and JIT side-exit mechanism enable fibers and JIT to coexist:
   frame and calls `elle_jit_fuel_pause`, which parks the frame at the charging
   instruction's bytecode offset, takes no resume value, and returns
   `YIELD_SENTINEL`. A silent function's charge never pauses
-  ([jit.md](../../docs/impl/jit.md)).
+  ([jit-fuel.md](../../docs/impl/jit-fuel.md)).
 
 - **Kill**: every charge reads the VM's kill word first, in a silent function
   as in any other. A budget below it calls `elle_jit_kill`, which sets the
   terminal `:killed` error as the fiber's signal and parks nothing, and the
   function returns `nil`; the caller's signal check finds the error
-  ([jit.md](../../docs/impl/jit.md)).
+  ([jit-fuel.md](../../docs/impl/jit-fuel.md)).
 
 - **Primitive signals**: `jit_handle_primitive_signal` classifies a
   primitive's signal as the interpreter does. A suspending signal parks the

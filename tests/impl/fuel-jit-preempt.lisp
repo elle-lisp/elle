@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-14
+# audited: 2026-10-22
 # A compiled fiber body keeps its operand-stack values across a fuel preemption and a refuel.
-# docs/impl/jit.md
+# docs/impl/jit-fuel.md
 #
 # The sidecar makes the JIT eager, so a body compiles on its first call.
 #
@@ -12,7 +12,7 @@
 ## Both tiers charge fuel at each call and each backward jump. When the budget
 ## runs out, in the body or in a callee, the compiled body spills its live
 ## params, locals and operands into a frame the interpreter resumes
-## (docs/impl/jit.md). This test pins that the spill and the restore keep the
+## (docs/impl/jit-fuel.md). This test pins that the spill and the restore keep the
 ## value feeding an `apply` splice: after the pause the spliced argument is
 ## still the computed list, never nil.
 ##

@@ -3,7 +3,7 @@
 //! takes from it, and the kill word every charge reads first.
 //!
 //! docs/runtime.md
-//! docs/impl/jit.md
+//! docs/impl/jit-fuel.md
 //!
 //! The budget is one 64-bit word, and an unmetered fiber holds a word above
 //! every budget, so a charge is a load, a test for zero and a store on either
@@ -70,7 +70,7 @@ impl Fuel {
     const LARGEST: u64 = i64::MAX as u64;
 
     /// The word of a fiber with no budget: above every budget, below a pulled
-    /// switch, and 2^62 decrements from the budget range (docs/impl/jit.md).
+    /// switch, and 2^62 decrements from the budget range (docs/impl/jit-fuel.md).
     const UNMETERED: u64 = (1 << 63) + (1 << 62);
 
     /// Whether a charge against the kill word `limit` kills the fiber instead.

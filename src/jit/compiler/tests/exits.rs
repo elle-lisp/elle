@@ -1,5 +1,6 @@
 // audited: 2026-10-22
 // docs/impl/jit.md
+// docs/impl/jit-fuel.md
 // docs/impl/region/unwind.md
 //! What a compiled call emits around itself: the fuel charge before it, the
 //! exits after it, and the region-map pop before each exit.
@@ -102,7 +103,7 @@ fn every_compiled_exit_pops_the_region_map() {
 }
 
 /// A function that may signal charges fuel at a call and parks where the
-/// budget runs out (docs/impl/jit.md).
+/// budget runs out (docs/impl/jit-fuel.md).
 #[test]
 fn a_call_that_may_pause_reaches_the_fuel_pause() {
     // Counter-factual: a translator that charges nothing compiles every

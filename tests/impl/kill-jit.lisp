@@ -1,7 +1,7 @@
 (elle/epoch 15)
 # audited: 2026-10-22
 # A kill lands inside compiled code: a silent loop and a loop that may raise, each compiled.
-# docs/impl/jit.md
+# docs/impl/jit-fuel.md
 #
 # The sidecar makes the JIT eager and compiles on the VM thread, and a worker
 # boots under the same policy. Each worker warms its loop, checks that the JIT

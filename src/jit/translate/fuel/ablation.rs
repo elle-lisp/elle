@@ -2,7 +2,7 @@
 //! The shapes a silent fuel charge can take, for the fuel bench to compare.
 //!
 //! benches/AGENTS.md
-//! docs/impl/jit.md
+//! docs/impl/jit-fuel.md
 //!
 //! Only a build with the `ablation` feature compiles this module. The knob is
 //! thread-local, because `compile/run-on :jit` compiles on the calling thread,

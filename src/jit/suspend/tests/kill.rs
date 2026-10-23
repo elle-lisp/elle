@@ -2,7 +2,7 @@
 //! What `elle_jit_kill` leaves: the terminal `:killed` error as the fiber's
 //! signal, `nil` as the function's result, and no parked frame.
 //!
-//! docs/impl/jit.md
+//! docs/impl/jit-fuel.md
 
 use super::*;
 use crate::value::fiber::{SIG_ERROR, SIG_TERMINAL};
