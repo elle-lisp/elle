@@ -11,8 +11,9 @@
 //! Byte accounting is a dump-size estimate, not an allocator audit. Each
 //! object contributes its `HeapObject` shell plus its payload wherever the
 //! payload lives — region pages (`RegionSlice` backings, syntax trees, code
-//! payloads, the extent of an `@array`, `@string`, `@bytes` or `@set` store)
-//! or, for a `@struct`, the Rust heap. A box's or capture cell's value lies
+//! payloads, the extent of an `@array`, `@string` or `@bytes` store, an
+//! `@set`'s node extent with its free nodes) or, for a `@struct`, the Rust
+//! heap. A box's or capture cell's value lies
 //! inside its shell, so the shell is all it costs. A payload shared through an
 //! aliased `RegionSlice` is counted once (first holder). Not counted:
 //! per-container `Rc`/`RefCell` bookkeeping, a code payload's region tables,
@@ -363,7 +364,7 @@ fn measure(obj: &HeapObject, seen: &mut FxHashSet<usize>) -> ObjStat {
         }
         HeapObject::LSetMut { data, .. } => {
             if let Some(vs) = data.try_read() {
-                stat.bytes += vs.len() * size_of::<Value>();
+                stat.bytes += vs.node_bytes();
                 for v in vs.iter() {
                     heap_slot(v, &mut stat);
                 }

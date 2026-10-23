@@ -9,9 +9,9 @@
 //! beside the region tracking its store needs, and `value/build/mutable.rs`
 //! calls the constructors. A write that overlaps a live read guard panics with
 //! "already borrowed". The `@array`, `@string` and `@bytes` stores are one
-//! extent type, generic over what it holds, and the `@set` store wraps it to
-//! keep its members in order. A box's or capture cell's store is its one value,
-//! inline in the shell.
+//! extent type, generic over what it holds. The `@set` store keeps its members
+//! in a B-tree whose nodes lie in one such extent. A box's or capture cell's
+//! store is its one value, inline in the shell.
 
 mod array;
 mod bytes;
@@ -19,6 +19,7 @@ mod cell;
 mod extent;
 mod set;
 mod structs;
+mod tree;
 
 pub use array::{ArrayRead, ArrayStore};
 pub use bytes::{ByteRead, ByteStore};

@@ -208,7 +208,8 @@ unsafe fn clone_with_traits(
             traits: table,
         })),
         HeapObject::LSetMut { data, .. } => {
-            Ok(ctx.set_mut_with_traits(data.read().as_slice(), table))
+            let members: Vec<Value> = data.read().iter().copied().collect();
+            Ok(ctx.set_mut_with_traits(&members, table))
         }
         // Infrastructure types — no trait field; return error. A closure
         // template is never user-visible, so `with-traits` can never reach it.

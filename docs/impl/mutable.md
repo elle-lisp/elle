@@ -186,7 +186,6 @@ capture cell, then `@set` onto a sorted extent. The `@set` then moves onto the
 B-tree, and `@struct` onto the same tree, each behind the benchmark. A step
 changes its own store file, its funnels and its constructors. The `@array`
 step also puts the byte store on the shared extent type. The seam, the byte
-step, the `@array` step, the cell step and the `@set` step onto a sorted
-extent have landed.
+step, the `@array` step, the cell step and both `@set` steps have landed.
 [The image plan](image/plan.md) orders the foundation among the image
 milestones.

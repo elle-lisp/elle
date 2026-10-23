@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-10-23
 //! An extent of a container's region: the items of a mutable store, read through a guard and edited in place.
 //!
 //! docs/impl/mutable.md
@@ -11,9 +11,12 @@ use crate::hir::region::RuntimeRegion;
 use crate::value::fiberheap::FiberHeap;
 
 /// The fewest bytes a growth claims, and the fewest items, so a store built
-/// empty does not claim a new extent for each of its first few items.
+/// empty does not claim a new extent for each of its first few items. The
+/// floor stops at `MAX_FLOOR_BYTES`, so an extent of large items, a tree's
+/// nodes, grows from one.
 const MIN_EXTENT_BYTES: usize = 8;
 const MIN_EXTENT_ITEMS: usize = 4;
+const MAX_FLOOR_BYTES: usize = 256;
 
 /// The borrow count while a write runs. A count above zero is that many live
 /// read guards, which are a `RefCell`'s rules.
@@ -157,7 +160,10 @@ impl<T: Copy + 'static> Extent<T> {
                 range.len(),
             ));
             if new_len > cap {
-                let floor = (MIN_EXTENT_BYTES / std::mem::size_of::<T>()).max(MIN_EXTENT_ITEMS);
+                let size = std::mem::size_of::<T>();
+                let floor = (MIN_EXTENT_BYTES / size)
+                    .max(MIN_EXTENT_ITEMS)
+                    .min((MAX_FLOOR_BYTES / size).max(1));
                 let grown = new_len.max(cap.saturating_mul(2)).max(floor);
                 let fresh = claimed(room, grown);
                 let to = fresh.as_ptr();

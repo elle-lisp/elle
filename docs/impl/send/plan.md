@@ -7,8 +7,8 @@ the risks still open.
 
 [The send design](../send.md) owns the argument, and
 [mutable stores in region pages](../mutable.md) owns the foundation. The first
-milestone's seam, byte step, `@array` step, cell step and `@set` step have
-landed, and nothing else here has.
+milestone's seam, byte step, `@array` step, cell step and both `@set` steps
+have landed, and nothing else here has.
 
 ## Landing order
 
@@ -70,8 +70,8 @@ guards a behavior its milestone must keep.
 - **Benchmark.** An `@set` add and delete, and a `@struct` put and delete, run
   at 10³, 10⁴ and 10⁵ random keys beside std's `BTreeSet` and `BTreeMap` on the
   same keys. At 10⁵ each stays within twice std's time. The bound gates the
-  `@set` tree step and the `@struct` step, and the `@set` on a sorted extent
-  fails it.
+  `@struct` step, as it gated the `@set` tree step, which a sorted extent
+  failed.
 
 ### policy
 
