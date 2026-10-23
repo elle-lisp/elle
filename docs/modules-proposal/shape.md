@@ -1,6 +1,6 @@
 # Modules: one pure form
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-10-23 -->
 
 The decided shape of a module: one pure form per file, evaluated once per instance, held pure by a full deny, and shipped as an image.
 
@@ -62,10 +62,8 @@ the import. `(def b (import "std/base64"))` followed by `(b:encode "x")`
 reports "get: expected collection …, got closure" when the module returns a
 function. That case needs an error of its own.
 
-All module code moves into a body, which infers less than a file
-([the proposal](../modules-proposal.md)). The solver solves a body's
-definitions jointly, forward and mutual references included
-([solver.md](../impl/solver.md)), so it lands before the shape.
+All module code moves into a body, and a body's signals are solved jointly, as
+a file's are ([compile.md](compile.md)).
 
 ## How the form is held pure
 

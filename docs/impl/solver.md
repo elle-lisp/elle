@@ -1,30 +1,29 @@
 # The signal solver
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-23 -->
 
-Signal inference across files: facts per file, a link through literal imports, and the least model of a few Datalog rules.
+Signal inference as the least model of a few Datalog rules: how the compiler raises each unit's signals to it, and how a run links files.
 
-The [module design](../modules-proposal.md) links literal imports, and a
-linked call needs the callee's signal from another file. This document owns
-how that signal is computed. The spike
-[examples/signal_solve](../../examples/signal_solve/main.rs) builds it beside
-the compiler, and nothing in the compiler uses it yet.
+The analyzer makes one pass over a unit, and the compiler then solves the
+unit's signals with the rules below ([pipeline.md](../pipeline.md)). The
+[module design](../modules-proposal.md) links literal imports, and a linked
+call needs the callee's signal from another file. This document owns how both
+are computed. The spike [examples/signal_solve](../../examples/signal_solve/main.rs)
+solves the files of a program jointly, and nothing in the compiler links
+across files yet.
 
-## What the analyzer cannot answer
+## What one unit cannot answer
 
-The analyzer infers one file at a time ([signals/inference.md](../signals/inference.md)):
-
-- A file's top level converges by a fixpoint over every definition, and a
-  function body converges only a definition that refers to itself
-  ([pipeline.md](../pipeline.md)). A call to a sibling the body defines later
-  gets every bit, and so does mutual recursion between siblings.
-- No signal crosses a file boundary, so a call into another file takes every
-  bit (#1232). A map from each exported field to a signal would not be enough:
-  it cannot say "field `:connect` of parameter 0", a parameter captured from an
-  enclosing function, or a dependency on another module's export.
+No signal crosses a file boundary, so a call into another file takes every bit
+(#1232). A map from each exported field to a signal would not be enough: it
+cannot say "field `:connect` of parameter 0", a parameter captured from an
+enclosing function, or a dependency on another module's export.
 
 A call to a field of a parameter, such as a plugin a module is given, has a
-call expression for its callee, and the analyzer answers it with every bit.
+call expression for its callee, and the pass answers it with every bit. So
+does a call to a parameter of an enclosing function. A signal only rises when
+the compiler solves a unit, so the compiler keeps those answers, and only the
+spike reads the tighter ones the model holds.
 
 ## A signal is bits and free variables
 
@@ -47,9 +46,9 @@ special case where every free variable is one of the function's own
 parameters.
 
 Two values carry fixed signals. A literal is data, so calling it can only
-raise `:error`. A value nothing is known about raises every bit. One bit value,
-`TOP`, stands for every user-facing bit at once, so the unknown value costs one
-fact instead of fifty.
+raise `:error`. A value nothing is known about raises every bit, and so does a
+binding that an `assign` reaches. One bit value, `TOP`, stands for every
+user-facing bit at once, so the unknown value costs one fact instead of fifty.
 
 ## Facts
 
@@ -63,15 +62,20 @@ HIR and states facts about it. A file's analysis never compiles its imports
   raises. The code outside every lambda takes the same bits from
   `AnalyzeResult`. The solver states none of these rules again, so it cannot
   drift from the analyzer on them.
-- A primitive's bits and propagated parameters come from the compile
-  metadata.
+- A binding the compile starts with, such as a primitive or an export of the
+  standard library, carries the signal the analyzer recorded for it: its bits
+  and the parameters it propagates.
 - A call states the context it runs in, the callee, the function whose
-  parameters it binds, and each argument.
+  parameters it binds, and each argument. Each fact keeps the call it came
+  from, so the model answers each call as well as each context.
 - A lambda's declared ceiling comes from the analyzer (`LambdaDecl`), because
-  the HIR keeps only the inferred signal, which the analyzer checked against
-  it.
+  the HIR keeps only the inferred signal.
 - A literal-mask `squelch` or `attune` becomes a variable that filters the
-  bits of its target.
+  bits of its target. The mask is literal where the analyzer finds it literal.
+
+The walk keeps every refinement the pass makes. A collection literal and a
+qualified name build calls the pass does not charge, and a call of `emit`
+whose first argument is a literal raises the bits that argument names.
 
 ## Linking
 
@@ -120,21 +124,37 @@ vdep(c, w)      :- rdep(c, w), ceiled(c).
 `c` is a context, `g` a callee, `o` the function whose parameters a call binds,
 `w` a free variable, and `a` what the call binds it to. `sub` says the call
 binds `w` to `a`, `miss` that it binds `w` to nothing known, and `flow` that an
-open export may call `a`.
+open export may call `a`. A call's own answer is `raw` and `rdep` over the
+tuples that call contributes to `c`.
 
 A ceiling checks and does not replace, as the analyzer's does: a reader of `c`
 sees what the body raises. `viol` names the bits a body raises past its
 ceiling. `vdep` names each free variable a ceiled body depends on. No ceiling
 admits one, because the analyzer rejects a ceiled body that passes on the
-signal of its parameters. A file reaches the solver only when the analyzer
-accepts it, so a violation means the solver is looser than the analyzer
-there.
+signal of its parameters. A file reaches the spike only when the compiler
+accepts it, so a violation there means the spike is looser than the compiler.
 
 The input facts also seed `raw`, `bits` and `dep`. Every negation names an
 input relation, so the program is Datalog with negation on its inputs alone.
 It has one least model, and every correct engine computes that model, whatever
 the order of its facts. The model is the answer the design needs, because a
 least fixpoint never claims a bit nothing raises.
+
+## In the compiler
+
+`Analyzer::analyze` and `Analyzer::analyze_file` solve the unit they analyzed
+before they return. Every import of the unit stays open, so the compile reads
+no other file, and a call into one takes every bit, as above. The answers then
+raise the HIR, and never lower it:
+
+| Node | What it takes |
+|------|---------------|
+| A call | The bits the model answers for the call. A free variable that is a parameter of the enclosing lambda adds `:yield` and `:error`, as the pass's call to a parameter does. Any other free variable adds every bit |
+| Any other node | The bits of each child but a lambda, because a lambda node is silent |
+| A lambda | The model's bits for it. Each of its own parameters joins `:propagates`, and any other free variable adds every bit |
+
+The ceilings, and the bounds a call meets, are checked against the raised
+signals, with the messages [inference.md](../signals/inference.md) shows.
 
 ## Two engines, and why these two
 
@@ -197,13 +217,12 @@ A `# violates` line has the shape of an `# expect` line. It states the bits
 the body of `NAME` raises past its ceiling, and the free variables it depends
 on. Under `--expect`, every
 violation the model finds in a fixture must be stated, and every stated one
-found. A fixture holds no violation unless the solver is looser than the
-analyzer, so the fixtures state none. A unit test of the rules builds a model
+found. A fixture holds no violation unless the spike is looser than the
+compiler, so the fixtures state none. A unit test of the rules builds a model
 with each kind of violation, and checks that both engines find it.
 
-Where the analyzer answers with every bit, the solver is exact:
+Where the compiler answers with every bit, the model is exact:
 
-- a forward or mutual reference inside a function body
 - a parameter called from a nested lambda
 - a parametric module whose exports call fields of the plugin it is given:
   `go` solves to `port/open`'s `|:error :io :fs|`
@@ -224,8 +243,7 @@ names the exports it calls, and a literal argument to an open export adds
 ## What the solver does not cover
 
 - `(f g)` with `f` a parameter: both the analyzer and the solver drop `g`.
-- A mutable binding, which the solver answers with every bit, and the
-  position a spliced argument binds.
+- The position a spliced argument binds.
 - A native plugin's signals at compile time.
 - The purity facts the design needs beside signals.
 

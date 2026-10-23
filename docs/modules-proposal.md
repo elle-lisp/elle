@@ -1,19 +1,20 @@
 # Modules: a proposal
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-10-23 -->
 
 The module system Elle is building toward: one pure form per file, evaluated once per instance, linked across files, shipped as images.
 
 [modules.md](modules.md) describes the module system as it is. This document
 and the two beside it state the design it becomes, and the argument for each
-part. Five parts are implemented, and [compile.md](modules-proposal/compile.md)
+part. Six parts are implemented, and [compile.md](modules-proposal/compile.md)
 states them: sound signals, the raw primitives, contained expansion,
-deterministic expansion and one compile per file. The shape a module takes is
-decided: one pure form, which [shape.md](modules-proposal/shape.md) states with
-how the form is held pure, why it does not suspend, and module images.
-[solver.md](impl/solver.md) owns the cross-file signal solver that linking
-uses. The decisions that still belong to the language's owner are listed under
-Open decisions below.
+deterministic expansion, one compile per file and a unit's signals solved
+jointly. The shape a module takes is decided: one pure form, which
+[shape.md](modules-proposal/shape.md) states with how the form is held pure,
+why it does not suspend, and module images. [solver.md](impl/solver.md) owns
+the signal solver, which the compiler runs on each unit and linking will run
+across files. The decisions that still belong to the language's owner are
+listed under Open decisions below.
 
 ## Where the module system stands
 
@@ -21,11 +22,6 @@ A defect below carries its issue number where it has one.
 [modules.md](modules.md) states one more under its architectural constraints:
 no signal crosses a file boundary, so a call into another file takes every bit
 (#1232).
-
-**A function body infers less than a file.** A file converges its definitions
-jointly. A body converges a definition only against itself, so a call to a
-later sibling, mutual recursion included, takes every bit
-([pipeline.md](pipeline.md)).
 
 **A transformer still reads two things outside its unit.** Under `eval`, a
 parameter it calls answers the caller's dynamic binding. A closure, a syntax

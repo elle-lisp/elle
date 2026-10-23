@@ -1,6 +1,6 @@
 # Signal Inference
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-10-23 -->
 
 How the compiler infers each function's signal, and the forms that bound,
 narrow or check it.
@@ -62,11 +62,11 @@ primitive does.
 (assert (contains? (get sig :bits) :io) "an unknown callee may do anything")
 ```
 
-Mutually recursive definitions in one file or one `letrec` converge by a
-fixpoint; see [pipeline.md](../pipeline.md). So does a function that calls
-itself from a lambda inside its own body, wherever it is defined. The signal
-decides the calling convention: a call whose callee may yield, do I/O or wait
-keeps a continuation frame.
+The signals of definitions that call each other settle jointly, in a file, a
+`letrec` or a function body, whatever their order ([pipeline.md](../pipeline.md)).
+So does a function that calls itself from a lambda inside its own body. The
+signal decides the calling convention: a call whose callee may yield, do I/O or
+wait keeps a continuation frame.
 
 ```lisp
 (assert (string/contains?
