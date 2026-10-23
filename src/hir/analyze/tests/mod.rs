@@ -10,7 +10,7 @@ use crate::syntax::{thread_arena, SeqCtor, Span, Syntax, SyntaxArena, SyntaxKind
 mod basics;
 mod bindings;
 mod environment;
-mod fixpoint;
+mod joint;
 mod messages;
 mod qualified;
 mod selfedge;
