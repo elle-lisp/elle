@@ -11,10 +11,11 @@ mod basics;
 mod bindings;
 mod body;
 mod environment;
-mod fixpoint;
+mod joint;
 mod merged;
 mod messages;
 mod nested;
+mod nestedjoint;
 mod prune;
 mod qualified;
 mod selfedge;
@@ -74,6 +75,17 @@ fn nodes(hir: &Hir) -> Vec<&Hir> {
     let mut out = Vec::new();
     collect(hir, &mut out);
     out
+}
+
+/// The inferred signal of every lambda in `hir`, outermost first.
+fn lambda_signals(hir: &Hir) -> Vec<Signal> {
+    nodes(hir)
+        .into_iter()
+        .filter_map(|node| match &node.kind {
+            HirKind::Lambda(lambda) => Some(lambda.inferred_signals),
+            _ => None,
+        })
+        .collect()
 }
 
 /// The inferred signal of the lambda a binding spelled `name` takes, wherever

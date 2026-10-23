@@ -1,5 +1,5 @@
-// audited: 2026-10-21
-// Signal inference through parameters, and the letrec fixpoint's convergence.
+// audited: 2026-10-23
+// Signal inference through parameters, and a letrec whose signals settle jointly.
 //
 // docs/signals/inference.md
 // docs/pipeline.md
@@ -141,8 +141,8 @@ fn test_mutual_recursion_converges_from_either_entry() {
     );
 }
 
-/// A three-way cycle: the raiser is two edges away from the entry point, so one
-/// re-analysis pass is not enough to carry the signal back around.
+/// A three-way cycle: the raiser is two edges away from the entry point, so its
+/// signal has to travel the whole cycle back to the entry.
 #[test]
 fn test_three_way_mutual_recursion_converges() {
     let (mut symbols, mut vm) = setup();
