@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-10-22
 # std/gun keepers over loopback: :peers dials and redials with backoff, resync after a drop, and gun:close.
 # lib/gun/mesh.md
 
@@ -73,8 +73,10 @@
                         (fn [] (= (gun:once note-a) both)))
             (eventually "B gets A's write from while apart"
                         (fn [] (= (gun:once note-b) both))))
-          (assert (= (freeze heard) [nil "x"])
-                  "an on function hears the write that resync brought")
+          # The trap: the merge lands before the on function is called, and the
+          # forward between them yields, so the read of note-b can come first.
+          (eventually "an on function hears the write that resync brought"
+                      (fn [] (= (freeze heard) [nil "x"])))
           (stop-heard)
           (stop)
           (gun:close b)
