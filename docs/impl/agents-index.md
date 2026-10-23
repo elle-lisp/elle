@@ -74,7 +74,9 @@ to a search.
 ## A directory's summary
 
 A parent index needs one line per child directory. It comes from
-`<dir>/overview.md`, whose call-out serves as the directory's summary.
+`<dir>/overview.md`, whose call-out serves as the directory's summary. A link
+in that call-out is relative to the child, so the parent writes it with the
+child's name in front.
 
 Where a directory has no `overview.md`, the parent lists the titles of the
 documents inside it. That is worse than a summary and better than a bare name,
