@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-22
+# audited: 2026-10-23
 # A macro expands without the effect capabilities, on a fiber that withholds nothing; the code it expands to runs with them.
 #
 # docs/signals/capabilities.md
@@ -75,11 +75,12 @@
 
                # The expansion ends before its unit runs, and the unit runs with the
                # capabilities of its fiber. The counter-factual would leave the effect
-               # bits withheld past the expansion, and the read would be denied.
+               # bits withheld past the expansion, and the :fs check would be denied.
+               # The check is synchronous: eval holds no park, so a file read, which
+               # waits on the scheduler, would fail inside eval with or without :fs.
                (def after
-                 (string/join ["(begin (defmacro w [] 0) (w) (file/read \""
+                 (string/join ["(begin (defmacro w [] 0) (w) (path/exists? \""
                                secret "\"))"] ""))
-               (assert (= "3311" (eval (read after)))
-                       "run-time code reads the file"))
+               (assert (eval (read after)) "run-time code reaches the file"))
 
 (println "macro-effects: OK")
