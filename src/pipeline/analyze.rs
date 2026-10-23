@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-22
 //! The entry points that analyze one form or a whole file to HIR, for the linter, the LSP and compile/analyze.
 //!
 //! docs/pipeline.md
@@ -100,7 +100,7 @@ fn analyze_file_in_arena(
     // Strip the epoch and version declarations and migrate old-epoch syntax,
     // as the compile front end does, so the linter and the portrait read the
     // forms the compiler reads. Unlike the front end, this checks no lexicon,
-    // stamps no file scope, splices no include and binds no `core_env`.
+    // stamps no file scope and binds no `core_env`.
     let source_epoch = crate::epoch::extract_epoch(&mut syntaxes)?;
     crate::pipeline::directives::extract_semver_directives(&mut syntaxes)?;
     if let Some(epoch) = source_epoch {
@@ -109,12 +109,8 @@ fn analyze_file_in_arena(
 
     let (mut expander, meta) = cctx.expander_and_meta(arena, unit);
 
-    // Expand all forms
-    let mut expanded_forms = Vec::new();
-    for syntax in syntaxes {
-        let expanded = expander.expand(syntax, symbols, vm)?;
-        expanded_forms.push(expanded);
-    }
+    // Expand all forms, splicing each include where it stands.
+    let expanded_forms = expander.expand_forms(syntaxes, symbols, vm)?;
 
     // Classify each form
     let forms = expanded_forms.iter().map(classify_form).collect();

@@ -96,5 +96,7 @@ its own forms. Two function bodies may each include one helper file.
 
 | File | Role |
 |------|------|
-| [include.rs](../src/pipeline/compile/include.rs) | Resolution and splicing, and the circular include check |
-| [include.lisp](../tests/lang/include.lisp) | Behavioral tests |
+| [include.rs](../src/pipeline/compile/include.rs) | Resolution, the circular include check, reading the file, and the WASM backend's splice of source text |
+| [include.rs](../src/syntax/expand/include.rs) | The splice into the form that holds the include, and the scopes each included form takes |
+| [include.lisp](../tests/lang/include.lisp) | Behavioral tests of a top-level include |
+| [include-splice.lisp](../tests/lang/include-splice.lisp) | Behavioral tests of each position an include splices into, its scopes, and its cycles |

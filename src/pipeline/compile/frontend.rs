@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-22
 //! The file front end: source text or read forms to regularized HIR, shared by every file entry point but `compile_file_to_lir`.
 //!
 //! src/pipeline/AGENTS.md
@@ -151,31 +151,18 @@ fn compile_syntaxes_frontend_xform_inner(
 
     let (expanded_forms, mut expander, meta, includes) =
         cctx.with_macro_expansion(arena, layer, unit, |macro_vm, mut expander, meta| {
-            // A form takes the file scope as it leaves the queue, after the
-            // include splice, so a spliced form shares the including file's
-            // scope and each sees what the other defines (docs/modules.md).
-            let file_scope = (!source_name.starts_with('<')).then(|| expander.fresh_scope());
-            let mut pending: std::collections::VecDeque<Syntax> = syntaxes.into();
-            let mut expanded_forms = Vec::new();
-            let mut includes = Includes::root(source_name);
-            while let Some(syntax) = pending.pop_front() {
-                if resolve_and_splice_include(
-                    &arena,
-                    &syntax,
-                    macro_vm,
-                    &meta,
-                    &mut pending,
-                    &mut includes,
-                )? {
-                    continue;
-                }
-                let syntax = match file_scope {
-                    Some(scope) => expander.stamp_scope(syntax, scope),
-                    None => syntax,
-                };
-                expanded_forms.push(expander.expand(syntax, symbols, macro_vm)?);
-            }
-            Ok::<_, String>((expanded_forms, expander, meta, includes.into_read()))
+            let forms = if source_name.starts_with('<') {
+                syntaxes
+            } else {
+                let file_scope = expander.fresh_scope();
+                syntaxes
+                    .into_iter()
+                    .map(|s| expander.stamp_scope(s, file_scope))
+                    .collect()
+            };
+            let expanded_forms = expander.expand_forms(forms, symbols, macro_vm)?;
+            let includes = expander.take_include_reads();
+            Ok::<_, String>((expanded_forms, expander, meta, includes))
         })?;
     crate::phase!(ct, "compile", t, "{} expand", source_name);
     let t = std::time::Instant::now();

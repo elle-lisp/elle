@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-22
 //! Expands one macro call by running its transformer closure on the VM and
 //! deep-copying the result back to owned `Syntax`.
 //!
@@ -42,9 +42,9 @@
 //! scope is reclaimed by balancing each survivor's unexplained references. The
 //! scope also owns the transient region the argument wrapping below allocates
 //! into, so its physical id goes back to the free list whether or not anything
-//! was wrapped into it. Together those
-//! keep the per-invocation cost of an expansion constant in every dimension:
-//! objects, regions, bytes, and physical ids.
+//! was wrapped into it. Together those keep the per-invocation cost of an
+//! expansion constant in every dimension: objects, regions, bytes, and physical
+//! ids.
 //!
 //! Known limitations:
 //! - Macros cannot return improper lists (for example, `(pair 1 2)`). The
@@ -175,9 +175,10 @@ impl Expander {
         macro_def: &MacroDef,
         args: &[Syntax],
         call_site: &Syntax,
+        out: &mut Vec<Syntax>,
         symbols: &mut SymbolTable,
         vm: &mut VM,
-    ) -> Result<Syntax, String> {
+    ) -> Result<(), String> {
         // Check arity: required params must be present, optional and rest are flexible
         let min_args = macro_def.params.required().len();
         let max_args = min_args + macro_def.params.optional().len();
@@ -219,7 +220,7 @@ impl Expander {
             ));
         }
 
-        let result = self.expand_macro_call_inner(macro_def, args, call_site, symbols, vm);
+        let result = self.expand_macro_call_inner(macro_def, args, call_site, out, symbols, vm);
         self.expansion_depth -= 1;
         result
     }
@@ -229,9 +230,10 @@ impl Expander {
         macro_def: &MacroDef,
         args: &[Syntax],
         call_site: &Syntax,
+        out: &mut Vec<Syntax>,
         symbols: &mut SymbolTable,
         vm: &mut VM,
-    ) -> Result<Syntax, String> {
+    ) -> Result<(), String> {
         let span = call_site.span;
 
         // --- Phase 1: Get or compile the transformer closure ---
@@ -341,7 +343,7 @@ impl Expander {
         // lose it, restoring their use-site scope sets exactly.
         let hygienized = self.flip_scope_recursive(result_syntax, intro_scope);
 
-        // Continue expanding the result.
-        self.expand(hygienized, symbols, vm)
+        // Continue expanding the result, which an include splices into `out`.
+        self.expand_into(hygienized, out, symbols, vm)
     }
 }
