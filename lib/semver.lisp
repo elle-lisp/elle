@@ -1,9 +1,9 @@
-(elle/epoch 12)
-(elle/version "1.0.0")
-## audited: 2026-09-21
-## lib/semver.lisp — Semantic versioning (pure Elle)
-##
-## Implements semver 2.0.0 parsing, comparison, and requirement matching.
+(elle/epoch 15)
+(elle/version "2.0.0")
+# audited: 2026-10-22
+## Semver 2.0.0 versions in pure Elle: parse, compare, increment, and match against requirements.
+## docs/semver.md
+## docs/versioning.md
 ##
 ## Usage:
 ##   (def semver ((import "std/semver")))
@@ -12,6 +12,15 @@
 ##   (semver:compare "1.0.0" "2.0.0")  => -1
 ##   (semver:satisfies? "1.2.3" ">=1") => true
 ##   (semver:increment "1.2.3" :minor) => "1.3.0"
+
+## Version 2 changed no answer. parse calls a value as a function, and the
+## other three call parse, so the signal of each is every bit. That set gained
+## :ambient.
+(elle/migration 2 "parse, compare, satisfies? and increment may raise :ambient"
+                (warn parse "signal gained :ambient; answers unchanged")
+                (warn compare "signal gained :ambient; answers unchanged")
+                (warn satisfies? "signal gained :ambient; answers unchanged")
+                (warn increment "signal gained :ambient; answers unchanged"))
 
 (fn []
   (defn try-int [s]
