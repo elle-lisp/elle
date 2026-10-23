@@ -147,7 +147,7 @@ index() {
                 IFS=$'\t' read -r title para < <(callout "$root/$sub/overview.md")
                 # A relative link in the call-out leads from the child.
                 para=$(printf '%s' "$para" |
-                    sed -E -e "s#\]\(([^)/:\#][^):]*)\)#]($base/\1)#g" -e "s#\]\($base/\.\./#](#g")
+                    sed -E -e "s|\]\(([^)/:#][^):]*)\)|]($base/\1)|g" -e "s|\]\($base/\.\./|](|g")
                 echo "- [$base/]($base/AGENTS.md) — ${para:-**$title (more...)**}"
             else
                 # No overview.md, so the parent lists what is inside. Worse
