@@ -1,6 +1,6 @@
 # Compile-Time Operations
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-22 -->
 
 The forms that act at compile time, and the `compile/*` API that reads the
 compiler's model from running code.
@@ -30,7 +30,7 @@ examples run as one program under `make doctest`.
 | `when!` / `unless!` *(proposed)* | analysis | no (the excluded body is not compiled) |
 | `emit` (signal keyword), `yield` | signal recorded at compile time | value emitted at runtime |
 | `quote`, quasiquote, `environment` | analysis/expansion | yes (data / list construction) |
-| `include`, `include-file` | before macro expansion | no (the file's forms are spliced in) |
+| `include`, `include-file` | macro expansion | no (the file's forms are spliced in) |
 | `meta/location`, `import-file` | analysis | yes (a constant; a load of a file the compiler names) |
 | `%`-intrinsics | proven at compile time, lowered | yes (one VM instruction; storing ops a native funnel call) |
 | `compile/*` | runtime, over the compile model | n/a (reflective) |
@@ -212,7 +212,7 @@ construction; `environment` desugars to a struct of the in-scope bindings.
 |---|---|
 | `(meta/location)` | `{:file :line :col}` of the form itself; `:file` is absolute, or nil for code with no file |
 | `(import-file path)` | the file `path` names, relative to the writer's directory, loaded when the form runs |
-| `(include-file path)`, `(include spec)` | the forms of a file, spliced in before expansion |
+| `(include-file path)`, `(include spec)` | the forms of a file, spliced in where the include stands |
 
 [modules.md](modules.md) owns `meta/location` and `import-file`, and
 [include.md](include.md) owns the two include forms.

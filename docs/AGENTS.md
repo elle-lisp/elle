@@ -26,7 +26,7 @@ Up: [..](../AGENTS.md)
 - [ffi.md](ffi.md) — **FFI** Elle calls C functions through libffi, with keyword type descriptors, reified signatures and explicit marshalling.
 - [fmt.md](fmt.md) — **elle fmt** Opinionated code formatter for Elle.
 - [functions.md](functions.md) — **Functions** How to make, call, compose and inspect functions, and how deep recursion may go.
-- [include.md](include.md) — **Including a file** `include` and `include-file` splice a file's forms into the including file at compile time, before macro expansion.
+- [include.md](include.md) — **Including a file** `include` and `include-file` splice a file's forms in place of the include, wherever the expander meets it.
 - [intrinsics.md](intrinsics.md) — **Intrinsics** Intrinsics are silent bytecode operations prefixed with `%`.
 - [io.md](io.md) — **I/O** All I/O in Elle is async: each call yields to the scheduler, and other fibers run until it completes.
 - [libraries.md](libraries.md) — **Libraries** Elle ships with libraries in `lib/`.
