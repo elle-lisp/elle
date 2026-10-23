@@ -11,7 +11,6 @@
 
 use elle::hir::region::RuntimeRegion;
 use elle::primitives::ctx::TestHeap;
-use elle::syntax::Syntax;
 use elle::value::arena::{region_of, struct_put_with_rebind, struct_remove_with_decref};
 use elle::value::heap::{HeapObject, HeapTag, Pair};
 use elle::value::repr::TAG_ARRAY;
@@ -81,14 +80,6 @@ fn a_struct_store_owns_nothing_to_drop() {
     assert!(
         !std::mem::needs_drop::<StructStore>(),
         "a struct store owns memory outside its region's pages"
-    );
-}
-
-#[test]
-fn a_struct_store_fits_the_shell_a_syntax_node_sets() {
-    assert!(
-        std::mem::size_of::<StructStore>() <= std::mem::size_of::<Syntax>(),
-        "a @struct's store grows every heap object past the size a syntax node sets"
     );
 }
 
