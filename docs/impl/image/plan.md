@@ -44,7 +44,7 @@ Then the image milestones:
    ([mutable.md](../mutable.md)). It lands before environment, so a mutable
    binding is body data before any dump writes one. [The send plan](../send/plan.md)
    orders its steps and holds its pins. The seam, the byte store, the
-   `@array` store and the cell store have landed.
+   `@array` store, the cell store and the `@set` store have landed.
 9. **environment** — `image/save` and `image/load`, manifest deltas over
    boot, and `&allow-mutable` as a switch in the dump policy.
 

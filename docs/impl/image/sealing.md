@@ -125,9 +125,9 @@ Refused outright: `Fiber`, thread and library handles, ports, externals, FFI
 signatures, managed pointers.
 
 Every mutable variant, `LBox` and an unsnapped capture cell are refused as
-unsealed data. `@set` and `@struct` keep their stores on the Rust heap, and
-every other mutable variant holds its contents in region pages. A store that
-has moved into region pages
+unsealed data. `@struct` keeps its store on the Rust heap, and every other
+mutable variant holds its contents in region pages. A store that has moved into
+region pages
 ([mutable stores](../mutable.md)) is body data, and the dump policy alone
 decides on it ([sending a region](../send.md) holds its table). Until that
 policy lands, the dumper refuses the moved stores too.
