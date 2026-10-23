@@ -1,5 +1,5 @@
-// audited: 2026-10-07
-//! Unit tests of a runtime's lifecycle, its root entry and the regions its programs own.
+// audited: 2026-10-22
+//! Unit tests of a runtime's lifecycle, its root entry, its kill switch and the regions its programs own.
 //!
 //! src/runtime.rs
 
@@ -17,6 +17,7 @@ fn cons() -> HeapObject {
 #[cfg(feature = "jit")]
 mod attempts;
 mod heaps;
+mod kill;
 mod lifecycle;
 mod macros;
 #[cfg(feature = "mlir")]

@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-22
 //! The `VM` struct — the per-instance state a running program reaches — and the
 //! accessors that reborrow the allocations it points at.
 //!
@@ -118,6 +118,14 @@ pub struct VM {
     /// The current fiber holding all per-execution state:
     /// operand stack, call frames, signal and fiber state.
     pub fiber: Fiber,
+    /// The kill switch every charge site of this VM reads, shared with the
+    /// thread handle that can pull it (docs/runtime.md). A worker takes the
+    /// switch its spawner made; every other VM holds one nobody can reach.
+    pub(crate) kill: crate::value::fiber::KillSwitch,
+    /// Where `kill`'s word lives, for compiled code to load through the VM
+    /// pointer. Set beside `kill`, and never by hand.
+    #[expect(dead_code, reason = "no compiled charge reads the word yet")]
+    pub(crate) kill_word: *const std::sync::atomic::AtomicU64,
     /// Handle to the current fiber's FiberHandle, if it came from a
     /// `fiber/new` allocation. `None` for the root fiber (which lives
     /// directly on the VM, not behind a handle). Used to wire up
@@ -298,6 +306,19 @@ impl VM {
     #[inline]
     pub fn heap(&mut self) -> &mut crate::value::fiberheap::FiberHeap {
         unsafe { &mut *self.heap_ptr }
+    }
+
+    /// The kill switch this VM's charge sites read.
+    pub fn kill_switch(&self) -> &crate::value::fiber::KillSwitch {
+        &self.kill
+    }
+
+    /// Read this VM's charges off `switch` from now on: a worker takes the
+    /// switch its spawner holds the other end of. Construction-time only.
+    #[expect(dead_code, reason = "no worker takes a switch yet")]
+    pub(crate) fn set_kill_switch(&mut self, switch: crate::value::fiber::KillSwitch) {
+        self.kill_word = switch.word();
+        self.kill = switch;
     }
 
     /// The FFI subsystem this VM owns — its loaded libraries, signatures, and

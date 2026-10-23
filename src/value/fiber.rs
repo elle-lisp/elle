@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-22
 //! Fiber types for the Elle runtime.
 //!
 //! A fiber is an independent execution context: it owns its operand stack,
@@ -36,7 +36,7 @@ mod signalbits;
 pub use signalbits::SignalBits;
 
 mod fuel;
-pub use fuel::Fuel;
+pub use fuel::{Fuel, KillSwitch};
 
 // Signal constants are defined in `crate::signals`, their owner, and
 // re-exported here beside the fiber that carries them.

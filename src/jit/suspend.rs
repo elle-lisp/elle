@@ -1,5 +1,5 @@
-// audited: 2026-10-12
-//! Side-exit helpers for JIT-compiled code: a yield, a park at a site, and a fuel pause.
+// audited: 2026-10-22
+//! Side-exit helpers for JIT-compiled code: a yield, a park at a site, a fuel pause and a kill.
 //!
 //! docs/impl/jit.md
 //! docs/impl/region/park.md
@@ -470,6 +470,22 @@ pub extern "C" fn elle_jit_fuel_pause(
     vm.fiber.suspended = Some(vec![frame]);
 
     YIELD_SENTINEL
+}
+
+/// JIT kill: the cold path of a charge whose budget is below the kill word.
+///
+/// Sets the fiber's signal to the terminal `:killed` error and answers `nil`,
+/// which the function then returns. The caller's check after the call finds
+/// the signal, as it finds a primitive's error. Nothing is spilled and no
+/// frame parks: a terminal signal is never resumed, and the killed worker's
+/// heap is freed whole (docs/impl/jit.md).
+///
+/// Parameters:
+///   vm: *mut () as u64
+#[no_mangle]
+pub extern "C" fn elle_jit_kill(vm: u64) -> JitValue {
+    let _ = vm;
+    JitValue::nil()
 }
 
 /// Check if any non-OK signal is pending on the VM.

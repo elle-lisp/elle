@@ -1,7 +1,8 @@
-// audited: 2026-10-12
+// audited: 2026-10-22
 //! A budget holds any count a program can write, counts down one unit per
 //! charge, and refuses the charge once spent. A silent function's spend never
-//! refuses, and an unmetered fiber never runs out.
+//! refuses, an unmetered fiber never runs out, and every word sits below a
+//! pulled kill switch.
 //!
 //! docs/runtime.md
 
@@ -77,4 +78,43 @@ fn an_unmetered_fiber_stays_unmetered_whatever_it_spends() {
         fuel.spend();
     }
     assert_eq!(fuel.remaining(), None);
+}
+
+#[test]
+fn every_budget_and_the_unmetered_word_sit_below_a_pulled_switch() {
+    // Counter-factual: an unmetered word of u64::MAX is below nothing, so a
+    // kill never reached a fiber with no budget, which is every fiber by
+    // default.
+    assert!(Fuel::unmetered().is_below(KillSwitch::PULLED));
+    assert!(Fuel::budget(LARGEST)
+        .expect("the largest budget")
+        .is_below(KillSwitch::PULLED));
+    assert!(Fuel::budget(0)
+        .expect("a budget of 0")
+        .is_below(KillSwitch::PULLED));
+}
+
+#[test]
+fn no_word_sits_below_a_slack_switch() {
+    // Counter-factual: a compare the wrong way round kills every fiber at
+    // its first charge.
+    assert!(!Fuel::unmetered().is_below(KillSwitch::SLACK));
+    assert!(!Fuel::budget(0)
+        .expect("a budget of 0")
+        .is_below(KillSwitch::SLACK));
+    assert!(!Fuel::budget(LARGEST)
+        .expect("the largest budget")
+        .is_below(KillSwitch::SLACK));
+}
+
+#[test]
+fn a_pull_reaches_every_end_of_the_switch() {
+    let switch = KillSwitch::new();
+    let other_end = switch.clone();
+    assert!(!switch.pulled());
+    assert_eq!(switch.limit(), KillSwitch::SLACK);
+    other_end.pull();
+    assert!(switch.pulled(), "the worker's end reads the spawner's pull");
+    assert_eq!(switch.limit(), KillSwitch::PULLED);
+    assert_eq!(switch.word(), other_end.word(), "both ends name one word");
 }

@@ -154,13 +154,16 @@ mod tests {
         let (vm, symbols, cctx) = core.parts();
         let out = eval_all(PROGRAM, symbols, vm, cctx, "<ablation>").expect("the program runs");
         let items = out.list_to_vec().expect("a list of three immediates");
-        set_charge_shape(ChargeShape::Saturating);
+        set_charge_shape(ChargeShape::Check);
         items
     }
 
     #[test]
     fn the_knob_starts_at_the_shape_every_other_build_emits() {
-        assert_eq!(charge_shape(), ChargeShape::Saturating);
+        // The kill check is the silent charge of a production build
+        // (benches/AGENTS.md), so a bench that never turns the knob measures
+        // what ships.
+        assert_eq!(charge_shape(), ChargeShape::Check);
     }
 
     // The counter-factual: a translator that ignores the knob spends the
