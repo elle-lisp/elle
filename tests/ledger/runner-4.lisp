@@ -26,3 +26,4 @@
 ["tests/lang/gun-walks.lisp" :objects 567]
 ["tests/lang/gun-wire.lisp" :objects 433]
 ["tests/lang/gun.lisp" :objects 1036]
+["tests/lang/kill.lisp" :objects 461]
