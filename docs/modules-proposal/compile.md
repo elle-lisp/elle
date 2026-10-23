@@ -1,8 +1,8 @@
 # Modules: how a file compiles
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-10-23 -->
 
-The implemented parts of the module proposal: sound signals, raw loaders, contained and deterministic expansion, and one compile per file.
+The module proposal's implemented parts: sound and joint signals, raw loaders, contained and deterministic expansion, one compile per file.
 
 [The proposal](../modules-proposal.md) defines the terms this document uses
 and states the principles it follows. Each part below is implemented, and every
@@ -153,6 +153,16 @@ echo '(def a ((import-file "lib/base64.lisp"))) (def b ((import-file "lib/base64
 
 The trace shows one compile of `lib/base64.lisp`: the second load runs the code
 the first one compiled.
+
+## A unit's signals are solved jointly
+
+After the analyzer's one pass over a unit, the signal solver settles all of the
+unit's signals together ([pipeline.md](../pipeline.md),
+[solver.md](../impl/solver.md)). A function body therefore infers what a file
+infers: a call to a sibling defined later, mutual recursion included, takes
+that sibling's signal. Every ceiling meets the solved signals.
+
+[The shape](shape.md) moves all module code into a body, so it reads this part.
 
 ## Rejected alternatives
 
