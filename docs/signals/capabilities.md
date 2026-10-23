@@ -1,6 +1,6 @@
 # Capability enforcement
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-10-23 -->
 
 Capabilities flow down. A fiber's parent decides what the fiber is
 permitted to do. Operations the fiber can't perform become signals the
@@ -412,11 +412,8 @@ not — see the spend section above.
   (fiber/cancel f))
 ```
 
-Denying `:ffi` stops the fiber loading a native module, because
-`import/load-plugin` declares `:ffi` for the foreign code its load runs. The
-gate refuses the call before the loader reads the path, so no library need
-exist. A `.lisp` module loads through `import/load-file`, which needs only
-`:fs`.
+Denying `:ffi` stops a native module load. The gate refuses the call before
+the loader reads the path, so no library need exist:
 
 ```lisp
 (let [f (fiber/new (fn [] (import/load-plugin "nonexistent.so")) |:ffi :error|
