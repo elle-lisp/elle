@@ -83,3 +83,6 @@ pub(crate) fn holds_value_refs(tag: HeapTag) -> bool {
         | HeapTag::LSetMut => false,
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -62,42 +62,6 @@ fn test_fiber_heap_clear() {
     assert!(heap.is_empty());
 }
 
-// A store in region pages needs no drop. The free scans its shell, found on
-// the reference list.
-#[test]
-fn test_fiber_heap_needs_drop_exhaustive() {
-    assert!(!needs_drop(HeapTag::Pair));
-    assert!(!needs_drop(HeapTag::Float));
-    assert!(!needs_drop(HeapTag::LibHandle));
-    assert!(!needs_drop(HeapTag::ManagedPointer));
-    assert!(!needs_drop(HeapTag::Parameter));
-    assert!(!needs_drop(HeapTag::LStringMut));
-    assert!(!needs_drop(HeapTag::LBytesMut));
-    assert!(!needs_drop(HeapTag::LArrayMut));
-    assert!(!needs_drop(HeapTag::LBox));
-    assert!(!needs_drop(HeapTag::CaptureCell));
-    assert!(holds_value_refs(HeapTag::LStringMut));
-    assert!(holds_value_refs(HeapTag::LBytesMut));
-    assert!(holds_value_refs(HeapTag::LArrayMut));
-    assert!(holds_value_refs(HeapTag::LBox));
-    assert!(holds_value_refs(HeapTag::CaptureCell));
-
-    assert!(needs_drop(HeapTag::LString));
-    assert!(needs_drop(HeapTag::LStructMut));
-    assert!(needs_drop(HeapTag::LStruct));
-    assert!(needs_drop(HeapTag::Closure));
-    assert!(needs_drop(HeapTag::LArray));
-    assert!(needs_drop(HeapTag::LBytes));
-    assert!(needs_drop(HeapTag::Syntax));
-    assert!(needs_drop(HeapTag::Fiber));
-    assert!(needs_drop(HeapTag::ThreadHandle));
-    assert!(needs_drop(HeapTag::FFISignature));
-    assert!(needs_drop(HeapTag::FFIType));
-    assert!(needs_drop(HeapTag::External));
-    assert!(needs_drop(HeapTag::LSet));
-    assert!(needs_drop(HeapTag::LSetMut));
-}
-
 #[test]
 fn free_region_physical_frees_matching_slots() {
     let mut heap = FiberHeap::new();
