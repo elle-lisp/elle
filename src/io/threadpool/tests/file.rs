@@ -1,5 +1,5 @@
-// audited: 2026-10-21
-//! The operations a pool worker runs on a file by its path: what each reports for a file, a missing path and a fifo.
+// audited: 2026-10-22
+//! The operations a pool worker runs on a file by its path: what each reports for a file, a missing path, a fifo and a device.
 //!
 //! src/io/AGENTS.md
 
@@ -45,8 +45,8 @@ fn syncing_a_missing_path_reports_enoent() {
     assert_eq!(sync_result(22, &path), -libc::ENOENT);
 }
 
-/// A fifo is neither a file nor a directory, so its sync fails, and fails at
-/// once.
+/// A fifo is neither a file nor a directory, so its sync fails with `EINVAL`,
+/// and fails at once.
 ///
 /// The trap: `open(2)` of a fifo for reading waits for a writer, and nobody
 /// writes this one. A sync that opened its path without `O_NONBLOCK` would
@@ -55,8 +55,35 @@ fn syncing_a_missing_path_reports_enoent() {
 #[test]
 fn syncing_a_fifo_fails_at_once() {
     let fifo = Fifo::new("sync-fifo");
-    let code = sync_result(23, &fifo.0);
-    assert!(code < 0, "a fifo cannot be synced, got {}", code);
+    assert_eq!(sync_result(23, &fifo.0), -libc::EINVAL);
+}
+
+/// A device is neither a file nor a directory either.
+#[test]
+fn syncing_a_device_fails() {
+    assert_eq!(sync_result(24, "/dev/null"), -libc::EINVAL);
+}
+
+/// Only a regular file and a directory sync, whatever their permission bits.
+///
+/// The trap: Linux refuses a fifo in `fsync(2)` itself, and macOS syncs one
+/// and answers 0. A worker that left the choice to the kernel passed the fifo
+/// test on Linux, the one platform that runs this file in CI.
+#[test]
+fn only_a_file_or_a_directory_syncs() {
+    use super::super::file::syncable;
+    for kind in [libc::S_IFREG, libc::S_IFDIR] {
+        assert!(syncable(kind | 0o644), "mode {kind:o} syncs");
+    }
+    for kind in [
+        libc::S_IFIFO,
+        libc::S_IFCHR,
+        libc::S_IFBLK,
+        libc::S_IFSOCK,
+        libc::S_IFLNK,
+    ] {
+        assert!(!syncable(kind | 0o644), "mode {kind:o} does not sync");
+    }
 }
 
 /// Run `op` on a worker and answer the result code and the bytes it reports.
