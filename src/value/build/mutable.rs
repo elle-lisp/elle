@@ -38,31 +38,39 @@ pub(crate) fn array_mut_with_traits(
 /// Allocate an empty mutable `@struct` into `region` on `heap`.
 #[inline]
 pub(crate) fn struct_mut(heap: &mut FiberHeap, region: RuntimeRegion) -> Value {
-    struct_mut_from(heap, BTreeMap::new(), region)
+    let traits = default_traits_for(heap, HeapTag::LStructMut);
+    struct_mut_with_traits(heap, &[], traits, region)
 }
 
 /// Allocate a mutable `@struct` with entries into `region` on `heap`.
-///
-/// The keys are interned into `region` like an immutable struct's, so an
-/// `@struct` never holds a key borrowed from the caller's region.
 #[inline]
 pub(crate) fn struct_mut_from(
     heap: &mut FiberHeap,
     entries: BTreeMap<TableKey, Value>,
     region: RuntimeRegion,
 ) -> Value {
-    let interned: BTreeMap<TableKey, Value> = entries
+    let traits = default_traits_for(heap, HeapTag::LStructMut);
+    let entries: Vec<(TableKey, Value)> = entries.into_iter().collect();
+    struct_mut_with_traits(heap, &entries, traits, region)
+}
+
+/// Allocate a mutable `@struct` carrying `traits`, and its entries, into
+/// `region` on `heap`. The keys ascend and are distinct, the order a struct
+/// read shows them in. Each is interned into `region` like an immutable
+/// struct's, so an `@struct` never holds a key borrowed from the caller's
+/// region.
+pub(crate) fn struct_mut_with_traits(
+    heap: &mut FiberHeap,
+    entries: &[(TableKey, Value)],
+    traits: Value,
+    region: RuntimeRegion,
+) -> Value {
+    let interned: Vec<(TableKey, Value)> = entries
         .iter()
         .map(|(k, v)| (k.intern_into(heap, region), *v))
         .collect();
-    let traits = default_traits_for(heap, HeapTag::LStructMut);
-    heap.alloc_in_region(
-        HeapObject::LStructMut {
-            data: StructStore::new(interned),
-            traits,
-        },
-        region,
-    )
+    let data = StructStore::new_in(heap, region, &interned);
+    heap.alloc_in_region(HeapObject::LStructMut { data, traits }, region)
 }
 
 /// Allocate a user box (`LBox`) into `region` on `heap`.

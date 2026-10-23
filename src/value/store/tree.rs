@@ -16,7 +16,9 @@ mod remove;
 use std::cell::Cell;
 
 use super::extent::{Extent, ExtentRead};
+use crate::value::types::TableKey;
 use crate::value::Value;
+pub use insert::Put;
 pub use iter::Iter;
 pub use node::Node;
 use node::NONE;
@@ -41,6 +43,15 @@ impl Entry for Value {
     }
 }
 
+impl Entry for (TableKey, Value) {
+    type Key = TableKey;
+
+    #[inline]
+    fn key(&self) -> &TableKey {
+        &self.0
+    }
+}
+
 /// The entries of a sorted store. The root is `NONE` when there are none,
 /// and a height of 0 makes the root a leaf.
 pub struct Tree<T> {
@@ -60,29 +71,86 @@ pub struct TreeRead<'a, T> {
 }
 
 /// The node at each level from the root down, with the place a search or a
-/// walk took within it.
+/// walk took within it. A place is at most `CAPACITY`, so a byte holds it, and
+/// a path stays small enough that a descent copies it cheaply.
 #[derive(Clone, Copy)]
 struct Path {
-    steps: [(u32, usize); MAX_DEPTH],
+    nodes: [u32; MAX_DEPTH],
+    places: [u8; MAX_DEPTH],
     depth: usize,
 }
 
 impl Path {
     fn new() -> Self {
         Path {
-            steps: [(NONE, 0); MAX_DEPTH],
+            nodes: [NONE; MAX_DEPTH],
+            places: [0; MAX_DEPTH],
             depth: 0,
         }
     }
 
-    fn push(&mut self, node: u32, at: usize) {
-        self.steps[self.depth] = (node, at);
+    #[inline]
+    fn push(&mut self, node: u32, place: usize) {
+        self.nodes[self.depth] = node;
+        self.set_place(self.depth, place);
         self.depth += 1;
     }
 
+    #[inline]
     fn at(&self, level: usize) -> (u32, usize) {
-        self.steps[level]
+        (self.nodes[level], self.places[level] as usize)
     }
+
+    /// Point the step at `level` at `place` within the same node.
+    #[inline]
+    fn set_place(&mut self, level: usize, place: usize) {
+        debug_assert!(place <= node::CAPACITY, "a place lies within its node");
+        self.places[level] = place as u8;
+    }
+}
+
+/// Descend from `root` toward `key`, calling `step` with each node passed and
+/// the place taken within it, and answer the level the entry under `key` was
+/// found at. Without one, the descent ends at the leaf place `key` would take.
+/// The tree holds at least one entry.
+#[inline]
+fn descend<T: Entry>(
+    nodes: &[Node<T>],
+    root: u32,
+    height: u32,
+    key: &T::Key,
+    mut step: impl FnMut(u32, usize),
+) -> Option<usize> {
+    let mut at = root;
+    for level in 0..=height as usize {
+        let node = &nodes[at as usize];
+        let (i, found) = match node.search(key) {
+            Ok(i) => (i, true),
+            Err(i) => (i, false),
+        };
+        step(at, i);
+        if found {
+            return Some(level);
+        }
+        if level < height as usize {
+            at = node.child(i);
+        }
+    }
+    None
+}
+
+/// Descend as [`descend`] does, and answer the path taken with the level the
+/// entry under `key` was found at.
+#[inline]
+fn locate<T: Entry>(
+    nodes: &[Node<T>],
+    root: u32,
+    height: u32,
+    key: &T::Key,
+) -> (Path, Option<usize>) {
+    let mut path = Path::new();
+    let found = descend(nodes, root, height, key, |at, i| path.push(at, i));
+    (path, found)
 }
 
 impl<T: Entry> Tree<T> {
@@ -149,6 +217,17 @@ impl<T: Entry> Tree<T> {
         });
     }
 
+    /// The path to the entry under `key`, and the level it was found at.
+    #[inline]
+    fn find(&self, key: &T::Key) -> Option<(Path, usize)> {
+        if self.len.get() == 0 {
+            return None;
+        }
+        let nodes = self.nodes.read();
+        let (path, found) = locate(&nodes, self.root.get(), self.height.get(), key);
+        Some((path, found?))
+    }
+
     /// Take a node off the free list. `reserve` has put one there.
     fn take_free(&self, nodes: &[Node<T>]) -> u32 {
         let at = self.free.get();
@@ -180,16 +259,11 @@ impl<'a, T: Entry> TreeRead<'a, T> {
         if self.len == 0 {
             return None;
         }
-        let mut at = self.root;
-        for level in 0..=self.height {
-            let node = &self.nodes[at as usize];
-            match node.search(key) {
-                Ok(i) => return Some(&node.entries()[i]),
-                Err(i) if level < self.height => at = node.child(i),
-                Err(_) => return None,
-            }
-        }
-        None
+        let mut last = (NONE, 0);
+        descend(&self.nodes, self.root, self.height, key, |at, i| {
+            last = (at, i)
+        })?;
+        Some(&self.nodes[last.0 as usize].entries()[last.1])
     }
 
     /// The entries in key order.

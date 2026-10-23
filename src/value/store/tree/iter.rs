@@ -69,7 +69,7 @@ impl<'a, T: Entry> Iterator for Iter<'a, T> {
             let (at, i) = self.front.at(self.front.depth - 1);
             let node = &self.nodes[at as usize];
             if i < node.len() {
-                self.front.steps[self.front.depth - 1].1 = i + 1;
+                self.front.set_place(self.front.depth - 1, i + 1);
                 if self.front.depth <= self.height {
                     self.descend_front(node.child(i + 1));
                 }
@@ -95,7 +95,7 @@ impl<'a, T: Entry> DoubleEndedIterator for Iter<'a, T> {
             let (at, i) = self.back.at(self.back.depth - 1);
             let node = &self.nodes[at as usize];
             if i > 0 {
-                self.back.steps[self.back.depth - 1].1 = i - 1;
+                self.back.set_place(self.back.depth - 1, i - 1);
                 if self.back.depth <= self.height {
                     self.descend_back(node.child(i - 1));
                 }

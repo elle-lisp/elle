@@ -5,6 +5,7 @@
 //! docs/impl/region/ownership.md
 
 use super::*;
+use crate::value::store::Put;
 
 // ── Tracked mutation helpers ────────────────────────────────────────
 //
@@ -234,58 +235,60 @@ pub fn with_array_mut_neutral<R>(collection: Value, f: impl FnOnce(&mut [Value])
 
 /// Insert into a mutable @struct, swapping tracked refs: increfs the stored
 /// value, decrefs a displaced one (insert vs replace). Returns the displaced
-/// value. Panics if `collection` is not an @struct.
+/// value. Panics if `collection` is not an @struct, or if a new key must grow
+/// it and no region of `heap` holds it.
 pub fn struct_put_with_rebind(
     heap: &mut FiberHeap,
     collection: Value,
     key: crate::value::heap::TableKey,
     val: Value,
 ) -> Option<Value> {
-    // A heap-valued KEY the struct holds outside its own region is a reference
-    // like the value's, and the free-time content scan enumerates it
-    // (`find_object_cross_refs`'s `LStructMut` arm walks keys). A NEW one is
-    // increfed and its edge recorded here, as the alloc-scan does for a struct
-    // BUILT with keys (region-struct-heap-key-uaf.lisp). Otherwise the recorded
-    // edge table and the free scan disagree: a missed store-funnel edge the
-    // equivalence oracle detonates on. `counted_key_values`
-    // decides WHICH of the key's values that is. A rebind (`Some(old)`) keeps the
-    // pre-existing key (BTreeMap::insert does not replace an equal key), so its
-    // edge is untouched.
-    //
-    // The caller's key borrows whatever it was built from (`TableKey::
-    // from_value`), so a key that is actually stored is interned into the
-    // container's own region first — the discipline the immutable constructors
-    // follow (docs/impl/values.md). Membership is probed with
-    // the BORROWED key, because a rebind stores no key and interning one would
-    // leave the copy unreachable in the container's region.
+    // The store is probed with the BORROWED key. A rebind keeps the stored
+    // key, so no key edge moves, and interning a key it does not store would
+    // leave the copy unreachable in the container's region. The caller's key
+    // borrows whatever it was built from (`TableKey::from_value`), so a new key
+    // is interned into the container's own region before it is stored, as the
+    // immutable constructors do (docs/impl/values.md).
     let store = collection
         .struct_store()
         .expect("struct_put_with_rebind: expected @struct");
-    let replacing = store.read().contains_key(&key);
-    let key = match region_of(heap, collection) {
-        Some(r) if !replacing => key.intern_into(heap, r),
-        _ => key,
-    };
-    let key_heap_vals = counted_key_values(heap, collection, &key);
-    let old = store.insert(key, val);
-    match old {
-        Some(old) => {
-            // Un-record old before the rebind's decref may free its region; record
-            // the new edge after (see `set_at_with_rebind`).
+    let h = &mut *heap;
+    let put = store.put(&key, val, move || {
+        let key = match region_of(h, collection) {
+            Some(r) => key.intern_into(h, r),
+            None => key,
+        };
+        (key, growth_room(h, collection, "struct_put_with_rebind"))
+    });
+    match put {
+        Put::Edited(old) => {
+            // Un-record old before the rebind's decref may free its region;
+            // record the new edge after (see `set_at_with_rebind`).
             unrecord_store(heap, collection, old);
             rebind_stored_element(heap, collection, old, val);
             record_store(heap, collection, val);
+            Some(old)
         }
-        None => {
+        Put::Stored(key) => {
+            // A heap-valued KEY the struct holds outside its own region is a
+            // reference like the value's, and the free-time content scan
+            // enumerates it (`find_object_cross_refs`'s `LStructMut` arm walks
+            // keys). A new one is increfed and its edge recorded here, as the
+            // alloc-scan does for a struct BUILT with keys
+            // (region-struct-heap-key-uaf.lisp). Otherwise the recorded edge
+            // table and the free scan disagree: a missed store-funnel edge the
+            // equivalence oracle detonates on. `counted_key_values` decides
+            // WHICH of the key's values that is.
+            let key_heap_vals = counted_key_values(heap, collection, &key);
             incref_inserted_element(heap, collection, val);
             record_store(heap, collection, val);
             for kv in &key_heap_vals {
                 incref_inserted_element(heap, collection, *kv);
                 record_store(heap, collection, *kv);
             }
+            None
         }
     }
-    old
 }
 
 /// Remove a key from a mutable @struct, releasing the removed value's

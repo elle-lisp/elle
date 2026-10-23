@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-23
 //! Process roots, the program value's hand-off, the pinned root region, and the macro-expansion scope.
 //!
 //! docs/impl/region/rules.md
@@ -16,9 +16,8 @@ pub fn register_process_root_region(heap: &mut FiberHeap, region: RuntimeRegion)
     heap.register_process_root_region(region);
 }
 /// Which reference the process root a host registers is funded by
-/// (docs/impl/region/rules.md § "The program value is the host's to release").
-/// The sweep decrefs a registered region once, so every registration answers
-/// this or it decrefs a reference nobody holds.
+/// (docs/impl/region/rules.md). The sweep decrefs a registered region once, so
+/// every registration answers this or it decrefs a reference nobody holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RootRef {
     /// Take the one owning reference the caller holds and give nothing back.
@@ -48,10 +47,10 @@ pub fn register_process_root(heap: &mut FiberHeap, value: Value, funding: RootRe
     heap.register_process_root_region(r);
 }
 /// Give back the one owning reference a completed run handed its host with the
-/// program value (docs/impl/region/rules.md § "The program value is the host's
-/// to release"). The mirror of the `DecrefValueRegion` a compiled caller runs:
-/// it resolves the value's own runtime region, seeing through a capture cell
-/// exactly as the return convention's mint did.
+/// program value (docs/impl/region/rules.md). The mirror of the
+/// `DecrefValueRegion` a compiled caller runs: it resolves the value's own
+/// runtime region, seeing through a capture cell exactly as the return
+/// convention's mint did.
 ///
 /// A host that reads the value for the rest of the runtime's life registers it
 /// with [`register_process_root`] instead, taking the reference, and the
@@ -67,8 +66,8 @@ pub fn release_program_value(heap: &mut FiberHeap, value: Value) {
 /// Release every registered process root of `heap` by reference count and return
 /// the number released. This is the *only* heap-region action the teardown sweep
 /// takes — it decrefs roots and lets the RC cascade do the rest (Rule 5/7); it
-/// never iterates the region table freeing live entries (see
-/// docs/impl/region/rules.md § "Teardown", property 1).
+/// never iterates the region table freeing live entries
+/// (docs/impl/region/rules.md).
 ///
 /// Draining the registry makes a second call a no-op, so teardown is idempotent.
 pub fn teardown_process_root_regions(heap: &mut FiberHeap) -> usize {
@@ -90,8 +89,7 @@ pub fn teardown_process_root_regions(heap: &mut FiberHeap) -> usize {
 ///
 /// `pub(crate)` for the root values whose payload must be built in the same
 /// region as their header — a slice-backed root cannot go through
-/// [`alloc_root`] alone (docs/impl/region/model.md, "RegionSlice contents share
-/// their object's region").
+/// [`alloc_root`] alone (docs/impl/region/model.md).
 pub(crate) fn root_region(heap: &mut FiberHeap) -> RuntimeRegion {
     if let Some(r) = heap.root_region_slot() {
         return r;
@@ -106,7 +104,7 @@ pub(crate) fn root_region(heap: &mut FiberHeap) -> RuntimeRegion {
 
 /// One open macro-expansion scope: the transient region the expansion wraps its
 /// arguments into, held as the mint receipt that returns the region's physical
-/// id (docs/impl/region/model.md § "Physical id recycling").
+/// id (docs/impl/region/model.md).
 ///
 /// The open hands this out rather than a bare `RuntimeRegion`, so the expander
 /// cannot name the region without also holding what closes it. The close is
@@ -124,10 +122,9 @@ impl MacroScope {
     }
 }
 
-/// Open a macro-expansion allocation scope (docs/impl/region/rules.md § "Macro
-/// expansion — a closed allocation scope"). Every region minted until the
-/// matching [`reclaim_macro_scope`] is recorded so its dead scratch can be
-/// reclaimed by RC.
+/// Open a macro-expansion allocation scope (docs/impl/region/rules.md). Every
+/// region minted until the matching [`reclaim_macro_scope`] is recorded so its
+/// dead scratch can be reclaimed by RC.
 ///
 /// The transient argument region is minted here, inside the log, so the reclaim
 /// covers it like any other region the expansion mints.
@@ -162,7 +159,7 @@ pub fn begin_macro_scope(heap: &mut FiberHeap) -> MacroScope {
 /// wrapped nothing left it unmaterialized, and no teardown can ever return an id
 /// that names no region; one that wrapped an argument left a live region the
 /// reclaim below frees, whose own teardown books the id, so the recycle reads it
-/// live and pushes nothing (docs/impl/region/model.md § "Physical id recycling").
+/// live and pushes nothing (docs/impl/region/model.md).
 pub fn reclaim_macro_scope(heap: &mut FiberHeap, scope: MacroScope) {
     heap.recycle_unmaterialized_region(scope.arg);
     let mut protected = heap.process_roots_snapshot();
@@ -175,14 +172,14 @@ pub fn reclaim_macro_scope(heap: &mut FiberHeap, scope: MacroScope) {
 
 /// Allocate a startup-once process-lifetime root (the default trait-method
 /// tables) into `heap`'s pinned root region — an ordinary mortal allocation
-/// that, pinned by its holder (the trait registry) and never decref'd, persists
-/// for the instance.
+/// that persists for the instance, because the process-root registration holds
+/// the region's reference until teardown.
 ///
-/// Safe with the un-scanned `traits` field: a value's `traits` pointer is not an
-/// RC-tracked cross-region edge (`find_object_cross_refs` skips it for every
-/// container, and the only object that does scan it — `Fiber` — never carries a
-/// trait table), so no per-object alloc/free touches this region's RC; it stays
-/// at its mint-time count for the whole run.
+/// A value whose `traits` field names a root table holds a counted edge into
+/// this region: `find_object_cross_refs` scans the field on every variant, so
+/// the value's allocation increfs the region and its free decrefs it. Those
+/// pairs balance, and the registration's own reference keeps the region alive
+/// between them.
 pub fn alloc_root(heap: &mut FiberHeap, obj: HeapObject) -> Value {
     let region = root_region(heap);
     heap.alloc_in_region(obj, region)

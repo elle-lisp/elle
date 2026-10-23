@@ -90,7 +90,8 @@ the next free node. A sorted store is a type of its own over its extent, so no
 - **Lookup** descends from the root by a binary search within each node.
 - **Insert** under a key already present adds no entry. An `@set` keeps the
   member it holds, and a `@struct` put replaces the value in place and keeps
-  the stored key, so neither claims. A leaf with room takes a new entry. A
+  the stored key, so neither claims. One descent finds either the entry or the
+  leaf place a new entry takes. A leaf with room takes a new entry. A
   full leaf splits around its middle entry, which moves up into the parent,
   and a full parent splits in turn. Before it edits anything, the insert
   counts the nodes its splits need. It takes them from the free list, and

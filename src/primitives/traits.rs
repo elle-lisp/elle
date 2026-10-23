@@ -19,7 +19,7 @@ use crate::primitives::def::{RegionEffect, RetType};
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::heap::{deref, HeapObject};
-use crate::value::store::{CellStore, StructStore};
+use crate::value::store::CellStore;
 use crate::value::types::Arity;
 use crate::value::Value;
 
@@ -125,15 +125,8 @@ unsafe fn clone_with_traits(
         // INDEPENDENT — a push to the original is not visible through it.
         HeapObject::LArrayMut { data, .. } => Ok(ctx.array_mut_with_traits(&data.read(), table)),
         HeapObject::LStructMut { data, .. } => {
-            let entries: std::collections::BTreeMap<_, _> = data
-                .read()
-                .iter()
-                .map(|(k, v)| (ctx.intern_key(k), *v))
-                .collect();
-            Ok(ctx.alloc(HeapObject::LStructMut {
-                data: StructStore::new(entries),
-                traits: table,
-            }))
+            let entries: Vec<_> = data.read().iter().map(|(k, v)| (*k, *v)).collect();
+            Ok(ctx.struct_mut_with_traits(&entries, table))
         }
         HeapObject::LStruct { data, .. } => {
             // Keys are interned into the clone's region like the entry slice

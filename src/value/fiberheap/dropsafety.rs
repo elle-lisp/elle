@@ -24,7 +24,6 @@ pub(crate) fn needs_drop(tag: HeapTag) -> bool {
         HeapTag::LibHandle => false,
         HeapTag::ManagedPointer => false,
         HeapTag::LString => true,
-        HeapTag::LStructMut => true,
         HeapTag::LStruct => true,
         HeapTag::Closure => true,
         HeapTag::LArray => true,
@@ -34,6 +33,7 @@ pub(crate) fn needs_drop(tag: HeapTag) -> bool {
         HeapTag::LBytes => true,
         HeapTag::LBytesMut => false,
         HeapTag::LSetMut => false,
+        HeapTag::LStructMut => false,
         HeapTag::Syntax => true,
         HeapTag::Fiber => true,
         HeapTag::ThreadHandle => true,
@@ -60,16 +60,16 @@ pub(crate) fn holds_value_refs(tag: HeapTag) -> bool {
         HeapTag::Float => false,
         HeapTag::LibHandle => false,
         HeapTag::ManagedPointer => false,
-        // The `traits` edge off the shell, the live members of an `@array` or
-        // an `@set`, and a cell's one value.
+        // The `traits` edge off the shell, the live entries of an `@array`, an
+        // `@set` or a `@struct`, and a cell's one value.
         HeapTag::LArrayMut
         | HeapTag::LStringMut
         | HeapTag::LBytesMut
         | HeapTag::LSetMut
+        | HeapTag::LStructMut
         | HeapTag::LBox
         | HeapTag::CaptureCell => true,
         HeapTag::LString
-        | HeapTag::LStructMut
         | HeapTag::LStruct
         | HeapTag::Closure
         | HeapTag::LArray

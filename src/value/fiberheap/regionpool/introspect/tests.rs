@@ -90,7 +90,7 @@ fn obj_with_value_in_every_channel(
         ),
         HeapTag::LStructMut => (
             HeapObject::LStructMut {
-                data: StructStore::new(std::collections::BTreeMap::from([(table_key(), v2)])),
+                data: StructStore::new(&[(table_key(), v2)], |n| store.alloc_room(own, n)),
                 traits: vt,
             },
             both,

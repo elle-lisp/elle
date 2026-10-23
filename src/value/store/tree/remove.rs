@@ -42,31 +42,6 @@ impl<T: Entry> Tree<T> {
         nodes[at as usize].replace(i, predecessor)
     }
 
-    /// The path to the entry under `key`, and the level it was found at.
-    fn find(&self, key: &T::Key) -> Option<(Path, usize)> {
-        if self.len.get() == 0 {
-            return None;
-        }
-        let nodes = self.nodes.read();
-        let height = self.height.get() as usize;
-        let mut path = Path::new();
-        let mut at = self.root.get();
-        for level in 0..=height {
-            let node = &nodes[at as usize];
-            match node.search(key) {
-                Ok(i) => {
-                    path.push(at, i);
-                    return Some((path, level));
-                }
-                Err(i) => {
-                    path.push(at, i);
-                    at = node.child(i);
-                }
-            }
-        }
-        None
-    }
-
     /// Restore the minimum fill from the leaf at the end of `path` up to the
     /// root, after an entry left that leaf.
     fn refill(&self, nodes: &mut [Node<T>], path: &Path) {

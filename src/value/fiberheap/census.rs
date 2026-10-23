@@ -11,14 +11,12 @@
 //! Byte accounting is a dump-size estimate, not an allocator audit. Each
 //! object contributes its `HeapObject` shell plus its payload wherever the
 //! payload lives — region pages (`RegionSlice` backings, syntax trees, code
-//! payloads, the extent of an `@array`, `@string` or `@bytes` store, an
-//! `@set`'s node extent with its free nodes) or, for a `@struct`, the Rust
-//! heap. A box's or capture cell's value lies
-//! inside its shell, so the shell is all it costs. A payload shared through an
-//! aliased `RegionSlice` is counted once (first holder). Not counted:
-//! per-container `Rc`/`RefCell` bookkeeping, a code payload's region tables,
-//! masks, child table and LIR body, and fiber-internal state (fibers are
-//! refused from the body).
+//! payloads, the live items of an `@array`, `@string` or `@bytes` extent, the
+//! node extent of an `@set` or a `@struct` with its free nodes). A box's or
+//! capture cell's value lies inside its shell, so the shell is all it costs. A
+//! payload shared through an aliased `RegionSlice` is counted once (first
+//! holder). Not counted: a code payload's region tables, masks, child table and
+//! LIR body, and fiber-internal state (fibers are refused from the body).
 //!
 //! Pointer-slot counting follows the image format's relocation definition
 //! (docs/impl/image/format.md): a heap-tagged `Value` slot or
@@ -33,7 +31,6 @@ use rustc_hash::FxHashSet;
 use crate::syntax::{Syntax, SyntaxKind};
 use crate::value::heap::{HeapObject, HeapTag};
 use crate::value::region_slice::RegionSlice;
-use crate::value::types::TableKey;
 use crate::value::Value;
 
 use super::regionstore::RegionStore;
@@ -372,7 +369,7 @@ fn measure(obj: &HeapObject, seen: &mut FxHashSet<usize>) -> ObjStat {
         }
         HeapObject::LStructMut { data, .. } => {
             if let Some(m) = data.try_read() {
-                stat.bytes += m.len() * size_of::<(TableKey, Value)>();
+                stat.bytes += m.node_bytes();
                 for (k, v) in m.iter() {
                     k.for_each_heap_value(&mut |kv| heap_slot(kv, &mut stat));
                     heap_slot(v, &mut stat);

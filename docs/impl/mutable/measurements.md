@@ -66,3 +66,22 @@ The same benchmark after the `@set` moved onto a B-tree of nodes in one extent:
 
 The run passed. At 10⁵ keys the `@set` funnels take 1.22 times std's time, less
 than the `@struct` funnels over std's own tree.
+
+## The `@struct` tree
+
+The same benchmark after the `@struct` moved onto a B-tree in one extent. A
+put descends once, whether it rebinds a key or stores a new one, and a lookup
+keeps no path:
+
+| Store | Keys | Insert | Delete | std insert | std delete | Ratio |
+|-------|------|--------|--------|------------|------------|-------|
+| `@set` | 10³ | 0.00012 | 0.00006 | 0.00006 | 0.00005 | 2.07 |
+| `@struct` | 10³ | 0.00016 | 0.00006 | 0.00005 | 0.00004 | 3.16 |
+| `@set` | 10⁴ | 0.00124 | 0.00095 | 0.00087 | 0.00083 | 1.42 |
+| `@struct` | 10⁴ | 0.00133 | 0.00097 | 0.00074 | 0.00077 | 1.80 |
+| `@set` | 10⁵ | 0.01403 | 0.01289 | 0.01130 | 0.01117 | 1.24 |
+| `@struct` | 10⁵ | 0.01572 | 0.01484 | 0.01007 | 0.01045 | 1.56 |
+
+The run passed. A first build probed for a rebind and then descended again to
+insert, and copied a 256-byte path out of each descent. Its `@struct` insert
+took 3.05 times std's time at 10⁵ keys, and the run exited 1.
