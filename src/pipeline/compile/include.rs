@@ -1,11 +1,14 @@
-// audited: 2026-10-21
-//! `include` and `include-file`: resolve each to its file, and splice the file's forms in.
+// audited: 2026-10-22
+//! `include` and `include-file`: resolve each to its file, check the chain of files being included, and read it.
 //!
 //! docs/include.md
 //! src/pipeline/AGENTS.md
+//!
+//! The expander splices what an include reads (src/syntax/expand/include.rs).
+//! `splice_includes` splices the top level of source text alone, for the WASM
+//! backend.
 
 use super::*;
-use crate::syntax::SyntaxArena;
 
 /// Splice include/include-file directives in source text.
 ///
@@ -25,18 +28,34 @@ pub fn splice_includes(
     let syntaxes = read_syntax_all_for(arena, source, source_name)?;
     let unit = crate::syntax::UnitTag::of(source_name, &syntaxes);
     cctx.with_macro_expansion(arena, Layer::Instance, unit, |vm, _expander, meta| {
-        let mut pending: std::collections::VecDeque<Syntax> = syntaxes.into();
-        let mut includes = Includes::root(source_name);
         let mut parts: Vec<String> = Vec::new();
-        while let Some(syntax) = pending.pop_front() {
-            if resolve_and_splice_include(&arena, &syntax, vm, &meta, &mut pending, &mut includes)?
-            {
-                continue;
-            }
-            parts.push(format!("{}", syntax));
-        }
+        let mut includes = Includes::default();
+        splice_text(&arena, syntaxes, vm, &meta, &mut includes, &mut parts)?;
         Ok(parts.join("\n"))
     })
+}
+
+/// Render each of `forms` onto `parts`, and in place of an include, the forms
+/// of the file it names.
+fn splice_text(
+    arena: &SyntaxArena,
+    forms: Vec<Syntax>,
+    vm: &mut crate::vm::VM,
+    meta: &crate::primitives::def::PrimitiveMeta,
+    includes: &mut Includes,
+    parts: &mut Vec<String>,
+) -> Result<(), String> {
+    for form in forms {
+        let Some(name) = IncludeName::of(&form) else {
+            parts.push(format!("{}", form));
+            continue;
+        };
+        let (read, mark) = includes.enter(arena, &form, name, vm, meta)?;
+        let spliced = splice_text(arena, read, vm, meta, includes, parts);
+        includes.leave(mark);
+        spliced?;
+    }
+    Ok(())
 }
 
 /// How an include names its file: the spec it wrote, whether the standard
@@ -51,9 +70,39 @@ pub(crate) struct IncludeName {
 }
 
 impl IncludeName {
+    /// The name `(include "spec")` or `(include-file "path")` writes, or None
+    /// when `form` is neither. The directory is that of the file the form was
+    /// read from, so an include inside an included file resolves against
+    /// that file.
+    pub(crate) fn of(form: &Syntax) -> Option<IncludeName> {
+        let [head, spec] = form.as_list()? else {
+            return None;
+        };
+        let by_resolver = match head.as_symbol()? {
+            "include" => true,
+            "include-file" => false,
+            _ => return None,
+        };
+        let SyntaxKind::String(spec) = &spec.kind else {
+            return None;
+        };
+        let dir = form
+            .span
+            .source_path()
+            .and_then(|f| crate::path::parent(&f).map(str::to_string));
+        Some(IncludeName {
+            spec: spec.to_string(),
+            by_resolver,
+            dir,
+        })
+    }
+
     /// The absolute path of the file this name resolves to, or why it names
     /// none: `import/resolve`'s error for an `include`, and nothing for an
     /// `include-file`, whose join has no error of its own.
+    ///
+    /// `(include spec)` calls `import/resolve` on `vm`, so that `include` and
+    /// `import` share one set of rules (docs/modules.md).
     pub(crate) fn resolve(
         &self,
         vm: &mut crate::vm::VM,
@@ -82,87 +131,85 @@ impl IncludeRead {
     }
 }
 
-/// The files a compile has included, the root file among them, which the
-/// circular-include check reads, and each include in the order the compile
-/// read it.
+/// The length of the chain before an include entered it, which
+/// [`Includes::leave`] restores.
+#[must_use]
+pub(crate) struct ChainMark(usize);
+
+/// The chain of files being included, which the circular-include check reads,
+/// and each include in the order the compile read it.
+#[derive(Default)]
 pub(crate) struct Includes {
-    seen: HashSet<String>,
+    /// The file that holds the outermost include, then each file an include
+    /// entered, outermost first.
+    chain: Vec<String>,
     read: Vec<IncludeRead>,
 }
 
 impl Includes {
-    /// What a compile of `source_name` starts from: the root file itself, when
-    /// it is a file, so a file that includes itself is a cycle.
-    pub(super) fn root(source_name: &str) -> Includes {
-        let root = Span::synthetic().with_file(source_name).source_path();
-        Includes {
-            seen: root.into_iter().collect(),
-            read: Vec::new(),
+    /// Resolve the include `form`, which names `name`, and read its file's
+    /// forms. The file enters the chain until [`leave`](Self::leave) takes the
+    /// mark back.
+    ///
+    /// An include reads a file for the compile, so it reads under the
+    /// capabilities of the fiber the compile runs for, as a macro does. A file
+    /// already in the chain is a cycle, and so is the file holding `form`.
+    pub(crate) fn enter(
+        &mut self,
+        arena: &SyntaxArena,
+        form: &Syntax,
+        name: IncludeName,
+        vm: &mut crate::vm::VM,
+        meta: &crate::primitives::def::PrimitiveMeta,
+    ) -> Result<(Vec<Syntax>, ChainMark), String> {
+        let span = form.span;
+        if vm.fiber.withheld.intersects(crate::signals::SIG_FS) {
+            return Err(format!(
+                "{}: include: '{}' needs :fs, which the compiling fiber withholds",
+                span, name.spec
+            ));
         }
+        let path = name.resolve(vm, meta).map_err(|why| match why {
+            Some(e) => format!("{}: include: '{}' not found: {}", span, name.spec, e),
+            None => format!("{}: include: '{}' not found", span, name.spec),
+        })?;
+        let own = span.source_path();
+        if let Some(cycle) = self.cycle(&path, own.as_deref()) {
+            return Err(format!("{}: include: circular dependency: {}", span, cycle));
+        }
+        let text = std::fs::read_to_string(&path)
+            .map_err(|e| format!("{}: include: failed to read '{}': {}", span, path, e))?;
+        let forms = read_syntax_all_for(*arena, &text, &path)?;
+        let mark = ChainMark(self.chain.len());
+        if self.chain.is_empty() {
+            self.chain.extend(own);
+        }
+        self.chain.push(path.clone());
+        self.read.push(IncludeRead::new(name, path, text));
+        Ok((forms, mark))
     }
 
-    /// Each include the compile read, in order.
-    pub(crate) fn into_read(self) -> Vec<IncludeRead> {
-        self.read
+    /// Take the files an include entered back off the chain.
+    pub(crate) fn leave(&mut self, mark: ChainMark) {
+        self.chain.truncate(mark.0);
     }
-}
 
-/// Resolve and splice a single include directive into the pending queue.
-/// Returns `Ok(true)` if the syntax was an include (resolved and spliced),
-/// `Ok(false)` if it was not an include, or `Err` on resolution failure.
-///
-/// The including file is the one the form was read from, so an include inside
-/// an included file resolves against that file. `(include spec)` names its file
-/// through the standard library's `import/resolve`, called on `vm`, so that
-/// `include` and `import` share one set of rules (docs/modules.md).
-/// `(include-file path)` joins the including file's directory.
-pub(super) fn resolve_and_splice_include(
-    arena: &SyntaxArena,
-    syntax: &Syntax,
-    vm: &mut crate::vm::VM,
-    meta: &crate::primitives::def::PrimitiveMeta,
-    pending: &mut std::collections::VecDeque<Syntax>,
-    includes: &mut Includes,
-) -> Result<bool, String> {
-    let (spec, by_resolver) = match extract_include(syntax) {
-        Some(pair) => pair,
-        None => return Ok(false),
-    };
-    // An include reads a file for the compile, so it reads under the
-    // capabilities of the fiber the compile runs for, as a macro does.
-    if vm.fiber.withheld.intersects(crate::signals::SIG_FS) {
-        return Err(format!(
-            "{}: include: '{}' needs :fs, which the compiling fiber withholds",
-            syntax.span, spec
-        ));
+    /// The cycle an include of `target` from the file `own` closes, written
+    /// from the first file being included that is `target`, back to `target`.
+    fn cycle(&self, target: &str, own: Option<&str>) -> Option<String> {
+        let mut links: Vec<&str> = match self.chain.iter().position(|p| p == target) {
+            Some(i) => self.chain[i..].iter().map(String::as_str).collect(),
+            None if own == Some(target) => vec![target],
+            None => return None,
+        };
+        links.push(target);
+        Some(links.join(" -> "))
     }
-    let dir = syntax
-        .span
-        .source_path()
-        .and_then(|f| crate::path::parent(&f).map(str::to_string));
-    let name = IncludeName {
-        spec,
-        by_resolver,
-        dir,
-    };
-    let path = name.resolve(vm, meta).map_err(|why| match why {
-        Some(e) => format!("{}: include: '{}' not found: {}", syntax.span, name.spec, e),
-        None => format!("{}: include: '{}' not found", syntax.span, name.spec),
-    })?;
-    if !includes.seen.insert(path.clone()) {
-        return Err(format!(
-            "{}: include: circular dependency on '{}'",
-            syntax.span, path
-        ));
+
+    /// Each include the compile read, in order, leaving none.
+    pub(crate) fn take_read(&mut self) -> Vec<IncludeRead> {
+        std::mem::take(&mut self.read)
     }
-    let text = std::fs::read_to_string(&path)
-        .map_err(|e| format!("{}: include: failed to read '{}': {}", syntax.span, path, e))?;
-    let forms = read_syntax_all_for(*arena, &text, &path)?;
-    for (i, form) in forms.into_iter().enumerate() {
-        pending.insert(i, form);
-    }
-    includes.read.push(IncludeRead::new(name, path, text));
-    Ok(true)
 }
 
 /// Call the standard library's `import/resolve` on `vm`: the absolute path of
@@ -199,31 +246,10 @@ fn call_import_resolve(
     answer
 }
 
-/// Extract the spec from `(include-file "path")` or `(include "spec")`.
-/// Returns `(spec, is_include)`, where `is_include` means the spec resolves
-/// through `import/resolve`.
-pub(super) fn extract_include(syntax: &Syntax) -> Option<(String, bool)> {
-    if let SyntaxKind::List(items) = &syntax.kind {
-        if items.len() == 2 {
-            if let Some(head) = items[0].as_symbol() {
-                let is_include = match head {
-                    "include" => true,
-                    "include-file" => false,
-                    _ => return None,
-                };
-                if let SyntaxKind::String(s) = &items[1].kind {
-                    return Some((s.to_string(), is_include));
-                }
-            }
-        }
-    }
-    None
-}
-
 /// Resolve an include-file path against the including file's directory, or
 /// the working directory for code with no file. The answer is absolute and
 /// normalized, the spelling the circular-include check keys on.
-pub(super) fn resolve_include_file(spec: &str, dir: Option<&str>) -> Option<String> {
+fn resolve_include_file(spec: &str, dir: Option<&str>) -> Option<String> {
     let joined = match dir {
         Some(dir) => crate::path::join(&[dir, spec]),
         None => spec.to_string(),

@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-22
 //! Compile a file to frozen LIR, for the WASM backend and the dumps.
 //!
 //! src/pipeline/AGENTS.md
@@ -47,28 +47,13 @@ fn compile_file_to_lir_inner(
         }
     }
 
-    // Expand all forms, splicing include/include-file inline
+    // Expand all forms, splicing each include where it stands.
     let (expanded_forms, meta, core_env) = cctx.with_macro_expansion(
         arena,
         Layer::Instance,
         unit,
         |macro_vm, mut expander, meta| {
-            let mut pending: std::collections::VecDeque<Syntax> = syntaxes.into();
-            let mut expanded_forms = Vec::new();
-            let mut includes = Includes::root(source_name);
-            while let Some(syntax) = pending.pop_front() {
-                if resolve_and_splice_include(
-                    &arena,
-                    &syntax,
-                    macro_vm,
-                    &meta,
-                    &mut pending,
-                    &mut includes,
-                )? {
-                    continue;
-                }
-                expanded_forms.push(expander.expand(syntax, symbols, macro_vm)?);
-            }
+            let expanded_forms = expander.expand_forms(syntaxes, symbols, macro_vm)?;
             Ok::<_, String>((expanded_forms, meta, expander.core_env.clone()))
         },
     )?;

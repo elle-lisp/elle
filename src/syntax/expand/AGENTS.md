@@ -188,7 +188,7 @@ The expander holds two. `arena` is the working arena of the unit under expansion
 ## When to modify
 
 - **Adding a new prelude macro**: Add to [prelude.lisp](../../prelude.lisp), not here
-- **Changing macro expansion algorithm**: Update `expand()` in [mod.rs](mod.rs)
+- **Changing macro expansion algorithm**: Update `expand_into()` in [mod.rs](mod.rs)
 - **Changing quasiquote semantics**: Update [quasiquote.rs](quasiquote.rs)
 - **Changing macro argument wrapping**: Update `wrap_macro_arg_value()` in [macro_expand.rs](macro_expand.rs)
 - **Adding introspection forms**: Update [introspection.rs](introspection.rs)
