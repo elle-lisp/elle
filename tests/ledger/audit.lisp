@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-22
+# audited: 2026-10-23
 # The ledger of tests/ratchet/audit.lisp, the audit queue: all three counts over the files git tracks, pinned at what the tree reads.
 (producer "tests/ratchet/audit.lisp")
 ["unstamped files" :files 723]
-["files stamped before the policy" :files 1670]
+["files stamped before the policy" :files 1635]
 ["files stamped with a deviation" :files 0]

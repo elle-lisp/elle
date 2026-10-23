@@ -1,6 +1,6 @@
 # VM
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-10-22 -->
 
 The VM is a stack-machine interpreter that executes bytecode.
 
@@ -91,7 +91,9 @@ ledger ([park.md](region/park.md)).
 - **Fuel** — charges one unit at each backward jump and each call. A charge
   that finds the budget spent emits the `:fuel` signal outside a silent
   function, and takes nothing inside one
-  ([inference.md](../signals/inference.md))
+  ([inference.md](../signals/inference.md)). Before it charges, the site
+  reads the VM's kill word, and a budget below it raises the terminal
+  `:killed` error ([runtime.md](../runtime.md))
 
 ## Where a reported error's location comes from
 

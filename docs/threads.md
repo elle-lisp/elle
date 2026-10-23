@@ -1,6 +1,6 @@
 # Threads
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-23 -->
 
 OS threads for CPU-bound work. For I/O-bound concurrency, prefer
 `ev/spawn` / `ev/join` (see [concurrency.md](concurrency.md)).
@@ -201,11 +201,11 @@ signals a completion channel, waking any parked joiner exactly once;
 - With no bound, `sys/join` waits until the thread completes.
 - With a bound, if the thread has not finished when it passes, `sys/join`
   raises a typed timeout error — the struct `{:error :timeout :message ...}`
-  — which `protect` catches as `[false {:error :timeout ...}]`. The worker is
-  **not** cancelled: there is no safe way to kill a running OS thread, so
-  a timed-out worker is abandoned (it runs to completion on its own and
-  its result is discarded). Each worker has its own VM and shares no value,
-  so an abandoned worker cannot corrupt the joiner's values.
+  — which `protect` catches as `[false {:error :timeout ...}]`. The worker
+  runs on: a timed-out worker is abandoned and its result is discarded,
+  unless the join names `:kill true`, which kills it. Each worker has its
+  own VM and shares no value, so an abandoned worker cannot corrupt the
+  joiner's values.
 - A worker that vanishes without producing a result (an unwinding panic
   in the thread) surfaces as `{:error :thread-error ...}`.
 
@@ -228,6 +228,50 @@ return the same result without waiting.
 > top-level code and inside `ev/run`). Joining a still-running thread
 > from a context with no scheduler raises a yield error — give that
 > context a scheduler by running under `ev/run`.
+
+## Killing a worker
+
+`(sys/kill handle)` kills a worker. It sets the worker's kill word, which
+every charge site the worker runs reads: each call and each backward jump, on
+the bytecode and JIT tiers, inside a silent function as outside one
+([runtime](runtime.md)). At the next charge site the worker raises the
+terminal error `{:error :killed}`. No mask catches a terminal error, so no
+`protect`, `try` or `defer` body in the worker runs again. The thread ends,
+its heap is freed whole, and a join answers `{:error :killed}`.
+
+```lisp
+(def spinner (sys/spawn-vm (fn [] (def @i 0) (while true (assign i (%add i 1))) i)))
+(sys/kill spinner)
+(let [[ok? err] (protect (sys/join spinner))]
+  (assert (not ok?) "a killed worker answers no value")
+  (assert (= (get err :error) :killed) "the join says the worker was killed"))
+```
+
+A kill lands where the worker next charges. A worker waiting in a port call,
+a channel, a futex, a join or a foreign call reaches a charge site when that
+wait ends, and not before. A kill releases nothing the worker holds, and the
+workers it spawned run on. A worker that has finished keeps its result: a kill
+after the end changes nothing.
+
+```lisp
+(def done (sys/spawn-vm (fn [] 7)))
+(assert (= 7 (sys/join done)) "the worker finished")
+(sys/kill done)
+(assert (= 7 (sys/join done)) "a kill after the end leaves the result standing")
+```
+
+A bounded join takes `:kill true`, and kills the worker when the bound
+passes. The join raises `{:error :timeout}` as it does without the flag, and
+a later join answers `{:error :killed}` once the kill has landed. `:kill
+true` with no bound is an `:argument-error`.
+
+```lisp
+(def busy (sys/spawn-vm (fn [] (def @i 0) (while true (assign i (%add i 1))) i)))
+(let [[ok? err] (protect (sys/join busy :timeout 0.05 :kill true))]
+  (assert (= (get err :error) :timeout) "the bound passes, and the join kills"))
+(let [[ok? err] (protect (sys/join busy))]
+  (assert (= (get err :error) :killed) "the kill landed"))
+```
 
 ## Channels
 

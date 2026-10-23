@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-22
 //! The `VM` struct — the per-instance state a running program reaches — and the
 //! accessors that reborrow the allocations it points at.
 //!
@@ -25,51 +25,7 @@ pub use caches::JitCacheEntry;
 pub use caches::{SpirvEntry, WorkgroupSize};
 pub use counts::CallCounts;
 
-pub(crate) struct TailCallInfo {
-    pub code: crate::value::Code,
-    pub env: Rc<Vec<Value>>,
-    /// The callee CLOSURE this tail call re-enters the activation as. A
-    /// frame-replacing tail call keeps the same Rust/activation frame but swaps
-    /// which closure is executing (a self-recursive `loop` re-enters as itself; a
-    /// tail call to a sibling re-enters as the sibling). `replace_by_tail_call` installs
-    /// it as `fiber.current_closure` on the replacement so the executing-closure
-    /// register tracks the frame across TCO. `NIL` for a callee with no closure
-    /// value (a native/parameter tail target sets no pending tail call, so this is
-    /// always a real closure in practice).
-    pub closure: Value,
-    /// The boundary the callee's signal crosses when the activation ends.
-    pub boundary: crate::value::closure::Boundary,
-}
-
-/// A non-tail call to an interpreted closure, handed from `call_inner` to
-/// `run_dispatch`, which pauses the caller in the fiber and runs the callee on
-/// the same dispatch loop (docs/impl/vm.md).
-pub(crate) struct PendingCall {
-    pub code: crate::value::Code,
-    pub env: Rc<Vec<Value>>,
-    /// The callee closure value, which becomes the body's executing-closure
-    /// register.
-    pub closure: Value,
-    /// The offset of the call instruction in the caller.
-    pub call_ip: usize,
-    pub site: crate::value::fiber::CallSite,
-}
-
-/// Pending fiber resume for the trampoline.
-///
-/// Set by `handle_fiber_resume_signal` when it wants to switch fibers
-/// without recursing. Consumed by the trampoline in `do_fiber_resume`.
-pub(crate) struct PendingFiberResume {
-    pub handle: FiberHandle,
-    pub fiber_value: Value,
-    /// The TRUE parent of the pending child — the fiber whose code called
-    /// `fiber/resume`. The trampoline descends from the ROOT context (the
-    /// requesting fiber is swapped out by then), so `with_child_fiber`'s
-    /// default parent wiring (the currently active fiber) would record the
-    /// wrong parent. Carried here and installed via the VM's
-    /// `trampoline_parent_override` for the descent.
-    pub parent: Option<(FiberHandle, Option<Value>)>,
-}
+pub(crate) use pending::{PendingCall, PendingFiberResume, TailCallInfo};
 
 pub struct VM {
     /// Mutable runtime configuration: trace flags, JIT/WASM policy.
@@ -118,6 +74,13 @@ pub struct VM {
     /// The current fiber holding all per-execution state:
     /// operand stack, call frames, signal and fiber state.
     pub fiber: Fiber,
+    /// The kill switch every charge site of this VM reads, shared with the
+    /// thread handle that can pull it (docs/runtime.md). A worker takes the
+    /// switch its spawner made; every other VM holds one nobody can reach.
+    pub(crate) kill: crate::value::fiber::KillSwitch,
+    /// Where `kill`'s word lives, for compiled code to load through the VM
+    /// pointer. Set beside `kill`, and never by hand.
+    pub(crate) kill_word: *const std::sync::atomic::AtomicU64,
     /// Handle to the current fiber's FiberHandle, if it came from a
     /// `fiber/new` allocation. `None` for the root fiber (which lives
     /// directly on the VM, not behind a handle). Used to wire up
@@ -290,6 +253,7 @@ mod decode;
 mod discard;
 mod format;
 mod lifecycle;
+mod pending;
 mod region;
 mod resume;
 
@@ -298,6 +262,18 @@ impl VM {
     #[inline]
     pub fn heap(&mut self) -> &mut crate::value::fiberheap::FiberHeap {
         unsafe { &mut *self.heap_ptr }
+    }
+
+    /// The kill switch this VM's charge sites read.
+    pub fn kill_switch(&self) -> &crate::value::fiber::KillSwitch {
+        &self.kill
+    }
+
+    /// Read this VM's charges off `switch` from now on: a worker takes the
+    /// switch its spawner holds the other end of. Construction-time only.
+    pub(crate) fn set_kill_switch(&mut self, switch: crate::value::fiber::KillSwitch) {
+        self.kill_word = switch.word();
+        self.kill = switch;
     }
 
     /// The FFI subsystem this VM owns — its loaded libraries, signatures, and

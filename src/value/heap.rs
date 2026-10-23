@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-22
 //! Heap-allocated value types for the tagged-union value system.
 //!
 //! docs/impl/values.md
@@ -10,7 +10,6 @@ use std::any::Any;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
 
 use crate::syntax::Syntax;
 use crate::value::fiber::FiberHandle;
@@ -334,62 +333,9 @@ pub enum HeapObject {
     ClosureTemplate(crate::value::closure::ClosureTemplate) = HeapTag::ClosureTemplate as u64,
 }
 
-/// Thread handle for concurrent execution.
-///
-/// Holds the result of a spawned thread's execution plus a completion
-/// channel the joiner waits on. `Arc<Mutex<>>` shares the result across
-/// threads; the worker fills it before signalling completion.
-///
-/// Completion is delivered via the channel wake protocol (`done_rx` /
-/// `done_wake`) rather than polling: after storing its result the worker
-/// sends a sentinel on `done_rx`'s channel and signals `done_wake`, so a
-/// joiner parked in `chan/select` wakes exactly once and yields to the
-/// scheduler in the meantime. `sys/thread-state` peeks `result` first (a
-/// finished thread needs no wait) and otherwise hands back a fresh
-/// `chan/receiver` over `done_rx` for the caller to select on. These are
-/// plain `Send` fields (like `result`) — not heap `Value`s — so they carry
-/// no region edge.
-#[derive(Clone)]
-pub struct ThreadHandle {
-    /// The result of the spawned thread execution, wrapped in `SendBundle` for Send.
-    pub result: Arc<Mutex<Option<Result<crate::value::send::SendBundle, String>>>>,
-    /// Receiver half of the worker's completion channel. Cloned into a
-    /// fresh `chan/receiver` Value on demand (`sys/thread-state`).
-    /// `pub(crate)`: `SendableValue` is a crate-private type.
-    pub(crate) done_rx: crossbeam_channel::Receiver<crate::primitives::chan::SendableValue>,
-    /// Shared wake list for the completion channel — the worker signals
-    /// it so a parked `chan/select` over `done_rx` wakes.
-    pub(crate) done_wake: Arc<crate::primitives::chan::WakeList>,
-}
-
-impl ThreadHandle {
-    /// Create a new thread handle with a shared result slot and the
-    /// receiver/wake-list halves of its completion channel.
-    /// `pub(crate)`: takes the crate-private `SendableValue` channel type.
-    pub(crate) fn new(
-        result: Arc<Mutex<Option<Result<crate::value::send::SendBundle, String>>>>,
-        done_rx: crossbeam_channel::Receiver<crate::primitives::chan::SendableValue>,
-        done_wake: Arc<crate::primitives::chan::WakeList>,
-    ) -> Self {
-        ThreadHandle {
-            result,
-            done_rx,
-            done_wake,
-        }
-    }
-}
-
-impl std::fmt::Debug for ThreadHandle {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ThreadHandle")
-    }
-}
-
-impl PartialEq for ThreadHandle {
-    fn eq(&self, _other: &Self) -> bool {
-        false // Thread handles are never equal
-    }
-}
+// The thread handle and the outcome it reports.
+mod thread;
+pub use thread::{OutcomeSlot, ThreadHandle, WorkerOutcome};
 
 /// External object for a plugin-provided or runtime type.
 /// Holds a type name (for Elle-side identity) and an arbitrary Rust value.

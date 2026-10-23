@@ -1,11 +1,11 @@
-// audited: 2026-09-20
+// audited: 2026-10-22
 //! Per-instance trait registry: default traitsets stamped at allocation.
 //! docs/traits.md
 //!
 //! Each collection/sequence HeapTag has a default @struct traitset. The tables
-//! are **instance state** living on the `FiberHeap` (tls.md: nothing
-//! correctness-bearing is thread-centric), so two embedded instances on one
-//! thread each carry their own and never cross-reference. The trait-method
+//! are **instance state** living on the `FiberHeap` (docs/impl/region/ctx.md:
+//! nothing correctness-bearing is thread-centric), so two embedded instances
+//! on one thread each carry their own and never cross-reference. The trait-method
 //! natives themselves are static `&'static PrimitiveDef` immediates — process-
 //! global and correctly shared, like every other primitive. Constructors read
 //! the heap's registry entry and stamp it into the new object's `traits` field.
@@ -21,7 +21,8 @@ use crate::value::Value;
 mod methods;
 use methods::*;
 
-/// Number of HeapTag variants (max index is CaptureCell = 28).
+/// One slot per tag through CaptureCell (28). ClosureTemplate (29) carries no
+/// traits, and a read past the table answers NIL.
 const NUM_TAGS: usize = 29;
 
 /// Return the default traitset for a given HeapTag on `heap`. Returns

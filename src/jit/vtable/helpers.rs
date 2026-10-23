@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-22
 // docs/impl/jit.md
 //! One Cranelift signature per `elle_jit_*` runtime helper, declared into the
 //! module before any function is translated.
@@ -206,6 +206,7 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         jit_yield: declare(module, "elle_jit_yield", &yield_sig)?,
         jit_yield_through_call: declare(module, "elle_jit_yield_through_call", &ytc_sig)?,
         fuel_pause: declare(module, "elle_jit_fuel_pause", &ytc_sig)?,
+        kill: declare(module, "elle_jit_kill", &vm_only)?,
         has_signal: declare(module, "elle_jit_has_signal", &vm_only)?,
         region_enter: declare(module, "elle_jit_region_enter", &void_to_value)?,
         region_exit: declare(module, "elle_jit_region_exit", &void_to_value)?,

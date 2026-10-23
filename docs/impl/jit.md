@@ -1,6 +1,6 @@
 # JIT
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-22 -->
 
 The JIT compiles hot functions from LIR to native code using Cranelift.
 
@@ -41,7 +41,8 @@ names those flags for a `Value`.
 It emits both halves of a `Value` — tag at `+0`, payload at `+8` — so the
 16-byte stride is written once, from `size_of`/`offset_of` rather than as a
 literal. The fuel charge ([fuel.rs](../../src/jit/translate/fuel.rs)) names
-them for the one other word compiled code reads, the fiber's budget.
+them for the other words compiled code reads: the fiber's budget and the
+kill word ([jit-fuel.md](jit-fuel.md)).
 
 ## Stores into stack slots
 
@@ -305,48 +306,6 @@ delivery ledger as the interpreter's parker does: `Emit` for an emit,
 `NoResult` for an instruction that produces no value, and `Call` for the rest
 ([vm.md](vm.md)).
 
-## Fuel
-
-Compiled code charges a fiber's fuel ([runtime.md](../runtime.md)) at the
-instructions where the interpreter charges it: one unit at each call, spliced
-call, tail call and spliced tail call, and one at each backward jump. A self
-tail call is a tail call, so the native loop it compiles to charges once per
-trip. A program therefore spends the same budget on either tier, and a driver
-that steps a fiber one unit at a time pauses it at the same instructions.
-
-**The charge is inline.** The budget is one 64-bit word on the fiber, and
-compiled code reaches it through the VM pointer. In a function that is not
-silent, the charge loads the word, pauses on zero, and otherwise stores the
-word less one. An unmetered fiber holds the largest 64-bit word, 2^64 − 1, so
-the charge needs no separate test for whether the fiber is metered. A budget
-is a non-negative integer, at most 2^63 − 1, and a run needs 2^63 charges to
-count the unmetered word down to that range. `fiber/fuel` answers `nil` for
-any word above it. The interpreter charges in the same steps.
-
-**A silent function never pauses.** Its charge loads the word and stores it
-less one unless it is zero, and nothing branches out of the function
-([inference.md](../signals/inference.md)). A silent function records no
-charge site, as it records no call site.
-
-**A pause parks at the charge site.** On zero, compiled code spills its frame
-and calls `elle_jit_fuel_pause`. The helper parks the frame at the bytecode
-offset where the charging instruction starts, with the operand stack the
-interpreter has there: a call's arguments and callee are still on it, and a
-backward jump's stack is the one its edge trimmed to. The signal is `:fuel`
-with a `nil` payload, and the park takes no resume value. On resume the
-interpreter runs that instruction again, charges again, and continues.
-
-The emitter records each charge site's offset and stack as a `ChargeSiteInfo`,
-in the order the translator meets the sites, in every function that may
-signal. A count mismatch rejects the compile, as it does for yield points and
-call sites. A site in bytecode that only the interpreter runs is counted with
-no charge: the jump an `emit` resumes through, and whatever follows a spliced
-tail call.
-
-**The paused frame resumes in the interpreter.** The frame runs to its end
-there, a self-tail-call loop included. Its next non-tail call reaches compiled
-code again through `try_jit_call`.
-
 ## Configuration
 
 [config.md](../config.md) owns the builds, the JIT threshold, and the policy the
@@ -375,6 +334,7 @@ the call count behind each rejection.
 
 - [impl/lir.md](lir.md) — LIR that the JIT translates
 - [impl/vm.md](vm.md) — VM fallback and dispatch
+- [impl/jit-fuel.md](jit-fuel.md) — the inline fuel charge, the kill check and the pause
 - [impl/jit-map.md](jit-map.md) — the table that names a compiled function by its entry address
 - [impl/bytecode.md](bytecode.md) — bytecode alternative
 - [impl/mlir.md](mlir.md) — MLIR, the tier an `mlir` build carries instead of this one

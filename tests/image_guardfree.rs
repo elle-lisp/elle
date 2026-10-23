@@ -1,4 +1,4 @@
-// audited: 2026-09-08
+// audited: 2026-10-22
 //! A hydrated region under `--trace=guardfree`: a freed image page keeps its
 //! address, and refuses to be read.
 //!
@@ -54,7 +54,7 @@ fn read_is_refused(addr: usize) -> bool {
     wrote == -1 && err == Some(libc::EFAULT)
 }
 
-// § Test plan, "Diagnostics": under `--trace=guardfree`, a freed hydrated page
+// Diagnostics: under `--trace=guardfree`, a freed hydrated page
 // stays mapped and inaccessible.
 //
 // The counter-factual is the ordinary release path, which unmaps a

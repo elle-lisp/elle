@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-22
 //! Building a VM over a heap it owns or shares, and resetting one for reuse.
 //!
 //! docs/impl/vm.md
@@ -112,6 +112,11 @@ impl VM {
         #[cfg(feature = "mlir")]
         let mlir_enabled = rc.mlir.enabled();
 
+        // A switch of this VM's own, which `set_kill_switch` replaces on a
+        // worker with the one its spawner holds.
+        let kill = crate::value::fiber::KillSwitch::new();
+        let kill_word = kill.word();
+
         VM {
             runtime_config: rc,
             unicode_generation: crate::config::get().unicode_generation(),
@@ -121,6 +126,8 @@ impl VM {
             compile_ctx_ptr: std::ptr::null_mut(),
             symbols_ptr: std::ptr::null_mut(),
             fiber,
+            kill,
+            kill_word,
             current_fiber_handle: None, // root fiber has no handle
             current_fiber_value: None,  // root fiber has no Value
             ffi: FFISubsystem::new(),

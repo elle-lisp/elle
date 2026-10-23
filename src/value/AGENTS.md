@@ -1,6 +1,6 @@
 # value
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-22 -->
 
 Runtime value representation using a tagged union.
 
@@ -28,7 +28,7 @@ Runtime value representation using a tagged union.
 | [ffi.rs](ffi.rs) | `LibHandle` for C interop |
 | [fiberheap/](fiberheap/mod.rs) | `FiberHeap` over a `RegionStore` (physical region allocator; each region owns its pages via a `PagePool`) plus a custom-allocator stack and object-limit tracking. Submodules: `regionstore`, `regionpool`, `pagepool`, `freelog`, `census`, `region`, `custom`, `dropsafety`. One heap per VM, shared by all of that VM's fibers. |
 | [arena.rs](arena.rs) | Heap-explicit allocation funnel over `FiberHeap`: every entry point takes `heap: &mut FiberHeap` — `alloc`, `alloc_in_region`, `deref`, `region_of`, region RC (`incref_region`/`decref_region`), and the tracked mutable-store funnels (`push_with_incref`, `struct_put_with_rebind`, `capture_store_with_rebind`, …). |
-| [heap.rs](heap.rs) | `HeapObject` enum, `HeapTag`, `Pair`, `ThreadHandle`, `LSet`, `LSetMut` (re-exports `Closure`, `Arity`, `NativeFn`, `TableKey`) |
+| [heap.rs](heap.rs) | `HeapObject` enum, `HeapTag`, `Pair`, `ThreadHandle` and the `WorkerOutcome` it reports, `LSet`, `LSetMut` (re-exports `Closure`, `Arity`, `NativeFn`, `TableKey`) |
 | [send/](send/mod.rs) | `SendValue`/`SendBundle` wrappers for thread-safe transfer |
 | [display.rs](display.rs) | `Display` implementation for values |
 | [keyword.rs](keyword.rs) | Keyword identity (name hash) and the static keyword vocabulary for display |
@@ -52,6 +52,7 @@ Runtime value representation using a tagged union.
 | `PausedCaller` | [fiber/caller.rs](fiber/caller.rs) | A caller activation waiting in `Fiber::callers` while its interpreted callee runs on the same dispatch loop ([vm.md](../../docs/impl/vm.md)) |
 | `FiberStatus` | [fiber/status.rs](fiber/status.rs) | Fiber lifecycle: New, Alive, Paused, Dead, Error |
 | `Fuel` | [fiber/fuel.rs](fiber/fuel.rs) | A fiber's instruction budget, and the charge a charging instruction takes from it ([runtime.md](../../docs/runtime.md)) |
+| `KillSwitch` | [fiber/fuel.rs](fiber/fuel.rs) | The kill word a VM's charge sites read, shared with the thread handle that pulls it ([runtime.md](../../docs/runtime.md)) |
 | `SignalBits` | [fiber/signalbits.rs](fiber/signalbits.rs) | Newtype over `u64` (re-exported from [fiber.rs](fiber.rs)). The `SIG_*` constants are defined in `crate::signals`: SIG_OK(0), SIG_ERROR(1<<0), SIG_YIELD(1<<1), SIG_DEBUG(1<<2), SIG_RESUME(1<<3), SIG_FFI(1<<4), SIG_PROPAGATE(1<<5), SIG_HALT(1<<8) (among others) |
 | `Arity` | [types.rs](types.rs) | Function arity (Exact, AtLeast, Range) |
 | `SymbolId` | [types.rs](types.rs) | Symbol identity: the FNV-1a hash of the name |

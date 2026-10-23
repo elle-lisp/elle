@@ -1,6 +1,6 @@
 # benches
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-22 -->
 
 Criterion and reporting benchmarks for the Elle compiler and VM.
 
@@ -11,6 +11,7 @@ Criterion and reporting benchmarks for the Elle compiler and VM.
 | [benchmarks.rs](benchmarks.rs) | Criterion | Wall-clock benchmarks: parsing, symbol interning, compilation, VM execution, end-to-end eval, macro expansion |
 | [memory.rs](memory.rs) | reporting | Heap allocations and bytes, total and net, while four programs compile and run: fib, n-queens, a list build, a closure loop |
 | [regionrc.rs](regionrc.rs) | reporting | Compile-time RC-coalescing win: value→slot mint reduction (transform 1) and merge-induced self-edges eliminated (transform 2), over the stdlib load and both Elle suites |
+| [fuel.rs](fuel.rs) | Criterion | The fuel charge per loop trip: a silent and a raising loop, tight and wide, on the bytecode and JIT tiers |
 
 ## Benchmark groups in benchmarks.rs
 
@@ -59,6 +60,39 @@ builder idiom seeds it.
 
 ```bash
 cargo bench --bench regionrc
+```
+
+## The fuel bench — the ladder of charge shapes
+
+Every backward jump and every call charges one unit of fuel
+([runtime.md](../docs/runtime.md)). The bench reads what each operation of the
+charge costs a loop trip. It runs one silent loop on the JIT under a ladder of
+charge shapes, each one operation more than the last:
+
+| Shape | The silent charge site holds |
+|-------|------------------------------|
+| `none` | nothing: the floor, a loop that checks nothing |
+| `decrement` | a load, a subtract and a store |
+| `saturating` | the same, and the compare and extend that stop the word at zero: a silent charge with no kill check |
+| `branch` | a load, a branch on zero around a subtract and a store: the raising charge less its pause |
+| `check` | the branch, and a load of the kill word, a compare and a second branch: the silent charge every build emits ([impl/jit-fuel.md](../docs/impl/jit-fuel.md)) |
+
+Beside the ladder, every tier runs the same loop as a function that may raise,
+whose charge is the real pausing one, and the interpreter runs the silent loop
+as it charges it. Each loop comes tight, with two intrinsics beside the charge,
+and wide, with eight. A reading is trips per second, so a case is the cost of
+one trip, charge included.
+
+The shapes are a knob in the translator that only a build with the `ablation`
+feature carries ([config.md](../docs/config.md)), and the bench requires that
+feature. A production build has no knob and emits the `check` shape at
+every silent site. Save a baseline before a change to the charge and compare
+after it:
+
+```bash
+cargo bench --features ablation --bench fuel -- --save-baseline before
+# make the change, then:
+cargo bench --features ablation --bench fuel -- --baseline before
 ```
 
 ## Running

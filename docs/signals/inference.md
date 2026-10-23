@@ -1,6 +1,6 @@
 # Signal Inference
 
-<!-- audited: 2026-10-13 -->
+<!-- audited: 2026-10-22 -->
 
 How the compiler infers each function's signal, and the forms that bound,
 narrow or check it.
@@ -467,7 +467,9 @@ stood, so the chain stays inspectable.
 Two signals pass a silent function's boundary as themselves. A halt passes,
 because the depth cap halts a deep recursion: that is a resource fault, not a
 broken proof. A signal that already carries `:terminal` passes whole, so the
-report names the innermost function whose proof broke.
+report names the innermost function whose proof broke. A kill raises one: the
+check at each charge site ends a killed worker inside a silent function as
+outside one ([runtime](../runtime.md)).
 
 Elle code cannot build a broken proof, because inference is sound.
 [proof_tests.rs](../../src/vm/call/proof_tests.rs) forges a silent code

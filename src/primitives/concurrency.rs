@@ -1,21 +1,21 @@
-// audited: 2026-10-20
-//! Thread primitives: `sys/spawn`, `sys/spawn-vm`, `sys/thread-state`,
-//! `sys/thread-id`, and `sys/unique`.
+// audited: 2026-10-22
+//! Thread primitives: `sys/spawn`, `sys/spawn-vm`, `sys/thread-id`, and
+//! `sys/unique`.
 //!
 //! docs/threads.md
 //!
-//! The worker a spawn stands up — its stack sizing, its fresh VM, and its
-//! completion channel — lives in `worker.rs`.
+//! The worker a spawn stands up — its stack sizing, its fresh VM, its kill
+//! switch and its completion channel — lives in `worker.rs`, and what its
+//! handle answers, `sys/thread-state` and `sys/kill`, in `handle.rs`.
 
-use crate::primitives::chan::receiver_value;
 use crate::primitives::ctx::NativeCtx;
 use crate::primitives::def::RegionEffect;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::Value;
-use std::sync::Arc;
 
+pub(crate) mod handle;
 mod worker;
 
 /// Shared dispatch for the two spawn primitives. `load_stdlib` picks the
@@ -71,62 +71,6 @@ pub(crate) fn prim_spawn_vm(
     args: &[Value],
 ) -> (SignalBits, Value) {
     spawn_dispatch(args, false, ctx)
-}
-
-/// Non-blocking inspection of a thread handle — a single check, never a
-/// loop. The building block for the scheduler-cooperative `sys/join`
-/// (defined in stdlib).
-/// (sys/thread-state thread-handle)
-///
-/// Returns one of:
-///   - `[:ready value]`  — the thread finished; `value` is its result,
-///     reconstructed into the caller's heap from the SendBundle slot.
-///   - `[:failed message]` — the thread finished by erroring (or panicked).
-///   - `[:pending receiver]` — the thread is still running; `receiver` is a
-///     fresh `chan/receiver` over its completion channel, suitable for
-///     `chan/select` (which yields to the scheduler rather than polling).
-///
-/// Peeking the result slot first makes a finished thread (or a repeated
-/// join) return immediately without touching the channel — so `sys/join`
-/// is idempotent and the common already-done case never yields.
-pub(crate) fn prim_thread_state(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    if let Some(handle) = args[0].as_thread_handle() {
-        if let Ok(holder) = handle.result.lock() {
-            if let Some(result) = holder.as_ref() {
-                return match result {
-                    Ok(bundle) => {
-                        // Reconstruct into the caller's region (`ctx`).
-                        // `ctx` deref-coerces `&mut NativeCtx` → `&mut Alloc`.
-                        // The joiner's memo learns the worker's symbol names.
-                        let joiner_symbols = ctx.vm().symbols_ptr;
-                        let value = bundle
-                            .clone()
-                            .into_value(ctx, unsafe { joiner_symbols.as_mut() });
-                        (SIG_OK, ctx.array(vec![Value::keyword("ready"), value]))
-                    }
-                    Err(e) => {
-                        let msg = ctx.string(e.clone());
-                        (SIG_OK, ctx.array(vec![Value::keyword("failed"), msg]))
-                    }
-                };
-            }
-        }
-        // Still running: hand back a fresh chan/receiver over the completion
-        // channel so the caller can chan/select on it (yielding meanwhile).
-        let rx = receiver_value(handle.done_rx.clone(), Arc::clone(&handle.done_wake), ctx);
-        (SIG_OK, ctx.array(vec![Value::keyword("pending"), rx]))
-    } else {
-        (
-            SIG_ERROR,
-            ctx.error(
-                "type-error",
-                "thread-state: argument must be a thread handle".to_string(),
-            ),
-        )
-    }
 }
 
 /// The counter behind `sys/unique`. Process-global on purpose: uniqueness must
@@ -185,16 +129,6 @@ primitive! {
         category: "sys",
         example: "(sys/spawn-vm (fn [] (+ 1 2)))",
         aliases: &["os/spawn-vm"],
-        effect: RegionEffect::Fresh,
-    }
-    "sys/thread-state" => prim_thread_state {
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
-        doc: "Inspect a thread handle without blocking (a single check, never a loop): [:ready value], [:failed message], or [:pending receiver]. Building block for sys/join (which adds the scheduler-cooperative wait + timeout).",
-        params: &["thread-handle"],
-        category: "sys",
-        example: "(sys/thread-state thread-handle)",
-        aliases: &["os/thread-state"],
         effect: RegionEffect::Fresh,
     }
     "sys/thread-id" => prim_current_thread_id {

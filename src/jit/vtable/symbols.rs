@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-22
 // docs/impl/jit.md
 //! One `builder.symbol` line per `elle_jit_*` helper: the address the JIT
 //! linker resolves each name to.
@@ -198,6 +198,7 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
         "elle_jit_fuel_pause",
         dispatch::elle_jit_fuel_pause as *const u8,
     );
+    builder.symbol("elle_jit_kill", dispatch::elle_jit_kill as *const u8);
     builder.symbol(
         "elle_jit_has_signal",
         dispatch::elle_jit_has_signal as *const u8,

@@ -1,6 +1,6 @@
 # Runtime Signals
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-10-22 -->
 
 The runtime uses fiber signals for internal coordination. These are
 distinct from user-level error handling.
@@ -53,6 +53,20 @@ A budget can be any non-negative integer:
 (fiber/set-fuel g 9223372036854775807)   # the largest integer
 (assert (= (fiber/fuel g) 9223372036854775807))
 ```
+
+### The kill word
+
+Every charge site reads one more word before it charges: the VM's kill word.
+A budget below the word ends the fiber with the terminal error
+`{:error :killed}` in place of the charge. The word starts at zero, which no
+budget is below. `sys/kill` sets a worker's word to the largest 64-bit value,
+which every budget is below ([threads](threads.md)). An unmetered fiber holds
+a word above the largest budget and below that value, so a kill reaches it as
+it reaches a metered one. The check runs inside a silent function as outside
+one, because the error carries `:terminal`, and a terminal signal passes the
+boundary of a silent function ([inference](signals/inference.md)). The MLIR,
+SPIR-V and WASM tiers carry no check, so a kill lands when control returns to
+a tier that does.
 
 ## SIG_QUERY
 

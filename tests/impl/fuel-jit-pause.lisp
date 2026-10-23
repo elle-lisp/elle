@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-14
+# audited: 2026-10-22
 # Compiled code charges a fiber's fuel where the interpreter does, and pauses where the budget runs out.
-# docs/impl/jit.md
+# docs/impl/jit-fuel.md
 #
 # The sidecar makes the JIT eager. Each subject is warmed once and the worker
 # drained with `jit/rejections`, so the fueled runs below enter compiled code

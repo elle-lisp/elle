@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-22
 //! Where syntax nodes are allocated.
 //!
 //! A [`Syntax`] node is region data, so every constructor names a region.
@@ -8,8 +8,7 @@
 //! An instance runs two syntax regions — a transient working region per
 //! compilation unit, and one process-root region for macro templates — and one
 //! rule keeps every pointer valid: a node may point into its own arena or into
-//! the template arena, and nowhere else. docs/impl/syntax.md § "Where a node
-//! lives" owns the argument.
+//! the template arena, and nowhere else. docs/impl/syntax.md owns the argument.
 
 use crate::hir::region::RuntimeRegion;
 use crate::value::fiberheap::FiberHeap;
@@ -90,7 +89,7 @@ impl SyntaxArena {
         let slice = unsafe { (*self.heap).alloc_region_slice_in_region(items, self.region) };
         // The copy carried whatever each kind's unwritten bytes held on the
         // stack. The region's copy is the one a page-base walk can read, so
-        // it carries nothing (docs/impl/syntax.md § "The node"). Nothing else
+        // it carries nothing (docs/impl/syntax.md). Nothing else
         // names these bytes yet, so the view is unique.
         let copied =
             unsafe { std::slice::from_raw_parts_mut(slice.as_ptr() as *mut Syntax, slice.len()) };
@@ -138,7 +137,7 @@ impl std::fmt::Debug for SyntaxArena {
 /// For callers that parse without a runtime: `elle fmt`, the pre-VM `unicode!`
 /// prescan, the epoch rewriter's template parse, and unit tests. A caller that
 /// has a `Runtime` uses its heap instead — one instance, one heap
-/// (docs/impl/region/tls.md).
+/// (docs/impl/region/ctx.md).
 pub struct SyntaxHeap {
     heap: Box<FiberHeap>,
     region: RuntimeRegion,

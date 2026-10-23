@@ -80,6 +80,9 @@ mlir = ["melior"]
 # io_uring on Linux. Without it, and on every other platform, I/O goes through
 # the thread pool (docs/config.md).
 uring = []
+# The fuel bench's knob over the shape of a silent fuel charge
+# (benches/AGENTS.md). No program reads it.
+ablation = []
 
 [profile.dev.package."*"]
 opt-level = 3
@@ -116,6 +119,11 @@ harness = false
 [[bench]]
 name = "regionrc"
 harness = false
+
+[[bench]]
+name = "fuel"
+harness = false
+required-features = ["ablation"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 io-uring = "0.7"

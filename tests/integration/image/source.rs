@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-10-22
 // Where an image's bytes come from: a descriptor and an offset, never a path.
 // docs/impl/image/format.md
 
@@ -18,7 +18,7 @@ fn park_image_at(path: &std::path::Path, offset: usize, image: &[u8]) {
     std::fs::write(path, &bytes).expect("write container");
 }
 
-// § Test plan, "Source": an image parked at a non-zero, base-page-aligned
+// Source (docs/impl/image/plan.md): an image parked at a non-zero, base-page-aligned
 // offset inside a larger file hydrates from that descriptor and offset.
 //
 // The counter-factual is the second half: the same descriptor at offset 0 is
@@ -40,7 +40,8 @@ fn an_image_parked_at_an_offset_hydrates_from_its_descriptor() {
     let file = std::fs::File::open(&container).expect("open container");
     let source = ImageSource::at(file, offset as u64).expect("aligned offset");
     let mut dst = FiberHeap::new();
-    let hydrated = image::hydrate(&mut dst, &mut SymbolTable::new(), &source).expect("hydrate at offset");
+    let hydrated =
+        image::hydrate(&mut dst, &mut SymbolTable::new(), &source).expect("hydrate at offset");
     assert_eq!(
         root, hydrated.root,
         "the graph read back from a parked image differs from the source"
@@ -54,7 +55,7 @@ fn an_image_parked_at_an_offset_hydrates_from_its_descriptor() {
     }
 }
 
-// § "An image starts at a base-page boundary of its container": every page
+// An image starts at a base-page boundary of its container: every page
 // maps at the image's offset plus a base-page multiple, so `mmap` accepts the
 // sum only when the image's own offset is a multiple of the base page. The
 // refusal is named, and it happens before anything is mapped.
@@ -84,7 +85,7 @@ fn a_misaligned_offset_is_refused_by_name() {
     }
 }
 
-// § Test plan, "Bytes": an image that arrives as bytes hydrates through an
+// Bytes (docs/impl/image/plan.md): an image that arrives as bytes hydrates through an
 // anonymous memory file, with no filesystem path anywhere in the path. The
 // file the bytes came from is deleted first, so a hydrator that reopened a
 // path could not pass this.
@@ -100,12 +101,16 @@ fn bytes_hydrate_through_an_anonymous_file() {
 
     let source = ImageSource::from_bytes(&bytes).expect("anonymous file");
     let mut dst = FiberHeap::new();
-    let hydrated = image::hydrate(&mut dst, &mut SymbolTable::new(), &source).expect("hydrate from bytes");
-    assert_eq!(root, hydrated.root, "the graph read back from bytes differs");
+    let hydrated =
+        image::hydrate(&mut dst, &mut SymbolTable::new(), &source).expect("hydrate from bytes");
+    assert_eq!(
+        root, hydrated.root,
+        "the graph read back from bytes differs"
+    );
     assert!(!plain.exists(), "the test's own precondition went stale");
 }
 
-// § "The hydrator's input is `(fd, offset)`": a read from the source starts at
+// The hydrator's input is `(fd, offset)` (docs/impl/image.md): a read starts at
 // the offset it was given, which is any offset at all — the base-page rule
 // binds where an image starts, not where its sections do.
 //
@@ -129,7 +134,9 @@ fn a_read_from_a_source_starts_where_it_was_asked_to() {
     // Deliberately misaligned, and long enough to leave the page it starts in.
     let at = base_page() as u64 + 37;
     let mut got = vec![0u8; base_page() + 11];
-    source.read_exact_at(&mut got, at).expect("read at an offset");
+    source
+        .read_exact_at(&mut got, at)
+        .expect("read at an offset");
     assert_eq!(
         got.as_slice(),
         &bytes[at as usize..at as usize + got.len()],
@@ -149,7 +156,7 @@ fn anonymous_entries() -> Vec<String> {
         .collect()
 }
 
-// § "The fallback is an unlinked file rather than POSIX shared memory": the
+// The fallback is an unlinked file (docs/impl/image.md): the
 // file is unlinked before its first byte is written, so the descriptor is the
 // only way back to the bytes and the call leaves nothing behind.
 //
@@ -185,7 +192,7 @@ fn an_anonymous_file_leaves_no_entry_behind() {
     assert_eq!(root, hydrated.root, "the unnamed descriptor lost the graph");
 }
 
-// § Hydration: where the kernel mints memory files the anonymous file is
+// docs/impl/image.md: where the kernel mints memory files the anonymous file is
 // write-sealed before it is mapped, so the immutability `MAP_PRIVATE` relies
 // on is enforced by the kernel rather than by our own discipline. A write to
 // that descriptor must fail.
@@ -221,5 +228,6 @@ fn an_anonymous_image_file_refuses_writes() {
 
     // The mapping still reads the bytes the source was built from.
     let mut dst = FiberHeap::new();
-    image::hydrate(&mut dst, &mut SymbolTable::new(), &source).expect("hydrate after the refused write");
+    image::hydrate(&mut dst, &mut SymbolTable::new(), &source)
+        .expect("hydrate after the refused write");
 }

@@ -1,10 +1,11 @@
 (elle/epoch 15)
-# audited: 2026-10-12
+# audited: 2026-10-22
 # A fiber's budget holds any non-negative integer, and a fiber with no budget reads nil however long it runs.
 # docs/runtime.md
 #
-# The budget is one 64-bit word, and a fiber with no budget holds 2^64 - 1
-# there, which no run counts down to the largest integer (docs/impl/jit.md).
+# The budget is one 64-bit word, and a fiber with no budget holds 2^63 + 2^62
+# there, which no run counts down to the largest integer
+# (docs/impl/jit-fuel.md).
 #
 # The counter-factual: a budget kept in 32 bits reads 2^32 back as 0, and a
 # fiber given it pauses at its first charge.

@@ -2954,7 +2954,7 @@
           result)
       _ first)))
 
-(defn sys/join [handle &named timeout deadline]
+(defn sys/join [handle &named timeout deadline kill]
   "Wait for an OS thread (sys/spawn) to finish and return its result.
 
    Cooperates with the scheduler: it does not poll and it does not park
@@ -2965,10 +2965,13 @@
    With no bound, waits indefinitely.  With :timeout in seconds or
    :deadline, a (clock/monotonic) reading, raises a typed timeout error —
    {:error :timeout} — if the thread has not finished when the bound
-   passes, and never before.
-   The worker is NOT cancelled (an OS thread cannot be safely killed): a
-   timed-out worker is abandoned and runs to completion on its own, its
-   result discarded.
+   passes, and never before.  A timed-out worker runs on, its result
+   discarded, unless the join names :kill true, which kills it as sys/kill
+   does once the bound passes; the join still raises {:error :timeout},
+   and a later join raises {:error :killed} once the kill has landed.
+   :kill true with no bound is an :argument-error.
+
+   A join on a killed worker raises {:error :killed}.
 
    sys/join is idempotent: once a thread has completed, repeated joins
    return the same result without waiting, whatever the bound.  A worker
@@ -2976,29 +2979,34 @@
    {:error :thread-error}.  Alias: os/join.
 
    Implementation: thread-state peeks the result slot first ([:ready v] /
-   [:failed msg]) and otherwise returns [:pending rx] — a receiver over
-   the worker's completion channel.  The worker stores its result BEFORE
-   signalling that channel, so once chan/select wakes, a re-poll sees the
-   result; a wake with no stored result means the worker vanished."
+   [:failed msg] / [:killed]) and otherwise returns [:pending rx] — a
+   receiver over the worker's completion channel.  The worker stores its
+   result BEFORE signalling that channel, so once chan/select wakes, a
+   re-poll sees the result; a wake with no stored result means the worker
+   vanished."
+  (when (and kill (nil? timeout) (nil? deadline))
+    (error {:error :argument-error
+            :message "sys/join :kill: needs a :timeout or a :deadline"}))
   (let [until (wait-until "sys/join" timeout deadline)
+        settled (fn [st]
+                  (match (get st 0)
+                    :ready (get st 1)
+                    :failed
+                      (error (struct :error :thread-error :message (get st 1)))
+                    :killed (error (struct :error :killed
+                                   :message "join: the worker was killed"))
+                    _ (error (struct :error :thread-error
+                                     :message "join: worker ended without a result"))))
         st (sys/thread-state handle)]
     (match (get st 0)
-      :ready (get st 1)
-      :failed
-        (error (struct :error :thread-error :message (get st 1)))
       :pending
         (match (get (chan/select @[(get st 1)] :deadline until) 0)
-          :timeout (error (struct :error :timeout
-                                  :message "join: deadline exceeded"))
-          _
-            (let [st2 (sys/thread-state handle)]
-              (match (get st2 0)
-                :ready (get st2 1)
-                :failed
-                  (error (struct :error :thread-error :message (get st2 1)))
-                _ (error (struct :error :thread-error
-                                 :message "join: worker ended without a result")))))
-      _ (error (struct :error :thread-error :message "join: not a thread handle")))))
+          :timeout
+            (begin
+              (when kill (sys/kill handle))
+              (error (struct :error :timeout :message "join: deadline exceeded")))
+          _ (settled (sys/thread-state handle)))
+      _ (settled st))))
 
 (defn inc [x]
   "Return x + 1."

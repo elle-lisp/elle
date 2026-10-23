@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-22
 //! The VM's execution entries: a compiled unit, a code object at the root, and a
 //! program under the async scheduler. The module list sits above them.
 //!
@@ -122,6 +122,17 @@ impl VM {
         let ctx = crate::primitives::ctx::Alloc::new(unsafe { &mut *self.heap_ptr });
         let err = ctx.error(kind, msg);
         self.fiber.signal = Some((SIG_ERROR, err));
+    }
+
+    /// Raise the terminal `:killed` error: a charge site found the fiber's
+    /// budget below the kill word (docs/runtime.md). No mask catches it, and
+    /// it passes a silent function's boundary as a terminal signal does. Both
+    /// tiers' charge sites raise through here. Answers the signal's bits.
+    pub(crate) fn raise_killed(&mut self) -> crate::value::SignalBits {
+        let err = self.escaping_error("killed", "killed: the kill switch was pulled");
+        let bits = SIG_ERROR.union(crate::value::SIG_TERMINAL);
+        self.fiber.signal = Some((bits, err));
+        bits
     }
 
     /// Check arity and set error signal if mismatch.

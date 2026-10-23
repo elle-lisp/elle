@@ -1,6 +1,6 @@
 # vm
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-10-22 -->
 
 The VM executes bytecode on a fiber's operand stack, with each local in a stack slot above the frame base.
 
@@ -197,6 +197,8 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | Field | Type | Purpose |
 |-------|-------|---------|
 | `fiber` | `Fiber` | Current fiber: stack, call frames, signal state |
+| `kill` | `KillSwitch` | The kill word every charge site reads first; a worker takes its spawner's through `set_kill_switch` ([runtime.md](../../docs/runtime.md)) |
+| `kill_word` | `*const AtomicU64` | Where `kill`'s word lives, for compiled code to load through the VM pointer |
 | `heap_ptr` | `*mut FiberHeap` | This instance's single heap, owned by `RuntimeCore` (or privately leaked for a bare VM). All fibers share it; reach it via `heap()` |
 | `current_fiber_handle` | `Option<FiberHandle>` | Handle for current fiber (`None` for root) |
 | `current_fiber_value` | `Option<Value>` | Cached Value for current fiber (`None` for root) |

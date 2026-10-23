@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-22
 // docs/impl/jit.md
 //! Cranelift JIT compilation of LIR functions, and the types every stage of it
 //! shares.
@@ -53,6 +53,8 @@ pub(crate) mod worker;
 pub use code::JitCode;
 pub use compiler::JitCompiler;
 pub use dispatch::{TAIL_CALL_SENTINEL, YIELD_SENTINEL};
+#[cfg(feature = "ablation")]
+pub use translate::fuel::ablation::{charge_shape, set_charge_shape, ChargeShape};
 pub use value::JitValue;
 pub use worker::{JIT_COMPILE_NS, JIT_COMPILE_TASKS};
 
