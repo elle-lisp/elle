@@ -1,6 +1,6 @@
 # CI and Triage
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-22 -->
 
 CI structure, local workflow, and failure diagnosis.
 
@@ -63,8 +63,7 @@ Two producers read the tree and not the build:
 change to any document can move either reading, and a build cannot. So QA
 builds the release rig and runs `make tree-producers`, which judges both
 against their ledgers before any suite starts, and no build's producer pass
-runs them again. That step records a run, so QA uploads its store (§ A corpus
-job's results leave the runner).
+runs them again. That step records a run, so QA uploads its store.
 
 QA runs on every pull request, with no `source` gate. A Markdown-only change
 can break a call-out or a link, and those are what the prose checks read.
@@ -111,11 +110,9 @@ slower of the pair instead of the sum. The split doubles the runner minutes the
 platform spends and roughly halves the wall clock, which is the trade the merge
 gate cares about.
 
-A Smoke job runs each pass of `make smoke` as a step of its own, not `make
-smoke` itself, for the reason the next section gives. The Makefile names the passes once, in
-`SMOKE_PASSES`. Each pass runs once. A `make smoke` step after the job's
-`doctest` step would run the doctests twice. A Smoke job runs no `make qa`: the
-`QA` job is the QA gate for every platform.
+A Smoke job runs each pass `SMOKE_PASSES` names once, as a step of its own,
+and not `make smoke` itself. It runs no `make qa`: the `QA` job is the QA gate
+for every platform.
 
 ### One step, one pass
 
@@ -127,9 +124,8 @@ A pass deals its files into batches and runs them side by side, and each batch
 prints its own summary. Each pass is a target of its own, and
 [the rig](../../rig/overview.md) names the ones that run on a rig.
 
-[Testing](../testing.md) describes what each batch prints. What a batch
-records leaves the runner in the store the job uploads, as a later section
-describes.
+[Testing](../testing.md) describes what each batch prints, and the job uploads
+what it records.
 
 A job runs its build's producer pass right after the build, before `doctest`
 and every other pass. The pass is short, and a stale ledger row fails it as
@@ -181,15 +177,15 @@ runs, so a pool-only defect fails on a Linux runner before it reaches the Mac.
 The rule is one such job per I/O backend. `Thread-Pool I/O Tests` covers the
 pool and `Default Build Tests` covers io_uring, so finding a region defect never
 depends on the macOS runner. That runner is the slowest box in the workflow, and
-its failures read as flaky timeouts, as the runner capacity section explains.
+its failures read as flaky timeouts.
 [workflows.rs](../../tests/integration/workflows.rs) is the standing check that
 both backends keep a job.
 
 `macOS Smoke` runs the rig's scrub profile beside the flag, because the panic
 that reads a scrubbed page needs both
 ([diagnostics](../impl/region/diagnostics.md)). Its binary is a release build
-that also runs the debug-only checks, on the smallest runner in the workflow. Read a macOS corpus timing against that, not against a Linux
-one.
+that also runs the debug-only checks, on the smallest runner in the workflow.
+Read a macOS corpus timing against that, not against a Linux one.
 
 ### Every job that runs `cargo test` installs rustfmt and clippy
 
@@ -235,8 +231,8 @@ without notice. A constant chosen for one runner over-subscribes another.
 Over-subscription does not fail the corpus, it stretches it. Every file still
 passes its assertions, and the ones nearest the per-file budget get killed on
 the way out. That failure is a `timeout` row that names the budget, which
-reads as a flaky runner rather than as a job count that never fit. `JOBS` remains an override
-for a job that needs a different number.
+reads as a flaky runner rather than as a job count that never fit. `JOBS`
+remains an override for a job that needs a different number.
 
 Outside CI the default stays the constant 16. A development box is not sized by
 the runner, and its owner can pass `JOBS=`.
