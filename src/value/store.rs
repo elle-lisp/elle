@@ -6,10 +6,11 @@
 //!
 //! A store's read is public and a store's write is visible only inside
 //! `value/`. The funnels in `value/arena/mutate.rs` call the writes, each
-//! beside the region tracking its store needs, and `value/build.rs` calls the
-//! constructors. A write that overlaps a live read guard panics with "already
-//! borrowed". The `@array`, `@string` and `@bytes` stores are one extent
-//! type, generic over what it holds.
+//! beside the region tracking its store needs, and `value/build/mutable.rs`
+//! calls the constructors. A write that overlaps a live read guard panics with
+//! "already borrowed". The `@array`, `@string` and `@bytes` stores are one
+//! extent type, generic over what it holds. A box's or capture cell's store is
+//! its one value, inline in the shell.
 
 mod array;
 mod bytes;

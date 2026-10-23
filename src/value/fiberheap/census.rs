@@ -12,10 +12,12 @@
 //! object contributes its `HeapObject` shell plus its payload wherever the
 //! payload lives — region pages (`RegionSlice` backings, syntax trees, code
 //! payloads, the extent of an `@array`, `@string` or `@bytes` store) or, for
-//! every other mutable container, the Rust heap. A payload shared through an aliased `RegionSlice` is counted
-//! once (first holder). Not counted: per-container `Rc`/`RefCell` bookkeeping,
-//! a code payload's region tables, masks, child table and LIR body, and
-//! fiber-internal state (fibers are refused from the body).
+//! an `@set` or `@struct`, the Rust heap. A box's or capture cell's value lies
+//! inside its shell, so the shell is all it costs. A payload shared through an
+//! aliased `RegionSlice` is counted once (first holder). Not counted:
+//! per-container `Rc`/`RefCell` bookkeeping, a code payload's region tables,
+//! masks, child table and LIR body, and fiber-internal state (fibers are
+//! refused from the body).
 //!
 //! Pointer-slot counting follows the image format's relocation definition
 //! (docs/impl/image/format.md): a heap-tagged `Value` slot or
@@ -349,7 +351,6 @@ fn measure(obj: &HeapObject, seen: &mut FxHashSet<usize>) -> ObjStat {
         HeapObject::Syntax { syntax, .. } => stat.bytes += syntax_bytes(syntax, seen),
         HeapObject::Parameter { default, .. } => heap_slot(default, &mut stat),
         HeapObject::LBox { cell, .. } | HeapObject::CaptureCell { cell, .. } => {
-            stat.bytes += size_of::<Value>();
             heap_slot(&cell.get(), &mut stat);
         }
         HeapObject::LArrayMut { data, .. } => {

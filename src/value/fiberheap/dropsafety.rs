@@ -17,8 +17,9 @@ use crate::value::heap::HeapTag;
 pub(crate) fn needs_drop(tag: HeapTag) -> bool {
     match tag {
         HeapTag::Pair => false,
-        HeapTag::LBox => true,
-        HeapTag::CaptureCell => true,
+        // A cell's value lies inside its shell (docs/impl/mutable.md).
+        HeapTag::LBox => false,
+        HeapTag::CaptureCell => false,
         HeapTag::Float => false,
         HeapTag::LibHandle => false,
         HeapTag::ManagedPointer => false,
@@ -59,11 +60,14 @@ pub(crate) fn holds_value_refs(tag: HeapTag) -> bool {
         HeapTag::Float => false,
         HeapTag::LibHandle => false,
         HeapTag::ManagedPointer => false,
-        // The `traits` edge off the shell, and an `@array`'s live elements.
-        HeapTag::LArrayMut | HeapTag::LStringMut | HeapTag::LBytesMut => true,
-        HeapTag::LBox
-        | HeapTag::CaptureCell
-        | HeapTag::LString
+        // The `traits` edge off the shell, an `@array`'s live elements, and a
+        // cell's one value.
+        HeapTag::LArrayMut
+        | HeapTag::LStringMut
+        | HeapTag::LBytesMut
+        | HeapTag::LBox
+        | HeapTag::CaptureCell => true,
+        HeapTag::LString
         | HeapTag::LStructMut
         | HeapTag::LStruct
         | HeapTag::Closure

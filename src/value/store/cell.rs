@@ -1,27 +1,26 @@
 // audited: 2026-10-22
-//! The box and capture-cell store: one value, copied out on a read.
+//! The box and capture-cell store: one value inside the shell, copied out on a read.
 //!
 //! docs/impl/mutable.md
 
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::cell::Cell;
 
 use crate::value::Value;
 
-/// The value a box or a capture cell holds. A read copies it out, so a cell
-/// has no read guard.
-pub struct CellStore(Rc<RefCell<Value>>);
+/// The value a box or a capture cell holds, inline in its shell. A read copies
+/// it out, so a cell has no read guard and no borrow count.
+pub struct CellStore(Cell<Value>);
 
 impl CellStore {
     /// A store holding `v`.
     pub fn new(v: Value) -> Self {
-        CellStore(Rc::new(RefCell::new(v)))
+        CellStore(Cell::new(v))
     }
 
     /// The value the cell holds now.
     #[inline]
     pub fn get(&self) -> Value {
-        *self.0.borrow()
+        self.0.get()
     }
 
     /// Store `v` and answer the value it displaced.
