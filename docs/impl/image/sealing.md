@@ -45,8 +45,7 @@ refuses anyway.
 A closure instance is three sealed fields: the template it references, its env
 slice, and its squelch mask. All three cross whole, traits beside them, and
 every env value goes through the ordinary walk. A capture cell in an env snaps
-to its content or fails the dump (§ "Capture cells are snapped, not
-persisted").
+to its content or fails the dump, as the section on capture cells below says.
 
 A closure template is a header naming a payload, and nothing else
 ([region/template.md](../region/template.md)). The payload is sealed data and
@@ -61,13 +60,13 @@ fragment is bytes, so it copies as the docstring does, and a compile that
 grafts a hydrated closure decodes it where it would decode a compiled one's
 ([graft.md](../graft.md)). The SPIR-V a `(git f)` compiled is not part of the
 code object. It lives in a cache on the VM, and the GPU path recompiles in a
-fresh process (§ "What the body refuses").
+fresh process.
 
 The defining span is twenty bytes of plain data. Its file id is the one
 process-local number a payload holds, and it travels by name like a syntax
 node's ([format.md](format.md)).
 
-The LIR is the payload's `lir` body ([lir.md](../lir.md) § "The frozen form").
+The LIR is the payload's `lir` body ([lir.md](../lir.md)).
 Its records hold indices and plain bits, so they copy as bytes, with every pad
 written as zero. The values its `ValueConst` instructions load go through the
 value walk, where the copy of the constant pool has already met each of them.
@@ -97,8 +96,8 @@ module fails the dump where any other WASM closure does.
 
 ## Capture cells are snapped, not persisted
 
-The stdlib file-letrec allocates one `CaptureCell` (`Rc<RefCell<Value>>`) per
-captured top-level binding. After the letrec fixpoint completes, a cell whose
+The stdlib file-letrec allocates one `CaptureCell` per captured top-level
+binding. After the letrec fixpoint completes, a cell whose
 binding is never `assign`ed holds its final value. The dumper snaps such a
 cell: the copy references the content directly, with no cell between. The
 sharing map keys the cell, so every closure that captured it hydrates naming
@@ -126,8 +125,9 @@ Refused outright: `Fiber`, thread and library handles, ports, externals, FFI
 signatures, managed pointers.
 
 Every mutable variant, `LBox` and an unsnapped capture cell are refused as
-unsealed data. Each but `@string`, `@bytes` and `@array` keeps its store on
-the Rust heap. A store that has moved into region pages
+unsealed data. `@set` and `@struct` keep their stores on the Rust heap, and
+every other mutable variant holds its contents in region pages. A store that
+has moved into region pages
 ([mutable stores](../mutable.md)) is body data, and the dump policy alone
 decides on it ([sending a region](../send.md) holds its table). Until that
 policy lands, the dumper refuses the moved stores too.

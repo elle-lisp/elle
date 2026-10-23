@@ -99,7 +99,7 @@ does, so that one rare type does not set the size of every object. Each
 (backed by a `RegionStore`), which every fiber of the instance shares.
 
 The pages store `HeapObject` shells. Many variants contain inner Rust heap
-data: a mutable container's store other than a byte store or an `@array` store
+data: the store of an `@set` or a `@struct`
 ([store.rs](../../src/value/store.rs)), a fiber's handle, an external's
 payload. The `needs_drop()` function
 ([dropsafety.rs](../../src/value/fiberheap/dropsafety.rs)) sorts each `HeapTag`
@@ -128,7 +128,8 @@ region-owned bytes, usually adjacent to the containing `HeapObject` header. This
 avoids inner `Vec` or `Box<str>` allocations for the common case. A mutable
 type keeps its contents in a store that grows, which a region slice cannot. The
 store of an `@string`, `@bytes` or `@array` is an extent of the container's
-region, and every other store grows on the Rust heap
+region, and the store of an `@set` or a `@struct` grows on the Rust heap. A box
+or a capture cell holds its one value inside its shell
 ([mutable stores in region pages](mutable.md)).
 
 A `slice` of an immutable string or bytes, and a `string` built over immutable

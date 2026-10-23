@@ -8,8 +8,9 @@ so a mutable value is sealed data an image or a send can copy.
 This is the sixth representation fix the image rests on
 ([foundations](image/foundations.md)), and [sending a region](send.md) rests on
 it too. The seam is in place ([the stores](../../src/value/store.rs)). The
-byte store of `@string` and `@bytes` and the store of `@array` lie in region
-pages, and every other store keeps its contents on the Rust heap.
+stores of `@string`, `@bytes` and `@array` lie in region pages, and a box or a
+capture cell holds its value inside its shell. The stores of `@set` and
+`@struct` keep their contents on the Rust heap.
 
 ## Where a mutable store lives
 
@@ -19,7 +20,7 @@ pages, and every other store keeps its contents on the Rust heap.
 | `@string` (`LStringMut`), `@bytes` (`LBytesMut`) | `ByteStore` | an extent of bytes in the container's region |
 | `@set` (`LSetMut`) | `SetStore` | `Rc<RefCell<BTreeSet<Value>>>` |
 | `@struct` (`LStructMut`) | `StructStore` | `Rc<RefCell<BTreeMap<TableKey, Value>>>` |
-| box (`LBox`), capture cell (`CaptureCell`) | `CellStore` | `Rc<RefCell<Value>>` |
+| box (`LBox`), capture cell (`CaptureCell`) | `CellStore` | the `Value` itself, inline in the shell |
 
 The `Rc` buys no sharing. Nothing clones it: `with-traits` builds a fresh store,
 so a traited copy is independent of its source
@@ -35,7 +36,7 @@ A Rust-heap store costs three things:
 - **Allocation the region gauges cannot see.** Each container is a `malloc`,
   and each growth a `realloc`. `--region-page-size`, `arena/page-claims`,
   `--trace=scrub` and `--trace=guardfree` see none of it.
-- **Destructors.** Four variants own Rust-heap memory, so freeing a region
+- **Destructors.** Two variants own Rust-heap memory, so freeing a region
   that holds one must drop it.
 - **No seal.** A mutable value is not page bytes, so an image refuses it and a
   send needs a Rust-heap mirror of it ([sending a region](send.md)).
@@ -68,15 +69,16 @@ that fits the capacity claims nothing, so it resolves no region.
 | box, capture cell | the `Value` itself, inline in the shell |
 
 A one-slot container needs no extent: a read copies the `Value` out, and a
-store goes through the funnel. A sorted store keeps the immutable twin's
+store goes through the funnel. No read holds the slot, so it needs no borrow
+count either. A sorted store keeps the immutable twin's
 layout, so freezing one copies a single extent and a lookup is the same binary
 search. An insert or a delete shifts entries within the capacity.
 
-The shell keeps a **borrow count** with the rules a `RefCell` keeps, so a write
-that overlaps a Rust-side read still panics. The count is plain bits, and a dump
-writes it as zero. A store in region pages owns nothing outside them, so its
-variant needs no destructor. The free still scans the shell: its `traits` edge,
-and each `Value` in its live extent.
+A shell with an extent keeps a **borrow count** with the rules a `RefCell`
+keeps, so a write that overlaps a Rust-side read still panics. The count is
+plain bits, and a dump writes it as zero. A store in region pages owns nothing
+outside them, so its variant needs no destructor. The free still scans the
+shell: its `traits` edge, and each `Value` in its live extent or its one slot.
 
 ## What does not change
 
@@ -131,7 +133,7 @@ others do, because a growth claims an extent. Then one variant moves per step,
 each green on its own: `@bytes` and `@string`, then `@array`, then box and
 capture cell, then `@set`, then `@struct` behind its benchmark. A step changes
 its own store file, its funnels and its constructors. The `@array` step also
-puts the byte store on the shared extent type. The seam, the byte step and the
-`@array` step have landed.
+puts the byte store on the shared extent type. The seam, the byte step, the
+`@array` step and the cell step have landed.
 [The image plan](image/plan.md) orders the foundation among the image
 milestones.

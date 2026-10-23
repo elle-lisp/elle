@@ -7,8 +7,8 @@ the risks still open.
 
 [The send design](../send.md) owns the argument, and
 [mutable stores in region pages](../mutable.md) owns the foundation. The first
-milestone's seam, byte step and `@array` step have landed, and nothing else
-here has.
+milestone's seam, byte step, `@array` step and cell step have landed, and
+nothing else here has.
 
 ## Landing order
 
