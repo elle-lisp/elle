@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-22
 //! The operations a pool worker runs on a file named by its path, and what each reports.
 //!
 //! src/io/AGENTS.md
@@ -46,13 +46,25 @@ fn failed(e: &std::io::Error) -> (i32, Vec<u8>) {
     (-errno, e.to_string().into_bytes())
 }
 
+/// The errno of the last failed system call on this thread.
+fn last_errno() -> i32 {
+    std::io::Error::last_os_error().raw_os_error().unwrap_or(1)
+}
+
+/// Whether a sync accepts a descriptor whose `st_mode` is `mode`: a regular
+/// file or a directory, and nothing else.
+pub(super) fn syncable(mode: libc::mode_t) -> bool {
+    matches!(mode & libc::S_IFMT, libc::S_IFREG | libc::S_IFDIR)
+}
+
 /// Flush `path` to stable storage, and report 0 or `-errno`.
 ///
 /// The open is read-only, which `fsync(2)` accepts on a file and on a
 /// directory alike, and non-blocking for the reason `open::open` is: a plain
 /// open of a fifo for reading parks this worker until a writer arrives, and
-/// nothing reaches a thread inside the syscall. A fifo then fails in
-/// `fsync(2)`, at once.
+/// nothing reaches a thread inside the syscall. Anything but a file or a
+/// directory then answers `-EINVAL` before `fsync(2)`, which refuses a fifo on
+/// Linux and syncs one on macOS.
 fn sync(path: &std::ffi::CStr) -> (i32, Vec<u8>) {
     use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd};
 
@@ -68,16 +80,24 @@ fn sync(path: &std::ffi::CStr) -> (i32, Vec<u8>) {
             // SAFETY: the kernel just handed this descriptor to this worker.
             break unsafe { OwnedFd::from_raw_fd(fd) };
         }
-        let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
+        let errno = last_errno();
         if errno != libc::EINTR {
             return (-errno, Vec::new());
         }
     };
+    let mut st = std::mem::MaybeUninit::<libc::stat>::uninit();
+    if unsafe { libc::fstat(fd.as_raw_fd(), st.as_mut_ptr()) } != 0 {
+        return (-last_errno(), Vec::new());
+    }
+    // SAFETY: fstat(2) answered 0, so it filled `st`.
+    if !syncable(unsafe { st.assume_init() }.st_mode) {
+        return (-libc::EINVAL, Vec::new());
+    }
     loop {
         if unsafe { libc::fsync(fd.as_raw_fd()) } == 0 {
             return (0, Vec::new());
         }
-        let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
+        let errno = last_errno();
         if errno != libc::EINTR {
             return (-errno, Vec::new());
         }
