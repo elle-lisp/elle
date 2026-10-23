@@ -1,7 +1,8 @@
-// audited: 2026-10-20
+// audited: 2026-10-23
 // docs/impl/jit.md
-//! What the solo-compilation gate accepts and rejects, and what the compiled
-//! entry it produces records about itself.
+// docs/impl/verifier.md
+//! What the solo-compilation gate accepts and rejects, what its compiled entry
+//! records, and whether Cranelift verifies it.
 
 use super::*;
 use crate::lir::testkit::LirFixture;
@@ -15,6 +16,13 @@ mod makeclosure;
 mod regions;
 mod seal;
 mod stores;
+mod verifier;
+
+/// A compiler that runs Cranelift's verifier, as every test of the translator
+/// does (docs/impl/verifier.md).
+fn verified() -> JitCompiler {
+    JitCompiler::new(JitVerifier::On).expect("Failed to create compiler")
+}
 
 /// fn(x) -> x, before it freezes, so a test can set one more field first.
 ///
@@ -62,7 +70,7 @@ fn make_add_lir() -> LirOwned {
 #[test]
 fn test_compile_identity() {
     let lir = make_simple_lir();
-    let compiler = JitCompiler::new().expect("Failed to create compiler");
+    let compiler = verified();
     let code = compiler.compile(&lir.view()).expect("Failed to compile");
 
     // Call the compiled function with self_tag=0, self_payload=0 (no self-tail-call).
@@ -87,7 +95,7 @@ fn test_compile_identity() {
 #[test]
 fn test_compile_add() {
     let lir = make_add_lir();
-    let compiler = JitCompiler::new().expect("Failed to create compiler");
+    let compiler = verified();
     let code = compiler.compile(&lir.view()).expect("Failed to compile");
 
     // Call the compiled function with self_tag=0, self_payload=0
@@ -113,7 +121,7 @@ fn test_accept_polymorphic() {
         .signal(Signal::polymorphic(0))
         .build();
 
-    let compiler = JitCompiler::new().expect("Failed to create compiler");
+    let compiler = verified();
     let result = compiler.compile(&lir.view());
     assert!(
         result.is_ok(),
@@ -128,7 +136,7 @@ fn test_accept_yielding() {
         .signal(Signal::yields())
         .build();
 
-    let compiler = JitCompiler::new().expect("Failed to create compiler");
+    let compiler = verified();
     // Should compile (no Yield terminators in this simple LIR)
     let result = compiler.compile(&lir.view());
     assert!(result.is_ok());
@@ -164,7 +172,7 @@ fn test_compile_yielding_function() {
         )
         .build();
 
-    let compiler = JitCompiler::new().expect("Failed to create compiler");
+    let compiler = verified();
     let result = compiler.compile(&func.view());
     assert!(
         result.is_ok(),
@@ -180,7 +188,7 @@ fn test_reject_struct_variadic() {
         .vararg_kind(crate::hir::VarargKind::Struct)
         .build();
 
-    let compiler = JitCompiler::new().expect("Failed to create compiler");
+    let compiler = verified();
     let result = compiler.compile(&lir.view());
     assert!(
         matches!(result, Err(JitError::UnsupportedInstruction(_))),
@@ -197,7 +205,7 @@ fn test_reject_strict_struct_variadic() {
         ))
         .build();
 
-    let compiler = JitCompiler::new().expect("Failed to create compiler");
+    let compiler = verified();
     let result = compiler.compile(&lir.view());
     assert!(
         matches!(result, Err(JitError::UnsupportedInstruction(_))),
@@ -215,7 +223,7 @@ fn test_compile_list_variadic() {
         .num_params(2) // x + rest
         .build();
 
-    let compiler = JitCompiler::new().expect("Failed to create compiler");
+    let compiler = verified();
     let result = compiler.compile(&lir.view());
     assert!(
         result.is_ok(),
@@ -229,7 +237,7 @@ fn compile_records_entry_in_code_address_registry() {
     let lir = simple_fixture(Arity::Exact(1))
         .name("registry-probe-solo")
         .build();
-    let compiler = JitCompiler::new().expect("Failed to create compiler");
+    let compiler = verified();
     let code = compiler.compile(&lir.view()).expect("Failed to compile");
     let entry = code.fn_ptr() as usize;
     let name = crate::jit::registry::snapshot()

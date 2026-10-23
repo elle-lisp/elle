@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-23
 // docs/impl/jit.md
 //! When the translator seals a block, read off the block parameters a
 //! translation builds, and a loop that still compiles to the right answer.
@@ -43,7 +43,7 @@ fn chain(blocks: u32, locals: u16) -> LirOwned {
 /// finds redundant becomes an alias, which keeps its entry, so the count
 /// holds every parameter the translation built, not only the ones it kept.
 fn parameters_built(lir: &LirOwned) -> usize {
-    let mut compiler = JitCompiler::new().expect("Failed to create compiler");
+    let mut compiler = verified();
     let mut func =
         Function::with_name_signature(UserFuncName::user(0, 0), compiler.make_jit_signature());
     compiler
@@ -153,10 +153,7 @@ fn a_loop_whose_header_waits_for_its_back_edge_counts_up() {
     // on a sealed block. The local's value from the back edge then never
     // reaches the test, and the loop never ends or returns its first value.
     let lir = make_counting_loop_lir();
-    let code = JitCompiler::new()
-        .expect("Failed to create compiler")
-        .compile(&lir.view())
-        .expect("Failed to compile");
+    let code = verified().compile(&lir.view()).expect("Failed to compile");
     let mut vm = crate::vm::VM::new();
     let args = [crate::value::Value::int(10)];
     let value = unsafe {

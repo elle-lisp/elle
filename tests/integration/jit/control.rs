@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-23
 // docs/impl/jit.md
 // Which values a compiled `Branch` reads as true, and what the compile gate
 // accepts beside them.
@@ -94,7 +94,7 @@ fn test_jit_accepts_yielding() {
         )],
     );
 
-    let compiler = JitCompiler::new().unwrap();
+    let compiler = verified();
     let result = compiler.compile(&func.view());
     assert!(
         result.is_ok(),
@@ -126,7 +126,7 @@ fn test_jit_call_compiles() {
         )],
     );
 
-    let compiler = JitCompiler::new().unwrap();
+    let compiler = verified();
     let result = compiler.compile(&func.view());
     // Call should now compile successfully
     assert!(result.is_ok(), "Call should compile: {:?}", result);
@@ -154,7 +154,7 @@ fn test_jit_rejects_make_closure() {
         )],
     );
 
-    let compiler = JitCompiler::new().unwrap();
+    let compiler = verified();
     let result = compiler.compile(&func.view());
     assert!(
         matches!(result, Err(elle::jit::JitError::UnsupportedInstruction(_))),

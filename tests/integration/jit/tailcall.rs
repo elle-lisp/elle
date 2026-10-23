@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-23
 // src/jit/AGENTS.md
 // Tail calls the JIT turns into a loop, and the integer fast paths at the
 // edges: wrapping overflow, a zero divisor, a mixed int/float pair.
@@ -37,7 +37,7 @@ fn test_jit_tail_call_compiles() {
         )],
     );
 
-    let compiler = JitCompiler::new().unwrap();
+    let compiler = verified();
     let result = compiler.compile(&func.view());
     // TailCall should now compile successfully
     assert!(result.is_ok(), "TailCall should compile: {:?}", result);

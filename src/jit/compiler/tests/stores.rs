@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-23
 // docs/impl/jit.md
 //! Where a store into a stack slot puts a `Value`: the tag and the payload at
 //! the offsets a load reads, at the stride the runtime walks.
@@ -27,7 +27,7 @@ type Write = (u32, u64, u64);
 /// so a store and a load that disagree with the layout in the same way cannot
 /// agree with each other.
 fn slot_words_after(values: usize, writes: &[Write]) -> Vec<u64> {
-    let mut compiler = JitCompiler::new().expect("Failed to create compiler");
+    let mut compiler = verified();
     let mut sig = compiler.module.make_signature();
     sig.call_conv = CallConv::SystemV;
     sig.params.push(AbiParam::new(I64));

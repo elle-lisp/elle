@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-23
 //! A closure crosses the send boundary with its LIR, closure-valued constants, frame release tables and rest-list layout.
 //!
 //! docs/threads.md
@@ -104,7 +104,7 @@ fn a_closure_crosses_with_its_lir_and_the_values_it_loads() {
         assert!(pair.rest.is_empty_list());
 
         #[cfg(feature = "jit")]
-        crate::jit::JitCompiler::new()
+        crate::jit::JitCompiler::new(crate::config::JitVerifier::On)
             .expect("a compiler")
             .compile(&lir)
             .expect("the worker's JIT compiles the LIR that arrived");

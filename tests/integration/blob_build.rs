@@ -1,6 +1,7 @@
-// audited: 2026-10-20
+// audited: 2026-10-23
 // The release build that embeds the boot image: two stages, the variable each
-// release build passes, its checks, and the builds without one.
+// release build passes, its checks, the target that builds it, and the builds
+// without one.
 //
 // docs/impl/image/boot.md
 // docs/analysis/ci.md
@@ -9,7 +10,7 @@
 // compiles, and a release build that embeds nothing still runs every suite
 // green: each start then compiles the library or reads the warm cache.
 
-use crate::common::make_dry_run_with;
+use crate::common::{make_dry_run, make_dry_run_with};
 
 /// The variable that names the blob to the build script.
 const VAR: &str = "ELLE_BOOT_BLOB=";
@@ -190,4 +191,24 @@ fn no_variant_build_embeds_the_blob() {
             "the release `make {target}` embeds the default build's blob:\n{recipe}"
         );
     }
+}
+
+// `make release` is the release `make elle` with nothing on the command line.
+// The counter-factual is the default it replaces: outside CI a plain
+// `make elle` builds a debug binary that embeds nothing.
+#[test]
+fn make_release_builds_the_release_elle_with_its_blob() {
+    let recipe =
+        make_dry_run("release").unwrap_or_else(|| panic!("`make --dry-run release` failed"));
+    assert!(
+        cargo_lines(&recipe)
+            .iter()
+            .any(|(_, l)| l.contains(STAGE_ONE) && l.contains("--release")),
+        "`make release` runs no release stage 1:\n{recipe}"
+    );
+    let (_, line) = stage_two(&recipe);
+    assert!(
+        line.contains("--release"),
+        "`make release` builds a stage 2 that is no release build: {line}"
+    );
 }

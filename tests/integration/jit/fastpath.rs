@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-23
 // src/jit/AGENTS.md
 // The unary fast paths over each operand shape, and which signals the JIT
 // accepts a function under.
@@ -69,7 +69,7 @@ fn test_jit_accepts_yields_errors_signal() {
     // can be JIT-compiled and will side-exit to the interpreter on yield.
     let func = forty_two(Signal::yields_errors());
 
-    let compiler = JitCompiler::new().unwrap();
+    let compiler = verified();
     let result = compiler.compile(&func.view());
     assert!(
         result.is_ok(),
@@ -85,7 +85,7 @@ fn test_jit_accepts_errors_only_signal() {
     // have this signal and are safe to call from JIT code.
     let func = forty_two(Signal::errors());
 
-    let compiler = JitCompiler::new().unwrap();
+    let compiler = verified();
     let result = compiler.compile(&func.view());
     assert!(
         result.is_ok(),
