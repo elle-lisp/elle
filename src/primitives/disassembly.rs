@@ -1,7 +1,7 @@
-// audited: 2026-10-06
+// audited: 2026-10-23
 // docs/impl/jit.md
-//! The primitives that render a closure's compiled forms: bytecode, Cranelift
-//! IR, and the LIR control flow graph.
+//! The primitives that render a closure's bytecode, Cranelift IR and LIR
+//! control flow graph, and the two that list the primitives.
 
 use crate::lir::{terminator_kind, Terminator};
 use crate::primitives::def::RegionEffect;
@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 
 /// (vm/list-primitives) or (vm/list-primitives :category) — list registered names
 ///
-/// Returns a sorted list of strings. With no arguments, returns all names.
+/// Returns a sorted list of symbols. With no arguments, returns all names.
 /// With a category keyword or string, filters by category (e.g., :math, :"special form").
 pub(crate) fn prim_list_primitives(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
@@ -82,7 +82,7 @@ pub(crate) fn prim_disjit(
             Some(lir) => lir,
             None => return (SIG_OK, Value::NIL),
         };
-        let compiler = match crate::jit::JitCompiler::new() {
+        let compiler = match crate::jit::JitCompiler::for_process() {
             Ok(c) => c,
             Err(_) => return (SIG_OK, Value::NIL),
         };

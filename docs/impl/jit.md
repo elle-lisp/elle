@@ -13,7 +13,7 @@ LIR → FunctionTranslator → Cranelift IR → Native code → JitCode
 ## Key types
 
 - **`JitCompiler`** — manages the Cranelift `JITModule`, declares
-  runtime helper symbols, tracks compilation stats
+  runtime helper symbols, runs the [verifier](verifier.md) when asked
 - **`FunctionTranslator`** — walks LIR basic blocks and instructions,
   emitting Cranelift IR
 - **`JitCode`** — wraps the native function pointer; keeps the module
@@ -188,7 +188,7 @@ Not all functions can be JIT-compiled. The JIT rejects functions that:
 
 - Use features not yet implemented in the translator
 - Contain `MakeClosure`, or collect struct or named varargs
-- Fail Cranelift verification
+- Fail Cranelift verification, where the verifier runs
 
 The translator has no lowering for `MakeClosure`. A closure's code object is a
 payload in its compile unit's code region, and the worker that compiles runs

@@ -1,15 +1,15 @@
 # Runtime Configuration (`vm/config`)
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-10-23 -->
 
 What a build decides, what the `elle` command line sets, and what a running
 program reads and changes through `vm/config`.
 
 A build fixes the runtime a program runs on: which optimizing tier it carries,
 and which I/O backend. The command line sets what a user may reasonably
-change per run — tracing, dumps, paths and caches — and no flag chooses a
-tier. A running program reads the rest through `vm/config` and changes a few
-settings through `vm/config-set`.
+change per run — tracing, dumps, the JIT verifier, paths and caches — and no
+flag chooses a tier. A running program reads the rest through `vm/config` and
+changes a few settings through `vm/config-set`.
 
 ## Builds
 
@@ -167,6 +167,19 @@ over one file print one text, so a recorded dump is a golden.
 `make bytecode-golden` records it for the corpus and the standard library, and
 `make bytecode-golden-check` compares the current binary against the record.
 
+### The JIT verifier
+
+```bash
+elle --jit-verify=on script.lisp     # Cranelift checks each function the JIT compiles
+ELLE_JIT_VERIFY=on elle script.lisp  # the same, for this process and every process it starts
+```
+
+`--jit-verify=` and `ELLE_JIT_VERIFY` each take `on` or `off`, and the flag
+wins over the variable. An empty variable reads as unset. Any other value stops
+`elle` before it runs anything, and the message names the value. The verifier
+is off by default, and [verifier](impl/verifier.md) says which processes turn it
+on.
+
 ### WASM policy
 
 A `wasm` build takes `--wasm=`; no other build accepts the flag.
@@ -240,6 +253,7 @@ that depends on them is off there, so every start compiles the standard library.
 (vm/config :jit)               # returns the JIT threshold, or nil
 (vm/config :mlir)              # returns the MLIR threshold, or nil
 (vm/config :max-depth)         # returns the non-tail call depth cap
+(vm/config :jit-verify)        # returns whether Cranelift verifies JIT code
 ```
 
 `:jit` answers the number of calls after which the JIT compiles a function,

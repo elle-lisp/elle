@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-23
 //! `vm/config` and `vm/config-set` over the VM's runtime configuration, and
 //! the `arena/allocs` measurement.
 //!
@@ -53,6 +53,7 @@ impl VM {
             "debug-bytecode",
             "unicode",
             "max-depth",
+            "jit-verify",
         ];
 
         if arg.is_nil() {
@@ -103,6 +104,7 @@ impl VM {
             "debug-bytecode" => Value::bool(rc.debug_bytecode),
             "unicode" => self.unicode_version_value(ctx),
             "max-depth" => Self::max_depth_value(rc.max_depth),
+            "jit-verify" => Value::bool(crate::config::get().jit_verifier.is_on()),
             _ => return None,
         })
     }
@@ -222,6 +224,13 @@ impl VM {
                 return Err((
                     "argument-error",
                     "vm/config-set :unicode: the Unicode generation is fixed at VM construction"
+                        .to_string(),
+                ))
+            }
+            "jit-verify" => {
+                return Err((
+                    "argument-error",
+                    "vm/config-set :jit-verify: the JIT verifier is fixed for the process"
                         .to_string(),
                 ))
             }

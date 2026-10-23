@@ -38,6 +38,7 @@ Up: [..](../AGENTS.md)
 - [syntax.md](syntax.md) — **Syntax — a region-native immutable tree** The pre-analysis tree the reader produces, the expander rewrites, and the analyzer consumes.
 - [typeinfer.md](typeinfer.md) — **Type inference: the ascent, and what a call proves** Where the types come from: an ascent from below whose limit is the least fixpoint, and what each kind of call contributes to it.
 - [values.md](values.md) — **Values** Every Elle value is a 16-byte tagged union: an 8-byte tag and an 8-byte payload.
+- [verifier.md](verifier.md) — **The JIT verifier** Cranelift's verifier checks each function the JIT compiles, and a test turns it on.
 - [vm.md](vm.md) — **VM** The VM is a stack-machine interpreter that executes bytecode.
 - [wasm.md](wasm.md) — **WASM Backend** The WASM backend compiles Elle programs to WebAssembly and runs them under Wasmtime, over the same front end the bytecode VM uses.
 

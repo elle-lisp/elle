@@ -1,7 +1,8 @@
-// audited: 2026-10-20
+// audited: 2026-10-23
 // docs/impl/jit.md
-//! `JitCompiler`: a compile's Cranelift module, the flag that abandons it,
-//! and the two entry points that drive a frozen function through it.
+// docs/impl/verifier.md
+//! `JitCompiler`: a compile's Cranelift module, whether it verifies, the flag
+//! that abandons it, and its two entry points.
 //!
 //! `compile` produces native code and the `JitCode` that keeps it alive, and
 //! refuses the two shapes `LirView::jit_refusal` names; those refusals are
@@ -21,6 +22,7 @@ use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{Linkage, Module};
 
+use crate::config::JitVerifier;
 #[cfg(test)]
 use crate::lir::LirOwned;
 use crate::lir::{Label, LirView};
@@ -64,19 +66,21 @@ mod seal;
 mod translate;
 
 impl JitCompiler {
-    /// Create a new JIT compiler
-    pub fn new() -> Result<Self, JitError> {
-        // Configure Cranelift for the host target
+    /// Create a JIT compiler for the host, which runs Cranelift's verifier on
+    /// each function when `verifier` is on (docs/impl/verifier.md).
+    pub fn new(verifier: JitVerifier) -> Result<Self, JitError> {
+        let verify = if verifier.is_on() { "true" } else { "false" };
         let mut flag_builder = settings::builder();
-        flag_builder
-            .set("use_colocated_libcalls", "false")
-            .map_err(|e| JitError::CompilationFailed(e.to_string()))?;
-        flag_builder
-            .set("is_pic", "false")
-            .map_err(|e| JitError::CompilationFailed(e.to_string()))?;
-        flag_builder
-            .set("opt_level", "speed")
-            .map_err(|e| JitError::CompilationFailed(e.to_string()))?;
+        for (name, value) in [
+            ("use_colocated_libcalls", "false"),
+            ("is_pic", "false"),
+            ("opt_level", "speed"),
+            ("enable_verifier", verify),
+        ] {
+            flag_builder
+                .set(name, value)
+                .map_err(|e| JitError::CompilationFailed(e.to_string()))?;
+        }
 
         let isa_builder =
             cranelift_native::builder().map_err(|e| JitError::CompilationFailed(e.to_string()))?;
@@ -100,6 +104,17 @@ impl JitCompiler {
             helpers,
             abandon: Abandon::default(),
         })
+    }
+
+    /// A compiler under this process's setting, which is how the VM builds
+    /// every compiler it uses.
+    pub fn for_process() -> Result<Self, JitError> {
+        Self::new(crate::config::get().jit_verifier)
+    }
+
+    /// Whether Cranelift verifies each function this compiler defines.
+    pub fn verifies(&self) -> bool {
+        self.module.isa().flags().enable_verifier()
     }
 
     /// Stop this compile with `JitError::Abandoned` once `abandon` is set.
@@ -217,12 +232,6 @@ impl JitCompiler {
 
         let text = format!("{}", ctx.func);
         Ok(text.lines().map(String::from).collect())
-    }
-}
-
-impl Default for JitCompiler {
-    fn default() -> Self {
-        Self::new().expect("Failed to create JIT compiler")
     }
 }
 

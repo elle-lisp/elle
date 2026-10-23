@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-23
 //! The rig's entry point: answer a subcommand, or read the sidecar and the profile, build the runtime, and run the program on it.
 //!
 //! rig/overview.md
@@ -114,6 +114,9 @@ fn main() {
         return;
     }
     settings.install(&mut config);
+    // The rig hosts tests alone, so it runs the JIT verifier, and so does every
+    // process its program starts (docs/impl/verifier.md).
+    config.verify_jit_for_tests();
     let program = elle::program::Program::prepare(config, remaining)
         .unwrap_or_else(|code| std::process::exit(code));
     if program.is_repl() {

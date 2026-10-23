@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-23
 // docs/impl/jit.md
 //! What only the rendered Cranelift IR settles: a load's flags, an operation's
 //! tag test, and a call's target.
@@ -62,8 +62,7 @@ fn branch_lines(clif: &[String]) -> Vec<&str> {
 }
 
 fn arith_clif(op: BinOp, make_op: fn(Reg, BinOp, Reg, Reg) -> InstrRef<'static>) -> Vec<String> {
-    JitCompiler::new()
-        .expect("Failed to create compiler")
+    verified()
         .clif_text(&make_arith_lir(op, make_op).view())
         .expect("Failed to translate")
 }
@@ -109,8 +108,7 @@ fn a_proven_comparison_compiles_without_a_tag_check() {
     use crate::lir::CmpOp;
 
     for op in [CmpOp::Lt, CmpOp::Le, CmpOp::Eq] {
-        let unproven = JitCompiler::new()
-            .expect("Failed to create compiler")
+        let unproven = verified()
             .clif_text(
                 &LirFixture::new(Arity::Exact(2))
                     .signal(Signal::silent())
@@ -138,8 +136,7 @@ fn a_proven_comparison_compiles_without_a_tag_check() {
             "{op:?}: an unproven comparison must test its operands' tags"
         );
 
-        let proven = JitCompiler::new()
-            .expect("Failed to create compiler")
+        let proven = verified()
             .clif_text(
                 &LirFixture::new(Arity::Exact(2))
                     .signal(Signal::silent())
@@ -195,7 +192,7 @@ fn an_argument_load_carries_trusted_flags() {
     // compiles, and the compiled code returns the right answers, because the
     // argument array really is aligned and mapped. It costs a trapping,
     // unaligned-tolerant access on every parameter of every hot function.
-    let compiler = JitCompiler::new().expect("Failed to create compiler");
+    let compiler = verified();
     let clif = compiler
         .clif_text(&make_simple_lir().view())
         .expect("Failed to translate");
@@ -217,7 +214,7 @@ fn an_argument_load_carries_trusted_flags() {
 fn a_capture_load_carries_trusted_flags() {
     // The environment pointer is a second base pointer, reached from a
     // different translator path than the argument array.
-    let compiler = JitCompiler::new().expect("Failed to create compiler");
+    let compiler = verified();
     let clif = compiler
         .clif_text(&make_capture_read_lir().view())
         .expect("Failed to translate");
@@ -344,7 +341,7 @@ fn a_self_recursive_call_goes_through_the_dispatch_helper() {
     // Counter-factual: a translator that emitted the direct call computes the
     // same answers for a capture-free function, and reads garbage captures for
     // every other one, because a direct call has no environment to hand over.
-    let compiler = JitCompiler::new().expect("Failed to create compiler");
+    let compiler = verified();
     let dispatch_id = compiler.helpers.call.as_u32();
     let lir = make_self_call_lir();
     let clif = compiler

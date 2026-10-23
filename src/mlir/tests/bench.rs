@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-23
 // docs/impl/mlir.md
 //! A two-operation kernel, `a * b + a`, and the timings that say what each MLIR
 //! phase costs beside Cranelift's.
@@ -98,7 +98,8 @@ fn bench_mlir() {
 
     // ── Cranelift: compile only (execution needs VM context) ─
     let start = Instant::now();
-    let compiler = crate::jit::JitCompiler::new().unwrap();
+    // Without the verifier, as a user build compiles (docs/impl/verifier.md).
+    let compiler = crate::jit::JitCompiler::new(crate::config::JitVerifier::Off).unwrap();
     let cranelift_init = start.elapsed();
 
     let start = Instant::now();

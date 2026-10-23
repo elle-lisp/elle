@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-23
 // docs/impl/jit.md
 //! The background JIT worker: the thread Cranelift runs on, and the task and
 //! result that cross to it.
@@ -74,7 +74,7 @@ impl JitWorker {
                     }
                     let key = task.bytecode_key;
                     let t0 = std::time::Instant::now();
-                    let result = JitCompiler::new().and_then(|compiler| {
+                    let result = JitCompiler::for_process().and_then(|compiler| {
                         compiler
                             .abandoned_by(owner_gone.clone())
                             .compile(&task.lir.view())

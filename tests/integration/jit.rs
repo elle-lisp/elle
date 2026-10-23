@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-23
 // docs/impl/jit.md
 // The JIT integration corpus: hand-built LIR compiled to native code, run, and
 // held to the answer the interpreter gives.
@@ -6,6 +6,7 @@
 // This root holds the shims and fixtures every submodule shares; each `mod`
 // below is one instruction family.
 
+use elle::config::JitVerifier;
 use elle::jit::{JitCompiler, JitError};
 use elle::lir::{
     BinOp, CmpOp, ConstRef, InstrRef, Label, LirBuilder, LirOwned, Reg, Terminator, UnaryOp,
@@ -156,6 +157,12 @@ fn unary(op: InstrRef<'_>) -> LirOwned {
     )
 }
 
+/// A compiler that runs Cranelift's verifier, as every test of the translator
+/// does (docs/impl/verifier.md).
+fn verified() -> JitCompiler {
+    JitCompiler::new(JitVerifier::On).expect("create a JIT compiler")
+}
+
 fn compile_and_call(lir: &LirOwned, args: &[Value]) -> Result<Value, JitError> {
     use elle::primitives::register_primitives;
     use elle::symbol::SymbolTable;
@@ -170,7 +177,7 @@ fn compile_and_call(lir: &LirOwned, args: &[Value]) -> Result<Value, JitError> {
     let mut vm = VM::new();
     let _signals = register_primitives(&mut vm, &mut symbols);
 
-    let compiler = JitCompiler::new()?;
+    let compiler = verified();
     let code = compiler.compile(&lir.view())?;
     // self_tag/self_payload = 0 since we're not testing self-tail-calls in these basic tests
     let result = unsafe {

@@ -11,6 +11,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  # Every job runs Cranelift's verifier, a `cargo test` step included
+  # (docs/impl/verifier.md).
+  ELLE_JIT_VERIFY: "on"
 
 jobs:
   audit:

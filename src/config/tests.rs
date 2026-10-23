@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-23
 //! Pins the configuration: trace cells, the starting tier, the refused flags
 //! and the page size.
 //!
@@ -8,6 +8,7 @@ use super::*;
 use crate::value::fiberheap::pagepool::base_page;
 
 mod cache;
+mod verifier;
 
 /// Trace state is per-instance: a `RuntimeConfig` reads and writes its own
 /// [`TraceCell`], so a diagnostic toggle on one instance never reaches another.

@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-10-23
 // docs/impl/jit.md
 // docs/impl/jit-fuel.md
 // docs/impl/region/unwind.md
@@ -61,7 +61,7 @@ fn every_compiled_exit_pops_the_region_map() {
     // assertions, and only the balance check in `execute_bytecode_saving_stack`
     // says anything at all: in a debug build, once the enclosing activation
     // returns.
-    let compiler = JitCompiler::new().expect("Failed to create compiler");
+    let compiler = verified();
     let pop_id = compiler.helpers.pop_region_map.as_u32();
     let clif = compiler
         .clif_text(&make_call_lir(Signal::yields()).view())
@@ -109,7 +109,7 @@ fn a_call_that_may_pause_reaches_the_fuel_pause() {
     // Counter-factual: a translator that charges nothing compiles every
     // program to the same answers, and a fueled fiber running the code never
     // pauses.
-    let compiler = JitCompiler::new().expect("Failed to create compiler");
+    let compiler = verified();
     let pause_id = compiler.helpers.fuel_pause.as_u32();
     let clif = compiler
         .clif_text(&make_call_lir(Signal::errors()).view())
@@ -130,7 +130,7 @@ fn a_silent_functions_charge_never_pauses() {
     // Counter-factual: a pausing charge in a silent function parks a frame its
     // silent caller cannot park behind, since a silent function records no call
     // site, and the pause leaves the caller as a broken proof.
-    let compiler = JitCompiler::new().expect("Failed to create compiler");
+    let compiler = verified();
     let pause_id = compiler.helpers.fuel_pause.as_u32();
     let clif = compiler
         .clif_text(&make_call_lir(Signal::silent()).view())

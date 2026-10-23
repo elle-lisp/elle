@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-23
 //! Two configurations: `Config` is set once at startup and read anywhere,
 //! `RuntimeConfig` rides on one VM and a running program may change it.
 //!
@@ -67,7 +67,7 @@ pub fn init(config: Config) {
 }
 
 mod policy;
-pub use policy::{GraftPolicy, JitPolicy, MlirPolicy, WasmPolicy};
+pub use policy::{GraftPolicy, JitPolicy, JitVerifier, MlirPolicy, WasmPolicy};
 
 mod keywords;
 pub use keywords::{dump_bits, trace_bits, DUMP_KEYWORDS, TRACE_KEYWORDS};
@@ -273,6 +273,10 @@ pub struct Config {
     /// runner's worker turn a tier off or make it eager through `vm/config-set`,
     /// which every other program is refused (docs/test-runner.md).
     pub test_runner: bool,
+
+    /// Whether Cranelift verifies each function the JIT compiles, from
+    /// `--jit-verify=` and `ELLE_JIT_VERIFY` (docs/impl/verifier.md).
+    pub jit_verifier: JitVerifier,
 }
 
 impl Default for Config {
@@ -303,6 +307,9 @@ impl Default for Config {
             help: false,
             version: false,
             test_runner: false,
+            // A value `Config::parse` refuses reads as off here, so an
+            // embedding host never fails to build a configuration.
+            jit_verifier: JitVerifier::from_env().unwrap_or_default(),
         }
     }
 }
@@ -310,6 +317,14 @@ impl Default for Config {
 mod parse;
 
 impl Config {
+    /// Run the JIT verifier in this process, and set the variable so that every
+    /// process it starts runs it too: what `elle test` and the rig do
+    /// (docs/impl/verifier.md). Call it before the process starts a thread.
+    pub fn verify_jit_for_tests(&mut self) {
+        self.jit_verifier = JitVerifier::On;
+        std::env::set_var(JitVerifier::VAR, "on");
+    }
+
     /// The Unicode segmentation generation new VMs default to.
     pub fn unicode_generation(&self) -> crate::segment::Generation {
         self.unicode.unwrap_or(crate::segment::Generation::NEWEST)

@@ -1,9 +1,10 @@
-// audited: 2026-10-14
-//! A closure crosses the send boundary with its LIR, closure-valued constants, frame release tables and rest-list layout.
+// audited: 2026-10-23
+//! A closure crosses the send boundary with its LIR, closure-valued constants, frame release tables, rest-list layout and body fragment.
 //!
 //! docs/threads.md
 
 use super::*;
+use crate::value::region_slice::RegionSlice;
 
 /// Build a minimal closure Value with an attached LIR function, on `heap`.
 fn make_test_closure(
@@ -20,7 +21,7 @@ fn make_test_closure(
     }
     let closure = Closure::new(
         code.build(unsafe { &mut *heap }),
-        crate::value::region_slice::RegionSlice::empty(),
+        RegionSlice::empty(),
         SignalBits::EMPTY,
     );
     crate::value::heap::alloc(
@@ -75,7 +76,7 @@ fn a_closure_crosses_with_its_lir_and_the_values_it_loads() {
             HeapObject::Closure {
                 closure: Closure::new(
                     outer.build(unsafe { &mut *heap_ptr }),
-                    crate::value::region_slice::RegionSlice::empty(),
+                    RegionSlice::empty(),
                     SignalBits::EMPTY,
                 ),
                 traits: Value::NIL,
@@ -104,7 +105,7 @@ fn a_closure_crosses_with_its_lir_and_the_values_it_loads() {
         assert!(pair.rest.is_empty_list());
 
         #[cfg(feature = "jit")]
-        crate::jit::JitCompiler::new()
+        crate::jit::JitCompiler::new(crate::config::JitVerifier::On)
             .expect("a compiler")
             .compile(&lir)
             .expect("the worker's JIT compiles the LIR that arrived");
@@ -136,7 +137,7 @@ fn closure_round_trips_preserving_frame_release_tables() {
             HeapObject::Closure {
                 closure: Closure::new(
                     template.build(unsafe { &mut *heap_ptr }),
-                    crate::value::region_slice::RegionSlice::empty(),
+                    RegionSlice::empty(),
                     SignalBits::EMPTY,
                 ),
                 traits: Value::NIL,
@@ -196,7 +197,7 @@ fn closure_round_trips_preserving_its_rest_list_layout() {
             HeapObject::Closure {
                 closure: Closure::new(
                     template.build(unsafe { &mut *heap_ptr }),
-                    crate::value::region_slice::RegionSlice::empty(),
+                    RegionSlice::empty(),
                     SignalBits::EMPTY,
                 ),
                 traits: Value::NIL,
@@ -246,7 +247,7 @@ fn closure_round_trips_preserving_its_fragment() {
             HeapObject::Closure {
                 closure: Closure::new(
                     template.build(unsafe { &mut *heap_ptr }),
-                    crate::value::region_slice::RegionSlice::empty(),
+                    RegionSlice::empty(),
                     SignalBits::EMPTY,
                 ),
                 traits: Value::NIL,

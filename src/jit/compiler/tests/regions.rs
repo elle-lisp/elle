@@ -44,7 +44,7 @@ fn adopt_into_activation_frees_member_at_compiled_return() {
     use crate::value::heap::{HeapObject, Pair};
 
     let lir = make_adopt_into_activation_lir();
-    let compiler = JitCompiler::new().expect("Failed to create compiler");
+    let compiler = verified();
     let code = compiler.compile(&lir.view()).expect("Failed to compile");
 
     let mut vm = crate::vm::VM::new();
@@ -128,7 +128,7 @@ fn a_kill_frees_the_members_a_compiled_activation_adopted() {
     use crate::value::heap::{HeapObject, Pair};
 
     let lir = make_adopt_then_spin_lir();
-    let compiler = JitCompiler::new().expect("Failed to create compiler");
+    let compiler = verified();
     let code = compiler.compile(&lir.view()).expect("Failed to compile");
 
     let mut vm = crate::vm::VM::new();
