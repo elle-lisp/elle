@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-10-22
 ## The std/gun mesh rules: fetch, forward, acks, deferral and resync, over the connections peer.lisp runs.
 ## lib/gun/mesh.md
 ## lib/gun/overview.md
@@ -49,26 +49,32 @@
 
   ## ── Fetching ─────────────────────────────────────────────────────────
 
+  (defn unfetched [c souls]
+    "The souls in souls that nobody has fetched or started to fetch."
+    (filter (fn [soul] (nil? (get c:fetched soul))) souls))
+
   (defn fetch-souls [c souls except]
     "Fetch each soul in souls: load it, ask every peer but except, and wait
      for their answers, :wait seconds at most. A soul another fiber is
      fetching is waited for instead. A soul is pending from before its get
      leaves, which is what ends a get cycle. A fetch that skipped except
-     leaves its souls unfetched, so a fiber that waited for it fetches again."
+     leaves its souls unfetched, so a fiber that waited for it fetches again.
+     A soul's entry in :fetched holds its :latch, the peer key it :skips,
+     and whether that peer was :asked for it."
     (let [fresh @[]
           others @[]]
       (each soul in souls
-        (let [latch (get c:fetched soul)]
-          (if latch
-            (push others [soul latch])
+        (let [f (get c:fetched soul)]
+          (if f
+            (push others [soul f:latch])
             (begin
-              (put c:fetched soul (sync:make-latch))
+              (put c:fetched soul @{:latch (sync:make-latch) :skips except})
               (push fresh soul)))))
       (defer
         (each soul in fresh
-          (let [latch (get c:fetched soul)]
+          (let [f (get c:fetched soul)]
             (when except (del c:fetched soul))
-            (latch:open)))
+            (f:latch:open)))
         (each soul in fresh
           (core:load c soul))
         (let [targets (peers-except c except)]
@@ -81,8 +87,7 @@
               (wait:await c id c:wait)))))
       (each [_ latch] in others
         (latch:wait))
-      (let [again (filter (fn [soul] (nil? (get c:fetched soul)))
-                          (map first others))]
+      (let [again (unfetched c (map first others))]
         (unless (empty? again) (fetch-souls c again except)))))
 
   (defn fetch [c souls]
@@ -97,7 +102,7 @@
      fiber, of those that nobody has fetched. Never waits on the network."
     (each soul in souls
       (core:load c soul))
-    (let [fresh (filter (fn [soul] (nil? (get c:fetched soul))) souls)]
+    (let [fresh (unfetched c souls)]
       (unless (empty? fresh)
         (ev/spawn (fn [] (reporting c (fn [] (fetch c fresh)))))))
     nil)
@@ -146,12 +151,26 @@
           (send-to p (wire:nack msg:id (reason-of err)))
           (core:report c err)))))
 
+  (defn ask-skipped [c p souls]
+    "Send one get to each peer other than p that a pending fetch of a soul in
+     souls skipped, for those souls, once per fetch. Its answer reaches p as
+     gossip."
+    (let [asks @{}]
+      (each soul in souls
+        (let [f (get c:fetched soul)]
+          (when (and f f:skips (not (= f:skips p:key)) (not f:asked))
+            (put f :asked true)
+            (put asks f:skips [;(or (get asks f:skips) []) soul]))))
+      (each [k skipped] in asks
+        (when-let [q (get c:peers k)] (send-to q (wire:get (uuid:v4) skipped))))))
+
   (defn handle-get [c p msg]
     "Fetch from every other peer each soul of the get this database has not
      started to fetch, then answer with the nodes it holds. A pending soul
-     answers from local data at once."
-    (fetch-souls c (filter (fn [soul] (nil? (get c:fetched soul))) msg:souls)
-                 p:key)
+     answers from local data at once, and the peer its fetch skipped is
+     asked for it."
+    (ask-skipped c p msg:souls)
+    (fetch-souls c (unfetched c msg:souls) p:key)
     (send-to p (wire:answer msg:id (core:nodes c msg:souls))))
 
   (defn handlers [c]
