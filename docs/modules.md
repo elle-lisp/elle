@@ -1,6 +1,6 @@
 # Modules
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-23 -->
 
 Elle's modules: three raw loaders, the `import-file` form over them, an `import` macro in Elle, and conventions built from closures.
 
@@ -359,8 +359,8 @@ never compiles a file it imports, so nothing recurses at compile time.
 
 ### No signal crosses a file boundary
 
-Signal inference within a file converges by a fixpoint loop, so mutual
-recursion inside a file is exact. The analysis of a file reads nothing from the
+Within a file, the signals of definitions that call each other settle jointly
+([pipeline.md](pipeline.md)). The analysis of a file reads nothing from the
 files it imports, so a call into another file takes the unknown signal
 (#1232). [signals/inference.md](signals/inference.md) owns the rule.
 

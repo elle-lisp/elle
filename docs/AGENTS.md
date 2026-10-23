@@ -41,7 +41,7 @@ Up: [..](../AGENTS.md)
 - [named-args.md](named-args.md) — **Named Arguments** Elle supports optional positional parameters, named keyword parameters, and collected keyword arguments.
 - [parameters.md](parameters.md) — **Dynamic Parameters** Dynamic parameters are fiber-local variables with scoped rebinding.
 - [philosophy.md](philosophy.md) — **Design Philosophy** Why Elle infers signals instead of asking for them, and the gap that leaves between what the compiler knows and what a reader sees.
-- [pipeline.md](pipeline.md) — **Compilation pipeline** Which VM each entry point expands macros on, what a loader keeps a compile under, and how signal inference settles over a letrec.
+- [pipeline.md](pipeline.md) — **Compilation pipeline** Which VM each entry point expands macros on, what a loader keeps a compile under, and how signal inference settles over a unit.
 - [plugins.md](plugins.md) — **Plugins** Elle ships with Rust plugins and pure Elle standard library modules.
 - [posix-signals.md](posix-signals.md) — **POSIX signals** Elle programs can send POSIX signals to other processes and observe signals delivered to themselves.
 - [process-scheduler.md](process-scheduler.md) — **Process scheduler** How a process scheduler runs sub-fibers, forwards its I/O to the scheduler it runs in, and nests.

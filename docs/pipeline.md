@@ -1,8 +1,8 @@
 # Compilation pipeline
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-10-23 -->
 
-Which VM each entry point expands macros on, what a loader keeps a compile under, and how signal inference settles over a letrec.
+Which VM each entry point expands macros on, what a loader keeps a compile under, and how signal inference settles over a unit.
 
 [The pipeline index](../src/pipeline/AGENTS.md) lists the entry points, the
 compile context and the stages in order. [The HIR index](../src/hir/AGENTS.md)
@@ -102,17 +102,13 @@ compile input needs a place in the key:
 
 `CompileCtx::release` empties the store before teardown counts the residue.
 
-## Signal inference over a letrec
+## Signal inference over a unit
 
-A file compiles as one letrec, and a local `letrec` form is the same shape. A
-`def` or `var` whose lambda refers to itself is a letrec of one binding. So one
-mechanism, `converge_signals` in [fixpoint.rs](../src/hir/analyze/fixpoint.rs),
-infers the signals of mutually recursive definitions in all three. Its callers
-are `analyze_file_letrec` in
-[fileletrec/letrec.rs](../src/hir/analyze/fileletrec/letrec.rs) for a file,
-[letrec.rs](../src/hir/analyze/letrec.rs) for the form, and
-[binding.rs](../src/hir/analyze/binding.rs) for a `def` in a function body or
-in a form compiled alone.
+A file compiles as one letrec, a local `letrec` form is the same shape, and a
+function body is an implicit letrec ([bindings](bindings.md)). A definition may
+call one defined after it, or call itself. The analyzer makes one pass over a
+unit, and the signal solver then settles every signal in it at once
+([the solver](impl/solver.md)).
 
 ### The problem
 
@@ -130,9 +126,9 @@ algorithm below gives `foo` the yield `bar` settles on:
 ```
 
 A function that refers to itself reads its own seed the same way. Below, the
-lambda inside `walk` calls `walk` while `walk` is still being analyzed. One
-pass gives that lambda the seed's signal, silent, and its yield then breaks
-the proof at run time.
+lambda inside `walk` calls `walk` while `walk` is still being analyzed. The
+pass gives that lambda the seed's signal, silent, and its yield would then
+break the proof at run time.
 
 ```lisp
 (defn outer []
@@ -150,59 +146,48 @@ the proof at run time.
 
 ### The algorithm
 
-1. **Pre-bind** every name, so each initializer resolves its siblings. A name
-   bound to `(fn …)` syntax is seeded as silent, with the arity its parameter
-   list gives. A `def` or `var` of a lambda seeds its own name the same way,
-   just before its initializer.
-2. **Analyze the initializers** in order. Each lambda records its
-   `inferred_signals` and its arity as the call signal of its binding.
-3. **Iterate** over the lambda bindings, at most 10 times. Re-analyze each one
-   against the current signals, and record any signal that changed. Stop at the
-   first iteration that changes nothing. A `def` iterates only when its lambda
-   refers to itself and its signal left the seed. The lambda of any other `def`
-   never read its own seed, so its first analysis stands.
-4. **Analyze the body** only after the loop settles, so a call into the cycle
-   reads the settled signals. For a `def`, the body is the forms after it. A
-   file-letrec has no separate body: step 2 analyzes its expression entries in
-   order, and the loop does not analyze them again.
-
-For a file, step 3 re-analyzes against the scope as it stood after step 1. An
-expression entry such as a `parameterize` body may define names in step 2, and
-a lambda re-analyzed with those visible would take a wrong capture set.
-
-Re-analysis only adds binding flags, such as the ones `mark_captured` sets, and
-never clears one. An extra iteration can make the result more conservative,
-never wrong. Re-analysis reports again every error the first analysis
-reported. The loop keeps the errors of its last iteration alone, and drops each
-one that step 2 already reported, so a body that fails to analyze reports each
-error once.
+1. **Seed** every name before any initializer is analyzed. A file, a `letrec`
+   and a function body each bind every name they define first. A name bound to
+   `(fn …)` syntax is seeded as silent, with the arity its parameter list
+   gives and whether it collects keywords. A `def` or `var` of a lambda
+   anywhere else seeds its own name just before its initializer.
+2. **Analyze once**, in order. A call reads its callee's signal as it stands,
+   which is the seed for a callee the pass has not reached. The call checks
+   its argument count against the seeded arity.
+3. **Solve.** The entry point, `Analyzer::analyze` for a form and
+   `Analyzer::analyze_file` for a file, states facts about the HIR the pass
+   built and computes their least model.
+4. **Raise.** Each call takes the bits the model answers for it, and each node
+   takes its children's bits, up to the enclosing lambda. Each lambda takes
+   the signal the model answers for it. A signal only rises, so nothing the
+   pass inferred is lost.
+5. **Check** each ceiling, and each bound at a call, against the final
+   signals. A seed is optimistic, so a check during the pass would accept a
+   body that raises. The messages are the ones
+   [signals/inference.md](signals/inference.md) shows.
 
 ### Why it ends
 
-Signals form a lattice, and each iteration only moves a signal upward from its
-silent seed. A signal that stops moving is at its least fixed point, so the
-lattice height bounds the loop. The limit of 10 guards against a defect in the
-lattice; the argument does not need it.
+The pass reads each form once. The solver only adds a bit or a free variable
+to an answer, and a unit's facts name finitely many of each, so it stops.
+Nothing caps either step.
 
-The seed is optimistic, so a loop cut short reports signals that are too low.
-That is the unsafe direction: a function that can raise `:error` but is
-inferred silent passes a `(silent!)` check at compile time, and raises at run
-time instead. That raise leaves a silent function, so its boundary reports it
-as the terminal `:broken-proof` error
+The model is the least one the solver's rules allow, and each rule is sound,
+so a final signal is never lower than what the code can raise. A defect that
+makes one too low still meets the boundary of a silent function, which reports
+it as the terminal `:broken-proof` error
 ([signals/inference.md](signals/inference.md)). The boundary is the backstop,
 not the guarantee.
 
 ### Scope
 
-The fixpoint is per file. No signal crosses a file boundary
-([signal inference](signals/inference.md)), so a mutual recursion across one
-does not settle.
+The solve is per unit: a file, or a form compiled alone. No signal crosses a
+file boundary ([signal inference](signals/inference.md)), so a mutual
+recursion across one does not settle.
 
-A function body seeds a `def` only as the `def` is reached. A lambda that
-calls a sibling defined later in the same body reads no seed for it. It takes
-the unknown-callee signal instead, which is sound and may be wider than the
-sibling's. Mutual recursion between siblings takes it at the call to the later
-one. A call to an earlier sibling reads that sibling's signal:
+Within a unit, the order of the definitions changes no signal. A call to a
+sibling defined later in a function body reads that sibling's signal, as a
+call to an earlier one does, and mutual recursion between siblings settles:
 
 ```lisp
 (defn outer-bits [src]
@@ -210,10 +195,47 @@ one. A call to an earlier sibling reads that sibling's signal:
 
 (def later (outer-bits "(defn outer [] (defn f [] (g)) (defn g [] (yield 1)) (f))"))
 (def earlier (outer-bits "(defn outer [] (defn g [] (yield 1)) (defn f [] (g)) (f))"))
-(def mutual (outer-bits "(defn outer [] (defn f [n] (if (= n 0) 0 (g (- n 1)))) (defn g [n] (yield n) (f n)) (f 3))"))
-(assert (has? later :io) "a call to a later sibling takes every bit")
-(assert (has? mutual :io) "mutual recursion between siblings takes every bit")
-(assert (= earlier |:yield|) "a call to an earlier sibling reads its signal")
+(def mutual (outer-bits "(defn outer [] (defn f [n] (if n (g false) 0)) (defn g [n] (yield n) (f n)) (f true))"))
+(assert (= later |:yield|) "a call to a later sibling reads its signal")
+(assert (= earlier |:yield|) "so does a call to an earlier one")
+(assert (= mutual |:yield|) "mutual recursion between siblings settles")
+```
+
+The seeded arity checks a call to a later sibling, so a call with the wrong
+count does not compile:
+
+```lisp
+(def [ok? err] (protect (eval '(defn outer [] (defn f [] (g 1)) (defn g [] 0) (f)))))
+(assert (not ok?) "the call to g passes one argument too many")
+(assert (string/contains? (get err :message) "arity error: g expects 0 arguments, got 1"))
+```
+
+A ceiling is checked after the solve, so a lambda inside any form meets it with
+its final signal. Below, the lambda in `k` reaches `g`'s yield through `f`,
+and the pass analyzes it before it reaches `g`:
+
+```lisp
+(def src "(def f (fn [] (g)))
+(def k (fiber/new (fn [] (silent!) (f)) |:yield|))
+(def g (fn [] (yield 1) 2))")
+(def [ok? err] (protect (compile/whole-module src "<doc>")))
+(assert (not ok?) "the silent lambda reaches a yield")
+(assert (string/contains? (get err :message) "body may emit {:yield}"))
+```
+
+A call through a binding that an `assign` reaches takes every bit, wherever the
+call stands, because the solver cannot know which value the call finds
+([the solver](impl/solver.md)):
+
+```lisp
+(def [ok? err]
+  (protect (eval '(fn []
+                    (var h (fn [] 1))
+                    (defn f [] (silent!) (h))
+                    (assign h (fn [] (yield 1)))
+                    f))))
+(assert (not ok?) "f may call the lambda that yields")
+(assert (string/contains? (get err :message) "function restricted to {} but body may emit"))
 ```
 
 The inferred signals are data a program can query: `compile/signal`, the
