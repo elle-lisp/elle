@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-10-23
 //! Trait table primitives: attach a table, read it back, and resolve the method a collection operator dispatches through.
 //!
 //! docs/traits.md
@@ -19,7 +19,7 @@ use crate::primitives::def::{RegionEffect, RetType};
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::heap::{deref, HeapObject};
-use crate::value::store::{CellStore, SetStore, StructStore};
+use crate::value::store::{CellStore, StructStore};
 use crate::value::types::Arity;
 use crate::value::Value;
 
@@ -207,10 +207,9 @@ unsafe fn clone_with_traits(
             data: ctx.alloc_slice::<crate::value::Value>(data.as_slice()),
             traits: table,
         })),
-        HeapObject::LSetMut { data, .. } => Ok(ctx.alloc(HeapObject::LSetMut {
-            data: SetStore::new(data.read().iter().copied().collect()),
-            traits: table,
-        })),
+        HeapObject::LSetMut { data, .. } => {
+            Ok(ctx.set_mut_with_traits(data.read().as_slice(), table))
+        }
         // Infrastructure types — no trait field; return error. A closure
         // template is never user-visible, so `with-traits` can never reach it.
         HeapObject::Float(_)

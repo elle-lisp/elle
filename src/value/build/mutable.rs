@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-10-23
 //! The mutable-container constructors: each builds a container's store in its region, then its shell.
 //!
 //! docs/impl/mutable.md
@@ -141,11 +141,19 @@ pub(crate) fn set_mut(
     region: RuntimeRegion,
 ) -> Value {
     let traits = default_traits_for(heap, HeapTag::LSetMut);
-    heap.alloc_in_region(
-        HeapObject::LSetMut {
-            data: SetStore::new(items),
-            traits,
-        },
-        region,
-    )
+    let members: Vec<Value> = items.into_iter().collect();
+    set_mut_with_traits(heap, &members, traits, region)
+}
+
+/// Allocate a mutable set carrying `traits`, and its members, into `region`
+/// on `heap`. The members are ascending and distinct, the order a set read
+/// shows them in.
+pub(crate) fn set_mut_with_traits(
+    heap: &mut FiberHeap,
+    members: &[Value],
+    traits: Value,
+    region: RuntimeRegion,
+) -> Value {
+    let data = SetStore::new_in(heap, region, members);
+    heap.alloc_in_region(HeapObject::LSetMut { data, traits }, region)
 }

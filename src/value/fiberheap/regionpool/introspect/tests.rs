@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-10-23
 //! The cross-region scan reports every channel each heap variant holds a value in.
 //!
 //! docs/impl/region/diagnostics.md
@@ -240,7 +240,7 @@ fn obj_with_value_in_every_channel(
         ),
         HeapTag::LSetMut => (
             HeapObject::LSetMut {
-                data: SetStore::new(std::collections::BTreeSet::from([v2])),
+                data: SetStore::new(&[v2], |n| store.alloc_room(own, n)),
                 traits: vt,
             },
             both,

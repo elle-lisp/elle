@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-10-23
 //! The ergonomic `ctx.*` allocation surface: one constructor per heap type,
 //! each born on the ctx's heap in the ctx's own region.
 //! docs/impl/region/ctx.md
@@ -91,6 +91,9 @@ ctx_ctors! {
     set (items: std::collections::BTreeSet<Value>);
     /// Allocate a mutable set into the call's region.
     set_mut (items: std::collections::BTreeSet<Value>);
+    /// Allocate a mutable set carrying `traits` into the call's region, from
+    /// ascending, distinct members.
+    set_mut_with_traits (members: &[Value], traits: Value);
     /// Allocate a managed FFI pointer into the call's region (NULL ⇒ nil).
     managed_pointer (addr: usize);
 }

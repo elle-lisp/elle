@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-10-23
 //! The post-boot heap census: every live object in this instance's region
 //! store, and the graph a boot image must dump.
 //!
@@ -11,8 +11,8 @@
 //! Byte accounting is a dump-size estimate, not an allocator audit. Each
 //! object contributes its `HeapObject` shell plus its payload wherever the
 //! payload lives — region pages (`RegionSlice` backings, syntax trees, code
-//! payloads, the extent of an `@array`, `@string` or `@bytes` store) or, for
-//! an `@set` or `@struct`, the Rust heap. A box's or capture cell's value lies
+//! payloads, the extent of an `@array`, `@string`, `@bytes` or `@set` store)
+//! or, for a `@struct`, the Rust heap. A box's or capture cell's value lies
 //! inside its shell, so the shell is all it costs. A payload shared through an
 //! aliased `RegionSlice` is counted once (first holder). Not counted:
 //! per-container `Rc`/`RefCell` bookkeeping, a code payload's region tables,

@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-10-23
 //! The tracked mutable-store funnels: every store into, or removal from, a mutable container.
 //!
 //! docs/impl/region/rules.md
@@ -329,12 +329,14 @@ pub fn struct_remove_with_decref(
 /// Insert into a mutable @set, tracking the stored ref — only when actually
 /// inserted (a duplicate stores nothing). The element must already be frozen
 /// (set invariant; the caller owns freezing). Returns whether it was
-/// inserted. Panics if `collection` is not an @set.
+/// inserted. Panics if `collection` is not an @set, or if it must grow and no
+/// region of `heap` holds it.
 pub fn set_add_with_incref(heap: &mut FiberHeap, collection: Value, frozen: Value) -> bool {
+    let room = growth_room(heap, collection, "set_add_with_incref");
     let inserted = collection
         .set_store()
         .expect("set_add_with_incref: expected @set")
-        .insert(frozen);
+        .insert(frozen, room);
     if inserted {
         incref_inserted_element(heap, collection, frozen);
         record_store(heap, collection, frozen);

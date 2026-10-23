@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-10-23
 //! Deserializing a `SendBundle`: every received value is rebuilt on the
 //! receiving heap, in the call's region.
 //!
@@ -146,7 +146,7 @@ pub(in crate::value::send) fn parts_from_sendable(
 pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) -> Value {
     use crate::value::closure::Closure;
     use crate::value::heap::{HeapObject, Pair};
-    use crate::value::store::{CellStore, SetStore, StructStore};
+    use crate::value::store::{CellStore, StructStore};
     use std::collections::BTreeSet;
 
     match sv {
@@ -308,10 +308,8 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) ->
                 .collect();
             let traits_resolved = into_value_inner(*traits, ctx);
             let traits_val = recv_traits(ctx.ctx.heap_mut(), traits_resolved, HeapTag::LSetMut);
-            ctx.alloc(HeapObject::LSetMut {
-                data: SetStore::new(set),
-                traits: traits_val,
-            })
+            let members: Vec<Value> = set.into_iter().collect();
+            ctx.ctx.set_mut_with_traits(&members, traits_val)
         }
         SendValue::ChanSender(tx, wake) => crate::primitives::chan::sender_value(tx, wake, ctx.ctx),
         SendValue::ChanReceiver(rx, wake) => {

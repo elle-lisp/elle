@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-10-23
 //! The mutable stores: each mutable container's contents, read through a guard and written by the funnels.
 //!
 //! docs/impl/mutable.md
@@ -9,8 +9,9 @@
 //! beside the region tracking its store needs, and `value/build/mutable.rs`
 //! calls the constructors. A write that overlaps a live read guard panics with
 //! "already borrowed". The `@array`, `@string` and `@bytes` stores are one
-//! extent type, generic over what it holds. A box's or capture cell's store is
-//! its one value, inline in the shell.
+//! extent type, generic over what it holds, and the `@set` store wraps it to
+//! keep its members in order. A box's or capture cell's store is its one value,
+//! inline in the shell.
 
 mod array;
 mod bytes;
