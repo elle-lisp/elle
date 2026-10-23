@@ -2,9 +2,8 @@
 // docs/impl/jit.md
 // docs/signals/inference.md
 // benches/AGENTS.md
-//! The inline fuel charge, which reads the kill word, takes one unit from the
-//! fiber's budget at each charge site, and parks the frame when the budget is
-//! spent.
+//! The inline fuel charge: the kill check, one unit off the fiber's budget,
+//! and the park when the budget is spent.
 //!
 //! The emitter records the sites of a function that may signal in the order
 //! the translator meets them, so one counter indexes the view's charge sites

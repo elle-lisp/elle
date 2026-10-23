@@ -1,9 +1,11 @@
 // audited: 2026-10-22
-//! A pulled kill switch ends a program at its next charge: inside a silent
-//! loop, under a protect, through a metered fiber's mask, and in compiled
-//! code. A slack switch ends nothing.
+//! A pulled kill switch ends a program at its next charge, and a slack one
+//! ends nothing.
 //!
 //! docs/runtime.md
+//!
+//! The kill lands inside a silent loop, under a protect, through a metered
+//! fiber's mask, and in compiled code.
 
 use super::*;
 use crate::pipeline::compile_file_repl;
