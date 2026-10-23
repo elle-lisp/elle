@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-10-23
 // docs/impl/jit-fuel.md
 // docs/signals/inference.md
 // benches/AGENTS.md
@@ -92,9 +92,10 @@ impl<'a> FunctionTranslator<'a> {
     /// The kill check that opens every charge: load the pointer to the kill
     /// word through the VM, load the word through it, and branch to a cold
     /// block when the budget `word` is below it. The cold block raises the
-    /// terminal `:killed` error through `elle_jit_kill` and returns `nil`,
-    /// spilling nothing and parking no frame (docs/impl/jit-fuel.md). The builder
-    /// is left on the block that continues past the check.
+    /// terminal `:killed` error through `elle_jit_kill`, releases what the
+    /// activation owes as a `Return` does, and returns `nil`, spilling nothing
+    /// and parking no frame (docs/impl/jit-fuel.md). The builder is left on the
+    /// block that continues past the check.
     ///
     /// The word is an atomic another thread stores, read here as a plain
     /// load: the budget store beside it keeps the load in the loop, and a
@@ -125,6 +126,7 @@ impl<'a> FunctionTranslator<'a> {
         let call = builder.ins().call(func_ref, &[vm]);
         let result_tag = builder.inst_results(call)[0];
         let result_payload = builder.inst_results(call)[1];
+        self.emit_release_activation_dues(builder)?;
         self.emit_pop_then_return(builder, result_tag, result_payload)?;
 
         builder.switch_to_block(live_block);

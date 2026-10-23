@@ -1,6 +1,6 @@
 # Owner nodes — an activation as a forest root
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-23 -->
 
 The pages-less region that realizes an activation or a fiber as a forest root, the two cuts that fill it, and what frees it.
 
@@ -231,7 +231,9 @@ normal completion** — the interpreter trampoline's clean
 break and the compiled function's `Return` path
 (`elle_jit_release_activation_dues`) each take the slot and run one
 `decref_region_if_present(node)`: rc 1→0, subtree drop — never by an emitted drop
-instruction (no single static site covers return + tail + yield + error + squelch). This is
+instruction (no single static site covers return + tail + yield + error + squelch).
+The kill exit of a compiled charge site runs the same release, because it ends the
+activation with no frame to park ([jit-fuel](../jit-fuel.md)). This is
 the same clean-break discipline as the trampoline's tail-call-adopted closure release, and a
 frame-replacing tail call likewise keeps the activation — and its node — alive to the
 recursion's completion.

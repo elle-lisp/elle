@@ -216,8 +216,9 @@ function at the same address.
 
 **Every failed compile is recorded**, whichever kind it is, so the negative
 cache covers all of them. A refusal the translator plans for,
-`UnsupportedInstruction`, is recorded and says nothing further. A Cranelift failure or an invalid-LIR result is a defect in
-the compiler, so it is recorded and also printed on stderr, once. Every path
+`UnsupportedInstruction`, is recorded and says nothing further. A Cranelift
+failure or an invalid-LIR result is a defect in the compiler, so it is recorded
+and also printed on stderr, once. Every path
 that takes a result classifies it through `VM::record_jit_failure`: the
 background poll, the diagnostic drain, and the synchronous compile that
 `--trace=syncjit` runs. A flag meant to show a codegen failure must not be the

@@ -1,6 +1,6 @@
 # SPIR-V Backend
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-23 -->
 
 Two paths turn Elle into SPIR-V compute kernels for Vulkan: the MLIR compiler path, and a hand-written emitter in pure Elle.
 
@@ -52,7 +52,8 @@ The module is wrapped with the SPIR-V target environment
 `gpu.thread_id x`, which is the invocation's index inside its workgroup, and
 indexes each input with it. It then runs the lowered LIR and stores the result
 into the output buffer at the same index. A float result is bitcast to `i64`
-for the store.
+for the store. A kernel charges no fuel and reads no kill word
+([runtime](../runtime.md)): a dispatch runs to its end on the device.
 
 Single-block functions are emitted directly; multi-block functions
 go through an `scf` → `spirv` pass to handle structured control flow

@@ -1,6 +1,6 @@
 # jit
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-10-23 -->
 
 JIT compilation for Elle using Cranelift.
 
@@ -274,8 +274,9 @@ The signal system and JIT side-exit mechanism enable fibers and JIT to coexist:
 
 - **Kill**: every charge reads the VM's kill word first, in a silent function
   as in any other. A budget below it calls `elle_jit_kill`, which sets the
-  terminal `:killed` error as the fiber's signal and parks nothing, and the
-  function returns `nil`; the caller's signal check finds the error
+  terminal `:killed` error as the fiber's signal and parks nothing. The
+  function then releases what its activation owes, as it does at a `Return`,
+  and returns `nil`; the caller's signal check finds the error
   ([jit-fuel.md](../../docs/impl/jit-fuel.md)).
 
 - **Primitive signals**: `jit_handle_primitive_signal` classifies a

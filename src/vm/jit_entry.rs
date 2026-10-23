@@ -180,10 +180,7 @@ impl VM {
         error: crate::jit::JitError,
         pin: Option<CodePin>,
     ) {
-        if !matches!(
-            error,
-            crate::jit::JitError::UnsupportedInstruction(_) | crate::jit::JitError::Polymorphic
-        ) {
+        if !matches!(error, crate::jit::JitError::UnsupportedInstruction(_)) {
             eprintln!("[jit] compilation failed: {}", error);
         }
         self.jit_rejections

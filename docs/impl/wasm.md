@@ -1,6 +1,6 @@
 # WASM Backend
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-23 -->
 
 The WASM backend compiles Elle programs to WebAssembly and runs them under
 Wasmtime, over the same front end the bytecode VM uses.
@@ -60,6 +60,9 @@ Two execution modes:
   tier keys each compiled module, and each closure it refused, by the
   closure's bytecode address, so each entry pins that code region
   ([jit.md](jit.md)).
+
+Code on either mode charges no fuel and reads no kill word
+([runtime](../runtime.md)); a kill lands at the next charge site the VM runs.
 
 ### Pipeline (full-module)
 
