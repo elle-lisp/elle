@@ -52,3 +52,9 @@ mod mutable_set {
 mod mutable_set_model {
     include!("mutable_set_model.rs");
 }
+mod mutable_struct {
+    include!("mutable_struct.rs");
+}
+mod mutable_struct_model {
+    include!("mutable_struct_model.rs");
+}

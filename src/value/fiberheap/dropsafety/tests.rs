@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-10-23
 //! Each heap tag's answer to whether its free runs a destructor or a cascade scan.
 //!
 //! docs/impl/mutable.md
@@ -21,15 +21,16 @@ fn each_tag_decides_drop_and_cascade() {
     assert!(!needs_drop(HeapTag::LBox));
     assert!(!needs_drop(HeapTag::CaptureCell));
     assert!(!needs_drop(HeapTag::LSetMut));
+    assert!(!needs_drop(HeapTag::LStructMut));
     assert!(holds_value_refs(HeapTag::LStringMut));
     assert!(holds_value_refs(HeapTag::LBytesMut));
     assert!(holds_value_refs(HeapTag::LArrayMut));
     assert!(holds_value_refs(HeapTag::LBox));
     assert!(holds_value_refs(HeapTag::CaptureCell));
     assert!(holds_value_refs(HeapTag::LSetMut));
+    assert!(holds_value_refs(HeapTag::LStructMut));
 
     assert!(needs_drop(HeapTag::LString));
-    assert!(needs_drop(HeapTag::LStructMut));
     assert!(needs_drop(HeapTag::LStruct));
     assert!(needs_drop(HeapTag::Closure));
     assert!(needs_drop(HeapTag::LArray));

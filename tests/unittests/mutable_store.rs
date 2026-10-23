@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-10-23
 // The mutable-store seam: its read guards, the byte splice, and the borrow rule
 // that refuses a write under a live read.
 //
@@ -109,11 +109,13 @@ fn a_store_grows_past_three_doublings_and_reads_back() {
     let arr = h.ctx().array_mut(Vec::new());
     let b = h.ctx().bytes_mut(Vec::new());
     let set = h.ctx().set_mut(BTreeSet::new());
+    let st = h.ctx().struct_mut();
     for n in 0..100 {
         push_with_incref(h.heap(), arr, Value::int(n));
         let end = b.bytes_mut_read().unwrap().len();
         bytes_splice(h.heap(), b, end..end, &[n as u8]);
         set_add_with_incref(h.heap(), set, Value::int(99 - n));
+        struct_put_with_rebind(h.heap(), st, TableKey::Int(99 - n), Value::int(n));
     }
     let want: Vec<i64> = (0..100).collect();
     assert_eq!(&arr.array_mut_read().unwrap()[..], &ints(&want)[..]);
@@ -121,6 +123,16 @@ fn a_store_grows_past_three_doublings_and_reads_back() {
     assert_eq!(&b.bytes_mut_read().unwrap()[..], &bytes[..]);
     let members: Vec<Value> = set.set_mut_read().unwrap().iter().copied().collect();
     assert_eq!(members, ints(&want));
+    let entries: Vec<(TableKey, Value)> = st
+        .struct_mut_read()
+        .unwrap()
+        .iter()
+        .map(|(k, v)| (*k, *v))
+        .collect();
+    let pairs: Vec<_> = (0..100)
+        .map(|k| (TableKey::Int(k), Value::int(99 - k)))
+        .collect();
+    assert_eq!(entries, pairs);
 }
 
 #[test]
