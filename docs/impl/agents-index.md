@@ -120,6 +120,9 @@ alternative costs every new worktree its index until somebody runs a build.
 
 `make agents` writes every index. `make agents-check` is the CI gate.
 
+No command enters a submodule. A submodule is another repository, which keeps
+its own indexes, and a run that wrote them would leave its checkout dirty.
+
 `--root` exists so the generator can run against a fixture tree rather than
 the repository that contains it. Without it the extraction rules can only be
 tested by mutating the real tree, and a test that edits the tree it is checking
