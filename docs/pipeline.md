@@ -71,8 +71,9 @@ not recurse. A file names its imports, and the loader compiles each one, or
 runs the code the store keeps, when the import runs.
 
 A compile may still run Elle code from the standard library. An `include`
-calls `import/resolve` on the macro VM to find its file
-([modules](modules.md)).
+calls `import/resolve` on the VM that expands it to find its file
+([modules](modules.md)). An include reads a file and compiles none: its forms
+become part of the unit that holds it ([include](include.md)).
 
 ## The store
 
