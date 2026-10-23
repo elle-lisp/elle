@@ -1,4 +1,4 @@
-// audited: 2026-10-07
+// audited: 2026-10-23
 //! Where a closure call meets the JIT: the hotness counter, the code cache, and the trampolines back into the interpreter.
 //!
 //! docs/impl/jit.md
@@ -180,10 +180,7 @@ impl VM {
         error: crate::jit::JitError,
         pin: Option<CodePin>,
     ) {
-        if !matches!(
-            error,
-            crate::jit::JitError::UnsupportedInstruction(_) | crate::jit::JitError::Polymorphic
-        ) {
+        if !matches!(error, crate::jit::JitError::UnsupportedInstruction(_)) {
             eprintln!("[jit] compilation failed: {}", error);
         }
         self.jit_rejections
