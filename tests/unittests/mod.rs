@@ -46,3 +46,6 @@ mod mutable_array {
 mod mutable_cell {
     include!("mutable_cell.rs");
 }
+mod mutable_set {
+    include!("mutable_set.rs");
+}

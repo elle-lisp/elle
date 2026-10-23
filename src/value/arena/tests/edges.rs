@@ -10,7 +10,6 @@
 // the count and not the edge: red while no edge is recorded, green once one is.
 
 use super::*;
-use crate::value::store::SetStore;
 
 /// A mutable push records the content edge `B → A` (B = the array's region,
 /// A = the pushed value's). RED before the seam records.
@@ -122,13 +121,7 @@ fn set_del_releases_stored_member_not_lookup_value() {
     assert_ne!(rid_a, rid_c);
     // The set — region B.
     let heap = unsafe { &mut *heap_ptr };
-    let (set, rid_b) = alloc_in_fresh_region(
-        heap,
-        HeapObject::LSetMut {
-            data: SetStore::new(std::collections::BTreeSet::new()),
-            traits: Value::NIL,
-        },
-    );
+    let (set, rid_b) = set_in_fresh_region(heap);
     // Add the member: records B → A, increfs A.
     let heap = unsafe { &mut *heap_ptr };
     assert!(crate::value::arena::set_add_with_incref(heap, set, member));

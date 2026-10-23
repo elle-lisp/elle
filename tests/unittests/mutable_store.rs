@@ -108,15 +108,19 @@ fn a_store_grows_past_three_doublings_and_reads_back() {
     let h = TestHeap::new();
     let arr = h.ctx().array_mut(Vec::new());
     let b = h.ctx().bytes_mut(Vec::new());
+    let set = h.ctx().set_mut(BTreeSet::new());
     for n in 0..100 {
         push_with_incref(h.heap(), arr, Value::int(n));
         let end = b.bytes_mut_read().unwrap().len();
         bytes_splice(h.heap(), b, end..end, &[n as u8]);
+        set_add_with_incref(h.heap(), set, Value::int(99 - n));
     }
     let want: Vec<i64> = (0..100).collect();
     assert_eq!(&arr.array_mut_read().unwrap()[..], &ints(&want)[..]);
     let bytes: Vec<u8> = (0..100).collect();
     assert_eq!(&b.bytes_mut_read().unwrap()[..], &bytes[..]);
+    let members: Vec<Value> = set.set_mut_read().unwrap().iter().copied().collect();
+    assert_eq!(members, ints(&want));
 }
 
 #[test]

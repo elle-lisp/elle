@@ -14,7 +14,7 @@
 
 use super::*;
 use crate::value::heap::TableKey;
-use crate::value::store::{CellStore, SetStore, StructStore};
+use crate::value::store::{CellStore, StructStore};
 
 fn array_in(heap: &mut FiberHeap, r: RuntimeRegion) -> Value {
     crate::value::build::array_mut(heap, Vec::new(), r)
@@ -31,13 +31,7 @@ fn struct_in(heap: &mut FiberHeap, r: RuntimeRegion) -> Value {
 }
 
 fn set_in(heap: &mut FiberHeap, r: RuntimeRegion) -> Value {
-    heap.alloc_in_region(
-        HeapObject::LSetMut {
-            data: SetStore::new(std::collections::BTreeSet::new()),
-            traits: Value::NIL,
-        },
-        r,
-    )
+    crate::value::build::set_mut(heap, std::collections::BTreeSet::new(), r)
 }
 
 fn box_in(heap: &mut FiberHeap, r: RuntimeRegion) -> Value {

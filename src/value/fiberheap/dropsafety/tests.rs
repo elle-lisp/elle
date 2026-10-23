@@ -20,11 +20,13 @@ fn each_tag_decides_drop_and_cascade() {
     assert!(!needs_drop(HeapTag::LArrayMut));
     assert!(!needs_drop(HeapTag::LBox));
     assert!(!needs_drop(HeapTag::CaptureCell));
+    assert!(!needs_drop(HeapTag::LSetMut));
     assert!(holds_value_refs(HeapTag::LStringMut));
     assert!(holds_value_refs(HeapTag::LBytesMut));
     assert!(holds_value_refs(HeapTag::LArrayMut));
     assert!(holds_value_refs(HeapTag::LBox));
     assert!(holds_value_refs(HeapTag::CaptureCell));
+    assert!(holds_value_refs(HeapTag::LSetMut));
 
     assert!(needs_drop(HeapTag::LString));
     assert!(needs_drop(HeapTag::LStructMut));
@@ -39,5 +41,4 @@ fn each_tag_decides_drop_and_cascade() {
     assert!(needs_drop(HeapTag::FFIType));
     assert!(needs_drop(HeapTag::External));
     assert!(needs_drop(HeapTag::LSet));
-    assert!(needs_drop(HeapTag::LSetMut));
 }

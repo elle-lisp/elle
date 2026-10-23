@@ -13,6 +13,16 @@ pub(crate) fn array_in_fresh_region(heap: &mut FiberHeap) -> (Value, RuntimeRegi
     (crate::value::build::array_mut(heap, Vec::new(), r), r)
 }
 
+/// An empty `@set` in a fresh region on `heap`, and that region, as
+/// [`array_in_fresh_region`] builds an `@array`.
+pub(crate) fn set_in_fresh_region(heap: &mut FiberHeap) -> (Value, RuntimeRegion) {
+    let r = heap.new_runtime_region();
+    (
+        crate::value::build::set_mut(heap, std::collections::BTreeSet::new(), r),
+        r,
+    )
+}
+
 mod deref;
 mod edges;
 mod keys;
