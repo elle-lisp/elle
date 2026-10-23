@@ -1,54 +1,34 @@
-# Lint System
+# Lint
 
-The lint system performs static analysis on Elle code to detect potential bugs, style issues, and performance problems.
+<!-- audited: 2026-10-23 -->
 
-## Lint Rules
+The linter's diagnostic type, its codes, its rules, and the `elle lint`
+command.
 
-The linter checks for:
+[The cookbook](../../docs/cookbook/lint-rules.md) owns the table of codes, how
+a lint run proceeds, and how to add a rule. [The HIR linter](../hir/lint.rs)
+walks the tree and calls each rule.
 
-- **Unused variables**: Variables defined but never referenced
-- **Shadowing**: Variables that shadow outer bindings
-- **Type mismatches**: Obvious type errors (e.g., calling non-function)
-- **Arity errors**: Calling functions with wrong number of arguments
-- **Dead code**: Unreachable expressions
-- **Performance issues**: Inefficient patterns (e.g., repeated list traversal)
-- **Mutable bindings never reassigned** (`mutable-binding-never-assigned`, W003):
-  A binding declared mutable (`var`, or an `@`-prefixed `def`/`let` name) that is
-  never the target of an `assign`. Such a binding is a *false-mutable*: its value
-  may still be mutated in place (e.g. `(let [buf @""] (push buf x))`), but the
-  binding itself never changes, so it can be a plain immutable `def`/`let`. This
-  distinguishes a mutable **binding** (the slot is reassignable) from a mutable
-  **value** (the data is mutated in place) — only the former warrants `var`/`@`.
-  Throwaway (`_`-prefixed), synthetic, and primitive bindings are exempt.
+## The rules
 
-## Running the Linter
+A rule reads facts analysis already holds and pushes a `Diagnostic`, raised
+through `Diagnostic::warn` or `Diagnostic::hint` with its `LintCode`, so a code
+and its rule name cannot drift apart.
 
-```bash
-# Lint a file
-cargo run -- lint path/to/file.lisp
+| Rule function | Code |
+|---------------|------|
+| `check_call_arity` | `W002` |
+| `check_mutable_never_assigned` | `W003` |
+| `check_unused_binding` | `W004` |
+| `check_non_tail_self_recursion` | `W005` |
+| `check_fiber_body` | `I001`, `I002` |
 
-# Lint with verbose output
-cargo run -- lint --verbose path/to/file.lisp
-```
+`W003`, `W004` and `W005` share one exemption through `reportable_name`: a
+synthetic binding, a primitive's binding, or a name that starts with `_`.
 
-## Diagnostic Types
+## The command
 
-Diagnostics are categorized by severity:
-
-- **Error**: Code that will definitely fail at runtime
-- **Warning**: Code that might fail or is inefficient
-- **Info**: Style suggestions and best practices
-
-## Integration
-
-The linter is integrated into:
-
-- **CLI**: `elle lint` command
-- **LSP**: Hover diagnostics and code actions
-- **REPL**: Optional linting on each expression
-
-## See Also
-
-- [AGENTS.md](AGENTS.md) - technical reference for LLM agents
-- [`src/hir/lint.rs`](../hir/lint.rs) - HIR-based linter implementation
-- [`src/lsp/`](../lsp/) - language server integration
+`elle lint FILE…` analyzes each file on a fresh `Runtime` and prints every
+diagnostic at or above `--level`: `error`, `warning` or `info`, which is the
+default. `--format json` prints them as one JSON object, and `--format text`
+as lines. It exits 1 on an error, 2 on warnings alone, and 0 otherwise.
