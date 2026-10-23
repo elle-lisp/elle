@@ -1,12 +1,12 @@
 (elle/epoch 15)
-# audited: 2026-10-12
-# Single-file cases for the solver, most of which today's analyzer answers as unknown.
+# audited: 2026-10-23
+# Single-file cases for the solver: mutual and forward calls, a parameter called in a nested lambda, a squelch.
 # examples/signal_solve/main.rs
 
 # Every callee here has an exact signal: yield, literals, parameter calls.
 # Each `expect` line is checked by `signal_solve --expect`.
 
-# Top level: the file letrec runs a fixpoint, so both are exact.
+# Top level: the file letrec solves its definitions jointly.
 # expect top-a |:yield|
 # expect top-b |:yield|
 (defn top-a [n]
@@ -32,16 +32,15 @@
   (quiet))
 
 (fn []
-  # Inside a function body there is no fixpoint: a forward reference reads
-  # nothing yet, and a mutual recursion reads the seed. A call forward checks
-  # no argument count, so it may raise.
-  # expect fwd |:error|
+  # A function body seeds each lambda it defines with its arity, so a forward
+  # call reads the later definition, and a mutual recursion settles.
+  # expect fwd ||
   (defn fwd [x]
     (later x))
   (defn later [x]
     x)
-  # expect mut-a |:yield :error|
-  # expect mut-b |:yield :error|
+  # expect mut-a |:yield|
+  # expect mut-b |:yield|
   (defn mut-a [n]
     (if n (mut-b n) 0))
   (defn mut-b [n]
