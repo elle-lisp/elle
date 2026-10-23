@@ -222,6 +222,12 @@ asker. Then it answers with the nodes it holds. A soul that is pending answers
 from local data at once, and what its fetch brings in reaches the asker
 afterwards, as gossip.
 
+A fetch that a get started skips that get's asker, so it brings in nothing
+that peer holds. When a get from another peer meets a soul pending from such a
+fetch, the database also sends the skipped peer a get for the soul, once per
+fetch. It waits for no answer, which merges like any other, so the skipped
+peer's fields reach the asker as gossip too.
+
 **Pending ends a get cycle.** A database marks a soul pending before it
 forwards a get for the soul. A get that comes back around a cycle meets the
 pending soul and is answered at once, so no get travels further than one lap.
