@@ -211,6 +211,9 @@ mod paths {
 mod agents {
     include!("agents.rs");
 }
+mod agents_counts {
+    include!("agents_counts.rs");
+}
 mod audit {
     include!("audit.rs");
 }

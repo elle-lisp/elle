@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-23
 // The committed ledgers: each producer has one, each row names a subject its
 // producer reads, and no row is in two files.
 //
@@ -162,6 +162,7 @@ const PRODUCERS: &[&str] = &[
     "tests/impl/region-collector-arg-move.lisp",
     "tests/impl/resource.lisp",
     "tests/ratchet/audit.lisp",
+    "tests/ratchet/agents.lisp",
     "tests/ratchet/valgrind.lisp",
     SIZE,
     RUNNER,

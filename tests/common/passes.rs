@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-23
 //! The `elle test` passes a suite target runs, read off `make --dry-run`.
 //!
 //! docs/testing.md
@@ -137,7 +137,11 @@ pub fn producer_files() -> BTreeSet<String> {
 /// The producers that read the tree and not the build, which `make qa` judges
 /// once on the release rig (docs/analysis/ci.md).
 #[allow(dead_code)]
-pub const TREE_PRODUCERS: [&str; 2] = ["tests/ratchet/audit.lisp", "tests/ratchet/size.lisp"];
+pub const TREE_PRODUCERS: [&str; 3] = [
+    "tests/ratchet/audit.lisp",
+    "tests/ratchet/agents.lisp",
+    "tests/ratchet/size.lisp",
+];
 
 /// The producers a build's producer pass runs: every producer but the tree's.
 #[allow(dead_code)]
