@@ -217,6 +217,9 @@ mod agents_counts {
 mod agents_links {
     include!("agents_links.rs");
 }
+mod agents_submodule {
+    include!("agents_submodule.rs");
+}
 mod audit {
     include!("audit.rs");
 }
