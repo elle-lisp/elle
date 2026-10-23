@@ -1,6 +1,6 @@
 # Signals and JIT
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-10-22 -->
 
 A function's signal decides nothing about whether the JIT compiles it. It
 decides the checks around each call and how a signal leaves compiled code.
@@ -54,7 +54,8 @@ a proof that nothing stops the fiber, so a signal that leaves one raises the
 terminal `:broken-proof` error on every tier. A halt, and a signal that
 already carries `:terminal`, pass it as themselves
 ([inference.md](inference.md)). No tier pauses a silent function: its
-charges spend fuel, and none of them stops the fiber.
+charges spend fuel, and none of them pauses the fiber. A kill ends it as it
+ends any function ([runtime](../runtime.md)).
 
 ## Fuel
 
@@ -63,7 +64,10 @@ it. In a function that is not silent, a charge that finds the budget spent
 parks the frame at the instruction that charged, and the interpreter runs that
 instruction again on resume. In a silent function a charge takes a unit while
 one is left and never parks, so a silent function records no charge site, as
-it records no call site ([jit.md](../impl/jit.md)).
+it records no call site ([jit.md](../impl/jit.md)). Every charge on either
+tier reads the kill word first, and a killed worker leaves compiled code with
+the terminal error, through the check after the call in each compiled caller
+([runtime](../runtime.md)).
 
 ## See also
 

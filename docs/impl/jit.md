@@ -1,6 +1,6 @@
 # JIT
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-22 -->
 
 The JIT compiles hot functions from LIR to native code using Cranelift.
 
@@ -317,11 +317,23 @@ that steps a fiber one unit at a time pauses it at the same instructions.
 **The charge is inline.** The budget is one 64-bit word on the fiber, and
 compiled code reaches it through the VM pointer. In a function that is not
 silent, the charge loads the word, pauses on zero, and otherwise stores the
-word less one. An unmetered fiber holds the largest 64-bit word, 2^64 − 1, so
-the charge needs no separate test for whether the fiber is metered. A budget
-is a non-negative integer, at most 2^63 − 1, and a run needs 2^63 charges to
+word less one. An unmetered fiber holds a word above every budget, 2^63 + 2^62,
+so the charge needs no separate test for whether the fiber is metered. A budget
+is a non-negative integer, at most 2^63 − 1, and a run needs 2^62 charges to
 count the unmetered word down to that range. `fiber/fuel` answers `nil` for
 any word above it. The interpreter charges in the same steps.
+
+**Every charge reads the kill word first.** The VM holds a pointer to its
+kill word ([runtime.md](../runtime.md)), which `sys/kill` writes from another
+thread. The charge loads the pointer, loads the word through it, compares the
+budget against it unsigned, and branches to a cold block when the budget is
+below it. The cold block calls `elle_jit_kill`, which sets the fiber's signal
+to the terminal `:killed` error, and returns `nil` from the function. The
+caller's check after the call finds the signal, so the kill leaves compiled
+code as a primitive's error does. The block spills nothing and parks no frame:
+a terminal signal is never resumed, and the killed worker's heap is freed
+whole. The check runs in a silent function as in any other, so a silent charge
+is the check, then a branch on zero around the decrement.
 
 **A silent function never pauses.** Its charge loads the word and stores it
 less one unless it is zero, and nothing branches out of the function

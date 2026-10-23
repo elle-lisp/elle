@@ -73,9 +73,9 @@ charge shapes, each one operation more than the last:
 |-------|------------------------------|
 | `none` | nothing: the floor, a loop that checks nothing |
 | `decrement` | a load, a subtract and a store |
-| `saturating` | the same, and the compare and extend that stop the word at zero: today's silent charge ([impl/jit.md](../docs/impl/jit.md)) |
-| `branch` | a load, a branch on zero around a subtract and a store: the shape of today's raising charge |
-| `check` | the branch, and a load of a limit word, a compare and a second branch: the shape of a kill check |
+| `saturating` | the same, and the compare and extend that stop the word at zero: a silent charge with no kill check |
+| `branch` | a load, a branch on zero around a subtract and a store: the raising charge less its pause |
+| `check` | the branch, and a load of the kill word, a compare and a second branch: the silent charge every build emits ([impl/jit.md](../docs/impl/jit.md)) |
 
 Beside the ladder, every tier runs the same loop as a function that may raise,
 whose charge is the real pausing one, and the interpreter runs the silent loop
@@ -85,7 +85,7 @@ one trip, charge included.
 
 The shapes are a knob in the translator that only a build with the `ablation`
 feature carries ([config.md](../docs/config.md)), and the bench requires that
-feature. A production build has no knob and emits the `saturating` shape at
+feature. A production build has no knob and emits the `check` shape at
 every silent site. Save a baseline before a change to the charge and compare
 after it:
 
