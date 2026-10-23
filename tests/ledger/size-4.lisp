@@ -92,7 +92,7 @@
 ["src/value/fiberheap/regionstore/tests/counters.rs" :tokens 3000]
 ["src/value/fiberheap/regionstore/tests/forest.rs" :tokens 3000]
 ["src/value/fiberheap/regionstore/tests/refcount.rs" :tokens 4000]
-["src/value/fiberheap/tests.rs" :tokens 4500]
+["src/value/fiberheap/tests.rs" :tokens 5000]
 ["src/value/fiber.rs" :tokens 5000]
 ["src/value/heap/objimpl.rs" :tokens 3000]
 ["src/value/heap.rs" :tokens 3500]

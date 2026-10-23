@@ -166,6 +166,13 @@
   (assert (= (length traited) 2)
           "mutable bytes copy is independent: push to original does not affect traited copy"))
 
+(begin
+  (def orig (box 1))
+  (def traited (with-traits orig {:tag :x}))
+  (rebox orig 2)
+  (assert (= (unbox traited) 1)
+          "box copy is independent: rebox of the original does not affect traited copy"))
+
 # ============================================================================
 # Constructor pattern — shared table, identical? fast path
 # ============================================================================

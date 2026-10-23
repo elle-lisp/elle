@@ -43,3 +43,6 @@ mod mutable_bytes {
 mod mutable_array {
     include!("mutable_array.rs");
 }
+mod mutable_cell {
+    include!("mutable_cell.rs");
+}
