@@ -67,6 +67,28 @@ callout() {
     ' "$1"
 }
 
+# The submodules below the root, each another repository with indexes of its
+# own. Read once: every walk below drops them, so whether a checkout holds one
+# changes nothing a run writes.
+submodules=""
+if cdup=$(cd "$root" && git rev-parse --show-cdup 2>/dev/null) && [ -z "$cdup" ]; then
+    submodules=$(cd "$root" && git ls-files -s | awk -F'\t' '{ split($1, m, " ") } m[1] == "160000" { print $2 }')
+fi
+
+# The paths on stdin, less every submodule and everything under one. A walk
+# from the root names its paths `./dir`, so the prefix goes before comparing.
+outside_submodules() {
+    awk -v subs="$submodules" '
+        BEGIN { n = split(subs, s, "\n") }
+        {
+            p = $0
+            sub(/^\.\//, "", p)
+            for (i = 1; i <= n; i++) if (p == s[i] || index(p, s[i] "/") == 1) next
+            print
+        }
+    '
+}
+
 # Documents in one directory, excluding the index itself.
 docs_in() {
     find "$root/$1" -maxdepth 1 -type f -name '*.md' \
@@ -80,7 +102,7 @@ subdirs_in() {
     local sub
     find "$root/$1" -mindepth 1 -maxdepth 1 -type d \
         -not -name '.git' -not -name 'target' -not -name 'node_modules' 2>/dev/null \
-        | sed "s|^$root/||" | LC_ALL=C sort | while read -r sub; do
+        | sed "s|^$root/||" | outside_submodules | LC_ALL=C sort | while read -r sub; do
             if [ -e "$root/$sub/AGENTS.md" ] || [ -n "$(docs_in "$sub")" ]; then
                 echo "$sub"
             fi
@@ -160,7 +182,7 @@ tree_of() {
     local d="$1"
     find "$root/${d#./}" -type d \
         -not -path '*/.git*' -not -path '*/target*' -not -path '*/node_modules*' \
-        2>/dev/null | sed -e "s|^$root$|.|" -e "s|^$root/||" | LC_ALL=C sort
+        2>/dev/null | sed -e "s|^$root$|.|" -e "s|^$root/||" | outside_submodules | LC_ALL=C sort
 }
 
 # The two counts the ratchet pins, which scripts/unconverted owns.
