@@ -1,45 +1,24 @@
 # Elle Demos
 
-Demonstration programs that dogfood Elle with non-trivial algorithms and serve as cross-language comparison implementations.
+<!-- audited: 2026-10-23 -->
 
-## Demos
+Programs that dogfood Elle on work larger than a test, several of them beside
+the same program in another language.
 
-| Demo | Purpose |
-|------|---------|
-| [blas/](blas/) | BLAS/LAPACK FFI — optimized linear algebra via CBLAS and LAPACKE |
-| [cfgviz/](cfgviz/) | Control flow graph visualization to DOT/SVG |
-| [conway/](conway/) | Conway's Game of Life — interactive SDL2 demo |
-| [docgen/](docgen/) | Documentation site generator written in Elle |
-| [egui/](egui/) | Immediate-mode GUI via egui plugin |
-| [fib/](fib/) | Recursive Fibonacci benchmark measuring function call overhead |
-| [logo/](logo/) | Elle logo glyph rendered as colored bezier fibers |
-| [mandelbrot/](mandelbrot/) | Interactive Mandelbrot explorer — GTK4 + Cairo (uses `std/gtk4/bind`) |
-| [matrix/](matrix/) | Heat diffusion simulation with ASCII visualization |
-| [microgpt/](microgpt/) | Micro GPT — scalar autograd + character-level transformer |
-| [nqueens/](nqueens/) | N-Queens backtracking algorithm (cons-list and array variants) |
-| [scope-alloc/](scope-alloc/) | Scope allocation workload measuring escape analysis tiers |
-| [webserver/](webserver/) | HTTP server + concurrent load generator with latency stats |
+A demo shows what Elle can express and where it hurts: a missing feature, a
+slow path, a form that reads badly. A demo is not a test. The suites hold the
+claims ([testing](../docs/testing.md)), and a demo prints what it computed.
+Each directory's README says what the demo does, what it needs, and how to run
+it. A demo that needs no plugin and no display runs from the repository root
+as `elle demos/NAME/NAME.lisp`.
 
-## Running Demos
+## Writing a demo
 
-```bash
-elle demos/fib/fib.lisp
-elle demos/nqueens/nqueens.lisp
-elle demos/nqueens/nqueens-array.lisp
-elle demos/blas/blas.lisp
-elle demos/matrix/matrix.lisp
-elle demos/cfgviz/cfgviz.lisp
-elle demos/scope-alloc/scope-alloc.lisp
-elle demos/logo/logo.lisp
-elle demos/docgen/generate.lisp
-elle demos/egui/smoke.lisp
-
-# Networking (requires two terminals)
-elle demos/webserver/server.lisp          # terminal 1
-elle demos/webserver/loadgen.lisp         # terminal 2
-
-# Interactive (require display + libraries)
-elle demos/conway/conway.lisp         # SDL2
-elle demos/mandelbrot/mandelbrot.lisp # GTK4 + Cairo
-elle demos/egui/counter.lisp          # egui plugin
-```
+- Open the file with a comment that says what the demo shows.
+- Import what it needs, then define helpers with `defn`, then run the work.
+- Print the results with `println`, so a person running it sees them.
+- Let an error propagate. A demo that catches its own failures hides them.
+- Prefer the forms a reader of other Elle code meets: `->` and `->>` for
+  threading, `when` and `unless`, `fold`, `map` and `filter`.
+- Give the directory a README with a title and a one-sentence call-out, so the
+  index lists it ([the generated index](../docs/impl/agents-index.md)).
