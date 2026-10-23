@@ -1,12 +1,14 @@
-// audited: 2026-10-20
-//! The `sys/spawn` worker: stack sizing, the fresh VM it stands up, and the
-//! completion channel it answers on.
+// audited: 2026-10-22
+//! The `sys/spawn` worker: stack sizing, the fresh VM it stands up, the kill
+//! switch it reads, and the completion channel it answers on.
 //!
 //! docs/threads.md
 
 use crate::error::{LError, LResult};
 use crate::primitives::chan::{SendableValue, WakeList};
 use crate::primitives::ctx::NativeCtx;
+use crate::value::fiber::KillSwitch;
+use crate::value::heap::{OutcomeSlot, WorkerOutcome};
 use crate::value::{SendBundle, Value};
 use std::sync::{Arc, Mutex};
 
@@ -98,8 +100,12 @@ pub(super) fn spawn_closure_impl(
     })
     .map_err(|e| LError::generic(format!("spawn: {}", e)))?;
 
-    let result_holder: Arc<Mutex<Option<Result<SendBundle, String>>>> = Arc::new(Mutex::new(None));
+    let result_holder: OutcomeSlot = Arc::new(Mutex::new(None));
     let result_clone = result_holder.clone();
+    // The kill switch: the handle keeps one end, the worker's VM reads the
+    // other at every charge site (docs/threads.md).
+    let kill = KillSwitch::new();
+    let worker_kill = kill.clone();
 
     // Completion channel: the worker signals here AFTER storing its result,
     // so a joiner parked in `chan/select` over `done_rx` wakes exactly once
@@ -169,6 +175,9 @@ pub(super) fn spawn_closure_impl(
                 )
                 .core;
                 let (vm, symbols, compile) = core.parts();
+                // The spawner's pull lands at this VM's next charge, from the
+                // body's first instruction on.
+                vm.set_kill_switch(worker_kill);
                 // After the boot, as `Runtime` registers them after its own.
                 // The worker's VM records each, so its own workers inherit them.
                 for def in host_primitives {
@@ -283,10 +292,18 @@ pub(super) fn spawn_closure_impl(
                 vm.fiber.withheld = withheld;
                 let result = vm.execute_code(closure.template.code(), Some(&env_rc));
 
-                let send_result = match result {
-                    Ok(val) => SendBundle::from_value(val, vm.heap(), Some(&*symbols))
-                        .map_err(|e| format!("Failed to serialize result: {}", e)),
-                    Err(e) => Err(e.to_string()),
+                // A body that ended on an error after the switch was pulled was
+                // killed: the kill lands at a charge site, and a raise at the
+                // same instant answers the same way.
+                let outcome = match result {
+                    Ok(val) => match SendBundle::from_value(val, vm.heap(), Some(&*symbols)) {
+                        Ok(bundle) => WorkerOutcome::Ready(bundle),
+                        Err(e) => {
+                            WorkerOutcome::Failed(format!("Failed to serialize result: {}", e))
+                        }
+                    },
+                    Err(_) if vm.kill_switch().pulled() => WorkerOutcome::Killed,
+                    Err(e) => WorkerOutcome::Failed(e.to_string()),
                 };
 
                 // SendBundle::from_value cloned the result out of recv_region into
@@ -296,7 +313,7 @@ pub(super) fn spawn_closure_impl(
                 vm.heap().decref_region(recv_region);
 
                 if let Ok(mut holder) = result_clone.lock() {
-                    *holder = Some(send_result);
+                    *holder = Some(outcome);
                 }
             }));
 
@@ -314,7 +331,10 @@ pub(super) fn spawn_closure_impl(
                             .unwrap_or_else(|| "non-string panic payload".to_string()),
                         Ok(_) => "result never stored".to_string(),
                     };
-                    *holder = Some(Err(format!("worker thread panicked: {}", detail)));
+                    *holder = Some(WorkerOutcome::Failed(format!(
+                        "worker thread panicked: {}",
+                        detail
+                    )));
                 }
             }
 
@@ -328,7 +348,7 @@ pub(super) fn spawn_closure_impl(
         .map_err(|e| LError::generic(format!("spawn: failed to start worker thread: {}", e)))?;
 
     Ok(ctx.alloc(HeapObject::ThreadHandle {
-        handle: ThreadHandle::new(result_holder, done_rx, done_wake),
+        handle: ThreadHandle::new(result_holder, done_rx, done_wake, kill),
         traits: Value::NIL,
     }))
 }

@@ -124,7 +124,6 @@ pub struct VM {
     pub(crate) kill: crate::value::fiber::KillSwitch,
     /// Where `kill`'s word lives, for compiled code to load through the VM
     /// pointer. Set beside `kill`, and never by hand.
-    #[expect(dead_code, reason = "no compiled charge reads the word yet")]
     pub(crate) kill_word: *const std::sync::atomic::AtomicU64,
     /// Handle to the current fiber's FiberHandle, if it came from a
     /// `fiber/new` allocation. `None` for the root fiber (which lives
@@ -315,7 +314,6 @@ impl VM {
 
     /// Read this VM's charges off `switch` from now on: a worker takes the
     /// switch its spawner holds the other end of. Construction-time only.
-    #[expect(dead_code, reason = "no worker takes a switch yet")]
     pub(crate) fn set_kill_switch(&mut self, switch: crate::value::fiber::KillSwitch) {
         self.kill_word = switch.word();
         self.kill = switch;

@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-22
 // docs/impl/jit.md
 // docs/impl/region/unwind.md
 //! What a compiled call emits around itself: the fuel charge before it, the
@@ -8,8 +8,8 @@ use super::clif::{call_target_before, called_refs, func_refs};
 use super::*;
 
 /// fn(f) -> f(), with `signal`. In a function that may signal, a `Call` makes
-/// the translator emit three exits: the charge's pause, the park after the
-/// call's signal check, and the normal return.
+/// the translator emit four exits: the charge's kill and its pause, the park
+/// after the call's signal check, and the normal return.
 fn make_call_lir(signal: Signal) -> LirOwned {
     use crate::hir::region::StaticRegion;
     LirFixture::new(Arity::Exact(1))
@@ -73,12 +73,12 @@ fn every_compiled_exit_pops_the_region_map() {
         .filter(|(_, line)| line.trim().starts_with("return"))
         .map(|(i, _)| i)
         .collect();
-    // One per exit: the charge's pause, the signal check's park, and the
-    // terminator's.
+    // One per exit: the charge's kill, the charge's pause, the signal
+    // check's park, and the terminator's.
     assert_eq!(
         returns.len(),
-        3,
-        "a Call in a function that may signal has three exits; got:\n{}",
+        4,
+        "a Call in a function that may signal has four exits; got:\n{}",
         clif.join("\n")
     );
 

@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-22
 // docs/impl/jit.md
 //! `RuntimeHelpers`: one pre-declared Cranelift `FuncId` per `extern "C"`
 //! runtime helper, so a translator emits a call without re-declaring.
@@ -112,6 +112,9 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) jit_yield_through_call: FuncId,
     /// Park the frame at a charge site whose fuel ran out (docs/impl/jit.md).
     pub(crate) fuel_pause: FuncId,
+    /// Raise the terminal `:killed` error at a charge site whose budget is
+    /// below the kill word (docs/impl/jit.md).
+    pub(crate) kill: FuncId,
     pub(crate) has_signal: FuncId,
     // Declared, and called by no translation: these four, `rotate_pools`,
     // `incref`, `decref` and `is_truthy`.

@@ -484,7 +484,8 @@ pub extern "C" fn elle_jit_fuel_pause(
 ///   vm: *mut () as u64
 #[no_mangle]
 pub extern "C" fn elle_jit_kill(vm: u64) -> JitValue {
-    let _ = vm;
+    let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
+    vm.raise_killed();
     JitValue::nil()
 }
 

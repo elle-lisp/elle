@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-22
 // src/jit/AGENTS.md
 // docs/impl/region/unwind.md
 //! The check a compiled frame runs where a signal can leave it, and the park it makes there.
@@ -27,8 +27,8 @@ impl FunctionTranslator<'_> {
     /// it as a bytecode frame at the site's resume ip behind whatever the callee
     /// parked, an error included, and builds no frame for a halt
     /// (docs/impl/region/unwind.md). A silent function records no site. The only
-    /// signal that reaches it is a halt or the terminal error a broken proof
-    /// raises, and it returns on either (docs/signals/jit.md).
+    /// signal that reaches it is a halt or a terminal error, which a broken
+    /// proof or a kill raises, and it returns on either (docs/signals/jit.md).
     pub(crate) fn emit_signal_check(
         &mut self,
         builder: &mut FunctionBuilder,

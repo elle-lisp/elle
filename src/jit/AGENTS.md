@@ -1,6 +1,6 @@
 # jit
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-10-22 -->
 
 JIT compilation for Elle using Cranelift.
 
@@ -169,6 +169,8 @@ These handle type checking and tagged-union encoding.
 - **Sentinels**: `TAIL_CALL_SENTINEL`, `YIELD_SENTINEL`
 - **Metadata types**: `YieldPointMeta`, `CallSiteMeta`, `ChargeSiteMeta`
 - **Signal check**: `elle_jit_has_signal`
+- **Side exits** ([suspend.rs](suspend.rs)): `elle_jit_yield`,
+  `elle_jit_yield_through_call`, `elle_jit_fuel_pause` and `elle_jit_kill`
 - **Function calls**: `elle_jit_call` in [callops.rs](calls/callops.rs), and
   `elle_jit_tail_call`, `elle_jit_call_array` and `elle_jit_tail_call_array`
   in [arraycall.rs](calls/callops/arraycall.rs)
@@ -270,6 +272,12 @@ The signal system and JIT side-exit mechanism enable fibers and JIT to coexist:
   `YIELD_SENTINEL`. A silent function's charge never pauses
   ([jit.md](../../docs/impl/jit.md)).
 
+- **Kill**: every charge reads the VM's kill word first, in a silent function
+  as in any other. A budget below it calls `elle_jit_kill`, which sets the
+  terminal `:killed` error as the fiber's signal and parks nothing, and the
+  function returns `nil`; the caller's signal check finds the error
+  ([jit.md](../../docs/impl/jit.md)).
+
 - **Primitive signals**: `jit_handle_primitive_signal` classifies a
   primitive's signal as the interpreter does. A suspending signal parks the
   payload and returns `YIELD_SENTINEL`; a fiber carrier (`SIG_RESUME`,
@@ -362,7 +370,8 @@ error included, and returns on a halt. No errors are silently swallowed.
 12. **Side-exit helpers set fiber.signal and fiber.suspended.** `elle_jit_yield`,
      `elle_jit_yield_through_call` and `elle_jit_fuel_pause` are responsible
      for building the `SuspendedFrame` and setting `fiber.signal` and
-     `fiber.suspended`. The JIT caller must not modify these fields.
+     `fiber.suspended`; `elle_jit_kill` sets `fiber.signal` alone. The JIT
+     caller must not modify these fields.
 
 13. **Variadic functions with `VarargKind::List` are JIT-supported.** The JIT
      entry block calls `elle_jit_collect_rest_list`, which builds the rest-arg

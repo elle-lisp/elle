@@ -41,19 +41,21 @@ impl KillSwitch {
     }
 
     /// Kill the VM that reads this switch, at its next charge.
-    pub fn pull(&self) {}
+    pub fn pull(&self) {
+        self.0.store(Self::PULLED, Ordering::Relaxed);
+    }
 
     /// Whether the switch was pulled.
     pub fn pulled(&self) -> bool {
-        false
+        self.limit() == Self::PULLED
     }
 
-    /// The word as a charge reads it.
+    /// The word as a charge reads it. A relaxed load: the pull carries no
+    /// other data, and a charge that reads the word a trip late lands the kill
+    /// one trip late.
     #[inline]
-    #[cfg_attr(not(test), expect(dead_code, reason = "no charge reads the word yet"))]
     pub(crate) fn limit(&self) -> u64 {
-        let _ = Ordering::Relaxed;
-        Self::SLACK
+        self.0.load(Ordering::Relaxed)
     }
 
     /// Where the word lives, for compiled code to read through the VM.
@@ -67,11 +69,14 @@ impl Fuel {
     /// above it is a fiber with no budget.
     const LARGEST: u64 = i64::MAX as u64;
 
+    /// The word of a fiber with no budget: above every budget, below a pulled
+    /// switch, and 2^62 decrements from the budget range (docs/impl/jit.md).
+    const UNMETERED: u64 = (1 << 63) + (1 << 62);
+
     /// Whether a charge against the kill word `limit` kills the fiber instead.
     #[inline]
     pub fn is_below(self, limit: u64) -> bool {
-        let _ = limit;
-        false
+        self.0 < limit
     }
 
     /// The byte offset of the budget word from the start of a `VM`, which is
@@ -83,12 +88,11 @@ impl Fuel {
     /// The byte offset from the start of a `VM` of the pointer to its kill
     /// word, which compiled code loads before each charge.
     #[cfg(feature = "jit")]
-    #[expect(dead_code, reason = "no compiled charge reads the word yet")]
     pub(crate) const KILL_PTR_OFFSET_IN_VM: usize = std::mem::offset_of!(crate::vm::VM, kill_word);
 
     /// No budget: the fiber runs until it finishes or suspends.
     pub const fn unmetered() -> Self {
-        Fuel(u64::MAX)
+        Fuel(Self::UNMETERED)
     }
 
     /// A budget of `n` units, or `None` when `n` is past the largest integer.

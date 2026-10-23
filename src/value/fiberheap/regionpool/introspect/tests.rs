@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-22
 //! The cross-region scan reports every channel each heap variant holds a value in.
 //!
 //! docs/impl/region/diagnostics.md
@@ -152,13 +152,14 @@ fn obj_with_value_in_every_channel(
             // Result/channel traffic crosses threads as deep-copied
             // SendBundles, never as region Values; traits only.
             HeapObject::ThreadHandle {
-                handle: crate::value::heap::ThreadHandle {
-                    result: std::sync::Arc::new(std::sync::Mutex::new(None)),
-                    done_rx: crossbeam_channel::unbounded().1,
-                    done_wake: crate::primitives::chan::WakeList::new(std::sync::Arc::new(
+                handle: crate::value::heap::ThreadHandle::new(
+                    std::sync::Arc::new(std::sync::Mutex::new(None)),
+                    crossbeam_channel::unbounded().1,
+                    crate::primitives::chan::WakeList::new(std::sync::Arc::new(
                         std::sync::atomic::AtomicU32::new(0),
                     )),
-                },
+                    crate::value::fiber::KillSwitch::new(),
+                ),
                 traits: vt,
             },
             traits_only,

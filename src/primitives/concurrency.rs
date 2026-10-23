@@ -1,17 +1,18 @@
-// audited: 2026-10-20
+// audited: 2026-10-22
 //! Thread primitives: `sys/spawn`, `sys/spawn-vm`, `sys/thread-state`,
-//! `sys/thread-id`, and `sys/unique`.
+//! `sys/kill`, `sys/thread-id`, and `sys/unique`.
 //!
 //! docs/threads.md
 //!
-//! The worker a spawn stands up — its stack sizing, its fresh VM, and its
-//! completion channel — lives in `worker.rs`.
+//! The worker a spawn stands up — its stack sizing, its fresh VM, its kill
+//! switch and its completion channel — lives in `worker.rs`.
 
 use crate::primitives::chan::receiver_value;
 use crate::primitives::ctx::NativeCtx;
 use crate::primitives::def::RegionEffect;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::heap::WorkerOutcome;
 use crate::value::types::Arity;
 use crate::value::Value;
 use std::sync::Arc;
@@ -82,6 +83,7 @@ pub(crate) fn prim_spawn_vm(
 ///   - `[:ready value]`  — the thread finished; `value` is its result,
 ///     reconstructed into the caller's heap from the SendBundle slot.
 ///   - `[:failed message]` — the thread finished by erroring (or panicked).
+///   - `[:killed]` — the thread was killed (docs/threads.md).
 ///   - `[:pending receiver]` — the thread is still running; `receiver` is a
 ///     fresh `chan/receiver` over its completion channel, suitable for
 ///     `chan/select` (which yields to the scheduler rather than polling).
@@ -95,9 +97,9 @@ pub(crate) fn prim_thread_state(
 ) -> (SignalBits, Value) {
     if let Some(handle) = args[0].as_thread_handle() {
         if let Ok(holder) = handle.result.lock() {
-            if let Some(result) = holder.as_ref() {
-                return match result {
-                    Ok(bundle) => {
+            if let Some(outcome) = holder.as_ref() {
+                return match outcome {
+                    WorkerOutcome::Ready(bundle) => {
                         // Reconstruct into the caller's region (`ctx`).
                         // `ctx` deref-coerces `&mut NativeCtx` → `&mut Alloc`.
                         // The joiner's memo learns the worker's symbol names.
@@ -107,10 +109,11 @@ pub(crate) fn prim_thread_state(
                             .into_value(ctx, unsafe { joiner_symbols.as_mut() });
                         (SIG_OK, ctx.array(vec![Value::keyword("ready"), value]))
                     }
-                    Err(e) => {
+                    WorkerOutcome::Failed(e) => {
                         let msg = ctx.string(e.clone());
                         (SIG_OK, ctx.array(vec![Value::keyword("failed"), msg]))
                     }
+                    WorkerOutcome::Killed => (SIG_OK, ctx.array(vec![Value::keyword("killed")])),
                 };
             }
         }
@@ -124,6 +127,28 @@ pub(crate) fn prim_thread_state(
             ctx.error(
                 "type-error",
                 "thread-state: argument must be a thread handle".to_string(),
+            ),
+        )
+    }
+}
+
+/// `(sys/kill thread-handle)` — pull the worker's kill switch, which ends it
+/// at its next charge site with the terminal `:killed` error
+/// (docs/threads.md). A kill after the worker's end, or a second kill,
+/// changes nothing. Answers nil.
+pub(crate) fn prim_kill(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    if let Some(handle) = args[0].as_thread_handle() {
+        handle.kill.pull();
+        (SIG_OK, Value::NIL)
+    } else {
+        (
+            SIG_ERROR,
+            ctx.error(
+                "type-error",
+                "kill: argument must be a thread handle".to_string(),
             ),
         )
     }
@@ -190,12 +215,22 @@ primitive! {
     "sys/thread-state" => prim_thread_state {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
-        doc: "Inspect a thread handle without blocking (a single check, never a loop): [:ready value], [:failed message], or [:pending receiver]. Building block for sys/join (which adds the scheduler-cooperative wait + timeout).",
+        doc: "Inspect a thread handle without blocking (a single check, never a loop): [:ready value], [:failed message], [:killed], or [:pending receiver]. Building block for sys/join (which adds the scheduler-cooperative wait + timeout).",
         params: &["thread-handle"],
         category: "sys",
         example: "(sys/thread-state thread-handle)",
         aliases: &["os/thread-state"],
         effect: RegionEffect::Fresh,
+    }
+    "sys/kill" => prim_kill {
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Kill the worker behind a thread handle: at its next charge site, each call and each backward jump, it raises the terminal error {:error :killed}, which no mask catches, and a join on it raises the same. A kill after the worker's end, or a second kill, changes nothing. Answers nil.",
+        params: &["thread-handle"],
+        category: "sys",
+        example: "(sys/kill thread-handle)",
+        aliases: &["os/kill"],
+        effect: RegionEffect::Immediate,
     }
     "sys/thread-id" => prim_current_thread_id {
         signal: Signal::silent(),
