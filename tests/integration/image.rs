@@ -69,9 +69,10 @@ fn alloc_array(heap: &mut FiberHeap, region: RuntimeRegion, items: &[Value]) -> 
 
 /// A mutable `@array` of `items` in the region, which the dumper refuses.
 fn alloc_array_mut(heap: &mut FiberHeap, region: RuntimeRegion, items: &[Value]) -> Value {
+    let data = elle::value::store::ArrayStore::new_in(heap, region, items);
     heap.alloc_in_region(
         HeapObject::LArrayMut {
-            data: elle::value::store::ArrayStore::new(items.to_vec()),
+            data,
             traits: Value::NIL,
         },
         region,

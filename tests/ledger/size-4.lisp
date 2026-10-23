@@ -67,7 +67,6 @@
 ["src/value/arena/mutate.rs" :tokens 5000]
 ["src/value/arena.rs" :tokens 5500]
 ["src/value/arena/tests/refcount.rs" :tokens 3000]
-["src/value/build.rs" :tokens 3500]
 ["src/value/closure/arena.rs" :tokens 4500]
 ["src/value/closure/payload.rs" :tokens 4500]
 ["src/value/closure/tests/payload.rs" :tokens 3000]

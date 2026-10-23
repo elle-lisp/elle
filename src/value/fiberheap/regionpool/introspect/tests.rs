@@ -83,7 +83,7 @@ fn obj_with_value_in_every_channel(
         }
         HeapTag::LArrayMut => (
             HeapObject::LArrayMut {
-                data: ArrayStore::new(vec![v2]),
+                data: ArrayStore::new(&[v2], |n| store.alloc_room(own, n)),
                 traits: vt,
             },
             both,

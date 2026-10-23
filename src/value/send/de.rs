@@ -146,7 +146,7 @@ pub(in crate::value::send) fn parts_from_sendable(
 pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) -> Value {
     use crate::value::closure::Closure;
     use crate::value::heap::{HeapObject, Pair};
-    use crate::value::store::{ArrayStore, CellStore, SetStore, StructStore};
+    use crate::value::store::{CellStore, SetStore, StructStore};
     use std::collections::BTreeSet;
 
     match sv {
@@ -175,10 +175,7 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) ->
                 .collect();
             let traits_resolved = into_value_inner(*traits, ctx);
             let traits_val = recv_traits(ctx.ctx.heap_mut(), traits_resolved, HeapTag::LArrayMut);
-            ctx.alloc(HeapObject::LArrayMut {
-                data: ArrayStore::new(values),
-                traits: traits_val,
-            })
+            ctx.ctx.array_mut_with_traits(&values, traits_val)
         }
         SendValue::Struct(map, traits) => {
             // `SendKey` ranks its variants the way `TableKey` does, so the

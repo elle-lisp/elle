@@ -8,16 +8,19 @@
 //! `value/`. The funnels in `value/arena/mutate.rs` call the writes, each
 //! beside the region tracking its store needs, and `value/build.rs` calls the
 //! constructors. A write that overlaps a live read guard panics with "already
-//! borrowed".
+//! borrowed". The `@array`, `@string` and `@bytes` stores are one extent
+//! type, generic over what it holds.
 
 mod array;
 mod bytes;
 mod cell;
+mod extent;
 mod set;
 mod structs;
 
 pub use array::{ArrayRead, ArrayStore};
 pub use bytes::{ByteRead, ByteStore};
 pub use cell::CellStore;
+pub use extent::{Extent, ExtentRead};
 pub use set::{SetRead, SetStore};
 pub use structs::{StructRead, StructStore};

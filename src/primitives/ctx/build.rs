@@ -39,6 +39,8 @@ ctx_ctors! {
     array (elements: Vec<Value>);
     /// Allocate a mutable `@array` into the call's region.
     array_mut (elements: Vec<Value>);
+    /// Allocate a mutable `@array` carrying `traits` into the call's region.
+    array_mut_with_traits (elements: &[Value], traits: Value);
     /// Allocate an empty mutable `@struct` into the call's region.
     struct_mut ();
     /// Allocate a mutable `@struct` with entries into the call's region.

@@ -16,11 +16,12 @@ use std::rc::Rc;
 use crate::hir::region::RuntimeRegion;
 use crate::primitives::traitregistry::default_traits_for;
 use crate::value::heap::{ExternalObject, HeapObject, HeapTag, Pair, TableKey};
-use crate::value::store::{ArrayStore, ByteStore, CellStore, SetStore, StructStore};
 use crate::value::FiberHeap;
 use crate::value::Value;
 
+mod mutable;
 mod view;
+pub(crate) use mutable::*;
 pub(crate) use view::{bytes_view, string_view};
 
 /// Allocate a string (bytes inline in the arena) into `region` on `heap`.
@@ -53,53 +54,6 @@ pub(crate) fn array(heap: &mut FiberHeap, elements: Vec<Value>, region: RuntimeR
     heap.alloc_in_region(
         HeapObject::LArray {
             elements: slice,
-            traits,
-        },
-        region,
-    )
-}
-
-/// Allocate a mutable `@array` into `region` on `heap`.
-#[inline]
-pub(crate) fn array_mut(
-    heap: &mut FiberHeap,
-    elements: Vec<Value>,
-    region: RuntimeRegion,
-) -> Value {
-    let traits = default_traits_for(heap, HeapTag::LArrayMut);
-    heap.alloc_in_region(
-        HeapObject::LArrayMut {
-            data: ArrayStore::new(elements),
-            traits,
-        },
-        region,
-    )
-}
-
-/// Allocate an empty mutable `@struct` into `region` on `heap`.
-#[inline]
-pub(crate) fn struct_mut(heap: &mut FiberHeap, region: RuntimeRegion) -> Value {
-    struct_mut_from(heap, BTreeMap::new(), region)
-}
-
-/// Allocate a mutable `@struct` with entries into `region` on `heap`.
-///
-/// The keys are interned into `region` like an immutable struct's, so an
-/// `@struct` never holds a key borrowed from the caller's region.
-#[inline]
-pub(crate) fn struct_mut_from(
-    heap: &mut FiberHeap,
-    entries: BTreeMap<TableKey, Value>,
-    region: RuntimeRegion,
-) -> Value {
-    let interned: BTreeMap<TableKey, Value> = entries
-        .iter()
-        .map(|(k, v)| (k.intern_into(heap, region), *v))
-        .collect();
-    let traits = default_traits_for(heap, HeapTag::LStructMut);
-    heap.alloc_in_region(
-        HeapObject::LStructMut {
-            data: StructStore::new(interned),
             traits,
         },
         region,
@@ -174,55 +128,6 @@ pub(crate) fn template(
     heap.alloc_in_region(HeapObject::ClosureTemplate(code.clone()), region)
 }
 
-/// Allocate a user box (`LBox`) into `region` on `heap`.
-#[inline]
-pub(crate) fn lbox(heap: &mut FiberHeap, value: Value, region: RuntimeRegion) -> Value {
-    heap.alloc_in_region(
-        HeapObject::LBox {
-            cell: CellStore::new(value),
-            traits: Value::NIL,
-        },
-        region,
-    )
-}
-
-/// Allocate a compiler capture cell into `region` on `heap`.
-#[inline]
-pub(crate) fn capture_cell(
-    heap: &mut FiberHeap,
-    value: Value,
-    origin: crate::value::heap::CellOrigin,
-    region: RuntimeRegion,
-) -> Value {
-    heap.alloc_in_region(
-        HeapObject::CaptureCell {
-            cell: CellStore::new(value),
-            origin,
-            traits: Value::NIL,
-        },
-        region,
-    )
-}
-
-/// Allocate a mutable `@string` into `region` on `heap`.
-#[inline]
-pub(crate) fn string_mut(heap: &mut FiberHeap, bytes: Vec<u8>, region: RuntimeRegion) -> Value {
-    let traits = default_traits_for(heap, HeapTag::LStringMut);
-    string_mut_with_traits(heap, &bytes, traits, region)
-}
-
-/// Allocate a mutable `@string` carrying `traits`, and its bytes, into
-/// `region` on `heap` (docs/impl/mutable.md).
-pub(crate) fn string_mut_with_traits(
-    heap: &mut FiberHeap,
-    bytes: &[u8],
-    traits: Value,
-    region: RuntimeRegion,
-) -> Value {
-    let data = ByteStore::new_in(heap, region, bytes);
-    heap.alloc_in_region(HeapObject::LStringMut { data, traits }, region)
-}
-
 /// Allocate immutable bytes (inline in the arena) into `region` on `heap`.
 #[inline]
 pub(crate) fn bytes(heap: &mut FiberHeap, data: Vec<u8>, region: RuntimeRegion) -> Value {
@@ -265,25 +170,6 @@ fn lbytes(
     heap.alloc_in_region(HeapObject::LBytes { data, traits }, region)
 }
 
-/// Allocate mutable `@bytes` into `region` on `heap`.
-#[inline]
-pub(crate) fn bytes_mut(heap: &mut FiberHeap, data: Vec<u8>, region: RuntimeRegion) -> Value {
-    let traits = default_traits_for(heap, HeapTag::LBytesMut);
-    bytes_mut_with_traits(heap, &data, traits, region)
-}
-
-/// Allocate mutable `@bytes` carrying `traits`, and its bytes, into `region`
-/// on `heap`.
-pub(crate) fn bytes_mut_with_traits(
-    heap: &mut FiberHeap,
-    data: &[u8],
-    traits: Value,
-    region: RuntimeRegion,
-) -> Value {
-    let data = ByteStore::new_in(heap, region, data);
-    heap.alloc_in_region(HeapObject::LBytesMut { data, traits }, region)
-}
-
 /// Allocate a syntax object into `region` on `heap`, copying `s`'s tree into
 /// that same region.
 ///
@@ -317,23 +203,6 @@ pub(crate) fn set(heap: &mut FiberHeap, items: BTreeSet<Value>, region: RuntimeR
     heap.alloc_in_region(
         HeapObject::LSet {
             data: slice,
-            traits,
-        },
-        region,
-    )
-}
-
-/// Allocate a mutable set into `region` on `heap`.
-#[inline]
-pub(crate) fn set_mut(
-    heap: &mut FiberHeap,
-    items: BTreeSet<Value>,
-    region: RuntimeRegion,
-) -> Value {
-    let traits = default_traits_for(heap, HeapTag::LSetMut);
-    heap.alloc_in_region(
-        HeapObject::LSetMut {
-            data: SetStore::new(items),
             traits,
         },
         region,

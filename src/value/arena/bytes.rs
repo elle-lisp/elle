@@ -23,17 +23,8 @@ pub fn bytes_splice(
         .string_store()
         .or_else(|| store.bytes_store())
         .expect("bytes_splice: expected @string or @bytes");
-    bytes.splice(range, with, |n| {
-        let region = heap.owning_region_of(store).unwrap_or_else(|| {
-            panic!(
-                "bytes_splice: the {} lies in no region of this heap, so it cannot \
-                 grow (docs/impl/mutable.md)",
-                store.type_name()
-            )
-        });
-        let room = heap.alloc_room_in_region::<u8>(n, region);
-        std::ptr::NonNull::new(room).expect("a region allocation is never null")
-    })
+    let room = growth_room(heap, store, "bytes_splice");
+    bytes.splice(range, with, room, <[u8]>::to_vec)
 }
 
 /// Append `with` to an `@string` or `@bytes`: a [`bytes_splice`] at the end.

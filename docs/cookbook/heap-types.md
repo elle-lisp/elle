@@ -1,6 +1,6 @@
 # Adding a New Heap Type
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-22 -->
 
 A heap type is a new kind of runtime value stored behind a tagged-union
 pointer.
@@ -47,9 +47,11 @@ each one a decision, never a wildcard.
 
 ## What the compiler does not find
 
-- A constructor in [build.rs](../../src/value/build.rs), and a method on the
-  primitive context in [ctx/build.rs](../../src/primitives/ctx/build.rs) when a
-  primitive allocates one. Build a heap value there, never from the variant at
+- A constructor in [build.rs](../../src/value/build.rs), or in
+  [build/mutable.rs](../../src/value/build/mutable.rs) for a mutable container,
+  and a method on the primitive context in
+  [ctx/build.rs](../../src/primitives/ctx/build.rs) when a primitive allocates
+  one. Build a heap value there, never from the variant at
   a call site.
 - A predicate in
   [predicates.rs](../../src/value/repr/accessors/predicates.rs), and an

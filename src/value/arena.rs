@@ -356,6 +356,28 @@ pub fn decref_removed_element(heap: &mut FiberHeap, container: Value, val: Value
     decref_region(heap, counted);
 }
 
+/// The room a growing store of `container` claims: an extent in the region of
+/// `heap` whose pages hold the shell. A write that fits the capacity never
+/// calls it, so it resolves no region. Panics, naming `funnel`, when no region
+/// of `heap` holds the shell: one another thread's heap owns, which a
+/// cross-thread channel delivers.
+fn growth_room<'h, T: Copy + 'static>(
+    heap: &'h mut FiberHeap,
+    container: Value,
+    funnel: &'static str,
+) -> impl FnOnce(usize) -> *mut T + 'h {
+    move |n| {
+        let region = heap.owning_region_of(container).unwrap_or_else(|| {
+            panic!(
+                "{funnel}: the {} lies in no region of this heap, so it cannot \
+                 grow (docs/impl/mutable.md)",
+                container.type_name()
+            )
+        });
+        heap.alloc_room_in_region::<T>(n, region)
+    }
+}
+
 mod bytes;
 mod mutate;
 pub use bytes::*;

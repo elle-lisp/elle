@@ -65,13 +65,15 @@ fn counted_key_values(
 }
 
 /// Push a value into a mutable @array, tracking the cross-region reference.
-/// Panics if `collection` is not an @array.
+/// Panics if `collection` is not an @array, or if it must grow and no region
+/// of `heap` holds it.
 /// Returns the collection value.
 pub fn push_with_incref(heap: &mut FiberHeap, collection: Value, elem: Value) -> Value {
+    let room = growth_room(heap, collection, "push_with_incref");
     collection
         .array_store()
         .expect("push_with_incref: expected @array")
-        .push(elem);
+        .push(elem, room);
     incref_inserted_element(heap, collection, elem);
     record_store(heap, collection, elem);
     collection
@@ -137,13 +139,15 @@ pub fn pop_with_decref(heap: &mut FiberHeap, collection: Value) -> Value {
 }
 
 /// Extend a mutable @array with multiple values, tracking each cross-region reference.
-/// Panics if `collection` is not an @array.
+/// Panics if `collection` is not an @array, or if it must grow and no region
+/// of `heap` holds it.
 /// Returns the collection value.
 pub fn extend_with_incref(heap: &mut FiberHeap, collection: Value, elems: &[Value]) -> Value {
+    let room = growth_room(heap, collection, "extend_with_incref");
     collection
         .array_store()
         .expect("extend_with_incref: expected @array")
-        .extend(elems);
+        .extend(elems, room);
     for &elem in elems {
         incref_inserted_element(heap, collection, elem);
         record_store(heap, collection, elem);
@@ -168,13 +172,14 @@ pub fn drain_tail_with_decref(heap: &mut FiberHeap, collection: Value, n: usize)
 }
 
 /// Insert a value at `index` in a mutable @array, tracking the stored ref.
-/// Panics if `collection` is not an @array or `index` is out of bounds
-/// (mirrors `Vec::insert`).
+/// Panics if `collection` is not an @array, if `index` is out of bounds
+/// (mirrors `Vec::insert`), or if it must grow and no region of `heap` holds it.
 pub fn insert_with_incref(heap: &mut FiberHeap, collection: Value, index: usize, elem: Value) {
+    let room = growth_room(heap, collection, "insert_with_incref");
     collection
         .array_store()
         .expect("insert_with_incref: expected @array")
-        .insert(index, elem);
+        .insert(index, elem, room);
     incref_inserted_element(heap, collection, elem);
     record_store(heap, collection, elem);
 }

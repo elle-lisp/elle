@@ -23,12 +23,12 @@ pub(crate) fn needs_drop(tag: HeapTag) -> bool {
         HeapTag::LibHandle => false,
         HeapTag::ManagedPointer => false,
         HeapTag::LString => true,
-        HeapTag::LArrayMut => true,
         HeapTag::LStructMut => true,
         HeapTag::LStruct => true,
         HeapTag::Closure => true,
         HeapTag::LArray => true,
-        // A byte store lies in its region's pages (docs/impl/mutable.md).
+        // An extent store lies in its region's pages (docs/impl/mutable.md).
+        HeapTag::LArrayMut => false,
         HeapTag::LStringMut => false,
         HeapTag::LBytes => true,
         HeapTag::LBytesMut => false,
@@ -59,12 +59,11 @@ pub(crate) fn holds_value_refs(tag: HeapTag) -> bool {
         HeapTag::Float => false,
         HeapTag::LibHandle => false,
         HeapTag::ManagedPointer => false,
-        // Only the `traits` edge, which the free scan reads off the shell.
-        HeapTag::LStringMut | HeapTag::LBytesMut => true,
+        // The `traits` edge off the shell, and an `@array`'s live elements.
+        HeapTag::LArrayMut | HeapTag::LStringMut | HeapTag::LBytesMut => true,
         HeapTag::LBox
         | HeapTag::CaptureCell
         | HeapTag::LString
-        | HeapTag::LArrayMut
         | HeapTag::LStructMut
         | HeapTag::LStruct
         | HeapTag::Closure

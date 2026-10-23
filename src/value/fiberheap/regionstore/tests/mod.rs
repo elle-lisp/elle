@@ -20,10 +20,11 @@ pub(super) fn cons_obj() -> HeapObject {
 /// A mutable array in `region` that holds `vals`, the way a container stores
 /// what it was given: the allocation records an edge to each value's region.
 pub(super) fn holder(store: &mut RegionStore, region: RuntimeRegion, vals: &[Value]) -> Value {
+    let data = ArrayStore::new(vals, |n| store.alloc_room(region, n));
     store.alloc_obj(
         region,
         HeapObject::LArrayMut {
-            data: ArrayStore::new(vals.to_vec()),
+            data,
             traits: Value::NIL,
         },
     )

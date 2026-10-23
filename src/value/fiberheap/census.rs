@@ -11,8 +11,8 @@
 //! Byte accounting is a dump-size estimate, not an allocator audit. Each
 //! object contributes its `HeapObject` shell plus its payload wherever the
 //! payload lives — region pages (`RegionSlice` backings, syntax trees, code
-//! payloads, a byte store's extent) or, for every other mutable container,
-//! the Rust heap. A payload shared through an aliased `RegionSlice` is counted
+//! payloads, the extent of an `@array`, `@string` or `@bytes` store) or, for
+//! every other mutable container, the Rust heap. A payload shared through an aliased `RegionSlice` is counted
 //! once (first holder). Not counted: per-container `Rc`/`RefCell` bookkeeping,
 //! a code payload's region tables, masks, child table and LIR body, and
 //! fiber-internal state (fibers are refused from the body).

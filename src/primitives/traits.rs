@@ -19,7 +19,7 @@ use crate::primitives::def::{RegionEffect, RetType};
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::heap::{deref, HeapObject};
-use crate::value::store::{ArrayStore, CellStore, SetStore, StructStore};
+use crate::value::store::{CellStore, SetStore, StructStore};
 use crate::value::types::Arity;
 use crate::value::Value;
 
@@ -123,10 +123,7 @@ unsafe fn clone_with_traits(
         }))),
         // Mutable collections: copy the store, so the traited copy is
         // INDEPENDENT — a push to the original is not visible through it.
-        HeapObject::LArrayMut { data, .. } => Ok(ctx.alloc(HeapObject::LArrayMut {
-            data: ArrayStore::new(data.read().to_vec()),
-            traits: table,
-        })),
+        HeapObject::LArrayMut { data, .. } => Ok(ctx.array_mut_with_traits(&data.read(), table)),
         HeapObject::LStructMut { data, .. } => {
             let entries: std::collections::BTreeMap<_, _> = data
                 .read()
