@@ -134,20 +134,35 @@ fn a_child_of_elle_test_verifies() {
 
 /// Every recipe sees the variable, so `make doctest` and `make smoke-plugins`,
 /// which run `elle` on a file directly, verify as the suites do.
+///
+/// The probe recipe is a second makefile, read after the repository's through
+/// `-f`: the `make` macOS ships is GNU make 3.81, which has no `--eval`.
 #[test]
 fn the_makefile_exports_the_variable_to_every_recipe() {
+    let dir = ScratchDir::new("verifier-probe");
+    let probe = dir.join("probe.mk");
+    std::fs::write(&probe, format!("verifier-probe: ; @printenv {VAR}\n"))
+        .expect("write the probe makefile");
+    let probe = probe.to_str().expect("a UTF-8 scratch path");
     let out = Command::new("make")
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .env_remove(VAR)
         .args([
             "--no-print-directory",
-            "--eval",
-            &format!("verifier-probe: ; @printenv {VAR}"),
+            "-f",
+            "Makefile",
+            "-f",
+            probe,
             "verifier-probe",
         ])
         .output()
         .expect("run make");
-    assert!(out.status.success(), "the probe recipe failed");
+    assert!(
+        out.status.success(),
+        "the probe recipe failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "on");
 }
 
