@@ -1,6 +1,6 @@
 # JIT fuel
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-10-23 -->
 
 How compiled code charges a fiber's fuel, reads the kill word, and parks where the budget runs out.
 
@@ -27,10 +27,11 @@ budget against it unsigned, and branches to a cold block when the budget is
 below it. The cold block calls `elle_jit_kill`, which sets the fiber's signal
 to the terminal `:killed` error, and returns `nil` from the function. The
 caller's check after the call finds the signal, so the kill leaves compiled
-code as a primitive's error does. The block spills nothing and parks no frame:
-a terminal signal is never resumed, and the killed worker's heap is freed
-whole. The check runs in a silent function as in any other, so a silent charge
-is the check, then a branch on zero around the decrement.
+code as a primitive's error does. The block releases what the activation owes,
+as a return does ([owner](region/owner.md)), and parks no frame, because a
+terminal signal is never resumed. The check runs in a silent function as in
+any other, so a silent charge is the check, then a branch on zero around the
+decrement.
 
 **A silent function never pauses.** Its charge loads the word and stores it
 less one unless it is zero, and nothing branches out of the function

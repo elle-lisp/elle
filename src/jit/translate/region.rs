@@ -1,8 +1,9 @@
-// audited: 2026-10-06
+// audited: 2026-10-23
 // docs/impl/jit.md
 // docs/impl/region/mechanism.md
-//! Prologue plumbing: region-map push/pop, local-variable init, per-slot
-//! alloc-region resolution, and the `JitCtx` capability-bundle accessor.
+// docs/impl/region/owner.md
+//! Prologue plumbing: region-map push/pop, the dues release, local-variable
+//! init, per-slot alloc-region resolution, and the `JitCtx` accessor.
 //!
 //! These methods bracket every activation — the prologue push and the balanced
 //! pop-before-return keep the activation's region-remap frame paired, and
@@ -92,6 +93,30 @@ impl<'a> FunctionTranslator<'a> {
         let func_ref = self
             .module
             .declare_func_in_func(self.helpers.pop_region_map, builder.func);
+        builder.ins().call(func_ref, &[vm]);
+        Ok(())
+    }
+
+    /// Emit a call to `elle_jit_release_activation_dues(vm)`, which frees the
+    /// activation's owner node and runs the releases it deferred, in a
+    /// function whose LIR can mint a node. Any other function reaches its exits
+    /// owing nothing and pays no call. Emitted before the region-map pop, as
+    /// the interpreter releases before it pops, at each exit that ends the
+    /// activation with no frame to park: the `Return`, and the kill
+    /// (docs/impl/region/owner.md).
+    pub(crate) fn emit_release_activation_dues(
+        &mut self,
+        builder: &mut FunctionBuilder,
+    ) -> Result<(), JitError> {
+        if !self.uses_activation_owner_node {
+            return Ok(());
+        }
+        let vm = self.vm_ptr.ok_or_else(|| {
+            JitError::InvalidLir("owner-node release without vm pointer".to_string())
+        })?;
+        let func_ref = self
+            .module
+            .declare_func_in_func(self.helpers.release_activation_dues, builder.func);
         builder.ins().call(func_ref, &[vm]);
         Ok(())
     }

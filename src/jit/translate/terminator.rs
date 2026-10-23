@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-23
 //! Terminator translation and the generic tail-call result branch.
 //!
 //! docs/impl/jit.md
@@ -104,18 +104,8 @@ impl<'a> FunctionTranslator<'a> {
                 let (tag, payload) = self.use_var_pair(builder, reg.0);
                 // Free this activation's owner node at normal completion — the
                 // JIT twin of the interpreter trampoline's clean-break release
-                // (docs/impl/region/owner.md). Emitted before the region-map pop,
-                // mirroring the interpreter's ordering, and only for a function
-                // whose LIR can mint a node.
-                if self.uses_activation_owner_node {
-                    let vm = self.vm_ptr.ok_or_else(|| {
-                        JitError::InvalidLir("owner-node release without vm pointer".to_string())
-                    })?;
-                    let func_ref = self
-                        .module
-                        .declare_func_in_func(self.helpers.release_activation_dues, builder.func);
-                    builder.ins().call(func_ref, &[vm]);
-                }
+                // (docs/impl/region/owner.md).
+                self.emit_release_activation_dues(builder)?;
                 self.emit_pop_then_return(builder, tag, payload)?;
             }
 

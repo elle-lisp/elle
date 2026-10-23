@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-10-23
 // docs/impl/jit.md
 //! Cranelift JIT compilation of LIR functions, and the types every stage of it
 //! shares.
@@ -148,8 +148,6 @@ impl TailDeferrals {
 pub enum JitError {
     /// Instruction not supported by JIT
     UnsupportedInstruction(String),
-    /// Function has polymorphic signal
-    Polymorphic,
     /// Cranelift compilation failed
     CompilationFailed(String),
     /// Invalid LIR structure
@@ -164,7 +162,6 @@ impl fmt::Display for JitError {
             JitError::UnsupportedInstruction(name) => {
                 write!(f, "JIT: unsupported instruction: {}", name)
             }
-            JitError::Polymorphic => write!(f, "JIT: function has polymorphic signal"),
             JitError::CompilationFailed(msg) => write!(f, "JIT compilation failed: {}", msg),
             JitError::InvalidLir(msg) => write!(f, "JIT: invalid LIR: {}", msg),
             JitError::Abandoned => write!(f, "JIT: the VM that asked for the compile is gone"),
