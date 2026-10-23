@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-10-22
 # std/gun reads over loopback WebSocket: a first read that asks the peers, and reads along a chain and around a cycle.
 # lib/gun/mesh.md
 
@@ -75,17 +75,45 @@
       (a-to-b)
       (b-to-silent)
       (srv:close)
+      (silent:close)))
+
+  # The same fetch, met by a read on C through B. C's read is answered from
+  # B's local data at once, and marks the soul fetched on C, so only a get
+  # that B sends A brings A's write to C. Without it, C reads nil for ever.
+  (let [a (open-db)
+        b (open-db :wait 1)
+        c (open-db)]
+    (gun:put (gun:get a "relayed") {:v 1})
+    (let [silent (raw-server :silent true)
+          b-to-silent (gun:connect b silent:url)
+          srv-a (serve a)
+          srv-b (serve b)
+          c-to-b (gun:connect c srv-b:url)
+          b-to-a (gun:connect b srv-a:url)]
+      (ev/sleep 0.2)
+      (gun:once (gun:get c "relayed"))
+      (eventually "a read that met a soul pending at B gets A's write as gossip"
+                  (fn [] (= (gun:once (gun:get c "relayed")) {"v" 1})))
+      (b-to-a)
+      (c-to-b)
+      (b-to-silent)
+      (srv-a:close)
+      (srv-b:close)
       (silent:close))))
 
 # ============================================================================
 # Forwarding along a chain A - B - C
 # ============================================================================
 
+# A holds deep in its store alone, so its resync sends no get for deep, and
+# C's read is the one get that reaches B for it. A resync get for deep could
+# leave deep pending on B, and C's first read would then answer nil.
 (defn chain []
-  (let [a (open-db)
+  (let [store-a (gun:memory-store)
+        a (open-db :store store-a)
         b (open-db)
         c (open-db)]
-    (gun:put (gun:get a "deep") {:v 1})
+    (gun:put (gun:get (gun:open :store store-a) "deep") {:v 1})
     (let [srv-a (serve a)
           srv-b (serve b)
           b-to-a (gun:connect b srv-a:url)
