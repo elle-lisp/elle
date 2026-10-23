@@ -1,7 +1,6 @@
 // audited: 2026-10-23
-// Which processes run Cranelift's verifier: `elle` as its flag and its
-// variable say, `elle test` always, the children it starts, every recipe of the
-// Makefile, and every CI job.
+// Which processes run Cranelift's verifier: `elle` as asked, `elle test` and
+// its children always, every Makefile recipe, and every CI job.
 //
 // docs/impl/verifier.md
 // docs/config.md

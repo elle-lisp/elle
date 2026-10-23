@@ -1,7 +1,7 @@
 // audited: 2026-10-23
 // docs/impl/jit.md
-//! The primitives that render a closure's compiled forms, its bytecode, Cranelift
-//! IR and LIR control flow graph, and the two that list the primitives.
+//! The primitives that render a closure's bytecode, Cranelift IR and LIR
+//! control flow graph, and the two that list the primitives.
 
 use crate::lir::{terminator_kind, Terminator};
 use crate::primitives::def::RegionEffect;

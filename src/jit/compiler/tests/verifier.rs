@@ -1,7 +1,7 @@
 // audited: 2026-10-23
 // docs/impl/verifier.md
-//! Whether a compiler runs Cranelift's verifier: the setting it was built with
-//! decides, and a verifying compiler refuses IR that is not well formed.
+//! Whether a compiler runs Cranelift's verifier: its setting decides, and a
+//! verifying compiler refuses IR that is not well formed.
 
 use super::*;
 

@@ -2,7 +2,7 @@
 // docs/impl/jit.md
 // docs/impl/verifier.md
 //! `JitCompiler`: a compile's Cranelift module, whether it verifies, the flag
-//! that abandons it, and the two entry points that drive a function through it.
+//! that abandons it, and its two entry points.
 //!
 //! `compile` produces native code and the `JitCode` that keeps it alive, and
 //! refuses the two shapes `LirView::jit_refusal` names; those refusals are
