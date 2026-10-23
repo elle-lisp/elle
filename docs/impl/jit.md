@@ -1,6 +1,6 @@
 # JIT
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-10-23 -->
 
 The JIT compiles hot functions from LIR to native code using Cranelift.
 
@@ -13,7 +13,7 @@ LIR → FunctionTranslator → Cranelift IR → Native code → JitCode
 ## Key types
 
 - **`JitCompiler`** — manages the Cranelift `JITModule`, declares
-  runtime helper symbols, tracks compilation stats
+  runtime helper symbols, runs the [verifier](verifier.md) when asked
 - **`FunctionTranslator`** — walks LIR basic blocks and instructions,
   emitting Cranelift IR
 - **`JitCode`** — wraps the native function pointer; keeps the module
@@ -188,7 +188,7 @@ Not all functions can be JIT-compiled. The JIT rejects functions that:
 
 - Use features not yet implemented in the translator
 - Contain `MakeClosure`, or collect struct or named varargs
-- Fail Cranelift verification
+- Fail Cranelift verification, where the verifier runs
 
 The translator has no lowering for `MakeClosure`. A closure's code object is a
 payload in its compile unit's code region, and the worker that compiles runs
@@ -215,9 +215,8 @@ its code region, so no count outlives that pin and none passes to a later
 function at the same address.
 
 **Every failed compile is recorded**, whichever kind it is, so the negative
-cache covers all of them. A refusal the translator plans for —
-`UnsupportedInstruction` or `Polymorphic` — is recorded and says
-nothing further. A Cranelift failure or an invalid-LIR result is a defect in
+cache covers all of them. A refusal the translator plans for,
+`UnsupportedInstruction`, is recorded and says nothing further. A Cranelift failure or an invalid-LIR result is a defect in
 the compiler, so it is recorded and also printed on stderr, once. Every path
 that takes a result classifies it through `VM::record_jit_failure`: the
 background poll, the diagnostic drain, and the synchronous compile that

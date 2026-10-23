@@ -1,6 +1,6 @@
 # Elle
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-23 -->
 
 A Lisp whose compiler infers what each function does and where each value dies,
 and runs on those facts.
@@ -224,7 +224,7 @@ maps its pages privately and rewrites its pointers in one pass. No value is
 decoded, and pages that nothing touches are never read from disk.
 
 The boot image holds the whole standard library as one region. A release
-binary that `make elle` builds carries its boot image inside the executable,
+binary that `make release` builds carries its boot image inside the executable,
 so its first start loads it too. Any other build compiles the library at its
 first start and stores the image in the cache directory, and every later start
 loads it. From an image, Elle starts in under 10 ms with 13 MB resident.
@@ -300,11 +300,10 @@ surface ([versioning](docs/versioning.md)).
 ## Using Elle
 
 Build with a stable Rust toolchain. The [install guide](INSTALL.md) lists the
-system libraries, and shows the `make` build that puts the boot image inside the
-binary.
+system libraries and the other builds.
 
 ```sh
-cargo build --release -p elle
+make release                            # the release binary, its boot image inside
 ./target/release/elle script.lisp       # run a file
 ./target/release/elle notes.md          # run the lisp blocks of a markdown file
 ./target/release/elle -e '(+ 1 2)'      # evaluate an expression

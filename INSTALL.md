@@ -1,6 +1,6 @@
 # Installing Elle
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-23 -->
 
 What to install, how to build Elle and its plugins, and how to run the tests.
 
@@ -47,25 +47,23 @@ emerge dev-db/sqlite sys-libs/zlib app-arch/zstd dev-libs/libgit2 sys-process/pa
 ## Building
 
 ```sh
+# The production binary: a release build with the boot image inside it
+make release
+
 # Debug build (fast to compile, slow to run)
 cargo build -p elle
-
-# Release build
-cargo build --release -p elle
-
-# Release build with the boot image inside the binary
-make elle CARGO_PROFILE=--release
 
 # Release build with WASM backend
 cargo build --release -p elle --features wasm
 ```
 
-The binary is at `target/debug/elle` or `target/release/elle`.
+The binary is at `target/release/elle`, or `target/debug/elle` for a debug
+build.
 
-`make elle` builds a release binary twice. The first build writes the boot
-image, and the second carries it, so the binary's first start loads the
-standard library without compiling it. A binary that `cargo build` makes
-carries no image. It compiles the standard library at its first start and
+`make release` builds the binary twice. The first build writes the boot image,
+and the second carries it, so the binary's first start loads the standard
+library without compiling it. A binary that `cargo build` makes carries no
+image. It compiles the standard library at its first start and
 stores the image in the cache directory for every later start
 ([boot.md](docs/impl/image/boot.md)).
 

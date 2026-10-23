@@ -1,6 +1,6 @@
 # The rig
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-23 -->
 
 `elle-rig` hosts the same compiler and runtime as `elle`, and configures them
 in ways a user build cannot.
@@ -9,10 +9,12 @@ The implementation suite runs on the rig ([spec](../docs/spec.md)). A user
 build has one runtime per build: no flag chooses a tier, and no flag turns the
 JIT off. An implementation test sometimes needs exactly that: the interpreter
 alone, every function compiled on its first call, every call kept a call, or
-the use-after-free oracle armed. The rig is where those settings live. The rig
-is a second executable over the `elle` library, so a program that runs under
-`elle` runs under the rig unchanged. Nothing in a user build accepts a rig setting, so none
-reaches user documentation.
+the use-after-free oracle armed. The rig is where those settings live, and it
+runs Cranelift's verifier on every function the JIT compiles
+([verifier](../docs/impl/verifier.md)). The rig is a second executable over the
+`elle` library, so a program that runs under `elle` runs under the rig
+unchanged. Nothing in a user build accepts a rig setting, so none reaches user
+documentation.
 
 ## Running a file
 
