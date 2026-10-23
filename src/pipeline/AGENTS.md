@@ -1,6 +1,6 @@
 # pipeline
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-22 -->
 
 The compilation entry points, from source text to bytecode, LIR, HIR or a value, and the compile context they share.
 
@@ -36,7 +36,7 @@ graft and the fold.
 | [compile.rs](compile.rs) | The bytecode and FHIR entry points, and the lowering they share |
 | [compile/frontend.rs](compile/frontend.rs) | The file front end: source text or forms to regularized HIR |
 | [compile/lir.rs](compile/lir.rs) | `compile_file_to_lir`: a file to frozen LIR |
-| [compile/include.rs](compile/include.rs) | `include` and `include-file`: resolution, splicing, and `splice_includes` |
+| [compile/include.rs](compile/include.rs) | `include` and `include-file`: resolution, the include log, and `splice_includes` |
 | [compile/transforms.rs](compile/transforms.rs) | The two test-runner transforms, and the entry points over them |
 | [analyze.rs](analyze.rs) | `analyze` and `analyze_file` |
 | [eval.rs](eval.rs) | `eval`, `eval_all`, `eval_file` and `eval_syntax` |
@@ -68,7 +68,7 @@ and `cctx`. `analyze`, `analyze_file` and `eval` expand on that VM, while
 | `compile_barrier_module` | `CodeUnit` | The test runner's per-form mode: the `def` and `var` forms run as the module runs, and each expression becomes an indexed thunk ([the test runner](../../docs/test-runner.md)) |
 | `compile_whole_module` | `CodeUnit` | The test runner's whole-file mode: one thunk runs every form in source order |
 | `compile_whole_module_forms(syntaxes, …)` | `CodeUnit` | `compile_whole_module` over forms that another VM read |
-| `splice_includes(source, source_name, cctx)` | `String` | The source text with each `include` and `include-file` inlined, for the WASM backend |
+| `splice_includes(source, source_name, cctx)` | `String` | The source text with each top-level `include` and `include-file` inlined, for the WASM backend |
 | `analyze` | `AnalyzeResult` | One form to HIR, with tail calls marked. No regularize, no bytecode |
 | `analyze_file` | `AnalyzeResult` | A file as one letrec to HIR, with tail calls marked. No regularize, no bytecode |
 | `eval` | `Value` | One form, compiled and run on the caller's VM |
@@ -134,7 +134,7 @@ top-level forms
     ▼
 current-epoch forms
     │  with_macro_expansion: stamp the file scope unless the name starts
-    │  with <, splice includes, expand
+    │  with <, then expand, splicing each include where it stands
     ▼
 expanded forms
     │  the test-runner transform, in those two modes only
@@ -175,9 +175,8 @@ The other entry points leave this path:
   [compile/lir.rs](compile/lir.rs). It stamps no file scope, honors
   `epoch_skip`, and stops at LIR.
 - `analyze_file` reads with `read_syntax_all`, strips the declarations,
-  migrates and expands. It checks no lexicon, stamps no file scope, splices no
-  include, and binds no `core_env`. It then analyzes the letrec and marks tail
-  calls.
+  migrates and expands. It checks no lexicon, stamps no file scope, and binds no
+  `core_env`. It then analyzes the letrec and marks tail calls.
 - `compile`, `analyze` and `eval` read one form with `read_syntax`, and skip
   the declarations and the epoch migration.
 - `eval` and `eval_syntax` do not regularize. They mark tail calls,

@@ -16,9 +16,9 @@ compile inputs match, and an image can carry it. The runtime adds nothing
 else: it caches and hydrates.
 
 No implicit letrec remains. A module with several definitions wraps them in
-`letrec`, `let`, `fn` or a struct literal. `defmacro` already works inside a
-body. `include` splices only at a file's top level today, so it must splice
-into the body that holds it.
+`letrec`, `let`, `fn` or a struct literal. `defmacro` works inside a body, and
+so does `include`, which splices into the form that holds it
+([include.md](../include.md)).
 
 The form may build any value. Pure work it does outside a lambda runs once per
 instance, and every importer shares the result. Effects and dependencies go
