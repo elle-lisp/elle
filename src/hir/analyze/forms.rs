@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-24
 //! The control-flow forms, and the quoted-datum, intrinsic and primitive helpers other forms share.
 //!
 //! docs/impl/hir.md
@@ -149,8 +149,15 @@ impl<'a> Analyzer<'a> {
             // A fn body is a letrec* context (docs/bindings.md): defining the
             // same binding identity twice in one body is rejected exactly like
             // an explicit letrec's duplicate.
+            //
+            // A name bound to a lambda is seeded here, so a call that precedes
+            // the lambda checks its count against the lambda's arity.
             let mut duplicates = super::scopes::DuplicateGuard::default();
             for item in items {
+                let value = match item.as_list() {
+                    Some([_, name, value]) if name.as_symbol().is_some() => Some(value),
+                    _ => None,
+                };
                 for (name, scopes) in Self::is_define_form(item) {
                     // Create local binding slot, marked prebound so that
                     // needs_capture() knows the binding may be captured before
@@ -163,6 +170,9 @@ impl<'a> Analyzer<'a> {
                     inner.is_prebound = true;
                     inner.init_pending = true;
                     inner.prebind_fn_depth = fn_depth;
+                    if let Some(value) = value {
+                        self.seed_lambda_facts(binding, value);
+                    }
                 }
             }
 

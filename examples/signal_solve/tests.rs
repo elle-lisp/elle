@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-24
 //! The rules on models built by hand: a ceiling that checks, and each kind of violation, in both engines.
 //!
 //! docs/impl/solver.md
@@ -6,8 +6,7 @@
 //! An analyzed file reaches the solver only when the analyzer accepts its
 //! ceilings, so no fixture can hold a violation. These models hold one each.
 
-use crate::link::lower;
-use crate::model::{Model, Solution, VarId, VarKey};
+use elle::hir::solve::{lower, Model, Solution, VarId, VarKey};
 use elle::signals::{SIG_ERROR, SIG_YIELD};
 
 /// The bit value of a one-bit signal word.
@@ -18,7 +17,7 @@ fn bit(word: elle::value::fiber::SignalBits) -> u32 {
 /// Solve with both engines, require them to agree, and answer the model.
 fn solve(model: &Model) -> Solution {
     let lowered = lower(model);
-    let worklist = crate::fixpoint::solve(model, &lowered);
+    let worklist = elle::hir::solve::solve(model, &lowered).solution(model);
     let datafrog = crate::crosscheck::solve(model, &lowered);
     assert_eq!(worklist, datafrog, "the two engines solve one model");
     worklist
