@@ -61,8 +61,11 @@
          (let [body (string (tls:read-all conn))]
            (assert (> (length body) 0)
                    "tls: read-all must return non-empty body")
+           ## The message carries the whole response, which tells a refused
+           ## request from a body cut short.
            (assert (string/contains? body "Example Domain")
-                   "tls: response body must contain 'Example Domain'"))))))
+                   (string "tls: response body must contain 'Example Domain', got: "
+                           body)))))))
 
   (println "tls: HTTPS GET with tls:read-all PASSED\n")
 
@@ -99,7 +102,7 @@
 ## ── Loopback echo server and client ──────────────────────────────────
 ##
 ## Generates a self-signed cert via openssl, starts a TLS echo server and a
-## TLS client under the same async scheduler, verifies the full round-trip.
+## TLS client under the same scheduler, and verifies the full round-trip.
 
 ## Generate test certificates. If openssl is not available or fails, skip.
 ## The scratch dir is created here — after the plugin gate above — so a
@@ -165,7 +168,7 @@
 ## ── Error cases ─────────────────────────────────────────────────────
 ##
 ## Tests that bad inputs fail with correct error kinds, not silently or with panics.
-## Plugin primitives accessed via the tls-plugin struct.
+## The cases call plugin primitives through the tls-plugin struct.
 
 ## Extract primitives we need to call directly for error-path testing.
 (def client-state-fn (get tls-plugin :client-state))
@@ -178,7 +181,7 @@
   (assert (not ok?) "empty hostname: must signal an error")
   (assert (= (get err :error) :tls-error)
           (string "empty hostname: error kind must be :tls-error, got: "
-                  (string (get err :error)))))
+                  (get err :error))))
 
 (println "tls errors: empty hostname rejected ✓\n")
 
@@ -188,7 +191,7 @@
     (assert (not ok?) "tls/process with string: must signal an error")
     (assert (= (get err :error) :type-error)
             (string "tls/process with string: must be :type-error, got: "
-                    (string (get err :error))))))
+                    (get err :error)))))
 
 (println "tls errors: tls/process type-check ✓\n")
 
@@ -197,7 +200,7 @@
   (let [result (write-plaintext-fn state (bytes "hello"))]
     (assert (= result:status :error)
             (string "write-plaintext before handshake: result:status must be :error, got: "
-                    (string result:status)))))
+                    result:status))))
 
 (println "tls errors: write-plaintext before handshake returns error struct ✓\n")
 
@@ -206,24 +209,24 @@
                            "/nonexistent/key.pem"))]
   (assert (not ok?) "invalid cert path: must signal an error")
   (assert (= (get err :error) :io-error)
-          (string "invalid cert path: must be :io-error, got: "
-                  (string (get err :error)))))
+          (string "invalid cert path: must be :io-error, got: " (get err :error))))
 
 (println "tls errors: invalid cert path rejected ✓\n")
 
-## Error 5: tls/connect to a closed port → :io-error or :connect-error
+## Error 5: tls/connect to a closed port → :io-error, :connect-error or :tls-error
 ## Port 19999 on 127.0.0.1 should have nothing listening.
 ## The scheduler propagates the error out, so protect wraps the call.
 (let [[ok? err] (protect ((fn [] (tls:connect "127.0.0.1" 19999))))]
   (assert (not ok?) "connect to closed port: must signal an error")
   (assert (or (= (get err :error) :io-error) (= (get err :error) :connect-error)
               (= (get err :error) :tls-error))
-          (string "connect to closed port: must be :io-error or :connect-error, got: "
-                  (string (get err :error)))))
+          (string "connect to closed port: must be :io-error, :connect-error or :tls-error, got: "
+                  (get err :error))))
 
 (println "tls errors: connect to closed port rejected ✓\n")
 
-## Error 6: tls/connect to a plain-HTTP port → :tls-error (handshake fails on non-TLS data)
+## Error 6: tls/connect to a plain-HTTP port → :tls-error, :io-error or :connect-error
+## The handshake fails on non-TLS data.
 ## Requires network access.
 (if has-network
   (begin
@@ -231,8 +234,8 @@
       (assert (not ok?) "connect to plain HTTP port: must signal an error")
       (assert (or (= (get err :error) :tls-error) (= (get err :error) :io-error)
                   (= (get err :error) :connect-error))
-              (string "connect to plain HTTP port: must be :tls-error or :io-error, got: "
-                      (string (get err :error)))))
+              (string "connect to plain HTTP port: must be :tls-error, :io-error or :connect-error, got: "
+                      (get err :error))))
     (println "tls errors: connect to plain-HTTP port rejected ✓\n"))
   (println "tls errors: connect to plain-HTTP port SKIPPED (no network)\n"))
 
