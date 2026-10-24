@@ -1,5 +1,5 @@
-// audited: 2026-10-21
-//! Visit a HIR node's direct children, and find the `.lisp` files a file's literal imports name.
+// audited: 2026-10-24
+//! Find the `.lisp` files a file's literal imports name, in the one spelling the link keys on.
 //!
 //! docs/impl/solver.md
 
@@ -35,96 +35,5 @@ pub fn literal_imports(hir: &Hir, arena: &BindingArena, out: &mut Vec<String>) {
             }
         }
     }
-    each_child(hir, &mut |c| literal_imports(c, arena, out));
-}
-/// Visit every direct child expression of a node.
-pub fn each_child<'h>(hir: &'h Hir, f: &mut dyn FnMut(&'h Hir)) {
-    match &hir.kind {
-        HirKind::Let { bindings, body }
-        | HirKind::Letrec { bindings, body }
-        | HirKind::Loop { bindings, body } => {
-            for (_, v) in bindings {
-                f(v);
-            }
-            f(body);
-        }
-        HirKind::Lambda(lambda) => f(&lambda.body),
-        HirKind::If {
-            cond,
-            then_branch,
-            else_branch,
-        } => {
-            f(cond);
-            f(then_branch);
-            f(else_branch);
-        }
-        HirKind::Cond {
-            clauses,
-            else_branch,
-        } => {
-            for (c, b) in clauses {
-                f(c);
-                f(b);
-            }
-            if let Some(e) = else_branch {
-                f(e);
-            }
-        }
-        HirKind::Begin(es) | HirKind::And(es) | HirKind::Or(es) => es.iter().for_each(f),
-        HirKind::Block { body, .. } => body.iter().for_each(f),
-        HirKind::Break { value, .. }
-        | HirKind::Return { value }
-        | HirKind::Emit { value, .. }
-        | HirKind::Assign { value, .. }
-        | HirKind::Define { value, .. }
-        | HirKind::Destructure { value, .. }
-        | HirKind::MakeCell { value } => f(value),
-        HirKind::Call { func, args, .. } => {
-            f(func);
-            for a in args {
-                f(&a.expr);
-            }
-        }
-        HirKind::While { cond, body } => {
-            f(cond);
-            f(body);
-        }
-        HirKind::Recur { args } | HirKind::Intrinsic { args, .. } => args.iter().for_each(f),
-        HirKind::Match { value, arms } => {
-            f(value);
-            for (_, g, b) in arms {
-                if let Some(g) = g {
-                    f(g);
-                }
-                f(b);
-            }
-        }
-        HirKind::Eval { expr, env } => {
-            f(expr);
-            f(env);
-        }
-        HirKind::Parameterize { bindings, body } => {
-            for (p, v) in bindings {
-                f(p);
-                f(v);
-            }
-            f(body);
-        }
-        HirKind::DerefCell { cell } => f(cell),
-        HirKind::SetCell { cell, value } => {
-            f(cell);
-            f(value);
-        }
-        HirKind::Nil
-        | HirKind::EmptyList
-        | HirKind::Bool(_)
-        | HirKind::Int(_)
-        | HirKind::Float(_)
-        | HirKind::String(_)
-        | HirKind::Keyword(_)
-        | HirKind::Var(_)
-        | HirKind::Quote(_)
-        | HirKind::QuoteConst(_)
-        | HirKind::Error => {}
-    }
+    hir.for_each_child(|c| literal_imports(c, arena, out));
 }

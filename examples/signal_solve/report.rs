@@ -1,13 +1,12 @@
-// audited: 2026-10-21
+// audited: 2026-10-24
 //! Compare the solver's least model with the analyzer's inferred signals, and print what the run found.
 //!
 //! docs/impl/solver.md
 
 mod verdict;
 
-use crate::extract::{ModuleShape, Unit};
-use crate::model::{Model, Solution, VarId, VarKey};
-use crate::visit::each_child;
+use crate::Unit;
+use elle::hir::solve::{to_word, Model, ModuleShape, Solution, VarId, VarKey};
 use elle::hir::{Hir, HirKind};
 use elle::signals::Signal;
 use elle::value::fiber::SignalBits;
@@ -55,7 +54,7 @@ fn lambdas(hir: &Hir, unit: u32, out: &mut Vec<Lambda>) {
             inferred: lambda.inferred_signals,
         });
     }
-    each_child(hir, &mut |c| lambdas(c, unit, out));
+    hir.for_each_child(|c| lambdas(c, unit, out));
 }
 
 impl<'a> Context<'a> {
@@ -90,12 +89,13 @@ impl<'a> Context<'a> {
                 format!("{}@{}:{}", name, self.file(*f), line)
             }
             VarKey::Top(f) => format!("top of {}", self.file(*f)),
-            VarKey::Prim(s) => self
+            VarKey::Fixed(f, b) => self
                 .symbols
-                .name(SymbolId(*s))
-                .unwrap_or("<prim>")
+                .name(self.units[*f as usize].arena.get(*b).name)
+                .unwrap_or("<fixed>")
                 .to_string(),
             VarKey::Param(o, i) => format!("param {} of {}", i, self.describe(*o, lines)),
+            VarKey::Bound(p) => format!("bounded {}", self.describe(*p, lines)),
             VarKey::Field(p, k) => {
                 format!(
                     "({}):{}",
@@ -141,7 +141,7 @@ pub fn disagreement(ctx: &Context, check: &Solution) -> usize {
 pub fn print(ctx: &Context, run: &Run) -> usize {
     let mut bits_of: HashMap<VarId, u64> = HashMap::new();
     for &(v, b) in &ctx.solution.bits {
-        *bits_of.entry(v).or_default() |= crate::model::to_word(std::iter::once(b));
+        *bits_of.entry(v).or_default() |= to_word(std::iter::once(b));
     }
     let mut deps_of: HashMap<VarId, Vec<VarId>> = HashMap::new();
     for &(v, w) in &ctx.solution.dep {
@@ -247,7 +247,7 @@ pub fn print(ctx: &Context, run: &Run) -> usize {
         println!("-- ceilings the solver finds broken");
         let mut by: BTreeMap<VarId, u64> = BTreeMap::new();
         for &(v, b) in &ctx.solution.viol {
-            *by.entry(v).or_default() |= crate::model::to_word(std::iter::once(b));
+            *by.entry(v).or_default() |= to_word(std::iter::once(b));
         }
         for (v, b) in by {
             println!(

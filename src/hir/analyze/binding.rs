@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-24
 //! The binding forms `let`, `def`, `var` and `assign`, and the analysis state a
 //! binding's initializer leaves for it.
 //!
@@ -231,8 +231,7 @@ impl<'a> Analyzer<'a> {
     /// `analyze_initializer` classifies a self-edge directly inside its lambda
     /// `CaptureKind::Recursive`, which resolves to the executing closure, cell
     /// free, as in a self-recursive `letrec`. A self-reference reads the seed
-    /// while the lambda is analyzed, so a lambda whose signal left the seed
-    /// converges like a letrec of one binding (docs/pipeline.md).
+    /// while the lambda is analyzed, and the solve raises it (docs/pipeline.md).
     fn analyze_definition(
         &mut self,
         binding: Binding,
@@ -241,16 +240,8 @@ impl<'a> Analyzer<'a> {
         // A self-recursive call inside the lambda reads the seed, not the
         // unknown-callee fallback.
         self.seed_lambda_facts(binding, value_syntax);
-        let seed = self.signal_env.get(&binding).copied();
-        let mut value = self.analyze_initializer(binding, value_syntax)?;
-        if self.record_lambda_facts(binding, &value)
-            && Self::refers_to_itself(binding, &value)
-            && self.signal_env.get(&binding).copied() != seed
-        {
-            value = self
-                .converge_signals(&[(binding, value_syntax)])?
-                .swap_remove(0);
-        }
+        let value = self.analyze_initializer(binding, value_syntax)?;
+        self.record_lambda_facts(binding, &value);
         self.apply_transient_binding_state(binding);
         Ok(value)
     }

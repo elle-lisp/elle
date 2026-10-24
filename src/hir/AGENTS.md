@@ -1,6 +1,6 @@
 # hir
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-24 -->
 
 The analyzed program, with bindings resolved, captures computed and signals
 inferred, and the passes over it.
@@ -23,6 +23,8 @@ Does NOT:
 
 [analyze/AGENTS.md](analyze/AGENTS.md) owns how the analyzer builds HIR.
 [docs/impl/hir.md](../../docs/impl/hir.md) owns the design of the passes.
+[The solver](solve/mod.rs) settles a unit's signals once the analyzer's pass
+is over, as [docs/impl/solver.md](../../docs/impl/solver.md) states.
 
 ## Interface
 
@@ -49,8 +51,8 @@ Does NOT:
 
 | Method | Purpose |
 |--------|---------|
-| `analyze(&mut self, syntax: &Syntax) -> Result<AnalysisResult, String>` | Analyze a single Syntax tree into HIR |
-| `analyze_file_letrec(&mut self, forms: Vec<FileForm>, span: Span) -> Result<Hir, String>` | Analyze a file's top-level forms, already classified as `Def`, `Var`, `Signal` or `Expr`, as one letrec. Pass 1 pre-binds all names. Pass 2 analyzes initializers in order. Pass 3 re-analyzes lambdas until their signals stop changing. Returns a single `HirKind::Letrec` node. |
+| `analyze(&mut self, syntax: &Syntax) -> Result<AnalysisResult, String>` | Analyze a single Syntax tree into HIR, and settle its signals |
+| `analyze_file(&mut self, forms: Vec<FileForm>, span: Span) -> Result<Hir, String>` | Analyze a file's top-level forms, already classified as `Def`, `Var`, `Signal` or `Expr`, as one letrec. Pass 1 pre-binds all names, and Pass 2 analyzes initializers in order. The unit's signals are then settled. Returns a single `HirKind::Letrec` node. |
 | `bind_primitives(&mut self, meta: &PrimitiveMeta)` | Bind every registered primitive as an immutable `Local` binding in the analyzer's initial scope. Call it before analysis. A file-level `def` shadows a primitive. |
 
 ## Data flow
@@ -206,7 +208,7 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     evaluates each pair, emits `PushParamFrame` with them, lowers the body,
     then emits `PopParamFrame`.
 
-21. **Files compile to a single synthetic letrec.** `analyze_file_letrec`
+21. **Files compile to a single synthetic letrec.** `analyze_file`
     turns a file's top-level forms into one `HirKind::Letrec`: `def` is an
     immutable binding, `var` a mutable one, `(signal :kw)` and a bare
     expression each a synthetic binding. Pass 1 pre-binds every name, which

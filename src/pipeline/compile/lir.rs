@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-10-24
 //! Compile a file to frozen LIR, for the WASM backend and the dumps.
 //!
 //! src/pipeline/AGENTS.md
@@ -82,13 +82,13 @@ fn compile_file_to_lir_inner(
     if !core_env.is_empty() {
         analyzer.bind_compile_time_env(&core_env, true);
     }
-    let mut hir = analyzer.analyze_file_letrec(forms, span)?;
+    let mut hir = analyzer.analyze_file(forms, span)?;
     let prim_values = analyzer.primitive_values().clone();
     let errors = analyzer.take_errors();
     drop(analyzer);
 
-    // If analysis collected recoverable errors, such as an undefined variable
-    // or a signal mismatch, report the first one as "file:line:col: message".
+    // If analysis collected undefined names, report the first one as
+    // "file:line:col: message".
     // Without this, the poison nodes those errors left reach the lowerer and
     // report the opaque "internal: error poison node in lowerer".
     if !errors.is_empty() {

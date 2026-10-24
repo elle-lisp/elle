@@ -1,12 +1,12 @@
-// audited: 2026-10-21
+// audited: 2026-10-24
 //! The shape of the value a module file returns, and the exports its struct literal names.
 //!
 //! docs/impl/solver.md
 //! docs/modules-proposal.md
 
 use super::Extractor;
-use crate::model::VarId;
-use elle::hir::{Hir, HirKind};
+use crate::hir::solve::model::VarId;
+use crate::hir::{Hir, HirKind};
 
 /// The shape a module file returns.
 #[derive(Debug, Clone)]

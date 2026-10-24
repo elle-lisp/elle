@@ -1,8 +1,9 @@
-// audited: 2026-10-12
+// audited: 2026-10-24
 //! The solver's vocabulary: interned signal variables, and the facts that the extractor states over them.
 //!
 //! docs/impl/solver.md
 
+use crate::hir::Binding;
 use std::collections::{BTreeSet, HashMap};
 
 /// A file in the import graph, by index.
@@ -22,10 +23,13 @@ pub enum VarKey {
     Lam(FileId, u32),
     /// The code of a file outside every lambda.
     Top(FileId),
-    /// A primitive, core or stdlib binding, by symbol id.
-    Prim(u64),
-    /// Parameter `idx` of the owner (a `Lam` or a `Prim`).
+    /// A binding the compile starts with: a primitive, or a core or stdlib
+    /// export. Its signal is the one the analyzer recorded for it.
+    Fixed(FileId, Binding),
+    /// Parameter `idx` of the owner (a `Lam` or a `Fixed`).
     Param(VarId, u32),
+    /// A parameter under a `bound`, which raises the bits the bound admits.
+    Bound(VarId),
     /// Field `key` of a parameter.
     Field(VarId, KeyId),
     /// Export `key` of the module instance a call site created.
@@ -45,11 +49,11 @@ pub enum VarKey {
 pub struct Facts {
     /// `raw(C, B)`: context C raises bit B by itself, whatever it calls.
     pub raw: BTreeSet<(VarId, u32)>,
-    /// `bits(V, B)`: V raises bit B by itself. Primitives, literals and
-    /// unknown values carry these.
+    /// `bits(V, B)`: V raises bit B by itself. Fixed bindings, bounded
+    /// parameters, literals and unknown values carry these.
     pub bits: BTreeSet<(VarId, u32)>,
-    /// `dep(V, W)`: V includes the signal of free variable W. A primitive
-    /// includes the parameters it propagates, and a free variable itself.
+    /// `dep(V, W)`: V includes the signal of free variable W. A fixed
+    /// binding includes the parameters it propagates, and a free variable itself.
     pub dep: BTreeSet<(VarId, VarId)>,
     /// `use(C, S, G, O)`: C includes G's signal at site S, with O's
     /// parameters bound to S's arguments.
@@ -163,6 +167,17 @@ impl Model {
         self.sites - 1
     }
 
+    /// The variable whose parameters a call of `v` binds: a squelch binds
+    /// the parameters of the closure it wraps.
+    pub fn owner(&self, v: VarId) -> VarId {
+        if let VarKey::Sq(_) = self.keys_by_id[v as usize] {
+            if let Some(&(_, t)) = self.facts.sqof.range((v, 0)..=(v, VarId::MAX)).next() {
+                return self.owner(t);
+            }
+        }
+        v
+    }
+
     pub fn unknown(&mut self) -> VarId {
         self.var(VarKey::Unknown)
     }
@@ -184,7 +199,7 @@ pub fn all_bits() -> impl Iterator<Item = u32> {
 /// The bit positions set in a signal-bit word, with `TOP` for a word that
 /// holds every user-facing bit.
 pub fn bit_positions(raw: u64) -> impl Iterator<Item = u32> {
-    let cap = elle::signals::CAP_MASK.raw();
+    let cap = crate::signals::CAP_MASK.raw();
     let top = raw & cap == cap;
     let rest = if top { raw & !cap } else { raw };
     (0..64)
@@ -196,7 +211,7 @@ pub fn bit_positions(raw: u64) -> impl Iterator<Item = u32> {
 pub fn to_word(bits: impl Iterator<Item = u32>) -> u64 {
     bits.fold(0, |w, b| {
         if b == TOP {
-            w | elle::signals::CAP_MASK.raw()
+            w | crate::signals::CAP_MASK.raw()
         } else {
             w | (1u64 << b)
         }

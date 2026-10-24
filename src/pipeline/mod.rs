@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-10-24
 //! The compilation pipeline's entry points: source text to bytecode, or to HIR
 //! for a reader that wants the analysis alone.
 //!
@@ -52,4 +52,7 @@ pub struct AnalyzeResult {
     pub lambda_decls: std::collections::HashMap<crate::hir::HirId, crate::hir::LambdaDecl>,
     /// The bits the code outside every lambda raises by itself.
     pub top_direct: crate::value::fiber::SignalBits,
+    /// The signal of each binding the analysis started with, as the solver
+    /// reads it.
+    pub fixed: std::collections::HashMap<crate::hir::Binding, crate::signals::Signal>,
 }

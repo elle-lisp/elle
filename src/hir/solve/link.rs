@@ -1,21 +1,12 @@
-// audited: 2026-10-05
+// audited: 2026-10-24
 //! Join every file's facts through the import graph, then lower the call facts for the solver.
 //!
 //! docs/impl/solver.md
 //! docs/modules-proposal.md
 
-use crate::extract::{ModuleShape, Pending};
-use crate::model::{Model, SiteId, VarId, VarKey};
+use super::extract::{ModuleShape, Pending};
+use super::model::{Model, SiteId, VarId, VarKey};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-
-fn owner_of(model: &Model, v: VarId) -> VarId {
-    if let VarKey::Sq(_) = model.keys_by_id[v as usize] {
-        if let Some(&(_, t)) = model.facts.sqof.iter().find(|(q, _)| *q == v) {
-            return owner_of(model, t);
-        }
-    }
-    v
-}
 
 /// Emit the facts that need another file's shape: what an instance's fields
 /// are, what instantiating a module raises, and whose parameters a call of
@@ -98,7 +89,7 @@ pub fn link(model: &mut Model, shapes: &HashMap<String, ModuleShape>, pending: V
         for call in p.export_calls {
             let owner = export_of
                 .get(&call.callee)
-                .map(|x| owner_of(model, *x))
+                .map(|x| model.owner(*x))
                 .unwrap_or(unknown);
             model.use_fact(call.ctx, call.site, call.callee, owner, call.nargs);
         }
@@ -107,21 +98,21 @@ pub fn link(model: &mut Model, shapes: &HashMap<String, ModuleShape>, pending: V
     close_fields(model);
 }
 
-/// The call relations with the site joined away. At a call from `c` to `g`
-/// binding the parameters of `o`, a free variable `w` of `o` stands for the
-/// argument `a` (`sub`), or for nothing known (`miss`). Everything here is
+/// The call relations, each keeping the site it came from. At a call from `c`
+/// to `g` binding the parameters of `o`, a free variable `w` of `o` stands for
+/// the argument `a` (`sub`), or for nothing known (`miss`). Everything here is
 /// input data, so the joins run once, before the solver.
 #[derive(Default)]
 pub struct Lowered {
-    /// `call(c, g, o)`.
-    pub call: BTreeSet<(VarId, VarId, VarId)>,
-    /// `sub(c, g, w, a)`.
-    pub sub: BTreeSet<(VarId, VarId, VarId, VarId)>,
-    /// `miss(c, g, w)`.
-    pub miss: BTreeSet<(VarId, VarId, VarId)>,
-    /// `flow(c, a)`: c calls an open import with argument a, so a may be
+    /// `call(c, s, g, o)`.
+    pub call: BTreeSet<(VarId, SiteId, VarId, VarId)>,
+    /// `sub(c, s, g, w, a)`.
+    pub sub: BTreeSet<(VarId, SiteId, VarId, VarId, VarId)>,
+    /// `miss(c, s, g, w)`.
+    pub miss: BTreeSet<(VarId, SiteId, VarId, VarId)>,
+    /// `flow(c, s, a)`: c calls an open import with argument a, so a may be
     /// called on c's behalf.
-    pub flow: BTreeSet<(VarId, VarId)>,
+    pub flow: BTreeSet<(VarId, SiteId, VarId)>,
 }
 
 pub fn lower(model: &Model) -> Lowered {
@@ -137,10 +128,10 @@ pub fn lower(model: &Model) -> Lowered {
     let fld: HashMap<(VarId, u32), VarId> = f.fld.iter().map(|&(a, k, v)| ((a, k), v)).collect();
     let mut out = Lowered::default();
     for &(c, site, g, o) in &f.uses {
-        out.call.insert((c, g, o));
+        out.call.insert((c, site, g, o));
         if f.owner.contains(&(g, g)) {
             for &(_, _, a) in f.arg.range((site, 0, 0)..(site + 1, 0, 0)) {
-                out.flow.insert((c, a));
+                out.flow.insert((c, site, a));
             }
         }
         let arg = |i: u32| -> Option<VarId> {
@@ -151,14 +142,14 @@ pub fn lower(model: &Model) -> Lowered {
         };
         for &(i, w) in params.get(&o).map(|v| v.as_slice()).unwrap_or(&[]) {
             match arg(i) {
-                Some(a) => out.sub.insert((c, g, w, a)),
-                None => out.miss.insert((c, g, w)),
+                Some(a) => out.sub.insert((c, site, g, w, a)),
+                None => out.miss.insert((c, site, g, w)),
             };
         }
         for &(i, k, w) in fields.get(&o).map(|v| v.as_slice()).unwrap_or(&[]) {
             match arg(i).and_then(|a| fld.get(&(a, k)).copied()) {
-                Some(fv) => out.sub.insert((c, g, w, fv)),
-                None => out.miss.insert((c, g, w)),
+                Some(fv) => out.sub.insert((c, site, g, w, fv)),
+                None => out.miss.insert((c, site, g, w)),
             };
         }
     }

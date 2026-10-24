@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-24
 //! Call analysis: the compile-time arity check, and the signal each call raises
 //! across function boundaries.
 //!
@@ -42,18 +42,18 @@ impl<'a> Analyzer<'a> {
             }
         }
 
-        // A bound is checked here wherever the argument's signal is known;
-        // the callee's entry check covers every other argument.
+        // A bound is checked once the unit is settled wherever the argument's
+        // signal is known; the callee's entry check covers every other argument.
         if !has_splice {
-            self.check_bounds_at_call(&func, &args, span)?;
+            self.record_bound_call(&func, &args, span);
         }
 
         // What the call checks at run time, and raises on. It checks the count
         // when no arity checked it above, which a splice or an unknown callee
         // leaves open. It checks the spliced value's shape, and the keyword
-        // arguments when the callee collects `&keys` or `&named`. A callee whose arity is known
-        // and which collects no keywords is checked above, so its call cannot
-        // fail.
+        // arguments when the callee collects `&keys` or `&named`. A callee
+        // whose arity is known and which collects no keywords is checked
+        // above, so its call cannot fail.
         let count_checked = !has_splice && self.get_callee_arity(&func).is_some();
         if !count_checked || self.callee_collects_keywords(&func) {
             self.add_inherent_bits(crate::value::SIG_ERROR);
@@ -66,11 +66,11 @@ impl<'a> Analyzer<'a> {
 
         // Refine a call to `emit` when its first argument is known at compile
         // time. `(emit :kw)` and `(emit :kw v)` over a literal keyword or set
-        // are the special form (forms/expr.rs), and a keyword with another
-        // argument count fails the arity check above. A keyword reaches the
-        // arm below only past a splice, or through a user binding spelled
-        // `emit`. An integer literal names its bits statically and replaces
-        // the registered, conservative signal.
+        // are the special form (src/hir/analyze/forms/expr.rs), and a keyword
+        // with another argument count fails the arity check above. A keyword
+        // reaches the arm below only past a splice, or through a user binding
+        // spelled `emit`. An integer literal names its bits statically and
+        // replaces the registered, conservative signal.
         let raw_callee_signal = if self.is_emit(&func) {
             if let Some(first_arg_kind) = args.first().map(|a| &a.expr.kind) {
                 match first_arg_kind {
@@ -388,3 +388,5 @@ impl<'a> Analyzer<'a> {
 
 mod bound;
 mod squelch;
+
+pub(super) use bound::{BoundArg, BoundCall};

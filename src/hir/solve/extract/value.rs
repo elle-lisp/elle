@@ -1,12 +1,11 @@
-// audited: 2026-10-21
+// audited: 2026-10-24
 //! The abstract value of an expression: what the extractor knows a callee, an argument or an export may be.
 //!
 //! docs/impl/solver.md
 
 use super::{AVal, Extractor};
-use crate::model::{bit_positions, VarId, VarKey};
-use crate::visit::resolve;
-use elle::hir::{Binding, BindingScope, Hir, HirKind};
+use crate::hir::solve::model::{bit_positions, VarId, VarKey};
+use crate::hir::{Binding, BindingScope, CallArg, Hir, HirKind};
 
 impl<'a> Extractor<'a> {
     /// The abstract value of an expression.
@@ -33,16 +32,28 @@ impl<'a> Extractor<'a> {
         }
     }
 
+    /// The variable a binding's value stands for.
+    pub fn binding_var(&mut self, b: Binding) -> VarId {
+        let v = self.binding_aval(b);
+        self.var_of(v)
+    }
+
     fn binding_aval(&mut self, b: Binding) -> AVal {
         let inner = self.unit.arena.get(b);
+        // A binding an `assign` reaches may hold any value by the time a call
+        // reads it.
         if inner.is_mutated {
             return AVal::Unknown;
         }
-        if inner.is_primitive {
-            return AVal::Callable(self.prim(b));
+        if let Some(&sig) = self.unit.fixed.get(&b) {
+            return AVal::Callable(self.fixed(b, sig));
         }
         if let Some(&p) = self.param_of.get(&b) {
-            return AVal::ParamVal(p);
+            let bound = VarKey::Bound(p);
+            return match self.model.find(&bound) {
+                Some(v) => AVal::Callable(v),
+                None => AVal::ParamVal(p),
+            };
         }
         if inner.scope == BindingScope::Parameter {
             return AVal::Unknown;
@@ -66,11 +77,12 @@ impl<'a> Extractor<'a> {
         v
     }
 
-    fn call_aval(&mut self, hir: &'a Hir, func: &'a Hir, args: &'a [elle::hir::CallArg]) -> AVal {
+    fn call_aval(&mut self, hir: &'a Hir, func: &'a Hir, args: &'a [CallArg]) -> AVal {
         if self.is_prim_named(func, "import/load-file") {
             if let Some(HirKind::String(literal)) = args.first().map(|a| &a.expr.kind) {
-                if let Some(path) = resolve(literal) {
+                if literal.ends_with(".lisp") {
                     let site = self.site(hir.id);
+                    let path = literal.clone();
                     return AVal::ModuleRef { path, site };
                 }
             }
@@ -99,9 +111,9 @@ impl<'a> Extractor<'a> {
         if (squelch || attune) && args.len() == 2 {
             // Both take the spec first.
             let (mask, target) = (&args[0].expr, &args[1].expr);
-            if let Some(mask) = literal_mask(mask) {
+            if let Some(mask) = crate::hir::spec::literal_signal_bits(mask, self.unit.arena) {
                 let mask = if attune {
-                    elle::signals::CAP_MASK.raw() & !mask
+                    crate::signals::CAP_MASK.subtract(mask)
                 } else {
                     mask
                 };
@@ -110,7 +122,7 @@ impl<'a> Extractor<'a> {
                 let t = self.aval(target);
                 let f = self.var_of(t);
                 self.model.facts.sqof.insert((q, f));
-                for bit in bit_positions(mask) {
+                for bit in bit_positions(mask.raw()) {
                     self.model.facts.sqm.insert((q, bit));
                 }
                 return AVal::Callable(q);
@@ -161,24 +173,5 @@ impl<'a> Extractor<'a> {
             }
             _ => self.model.unknown(),
         }
-    }
-}
-
-/// The bits a literal keyword or keyword-set mask names.
-fn literal_mask(hir: &Hir) -> Option<u64> {
-    let reg = elle::signals::registry::global_registry().lock().unwrap();
-    match &hir.kind {
-        HirKind::Keyword(k) => reg.to_signal_bits(k).map(|b| b.raw()),
-        HirKind::Call { args, .. } => {
-            let mut mask = 0u64;
-            for a in args {
-                match &a.expr.kind {
-                    HirKind::Keyword(k) => mask |= reg.to_signal_bits(k)?.raw(),
-                    _ => return None,
-                }
-            }
-            Some(mask)
-        }
-        _ => None,
     }
 }

@@ -1,6 +1,6 @@
 # pipeline
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-10-24 -->
 
 The compilation entry points, from source text to bytecode, LIR, HIR or a value, and the compile context they share.
 
@@ -24,8 +24,8 @@ Does NOT:
 [src/hir/AGENTS.md](../hir/AGENTS.md) owns the passes `regularize` runs, the
 shape of a file's letrec, and how primitives are bound.
 [docs/pipeline.md](../../docs/pipeline.md) owns why each entry point expands
-on the VM it does, the REPL layer, the store's key, and the signal fixpoint
-over a file's letrec. [Grafting a call](../../docs/impl/graft.md) owns the
+on the VM it does, the REPL layer, the store's key, and how a unit's signals
+settle. [Grafting a call](../../docs/impl/graft.md) owns the
 graft and the fold.
 
 ## Files
@@ -80,7 +80,7 @@ and `cctx`. `analyze`, `analyze_file` and `eval` expand on that VM, while
 | Type | Purpose |
 |------|---------|
 | `CodeUnit` | The entry's code object, and one counted reference to the code region every payload of the unit lives in ([template.md](../../docs/impl/region/template.md)) |
-| `AnalyzeResult` | `hir`, its `arena`, the non-fatal `errors` the analyzer collected, and two facts the HIR does not keep: `lambda_decls`, each lambda's declared ceiling and the bits its body raises by itself, and `top_direct`, the bits the code outside every lambda raises by itself. A signal solver reads both ([the solver](../../docs/impl/solver.md)) |
+| `AnalyzeResult` | `hir`, its `arena`, the non-fatal `errors` the analyzer collected, and three facts the HIR does not keep: `lambda_decls`, each lambda's declared ceiling and the bits its body raises by itself, `top_direct`, the bits the code outside every lambda raises by itself, and `fixed`, the signal of each binding the analysis started with. A signal solver reads all three ([the solver](../../docs/impl/solver.md)) |
 | `CompileCtx` | The compile context of one instance ([cache.rs](cache.rs)) |
 | `Layer` | Which layer a compile sees: `Instance`, or `Repl`, which adds the REPL layer |
 | `BootExports` | The core and stdlib export structs a boot leaves, which a boot image carries as its roots |
@@ -140,7 +140,7 @@ expanded forms
     │  the test-runner transform, in those two modes only
     │  classify_form: Def, Var, Signal or Expr
     ▼
-Analyzer: bind_primitives, core_env, analyze_file_letrec
+Analyzer: bind_primitives, core_env, analyze_file
     │  the first collected error ends the compile, as file:line:col: message
     ▼
 HIR: one Letrec
@@ -212,7 +212,7 @@ The other entry points leave this path:
    exports.
 
 5. **A file is one letrec.** Every file entry point classifies the expanded
-   forms and analyzes them with `analyze_file_letrec`.
+   forms and analyzes them with `Analyzer::analyze_file`.
 
 6. **Version and migration declarations leave before epoch migration.**
    `extract_semver_directives` validates and removes them, so an epoch rewrite

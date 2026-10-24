@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-24
 //! HIR: the tree the analyzer builds from expanded Syntax, and the passes that prepare it for lowering.
 //!
 //! docs/impl/hir.md
@@ -23,6 +23,7 @@ mod pattern;
 pub mod region;
 mod regularize;
 mod return_incref;
+pub mod solve;
 pub(crate) mod spec;
 pub mod symbols;
 pub mod tailcall;

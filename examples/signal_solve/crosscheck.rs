@@ -1,11 +1,12 @@
-// audited: 2026-10-12
+// audited: 2026-10-24
 //! Solve the solver's rules again with the datafrog crate, as an independent check on the worklist's model.
 //!
 //! docs/impl/solver.md
+//!
+//! A relation here drops the site column, which the rules never join on.
 
-use crate::link::Lowered;
-use crate::model::{Model, Solution, TOP};
 use datafrog::{Iteration, Relation, RelationLeaper, ValueFilter};
+use elle::hir::solve::{Lowered, Model, Solution, TOP};
 use std::collections::HashSet;
 
 type Pair = (u32, u32);
@@ -13,16 +14,22 @@ type Pair = (u32, u32);
 /// Compute the least model of the rules, each one a join over sorted relations.
 pub fn solve(model: &Model, lowered: &Lowered) -> Solution {
     let f = &model.facts;
-    let call_by_g: Relation<(u32, Pair)> =
-        lowered.call.iter().map(|&(c, g, o)| (g, (c, o))).collect();
+    let call_by_g: Relation<(u32, Pair)> = lowered
+        .call
+        .iter()
+        .map(|&(c, _, g, o)| (g, (c, o)))
+        .collect();
     let sub_by_gw: Relation<(Pair, Pair)> = lowered
         .sub
         .iter()
-        .map(|&(c, g, w, a)| ((g, w), (c, a)))
+        .map(|&(c, _, g, w, a)| ((g, w), (c, a)))
         .collect();
-    let miss_by_gw: Relation<(Pair, u32)> =
-        lowered.miss.iter().map(|&(c, g, w)| ((g, w), c)).collect();
-    let flow_by_a: Relation<Pair> = lowered.flow.iter().map(|&(c, a)| (a, c)).collect();
+    let miss_by_gw: Relation<(Pair, u32)> = lowered
+        .miss
+        .iter()
+        .map(|&(c, _, g, w)| ((g, w), c))
+        .collect();
+    let flow_by_a: Relation<Pair> = lowered.flow.iter().map(|&(c, _, a)| (a, c)).collect();
     let sqof_by_f: Relation<Pair> = f.sqof.iter().map(|&(q, t)| (t, q)).collect();
     let owner: HashSet<Pair> = f.owner.iter().copied().collect();
     let sqm: HashSet<Pair> = f.sqm.iter().copied().collect();

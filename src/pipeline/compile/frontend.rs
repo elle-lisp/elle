@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-10-24
 //! The file front end: source text or read forms to regularized HIR, shared by every file entry point but `compile_file_to_lir`.
 //!
 //! src/pipeline/AGENTS.md
@@ -54,8 +54,8 @@ pub(super) fn compile_file_frontend(
 /// top-level forms before classification and analysis. The fault-barrier test
 /// mode (`compile_barrier_module`) uses this to wrap each test form in a
 /// captured thunk and leave the `def` and `var` setup forms intact. The file
-/// then still takes the whole-module `analyze_file_letrec` path, which
-/// per-form `eval` cannot.
+/// then still takes the whole-module `analyze_file` path, which per-form
+/// `eval` cannot.
 ///
 /// Reads and compiles inside the unit's syntax arena, which
 /// `with_syntax_arena` frees on return.
@@ -197,7 +197,7 @@ fn compile_syntaxes_frontend_xform_inner(
     if !expander.core_env.is_empty() {
         analyzer.bind_compile_time_env(&expander.core_env, true);
     }
-    let mut hir = analyzer.analyze_file_letrec(forms, span)?;
+    let mut hir = analyzer.analyze_file(forms, span)?;
     let prim_values = analyzer.primitive_values().clone();
     let errors = analyzer.take_errors();
     drop(analyzer);

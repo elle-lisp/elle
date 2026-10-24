@@ -1,13 +1,12 @@
-// audited: 2026-10-21
+// audited: 2026-10-24
 //! A file's top-level forms as one letrec: classifying each form, and pre-binding its names.
 //!
 //! docs/bindings.md
 //! docs/signals/inference.md
 //!
-//! `analyze_file_letrec`, in the `letrec` submodule, analyzes the forms in three
+//! `analyze_file_letrec`, in the `letrec` submodule, analyzes the forms in two
 //! passes. Pass 1 pre-binds every name, so forms may refer to each other in any
-//! order. Pass 2 analyzes the initializers in order. Pass 3 re-analyzes the
-//! lambdas until their signals stop changing. A duplicate name shadows
+//! order. Pass 2 analyzes the initializers in order. A duplicate name shadows
 //! sequentially: the redefinition's value sees the previous binding, and later
 //! forms see the new one.
 
