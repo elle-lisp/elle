@@ -55,6 +55,11 @@ impl<'a> Analyzer<'a> {
         if let Some(frame) = self.defs.owners.get_mut(owner) {
             frame.hoisted.push((binding, init));
         }
+        // Before its `def` runs it holds another value, so a seed its body
+        // gave it no longer holds.
+        self.signal_env.remove(&binding);
+        self.arity_env.remove(&binding);
+        self.keyword_collectors.remove(&binding);
         let inner = self.arena.get_mut(binding);
         inner.is_mutated = true;
         inner.is_prebound = true;
@@ -151,11 +156,6 @@ impl<'a> Analyzer<'a> {
             });
         }
 
-        // The file's fixpoint takes up a lambda nested in a top-level form,
-        // with the scope as the `def` sees it.
-        if !pattern && self.defines_file_lambda(&items[2]) {
-            self.nested_lambda(sites[0].binding, &items[2]);
-        }
         let node = if pattern {
             let value = self.analyze_expr(&items[2])?;
             self.pre_bindings = sites.iter().map(|s| (s.name.clone(), s.binding)).collect();

@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-14
 //! A call through a merged binding signals what every binding it may stand for shares.
 //!
 //! docs/signals/inference.md
@@ -92,9 +92,8 @@ fn a_keyword_collector_makes_the_call_check_its_keywords() {
     assert_eq!(signal_of(&result, "pick"), Signal::errors());
 }
 
-// A file's merge reads facts its inputs settle on only in the fixpoint's
-// later passes: the first `f` reads `g`'s silent seed in Pass 2, and `g`
-// yields. Facts copied when the merge closed keep the seed's silence.
+// The first `f` reads `g`'s silent seed in Pass 2, and `g` yields. Facts
+// copied when the merge closed keep the seed's silence; the solve reads `g`.
 #[test]
 fn a_file_merge_takes_the_signal_its_inputs_settle_on() {
     let result = analyze_file(
@@ -109,7 +108,7 @@ fn a_file_merge_takes_the_signal_its_inputs_settle_on() {
 
 // Both branches define `f`, so no nil reaches the call, and the first `f`,
 // nested in a top-level form, reads `g`'s silent seed in Pass 2. The merge
-// yields only once that lambda converges and the merge joins it again.
+// yields only once the solve reads that lambda through it.
 #[test]
 fn a_file_merge_of_a_nested_lambda_def_takes_its_settled_signal() {
     let result = analyze_file(

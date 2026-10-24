@@ -1,10 +1,10 @@
-// audited: 2026-10-21
+// audited: 2026-10-24
 //! How the solver's answer for each lambda relates to the analyzer's, tallied and printed.
 //!
 //! docs/impl/solver.md
 
 use super::{fmt_bits, Context, Lambda};
-use crate::model::{VarId, VarKey};
+use elle::hir::solve::{VarId, VarKey};
 use std::collections::{BTreeMap, HashMap};
 
 /// How the solver's answer for one lambda relates to the analyzer's.

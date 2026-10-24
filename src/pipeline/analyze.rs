@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-10-24
 //! The entry points that analyze one form or a whole file to HIR, for the linter, the LSP and compile/analyze.
 //!
 //! docs/pipeline.md
@@ -55,6 +55,8 @@ fn analyze_in_arena(
     let errors = analysis.errors;
     let lambda_decls = analyzer.take_lambda_decls();
     let top_direct = analyzer.take_top_direct();
+    let fixed = analyzer.fixed_signals();
+    let merges = analyzer.merge_inputs();
     drop(analyzer);
     let mut hir = analysis.hir;
     crate::hir::tailcall::mark_tail_calls(&mut hir);
@@ -64,6 +66,8 @@ fn analyze_in_arena(
         errors,
         lambda_decls,
         top_direct,
+        fixed,
+        merges,
     })
 }
 
@@ -133,10 +137,12 @@ fn analyze_file_in_arena(
         meta.arities.clone(),
     );
     analyzer.bind_primitives(&meta);
-    let mut hir = analyzer.analyze_file_letrec(forms, span)?;
+    let mut hir = analyzer.analyze_file(forms, span)?;
     let errors = analyzer.take_errors();
     let lambda_decls = analyzer.take_lambda_decls();
     let top_direct = analyzer.take_top_direct();
+    let fixed = analyzer.fixed_signals();
+    let merges = analyzer.merge_inputs();
     drop(analyzer);
 
     crate::hir::tailcall::mark_tail_calls(&mut hir);
@@ -146,5 +152,7 @@ fn analyze_file_in_arena(
         errors,
         lambda_decls,
         top_direct,
+        fixed,
+        merges,
     })
 }

@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-14
 //! A `def` binds in its scope however deep it sits, a redefinition is a new binding, and a read after a skippable def resolves past it.
 //!
 //! docs/bindings.md
@@ -52,8 +52,8 @@ fn a_read_after_a_skipped_nested_def_resolves_to_the_later_def() {
     assert_eq!(read, seven, "the read resolves to (def num 7)");
 }
 
-// Counter-factual: the fixpoint re-analyzed every lambda against the scope
-// after the first pass, which held the first `again` alone.
+// Counter-factual: a second analysis of every lambda read the scope after
+// the first pass, which held the first `again` alone.
 #[test]
 fn a_lambda_after_a_redefinition_reads_the_redefinition() {
     let result = analyze_file("(def again 1) (def again 2) (defn read [] again)");

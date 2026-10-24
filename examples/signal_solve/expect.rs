@@ -1,10 +1,10 @@
-// audited: 2026-10-12
+// audited: 2026-10-24
 //! Check the `# expect` and `# violates` lines in the analyzed files against the solver's least model.
 //!
 //! docs/impl/solver.md
 
-use crate::model::{VarId, VarKey};
 use crate::report::{Context, Lambda};
+use elle::hir::solve::{to_word, VarId, VarKey};
 use std::collections::HashMap;
 
 /// Expectation markers in the field list: a free import export, and a free
@@ -144,7 +144,7 @@ pub fn check(
 ) -> usize {
     let mut viol_of: HashMap<VarId, u64> = HashMap::new();
     for &(v, b) in &ctx.solution.viol {
-        *viol_of.entry(v).or_default() |= crate::model::to_word(std::iter::once(b));
+        *viol_of.entry(v).or_default() |= to_word(std::iter::once(b));
     }
     let mut vdep_of: HashMap<VarId, Vec<VarId>> = HashMap::new();
     for &(v, w) in &ctx.solution.vdep {

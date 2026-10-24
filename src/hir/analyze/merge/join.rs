@@ -1,11 +1,11 @@
-// audited: 2026-11-10
+// audited: 2026-11-13
 //! What a call through a merged binding knows: the signal, arity and bounds every binding it may stand for shares.
 //!
 //! docs/signals/inference.md
 //!
-//! A merge in a file may close before the fixpoint settles the signals of the
-//! bindings it stands for, so the fixpoint joins every merge again after a
-//! signal moves.
+//! A merge may close before the pass reaches a binding it stands for, so the
+//! signal it joins here can be a seed. The solve reads each merge's inputs
+//! again (`Analyzer::merge_inputs`), and raises a call through it to theirs.
 
 use super::super::*;
 
@@ -40,14 +40,14 @@ impl<'a> Analyzer<'a> {
         self.defs.joins.push(join);
     }
 
-    /// Join every merge again, in the order the merges closed, so a merge that
-    /// stands for an earlier merged binding reads that binding's new facts.
-    pub(in crate::hir::analyze) fn rejoin_merges(&mut self) {
-        let joins = std::mem::take(&mut self.defs.joins);
-        for join in &joins {
-            self.join_facts(join);
-        }
-        self.defs.joins = joins;
+    /// Each merged binding, with each binding it may stand for. `None` stands
+    /// for nil.
+    pub fn merge_inputs(&self) -> crate::hir::solve::Merges {
+        self.defs
+            .joins
+            .iter()
+            .map(|join| (join.merged, join.inputs.clone()))
+            .collect()
     }
 
     /// Give `join.merged` the facts every one of its inputs shares. A nil input

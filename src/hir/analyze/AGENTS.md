@@ -1,6 +1,6 @@
 # hir/analyze
 
-<!-- audited: 2026-11-10 -->
+<!-- audited: 2026-11-13 -->
 
 Syntax to HIR analysis: binding resolution, capture computation, signal inference, and linting.
 
@@ -33,7 +33,7 @@ file covers how the analyzer produces it.
 | `ParamBound` | Struct: `{ binding, signal }` — a parameter bound |
 | `current_param_bounds` | Maps `Binding` → `Signal` for parameters bounded by `(bound p spec)` in the lambda being analyzed |
 | `bound_env` | The parameter bounds of each binding initialized with a lambda that declares one, or a merged binding whose bindings share them, by parameter position; a call checks an argument whose signal is known against them |
-| `current_declared_ceiling` | `Option<Signal>`: the ceiling `(silent!)` or `(attune! …)` declares, the intersection when a body declares several. `analyze_lambda` checks the inferred signal against it and does not replace the signal with it |
+| `current_declared_ceiling` | `Option<Signal>`: the ceiling `(silent!)` or `(attune! …)` declares, the intersection when a body declares several. `analyze_lambda` keeps it in the lambda's `LambdaDecl`, and `settle` checks the settled signal against it without replacing the signal |
 | `ScopedBinding` | Binding with its scope set for hygienic resolution, and the `EntryState` a lookup reads |
 | `Scope` | Lexical scope with bindings HashMap and local index tracking |
 
@@ -60,7 +60,7 @@ HIR (binding indices are inline — metadata lives in BindingArena)
 ## Interprocedural signal tracking
 
 The analyzer tracks signals across function boundaries (see
-[signals/AGENTS.md](../../signals/AGENTS.md) for signal type definitions):
+[signals/overview.md](../../signals/overview.md) for signal type definitions):
 
 1. **Signal environment**: `signal_env` maps `Binding` → `Signal` for
    locally-defined functions, and for a merged binding (invariant 8).
@@ -80,12 +80,13 @@ The analyzer tracks signals across function boundaries (see
    `signal_env` entry. This is sound only because the fallback in (2) is
    gated to primitives: a reassigned non-primitive local therefore resolves
    to `Signal::unknown()`, never a stale or same-named global's signal.
-5. **Convergence**: a lambda analyzed against a seed re-analyzes until its
-   signal holds. `converge_signals` ([fixpoint.rs](fixpoint.rs)) runs the
-   loop for a file letrec, a `letrec`, and a `def` or `var` whose lambda
-   refers to itself. A file's loop also takes each lambda `def` nested in a
-   top-level form. [docs/pipeline.md](../../../docs/pipeline.md) owns the
-   algorithm.
+5. **Settling**: the pass reads a seed for a lambda it has not reached yet.
+   Once the pass is over, `settle` ([settle.rs](settle.rs)) solves the unit's
+   signals with [the solver](../solve/mod.rs) and raises the HIR to them. The
+   solve answers a call through a binding an `assign` reaches with every bit,
+   wherever the call stands. It reads the bindings each merged binding may
+   stand for (`merge_inputs`), so a call through a merge raises what theirs
+   raise. [docs/pipeline.md](../../../docs/pipeline.md) owns the algorithm.
 
 ## Scope-aware binding resolution
 
@@ -96,14 +97,14 @@ Bindings are resolved using **hygienic scope sets**:
 - A binding is visible if its scope set is a **subset** of the reference's scope set
 - When multiple bindings match, the one with the **largest scope set** wins (most specific)
 - Empty scopes `[]` is a subset of everything, so pre-expansion code works identically
-- **Referential transparency** ([docs/macros.md](../../../docs/macros.md),
-  "Hygiene: sets of scopes"): outside a definition-environment frame (the
-  global frame, a file's top-level letrec frame), a binding is visible to a
-  reference only if every INTRO scope the reference carries
-  (`ScopeId::is_intro`) is on the binding or in the frame's expansion
-  provenance (`Scope::intro_provenance` — the intro scopes of the form that
-  opened the frame). A call-site shadow therefore cannot capture a macro
-  template's free variable; resolution falls through to top level.
+- **Referential transparency** ([docs/macros.md](../../../docs/macros.md)).
+  Outside a definition-environment frame, such as the global frame or a
+  file's top-level letrec frame, a reference sees a binding only when every
+  INTRO scope it carries (`ScopeId::is_intro`) is on the binding. An intro
+  scope in the frame's expansion provenance counts as on the binding:
+  `Scope::intro_provenance` holds the intro scopes of the form that opened
+  the frame. A call-site shadow therefore cannot capture a macro template's
+  free variable; resolution falls through to top level.
 
 This prevents accidental capture in macros while allowing intentional capture via `datum->syntax`.
 
@@ -130,7 +131,7 @@ This prevents accidental capture in macros while allowing intentional capture vi
    level (`fileletrec`) reads the `Forward` binding, which yields nil (#1244).
 
 3. **The `(doc name)` form rewrites by what the symbol resolves to.** The
-   `doc` arm in `forms/expr.rs` passes a symbol that resolves to a closure
+   `doc` arm in [forms/expr.rs](forms/expr.rs) passes a symbol that resolves to a closure
    (user-defined or stdlib) through as the closure, so `prim_doc` can read
    its docstring. A NativeFn, a Parameter, or an unresolved symbol (a
    special form) is rewritten to `(doc "name")` for `vm.docs` lookup. The
@@ -144,18 +145,18 @@ This prevents accidental capture in macros while allowing intentional capture vi
    parameter is a compile error. `analyze_lambda` reads the accumulators after
    analyzing the body. The bound is checked on entry, and that check may
    raise, so a lambda with a bound carries `:error`. `analyze_call` also
-   checks each argument whose signal it knows against the callee's
-   `bound_env` entry, and a violation is a compile error.
+   records each argument that is a lambda or a binding against the callee's
+   `bound_env` entry. `settle` checks the argument's settled signal, when it
+   is known, and a violation is a compile error.
 
 5. **A ceiling checks and never replaces.** `(attune! spec)` and
-   `(silent!)`, which is `(attune! ||)`, record a ceiling. `analyze_lambda`
-   checks the inferred signal against it after the body, and an excess bit or
-   a propagated parameter is a compile error.
+   `(silent!)`, which is `(attune! ||)`, record a ceiling. `settle` checks
+   each lambda's settled signal against it, and an excess bit or a propagated
+   parameter is a compile error.
 
 6. **A construct that can raise carries `:error`, on its node and in the
    enclosing function's sources.** The list is in
-   [docs/signals/inference.md](../../../docs/signals/inference.md), "What
-   raises". Each site reports through `add_inherent_bits`; a strict
+   [docs/signals/inference.md](../../../docs/signals/inference.md). Each site reports through `add_inherent_bits`; a strict
    `Destructure` is built by `destructure`, which reports for it. A call
    reports `:error` unless the compiler checked its argument count against a
    known arity and knows whether the callee collects keywords
@@ -185,18 +186,18 @@ This prevents accidental capture in macros while allowing intentional capture vi
 ## When to modify
 
 - **Adding a new special form**: Add one `SpecialForm` entry to
-  `forms/registry.rs` and implement its `analyze_*` method
-- **Changing binding semantics**: Update `binding.rs`, `owned.rs`, `merge.rs`
-  and `destructure.rs`
-- **Changing signal inference**: Update `call.rs` and `lambda.rs`, and
-  `fixpoint.rs` for convergence
-- **Changing signal bounds**: Update `special.rs` for `analyze_bound` and
-  `lambda.rs` for the ceiling check, and `call.rs` for the check at a call;
-  the entry check is emitted in
-  `lir/lower/lambda/body.rs` (`CheckSignalBound`)
-- **Changing pattern matching**: Update `special/pattern.rs` and `destructure.rs`
-- **Changing scope resolution**: Update `scopes.rs` (`lookup()` and `bind()`)
-- **Changing `(doc name)` resolution**: The `doc` arm in `forms/expr.rs`
+  [forms/registry.rs](forms/registry.rs) and implement its `analyze_*` method
+- **Changing binding semantics**: Update [binding.rs](binding.rs), [owned.rs](owned.rs),
+  [merge.rs](merge.rs) and [destructure.rs](destructure.rs)
+- **Changing signal inference**: Update [call.rs](call.rs) and [lambda.rs](lambda.rs), and
+  [settle.rs](settle.rs) and [the solver](../solve/mod.rs) for the solve
+- **Changing signal bounds**: Update [special.rs](special.rs) for `analyze_bound` and
+  [settle.rs](settle.rs) for the ceiling check, and [call/bound.rs](call/bound.rs) for the check at a call.
+  The lowerer emits the entry check (`CheckSignalBound`) in
+  [body.rs](../../lir/lower/lambda/body.rs).
+- **Changing pattern matching**: Update [special/pattern.rs](special/pattern.rs) and [destructure.rs](destructure.rs)
+- **Changing scope resolution**: Update [scopes.rs](scopes.rs) (`lookup()` and `bind()`)
+- **Changing `(doc name)` resolution**: The `doc` arm in [forms/expr.rs](forms/expr.rs)
   (see invariant 3)
 
 ## Common pitfalls
@@ -205,8 +206,8 @@ This prevents accidental capture in macros while allowing intentional capture vi
   sibling captures. Do not call `mark_captured` for a self-reference; a
   `Recursive` capture must not mark.
 - **Forgetting to mark mutations**: If a binding is assigned via `assign`, set
-  `arena.get_mut(b).is_mutated = true`, and when the `assign` sits in a lambda
-  the binding does not belong to, mark it written by a closure too. The graft
+  `arena.get_mut(b).is_mutated = true`. When the `assign` sits in a lambda the
+  binding does not belong to, mark it written by a closure too. The graft
   reads that mark before it writes an operand in place
   ([the operands](../../../docs/impl/graft/operands.md))
 - **Conflating nil and empty list**: Use `HirKind::EmptyList` for `()`, not `HirKind::Nil`

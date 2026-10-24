@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-24
 //! The core.lisp bootstrap: compile and run the core module before any compile context exists, and the exports a boot leaves.
 //!
 //! src/pipeline/AGENTS.md
@@ -138,7 +138,7 @@ pub(super) fn compile_core(
     );
     analyzer.bind_primitives(meta);
     let mut hir = analyzer
-        .analyze_file_letrec(forms, span)
+        .analyze_file(forms, span)
         .expect("core.lisp analysis must succeed");
     let prim_values = analyzer.primitive_values().clone();
     let errors = analyzer.take_errors();

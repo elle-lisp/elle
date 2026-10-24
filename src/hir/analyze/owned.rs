@@ -72,8 +72,6 @@ pub(super) struct DefState {
     /// Each merged binding and what it may stand for, in the order the merges
     /// closed (`merge/join.rs`).
     pub(super) joins: Vec<super::merge::Join>,
-    /// The lambdas the fixpoint of the file being analyzed re-analyzes.
-    pub(super) file: Option<super::fileletrec::FileLambdas>,
     pub(super) owners: Vec<Owner>,
     /// Whether a lookup read past a pending first `def`, for the message a
     /// name that resolves to nothing gets.
@@ -197,6 +195,11 @@ impl<'a> Analyzer<'a> {
                 // A lambda before it may capture it, as a run of local `defn`
                 // forms does.
                 inner.is_prebound = straight;
+                // A `def` no branch can skip holds nothing but its value, so a
+                // lambda's arity holds for a call that precedes it.
+                if straight && !pattern {
+                    self.seed_lambda_facts(binding, &def[2]);
+                }
                 names.push((name.to_string(), binding));
                 forwarded.push(name.to_string());
             }

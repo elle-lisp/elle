@@ -4,10 +4,9 @@
 //! docs/bindings.md
 //! docs/signals/inference.md
 //!
-//! `analyze_file_letrec`, in the `letrec` submodule, analyzes the forms in three
+//! `analyze_file_letrec`, in the `letrec` submodule, analyzes the forms in two
 //! passes. Pass 1 pre-binds every name, so forms may refer to each other in any
-//! order. Pass 2 analyzes the initializers in order. Pass 3 re-analyzes the
-//! lambdas until their signals stop changing. A duplicate name shadows
+//! order. Pass 2 analyzes the initializers in order. A duplicate name shadows
 //! sequentially: the redefinition's value sees the previous binding, and later
 //! forms see the new one.
 
@@ -70,7 +69,6 @@ enum PreBound<'s> {
 
 mod letrec;
 mod nested;
-pub(super) use nested::FileLambdas;
 
 impl<'a> Analyzer<'a> {
     /// Analyze an internal `(%file-body form…)` node: the body of a whole-module

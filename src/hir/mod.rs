@@ -24,6 +24,7 @@ mod pattern;
 pub mod region;
 mod regularize;
 mod return_incref;
+pub mod solve;
 pub(crate) mod spec;
 pub mod symbols;
 pub mod tailcall;

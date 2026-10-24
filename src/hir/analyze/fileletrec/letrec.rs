@@ -1,6 +1,6 @@
-// audited: 2026-11-10
-//! The three passes over a file's top-level forms: pre-bind every name,
-//! analyze each initializer, and run the signal fixpoint over the lambdas.
+// audited: 2026-11-13
+//! The two passes over a file's top-level forms: pre-bind every name, then
+//! analyze each initializer in order.
 //!
 //! docs/pipeline.md
 
@@ -9,10 +9,10 @@ use crate::hir::analyze::owned::Owner;
 
 impl<'a> Analyzer<'a> {
     /// Analyze a file's top-level forms as one letrec. Pass 1 pre-binds every
-    /// name, Pass 2 analyzes the initializers in order, and Pass 3 re-analyzes
-    /// the lambdas until their signals stop changing. The letrec body names the
-    /// last binding a form declares, and an empty file is `nil`.
-    pub(crate) fn analyze_file_letrec(
+    /// name, and Pass 2 analyzes the initializers in order. The letrec body
+    /// names the last binding a form declares, and an empty file is `nil`.
+    /// `analyze_file` settles the signals after.
+    pub(in crate::hir::analyze) fn analyze_file_letrec(
         &mut self,
         forms: Vec<FileForm>,
         span: Span,
@@ -28,11 +28,6 @@ impl<'a> Analyzer<'a> {
         // The file owns each `def` nested in a top-level form (`owned.rs`).
         self.defs.owners.push(Owner::default());
         let owner = self.defs.owners.len() - 1;
-        let depth = self.scopes.len() - 1;
-        let outer = self
-            .defs
-            .file
-            .replace(super::nested::FileLambdas::new(depth));
 
         let mut entries: Vec<PreBound> = Vec::new();
         let mut gensym_counter = 0u32;
@@ -120,8 +115,6 @@ impl<'a> Analyzer<'a> {
         let mut bindings = Vec::new();
         let mut signal = Signal::silent();
         let mut last_binding: Option<Binding> = None;
-        // The value syntax of each top-level lambda, for Pass 3.
-        let mut lambda_syntax: Vec<&Syntax> = Vec::new();
 
         for (index, entry) in entries.iter().enumerate() {
             let entry_start = bindings.len();
@@ -143,11 +136,8 @@ impl<'a> Analyzer<'a> {
                     }
                     signal = signal.combine(value.signal);
 
-                    let bindings_idx = bindings.len();
-                    if self.record_lambda_facts(*binding, &value) {
-                        self.entry_lambda(*binding, lambda_syntax.len(), bindings_idx);
-                        lambda_syntax.push(value_syntax);
-                    } else if let HirKind::Var(source) = &value.kind {
+                    self.record_lambda_facts(*binding, &value);
+                    if let HirKind::Var(source) = &value.kind {
                         // `(def dynamic-eq %eq)` names a primitive, whose signal
                         // and arity are fixed, so a call through the new name
                         // signals what a call to the primitive does.
@@ -219,13 +209,6 @@ impl<'a> Analyzer<'a> {
             );
         }
 
-        // Pass 3: signals converge by fixpoint. A lambda analyzed early in
-        // Pass 2 read the silent seed of a lambda analyzed later, whether a
-        // top-level form or a `def` nested in one binds it. Each re-analysis
-        // sees the scope its lambda saw in Pass 2, where a later redefinition
-        // is not yet visible (docs/pipeline.md).
-        let file = std::mem::replace(&mut self.defs.file, outer);
-        self.converge_file_lambdas(file, &lambda_syntax, &mut bindings)?;
         self.defs.owners.pop();
 
         // Body: reference to the last binding (the file's return value).

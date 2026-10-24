@@ -1,6 +1,5 @@
-// audited: 2026-10-21
-//! What the analyzer records about a lambda for its callers, and how a form
-//! that can raise reports itself.
+// audited: 2026-11-14
+//! What the analyzer records about a lambda for its callers, and how a form that can raise reports itself.
 //!
 //! docs/signals/inference.md
 
@@ -51,7 +50,7 @@ impl<'a> Analyzer<'a> {
 
     /// Seed what a binding's lambda initializer promises before the lambda is
     /// analyzed, so a call that precedes it in a letrec reads the right facts.
-    /// The facts are a silent signal the fixpoint raises, the arity the
+    /// The facts are a silent signal the solve raises, the arity the
     /// parameter list states, and whether the lambda collects keyword
     /// arguments.
     pub(crate) fn seed_lambda_facts(&mut self, binding: Binding, value_syntax: &Syntax) {
