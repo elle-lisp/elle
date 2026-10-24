@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-22
 //! The channel primitives: make a channel, send, receive, clone and close; the select pair lives in `select`.
 //!
 //! docs/threads.md
@@ -13,14 +13,15 @@ use crate::primitives::ctx::NativeCtx;
 ///
 /// `chan/send` is `RegionEffect::Sends` (docs/impl/region/effects.md):
 /// the message crosses the fiber frontier, so it can never be Owned and stays on
-/// the per-region RC path. The buffer is external to the region system — no
-/// free-time cascade balances a reference held by it — so the seam counts its
+/// the per-region RC path. The buffer is external to the region system, and no
+/// free-time cascade balances a reference held by it. So the seam counts its
 /// own reference here, the way every other fiber-frontier seam does
 /// (`EscapeSite::ChanSend`; "a store into a Shared region bumps its count").
-/// This cannot be a compile-time edge: an edge's incref is keyed on a region
-/// pair the solver must name, and at a real call site the channel is typically
-/// an upvalue or module-level binding, so no pair exists and no incref would be
-/// emitted — the message would then ride the buffer on the sender's own
+///
+/// This cannot be a compile-time edge. An edge's incref is keyed on a region
+/// pair the solver must name. At a real call site the channel is typically an
+/// upvalue or module-level binding, so no pair exists and no incref would be
+/// emitted. The message would then ride the buffer on the sender's own
 /// references and be freed before the receive
 /// (tests/impl/region-chan-send-owned-param-uaf.lisp). Call this only after a
 /// successful enqueue; a `[:full]`/`[:disconnected]` send stores nothing.
@@ -45,15 +46,15 @@ fn retain_sent_message(ctx: &mut NativeCtx, msg: Value) {
 /// channel buffer — the receive half of the genuinely-Shared (class 7) message's
 /// incoming-count accounting, balancing `retain_sent_message`. A receive removes
 /// the message from the buffer, so its region's incoming count must drop by one
-/// — the matching "an overwrite/drop lowers it". Call
-/// this once per message pulled from the buffer, AFTER the `[:ok msg]`/`[i msg]`
-/// result carrying it is built, so that result's own reference holds the message
-/// across the release (releasing first could free it under the read).
+/// — the matching "an overwrite/drop lowers it". Call this once per message
+/// pulled from the buffer, AFTER the `[:ok msg]`/`[i msg]` result carrying it is
+/// built. That result's own reference then holds the message across the
+/// release; releasing first could free it under the read.
 ///
-/// Guarded by `value_in_region_store`: a cross-thread message (a `sys/spawn` worker
-/// sending by pointer) lives in the sending thread's heap — a foreign borrow this
-/// store neither counts nor may free, so its send-side incref lands on that heap and
-/// is balanced there, never here. An immediate message has no region and no-ops.
+/// Guarded by `value_in_region_store`. A cross-thread message (a `sys/spawn`
+/// worker sending by pointer) lives in the sending thread's heap: a foreign
+/// borrow this store neither counts nor may free. Its send-side incref lands on
+/// that heap and is balanced there, never here. An immediate message has no region and no-ops.
 fn release_received_message(ctx: &mut NativeCtx, msg: Value) {
     let heap = ctx.heap_mut();
     if heap.value_in_region_store(msg) {
@@ -120,7 +121,7 @@ pub(super) fn with_receivers<R>(
     ctx: &mut NativeCtx,
     f: impl FnOnce(&[&ChanReceiver], &mut NativeCtx) -> R,
 ) -> Result<R, (SignalBits, Value)> {
-    let cell = arg.as_array_mut().ok_or_else(|| {
+    let vec = arg.array_mut_read().ok_or_else(|| {
         (
             SIG_ERROR,
             ctx.error(
@@ -133,7 +134,6 @@ pub(super) fn with_receivers<R>(
             ),
         )
     })?;
-    let vec = cell.borrow();
     if vec.is_empty() {
         return Err((
             SIG_ERROR,

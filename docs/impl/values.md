@@ -1,6 +1,6 @@
 # Values
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-22 -->
 
 Every Elle value is a 16-byte tagged union: an 8-byte tag and an 8-byte
 payload.
@@ -34,15 +34,15 @@ TAG_CPOINTER (9)    raw C pointer address
 TAG_NATIVE_FN (10)  prim_id (index into the primitive registry)
 ```
 
-A **native-fn is an immediate**: its tag is below `TAG_HEAP_START` and its
-payload is a `prim_id` — a dense `u32` index minted by `prim_id_of(def)` against
-the global primitive registry (`PRIM_REGISTRY`, seeded from `ALL_TABLES` plus the
+A **native-fn is an immediate**: its tag is below `TAG_HEAP_START`, and its
+payload is a `prim_id`. That is a dense `u32` index minted by `prim_id_of(def)`
+against the global primitive registry (`PRIM_REGISTRY`, seeded from `ALL_TABLES` plus the
 ffi tables). `prim_def(id)` is the inverse, resolving a native-fn back to its
 `&'static PrimitiveDef`. A native-fn allocates nothing and belongs to no region
 (it is not heap, so `region_of` is `None`), and two native-fns are equal iff
 their `prim_id`s match. Because the identity is a position-stable index rather
 than a pointer, the immediate rides the `Immediate` arm of `send` unchanged
-across the process boundary. `prim_table_snapshot()` materializes an indexable
+between threads, which read one registry. `prim_table_snapshot()` materializes an indexable
 table that agrees with these payloads, for the WASM host's dispatch.
 
 ## Heap types
@@ -55,18 +55,18 @@ a reference-counted handle.
 ```text
 Tag                   HeapObject variant
 ──────────────────────────────────────────────────────────
-TAG_STRING_MUT (11)   LStringMut { data: Rc<RefCell<Vec<u8>>>, traits }
+TAG_STRING_MUT (11)   LStringMut { data: ByteStore, traits }
 TAG_ARRAY (12)        LArray { elements: RegionSlice<Value>, traits }
-TAG_ARRAY_MUT (13)    LArrayMut { data: Rc<RefCell<Vec<Value>>>, traits }
+TAG_ARRAY_MUT (13)    LArrayMut { data: ArrayStore, traits }
 TAG_STRUCT (14)       LStruct { data: RegionSlice<(TableKey, Value)>, traits }
-TAG_STRUCT_MUT (15)   LStructMut { data: Rc<RefCell<BTreeMap<TableKey, Value>>>, traits }
+TAG_STRUCT_MUT (15)   LStructMut { data: StructStore, traits }
 TAG_CONS (16)         Pair { first: Value, rest: Value, traits }
 TAG_CLOSURE (17)      Closure { closure: Closure, traits }
 TAG_BYTES (18)        LBytes { data: RegionSlice<u8>, traits }
-TAG_BYTES_MUT (19)    LBytesMut { data: Rc<RefCell<Vec<u8>>>, traits }
+TAG_BYTES_MUT (19)    LBytesMut { data: ByteStore, traits }
 TAG_SET (20)          LSet { data: RegionSlice<Value>, traits }
-TAG_SET_MUT (21)      LSetMut { data: Rc<RefCell<BTreeSet<Value>>>, traits }
-TAG_LBOX (22)         LBox { cell: Rc<RefCell<Value>>, traits }
+TAG_SET_MUT (21)      LSetMut { data: SetStore, traits }
+TAG_LBOX (22)         LBox { cell: CellStore, traits }
 TAG_FIBER (23)        Fiber { handle: FiberHandle, traits }
 TAG_SYNTAX (24)       Syntax { syntax: Syntax, traits }
 TAG_STRING (26)       LString { s: RegionSlice<u8>, traits }
@@ -77,7 +77,7 @@ TAG_MANAGED_PTR (30)  ManagedPointer { addr, traits }
 TAG_EXTERNAL (31)     External { obj: ExternalObject, traits }
 TAG_PARAMETER (32)    Parameter { id: u32, default: Value, traits }
 TAG_THREAD (33)       ThreadHandle { handle, traits }
-TAG_CAPTURE_CELL (34) CaptureCell { cell: Rc<RefCell<Value>>, origin, traits }
+TAG_CAPTURE_CELL (34) CaptureCell { cell: CellStore, origin, traits }
 TAG_CLOSURE_TEMPLATE (35) ClosureTemplate(ClosureTemplate)  # never user-visible
 ```
 
@@ -98,13 +98,15 @@ does, so that one rare type does not set the size of every object. Each
 `HeapObject` lives in a region page of the instance's `FiberHeap`
 (backed by a `RegionStore`), which every fiber of the instance shares.
 
-The pages store `HeapObject` shells. Many variants contain inner Rust
-heap data — a `Vec<Value>` inside a mutable array, an `Rc<RefCell<...>>`
-inside a box, a `BTreeMap` inside a mutable struct. The `needs_drop()` function
-([dropsafety.rs](../../src/value/fiberheap/dropsafety.rs)) tracks which
-`HeapTag` variants have inner heap allocations that require `Drop`. When a
-region is reclaimed, destructors run on those `HeapObject`s (freeing inner data)
-before the pages are released.
+The pages store `HeapObject` shells. Many variants contain inner Rust heap
+data: the store of a `@struct`
+([store.rs](../../src/value/store.rs)), a fiber's handle, an external's
+payload. The `needs_drop()` function
+([dropsafety.rs](../../src/value/fiberheap/dropsafety.rs)) sorts each `HeapTag`
+into a region's destructor list or its reference list, and it answers true for
+some variants that own nothing, such as `LString`. The free scans both lists for
+cross-region references, then drops each object on the destructor list
+(freeing inner data) before the pages are released.
 
 This structure means:
 - **Allocation is O(1)** — bump a byte offset within the current region page
@@ -113,7 +115,7 @@ This structure means:
 - **Batch deallocation** — a region's free runs all its destructors, then
   releases its pages
 - **Region reclamation** — a region is a set of pages with a reference count
-  minted per allocation; `DecrefRegion` decrements that RC, and when it hits 0
+  minted per allocation. `DecrefRegion` decrements that RC, and when it hits 0
   the region's pages are freed and the contained destructors run (see
   [regions.md](../regions.md)). This is RC-driven, not tied to any lexical
   scope.
@@ -123,21 +125,25 @@ This structure means:
 Immutable collections (arrays, strings, bytes, sets, structs) store their data
 inline in their region's pages via `RegionSlice<T>` — a `(ptr, len)` view into
 region-owned bytes, usually adjacent to the containing `HeapObject` header. This
-avoids inner `Vec` or `Box<str>` allocations for the common case. Mutable types
-use `Rc<RefCell<...>>` for cross-fiber live-update semantics.
+avoids inner `Vec` or `Box<str>` allocations for the common case. A mutable
+type keeps its contents in a store that grows, which a region slice cannot. The
+store of an `@string`, `@bytes`, `@array` or `@set` is an extent of the
+container's region, and the store of a `@struct` grows on the Rust heap. A box
+or a capture cell holds its one value inside its shell
+([mutable stores in region pages](mutable.md)).
 
 A `slice` of an immutable string or bytes, and a `string` built over immutable
 bytes, is a **view**: a header in the call's own region whose `RegionSlice`
 points into the source's pages. The alloc-time scan
 ([introspect.rs](../../src/value/fiberheap/regionpool/introspect.rs)) treats
 the backing of a string or bytes that lies in another region as a cross-region
-reference, exactly as it treats a shared closure env, so the view's region
-holds the source's region and the free-time cascade releases it. Both
+reference, exactly as it treats a shared closure env. So the view's region
+holds the source's region, and the free-time cascade releases it. Both
 primitives declare `Fresh` with `embeds: &[0]`, so the ownership forest sees
 the containment ([effects](region/effects.md)). The payload copies that
-remain are the ones a backing in another region cannot serve: `with-traits`
+remain are the ones a backing in another region cannot serve. `with-traits`
 clones into its own region, `send` and the image dumper copy the bytes, and a
-slice of a mutable value copies because a `Vec` can move.
+slice of a mutable value copies because a write can shift or move its store.
 
 ### Trait tables
 
@@ -170,7 +176,7 @@ region per link.
 The split reproduces what the owned representation did. A string key used to
 copy its bytes, and `intern_into` copies them too. A `Heap` key — a pair, a
 set, a struct, a fiber, a closure — used to alias its value, and it still
-aliases: interning one would break the identity that a fiber or closure key
+aliases. Interning one would break the identity that a fiber or closure key
 depends on.
 
 Every store site interns: the constructors in
@@ -230,10 +236,10 @@ A `Closure` stores three `Copy` fields:
 - Captured values (`RegionSlice<Value>`)
 - A per-instance squelch mask
 
-Everything a definition shares between its instances — bytecode, constants,
-arity, docstring, signal profile, source locations — lives in the code
-object's payload, written once per lambda into its compile unit's code region
-([region/template.md](region/template.md) owns that split).
+Everything a definition shares between its instances lives in the code
+object's payload: bytecode, constants, arity, docstring, signal profile and
+source locations. The payload is written once per lambda into its compile
+unit's code region ([region/template.md](region/template.md) owns that split).
 
 ## Arity
 

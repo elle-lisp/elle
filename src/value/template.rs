@@ -1,4 +1,7 @@
-//! Compile-time templates for heap literals.
+// audited: 2026-10-22
+//! Compile-time templates for heap literals, each materialized fresh into its literal's region on every run.
+//!
+//! docs/impl/region/model.md
 //!
 //! A quoted compound literal (`'(a b c)`, `'[1 2]`, nested data) is **not** a
 //! pre-baked heap `Value` — a heap literal is an ordinary, reclaimable
@@ -8,11 +11,11 @@
 //! `MaterializeConst` instruction builds a **fresh** value from the template each
 //! time it executes, into the literal's OWN solver-assigned region.
 //!
-//! The whole structure shares that one region (an immutable aggregate): every
-//! node is materialized bottom-up into the same region, so all internal
-//! references are self-edges (filtered by `find_object_cross_refs`'s
-//! `rid != own_id`) — no spurious cross-region RC, and freeing the one region
-//! reclaims the entire structure at its `decref_point` (Rule 4/7).
+//! The whole structure shares that one region. Every node is materialized
+//! bottom-up into it, so every internal reference is a self-edge, which
+//! `find_object_cross_refs` filters by `rid != own_id`. No cross-region RC is
+//! taken, and freeing the one region reclaims the entire structure at its
+//! `decref_point` (Rule 4/7).
 
 use crate::hir::region::RuntimeRegion;
 use crate::value::Value;
@@ -29,12 +32,10 @@ pub enum ConstTemplate {
     Bool(bool),
     Int(i64),
     Float(f64),
-    /// A symbol carried BY NAME, not by id: symbol ids are per-symbol-table
-    /// (per-instance), so a raw id would name a different symbol — or nothing —
-    /// after the template crosses a `sys/spawn` boundary. The name is re-interned
-    /// into the executing instance's table at materialize time (the `symbols`
-    /// threaded into [`materialize`](Self::materialize)), exactly as a sent symbol
-    /// Value re-interns (`value::send`). (spawn-eval.lisp pins this.)
+    /// A symbol carried by name. Its id is the name's hash in every instance
+    /// (docs/impl/symbol.md), but the executing instance prints it only when
+    /// its table holds the spelling. So [`materialize`](Self::materialize)
+    /// interns the name into the `symbols` it is handed (spawn-eval.lisp).
     Symbol(String),
     Keyword(String),
     // Heap leaves / aggregates — allocated into the literal's region.
@@ -93,12 +94,11 @@ impl ConstTemplate {
     /// Materialize a FRESH value from this template into `region`. Heap nodes are
     /// built bottom-up (children first) so each parent's contents already live in
     /// `region` when its allocation is scanned — every internal reference is a
-    /// self-edge, taking no cross-region RC. Mirrors the immutable constructors
-    /// in `value/repr/constructors.rs`, into the explicit resolved region.
+    /// self-edge, taking no cross-region RC. Each heap node goes through its
+    /// constructor in `value/build.rs`.
     ///
-    /// A quoted `Symbol` leaf re-interns its name into `symbols` (the executing
-    /// instance's table, threaded explicitly); the id is then valid HERE even
-    /// across a `sys/spawn` boundary. `symbols` must be `Some` whenever the
+    /// A quoted `Symbol` leaf interns its name into `symbols`, the executing
+    /// instance's table, threaded explicitly. `symbols` must be `Some` whenever the
     /// template contains a `Symbol` leaf (the only arm that needs it); a `None`
     /// there panics.
     pub fn materialize(
@@ -107,11 +107,9 @@ impl ConstTemplate {
         region: RuntimeRegion,
         mut symbols: Option<&mut crate::symbol::SymbolTable>,
     ) -> Value {
-        use crate::primitives::traitregistry::default_traits_for;
-        use crate::value::arena::{alloc_in_region, alloc_region_slice_in_region};
-        use crate::value::heap::{HeapObject, HeapTag, Pair};
-        use std::cell::RefCell;
-        use std::rc::Rc;
+        use crate::value::arena::alloc_in_region;
+        use crate::value::build;
+        use crate::value::heap::HeapObject;
 
         match self {
             // Immediates — no allocation.
@@ -126,68 +124,26 @@ impl ConstTemplate {
                 }
                 Value::keyword(k)
             }
-            // Re-intern the symbol's name into the executing instance's table so
-            // the id is valid HERE — across a `sys/spawn` boundary the sender's id
-            // would name a different symbol (spawn-eval.lisp).
+            // Interning records the spelling the executing instance prints.
             ConstTemplate::Symbol(name) => {
                 let symbols = symbols.expect("materialize: no symbol table for a quoted symbol");
                 Value::symbol(symbols.intern(name))
             }
 
-            ConstTemplate::String(s) => {
-                let slice = alloc_region_slice_in_region::<u8>(heap, s.as_bytes(), region);
-                let traits = default_traits_for(heap, HeapTag::LString);
-                alloc_in_region(heap, HeapObject::LString { s: slice, traits }, region)
-            }
-            ConstTemplate::StringMut(s) => {
-                let data = Rc::new(RefCell::new(s.as_bytes().to_vec()));
-                let traits = default_traits_for(heap, HeapTag::LStringMut);
-                alloc_in_region(heap, HeapObject::LStringMut { data, traits }, region)
-            }
+            ConstTemplate::String(s) => build::string(heap, s, region),
+            ConstTemplate::StringMut(s) => build::string_mut(heap, s.as_bytes().to_vec(), region),
             ConstTemplate::Pair(car, cdr) => {
                 let first = car.materialize(heap, region, symbols.as_deref_mut());
                 let rest = cdr.materialize(heap, region, symbols);
-                let traits = default_traits_for(heap, HeapTag::Pair);
-                alloc_in_region(
-                    heap,
-                    HeapObject::Pair(Pair {
-                        first,
-                        rest,
-                        traits,
-                    }),
-                    region,
-                )
+                build::pair(heap, first, rest, region)
             }
             ConstTemplate::Array(elems) => {
-                let vals: Vec<Value> = elems
-                    .iter()
-                    .map(|e| e.materialize(heap, region, symbols.as_deref_mut()))
-                    .collect();
-                let slice = alloc_region_slice_in_region::<Value>(heap, &vals, region);
-                let traits = default_traits_for(heap, HeapTag::LArray);
-                alloc_in_region(
-                    heap,
-                    HeapObject::LArray {
-                        elements: slice,
-                        traits,
-                    },
-                    region,
-                )
+                let vals = Self::materialize_all(elems, heap, region, symbols);
+                build::array(heap, vals, region)
             }
             ConstTemplate::ArrayMut(elems) => {
-                let vals: Vec<Value> = elems
-                    .iter()
-                    .map(|e| e.materialize(heap, region, symbols.as_deref_mut()))
-                    .collect();
-                let traits = default_traits_for(heap, HeapTag::LArrayMut);
-                alloc_in_region(
-                    heap,
-                    HeapObject::LArrayMut {
-                        data: Rc::new(RefCell::new(vals)),
-                        traits,
-                    },
-                    region,
-                )
+                let vals = Self::materialize_all(elems, heap, region, symbols);
+                build::array_mut(heap, vals, region)
             }
             ConstTemplate::SyntaxSymbol {
                 name,
@@ -198,7 +154,7 @@ impl ConstTemplate {
                 use crate::syntax::{ScopeId, Syntax, SyntaxArena};
                 // The node is born in the region the materialized value lives
                 // in, so the `Value` owns its tree outright
-                // (docs/impl/syntax.md § "A syntax `Value` owns its tree").
+                // (docs/impl/syntax.md).
                 let arena = unsafe { SyntaxArena::from_raw(heap as *mut _, region) };
                 let scope_ids: Vec<ScopeId> = scopes.iter().map(|&s| ScopeId(s)).collect();
                 let mut syn = Syntax::symbol_scoped(&arena, name, *span, &scope_ids);
@@ -213,6 +169,19 @@ impl ConstTemplate {
                 )
             }
         }
+    }
+
+    /// Materialize each of `elems` into `region`, in order.
+    fn materialize_all(
+        elems: &[ConstTemplate],
+        heap: &mut crate::value::fiberheap::FiberHeap,
+        region: RuntimeRegion,
+        mut symbols: Option<&mut crate::symbol::SymbolTable>,
+    ) -> Vec<Value> {
+        elems
+            .iter()
+            .map(|e| e.materialize(heap, region, symbols.as_deref_mut()))
+            .collect()
     }
 
     /// Serialize this template into the (reclaimable) bytecode instruction

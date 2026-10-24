@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-22
 //! Runtime eval instruction handler.
 //!
 //! Compiles and executes a datum (quoted value) at runtime.
@@ -276,10 +276,9 @@ fn extract_env_bindings(
         }
         return Ok(map);
     }
-    if let Some(cell) = env_value.as_struct_mut() {
-        let borrowed = cell.borrow();
+    if let Some(entries) = env_value.struct_mut_read() {
         let mut map = HashMap::new();
-        for (key, value) in borrowed.iter() {
+        for (key, value) in entries.iter() {
             if let TableKey::Symbol(sym_id) = key {
                 if let Some(name) = symbols.name(*sym_id) {
                     map.insert(name.to_string(), *value);

@@ -1,3 +1,8 @@
+// audited: 2026-10-22
+//! The JSON writer: a value as compact or pretty JSON text, refusing what JSON cannot spell.
+//!
+//! docs/impl/symbol.md
+
 use crate::value::{TableKey, Value};
 
 /// The refusal for a keyword whose spelling neither the calling instance's
@@ -7,7 +12,7 @@ use crate::value::{TableKey, Value};
 /// different name, so there is no fallback to take. The message names the
 /// hash because that is the author's only handle on which keyword it was —
 /// and, upstream, on the mint site that never recorded the spelling
-/// (docs/impl/symbol.md § "A spelling the runtime itself mints").
+/// (docs/impl/symbol.md).
 fn unspellable(what: &str, hash: u64) -> String {
     format!("{} has no learned spelling: #<keyword:{:#x}>", what, hash)
 }
@@ -98,15 +103,11 @@ pub fn serialize_value(
         let elements: Result<Vec<String>, String> =
             vec.iter().map(|v| serialize_value(v, symbols)).collect();
         Ok(format!("[{}]", elements?.join(",")))
-    } else if let Some(v) = value.as_array_mut() {
-        let borrowed = v.borrow();
-        let elements: Result<Vec<String>, String> = borrowed
-            .iter()
-            .map(|v| serialize_value(v, symbols))
-            .collect();
+    } else if let Some(elems) = value.array_mut_read() {
+        let elements: Result<Vec<String>, String> =
+            elems.iter().map(|v| serialize_value(v, symbols)).collect();
         Ok(format!("[{}]", elements?.join(",")))
-    } else if let Some(t) = value.as_struct_mut() {
-        let mstruct = t.borrow();
+    } else if let Some(mstruct) = value.struct_mut_read() {
         let mut pairs = Vec::new();
         for (k, v) in mstruct.iter() {
             let key_str = json_object_key(k, symbols, "@struct")?;
@@ -128,9 +129,7 @@ pub fn serialize_value(
         Err("Cannot serialize closures to JSON".to_string())
     } else if value.is_symbol() {
         Err("Cannot serialize symbols to JSON".to_string())
-    } else if let Some(cell) = value.as_lbox() {
-        // Dereference the cell and serialize the inner value
-        let inner = cell.borrow();
+    } else if let Some(inner) = value.lbox_get() {
         serialize_value(&inner, symbols)
     } else if let Some(tag) = value.heap_tag() {
         use crate::value::heap::HeapTag;
@@ -179,8 +178,7 @@ pub fn serialize_value(
                 }
             }
             HeapTag::LSetMut => {
-                if let Some(s_ref) = value.as_set_mut() {
-                    let s = s_ref.borrow();
+                if let Some(s) = value.set_mut_read() {
                     let items: Result<Vec<String>, String> =
                         s.iter().map(|v| serialize_value(v, symbols)).collect();
                     Ok(format!("[{}]", items?.join(",")))
@@ -242,12 +240,11 @@ pub fn serialize_value_pretty(
             elements?.join(&format!(",\n{}", next_indent)),
             indent
         ))
-    } else if let Some(v) = value.as_array_mut() {
-        let borrowed = v.borrow();
-        if borrowed.is_empty() {
+    } else if let Some(elems) = value.array_mut_read() {
+        if elems.is_empty() {
             return Ok("[]".to_string());
         }
-        let elements: Result<Vec<String>, String> = borrowed
+        let elements: Result<Vec<String>, String> = elems
             .iter()
             .map(|val| serialize_value_pretty(val, symbols, indent_level + 1))
             .collect();
@@ -257,8 +254,7 @@ pub fn serialize_value_pretty(
             elements?.join(&format!(",\n{}", next_indent)),
             indent
         ))
-    } else if let Some(t) = value.as_struct_mut() {
-        let mstruct = t.borrow();
+    } else if let Some(mstruct) = value.struct_mut_read() {
         if mstruct.is_empty() {
             return Ok("{}".to_string());
         }
@@ -296,9 +292,7 @@ pub fn serialize_value_pretty(
         Err("Cannot serialize closures to JSON".to_string())
     } else if value.is_symbol() {
         Err("Cannot serialize symbols to JSON".to_string())
-    } else if let Some(cell) = value.as_lbox() {
-        // Dereference the cell and serialize the inner value
-        let inner = cell.borrow();
+    } else if let Some(inner) = value.lbox_get() {
         serialize_value_pretty(&inner, symbols, indent_level)
     } else if let Some(tag) = value.heap_tag() {
         use crate::value::heap::HeapTag;
@@ -361,8 +355,7 @@ pub fn serialize_value_pretty(
                 }
             }
             HeapTag::LSetMut => {
-                if let Some(s_ref) = value.as_set_mut() {
-                    let s = s_ref.borrow();
+                if let Some(s) = value.set_mut_read() {
                     let items: Result<Vec<String>, String> = s
                         .iter()
                         .map(|v| serialize_value_pretty(v, symbols, indent_level + 1))

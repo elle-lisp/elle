@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-22
 // The JSON primitives: what parses, what it parses to, what serializes, and
 // what refuses.
 //
@@ -111,7 +111,7 @@ fn test_json_parse_arrays() {
     let result = call_primitive(&json_parse, &[h.ctx().string("[1,2,3]")]);
     let array = result.unwrap();
     assert!(
-        array.as_array_mut().is_none(),
+        array.array_mut_read().is_none(),
         "a parsed JSON array is immutable"
     );
     let elements = array.as_array().expect("JSON array parses to an array");
@@ -151,21 +151,24 @@ fn test_json_parse_is_immutable_at_every_depth() {
 
     let result = call_primitive(&json_parse, &[h.ctx().string("{\"a\": [1, {\"b\": [2]}]}")]);
     let root = result.unwrap();
-    assert!(root.as_struct_mut().is_none(), "root object is immutable");
+    assert!(root.struct_mut_read().is_none(), "root object is immutable");
 
     let outer = json_field(root, "a");
-    assert!(outer.as_array_mut().is_none(), "nested array is immutable");
+    assert!(
+        outer.array_mut_read().is_none(),
+        "nested array is immutable"
+    );
     let outer = outer.as_array().expect("nested array parses to an array");
 
     let inner = outer[1];
     assert!(
-        inner.as_struct_mut().is_none(),
+        inner.struct_mut_read().is_none(),
         "nested object is immutable"
     );
 
     let deepest = json_field(inner, "b");
     assert!(
-        deepest.as_array_mut().is_none(),
+        deepest.array_mut_read().is_none(),
         "deepest array is immutable"
     );
     assert_eq!(
@@ -183,7 +186,7 @@ fn test_json_parse_objects() {
     let result = call_primitive(&json_parse, &[h.ctx().string("{}")]);
     let empty = result.unwrap();
     assert!(
-        empty.as_struct_mut().is_none(),
+        empty.struct_mut_read().is_none(),
         "a parsed JSON object is immutable"
     );
     assert_eq!(
@@ -200,7 +203,7 @@ fn test_json_parse_objects() {
     );
     let parsed = result.unwrap();
     assert!(
-        parsed.as_struct_mut().is_none(),
+        parsed.struct_mut_read().is_none(),
         "a parsed JSON object is immutable"
     );
     let fields = parsed.as_struct().expect("JSON object parses to a struct");

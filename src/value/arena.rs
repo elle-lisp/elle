@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-22
 //! Arena allocation layer.
 //!
 //! docs/impl/region/rules.md
@@ -126,21 +126,21 @@ pub fn region_of(heap: &FiberHeap, val: Value) -> Option<RuntimeRegion> {
 /// value. Unwrap one level so retain/release reach the wrapped value.
 pub fn result_region_of(heap: &FiberHeap, val: Value) -> Option<RuntimeRegion> {
     if val.is_capture_cell() {
-        // The unwrap reads the cell's page. A debug build classifies the cell
-        // itself first, so a cell whose region was freed panics as a stale
-        // deref of the cell (docs/impl/region/generations.md) rather than as
-        // a malformed inner value read off a recycled page.
+        // The unwrap reads the cell's page, so a debug build classifies the
+        // cell itself first. A cell whose region was freed then panics as a
+        // stale deref of the cell (docs/impl/region/generations.md), not as a
+        // malformed inner value read off a recycled page.
         #[cfg(debug_assertions)]
         let _ = region_of(heap, val);
-        if let Some(cell) = val.as_capture_cell_raw() {
-            return region_of(heap, *cell.borrow());
+        if let Some(inner) = val.capture_cell_get() {
+            return region_of(heap, inner);
         }
     }
     region_of(heap, val)
 }
 
 /// Increment a region's reference count. `None` (a non-heap value's absent
-/// region, i.e. an immediate) is a no-op. Every `RuntimeRegion` is mortal and
+/// region, that is an immediate) is a no-op. Every `RuntimeRegion` is mortal and
 /// RC-tracked, so a present region always reaches the store.
 pub fn incref_region(heap: &mut FiberHeap, id: Option<RuntimeRegion>) {
     let Some(r) = id else {
@@ -188,8 +188,8 @@ pub enum EscapeSite {
     /// consumes it).
     ReturnValue,
     /// A message enqueued into a channel buffer (`chan/send`). The buffer is
-    /// external to the region system — no free-time cascade balances it — so
-    /// this retain IS the message's reference while it rides the buffer;
+    /// external to the region system, and no free-time cascade balances it.
+    /// So this retain IS the message's reference while it rides the buffer;
     /// `release_received_message` lowers it as the receive takes the message
     /// out (docs/impl/region/effects.md).
     ChanSend,
@@ -356,7 +356,31 @@ pub fn decref_removed_element(heap: &mut FiberHeap, container: Value, val: Value
     decref_region(heap, counted);
 }
 
+/// The room a growing store of `container` claims: an extent in the region of
+/// `heap` whose pages hold the shell. A write that fits the capacity never
+/// calls it, so it resolves no region. Panics, naming `funnel`, when no region
+/// of `heap` holds the shell: one another thread's heap owns, which a
+/// cross-thread channel delivers.
+fn growth_room<'h, T: Copy + 'static>(
+    heap: &'h mut FiberHeap,
+    container: Value,
+    funnel: &'static str,
+) -> impl FnOnce(usize) -> *mut T + 'h {
+    move |n| {
+        let region = heap.owning_region_of(container).unwrap_or_else(|| {
+            panic!(
+                "{funnel}: the {} lies in no region of this heap, so it cannot \
+                 grow (docs/impl/mutable.md)",
+                container.type_name()
+            )
+        });
+        heap.alloc_room_in_region::<T>(n, region)
+    }
+}
+
+mod bytes;
 mod mutate;
+pub use bytes::*;
 pub use mutate::*;
 
 // ── Utility ─────────────────────────────────────────────────────────
@@ -395,7 +419,7 @@ pub unsafe fn deref(value: Value) -> &'static HeapObject {
             "tag/object mismatch — use-after-free? value.tag=0x{:x} object={} \
              (variant's expected tag=0x{:x}) payload=0x{:x} first8=0x{:016x}; \
              {}\n    expansion context: {}; \
-             see docs/regions.md and CONTRIBUTING.md on progressive constraint",
+             see docs/impl/region/diagnostics.md",
             value.tag,
             obj.type_name(),
             obj.value_tag(),

@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-22
 // The image store milestone: dump a sealed value graph, hydrate it by
 // private file mapping, and prove the mechanism end to end.
 // docs/impl/image/plan.md
@@ -61,6 +61,18 @@ fn alloc_array(heap: &mut FiberHeap, region: RuntimeRegion, items: &[Value]) -> 
     heap.alloc_in_region(
         HeapObject::LArray {
             elements: slice,
+            traits: Value::NIL,
+        },
+        region,
+    )
+}
+
+/// A mutable `@array` of `items` in the region, which the dumper refuses.
+fn alloc_array_mut(heap: &mut FiberHeap, region: RuntimeRegion, items: &[Value]) -> Value {
+    let data = elle::value::store::ArrayStore::new_in(heap, region, items);
+    heap.alloc_in_region(
+        HeapObject::LArrayMut {
+            data,
             traits: Value::NIL,
         },
         region,

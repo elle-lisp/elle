@@ -4,7 +4,7 @@
 //!
 //! docs/impl/image/sealing.md
 //! docs/impl/image/format.md
-//! docs/impl/image.md
+//! docs/impl/image/hydration.md
 
 use std::path::PathBuf;
 
@@ -107,7 +107,7 @@ fn a_nodes_scope_set_survives_hydration() {
 }
 
 // The scope watermark bounds what a fresh expander may mint
-// (docs/impl/image.md). An expander starts its counter at one, so a hydrated
+// (docs/impl/image/format.md). An expander starts its counter at one, so a hydrated
 // body's scopes and a fresh expander's would collide. The watermark clears
 // every counter value in the body — the intro scope included, since intro ids
 // and ordinary ones come off the same counter and differ only in a reserved
@@ -171,7 +171,7 @@ fn long_list(heap: &mut FiberHeap, n: i64) -> Value {
     list
 }
 
-// An image file is never rewritten in place (docs/impl/image.md), so two
+// An image file is never rewritten in place (docs/impl/image/hydration.md), so two
 // dumps racing for one path each rename a whole file. The warm cache meets
 // this whenever two threads of one process boot at once and both miss.
 //

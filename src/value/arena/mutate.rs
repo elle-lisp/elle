@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-10-23
 //! The tracked mutable-store funnels: every store into, or removal from, a mutable container.
 //!
 //! docs/impl/region/rules.md
@@ -9,12 +9,11 @@ use super::*;
 // ── Tracked mutation helpers ────────────────────────────────────────
 //
 // THE mutable-store funnel (docs/impl/region/rules.md Rule 5, mutable store).
-// The raw `RefCell` accessors of the Value-bearing mutable containers are
-// visible only inside `value/`. So these helpers are the only way the rest of
-// the crate can store a `Value` into (or remove one from) an @array, @struct,
-// @set, box, or capture cell. Each pairs the mutation with its region
-// tracking; an uncounted container store is a compile error, not a review
-// item.
+// A store's writes are visible only inside `value/` (src/value/store.rs). So
+// these helpers are the only way the rest of the crate can store a `Value` into
+// (or remove one from) an @array, @struct, @set, box, or capture cell. Each
+// pairs the mutation with its region tracking; an uncounted container store is
+// a compile error, not a review item.
 //
 // Region tracking is two ledgers, both maintained here: the incoming RC
 // (`incref_inserted_element`/`decref_removed_element`/`rebind_stored_element`,
@@ -66,13 +65,15 @@ fn counted_key_values(
 }
 
 /// Push a value into a mutable @array, tracking the cross-region reference.
-/// Panics if `collection` is not an @array.
+/// Panics if `collection` is not an @array, or if it must grow and no region
+/// of `heap` holds it.
 /// Returns the collection value.
 pub fn push_with_incref(heap: &mut FiberHeap, collection: Value, elem: Value) -> Value {
-    let vec_ref = collection
-        .as_array_mut_raw()
-        .expect("push_with_incref: expected @array");
-    vec_ref.borrow_mut().push(elem);
+    let room = growth_room(heap, collection, "push_with_incref");
+    collection
+        .array_store()
+        .expect("push_with_incref: expected @array")
+        .push(elem, room);
     incref_inserted_element(heap, collection, elem);
     record_store(heap, collection, elem);
     collection
@@ -110,11 +111,9 @@ pub fn push_with_incref(heap: &mut FiberHeap, collection: Value, elem: Value) ->
 /// stay paired (the two-ledger co-location invariant), and the incoming RC never
 /// transiently reaches zero.
 pub fn pop_with_decref(heap: &mut FiberHeap, collection: Value) -> Value {
-    let vec_ref = collection
-        .as_array_mut_raw()
-        .expect("pop_with_decref: expected @array");
-    let popped = vec_ref
-        .borrow_mut()
+    let popped = collection
+        .array_store()
+        .expect("pop_with_decref: expected @array")
         .pop()
         .expect("pop_with_decref: empty @array");
     let popped_region = region_of(heap, popped);
@@ -140,13 +139,15 @@ pub fn pop_with_decref(heap: &mut FiberHeap, collection: Value) -> Value {
 }
 
 /// Extend a mutable @array with multiple values, tracking each cross-region reference.
-/// Panics if `collection` is not an @array.
+/// Panics if `collection` is not an @array, or if it must grow and no region
+/// of `heap` holds it.
 /// Returns the collection value.
 pub fn extend_with_incref(heap: &mut FiberHeap, collection: Value, elems: &[Value]) -> Value {
-    let vec_ref = collection
-        .as_array_mut_raw()
-        .expect("extend_with_incref: expected @array");
-    vec_ref.borrow_mut().extend_from_slice(elems);
+    let room = growth_room(heap, collection, "extend_with_incref");
+    collection
+        .array_store()
+        .expect("extend_with_incref: expected @array")
+        .extend(elems, room);
     for &elem in elems {
         incref_inserted_element(heap, collection, elem);
         record_store(heap, collection, elem);
@@ -158,13 +159,10 @@ pub fn extend_with_incref(heap: &mut FiberHeap, collection: Value, elems: &[Valu
 /// releasing each tracked ref. Returns the removed values in array order.
 /// Panics if `collection` is not an @array.
 pub fn drain_tail_with_decref(heap: &mut FiberHeap, collection: Value, n: usize) -> Vec<Value> {
-    let vec_ref = collection
-        .as_array_mut_raw()
-        .expect("drain_tail_with_decref: expected @array");
-    let mut vec = vec_ref.borrow_mut();
-    let len = vec.len();
-    let removed: Vec<Value> = vec.drain(len - n.min(len)..).collect();
-    drop(vec);
+    let removed = collection
+        .array_store()
+        .expect("drain_tail_with_decref: expected @array")
+        .drain_tail(n);
     for &v in &removed {
         // Un-record before decref (the decref may free `v`'s region — see `pop`).
         unrecord_store(heap, collection, v);
@@ -174,13 +172,14 @@ pub fn drain_tail_with_decref(heap: &mut FiberHeap, collection: Value, n: usize)
 }
 
 /// Insert a value at `index` in a mutable @array, tracking the stored ref.
-/// Panics if `collection` is not an @array or `index` is out of bounds
-/// (mirrors `Vec::insert`).
+/// Panics if `collection` is not an @array, if `index` is out of bounds
+/// (mirrors `Vec::insert`), or if it must grow and no region of `heap` holds it.
 pub fn insert_with_incref(heap: &mut FiberHeap, collection: Value, index: usize, elem: Value) {
-    let vec_ref = collection
-        .as_array_mut_raw()
-        .expect("insert_with_incref: expected @array");
-    vec_ref.borrow_mut().insert(index, elem);
+    let room = growth_room(heap, collection, "insert_with_incref");
+    collection
+        .array_store()
+        .expect("insert_with_incref: expected @array")
+        .insert(index, elem, room);
     incref_inserted_element(heap, collection, elem);
     record_store(heap, collection, elem);
 }
@@ -189,10 +188,10 @@ pub fn insert_with_incref(heap: &mut FiberHeap, collection: Value, index: usize,
 /// tracked ref. Panics if `collection` is not an @array or `index` is out of
 /// bounds (mirrors `Vec::remove`).
 pub fn remove_at_with_decref(heap: &mut FiberHeap, collection: Value, index: usize) -> Value {
-    let vec_ref = collection
-        .as_array_mut_raw()
-        .expect("remove_at_with_decref: expected @array");
-    let removed = vec_ref.borrow_mut().remove(index);
+    let removed = collection
+        .array_store()
+        .expect("remove_at_with_decref: expected @array")
+        .remove(index);
     // Un-record before decref (the decref may free `removed`'s region — see `pop`).
     unrecord_store(heap, collection, removed);
     decref_removed_element(heap, collection, removed);
@@ -208,10 +207,10 @@ pub fn set_at_with_rebind(
     index: usize,
     new: Value,
 ) -> Value {
-    let vec_ref = collection
-        .as_array_mut_raw()
-        .expect("set_at_with_rebind: expected @array");
-    let old = std::mem::replace(&mut vec_ref.borrow_mut()[index], new);
+    let old = collection
+        .array_store()
+        .expect("set_at_with_rebind: expected @array")
+        .replace(index, new);
     // Un-record the old edge BEFORE the rebind (its decref may free `old`'s region,
     // making `old`'s region unresolvable); record the new edge after (the rebind's
     // incref keeps `new`'s region live).
@@ -223,23 +222,14 @@ pub fn set_at_with_rebind(
 
 /// Mutable access to an @array for membership-NEUTRAL operations ONLY —
 /// sort/reverse/swap/rotate, where no value enters or leaves the container
-/// and region RC is untouched. Storing or removing through this funnel is a
-/// Rule-5 violation; the debug length assert is the tripwire for the
-/// insert/remove case (an in-place replacement it cannot see — use
-/// [`set_at_with_rebind`]).
-pub fn with_array_mut_neutral<R>(collection: Value, f: impl FnOnce(&mut Vec<Value>) -> R) -> R {
-    let vec_ref = collection
-        .as_array_mut_raw()
-        .expect("with_array_mut_neutral: expected @array");
-    let mut vec = vec_ref.borrow_mut();
-    let len_before = vec.len();
-    let out = f(&mut vec);
-    debug_assert_eq!(
-        len_before,
-        vec.len(),
-        "with_array_mut_neutral: membership changed — use the tracked funnels"
-    );
-    out
+/// and region RC is untouched. A slice cannot change its length, so this
+/// cannot insert or remove. Storing a new value into a slot through it is a
+/// Rule-5 violation the slice cannot refuse: use [`set_at_with_rebind`].
+pub fn with_array_mut_neutral<R>(collection: Value, f: impl FnOnce(&mut [Value]) -> R) -> R {
+    collection
+        .array_store()
+        .expect("with_array_mut_neutral: expected @array")
+        .with_slice_mut(f)
 }
 
 /// Insert into a mutable @struct, swapping tracked refs: increfs the stored
@@ -268,16 +258,16 @@ pub fn struct_put_with_rebind(
     // follow (docs/impl/values.md). Membership is probed with
     // the BORROWED key, because a rebind stores no key and interning one would
     // leave the copy unreachable in the container's region.
-    let map_ref = collection
-        .as_struct_mut_raw()
+    let store = collection
+        .struct_store()
         .expect("struct_put_with_rebind: expected @struct");
-    let replacing = map_ref.borrow().contains_key(&key);
+    let replacing = store.read().contains_key(&key);
     let key = match region_of(heap, collection) {
         Some(r) if !replacing => key.intern_into(heap, r),
         _ => key,
     };
     let key_heap_vals = counted_key_values(heap, collection, &key);
-    let old = map_ref.borrow_mut().insert(key, val);
+    let old = store.insert(key, val);
     match old {
         Some(old) => {
             // Un-record old before the rebind's decref may free its region; record
@@ -306,8 +296,8 @@ pub fn struct_remove_with_decref(
     collection: Value,
     key: &crate::value::heap::TableKey,
 ) -> Option<Value> {
-    let map_ref = collection
-        .as_struct_mut_raw()
+    let store = collection
+        .struct_store()
         .expect("struct_remove_with_decref: expected @struct");
     // `remove_entry` hands back the STORED key, not the caller's lookup key. For a
     // value-equal-but-distinct heap key (a list) they are two allocations in two
@@ -317,7 +307,7 @@ pub fn struct_remove_with_decref(
     // takes them on. This half cannot tell whether the key it removes was interned
     // by a constructor or by that funnel, so the two must agree on which of a key's
     // values is a reference at all.
-    let removed = map_ref.borrow_mut().remove_entry(key);
+    let removed = store.remove_entry(key);
     if let Some((stored_key, v)) = removed {
         // Every region this call will release is resolved FIRST, and every
         // un-record runs before any decref: a decref may free a region, and a
@@ -339,12 +329,14 @@ pub fn struct_remove_with_decref(
 /// Insert into a mutable @set, tracking the stored ref — only when actually
 /// inserted (a duplicate stores nothing). The element must already be frozen
 /// (set invariant; the caller owns freezing). Returns whether it was
-/// inserted. Panics if `collection` is not an @set.
+/// inserted. Panics if `collection` is not an @set, or if it must grow and no
+/// region of `heap` holds it.
 pub fn set_add_with_incref(heap: &mut FiberHeap, collection: Value, frozen: Value) -> bool {
-    let set_ref = collection
-        .as_set_mut_raw()
-        .expect("set_add_with_incref: expected @set");
-    let inserted = set_ref.borrow_mut().insert(frozen);
+    let room = growth_room(heap, collection, "set_add_with_incref");
+    let inserted = collection
+        .set_store()
+        .expect("set_add_with_incref: expected @set")
+        .insert(frozen, room);
     if inserted {
         incref_inserted_element(heap, collection, frozen);
         record_store(heap, collection, frozen);
@@ -356,8 +348,8 @@ pub fn set_add_with_incref(heap: &mut FiberHeap, collection: Value, frozen: Valu
 /// only when actually removed. Returns whether it was removed. Panics if
 /// `collection` is not an @set.
 pub fn set_del_with_decref(heap: &mut FiberHeap, collection: Value, frozen: &Value) -> bool {
-    let set_ref = collection
-        .as_set_mut_raw()
+    let store = collection
+        .set_store()
         .expect("set_del_with_decref: expected @set");
     // `take` HANDS BACK the stored member — a plain `remove` yields only a bool. For
     // a heap member, the stored element and the caller's `frozen` are DISTINCT
@@ -368,7 +360,7 @@ pub fn set_del_with_decref(heap: &mut FiberHeap, collection: Value, frozen: &Val
     // drift) and decrefs a live region the caller still owns (an over-free). Resolve
     // them from the removed member, as `struct_remove_with_decref` does with the
     // entry `remove_entry` returns.
-    let removed = set_ref.borrow_mut().take(frozen);
+    let removed = store.take(frozen);
     if let Some(member) = removed {
         // Un-record before decref (the decref may free the region — see `pop`).
         unrecord_store(heap, collection, member);
@@ -383,10 +375,10 @@ pub fn set_del_with_decref(heap: &mut FiberHeap, collection: Value, frozen: &Val
 /// vs new-region rebind). Returns the displaced value. Panics if `bx` is not
 /// a box.
 pub fn lbox_store_with_rebind(heap: &mut FiberHeap, bx: Value, new: Value) -> Value {
-    let cell = bx
-        .as_lbox_raw()
-        .expect("lbox_store_with_rebind: expected box");
-    let old = std::mem::replace(&mut *cell.borrow_mut(), new);
+    let old = bx
+        .lbox_store()
+        .expect("lbox_store_with_rebind: expected box")
+        .replace(new);
     // Un-record old before the rebind's decref may free its region; record new after
     // (see `set_at_with_rebind`).
     unrecord_store(heap, bx, old);
@@ -403,10 +395,10 @@ pub fn lbox_store_with_rebind(heap: &mut FiberHeap, bx: Value, new: Value) -> Va
 /// a capture cell. The single store routine for every tier (interpreter,
 /// JIT, WASM host).
 pub fn capture_store_with_rebind(heap: &mut FiberHeap, cell_val: Value, new_value: Value) -> Value {
-    let cell_ref = cell_val
-        .as_capture_cell_raw()
+    let store = cell_val
+        .capture_cell_store()
         .expect("capture_store_with_rebind: expected capture cell");
-    let old_value = *cell_ref.borrow();
+    let old_value = store.get();
     if crate::config::get().has_trace("rc") {
         eprintln!(
             "[trace:rc] capture_store cell_r={:?} old_r={:?} new_r={:?}",
@@ -434,6 +426,6 @@ pub fn capture_store_with_rebind(heap: &mut FiberHeap, cell_val: Value, new_valu
             }
         }
     }
-    *cell_ref.borrow_mut() = new_value;
+    store.replace(new_value);
     old_value
 }

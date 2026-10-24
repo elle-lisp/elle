@@ -1,8 +1,10 @@
+// audited: 2026-10-22
 //! Structural equality, parameterized by relation.
 //!
-//! One traversal serves the two equality relations of docs/types.md
-//! § Equality, so they can never disagree about structure — only about
-//! number leaves:
+//! docs/types.md
+//!
+//! One traversal serves the language's two equality relations, so they can
+//! never disagree about structure — only about number leaves:
 //!
 //! - `Identity` — Rust `PartialEq`, exposed to users as `identical?`:
 //!   no numeric coercion, floats compare by bit pattern (NaN is
@@ -89,11 +91,11 @@ pub(crate) fn eq_with(a: &Value, b: &Value, rel: Relation) -> bool {
             // String × @string
             (HeapObject::LString { s: s1, .. }, HeapObject::LStringMut { data: b2, .. })
             | (HeapObject::LStringMut { data: b2, .. }, HeapObject::LString { s: s1, .. }) => {
-                s1.as_slice() == b2.borrow().as_slice()
+                s1.as_slice() == &*b2.read()
             }
             // @string × @string
             (HeapObject::LStringMut { data: b1, .. }, HeapObject::LStringMut { data: b2, .. }) => {
-                *b1.borrow() == *b2.borrow()
+                *b1.read() == *b2.read()
             }
 
             // Pair cells: recurse on first, iterate on rest (traits
@@ -107,7 +109,7 @@ pub(crate) fn eq_with(a: &Value, b: &Value, rel: Relation) -> bool {
             // Array × @array
             (HeapObject::LArray { elements: a1, .. }, HeapObject::LArrayMut { data: a2, .. })
             | (HeapObject::LArrayMut { data: a2, .. }, HeapObject::LArray { elements: a1, .. }) => {
-                slice_eq(a1.as_slice(), a2.borrow().as_slice(), rel)
+                slice_eq(a1.as_slice(), &a2.read(), rel)
             }
             // @array × @array
             (HeapObject::LArrayMut { data: v1, .. }, HeapObject::LArrayMut { data: v2, .. }) => {
@@ -115,7 +117,7 @@ pub(crate) fn eq_with(a: &Value, b: &Value, rel: Relation) -> bool {
                     Some(g) => g,
                     None => return true, // cycle: assume equal
                 };
-                slice_eq(v1.borrow().as_slice(), v2.borrow().as_slice(), rel)
+                slice_eq(&v1.read(), &v2.read(), rel)
             }
 
             // Struct: immutable × immutable (sorted Vec vs sorted Vec).
@@ -131,11 +133,11 @@ pub(crate) fn eq_with(a: &Value, b: &Value, rel: Relation) -> bool {
             // Struct × @struct (sorted Vec vs BTreeMap)
             (HeapObject::LStruct { data: s1, .. }, HeapObject::LStructMut { data: s2, .. })
             | (HeapObject::LStructMut { data: s2, .. }, HeapObject::LStruct { data: s1, .. }) => {
-                let borrowed = s2.borrow();
-                s1.len() == borrowed.len()
+                let read = s2.read();
+                s1.len() == read.len()
                     && s1
                         .iter()
-                        .all(|(k, v)| borrowed.get(k).is_some_and(|v2| eq_with(v, v2, rel)))
+                        .all(|(k, v)| read.get(k).is_some_and(|v2| eq_with(v, &v2, rel)))
             }
             // @struct × @struct
             (HeapObject::LStructMut { data: t1, .. }, HeapObject::LStructMut { data: t2, .. }) => {
@@ -143,7 +145,7 @@ pub(crate) fn eq_with(a: &Value, b: &Value, rel: Relation) -> bool {
                     Some(g) => g,
                     None => return true,
                 };
-                let (m1, m2) = (t1.borrow(), t2.borrow());
+                let (m1, m2) = (t1.read(), t2.read());
                 m1.len() == m2.len()
                     && m1
                         .iter()
@@ -156,11 +158,11 @@ pub(crate) fn eq_with(a: &Value, b: &Value, rel: Relation) -> bool {
             // Bytes × @bytes
             (HeapObject::LBytes { data: b1, .. }, HeapObject::LBytesMut { data: b2, .. })
             | (HeapObject::LBytesMut { data: b2, .. }, HeapObject::LBytes { data: b1, .. }) => {
-                b1.as_slice() == b2.borrow().as_slice()
+                b1.as_slice() == &*b2.read()
             }
             // @bytes × @bytes
             (HeapObject::LBytesMut { data: b1, .. }, HeapObject::LBytesMut { data: b2, .. }) => {
-                *b1.borrow() == *b2.borrow()
+                *b1.read() == *b2.read()
             }
 
             // Set: immutable × immutable. Sets are Ord-sorted, and Ord
@@ -173,12 +175,9 @@ pub(crate) fn eq_with(a: &Value, b: &Value, rel: Relation) -> bool {
             // Set × @set
             (HeapObject::LSet { data: s1, .. }, HeapObject::LSetMut { data: s2, .. })
             | (HeapObject::LSetMut { data: s2, .. }, HeapObject::LSet { data: s1, .. }) => {
-                let borrowed = s2.borrow();
-                s1.len() == borrowed.len()
-                    && s1
-                        .iter()
-                        .zip(borrowed.iter())
-                        .all(|(x, y)| eq_with(x, y, rel))
+                let read = s2.read();
+                s1.len() == read.len()
+                    && s1.iter().zip(read.iter()).all(|(x, y)| eq_with(x, y, rel))
             }
             // @set × @set
             (HeapObject::LSetMut { data: s1, .. }, HeapObject::LSetMut { data: s2, .. }) => {
@@ -186,7 +185,7 @@ pub(crate) fn eq_with(a: &Value, b: &Value, rel: Relation) -> bool {
                     Some(g) => g,
                     None => return true,
                 };
-                let (b1, b2) = (s1.borrow(), s2.borrow());
+                let (b1, b2) = (s1.read(), s2.read());
                 b1.len() == b2.len() && b1.iter().zip(b2.iter()).all(|(x, y)| eq_with(x, y, rel))
             }
 
@@ -207,7 +206,7 @@ pub(crate) fn eq_with(a: &Value, b: &Value, rel: Relation) -> bool {
                     Some(g) => g,
                     None => return true,
                 };
-                eq_with(&c1.borrow(), &c2.borrow(), rel)
+                eq_with(&c1.get(), &c2.get(), rel)
             }
 
             // (Native-fns are immediates now — `Value{TAG_NATIVE_FN, prim_id}` —

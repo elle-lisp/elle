@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-22
 //! The struct primitives: the immutable constructor, freeze, deep-freeze and thaw, and pairs.
 //!
 //! docs/structs.md
@@ -107,26 +107,25 @@ pub(crate) fn prim_freeze(
     args: &[Value],
 ) -> (SignalBits, Value) {
     // @array → array
-    if let Some(a) = args[0].as_array_mut() {
-        let elements = a.borrow().clone();
-        return (SIG_OK, ctx.array(elements));
+    if let Some(a) = args[0].array_mut_read() {
+        return (SIG_OK, ctx.array(a.to_vec()));
     }
     if args[0].is_array() {
         return (SIG_OK, args[0]);
     }
 
     // @struct → struct
-    if let Some(t) = args[0].as_struct_mut() {
-        let map = t.borrow().clone();
-        return (SIG_OK, ctx.struct_from(map));
+    if let Some(t) = args[0].struct_mut_read() {
+        let entries: Vec<(TableKey, Value)> = t.iter().map(|(k, v)| (*k, *v)).collect();
+        return (SIG_OK, ctx.struct_from_sorted(entries));
     }
     if args[0].is_struct() {
         return (SIG_OK, args[0]);
     }
 
     // @set → set
-    if let Some(s) = args[0].as_set_mut() {
-        let items: BTreeSet<Value> = s.borrow().iter().copied().collect();
+    if let Some(s) = args[0].set_mut_read() {
+        let items: BTreeSet<Value> = s.iter().copied().collect();
         return (SIG_OK, ctx.set(items));
     }
     if args[0].is_set() {
@@ -134,8 +133,7 @@ pub(crate) fn prim_freeze(
     }
 
     // @string → string (fallible: requires valid UTF-8)
-    if let Some(buf) = args[0].as_string_mut() {
-        let bytes = buf.borrow();
+    if let Some(bytes) = args[0].string_mut_read() {
         return match std::str::from_utf8(&bytes) {
             Ok(s) => (SIG_OK, ctx.string(s)),
             Err(e) => (
@@ -152,9 +150,8 @@ pub(crate) fn prim_freeze(
     }
 
     // @bytes → bytes
-    if let Some(b) = args[0].as_bytes_mut() {
-        let data = b.borrow().clone();
-        return (SIG_OK, ctx.bytes(data));
+    if let Some(b) = args[0].bytes_mut_read() {
+        return (SIG_OK, ctx.bytes(b.to_vec()));
     }
     if args[0].is_bytes() {
         return (SIG_OK, args[0]);
@@ -171,12 +168,8 @@ pub(crate) fn prim_freeze(
 /// Recursively freeze a value and all nested contents.
 fn deep_freeze_val(ctx: &mut crate::primitives::ctx::NativeCtx<'_>, val: Value) -> Value {
     // @array → freeze to array, deep-freeze each element
-    if let Some(a) = val.as_array_mut() {
-        let elements: Vec<Value> = a
-            .borrow()
-            .iter()
-            .map(|v| deep_freeze_val(ctx, *v))
-            .collect();
+    if let Some(a) = val.array_mut_read() {
+        let elements: Vec<Value> = a.iter().map(|v| deep_freeze_val(ctx, *v)).collect();
         return ctx.array(elements);
     }
     // immutable array → deep-freeze each element
@@ -186,9 +179,8 @@ fn deep_freeze_val(ctx: &mut crate::primitives::ctx::NativeCtx<'_>, val: Value) 
     }
 
     // @struct → freeze to struct, deep-freeze each value
-    if let Some(t) = val.as_struct_mut() {
+    if let Some(t) = val.struct_mut_read() {
         let map: BTreeMap<TableKey, Value> = t
-            .borrow()
             .iter()
             .map(|(k, v)| (*k, deep_freeze_val(ctx, *v)))
             .collect();
@@ -204,12 +196,8 @@ fn deep_freeze_val(ctx: &mut crate::primitives::ctx::NativeCtx<'_>, val: Value) 
     }
 
     // @set → freeze to set, deep-freeze each element
-    if let Some(s) = val.as_set_mut() {
-        let items: BTreeSet<Value> = s
-            .borrow()
-            .iter()
-            .map(|v| deep_freeze_val(ctx, *v))
-            .collect();
+    if let Some(s) = val.set_mut_read() {
+        let items: BTreeSet<Value> = s.iter().map(|v| deep_freeze_val(ctx, *v)).collect();
         return ctx.set(items);
     }
     // immutable set → deep-freeze each element
@@ -226,8 +214,7 @@ fn deep_freeze_val(ctx: &mut crate::primitives::ctx::NativeCtx<'_>, val: Value) 
     }
 
     // @string → string
-    if let Some(buf) = val.as_string_mut() {
-        let bytes = buf.borrow();
+    if let Some(bytes) = val.string_mut_read() {
         return match std::str::from_utf8(&bytes) {
             Ok(s) => ctx.string(s),
             Err(_) => val, // return as-is if invalid UTF-8
@@ -235,9 +222,8 @@ fn deep_freeze_val(ctx: &mut crate::primitives::ctx::NativeCtx<'_>, val: Value) 
     }
 
     // @bytes → bytes
-    if let Some(b) = val.as_bytes_mut() {
-        let data = b.borrow().clone();
-        return ctx.bytes(data);
+    if let Some(b) = val.bytes_mut_read() {
+        return ctx.bytes(b.to_vec());
     }
 
     // atoms and everything else → return as-is
@@ -337,9 +323,8 @@ pub(crate) fn prim_pairs(
         return (SIG_OK, pairs_from_slice(ctx, entries));
     }
 
-    if let Some(map) = args[0].as_struct_mut() {
-        let borrowed = map.borrow();
-        let entries: Vec<(TableKey, Value)> = borrowed.iter().map(|(k, v)| (*k, *v)).collect();
+    if let Some(read) = args[0].struct_mut_read() {
+        let entries: Vec<(TableKey, Value)> = read.iter().map(|(k, v)| (*k, *v)).collect();
         return (SIG_OK, pairs_from_slice(ctx, &entries));
     }
 

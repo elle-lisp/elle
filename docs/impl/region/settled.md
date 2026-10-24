@@ -1,6 +1,6 @@
 # Settled invariants
 
-<!-- audited: 2026-10-16 -->
+<!-- audited: 2026-10-22 -->
 
 The invariants the region system upholds, one line each, with the spec that
 owns the argument.
@@ -15,9 +15,9 @@ these invariants close are [the model](../memory.md).
 - Subtree drop frees an Owned region's whole subtree — interior cycles
   included — at the root's single demise, walking the recorded edge table,
   never heap contents ([ownership.md](ownership.md)).
-- The mutable-store funnel holds by construction: raw `RefCell` accessors are
-  private to `value/`, so an uncounted container store is a compile error
-  ([ownership.md](ownership.md)).
+- The mutable-store funnel holds by construction: a store's writes are private
+  to `value/`, so an uncounted container store is a compile error
+  ([rules.md](rules.md)).
 - A fiber's region is never a member of a region-rooted cut: a fiber acquires
   aliases merely by running, so no structural obligation can bound its borrows
   ([adopt.md](adopt.md)).
@@ -129,9 +129,9 @@ these invariants close are [the model](../memory.md).
   ([park.md](park.md)).
 - A boundary ends a park with no reader and no install, so it owes both
   references, told apart by the delivery ledger ([park.md](park.md)).
-- A value handed to another fiber is delivered, not stored uncounted:
+- A value handed to another fiber is delivered, not stored uncounted.
   `Delivers` answers the argument side with no clique, a fiber-frontier escape
-  seed, and an unbounded result; an injected error payload's delivery is
+  seed, and an unbounded result. An injected error payload's delivery is
   minted at the injection ([effects.md](effects.md)).
 - The may-store clique is over pairs of arguments, never over one argument's
   own regions ([clique.md](clique.md)).

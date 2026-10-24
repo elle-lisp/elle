@@ -1,3 +1,8 @@
+// audited: 2026-10-22
+//! The struct and array opcodes of destructuring, and the splice builders: keyed reads, rests, safe reads, extend and push.
+//!
+//! docs/impl/vm.md
+
 use super::*;
 
 /// Table/struct get with silent nil: returns nil if key missing or wrong type.
@@ -26,17 +31,17 @@ pub(crate) fn handle_struct_get_or_nil(
         }
     };
 
-    // Try struct first (immutable, no RefCell borrow)
+    // Try struct first
     if let Some(struct_map) = val.as_struct() {
         if let Some(value) = sorted_struct_get(struct_map, &key) {
             vm.fiber.stack.push(*value);
             return;
         }
     }
-    // Try table (mutable)
-    if let Some(table_ref) = val.as_struct_mut() {
-        if let Some(value) = table_ref.borrow().get(&key) {
-            vm.fiber.stack.push(*value);
+    // Try @struct
+    if let Some(entries) = val.struct_mut_read() {
+        if let Some(value) = entries.get(&key) {
+            vm.fiber.stack.push(value);
             return;
         }
     }
@@ -87,10 +92,10 @@ pub(crate) fn handle_struct_get_destructure(
         }
     }
     // Try mutable @struct
-    if let Some(table_ref) = val.as_struct_mut() {
-        match table_ref.borrow().get(&key) {
+    if let Some(entries) = val.struct_mut_read() {
+        match entries.get(&key) {
             Some(value) => {
-                vm.fiber.stack.push(*value);
+                vm.fiber.stack.push(value);
                 return;
             }
             None => {
@@ -140,33 +145,18 @@ pub(crate) fn handle_struct_rest(
     // sub-struct is the destructure-rest binding's value: born in its own fresh
     // region (Rule 3; docs/impl/region/ctx.md) via a `NativeCtx`
     // over a freshly minted region, freed value-based by the binding's consumer,
-    // like the native-result discipline.
-    if let Some(struct_map) = val.as_struct() {
-        let result: Vec<(TableKey, Value)> = struct_map
-            .iter()
-            .filter(|(k, _)| !exclude.contains(k))
-            .map(|(k, v)| (*k, *v))
-            .collect();
-        let ctx = crate::primitives::ctx::Alloc::new(unsafe { &mut *vm.heap_ptr });
-        let rest = ctx.struct_from_sorted(result);
-        vm.fiber.stack.push(rest);
-    } else if let Some(table_ref) = val.as_struct_mut() {
-        let mut result: Vec<(TableKey, Value)> = table_ref
-            .borrow()
-            .iter()
-            .filter(|(k, _)| !exclude.contains(k))
-            .map(|(k, v)| (*k, *v))
-            .collect();
-        result.sort_by_key(|(a, _)| *a);
-        let ctx = crate::primitives::ctx::Alloc::new(unsafe { &mut *vm.heap_ptr });
-        let rest = ctx.struct_from_sorted(result);
-        vm.fiber.stack.push(rest);
-    } else {
-        // Non-struct input → empty struct rest (consistent with StructGetOrNil nil behavior)
-        let ctx = crate::primitives::ctx::Alloc::new(unsafe { &mut *vm.heap_ptr });
-        let rest = ctx.struct_from_sorted(vec![]);
-        vm.fiber.stack.push(rest);
-    }
+    // like the native-result discipline. Both struct kinds iterate in key
+    // order, so the kept entries are sorted, and a non-struct input answers an
+    // empty struct, as StructGetOrNil answers nil.
+    let kept: Vec<(TableKey, Value)> = val
+        .struct_to_vec()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(k, _)| !exclude.contains(k))
+        .collect();
+    let ctx = crate::primitives::ctx::Alloc::new(unsafe { &mut *vm.heap_ptr });
+    let rest = ctx.struct_from_sorted(kept);
+    vm.fiber.stack.push(rest);
 }
 
 /// First with silent nil (parameter destructuring): returns nil if not a pair cell.
@@ -206,8 +196,8 @@ pub(crate) fn handle_array_ref_or_nil(vm: &mut VM, bytecode: &[u8], ip: &mut usi
         .stack
         .pop()
         .expect("VM bug: Stack underflow on ArrayMutRefOrNil");
-    let result = if let Some(vec_ref) = val.as_array_mut() {
-        vec_ref.borrow().get(index).copied()
+    let result = if let Some(elems) = val.array_mut_read() {
+        elems.get(index).copied()
     } else if let Some(elems) = val.as_array() {
         elems.get(index).copied()
     } else {
@@ -232,10 +222,8 @@ pub(crate) fn handle_array_extend(vm: &mut VM) {
         .expect("VM bug: Stack underflow on ArrayMutExtend");
 
     // Get the source elements
-    let source_elems: Vec<Value> = if let Some(arr) = source.as_array_mut() {
-        arr.borrow().to_vec()
-    } else if let Some(tup) = source.as_array() {
-        tup.to_vec()
+    let source_elems: Vec<Value> = if let Some(elems) = source.array_to_vec() {
+        elems
     } else if source.as_pair().is_some() || source.is_empty_list() {
         match source.list_to_vec() {
             Ok(v) => v,

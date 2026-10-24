@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-22
 // docs/impl/values.md
 //! Value representation: the 16-byte tagged union, the heap objects it points at, and the types around them.
 
@@ -22,6 +22,7 @@ pub(crate) mod parameter;
 pub mod region_slice;
 pub mod repr;
 pub mod send;
+pub mod store;
 pub mod template;
 pub mod types;
 

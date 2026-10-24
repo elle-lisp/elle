@@ -1,4 +1,8 @@
-//! Array operations primitives
+// audited: 2026-10-22
+//! The array primitives: construct, fill, pop several, insert and remove, over @arrays and @strings.
+//!
+//! docs/arrays.md
+
 use crate::primitives::def::RegionEffect;
 use crate::primitives::def::RetType;
 use crate::primitives::seq::{seq_pop, seq_push};
@@ -102,12 +106,9 @@ pub(crate) fn prim_popn(
         return (SIG_OK, ctx.array_mut(removed));
     }
 
-    if let Some(buf_ref) = args[0].as_string_mut() {
-        let mut buf = buf_ref.borrow_mut();
-        let len = buf.len();
-        let remove_count = std::cmp::min(n, len);
-        let removed: Vec<u8> = buf.drain(len - remove_count..).collect();
-        drop(buf);
+    if let Some(len) = args[0].string_mut_read().map(|b| b.len()) {
+        let span = len - n.min(len)..len;
+        let removed = crate::value::arena::bytes_splice(ctx.heap_mut(), args[0], span, &[]);
         return (SIG_OK, ctx.string_mut(removed));
     }
 
@@ -124,7 +125,7 @@ pub(crate) fn prim_insert(
     let raw_index = prim_arg!(ctx, args, 1, as_int, "insert", "integer");
 
     if args[0].is_array_mut() {
-        let len = args[0].array_mut_ref().unwrap().len();
+        let len = args[0].array_mut_read().map_or(0, |a| a.len());
         let index = match resolve_index(raw_index, len) {
             Some(i) => i,
             None => {
@@ -147,7 +148,7 @@ pub(crate) fn prim_insert(
         return (SIG_OK, args[0]);
     }
 
-    if let Some(buf_ref) = args[0].as_string_mut() {
+    if let Some(len) = args[0].string_mut_read().map(|b| b.len()) {
         let byte = match args[2].as_int() {
             Some(n) if (0..=255).contains(&n) => n as u8,
             Some(n) => {
@@ -172,31 +173,25 @@ pub(crate) fn prim_insert(
                 )
             }
         };
-        let mut buf = buf_ref.borrow_mut();
-        let index = match resolve_index(raw_index, buf.len()) {
+        let index = match resolve_index(raw_index, len) {
             Some(i) => i,
             None => {
-                if raw_index >= 0 && raw_index as usize <= buf.len() {
+                if raw_index >= 0 && raw_index as usize <= len {
                     raw_index as usize
                 } else if raw_index < 0 {
                     return (
                         SIG_ERROR,
                         ctx.error(
                             "argument-error",
-                            format!(
-                                "insert: index {} out of bounds (length {})",
-                                raw_index,
-                                buf.len()
-                            ),
+                            format!("insert: index {} out of bounds (length {})", raw_index, len),
                         ),
                     );
                 } else {
-                    buf.len()
+                    len
                 }
             }
         };
-        buf.insert(index, byte);
-        drop(buf);
+        crate::value::arena::bytes_splice(ctx.heap_mut(), args[0], index..index, &[byte]);
         return (SIG_OK, args[0]);
     }
 
@@ -233,7 +228,7 @@ pub(crate) fn prim_remove(
     };
 
     if args[0].is_array_mut() {
-        let len = args[0].array_mut_ref().unwrap().len();
+        let len = args[0].array_mut_read().map_or(0, |a| a.len());
         if let Some(index) = resolve_index(raw_index, len) {
             let remove_count = std::cmp::min(count, len - index);
             for _ in 0..remove_count {
@@ -243,15 +238,11 @@ pub(crate) fn prim_remove(
         return (SIG_OK, args[0]);
     }
 
-    if let Some(buf_ref) = args[0].as_string_mut() {
-        let mut buf = buf_ref.borrow_mut();
-        if let Some(index) = resolve_index(raw_index, buf.len()) {
-            let remove_count = std::cmp::min(count, buf.len() - index);
-            for _ in 0..remove_count {
-                buf.remove(index);
-            }
+    if let Some(len) = args[0].string_mut_read().map(|b| b.len()) {
+        if let Some(index) = resolve_index(raw_index, len) {
+            let span = index..index + count.min(len - index);
+            crate::value::arena::bytes_splice(ctx.heap_mut(), args[0], span, &[]);
         }
-        drop(buf);
         return (SIG_OK, args[0]);
     }
 

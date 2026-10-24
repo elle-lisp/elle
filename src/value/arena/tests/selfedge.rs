@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-10-22
 //! A value stored into a container in its own region is counted by neither half of the store funnel.
 //!
 //! docs/impl/region/rules.md
@@ -14,23 +14,16 @@
 
 use super::*;
 use crate::value::heap::TableKey;
-use std::cell::RefCell;
-use std::rc::Rc;
+use crate::value::store::{CellStore, StructStore};
 
 fn array_in(heap: &mut FiberHeap, r: RuntimeRegion) -> Value {
-    heap.alloc_in_region(
-        HeapObject::LArrayMut {
-            data: Rc::new(RefCell::new(vec![])),
-            traits: Value::NIL,
-        },
-        r,
-    )
+    crate::value::build::array_mut(heap, Vec::new(), r)
 }
 
 fn struct_in(heap: &mut FiberHeap, r: RuntimeRegion) -> Value {
     heap.alloc_in_region(
         HeapObject::LStructMut {
-            data: Rc::new(RefCell::new(std::collections::BTreeMap::new())),
+            data: StructStore::new(std::collections::BTreeMap::new()),
             traits: Value::NIL,
         },
         r,
@@ -38,19 +31,13 @@ fn struct_in(heap: &mut FiberHeap, r: RuntimeRegion) -> Value {
 }
 
 fn set_in(heap: &mut FiberHeap, r: RuntimeRegion) -> Value {
-    heap.alloc_in_region(
-        HeapObject::LSetMut {
-            data: Rc::new(RefCell::new(std::collections::BTreeSet::new())),
-            traits: Value::NIL,
-        },
-        r,
-    )
+    crate::value::build::set_mut(heap, std::collections::BTreeSet::new(), r)
 }
 
 fn box_in(heap: &mut FiberHeap, r: RuntimeRegion) -> Value {
     heap.alloc_in_region(
         HeapObject::LBox {
-            cell: Rc::new(RefCell::new(Value::NIL)),
+            cell: CellStore::new(Value::NIL),
             traits: Value::NIL,
         },
         r,

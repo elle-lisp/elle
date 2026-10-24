@@ -1,9 +1,9 @@
-// audited: 2026-09-29
+// audited: 2026-10-23
 //! Trait table primitives: attach a table, read it back, and resolve the method a collection operator dispatches through.
 //!
 //! docs/traits.md
 //!
-//! `with-traits` attaches an immutable struct as a trait table to a value,
+//! `with-traits` attaches a struct as a trait table to a value,
 //! returning a new heap object with the same data and the given table.
 //!
 //! `traits` returns the trait table attached to a value, or `nil` if none.
@@ -19,6 +19,7 @@ use crate::primitives::def::{RegionEffect, RetType};
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::heap::{deref, HeapObject};
+use crate::value::store::{CellStore, StructStore};
 use crate::value::types::Arity;
 use crate::value::Value;
 
@@ -26,7 +27,7 @@ use crate::value::Value;
 ///
 /// - value must be a traitable heap type (every heap type but the
 ///   infrastructure ones `clone_with_traits` refuses)
-/// - table must be an immutable struct (LStruct)
+/// - table must be a struct, immutable or mutable
 /// - returns a new heap object with the same data and traits = table
 /// - for mutable collections the store is COPIED, so the result is
 ///   independent of the original (see `clone_with_traits`)
@@ -78,21 +79,20 @@ pub(crate) fn prim_with_traits(
 
 /// Clone a heap value, replacing the traits field with `table`.
 ///
-/// The copy is independent for every type that owns its data: mutable
+/// The copy is independent for every type that owns its data. Mutable
 /// collections (LArrayMut, LStructMut, LStringMut, LBytesMut, LSetMut, LBox,
-/// CaptureCell) get a fresh `Rc` over a cloned store, and slice-backed
-/// immutables get their payload copied into the clone's own region. A write
+/// CaptureCell) get a copy of the store. Slice-backed immutables get their
+/// payload copied into the clone's own region. A write
 /// to the original is never visible through the traited copy — the user asked
 /// for a value with different traits, not a second name for this one.
 ///
 /// Fiber, ThreadHandle, and External are the exception, and must be: they
 /// wrap a shared handle rather than owning data, so the clone names the same
 /// fiber, thread, or plugin object. Value identity follows the handle, so the
-/// two wrappers stay equal (`repr/eq.rs`, "Wrapper variants take their
-/// identity from the handle").
+/// two wrappers stay equal (src/value/repr/eq.rs).
 ///
-/// For infrastructure types (Float, NativeFn, LibHandle, FFISignature,
-/// FFIType), returns Err.
+/// For infrastructure types (Float, LibHandle, FFISignature, FFIType,
+/// ClosureTemplate), returns Err.
 ///
 /// # Safety
 /// `value` must be a valid heap pointer.
@@ -108,9 +108,9 @@ unsafe fn clone_with_traits(
         // Slice-backed immutables (LString/LArray/LBytes/LSet): COPY the
         // payload into the clone's own region. RegionSlice is Copy, and
         // copying the (ptr, len) pair instead aliases backing pages in the
-        // SOURCE's region with no counted edge — the source's ordinary
-        // demise frees the payload under the live clone, and the declared
-        // Fresh effect is falsified (docs/impl/region/model.md;
+        // SOURCE's region with no counted edge. The source's ordinary demise
+        // then frees the payload under the live clone, and the declared Fresh
+        // effect is falsified (docs/impl/region/model.md;
         // tests/impl/region-withtraits-slice-uaf.lisp).
         HeapObject::LString { s, .. } => Ok(ctx.alloc(HeapObject::LString {
             s: ctx.alloc_slice::<u8>(s.as_slice()),
@@ -121,22 +121,17 @@ unsafe fn clone_with_traits(
             rest: pair.rest,
             traits: table,
         }))),
-        // Mutable collections: materialize a fresh Rc over a cloned inner
-        // value, so the traited copy is INDEPENDENT — a push to the original
-        // is not visible through it. Cloning the Rc instead would share one
-        // store between two values the user sees as separate.
-        HeapObject::LArrayMut { data, .. } => Ok(ctx.alloc(HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(data.borrow().clone())),
-            traits: table,
-        })),
+        // Mutable collections: copy the store, so the traited copy is
+        // INDEPENDENT — a push to the original is not visible through it.
+        HeapObject::LArrayMut { data, .. } => Ok(ctx.array_mut_with_traits(&data.read(), table)),
         HeapObject::LStructMut { data, .. } => {
             let entries: std::collections::BTreeMap<_, _> = data
-                .borrow()
+                .read()
                 .iter()
                 .map(|(k, v)| (ctx.intern_key(k), *v))
                 .collect();
             Ok(ctx.alloc(HeapObject::LStructMut {
-                data: std::rc::Rc::new(std::cell::RefCell::new(entries)),
+                data: StructStore::new(entries),
                 traits: table,
             }))
         }
@@ -159,24 +154,18 @@ unsafe fn clone_with_traits(
             elements: ctx.alloc_slice::<crate::value::Value>(elements.as_slice()),
             traits: table,
         })),
-        HeapObject::LStringMut { data, .. } => Ok(ctx.alloc(HeapObject::LStringMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(data.borrow().clone())),
-            traits: table,
-        })),
+        HeapObject::LStringMut { data, .. } => Ok(ctx.string_mut_with_traits(&data.read(), table)),
         HeapObject::LBytes { data, .. } => Ok(ctx.alloc(HeapObject::LBytes {
             data: ctx.alloc_slice::<u8>(data.as_slice()),
             traits: table,
         })),
-        HeapObject::LBytesMut { data, .. } => Ok(ctx.alloc(HeapObject::LBytesMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(data.borrow().clone())),
-            traits: table,
-        })),
+        HeapObject::LBytesMut { data, .. } => Ok(ctx.bytes_mut_with_traits(&data.read(), table)),
         HeapObject::LBox { cell, .. } => Ok(ctx.alloc(HeapObject::LBox {
-            cell: std::rc::Rc::new(std::cell::RefCell::new(*cell.borrow())),
+            cell: CellStore::new(cell.get()),
             traits: table,
         })),
         HeapObject::CaptureCell { cell, origin, .. } => Ok(ctx.alloc(HeapObject::CaptureCell {
-            cell: std::rc::Rc::new(std::cell::RefCell::new(*cell.borrow())),
+            cell: CellStore::new(cell.get()),
             origin: *origin,
             traits: table,
         })),
@@ -218,10 +207,9 @@ unsafe fn clone_with_traits(
             data: ctx.alloc_slice::<crate::value::Value>(data.as_slice()),
             traits: table,
         })),
-        HeapObject::LSetMut { data, .. } => Ok(ctx.alloc(HeapObject::LSetMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(data.borrow().clone())),
-            traits: table,
-        })),
+        HeapObject::LSetMut { data, .. } => {
+            Ok(ctx.set_mut_with_traits(data.read().as_slice(), table))
+        }
         // Infrastructure types — no trait field; return error. A closure
         // template is never user-visible, so `with-traits` can never reach it.
         HeapObject::Float(_)
@@ -421,9 +409,9 @@ mod tests {
     /// region, like every other slice-backed arm of `clone_with_traits`.
     ///
     /// The counter-factual, and the reason this is a Rust test rather than an
-    /// Elle one: a `Syntax` node is `Copy`, so writing `syntax: *syntax`
-    /// compiles and leaves the clone's children and name bytes in the SOURCE's
-    /// region. Nothing observable happens until that region is freed, which
+    /// Elle one: a `Syntax` node is `Copy`. So writing `syntax: *syntax`
+    /// compiles, and leaves the clone's children and name bytes in the
+    /// SOURCE's region. Nothing observable happens until that region is freed, which
     /// the region solver defers past every shape an Elle test can write — so
     /// the assertion is on ownership, where the mistake is always visible.
     #[test]

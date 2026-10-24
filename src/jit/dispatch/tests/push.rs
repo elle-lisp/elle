@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-22
 //! The push helpers mutate a mutable @array in place, count the region of what they insert, and copy an immutable one.
 //!
 //! docs/impl/jit.md
@@ -19,9 +19,8 @@ use crate::value::heap::{HeapObject, Pair};
 fn array_push_mutates_in_place_and_returns_same_value() {
     crate::value::arena::with_test_region(|| {
         let mut vm = vm_with_primitives();
-
-        let h = crate::primitives::ctx::TestHeap::new();
-        let arr = h.ctx().array_mut(vec![]);
+        let arr_region = unsafe { (*vm.heap_ptr).new_runtime_region() };
+        let arr = ctx_in(&mut vm, arr_region).array_mut(vec![]);
         let v = Value::int(42);
         let ret = elle_jit_array_push(arr.tag, arr.payload, v.tag, v.payload, vm_arg(&mut vm));
         let ret_val = ret.to_value();
@@ -35,17 +34,9 @@ fn array_push_mutates_in_place_and_returns_same_value() {
             "elle_jit_array_push must return the same @array (payload mismatch)"
         );
         // Input @array must reflect the push.
-        let inner = arr.as_array_mut().expect("input is @array");
-        assert_eq!(
-            inner.borrow().len(),
-            1,
-            "@array length should be 1 after push"
-        );
-        assert_eq!(
-            inner.borrow()[0],
-            v,
-            "@array element should be the pushed value"
-        );
+        let inner = arr.array_mut_read().expect("input is @array");
+        assert_eq!(inner.len(), 1, "@array length should be 1 after push");
+        assert_eq!(inner[0], v, "@array element should be the pushed value");
     });
 }
 

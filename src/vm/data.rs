@@ -1,3 +1,8 @@
+// audited: 2026-10-22
+//! The data opcodes: pairs and their parts, array construction and indexing, and the destructuring reads.
+//!
+//! docs/impl/vm.md
+
 use super::core::VM;
 use crate::hir::region::RuntimeRegion;
 use crate::value::{sorted_struct_get, TableKey, Value, SIG_ERROR};
@@ -6,7 +11,6 @@ mod structops;
 pub(crate) use structops::*;
 
 pub(crate) fn handle_list(vm: &mut VM, region_id: RuntimeRegion) {
-    use crate::value::heap::{HeapObject, HeapTag, Pair};
     let rest = vm
         .fiber
         .stack
@@ -17,15 +21,6 @@ pub(crate) fn handle_list(vm: &mut VM, region_id: RuntimeRegion) {
         .stack
         .pop()
         .expect("VM bug: Stack underflow on Pair");
-    let traits = crate::primitives::traitregistry::default_traits_for(
-        unsafe { &*vm.heap_ptr },
-        HeapTag::Pair,
-    );
-    let obj = HeapObject::Pair(Pair {
-        first,
-        rest,
-        traits,
-    });
     // Containment of `first`/`rest`'s cross-region members is counted and
     // recorded exactly once by the alloc funnel: `alloc_in_region` → `alloc_obj`
     // → `incref_cross_region_refs` scans the object, increfs each cross-region
@@ -35,7 +30,7 @@ pub(crate) fn handle_list(vm: &mut VM, region_id: RuntimeRegion) {
     // (pinned by the `arg-result` and `take` oracle probes). The same
     // alloc-funnel-only discipline `args_to_list` and every native list/array
     // constructor uses; soundness pinned by region-pair-heap-content-uaf.lisp.
-    let val = vm.heap().alloc_in_region(obj, region_id);
+    let val = crate::value::build::pair(vm.heap(), first, rest, region_id);
     vm.fiber.stack.push(val);
 }
 
@@ -111,9 +106,6 @@ pub(crate) fn handle_make_array(
     ip: &mut usize,
     region_id: RuntimeRegion,
 ) {
-    use crate::value::heap::{HeapObject, HeapTag};
-    use std::cell::RefCell;
-    use std::rc::Rc;
     let size = vm.read_u8(bytecode, ip) as usize;
     let mut vec = Vec::with_capacity(size);
     for _ in 0..size {
@@ -125,20 +117,12 @@ pub(crate) fn handle_make_array(
         );
     }
     vec.reverse();
-    let traits = crate::primitives::traitregistry::default_traits_for(
-        unsafe { &*vm.heap_ptr },
-        HeapTag::LArrayMut,
-    );
-    let obj = HeapObject::LArrayMut {
-        data: Rc::new(RefCell::new(vec)),
-        traits,
-    };
     // Element containment is counted+recorded once by the alloc funnel
     // (`alloc_in_region` → `incref_cross_region_refs`), balanced by the free-time
     // cascade — see `handle_list` for the full note. A manual pre-incref here
     // would double-count each cross-region element against that single cascade
     // decref.
-    let val = vm.heap().alloc_in_region(obj, region_id);
+    let val = crate::value::build::array_mut(vm.heap(), vec, region_id);
     vm.fiber.stack.push(val);
 }
 
@@ -156,17 +140,16 @@ pub(crate) fn handle_array_ref(vm: &mut VM) {
     let Some(idx_val) = idx.as_int() else {
         vm_type_error!(vm, idx, "array-ref", "integer index")
     };
-    let Some(vec_ref) = vec.as_array_mut() else {
+    let Some(elems) = vec.array_mut_read() else {
         vm_type_error!(vm, vec, "array-ref", "array")
     };
-    let vec_borrow = vec_ref.borrow();
-    match vec_borrow.get(idx_val as usize) {
+    match elems.get(idx_val as usize) {
         Some(val) => {
             vm.fiber.stack.push(*val);
         }
         None => {
-            let len = vec_borrow.len();
-            drop(vec_borrow);
+            let len = elems.len();
+            drop(elems);
             vm.set_error(
                 "argument-error",
                 format!(
@@ -201,7 +184,8 @@ pub(crate) fn handle_array_set(vm: &mut VM) {
     if !vec.is_array_mut() {
         vm_type_error!(vm, vec, "array-set!", "array")
     }
-    // Note: Arrays are immutable in this implementation
+    // No emitter produces ArrayMutSet: the handler checks its operands and
+    // stores nothing.
     vm.fiber.stack.push(val);
 }
 
@@ -264,44 +248,28 @@ pub(crate) fn handle_array_ref_destructure(vm: &mut VM, bytecode: &[u8], ip: &mu
         .stack
         .pop()
         .expect("VM bug: Stack underflow on ArrayMutRefDestructure");
-    if let Some(vec_ref) = val.as_array_mut() {
-        let borrowed = vec_ref.borrow();
-        match borrowed.get(index).copied() {
-            Some(v) => vm.fiber.stack.push(v),
-            None => {
-                let len = borrowed.len();
-                drop(borrowed);
-                vm.set_error(
-                    "type-error",
-                    format!(
-                        "destructuring: array index {} out of bounds (length {})",
-                        index, len
-                    ),
-                );
-                vm.fiber.stack.push(Value::NIL);
-            }
+    let found = match val.array_mut_read() {
+        Some(read) => Some((read.get(index).copied(), read.len())),
+        None => val
+            .as_array()
+            .map(|elems| (elems.get(index).copied(), elems.len())),
+    };
+    match found {
+        Some((Some(v), _)) => vm.fiber.stack.push(v),
+        Some((None, len)) => {
+            vm.set_error(
+                "type-error",
+                format!("destructuring: array index {index} out of bounds (length {len})"),
+            );
+            vm.fiber.stack.push(Value::NIL);
         }
-    } else if let Some(elems) = val.as_array() {
-        match elems.get(index).copied() {
-            Some(v) => vm.fiber.stack.push(v),
-            None => {
-                let len = elems.len();
-                vm.set_error(
-                    "type-error",
-                    format!(
-                        "destructuring: array index {} out of bounds (length {})",
-                        index, len
-                    ),
-                );
-                vm.fiber.stack.push(Value::NIL);
-            }
+        None => {
+            vm.set_error(
+                "type-error",
+                format!("destructuring: expected array, got {}", val.type_name()),
+            );
+            vm.fiber.stack.push(Value::NIL);
         }
-    } else {
-        vm.set_error(
-            "type-error",
-            format!("destructuring: expected array, got {}", val.type_name()),
-        );
-        vm.fiber.stack.push(Value::NIL);
     }
 }
 
@@ -322,26 +290,20 @@ pub(crate) fn handle_array_slice_from(vm: &mut VM, bytecode: &[u8], ip: &mut usi
     // value-based by the binding's consumer. A borrowing structural opcode that
     // the solver assigns no region slot, so it builds a `NativeCtx` over a
     // freshly minted region here, mirroring the native-result discipline.
-    let result = if let Some(vec_ref) = val.as_array_mut() {
-        let borrowed = vec_ref.borrow();
-        let elems = if index < borrowed.len() {
-            borrowed[index..].to_vec()
-        } else {
-            vec![]
-        };
-        drop(borrowed);
-        let ctx = crate::primitives::ctx::Alloc::new(unsafe { &mut *vm.heap_ptr });
-        ctx.array_mut(elems)
-    } else if let Some(elems) = val.as_array() {
-        let elems = if index < elems.len() {
-            elems[index..].to_vec()
-        } else {
-            vec![]
-        };
-        let ctx = crate::primitives::ctx::Alloc::new(unsafe { &mut *vm.heap_ptr });
-        ctx.array(elems)
-    } else {
+    let tail = match val.array_mut_read() {
+        Some(read) => Some((read.get(index..).unwrap_or_default().to_vec(), true)),
+        None => val
+            .as_array()
+            .map(|elems| (elems.get(index..).unwrap_or_default().to_vec(), false)),
+    };
+    let Some((elems, mutable)) = tail else {
         vm_type_error!(vm, val, "destructuring", "array")
+    };
+    let ctx = crate::primitives::ctx::Alloc::new(unsafe { &mut *vm.heap_ptr });
+    let result = if mutable {
+        ctx.array_mut(elems)
+    } else {
+        ctx.array(elems)
     };
     vm.fiber.stack.push(result);
 }

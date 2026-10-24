@@ -17,7 +17,7 @@ Runtime value representation using a tagged union.
 | [repr/mod.rs](repr/mod.rs) | Tagged-union `Value` type, tag encoding |
 | [repr/constructors.rs](repr/constructors.rs) | Value construction methods |
 | [repr/accessors.rs](repr/accessors.rs) | Value field access and type checking |
-| [repr/traits.rs](repr/traits.rs) | `Display`, `Debug`, `Clone` implementations |
+| [repr/traits.rs](repr/traits.rs) | `PartialEq`, `Eq`, `Hash` and `Ord` implementations |
 | [types.rs](types.rs) | `Arity`, `SymbolId`, `NativeFn`, `TableKey`, sorted-struct helpers |
 | [closure.rs](closure.rs) | `Closure` (template + env + squelch mask) and the `TemplateRef` seam; submodules `payload` (`CodePayload`, the region-inline code data), `arity` (`ArityRec`, the arity as a record with every byte written), `header` (`ClosureTemplate`), `arena` (`CodeArena` and the `PayloadParts` a payload is written from), `unit` (`CodeUnit` and `CodePin`, the Rust-held references to a code region), `names` (the names a payload holds outside its value slots, which the image dumper and `send` spell). [template.md](../../docs/impl/region/template.md) owns the argument |
 | [fiber.rs](fiber.rs) | `Fiber`, `FiberHandle`, `WeakFiberHandle`, `SuspendedFrame`, `FiberStatus`; re-exports `SignalBits` (from [fiber/signalbits.rs](fiber/signalbits.rs)) and the `SIG_*` constants (from `crate::signals`) |
@@ -27,8 +27,8 @@ Runtime value representation using a tagged union.
 | [error.rs](error.rs) | `rich_error!` macro plus `error_val_in()`, `error_val_extra_in()`, `match_fail_error_in()`, and `format_error()` for region-coherent error structs ([errors.md](../../docs/impl/region/errors.md)) |
 | [ffi.rs](ffi.rs) | `LibHandle` for C interop |
 | [fiberheap/](fiberheap/mod.rs) | `FiberHeap` over a `RegionStore` (physical region allocator; each region owns its pages via a `PagePool`) plus a custom-allocator stack and object-limit tracking. Submodules: `regionstore`, `regionpool`, `pagepool`, `freelog`, `census`, `region`, `custom`, `dropsafety`. One heap per VM, shared by all of that VM's fibers. |
-| [arena.rs](arena.rs) | Heap-explicit allocation funnel over `FiberHeap`: every entry point takes `heap: &mut FiberHeap` — `alloc`, `alloc_in_region`, `deref`, `region_of`, region RC (`incref_region`/`decref_region`), and the tracked mutable-store funnels (`push_with_incref`, `struct_put_with_rebind`, `capture_store_with_rebind`, …). |
-| [heap.rs](heap.rs) | `HeapObject` enum, `HeapTag`, `Pair`, `ThreadHandle` and the `WorkerOutcome` it reports, `LSet`, `LSetMut` (re-exports `Closure`, `Arity`, `NativeFn`, `TableKey`) |
+| [arena.rs](arena.rs) | Heap-explicit allocation funnel over `FiberHeap`: every entry point takes `heap: &mut FiberHeap` — `alloc`, `alloc_in_region`, `deref`, `region_of`, region RC (`incref_region`/`decref_region`), and the tracked mutable-store funnels (`push_with_incref`, `struct_put_with_rebind`, `capture_store_with_rebind`, `bytes_splice`, …). |
+| [heap.rs](heap.rs) | `HeapObject` enum, `HeapTag`, `Pair`, `ThreadHandle` and the `WorkerOutcome` it reports, `ExternalObject` (re-exports `Closure`, `Arity`, `NativeFn`, `TableKey`) |
 | [send/](send/mod.rs) | `SendValue`/`SendBundle` wrappers for thread-safe transfer |
 | [display.rs](display.rs) | `Display` implementation for values |
 | [keyword.rs](keyword.rs) | Keyword identity (name hash) and the static keyword vocabulary for display |
@@ -45,7 +45,7 @@ Runtime value representation using a tagged union.
 | `FiberHeap` | [fiberheap/](fiberheap/mod.rs) | The VM's single heap over a `RegionStore` (region-based, RC-driven reclamation) plus a custom-allocator stack; reclamation is `FreeRegion(ρ)` when a region's RC reaches 0. Despite the name it is NOT per-fiber — all fibers share it and isolation is per-region ([fiber.rs](fiber.rs)) |
 | `Parameter` | [heap.rs](heap.rs) | Dynamic parameter with id and default value, looked up at runtime |
 | `LSet` | [heap.rs](heap.rs) | Immutable set (`RegionSlice<Value>`, region-inline), no `RefCell` |
-| `LSetMut` | [heap.rs](heap.rs) | Mutable set (`Rc<RefCell<BTreeSet<Value>>>`) (type name `:@set`) |
+| `LSetMut` | [heap.rs](heap.rs) | Mutable set, its members in a `SetStore` (type name `:@set`) |
 | `TableKey` | [types.rs](types.rs) | Struct key. `Copy`; string and array keys hold a `Value`, so a key owns no Rust heap memory ([values.md](../../docs/impl/values.md)) |
 | `SendKey` | [send/mod.rs](send/mod.rs) | The owning key form `SendValue`'s maps are keyed on — the only key type that crosses a thread or reaches serde |
 | `SuspendedFrame` | [fiber/frame.rs](fiber/frame.rs) | Bytecode/constants/env/IP/stack for resuming a suspended fiber |
@@ -62,7 +62,7 @@ Runtime value representation using a tagged union.
 
 Fibers maintain cached `Value`s alongside their handle references
 so that `fiber/parent` and `fiber/child` return identity-preserving values
-(i.e., `(identical? (fiber/parent f) (fiber/parent f))` is `true`):
+(that is, `(identical? (fiber/parent f) (fiber/parent f))` is `true`):
 
 | Field | Type | Purpose |
 |-------|------|---------|
@@ -76,17 +76,17 @@ These are set during the swap protocol in `with_child_fiber`
 
 ## Invariants
 
-0. **The mutable-store seam.** The raw `RefCell` accessors for the
-   `Value`-bearing mutable containers (`as_array_mut_raw`,
-   `as_struct_mut_raw`, `as_set_mut_raw`, `as_lbox_raw`,
-   `as_capture_cell_raw` — [conversions.rs](repr/accessors/conversions.rs)) are `pub(in crate::value)`.
-   Outside `value/`, reads go through the borrow-only `ReadCell` accessors
-   (`as_array_mut` & co.) or copy-outs (`lbox_get`, `capture_cell_get`), and
-   every store/remove goes through the tracked funnels in [arena.rs](arena.rs)
-   (`push_with_incref`, `struct_put_with_rebind`,
-   `capture_store_with_rebind`, …) — [rules.md](../../docs/impl/region/rules.md)
-   Rule 5, mutable store: an uncounted container store is a compile error. Membership-neutral
-   mutation uses `with_array_mut_neutral`.
+0. **The mutable-store seam.** Each mutable container keeps its contents in a
+   store ([store.rs](store.rs), [mutable.md](../../docs/impl/mutable.md)). A
+   store's writes are `pub(in crate::value)`, and so are the accessors that
+   hand out a store. Outside `value/`, a read takes a guard (`array_mut_read`
+   and its kin) or copies the value out (`lbox_get`, `capture_cell_get`), both
+   in [stores.rs](repr/accessors/stores.rs). Every store or remove goes
+   through the tracked funnels in [arena.rs](arena.rs) (`push_with_incref`,
+   `struct_put_with_rebind`, `capture_store_with_rebind`, `bytes_splice`, …),
+   so an uncounted container store is a compile error
+   ([rules.md](../../docs/impl/region/rules.md), Rule 5). Membership-neutral
+   mutation uses `with_array_mut_neutral`. A write under a live guard panics.
 
 1. **`Value` is `Copy`.** All 16 bytes (tag + payload). Heap data lives in regions.
    The `traits: Value` field on heap variants is also `Copy`.
@@ -103,25 +103,25 @@ These are set during the swap protocol in `with_child_fiber`
        (user-created via `box`, explicit deref, not auto-unwrapped) and
        `HeapObject::CaptureCell` (compiler-created for mutable captures and
        mutated parameters, auto-unwrapped by `LoadUpvalue`, never user-visible).
-       Both wrap `Rc<RefCell<Value>>`. Immutable captured locals do not need a
+       Both hold a `CellStore`. Immutable captured locals do not need a
        cell — they are captured by value.
 
 5. **Per-function code lives on the code object, not on `Closure`.** A `Closure`
      is just a `TemplateRef` + captured env (`RegionSlice<Value>`) + a
      `squelch_mask`. The code object is two things
-     ([template.md](../../docs/impl/region/template.md)): a `CodePayload`
-     holding every field inline in its compile unit's code region (bytecode,
-     constants, the sorted location table over an interned file table, the
-     region tables, the child table, the LIR, name and doc), and the one-word
-     `ClosureTemplate` header a closure references. One payload serves every
+     ([template.md](../../docs/impl/region/template.md)). A `CodePayload` holds
+     every field inline in its compile unit's code region: bytecode, constants,
+     the sorted location table over an interned file table, the region tables,
+     the child table, the LIR, name and doc. A one-word `ClosureTemplate`
+     header is what a closure references. One payload serves every
      header built over it, so `MakeClosure` copies one word whatever the size of
      the function's body. Accessors are methods (`template.bytecode()`,
      `template.arity()`, …), not fields. The payload keeps the origin span —
      where the lambda was written, read by `(meta/origin f)` — as 20 bytes of
      POD, not the lambda's syntax tree.
 
-6. **Thread transfer uses `SendValue`.** `SendValue` wraps values for safe
-     transfer between threads, cloning `Rc` contents as needed. A
+6. **Thread transfer uses `SendValue`.** `SendValue` deep-copies a value's
+     heap data into owned Rust data for transfer between threads. A
      user-attached trait table is serialized as part of the value. A registry
      default crosses as nil, and the receiving thread's registry supplies it.
 
@@ -130,8 +130,8 @@ These are set during the swap protocol in `with_child_fiber`
      fiber. Every parked frame captures its operand stack.
 
 8. **A stored struct key is interned into the struct's region.** `TableKey`
-     is `Copy` and its string and array arms hold a `Value`, so a key built by
-     `TableKey::from_value` merely borrows what it was built from — correct for
+     is `Copy`, and its string and array arms hold a `Value`. So a key built by
+     `TableKey::from_value` merely borrows what it was built from: correct for
      a probe, wrong to store. Every site that puts a key into a struct calls
      `TableKey::intern_into` first, which copies a string or array payload into
      the destination region; a `Heap` key keeps aliasing, because its identity
@@ -180,14 +180,14 @@ Two set types exist, following the immutable/mutable split:
   it into the slice). Accessed via `Value::as_set()`. Displays as `|1 2 3|`.
   `type_name()` returns `"set"`. Type keyword: `:set`.
 
-- **`LSetMut { data: Rc<RefCell<BTreeSet<Value>>> }`** — mutable set.
-  Created via `value::build::set_mut`. Accessed via `Value::as_set_mut()`. Displays
+- **`LSetMut { data: SetStore }`** — mutable set.
+  Created via `value::build::set_mut`. Read via `Value::set_mut_read()`. Displays
   as `@|1 2 3|`. `type_name()` returns `"@set"`. Type keyword: `:@set`.
 
 Set membership uses structural equality (from `Value: Eq`). When a mutable value
 is inserted into a set, it is frozen (converted to its immutable equivalent).
-This prevents mutation from breaking set invariants (e.g., changing a key's hash
-after insertion).
+This prevents mutation from breaking set invariants, such as a member's hash
+changing after insertion.
 
 Predicates: `is_set()` and `is_set_mut()` for type checking.
 
@@ -210,18 +210,18 @@ The field is **invisible to structural equality, ordering, and hashing**:
 | Variant | Note |
 |---------|------|
 | `LArray` | immutable array |
-| `LArrayMut` | mutable @array — RefCell data shared on `with-traits` |
+| `LArrayMut` | mutable @array — store copied on `with-traits` |
 | `LStruct` | immutable struct |
-| `LStructMut` | mutable @struct — RefCell data shared on `with-traits` |
+| `LStructMut` | mutable @struct — store copied on `with-traits` |
 | `LString` | immutable string |
-| `LStringMut` | mutable @string — RefCell data shared on `with-traits` |
+| `LStringMut` | mutable @string — store copied on `with-traits` |
 | `LBytes` | immutable bytes |
-| `LBytesMut` | mutable @bytes — RefCell data shared on `with-traits` |
+| `LBytesMut` | mutable @bytes — store copied on `with-traits` |
 | `LSet` | immutable set |
-| `LSetMut` | mutable @set — RefCell data shared on `with-traits` |
+| `LSetMut` | mutable @set — store copied on `with-traits` |
 | `Pair` | list pair |
 | `Closure` | closure |
-| `LBox` | mutable box — RefCell data shared on `with-traits` |
+| `LBox` | mutable box — store copied on `with-traits` |
 | `CaptureCell` | compiler-created mutable-capture cell |
 | `Fiber` | fiber — FiberHandle (Rc) cloned on `with-traits` |
 | `Syntax` | syntax object — the inline node is `Copy`, so `with-traits` copies it |

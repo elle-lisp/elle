@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-22
 // Each reclamation counter moves at the store event it names, and the forest counters close.
 //
 // docs/impl/region/diagnostics.md
@@ -8,18 +8,6 @@
 // see a counter that is stuck at zero or bumped on the wrong path.
 
 use super::*;
-
-/// A mutable array in `region` that holds `vals`, the way a container stores
-/// what it was given: the allocation records an edge to each value's region.
-fn holder(store: &mut RegionStore, region: RuntimeRegion, vals: Vec<Value>) -> Value {
-    store.alloc_obj(
-        region,
-        HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vals)),
-            traits: Value::NIL,
-        },
-    )
-}
 
 /// The identity diagnostics.md states: every adoption has ended in an owned
 /// free, a rescue or an extraction, or its region is still owned.
@@ -151,7 +139,7 @@ fn an_adoption_counts_once_and_the_owners_drop_frees_the_member_as_owned() {
     let parent = store.new_runtime_region();
     let child = store.new_runtime_region();
     let child_val = store.alloc_obj(child, cons_obj());
-    holder(&mut store, parent, vec![child_val]);
+    holder(&mut store, parent, &[child_val]);
 
     store.adopt_region(parent, child);
     let c = store.reclaim_counters();
@@ -198,9 +186,9 @@ fn a_rescue_counts_the_rescued_region_and_the_subtree_it_keeps() {
     let cell = store.new_runtime_region();
     let member_val = store.alloc_obj(member, cons_obj());
     let grand_val = store.alloc_obj(grand, cons_obj());
-    holder(&mut store, member, vec![grand_val]);
-    holder(&mut store, root, vec![member_val]);
-    holder(&mut store, cell, vec![member_val]);
+    holder(&mut store, member, &[grand_val]);
+    holder(&mut store, root, &[member_val]);
+    holder(&mut store, cell, &[member_val]);
     store.adopt_region(root, member);
     store.adopt_region(member, grand);
 
@@ -231,7 +219,7 @@ fn an_extraction_counts_and_the_region_leaves_the_forest() {
     let parent = store.new_runtime_region();
     let child = store.new_runtime_region();
     let child_val = store.alloc_obj(child, cons_obj());
-    holder(&mut store, parent, vec![child_val]);
+    holder(&mut store, parent, &[child_val]);
     store.adopt_region(parent, child);
 
     store.extract_owned_region(child);

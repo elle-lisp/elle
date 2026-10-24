@@ -161,10 +161,10 @@ pub fn dispatch_trait_method(
 }
 
 /// Call a resolved trait method (NativeFn or Closure). `ctx` is the calling
-/// native's capability — its `alloc_region` is the outer call's result slot, so
-/// the native-fn branch runs the method against it (a fresh result then lands in
-/// the region `dispatch_native_call` reclaims); the closure branch re-enters the
-/// driving VM through it.
+/// native's capability, and its `alloc_region` is the outer call's result slot.
+/// So the native-fn branch runs the method against it, and a fresh result lands
+/// in the region `dispatch_native_call` reclaims. The closure branch re-enters
+/// the driving VM through it.
 fn call_method_fn(
     method_fn: &Value,
     protocol: &str,
@@ -174,14 +174,14 @@ fn call_method_fn(
 ) -> (SignalBits, Value) {
     // NativeFn — call directly, against the OUTER call's own `ctx`. A trait
     // method resolved here is the body of an outer native (`first`/`rest`/`nth`,
-    // `length`, …) that already holds a compiler-assigned result slot; running
+    // `length`, …) that already holds a compiler-assigned result slot. Running
     // the method against that same `ctx` lands its fresh result in the outer
     // call's `alloc_region`, so `dispatch_native_call` recognises it as fresh and
-    // the consumer's `DecrefValueRegion` reclaims it. Minting a SEPARATE
-    // `boundary` region here instead stranded a genuinely-fresh result — the
-    // tail-copy slice of `(rest [array])` — in a region distinct from
-    // `alloc_region`, which `dispatch_native_call` then mis-read as a pass-through
-    // and over-retained, leaking that region (pinned bounded by
+    // the consumer's `DecrefValueRegion` reclaims it. The counter-factual mints a
+    // SEPARATE `boundary` region here. That strands a genuinely-fresh result,
+    // the tail-copy slice of `(rest [array])`, in a region distinct from
+    // `alloc_region`. `dispatch_native_call` then mis-reads it as a pass-through
+    // and over-retains it, leaking that region (pinned bounded by
     // `runtime::tests::ownership::region_native_trait_dispatch_fresh_result_reclaims`).
     // A borrowed-element method (`first`/`nth`) allocates nothing, so its result
     // still lives in the arg's region and is correctly pass-through-retained.
@@ -240,9 +240,8 @@ pub(crate) fn lookup_keyword_hash(val: &Value, key_hash: u64) -> Value {
     }
 
     // Mutable struct — linear scan on values
-    if let Some(map_ref) = val.as_struct_mut() {
-        let borrowed = map_ref.borrow();
-        for (k, v) in borrowed.iter() {
+    if let Some(entries) = val.struct_mut_read() {
+        for (k, v) in entries.iter() {
             if let TableKey::Keyword(hash) = k {
                 if *hash == key_hash {
                     return *v;

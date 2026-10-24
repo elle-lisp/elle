@@ -1,7 +1,7 @@
-// audited: 2026-09-14
+// audited: 2026-10-21
 // What the verifier refuses: a table entry that would send a write, a read,
 // or a rebuild outside the image.
-// docs/impl/image.md
+// docs/impl/image/verifier.md
 
 use super::*;
 use elle::image::{self, ImageError, Sections};
@@ -25,7 +25,10 @@ fn dumped_bytes(dir: &crate::common::ScratchDir) -> (Vec<u8>, Sections) {
 fn a_relocation_slot_outside_the_image_is_refused() {
     let dir = crate::common::ScratchDir::new("image-reloc-range");
     let (mut bytes, s) = dumped_bytes(&dir);
-    assert!(!s.relocations.is_empty(), "the graph has relocations to damage");
+    assert!(
+        !s.relocations.is_empty(),
+        "the graph has relocations to damage"
+    );
     let pages_len = s.pages.len() as u64;
     put_u64(&mut bytes, s.relocations.start, pages_len);
     match refusal(&bytes) {
@@ -63,7 +66,7 @@ fn a_slice_extent_that_leaves_the_image_is_refused() {
     // The graph's one string is "hello image". Find its object through the
     // index, then its slice header: a probed variant's payload sits at offset
     // 8 of the shell, and a `RegionSlice`'s `len` is 8 bytes into that
-    // (docs/impl/image/measurements.md item 6).
+    // (docs/impl/image/format.md).
     let mut patched = false;
     for entry in s.index.clone().step_by(Sections::INDEX_BYTES) {
         if get_u64(&bytes, entry + 8) != HeapTag::LString as u64 {
@@ -138,7 +141,7 @@ fn a_struct_entry_slice_that_leaves_the_image_is_refused() {
 }
 
 // A syntax object's root node rides in its shell, so its child slice is an
-// extent the walk reads there (docs/impl/image.md § Verifier). The trap: a
+// extent the walk reads there. The trap: a
 // verifier that checked only the one extent a string, array, or struct has
 // would skip a syntax object entirely, and the first walk of that tree would
 // read past the image.
@@ -176,7 +179,10 @@ fn a_syntax_child_extent_that_leaves_the_image_is_refused() {
     // relocated slot.
     let len_at = s.pages.start + get_u64(&bytes, s.relocations.start) as usize + 8;
     let len = u32::from_le_bytes(bytes[len_at..len_at + 4].try_into().expect("4 bytes"));
-    assert_eq!(len, 3, "the child count is not beside the relocated pointer");
+    assert_eq!(
+        len, 3,
+        "the child count is not beside the relocated pointer"
+    );
     bytes[len_at..len_at + 4].copy_from_slice(&u32::MAX.to_le_bytes());
 
     match refusal(&bytes) {
@@ -299,7 +305,7 @@ fn an_unknown_constructor_tag_is_refused() {
     }
 }
 
-// § Verifier: an immediate root and a pages section disagree. The trap is
+// An immediate root and a pages section disagree. The trap is
 // what the root's payload word means — a page offset for a heap root, the
 // value's own payload for an immediate one, and a primitive-table index for a
 // native-fn. A file claiming both leaves that reading to whichever branch runs

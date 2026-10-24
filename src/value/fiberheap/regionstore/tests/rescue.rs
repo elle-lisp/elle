@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-10-22
 // A subtree drop spares a member something outside the subtree still refers to.
 //
 // docs/impl/region/ownership.md
@@ -27,21 +27,9 @@ fn externally_referenced_member_is_rescued_from_subtree_drop() {
     let member_val = store.alloc_obj(member, cons_obj());
     // The external holder stores the member's value BEFORE the adopt (records
     // cell → member and increfs, exactly as the capture-store funnel does).
-    store.alloc_obj(
-        cell,
-        HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![member_val])),
-            traits: Value::NIL,
-        },
-    );
+    holder(&mut store, cell, &[member_val]);
     // The parent holds the member too (the closure-env shape), then adopts it.
-    store.alloc_obj(
-        parent,
-        HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![member_val])),
-            traits: Value::NIL,
-        },
-    );
+    holder(&mut store, parent, &[member_val]);
     store.adopt_region(parent, member);
 
     store.decref(parent); // subtree drop — must rescue the member, not tear it down
@@ -68,10 +56,10 @@ fn externally_referenced_member_is_rescued_from_subtree_drop() {
     );
 }
 
-/// The rescue covers the store-AFTER-adopt interleaving too: an external
-/// reference recorded while the member is already `Owned` (the incref is inert on
-/// the frozen mode, but the edge IS recorded) still rescues the member at the
-/// drop. This is what an adopt-time-only guard could never see.
+/// The rescue covers the store-AFTER-adopt interleaving too. An external
+/// reference recorded while the member is already `Owned` still rescues the
+/// member at the drop: the incref is inert on the frozen mode, but the edge IS
+/// recorded. This is what an adopt-time-only guard could never see.
 #[test]
 fn external_reference_recorded_after_adopt_still_rescues() {
     let mut store = RegionStore::default();
@@ -79,23 +67,11 @@ fn external_reference_recorded_after_adopt_still_rescues() {
     let member = store.new_runtime_region();
     let cell = store.new_runtime_region();
     let member_val = store.alloc_obj(member, cons_obj());
-    store.alloc_obj(
-        parent,
-        HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![member_val])),
-            traits: Value::NIL,
-        },
-    );
+    holder(&mut store, parent, &[member_val]);
     store.adopt_region(parent, member);
     // The external store happens AFTER the adopt: incref is a frozen no-op, the
     // content edge is recorded regardless.
-    store.alloc_obj(
-        cell,
-        HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![member_val])),
-            traits: Value::NIL,
-        },
-    );
+    holder(&mut store, cell, &[member_val]);
 
     store.decref(parent);
     assert_eq!(
@@ -111,10 +87,10 @@ fn external_reference_recorded_after_adopt_still_rescues() {
     );
 }
 
-/// The rescued count excludes the member's OWN subtree's back-edges: a grandchild
-/// that back-references the rescued member stays owned beneath it (it releases
+/// The rescued count excludes the member's OWN subtree's back-edges. A grandchild
+/// that back-references the rescued member stays owned beneath it. It releases
 /// only at the member's own drop, so counting it would self-sustain the count and
-/// leak the pair). The external holder's release must free the member AND
+/// leak the pair. The external holder's release must free the member AND
 /// subtree-drop the grandchild.
 #[test]
 fn rescued_count_excludes_own_subtree_back_edges() {
@@ -126,35 +102,11 @@ fn rescued_count_excludes_own_subtree_back_edges() {
     let member_val = store.alloc_obj(member, cons_obj());
     let grand_val = store.alloc_obj(grand, cons_obj());
     // member holds grand (the containment edge)…
-    store.alloc_obj(
-        member,
-        HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![grand_val])),
-            traits: Value::NIL,
-        },
-    );
+    holder(&mut store, member, &[grand_val]);
     // …and grand back-references member (the interior knot).
-    store.alloc_obj(
-        grand,
-        HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![member_val])),
-            traits: Value::NIL,
-        },
-    );
-    store.alloc_obj(
-        root,
-        HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![member_val])),
-            traits: Value::NIL,
-        },
-    );
-    store.alloc_obj(
-        cell,
-        HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![member_val])),
-            traits: Value::NIL,
-        },
-    );
+    holder(&mut store, grand, &[member_val]);
+    holder(&mut store, root, &[member_val]);
+    holder(&mut store, cell, &[member_val]);
     store.adopt_region(root, member);
     store.adopt_region(member, grand);
 
@@ -189,8 +141,8 @@ fn rescued_count_excludes_own_subtree_back_edges() {
     );
 }
 
-/// Rescue iterates to a fixpoint: rescuing one member makes its surviving edges
-/// external for a sibling member, which must be rescued too — a sibling freed in
+/// Rescue iterates to a fixpoint. Rescuing one member makes its surviving edges
+/// external for a sibling member, which must be rescued too: a sibling freed in
 /// the same drop would strand the rescued member's live edge into it.
 #[test]
 fn rescue_cascades_to_sibling_referenced_by_rescued_member() {
@@ -202,28 +154,10 @@ fn rescue_cascades_to_sibling_referenced_by_rescued_member() {
     let m1_val = store.alloc_obj(m1, cons_obj());
     let m2_val = store.alloc_obj(m2, cons_obj());
     // m1 holds m2 (a sibling edge inside the subtree).
-    store.alloc_obj(
-        m1,
-        HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![m2_val])),
-            traits: Value::NIL,
-        },
-    );
-    store.alloc_obj(
-        root,
-        HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![m1_val, m2_val])),
-            traits: Value::NIL,
-        },
-    );
+    holder(&mut store, m1, &[m2_val]);
+    holder(&mut store, root, &[m1_val, m2_val]);
     // Only m1 is externally held.
-    store.alloc_obj(
-        cell,
-        HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![m1_val])),
-            traits: Value::NIL,
-        },
-    );
+    holder(&mut store, cell, &[m1_val]);
     store.adopt_region(root, m1);
     store.adopt_region(root, m2);
 
@@ -254,7 +188,7 @@ fn rescue_cascades_to_sibling_referenced_by_rescued_member() {
 }
 
 /// A `moves_out` extract (`%pop` of an adopted element) rebuilds the element's
-/// count from its recorded incoming edges, not a bare 1: an element ALSO held by
+/// count from its recorded incoming edges, not a bare 1. An element ALSO held by
 /// an external container must survive that holder's release while the caller's
 /// moves-out reference still stands. Counterfactual: `Counted(1)` lets the
 /// external holder's cascade free the element under the caller.
@@ -265,20 +199,8 @@ fn extract_owned_region_admits_external_references() {
     let elem = store.new_runtime_region();
     let cell = store.new_runtime_region(); // an external holder of the element
     let elem_val = store.alloc_obj(elem, cons_obj());
-    store.alloc_obj(
-        container,
-        HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![elem_val])),
-            traits: Value::NIL,
-        },
-    );
-    store.alloc_obj(
-        cell,
-        HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![elem_val])),
-            traits: Value::NIL,
-        },
-    );
+    holder(&mut store, container, &[elem_val]);
+    holder(&mut store, cell, &[elem_val]);
     store.adopt_region(container, elem);
 
     // The pop funnel's order: un-record the container's edge, then extract.

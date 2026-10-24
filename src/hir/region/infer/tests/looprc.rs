@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-22
 //! Release placement around loops and sibling top-level forms, and the tail region of a closure inlined in a loop.
 //!
 //! docs/impl/region/cells.md
@@ -10,11 +10,11 @@ use super::*;
 /// `x` at the Begin's HirId, and a sibling top-level form re-uses the
 /// same binding (here, the final `x` reference at the file's top level).
 /// The cell's region must outlive every use of `x`, including the
-/// sibling form's. The counter-factual: the cell is freed at the Begin's
-/// `decref_point`, and the next top-level access reads through a dangling
-/// `CaptureCell` Value into a reclaimed region, which `as_capture_cell` catches
-/// at `handle_update_capture` / `handle_unwrap_capture`. tests/lang/destructuring.lisp
-/// runs this shape at top level.
+/// sibling form's. The counter-factual frees the cell at the Begin's
+/// `decref_point`. The next top-level access then reads through a dangling
+/// `CaptureCell` Value into a reclaimed region, which the deref tag check
+/// catches at `handle_update_capture` / `handle_unwrap_capture`.
+/// tests/lang/destructuring.lisp runs this shape at top level.
 #[test]
 fn begin_capture_cell_region_extends_to_binding_last_use_across_sibling_forms() {
     use crate::symbol::SymbolTable;
@@ -126,14 +126,14 @@ fn begin_capture_cell_region_extends_to_binding_last_use_across_sibling_forms() 
 /// The counter-factual for tests/impl/region-capture-cell-loop-uaf.lisp. A
 /// `@`-mutable captured local DEFINED INSIDE a loop and captured by a closure
 /// built in that loop is a `populate_env` env cell minted EXACTLY ONCE per
-/// activation (the box is not re-allocated per iteration; only its content is
-/// re-stored). Its `DecrefCellRegion` must therefore also fire once per
-/// activation. If the binding-chain `decref_point` extension left it at the
-/// binding's in-loop last use, it would fire per iteration: a closure called in
-/// place and dying within the iteration nets the box region -1 each pass
-/// (capture-incref +1, free-cascade -1, DecrefCellRegion -1), freeing the
-/// once-allocated box on iteration 1 → the next iteration reads the recycled
-/// cell. The env-cell hoist lifts a cell-release region's
+/// activation. The box is not re-allocated per iteration; only its content is
+/// re-stored. Its `DecrefCellRegion` must therefore also fire once per
+/// activation. Left at the binding's in-loop last use by the binding-chain
+/// `decref_point` extension, it would fire per iteration. A closure called in
+/// place and dying within the iteration then nets the box region -1 each pass
+/// (capture-incref +1, free-cascade -1, DecrefCellRegion -1). That frees the
+/// once-allocated box on iteration 1, and the next iteration reads the
+/// recycled cell. The env-cell hoist lifts a cell-release region's
 /// decref_point to the outermost enclosing While/Loop, which the lowerer emits
 /// AFTER the loop. Assert the hoist at the region-analysis layer:
 /// region_data[cell_region].decref_point is at/after the enclosing While node,
@@ -147,10 +147,10 @@ fn env_cell_release_in_loop_hoisted_past_loop() {
     // exactly as the elle reproducer does.
     // Only intrinsics/literals/callable-array — `compile_file_to_fhir` loads no
     // prelude, so `+`/`get` are undefined. The closure reads an ELEMENT via the
-    // callable-array form `(s 0)`, NOT the cell itself: returning the cell would
-    // put its region in the return frontier (escape's return facet), where the
-    // ownership analysis would treat it as the closure's tail value and elide the
-    // per-iteration decref, masking the fault. Reading an element
+    // callable-array form `(s 0)`, NOT the cell itself. Returning the cell would
+    // put its region in the return frontier (escape's return facet). The
+    // ownership analysis would then treat it as the closure's tail value and
+    // elide the per-iteration decref, masking the fault. Reading an element
     // keeps the env cell's release live and in-loop — exactly the faulting
     // shape.
     let source = "(defn go [] \
@@ -236,14 +236,14 @@ fn env_cell_release_in_loop_hoisted_past_loop() {
 
 /// The counter-factual for the unrecorded-binder hoist
 /// (tests/impl/region-match-bind-loop.lisp). A `match` arm's pattern binds a
-/// projection out of the scrutinee by an UNCOUNTED read, so the projection
-/// resolves to the scrutinee's own region and the binding-chain extension carries
-/// the scrutinee's release out to wherever the projection is last used. Inside a
-/// loop, that read is put through the iter-scope extension, which asks whether the
-/// binding is bound OUTSIDE the loop — a containment test over the binding's
-/// recorded scope node. A pattern that records no scope has none, absence reads as
-/// bound-outside, and the release is hoisted to the loop node: one release for N
-/// per-iteration scrutinees, N−1 held to fiber teardown
+/// projection out of the scrutinee by an UNCOUNTED read. So the projection
+/// resolves to the scrutinee's own region, and the binding-chain extension
+/// carries the scrutinee's release out to wherever the projection is last used.
+/// Inside a loop, that read is put through the iter-scope extension, which asks
+/// whether the binding is bound OUTSIDE the loop: a containment test over the
+/// binding's recorded scope node. A pattern that records no scope has none, and
+/// absence reads as bound-outside. The release is then hoisted to the loop node:
+/// one release for N per-iteration scrutinees, N−1 held to fiber teardown
 /// (docs/impl/region/anchors.md).
 ///
 /// Region-analysis invariant: the scrutinee's region is allocated in the loop
@@ -255,8 +255,8 @@ fn match_pattern_binding_keeps_scrutinee_release_inside_the_loop() {
     use crate::symbol::SymbolTable;
 
     // No-prelude file pipeline (intrinsics + special forms only). The scrutinee is
-    // a fresh `%pair` per iteration and the taken arm READS the name its pattern
-    // bound — the read is what places the scrutinee's release, so an arm that
+    // a fresh `%pair` per iteration, and the taken arm READS the name its pattern
+    // bound. The read is what places the scrutinee's release, so an arm that
     // ignored its binding would not exercise this at all.
     let source = "(defn go [] \
                      (def @i 0) \
@@ -346,10 +346,10 @@ fn match_pattern_binding_keeps_scrutinee_release_inside_the_loop() {
 /// the call site (in the caller's discarding context) to discover edges. That
 /// re-walk must NOT `alloc_here`-overwrite `alloc_region[body-node]` with a
 /// fresh caller-context region: doing so desyncs it from the return-frontier
-/// projection. The lowerer reads `alloc_region` and the ownership/compensation
-/// passes read escape's return frontier *projected through* `alloc_region`, so a
-/// clobbered entry makes the two disagree on which region the body's tail names —
-/// a stale region spared by one path while the other emits a decref on the
+/// projection. The lowerer reads `alloc_region`, and the ownership/compensation
+/// passes read escape's return frontier *projected through* `alloc_region`. So a
+/// clobbered entry makes the two disagree on which region the body's tail
+/// names. One path spares a stale region while the other emits a decref on the
 /// clobbered one, so the closure frees the value it returns.
 ///
 /// Region-analysis invariant: the region the lowerer will emit for the closure

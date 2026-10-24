@@ -1,11 +1,12 @@
-//! audited: 2026-09-16
+// audited: 2026-10-22
 //! What the pending table's tests build on: an entry that owns nothing, an
 //! entry that holds one value, and a value in a region of its own.
+//!
+//! docs/impl/io-inflight.md
 
 use super::*;
 use crate::io::pool::BufferPool;
 use crate::value::fiber::FiberStatus;
-use crate::value::heap::HeapObject;
 use crate::value::Value;
 
 /// A `Sleep` entry: the one variant that owns nothing but its buffer, so a
@@ -47,13 +48,7 @@ fn value_in_fresh_region() -> (
     // SAFETY: the heap is leaked for the process.
     let h = unsafe { &mut *heap };
     let region = h.new_runtime_region();
-    let value = h.alloc_in_region(
-        HeapObject::LBox {
-            cell: std::rc::Rc::new(std::cell::RefCell::new(Value::NIL)),
-            traits: Value::NIL,
-        },
-        region,
-    );
+    let value = crate::value::build::lbox(h, Value::NIL, region);
     (heap, region, value)
 }
 

@@ -1,4 +1,4 @@
-//! audited: 2026-09-23
+//! audited: 2026-10-22
 //! Where a stream operation's bytes land: the remainder a read borrows, a
 //! write's payload by address, and what a pool worker is handed of both.
 //!
@@ -89,10 +89,10 @@ pub(crate) fn copy_payload_into(data: &Value, out: &mut Vec<u8>) {
     out.clear();
     if let Some(bytes) = payload_in_region(data) {
         out.extend_from_slice(bytes);
-    } else if let Some(b) = data.as_bytes_mut() {
-        out.extend_from_slice(&b.borrow());
-    } else if let Some(b) = data.as_string_mut() {
-        out.extend_from_slice(&b.borrow());
+    } else if let Some(b) = data.bytes_mut_read() {
+        out.extend_from_slice(&b);
+    } else if let Some(b) = data.string_mut_read() {
+        out.extend_from_slice(&b);
     } else {
         use std::io::Write;
         let _ = write!(out, "{}", data);
@@ -230,10 +230,10 @@ impl Landing {
         self.filled == self.cap
     }
 
-    /// The completion this read reports: as its result code, the bytes it
-    /// added to the caller's buffer, and as its data the bytes that went
-    /// anywhere else — `extra`, past a full buffer, or everything, when the
-    /// worker read into a buffer of its own.
+    /// The completion this read reports. Its result code is the bytes it added
+    /// to the caller's buffer. Its data is the bytes that went anywhere else:
+    /// `extra`, past a full buffer, or everything, when the worker read into a
+    /// buffer of its own.
     pub(crate) fn finish(self, extra: Vec<u8>) -> (i32, Vec<u8>) {
         match self.own {
             None => ((self.filled - self.start) as i32, extra),

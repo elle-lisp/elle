@@ -1,3 +1,8 @@
+// audited: 2026-10-22
+// FFI memory and marshalling round-trip: typed reads of typed writes, layout sizes, strings, and structs.
+//
+// docs/ffi.md
+
 use super::*;
 
 // =========================================================================
@@ -208,8 +213,7 @@ proptest! {
         prop_assert_eq!(read.0, SIG_OK, "read failed");
 
         // Compare field by field
-        let original = val.as_array_mut().unwrap();
-        let original = original.borrow();
+        let original = val.array_mut_read().unwrap();
         let result = read.1.as_array().unwrap();
         prop_assert_eq!(original.len(), result.len(), "field count mismatch");
 

@@ -1,3 +1,8 @@
+// audited: 2026-10-22
+//! The intrinsic bodies count what they store and move what they pop: push, bulk byte append, and pop.
+//!
+//! docs/impl/region/rules.md
+
 use super::*;
 use crate::value::arena::{alloc_in_fresh_region, region_rc};
 use crate::value::heap::{HeapObject, Pair};
@@ -6,10 +11,10 @@ use crate::value::heap::{HeapObject, Pair};
 /// compiled call-position use lowers to) must call
 /// `incref_inserted_element` on the pushed value so its source region's
 /// RC accounts for the new reference from the destination @array.
-/// Without this, the source region's RC stays at its baseline; when the
+/// Without this, the source region's RC stays at its baseline. When the
 /// destination @array is later freed, cascade decref drops the entry's
-/// source region RC and frees it while the pushed value is still live
-/// elsewhere — UAF. `handle_intr_push` (VM bytecode) and `elle_jit_push`
+/// source region RC, and frees it while the pushed value is still live
+/// elsewhere: a UAF. `handle_intr_push` (VM bytecode) and `elle_jit_push`
 /// (JIT) both route through `push_with_incref`; the NativeFn `prim_push`
 /// must do the same.
 #[test]
@@ -56,9 +61,9 @@ fn push_track_inserts_cross_region_value() {
 /// bytes/@bytes VALUE, not only a single integer byte. This is the linear
 /// binary-append path `core.lisp`'s `push-all` relies on — the mirror of
 /// `%string-push` bulk-appending a whole string. Without it, `push-all` /
-/// `append` / `concat` walk a bytes source one byte at a time through the VM
-/// (O(n) interpreted iterations with a large constant — orders of magnitude
-/// slower than the text bulk path, the HTTP/2 body-copy bottleneck). The
+/// `append` / `concat` walk a bytes source one byte at a time through the VM:
+/// O(n) interpreted iterations with a large constant, orders of magnitude
+/// slower than the text bulk path. The
 /// single-integer form must keep working, so both are pinned here.
 #[test]
 fn bytes_push_bulk_appends_bytes_value() {
@@ -87,7 +92,7 @@ fn bytes_push_bulk_appends_bytes_value() {
         };
         assert_eq!(bits, SIG_OK, "bulk bytes append must succeed");
         assert_eq!(
-            res.as_bytes_mut().unwrap().borrow().as_slice(),
+            &res.bytes_mut_read().unwrap()[..],
             &[1, 2, 3, 4, 5, 6],
             "every source byte appended in order (@bytes extended in place)"
         );
@@ -102,7 +107,7 @@ fn bytes_push_bulk_appends_bytes_value() {
         };
         assert_eq!(bits2, SIG_OK);
         assert_eq!(
-            res2.as_bytes_mut().unwrap().borrow().as_slice(),
+            &res2.bytes_mut_read().unwrap()[..],
             &[1, 2, 3, 4, 5, 6, 9],
             "single integer byte still appends"
         );
@@ -110,18 +115,20 @@ fn bytes_push_bulk_appends_bytes_value() {
 }
 
 /// Counterfactual: `%pop` (the funnel native `prim_pop` every compiled
-/// call-position use lowers to) MOVES the popped element out to the caller. It must do
-/// two things in lockstep: release the container's stored reference
-/// (`decref_removed_element`, undoing the push's `incref_inserted_element`) AND
-/// hold the caller's owning reference (the pass-through retain), the retain taken
-/// BEFORE the release so a sole-owned element's region is never transiently freed
-/// under the returned Value (the free-before-retain UAF; `arena::pop_with_decref`,
-/// the `raw-pop` oracle probe). So the source region's RC is UNCHANGED from the
-/// push state after the pop — not dropped to baseline — and returns to baseline
-/// only when the caller releases the moved-out result. Two defects this pins:
-/// forgetting the release leaves RC one too high (a region-RC leak, the symmetric
-/// defect of `push_track_inserts_cross_region_value`); forgetting the retain drops
-/// RC to baseline here and frees the element under the returned Value.
+/// call-position use lowers to) MOVES the popped element out to the caller. It
+/// does two things in lockstep. It releases the container's stored reference
+/// (`decref_removed_element`, undoing the push's `incref_inserted_element`). And
+/// it holds the caller's owning reference (the pass-through retain), taken
+/// BEFORE the release so a sole-owned element's region is never transiently
+/// freed under the returned Value (the free-before-retain UAF;
+/// `arena::pop_with_decref`, the `raw-pop` oracle probe). So the source
+/// region's RC is UNCHANGED from the push state after the pop, and returns to
+/// baseline only when the caller releases the moved-out result.
+///
+/// Two defects this pins. Forgetting the release leaves RC one too high, a
+/// region-RC leak, the symmetric defect of
+/// `push_track_inserts_cross_region_value`. Forgetting the retain drops RC to
+/// baseline here and frees the element under the returned Value.
 #[test]
 fn pop_track_removes_cross_region_value() {
     use crate::value::arena::push_with_incref;
@@ -175,10 +182,11 @@ fn pop_track_removes_cross_region_value() {
             rc_baseline + 1,
             "prim_pop holds the caller's reference (RC unchanged from push, not dropped)"
         );
-        // The caller releasing the moved-out result (its `DecrefValueRegion` at the
-        // result's decref_point — the whole caller side, since dispatch skips its
-        // own pass-through retain for the `moves_out` `%pop`) completes the move,
-        // returning the source region's RC to baseline.
+        // The caller releasing the moved-out result completes the move, and
+        // returns the source region's RC to baseline. That release is its
+        // `DecrefValueRegion` at the result's decref_point: the whole caller
+        // side, since dispatch skips its own pass-through retain for the
+        // `moves_out` `%pop`.
         crate::value::arena::decref_region(unsafe { &mut *heap_ptr }, Some(source_rid));
         assert_eq!(
             region_rc(unsafe { &*heap_ptr }, source_rid),

@@ -1,3 +1,8 @@
+// audited: 2026-10-22
+//! The control-flow opcodes: the jumps and the return.
+//!
+//! docs/impl/vm.md
+
 use super::core::VM;
 use crate::value::Value;
 
@@ -37,20 +42,7 @@ pub(crate) fn handle_return(vm: &mut VM) -> Value {
         .pop()
         .expect("VM bug: Stack underflow on return");
 
-    // Unwrap CaptureCell (internal cells for mutable captures).
-    // User code should never see a CaptureCell — it's an implementation detail.
-    // LBox (user-facing box) must NOT be unwrapped here.
-    if let Some(cell_ref) = value.as_capture_cell() {
-        *cell_ref.borrow()
-    } else {
-        value
-    }
-}
-
-// Call and TailCall are complex and need to stay in mod.rs because they call the executor recursively
-// These functions are just placeholders for documentation purposes
-pub mod note {
-    //! Call, TailCall, and MakeClosure handle complex recursive execution logic
-    //! and require access to the full execution context (the executor entry).
-    //! These remain in the main execution loop in mod.rs
+    // A return unwraps a capture cell, which user code never sees. A user
+    // box is a value and returns as it is.
+    value.capture_cell_get().unwrap_or(value)
 }

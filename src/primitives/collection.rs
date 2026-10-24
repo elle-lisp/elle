@@ -1,4 +1,7 @@
+// audited: 2026-10-22
 //! Collection protocol: centralized dispatch for all container types.
+//!
+//! docs/traits.md
 //!
 //! Every container in Elle (list, (), array, @array, string, @string,
 //! bytes, @bytes, set, @set, struct, @struct) implements these operations.
@@ -26,32 +29,32 @@ pub fn coll_empty(val: &Value, ctx: &mut NativeCtx) -> Result<bool, Value> {
     if let Some(elems) = val.as_array() {
         return Ok(elems.is_empty());
     }
-    if let Some(arr) = val.as_array_mut() {
-        return Ok(arr.borrow().is_empty());
+    if let Some(arr) = val.array_mut_read() {
+        return Ok(arr.is_empty());
     }
     if let Some(r) = val.with_string(|s| s.is_empty()) {
         return Ok(r);
     }
-    if let Some(buf_ref) = val.as_string_mut() {
-        return Ok(buf_ref.borrow().is_empty());
+    if let Some(buf_ref) = val.string_mut_read() {
+        return Ok(buf_ref.is_empty());
     }
     if let Some(b) = val.as_bytes() {
         return Ok(b.is_empty());
     }
-    if let Some(blob_ref) = val.as_bytes_mut() {
-        return Ok(blob_ref.borrow().is_empty());
+    if let Some(blob_ref) = val.bytes_mut_read() {
+        return Ok(blob_ref.is_empty());
     }
     if let Some(s) = val.as_set() {
         return Ok(s.is_empty());
     }
-    if let Some(s) = val.as_set_mut() {
-        return Ok(s.borrow().is_empty());
+    if let Some(s) = val.set_mut_read() {
+        return Ok(s.is_empty());
     }
     if let Some(s) = val.as_struct() {
         return Ok(s.is_empty());
     }
-    if let Some(t) = val.as_struct_mut() {
-        return Ok(t.borrow().is_empty());
+    if let Some(t) = val.struct_mut_read() {
+        return Ok(t.is_empty());
     }
     if let Some(syntax) = val.as_syntax() {
         use crate::syntax::SyntaxKind;
@@ -80,14 +83,13 @@ pub fn coll_len(val: &Value, ctx: &mut NativeCtx) -> Result<usize, Value> {
     if let Some(elems) = val.as_array() {
         return Ok(elems.len());
     }
-    if let Some(arr) = val.as_array_mut() {
-        return Ok(arr.borrow().len());
+    if let Some(arr) = val.array_mut_read() {
+        return Ok(arr.len());
     }
     if let Some(r) = val.with_string(|s| crate::segment::grapheme_count(s, gen)) {
         return Ok(r);
     }
-    if let Some(buf_ref) = val.as_string_mut() {
-        let borrowed = buf_ref.borrow();
+    if let Some(borrowed) = val.string_mut_read() {
         match std::str::from_utf8(&borrowed) {
             Ok(s) => return Ok(crate::segment::grapheme_count(s, gen)),
             Err(e) => {
@@ -101,20 +103,20 @@ pub fn coll_len(val: &Value, ctx: &mut NativeCtx) -> Result<usize, Value> {
     if let Some(b) = val.as_bytes() {
         return Ok(b.len());
     }
-    if let Some(blob_ref) = val.as_bytes_mut() {
-        return Ok(blob_ref.borrow().len());
+    if let Some(blob_ref) = val.bytes_mut_read() {
+        return Ok(blob_ref.len());
     }
     if let Some(s) = val.as_set() {
         return Ok(s.len());
     }
-    if let Some(s) = val.as_set_mut() {
-        return Ok(s.borrow().len());
+    if let Some(s) = val.set_mut_read() {
+        return Ok(s.len());
     }
     if let Some(s) = val.as_struct() {
         return Ok(s.len());
     }
-    if let Some(t) = val.as_struct_mut() {
-        return Ok(t.borrow().len());
+    if let Some(t) = val.struct_mut_read() {
+        return Ok(t.len());
     }
     if let Some(sid) = val.as_symbol() {
         if let Some(name) = ctx.vm().symbols().and_then(|s| s.name(sid)) {
@@ -147,8 +149,8 @@ pub fn coll_has(coll: &Value, needle: &Value, ctx: &mut NativeCtx) -> Result<boo
     if let Some(s) = coll.as_set() {
         return Ok(s.binary_search(&frozen).is_ok());
     }
-    if let Some(s) = coll.as_set_mut() {
-        return Ok(s.borrow().contains(&frozen));
+    if let Some(s) = coll.set_mut_read() {
+        return Ok(s.contains(&frozen));
     }
     // Strings — substring check
     if coll.is_string() {
@@ -165,7 +167,7 @@ pub fn coll_has(coll: &Value, needle: &Value, ctx: &mut NativeCtx) -> Result<boo
             .with_string(|haystack| haystack.contains(&*needle_str))
             .ok_or_else(|| ctx.error("internal-error", "has?: unreachable string case"));
     }
-    if let Some(buf_ref) = coll.as_string_mut() {
+    if let Some(bytes) = coll.string_mut_read() {
         let needle_str = needle.with_string(|s| s.to_string()).ok_or_else(|| {
             ctx.error(
                 "type-error",
@@ -175,8 +177,7 @@ pub fn coll_has(coll: &Value, needle: &Value, ctx: &mut NativeCtx) -> Result<boo
                 ),
             )
         })?;
-        let borrowed = buf_ref.borrow();
-        let haystack = String::from_utf8(borrowed.clone()).map_err(|e| {
+        let haystack = std::str::from_utf8(&bytes).map_err(|e| {
             ctx.error(
                 "encoding-error",
                 format!("has?: buffer contains invalid UTF-8: {}", e),
@@ -195,8 +196,8 @@ pub fn coll_has(coll: &Value, needle: &Value, ctx: &mut NativeCtx) -> Result<boo
         if let Some(s) = coll.as_struct() {
             return Ok(sorted_struct_contains(s, &key));
         }
-        if let Some(t) = coll.as_struct_mut() {
-            return Ok(t.borrow().contains_key(&key));
+        if let Some(t) = coll.struct_mut_read() {
+            return Ok(t.contains_key(&key));
         }
     }
     Err(ctx.error(
@@ -224,15 +225,15 @@ pub fn coll_to_vec(val: &Value, ctx: &mut NativeCtx) -> Result<Vec<Value>, Value
     if let Some(elems) = val.as_array() {
         return Ok(elems.to_vec());
     }
-    if let Some(data) = val.as_array_mut() {
-        return Ok(data.borrow().clone());
+    if let Some(data) = val.array_mut_read() {
+        return Ok(data.to_vec());
     }
     // Set / @set
     if let Some(set) = val.as_set() {
         return Ok(set.to_vec());
     }
-    if let Some(set) = val.as_set_mut() {
-        return Ok(set.borrow().iter().copied().collect());
+    if let Some(set) = val.set_mut_read() {
+        return Ok(set.iter().copied().collect());
     }
     // String — grapheme clusters
     if val.is_string() {
@@ -248,8 +249,7 @@ pub fn coll_to_vec(val: &Value, ctx: &mut NativeCtx) -> Result<Vec<Value>, Value
     // @string — grapheme clusters
     if val.is_string_mut() {
         let gen = ctx.unicode_generation();
-        if let Some(data) = val.as_string_mut() {
-            let bytes = data.borrow();
+        if let Some(bytes) = val.string_mut_read() {
             if let Ok(s) = std::str::from_utf8(&bytes) {
                 return Ok(crate::segment::graphemes(s, gen)
                     .map(|g| ctx.string(g))
@@ -263,12 +263,8 @@ pub fn coll_to_vec(val: &Value, ctx: &mut NativeCtx) -> Result<Vec<Value>, Value
         return Ok(b.iter().map(|&byte| Value::int(byte as i64)).collect());
     }
     // @bytes
-    if let Some(data) = val.as_bytes_mut() {
-        return Ok(data
-            .borrow()
-            .iter()
-            .map(|&byte| Value::int(byte as i64))
-            .collect());
+    if let Some(data) = val.bytes_mut_read() {
+        return Ok(data.iter().map(|&byte| Value::int(byte as i64)).collect());
     }
     // Struct — key-value pairs as 2-element arrays
     if let Some(s) = val.as_struct() {
@@ -280,9 +276,8 @@ pub fn coll_to_vec(val: &Value, ctx: &mut NativeCtx) -> Result<Vec<Value>, Value
             })
             .collect());
     }
-    if let Some(t) = val.as_struct_mut() {
+    if let Some(t) = val.struct_mut_read() {
         return Ok(t
-            .borrow()
             .iter()
             .map(|(k, v)| {
                 let key = k.to_value();
@@ -296,38 +291,26 @@ pub fn coll_to_vec(val: &Value, ctx: &mut NativeCtx) -> Result<Vec<Value>, Value
     ))
 }
 
-/// Combine two collections (concat for seqs, union for sets, merge for structs).
 /// Collect set elements into a BTreeSet regardless of mutability.
 pub fn set_elements(v: &Value) -> Option<std::collections::BTreeSet<Value>> {
     v.as_set()
         .map(|s| s.iter().copied().collect())
-        .or_else(|| v.as_set_mut().map(|s| s.borrow().iter().copied().collect()))
+        .or_else(|| v.set_mut_read().map(|s| s.iter().copied().collect()))
 }
 
 /// Collect struct entries into a BTreeMap regardless of mutability.
 fn struct_entries(
     v: &Value,
 ) -> Option<std::collections::BTreeMap<crate::value::heap::TableKey, Value>> {
-    v.as_struct()
-        .map(|s| s.iter().map(|(k, v)| (*k, *v)).collect())
-        .or_else(|| {
-            v.as_struct_mut()
-                .map(|s| s.borrow().iter().map(|(k, v)| (*k, *v)).collect())
-        })
-}
-
-/// Collect array elements into a Vec regardless of mutability.
-fn array_elements(v: &Value) -> Option<Vec<Value>> {
-    v.as_array()
-        .map(|a| a.to_vec())
-        .or_else(|| v.as_array_mut().map(|a| a.borrow().clone()))
+    v.struct_to_vec()
+        .map(|entries| entries.into_iter().collect())
 }
 
 /// Collect string content regardless of mutability.
 fn string_content(v: &Value) -> Option<String> {
     v.with_string(|s| s.to_string()).or_else(|| {
-        v.as_string_mut()
-            .map(|s| String::from_utf8_lossy(&s.borrow()).into_owned())
+        v.string_mut_read()
+            .map(|s| String::from_utf8_lossy(&s).into_owned())
     })
 }
 
@@ -335,18 +318,15 @@ fn string_content(v: &Value) -> Option<String> {
 fn bytes_content(v: &Value) -> Option<Vec<u8>> {
     v.as_bytes()
         .map(|b| b.to_vec())
-        .or_else(|| v.as_bytes_mut().map(|b| b.borrow().clone()))
+        .or_else(|| v.bytes_mut_read().map(|b| b.to_vec()))
 }
 
 /// Is the value a mutable variant of its base type?
 pub fn is_mutable(v: &Value) -> bool {
-    v.is_set_mut()
-        || v.is_struct_mut()
-        || v.is_array_mut()
-        || v.as_string_mut().is_some()
-        || v.as_bytes_mut().is_some()
+    v.is_set_mut() || v.is_struct_mut() || v.is_array_mut() || v.is_string_mut() || v.is_bytes_mut()
 }
 
+/// Combine two collections: concat for seqs, union for sets, merge for structs.
 pub fn coll_combine(a: &Value, b: &Value, ctx: &mut NativeCtx) -> Result<Value, Value> {
     let a_mut = is_mutable(a);
 
@@ -387,7 +367,7 @@ pub fn coll_combine(a: &Value, b: &Value, ctx: &mut NativeCtx) -> Result<Value, 
     }
 
     // Arrays
-    if let (Some(mut ea), Some(eb)) = (array_elements(a), array_elements(b)) {
+    if let (Some(mut ea), Some(eb)) = (a.array_to_vec(), b.array_to_vec()) {
         ea.extend(eb);
         return Ok(if a_mut {
             ctx.array_mut(ea)

@@ -1,6 +1,6 @@
 # Where a stream operation's bytes live
 
-<!-- audited: 2026-10-19 -->
+<!-- audited: 2026-10-22 -->
 
 A read lands in the caller's region and a write leaves from the payload's, and the operation holds both while the kernel works.
 
@@ -65,8 +65,8 @@ drop the bytes past it. The port has already taken those bytes from the kernel,
 so nothing would be left to read them again.
 
 A `read-line` whose buffer fills with no newline goes the same way. Its bytes
-move to a `Vec`, the port's remainder on the ring and the worker's own on the
-pool, and the read goes on into the buffer until the newline or the end of the
+move to a `Vec`: the port's remainder on the ring, and the worker's own on the
+pool. The read goes on into the buffer until the newline or the end of the
 stream arrives. The completion joins the parts and cuts the line from the join,
 so one call answers one line however long it is. Both backends answer this way,
 so a line longer than 64 KiB is one answer on either one. Answering with the
@@ -103,9 +103,10 @@ An immutable string or bytes payload lives in region pages. Both backends hand
 the kernel its address: the ring in the SQE, and in each resubmission of the
 unwritten tail; a pool worker in its `write(2)`. No byte of it is copied.
 
-Three payloads are copied once instead. A mutable `@string` or `@bytes` keeps
-its bytes in a Rust `Vec` that another fiber can grow, and a reallocation would
-move them under the kernel. Any other value is written as its display text,
+Three payloads are copied once instead. Another fiber can write to a mutable
+`@string` or `@bytes` while the operation waits, and that write shifts its bytes
+or moves them to a larger extent under the kernel
+([mutable stores](mutable.md)). Any other value is written as its display text,
 which exists only once it is formatted. And a pool operation that carries no
 stop pipe copies, for the reason in the last section.
 
@@ -147,13 +148,18 @@ the whole process shares, and its teardown is not a backend's.
 ## Pinned by
 
 - [io_copies.rs](../../tests/io_copies.rs) counts the Rust heap bytes a read,
-  a write and a `read-all` allocate on the platform's own backend: the ring on
-  Linux, and the pool on a Mac or in a build without the `uring` feature. The
+  a write and a `read-all` allocate on the platform's own backend. That backend
+  is the ring on Linux, and the pool on a Mac or in a build without the `uring`
+  feature. The
   count must not grow with the bytes moved, except for the one copy `read-all`
   makes.
 - `a_write_hands_the_kernel_the_payload_where_it_lies`
   ([bytes.rs](../../src/io/aio/tests/bytes.rs)) changes a payload after its
   write parks. The peer receives the changed bytes.
+- `a_mutable_payload_is_written_as_it_was_at_submission`
+  ([mutable.rs](../../src/io/aio/tests/mutable.rs)) overwrites and grows an
+  `@bytes` after its write parks. The peer receives the bytes the write was
+  submitted with.
 - `a_read_that_ends_unanswered_gives_the_port_its_remainder_back`
   ([bytes.rs](../../src/io/aio/tests/bytes.rs)) cancels a read and times one
   out, and reads the remainder afterwards.

@@ -1,7 +1,7 @@
-// audited: 2026-09-20
+// audited: 2026-10-21
 // A list crosses whatever its length: the dumper walks the `rest` spine with
 // a loop, so depth costs memory rather than stack.
-// docs/impl/image.md
+// docs/impl/image/dumping.md
 
 use super::*;
 use elle::image;
@@ -36,7 +36,7 @@ fn nth_rest(mut v: Value, n: usize) -> Value {
     v
 }
 
-// § Dumping: a list's length is bounded by memory rather than by the text
+// A list's length is bounded by memory rather than by the text
 // that built it, so the spine is walked with a loop. The counter-factual is
 // the recursive walk this replaces: it does not fail the assertion below, it
 // overflows the stack and aborts the whole test process.
@@ -65,7 +65,7 @@ fn a_long_list_dumps_and_hydrates() {
     );
 }
 
-// § Dumping: sharing is preserved through the visited map. A spine loop has
+// Sharing is preserved through the visited map. A spine loop has
 // to consult that map at every link, not only at the head — the
 // counter-factual is a loop that runs to the end of its own spine before
 // looking, which copies a shared tail once per list that names it and
@@ -98,7 +98,7 @@ fn two_lists_over_one_tail_hydrate_sharing_it() {
     );
 }
 
-// § Dumping: two dumps of one graph are byte-identical whole files. The
+// Two dumps of one graph are byte-identical whole files. The
 // spine loop assembles its copies in a different order from the recursion it
 // replaces, so it is a fresh chance to let a construction temporary reach
 // the file.

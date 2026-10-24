@@ -1,4 +1,4 @@
-//! audited: 2026-09-17
+//! audited: 2026-10-22
 //! `subprocess/exec`: the options it parses, and the sequence widening its
 //! args take.
 //!
@@ -225,8 +225,8 @@ pub(super) fn extract_string_sequence(
     }
 
     // Mutable array
-    if let Some(arr) = seq.as_array_mut() {
-        for v in arr.borrow().iter() {
+    if let Some(arr) = seq.array_mut_read() {
+        for v in arr.iter() {
             match v.with_string(|s| s.to_string()) {
                 Some(s) => result.push(s),
                 None => {

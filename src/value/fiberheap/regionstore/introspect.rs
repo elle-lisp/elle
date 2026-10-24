@@ -63,7 +63,7 @@ impl RegionStore {
         }
     }
 
-    /// The interval table's regions, in hydration order (docs/impl/image.md).
+    /// The interval table's regions, in hydration order (docs/impl/image/hydration.md).
     #[cfg(test)]
     pub(crate) fn interval_table(&self) -> Vec<RuntimeRegion> {
         self.images.clone()

@@ -1,8 +1,8 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! The verifier's second pass: every mapped object against the tag its index
 //! claims, and every extent it names against the image's bounds.
 //!
-//! docs/impl/image.md
+//! docs/impl/image/verifier.md
 //!
 //! This pass runs after relocation, in every build, and reads object shells
 //! only — an extent is checked from the `ptr` and `len` in the shell, never by

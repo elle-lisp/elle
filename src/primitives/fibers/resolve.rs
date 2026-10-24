@@ -1,5 +1,7 @@
-// audited: 2026-09-21
+// audited: 2026-10-22
 //! Signal-bits resolution for fiber primitives.
+//!
+//! docs/signals/index.md
 //!
 //! Fiber primitives accept signal specifications in many surface forms
 //! (integer, keyword, or any keyword collection). Centralizing the coercion
@@ -15,7 +17,7 @@ pub(super) fn status_keyword(status: FiberStatus) -> Value {
 
 /// Resolve a slice of Values (from array) to SignalBits by OR-ing keyword bits.
 ///
-/// `context` is used in error messages (e.g., "fiber/new", "fiber/signal").
+/// `context` names the caller in error messages, such as "fiber/new".
 fn resolve_keyword_slice(
     elems: &[Value],
     context: &str,
@@ -58,13 +60,13 @@ fn resolve_keyword_slice(
 /// - Keyword: lookup in global registry, return `SignalBits(1 << bit_position)`
 /// - Set / array / mutable array / list of keywords: look up each, OR the bits
 ///
-/// `context` is used in error messages (e.g., "fiber/new", "fiber/signal").
+/// `context` names the caller in error messages, such as "fiber/new".
 pub(crate) fn resolve_signal_bits(
     val: &Value,
     context: &str,
     ctx: &mut NativeCtx,
 ) -> Result<SignalBits, (SignalBits, Value)> {
-    // 1. Integer passthrough (existing behavior)
+    // 1. Integer passthrough
     if let Some(i) = val.as_int() {
         return Ok(SignalBits::from_i64(i));
     }
@@ -122,8 +124,7 @@ pub(crate) fn resolve_signal_bits(
     }
 
     // 5. Mutable array of keywords (@[...])
-    if let Some(arr) = val.as_array_mut() {
-        let elems = arr.borrow();
+    if let Some(elems) = val.array_mut_read() {
         return resolve_keyword_slice(&elems, context, ctx);
     }
 
@@ -215,9 +216,8 @@ fn bits_of_signal_spec(val: &Value) -> SignalBits {
             .iter()
             .fold(SignalBits::EMPTY, |b, e| b.union(bits_of_signal_spec(e)));
     }
-    if let Some(arr) = val.as_array_mut() {
+    if let Some(arr) = val.array_mut_read() {
         return arr
-            .borrow()
             .iter()
             .fold(SignalBits::EMPTY, |b, e| b.union(bits_of_signal_spec(e)));
     }

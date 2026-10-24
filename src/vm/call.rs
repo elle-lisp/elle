@@ -1,7 +1,8 @@
-// audited: 2026-10-06
+// audited: 2026-10-22
 //! Call and TailCall instruction handlers.
 //!
-//! Handles:
+//! It handles:
+//!
 //! - Native function calls (routes to signal dispatch in signal.rs)
 //! - Closure calls: the environment is built here, then the callee goes to
 //!   `run_dispatch`, which runs it on the caller's dispatch loop
@@ -118,10 +119,8 @@ impl VM {
             .expect("VM bug: Stack underflow on CallArrayMut");
 
         // Extract args from the array
-        let args: Vec<Value> = if let Some(arr) = args_val.as_array_mut() {
-            arr.borrow().to_vec()
-        } else if let Some(tup) = args_val.as_array() {
-            tup.to_vec()
+        let args: Vec<Value> = if let Some(elems) = args_val.array_to_vec() {
+            elems
         } else {
             self.set_error(
                 "type-error",
@@ -145,9 +144,9 @@ impl VM {
             checked,
             region_id,
         );
-        // The callee holds its own reference to every argument by now — the env's
+        // The callee holds its own reference to every argument by now: the env's
         // `CallArgument` incref for a closure, the pass-through retain for a
-        // native — so the array's counted edges are surplus and this reclaim
+        // native. So the array's counted edges are surplus, and this reclaim
         // balances the pushes that built it.
         self.release_splice_args(args_array);
         bits
@@ -238,10 +237,8 @@ impl VM {
             .expect("VM bug: Stack underflow on TailCallArrayMut");
 
         // Extract args from the array
-        let args: Vec<Value> = if let Some(arr) = args_val.as_array_mut() {
-            arr.borrow().to_vec()
-        } else if let Some(tup) = args_val.as_array() {
-            tup.to_vec()
+        let args: Vec<Value> = if let Some(elems) = args_val.array_to_vec() {
+            elems
         } else {
             self.set_error(
                 "type-error",
@@ -273,19 +270,20 @@ impl VM {
     /// `(str i)` / …) with the same per-execution region routing and pass-through
     /// retain a native primitive gets via [`VM::dispatch_native_call`].
     ///
-    /// A collection-call is morally a native: it returns either a value it
+    /// A collection-call is morally a native. It returns either a value it
     /// allocated fresh (a `(str i)` single-grapheme string), which lands in this
-    /// call's minted `alloc_region`, or a co-located / stored element it borrows
-    /// from the collection's region (an immutable array/struct element shares the
-    /// container's region pages; a mutable container's stored value has its own
-    /// region kept alive only by the container's stored reference). The borrowed
-    /// case is a Rule-5 native-result pass-through (docs/impl/region/rules.md): without an
-    /// incref the caller's `DecrefValueRegion` cascade-frees the element under its
-    /// consumer's borrow — the call-index UAF family (region-array-element-uaf,
+    /// call's minted `alloc_region`, or a co-located or stored element it
+    /// borrows from the collection's region. An immutable array or struct element
+    /// shares the container's region pages. A mutable container's stored value
+    /// has its own region, kept alive only by the container's stored reference.
+    /// The borrowed case is a Rule-5 native-result pass-through
+    /// (docs/impl/region/rules.md). Without an incref, the caller's
+    /// `DecrefValueRegion` cascade-frees the element under its consumer's borrow:
+    /// the call-index UAF family (region-array-element-uaf,
     /// region-struct-call-index-uaf, region-mut-collection-call-index-uaf). The
-    /// fresh case lives in `alloc_region` and is skipped — its alloc incref
-    /// (rc=1) is already the caller's single owning reference, exactly as in
-    /// `dispatch_native_call`. An immediate result (`(b i)` int, `(s v)` bool, a
+    /// fresh case lives in `alloc_region` and is skipped, because its alloc
+    /// incref (rc=1) is already the caller's single owning reference, exactly as
+    /// in `dispatch_native_call`. An immediate result (`(b i)` int, `(s v)` bool, a
     /// `nil` default) has no region, so the incref no-ops.
     ///
     /// Shared verbatim by the interpreter (`call_inner` / `tail_call_inner`) and

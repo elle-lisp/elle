@@ -1,4 +1,4 @@
-//! audited: 2026-09-17
+//! audited: 2026-10-22
 //! POSIX signal primitives — send, raise, watch, next, close, plus
 //! introspection (pending / mask / watching / name).
 //!
@@ -104,8 +104,8 @@ fn resolve_signal_set(
         }
         return Ok(out);
     }
-    if let Some(arr) = val.as_array_mut() {
-        for elem in arr.borrow().iter() {
+    if let Some(arr) = val.array_mut_read() {
+        for elem in arr.iter() {
             let name = ctx.keyword_spelling(*elem).ok_or_else(|| {
                 (
                     SIG_ERROR,
@@ -355,7 +355,7 @@ fn prim_sig_mask(
 
 /// (os/sig-name N) → :sigsegv | nil
 ///
-/// Names a signal number, including the fatal ones `os/sig-send` refuses: what
+/// Names a signal number, including the fatal ones `os/sig-send` refuses. What
 /// a process dies on and what it may be sent are different sets, and a
 /// terminating status is read far more often than it is produced.
 fn prim_sig_name(

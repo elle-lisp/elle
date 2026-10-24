@@ -1,6 +1,6 @@
 # Standard Library Disk Cache
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-21 -->
 
 A start that finds the compiled standard library on disk deserializes it instead of compiling it again.
 
@@ -108,7 +108,7 @@ is a code-execution surface like any other loadable artifact.
 
 A store prunes: after the rename, every other `.bin` in the directory is
 removed. The key follows the binary, so every rebuild mints a new one and
-orphans the last one's file — at ~9 MB each, a day of rebuilds fills a
+orphans the last one's file — at megabytes each, a day of rebuilds fills a
 directory nobody looks at. Pruning runs *after* the rename, never before, so a
 store that fails leaves the directory as it found it. A removal that fails is
 ignored; it is disk hygiene, not correctness.
@@ -140,7 +140,7 @@ halves.
 
 Carrying it costs one field: a `Span` serializes its file by spelling and
 re-interns it on load ([span.rs](../../src/syntax/span.rs)). A boot image
-already carries it, as part of the code payload ([image.md](image.md)).
+already carries it, as part of the code payload ([sealing](image/sealing.md)).
 
 ## Serialization format
 
@@ -266,19 +266,12 @@ allocation context, and the teardown sweep reclaims the reload by RC like any
 other root ([the allocation capability](region/ctx.md)). The code unit itself
 is released after the run, as a compiled one is.
 
-## Measured effect
+## What a hit saves
 
-Release build, `--trace=boot`, running `(+ 1 2)`:
-
-| Phase | No cache | Cache hit |
-|---|---|---|
-| obtaining the compiled stdlib | 266ms | 23ms |
-| executing it | 3.5ms | 3.8ms |
-
-The front end is the whole of the difference, and deserialization is what
-remains of it; a faster encoder or a lazily-loaded LIR is where the rest would
-come from. Re-measure with `--trace=boot` rather than reading these numbers —
-they move with the machine and with every change to a front-end pass.
+`--trace=boot` attributes a start to two phases: obtaining the compiled stdlib,
+and executing it. A hit removes the front end from the first phase, and
+deserialization is what remains of it; a faster encoder or a lazily-loaded LIR
+is where the rest would come from.
 
 ## Tests
 

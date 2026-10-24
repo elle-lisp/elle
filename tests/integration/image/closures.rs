@@ -1,10 +1,8 @@
-// audited: 2026-10-21
+// audited: 2026-10-22
 // A closure and its code object cross the body, field by field and sharing
 // kept.
 // docs/impl/image/sealing.md
 // docs/impl/image/pins.md
-
-use std::rc::Rc;
 
 use super::*;
 use elle::hir::region::StaticRegion;
@@ -12,6 +10,7 @@ use elle::hir::VarargKind;
 use elle::image::Sections;
 use elle::signals::Signal;
 use elle::value::heap::deref;
+use elle::value::store::CellStore;
 use elle::value::{Arity, CaptureMask, RestListLayout};
 use elle::SourceLoc;
 
@@ -21,9 +20,9 @@ const FILE: &str = "<image-closures>";
 /// A lambda whose body is all intrinsics, so its graph is its own.
 const COMPILED: &str = "(fn [x] (if (%eq x 2) 42 7))";
 
-/// A code object exercising every payload field a data closure carries: real
-/// locations with two interned files, both release tables, a merge set, the
-/// capture masks, a `&named` key set, the rest-list layout, and a mixed
+/// A code object exercising every payload field a data closure carries. It holds
+/// real locations with two interned files, both release tables, a merge set,
+/// the capture masks, a `&named` key set, the rest-list layout, and a mixed
 /// constant pool. Answers the code object and its shared string constant.
 fn full_code(heap: &mut FiberHeap, region: RuntimeRegion) -> (TemplateRef, Value) {
     let shared = alloc_str(heap, region, "shared payload");
@@ -251,7 +250,7 @@ fn an_env_capture_cell_refuses_the_dump() {
     let region = src.new_runtime_region();
     let cell = src.alloc_in_region(
         HeapObject::CaptureCell {
-            cell: Rc::new(std::cell::RefCell::new(Value::int(1))),
+            cell: CellStore::new(Value::int(1)),
             origin: elle::value::heap::CellOrigin::Runtime,
             traits: Value::NIL,
         },

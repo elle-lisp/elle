@@ -1,6 +1,6 @@
 # Capture cells
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-22 -->
 
 How a captured binding's cell is realized, what a read through one borrows, and where the cell's own release lands.
 
@@ -165,8 +165,9 @@ per-iteration `DecrefCellRegion`. `populate_env` allocates the box once (`+1`),
 so the box dies at the end of iteration 1, and iteration 2 reads the freed and
 recycled cell.
 
-That use-after-free shows as an `as_capture_cell` deref tag mismatch under the
-plain VM, and as a cascade free under `--trace=guardfree`. It occurs whether the
+That use-after-free shows as a deref tag mismatch at the cell's read
+(`capture_cell_get`) under the plain VM, and as a cascade free under
+`--trace=guardfree`. It occurs whether the
 loop is single or nested. A binding bound *between* two nested loops (the
 `(cap2)` shape,
 [region-capture-cell-loop-uaf.lisp](../../../tests/impl/region-capture-cell-loop-uaf.lisp))

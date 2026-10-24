@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-10-21
 //! Where an image's bytes live: a descriptor, and the offset of the image's
 //! first byte inside it.
 //!
@@ -143,7 +143,7 @@ fn anonymous_file(bytes: &[u8]) -> Result<File, ImageError> {
 ///
 /// POSIX shared memory is the obvious candidate and cannot serve. A Darwin
 /// object of that kind takes `mmap` only with `MAP_SHARED`, and the hydrator
-/// maps every page `MAP_FIXED | MAP_PRIVATE` (docs/impl/image.md).
+/// maps every page `MAP_FIXED | MAP_PRIVATE` (docs/impl/image/hydration.md).
 ///
 /// Android takes the memfd arm above and never reaches this one.
 #[cfg(not(any(target_os = "linux", target_os = "android")))]

@@ -1,8 +1,8 @@
-// audited: 2026-09-14
+// audited: 2026-10-21
 //! The verifier's first pass: every table decoded and bounds-checked before
 //! anything is mapped.
 //!
-//! docs/impl/image.md
+//! docs/impl/image/verifier.md
 //!
 //! This pass reads the metadata block rather than the page bytes, so it costs
 //! no faults, and it is what stops a corrupt table from writing outside the

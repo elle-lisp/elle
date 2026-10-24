@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-22
 //! `FiberHeap` region-allocator surface.
 //!
 //! Everything that allocates into, reference-counts, adopts, or inspects the
@@ -217,7 +217,7 @@ impl FiberHeap {
         self.alloc_count -= freed;
     }
 
-    /// Install a hydrated image region (docs/impl/image.md):
+    /// Install a hydrated image region (docs/impl/image/hydration.md):
     /// adopt the mapped pages, rebuild the object bookkeeping from the index
     /// (`base`-relative offsets), and account the objects like any other
     /// allocation. Returns the minted `Counted` region — rc 1, the caller's
@@ -240,14 +240,14 @@ impl FiberHeap {
     }
 
     /// The hydrated regions this heap resolves through the interval table,
-    /// in hydration order (docs/impl/image.md).
+    /// in hydration order (docs/impl/image/hydration.md).
     #[cfg(test)]
     pub(crate) fn interval_table(&self) -> Vec<RuntimeRegion> {
         self.region_store.interval_table()
     }
 
     /// The page layouts and live objects of one region, for the image dumper
-    /// (docs/impl/image.md). `None` for an absent region.
+    /// (docs/impl/image/dumping.md). `None` for an absent region.
     pub(crate) fn region_pool(&self, id: RuntimeRegion) -> Option<&super::regionpool::RegionPool> {
         self.region_store.region_pool(id)
     }
@@ -269,6 +269,15 @@ impl FiberHeap {
     /// backend of `arena::region_of`.
     pub fn region_of_ptr(&self, ptr: *const ()) -> u32 {
         self.region_store.region_of_ptr(ptr)
+    }
+
+    /// The live region of this heap whose pages hold `value`, or `None` for an
+    /// immediate and for a value another heap owns. A page header names a
+    /// region whoever stamped it, so this asks the region itself, as the free
+    /// scan does (`RegionStore::owning_region`).
+    pub(crate) fn owning_region_of(&self, value: Value) -> Option<RuntimeRegion> {
+        let ptr = value.as_heap_ptr()?;
+        RuntimeRegion::new(self.region_store.owning_region(ptr))
     }
 
     /// Get the reference count for a region.

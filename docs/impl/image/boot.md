@@ -97,7 +97,7 @@ build and digest, paid by the start that stores it.
 
 The dump is the ordinary dumper over the root struct, so determinism, the
 refusals, and the cross-build name and primitive tables are the ones
-[the image design](../image.md) and [sealing](sealing.md) already describe. The
+[dumping](dumping.md) and [sealing](sealing.md) already describe. The
 boot policy adds one refusal of its own: a process that registered a user signal
 bit fails the dump, naming the signal. Bits above 31 are minted in declaration
 order into a process-global registry, and no image carries a signal table yet.
@@ -112,7 +112,7 @@ exists, and installs into the same structures a source boot writes:
 
 1. Hydrate the image into this instance's heap, replaying the name table into
    its display memo and raising its parameter and static-region counters
-   ([the image design](../image.md)).
+   ([hydration](hydration.md)).
 2. Check the digest against this binary's sources, and fall back to a source
    boot when it differs.
 3. Register the hydrated region as a process root, so teardown releases the
@@ -176,7 +176,7 @@ next start.
   target. The temporary file's name is the store's alone, because two threads
   of one process can store one image at once. Never rewrite an image in place:
   a `MAP_PRIVATE` mapping of a file mutated underneath it is unspecified, and a
-  live hydration holds one ([image.md](../image.md)).
+  live hydration holds one ([hydration](hydration.md)).
 - A store prunes every other `.image` in the directory after the rename, never
   before. Each rebuild and each edit to a boot source orphans the last file, at
   megabytes apiece. A directory therefore holds one image whatever runs in it,
@@ -214,7 +214,7 @@ shared between them through the page cache.
 - A worker whose hydration refuses the image reports the refusal and compiles.
   It hands on only an image it hydrated, so its own workers compile too.
 
-The descriptor is the hydrator's input form ([image.md](../image.md)). So the
+The descriptor is the hydrator's input form ([hydration](hydration.md)). So the
 embedded blob reaches a worker the same way, whether the parent mapped it from
 the executable or copied it. A process copies a blob
 once.
@@ -245,8 +245,8 @@ pointed at that directory. A pull request gets the same run from the `Boot
 Image Tests` job ([CI](../../analysis/ci.md)). The other corpus jobs run
 release binaries that carry a blob, so they run the corpus from the blob.
 
-The target runs `make bytecode-parity` first, the compile half of the parity
-[image.md](../image.md) demands. It writes every corpus file's
+The target runs `make bytecode-parity` first, the compile half of
+[parity](parity.md). It writes every corpus file's
 `--dump=bytecode` once under a source boot and once under an image boot, and
 fails on any difference. Each dump runs in a process of its own, because the
 static-region counter is process-global: a second boot in one process starts
