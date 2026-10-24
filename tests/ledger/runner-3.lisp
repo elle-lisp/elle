@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-23
+# audited: 2026-10-24
 # The runner's ledger, part 3 of 4: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/lang/process-clock.lisp" :objects 371]
@@ -102,7 +102,7 @@
 ["tests/lang/tempdir.lisp" :objects 276]
 ["tests/lang/threading.lisp" :objects 147]
 ["tests/lang/time-sleep.lisp" :objects 239]
-["tests/lang/tls.lisp" :objects 884]
+["tests/lang/tls.lisp" :objects 875]
 ["tests/lang/trait-dispatch.lisp" :objects 1341]
 ["tests/lang/trait-operator-fallback.lisp" :objects 1162]
 ["tests/lang/trait-operator-methods.lisp" :objects 786]
