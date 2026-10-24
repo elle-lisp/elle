@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-22
 //! The compacting copy: what the dumper accepts into an image's body, and
 //! the spellings it records on the way through.
 //!
@@ -158,7 +158,7 @@ pub(super) fn copy_value(
     }
     let obj = unsafe { deref(v) };
     // A list's `rest` spine is walked by loop rather than by recursion, so a
-    // list costs memory rather than stack (docs/impl/image.md).
+    // list costs memory rather than stack (docs/impl/image/dumping.md).
     if matches!(obj, HeapObject::Pair(_)) {
         return copy_pair_spine(heap, region, v, walk);
     }
@@ -203,10 +203,10 @@ pub(super) fn copy_value(
                 region,
             )
         }
-        // A sorted container copies in order and is never re-sorted: every
-        // key and element an image may carry ranks by its own content, so the
-        // order the copy preserves is the order the hydrating instance's
-        // comparator agrees with (docs/impl/image/sealing.md).
+        // A sorted container copies in order and is never re-sorted. Every key
+        // and element an image may carry ranks by its own content. So the order
+        // the copy preserves is the order the hydrating instance's comparator
+        // agrees with (docs/impl/image/sealing.md).
         HeapObject::LSet { data, .. } => {
             let mut copies = Vec::with_capacity(data.len());
             for &el in data.iter() {
@@ -236,10 +236,10 @@ pub(super) fn copy_value(
                 region,
             )
         }
-        // A tree is region-resident POD with no Rust-heap ownership, so the
-        // copy the syntax module already performs between arenas is the copy
-        // an image needs — every node, child slice, string payload, and scope
-        // set rebuilt in the destination.
+        // A tree is region-resident POD with no Rust-heap ownership. So the copy
+        // the syntax module already performs between arenas is the copy an
+        // image needs: every node, child slice, string payload, and scope set
+        // rebuilt in the destination.
         HeapObject::Syntax { syntax, .. } => {
             let arena = unsafe { SyntaxArena::from_raw(heap as *mut FiberHeap, region) };
             let owned = syntax.copy_into(&arena);
@@ -305,7 +305,7 @@ pub(super) fn copy_value(
         // binding, by name, and the run-time cell, by variant.
         HeapObject::CaptureCell { cell, origin, .. } => match origin {
             CellOrigin::Compiled { mutated: false, .. } => {
-                let content = *cell.borrow();
+                let content = cell.get();
                 let copy = copy_value(heap, region, content, walk)?;
                 walk.visited.insert(key, copy);
                 return Ok(copy);
@@ -373,7 +373,7 @@ fn patch_pair(copy: Value, write: impl FnOnce(&mut Pair)) {
 ///
 /// A list's length is bounded by memory rather than by the text that built
 /// it, so a recursive walk down `rest` aborts the process on a stack overflow
-/// where this writes the image (docs/impl/image.md). Each copy is reserved
+/// where this writes the image (docs/impl/image/dumping.md). Each copy is reserved
 /// before anything it holds is walked, exactly as a closure's is, so a cycle
 /// that re-enters a pair closes onto the one copy.
 ///
@@ -430,9 +430,9 @@ fn copy_pair_spine(
     Ok(acc)
 }
 
-/// Copy one struct key into the scratch region: its own value goes through
-/// the value walk, so a key's string or array is shared and relocated exactly
-/// as the same value in a struct's *value* position would be.
+/// Copy one struct key into the scratch region. Its own value goes through the
+/// value walk, so a key's string or array is shared and relocated exactly as
+/// the same value in a struct's *value* position would be.
 ///
 /// A key is also a name site. Keys never pass through [`copy_value`], so a
 /// symbol or keyword key's spelling is recorded here or nowhere.

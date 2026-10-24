@@ -1,3 +1,8 @@
+// audited: 2026-10-22
+//! The display primitives: `pp` pretty-prints a value at a width, and `describe` names its type and size.
+//!
+//! docs/io.md
+
 use crate::primitives::def::RegionEffect;
 use crate::value::fiber::{SignalBits, SIG_OK};
 use crate::value::types::Arity;
@@ -62,8 +67,7 @@ fn flat_repr(val: Value, symbols: Option<&crate::symbol::SymbolTable>, depth: us
     }
 
     // @array (mutable)
-    if let Some(vec_ref) = val.as_array_mut() {
-        let vec = vec_ref.borrow();
+    if let Some(vec) = val.array_mut_read() {
         let parts: Vec<String> = vec
             .iter()
             .map(|v| flat_repr(*v, symbols, depth + 1))
@@ -72,8 +76,7 @@ fn flat_repr(val: Value, symbols: Option<&crate::symbol::SymbolTable>, depth: us
     }
 
     // @struct (mutable)
-    if let Some(table_ref) = val.as_struct_mut() {
-        let table = table_ref.borrow();
+    if let Some(table) = val.struct_mut_read() {
         let mut parts = Vec::new();
         for (k, v) in table.iter() {
             parts.push(format!(
@@ -202,8 +205,7 @@ fn pretty_print_impl(
     }
 
     // @array: break with elements indented
-    if let Some(vec_ref) = val.as_array_mut() {
-        let vec = vec_ref.borrow();
+    if let Some(vec) = val.array_mut_read() {
         if vec.is_empty() {
             return "@[]".to_string();
         }
@@ -222,8 +224,7 @@ fn pretty_print_impl(
     }
 
     // @struct: break with key-value pairs indented
-    if let Some(table_ref) = val.as_struct_mut() {
-        let table = table_ref.borrow();
+    if let Some(table) = val.struct_mut_read() {
         if table.is_empty() {
             return "@{}".to_string();
         }
@@ -327,8 +328,7 @@ pub(crate) fn prim_describe(
         return (SIG_OK, r);
     }
 
-    if let Some(buf_ref) = val.as_string_mut() {
-        let buf = buf_ref.borrow();
+    if let Some(buf) = val.string_mut_read() {
         let display = if buf.len() > 20 {
             let s = String::from_utf8_lossy(&buf[..20]);
             format!("\"{}...\"", s)
@@ -374,8 +374,7 @@ pub(crate) fn prim_describe(
     }
 
     // Mutable array
-    if let Some(vec_ref) = val.as_array_mut() {
-        let vec = vec_ref.borrow();
+    if let Some(vec) = val.array_mut_read() {
         return (
             SIG_OK,
             ctx.string(format!("<@array ({} elements)>", vec.len())),
@@ -391,8 +390,7 @@ pub(crate) fn prim_describe(
     }
 
     // Mutable struct
-    if let Some(table_ref) = val.as_struct_mut() {
-        let table = table_ref.borrow();
+    if let Some(table) = val.struct_mut_read() {
         return (
             SIG_OK,
             ctx.string(format!("<@struct ({} entries)>", table.len())),
@@ -408,8 +406,7 @@ pub(crate) fn prim_describe(
     }
 
     // Mutable set
-    if let Some(set_ref) = val.as_set_mut() {
-        let set = set_ref.borrow();
+    if let Some(set) = val.set_mut_read() {
         return (
             SIG_OK,
             ctx.string(format!("<@set ({} elements)>", set.len())),
@@ -425,8 +422,7 @@ pub(crate) fn prim_describe(
     }
 
     // Mutable bytes
-    if let Some(bytes_ref) = val.as_bytes_mut() {
-        let bytes = bytes_ref.borrow();
+    if let Some(bytes) = val.bytes_mut_read() {
         return (
             SIG_OK,
             ctx.string(format!("<@bytes ({} bytes)>", bytes.len())),

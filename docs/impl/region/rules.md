@@ -1,6 +1,6 @@
 # Region rules — the implementor's correctness obligations
 
-<!-- audited: 2026-10-16 -->
+<!-- audited: 2026-10-22 -->
 
 The exhaustive correctness contract the compiler and runtime must uphold for
 regions.
@@ -193,21 +193,21 @@ is a correctness defect, not a tuning knob.
      region its fields point into;
    - *mutable store* — `push`/`put`/`add`/`%put`/`insert` incref the stored
      value's region; `pop`/`del`/`remove` decref it. This entry is **statically
-     complete**. The raw `RefCell` accessors for the `Value`-bearing mutable
-     containers (`@array`, `@struct`, `@set`, box, capture cell) are visible
-     only inside `value/` (`as_*_raw`,
-     [conversions.rs](../../../src/value/repr/accessors/conversions.rs)). So the
-     only way code elsewhere can store into one is through the tracked funnels
-     in [mutate.rs](../../../src/value/arena/mutate.rs) (`push_with_incref` and
+     complete**. The store of a `Value`-bearing mutable container (`@array`,
+     `@struct`, `@set`, box, capture cell) has writes visible only inside
+     `value/` ([store.rs](../../../src/value/store.rs)), and so do the accessors
+     that hand out a store. So the only way code elsewhere can store into one
+     is through the tracked funnels in
+     [mutate.rs](../../../src/value/arena/mutate.rs) (`push_with_incref` and
      friends). An uncounted container store is a compile error, not a review
-     item. Read access goes through borrow-guard/copy-out accessors that cannot
+     item. Read access goes through read guards and copy-outs that cannot
      mutate. Membership-neutral mutation (in-place sort/reverse/shuffle — no
      value enters or leaves the container) is region-neutral. It gets its own
      funnel that grants mutable access without RC traffic. Residual channels,
-     named: `HeapObject`'s fields are still `pub` for construction and the
-     deep-copy machinery. (A direct field match could bypass the seam, so do
-     not write one. The accessor channel is the one closed here.) An
-     `External`'s `Rc<dyn Any>` payload is opaque to both scan and seam. An
+     named: `HeapObject`'s fields are `pub` for construction and the
+     deep-copy machinery, and a field match outside `value/` reaches only a
+     store's read. An `External`'s `Rc<dyn Any>` payload is opaque to both scan
+     and seam. An
      `IoRequest` names values in other regions through that channel and counts
      none of them: it is spent only while the park that raised it stands
      ([what a park retains](park.md));

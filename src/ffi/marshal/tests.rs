@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-22
 //! Marshalling between values and C storage: libffi types, argument storage, and buffer reads and writes.
 //!
 //! docs/ffi.md
@@ -9,8 +9,8 @@ use crate::ffi::types::StructDesc;
 use crate::value::Value;
 
 /// Run `f` with an `Alloc` over a fresh region on the root heap, NOT releasing
-/// it: a reconstructed heap value must outlive the call (the test reads it
-/// afterward), so freeing the region would recycle the pages the returned value
+/// it. A reconstructed heap value must outlive the call, because the test reads
+/// it afterward; freeing the region would recycle the pages the returned value
 /// points at (a UAF). The region simply stays resident for the test's duration.
 fn read_in_region(
     f: impl FnOnce(&mut crate::primitives::ctx::Alloc) -> crate::error::LResult<Value>,
@@ -267,8 +267,7 @@ fn test_read_write_struct_roundtrip() {
         let align = desc.align().unwrap();
         let buf = AlignedBuffer::new(total_size, align);
 
-        let arr = values.as_array_mut().unwrap();
-        let elems = arr.borrow();
+        let elems = values.array_mut_read().unwrap();
         for (i, (field_desc, &offset)) in sd.fields.iter().zip(offsets.iter()).enumerate() {
             let _ = write_value_to_buffer(
                 unsafe { buf.as_mut_ptr().add(offset) },
@@ -304,8 +303,7 @@ fn test_read_write_array_roundtrip() {
         let align = TypeDesc::I32.align().unwrap();
         let buf = AlignedBuffer::new(total_size, align);
 
-        let arr = values.as_array_mut().unwrap();
-        let elems = arr.borrow();
+        let elems = values.array_mut_read().unwrap();
         for (i, elem_val) in elems.iter().enumerate() {
             let _ = write_value_to_buffer(
                 unsafe { buf.as_mut_ptr().add(i * elem_size) },
@@ -385,8 +383,7 @@ fn test_read_write_nested_struct_roundtrip() {
         let align = desc.align().unwrap();
         let buf = AlignedBuffer::new(total_size, align);
 
-        let arr = outer_val.as_array_mut().unwrap();
-        let elems = arr.borrow();
+        let elems = outer_val.array_mut_read().unwrap();
         for (i, (field_desc, &offset)) in outer_sd.fields.iter().zip(offsets.iter()).enumerate() {
             let _ = write_value_to_buffer(
                 unsafe { buf.as_mut_ptr().add(offset) },

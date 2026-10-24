@@ -1,7 +1,8 @@
-// audited: 2026-09-14
+// audited: 2026-10-21
 // What a `traits` field crosses as: the instance's own table on one side, and
 // program data on the other.
-// docs/impl/image.md
+// docs/impl/image/sealing.md
+// docs/impl/image/hydration.md
 
 use super::*;
 use elle::value::HeapTag;
@@ -30,7 +31,7 @@ fn table_region(heap: &FiberHeap) -> RuntimeRegion {
     RuntimeRegion::new(heap.region_of_ptr(ptr)).expect("the table lives in a real region")
 }
 
-// § "Process-owned resources reconstruct in place": a default traitset is
+// A default traitset is
 // instance infrastructure, so the hydrated value must carry the HYDRATING
 // instance's table, not a copy of the dumping instance's.
 //
@@ -105,7 +106,7 @@ fn a_user_traitset_hydrates_out_of_the_body() {
     assert_eq!(entries[0].1, Value::int(42));
 }
 
-// § Hydration step 4: a reconstruction write is a cross-region reference, so
+// A reconstruction write is a cross-region reference, so
 // it is counted like any other. The trap is the free-time equivalence oracle —
 // a debug build scans the dying region's contents and asserts the recorded
 // edge table matches, so an unrecorded traits pointer aborts the free, and an

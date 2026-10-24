@@ -1,4 +1,7 @@
-//! FFI memory management, typed access, and type construction primitives
+// audited: 2026-10-22
+//! FFI memory management, typed access, and type construction primitives.
+//!
+//! docs/ffi.md
 
 use crate::ffi::types::TypeDesc;
 use crate::primitives::def::RegionEffect;
@@ -19,10 +22,8 @@ pub(crate) fn prim_ffi_struct(
     args: &[Value],
 ) -> (SignalBits, Value) {
     // Accept array, @array, or list of type descriptors
-    let field_vals = if let Some(arr) = args[0].as_array() {
-        arr.to_vec()
-    } else if let Some(arr) = args[0].as_array_mut() {
-        arr.borrow().clone()
+    let field_vals = if let Some(elems) = args[0].array_to_vec() {
+        elems
     } else {
         match args[0].list_to_vec_in(ctx.heap_mut()) {
             Ok(v) => v,
@@ -189,10 +190,6 @@ pub fn prim_ffi_free(
     (SIG_OK, Value::NIL)
 }
 
-// ── Typed memory access ─────────────────────────────────────────────
-
-// ── String from pointer ─────────────────────────────────────────────
-
 // ── Pointer arithmetic ──────────────────────────────────────────────
 
 /// `(ptr/add pointer offset)` — Offset a pointer by a byte count.
@@ -294,7 +291,7 @@ pub fn prim_ptr_from_int(
 ) -> (SignalBits, Value) {
     let n = prim_arg!(ctx, args, 0, as_int, "ptr/from-int", "integer");
     // Reinterpret as unsigned — negative values are valid C pointers
-    // (e.g. SQLITE_TRANSIENT = (void(*)(void*))-1 = 0xFFFFFFFFFFFFFFFF).
+    // (SQLITE_TRANSIENT, for example: (void(*)(void*))-1 = 0xFFFFFFFFFFFFFFFF).
     let addr = n as u64;
     // Validate the address fits in a usize (platform pointer width).
     if addr > usize::MAX as u64 {

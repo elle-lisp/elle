@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-22
 // docs/threads.md
 //! Serialization of a live `Value` into a Send-safe `SendValue`.
 //!
@@ -6,8 +6,8 @@
 //! traits-field helper it leans on. Cohesive sub-concerns live in siblings:
 //! `ctx` (the threaded bookkeeping context), `template` (code-object copies,
 //! with the LIR they carry), and `closure` (the interning closure arm).
-//! Re-exports keep `ser::from_value_inner` / `ser::SerContext` resolving
-//! for the parent module unchanged.
+//! Re-exports let the parent module name `ser::from_value_inner` and
+//! `ser::SerContext`.
 
 use super::syntax::syntax_to_send;
 use super::*;
@@ -60,7 +60,7 @@ pub(super) fn from_value_inner(
         return Ok(SendValue::Immediate(value));
     }
 
-    // String values (SSO or heap)
+    // String values
     if let Some(s) = value.with_string(|s| s.to_string()) {
         return Ok(SendValue::String(s));
     }
@@ -89,16 +89,12 @@ pub(super) fn from_value_inner(
         }
 
         // Arrays - deep copy all elements, plus traits
-        HeapObject::LArrayMut {
-            data: vec_ref,
-            traits,
-            ..
-        } => {
-            let borrowed = vec_ref
-                .try_borrow()
-                .map_err(|_| "Cannot borrow array for sending".to_string())?;
+        HeapObject::LArrayMut { data, traits } => {
+            let read = data
+                .try_read()
+                .ok_or_else(|| "Cannot borrow array for sending".to_string())?;
             let copied: Result<Vec<SendValue>, String> =
-                borrowed.iter().map(|v| from_value_inner(*v, ctx)).collect();
+                read.iter().map(|v| from_value_inner(*v, ctx)).collect();
             let traits_sv = send_traits(*traits, HeapTag::LArrayMut, ctx)?;
             Ok(SendValue::Array(copied?, Box::new(traits_sv)))
         }
@@ -136,42 +132,24 @@ pub(super) fn from_value_inner(
         }
 
         // @string - deep copy the bytes, plus traits
-        HeapObject::LStringMut {
-            data: buf_ref,
-            traits,
-            ..
-        } => {
-            let borrowed = buf_ref
-                .try_borrow()
-                .map_err(|_| "Cannot borrow @string for sending".to_string())?;
+        HeapObject::LStringMut { data, traits } => {
+            let read = data
+                .try_read()
+                .ok_or_else(|| "Cannot borrow @string for sending".to_string())?;
             let traits_sv = send_traits(*traits, HeapTag::LStringMut, ctx)?;
-            Ok(SendValue::Buffer(borrowed.clone(), Box::new(traits_sv)))
+            Ok(SendValue::Buffer(read.to_vec(), Box::new(traits_sv)))
         }
 
         // User boxes - deep copy the contents if sendable, plus traits
-        HeapObject::LBox {
-            cell: cell_ref,
-            traits,
-            ..
-        } => {
-            let borrowed = cell_ref
-                .try_borrow()
-                .map_err(|_| "Cannot borrow box for sending".to_string())?;
-            let contents = from_value_inner(*borrowed, ctx)?;
+        HeapObject::LBox { cell, traits } => {
+            let contents = from_value_inner(cell.get(), ctx)?;
             let traits_sv = send_traits(*traits, HeapTag::LBox, ctx)?;
             Ok(SendValue::LBox(Box::new(contents), Box::new(traits_sv)))
         }
 
         // Compiler capture cells - deep copy the contents if sendable, plus traits
-        HeapObject::CaptureCell {
-            cell: cell_ref,
-            traits,
-            ..
-        } => {
-            let borrowed = cell_ref
-                .try_borrow()
-                .map_err(|_| "Cannot borrow capture cell for sending".to_string())?;
-            let contents = from_value_inner(*borrowed, ctx)?;
+        HeapObject::CaptureCell { cell, traits, .. } => {
+            let contents = from_value_inner(cell.get(), ctx)?;
             let traits_sv = send_traits(*traits, HeapTag::CaptureCell, ctx)?;
             Ok(SendValue::CaptureCell(
                 Box::new(contents),
@@ -183,16 +161,12 @@ pub(super) fn from_value_inner(
         HeapObject::Float(f) => Ok(SendValue::Float(*f)),
 
         // Mutable @structs — deep copy all values, plus traits
-        HeapObject::LStructMut {
-            data: map_ref,
-            traits,
-            ..
-        } => {
-            let borrowed = map_ref
-                .try_borrow()
-                .map_err(|_| "Cannot borrow @struct for sending".to_string())?;
+        HeapObject::LStructMut { data, traits } => {
+            let read = data
+                .try_read()
+                .ok_or_else(|| "Cannot borrow @struct for sending".to_string())?;
             let mut copied = BTreeMap::new();
-            for (k, v) in borrowed.iter() {
+            for (k, v) in read.iter() {
                 let Some(key) = super::SendKey::from_key(k) else {
                     return Err("Cannot send @struct with identity keys".to_string());
                 };
@@ -292,16 +266,12 @@ pub(super) fn from_value_inner(
         }
 
         // @bytes - deep copy the bytes, plus traits
-        HeapObject::LBytesMut {
-            data: blob_ref,
-            traits,
-            ..
-        } => {
-            let borrowed = blob_ref
-                .try_borrow()
-                .map_err(|_| "Cannot borrow @bytes for sending".to_string())?;
+        HeapObject::LBytesMut { data, traits } => {
+            let read = data
+                .try_read()
+                .ok_or_else(|| "Cannot borrow @bytes for sending".to_string())?;
             let traits_sv = send_traits(*traits, HeapTag::LBytesMut, ctx)?;
-            Ok(SendValue::Blob(borrowed.clone(), Box::new(traits_sv)))
+            Ok(SendValue::Blob(read.to_vec(), Box::new(traits_sv)))
         }
 
         // Sets (immutable) - deep copy all elements, plus traits
@@ -315,23 +285,19 @@ pub(super) fn from_value_inner(
         }
 
         // Sets (mutable) - deep copy all elements, plus traits
-        HeapObject::LSetMut {
-            data: s_ref,
-            traits,
-            ..
-        } => {
-            let borrowed = s_ref
-                .try_borrow()
-                .map_err(|_| "Cannot borrow mutable set for sending".to_string())?;
+        HeapObject::LSetMut { data, traits } => {
+            let read = data
+                .try_read()
+                .ok_or_else(|| "Cannot borrow mutable set for sending".to_string())?;
             let copied: Result<Vec<SendValue>, String> =
-                borrowed.iter().map(|v| from_value_inner(*v, ctx)).collect();
+                read.iter().map(|v| from_value_inner(*v, ctx)).collect();
             let traits_sv = send_traits(*traits, HeapTag::LSetMut, ctx)?;
             Ok(SendValue::LSetMut(copied?, Box::new(traits_sv)))
         }
 
-        // A bare closure template is never a top-level user value (it is reached
-        // only as a closure instance's template, or through a child table,
-        // serialized via the Closure arm), so it is never sent on its own.
+        // A bare closure template is never a top-level user value. A send reaches
+        // one only as a closure instance's template or through a child table,
+        // both serialized by the Closure arm, so it is never sent on its own.
         HeapObject::ClosureTemplate(_) => Err("Cannot send a bare closure template".to_string()),
     }
 }

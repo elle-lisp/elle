@@ -1,8 +1,8 @@
-// audited: 2026-10-12
+// audited: 2026-10-21
 //! The hydrator: map an image's pages privately, relocate them, and install
 //! them as a freshly minted counted region.
 //!
-//! docs/impl/image.md
+//! docs/impl/image/hydration.md
 //!
 //! Validate the fingerprint, check the tables, reserve one aligned contiguous
 //! interval, `MAP_FIXED` + `MAP_PRIVATE` each page from the descriptor into
@@ -124,7 +124,7 @@ pub fn hydrate(
     let mut meta = vec![0u8; meta_len as usize];
     source.read_exact_at(&mut meta, meta_off)?;
 
-    // The verifier's first pass (§ Verifier): every table decoded and
+    // The verifier's first pass: every table decoded and
     // bounds-checked before a byte of the image is mapped.
     let t = verify::tables(&header, &meta)?;
 
@@ -156,7 +156,7 @@ pub fn hydrate(
         }
     };
 
-    // Replay the name table (step 2), before the region is minted: the
+    // Replay the name table before the region is minted: the
     // spellings are what let this instance print the image's symbols and
     // keywords, and recording one whose hash the instance maps to a different
     // spelling panics here rather than making two names one name.
@@ -184,7 +184,7 @@ pub fn hydrate(
         });
     }
 
-    // Reserve one contiguous interval aligned to the largest page (step 3):
+    // Reserve one contiguous interval aligned to the largest page:
     // with pages placed largest-first, base alignment makes every page
     // self-aligned for the masked-header walk.
     let max_align = t.pages[0].1.size as usize;
@@ -220,7 +220,7 @@ pub fn hydrate(
         armed: true,
     };
 
-    // Map each page from the descriptor into its slot (step 3). The image
+    // Map each page from the descriptor into its slot. The image
     // starts on a base-page boundary, the pages section starts on one inside
     // it, and each offset within that section is a multiple of that page's
     // own (≥ base-page) size — so every file offset here is a multiple of the
@@ -243,7 +243,7 @@ pub fn hydrate(
         debug_assert_eq!(got, want, "MAP_FIXED returned a different address");
     }
 
-    // The relocation pass (step 4): one linear sweep, each write faulting
+    // The relocation pass: one linear sweep, each write faulting
     // its 4 KiB frame copy-on-write private.
     for &(slot, target) in &t.relocs {
         unsafe {
@@ -269,7 +269,7 @@ pub fn hydrate(
         }
     }
 
-    // The verifier's object walk (§ Verifier), over the shells relocation
+    // The verifier's object walk, over the shells relocation
     // has already made resident.
     let mapped: Vec<MappedPage> = t
         .pages
@@ -300,7 +300,7 @@ pub fn hydrate(
         }
     }
 
-    // Install (steps 5–6): the mapped pages become a freshly minted Counted
+    // Install: the mapped pages become a freshly minted Counted
     // region; the header stamps and cursor rebuild happen inside.
     let pages: Vec<(MmapPage, usize, usize)> = t
         .pages

@@ -1,3 +1,8 @@
+// audited: 2026-10-22
+//! A call on a collection: a struct, array, string, bytes or set applied to a key or an index.
+//!
+//! docs/impl/vm.md
+
 use super::*;
 
 /// Dispatch a call on a collection value.
@@ -34,7 +39,7 @@ pub(crate) fn call_collection(
         let default = if args.len() == 2 { args[1] } else { Value::NIL };
         return Some(Ok(sorted_struct_get(s, &key).copied().unwrap_or(default)));
     }
-    if let Some(s) = func.as_struct_mut() {
+    if let Some(s) = func.struct_mut_read() {
         if args.is_empty() || args.len() > 2 {
             return Some(Err((
                 "arity-error",
@@ -54,7 +59,7 @@ pub(crate) fn call_collection(
             }
         };
         let default = if args.len() == 2 { args[1] } else { Value::NIL };
-        return Some(Ok(s.borrow().get(&key).copied().unwrap_or(default)));
+        return Some(Ok(s.get(&key).unwrap_or(default)));
     }
 
     // ── Arrays (immutable and mutable) ───────────────────────────────
@@ -83,7 +88,7 @@ pub(crate) fn call_collection(
             None => return Some(Ok(default)),
         }
     }
-    if let Some(vec_ref) = func.as_array_mut() {
+    if let Some(elems) = func.array_mut_read() {
         if args.is_empty() || args.len() > 2 {
             return Some(Err((
                 "arity-error",
@@ -103,9 +108,8 @@ pub(crate) fn call_collection(
             }
         };
         let default = if args.len() == 2 { args[1] } else { Value::NIL };
-        let borrowed = vec_ref.borrow();
-        match resolve_index(index, borrowed.len()) {
-            Some(i) => return Some(Ok(borrowed[i])),
+        match resolve_index(index, elems.len()) {
+            Some(i) => return Some(Ok(elems[i])),
             None => return Some(Ok(default)),
         }
     }
@@ -148,7 +152,7 @@ pub(crate) fn call_collection(
             })
             .unwrap();
     }
-    if let Some(buf_ref) = func.as_string_mut() {
+    if let Some(bytes) = func.string_mut_read() {
         if args.is_empty() || args.len() > 2 {
             return Some(Err((
                 "arity-error",
@@ -168,8 +172,7 @@ pub(crate) fn call_collection(
             }
         };
         let default = if args.len() == 2 { args[1] } else { Value::NIL };
-        let borrowed = buf_ref.borrow();
-        let s = match std::str::from_utf8(&borrowed) {
+        let s = match std::str::from_utf8(&bytes) {
             Ok(s) => s,
             Err(e) => {
                 return Some(Err((
@@ -218,7 +221,7 @@ pub(crate) fn call_collection(
             None => return Some(Ok(default)),
         }
     }
-    if let Some(blob_ref) = func.as_bytes_mut() {
+    if let Some(bytes) = func.bytes_mut_read() {
         if args.is_empty() || args.len() > 2 {
             return Some(Err((
                 "arity-error",
@@ -238,9 +241,8 @@ pub(crate) fn call_collection(
             }
         };
         let default = if args.len() == 2 { args[1] } else { Value::NIL };
-        let borrowed = blob_ref.borrow();
-        match resolve_index(index, borrowed.len()) {
-            Some(i) => return Some(Ok(Value::int(borrowed[i] as i64))),
+        match resolve_index(index, bytes.len()) {
+            Some(i) => return Some(Ok(Value::int(bytes[i] as i64))),
             None => return Some(Ok(default)),
         }
     }
@@ -256,7 +258,7 @@ pub(crate) fn call_collection(
         let frozen = crate::primitives::sets::freeze_value(args[0], ctx);
         return Some(Ok(Value::bool(s.contains(&frozen))));
     }
-    if let Some(s) = func.as_set_mut() {
+    if let Some(s) = func.set_mut_read() {
         if args.len() != 1 {
             return Some(Err((
                 "arity-error",
@@ -264,7 +266,7 @@ pub(crate) fn call_collection(
             )));
         }
         let frozen = crate::primitives::sets::freeze_value(args[0], ctx);
-        return Some(Ok(Value::bool(s.borrow().contains(&frozen))));
+        return Some(Ok(Value::bool(s.contains(&frozen))));
     }
 
     None

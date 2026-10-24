@@ -1,3 +1,8 @@
+// audited: 2026-10-22
+//! The total order over values: a rank per type, then a comparison within the type.
+//!
+//! docs/impl/values.md
+
 use super::*;
 
 impl PartialOrd for Value {
@@ -48,8 +53,8 @@ fn type_rank(v: &Value) -> u8 {
     } else if v.is_empty_list() {
         6
     } else if v.is_native_fn() {
-        // Native-fn is an immediate (tag below the heap boundary): rank 18, where
-        // native-fns sat as heap objects before. Compared by prim_id below.
+        // Native-fn is an immediate (tag below the heap boundary), compared by
+        // prim_id below.
         18
     } else if v.is_heap() {
         match unsafe { deref(*v).tag() } {
@@ -174,9 +179,7 @@ unsafe fn cmp_heap(a: &Value, b: &Value) -> std::cmp::Ordering {
                 Some(g) => g,
                 None => return Ordering::Equal,
             };
-            let b1 = a1.borrow();
-            let b2 = a2.borrow();
-            b1.as_slice().cmp(b2.as_slice())
+            a1.read().cmp(&a2.read())
         }
 
         // Bytes — byte-wise lexicographic
@@ -184,16 +187,12 @@ unsafe fn cmp_heap(a: &Value, b: &Value) -> std::cmp::Ordering {
 
         // @string — byte-wise lexicographic (borrow)
         (HeapObject::LStringMut { data: b1, .. }, HeapObject::LStringMut { data: b2, .. }) => {
-            let r1 = b1.borrow();
-            let r2 = b2.borrow();
-            r1.cmp(&*r2)
+            b1.read().cmp(&b2.read())
         }
 
         // @bytes — byte-wise lexicographic (borrow)
         (HeapObject::LBytesMut { data: b1, .. }, HeapObject::LBytesMut { data: b2, .. }) => {
-            let r1 = b1.borrow();
-            let r2 = b2.borrow();
-            r1.cmp(&*r2)
+            b1.read().cmp(&b2.read())
         }
 
         // Struct — entry-wise lexicographic (BTreeMap iteration is sorted)
@@ -207,9 +206,7 @@ unsafe fn cmp_heap(a: &Value, b: &Value) -> std::cmp::Ordering {
                 Some(g) => g,
                 None => return Ordering::Equal,
             };
-            let b1 = t1.borrow();
-            let b2 = t2.borrow();
-            b1.iter().cmp(b2.iter())
+            t1.read().iter().cmp(t2.read().iter())
         }
 
         // Box / CaptureCell — by contained value (borrow)
@@ -219,9 +216,7 @@ unsafe fn cmp_heap(a: &Value, b: &Value) -> std::cmp::Ordering {
                 Some(g) => g,
                 None => return Ordering::Equal,
             };
-            let v1 = c1.borrow();
-            let v2 = c2.borrow();
-            v1.cmp(&*v2)
+            c1.get().cmp(&c2.get())
         }
 
         // LibHandle — by u32 ID
@@ -259,9 +254,7 @@ unsafe fn cmp_heap(a: &Value, b: &Value) -> std::cmp::Ordering {
                 Some(g) => g,
                 None => return Ordering::Equal,
             };
-            let b1 = s1.borrow();
-            let b2 = s2.borrow();
-            b1.iter().cmp(b2.iter())
+            s1.read().iter().cmp(s2.read().iter())
         }
 
         // All reference-identity types — by raw pointer (payload)

@@ -1,3 +1,8 @@
+// audited: 2026-10-22
+//! The JIT's runtime helpers for the type tests and the intrinsic data operations.
+//!
+//! docs/impl/jit.md
+
 use super::*;
 
 /// Check if value is nil
@@ -113,24 +118,23 @@ pub extern "C" fn elle_jit_length(
         v.list_to_vec().expect("%length: improper list").len()
     } else if let Some(a) = v.as_array() {
         a.len()
-    } else if let Some(a) = v.as_array_mut() {
-        a.borrow().len()
+    } else if let Some(a) = v.array_mut_read() {
+        a.len()
     } else if let Some(s) = v.as_struct() {
         s.len()
-    } else if let Some(s) = v.as_struct_mut() {
-        s.borrow().len()
+    } else if let Some(s) = v.struct_mut_read() {
+        s.len()
     } else if let Some(s) = v.as_set() {
         s.len()
-    } else if let Some(s) = v.as_set_mut() {
-        s.borrow().len()
+    } else if let Some(s) = v.set_mut_read() {
+        s.len()
     } else if let Some(b) = v.as_bytes() {
         b.len()
-    } else if let Some(b) = v.as_bytes_mut() {
-        b.borrow().len()
+    } else if let Some(b) = v.bytes_mut_read() {
+        b.len()
     } else if let Some(r) = v.with_string(|s| crate::segment::grapheme_count(s, gen)) {
         r
-    } else if let Some(buf) = v.as_string_mut() {
-        let b = buf.borrow();
+    } else if let Some(b) = v.string_mut_read() {
         crate::segment::grapheme_count(
             std::str::from_utf8(&b).expect("%length: @string invalid UTF-8"),
             gen,
@@ -155,16 +159,16 @@ pub extern "C" fn elle_jit_get(obj_tag: u64, obj_pay: u64, key_tag: u64, key_pay
     use crate::value::TableKey;
     let result = if let Some(elems) = obj.as_array() {
         elems[key.as_int().expect("%get: index must be int") as usize]
-    } else if let Some(a) = obj.as_array_mut() {
-        a.borrow()[key.as_int().expect("%get: index must be int") as usize]
+    } else if let Some(a) = obj.array_mut_read() {
+        a[key.as_int().expect("%get: index must be int") as usize]
     } else if let Some(pairs) = obj.as_struct() {
         let tk = TableKey::from_value(&key).expect("%get: unhashable key");
         crate::value::sorted_struct_get(pairs, &tk)
             .copied()
             .unwrap_or(Value::NIL)
-    } else if let Some(t) = obj.as_struct_mut() {
+    } else if let Some(t) = obj.struct_mut_read() {
         let tk = TableKey::from_value(&key).expect("%get: unhashable key");
-        t.borrow().get(&tk).copied().unwrap_or(Value::NIL)
+        t.get(&tk).unwrap_or(Value::NIL)
     } else {
         panic!("%get: unsupported type {}", obj.type_name())
     };
@@ -274,14 +278,14 @@ pub extern "C" fn elle_jit_has(
 
 /// Push — panics on type error (intrinsic contract).
 ///
-/// Mirrors `handle_intr_push` in `src/vm/types.rs`. Routes through the shared
-/// `prim_push` body via `run_alloc_intrinsic`: an @array mutates in place
-/// (through `arena::push_with_incref`, so cross-region values inserted into the
-/// @array keep their source region alive) and is returned as a pass-through; an
+/// Mirrors `handle_intr_push` in src/vm/types/intrinsic.rs. Routes through the
+/// shared `prim_push` body via `run_alloc_intrinsic`. An @array mutates in place
+/// through `arena::push_with_incref`, which keeps the source region of an
+/// inserted cross-region value alive, and is returned as a pass-through. An
 /// immutable array yields a fresh copy born in this call's own minted region.
-/// Both cases pass-through-retain, and the compiler emits the matching value-based
-/// `DecrefValueRegion` (%array-push is now a `produces_call_result_region` op),
-/// exactly like `elle_jit_put`/`del`/`string_push`.
+/// Both cases pass-through-retain, and the compiler emits the matching
+/// value-based `DecrefValueRegion` (%array-push is a `produces_call_result_region`
+/// op), exactly like `elle_jit_put`/`del`/`string_push`.
 #[no_mangle]
 pub extern "C" fn elle_jit_push(
     arr_tag: u64,
@@ -347,14 +351,14 @@ pub extern "C" fn elle_jit_string_push(
 
 /// Bytes push — panics on type error (intrinsic contract).
 ///
-/// Mirrors `handle_intr_bytes_push` in `src/vm/types.rs`. Routes through the
-/// shared `prim_bytes_push` body via `run_alloc_intrinsic`: a `@bytes` appends
-/// the truncated `u8` in place and is returned as a pass-through; an immutable
-/// `bytes` yields a fresh copy born in this call's own minted region and
-/// pass-through-retained, with the compiler's matching value-based
-/// `DecrefValueRegion` (%bytes-push is now a `produces_call_result_region` op). No
-/// cross-region RC tracking of the pushed value is needed because `@bytes` stores
-/// raw bytes, not Value references (per `docs/regions.md`).
+/// Mirrors `handle_intr_bytes_push` in src/vm/types/intrinsic.rs. Routes
+/// through the shared `prim_bytes_push` body via `run_alloc_intrinsic`. A
+/// `@bytes` appends the truncated `u8` in place and is returned as a
+/// pass-through. An immutable `bytes` yields a fresh copy born in this call's
+/// own minted region and pass-through-retained, with the compiler's matching
+/// value-based `DecrefValueRegion` (%bytes-push is a `produces_call_result_region`
+/// op). The pushed value takes no cross-region RC tracking, because `@bytes`
+/// stores raw bytes, not Value references.
 #[no_mangle]
 pub extern "C" fn elle_jit_bytes_push(
     coll_tag: u64,
@@ -386,9 +390,9 @@ pub extern "C" fn elle_jit_bytes_push(
 /// Pop — panics on type error or empty (intrinsic contract).
 ///
 /// Routes through `arena::pop_with_decref`, the single move-out funnel every tier
-/// shares: it hands the popped element back to the caller, holding the caller's
-/// owning reference before releasing the container's so a sole-owned element's
-/// region is never freed under the returned Value. Like the interpreter opcode
+/// shares. It hands the popped element back to the caller, and holds the
+/// caller's owning reference before releasing the container's. So a sole-owned
+/// element's region is never freed under the returned Value. Like the interpreter opcode
 /// (`handle_intr_pop`), this unchecked JIT path takes no pass-through retain of its
 /// own — the body's retain IS the caller's reference. (The checked native-call
 /// path routes through `dispatch_native_call`, which skips its own
@@ -402,24 +406,22 @@ pub extern "C" fn elle_jit_pop(
     let v = Value { tag, payload };
     assert!(v.is_array_mut(), "%pop: expected @array");
     // The heap comes from the threaded `JitCtx`'s VM — this instance's own heap,
-    // not a per-thread slot (docs/impl/region/ctx.md "JIT intrinsic helpers reach
-    // the VM through a JitCtx").
+    // not a per-thread slot (docs/impl/region/ctx.md).
     let heap = unsafe { &mut *(*(*jit_ctx).vm()).heap_ptr };
     JitValue::from_value(crate::value::arena::pop_with_decref(heap, v))
 }
 
 /// Freeze — mutable → immutable copy (pass-through for already-immutable types).
 ///
-/// `%freeze` is an `IntrinsicOp::allocates` op: the lowerer's `emit_alloc`
+/// `%freeze` is an `IntrinsicOp::allocates` op. The lowerer's `emit_alloc`
 /// assigns it a static region SLOT with a matching `DecrefRegion(slot)`, so the
-/// fresh immutable copy must be born in THAT slot's resolved physical region —
-/// not a fresh mint. The emitter resolves the slot to
-/// its physical region id with `elle_jit_resolve_alloc_region` (the same
-/// region-id ABI `List`/`MakeArrayMut`/`MaterializeConst` use) and threads it
-/// here; we rebuild the region and run the shared `prim_freeze` body through a
-/// `with_region` ctx — one body shared with the interpreter
-/// (`handle_intr_freeze`), no drift, and the `DecrefRegion(slot)` frees exactly
-/// this region.
+/// fresh immutable copy must be born in THAT slot's resolved physical region,
+/// not a fresh mint. The emitter resolves the slot to its physical region id
+/// with `elle_jit_resolve_alloc_region`, the same region-id ABI
+/// `List`/`MakeArrayMut`/`MaterializeConst` use, and threads it here. This
+/// helper runs the shared `prim_freeze` body through a `with_region` ctx, the
+/// body the interpreter's `handle_intr_freeze` runs too. The `DecrefRegion(slot)`
+/// frees exactly this region.
 #[no_mangle]
 pub extern "C" fn elle_jit_freeze(
     tag: u64,
@@ -449,7 +451,7 @@ pub extern "C" fn elle_jit_freeze(
 /// `IntrinsicOp::allocates` op, so the fresh mutable copy is born in the
 /// emitter-resolved SLOT region (threaded as `region`), freed by the matching
 /// `DecrefRegion(slot)`. Runs the shared `prim_thaw` body through a `with_region`
-/// ctx — one body shared with the interpreter (`handle_intr_thaw`).
+/// ctx, the body the interpreter's `handle_intr_thaw` runs too.
 #[no_mangle]
 pub extern "C" fn elle_jit_thaw(
     tag: u64,

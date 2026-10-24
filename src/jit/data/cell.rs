@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-22
 //! Capture-cell (box) operations for JIT-compiled code.
 //!
 //! docs/impl/region/rules.md
@@ -44,11 +44,11 @@ pub extern "C" fn elle_jit_make_capture(
 /// analog of the interpreter's `populate_env`/`push_param` capture-cell path
 /// (`env_value_region` mints a fresh `new_runtime_region`, `alloc_in_region`
 /// builds the cell there; src/vm/env.rs). The prologue must use THIS, not
-/// `elle_jit_make_capture` (which builds the cell in the region slot it is
-/// handed): on a JIT->JIT call the callee inherits the caller's region, so a cell
-/// allocated there commingles with it (docs/impl/region/rules.md Rule 6) and its
-/// value-based `DecrefCellRegion` decrefs the caller's region — a leak (Rule 8)
-/// and a latent use-after-free. `alloc_in_region` → `alloc_obj` scans the cell
+/// `elle_jit_make_capture`, which builds the cell in the region slot it is
+/// handed. On a JIT->JIT call the callee inherits the caller's region, so a cell
+/// allocated there commingles with it (docs/impl/region/rules.md, Rule 6). Its
+/// value-based `DecrefCellRegion` then decrefs the caller's region: a leak
+/// (Rule 8) and a latent use-after-free. `alloc_in_region` → `alloc_obj` scans the cell
 /// and increfs the wrapped value's region (the cross-region capture edge),
 /// exactly as the interpreter does.
 #[no_mangle]
@@ -103,8 +103,8 @@ pub extern "C" fn elle_jit_load_capture_cell(cell_tag: u64, cell_payload: u64) -
         tag: cell_tag,
         payload: cell_payload,
     };
-    if let Some(cell_ref) = cell.as_capture_cell() {
-        JitValue::from_value(*cell_ref.borrow())
+    if let Some(inner) = cell.capture_cell_get() {
+        JitValue::from_value(inner)
     } else {
         // The LIR promised a capture cell here; anything else is corruption
         // (a scrubbed or recycled slot reads as an unrelated tag). Detonate
@@ -128,8 +128,8 @@ pub extern "C" fn elle_jit_load_capture_cell(cell_tag: u64, cell_payload: u64) -
 pub extern "C" fn elle_jit_load_capture(tag: u64, payload: u64) -> JitValue {
     let val = Value { tag, payload };
     if val.is_capture_cell() {
-        if let Some(cell_ref) = val.as_capture_cell() {
-            JitValue::from_value(*cell_ref.borrow())
+        if let Some(inner) = val.capture_cell_get() {
+            JitValue::from_value(inner)
         } else {
             // Unreachable: `is_capture_cell` implies the accessor answers.
             JitValue { tag, payload }

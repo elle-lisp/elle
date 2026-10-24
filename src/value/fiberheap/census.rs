@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-23
 //! The post-boot heap census: every live object in this instance's region
 //! store, and the graph a boot image must dump.
 //!
@@ -6,17 +6,18 @@
 //! docs/impl/image/measurements.md
 //!
 //! Reached from `Runtime::build_with` under `--trace=census` and from the
-//! sealing regression net in `tests/integration/census.rs`. The census is
-//! item 2 of the measurements above.
+//! sealing regression net in `tests/integration/census.rs`.
 //!
 //! Byte accounting is a dump-size estimate, not an allocator audit. Each
 //! object contributes its `HeapObject` shell plus its payload wherever the
 //! payload lives — region pages (`RegionSlice` backings, syntax trees, code
-//! payloads) or, for a mutable container, the Rust heap. A payload shared
-//! through an aliased `RegionSlice` is counted once (first holder). Not
-//! counted: per-container `Rc`/`RefCell` bookkeeping, a code payload's region
-//! tables, masks, child table and LIR body, and fiber-internal state (fibers
-//! are refused from the body).
+//! payloads, the extent of an `@array`, `@string`, `@bytes` or `@set` store)
+//! or, for a `@struct`, the Rust heap. A box's or capture cell's value lies
+//! inside its shell, so the shell is all it costs. A payload shared through an
+//! aliased `RegionSlice` is counted once (first holder). Not counted:
+//! per-container `Rc`/`RefCell` bookkeeping, a code payload's region tables,
+//! masks, child table and LIR body, and fiber-internal state (fibers are
+//! refused from the body).
 //!
 //! Pointer-slot counting follows the image format's relocation definition
 //! (docs/impl/image/format.md): a heap-tagged `Value` slot or
@@ -350,13 +351,10 @@ fn measure(obj: &HeapObject, seen: &mut FxHashSet<usize>) -> ObjStat {
         HeapObject::Syntax { syntax, .. } => stat.bytes += syntax_bytes(syntax, seen),
         HeapObject::Parameter { default, .. } => heap_slot(default, &mut stat),
         HeapObject::LBox { cell, .. } | HeapObject::CaptureCell { cell, .. } => {
-            stat.bytes += size_of::<Value>();
-            if let Ok(v) = cell.try_borrow() {
-                heap_slot(&v, &mut stat);
-            }
+            heap_slot(&cell.get(), &mut stat);
         }
         HeapObject::LArrayMut { data, .. } => {
-            if let Ok(vs) = data.try_borrow() {
+            if let Some(vs) = data.try_read() {
                 stat.bytes += vs.len() * size_of::<Value>();
                 for v in vs.iter() {
                     heap_slot(v, &mut stat);
@@ -364,7 +362,7 @@ fn measure(obj: &HeapObject, seen: &mut FxHashSet<usize>) -> ObjStat {
             }
         }
         HeapObject::LSetMut { data, .. } => {
-            if let Ok(vs) = data.try_borrow() {
+            if let Some(vs) = data.try_read() {
                 stat.bytes += vs.len() * size_of::<Value>();
                 for v in vs.iter() {
                     heap_slot(v, &mut stat);
@@ -372,7 +370,7 @@ fn measure(obj: &HeapObject, seen: &mut FxHashSet<usize>) -> ObjStat {
             }
         }
         HeapObject::LStructMut { data, .. } => {
-            if let Ok(m) = data.try_borrow() {
+            if let Some(m) = data.try_read() {
                 stat.bytes += m.len() * size_of::<(TableKey, Value)>();
                 for (k, v) in m.iter() {
                     k.for_each_heap_value(&mut |kv| heap_slot(kv, &mut stat));
@@ -381,7 +379,7 @@ fn measure(obj: &HeapObject, seen: &mut FxHashSet<usize>) -> ObjStat {
             }
         }
         HeapObject::LStringMut { data, .. } | HeapObject::LBytesMut { data, .. } => {
-            if let Ok(bs) = data.try_borrow() {
+            if let Some(bs) = data.try_read() {
                 stat.bytes += bs.len();
             }
         }

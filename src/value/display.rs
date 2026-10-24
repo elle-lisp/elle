@@ -1,12 +1,13 @@
-//! audited: 2026-09-17
-//! Display and Debug implementations for values
+// audited: 2026-10-22
+//! Display and Debug implementations for values.
+//!
+//! docs/impl/symbol.md
 //!
 //! The tagged-union `Value` renders through one body, `fmt_value`, parameterized
 //! by a `debug` flag and an optional `&SymbolTable`. Symbol-name resolution is
-//! per-instance (docs/impl/symbol.md § "Reading a name, and not reading one"): a bare
-//! `Display`/`Debug` carries no table and renders a symbol as `#<symbol:hash>`, while
-//! [`Value::display_with`] / [`Value::debug_with`] thread an instance's table so
-//! names resolve all the way down.
+//! per-instance. A bare `Display`/`Debug` carries no table and renders a symbol
+//! as `#<symbol:hash>`, while [`Value::display_with`] / [`Value::debug_with`]
+//! thread an instance's table so names resolve all the way down.
 
 use crate::symbol::SymbolTable;
 use crate::value::cycle::{fmt_enter, HareState};
@@ -14,10 +15,9 @@ use crate::value::Value;
 use std::fmt;
 
 /// Format a `@string` (mutable string buffer) value.
-fn fmt_string_mut(buf: &std::cell::RefCell<Vec<u8>>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    let borrowed = buf.borrow();
+fn fmt_string_mut(bytes: &[u8], f: &mut fmt::Formatter<'_>) -> fmt::Result {
     write!(f, "@\"")?;
-    for &byte in borrowed.iter() {
+    for &byte in bytes {
         if byte == b'"' {
             write!(f, "\\\"")?;
         } else if byte == b'\\' {
@@ -44,10 +44,9 @@ fn fmt_bytes(b: &[u8], f: &mut fmt::Formatter<'_>) -> fmt::Result {
 }
 
 /// Format mutable `@bytes` value.
-fn fmt_bytes_mut(blob: &std::cell::RefCell<Vec<u8>>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    let borrowed = blob.borrow();
+fn fmt_bytes_mut(bytes: &[u8], f: &mut fmt::Formatter<'_>) -> fmt::Result {
     write!(f, "@b[")?;
-    for (i, byte) in borrowed.iter().enumerate() {
+    for (i, byte) in bytes.iter().enumerate() {
         if i > 0 {
             write!(f, " ")?;
         }
@@ -81,8 +80,7 @@ fn write_float(f: &mut fmt::Formatter<'_>, n: f64) -> fmt::Result {
 /// (`debug == true`); it recurses by calling itself, so a threaded table reaches
 /// every nested symbol. `symbols` is `None` for a bare trait render — a symbol
 /// then prints `#<symbol:hash>` — and `Some` when a caller threads its instance's
-/// table via [`Value::display_with`] / [`Value::debug_with`]
-/// (docs/impl/symbol.md § "Reading a name, and not reading one").
+/// table via [`Value::display_with`] / [`Value::debug_with`].
 ///
 /// Where the two renderings diverge they branch on `debug`: strings (Debug quotes
 /// and escapes), and the element/key recursion of cons/array/set/struct. Two
@@ -116,12 +114,12 @@ pub(crate) fn fmt_value(
     }
     if let Some(id) = v.as_symbol() {
         // Identical in Display and Debug: the bare name if the threaded table
-        // resolves it, else `#<symbol:hash>`. The name carries no leading `'` —
-        // Scheme/CL print a symbol as its bare name (`'` is reader syntax for
-        // `quote`, not part of a symbol's printed form), and this matches the
-        // `string`/`println` path (`src/primitives/convert.rs`), so a list of
-        // symbols renders the same `(a b c)` everywhere it appears (a bare
-        // `Display`, a struct field, an error's `:syntax` form). A symbol stays
+        // resolves it, else `#<symbol:hash>`. The name carries no leading `'`:
+        // Scheme/CL print a symbol as its bare name, since `'` is reader syntax
+        // for `quote`. This matches the `string`/`println` path
+        // (src/primitives/convert.rs), so a list of symbols renders the same
+        // `(a b c)` everywhere it appears: a bare `Display`, a struct field, an
+        // error's `:syntax` form. A symbol stays
         // distinguishable from a `"string"` in Debug mode (strings quote) and
         // from a `:keyword` always.
         return match symbols.and_then(|s| s.name(id)) {
@@ -130,7 +128,7 @@ pub(crate) fn fmt_value(
         };
     }
     // Keywords resolve their spelling through the threaded memo, exactly as
-    // symbols do; without one (or for a spelling this instance never learned)
+    // symbols do. Without one, or for a spelling this instance never learned,
     // the unreadable form keeps the identity visible without fabricating a
     // keyword literal that would denote a different keyword.
     if let Some(hash) = v.keyword_hash() {
@@ -146,7 +144,7 @@ pub(crate) fn fmt_value(
     if v.is_native_fn() {
         return write!(f, "<native-fn>");
     }
-    // String (SSO or heap): Debug quotes and escapes; Display prints raw.
+    // String: Debug quotes and escapes; Display prints raw.
     if v.is_string() {
         return v
             .with_string(|s| {
@@ -178,12 +176,11 @@ pub(crate) fn fmt_value(
     }
 
     // Array (@array, mutable).
-    if let Some(vec_ref) = v.as_array_mut_raw() {
+    if let Some(vec) = v.array_mut_read() {
         let _guard = match fmt_enter(v.payload as usize) {
             Some(g) => g,
             None => return write!(f, "@[<cycle>]"),
         };
-        let vec = vec_ref.borrow();
         write!(f, "@[")?;
         for (i, item) in vec.iter().enumerate() {
             if i > 0 {
@@ -196,12 +193,11 @@ pub(crate) fn fmt_value(
 
     // @struct (mutable). The key follows the outer mode; the value is always
     // rendered Debug-style.
-    if let Some(table_ref) = v.as_struct_mut_raw() {
+    if let Some(table) = v.struct_mut_read() {
         let _guard = match fmt_enter(v.payload as usize) {
             Some(g) => g,
             None => return write!(f, "@{{<cycle>}}"),
         };
-        let table = table_ref.borrow();
         write!(f, "@{{")?;
         let mut first = true;
         for (k, val) in table.iter() {
@@ -239,12 +235,11 @@ pub(crate) fn fmt_value(
 
     // Box — the inner value always renders in Display mode, whatever the outer
     // mode is.
-    if let Some(cell_ref) = v.as_lbox_raw() {
+    if let Some(val) = v.lbox_get() {
         let _guard = match fmt_enter(v.payload as usize) {
             Some(g) => g,
             None => return write!(f, "<box <cycle>>"),
         };
-        let val = cell_ref.borrow();
         write!(f, "<box ")?;
         fmt_value(&val, symbols, false, f)?;
         return write!(f, ">");
@@ -276,14 +271,14 @@ pub(crate) fn fmt_value(
         return write!(f, "<parameter:{}>", id);
     }
 
-    if let Some(buf_ref) = v.as_string_mut() {
-        return fmt_string_mut(buf_ref, f);
+    if let Some(bytes) = v.string_mut_read() {
+        return fmt_string_mut(&bytes, f);
     }
     if let Some(b) = v.as_bytes() {
         return fmt_bytes(b, f);
     }
-    if let Some(blob_ref) = v.as_bytes_mut() {
-        return fmt_bytes_mut(blob_ref, f);
+    if let Some(bytes) = v.bytes_mut_read() {
+        return fmt_bytes_mut(&bytes, f);
     }
 
     // Array (immutable).
@@ -311,12 +306,11 @@ pub(crate) fn fmt_value(
     }
 
     // Set (mutable).
-    if let Some(set_ref) = v.as_set_mut_raw() {
+    if let Some(set) = v.set_mut_read() {
         let _guard = match fmt_enter(v.payload as usize) {
             Some(g) => g,
             None => return write!(f, "@|<cycle>|"),
         };
-        let set = set_ref.borrow();
         write!(f, "@|")?;
         for (i, item) in set.iter().enumerate() {
             if i > 0 {
@@ -444,8 +438,7 @@ impl fmt::Display for DebugWith<'_> {
 
 impl Value {
     /// Render through `symbols`, resolving symbol names to the bare `name`; pass `None` to
-    /// render `#<symbol:hash>`. The threaded-table alternative to a bare `Display`
-    /// (docs/impl/symbol.md § "Reading a name, and not reading one").
+    /// render `#<symbol:hash>`. The threaded-table alternative to a bare `Display`.
     pub fn display_with<'a>(&self, symbols: Option<&'a SymbolTable>) -> DisplayWith<'a> {
         DisplayWith {
             value: *self,

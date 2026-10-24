@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-22
 //! Array-call, tail-call, and env-building JIT entry points.
 //!
 //! docs/impl/jit.md
@@ -32,10 +32,8 @@ pub extern "C" fn elle_jit_call_array(
     // Claimed before the callee can park, exactly as on the interpreter tier.
     let args_array = vm_ref.take_splice_args(args_slot);
 
-    let args: Vec<Value> = if let Some(arr) = args_val.as_array_mut() {
-        arr.borrow().to_vec()
-    } else if let Some(arr) = args_val.as_array() {
-        arr.to_vec()
+    let args: Vec<Value> = if let Some(elems) = args_val.array_to_vec() {
+        elems
     } else {
         vm_ref.set_error(
             "type-error",
@@ -70,8 +68,8 @@ pub extern "C" fn elle_jit_call_array(
 /// Tail-call a function with arguments from an array value.
 /// Unpacks the array and delegates to the shared tail-call body.
 ///
-/// A spliced tail call MOVES nothing — its arguments came out of the args array,
-/// not off this frame — so the callee mints one reference per parameter
+/// A spliced tail call MOVES nothing: its arguments came out of the args array,
+/// not off this frame. So the callee mints one reference per parameter
 /// (`own_params`), and the array's reclaim balances the pushes that built it.
 #[no_mangle]
 pub extern "C" fn elle_jit_tail_call_array(
@@ -93,10 +91,8 @@ pub extern "C" fn elle_jit_tail_call_array(
     // Claimed before the callee can park, exactly as on the interpreter tier.
     let args_array = vm_ref.take_splice_args(args_slot);
 
-    let args: Vec<Value> = if let Some(arr) = args_val.as_array_mut() {
-        arr.borrow().to_vec()
-    } else if let Some(arr) = args_val.as_array() {
-        arr.to_vec()
+    let args: Vec<Value> = if let Some(elems) = args_val.array_to_vec() {
+        elems
     } else {
         vm_ref.set_error(
             "type-error",
@@ -249,9 +245,9 @@ pub extern "C" fn elle_jit_tail_call(
 /// [`elle_jit_tail_call_array`].
 ///
 /// `spliced_args` is the same fact `tail_call_inner` reads on the interpreter
-/// tier: an ordinary tail call MOVES its arguments (the caller's reference
-/// transfers), while a spliced one holds them in an args array the convention
-/// owns and reclaims, so the callee mints one reference per parameter instead.
+/// tier. An ordinary tail call MOVES its arguments: the caller's reference
+/// transfers. A spliced one holds them in an args array the convention owns
+/// and reclaims, so the callee mints one reference per parameter instead.
 #[allow(clippy::too_many_arguments)]
 fn jit_tail_call_inner(
     func_tag: u64,
@@ -367,11 +363,11 @@ fn jit_tail_call_inner(
 
     // Callable collections: struct, array, set, string, bytes — in TAIL
     // position. Routed through the shared `dispatch_collection_call` for the
-    // per-execution region + Rule-5 pass-through retain, then returned exactly
+    // per-execution region + Rule-5 pass-through retain. Then returned exactly
     // like the native-tail Ok path above (`jit_handle_primitive_signal` →
     // `JitValue::from_value`): the value is handed back in the return register
-    // with its one owning reference, and the JIT-compiled caller's
-    // post-`TailCall` block runs the owned-arg releases + result handling.
+    // with its one owning reference. The JIT-compiled caller's post-`TailCall`
+    // block runs the owned-arg releases + result handling.
     // Handing the value over through `fiber.signal` instead reaches neither, and
     // a returned element co-located in its collection's region is then freed
     // under the caller's borrow.

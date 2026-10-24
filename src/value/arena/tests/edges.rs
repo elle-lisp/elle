@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-10-22
 // The mutable-store seam records a content edge for a store the alloc-time
 // scan never saw.
 //
@@ -20,13 +20,7 @@ fn mutable_push_records_outgoing_edge() {
     let (val, rid_a) =
         alloc_in_fresh_region(heap, HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)));
     let heap = unsafe { &mut *heap_ptr };
-    let (arr, rid_b) = alloc_in_fresh_region(
-        heap,
-        HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![])),
-            traits: Value::NIL,
-        },
-    );
+    let (arr, rid_b) = array_in_fresh_region(heap);
     assert_ne!(rid_a, rid_b);
     assert!(
         unsafe { (*heap_ptr).outgoing_edges(rid_b) }.is_empty(),
@@ -50,13 +44,7 @@ fn duplicate_edges_counted_then_decremented() {
     let (val, rid_a) =
         alloc_in_fresh_region(heap, HeapObject::Pair(Pair::new(Value::int(1), Value::NIL)));
     let heap = unsafe { &mut *heap_ptr };
-    let (arr, rid_b) = alloc_in_fresh_region(
-        heap,
-        HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![])),
-            traits: Value::NIL,
-        },
-    );
+    let (arr, rid_b) = array_in_fresh_region(heap);
     let heap = unsafe { &mut *heap_ptr };
     crate::value::arena::push_with_incref(heap, arr, val);
     let heap = unsafe { &mut *heap_ptr };
@@ -94,13 +82,7 @@ fn overwrite_removes_old_edge() {
     let (val_c, rid_c) =
         alloc_in_fresh_region(heap, HeapObject::Pair(Pair::new(Value::int(2), Value::NIL)));
     let heap = unsafe { &mut *heap_ptr };
-    let (arr, rid_b) = alloc_in_fresh_region(
-        heap,
-        HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![])),
-            traits: Value::NIL,
-        },
-    );
+    let (arr, rid_b) = array_in_fresh_region(heap);
     let heap = unsafe { &mut *heap_ptr };
     crate::value::arena::push_with_incref(heap, arr, val_a);
     assert_eq!(
@@ -120,11 +102,11 @@ fn overwrite_removes_old_edge() {
 
 /// A mutable-set del of a HEAP member un-records and decrefs the STORED member's
 /// region, not the caller's lookup value. The stored member and the lookup are
-/// distinct allocations in distinct regions that merely compare equal (set
-/// membership is by value); resolving the un-record/decref from the lookup drifts
-/// the outgoing-edge table (a plain `BTreeSet::remove` hands back no element) and
-/// over-frees the caller's live region. RED against the pre-`take` seam, which
-/// un-recorded `region(lookup)` — an edge never recorded.
+/// distinct allocations in distinct regions that merely compare equal, because
+/// set membership is by value. The counter-factual resolves the un-record and
+/// decref from the lookup: it un-records `region(lookup)`, an edge never
+/// recorded, which drifts the outgoing-edge table and over-frees the caller's
+/// live region.
 #[test]
 fn set_del_releases_stored_member_not_lookup_value() {
     let heap_ptr = crate::value::arena::leaked_test_heap();
@@ -139,13 +121,7 @@ fn set_del_releases_stored_member_not_lookup_value() {
     assert_ne!(rid_a, rid_c);
     // The set — region B.
     let heap = unsafe { &mut *heap_ptr };
-    let (set, rid_b) = alloc_in_fresh_region(
-        heap,
-        HeapObject::LSetMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(std::collections::BTreeSet::new())),
-            traits: Value::NIL,
-        },
-    );
+    let (set, rid_b) = set_in_fresh_region(heap);
     // Add the member: records B → A, increfs A.
     let heap = unsafe { &mut *heap_ptr };
     assert!(crate::value::arena::set_add_with_incref(heap, set, member));

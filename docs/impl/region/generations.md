@@ -48,7 +48,7 @@ guardfree makes the re-claimed window loud in dedicated runs.
 `region_of` resolves a pointer to its region through
 `RegionStore::region_of_ptr`. A pointer into a hydrated image resolves through
 the store's interval table, with a range check and no header read
-([image.md](../image.md)). Every other pointer needs its **page base** first.
+([hydration](../image/hydration.md)). Every other pointer needs its **page base** first.
 Pages are variable-sized (geometric growth to 4 MiB), so the walk masks the
 pointer to each candidate power-of-2 alignment and reads the header there.
 The header's `size_tag` carries a 24-bit `PAGE_MAGIC` plus `log2(page_size)`,
@@ -159,8 +159,8 @@ panic there would turn tolerated teardown ordering into false positives.
 
 The store id scopes the check to pages the checking store actually stamped.
 Generations from two different stores are unrelated numbers. A worker thread's
-`region_of` on a value its parent's heap allocated, which the spawn-closure
-path does, would otherwise compare the parent's stamp against the worker's
+`region_of` on a value its parent's heap allocated, which a channel message
+sent across threads hands it, would otherwise compare the parent's stamp against the worker's
 counter and report a false positive. A store-id mismatch is definitive, because
 pages never migrate between stores (each store owns its page pool). So the
 check skips such pages, and keeps `region_of`'s cross-thread behavior, unsound

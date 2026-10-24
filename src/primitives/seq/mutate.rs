@@ -1,4 +1,7 @@
+// audited: 2026-10-22
 //! In-place seq mutation: push and pop.
+//!
+//! docs/impl/region/rules.md
 //!
 //! Unlike the query ops these take an `Alloc` (not the fuller `NativeCtx`),
 //! since growing/shrinking a @mutable container needs heap refcount
@@ -22,7 +25,7 @@ pub fn seq_push(
         ));
     }
     // @string — append string
-    if let Some(buf_ref) = val.as_string_mut() {
+    if val.is_string_mut() {
         let s = elem.with_string(|s| s.to_string()).ok_or_else(|| {
             ctx.error(
                 "type-error",
@@ -32,13 +35,13 @@ pub fn seq_push(
                 ),
             )
         })?;
-        buf_ref.borrow_mut().extend_from_slice(s.as_bytes());
+        crate::value::arena::bytes_append(ctx.heap_mut(), *val, s.as_bytes());
         return Ok(*val);
     }
     // @bytes — append byte
-    if let Some(blob_ref) = val.as_bytes_mut() {
+    if val.is_bytes_mut() {
         let byte = require_byte("push", &elem, ctx)?;
-        blob_ref.borrow_mut().push(byte);
+        crate::value::arena::bytes_append(ctx.heap_mut(), *val, &[byte]);
         return Ok(*val);
     }
     // Immutable array
@@ -90,36 +93,33 @@ pub fn seq_pop(
     ctx: &mut crate::primitives::ctx::Alloc,
 ) -> Result<Value, Value> {
     if val.is_array_mut() {
-        if val.array_mut_ref().unwrap().is_empty() {
+        if val.array_mut_read().is_some_and(|a| a.is_empty()) {
             return Err(ctx.error("argument-error", "pop: empty @array"));
         }
         return Ok(crate::value::arena::pop_with_decref(ctx.heap_mut(), *val));
     }
-    if let Some(buf_ref) = val.as_string_mut() {
-        let mut buf = buf_ref.borrow_mut();
-        if buf.is_empty() {
+    if let Some(bytes) = val.string_mut_read() {
+        if bytes.is_empty() {
             return Err(ctx.error("argument-error", "pop: empty @string"));
         }
-        let s = std::str::from_utf8(&buf)
+        let s = std::str::from_utf8(&bytes)
             .map_err(|_| ctx.error("encoding-error", "pop: @string contains invalid UTF-8"))?;
         let cluster = crate::segment::graphemes(s, gen)
             .next_back()
             .unwrap()
             .to_string();
-        let new_len = buf.len() - cluster.len();
-        buf.truncate(new_len);
-        drop(buf);
+        let end = bytes.len();
+        // The splice refuses to run under a live read.
+        drop(bytes);
+        crate::value::arena::bytes_splice(ctx.heap_mut(), *val, end - cluster.len()..end, &[]);
         return Ok(ctx.string(cluster));
     }
-    if let Some(blob_ref) = val.as_bytes_mut() {
-        let mut blob = blob_ref.borrow_mut();
-        match blob.pop() {
-            Some(byte) => {
-                drop(blob);
-                return Ok(Value::int(byte as i64));
-            }
-            None => return Err(ctx.error("argument-error", "pop: empty @bytes")),
+    if let Some(len) = val.bytes_mut_read().map(|b| b.len()) {
+        if len == 0 {
+            return Err(ctx.error("argument-error", "pop: empty @bytes"));
         }
+        let popped = crate::value::arena::bytes_splice(ctx.heap_mut(), *val, len - 1..len, &[]);
+        return Ok(Value::int(popped[0] as i64));
     }
     Err(ctx.error(
         "type-error",

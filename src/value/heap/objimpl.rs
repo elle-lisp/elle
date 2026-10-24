@@ -1,3 +1,8 @@
+// audited: 2026-10-22
+//! The per-variant answers of a heap object: its tag, its trait table, its value tag, its type name, and its debug form.
+//!
+//! docs/impl/values.md
+
 use super::*;
 
 impl HeapObject {
@@ -35,11 +40,12 @@ impl HeapObject {
 
     /// Read the trait table attached to this object, or `Value::NIL` if it has
     /// none (the 5 infrastructure variants, or a never-traited object). This is
-    /// the single read site for the `traits` side-field: `traitregistry::
+    /// the single read site for the `traits` side-field. `traitregistry::
     /// get_traitset` (the `Value` entry point) and the region cross-ref scan
-    /// (`find_object_cross_refs`) both go through it, so the field is enumerated
-    /// in exactly one place — the trait table is a cross-region edge like any
-    /// other content field and must be RC-tracked symmetrically (Rule 5/7).
+    /// (`find_object_cross_refs`) both go through it, so the field is
+    /// enumerated in exactly one place. The trait table is a cross-region edge
+    /// like any other content field, and must be RC-tracked symmetrically
+    /// (Rule 5/7).
     #[inline]
     pub fn traits(&self) -> Value {
         match self {
@@ -106,10 +112,10 @@ impl HeapObject {
             HeapObject::Parameter { .. } => TAG_PARAMETER,
             HeapObject::ThreadHandle { .. } => TAG_THREAD,
             HeapObject::ClosureTemplate(_) => TAG_CLOSURE_TEMPLATE,
-            // Float: in the new representation ALL floats are immediate (TAG_FLOAT,
-            // payload = f64::to_bits()). HeapObject::Float must never be allocated.
+            // Every float is an immediate (TAG_FLOAT, payload = f64::to_bits()),
+            // so HeapObject::Float is never allocated.
             HeapObject::Float(_) => {
-                panic!("HeapObject::Float must not be allocated — floats are now immediate")
+                panic!("HeapObject::Float must not be allocated — floats are immediate")
             }
         }
     }
@@ -154,8 +160,8 @@ impl std::fmt::Debug for HeapObject {
             }
             HeapObject::Pair(c) => write!(f, "({:?} . {:?})", c.first, c.rest),
             HeapObject::LArrayMut { data, .. } => {
-                if let Ok(borrowed) = data.try_borrow() {
-                    write!(f, "{:?}", *borrowed)
+                if let Some(read) = data.try_read() {
+                    write!(f, "{:?}", &*read)
                 } else {
                     write!(f, "[<borrowed>]")
                 }
@@ -174,8 +180,8 @@ impl std::fmt::Debug for HeapObject {
                 write!(f, "]")
             }
             HeapObject::LStringMut { data, .. } => {
-                if let Ok(borrowed) = data.try_borrow() {
-                    write!(f, "@\"{}\"", String::from_utf8_lossy(&borrowed))
+                if let Some(read) = data.try_read() {
+                    write!(f, "@\"{}\"", String::from_utf8_lossy(&read))
                 } else {
                     write!(f, "@\"<borrowed>\"")
                 }
@@ -191,9 +197,9 @@ impl std::fmt::Debug for HeapObject {
                 write!(f, "]")
             }
             HeapObject::LBytesMut { data, .. } => {
-                if let Ok(borrowed) = data.try_borrow() {
+                if let Some(read) = data.try_read() {
                     write!(f, "#@bytes[")?;
-                    for (i, byte) in borrowed.iter().enumerate() {
+                    for (i, byte) in read.iter().enumerate() {
                         if i > 0 {
                             write!(f, " ")?;
                         }
@@ -223,7 +229,10 @@ impl std::fmt::Debug for HeapObject {
             HeapObject::External { obj, .. } => write!(f, "#<{}>", obj.type_name),
             HeapObject::Parameter { id, .. } => write!(f, "<parameter:{}>", id),
             HeapObject::LSet { data, .. } => write!(f, "LSet({:?})", data),
-            HeapObject::LSetMut { data, .. } => write!(f, "LSetMut({:?})", data.borrow()),
+            HeapObject::LSetMut { data, .. } => match data.try_read() {
+                Some(read) => write!(f, "LSetMut({:?})", read.iter().collect::<Vec<_>>()),
+                None => write!(f, "LSetMut(<borrowed>)"),
+            },
             HeapObject::ClosureTemplate(_) => write!(f, "<closure-template>"),
         }
     }

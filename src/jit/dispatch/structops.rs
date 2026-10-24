@@ -1,3 +1,8 @@
+// audited: 2026-10-22
+//! The JIT's struct access helpers: a keyed read that answers nil, a keyed read that signals, and the rest of a struct.
+//!
+//! docs/impl/jit.md
+
 use super::*;
 
 /// Struct/table get with silent nil: returns value for key, NIL if missing or wrong type.
@@ -26,9 +31,9 @@ pub extern "C" fn elle_jit_struct_get_or_nil(
             return JitValue::from_value(*v);
         }
     }
-    if let Some(table_ref) = val.as_struct_mut() {
-        if let Some(v) = table_ref.borrow().get(&key) {
-            return JitValue::from_value(*v);
+    if let Some(read) = val.struct_mut_read() {
+        if let Some(v) = read.get(&key) {
+            return JitValue::from_value(v);
         }
     }
     JitValue::nil()
@@ -71,9 +76,9 @@ pub extern "C" fn elle_jit_struct_get_destructure(
             }
         };
     }
-    if let Some(table_ref) = val.as_struct_mut() {
-        return match table_ref.borrow().get(&key) {
-            Some(v) => JitValue::from_value(*v),
+    if let Some(read) = val.struct_mut_read() {
+        return match read.get(&key) {
+            Some(v) => JitValue::from_value(v),
             None => {
                 vm_ref.set_error(
                     "type-error",
@@ -115,26 +120,13 @@ pub extern "C" fn elle_jit_struct_rest(
         }
     }
 
-    if let Some(struct_map) = val.as_struct() {
-        let result: Vec<_> = struct_map
-            .iter()
-            .filter(|(k, _)| !exclude.contains(k))
-            .map(|(k, v)| (*k, *v))
-            .collect();
-        let ctx = crate::primitives::ctx::Alloc::new(unsafe { &mut *vm_ref.heap_ptr });
-        JitValue::from_value(ctx.struct_from_sorted(result))
-    } else if let Some(table_ref) = val.as_struct_mut() {
-        let mut result: Vec<_> = table_ref
-            .borrow()
-            .iter()
-            .filter(|(k, _)| !exclude.contains(k))
-            .map(|(k, v)| (*k, *v))
-            .collect();
-        result.sort_by_key(|(a, _)| *a);
-        let ctx = crate::primitives::ctx::Alloc::new(unsafe { &mut *vm_ref.heap_ptr });
-        JitValue::from_value(ctx.struct_from_sorted(result))
-    } else {
-        let ctx = crate::primitives::ctx::Alloc::new(unsafe { &mut *vm_ref.heap_ptr });
-        JitValue::from_value(ctx.struct_from_sorted(vec![]))
-    }
+    // Both struct kinds iterate in key order, so the kept entries are sorted.
+    let kept: Vec<_> = val
+        .struct_to_vec()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(k, _)| !exclude.contains(k))
+        .collect();
+    let ctx = crate::primitives::ctx::Alloc::new(unsafe { &mut *vm_ref.heap_ptr });
+    JitValue::from_value(ctx.struct_from_sorted(kept))
 }

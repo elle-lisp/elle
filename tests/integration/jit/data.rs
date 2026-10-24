@@ -1,5 +1,5 @@
-// audited: 2026-10-06
-// src/jit/AGENTS.md
+// audited: 2026-10-22
+// docs/impl/jit.md
 // What JIT-compiled code makes of values that are not integers: floats, pairs,
 // arrays, and capture cells.
 
@@ -146,12 +146,11 @@ fn test_jit_make_array() {
 
     let result = compile_and_call(&func, &[Value::int(1), Value::int(2), Value::int(3)]).unwrap();
     assert!(result.is_array_mut());
-    let vec = result.as_array_mut().unwrap();
-    let borrowed = vec.borrow();
-    assert_eq!(borrowed.len(), 3);
-    assert_eq!(borrowed[0].as_int(), Some(1));
-    assert_eq!(borrowed[1].as_int(), Some(2));
-    assert_eq!(borrowed[2].as_int(), Some(3));
+    let elems = result.array_mut_read().unwrap();
+    assert_eq!(elems.len(), 3);
+    assert_eq!(elems[0].as_int(), Some(1));
+    assert_eq!(elems[1].as_int(), Some(2));
+    assert_eq!(elems[2].as_int(), Some(3));
 }
 
 // =============================================================================
@@ -172,8 +171,8 @@ fn test_jit_make_lbox() {
 
     let result = compile_and_call(&func, &[Value::int(42)]).unwrap();
     assert!(result.is_capture_cell());
-    let cell = result.as_capture_cell().unwrap();
-    assert_eq!(cell.borrow().as_int(), Some(42));
+    let inner = result.capture_cell_get().unwrap();
+    assert_eq!(inner.as_int(), Some(42));
 }
 
 #[test]

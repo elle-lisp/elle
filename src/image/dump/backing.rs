@@ -1,7 +1,7 @@
-// audited: 2026-10-12
+// audited: 2026-10-21
 //! One slice's backing bytes, and how they reach the pages section.
 //!
-//! docs/impl/image.md
+//! docs/impl/image/dumping.md
 //!
 //! emit.rs and payload.rs record where each backing lands; these write the
 //! bytes. A raw backing copies as it stands; the three assembled forms —
@@ -24,11 +24,11 @@ pub(super) enum Backing {
     Raw { rel: u64, src: usize, len: usize },
     /// Struct entries, each assembled from probed extents. An entry's key is
     /// an enum whose padding a copy would carry into the artifact
-    /// (docs/impl/image.md § Dumping).
+    /// (docs/impl/image/dumping.md).
     Entries { rel: u64, src: usize, count: usize },
     /// One code payload, assembled from measured offsets: thirteen slice
     /// headers, an LIR body, an arity record, a span and a scalar tail
-    /// (docs/impl/image.md § Dumping).
+    /// (docs/impl/image/dumping.md).
     Payload { rel: u64, src: usize },
     /// Slice headers end to end — a payload's file names, its `&named` keys, or
     /// its LIR body's file spellings.

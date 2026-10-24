@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-23
 //! Deserializing a `SendBundle`: every received value is rebuilt on the
 //! receiving heap, in the call's region.
 //!
@@ -56,9 +56,9 @@ pub(super) struct DeserContext<'a, 'h> {
     closures: Vec<Option<SendableClosure>>,
     /// Reconstruction state per intern table index.
     pub(super) states: Vec<ReconState>,
-    /// Deferred fixups: (LBox Value that holds a NIL placeholder, intern index).
-    /// After all closures are built, each LBox's RefCell is overwritten with
-    /// the actual closure value.
+    /// Deferred fixups: (a box or capture cell holding a NIL placeholder, intern index).
+    /// After all closures are built, each cell's store takes the actual
+    /// closure value.
     pub(super) fixups: Vec<(Value, usize)>,
     /// The allocation capability every reconstructed heap object is born
     /// through — the receiving thread's per-call ctx.
@@ -146,7 +146,7 @@ pub(in crate::value::send) fn parts_from_sendable(
 pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) -> Value {
     use crate::value::closure::Closure;
     use crate::value::heap::{HeapObject, Pair};
-    use std::cell::RefCell;
+    use crate::value::store::{CellStore, StructStore};
     use std::collections::BTreeSet;
 
     match sv {
@@ -175,10 +175,7 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) ->
                 .collect();
             let traits_resolved = into_value_inner(*traits, ctx);
             let traits_val = recv_traits(ctx.ctx.heap_mut(), traits_resolved, HeapTag::LArrayMut);
-            ctx.alloc(HeapObject::LArrayMut {
-                data: std::rc::Rc::new(RefCell::new(values)),
-                traits: traits_val,
-            })
+            ctx.ctx.array_mut_with_traits(&values, traits_val)
         }
         SendValue::Struct(map, traits) => {
             // `SendKey` ranks its variants the way `TableKey` does, so the
@@ -203,7 +200,7 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) ->
             let traits_resolved = into_value_inner(*traits, ctx);
             let traits_val = recv_traits(ctx.ctx.heap_mut(), traits_resolved, HeapTag::LStructMut);
             ctx.alloc(HeapObject::LStructMut {
-                data: std::rc::Rc::new(RefCell::new(entries)),
+                data: StructStore::new(entries),
                 traits: traits_val,
             })
         }
@@ -223,10 +220,7 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) ->
         SendValue::Buffer(bytes, traits) => {
             let traits_resolved = into_value_inner(*traits, ctx);
             let traits_val = recv_traits(ctx.ctx.heap_mut(), traits_resolved, HeapTag::LStringMut);
-            ctx.alloc(HeapObject::LStringMut {
-                data: std::rc::Rc::new(RefCell::new(bytes)),
-                traits: traits_val,
-            })
+            ctx.ctx.string_mut_with_traits(&bytes, traits_val)
         }
         SendValue::Bytes(bytes, traits) => {
             let traits_resolved = into_value_inner(*traits, ctx);
@@ -240,10 +234,7 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) ->
         SendValue::Blob(bytes, traits) => {
             let traits_resolved = into_value_inner(*traits, ctx);
             let traits_val = recv_traits(ctx.ctx.heap_mut(), traits_resolved, HeapTag::LBytesMut);
-            ctx.alloc(HeapObject::LBytesMut {
-                data: std::rc::Rc::new(RefCell::new(bytes)),
-                traits: traits_val,
-            })
+            ctx.ctx.bytes_mut_with_traits(&bytes, traits_val)
         }
 
         SendValue::LBox(contents, traits) => {
@@ -260,7 +251,7 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) ->
             let inner_val = into_value_inner(*contents, ctx);
             let traits_val = into_value_inner(*traits, ctx);
             let lbox_val = ctx.alloc(HeapObject::LBox {
-                cell: std::rc::Rc::new(RefCell::new(inner_val)),
+                cell: CellStore::new(inner_val),
                 traits: traits_val,
             });
             if let Some(idx) = fixup_idx {
@@ -283,7 +274,7 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) ->
             let inner_val = into_value_inner(*contents, ctx);
             let traits_val = into_value_inner(*traits, ctx);
             let cell_val = ctx.alloc(HeapObject::CaptureCell {
-                cell: std::rc::Rc::new(RefCell::new(inner_val)),
+                cell: CellStore::new(inner_val),
                 origin: crate::value::heap::CellOrigin::Runtime,
                 traits: traits_val,
             });
@@ -317,10 +308,8 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) ->
                 .collect();
             let traits_resolved = into_value_inner(*traits, ctx);
             let traits_val = recv_traits(ctx.ctx.heap_mut(), traits_resolved, HeapTag::LSetMut);
-            ctx.alloc(HeapObject::LSetMut {
-                data: std::rc::Rc::new(RefCell::new(set)),
-                traits: traits_val,
-            })
+            let members: Vec<Value> = set.into_iter().collect();
+            ctx.ctx.set_mut_with_traits(&members, traits_val)
         }
         SendValue::ChanSender(tx, wake) => crate::primitives::chan::sender_value(tx, wake, ctx.ctx),
         SendValue::ChanReceiver(rx, wake) => {

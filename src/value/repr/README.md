@@ -1,49 +1,32 @@
-# Value Representation
+# Value representation
 
-The value representation module implements the tagged union used to represent all Elle runtime values in 16 bytes.
+<!-- audited: 2026-10-24 -->
 
-## Tagged Union
+The tagged-union `Value`: its tags, its constructors, its accessors, and its
+equality, hashing and order.
 
-Each `Value` is a `(tag: u64, payload: u64)` pair. The tag discriminates the type, and the payload carries the data:
+[values.md](../../../docs/impl/values.md) owns the encoding: every tag, what
+each payload holds, and which tags are heap pointers. Each source here opens
+with what it holds.
 
-- **Floating-point numbers**: Payload is the IEEE 754 bit pattern
-- **Integers**: Payload is a full-range i64
-- **Pointers**: Payload is a pointer to a heap-allocated object
-- **Immediates**: Booleans, nil, keywords encoded in the payload
+A heap value has no `Value::*` constructor. It is built through
+[build.rs](../build.rs) or a primitive's `ctx`, which name the heap and the
+region it is born in.
 
-## Value Types
+One traversal in [eq.rs](eq.rs) serves both equality relations, `identical?`
+and `=`, so the two cannot disagree about structure. A read of a mutable
+container takes a guard or copies the value out
+([accessors/stores.rs](accessors/stores.rs)), and only the funnels in
+[arena.rs](../arena.rs) write one ([mutable stores](../../../docs/impl/mutable.md)).
 
-| Type | Representation | Size |
-|------|----------------|------|
-| Integer | Tag + i64 payload | 16 bytes |
-| Float | Tag + IEEE 754 payload | 16 bytes |
-| String | Tag + pointer to heap | 16 bytes |
-| List | Tag + pointer to heap | 16 bytes |
-| Array | Tag + pointer to heap | 16 bytes |
-| Table | Tag + pointer to heap | 16 bytes |
-| Closure | Tag + pointer to heap | 16 bytes |
-| Boolean | Tag + immediate | 16 bytes |
-| Nil | Tag + immediate | 16 bytes |
-| Keyword | Tag + immediate | 16 bytes |
+## Invariants
 
-## Key Modules
-
-| Module | Purpose |
-|--------|---------|
-| [`constructors.rs`](constructors.rs) | Create values: `Value::int()`, `Value::string()`, etc. |
-| [`accessors.rs`](accessors.rs) | Extract values: `as_int()`, `as_string()`, etc. |
-| [`traits.rs`](traits.rs) | Implement `PartialEq`, `Hash`, `Display` |
-
-## Performance
-
-The tagged-union representation provides:
-
-- **Fast operations**: No indirection for immediates
-- **Efficient type checks**: Tag comparison is a single integer compare
-- **Full-range integers**: i64 without truncation
-
-## See Also
-
-- [AGENTS.md](AGENTS.md) - technical reference for LLM agents
-- [`src/value/`](../) - value types and heap objects
-- [`src/value/heap.rs`](../heap.rs) - heap-allocated object types
+1. **`Value` is `Copy`.** All 16 bytes are the tag and the payload; heap data
+   lives in regions.
+2. **Trait tables are invisible to equality, hashing and order.** `PartialEq`,
+   `Hash` and `Ord` never read a heap object's `traits` field.
+3. **`nil` ≠ empty list.** `Value::NIL` is falsy; `Value::EMPTY_LIST` is
+   truthy and ends every list.
+4. **Floats are bit-exact.** `Value::float(f).as_float()` answers the same
+   bits, NaN, infinity and -0.0 included.
+5. **Integers are full-range i64.** The payload holds the whole value.

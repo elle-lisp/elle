@@ -1,4 +1,8 @@
-//! Set primitives for immutable and mutable sets
+// audited: 2026-10-22
+//! Set primitives for immutable and mutable sets.
+//!
+//! docs/sets.md
+
 use crate::primitives::def::RetType;
 use std::collections::BTreeSet;
 
@@ -17,25 +21,22 @@ use crate::value::Value;
 /// - @string → string (lossy UTF-8)
 /// - @bytes → bytes
 pub(crate) fn freeze_value(v: Value, ctx: &mut crate::primitives::ctx::Alloc) -> Value {
-    if let Some(arr) = v.as_array_mut() {
-        let items: Vec<Value> = arr.borrow().iter().map(|x| freeze_value(*x, ctx)).collect();
+    if let Some(arr) = v.array_mut_read() {
+        let items: Vec<Value> = arr.iter().map(|x| freeze_value(*x, ctx)).collect();
         ctx.array(items)
-    } else if let Some(tbl) = v.as_struct_mut() {
+    } else if let Some(tbl) = v.struct_mut_read() {
         let map: std::collections::BTreeMap<crate::value::TableKey, Value> = tbl
-            .borrow()
             .iter()
             .map(|(k, v)| (*k, freeze_value(*v, ctx)))
             .collect();
         ctx.struct_from(map)
-    } else if let Some(s) = v.as_set_mut() {
-        let items: BTreeSet<Value> = s.borrow().iter().map(|x| freeze_value(*x, ctx)).collect();
+    } else if let Some(s) = v.set_mut_read() {
+        let items: BTreeSet<Value> = s.iter().map(|x| freeze_value(*x, ctx)).collect();
         ctx.set(items)
-    } else if let Some(buf) = v.as_string_mut() {
-        let bytes = buf.borrow().clone();
+    } else if let Some(bytes) = v.string_mut_read() {
         ctx.string(&*String::from_utf8_lossy(&bytes))
-    } else if let Some(blob) = v.as_bytes_mut() {
-        let data = blob.borrow().clone();
-        ctx.bytes(data)
+    } else if let Some(bytes) = v.bytes_mut_read() {
+        ctx.bytes(bytes.to_vec())
     } else {
         v
     }
@@ -212,7 +213,7 @@ pub(crate) fn prim_difference(
     }
 }
 
-// set->array — now an alias for ->array (defined in src/stdlib.lisp)
+// set->array is an alias for ->array (defined in src/stdlib.lisp)
 
 /// Convert any sequence to a set
 ///
@@ -286,15 +287,14 @@ pub(crate) fn prim_seq_to_set(
     }
 
     // Array (mutable) → mutable set
-    if let Some(arr) = v.as_array_mut() {
-        let set: BTreeSet<Value> = arr.borrow().iter().map(|x| freeze_value(*x, ctx)).collect();
+    if let Some(arr) = v.array_mut_read() {
+        let set: BTreeSet<Value> = arr.iter().map(|x| freeze_value(*x, ctx)).collect();
         return (SIG_OK, ctx.set_mut(set));
     }
 
     // @string (mutable) → mutable set of single-grapheme-cluster strings
-    if let Some(buf) = v.as_string_mut() {
+    if let Some(bytes) = v.string_mut_read() {
         let mut set = BTreeSet::new();
-        let bytes = buf.borrow();
         let s = String::from_utf8_lossy(&bytes);
         for ch in s.chars() {
             set.insert(ctx.string(ch.to_string()));
@@ -303,12 +303,8 @@ pub(crate) fn prim_seq_to_set(
     }
 
     // @bytes (mutable) → mutable set of ints
-    if let Some(blob) = v.as_bytes_mut() {
-        let set: BTreeSet<Value> = blob
-            .borrow()
-            .iter()
-            .map(|&b| Value::int(b as i64))
-            .collect();
+    if let Some(blob) = v.bytes_mut_read() {
+        let set: BTreeSet<Value> = blob.iter().map(|&b| Value::int(b as i64)).collect();
         return (SIG_OK, ctx.set_mut(set));
     }
 

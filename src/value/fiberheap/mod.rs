@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! Per-instance heap ownership.
 //!
 //! docs/impl/region/model.md
@@ -167,7 +167,7 @@ impl FiberHeap {
     /// usize`. The image dumper reads it to ask which tag a `traits` pointer
     /// names, which the per-tag accessor cannot answer: one traitset serves
     /// several tags, and a value may carry a table other than its own tag's
-    /// (docs/impl/image.md).
+    /// (docs/impl/image/sealing.md).
     pub fn default_traits_table(&self) -> &[Value] {
         &self.default_traits
     }

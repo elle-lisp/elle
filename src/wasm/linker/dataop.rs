@@ -1,6 +1,8 @@
-// audited: 2026-09-19
+// audited: 2026-10-22
 //! The WASM host's data-operation dispatch: one opcode routed to the value
 //! constructors and intrinsic bodies it stands for.
+//!
+//! docs/impl/wasm.md
 
 use super::*;
 
@@ -86,10 +88,9 @@ pub fn dispatch_data_op(
             SIG_OK,
             ctx.capture_cell(args[0], crate::value::heap::CellOrigin::Runtime),
         ),
-        x if x == DataOp::LoadCapture as i32 => match args[0].as_capture_cell() {
-            Some(cell) => (SIG_OK, *cell.borrow()),
-            None => (SIG_OK, args[0]),
-        },
+        x if x == DataOp::LoadCapture as i32 => {
+            (SIG_OK, args[0].capture_cell_get().unwrap_or(args[0]))
+        }
         x if x == DataOp::StoreCapture as i32 => {
             if args[0].is_capture_cell() {
                 // The capture-store funnel (Rule 5): region RC ops are
@@ -103,8 +104,7 @@ pub fn dispatch_data_op(
         11 => (SIG_OK, Value::NIL), // MakeString (unused)
         x if x == DataOp::ArrayRefDestructure as i32 => {
             let index = args[1].payload as usize;
-            if let Some(arr) = args[0].as_array_mut() {
-                let b = arr.borrow();
+            if let Some(b) = args[0].array_mut_read() {
                 if index < b.len() {
                     (SIG_OK, b[index])
                 } else {
@@ -122,8 +122,7 @@ pub fn dispatch_data_op(
         }
         x if x == DataOp::ArraySliceFrom as i32 => {
             let index = args[1].payload as usize;
-            if let Some(arr) = args[0].as_array_mut() {
-                let b = arr.borrow();
+            if let Some(b) = args[0].array_mut_read() {
                 (SIG_OK, ctx.array_mut(b[index.min(b.len())..].to_vec()))
             } else if let Some(arr) = args[0].as_array() {
                 (SIG_OK, ctx.array_mut(arr[index.min(arr.len())..].to_vec()))
@@ -141,12 +140,12 @@ pub fn dispatch_data_op(
                     SIG_OK,
                     sorted_struct_get(s, &key).copied().unwrap_or(Value::NIL),
                 )
-            } else if let Some(s) = args[0].as_struct_mut() {
+            } else if let Some(s) = args[0].struct_mut_read() {
                 let key = match TableKey::from_value(&args[1]) {
                     Some(k) => k,
                     None => return (SIG_OK, Value::NIL),
                 };
-                (SIG_OK, s.borrow().get(&key).copied().unwrap_or(Value::NIL))
+                (SIG_OK, s.get(&key).unwrap_or(Value::NIL))
             } else {
                 (SIG_OK, Value::NIL)
             }
@@ -166,9 +165,9 @@ pub fn dispatch_data_op(
             }
         }
         x if x == DataOp::ArrayExtend as i32 => {
-            if let Some(arr) = args[0].as_array_mut() {
-                let source_elems: Vec<Value> = if let Some(src) = args[1].as_array_mut() {
-                    src.borrow().to_vec()
+            if let Some(arr) = args[0].array_mut_read() {
+                let source_elems: Vec<Value> = if let Some(src) = args[1].array_mut_read() {
+                    src.to_vec()
                 } else if let Some(src) = args[1].as_array() {
                     src.to_vec()
                 } else if args[1].as_pair().is_some() || args[1].is_empty_list() {
@@ -187,7 +186,7 @@ pub fn dispatch_data_op(
                         ),
                     );
                 };
-                let mut vec = arr.borrow().to_vec();
+                let mut vec = arr.to_vec();
                 vec.extend(source_elems);
                 (SIG_OK, ctx.array_mut(vec))
             } else {
@@ -202,8 +201,8 @@ pub fn dispatch_data_op(
             (SIG_OK, args[0])
         }
         x if x == DataOp::ArrayLen as i32 => {
-            let len = if let Some(arr) = args[0].as_array_mut() {
-                arr.borrow().len()
+            let len = if let Some(arr) = args[0].array_mut_read() {
+                arr.len()
             } else if let Some(arr) = args[0].as_array() {
                 arr.len()
             } else {
@@ -213,8 +212,7 @@ pub fn dispatch_data_op(
         }
         x if x == DataOp::ArrayRefOrNil as i32 => {
             let index = args[1].payload as usize;
-            if let Some(arr) = args[0].as_array_mut() {
-                let b = arr.borrow();
+            if let Some(b) = args[0].array_mut_read() {
                 (SIG_OK, b.get(index).copied().unwrap_or(Value::NIL))
             } else if let Some(arr) = args[0].as_array() {
                 (SIG_OK, arr.get(index).copied().unwrap_or(Value::NIL))
@@ -225,25 +223,15 @@ pub fn dispatch_data_op(
         x if x == DataOp::StructRest as i32 => {
             let exclude_keys: Vec<TableKey> =
                 args[1..].iter().filter_map(TableKey::from_value).collect();
-            if let Some(s) = args[0].as_struct() {
-                let filtered: Vec<(TableKey, Value)> = s
-                    .iter()
-                    .filter(|(k, _)| !exclude_keys.contains(k))
-                    .map(|(k, v)| (*k, *v))
-                    .collect();
-                (SIG_OK, ctx.struct_from_sorted(filtered))
-            } else if let Some(s) = args[0].as_struct_mut() {
-                let b = s.borrow();
-                let mut filtered: Vec<(TableKey, Value)> = b
-                    .iter()
-                    .filter(|(k, _)| !exclude_keys.contains(k))
-                    .map(|(k, v)| (*k, *v))
-                    .collect();
-                filtered.sort_by_key(|(a, _)| *a);
-                (SIG_OK, ctx.struct_from_sorted(filtered))
-            } else {
-                (SIG_OK, ctx.struct_from_sorted(vec![]))
-            }
+            // Both struct kinds iterate in key order, so the kept entries are
+            // sorted.
+            let kept: Vec<(TableKey, Value)> = args[0]
+                .struct_to_vec()
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|(k, _)| !exclude_keys.contains(k))
+                .collect();
+            (SIG_OK, ctx.struct_from_sorted(kept))
         }
         x if x == DataOp::IntToFloat as i32 => {
             if let Some(n) = args[0].as_int() {

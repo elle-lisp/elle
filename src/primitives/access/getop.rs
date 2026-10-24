@@ -1,4 +1,4 @@
-//! audited: 2026-09-17
+//! audited: 2026-10-22
 //! `get` — the polymorphic read, one arm per collection shape.
 //!
 //! docs/structs.md
@@ -15,7 +15,7 @@ pub(crate) fn prim_get(
     let default = if args.len() == 3 { args[2] } else { Value::NIL };
 
     // Array (mutable indexed collection)
-    if let Some(vec_ref) = args[0].as_array_mut() {
+    if let Some(elems) = args[0].array_mut_read() {
         let index = match args[1].as_int() {
             Some(i) => i,
             None => {
@@ -31,9 +31,8 @@ pub(crate) fn prim_get(
                 )
             }
         };
-        let borrowed = vec_ref.borrow();
-        match resolve_index(index, borrowed.len()) {
-            Some(i) => return (SIG_OK, borrowed[i]),
+        match resolve_index(index, elems.len()) {
+            Some(i) => return (SIG_OK, elems[i]),
             None => return (SIG_OK, default),
         }
     }
@@ -62,7 +61,7 @@ pub(crate) fn prim_get(
     }
 
     // @string (mutable string — indexed by grapheme cluster position)
-    if let Some(buf_ref) = args[0].as_string_mut() {
+    if let Some(bytes) = args[0].string_mut_read() {
         let index = match args[1].as_int() {
             Some(i) => i,
             None => {
@@ -78,8 +77,7 @@ pub(crate) fn prim_get(
                 )
             }
         };
-        let borrowed = buf_ref.borrow();
-        let s = match std::str::from_utf8(&borrowed) {
+        let s = match std::str::from_utf8(&bytes) {
             Ok(s) => s,
             Err(e) => {
                 return (
@@ -138,7 +136,7 @@ pub(crate) fn prim_get(
     }
 
     // @bytes (mutable binary data — indexed by byte position)
-    if let Some(blob_ref) = args[0].as_bytes_mut() {
+    if let Some(bytes) = args[0].bytes_mut_read() {
         let index = match args[1].as_int() {
             Some(i) => i,
             None => {
@@ -154,9 +152,8 @@ pub(crate) fn prim_get(
                 )
             }
         };
-        let borrowed = blob_ref.borrow();
-        match resolve_index(index, borrowed.len()) {
-            Some(i) => return (SIG_OK, Value::int(borrowed[i] as i64)),
+        match resolve_index(index, bytes.len()) {
+            Some(i) => return (SIG_OK, Value::int(bytes[i] as i64)),
             None => {
                 return (
                     SIG_ERROR,
@@ -165,7 +162,7 @@ pub(crate) fn prim_get(
                         format!(
                             "get: index {} out of bounds (length {})",
                             index,
-                            borrowed.len()
+                            bytes.len()
                         ),
                     ),
                 );
@@ -210,7 +207,7 @@ pub(crate) fn prim_get(
     }
 
     // Struct (mutable keyed collection)
-    if let Some(mstruct) = args[0].as_struct_mut() {
+    if let Some(entries) = args[0].struct_mut_read() {
         let key = match TableKey::from_value(&args[1]) {
             Some(k) => k,
             None => {
@@ -226,8 +223,7 @@ pub(crate) fn prim_get(
                 )
             }
         };
-        let borrowed = mstruct.borrow();
-        return (SIG_OK, borrowed.get(&key).copied().unwrap_or(default));
+        return (SIG_OK, entries.get(&key).unwrap_or(default));
     }
 
     // Struct (immutable keyed collection)

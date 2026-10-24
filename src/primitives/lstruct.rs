@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-22
 //! The keyed reads over a struct, a `@struct` and a subprocess, plus the `@struct` constructor.
 //!
 //! docs/structs.md
@@ -68,12 +68,12 @@ primitive! {
         category: "struct",
         example: "(has? {:a 1} :a) #=> true\n(has? |1 2 3| 2) #=> true\n(has? \"hello\" \"ell\") #=> true",
         aliases: &["has-key?", "contains?"],
-        // A read-only trait dispatcher: the result is unbounded (a `with-traits`
+        // A read-only trait dispatcher. The result is unbounded: a `with-traits`
         // override of `:Collection` may return anything, so neither `Immediate`
-        // nor `Fresh` holds on every path) while the store side is bounded (the
-        // built-in method reads and returns a bool; a user closure stores only
-        // through the runtime-counted funnel). Unbounded result + no store is
-        // exactly `Opaque` — no arg clique (docs/impl/region/effects.md;
+        // nor `Fresh` holds on every path. The store side is bounded: the
+        // built-in method reads and returns a bool, and a user closure stores
+        // only through the runtime-counted funnel. Unbounded result + no store
+        // is exactly `Opaque`, with no arg clique (docs/impl/region/effects.md;
         // tests/impl/region-has-clique-leak.lisp).
         effect: RegionEffect::Opaque,
     }
@@ -170,9 +170,8 @@ pub(crate) fn prim_keys(
     args: &[Value],
 ) -> (SignalBits, Value) {
     if args[0].is_struct_mut() {
-        let mstruct = prim_arg!(ctx, args, 0, as_struct_mut, "keys", "struct");
-        let borrowed = mstruct.borrow();
-        let keys: Vec<Value> = borrowed.keys().map(|k| k.to_value()).collect();
+        let entries = prim_arg!(ctx, args, 0, struct_mut_read, "keys", "struct");
+        let keys: Vec<Value> = entries.iter().map(|(k, _)| k.to_value()).collect();
         (SIG_OK, ctx.list(keys))
     } else if args[0].is_struct() {
         let s = prim_arg!(ctx, args, 0, as_struct, "keys", "struct");
@@ -193,9 +192,8 @@ pub(crate) fn prim_values(
     args: &[Value],
 ) -> (SignalBits, Value) {
     if args[0].is_struct_mut() {
-        let mstruct = prim_arg!(ctx, args, 0, as_struct_mut, "values", "struct");
-        let borrowed = mstruct.borrow();
-        let values: Vec<Value> = borrowed.values().copied().collect();
+        let entries = prim_arg!(ctx, args, 0, struct_mut_read, "values", "struct");
+        let values: Vec<Value> = entries.iter().map(|(_, v)| *v).collect();
         (SIG_OK, ctx.list(values))
     } else if args[0].is_struct() {
         let s = prim_arg!(ctx, args, 0, as_struct, "values", "struct");

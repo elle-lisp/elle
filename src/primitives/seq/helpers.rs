@@ -1,10 +1,13 @@
+// audited: 2026-10-22
 //! Container dispatch and result-building helpers shared by seq operations.
 //!
+//! docs/impl/region/ctx.md
+//!
 //! Seq ops apply uniformly to arrays, strings, and bytes in both immutable and
-//! @mutable forms. Collapsing each 2-way (immut vs @mut) branch into a single
-//! `with_*` call — and each result into a `make_*` builder that preserves
-//! mutability — keeps the per-operation code focused on the operation itself,
-//! not on re-deriving the container taxonomy.
+//! @mutable forms. Each 2-way (immut vs @mut) branch collapses into a single
+//! `with_*` call, and each result into a `make_*` builder that preserves
+//! mutability. The per-operation code then holds the operation itself, not a
+//! re-derivation of the container taxonomy.
 
 use super::*;
 
@@ -32,9 +35,8 @@ where
     if let Some(elems) = val.as_array() {
         return Some(f(elems, false));
     }
-    if let Some(arr) = val.as_array_mut() {
-        let borrowed = arr.borrow();
-        return Some(f(&borrowed, true));
+    if let Some(elems) = val.array_mut_read() {
+        return Some(f(&elems, true));
     }
     None
 }
@@ -49,9 +51,8 @@ where
     if val.is_string() {
         return val.with_string(|s| f(s, false));
     }
-    if let Some(buf_ref) = val.as_string_mut() {
-        let borrowed = buf_ref.borrow();
-        if let Ok(s) = std::str::from_utf8(&borrowed) {
+    if let Some(bytes) = val.string_mut_read() {
+        if let Ok(s) = std::str::from_utf8(&bytes) {
             return Some(f(s, true));
         }
     }
@@ -66,9 +67,8 @@ where
     if let Some(b) = val.as_bytes() {
         return Some(f(b, false));
     }
-    if let Some(blob_ref) = val.as_bytes_mut() {
-        let borrowed = blob_ref.borrow();
-        return Some(f(&borrowed, true));
+    if let Some(bytes) = val.bytes_mut_read() {
+        return Some(f(&bytes, true));
     }
     None
 }

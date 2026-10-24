@@ -1,13 +1,12 @@
-// audited: 2026-09-10
+// audited: 2026-10-22
 // What the dumper refuses, and how it says so.
-// docs/impl/image.md
+// docs/impl/image/dumping.md
 
 use super::*;
 use elle::image::{self, ImageError};
-use std::rc::Rc;
 
-// § Dumping: "Unsupported values fail the dump with an error naming the
-// binding" — for the store milestone, naming the refused variant. A mutable
+// A refused value fails the dump with an error naming the binding or, for a
+// value no binding names, the refused variant. A mutable
 // store must never be silently dropped or frozen into the body.
 #[test]
 fn mutable_value_refuses_dump() {
@@ -16,13 +15,7 @@ fn mutable_value_refuses_dump() {
 
     let mut src = FiberHeap::new();
     let region = src.new_runtime_region();
-    let arr = src.alloc_in_region(
-        HeapObject::LArrayMut {
-            data: Rc::new(std::cell::RefCell::new(vec![Value::int(1)])),
-            traits: Value::NIL,
-        },
-        region,
-    );
+    let arr = alloc_array_mut(&mut src, region, &[Value::int(1)]);
     let root = alloc_pair(&mut src, region, Value::int(1), arr);
     match image::dump(&mut src, &SymbolTable::new(), root, &path) {
         Err(ImageError::Unsupported(what)) => {
@@ -46,13 +39,7 @@ fn a_mutable_value_inside_a_traitset_refuses_dump() {
 
     let mut src = FiberHeap::new();
     let region = src.new_runtime_region();
-    let store = src.alloc_in_region(
-        HeapObject::LArrayMut {
-            data: Rc::new(std::cell::RefCell::new(vec![Value::int(1)])),
-            traits: Value::NIL,
-        },
-        region,
-    );
+    let store = alloc_array_mut(&mut src, region, &[Value::int(1)]);
     let table = alloc_struct(&mut src, region, &[(TableKey::keyword("method"), store)]);
     let slice = src.alloc_region_slice_in_region("x".as_bytes(), region);
     let traited = src.alloc_in_region(

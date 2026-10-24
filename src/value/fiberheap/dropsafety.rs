@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-23
 //! Per-tag drop/cascade classification: which variants need `Drop`, and which hold region references.
 //!
 //! docs/impl/region/model.md
@@ -17,20 +17,23 @@ use crate::value::heap::HeapTag;
 pub(crate) fn needs_drop(tag: HeapTag) -> bool {
     match tag {
         HeapTag::Pair => false,
-        HeapTag::LBox => true,
-        HeapTag::CaptureCell => true,
+        // A cell's value lies inside its shell (docs/impl/mutable.md).
+        HeapTag::LBox => false,
+        HeapTag::CaptureCell => false,
         HeapTag::Float => false,
         HeapTag::LibHandle => false,
         HeapTag::ManagedPointer => false,
         HeapTag::LString => true,
-        HeapTag::LArrayMut => true,
         HeapTag::LStructMut => true,
         HeapTag::LStruct => true,
         HeapTag::Closure => true,
         HeapTag::LArray => true,
-        HeapTag::LStringMut => true,
+        // An extent store lies in its region's pages (docs/impl/mutable.md).
+        HeapTag::LArrayMut => false,
+        HeapTag::LStringMut => false,
         HeapTag::LBytes => true,
-        HeapTag::LBytesMut => true,
+        HeapTag::LBytesMut => false,
+        HeapTag::LSetMut => false,
         HeapTag::Syntax => true,
         HeapTag::Fiber => true,
         HeapTag::ThreadHandle => true,
@@ -39,7 +42,6 @@ pub(crate) fn needs_drop(tag: HeapTag) -> bool {
         HeapTag::External => true,
         HeapTag::Parameter => false,
         HeapTag::LSet => true,
-        HeapTag::LSetMut => true,
         // A header is one payload slice and owns no Rust heap memory
         // (docs/impl/region/template.md).
         HeapTag::ClosureTemplate => false,
@@ -58,24 +60,29 @@ pub(crate) fn holds_value_refs(tag: HeapTag) -> bool {
         HeapTag::Float => false,
         HeapTag::LibHandle => false,
         HeapTag::ManagedPointer => false,
-        HeapTag::LBox
-        | HeapTag::CaptureCell
-        | HeapTag::LString
-        | HeapTag::LArrayMut
+        // The `traits` edge off the shell, the live members of an `@array` or
+        // an `@set`, and a cell's one value.
+        HeapTag::LArrayMut
+        | HeapTag::LStringMut
+        | HeapTag::LBytesMut
+        | HeapTag::LSetMut
+        | HeapTag::LBox
+        | HeapTag::CaptureCell => true,
+        HeapTag::LString
         | HeapTag::LStructMut
         | HeapTag::LStruct
         | HeapTag::Closure
         | HeapTag::LArray
-        | HeapTag::LStringMut
         | HeapTag::LBytes
-        | HeapTag::LBytesMut
         | HeapTag::Syntax
         | HeapTag::Fiber
         | HeapTag::ThreadHandle
         | HeapTag::FFISignature
         | HeapTag::FFIType
         | HeapTag::External
-        | HeapTag::LSet
-        | HeapTag::LSetMut => false,
+        | HeapTag::LSet => false,
     }
 }
+
+#[cfg(test)]
+mod tests;

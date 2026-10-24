@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-22
 //! Value accessors for extracting typed data from Values.
 //!
 //! docs/impl/values.md
@@ -15,6 +15,8 @@ use super::{
 mod predicates;
 
 mod conversions;
+
+mod stores;
 
 impl Value {
     // =========================================================================
@@ -52,8 +54,8 @@ impl Value {
     // =========================================================================
 
     /// The contents of an immutable string, borrowed from its region pages.
-    /// `None` for every other value, `@string` included — a mutable store is
-    /// behind a `RefCell` and cannot hand out a bare borrow.
+    /// `None` for every other value, `@string` included: a mutable store is
+    /// read through a guard ([`Value::string_mut_read`]).
     #[inline]
     pub fn as_str(&self) -> Option<&str> {
         use crate::value::heap::{deref, HeapObject};

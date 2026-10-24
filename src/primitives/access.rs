@@ -1,8 +1,11 @@
-//! Polymorphic collection access primitives (get, put).
+// audited: 2026-10-22
+//! Polymorphic collection access: `get` reads by index or key, and `put` writes one.
 //!
-//! These functions work on multiple collection types:
-//! - `get`: retrieves values from arrays, @arrays, strings, @strings, bytes, @bytes, lists, and structs
-//! - `put`: updates values in @arrays, arrays, strings, @strings, @bytes, and structs
+//! docs/structs.md
+//!
+//! - `get` reads arrays, @arrays, strings, @strings, bytes, @bytes, lists, and
+//!   structs.
+//! - `put` writes @arrays, arrays, strings, @strings, @bytes, and structs.
 
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::{sorted_struct_get, sorted_struct_insert, TableKey, Value};
@@ -43,12 +46,11 @@ pub(crate) fn resolve_slice_index(index: i64, len: usize) -> usize {
     }
 }
 
-/// Polymorphic put - works on arrays, @arrays, strings, @strings, and structs
-/// For @arrays: mutates in-place and returns the @array
-/// For arrays: returns a new array with the updated element (immutable)
-/// For strings: returns a new string with the updated grapheme cluster (immutable)
-/// For structs: mutates in-place (@struct) or returns new (struct)
-/// `(put collection key value)`
+/// Polymorphic put: `(put collection key value)`.
+///
+/// - An @array, @string or @bytes mutates in place and returns itself.
+/// - An array or string returns a new value with the element replaced.
+/// - An @struct mutates in place; a struct returns a new struct.
 pub(crate) fn prim_put(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -70,7 +72,7 @@ pub(crate) fn prim_put(
         );
     }
     // @string (mutable string — indexed by grapheme cluster position)
-    if let Some(buf_ref) = args[0].as_string_mut() {
+    if let Some(bytes) = args[0].string_mut_read() {
         let index = match args[1].as_int() {
             Some(i) => i,
             None => {
@@ -101,8 +103,7 @@ pub(crate) fn prim_put(
                 )
             }
         };
-        let borrowed = buf_ref.borrow();
-        let s = match std::str::from_utf8(&borrowed) {
+        let s = match std::str::from_utf8(&bytes) {
             Ok(s) => s,
             Err(e) => {
                 return (
@@ -131,21 +132,16 @@ pub(crate) fn prim_put(
                 );
             }
         };
-        let mut result = String::new();
-        for (i, g) in graphemes.iter().enumerate() {
-            if i == resolved {
-                result.push_str(&replacement);
-            } else {
-                result.push_str(g);
-            }
-        }
-        drop(borrowed); // release immutable borrow
-        *buf_ref.borrow_mut() = result.into_bytes(); // take mutable borrow
+        let start: usize = graphemes[..resolved].iter().map(|g| g.len()).sum();
+        let span = start..start + graphemes[resolved].len();
+        // The splice refuses to run under a live read.
+        drop(bytes);
+        crate::value::arena::bytes_splice(ctx.heap_mut(), args[0], span, replacement.as_bytes());
         return (SIG_OK, args[0]);
     }
 
     // @bytes (mutable byte sequence) - mutate in place
-    if let Some(blob_ref) = args[0].as_bytes_mut() {
+    if let Some(len) = args[0].bytes_mut_read().map(|b| b.len()) {
         let index = match args[1].as_int() {
             Some(i) => i,
             None => {
@@ -185,7 +181,6 @@ pub(crate) fn prim_put(
                 )
             }
         };
-        let len = blob_ref.borrow().len();
         let resolved = match resolve_index(index, len) {
             Some(i) => i,
             None => {
@@ -198,7 +193,7 @@ pub(crate) fn prim_put(
                 );
             }
         };
-        blob_ref.borrow_mut()[resolved] = byte;
+        crate::value::arena::bytes_splice(ctx.heap_mut(), args[0], resolved..resolved + 1, &[byte]);
         return (SIG_OK, args[0]);
     }
 
@@ -219,7 +214,7 @@ pub(crate) fn prim_put(
                 )
             }
         };
-        let len = args[0].array_mut_ref().unwrap().len();
+        let len = args[0].array_mut_read().map_or(0, |a| a.len());
         let resolved = match resolve_index(index, len) {
             Some(i) => i,
             None => {

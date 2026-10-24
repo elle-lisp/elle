@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-22
 //! The `%`-intrinsic bodies over data: the type predicates, the collection reads and writes, and freeze and thaw.
 //!
 //! docs/intrinsics.md
@@ -155,26 +155,25 @@ pub(super) fn prim_length(
         }
     } else if let Some(a) = val.as_array() {
         a.len()
-    } else if let Some(a) = val.as_array_mut() {
-        a.borrow().len()
+    } else if let Some(a) = val.array_mut_read() {
+        a.len()
     } else if let Some(s) = val.as_struct() {
         s.len()
-    } else if let Some(s) = val.as_struct_mut() {
-        s.borrow().len()
+    } else if let Some(s) = val.struct_mut_read() {
+        s.len()
     } else if let Some(s) = val.as_set() {
         s.len()
-    } else if let Some(s) = val.as_set_mut() {
-        s.borrow().len()
+    } else if let Some(s) = val.set_mut_read() {
+        s.len()
     } else if let Some(b) = val.as_bytes() {
         b.len()
-    } else if let Some(b) = val.as_bytes_mut() {
-        b.borrow().len()
+    } else if let Some(b) = val.bytes_mut_read() {
+        b.len()
     } else if let Some(r) =
         val.with_string(|s| crate::segment::grapheme_count(s, ctx.unicode_generation()))
     {
         r
-    } else if let Some(buf) = val.as_string_mut() {
-        let b = buf.borrow();
+    } else if let Some(b) = val.string_mut_read() {
         match std::str::from_utf8(&b) {
             Ok(s) => crate::segment::grapheme_count(s, ctx.unicode_generation()),
             Err(_) => {
@@ -259,10 +258,10 @@ pub(super) fn prim_pop(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    let Some(arr) = args[0].as_array_mut() else {
+    let Some(empty) = args[0].array_mut_read().map(|arr| arr.is_empty()) else {
         return type_err("%pop", "@array", &args[0], ctx);
     };
-    if arr.borrow().is_empty() {
+    if empty {
         // Popping an empty container is an argument error, not a type error — the
         // container's type is fine, its length is not. Aligned with the other two
         // pop-empty paths (`seq::mutate::seq_pop`, `vm::types::intrinsic`) and the
@@ -282,24 +281,23 @@ pub(crate) fn prim_string_push(
     let collection = &args[0];
     let value = args[1];
     // The pushed value may be an immutable string OR a mutable @string. Read
-    // its bytes into an owned buffer first — both so a single bulk append
-    // works (string concat == UTF-8 byte concat, the linear path used by
-    // core.lisp's push-all) and so we never hold an @string's RefCell borrow
-    // across a mutation of `collection` (which may be the same @string).
+    // its bytes into an owned buffer first. A single bulk append then works:
+    // string concat == UTF-8 byte concat, the linear path core.lisp's push-all
+    // uses. And no read of an @string is live across the append to
+    // `collection`, which may be the same @string.
     let s: String = if let Some(s) = value.with_string(|s| s.to_string()) {
         s
-    } else if let Some(buf) = value.as_string_mut() {
+    } else if let Some(buf) = value.string_mut_read() {
         // @string is maintained as valid UTF-8 by its constructors/mutators.
-        let bytes = buf.borrow().clone();
-        match String::from_utf8(bytes) {
+        match String::from_utf8(buf.to_vec()) {
             Ok(s) => s,
             Err(_) => return type_err("%string-push value", "string", &value, ctx),
         }
     } else {
         return type_err("%string-push value", "string", &value, ctx);
     };
-    if let Some(buf_ref) = collection.as_string_mut() {
-        buf_ref.borrow_mut().extend_from_slice(s.as_bytes());
+    if collection.is_string_mut() {
+        crate::value::arena::bytes_append(ctx.heap_mut(), *collection, s.as_bytes());
         (SIG_OK, *collection)
     } else if collection.is_string() {
         let new = collection
@@ -322,22 +320,22 @@ pub(crate) fn prim_bytes_push(
     let collection = &args[0];
     let value = args[1];
     // The pushed value is either a single byte (integer) OR a whole bytes/@bytes
-    // value appended in bulk — the linear binary path core.lisp's push-all uses,
-    // the exact mirror of %string-push bulk-appending a string (string concat ==
-    // UTF-8 byte concat). Read the source into an owned buffer FIRST (like
-    // prim_string_push) so we never hold an @bytes RefCell borrow across a
-    // mutation of `collection`, which may be the same @bytes (for example `(append b b)`).
+    // value appended in bulk: the linear binary path core.lisp's push-all uses.
+    // It mirrors %string-push bulk-appending a string (string concat == UTF-8
+    // byte concat). Read the source into an owned buffer FIRST (like
+    // prim_string_push) so no read of an @bytes is live across the append to
+    // `collection`, which may be the same @bytes (for example `(append b b)`).
     let src: Vec<u8> = if let Some(i) = value.as_int() {
         vec![i as u8]
     } else if let Some(data) = value.as_bytes() {
         data.to_vec()
-    } else if let Some(buf) = value.as_bytes_mut() {
-        buf.borrow().clone()
+    } else if let Some(buf) = value.bytes_mut_read() {
+        buf.to_vec()
     } else {
         return type_err("%bytes-push value", "integer or bytes", &value, ctx);
     };
-    if let Some(buf_ref) = collection.as_bytes_mut() {
-        buf_ref.borrow_mut().extend_from_slice(&src);
+    if collection.is_bytes_mut() {
+        crate::value::arena::bytes_append(ctx.heap_mut(), *collection, &src);
         (SIG_OK, *collection)
     } else if let Some(data) = collection.as_bytes() {
         let mut new = data.to_vec();
@@ -355,15 +353,14 @@ pub(crate) fn prim_freeze(
     args: &[Value],
 ) -> (SignalBits, Value) {
     let val = &args[0];
-    let result = if let Some(a) = val.as_array_mut() {
-        ctx.array(a.borrow().clone())
-    } else if let Some(t) = val.as_struct_mut() {
-        let entries: Vec<_> = t.borrow().iter().map(|(k, v)| (*k, *v)).collect();
+    let result = if let Some(a) = val.array_mut_read() {
+        ctx.array(a.to_vec())
+    } else if let Some(t) = val.struct_mut_read() {
+        let entries: Vec<_> = t.iter().map(|(k, v)| (*k, *v)).collect();
         ctx.struct_from_sorted(entries)
-    } else if let Some(s) = val.as_set_mut() {
-        ctx.set(s.borrow().clone())
-    } else if let Some(buf) = val.as_string_mut() {
-        let b = buf.borrow();
+    } else if let Some(s) = val.set_mut_read() {
+        ctx.set(s.iter().copied().collect())
+    } else if let Some(b) = val.string_mut_read() {
         match std::str::from_utf8(&b) {
             Ok(s) => ctx.string(s),
             Err(_) => {
@@ -373,8 +370,8 @@ pub(crate) fn prim_freeze(
                 )
             }
         }
-    } else if let Some(b) = val.as_bytes_mut() {
-        ctx.bytes(b.borrow().clone())
+    } else if let Some(b) = val.bytes_mut_read() {
+        ctx.bytes(b.to_vec())
     } else {
         *val // already immutable
     };

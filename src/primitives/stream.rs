@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-22
 //! Stream primitives — yield SIG_IO with IoRequest descriptors.
 //!
 //! docs/io.md
@@ -130,9 +130,9 @@ fn prim_stream_read_exact(
     // will answer with. Text cannot: a cluster is any number of joined
     // codepoints, so no reservation is a bound on the answer. Four bytes
     // per cluster is a chunk large enough that the common case is filled
-    // in one read; the completion assembles the answer outside this buffer
-    // when the clusters turn out wider, splits at the Nth boundary, and
-    // stashes the remainder for the next read on the port.
+    // in one read. When the clusters turn out wider, the completion assembles
+    // the answer outside this buffer, splits at the Nth boundary, and stashes
+    // the remainder for the next read on the port.
     // The buffer is allocated in the caller's region so the resulting
     // string stays in-region (bytes_to_string_in_place).
     let is_text = port
@@ -187,8 +187,8 @@ fn prim_stream_write(
     let data = args[1];
     let is_empty = data.with_string(|s| s.is_empty()).unwrap_or(false)
         || data.as_bytes().is_some_and(|b| b.is_empty())
-        || data.as_bytes_mut().is_some_and(|b| b.borrow().is_empty())
-        || data.as_string_mut().is_some_and(|b| b.borrow().is_empty());
+        || data.bytes_mut_read().is_some_and(|b| b.is_empty())
+        || data.string_mut_read().is_some_and(|b| b.is_empty());
     if is_empty {
         return (SIG_OK, Value::int(0));
     }

@@ -1,4 +1,7 @@
+// audited: 2026-10-22
 //! Destructuring and safe-accessor helpers for JIT-compiled code.
+//!
+//! docs/impl/jit.md
 //!
 //! The `*_destructure` helpers signal a `type-error` on shape mismatch (pattern
 //! binding must fail loudly), while `*_or_nil` variants and `elle_jit_array_len`
@@ -63,43 +66,28 @@ pub extern "C" fn elle_jit_array_ref_destructure(
     let val = Value { tag, payload };
     let idx = index as usize;
     let vm_ref = unsafe { &mut *(vm as *mut crate::vm::VM) };
-    if let Some(arr) = val.as_array_mut() {
-        let borrowed = arr.borrow();
-        match borrowed.get(idx).copied() {
-            Some(v) => JitValue::from_value(v),
-            None => {
-                vm_ref.set_error(
-                    "type-error",
-                    format!(
-                        "destructuring: array index {} out of bounds (length {})",
-                        idx,
-                        borrowed.len()
-                    ),
-                );
-                JitValue::nil()
-            }
+    let found = match val.array_mut_read() {
+        Some(read) => Some((read.get(idx).copied(), read.len())),
+        None => val
+            .as_array()
+            .map(|elems| (elems.get(idx).copied(), elems.len())),
+    };
+    match found {
+        Some((Some(v), _)) => JitValue::from_value(v),
+        Some((None, len)) => {
+            vm_ref.set_error(
+                "type-error",
+                format!("destructuring: array index {idx} out of bounds (length {len})"),
+            );
+            JitValue::nil()
         }
-    } else if let Some(elems) = val.as_array() {
-        match elems.get(idx).copied() {
-            Some(v) => JitValue::from_value(v),
-            None => {
-                vm_ref.set_error(
-                    "type-error",
-                    format!(
-                        "destructuring: array index {} out of bounds (length {})",
-                        idx,
-                        elems.len()
-                    ),
-                );
-                JitValue::nil()
-            }
+        None => {
+            vm_ref.set_error(
+                "type-error",
+                format!("destructuring: expected array, got {}", val.type_name()),
+            );
+            JitValue::nil()
         }
-    } else {
-        vm_ref.set_error(
-            "type-error",
-            format!("destructuring: expected array, got {}", val.type_name()),
-        );
-        JitValue::nil()
     }
 }
 
@@ -118,30 +106,25 @@ pub extern "C" fn elle_jit_array_slice_from(
     let val = Value { tag, payload };
     let idx = index as usize;
     let vm_ref = unsafe { &mut *(vm as *mut crate::vm::VM) };
-    if let Some(arr) = val.as_array_mut() {
-        let borrowed = arr.borrow();
-        let slice = if idx < borrowed.len() {
-            borrowed[idx..].to_vec()
-        } else {
-            vec![]
-        };
-        let ctx = crate::primitives::ctx::Alloc::new(unsafe { &mut *vm_ref.heap_ptr });
-        JitValue::from_value(ctx.array_mut(slice))
-    } else if let Some(elems) = val.as_array() {
-        let slice = if idx < elems.len() {
-            elems[idx..].to_vec()
-        } else {
-            vec![]
-        };
-        let ctx = crate::primitives::ctx::Alloc::new(unsafe { &mut *vm_ref.heap_ptr });
-        JitValue::from_value(ctx.array(slice))
-    } else {
+    let tail = match val.array_mut_read() {
+        Some(read) => Some((read.get(idx..).unwrap_or_default().to_vec(), true)),
+        None => val
+            .as_array()
+            .map(|elems| (elems.get(idx..).unwrap_or_default().to_vec(), false)),
+    };
+    let Some((slice, mutable)) = tail else {
         vm_ref.set_error(
             "type-error",
             format!("destructuring: expected array, got {}", val.type_name()),
         );
-        JitValue::nil()
-    }
+        return JitValue::nil();
+    };
+    let ctx = crate::primitives::ctx::Alloc::new(unsafe { &mut *vm_ref.heap_ptr });
+    JitValue::from_value(if mutable {
+        ctx.array_mut(slice)
+    } else {
+        ctx.array(slice)
+    })
 }
 
 /// First with silent nil: returns car if cons, NIL otherwise.
@@ -168,8 +151,8 @@ pub extern "C" fn elle_jit_rest_or_nil(tag: u64, payload: u64) -> JitValue {
 #[no_mangle]
 pub extern "C" fn elle_jit_array_len(tag: u64, payload: u64) -> JitValue {
     let val = Value { tag, payload };
-    let len = if let Some(arr) = val.as_array_mut() {
-        arr.borrow().len() as i64
+    let len = if let Some(arr) = val.array_mut_read() {
+        arr.len() as i64
     } else if let Some(arr) = val.as_array() {
         arr.len() as i64
     } else {
@@ -183,8 +166,8 @@ pub extern "C" fn elle_jit_array_len(tag: u64, payload: u64) -> JitValue {
 pub extern "C" fn elle_jit_array_ref_or_nil(tag: u64, payload: u64, index: u64) -> JitValue {
     let val = Value { tag, payload };
     let idx = index as usize;
-    let result = if let Some(arr) = val.as_array_mut() {
-        arr.borrow().get(idx).copied()
+    let result = if let Some(arr) = val.array_mut_read() {
+        arr.get(idx).copied()
     } else if let Some(arr) = val.as_array() {
         arr.get(idx).copied()
     } else {

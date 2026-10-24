@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-22
 //! Runtime dispatch helpers for JIT-compiled code: array mutation, parameter
 //! frames, the signal bound, and re-exports.
 //!
@@ -19,7 +19,7 @@ pub use structops::*;
 mod region;
 pub use region::*;
 
-// Re-export split modules so compiler.rs / vtable.rs can still use dispatch::elle_jit_*
+// Re-export the split modules, so compiler.rs and vtable.rs reach them as dispatch::elle_jit_*
 pub use super::calls::*;
 pub use super::data::*;
 pub use super::suspend::*;
@@ -27,13 +27,12 @@ pub use super::suspend::*;
 // =============================================================================
 // Array and Collection Mutation Helpers
 // =============================================================================
-/// Push a value onto a mutable @array (splice path). Mutates in place
-/// and returns the same @array Value, mirroring `handle_array_push` in
-/// `src/vm/data.rs` which goes through `arena::push_with_incref`. Must call
-/// `incref_inserted_element` so cross-region references the @array now holds keep
-/// the source region alive — without this, the source region can drop
-/// to RC=0 and be freed while the @array still references its values,
-/// corrupting the C heap on subsequent allocations.
+/// Push a value onto a mutable @array (splice path). Mutates in place and
+/// returns the same @array Value, mirroring `handle_array_push` in
+/// src/vm/data/structops.rs. Both go through `arena::push_with_incref`, whose
+/// `incref_inserted_element` keeps the source region of a cross-region value
+/// alive. Without it, the source region can drop to RC=0 and free while the
+/// @array still references its values.
 #[no_mangle]
 pub extern "C" fn elle_jit_array_push(
     array_tag: u64,
@@ -71,7 +70,7 @@ pub extern "C" fn elle_jit_array_push(
 
 /// Extend a mutable @array with the elements of another array/list,
 /// mutating in place. Returns the same @array Value. Mirrors
-/// `handle_array_extend` in `src/vm/data.rs` which goes through
+/// `handle_array_extend` in src/vm/data/structops.rs, which goes through
 /// `arena::extend_with_incref`; the per-element `incref_inserted_element` keeps any
 /// cross-region source values alive.
 #[no_mangle]
@@ -92,10 +91,8 @@ pub extern "C" fn elle_jit_array_extend(
         payload: source_payload,
     };
 
-    let source_elems: Vec<Value> = if let Some(arr) = source_val.as_array_mut() {
-        arr.borrow().to_vec()
-    } else if let Some(arr) = source_val.as_array() {
-        arr.to_vec()
+    let source_elems: Vec<Value> = if let Some(elems) = source_val.array_to_vec() {
+        elems
     } else if source_val.as_pair().is_some() || source_val.is_empty_list() {
         match source_val.list_to_vec() {
             Ok(v) => v,
@@ -178,7 +175,7 @@ pub extern "C" fn elle_jit_push_param_frame(
 // =============================================================================
 
 /// Check that the value's signal bits are a subset of allowed_bits, as the
-/// interpreter's `CheckSignalBound` does: `signals::bound::violation` judges a
+/// interpreter's `CheckSignalBound` does. `signals::bound::violation` judges a
 /// closure by its effective signal and a native by its declared one, and lets
 /// any other value pass. Signals error on a violation.
 #[no_mangle]

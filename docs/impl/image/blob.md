@@ -37,7 +37,7 @@ bytes would rebuild the library at every `make elle`.
 
 - Its own `elle image dump-boot` writes the embedded bytes again, byte for
   byte. Embedding changes the binary and none of the fingerprint's inputs, and
-  the dump is deterministic ([image.md](../image.md)). So a difference means
+  the dump is deterministic ([dumping](dumping.md)). So a difference means
   the two stages compiled the library differently.
 - A `--cache=` start with `--trace=boot` that spawns a worker prints a
   `blob-map` mark and two `image-hydrate` marks. The start mapped the blob from
@@ -65,6 +65,6 @@ memory, and the offset must fall on a base page. A rebuild that replaced a
 macOS path breaks the first rule, and so does a universal Mach-O, which holds
 the slice at an offset its load commands do not show. When a rule fails, or
 the file does not open, the start copies the blob into an anonymous file
-([image.md](../image.md)) and hydrates that. It prints `blob-copy` in place of
+([hydration](hydration.md)) and hydrates that. It prints `blob-copy` in place of
 `blob-map`. The copy costs a write of the whole blob, and its pages are this
 process's alone.

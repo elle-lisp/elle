@@ -1,20 +1,9 @@
+// audited: 2026-10-22
+//! The typed extractors: each answers its payload for a value of its own type, and `None` for any other.
+//!
+//! docs/impl/values.md
+
 use super::*;
-
-/// Read-only handle on a mutable container's `RefCell`: exposes `borrow()`
-/// and nothing else. The public face of the mutable-store seam
-/// (docs/impl/region/rules.md Rule 5, mutable store) — code outside `value/` can read
-/// an @array/@struct/@set/box/capture cell through this, but storing a
-/// `Value` is only possible through the tracked funnels in `value/arena.rs`.
-pub struct ReadCell<'a, T>(&'a std::cell::RefCell<T>);
-
-impl<'a, T> ReadCell<'a, T> {
-    /// Immutably borrow the contents (same panic-on-conflict semantics as
-    /// `RefCell::borrow`).
-    #[inline]
-    pub fn borrow(&self) -> std::cell::Ref<'a, T> {
-        self.0.borrow()
-    }
-}
 
 impl Value {
     /// Extract as boolean if this is a bool.
@@ -72,8 +61,8 @@ impl Value {
         }
     }
     /// Whether this value is the keyword spelled `name` — one hash compare,
-    /// no table, no allocation (docs/impl/symbol.md § "Reading a name, and
-    /// not reading one"). Spelling recovery goes through
+    /// no table, no allocation (docs/impl/symbol.md). Spelling recovery goes
+    /// through
     /// `keyword::resolve_keyword_name` with a memo instead.
     #[inline]
     pub fn is_keyword_named(&self, name: &str) -> bool {
@@ -100,54 +89,6 @@ impl Value {
             _ => None,
         }
     }
-    /// Read-only view of a mutable array — `borrow()` only. The mutation
-    /// channel is the `value/`-scoped raw-cell accessor (`as_array_mut_raw`);
-    /// every `Value` store flows through the tracked funnels in
-    /// `value/arena.rs` (docs/impl/region/rules.md Rule 5, mutable store).
-    #[inline]
-    pub fn as_array_mut(&self) -> Option<ReadCell<'_, Vec<Value>>> {
-        self.as_array_mut_raw().map(ReadCell)
-    }
-    /// Raw cell of a mutable array — the mutation channel (see
-    /// [`Value::as_array_mut`]).
-    #[inline]
-    pub(in crate::value) fn as_array_mut_raw(&self) -> Option<&std::cell::RefCell<Vec<Value>>> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_array_mut() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            // Deref the Rc to expose the inner RefCell directly. Callers
-            // already borrow from the RefCell; the Rc is an implementation
-            // detail that enables cross-fiber sharing (see heap.rs).
-            HeapObject::LArrayMut { data, .. } => Some(&**data),
-            _ => None,
-        }
-    }
-    /// Read-only view of an @struct — `borrow()` only (see
-    /// [`Value::as_array_mut`]).
-    #[inline]
-    pub fn as_struct_mut(
-        &self,
-    ) -> Option<ReadCell<'_, std::collections::BTreeMap<crate::value::heap::TableKey, Value>>> {
-        self.as_struct_mut_raw().map(ReadCell)
-    }
-    /// Raw cell of an @struct — the mutation channel (see
-    /// [`Value::as_array_mut`]).
-    #[inline]
-    pub(in crate::value) fn as_struct_mut_raw(
-        &self,
-    ) -> Option<&std::cell::RefCell<std::collections::BTreeMap<crate::value::heap::TableKey, Value>>>
-    {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_struct_mut() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            HeapObject::LStructMut { data, .. } => Some(data),
-            _ => None,
-        }
-    }
     /// Extract as struct if this is a struct.
     /// Returns a sorted slice of (key, value) pairs.
     #[inline]
@@ -163,9 +104,9 @@ impl Value {
     }
     /// Extract as closure if this is a closure.
     ///
-    /// Returns a borrow of the arena-resident `Closure`. If you need an
-    /// owned `Rc<Closure>` (e.g. for storing in a `Fiber` or `Frame`),
-    /// clone explicitly: `Rc::new(value.as_closure().unwrap().clone())`.
+    /// Returns a borrow of the arena-resident `Closure`. A holder that needs
+    /// an owned `Rc<Closure>`, as a `Fiber` does, clones explicitly:
+    /// `Rc::new(value.as_closure().unwrap().clone())`.
     /// `Closure::clone` is O(1) — every field is `Copy`.
     #[inline]
     pub fn as_closure(&self) -> Option<&crate::value::heap::Closure> {
@@ -177,97 +118,6 @@ impl Value {
             HeapObject::Closure { closure, .. } => Some(closure),
             _ => None,
         }
-    }
-    /// Read-only view of a user box — `borrow()` only (see
-    /// [`Value::as_array_mut`]); [`Value::lbox_get`] copies the value out.
-    #[inline]
-    pub fn as_lbox(&self) -> Option<ReadCell<'_, Value>> {
-        self.as_lbox_raw().map(ReadCell)
-    }
-    /// Raw cell of a user box — the mutation channel (see
-    /// [`Value::as_array_mut`]).
-    #[inline]
-    pub(in crate::value) fn as_lbox_raw(&self) -> Option<&std::cell::RefCell<Value>> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_lbox() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            HeapObject::LBox { cell, .. } => Some(cell),
-            _ => None,
-        }
-    }
-    /// Read-only view of a compiler capture cell — `borrow()` only (see
-    /// [`Value::as_array_mut`]); [`Value::capture_cell_get`] copies the
-    /// value out.
-    #[inline]
-    pub fn as_capture_cell(&self) -> Option<ReadCell<'_, Value>> {
-        self.as_capture_cell_raw().map(ReadCell)
-    }
-    /// Raw cell of a compiler capture cell — the mutation channel (see
-    /// [`Value::as_array_mut`]).
-    #[inline]
-    pub(in crate::value) fn as_capture_cell_raw(&self) -> Option<&std::cell::RefCell<Value>> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_capture_cell() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            HeapObject::CaptureCell { cell, .. } => Some(cell),
-            _ => None,
-        }
-    }
-    /// Read-only view of a box or capture cell — `borrow()` only (see
-    /// [`Value::as_array_mut`]).
-    #[inline]
-    pub fn as_box_or_capture(&self) -> Option<ReadCell<'_, Value>> {
-        self.as_box_or_capture_raw().map(ReadCell)
-    }
-    /// Raw cell of either a user box or a capture cell — the mutation
-    /// channel (see [`Value::as_array_mut`]).
-    #[inline]
-    pub(in crate::value) fn as_box_or_capture_raw(&self) -> Option<&std::cell::RefCell<Value>> {
-        self.as_lbox_raw().or_else(|| self.as_capture_cell_raw())
-    }
-
-    // ── Read-only views of the mutable containers ───────────────────
-    //
-    // The seam's public half (docs/impl/region/rules.md Rule 5, mutable store): borrow
-    // guards and copy-outs that cannot store. Same borrow semantics as the
-    // raw cells (panic on a conflicting mutable borrow).
-
-    /// Borrow a mutable array's elements, read-only.
-    #[inline]
-    pub fn array_mut_ref(&self) -> Option<std::cell::Ref<'_, Vec<Value>>> {
-        self.as_array_mut_raw().map(|c| c.borrow())
-    }
-    /// Borrow an @struct's entries, read-only.
-    #[inline]
-    pub fn struct_mut_ref(
-        &self,
-    ) -> Option<std::cell::Ref<'_, std::collections::BTreeMap<crate::value::heap::TableKey, Value>>>
-    {
-        self.as_struct_mut_raw().map(|c| c.borrow())
-    }
-    /// Borrow a mutable set's elements, read-only.
-    #[inline]
-    pub fn set_mut_ref(&self) -> Option<std::cell::Ref<'_, std::collections::BTreeSet<Value>>> {
-        self.as_set_mut_raw().map(|c| c.borrow())
-    }
-    /// The value currently in a user box (`Value` is `Copy`).
-    #[inline]
-    pub fn lbox_get(&self) -> Option<Value> {
-        self.as_lbox_raw().map(|c| *c.borrow())
-    }
-    /// The value currently in a compiler capture cell (`Value` is `Copy`).
-    #[inline]
-    pub fn capture_cell_get(&self) -> Option<Value> {
-        self.as_capture_cell_raw().map(|c| *c.borrow())
-    }
-    /// The value currently in a box or capture cell (`Value` is `Copy`).
-    #[inline]
-    pub fn box_or_capture_get(&self) -> Option<Value> {
-        self.as_box_or_capture_raw().map(|c| *c.borrow())
     }
     /// Extract the primitive definition if this is a native function.
     #[inline]
@@ -309,39 +159,6 @@ impl Value {
             _ => None,
         }
     }
-    /// Read-only view of a mutable set — `borrow()` only (see
-    /// [`Value::as_array_mut`]).
-    #[inline]
-    pub fn as_set_mut(&self) -> Option<ReadCell<'_, std::collections::BTreeSet<Value>>> {
-        self.as_set_mut_raw().map(ReadCell)
-    }
-    /// Raw cell of a mutable set — the mutation channel (see
-    /// [`Value::as_array_mut`]).
-    #[inline]
-    pub(in crate::value) fn as_set_mut_raw(
-        &self,
-    ) -> Option<&std::cell::RefCell<std::collections::BTreeSet<Value>>> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_set_mut() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            HeapObject::LSetMut { data, .. } => Some(data),
-            _ => None,
-        }
-    }
-    /// Extract as @string if this is an @string.
-    #[inline]
-    pub fn as_string_mut(&self) -> Option<&std::cell::RefCell<Vec<u8>>> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_string_mut() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            HeapObject::LStringMut { data, .. } => Some(data),
-            _ => None,
-        }
-    }
     /// Extract as bytes if this is a bytes value.
     #[inline]
     pub fn as_bytes(&self) -> Option<&[u8]> {
@@ -351,18 +168,6 @@ impl Value {
         }
         match unsafe { deref(*self) } {
             HeapObject::LBytes { data, .. } => Some(data),
-            _ => None,
-        }
-    }
-    /// Extract as @bytes if this is an @bytes value.
-    #[inline]
-    pub fn as_bytes_mut(&self) -> Option<&std::cell::RefCell<Vec<u8>>> {
-        use crate::value::heap::{deref, HeapObject};
-        if !self.is_bytes_mut() {
-            return None;
-        }
-        match unsafe { deref(*self) } {
-            HeapObject::LBytesMut { data, .. } => Some(data),
             _ => None,
         }
     }

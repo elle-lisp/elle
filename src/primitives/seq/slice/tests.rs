@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-22
 //! A slice of an immutable string or bytes points into its source; a slice of
 //! a mutable one is a copy.
 //!
@@ -64,16 +64,15 @@ fn an_empty_slice_shares_nothing() {
     });
 }
 
-/// A mutable value keeps its bytes in a `Vec` another holder can grow, so a
-/// view into it would dangle on the first push. The slice copies.
+/// A mutable value's store moves its bytes when it grows, so a view into it
+/// would dangle on the first push. The slice copies.
 #[test]
 fn a_slice_of_mutable_bytes_is_a_copy() {
     with_test_ctx(|ctx| {
         let src = ctx.bytes_mut(b"hello world".to_vec());
         let v = seq_slice(&src, 2, 5, ctx).expect("a slice");
-        let src_ptr = src.as_bytes_mut().unwrap().borrow().as_ptr();
-        let v_ref = v.as_bytes_mut().expect("a slice of @bytes is @bytes");
-        let v_bytes = v_ref.borrow();
+        let src_ptr = src.bytes_mut_read().unwrap().as_ptr();
+        let v_bytes = v.bytes_mut_read().expect("a slice of @bytes is @bytes");
         assert_eq!(&v_bytes[..], b"llo");
         assert_ne!(
             v_bytes.as_ptr(),

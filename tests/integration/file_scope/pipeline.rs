@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-22
 // The file-as-letrec pipeline, and what `import-file` reports when the file it
 // loads fails.
 //
@@ -48,8 +48,7 @@ fn test_file_side_effect_ordering() {
     eval_file_source_stdlib(code, |r| {
         let result = r.unwrap();
         // log should be @[1, 2]
-        let items = result.as_array_mut().expect("expected array");
-        let items = items.borrow();
+        let items = result.array_mut_read().expect("expected array");
         assert_eq!(items.len(), 2);
         assert_eq!(items[0], Value::int(1));
         assert_eq!(items[1], Value::int(2));

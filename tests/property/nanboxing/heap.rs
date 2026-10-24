@@ -1,3 +1,8 @@
+// audited: 2026-10-22
+// Heap values round-trip: a pair, a string, a list and an array read back what built them.
+//
+// docs/impl/values.md
+
 use super::*;
 
 // =========================================================================
@@ -129,8 +134,8 @@ fn array_roundtrip_empty() {
     let h = elle::primitives::ctx::TestHeap::new();
     let arr = h.ctx().array_mut(vec![]);
     assert!(arr.is_array_mut());
-    let borrowed = arr.as_array_mut().unwrap().borrow();
-    assert_eq!(borrowed.len(), 0);
+    let elems = arr.array_mut_read().unwrap();
+    assert_eq!(elems.len(), 0);
 }
 
 #[test]
@@ -139,9 +144,9 @@ fn array_roundtrip_single() {
     let values = vec![Value::int(42)];
     let arr = h.ctx().array_mut(values.clone());
     assert!(arr.is_array_mut());
-    let borrowed = arr.as_array_mut().unwrap().borrow();
-    assert_eq!(borrowed.len(), 1);
-    assert_eq!(borrowed[0], Value::int(42));
+    let elems = arr.array_mut_read().unwrap();
+    assert_eq!(elems.len(), 1);
+    assert_eq!(elems[0], Value::int(42));
 }
 
 #[test]
@@ -150,11 +155,11 @@ fn array_roundtrip_multiple() {
     let values = vec![Value::int(1), Value::int(2), Value::int(3)];
     let arr = h.ctx().array_mut(values.clone());
     assert!(arr.is_array_mut());
-    let borrowed = arr.as_array_mut().unwrap().borrow();
-    assert_eq!(borrowed.len(), 3);
-    assert_eq!(borrowed[0], Value::int(1));
-    assert_eq!(borrowed[1], Value::int(2));
-    assert_eq!(borrowed[2], Value::int(3));
+    let elems = arr.array_mut_read().unwrap();
+    assert_eq!(elems.len(), 3);
+    assert_eq!(elems[0], Value::int(1));
+    assert_eq!(elems[1], Value::int(2));
+    assert_eq!(elems[2], Value::int(3));
 }
 
 #[test]
@@ -163,15 +168,15 @@ fn array_roundtrip_negative() {
     let values = vec![Value::int(-5), Value::int(0), Value::int(7)];
     let arr = h.ctx().array_mut(values.clone());
     assert!(arr.is_array_mut());
-    let borrowed = arr.as_array_mut().unwrap().borrow();
-    assert_eq!(borrowed.len(), 3);
-    assert_eq!(borrowed[0], Value::int(-5));
-    assert_eq!(borrowed[1], Value::int(0));
-    assert_eq!(borrowed[2], Value::int(7));
+    let elems = arr.array_mut_read().unwrap();
+    assert_eq!(elems.len(), 3);
+    assert_eq!(elems[0], Value::int(-5));
+    assert_eq!(elems[1], Value::int(0));
+    assert_eq!(elems[2], Value::int(7));
 }
 
 // =========================================================================
-// Constants (not inside proptest! because they don't need generation)
+// Constants
 // =========================================================================
 
 #[test]

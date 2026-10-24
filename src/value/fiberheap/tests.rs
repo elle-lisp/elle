@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-22
 //! What a `FiberHeap` promises about the physical region ids it hands out, and
 //! what it does with a value whose region is gone.
 //!
@@ -60,35 +60,6 @@ fn test_fiber_heap_clear() {
     heap.clear();
     assert_eq!(heap.len(), 0);
     assert!(heap.is_empty());
-}
-
-#[test]
-fn test_fiber_heap_needs_drop_exhaustive() {
-    assert!(!needs_drop(HeapTag::Pair));
-    assert!(!needs_drop(HeapTag::Float));
-    assert!(!needs_drop(HeapTag::LibHandle));
-    assert!(!needs_drop(HeapTag::ManagedPointer));
-    assert!(!needs_drop(HeapTag::Parameter));
-
-    assert!(needs_drop(HeapTag::LBox));
-    assert!(needs_drop(HeapTag::CaptureCell));
-    assert!(needs_drop(HeapTag::LString));
-    assert!(needs_drop(HeapTag::LArrayMut));
-    assert!(needs_drop(HeapTag::LStructMut));
-    assert!(needs_drop(HeapTag::LStruct));
-    assert!(needs_drop(HeapTag::Closure));
-    assert!(needs_drop(HeapTag::LArray));
-    assert!(needs_drop(HeapTag::LStringMut));
-    assert!(needs_drop(HeapTag::LBytes));
-    assert!(needs_drop(HeapTag::LBytesMut));
-    assert!(needs_drop(HeapTag::Syntax));
-    assert!(needs_drop(HeapTag::Fiber));
-    assert!(needs_drop(HeapTag::ThreadHandle));
-    assert!(needs_drop(HeapTag::FFISignature));
-    assert!(needs_drop(HeapTag::FFIType));
-    assert!(needs_drop(HeapTag::External));
-    assert!(needs_drop(HeapTag::LSet));
-    assert!(needs_drop(HeapTag::LSetMut));
 }
 
 #[test]

@@ -1,4 +1,8 @@
-// DEFENSE: Value type is the foundation - must be rock solid
+// audited: 2026-10-22
+// The Value type's basics: equality, truthiness, conversions, lists and arrays, and arity matching.
+//
+// docs/impl/values.md
+
 use elle::value::{Arity, Value};
 
 #[test]
@@ -85,7 +89,9 @@ fn test_cons_cell() {
 #[test]
 fn test_list_construction() {
     let h = elle::primitives::ctx::TestHeap::new();
-    let l = h.ctx().list(vec![Value::int(1), Value::int(2), Value::int(3)]);
+    let l = h
+        .ctx()
+        .list(vec![Value::int(1), Value::int(2), Value::int(3)]);
 
     assert!(l.is_list());
 
@@ -135,10 +141,9 @@ fn test_array() {
     let vec = vec![Value::int(1), Value::int(2), Value::int(3)];
     let v = h.ctx().array_mut(vec);
 
-    let vec_ref = v.as_array_mut().unwrap();
-    let borrowed = vec_ref.borrow();
-    assert_eq!(borrowed.len(), 3);
-    assert_eq!(borrowed[0], Value::int(1));
+    let elems = v.array_mut_read().unwrap();
+    assert_eq!(elems.len(), 3);
+    assert_eq!(elems[0], Value::int(1));
 }
 
 #[test]
