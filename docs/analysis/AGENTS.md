@@ -11,7 +11,8 @@ Up: [..](../AGENTS.md)
 - [budget.md](budget.md) — **Where subject-mixing begins, and the source cap it sets (2026-10-19)** The share of Elle's sources that do more than one job, by size, and the 2,500-token cap read off it.
 - [ci.md](ci.md) — **CI and Triage** CI structure, local workflow, and failure diagnosis.
 - [debugging.md](debugging.md) — **Debugging and introspection** The primitives a program uses to print its values, inspect a closure, and time its own work.
-- [index.md](index.md) — **Analysis** Meta-analysis tools: testing, CI, debugging, semantic portraits, and the report behind the source cap.
+- [index.md](index.md) — **Analysis** Meta-analysis tools: testing, CI, debugging, semantic portraits, and the reports behind the source cap and the signal solver's engines.
 - [plugins.md](plugins.md) — **The plugins submodule in CI** How CI compiles the `plugins/` submodule, asserts what it built, and builds the plugins the language suite loads.
 - [portrait.md](portrait.md) — **Portrait** A portrait reports what the compiler knows about code without running it: signals, captures, calls and lint advisories.
+- [solver-engines.md](solver-engines.md) — **Five engines on the signal solver's rules (2026-10-05)** How fast five Datalog engines solve the signal solver's rules over `lib/`, and whether their models agree.
 - [testing.md](testing.md) — **Testing Strategy** Which *kind* of test to write, and where it belongs.

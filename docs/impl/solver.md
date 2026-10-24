@@ -171,35 +171,19 @@ relations. Every run computes both models and fails when they differ. The two
 share the input facts and nothing else, so a dropped or wrong rule in either
 shows as a difference.
 
-Five engines were measured at commit `73a50c636`, on all of `lib/`: 80 files,
-115,000 facts. Each in-process engine reports its fastest of five solves, over
-five runs on a loaded machine.
-
-| Engine | Solve | Crates it adds | Agrees |
-|--------|-------|----------------|--------|
-| datafrog | 2.2–3.9 ms | 1 | yes |
-| ascent | 3.9–6.6 ms | 23 | yes |
-| worklist | 6.7–16.6 ms | 0 | yes |
-| crepe | 10–21.5 ms | 6 | yes |
-| z3 | 1–2 s | an external binary | yes |
-
-The analysis the engines read takes 323–374 ms, so each in-process engine
-costs under 5% of it. Removing the `owner` check from the datafrog rules made
-its model differ from the others on `lib/` and on one fixture, so the
-comparison catches a dropped rule.
-
 - **The worklist solves.** It adds no dependency, and its cost is small beside
   the analysis.
 - **datafrog checks.** It adds one crate, as a development dependency, and its
   joins are a second, independent reading of the rules.
-- **z3** ran the rules in its Datalog engine and used no SMT reasoning. It is
-  a process and a text format away, it costs a binary on every machine that
-  runs the tests, and it was about 100 times slower than the worklist. A model
-  from its SMT engine would not be unique; the rules need Datalog semantics.
-  z3 earns a place only for a constraint a fixpoint cannot solve.
-- **ascent** reads as the rules, line for line, and adds 23 crates.
-- **crepe** was the slowest in-process engine, and it adds
-  `proc-macro-error`, which RustSec lists as unmaintained.
+- **z3** costs a binary on every machine that runs the tests, and solves far
+  slower. A model from its SMT engine would not be unique, because the rules
+  need Datalog semantics. z3 earns a place only for a constraint a fixpoint
+  cannot solve.
+- **ascent** reads as the rules, line for line, and adds many crates.
+- **crepe** is slower than the worklist, and it depends on a crate that is no
+  longer maintained.
+
+[The engine measurements](../analysis/solver-engines.md) compare all five.
 
 ## What the fixtures show
 
