@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-24
 //! Syntax to HIR analysis
 //!
 //! docs/impl/hir.md
@@ -16,7 +16,7 @@
 //! - When a call is analyzed, we look up the callee's signal and propagate it
 //! - Polymorphic signals (like `map`) are resolved by examining the argument's signal
 //! - `assign` invalidates signal tracking for the mutated binding
-//! - A lambda that read a seed is re-analyzed until its signal holds (`fixpoint.rs`)
+//! - Once the pass is over, the unit's signals are solved together (src/hir/analyze/settle.rs)
 
 mod binding;
 mod call;
@@ -24,11 +24,11 @@ mod destructure;
 mod env;
 mod facts;
 mod fileletrec;
-mod fixpoint;
 mod letrec;
 pub use fileletrec::classify_form;
 pub(crate) mod forms;
 mod lambda;
+mod settle;
 mod special;
 
 use super::binding::{Binding, CaptureInfo, CaptureKind};
@@ -46,7 +46,7 @@ use std::collections::{HashMap, HashSet};
 /// A classified top-level form for file-as-letrec compilation.
 ///
 /// The pipeline classifies each expanded top-level form into one of
-/// these variants before passing them to `Analyzer::analyze_file_letrec`.
+/// these variants before passing them to `Analyzer::analyze_file`.
 pub enum FileForm<'a> {
     /// `(def name value)` or `(def pattern value)` — immutable binding
     Def(&'a Syntax, &'a Syntax),
@@ -139,11 +139,10 @@ struct Scope {
     ///
     /// The key is the id, not the spelling, because resolution is an identity
     /// question: the id is the name's hash, so it answers without a display
-    /// memo (docs/impl/symbol.md). A name-keyed map would make binding
-    /// resolution depend on whichever memo happened to have learned the
-    /// spelling — and `bind_primitives` receives the primitives as ids from
-    /// the compile context, whose spellings this analyzer's memo may never
-    /// have learned.
+    /// memo (docs/impl/symbol.md). A name-keyed map would make resolution
+    /// depend on which memo had learned the spelling. `bind_primitives`
+    /// receives the primitives as ids from the compile context, whose
+    /// spellings this analyzer's memo may never learn.
     bindings: HashMap<SymbolId, Vec<ScopedBinding>>,
     /// Is this a function scope (creates new capture boundary)
     is_function: bool,
@@ -155,11 +154,11 @@ struct Scope {
     definition_env: bool,
     /// Expansion provenance: the intro scopes carried by the form that
     /// opened this frame (snapshot of `Analyzer::current_form_intros` at
-    /// push time). A template-origin binding form carries its expansion's
-    /// intro scope, so references from the same expansion may resolve into
-    /// its frame even when the binder itself lacks the scope (the
-    /// datum->syntax deliberate-capture case); a user-written form has no
-    /// intro scopes, so its frame is invisible to template references.
+    /// push time). A binding form from a template carries its expansion's
+    /// intro scope, so a reference from the same expansion may resolve into
+    /// its frame even when the binder lacks the scope (deliberate capture
+    /// through datum->syntax). A user-written form has no intro scopes, so
+    /// its frame is invisible to template references.
     intro_provenance: Vec<ScopeId>,
     /// Next local index for this scope (used only for tracking local count)
     next_local: u16,
@@ -195,27 +194,22 @@ pub struct Analyzer<'a> {
     /// into the new frame's `intro_provenance`.
     current_form_intros: Vec<ScopeId>,
     /// The binding whose initializer is currently being analyzed — the analyzer
-    /// analogue of the lowerer's `current_function_binding` (lir/lower/mod.rs).
+    /// analogue of the lowerer's `current_function_binding` (src/lir/lower/mod.rs).
     /// When a lookup inside this initializer's lambda resolves back to this same
     /// binding (a self-edge across the lambda boundary), the capture is classified
-    /// `CaptureKind::Recursive` rather than a sibling `Local` (scopes.rs::lookup).
+    /// `CaptureKind::Recursive` rather than a sibling `Local` (src/hir/analyze/scopes.rs).
     /// Saved/restored around each initializer by `analyze_initializer`, so it names
-    /// the nearest enclosing `letrec`/`def` binding. Paired with
-    /// `current_init_binding_depth`: a reference is a self-edge only when it resolves
-    /// to this binding from *directly* inside its initializer lambda, one function
-    /// level deeper — a reference from a further-nested lambda is a sibling capture of
-    /// that inner lambda, not this binding's self-edge (scopes.rs::lookup).
+    /// the nearest enclosing `letrec`/`def` binding. A reference is a self-edge only
+    /// from directly inside the initializer lambda, one function level deeper. A
+    /// reference from a further-nested lambda is a sibling capture of that lambda.
     current_init_binding: Option<Binding>,
     /// The `fn_depth` at the point `analyze_initializer` set `current_init_binding`
     /// (the depth of the enclosing `letrec`/`def`, one level *outside* the initializer
-    /// lambda). A self-edge fires only at `current_init_binding_depth + 1` — the
-    /// initializer lambda's own body — so a reference from a deeper nested lambda,
-    /// which sits at a greater depth, classifies as that inner lambda's sibling
-    /// capture rather than this binding's self-edge.
+    /// lambda). A self-edge fires only at this depth plus one, the initializer
+    /// lambda's own body.
     current_init_binding_depth: u32,
-    /// Maps Binding -> known signal of the bound value (if it's a callable)
-    /// This enables interprocedural signal tracking: when we call a function,
-    /// we can look up its signal and propagate it to the call site.
+    /// The known signal of each binding whose value is a callable. A call looks
+    /// its callee up here and propagates the signal to the call site.
     signal_env: HashMap<Binding, Signal>,
     /// Maps SymbolId -> Signal for primitive functions, from the
     /// `PrimitiveMeta` the pipeline passes to `new_with_primitives`. Read only
@@ -267,7 +261,8 @@ pub struct Analyzer<'a> {
     current_param_bounds: HashMap<Binding, Signal>,
     /// The ceiling `(attune! spec)` and `(silent!)` declare in the current
     /// lambda, the intersection when there are several. Populated by
-    /// `declare_ceiling`, checked by `analyze_lambda`.
+    /// `declare_ceiling`, kept by `analyze_lambda` in its `LambdaDecl`, and
+    /// checked once the unit is settled.
     current_declared_ceiling: Option<Signal>,
     /// Accumulated non-fatal errors. A recoverable error site, an undefined
     /// name, pushes here and returns `Ok(Hir::error(span))` to continue
@@ -290,6 +285,9 @@ pub struct Analyzer<'a> {
     /// what the body's calls raise, and drops the ceiling it was checked
     /// against; a reader that solves signals itself needs both.
     lambda_decls: HashMap<super::expr::HirId, LambdaDecl>,
+    /// Each call whose callee bounds a parameter, with the arguments those
+    /// bounds check once the unit is solved.
+    bound_calls: Vec<call::BoundCall>,
 }
 
 /// What a lambda's body declared about its own signal, and what it raises by
@@ -361,6 +359,7 @@ impl<'a> Analyzer<'a> {
             immutable_by_default: true,
             unicode_generation: crate::config::get().unicode_generation(),
             lambda_decls: HashMap::new(),
+            bound_calls: Vec::new(),
         };
         // Initialize with a global scope so top-level bindings can be registered
         analyzer.push_definition_scope();
@@ -384,28 +383,34 @@ impl<'a> Analyzer<'a> {
             .map_err(|e| format!("{}: {}", span, e))
     }
 
-    /// Analyze a syntax tree into HIR
+    /// Analyze a syntax tree into HIR, and settle its signals.
     pub fn analyze(&mut self, syntax: &crate::syntax::Syntax) -> Result<AnalysisResult, String> {
         // Keyword pre-pass: keywords reach HIR through many arms (literals,
         // pattern keys, struct literals, quoted data), so their spellings are
         // learned in one walk rather than per arm.
         crate::syntax::convert::learn_keywords(syntax, self.symbols);
-        let hir = self.analyze_expr(syntax)?;
+        let mut hir = self.analyze_expr(syntax)?;
+        self.settle(&mut hir)?;
         let errors = std::mem::take(&mut self.errors);
         Ok(AnalysisResult { hir, errors })
     }
 
+    /// Analyze a file's top-level forms, each classified by `classify_form`,
+    /// into one `HirKind::Letrec`, and settle its signals.
+    pub fn analyze_file(&mut self, forms: Vec<FileForm>, span: Span) -> Result<Hir, String> {
+        let mut hir = self.analyze_file_letrec(forms, span)?;
+        self.settle(&mut hir)?;
+        Ok(hir)
+    }
+
     /// Analyze a binding's initializer with `current_init_binding` set to `binding`
-    /// and `current_init_binding_depth` to the current `fn_depth`, so a self-reference
-    /// resolving back to `binding` from *directly* inside the initializer's lambda
-    /// (one function level deeper, `scopes.rs::lookup`) classifies
-    /// `CaptureKind::Recursive` rather than a sibling `Local`. The depth guard is what
-    /// keeps a reference from a further-nested lambda a sibling capture of that inner
-    /// lambda, not this binding's self-edge — `analyze_lambda` leaves the field
-    /// untouched, so without the depth check the context would leak into every nested
-    /// lambda and mis-materialize their self-references. Saved/restored so a nested
-    /// initializer (an inner `letrec`/`def`) names its own binding at its own depth and
-    /// the outer one is restored after.
+    /// and `current_init_binding_depth` to the current `fn_depth`. A self-reference
+    /// to `binding` from directly inside the initializer's lambda then classifies
+    /// `CaptureKind::Recursive` rather than a sibling `Local` (src/hir/analyze/scopes.rs).
+    /// `analyze_lambda` leaves both fields untouched, so the depth check keeps a
+    /// further-nested lambda's reference a sibling capture of that lambda. Both are
+    /// saved and restored, so a nested initializer (an inner `letrec`/`def`) names
+    /// its own binding at its own depth.
     pub(crate) fn analyze_initializer(
         &mut self,
         binding: Binding,

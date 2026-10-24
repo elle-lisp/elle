@@ -1,6 +1,6 @@
 # The signal solver
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-10-24 -->
 
 Signal inference as the least model of a few Datalog rules: how the compiler raises each unit's signals to it, and how a run links files.
 
@@ -8,9 +8,10 @@ The analyzer makes one pass over a unit, and the compiler then solves the
 unit's signals with the rules below ([pipeline.md](../pipeline.md)). The
 [module design](../modules-proposal.md) links literal imports, and a linked
 call needs the callee's signal from another file. This document owns how both
-are computed. The spike [examples/signal_solve](../../examples/signal_solve/main.rs)
-solves the files of a program jointly, and nothing in the compiler links
-across files yet.
+are computed. [The solver](../../src/hir/solve/mod.rs) lives in the compiler,
+and the spike [examples/signal_solve](../../examples/signal_solve/main.rs) runs it
+over the files of a program jointly. Nothing in the compiler links across
+files yet.
 
 ## What one unit cannot answer
 
@@ -52,8 +53,8 @@ user-facing bit at once, so the unknown value costs one fact instead of fifty.
 
 ## Facts
 
-[extract.rs](../../examples/signal_solve/extract.rs) walks each file's analyzed
-HIR and states facts about it. A file's analysis never compiles its imports
+[extract.rs](../../src/hir/solve/extract.rs) walks each unit's analyzed HIR
+and states facts about it. A file's analysis never compiles its imports
 ([pipeline.md](../pipeline.md)), so the walk never enters another file.
 
 - What a lambda raises by itself comes from the analyzer (`LambdaDecl`): its
@@ -65,6 +66,8 @@ HIR and states facts about it. A file's analysis never compiles its imports
 - A binding the compile starts with, such as a primitive or an export of the
   standard library, carries the signal the analyzer recorded for it: its bits
   and the parameters it propagates.
+- A parameter under a `bound` raises the bits the bound admits, whatever the
+  caller passes.
 - A call states the context it runs in, the callee, the function whose
   parameters it binds, and each argument. Each fact keeps the call it came
   from, so the model answers each call as well as each context.
@@ -79,7 +82,7 @@ whose first argument is a literal raises the bits that argument names.
 
 ## Linking
 
-[link.rs](../../examples/signal_solve/link.rs) joins the files of one run
+[link.rs](../../src/hir/solve/link.rs) joins the files of one run
 through their literal imports. A literal import is `((import-file "path"))`
 with a string path: the compiler knows its file before anything runs. An
 `import` is a macro over a resolver the program may replace, so the solver
@@ -143,9 +146,10 @@ least fixpoint never claims a bit nothing raises.
 ## In the compiler
 
 `Analyzer::analyze` and `Analyzer::analyze_file` solve the unit they analyzed
-before they return. Every import of the unit stays open, so the compile reads
-no other file, and a call into one takes every bit, as above. The answers then
-raise the HIR, and never lower it:
+before they return ([settle.rs](../../src/hir/analyze/settle.rs)). Every import
+of the unit stays open, so the compile reads no other file, and a call into
+one takes every bit, as above. The answers then raise the HIR, and never lower
+it:
 
 | Node | What it takes |
 |------|---------------|
@@ -158,7 +162,7 @@ signals, with the messages [inference.md](../signals/inference.md) shows.
 
 ## Two engines, and why these two
 
-[fixpoint.rs](../../examples/signal_solve/fixpoint.rs) solves the rules with a
+[fixpoint.rs](../../src/hir/solve/fixpoint.rs) solves the rules with a
 worklist: each context recomputes its bits and free variables from what it
 reads, and a change queues its readers.
 [crosscheck.rs](../../examples/signal_solve/crosscheck.rs) solves the same
@@ -243,7 +247,8 @@ names the exports it calls, and a literal argument to an open export adds
 ## What the solver does not cover
 
 - `(f g)` with `f` a parameter: both the analyzer and the solver drop `g`.
-- The position a spliced argument binds.
+- The position a spliced argument binds: from the first splice on, a call
+  binds each parameter to nothing known.
 - A native plugin's signals at compile time.
 - The purity facts the design needs beside signals.
 
